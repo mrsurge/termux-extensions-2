@@ -141,6 +141,15 @@
     grid-template-columns: var(--explorer-width, 430px) 1fr 0px;
   }
 
+  /* Keep sidebar iframes measurable while hidden (avoid zero-size resizes). */
+  .layout-desktop .agent-drawer:not(.open) .sidebar-iframe-stack {
+    position: fixed;
+    top: 0;
+    right: -9999px;
+    width: var(--agent-width, 400px);
+    height: 100vh;
+  }
+
   /* Terminal is tiled in editor column only in desktop mode */
   .layout-desktop .terminal-drawer {
     position: static !important;
@@ -971,8 +980,66 @@
   .agent-drawer__iframe {
     flex: 1;
     display: none;
+    position: relative;
     padding: 0;
     overflow: hidden;
+  }
+
+  .sidebar-setup {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+
+  .sidebar-setup__card {
+    width: min(440px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(37, 50, 75, 0.5);
+    background: rgba(6, 10, 18, 0.9);
+  }
+
+  .sidebar-setup__title {
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .sidebar-setup__hint {
+    font-size: 0.82rem;
+    opacity: 0.7;
+    line-height: 1.4;
+  }
+
+  .sidebar-iframe-stack {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    display: flex;
+  }
+
+  .sidebar-iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+  }
+
+  .sidebar-iframe.is-active {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .agent-drawer__iframe iframe {
@@ -2156,7 +2223,7 @@
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
       <span id="fe-lsp-spinner" class="fe-lsp-status--error" title="Adapter not started" aria-label="Adapter status"></span>
       <div id="fe-adapter-dd" class="fe-dropdown" style="right: 0; left: auto;"></div>
-      <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Agent drawer">
+      <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Sidebar drawer">
         <span class="fe-agent-icon" data-default-icon="💬">💬</span>
       </button>
       <div id="fe-agent-dd" class="fe-dropdown"></div>
@@ -2296,20 +2363,38 @@
   <!-- Agent Drawer -->
   <aside id="agent-drawer" class="agent-drawer" aria-hidden="true">
     <header class="agent-drawer__header">
-      <div class="agent-drawer__title">Agent Sessions</div>
+      <div class="agent-drawer__title">Sidebar</div>
       <div class="agent-drawer__actions">
         <button class="fe-btn" id="agent-new-session">New Session</button>
         <button class="fe-btn" id="agent-close">✕</button>
       </div>
     </header>
     <div class="agent-drawer__iframe" id="agent-iframe-wrap">
-      <iframe
-        id="agent-iframe"
-        title="Agent"
-        loading="lazy"
-        referrerpolicy="no-referrer"
-        allow="clipboard-read; clipboard-write">
-      </iframe>
+      <div id="sidebar-setup-placeholder" class="sidebar-setup">
+        <div class="sidebar-setup__card">
+          <div class="sidebar-setup__title">Side-bar setup</div>
+          <div class="sidebar-setup__hint">Add shortcuts to choose what loads in the side-bar.</div>
+          <div style="font-size: 0.82rem; opacity: 0.8;">Side-bar toggle</div>
+          <div style="display:flex; flex-direction: column; gap: 8px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="radio" name="agent-toggle-display" value="icon" checked />
+              <span>Icon only</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="radio" name="agent-toggle-display" value="text" />
+              <span>Text only</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="radio" name="agent-toggle-display" value="both" />
+              <span>Icon + text</span>
+            </label>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center; margin-top: 6px;">
+            <button class="fe-btn" id="sidebar-setup-shortcuts">Shortcuts…</button>
+          </div>
+        </div>
+      </div>
+      <div id="sidebar-iframe-stack" class="sidebar-iframe-stack" aria-hidden="true"></div>
     </div>
     <div class="agent-drawer__body">
       <section class="agent-section agent-section--current-session" aria-label="Current agent session">
@@ -2871,28 +2956,11 @@
         </div>
       </div>
 
-      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
+      <hr style="border: 0; border-top: 1px solid var(--border, #333); margin: 12px 0;" />
 
-      <div style="font-weight: 600; margin-bottom: 6px;">Agent Drawer (global)</div>
+      <div style="font-weight: 600; margin-bottom: 6px;">Side-bar</div>
       <div id="editor-settings-agent" style="font-size: 0.88rem; line-height: 1.6;">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom: 8px;">
-          <input id="editor-settings-agent-iframe" type="checkbox" />
-          <span>Use iframe agent drawer</span>
-        </label>
-        <label for="editor-settings-agent-iframe-url" style="display:block; margin-bottom: 6px;">Agent iframe URL</label>
-        <input
-          id="editor-settings-agent-iframe-url"
-          class="lsp-rootrel-input"
-          type="text"
-          placeholder="http://127.0.0.1:12359/codex-agent"
-          autocomplete="off"
-          autocapitalize="off"
-          spellcheck="false"
-        />
-
-        <div class="fe-hr-thin"></div>
-
-        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Agent toggle</div>
+        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Side-bar toggle</div>
         <div style="display:flex; flex-direction: column; gap: 8px;">
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
             <input type="radio" name="agent-toggle-display" value="icon" checked />
@@ -2908,37 +2976,8 @@
           </label>
         </div>
 
-        <label for="editor-settings-agent-toggle-text" style="display:block; margin-top: 10px; margin-bottom: 6px;">Toggle text</label>
-        <input
-          id="editor-settings-agent-toggle-text"
-          class="lsp-rootrel-input"
-          type="text"
-          placeholder="Agent"
-          autocomplete="off"
-          autocapitalize="off"
-          spellcheck="false"
-        />
-
-        <div style="display:flex; gap:8px; align-items:flex-end; margin-top: 10px;">
-          <div style="flex:1;">
-            <label for="editor-settings-agent-toggle-emoji" style="display:block; margin-bottom: 6px;">Toggle emoji (optional)</label>
-            <input
-              id="editor-settings-agent-toggle-emoji"
-              class="lsp-rootrel-input"
-              type="text"
-              placeholder="💬"
-              autocomplete="off"
-              autocapitalize="off"
-              spellcheck="false"
-            />
-          </div>
-          <button class="fe-btn" id="editor-settings-agent-toggle-icon-browse">Browse icon…</button>
-          <button class="fe-btn" id="editor-settings-agent-toggle-icon-clear">Clear</button>
-        </div>
-
         <div style="display:flex; gap:8px; align-items:center; margin-top: 12px;">
           <button class="fe-btn" id="editor-settings-agent-shortcuts">Shortcuts…</button>
-          <span style="font-size: 0.8rem; opacity: 0.7;">Long-press / right-click the toggle to choose.</span>
         </div>
       </div>
     </div>
@@ -2949,7 +2988,7 @@
 <div id="agent-shortcuts-modal" class="fe-modal" aria-hidden="true" style="z-index: 360;">
   <div class="fe-modal-card" style="max-width: 760px;">
     <div class="fe-modal-header">
-      <strong>Agent Shortcuts</strong>
+      <strong>Side-bar Shortcuts</strong>
       <span style="flex:1"></span>
       <button class="fe-btn" id="agent-shortcuts-close" aria-label="Close">✕</button>
     </div>
@@ -2970,6 +3009,19 @@
           <div style="flex:2; min-width: 260px;">
             <label for="agent-shortcut-url" style="display:block; margin-bottom: 6px;">URL</label>
             <input id="agent-shortcut-url" class="lsp-rootrel-input" type="text" placeholder="http://127.0.0.1:12359/codex-agent" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+
+        <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px;">
+          <div style="flex:1; min-width: 220px;">
+            <label for="agent-shortcut-load-btn" style="display:block; margin-bottom: 6px;">Load</label>
+            <div class="fe-menu" style="width: 100%;">
+              <button id="agent-shortcut-load-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;" aria-haspopup="listbox" aria-expanded="false">
+                <span id="agent-shortcut-load-label">Lazy</span>
+                <span aria-hidden="true">▾</span>
+              </button>
+              <div id="agent-shortcut-load-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 200px; overflow-y: auto;"></div>
+            </div>
           </div>
         </div>
 

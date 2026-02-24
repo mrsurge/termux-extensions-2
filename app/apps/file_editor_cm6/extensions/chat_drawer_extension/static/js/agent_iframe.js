@@ -1,7 +1,7 @@
 // app/apps/file_editor_cm6/extensions/chat_drawer_extension/static/js/agent_iframe.js
 // Lightweight iframe-based agent drawer.
 
-const DEFAULT_IFRAME_URL = '/codex-agent';
+const DEFAULT_IFRAME_URL = '';
 const DEFAULT_DRAWER_OPEN_ENDPOINT = '/api/host/drawer/open';
 const DEFAULT_DRAWER_CLOSE_ENDPOINT = '/api/host/drawer/close';
 
@@ -17,7 +17,7 @@ export function initAgentIframe(options = {}) {
     return { open: () => {}, close: () => {}, destroy: () => {}, setUrl: () => {} };
   }
 
-  let url = options.url || DEFAULT_IFRAME_URL;
+  let url = (typeof options.url === 'string') ? options.url : DEFAULT_IFRAME_URL;
   let hostOrigin = '';
   let drawerOpenEndpoint = DEFAULT_DRAWER_OPEN_ENDPOINT;
   let drawerCloseEndpoint = DEFAULT_DRAWER_CLOSE_ENDPOINT;
@@ -33,6 +33,13 @@ export function initAgentIframe(options = {}) {
   }
 
   function refreshOriginsAndEndpoints() {
+    if (!url) {
+      hostOrigin = '';
+      drawerOpenEndpoint = '';
+      drawerCloseEndpoint = '';
+      iframeOrigin = null;
+      return;
+    }
     try {
       hostOrigin = new URL(url, window.location.href).origin;
     } catch {
@@ -52,6 +59,7 @@ export function initAgentIframe(options = {}) {
   }
 
   async function updateHostUi(showClose) {
+    if (!url) return;
     const endpoint = showClose ? drawerOpenEndpoint : drawerCloseEndpoint;
     if (!endpoint) return;
     try {
@@ -87,6 +95,10 @@ export function initAgentIframe(options = {}) {
 
   function ensureIframeLoaded() {
     if (!iframe) return;
+    if (!url) {
+      iframe.removeAttribute('src');
+      return;
+    }
     if (!iframe.src || iframe.src !== url) {
       iframe.src = url;
     }
@@ -124,7 +136,7 @@ export function initAgentIframe(options = {}) {
   drawer.classList.add('agent-drawer--iframe');
   applyHeaderMode();
   if (title) {
-    title.textContent = options.title || 'Agent';
+    title.textContent = options.title || 'Sidebar';
   }
 
   refreshOriginsAndEndpoints();
@@ -154,11 +166,15 @@ export function initAgentIframe(options = {}) {
 
   function setUrl(nextUrl) {
     const normalized = String(nextUrl || '').trim();
-    if (!normalized || normalized === url) return;
+    if (normalized === url) return;
     url = normalized;
     refreshOriginsAndEndpoints();
     if (iframe) {
-      iframe.src = url;
+      if (url) {
+        iframe.src = url;
+      } else {
+        iframe.removeAttribute('src');
+      }
     }
   }
 

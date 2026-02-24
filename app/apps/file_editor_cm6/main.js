@@ -11,7 +11,6 @@ import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';
 import { initBranchMenu } from './static/js/git_menu.js';
 // Hardcoded extension imports for now; will be dynamically loaded later.
-import { initAgentDrawer } from './extensions/chat_drawer_extension/static/js/agent_drawer.js';
 import { initAgentIframe } from './extensions/chat_drawer_extension/static/js/agent_iframe.js';
 import ReconnectingWebSocket from './static/js/reconnecting_websocket.js'; // used by other WS helpers (not explorer)
 import { initLspModal } from './static/js/lsp-modal/index.js';
@@ -43,16 +42,10 @@ function ensureVConsoleLoaded() {
 }
 import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
 
-const AGENT_HOST_PORT = 12359;
-const AGENT_HOST_RESOLVE_ENDPOINT = '/api/host/resolve_iframe';
-const AGENT_IFRAME_STORAGE_KEY = 'te2_agent_iframe_url';
 const AGENT_EXTENSION_MANIFEST = '/apps/file_editor_cm6/extensions/chat_drawer_extension/manifest.json';
 const AGENT_HOST_CWD_ENDPOINT = '/api/host/project/cwd';
-const UI_PREF_KEY_AGENT_IFRAME = 'agentDrawerIframe';
-const UI_PREF_KEY_AGENT_IFRAME_URL = 'agentDrawerIframeUrl';
+const UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT = 'agentActiveShortcutId';
 const UI_PREF_KEY_AGENT_TOGGLE_DISPLAY = 'agentToggleDisplay';
-const UI_PREF_KEY_AGENT_TOGGLE_TEXT = 'agentToggleText';
-const UI_PREF_KEY_AGENT_TOGGLE_ICON = 'agentToggleIcon';
 const UI_PREF_KEY_AGENT_SHORTCUTS = 'agentShortcuts';
 
 let _latestUiPrefs = {};
@@ -215,8 +208,10 @@ function startAgentOpenRequestPoller() {
 async function pushAgentHostCwd(cwd) {
   const value = typeof cwd === 'string' ? cwd.trim() : '';
   if (!value) return;
+  const base = getAgentHostBase();
+  if (!base) return;
   try {
-    await fetch(`${getAgentHostBase()}${AGENT_HOST_CWD_ENDPOINT}`, {
+    await fetch(`${base}${AGENT_HOST_CWD_ENDPOINT}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cwd: value }),
@@ -226,85 +221,71 @@ async function pushAgentHostCwd(cwd) {
   }
 }
 
-function parseBoolean(value) {
-  if (value === true) return true;
-  if (value === false || value == null) return false;
-  if (typeof value === 'number') return value !== 0;
-  if (typeof value === 'string') {
-    const v = value.trim().toLowerCase();
-    return v === 'true' || v === '1' || v === 'yes' || v === 'on';
-  }
-  return false;
-}
-
-function buildAgentHostBase() {
-  const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-  const host = window.location.hostname || '127.0.0.1';
-  return `${protocol}//${host}:${AGENT_HOST_PORT}`;
-}
-
-function buildDefaultAgentIframeUrl() {
-  return `${buildAgentHostBase()}/codex-agent`;
-}
-
-function getAgentHostBaseFromStorage() {
-  try {
-    const stored = localStorage.getItem(AGENT_IFRAME_STORAGE_KEY);
-    if (stored) {
-      const parsed = new URL(stored, window.location.href);
-      return parsed.origin;
-    }
-  } catch (_) {}
-  return '';
-}
-
 function getAgentHostBase() {
-  return getAgentHostBaseFromStorage() || buildAgentHostBase();
+  return typeof window.__agentHostBase === 'string' ? window.__agentHostBase : '';
+}
+
+function _normalizeShortcutLoad(raw) {
+  const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return value === 'eager' ? 'eager' : 'lazy';
+}
+
+function _setAgentShortcutLoadValue(value) {
+  const normalized = _normalizeShortcutLoad(value);
+  if (agentShortcutLoadBtn) {
+    agentShortcutLoadBtn.dataset.value = normalized;
+  }
+  if (agentShortcutLoadLabel) {
+    agentShortcutLoadLabel.textContent = normalized === 'eager' ? 'Eager' : 'Lazy';
+  }
+}
+
+function _getAgentShortcutLoadValue() {
+  const raw = agentShortcutLoadBtn?.dataset?.value;
+  return _normalizeShortcutLoad(raw);
+}
+
+function _collectSidebarShortcuts(uiPrefs) {
+  const shortcuts = Array.isArray(uiPrefs?.[UI_PREF_KEY_AGENT_SHORTCUTS])
+    ? uiPrefs[UI_PREF_KEY_AGENT_SHORTCUTS]
+    : [];
+  const out = [];
+  shortcuts.forEach((sc) => {
+    if (!sc || typeof sc !== 'object') return;
+    const url = typeof sc.url === 'string' ? sc.url.trim() : '';
+    if (!url) return;
+    const id = typeof sc.id === 'string' ? sc.id.trim() : '';
+    const key = id || url;
+    if (!key) return;
+    out.push({
+      key,
+      id,
+      label: typeof sc.label === 'string' ? sc.label : '',
+      url,
+      icon: sc.icon || null,
+      load: _normalizeShortcutLoad(sc.load),
+    });
+  });
+  return out;
+}
+
+function _resolveActiveShortcut(uiPrefs, shortcuts) {
+  const activeId = typeof uiPrefs?.[UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT].trim()
+    : '';
+  if (!activeId) return null;
+  const list = Array.isArray(shortcuts) ? shortcuts : _collectSidebarShortcuts(uiPrefs);
+  return list.find((sc) => sc && (sc.id === activeId || sc.url === activeId || sc.key === activeId)) || null;
 }
 
 async function resolveAgentIframeUrl(uiPrefs) {
-  const explicit = typeof uiPrefs?.[UI_PREF_KEY_AGENT_IFRAME_URL] === 'string'
-    ? uiPrefs[UI_PREF_KEY_AGENT_IFRAME_URL].trim()
-    : '';
-  if (explicit) {
-    return explicit;
-  }
-
-  let resolved = '';
-  try {
-    const resp = await fetch(`${buildAgentHostBase()}${AGENT_HOST_RESOLVE_ENDPOINT}`, { cache: 'no-store' });
-    const body = await resp.json();
-    resolved = (body && typeof body.url === 'string' && body.url.trim()) ? body.url.trim() : '';
-    if (!resolved && body && body.data && typeof body.data.url === 'string') {
-      resolved = body.data.url.trim();
-    }
-  } catch (e) {
-    console.warn('[Agent Drawer] Failed to resolve iframe URL:', e);
-  }
-
-  if (!resolved) {
-    resolved = buildDefaultAgentIframeUrl();
-  }
-
-  try {
-    localStorage.setItem(AGENT_IFRAME_STORAGE_KEY, resolved);
-  } catch (_) {}
-
-  return resolved;
+  const match = _resolveActiveShortcut(uiPrefs);
+  return match ? match.url : '';
 }
 
 async function resolveAgentIframeSettings(uiPrefs) {
-  const enabled = parseBoolean(uiPrefs?.[UI_PREF_KEY_AGENT_IFRAME]);
   const url = await resolveAgentIframeUrl(uiPrefs || {});
-  let normalized = '';
-  try {
-    normalized = String(url || '').trim();
-  } catch (_) {
-    normalized = '';
-  }
-  const noProto = normalized.replace(/^[a-z]+:\/\//i, '').replace(/\/+$/, '');
-  const isDefaultCodexTarget = noProto === '127.0.0.1:12359/codex-agent';
-  return { enabled, url, hideDrawerHeader: isDefaultCodexTarget };
+  return { enabled: true, url, hideDrawerHeader: false };
 }
 
 let explorerSocket = null;
@@ -1479,13 +1460,8 @@ const editorSettingsThemeSummary = requireEl('#editor-settings-theme-summary');
 const editorThemesModal = requireEl('#editor-themes-modal');
 const editorThemesClose = requireEl('#editor-themes-close');
 const editorThemesList = requireEl('#editor-themes-list');
-const editorSettingsAgentIframeToggle = requireEl('#editor-settings-agent-iframe');
-const editorSettingsAgentIframeUrlInput = requireEl('#editor-settings-agent-iframe-url');
-const editorSettingsAgentToggleText = requireEl('#editor-settings-agent-toggle-text');
-const editorSettingsAgentToggleEmoji = requireEl('#editor-settings-agent-toggle-emoji');
-const editorSettingsAgentToggleIconBrowse = requireEl('#editor-settings-agent-toggle-icon-browse');
-const editorSettingsAgentToggleIconClear = requireEl('#editor-settings-agent-toggle-icon-clear');
 const editorSettingsAgentShortcutsBtn = requireEl('#editor-settings-agent-shortcuts');
+const sidebarSetupShortcutsBtn = requireEl('#sidebar-setup-shortcuts');
 
 const agentShortcutsModal = requireEl('#agent-shortcuts-modal');
 const agentShortcutsClose = requireEl('#agent-shortcuts-close');
@@ -1494,6 +1470,9 @@ const agentShortcutsList = requireEl('#agent-shortcuts-list');
 const agentShortcutsEditor = requireEl('#agent-shortcuts-editor');
 const agentShortcutLabel = requireEl('#agent-shortcut-label');
 const agentShortcutUrl = requireEl('#agent-shortcut-url');
+const agentShortcutLoadBtn = requireEl('#agent-shortcut-load-btn');
+const agentShortcutLoadLabel = requireEl('#agent-shortcut-load-label');
+const agentShortcutLoadDD = requireEl('#agent-shortcut-load-dd');
 const agentShortcutEmoji = requireEl('#agent-shortcut-emoji');
 const agentShortcutIconBrowse = requireEl('#agent-shortcut-icon-browse');
 const agentShortcutIconClear = requireEl('#agent-shortcut-icon-clear');
@@ -2748,13 +2727,7 @@ let lastPickerPath = HOME_DIR;
 let _agentShortcutsCache = [];
 let _agentShortcutEditingId = null;
 let _agentShortcutEditingAssetName = null;
-let _agentToggleEditingAssetName = null;
-
-function _setAgentIframeUrlInputEnabled(enabled) {
-  if (!editorSettingsAgentIframeUrlInput) return;
-  editorSettingsAgentIframeUrlInput.disabled = !enabled;
-  editorSettingsAgentIframeUrlInput.style.opacity = enabled ? '1' : '0.72';
-}
+let _agentShortcutIframeMap = new Map();
 
 function _agentIconUrlFromName(name) {
   const safe = String(name || '').trim();
@@ -2795,68 +2768,43 @@ function _applyAgentToggleToolbar(uiPrefs) {
   const iconEl = btn.querySelector('.fe-agent-icon');
   if (!iconEl) return;
 
-  const currentUrl = typeof uiPrefs?.[UI_PREF_KEY_AGENT_IFRAME_URL] === 'string'
-    ? uiPrefs[UI_PREF_KEY_AGENT_IFRAME_URL].trim()
+  const activeId = typeof uiPrefs?.[UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT] === 'string'
+    ? uiPrefs[UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT].trim()
     : '';
 
-  // If the active URL matches a shortcut with an icon, that icon wins.
+  // If the active shortcut has an icon, that icon wins.
   const shortcuts = Array.isArray(uiPrefs?.[UI_PREF_KEY_AGENT_SHORTCUTS])
     ? uiPrefs[UI_PREF_KEY_AGENT_SHORTCUTS]
     : [];
   let shortcutIcon = null;
-  if (currentUrl) {
-    const match = shortcuts.find((sc) => sc && typeof sc === 'object' && sc.url === currentUrl);
+  if (activeId) {
+    const match = shortcuts.find((sc) => sc && typeof sc === 'object'
+      && (sc.id === activeId || sc.url === activeId));
     if (match && match.icon && typeof match.icon === 'object') {
       shortcutIcon = match.icon;
     }
   }
 
-  const icon = shortcutIcon || uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_ICON] || null;
-  if (icon && typeof icon === 'object' && icon.kind && icon.kind !== 'default') {
-    _renderAgentIconInto(iconEl, icon);
+  if (shortcutIcon && typeof shortcutIcon === 'object' && shortcutIcon.kind && shortcutIcon.kind !== 'default') {
+    _renderAgentIconInto(iconEl, shortcutIcon);
   }
 }
 
 function _applyAgentSettingsControls(uiPrefs) {
-  const enabled = parseBoolean(uiPrefs?.[UI_PREF_KEY_AGENT_IFRAME]);
-  const explicitUrl =
-    typeof uiPrefs?.[UI_PREF_KEY_AGENT_IFRAME_URL] === 'string'
-      ? uiPrefs[UI_PREF_KEY_AGENT_IFRAME_URL].trim()
-      : '';
   const display = typeof uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_DISPLAY] === 'string'
     ? uiPrefs[UI_PREF_KEY_AGENT_TOGGLE_DISPLAY].trim()
     : 'icon';
-  const toggleText = typeof uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_TEXT] === 'string'
-    ? uiPrefs[UI_PREF_KEY_AGENT_TOGGLE_TEXT].trim()
-    : 'Agent';
-  const toggleIcon = uiPrefs?.[UI_PREF_KEY_AGENT_TOGGLE_ICON];
   const shortcuts = Array.isArray(uiPrefs?.[UI_PREF_KEY_AGENT_SHORTCUTS])
     ? uiPrefs[UI_PREF_KEY_AGENT_SHORTCUTS]
     : [];
 
   _agentSettingsUiMutating = true;
   try {
-    editorSettingsAgentIframeToggle.checked = enabled;
-    editorSettingsAgentIframeUrlInput.value = explicitUrl;
-    _setAgentIframeUrlInputEnabled(enabled);
-
     // Toggle display radios
     try {
       const radios = document.querySelectorAll('input[name="agent-toggle-display"]');
       radios.forEach((r) => { r.checked = (r.value === display); });
     } catch (_) {}
-
-    editorSettingsAgentToggleText.value = toggleText || 'Agent';
-    if (toggleIcon && typeof toggleIcon === 'object' && toggleIcon.kind === 'emoji') {
-      editorSettingsAgentToggleEmoji.value = String(toggleIcon.emoji || '').trim();
-      _agentToggleEditingAssetName = null;
-    } else if (toggleIcon && typeof toggleIcon === 'object' && toggleIcon.kind === 'asset') {
-      editorSettingsAgentToggleEmoji.value = '';
-      _agentToggleEditingAssetName = String(toggleIcon.name || '').trim() || null;
-    } else {
-      editorSettingsAgentToggleEmoji.value = '';
-      _agentToggleEditingAssetName = null;
-    }
 
     _agentShortcutsCache = shortcuts.slice();
   } finally {
@@ -2864,6 +2812,24 @@ function _applyAgentSettingsControls(uiPrefs) {
   }
 
   _applyAgentToggleToolbar(uiPrefs);
+  _syncSidebarIframes(uiPrefs);
+}
+
+function _updateSidebarSetupPlaceholder(uiPrefs, hasActiveOverride) {
+  const placeholder = document.getElementById('sidebar-setup-placeholder');
+  const stack = document.getElementById('sidebar-iframe-stack');
+  if (!placeholder || !stack) return;
+  const hasActive = typeof hasActiveOverride === 'boolean'
+    ? hasActiveOverride
+    : !!(_resolveActiveShortcut(uiPrefs)?.url);
+  if (hasActive) {
+    placeholder.style.display = 'none';
+  } else {
+    placeholder.style.display = 'flex';
+  }
+  stack.style.opacity = hasActive ? '1' : '0';
+  stack.style.pointerEvents = hasActive ? 'auto' : 'none';
+  stack.setAttribute('aria-hidden', hasActive ? 'false' : 'true');
 }
 
 function _sendAgentUiPrefUpdate(key, value) {
@@ -2874,15 +2840,69 @@ function _sendAgentUiPrefUpdate(key, value) {
   window.__explorerBusSend('prefs:updateUi', { key, value });
 }
 
-function _applyAgentIframeUrlToDom(url) {
-  const iframe = document.getElementById('agent-iframe');
-  if (!iframe) return;
-  const next = String(url || '').trim();
-  if (!next) return;
-  const current = String(iframe.getAttribute('src') || '').trim();
-  if (current !== next) {
-    iframe.setAttribute('src', next);
-  }
+function _ensureSidebarIframeLoaded(entry) {
+  if (!entry || !entry.iframe || entry.loaded) return;
+  if (!entry.url) return;
+  entry.iframe.src = entry.url;
+  entry.loaded = true;
+}
+
+function _setActiveSidebarIframe(activeKey, activeUrl, uiPrefs) {
+  let hasActive = false;
+  _agentShortcutIframeMap.forEach((entry, key) => {
+    const isActive = !!(activeKey && activeUrl && key === activeKey);
+    entry.iframe.classList.toggle('is-active', isActive);
+    if (isActive) {
+      _ensureSidebarIframeLoaded(entry);
+      hasActive = true;
+    }
+  });
+  _updateSidebarSetupPlaceholder(uiPrefs || _latestUiPrefs || {}, hasActive);
+  return hasActive;
+}
+
+function _syncSidebarIframes(uiPrefs) {
+  const stack = document.getElementById('sidebar-iframe-stack');
+  if (!stack) return;
+  const shortcuts = _collectSidebarShortcuts(uiPrefs);
+  const desiredKeys = new Set(shortcuts.map((sc) => sc.key));
+
+  _agentShortcutIframeMap.forEach((entry, key) => {
+    if (!desiredKeys.has(key)) {
+      try {
+        entry.iframe.remove();
+      } catch (_) {}
+      _agentShortcutIframeMap.delete(key);
+    }
+  });
+
+  shortcuts.forEach((sc) => {
+    let entry = _agentShortcutIframeMap.get(sc.key);
+    if (!entry) {
+      const iframe = document.createElement('iframe');
+      iframe.className = 'sidebar-iframe';
+      iframe.setAttribute('data-shortcut-id', sc.key);
+      iframe.setAttribute('loading', sc.load === 'eager' ? 'eager' : 'lazy');
+      stack.appendChild(iframe);
+      entry = { iframe, url: sc.url, loaded: false };
+      _agentShortcutIframeMap.set(sc.key, entry);
+    }
+    entry.url = sc.url;
+    entry.iframe.setAttribute('data-shortcut-id', sc.key);
+    entry.iframe.setAttribute('data-shortcut-load', sc.load);
+    entry.iframe.setAttribute('loading', sc.load === 'eager' ? 'eager' : 'lazy');
+    if (entry.loaded && entry.iframe.src !== sc.url) {
+      entry.iframe.src = sc.url;
+    }
+    if (sc.load === 'eager') {
+      _ensureSidebarIframeLoaded(entry);
+    }
+  });
+
+  const active = _resolveActiveShortcut(uiPrefs, shortcuts);
+  const activeKey = active ? active.key : '';
+  const activeUrl = active ? active.url : '';
+  _setActiveSidebarIframe(activeKey, activeUrl, uiPrefs);
 }
 
 function _renderShortcutIconNode(icon, sizePx = 16) {
@@ -2932,7 +2952,9 @@ function _renderAgentDropdown() {
     shortcuts.forEach((sc) => {
       const label = typeof sc?.label === 'string' ? sc.label : '';
       const url = typeof sc?.url === 'string' ? sc.url : '';
-      if (!label || !url) return;
+      const id = typeof sc?.id === 'string' ? sc.id : '';
+      const activeId = id || url;
+      if (!label || !url || !activeId) return;
       const item = document.createElement('div');
       item.className = 'fe-dd-item';
       item.style.display = 'flex';
@@ -2951,8 +2973,7 @@ function _renderAgentDropdown() {
       item.addEventListener('click', async (ev) => {
         ev.stopPropagation();
         _closeAgentDropdown();
-        _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_IFRAME, true);
-        _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_IFRAME_URL, url);
+        _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT, activeId);
         // Give the controller rebind a beat if mode changes.
         setTimeout(() => { try { agentDrawerHandle?.open?.(); } catch (_) {} }, 120);
       });
@@ -3008,8 +3029,10 @@ function _hideAgentShortcutEditor() {
   _agentShortcutEditingAssetName = null;
   agentShortcutLabel.value = '';
   agentShortcutUrl.value = '';
+  _setAgentShortcutLoadValue('lazy');
   agentShortcutEmoji.value = '';
   agentShortcutIconPreview.textContent = '';
+  _closeAgentShortcutLoadMenu();
 }
 
 function _showAgentShortcutEditor(entry) {
@@ -3018,6 +3041,7 @@ function _showAgentShortcutEditor(entry) {
   _agentShortcutEditingId = typeof e.id === 'string' && e.id.trim() ? e.id.trim() : null;
   agentShortcutLabel.value = typeof e.label === 'string' ? e.label : '';
   agentShortcutUrl.value = typeof e.url === 'string' ? e.url : '';
+  _setAgentShortcutLoadValue(e.load);
 
   const icon = e.icon && typeof e.icon === 'object' ? e.icon : null;
   _agentShortcutEditingAssetName = null;
@@ -3048,8 +3072,59 @@ function _renderAgentShortcutPreview() {
   }
 }
 
+function _closeAgentShortcutLoadMenu() {
+  if (!agentShortcutLoadDD) return;
+  agentShortcutLoadDD.classList.remove('show');
+  if (agentShortcutLoadBtn) {
+    agentShortcutLoadBtn.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function _renderAgentShortcutLoadMenu() {
+  if (!agentShortcutLoadDD) return;
+  agentShortcutLoadDD.innerHTML = '';
+  const current = _getAgentShortcutLoadValue();
+  const options = [
+    { value: 'lazy', label: 'Lazy' },
+    { value: 'eager', label: 'Eager' },
+  ];
+  options.forEach((opt) => {
+    const item = document.createElement('div');
+    item.className = 'fe-dd-item';
+    item.textContent = opt.label;
+    item.dataset.checkable = 'true';
+    setMenuChecked(item, opt.value === current);
+    item.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      _setAgentShortcutLoadValue(opt.value);
+      _closeAgentShortcutLoadMenu();
+    });
+    agentShortcutLoadDD.appendChild(item);
+  });
+}
+
+function _openAgentShortcutLoadMenu() {
+  if (!agentShortcutLoadDD) return;
+  try { closeAllMenus(); } catch (_) {}
+  _renderAgentShortcutLoadMenu();
+  agentShortcutLoadDD.classList.add('show');
+  if (agentShortcutLoadBtn) {
+    agentShortcutLoadBtn.setAttribute('aria-expanded', 'true');
+  }
+}
+
 function _persistAgentShortcuts(nextList) {
   _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_SHORTCUTS, nextList);
+  const activeId = typeof _latestUiPrefs?.[UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT] === 'string'
+    ? _latestUiPrefs[UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT].trim()
+    : '';
+  const hasActive = !!(activeId && Array.isArray(nextList) && nextList.some((sc) => sc && (sc.id === activeId || sc.url === activeId)));
+  if (!hasActive) {
+    const fallback = Array.isArray(nextList) && nextList.length
+      ? (nextList[0].id || nextList[0].url || '')
+      : '';
+    _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT, fallback);
+  }
 }
 
 function _renderAgentShortcutsList() {
@@ -3136,17 +3211,13 @@ function _renderAgentShortcutsList() {
 }
 
 function _createAgentController(config) {
-  const enabled = !!config?.enabled;
-  _agentRuntimeMode = enabled ? 'iframe' : 'drawer';
-  if (enabled) {
-    return initAgentIframe({
-      url: config.url,
-      title: 'Agent',
-      allowAnyOrigin: true,
-      hideDrawerHeader: config.hideDrawerHeader !== false,
-    });
-  }
-  return initAgentDrawer();
+  _agentRuntimeMode = 'iframe';
+  return initAgentIframe({
+    url: config.url,
+    title: 'Sidebar',
+    allowAnyOrigin: true,
+    hideDrawerHeader: false,
+  });
 }
 
 function _destroyAgentController() {
@@ -3183,20 +3254,14 @@ async function _applyAgentRuntimeConfigFromUi(uiPrefs) {
   try {
     window.__agentHostBase = new URL(config.url, window.location.href).origin;
   } catch (_) {
-    window.__agentHostBase = getAgentHostBase();
+    window.__agentHostBase = '';
   }
-
-  try {
-    if (config.url) {
-      localStorage.setItem(AGENT_IFRAME_STORAGE_KEY, config.url);
-    }
-  } catch (_) {}
 
   if (!agentDrawerHandle) {
     return config;
   }
 
-  const nextMode = config.enabled ? 'iframe' : 'drawer';
+  const nextMode = 'iframe';
   const currentMode = _agentRuntimeMode || nextMode;
   const modeChanged = currentMode !== nextMode;
   const headerChanged =
@@ -3212,8 +3277,6 @@ async function _applyAgentRuntimeConfigFromUi(uiPrefs) {
   if (nextMode === 'iframe') {
     if (typeof agentDrawerHandle?.setUrl === 'function') {
       agentDrawerHandle.setUrl(config.url);
-    } else {
-      _applyAgentIframeUrlToDom(config.url);
     }
   }
 
@@ -3221,29 +3284,6 @@ async function _applyAgentRuntimeConfigFromUi(uiPrefs) {
 }
 
 function _initAgentSettingsUI() {
-  editorSettingsAgentIframeToggle.addEventListener('change', () => {
-    if (_agentSettingsUiMutating) return;
-    _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_IFRAME, !!editorSettingsAgentIframeToggle.checked);
-  });
-
-  const sendUrlUpdate = () => {
-    if (_agentSettingsUiMutating) return;
-    _sendAgentUiPrefUpdate(
-      UI_PREF_KEY_AGENT_IFRAME_URL,
-      (editorSettingsAgentIframeUrlInput.value || '').trim(),
-    );
-  };
-
-  editorSettingsAgentIframeUrlInput.addEventListener('change', sendUrlUpdate);
-  editorSettingsAgentIframeUrlInput.addEventListener('blur', sendUrlUpdate);
-  editorSettingsAgentIframeUrlInput.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') {
-      ev.preventDefault();
-      sendUrlUpdate();
-      editorSettingsAgentIframeUrlInput.blur();
-    }
-  });
-
   // Toggle display radios
   try {
     const radios = document.querySelectorAll('input[name="agent-toggle-display"]');
@@ -3256,52 +3296,14 @@ function _initAgentSettingsUI() {
     });
   } catch (_) {}
 
-  const sendToggleText = () => {
-    if (_agentSettingsUiMutating) return;
-    _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_TOGGLE_TEXT, (editorSettingsAgentToggleText.value || '').trim());
-  };
-  editorSettingsAgentToggleText.addEventListener('change', sendToggleText);
-  editorSettingsAgentToggleText.addEventListener('blur', sendToggleText);
-
-  editorSettingsAgentToggleEmoji.addEventListener('change', () => {
-    if (_agentSettingsUiMutating) return;
-    const em = (editorSettingsAgentToggleEmoji.value || '').trim();
-    if (!em) return;
-    _agentToggleEditingAssetName = null;
-    _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_TOGGLE_ICON, { kind: 'emoji', emoji: em });
-  });
-
-  editorSettingsAgentToggleIconBrowse.addEventListener('click', async () => {
-    if (typeof window.__explorerBusRequest !== 'function') {
-      host.toast('Explorer connection unavailable');
-      return;
-    }
-    const picked = await pickFile(lastPickerPath || HOME_DIR);
-    if (!picked) return;
-    try {
-      const res = await window.__explorerBusRequest('prefs:vendorAgentIcon', { abs_path: picked }, 12000);
-      if (res?.payload?.ok && res.payload.name) {
-        _agentToggleEditingAssetName = res.payload.name;
-        _agentSettingsUiMutating = true;
-        try { editorSettingsAgentToggleEmoji.value = ''; } finally { _agentSettingsUiMutating = false; }
-        _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_TOGGLE_ICON, { kind: 'asset', name: res.payload.name });
-      }
-    } catch (e) {
-      host.toast(e?.message || 'Failed to vendor icon');
-    }
-  });
-
-  editorSettingsAgentToggleIconClear.addEventListener('click', () => {
-    if (_agentSettingsUiMutating) return;
-    _agentToggleEditingAssetName = null;
-    _agentSettingsUiMutating = true;
-    try { editorSettingsAgentToggleEmoji.value = ''; } finally { _agentSettingsUiMutating = false; }
-    _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_TOGGLE_ICON, { kind: 'default' });
-  });
-
   editorSettingsAgentShortcutsBtn.addEventListener('click', () => {
     _openAgentShortcutsModal();
   });
+  if (sidebarSetupShortcutsBtn) {
+    sidebarSetupShortcutsBtn.addEventListener('click', () => {
+      _openAgentShortcutsModal();
+    });
+  }
 
   agentShortcutsClose.addEventListener('click', _closeAgentShortcutsModal);
   agentShortcutsModal.addEventListener('click', (ev) => {
@@ -3310,6 +3312,15 @@ function _initAgentSettingsUI() {
   agentShortcutsAdd.addEventListener('click', () => _showAgentShortcutEditor({}));
   agentShortcutCancel.addEventListener('click', _hideAgentShortcutEditor);
   agentShortcutEmoji.addEventListener('input', _renderAgentShortcutPreview);
+  agentShortcutLoadBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const wasOpen = agentShortcutLoadDD.classList.contains('show');
+    if (wasOpen) {
+      _closeAgentShortcutLoadMenu();
+      return;
+    }
+    _openAgentShortcutLoadMenu();
+  });
 
   agentShortcutIconBrowse.addEventListener('click', async () => {
     if (typeof window.__explorerBusRequest !== 'function') {
@@ -3339,6 +3350,7 @@ function _initAgentSettingsUI() {
   agentShortcutSave.addEventListener('click', () => {
     const label = (agentShortcutLabel.value || '').trim();
     const url = (agentShortcutUrl.value || '').trim();
+    const load = _getAgentShortcutLoadValue();
     if (!label || !url) {
       host.toast('Label and URL are required');
       return;
@@ -3353,7 +3365,7 @@ function _initAgentSettingsUI() {
     }
     const next = Array.isArray(_agentShortcutsCache) ? _agentShortcutsCache.slice() : [];
     const idx = next.findIndex((x) => x && x.id === id);
-    const entry = { id, label, url, icon };
+    const entry = { id, label, url, icon, load };
     if (idx >= 0) next[idx] = entry;
     else next.push(entry);
     _persistAgentShortcuts(next);
@@ -5519,6 +5531,12 @@ function closeAllMenus() {
   menuEditorDD.classList.remove('show');
   menuViewDD.classList.remove('show');
   recentFilesDD.classList.remove('show');
+  if (agentShortcutLoadDD) {
+    agentShortcutLoadDD.classList.remove('show');
+  }
+  if (agentShortcutLoadBtn) {
+    agentShortcutLoadBtn.setAttribute('aria-expanded', 'false');
+  }
   try {
     if (typeof window.__cm6CloseLspMenus === 'function') {
       window.__cm6CloseLspMenus();

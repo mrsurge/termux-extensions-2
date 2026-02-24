@@ -65,7 +65,14 @@ def sync_vscode_watcher_settings(watcher_mode: str) -> None:
     if watcher_mode in ("watchexec", "none"):
         settings["files.watcherExclude"] = {"**": True}
     else:
-        settings.pop("files.watcherExclude", None)
+        # IPC mode: let VS Code's native watcher run, but always exclude
+        # git lock files — the upstream git poller creates transient
+        # index.lock files that cascade into watcher/change event storms.
+        settings["files.watcherExclude"] = {
+            "**/.git/index.lock": True,
+            "**/.git/index.lock+": True,
+            "**/.git/*.lock": True,
+        }
 
     _USER_SETTINGS_PATH.write_text(
         _json.dumps(settings, indent=4) + "\n", encoding="utf-8"

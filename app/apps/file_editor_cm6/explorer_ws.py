@@ -1433,31 +1433,6 @@ class ExplorerDispatcher:
                         "agentToggleDisplay must be one of: icon, text, both",
                         msg_id,
                     )
-        elif isinstance(expected, dict):
-            if not isinstance(value, dict):
-                return await self.send_error(
-                    "prefs:updateUi requires 'value' (object)",
-                    msg_id,
-                )
-            if key == "agentToggleIcon":
-                kind = value.get("kind")
-                if kind == "emoji":
-                    emoji = value.get("emoji")
-                    if not isinstance(emoji, str) or not emoji.strip():
-                        return await self.send_error("agentToggleIcon.emoji is required", msg_id)
-                    value = {"kind": "emoji", "emoji": emoji.strip()}
-                elif kind == "asset":
-                    name = value.get("name")
-                    if not isinstance(name, str) or not name.strip():
-                        return await self.send_error("agentToggleIcon.name is required", msg_id)
-                    value = {"kind": "asset", "name": name.strip()}
-                elif kind == "default":
-                    value = {"kind": "default"}
-                else:
-                    return await self.send_error(
-                        "agentToggleIcon.kind must be 'default', 'emoji', or 'asset'",
-                        msg_id,
-                    )
         elif isinstance(expected, list):
             if not isinstance(value, list):
                 return await self.send_error(
@@ -1482,6 +1457,21 @@ class ExplorerDispatcher:
                         sid = sid.strip()
                     else:
                         sid = f"sc_{idx}"
+                    load = raw.get("load")
+                    if load is None or (isinstance(load, str) and not load.strip()):
+                        load = "lazy"
+                    elif isinstance(load, str):
+                        load = load.strip().lower()
+                        if load not in ("lazy", "eager"):
+                            return await self.send_error(
+                                f"agentShortcuts[{idx}].load must be 'lazy' or 'eager'",
+                                msg_id,
+                            )
+                    else:
+                        return await self.send_error(
+                            f"agentShortcuts[{idx}].load must be 'lazy' or 'eager'",
+                            msg_id,
+                        )
                     icon = raw.get("icon")
                     icon_clean = None
                     if icon is not None:
@@ -1509,6 +1499,7 @@ class ExplorerDispatcher:
                             "label": label.strip(),
                             "url": url.strip(),
                             "icon": icon_clean,
+                            "load": load,
                         }
                     )
                 value = cleaned

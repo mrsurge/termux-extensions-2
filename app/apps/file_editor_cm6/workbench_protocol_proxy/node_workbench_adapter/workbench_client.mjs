@@ -2836,7 +2836,15 @@ export class WorkbenchClient {
       sub.event((changes) => {
         console.log(`[watcher] EVENT FIRED: ${JSON.stringify(changes)?.slice(0, 500)}`);
         if (Array.isArray(changes) && changes.length > 0) {
-          const mapped = changes.map(c => ({
+          // Filter out .git lock files — upstream git poller creates transient
+          // index.lock files that cascade into watcher/change event storms.
+          const filtered = changes.filter(c => {
+            const p = c.resource?.path ?? c.resource?.fsPath ?? "";
+            if (p.includes("/.git/") && p.endsWith(".lock")) return false;
+            return true;
+          });
+          if (filtered.length === 0) return;
+          const mapped = filtered.map(c => ({
             type: c.type,
             path: c.resource?.path ?? c.resource?.fsPath ?? String(c.resource ?? ""),
           }));
@@ -2855,7 +2863,7 @@ export class WorkbenchClient {
         const authority = this._useRemote ? this._authority : null;
         const rootUri = this._uriForPath(String(workspaceRoot), authority);
         console.log(`[watcher] calling watch() sessionId=${sessionId} watchId=${watchId} uri=${JSON.stringify(rootUri)}`);
-        await this._mgmtIpc.call("remoteFilesystem", "watch", [sessionId, watchId, rootUri, { recursive: true, excludes: [] }]);
+        await this._mgmtIpc.call("remoteFilesystem", "watch", [sessionId, watchId, rootUri, { recursive: true, excludes: ["**/.git/*.lock"] }]);
         this.onEvent({ type: "watcher/subscribed", ts_ms: Date.now(), root: String(workspaceRoot) });
         console.log(`[watcher] watch() call returned OK — subscribed to ${workspaceRoot}`);
       } else {
