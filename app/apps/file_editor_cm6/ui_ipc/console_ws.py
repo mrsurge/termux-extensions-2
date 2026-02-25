@@ -138,3 +138,16 @@ async def on_console_eval_result(ns, sid, data):
     if not isinstance(data, dict):
         return
     await ns.emit("console:evalResult", data, room="console:drawers", skip_sid=sid)
+
+
+async def on_console_clear(ns, sid, data):
+    """Drawer requests to clear the log file."""
+    global _log_fh
+    try:
+        _log_fh.close()
+        _LOG_FILE.write_text("")
+        _log_fh = open(_LOG_FILE, "a", encoding="utf-8")
+    except Exception:
+        pass
+    # Broadcast to all drawers so they sync their UI
+    await ns.emit("console:cleared", {}, room="console:drawers")

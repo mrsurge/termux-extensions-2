@@ -63,3 +63,6 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
     async def on_console_replay(self, sid, data):
         await console_ws.on_console_replay(self, sid, data)
+
+    async def on_console_clear(self, sid, data):
+        await console_ws.on_console_clear(self, sid, data)

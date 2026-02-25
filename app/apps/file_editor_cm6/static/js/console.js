@@ -66,6 +66,12 @@ export function createConsoleDrawer(options = {}) {
           showTimestamps: true,
         },
         defaultPlugins: ['system'],
+        onClearLog() {
+          // Native Clear button was pressed — truncate backend transcript
+          if (socket && socket.connected) {
+            socket.emit('console:clear', {});
+          }
+        },
       });
 
       // Restore bridge wrappers — removes vConsole's capture layer
@@ -237,6 +243,7 @@ export function createConsoleDrawer(options = {}) {
       if (!Array.isArray(workers)) return;
       for (const w of workers) _trackWorker(w);
     });
+
   }
 
   // ─── Log rendering via vConsole plugin API ────────────────
