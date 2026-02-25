@@ -2073,15 +2073,8 @@
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
     try { _forceSemanticHighlighting(); } catch (_) {}
     try { _installMarkerNavBindings(editor); } catch (_) {}
-    try {
-      var dom = editor.getDomNode();
-      if (dom) {
-        dom.addEventListener('contextmenu', function(ev) {
-          ev.preventDefault();
-          ev.stopPropagation();
-        }, { capture: true });
-      }
-    } catch (_) {}
+    _syncReadOnlyInputMode(editor);
+    editor.onDidChangeConfiguration(function() { _syncReadOnlyInputMode(editor); });
     updateDebug();
   }
 
@@ -3198,16 +3191,9 @@
       var t = prefs && prefs.editor && prefs.editor.theme ? prefs.editor.theme : '';
       applyMonacoTheme(t);
     } catch (_) {}
-    try {
-      var dom = editor.getDomNode();
-      if (dom) {
-        dom.addEventListener('contextmenu', function(ev) {
-          ev.preventDefault();
-          ev.stopPropagation();
-        }, { capture: true });
-      }
-    } catch (_) {}
     ensureTouchSelection('boot');
+    _syncReadOnlyInputMode(editor);
+    editor.onDidChangeConfiguration(function() { _syncReadOnlyInputMode(editor); });
     updateDebug('ssot=ok');
     ensureLayoutObserver();
 
@@ -3242,21 +3228,14 @@
       var t = prefs && prefs.editor && prefs.editor.theme ? prefs.editor.theme : '';
       applyMonacoTheme(t);
     } catch (_) {}
-    try {
-      var dom = editor.getDomNode();
-      if (dom) {
-        dom.addEventListener('contextmenu', function(ev) {
-          ev.preventDefault();
-          ev.stopPropagation();
-        }, { capture: true });
-      }
-    } catch (_) {}
     if (model) {
       try { editor.setModel(model); } catch (_) {}
       installMirrorPublisher();
       installScrollPublisher();
     }
     ensureTouchSelection('plain');
+    _syncReadOnlyInputMode(editor);
+    editor.onDidChangeConfiguration(function() { _syncReadOnlyInputMode(editor); });
     ensureLayoutObserver();
     _layoutEditors();
 
@@ -3329,15 +3308,6 @@
     } catch (_) {}
 
     editor = diffEditor.getModifiedEditor();
-    try {
-      var dom = editor.getDomNode();
-      if (dom) {
-        dom.addEventListener('contextmenu', function(ev) {
-          ev.preventDefault();
-          ev.stopPropagation();
-        }, { capture: true });
-      }
-    } catch (_) {}
 
     if (model) {
       try { editor.setModel(model); } catch (_) {}
@@ -3347,6 +3317,10 @@
     // Request breadcrumb symbols for the diff editor's active file.
     try { if (currentPath) _bcRequestSymbols(currentPath); } catch (_) {}
     ensureTouchSelection('diff');
+    // Original pane is always readOnly — always suppress keyboard.
+    _syncReadOnlyInputMode(diffEditor.getOriginalEditor());
+    _syncReadOnlyInputMode(editor);
+    editor.onDidChangeConfiguration(function() { _syncReadOnlyInputMode(editor); });
     ensureLayoutObserver();
     _layoutEditors();
 
@@ -3445,6 +3419,19 @@
     } catch (e) {
       console.warn('[MonacoTouchSelection] ensure failed', e);
     }
+  }
+
+  // Suppress soft keyboard on mobile when editor is readOnly.
+  function _syncReadOnlyInputMode(ed) {
+    try {
+      if (!ed) return;
+      var dom = ed.getDomNode && ed.getDomNode();
+      if (!dom) return;
+      var ta = dom.querySelector('textarea.inputarea') || dom.querySelector('textarea');
+      if (!ta) return;
+      var ro = ed.getOption(monaco.editor.EditorOption.readOnly);
+      ta.setAttribute('inputmode', ro ? 'none' : 'text');
+    } catch (_) {}
   }
 
   function updateDebug(extra) {
