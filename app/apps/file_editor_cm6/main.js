@@ -2922,7 +2922,7 @@ function _renderSidebarHeaderIconList(uiPrefs, overrides = {}) {
     }
     btn.title = sc.label || sc.url || 'Shortcut';
     const fallbackText = _firstGrapheme(sc.label);
-    const iconNode = _renderShortcutIconNode(sc.icon, 16, fallbackText);
+    const iconNode = _renderShortcutIconNode(sc.icon, null, fallbackText);
     if (!iconNode.textContent && !iconNode.childNodes.length) {
       return;
     }
@@ -3115,8 +3115,13 @@ function _renderShortcutIconNode(icon, sizePx = 16, fallbackText = '') {
   wrap.style.display = 'inline-flex';
   wrap.style.alignItems = 'center';
   wrap.style.justifyContent = 'center';
-  wrap.style.width = `${sizePx}px`;
-  wrap.style.height = `${sizePx}px`;
+  if (sizePx === null) {
+    wrap.style.width = '100%';
+    wrap.style.height = '100%';
+  } else {
+    wrap.style.width = `${sizePx}px`;
+    wrap.style.height = `${sizePx}px`;
+  }
   const i = icon && typeof icon === 'object' ? icon : null;
   if (!i) {
     if (fallbackText) wrap.textContent = fallbackText;
@@ -3135,9 +3140,11 @@ function _renderShortcutIconNode(icon, sizePx = 16, fallbackText = '') {
     const img = document.createElement('img');
     img.src = _agentIconUrlFromName(name);
     img.alt = '';
-    img.style.width = `${sizePx}px`;
-    img.style.height = `${sizePx}px`;
-    img.style.objectFit = 'contain';
+    if (sizePx !== null) {
+      img.style.width = `${sizePx}px`;
+      img.style.height = `${sizePx}px`;
+      img.style.objectFit = 'contain';
+    }
     wrap.appendChild(img);
   }
   if (!wrap.textContent && !wrap.childNodes.length && fallbackText) {

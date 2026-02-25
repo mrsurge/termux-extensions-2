@@ -2828,6 +2828,9 @@ export async function initExplorerUI() {
                 parent_rel: rel,
                 name,
               });
+              // Open the newly created file after a short delay for server processing.
+              const newRel = (rel && rel !== '.') ? rel.replace(/\/+$/, '') + '/' + name : name;
+              setTimeout(() => { openFileAndMaybeJump(newRel); }, 200);
             }
             break;
           }

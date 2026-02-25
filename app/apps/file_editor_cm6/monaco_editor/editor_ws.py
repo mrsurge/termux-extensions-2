@@ -1060,7 +1060,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             pass
 
         cached = _history_store.get_cached_document(project, abs_path)
-        if not cached or not cached.get("content"):
+        if not cached or cached.get("content") is None:
             file_meta = _get_file_meta(Path(abs_path))
             return {"ok": True, "data": file_meta, "noop": True}
 
