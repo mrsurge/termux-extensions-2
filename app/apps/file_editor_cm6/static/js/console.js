@@ -24,7 +24,6 @@ export function createConsoleDrawer(options = {}) {
   const container = document.getElementById(containerId);
   const originToggle = document.getElementById('console-origin-toggle');
   const originDropdown = document.getElementById('console-origin-dd');
-  const clearBtn = document.getElementById('console-clear-btn');
   const consoleHeader = document.getElementById('console-header');
 
   // ─── vConsole initialization ──────────────────────────────
@@ -208,15 +207,6 @@ export function createConsoleDrawer(options = {}) {
     document.addEventListener('click', (e) => {
       if (!originDropdown.contains(e.target) && e.target !== originToggle) {
         originDropdown.classList.remove('show');
-      }
-    });
-  }
-
-  // Wire clear button
-  if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
-      if (vConsoleInstance && vConsoleInstance.log) {
-        vConsoleInstance.log.clear();
       }
     });
   }

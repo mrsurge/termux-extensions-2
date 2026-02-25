@@ -6059,6 +6059,11 @@ const terminal = createTerminalDrawer({
 // Initialize console drawer (tab alongside terminal in the drawer)
 const consoleDrawer = createConsoleDrawer();
 
+const consoleCollapseBtn = document.getElementById('console-collapse-btn');
+if (consoleCollapseBtn) {
+  consoleCollapseBtn.addEventListener('click', () => terminal.close());
+}
+
 // Initialize console bridge — patches console.* on the main page
 // and sends logs to the ui_ipc bus so the console drawer can receive them.
 // Actual init happens inside connectUIIPC() after the socket is created.
