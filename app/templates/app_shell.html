@@ -32,6 +32,7 @@
         .app-shell { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
         .app-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--card); position: sticky; top: 0; z-index: 5; }
         html.gv-native .app-toolbar { display: none; }
+        html.te-embed .app-toolbar { display: none; }
         .app-title { font-weight: 600; margin-left: 6px; color: var(--foreground); font-size: 0.95rem; max-width: 45vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .spacer { flex: 1; }
         .app-btn { background: var(--secondary); color: var(--foreground); border: 1px solid var(--border); border-radius: 1px; padding: 6px 10px; cursor: pointer; }
@@ -169,6 +170,7 @@
     // GeckoView: persist gv-native mode across navigation so we never show two headers.
     (function () {
         let enabled = false;
+        let embed = false;
         try {
             const p = new URLSearchParams(location.search);
             if (p.get('gv_native') === '1') {
@@ -177,11 +179,25 @@
             } else if (sessionStorage.getItem('te_gv_native') === '1') {
                 enabled = true;
             }
+
+            // iframe embed mode (used by the TE2 side-bar shortcuts)
+            const embedParam = p.get('embed');
+            if (embedParam === '1' || embedParam === 'true') {
+                embed = true;
+                sessionStorage.setItem('te_embed', '1');
+            } else if (sessionStorage.getItem('te_embed') === '1') {
+                embed = true;
+            }
         } catch (e) {}
 
         if (enabled) {
             document.documentElement.classList.add('gv-native');
             try { console.log('[app_shell] gv-native enabled'); } catch (e) {}
+        }
+
+        if (embed) {
+            document.documentElement.classList.add('te-embed');
+            try { console.log('[app_shell] embed enabled'); } catch (e) {}
         }
     })();
 
@@ -233,7 +249,11 @@
     // Framework toolbar height tracking - expose as CSS variable for all apps
     function updateFrameworkToolbarHeight() {
         const toolbar = document.querySelector('.app-toolbar');
-        if (toolbar && !document.documentElement.classList.contains('gv-native')) {
+        if (
+            toolbar
+            && !document.documentElement.classList.contains('gv-native')
+            && !document.documentElement.classList.contains('te-embed')
+        ) {
             const height = toolbar.offsetHeight;
             document.documentElement.style.setProperty('--framework-toolbar-height', `${height}px`);
         } else {

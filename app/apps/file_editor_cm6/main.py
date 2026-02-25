@@ -1014,10 +1014,10 @@ async def api_lsp_status():
     return {"ok": True, "data": {"servers": servers}}
 
 
-# Chat drawer extension routes (hardwired until dynamic extension loading lands).
+# Sidebar extension routes (hardwired until dynamic extension loading lands).
 # Register before agent routes to avoid /agent/{session_id} shadowing static paths.
-from .extensions.chat_drawer_extension.codex_as_extension import bp as chat_drawer_extension_bp
-file_editor_cm6_bp.include_router(chat_drawer_extension_bp)
+from .extensions.sidebar_extension.sidebar_extension import bp as sidebar_extension_bp
+file_editor_cm6_bp.include_router(sidebar_extension_bp)
 
 # # Register agent routes and WebSocket handler
 from .agent_routes import bp as agent_routes_bp

@@ -505,18 +505,6 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             except Exception:
                 pass
 
-        # Diagnostics baton on SSOT restore: signal pending for the current file.
-        try:
-            if current_path:
-                import time as _time
-                await self.emit(
-                    "editor:diagnostics_pending",
-                    {"path": current_path, "request_id": connect_request_id, "ts_ms": int(_time.time() * 1000)},
-                    room="file_editor_cm6",
-                )
-        except Exception:
-            pass
-
         # Diagnostics bridge: ensure the background adapter→editor bridge is running.
         try:
             from ..diagnostics_bridge import (
@@ -761,18 +749,6 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 )
         except Exception:
             pass
-
-        # Diagnostics baton: tell browser to show spinner while we wait for analysis.
-        try:
-            import time as _time
-            print(f"[editor_ws] on_editor_open_request: emitting editor:diagnostics_pending path={path}", flush=True)
-            await self.emit(
-                "editor:diagnostics_pending",
-                {"path": path, "request_id": request_id, "ts_ms": int(_time.time() * 1000)},
-                room="file_editor_cm6",
-            )
-        except Exception as _e:
-            print(f"[editor_ws] on_editor_open_request: diagnostics_pending emit FAILED: {_e}", flush=True)
 
         # Diagnostics bridge: send cached diagnostics for the new file.
         # NOTE: do not replay cached diagnostics on open. Diagnostics should be driven

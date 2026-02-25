@@ -11,7 +11,8 @@ import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';
 import { initBranchMenu } from './static/js/git_menu.js';
 // Hardcoded extension imports for now; will be dynamically loaded later.
-import { initAgentIframe } from './extensions/chat_drawer_extension/static/js/agent_iframe.js';
+import { initSidebarIframe } from './extensions/sidebar_extension/static/js/sidebar_iframe.js';
+import { initSidebarShortcuts } from './extensions/sidebar_extension/static/js/sidebar_shortcuts.js';
 import ReconnectingWebSocket from './static/js/reconnecting_websocket.js'; // used by other WS helpers (not explorer)
 import { initLspModal } from './static/js/lsp-modal/index.js';
 import { createConsoleDrawer } from './static/js/console.js';
@@ -42,12 +43,14 @@ function ensureVConsoleLoaded() {
 }
 import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
 
-const AGENT_EXTENSION_MANIFEST = '/apps/file_editor_cm6/extensions/chat_drawer_extension/manifest.json';
+const AGENT_EXTENSION_MANIFEST = '/apps/file_editor_cm6/extensions/sidebar_extension/manifest.json';
 const AGENT_HOST_CWD_ENDPOINT = '/api/host/project/cwd';
 const UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT = 'agentActiveShortcutId';
 const UI_PREF_KEY_AGENT_TOGGLE_DISPLAY = 'agentToggleDisplay';
 const UI_PREF_KEY_AGENT_HEADER_DISPLAY = 'agentHeaderDisplay';
 const UI_PREF_KEY_AGENT_SHORTCUTS = 'agentShortcuts';
+const SHORTCUT_KIND_URL = 'url';
+const SHORTCUT_KIND_FRAMEWORK_APP = 'framework_app';
 
 let _latestUiPrefs = {};
 let _hasUiPrefsSnapshot = false;
@@ -272,6 +275,8 @@ function _collectSidebarShortcuts(uiPrefs) {
   const out = [];
   shortcuts.forEach((sc) => {
     if (!sc || typeof sc !== 'object') return;
+    const kind = typeof sc.kind === 'string' ? sc.kind.trim().toLowerCase() : '';
+    if (kind !== SHORTCUT_KIND_URL && kind !== SHORTCUT_KIND_FRAMEWORK_APP) return;
     const url = typeof sc.url === 'string' ? sc.url.trim() : '';
     if (!url) return;
     const id = typeof sc.id === 'string' ? sc.id.trim() : '';
@@ -280,6 +285,8 @@ function _collectSidebarShortcuts(uiPrefs) {
     out.push({
       key,
       id,
+      kind,
+      app_id: typeof sc.app_id === 'string' ? sc.app_id.trim() : '',
       label: typeof sc.label === 'string' ? sc.label : '',
       url,
       icon: sc.icon || null,
@@ -301,6 +308,10 @@ function _resolveActiveShortcut(uiPrefs, shortcuts) {
 }
 
 async function resolveAgentIframeUrl(uiPrefs) {
+  try {
+    const url = sidebarShortcuts?.getActiveUrl?.(uiPrefs || {});
+    if (url) return url;
+  } catch (_) {}
   const match = _resolveActiveShortcut(uiPrefs);
   return match ? match.url : '';
 }
@@ -833,91 +844,6 @@ function connectEditorSocket() {
           return 'now=' + Date.now();
         }
       }
-
-      // Diagnostics baton: show spinner while waiting for analysis of newly opened file.
-      editorSocket.on('editor:diagnostics_pending', (payload) => {
-        try {
-          const p = payload && typeof payload === 'object' ? payload : {};
-          const pendingPath = p.path || '';
-          const pendingRequestId = p.request_id || '';
-          console.log(_feTs(), '[diag_baton] pending path=' + pendingPath + ' request_id=' + (pendingRequestId || '-'));
-          try {
-            const prev = window.__feDiagBaton;
-            const prevRid = prev && prev.requestId ? String(prev.requestId) : '';
-            const prevPath = prev && prev.path ? String(prev.path) : '';
-            if (prevRid && prevRid !== pendingRequestId) {
-              console.log(_feTs(), '[spinner] REPLACE old=' + prevRid + ' new=' + pendingRequestId + ' path=' + pendingPath + ' prevPath=' + prevPath);
-            }
-            console.log(_feTs(), '[spinner] START request_id=' + (pendingRequestId || '-') + ' path=' + pendingPath + ' reason=diagnostics_pending');
-          } catch (_) {}
-          window.__feDiagBaton = { path: pendingPath, requestId: pendingRequestId, ts: Date.now() };
-          // Show the LSP spinner.
-          if (window.__feLspSpinnerUi) {
-            window.__feLspSpinnerUi.busyShow = true;
-            window.__feLspSpinnerUi.busyActivity = 'diagnostics';
-            window.__feLspSpinnerUi.busyTitle = 'Analyzing ' + (pendingPath.split('/').pop() || 'file') + '…';
-          }
-          _feUpdateLspSpinner();
-          // Safety timeout: auto-hide after 45s if no ready event.
-          // Must be longer than adapter connect (~30s) + Pyright analysis (~10s).
-          if (window.__feDiagBatonTimer) clearTimeout(window.__feDiagBatonTimer);
-          window.__feDiagBatonTimer = setTimeout(() => {
-            console.log(_feTs(), '[diag_baton] timeout, hiding spinner');
-            console.log(_feTs(), '[spinner] STOP request_id=' + (pendingRequestId || '-') + ' path=' + pendingPath + ' reason=timeout');
-            window.__feDiagBaton = null;
-            if (window.__feLspSpinnerUi) {
-              window.__feLspSpinnerUi.busyShow = false;
-              window.__feLspSpinnerUi.busyActivity = '';
-              window.__feLspSpinnerUi.busyTitle = '';
-            }
-            // Clear anti-flicker timer so _feUpdateLspSpinner gets clean state.
-            try {
-              if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
-                clearTimeout(window.__feLspSpinnerState.hideTimer);
-                window.__feLspSpinnerState.hideTimer = null;
-              }
-            } catch (_) {}
-            _feUpdateLspSpinner();
-          }, 45000);
-        } catch (_) {}
-      });
-
-      editorSocket.on('editor:diagnostics_ready', (payload) => {
-        try {
-          const p = payload && typeof payload === 'object' ? payload : {};
-          const readyPath = p.path || '';
-          const readyRequestId = p.request_id || '';
-          console.log(_feTs(), '[diag_baton] ready path=' + readyPath + ' request_id=' + (readyRequestId || '-') + ' markers=' + (p.markers || 0) + (p.reason ? (' reason=' + p.reason) : '') + (p.error ? ' error=1' : ''));
-          const baton = window.__feDiagBaton;
-          const matchByRequest = !!(baton && baton.requestId && readyRequestId && baton.requestId === readyRequestId);
-          const matchByPath = !!(baton && baton.path && baton.path === readyPath);
-          try {
-            const pendingRid = baton && baton.requestId ? String(baton.requestId) : '';
-            console.log(_feTs(), '[spinner] READY request_id=' + (readyRequestId || '-') + ' pending=' + (pendingRid || '-') + ' match=' + ((matchByRequest || matchByPath) ? '1' : '0') + ' path=' + readyPath);
-          } catch (_) {}
-          if (matchByRequest || matchByPath) {
-            window.__feDiagBaton = null;
-            if (window.__feDiagBatonTimer) {
-              clearTimeout(window.__feDiagBatonTimer);
-              window.__feDiagBatonTimer = null;
-            }
-            if (window.__feLspSpinnerUi) {
-              window.__feLspSpinnerUi.busyShow = false;
-              window.__feLspSpinnerUi.busyActivity = '';
-              window.__feLspSpinnerUi.busyTitle = '';
-            }
-            console.log(_feTs(), '[spinner] STOP request_id=' + (readyRequestId || '-') + ' path=' + readyPath + ' reason=diagnostics_ready');
-            // Clear anti-flicker timer so _feUpdateLspSpinner gets clean state.
-            try {
-              if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
-                clearTimeout(window.__feLspSpinnerState.hideTimer);
-                window.__feLspSpinnerState.hideTimer = null;
-              }
-            } catch (_) {}
-            _feUpdateLspSpinner();
-          }
-        } catch (_) {}
-      });
 
       // Diagnostics counts from iframe → update toolbar badges.
       editorSocket.on('editor:diagnostics_counts', (payload) => {
@@ -2734,6 +2660,7 @@ let cachedProjectRoot = null;
 let editorState = null;
 let branchMenuHandle = null;
 let agentDrawerHandle = null;
+let sidebarShortcuts = null;
 let _agentSettingsUiMutating = false;
 let sessionState = {
   activeProject: null,
@@ -3435,7 +3362,7 @@ function _renderAgentShortcutsList() {
 
 function _createAgentController(config) {
   _agentRuntimeMode = 'iframe';
-  return initAgentIframe({
+  return initSidebarIframe({
     url: config.url,
     allowAnyOrigin: true,
     hideDrawerHeader: false,
@@ -3602,7 +3529,17 @@ function _initAgentSettingsUI() {
     const idx = next.findIndex((x) => x && x.id === id);
     const existing = idx >= 0 ? next[idx] : null;
     const lastUsed = Number.isFinite(Number(existing?.last_used)) ? Number(existing.last_used) : 0;
-    const entry = { id, label, url, icon, load, header, last_used: lastUsed };
+    const entry = {
+      id,
+      kind: SHORTCUT_KIND_URL,
+      app_id: '',
+      label,
+      url,
+      icon,
+      load,
+      header,
+      last_used: lastUsed,
+    };
     if (idx >= 0) next[idx] = entry;
     else next.push(entry);
     _persistAgentShortcuts(next);
@@ -3697,23 +3634,14 @@ window.__cm6HandleUiPrefs = function(payload) {
     _latestUiPrefs = { ...ui };
     _hasUiPrefsSnapshot = true;
     _resolveUiPrefsWaiters(_latestUiPrefs);
-    _applyAgentSettingsControls(_latestUiPrefs);
+    try {
+      sidebarShortcuts?.applyUiPrefs?.(_latestUiPrefs);
+    } catch (e) {
+      console.warn('[Sidebar] Failed to apply sidebar prefs:', e);
+    }
     if (agentDrawerHandle) {
       void _applyAgentRuntimeConfigFromUi(_latestUiPrefs);
     }
-    // Keep agent dropdown in sync if open.
-    try {
-      const dd = document.getElementById('fe-agent-dd');
-      if (dd && dd.classList.contains('show')) {
-        _renderAgentDropdown();
-      }
-    } catch (_) {}
-    // Keep shortcuts modal list in sync while open.
-    try {
-      if (agentShortcutsModal && agentShortcutsModal.classList.contains('show')) {
-        _renderAgentShortcutsList();
-      }
-    } catch (_) {}
   } catch (err) {
     console.warn('[AgentPrefs] Failed to apply prefs:setUi payload:', err);
   }
@@ -5404,7 +5332,18 @@ window.__cm6HandleWatcherModeStatus = (status) => {
 
 // Init watcher UI on load
 try { _initWatcherSettingsUI(); } catch (_) {}
-try { _initAgentSettingsUI(); } catch (_) {}
+try {
+  sidebarShortcuts = initSidebarShortcuts({
+    host,
+    homeDir: HOME_DIR,
+    openDrawer: () => { try { agentDrawerHandle?.open?.(); } catch (_) {} },
+    closeAllMenus,
+    setMenuChecked,
+  });
+  void sidebarShortcuts.init();
+} catch (e) {
+  console.warn('Failed to initialize sidebar shortcuts:', e);
+}
 
 try {
   if (window.__cm6PendingWatcherError) {
@@ -6325,19 +6264,14 @@ async function main() {
   }
 
   branchMenuHandle = initBranchMenu();
-  const agentExtensionManifest = await fetchAgentExtensionManifest();
-  applyAgentIcon(agentExtensionManifest);
-  try {
-    _applyAgentSettingsControls(_latestUiPrefs || {});
-  } catch (_) {}
   const initialUiPrefs = await waitForInitialUiPrefs(2200);
+  try {
+    sidebarShortcuts?.applyUiPrefs?.(initialUiPrefs || {});
+  } catch (e) {
+    console.warn('[Sidebar] Failed to apply initial prefs:', e);
+  }
   const agentIframeConfig = await _applyAgentRuntimeConfigFromUi(initialUiPrefs);
   agentDrawerHandle = _createAgentController(agentIframeConfig);
-  try {
-    const normalizedShortcuts = _collectSidebarShortcuts(initialUiPrefs);
-    const ensured = _ensureActiveShortcutSelection(initialUiPrefs, normalizedShortcuts);
-    _applyAgentHeaderDisplay(initialUiPrefs, { shortcuts: normalizedShortcuts, active: ensured.active });
-  } catch (_) {}
 
   const serverState = await syncEditorState(true);
   

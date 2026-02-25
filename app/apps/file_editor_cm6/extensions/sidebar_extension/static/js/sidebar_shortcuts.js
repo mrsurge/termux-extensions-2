@@ -1,0 +1,1546 @@
+// app/apps/file_editor_cm6/extensions/sidebar_extension/static/js/sidebar_shortcuts.js
+// Sidebar shortcuts + iframe stack orchestration (kept out of main.js).
+//
+// Owns:
+// - UI prefs wiring (agentToggleDisplay / agentHeaderDisplay / agentShortcuts / agentActiveShortcutId)
+// - Sidebar header icon list + title/icon rendering
+// - Shortcuts editor modal (URL + framework_app)
+// - Iframe stack lifecycle (lazy/eager) with framework app start-before-load
+
+const EXTENSION_MANIFEST_URL = '/apps/file_editor_cm6/extensions/sidebar_extension/manifest.json';
+
+const UI_PREF_KEY_ACTIVE = 'agentActiveShortcutId';
+const UI_PREF_KEY_TOGGLE_DISPLAY = 'agentToggleDisplay';
+const UI_PREF_KEY_HEADER_DISPLAY = 'agentHeaderDisplay';
+const UI_PREF_KEY_SHORTCUTS = 'agentShortcuts';
+
+const SHORTCUT_KIND_URL = 'url';
+const SHORTCUT_KIND_FRAMEWORK_APP = 'framework_app';
+
+const SHORTCUT_LOAD_LAZY = 'lazy';
+const SHORTCUT_LOAD_EAGER = 'eager';
+
+function _normStr(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function _firstGrapheme(text) {
+  const value = _normStr(text);
+  if (!value) return '';
+  try {
+    if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+      const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+      const it = seg.segment(value)[Symbol.iterator]();
+      const first = it.next();
+      if (first && first.value && first.value.segment) return first.value.segment;
+    }
+  } catch (_) {}
+  return Array.from(value)[0] || '';
+}
+
+function _normalizeLoad(raw) {
+  const value = _normStr(raw).toLowerCase();
+  return value === SHORTCUT_LOAD_EAGER ? SHORTCUT_LOAD_EAGER : SHORTCUT_LOAD_LAZY;
+}
+
+function _normalizeKind(raw) {
+  const value = _normStr(raw).toLowerCase();
+  if (value === SHORTCUT_KIND_URL) return SHORTCUT_KIND_URL;
+  if (value === SHORTCUT_KIND_FRAMEWORK_APP) return SHORTCUT_KIND_FRAMEWORK_APP;
+  return '';
+}
+
+function _normalizeEditorKind(raw) {
+  const kind = _normalizeKind(raw);
+  return kind || SHORTCUT_KIND_URL;
+}
+
+function _buildFrameworkAppUrl(appId) {
+  const safe = _normStr(appId);
+  if (!safe) return '';
+  return `/app/${encodeURIComponent(safe)}?embed=1`;
+}
+
+async function _fetchJson(url, opts) {
+  const resp = await fetch(url, opts);
+  let body = null;
+  try {
+    body = await resp.json();
+  } catch (_) {}
+  return { resp, body };
+}
+
+export function initSidebarShortcuts(options = {}) {
+  const host = options.host || null;
+  const openDrawer = typeof options.openDrawer === 'function' ? options.openDrawer : null;
+  const closeAllMenus = typeof options.closeAllMenus === 'function' ? options.closeAllMenus : null;
+  const setMenuChecked =
+    typeof options.setMenuChecked === 'function'
+      ? options.setMenuChecked
+      : (el, checked) => {
+          if (!el) return;
+          el.classList.toggle('fe-menu-item-checked', !!checked);
+          el.setAttribute('aria-checked', checked ? 'true' : 'false');
+        };
+
+  const toast = (msg) => {
+    try {
+      if (host && typeof host.toast === 'function') host.toast(msg);
+      else console.log(msg);
+    } catch (_) {}
+  };
+
+  // --- DOM elements (resolved on init) ---
+  let agentToggleBtn = null;
+  let agentToggleIconEl = null;
+
+  let shortcutsModal = null;
+  let shortcutsCloseBtn = null;
+  let shortcutsAddBtn = null;
+  let shortcutsListEl = null;
+  let shortcutsEditorEl = null;
+
+  let editorSettingsShortcutsBtn = null;
+  let setupShortcutsBtn = null;
+
+  let shortcutLabelInput = null;
+  let shortcutUrlWrap = null;
+  let shortcutUrlInput = null;
+  let shortcutKindBtn = null;
+  let shortcutKindLabel = null;
+  let shortcutKindDD = null;
+  let shortcutAppWrap = null;
+  let shortcutAppBtn = null;
+  let shortcutAppLabel = null;
+  let shortcutAppDD = null;
+
+  let shortcutLoadBtn = null;
+  let shortcutLoadLabel = null;
+  let shortcutLoadDD = null;
+  let shortcutHeaderCheck = null;
+
+  let shortcutEmojiInput = null;
+  let shortcutIconBrowseBtn = null;
+  let shortcutIconClearBtn = null;
+  let shortcutIconPreview = null;
+  let shortcutCancelBtn = null;
+  let shortcutSaveBtn = null;
+
+  let sidebarHeaderIconEl = null;
+  let sidebarHeaderTitleEl = null;
+  let sidebarHeaderIconListEl = null;
+  let sidebarSetupPlaceholder = null;
+  let sidebarIframeStack = null;
+
+  // --- internal state ---
+  let _latestUiPrefs = {};
+  let _settingsUiMutating = false;
+  let _shortcutsCache = [];
+
+  let _editingId = null;
+  let _editingAssetName = null;
+  let _editingKind = SHORTCUT_KIND_URL;
+  let _editingAppId = '';
+  let _lastPickerPath = '';
+
+  let _iframeMap = new Map(); // key -> {iframe,url,loaded}
+  let _lastShortcutUsageKey = '';
+  let _lastShortcutUsageStamp = 0;
+  let _activateSeq = 0;
+
+  let _extensionManifestIcon = { kind: '', value: '', defaultIcon: '' };
+
+  let _appsCache = null; // [{id,name,icon_src,icon_emoji,entrypoints,...}]
+  let _appsCacheAt = 0;
+  let _runningCache = null; // Set(app_id)
+  let _runningCacheAt = 0;
+  let _appsChromeSeq = 0;
+
+  function _requireEl(selector, scope = document) {
+    const el = scope.querySelector(selector);
+    if (!el) throw new Error(`Missing element: ${selector}`);
+    return el;
+  }
+
+  function _sendUiPrefUpdate(key, value) {
+    if (typeof window.__explorerBusSend !== 'function') {
+      toast('Explorer WebSocket is not connected yet.');
+      return;
+    }
+    window.__explorerBusSend('prefs:updateUi', { key, value });
+  }
+
+  async function _ensureAppsCache(force = false) {
+    const now = Date.now();
+    if (!force && _appsCache && (now - _appsCacheAt) < 2500) return _appsCache;
+    try {
+      const { body } = await _fetchJson('/api/apps', { cache: 'no-store' });
+      const list = Array.isArray(body?.data) ? body.data : [];
+      _appsCache = list;
+      _appsCacheAt = now;
+      return list;
+    } catch (e) {
+      toast(e?.message || 'Failed to fetch app list');
+      _appsCache = [];
+      _appsCacheAt = now;
+      return _appsCache;
+    }
+  }
+
+  async function _ensureRunningCache(force = false) {
+    const now = Date.now();
+    if (!force && _runningCache && (now - _runningCacheAt) < 1500) return _runningCache;
+    try {
+      const { body } = await _fetchJson('/api/apps/running', { cache: 'no-store' });
+      const list = Array.isArray(body?.data) ? body.data : [];
+      const set = new Set();
+      list.forEach((rec) => {
+        const id = _normStr(rec?.app_id);
+        if (id) set.add(id);
+      });
+      _runningCache = set;
+      _runningCacheAt = now;
+      return set;
+    } catch (_) {
+      _runningCache = new Set();
+      _runningCacheAt = now;
+      return _runningCache;
+    }
+  }
+
+  function _findAppManifest(appId) {
+    const id = _normStr(appId);
+    if (!id || !Array.isArray(_appsCache)) return null;
+    return _appsCache.find((a) => a && a.id === id) || null;
+  }
+
+  async function _isAppBackendRequired(appId) {
+    const id = _normStr(appId);
+    if (!id) return false;
+    if (!_appsCache) {
+      await _ensureAppsCache(true);
+    }
+    const m = _findAppManifest(id);
+    const entrypoints = m && typeof m.entrypoints === 'object' && m.entrypoints ? m.entrypoints : {};
+    return !!(entrypoints.backend_blueprint || entrypoints.nicegui_shell);
+  }
+
+  function _manifestIconForApp(appId) {
+    const m = _findAppManifest(appId);
+    if (!m) return null;
+    const iconSrc = _normStr(m.icon_src);
+    if (iconSrc) return { kind: 'image', src: iconSrc };
+    const iconEmoji = _normStr(m.icon_emoji);
+    if (iconEmoji) return { kind: 'emoji', emoji: iconEmoji };
+    return null;
+  }
+
+  function _agentIconUrlFromName(name) {
+    const safe = _normStr(name);
+    if (!safe) return '';
+    return `/api/app/file_editor_cm6/agent_icons/${encodeURIComponent(safe)}`;
+  }
+
+  function _renderIconNode(icon, sizePx = 16, fallbackText = '') {
+    const wrap = document.createElement('span');
+    wrap.style.display = 'inline-flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.justifyContent = 'center';
+    if (sizePx === null) {
+      wrap.style.width = '100%';
+      wrap.style.height = '100%';
+    } else {
+      wrap.style.width = `${sizePx}px`;
+      wrap.style.height = `${sizePx}px`;
+    }
+
+    const i = icon && typeof icon === 'object' ? icon : null;
+    if (!i) {
+      if (fallbackText) wrap.textContent = fallbackText;
+      return wrap;
+    }
+
+    if (i.kind === 'emoji') {
+      wrap.textContent = _normStr(i.emoji);
+      return wrap;
+    }
+
+    if (i.kind === 'asset') {
+      const name = _normStr(i.name);
+      if (!name) {
+        if (fallbackText) wrap.textContent = fallbackText;
+        return wrap;
+      }
+      const img = document.createElement('img');
+      img.src = _agentIconUrlFromName(name);
+      img.alt = '';
+      if (sizePx !== null) {
+        img.style.width = `${sizePx}px`;
+        img.style.height = `${sizePx}px`;
+        img.style.objectFit = 'contain';
+      }
+      wrap.appendChild(img);
+      return wrap;
+    }
+
+    if (i.kind === 'image') {
+      const src = _normStr(i.src);
+      if (!src) {
+        if (fallbackText) wrap.textContent = fallbackText;
+        return wrap;
+      }
+      const img = document.createElement('img');
+      img.src = src;
+      img.alt = '';
+      if (sizePx !== null) {
+        img.style.width = `${sizePx}px`;
+        img.style.height = `${sizePx}px`;
+        img.style.objectFit = 'contain';
+      }
+      wrap.appendChild(img);
+      return wrap;
+    }
+
+    if (fallbackText) wrap.textContent = fallbackText;
+    return wrap;
+  }
+
+  function _applyExtensionManifestIcon(manifest) {
+    const iconPath = _normStr(manifest?.icon);
+    const iconEmoji = _normStr(manifest?.icon_emoji);
+
+    const targets = [agentToggleIconEl, sidebarHeaderIconEl].filter(Boolean);
+    if (!targets.length) return;
+
+    targets.forEach((el) => {
+      el.textContent = '';
+      el.dataset.manifestKind = '';
+      el.dataset.manifestValue = '';
+    });
+
+    if (iconPath) {
+      const resolved = iconPath.startsWith('/')
+        ? iconPath
+        : `/apps/file_editor_cm6/${iconPath.replace(/^\/+/, '')}`;
+      targets.forEach((el) => {
+        const img = document.createElement('img');
+        img.src = resolved;
+        img.alt = '';
+        img.setAttribute('aria-hidden', 'true');
+        el.appendChild(img);
+        el.dataset.manifestKind = 'image';
+        el.dataset.manifestValue = resolved;
+      });
+      _extensionManifestIcon = { kind: 'image', value: resolved, defaultIcon: '' };
+      return;
+    }
+
+    if (iconEmoji) {
+      targets.forEach((el) => {
+        el.textContent = iconEmoji;
+        el.dataset.manifestKind = 'emoji';
+        el.dataset.manifestValue = iconEmoji;
+      });
+      _extensionManifestIcon = { kind: 'emoji', value: iconEmoji, defaultIcon: '' };
+      return;
+    }
+
+    // No fallback here: leave empty and let CSS decide.
+    _extensionManifestIcon = { kind: '', value: '', defaultIcon: '' };
+  }
+
+  async function _bootstrapExtensionManifest() {
+    try {
+      const { body } = await _fetchJson(EXTENSION_MANIFEST_URL, { cache: 'no-store' });
+      if (body && typeof body === 'object') {
+        _applyExtensionManifestIcon(body);
+      }
+    } catch (e) {
+      console.warn('[Sidebar] Failed to load extension manifest:', e);
+    }
+  }
+
+  function _restoreManifestIcon(el) {
+    if (!el) return;
+    const kind = _normStr(el.dataset?.manifestKind);
+    const value = _normStr(el.dataset?.manifestValue);
+    el.textContent = '';
+    if (kind === 'image' && value) {
+      const img = document.createElement('img');
+      img.src = value;
+      img.alt = '';
+      img.setAttribute('aria-hidden', 'true');
+      el.appendChild(img);
+      return;
+    }
+    if (kind === 'emoji' && value) {
+      el.textContent = value;
+      return;
+    }
+  }
+
+  function _renderIconInto(el, icon, fallbackIcon = null) {
+    if (!el) return;
+    el.textContent = '';
+
+    const i = icon && typeof icon === 'object' ? icon : null;
+    if (i && i.kind === 'emoji') {
+      const emoji = _normStr(i.emoji);
+      if (emoji) {
+        el.textContent = emoji;
+        return;
+      }
+    }
+    if (i && i.kind === 'asset') {
+      const name = _normStr(i.name);
+      if (name) {
+        const img = document.createElement('img');
+        img.src = _agentIconUrlFromName(name);
+        img.alt = '';
+        img.setAttribute('aria-hidden', 'true');
+        el.appendChild(img);
+        return;
+      }
+    }
+    if (i && i.kind === 'image') {
+      const src = _normStr(i.src);
+      if (src) {
+        const img = document.createElement('img');
+        img.src = src;
+        img.alt = '';
+        img.setAttribute('aria-hidden', 'true');
+        el.appendChild(img);
+        return;
+      }
+    }
+
+    if (fallbackIcon) {
+      _renderIconInto(el, fallbackIcon, null);
+      return;
+    }
+    _restoreManifestIcon(el);
+  }
+
+  function _collectShortcuts(uiPrefs) {
+    const raw = Array.isArray(uiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? uiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
+    const out = [];
+    raw.forEach((sc) => {
+      if (!sc || typeof sc !== 'object') return;
+      const kind = _normalizeKind(sc.kind);
+      if (!kind) return;
+      const appId = _normStr(sc.app_id);
+      if (kind === SHORTCUT_KIND_FRAMEWORK_APP && !appId) return;
+      const label = _normStr(sc.label);
+      const url = _normStr(sc.url) || (kind === SHORTCUT_KIND_FRAMEWORK_APP ? _buildFrameworkAppUrl(appId) : '');
+      if (!url) return;
+      const id = _normStr(sc.id);
+      const key = id || url;
+      if (!key) return;
+      out.push({
+        key,
+        id,
+        kind,
+        app_id: appId,
+        label,
+        url,
+        icon: sc.icon || null,
+        load: _normalizeLoad(sc.load),
+        header: !!sc.header,
+        last_used: Number.isFinite(Number(sc.last_used)) ? Number(sc.last_used) : 0,
+      });
+    });
+    return out;
+  }
+
+  function _resolveActive(uiPrefs, shortcuts) {
+    const activeId = _normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
+    if (!activeId) return null;
+    const list = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    return (
+      list.find((sc) => sc && (sc.id === activeId || sc.url === activeId || sc.key === activeId))
+      || null
+    );
+  }
+
+  function getActiveUrl(uiPrefs) {
+    const active = _resolveActive(uiPrefs || _latestUiPrefs || {});
+    return active ? active.url : '';
+  }
+
+  function _ensureActiveSelection(uiPrefs, shortcuts) {
+    const activeId = _normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
+    const list = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    if (!list.length) return { active: null, activeId: '' };
+    const active = _resolveActive(uiPrefs, list);
+    if (active) return { active, activeId: activeId || active.key };
+    const fallback = list[0];
+    const nextId = fallback?.id || fallback?.url || fallback?.key || '';
+    if (nextId && nextId !== activeId) {
+      _sendUiPrefUpdate(UI_PREF_KEY_ACTIVE, nextId);
+    }
+    return { active: fallback || null, activeId: nextId };
+  }
+
+  function _maybeUpdateLastUsed(uiPrefs, active, shortcuts) {
+    if (!active || !active.key) return;
+    const now = Date.now();
+    if (_lastShortcutUsageKey === active.key && (now - _lastShortcutUsageStamp) < 800) return;
+    const raw = Array.isArray(uiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? uiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
+    const idx = raw.findIndex((sc) => sc && typeof sc === 'object'
+      && (sc.id === active.key || sc.url === active.key || sc.id === active.id || sc.url === active.url));
+    if (idx < 0) return;
+    const prevTs = Number(raw[idx]?.last_used || 0);
+    if (Number.isFinite(prevTs) && (now - prevTs) < 800) {
+      _lastShortcutUsageKey = active.key;
+      _lastShortcutUsageStamp = now;
+      return;
+    }
+    const next = raw.map((sc, i) => {
+      if (i !== idx || !sc || typeof sc !== 'object') return sc;
+      return { ...sc, last_used: now };
+    });
+    _lastShortcutUsageKey = active.key;
+    _lastShortcutUsageStamp = now;
+    _sendUiPrefUpdate(UI_PREF_KEY_SHORTCUTS, next);
+  }
+
+  function _applyToggleDisplay(uiPrefs) {
+    const display = _normStr(uiPrefs?.[UI_PREF_KEY_TOGGLE_DISPLAY]) || 'icon';
+    try {
+      const radios = document.querySelectorAll('input[name="agent-toggle-display"]');
+      radios.forEach((r) => { r.checked = (r.value === display); });
+    } catch (_) {}
+  }
+
+  function _applyHeaderDisplayMode(uiPrefs) {
+    const iconEl = sidebarHeaderIconEl;
+    const textEl = sidebarHeaderTitleEl;
+    if (!iconEl || !textEl) return;
+    const display = _normStr(uiPrefs?.[UI_PREF_KEY_HEADER_DISPLAY]) || 'text';
+    if (display === 'icon') {
+      iconEl.style.display = 'inline-flex';
+      textEl.style.display = 'none';
+    } else if (display === 'text') {
+      iconEl.style.display = 'none';
+      textEl.style.display = '';
+    } else {
+      iconEl.style.display = 'inline-flex';
+      textEl.style.display = '';
+    }
+  }
+
+  function _effectiveShortcutIcon(sc) {
+    const icon = sc && sc.icon && typeof sc.icon === 'object' ? sc.icon : null;
+    if (icon && icon.kind && icon.kind !== 'default') return icon;
+    if (sc && sc.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
+      const mIcon = _manifestIconForApp(sc.app_id);
+      if (mIcon) return mIcon;
+    }
+    return null;
+  }
+
+  function _refreshShortcutChrome() {
+    const normalized = _collectShortcuts(_latestUiPrefs || {});
+    const active = _resolveActive(_latestUiPrefs || {}, normalized);
+    _applyToggleIcon(_latestUiPrefs || {}, normalized, active);
+    _applyHeaderLabelAndIcon(_latestUiPrefs || {}, normalized, active);
+    _renderHeaderIconList(_latestUiPrefs || {}, normalized, active);
+    try {
+      const dd = document.getElementById('fe-agent-dd');
+      if (dd && dd.classList.contains('show')) _renderAgentDropdown();
+    } catch (_) {}
+    try {
+      if (shortcutsModal && shortcutsModal.classList.contains('show')) _renderShortcutsList();
+    } catch (_) {}
+  }
+
+  function _applyToggleIcon(uiPrefs, shortcuts, active) {
+    if (!agentToggleIconEl) return;
+    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
+    const icon = _effectiveShortcutIcon(resolvedActive);
+    if (icon) {
+      _renderIconInto(agentToggleIconEl, icon, null);
+      return;
+    }
+    _restoreManifestIcon(agentToggleIconEl);
+  }
+
+  function _applyHeaderLabelAndIcon(uiPrefs, shortcuts, active) {
+    if (!sidebarHeaderIconEl || !sidebarHeaderTitleEl) return;
+    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
+    const headerLabel = resolvedActive && _normStr(resolvedActive.label) ? _normStr(resolvedActive.label) : 'Sidebar';
+    sidebarHeaderTitleEl.textContent = headerLabel;
+
+    const icon = _effectiveShortcutIcon(resolvedActive);
+    if (icon) {
+      _renderIconInto(sidebarHeaderIconEl, icon, null);
+      return;
+    }
+    const fallbackText = _firstGrapheme(headerLabel);
+    if (fallbackText) {
+      sidebarHeaderIconEl.textContent = fallbackText;
+      return;
+    }
+    _restoreManifestIcon(sidebarHeaderIconEl);
+  }
+
+  function _renderHeaderIconList(uiPrefs, shortcuts, active) {
+    const listEl = sidebarHeaderIconListEl;
+    if (!listEl) return;
+    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
+    const activeKey = resolvedActive?.key || '';
+    const now = Date.now();
+
+    const headerItems = resolvedShortcuts
+      .filter((sc) => sc && sc.header)
+      .map((sc, idx) => ({
+        ...sc,
+        _sortTs: sc.last_used || (sc.key === activeKey ? now : 0),
+        _idx: idx,
+      }))
+      .sort((a, b) => (b._sortTs - a._sortTs) || (a._idx - b._idx));
+
+    listEl.innerHTML = '';
+    if (!headerItems.length) {
+      listEl.style.display = 'none';
+      return;
+    }
+    listEl.style.display = 'flex';
+
+    headerItems.forEach((sc) => {
+      const btn = document.createElement('button');
+      btn.className = 'agent-drawer__icon-btn';
+      if (sc.key && sc.key === activeKey) btn.classList.add('is-active');
+      btn.title = sc.label || sc.url || 'Shortcut';
+
+      const effectiveIcon = _effectiveShortcutIcon(sc);
+      const fallbackText = _firstGrapheme(sc.label);
+      const iconNode = _renderIconNode(effectiveIcon, null, fallbackText);
+      if (!iconNode.textContent && !iconNode.childNodes.length) return;
+
+      btn.appendChild(iconNode);
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const targetId = sc.id || sc.url || sc.key;
+        if (!targetId) return;
+        _sendUiPrefUpdate(UI_PREF_KEY_ACTIVE, targetId);
+        if (openDrawer) {
+          setTimeout(() => { try { openDrawer(); } catch (_) {} }, 120);
+        }
+      });
+      listEl.appendChild(btn);
+    });
+  }
+
+  function _updateSetupPlaceholder(uiPrefs, hasActiveOverride) {
+    if (!sidebarSetupPlaceholder || !sidebarIframeStack) return;
+    const hasActive = typeof hasActiveOverride === 'boolean'
+      ? hasActiveOverride
+      : !!(_resolveActive(uiPrefs)?.url);
+    if (hasActive) {
+      sidebarSetupPlaceholder.style.display = 'none';
+    } else {
+      sidebarSetupPlaceholder.style.display = 'flex';
+    }
+    sidebarIframeStack.style.opacity = hasActive ? '1' : '0';
+    sidebarIframeStack.style.pointerEvents = hasActive ? 'auto' : 'none';
+    sidebarIframeStack.setAttribute('aria-hidden', hasActive ? 'false' : 'true');
+  }
+
+  async function _ensureFrameworkAppRunning(appId) {
+    const id = _normStr(appId);
+    if (!id) return false;
+    try {
+      const { resp, body } = await _fetchJson(`/api/apps/${encodeURIComponent(id)}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!resp.ok || !body?.ok) {
+        const detail = body?.detail || body?.error || `Failed to start app ${id}`;
+        throw new Error(detail);
+      }
+      // refresh running cache opportunistically
+      try {
+        const set = await _ensureRunningCache(true);
+        set.add(id);
+      } catch (_) {}
+      return true;
+    } catch (e) {
+      toast(e?.message || `Failed to start app ${id}`);
+      return false;
+    }
+  }
+
+  async function _ensureIframeLoadedForShortcut(sc, entry) {
+    if (!sc || !entry || !entry.iframe || entry.loaded) return;
+    const url = _normStr(sc.url);
+    if (!url) return;
+
+    if (sc.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
+      let needsStart = true;
+      try {
+        needsStart = await _isAppBackendRequired(sc.app_id);
+      } catch (_) {
+        needsStart = true;
+      }
+      if (needsStart) {
+        const ok = await _ensureFrameworkAppRunning(sc.app_id);
+        if (!ok) return;
+      }
+    }
+
+    entry.iframe.src = url;
+    entry.loaded = true;
+  }
+
+  async function _syncIframesAndActivate(uiPrefs, shortcuts, active) {
+    const seq = ++_activateSeq;
+    const stack = sidebarIframeStack;
+    if (!stack) return;
+
+    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    const desiredKeys = new Set(resolvedShortcuts.map((sc) => sc.key));
+
+    _iframeMap.forEach((entry, key) => {
+      if (!desiredKeys.has(key)) {
+        try { entry.iframe.remove(); } catch (_) {}
+        _iframeMap.delete(key);
+      }
+    });
+
+    // Ensure app metadata is available for default icons (best-effort).
+    void _ensureAppsCache(false);
+
+    // Create iframes for shortcuts.
+    resolvedShortcuts.forEach((sc) => {
+      let entry = _iframeMap.get(sc.key);
+      if (!entry) {
+        const iframe = document.createElement('iframe');
+        iframe.className = 'sidebar-iframe';
+        iframe.setAttribute('data-shortcut-id', sc.key);
+        iframe.setAttribute('loading', sc.load === SHORTCUT_LOAD_EAGER ? 'eager' : 'lazy');
+        stack.appendChild(iframe);
+        entry = { iframe, url: sc.url, loaded: false };
+        _iframeMap.set(sc.key, entry);
+      }
+      entry.url = sc.url;
+      entry.iframe.setAttribute('data-shortcut-id', sc.key);
+      entry.iframe.setAttribute('data-shortcut-load', sc.load);
+      entry.iframe.setAttribute('loading', sc.load === SHORTCUT_LOAD_EAGER ? 'eager' : 'lazy');
+
+      if (entry.loaded && entry.iframe.src !== sc.url) {
+        entry.iframe.src = sc.url;
+      }
+    });
+
+    const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
+    const activeKey = resolvedActive ? resolvedActive.key : '';
+
+    // Eager load (best-effort). For framework apps this will start apps too.
+    const eager = resolvedShortcuts.filter((sc) => sc && sc.load === SHORTCUT_LOAD_EAGER);
+    for (const sc of eager) {
+      const entry = _iframeMap.get(sc.key);
+      if (!entry) continue;
+      void _ensureIframeLoadedForShortcut(sc, entry);
+    }
+
+    // Mark active + lazy-load active.
+    let hasActive = false;
+    _iframeMap.forEach((entry, key) => {
+      const isActive = !!(activeKey && key === activeKey);
+      entry.iframe.classList.toggle('is-active', isActive);
+      if (isActive) hasActive = true;
+    });
+
+    if (hasActive && resolvedActive) {
+      const entry = _iframeMap.get(resolvedActive.key);
+      if (entry) {
+        await _ensureIframeLoadedForShortcut(resolvedActive, entry);
+        if (seq !== _activateSeq) return;
+      }
+    }
+
+    _updateSetupPlaceholder(uiPrefs || _latestUiPrefs || {}, hasActive);
+  }
+
+  // --- Shortcut editor UI ---
+
+  function _setLoadValue(value) {
+    const normalized = _normalizeLoad(value);
+    if (shortcutLoadBtn) shortcutLoadBtn.dataset.value = normalized;
+    if (shortcutLoadLabel) shortcutLoadLabel.textContent = normalized === SHORTCUT_LOAD_EAGER ? 'Eager' : 'Lazy';
+  }
+
+  function _getLoadValue() {
+    const raw = shortcutLoadBtn?.dataset?.value;
+    return _normalizeLoad(raw);
+  }
+
+  function _closeLoadMenu() {
+    if (!shortcutLoadDD) return;
+    shortcutLoadDD.classList.remove('show');
+    if (shortcutLoadBtn) shortcutLoadBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function _renderLoadMenu() {
+    if (!shortcutLoadDD) return;
+    shortcutLoadDD.innerHTML = '';
+    const current = _getLoadValue();
+    const opts = [
+      { value: SHORTCUT_LOAD_LAZY, label: 'Lazy' },
+      { value: SHORTCUT_LOAD_EAGER, label: 'Eager' },
+    ];
+    opts.forEach((opt) => {
+      const item = document.createElement('div');
+      item.className = 'fe-dd-item';
+      item.textContent = opt.label;
+      item.dataset.checkable = 'true';
+      setMenuChecked(item, opt.value === current);
+      item.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        _setLoadValue(opt.value);
+        _closeLoadMenu();
+      });
+      shortcutLoadDD.appendChild(item);
+    });
+  }
+
+  function _openLoadMenu() {
+    if (!shortcutLoadDD) return;
+    try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
+    _renderLoadMenu();
+    shortcutLoadDD.classList.add('show');
+    if (shortcutLoadBtn) shortcutLoadBtn.setAttribute('aria-expanded', 'true');
+  }
+
+  function _setKind(kind) {
+    _editingKind = _normalizeEditorKind(kind);
+    if (shortcutKindBtn) shortcutKindBtn.dataset.value = _editingKind;
+    if (shortcutKindLabel) {
+      shortcutKindLabel.textContent = _editingKind === SHORTCUT_KIND_FRAMEWORK_APP ? 'App' : 'URL';
+    }
+    if (shortcutUrlWrap) shortcutUrlWrap.style.display = _editingKind === SHORTCUT_KIND_URL ? '' : 'none';
+    if (shortcutAppWrap) shortcutAppWrap.style.display = _editingKind === SHORTCUT_KIND_FRAMEWORK_APP ? '' : 'none';
+    _renderIconPreview();
+  }
+
+  function _getKind() {
+    const raw = shortcutKindBtn?.dataset?.value;
+    return _normalizeEditorKind(raw);
+  }
+
+  function _closeKindMenu() {
+    if (!shortcutKindDD) return;
+    shortcutKindDD.classList.remove('show');
+    if (shortcutKindBtn) shortcutKindBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function _renderKindMenu() {
+    if (!shortcutKindDD) return;
+    shortcutKindDD.innerHTML = '';
+    const current = _getKind();
+    const opts = [
+      { value: SHORTCUT_KIND_URL, label: 'URL' },
+      { value: SHORTCUT_KIND_FRAMEWORK_APP, label: 'App' },
+    ];
+    opts.forEach((opt) => {
+      const item = document.createElement('div');
+      item.className = 'fe-dd-item';
+      item.textContent = opt.label;
+      item.dataset.checkable = 'true';
+      setMenuChecked(item, opt.value === current);
+      item.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        _setKind(opt.value);
+        _closeKindMenu();
+      });
+      shortcutKindDD.appendChild(item);
+    });
+  }
+
+  function _openKindMenu() {
+    if (!shortcutKindDD) return;
+    try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
+    _renderKindMenu();
+    shortcutKindDD.classList.add('show');
+    if (shortcutKindBtn) shortcutKindBtn.setAttribute('aria-expanded', 'true');
+  }
+
+  function _closeAppMenu() {
+    if (!shortcutAppDD) return;
+    shortcutAppDD.classList.remove('show');
+    if (shortcutAppBtn) shortcutAppBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function _applyEditingApp(appId, appsList) {
+    const id = _normStr(appId);
+    _editingAppId = id;
+    if (shortcutAppBtn) shortcutAppBtn.dataset.value = id;
+    const found = Array.isArray(appsList) ? appsList.find((a) => a && a.id === id) : null;
+    if (shortcutAppLabel) shortcutAppLabel.textContent = found ? (found.name || found.id) : (id || 'Select app…');
+
+    // If label is blank, adopt the app name.
+    const currentLabel = _normStr(shortcutLabelInput?.value);
+    if (!currentLabel && found && shortcutLabelInput) {
+      shortcutLabelInput.value = found.name || found.id || '';
+    }
+
+    // URL is computed for framework apps (kept in prefs for stability).
+    if (shortcutUrlInput && _editingKind === SHORTCUT_KIND_FRAMEWORK_APP) {
+      shortcutUrlInput.value = _buildFrameworkAppUrl(id);
+    }
+
+    _renderIconPreview();
+  }
+
+  async function _renderAppMenu() {
+    if (!shortcutAppDD) return;
+    shortcutAppDD.innerHTML = '';
+
+    const apps = await _ensureAppsCache(true);
+    const running = await _ensureRunningCache(true);
+    const current = _normStr(shortcutAppBtn?.dataset?.value);
+
+    if (!apps.length) {
+      const empty = document.createElement('div');
+      empty.className = 'fe-dd-item';
+      empty.style.opacity = '0.7';
+      empty.textContent = 'No apps found';
+      shortcutAppDD.appendChild(empty);
+      return;
+    }
+
+    apps.forEach((app) => {
+      const id = _normStr(app?.id);
+      if (!id) return;
+      const name = _normStr(app?.name) || id;
+
+      const item = document.createElement('div');
+      item.className = 'fe-dd-item';
+      item.style.display = 'flex';
+      item.style.gap = '8px';
+      item.style.alignItems = 'center';
+      item.dataset.checkable = 'true';
+      setMenuChecked(item, id === current);
+
+      const icon = _manifestIconForApp(id);
+      item.appendChild(_renderIconNode(icon, 16));
+
+      const text = document.createElement('span');
+      text.textContent = name;
+      item.appendChild(text);
+
+      if (running && running.has(id)) {
+        const badge = document.createElement('span');
+        badge.textContent = 'running';
+        badge.style.fontSize = '0.72rem';
+        badge.style.opacity = '0.65';
+        badge.style.marginLeft = 'auto';
+        item.appendChild(badge);
+      }
+
+      item.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        _applyEditingApp(id, apps);
+        _closeAppMenu();
+      });
+
+      shortcutAppDD.appendChild(item);
+    });
+  }
+
+  function _openAppMenu() {
+    if (!shortcutAppDD) return;
+    try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
+    void _renderAppMenu();
+    shortcutAppDD.classList.add('show');
+    if (shortcutAppBtn) shortcutAppBtn.setAttribute('aria-expanded', 'true');
+  }
+
+  function _renderIconPreview() {
+    if (!shortcutIconPreview) return;
+    shortcutIconPreview.textContent = '';
+
+    if (_editingAssetName) {
+      const img = document.createElement('img');
+      img.src = _agentIconUrlFromName(_editingAssetName);
+      img.alt = '';
+      img.style.width = '18px';
+      img.style.height = '18px';
+      img.style.objectFit = 'contain';
+      shortcutIconPreview.appendChild(img);
+      return;
+    }
+
+    const em = _normStr(shortcutEmojiInput?.value);
+    if (em) {
+      shortcutIconPreview.textContent = em;
+      return;
+    }
+
+    if (_editingKind === SHORTCUT_KIND_FRAMEWORK_APP) {
+      const icon = _manifestIconForApp(_editingAppId);
+      if (icon) {
+        const node = _renderIconNode(icon, 18);
+        if (node) shortcutIconPreview.appendChild(node);
+        return;
+      }
+    }
+  }
+
+  function _hideEditor() {
+    if (!shortcutsEditorEl) return;
+    shortcutsEditorEl.style.display = 'none';
+    _editingId = null;
+    _editingAssetName = null;
+    _editingAppId = '';
+    _setKind(SHORTCUT_KIND_URL);
+    if (shortcutLabelInput) shortcutLabelInput.value = '';
+    if (shortcutUrlInput) shortcutUrlInput.value = '';
+    if (shortcutHeaderCheck) shortcutHeaderCheck.checked = false;
+    _setLoadValue(SHORTCUT_LOAD_LAZY);
+    if (shortcutEmojiInput) shortcutEmojiInput.value = '';
+    if (shortcutIconPreview) shortcutIconPreview.textContent = '';
+    _closeLoadMenu();
+    _closeKindMenu();
+    _closeAppMenu();
+  }
+
+  function _showEditor(entry) {
+    if (!shortcutsEditorEl) return;
+    shortcutsEditorEl.style.display = '';
+    const e = entry && typeof entry === 'object' ? entry : {};
+    _editingId = _normStr(e.id) || null;
+    if (shortcutLabelInput) shortcutLabelInput.value = _normStr(e.label);
+    if (shortcutUrlInput) shortcutUrlInput.value = _normStr(e.url);
+    if (shortcutHeaderCheck) shortcutHeaderCheck.checked = !!e.header;
+    _setLoadValue(e.load);
+
+    _editingAssetName = null;
+    _editingAppId = _normStr(e.app_id);
+    _setKind(e.kind);
+
+    if (shortcutAppBtn) shortcutAppBtn.dataset.value = _editingAppId;
+    if (shortcutAppLabel) shortcutAppLabel.textContent = _editingAppId ? _editingAppId : 'Select app…';
+    if (shortcutEmojiInput) shortcutEmojiInput.value = '';
+
+    const icon = e.icon && typeof e.icon === 'object' ? e.icon : null;
+    if (icon && icon.kind === 'emoji' && shortcutEmojiInput) {
+      shortcutEmojiInput.value = _normStr(icon.emoji);
+    } else if (icon && icon.kind === 'asset') {
+      _editingAssetName = _normStr(icon.name) || null;
+    }
+
+    if (_editingKind === SHORTCUT_KIND_FRAMEWORK_APP && _editingAppId) {
+      void _ensureAppsCache(true).then((apps) => _applyEditingApp(_editingAppId, apps));
+    }
+
+    _renderIconPreview();
+  }
+
+  function _persistShortcuts(nextList) {
+    _sendUiPrefUpdate(UI_PREF_KEY_SHORTCUTS, nextList);
+
+    const activeId = _normStr(_latestUiPrefs?.[UI_PREF_KEY_ACTIVE]);
+    const hasActive = !!(
+      activeId
+      && Array.isArray(nextList)
+      && nextList.some((sc) => sc && (sc.id === activeId || sc.url === activeId))
+    );
+    if (!hasActive) {
+      const fallback = Array.isArray(nextList) && nextList.length ? (_normStr(nextList[0].id) || _normStr(nextList[0].url)) : '';
+      _sendUiPrefUpdate(UI_PREF_KEY_ACTIVE, fallback);
+    }
+  }
+
+  function _renderShortcutsList() {
+    if (!shortcutsListEl) return;
+    shortcutsListEl.innerHTML = '';
+    const shortcuts = Array.isArray(_shortcutsCache) ? _shortcutsCache.slice() : [];
+    if (!shortcuts.length) {
+      const empty = document.createElement('div');
+      empty.style.opacity = '0.7';
+      empty.textContent = 'No shortcuts yet.';
+      shortcutsListEl.appendChild(empty);
+      return;
+    }
+
+    shortcuts.forEach((sc, idx) => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.gap = '10px';
+      row.style.alignItems = 'center';
+      row.style.padding = '6px 0';
+      row.style.borderBottom = '1px solid rgba(255,255,255,0.06)';
+
+      const effectiveIcon = _effectiveShortcutIcon(sc);
+      row.appendChild(_renderIconNode(effectiveIcon, 18));
+
+      const meta = document.createElement('div');
+      meta.style.flex = '1';
+      const title = document.createElement('div');
+      title.textContent = sc.label || '(no label)';
+      const url = document.createElement('div');
+      url.style.fontSize = '0.78rem';
+      url.style.opacity = '0.7';
+      url.textContent = sc.kind === SHORTCUT_KIND_FRAMEWORK_APP
+        ? `App: ${_normStr(sc.app_id) || '(unset)'}`
+        : (sc.url || '');
+      meta.appendChild(title);
+      meta.appendChild(url);
+      row.appendChild(meta);
+
+      const mkBtn = (text) => {
+        const b = document.createElement('button');
+        b.className = 'fe-btn';
+        b.textContent = text;
+        return b;
+      };
+
+      const up = mkBtn('↑');
+      up.title = 'Move up';
+      up.disabled = idx === 0;
+      up.addEventListener('click', () => {
+        if (idx <= 0) return;
+        const next = shortcuts.slice();
+        const t = next[idx - 1];
+        next[idx - 1] = next[idx];
+        next[idx] = t;
+        _persistShortcuts(next);
+      });
+      row.appendChild(up);
+
+      const down = mkBtn('↓');
+      down.title = 'Move down';
+      down.disabled = idx >= shortcuts.length - 1;
+      down.addEventListener('click', () => {
+        if (idx >= shortcuts.length - 1) return;
+        const next = shortcuts.slice();
+        const t = next[idx + 1];
+        next[idx + 1] = next[idx];
+        next[idx] = t;
+        _persistShortcuts(next);
+      });
+      row.appendChild(down);
+
+      const edit = mkBtn('Edit');
+      edit.addEventListener('click', () => _showEditor(sc));
+      row.appendChild(edit);
+
+      const del = mkBtn('Delete');
+      del.addEventListener('click', () => {
+        const next = shortcuts.slice();
+        next.splice(idx, 1);
+        _persistShortcuts(next);
+        _hideEditor();
+      });
+      row.appendChild(del);
+
+      shortcutsListEl.appendChild(row);
+    });
+  }
+
+  function _openShortcutsModal() {
+    if (!shortcutsModal) return;
+    shortcutsModal.classList.add('show');
+    shortcutsModal.setAttribute('aria-hidden', 'false');
+    _renderShortcutsList();
+  }
+
+  function _closeShortcutsModal() {
+    if (!shortcutsModal) return;
+    shortcutsModal.classList.remove('show');
+    shortcutsModal.setAttribute('aria-hidden', 'true');
+    _hideEditor();
+  }
+
+  function _closeAgentDropdown() {
+    const dd = document.getElementById('fe-agent-dd');
+    if (!dd) return;
+    dd.classList.remove('show');
+  }
+
+  function _renderAgentDropdown() {
+    const dd = document.getElementById('fe-agent-dd');
+    if (!dd) return;
+    dd.innerHTML = '';
+
+    const display = _normStr(_latestUiPrefs?.[UI_PREF_KEY_TOGGLE_DISPLAY]) || 'icon';
+    const shortcuts = Array.isArray(_shortcutsCache) ? _shortcutsCache : [];
+
+    if (!shortcuts.length) {
+      const empty = document.createElement('div');
+      empty.className = 'fe-dd-item';
+      empty.style.opacity = '0.7';
+      empty.textContent = 'No shortcuts';
+      dd.appendChild(empty);
+    } else {
+      shortcuts.forEach((sc) => {
+        const label = _normStr(sc?.label);
+        const url = _normStr(sc?.url);
+        const id = _normStr(sc?.id);
+        const activeId = id || url;
+        if (!label || !url || !activeId) return;
+
+        const item = document.createElement('div');
+        item.className = 'fe-dd-item';
+        item.style.display = 'flex';
+        item.style.gap = '8px';
+        item.style.alignItems = 'center';
+
+        if (display === 'icon' || display === 'both') {
+          item.appendChild(_renderIconNode(_effectiveShortcutIcon(sc), 16));
+        }
+        if (display === 'text' || display === 'both') {
+          const text = document.createElement('span');
+          text.textContent = label;
+          item.appendChild(text);
+        } else {
+          item.title = label;
+        }
+
+        item.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          _closeAgentDropdown();
+          _sendUiPrefUpdate(UI_PREF_KEY_ACTIVE, activeId);
+          if (openDrawer) setTimeout(() => { try { openDrawer(); } catch (_) {} }, 120);
+        });
+        dd.appendChild(item);
+      });
+    }
+
+    const sep = document.createElement('div');
+    sep.className = 'fe-dd-separator';
+    sep.style.margin = '6px 0';
+    dd.appendChild(sep);
+
+    const manage = document.createElement('div');
+    manage.className = 'fe-dd-item';
+    manage.textContent = 'Manage shortcuts…';
+    manage.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      _closeAgentDropdown();
+      _openShortcutsModal();
+    });
+    dd.appendChild(manage);
+  }
+
+  function _openAgentDropdown() {
+    const dd = document.getElementById('fe-agent-dd');
+    if (!dd) return;
+    try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
+    _renderAgentDropdown();
+    dd.classList.add('show');
+  }
+
+  function _bindAgentDropdownInteractions() {
+    const agentBtn = agentToggleBtn;
+    if (!agentBtn) return;
+    let longPressTimer = null;
+    let suppressUntil = 0;
+
+    agentBtn.addEventListener('click', (ev) => {
+      if (Date.now() < suppressUntil) {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        suppressUntil = 0;
+      }
+    }, true);
+
+    agentBtn.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      _openAgentDropdown();
+    });
+
+    agentBtn.addEventListener('touchstart', () => {
+      if (longPressTimer) clearTimeout(longPressTimer);
+      longPressTimer = setTimeout(() => {
+        suppressUntil = Date.now() + 900;
+        _openAgentDropdown();
+      }, 520);
+    }, { passive: true });
+
+    const clearLp = () => {
+      if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    };
+    agentBtn.addEventListener('touchend', clearLp, { passive: true });
+    agentBtn.addEventListener('touchcancel', clearLp, { passive: true });
+
+    document.addEventListener('click', (ev) => {
+      const dd = document.getElementById('fe-agent-dd');
+      if (!dd || !dd.classList.contains('show')) return;
+      if (ev.target.closest('#fe-agent-toggle')) return;
+      if (ev.target.closest('#fe-agent-dd')) return;
+      _closeAgentDropdown();
+    }, false);
+  }
+
+  function applyUiPrefs(uiPrefs) {
+    const ui = uiPrefs && typeof uiPrefs === 'object' ? uiPrefs : {};
+    _latestUiPrefs = { ...ui };
+
+    _settingsUiMutating = true;
+    try {
+      _applyToggleDisplay(_latestUiPrefs);
+      _applyHeaderDisplayMode(_latestUiPrefs);
+      _shortcutsCache = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS])
+        ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS].slice()
+        : [];
+    } finally {
+      _settingsUiMutating = false;
+    }
+
+    const normalized = _collectShortcuts(_latestUiPrefs);
+    const ensured = _ensureActiveSelection(_latestUiPrefs, normalized);
+    _maybeUpdateLastUsed(_latestUiPrefs, ensured.active, normalized);
+    _applyToggleIcon(_latestUiPrefs, normalized, ensured.active);
+    _applyHeaderLabelAndIcon(_latestUiPrefs, normalized, ensured.active);
+    _renderHeaderIconList(_latestUiPrefs, normalized, ensured.active);
+    void _syncIframesAndActivate(_latestUiPrefs, normalized, ensured.active);
+
+    // Keep open UI surfaces in sync.
+    try {
+      const dd = document.getElementById('fe-agent-dd');
+      if (dd && dd.classList.contains('show')) _renderAgentDropdown();
+    } catch (_) {}
+    try {
+      if (shortcutsModal && shortcutsModal.classList.contains('show')) _renderShortcutsList();
+    } catch (_) {}
+
+    // If we have any framework-app shortcuts, ensure the app list is loaded so
+    // default (manifest) icons can replace placeholder chrome.
+    try {
+      const needsApps = normalized.some((sc) => sc && sc.kind === SHORTCUT_KIND_FRAMEWORK_APP);
+      if (needsApps) {
+        const seq = ++_appsChromeSeq;
+        void _ensureAppsCache(false).then(() => {
+          if (seq !== _appsChromeSeq) return;
+          _refreshShortcutChrome();
+        });
+      }
+    } catch (_) {}
+  }
+
+  async function init() {
+    // Resolve core DOM.
+    agentToggleBtn = document.getElementById('fe-agent-toggle');
+    agentToggleIconEl = agentToggleBtn?.querySelector('.fe-agent-icon') || null;
+
+    sidebarHeaderIconEl = document.getElementById('agent-drawer-icon');
+    sidebarHeaderTitleEl = document.getElementById('agent-drawer-title-text');
+    sidebarHeaderIconListEl = document.getElementById('agent-drawer-icon-list');
+    sidebarSetupPlaceholder = document.getElementById('sidebar-setup-placeholder');
+    sidebarIframeStack = document.getElementById('sidebar-iframe-stack');
+
+    shortcutsModal = document.getElementById('agent-shortcuts-modal');
+    shortcutsCloseBtn = document.getElementById('agent-shortcuts-close');
+    shortcutsAddBtn = document.getElementById('agent-shortcuts-add');
+    shortcutsListEl = document.getElementById('agent-shortcuts-list');
+    shortcutsEditorEl = document.getElementById('agent-shortcuts-editor');
+
+    editorSettingsShortcutsBtn = document.getElementById('editor-settings-agent-shortcuts');
+    setupShortcutsBtn = document.getElementById('sidebar-setup-shortcuts');
+
+    shortcutLabelInput = document.getElementById('agent-shortcut-label');
+    shortcutUrlWrap = document.getElementById('agent-shortcut-target-url');
+    shortcutUrlInput = document.getElementById('agent-shortcut-url');
+    shortcutKindBtn = document.getElementById('agent-shortcut-kind-btn');
+    shortcutKindLabel = document.getElementById('agent-shortcut-kind-label');
+    shortcutKindDD = document.getElementById('agent-shortcut-kind-dd');
+    shortcutAppWrap = document.getElementById('agent-shortcut-target-app');
+    shortcutAppBtn = document.getElementById('agent-shortcut-app-btn');
+    shortcutAppLabel = document.getElementById('agent-shortcut-app-label');
+    shortcutAppDD = document.getElementById('agent-shortcut-app-dd');
+
+    shortcutLoadBtn = document.getElementById('agent-shortcut-load-btn');
+    shortcutLoadLabel = document.getElementById('agent-shortcut-load-label');
+    shortcutLoadDD = document.getElementById('agent-shortcut-load-dd');
+    shortcutHeaderCheck = document.getElementById('agent-shortcut-header');
+
+    shortcutEmojiInput = document.getElementById('agent-shortcut-emoji');
+    shortcutIconBrowseBtn = document.getElementById('agent-shortcut-icon-browse');
+    shortcutIconClearBtn = document.getElementById('agent-shortcut-icon-clear');
+    shortcutIconPreview = document.getElementById('agent-shortcut-icon-preview');
+    shortcutCancelBtn = document.getElementById('agent-shortcut-cancel');
+    shortcutSaveBtn = document.getElementById('agent-shortcut-save');
+
+    // Hide URL/app rows until kind is selected (defaults to URL).
+    _setKind(SHORTCUT_KIND_URL);
+
+    // Extension manifest icon for the toggle/header defaults.
+    void _bootstrapExtensionManifest();
+    // App list for framework-app shortcuts (icons + picker).
+    void _ensureAppsCache(false);
+    void _ensureRunningCache(false);
+
+    // Settings radios: update prefs.
+    try {
+      const radios = document.querySelectorAll('input[name="agent-toggle-display"]');
+      radios.forEach((r) => {
+        r.addEventListener('change', () => {
+          if (_settingsUiMutating) return;
+          if (!r.checked) return;
+          _sendUiPrefUpdate(UI_PREF_KEY_TOGGLE_DISPLAY, r.value);
+        });
+      });
+    } catch (_) {}
+
+    try {
+      const headerRadios = document.querySelectorAll('input[name="agent-header-display"]');
+      headerRadios.forEach((r) => {
+        r.addEventListener('change', () => {
+          if (_settingsUiMutating) return;
+          if (!r.checked) return;
+          _sendUiPrefUpdate(UI_PREF_KEY_HEADER_DISPLAY, r.value);
+        });
+      });
+    } catch (_) {}
+
+    if (editorSettingsShortcutsBtn) editorSettingsShortcutsBtn.addEventListener('click', _openShortcutsModal);
+    if (setupShortcutsBtn) setupShortcutsBtn.addEventListener('click', _openShortcutsModal);
+    if (shortcutsCloseBtn) shortcutsCloseBtn.addEventListener('click', _closeShortcutsModal);
+    if (shortcutsModal) {
+      shortcutsModal.addEventListener('click', (ev) => {
+        if (ev.target === shortcutsModal) _closeShortcutsModal();
+      });
+    }
+    if (shortcutsAddBtn) shortcutsAddBtn.addEventListener('click', () => _showEditor({}));
+
+    if (shortcutCancelBtn) shortcutCancelBtn.addEventListener('click', _hideEditor);
+
+    if (shortcutEmojiInput) shortcutEmojiInput.addEventListener('input', _renderIconPreview);
+
+    if (shortcutLoadBtn) {
+      shortcutLoadBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const wasOpen = shortcutLoadDD?.classList.contains('show');
+        if (wasOpen) _closeLoadMenu();
+        else _openLoadMenu();
+      });
+    }
+
+    if (shortcutKindBtn) {
+      shortcutKindBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const wasOpen = shortcutKindDD?.classList.contains('show');
+        if (wasOpen) _closeKindMenu();
+        else _openKindMenu();
+      });
+    }
+
+    if (shortcutAppBtn) {
+      shortcutAppBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const wasOpen = shortcutAppDD?.classList.contains('show');
+        if (wasOpen) _closeAppMenu();
+        else _openAppMenu();
+      });
+    }
+
+    if (shortcutIconBrowseBtn) {
+      shortcutIconBrowseBtn.addEventListener('click', async () => {
+        if (typeof window.__explorerBusRequest !== 'function') {
+          toast('Explorer connection unavailable');
+          return;
+        }
+        if (typeof pickFile !== 'function') {
+          toast('File picker unavailable');
+          return;
+        }
+        const base = _lastPickerPath || options.homeDir || '';
+        const picked = await pickFile(base);
+        if (!picked) return;
+        _lastPickerPath = picked;
+        try {
+          const res = await window.__explorerBusRequest('prefs:vendorAgentIcon', { abs_path: picked }, 12000);
+          if (res?.payload?.ok && res.payload.name) {
+            _editingAssetName = res.payload.name;
+            if (shortcutEmojiInput) shortcutEmojiInput.value = '';
+            _renderIconPreview();
+          }
+        } catch (e) {
+          toast(e?.message || 'Failed to vendor icon');
+        }
+      });
+    }
+
+    if (shortcutIconClearBtn) {
+      shortcutIconClearBtn.addEventListener('click', () => {
+        _editingAssetName = null;
+        if (shortcutEmojiInput) shortcutEmojiInput.value = '';
+        _renderIconPreview();
+      });
+    }
+
+    if (shortcutSaveBtn) {
+      shortcutSaveBtn.addEventListener('click', () => {
+        const label = _normStr(shortcutLabelInput?.value);
+        const kind = _getKind();
+        const load = _getLoadValue();
+        const header = !!shortcutHeaderCheck?.checked;
+
+        let appId = '';
+        let url = '';
+        if (kind === SHORTCUT_KIND_FRAMEWORK_APP) {
+          appId = _normStr(shortcutAppBtn?.dataset?.value) || _editingAppId;
+          if (!appId) {
+            toast('App is required');
+            return;
+          }
+          url = _buildFrameworkAppUrl(appId);
+          if (shortcutUrlInput) shortcutUrlInput.value = url;
+        } else {
+          url = _normStr(shortcutUrlInput?.value);
+        }
+
+        if (!label || !url) {
+          toast(kind === SHORTCUT_KIND_FRAMEWORK_APP ? 'Label and App are required' : 'Label and URL are required');
+          return;
+        }
+
+        const id = _editingId || `sc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+        let icon = null;
+        if (_editingAssetName) {
+          icon = { kind: 'asset', name: _editingAssetName };
+        } else {
+          const em = _normStr(shortcutEmojiInput?.value);
+          if (em) icon = { kind: 'emoji', emoji: em };
+        }
+
+        const next = Array.isArray(_shortcutsCache) ? _shortcutsCache.slice() : [];
+        const idx = next.findIndex((x) => x && x.id === id);
+        const existing = idx >= 0 ? next[idx] : null;
+        const lastUsed = Number.isFinite(Number(existing?.last_used)) ? Number(existing.last_used) : 0;
+
+        const entry = {
+          id,
+          kind,
+          app_id: kind === SHORTCUT_KIND_FRAMEWORK_APP ? appId : '',
+          label,
+          url,
+          icon,
+          load,
+          header,
+          last_used: lastUsed,
+        };
+
+        if (idx >= 0) next[idx] = entry;
+        else next.push(entry);
+        _persistShortcuts(next);
+        _hideEditor();
+      });
+    }
+
+    _bindAgentDropdownInteractions();
+  }
+
+  return { init, applyUiPrefs, getActiveUrl };
+}

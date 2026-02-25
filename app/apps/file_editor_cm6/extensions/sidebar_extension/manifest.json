@@ -1,5 +1,5 @@
 {
-  "name": "Chat Drawer",
-  "id": "chat_drawer_extension",
+  "name": "Sidebar",
+  "id": "sidebar_extension",
   "icon": "/apps/file_editor_cm6/static/icons/show.png"
 }

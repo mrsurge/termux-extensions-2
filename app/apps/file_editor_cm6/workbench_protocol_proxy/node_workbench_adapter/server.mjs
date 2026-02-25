@@ -311,76 +311,6 @@ const wsClients = new Set();
 const eventLog = [];
 const EVENT_LOG_MAX = Number(process.env.TE2_EVENT_LOG_MAX ?? "200");
 
-// Diagnostics baton: a pending Promise resolved when $changeMany includes the target path.
-//
-// Robustness rules:
-// - Only one in-flight "open file -> wait for diagnostics for that file" job at a time.
-// - A new open cancels the previous job without emitting diagnostics/ready for the cancelled job.
-// - We resolve on the first diagnostics/update that matches the target path, regardless of marker count.
-//   (Clean files still need the spinner to stop.)
-const DIAG_BATON_TIMEOUT_MS = Number(process.env.TE2_DIAG_BATON_TIMEOUT_MS ?? "45000");
-let _diagBatonJob = null; // { absPath, requestId, startMs, timer, resolve, promise }
-
-function batonLog(msg) {
-  console.log(`[baton] ts=${Date.now()} ${msg}`);
-}
-
-function _absPathFromUri(uri) {
-  if (!uri) return "";
-  if (typeof uri === "object") {
-    // Support URI objects (revived) as well as strings.
-    if (typeof uri.fsPath === "string" && uri.fsPath) return uri.fsPath;
-    if (typeof uri.path === "string" && uri.path && uri.path.startsWith("/")) return uri.path;
-    if (typeof uri.external === "string" && uri.external) return _absPathFromUri(uri.external);
-    return "";
-  }
-  if (typeof uri !== "string") return "";
-  if (uri.startsWith("/")) return uri;
-  if (uri.startsWith("file://")) return uri.slice(7);
-  if (uri.startsWith("vscode-remote://")) {
-    const slash = uri.indexOf("/", "vscode-remote://".length);
-    return slash !== -1 ? uri.slice(slash) : "";
-  }
-  return "";
-}
-
-function _cancelDiagBatonJob(reason = "cancelled") {
-  if (!_diagBatonJob) return;
-  try { clearTimeout(_diagBatonJob.timer); } catch {}
-  const job = _diagBatonJob;
-  _diagBatonJob = null;
-  try {
-    job.resolve({ status: "cancelled", reason, absPath: job.absPath, requestId: job.requestId });
-  } catch {}
-}
-
-function _startDiagBatonJob(absPath, requestId) {
-  // Cancel previous job without emitting diagnostics/ready for it.
-  if (_diagBatonJob && (_diagBatonJob.absPath !== absPath || _diagBatonJob.requestId !== requestId)) {
-    batonLog(`cancelling stale job for ${_diagBatonJob.absPath}`);
-    _cancelDiagBatonJob("superseded");
-  }
-  if (_diagBatonJob && _diagBatonJob.absPath === absPath && _diagBatonJob.requestId === requestId) {
-    batonLog(`reusing existing job for ${absPath}`);
-    return _diagBatonJob.promise;
-  }
-
-  batonLog(`CREATED job for ${absPath} requestId=${requestId || "-"}`);
-  const startMs = Date.now();
-  let resolve;
-  const promise = new Promise((r) => { resolve = r; });
-  const timer = setTimeout(() => {
-    const elapsed = Date.now() - startMs;
-    batonLog(`TIMEOUT path=${absPath} requestId=${requestId || "-"} after ${elapsed}ms`);
-    if (_diagBatonJob && _diagBatonJob.absPath === absPath && _diagBatonJob.requestId === requestId) {
-      _diagBatonJob = null;
-    }
-    resolve({ status: "timeout", absPath, requestId, elapsed_ms: elapsed });
-  }, Math.max(1000, DIAG_BATON_TIMEOUT_MS));
-  _diagBatonJob = { absPath, requestId, startMs, timer, resolve, promise };
-  return promise;
-}
-
 const EVENT_TRUNC_STR_MAX = Number(process.env.TE2_EVENT_TRUNC_STR_MAX ?? "4096");
 const EVENT_TRUNC_ARR_MAX = Number(process.env.TE2_EVENT_TRUNC_ARR_MAX ?? "200");
 
@@ -548,55 +478,6 @@ const wb = new WorkbenchClient({
           owner: norm.owner,
           items: norm.items,
         });
-
-        // Diagnostics baton: resolve the current in-flight job when any item URI matches its path.
-        // We intentionally resolve on the first match, regardless of marker count, so clean files
-        // do not spin forever and late-arriving diagnostics for previous files won't block.
-        // EXCEPTION: When markers=0 arrives very quickly (<1500ms), defer resolution briefly
-        // because some extensions (clangd) clear diagnostics on document re-open then re-send.
-        const DIAG_EMPTY_GRACE_MS = 1500;
-        if (_diagBatonJob) {
-          const wantPath = _diagBatonJob.absPath;
-          for (const item of norm.items) {
-            const itemPath = _absPathFromUri(item.uri || "");
-            try {
-              // Minimal debug to see why a match is missed without dumping huge payloads.
-              batonLog(`diag item uri=${typeof item.uri === "string" ? item.uri : "[obj]"} itemPath=${itemPath} wantPath=${wantPath} markers=${(item.markers || []).length}`);
-            } catch {}
-            if (itemPath && wantPath && itemPath === wantPath) {
-              const markerCount = (item.markers || []).length;
-              const elapsed = Date.now() - (_diagBatonJob.startMs || Date.now());
-              // If markers=0 and we're still within the grace window, defer — wait for real diagnostics.
-              if (markerCount === 0 && elapsed < DIAG_EMPTY_GRACE_MS) {
-                batonLog(`DEFER empty match path=${itemPath} elapsed=${elapsed}ms (grace ${DIAG_EMPTY_GRACE_MS}ms)`);
-                // Schedule a fallback: if no non-empty match arrives in the grace window, resolve with 0.
-                if (!_diagBatonJob._emptyGraceTimer) {
-                  const jobRef = _diagBatonJob;
-                  _diagBatonJob._emptyGraceTimer = setTimeout(() => {
-                    if (_diagBatonJob === jobRef) {
-                      batonLog(`GRACE expired, resolving with markers=0 for ${itemPath}`);
-                      try { clearTimeout(_diagBatonJob.timer); } catch {}
-                      _diagBatonJob = null;
-                      try {
-                        jobRef.resolve({ status: "matched", absPath: itemPath, requestId: jobRef.requestId, owner: norm.owner, markers: 0, elapsed_ms: Date.now() - jobRef.startMs });
-                      } catch {}
-                    }
-                  }, DIAG_EMPTY_GRACE_MS - elapsed);
-                }
-                break;
-              }
-              batonLog(`MATCH path=${itemPath} owner=${norm.owner} markers=${markerCount} elapsed=${elapsed}ms`);
-              try { clearTimeout(_diagBatonJob.timer); } catch {}
-              try { clearTimeout(_diagBatonJob._emptyGraceTimer); } catch {}
-              const job = _diagBatonJob;
-              _diagBatonJob = null;
-              try {
-                job.resolve({ status: "matched", absPath: itemPath, requestId: job.requestId, owner: norm.owner, markers: markerCount, elapsed_ms: elapsed });
-              } catch {}
-              break;
-            }
-          }
-        }
       }
     }
   },
@@ -785,8 +666,8 @@ async function handleJsonRpc(reqObj) {
     // To make "change file" requests deterministic for *every* client, treat alreadyActive
     // + requestId as an explicit refresh request.
     const forceRefreshEff = forceRefreshReq || (alreadyActive && !!requestId);
-    batonLog(
-      `vscode.openFile ENTER path=${resolvedPath} id=${id} requestId=${requestId || "-"} alreadyActive=${alreadyActive ? 1 : 0} forceRefresh_req=${forceRefreshReq ? 1 : 0} forceRefresh_eff=${forceRefreshEff ? 1 : 0}`
+    console.log(
+      `[server] vscode.openFile ENTER path=${resolvedPath} id=${id} requestId=${requestId || "-"} alreadyActive=${alreadyActive ? 1 : 0} forceRefresh_req=${forceRefreshReq ? 1 : 0} forceRefresh_eff=${forceRefreshEff ? 1 : 0}`
     );
 
     const openFileSnapEnabled =
@@ -831,29 +712,8 @@ async function handleJsonRpc(reqObj) {
       forceRefresh: forceRefreshEff,
       generation: p.generation,
     });
-    batonLog(`wb.openFile returned for ${resolvedPath}`);
+    console.log(`[server] wb.openFile returned for ${resolvedPath}`);
     logStatus("open_file", { path: resolvedPath });
-
-    // Diagnostics baton: wait for $changeMany to include this file's URI.
-    // The Promise resolves when onEvent sees a matching diagnostics/update for this file,
-    // or on timeout. Non-blocking to the HTTP response — fires async.
-    (async () => {
-      batonLog(`waiting for diagnostics for ${resolvedPath} requestId=${requestId || "-"}`);
-      const r = await _startDiagBatonJob(resolvedPath, requestId);
-      if (r && r.status === "cancelled") return;
-      const error = r && r.status === "timeout";
-      batonLog(`emitting diagnostics/ready path=${resolvedPath} status=${r?.status || "?"}`);
-      emitTe2Event({
-        type: "diagnostics/ready",
-        ts_ms: nowMs(),
-        path: resolvedPath,
-        request_id: requestId,
-        error: error || undefined,
-        reason: r?.status || undefined,
-        markers: (r && typeof r.markers === "number") ? r.markers : undefined,
-        owner: r?.owner,
-      });
-    })();
 
     return { jsonrpc: "2.0", id, result: { ...result, path: resolvedPath, uri: vscodeRemoteUri(authority, resolvedPath) } };
   }

@@ -3082,14 +3082,43 @@
       <div class="fe-dd-separator" style="margin: 12px 0;"></div>
 
       <div id="agent-shortcuts-editor" style="display:none;">
-        <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px;">
+        <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px; flex-wrap: wrap;">
           <div style="flex:1; min-width: 220px;">
             <label for="agent-shortcut-label" style="display:block; margin-bottom: 6px;">Label</label>
             <input id="agent-shortcut-label" class="lsp-rootrel-input" type="text" placeholder="Codex Agent" autocomplete="off" spellcheck="false" />
           </div>
-          <div style="flex:2; min-width: 260px;">
+          <div style="flex:1; min-width: 220px;">
+            <label for="agent-shortcut-kind-btn" style="display:block; margin-bottom: 6px;">Type</label>
+            <div class="fe-menu" style="width: 100%;">
+              <button id="agent-shortcut-kind-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;" aria-haspopup="listbox" aria-expanded="false">
+                <span id="agent-shortcut-kind-label">URL</span>
+                <span aria-hidden="true">▾</span>
+              </button>
+              <div id="agent-shortcut-kind-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 200px; overflow-y: auto;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="agent-shortcut-target-url" style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px;">
+          <div style="flex:1; min-width: 260px;">
             <label for="agent-shortcut-url" style="display:block; margin-bottom: 6px;">URL</label>
             <input id="agent-shortcut-url" class="lsp-rootrel-input" type="text" placeholder="http://127.0.0.1:12359/codex-agent" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+
+        <div id="agent-shortcut-target-app" style="display:none; gap:10px; align-items:flex-end; margin-bottom: 10px;">
+          <div style="flex:1; min-width: 260px;">
+            <label for="agent-shortcut-app-btn" style="display:block; margin-bottom: 6px;">App</label>
+            <div class="fe-menu" style="width: 100%;">
+              <button id="agent-shortcut-app-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;" aria-haspopup="listbox" aria-expanded="false">
+                <span id="agent-shortcut-app-label">Select app…</span>
+                <span aria-hidden="true">▾</span>
+              </button>
+              <div id="agent-shortcut-app-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 240px; overflow-y: auto;"></div>
+            </div>
+            <div style="font-size: 0.78rem; opacity: 0.65; margin-top: 4px;">
+              Loads via <code>/app/&lt;id&gt;?embed=1</code>
+            </div>
           </div>
         </div>
 

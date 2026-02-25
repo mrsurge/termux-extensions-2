@@ -45,7 +45,8 @@ DEFAULT_UI_PREFS: Dict[str, Any] = {
     "agentActiveShortcutId": "",
     "agentToggleDisplay": "icon",  # "icon" | "text" | "both"
     "agentHeaderDisplay": "text",  # "icon" | "text" | "both"
-    # Shortcuts list: [{"id": "...", "label": "...", "url": "...", "icon": {...}, "load": "...", "header": bool, "last_used": int}]
+    # Shortcuts list:
+    #   [{"id": "...", "kind": "url"|"framework_app", "app_id": "...", "label": "...", "url": "...", "icon": {...}, "load": "...", "header": bool, "last_used": int}]
     "agentShortcuts": [],
 }
 

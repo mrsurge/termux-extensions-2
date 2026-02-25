@@ -1,5 +1,5 @@
-// app/apps/file_editor_cm6/extensions/chat_drawer_extension/static/js/agent_drawer.js
-// Agent drawer with shared shell architecture - ONE MCP server for all sessions
+// app/apps/file_editor_cm6/extensions/sidebar_extension/static/js/sidebar_drawer.js
+// Legacy sidebar drawer with shared shell architecture
 
 function notify(message) {
   if (window.host && typeof window.host.toast === 'function') {
@@ -9,7 +9,7 @@ function notify(message) {
   }
 }
 
-export function initAgentDrawer() {
+export function initSidebarDrawer() {
   const drawer = document.getElementById('agent-drawer');
   const toggle = document.getElementById('fe-agent-toggle');
   const closeBtn = document.getElementById('agent-close');

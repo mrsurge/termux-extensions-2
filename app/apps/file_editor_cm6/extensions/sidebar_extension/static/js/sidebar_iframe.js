@@ -1,11 +1,11 @@
-// app/apps/file_editor_cm6/extensions/chat_drawer_extension/static/js/agent_iframe.js
-// Lightweight iframe-based agent drawer.
+// app/apps/file_editor_cm6/extensions/sidebar_extension/static/js/sidebar_iframe.js
+// Lightweight iframe-based sidebar.
 
 const DEFAULT_IFRAME_URL = '';
 const DEFAULT_DRAWER_OPEN_ENDPOINT = '/api/host/drawer/open';
 const DEFAULT_DRAWER_CLOSE_ENDPOINT = '/api/host/drawer/close';
 
-export function initAgentIframe(options = {}) {
+export function initSidebarIframe(options = {}) {
   const drawer = document.getElementById('agent-drawer');
   const toggle = document.getElementById('fe-agent-toggle');
   const closeBtn = document.getElementById('agent-close');

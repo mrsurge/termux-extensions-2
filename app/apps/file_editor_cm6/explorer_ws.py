@@ -1446,6 +1446,28 @@ class ExplorerDispatcher:
                 for idx, raw in enumerate(value):
                     if not isinstance(raw, dict):
                         return await self.send_error(f"agentShortcuts[{idx}] must be an object", msg_id)
+                    shortcut_kind = raw.get("kind")
+                    if not isinstance(shortcut_kind, str):
+                        return await self.send_error(
+                            f"agentShortcuts[{idx}].kind must be a string",
+                            msg_id,
+                        )
+                    shortcut_kind = shortcut_kind.strip().lower()
+                    if shortcut_kind not in ("url", "framework_app"):
+                        return await self.send_error(
+                            f"agentShortcuts[{idx}].kind must be 'url' or 'framework_app'",
+                            msg_id,
+                        )
+
+                    app_id = raw.get("app_id")
+                    app_id_clean = ""
+                    if shortcut_kind == "framework_app":
+                        if not isinstance(app_id, str) or not app_id.strip():
+                            return await self.send_error(
+                                f"agentShortcuts[{idx}].app_id is required for kind=framework_app",
+                                msg_id,
+                            )
+                        app_id_clean = app_id.strip()
                     label = raw.get("label")
                     url = raw.get("url")
                     if not isinstance(label, str) or not label.strip():
@@ -1477,13 +1499,13 @@ class ExplorerDispatcher:
                     if icon is not None:
                         if not isinstance(icon, dict):
                             return await self.send_error(f"agentShortcuts[{idx}].icon must be an object", msg_id)
-                        kind = icon.get("kind")
-                        if kind == "emoji":
+                        icon_kind = icon.get("kind")
+                        if icon_kind == "emoji":
                             emoji = icon.get("emoji")
                             if not isinstance(emoji, str) or not emoji.strip():
                                 return await self.send_error(f"agentShortcuts[{idx}].icon.emoji is required", msg_id)
                             icon_clean = {"kind": "emoji", "emoji": emoji.strip()}
-                        elif kind == "asset":
+                        elif icon_kind == "asset":
                             name = icon.get("name")
                             if not isinstance(name, str) or not name.strip():
                                 return await self.send_error(f"agentShortcuts[{idx}].icon.name is required", msg_id)
@@ -1503,6 +1525,8 @@ class ExplorerDispatcher:
                     cleaned.append(
                         {
                             "id": sid,
+                            "kind": shortcut_kind,
+                            "app_id": app_id_clean,
                             "label": label.strip(),
                             "url": url.strip(),
                             "icon": icon_clean,

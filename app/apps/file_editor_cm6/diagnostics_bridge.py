@@ -235,28 +235,6 @@ async def _adapter_ws_loop(sio):
                         continue
                     ev_type = ev.get("type")
 
-                    # Forward diagnostics/ready (baton resolution) to browser.
-                    if ev_type == "diagnostics/ready":
-                        try:
-                            await sio.emit(
-                                "editor:diagnostics_ready",
-                                {
-                                    "path": ev.get("path", ""),
-                                    "request_id": ev.get("request_id", ""),
-                                    "markers": ev.get("markers", 0),
-                                    "ts_ms": ev.get("ts_ms", 0),
-                                },
-                                room="file_editor_cm6",
-                                namespace="/editor",
-                            )
-                            print(
-                                f"[diag_bridge] diagnostics/ready path={ev.get('path','?')} request_id={ev.get('request_id','-')} markers={ev.get('markers',0)}",
-                                flush=True,
-                            )
-                        except Exception as exc:
-                            print(f"[diag_bridge] diagnostics/ready emit FAIL: {exc}", flush=True)
-                        continue
-
                     # Forward adapter/ready so browser knows adapter is connected.
                     if ev_type == "adapter/ready":
                         try:
