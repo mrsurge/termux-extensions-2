@@ -184,9 +184,6 @@
             const embedParam = p.get('embed');
             if (embedParam === '1' || embedParam === 'true') {
                 embed = true;
-                sessionStorage.setItem('te_embed', '1');
-            } else if (sessionStorage.getItem('te_embed') === '1') {
-                embed = true;
             }
         } catch (e) {}
 

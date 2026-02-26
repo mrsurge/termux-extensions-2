@@ -16,6 +16,14 @@ export default function(container) {
     return raw;
   }
 
+  function resolveIconText(app) {
+    const emoji = typeof app.icon_emoji === 'string' ? app.icon_emoji.trim() : '';
+    if (emoji) return emoji;
+    const text = typeof app.icon_text === 'string' ? app.icon_text.trim() : '';
+    if (text) return text;
+    return '';
+  }
+
   function render() {
     if (state.loading) {
       grid.innerHTML = `<p class="apps-empty">Loading apps…</p>`;
@@ -45,9 +53,10 @@ export default function(container) {
         img.referrerPolicy = 'no-referrer';
         icon.appendChild(img);
       } else {
-        // No explicit icon file: use icon_emoji or first letter.
-        const label = app.icon_emoji || ((app.name || app.id || '?').trim()[0] || '📦');
-        icon.textContent = label;
+        const iconText = resolveIconText(app);
+        if (iconText) {
+          icon.textContent = iconText;
+        }
       }
 
       const title = document.createElement('div');
@@ -81,7 +90,7 @@ export default function(container) {
     try {
       state.loading = true;
       render();
-      const apps = await window.teFetch('/api/apps');
+      const apps = await window.teFetch('/api/apps/catalog');
       // Expecting an array
       state.apps = Array.isArray(apps) ? apps : (apps?.data || []);
     } catch (e) {

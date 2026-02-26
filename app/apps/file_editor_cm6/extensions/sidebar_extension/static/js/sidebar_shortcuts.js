@@ -72,6 +72,7 @@ async function _fetchJson(url, opts) {
 
 export function initSidebarShortcuts(options = {}) {
   const host = options.host || null;
+  const pickFileFn = typeof options.pickFile === 'function' ? options.pickFile : null;
   const openDrawer = typeof options.openDrawer === 'function' ? options.openDrawer : null;
   const closeAllMenus = typeof options.closeAllMenus === 'function' ? options.closeAllMenus : null;
   const setMenuChecked =
@@ -89,6 +90,26 @@ export function initSidebarShortcuts(options = {}) {
       else console.log(msg);
     } catch (_) {}
   };
+
+  function _logAppDiscovery(step, data) {
+    try {
+      if (typeof data === 'undefined') {
+        console.log(`[SidebarShortcuts][AppDiscovery] ${step}`);
+      } else {
+        console.log(`[SidebarShortcuts][AppDiscovery] ${step}`, data);
+      }
+    } catch (_) {}
+  }
+
+  function _warnAppDiscovery(step, data) {
+    try {
+      if (typeof data === 'undefined') {
+        console.warn(`[SidebarShortcuts][AppDiscovery] ${step}`);
+      } else {
+        console.warn(`[SidebarShortcuts][AppDiscovery] ${step}`, data);
+      }
+    } catch (_) {}
+  }
 
   // --- DOM elements (resolved on init) ---
   let agentToggleBtn = null;
@@ -129,6 +150,7 @@ export function initSidebarShortcuts(options = {}) {
   let sidebarHeaderIconEl = null;
   let sidebarHeaderTitleEl = null;
   let sidebarHeaderIconListEl = null;
+  let sidebarHeaderRunningListEl = null;
   let sidebarSetupPlaceholder = null;
   let sidebarIframeStack = null;
 
@@ -150,10 +172,15 @@ export function initSidebarShortcuts(options = {}) {
 
   let _extensionManifestIcon = { kind: '', value: '', defaultIcon: '' };
 
-  let _appsCache = null; // [{id,name,icon_src,icon_emoji,entrypoints,...}]
+  let _appsCache = null; // canonical apps catalog from /api/apps/catalog
   let _appsCacheAt = 0;
   let _runningCache = null; // Set(app_id)
   let _runningCacheAt = 0;
+  let _startingApps = new Map(); // app_id -> Promise<boolean>
+  let _frameworkEventsWs = null;
+  let _frameworkEventsReconnectTimer = null;
+  let _frameworkEventsBackoffMs = 600;
+  let _frameworkEventsEnabled = false;
   let _appsChromeSeq = 0;
 
   function _requireEl(selector, scope = document) {
@@ -172,14 +199,27 @@ export function initSidebarShortcuts(options = {}) {
 
   async function _ensureAppsCache(force = false) {
     const now = Date.now();
-    if (!force && _appsCache && (now - _appsCacheAt) < 2500) return _appsCache;
+    _logAppDiscovery('apps-cache:begin', { force, hasCache: !!_appsCache, ageMs: now - _appsCacheAt });
+    if (!force && _appsCache && (now - _appsCacheAt) < 2500) {
+      _logAppDiscovery('apps-cache:hit', { count: Array.isArray(_appsCache) ? _appsCache.length : 0 });
+      return _appsCache;
+    }
     try {
-      const { body } = await _fetchJson('/api/apps', { cache: 'no-store' });
+      _logAppDiscovery('apps-cache:fetch:start', { url: '/api/apps/catalog' });
+      const { resp, body } = await _fetchJson('/api/apps/catalog', { cache: 'no-store' });
+      _logAppDiscovery('apps-cache:fetch:response', {
+        ok: !!resp?.ok,
+        status: resp?.status,
+        hasBody: !!body,
+        bodyKeys: body && typeof body === 'object' ? Object.keys(body) : [],
+      });
       const list = Array.isArray(body?.data) ? body.data : [];
+      _logAppDiscovery('apps-cache:fetch:parsed', { count: list.length });
       _appsCache = list;
       _appsCacheAt = now;
       return list;
     } catch (e) {
+      _warnAppDiscovery('apps-cache:fetch:error', { message: e?.message || String(e) });
       toast(e?.message || 'Failed to fetch app list');
       _appsCache = [];
       _appsCacheAt = now;
@@ -189,49 +229,239 @@ export function initSidebarShortcuts(options = {}) {
 
   async function _ensureRunningCache(force = false) {
     const now = Date.now();
-    if (!force && _runningCache && (now - _runningCacheAt) < 1500) return _runningCache;
+    _logAppDiscovery('running-cache:begin', { force, hasCache: !!_runningCache, ageMs: now - _runningCacheAt });
+    if (!force && _runningCache && (now - _runningCacheAt) < 1500) {
+      _logAppDiscovery('running-cache:hit', { count: _runningCache instanceof Set ? _runningCache.size : 0 });
+      return _runningCache;
+    }
     try {
-      const { body } = await _fetchJson('/api/apps/running', { cache: 'no-store' });
+      _logAppDiscovery('running-cache:fetch:start', { url: '/api/apps/running' });
+      const { resp, body } = await _fetchJson('/api/apps/running', { cache: 'no-store' });
+      _logAppDiscovery('running-cache:fetch:response', {
+        ok: !!resp?.ok,
+        status: resp?.status,
+        hasBody: !!body,
+      });
       const list = Array.isArray(body?.data) ? body.data : [];
       const set = new Set();
       list.forEach((rec) => {
         const id = _normStr(rec?.app_id);
         if (id) set.add(id);
       });
+      _logAppDiscovery('running-cache:fetch:parsed', { runningCount: set.size });
       _runningCache = set;
       _runningCacheAt = now;
       return set;
-    } catch (_) {
+    } catch (e) {
+      _warnAppDiscovery('running-cache:fetch:error', { message: e?.message || String(e) });
       _runningCache = new Set();
       _runningCacheAt = now;
       return _runningCache;
     }
   }
 
-  function _findAppManifest(appId) {
-    const id = _normStr(appId);
-    if (!id || !Array.isArray(_appsCache)) return null;
-    return _appsCache.find((a) => a && a.id === id) || null;
+  function _frameworkEventsUrl() {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/ws/events`;
   }
 
-  async function _isAppBackendRequired(appId) {
-    const id = _normStr(appId);
-    if (!id) return false;
-    if (!_appsCache) {
-      await _ensureAppsCache(true);
+  function _deriveAppIdFromShellEvent(evt) {
+    const direct = _normStr(evt?.app_id || evt?.data?.app_id);
+    if (direct) return direct;
+
+    const label = _normStr(evt?.data?.label);
+    if (label.startsWith('app-worker:')) return _normStr(label.slice('app-worker:'.length));
+    if (label.startsWith('asgi-app:')) return _normStr(label.slice('asgi-app:'.length));
+
+    const specId = _normStr(evt?.data?.spec_id);
+    if (specId.startsWith('app:')) {
+      const parts = specId.split(':');
+      if (parts.length >= 2) return _normStr(parts[1]);
     }
-    const m = _findAppManifest(id);
-    const entrypoints = m && typeof m.entrypoints === 'object' && m.entrypoints ? m.entrypoints : {};
-    return !!(entrypoints.backend_blueprint || entrypoints.nicegui_shell);
+    return '';
+  }
+
+  function _runningStateFromShellEvent(evt) {
+    const type = _normStr(evt?.type).toLowerCase();
+    const status = _normStr(evt?.data?.status).toLowerCase();
+
+    if (type === 'shell.exited' || type === 'shell.removed') return false;
+    if (type === 'shell.ready' || type === 'shell.spawned') return true;
+    if (type === 'shell.created') {
+      if (!status || status === 'running') return true;
+      return null;
+    }
+    if (type === 'shell.updated') {
+      if (!status) return null;
+      return status === 'running';
+    }
+    return null;
+  }
+
+  function _applyRunningDelta(appId, isRunning) {
+    const id = _normStr(appId);
+    if (!id || typeof isRunning !== 'boolean') return;
+    if (!(_runningCache instanceof Set)) _runningCache = new Set();
+
+    const had = _runningCache.has(id);
+    if (isRunning) _runningCache.add(id);
+    else _runningCache.delete(id);
+    if (had === isRunning) return;
+
+    _runningCacheAt = Date.now();
+    _renderHeaderRunningList(_latestUiPrefs || {});
+
+    // If the active framework shortcut backend dies, clear the iframe and show setup fallback.
+    if (!isRunning) {
+      const shortcuts = _collectShortcuts(_latestUiPrefs || {});
+      const active = _resolveActive(_latestUiPrefs || {}, shortcuts);
+      if (active && active.kind === SHORTCUT_KIND_FRAMEWORK_APP && _normStr(active.app_id) === id) {
+        const entry = _iframeMap.get(active.key);
+        if (entry) {
+          entry.loaded = false;
+          try { entry.iframe.src = 'about:blank'; } catch (_) {}
+        }
+        _updateSetupPlaceholder(_latestUiPrefs || {}, false);
+      }
+    }
+
+    try {
+      if (shortcutAppDD && shortcutAppDD.classList.contains('show')) {
+        void _renderAppMenu();
+      }
+    } catch (_) {}
+  }
+
+  function _handleFrameworkShellEvent(raw) {
+    let evt = raw;
+    try {
+      if (typeof evt === 'string') evt = JSON.parse(evt);
+    } catch (_) {
+      return;
+    }
+    if (!evt || typeof evt !== 'object') return;
+
+    const appId = _deriveAppIdFromShellEvent(evt);
+    if (!appId) return;
+
+    const running = _runningStateFromShellEvent(evt);
+    if (running === null) return;
+    _applyRunningDelta(appId, running);
+  }
+
+  function _scheduleFrameworkEventsReconnect() {
+    if (!_frameworkEventsEnabled) return;
+    if (_frameworkEventsReconnectTimer) return;
+    const waitMs = _frameworkEventsBackoffMs;
+    _frameworkEventsBackoffMs = Math.min(15000, Math.floor(_frameworkEventsBackoffMs * 1.8));
+    _frameworkEventsReconnectTimer = setTimeout(() => {
+      _frameworkEventsReconnectTimer = null;
+      _connectFrameworkEvents();
+    }, waitMs);
+  }
+
+  function _connectFrameworkEvents() {
+    if (!_frameworkEventsEnabled) return;
+    if (_frameworkEventsWs && (
+      _frameworkEventsWs.readyState === WebSocket.OPEN
+      || _frameworkEventsWs.readyState === WebSocket.CONNECTING
+    )) return;
+
+    let ws = null;
+    try {
+      ws = new WebSocket(_frameworkEventsUrl());
+    } catch (_) {
+      _scheduleFrameworkEventsReconnect();
+      return;
+    }
+    _frameworkEventsWs = ws;
+
+    ws.addEventListener('open', () => {
+      _frameworkEventsBackoffMs = 600;
+      void _ensureRunningCache(true).then(() => {
+        _renderHeaderRunningList(_latestUiPrefs || {});
+      });
+    });
+
+    ws.addEventListener('message', (ev) => {
+      _handleFrameworkShellEvent(ev?.data);
+    });
+
+    ws.addEventListener('error', () => {
+      try { ws.close(); } catch (_) {}
+    });
+
+    ws.addEventListener('close', () => {
+      if (_frameworkEventsWs === ws) _frameworkEventsWs = null;
+      _scheduleFrameworkEventsReconnect();
+    });
+  }
+
+  function _setFrameworkEventsEnabled(enabled) {
+    if (!enabled) {
+      _frameworkEventsEnabled = false;
+      if (_frameworkEventsReconnectTimer) {
+        clearTimeout(_frameworkEventsReconnectTimer);
+        _frameworkEventsReconnectTimer = null;
+      }
+      if (_frameworkEventsWs) {
+        try { _frameworkEventsWs.close(); } catch (_) {}
+        _frameworkEventsWs = null;
+      }
+      return;
+    }
+    _frameworkEventsEnabled = true;
+    _connectFrameworkEvents();
+  }
+
+  function _findAppManifest(appId) {
+    const id = _normStr(appId);
+    if (!id || !Array.isArray(_appsCache)) {
+      _warnAppDiscovery('manifest:find:skipped', { appId: id, hasAppsCache: Array.isArray(_appsCache) });
+      return null;
+    }
+    const found = _appsCache.find((a) => a && a.id === id) || null;
+    _logAppDiscovery('manifest:find:result', { appId: id, found: !!found });
+    return found;
+  }
+
+  function _resolveAppIconSrc(appManifest) {
+    const raw = _normStr(appManifest?.icon_src);
+    if (!raw) {
+      _logAppDiscovery('icon-src:none', { appId: _normStr(appManifest?.id) });
+      return '';
+    }
+    if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('/')) {
+      _logAppDiscovery('icon-src:absolute', { appId: _normStr(appManifest?.id), iconSrc: raw });
+      return raw;
+    }
+    const appDir = _normStr(appManifest?._dir);
+    if (appDir) {
+      const resolved = `/apps/${appDir}/${raw.replace(/^\/+/, '')}`;
+      _logAppDiscovery('icon-src:resolved', { appId: _normStr(appManifest?.id), iconSrc: resolved });
+      return resolved;
+    }
+    _logAppDiscovery('icon-src:raw', { appId: _normStr(appManifest?.id), iconSrc: raw });
+    return raw;
   }
 
   function _manifestIconForApp(appId) {
     const m = _findAppManifest(appId);
-    if (!m) return null;
-    const iconSrc = _normStr(m.icon_src);
-    if (iconSrc) return { kind: 'image', src: iconSrc };
+    if (!m) {
+      _warnAppDiscovery('manifest-icon:missing-manifest', { appId: _normStr(appId) });
+      return null;
+    }
+    const iconSrc = _resolveAppIconSrc(m);
+    if (iconSrc) {
+      _logAppDiscovery('manifest-icon:image', { appId: _normStr(appId), iconSrc });
+      return { kind: 'image', src: iconSrc };
+    }
     const iconEmoji = _normStr(m.icon_emoji);
-    if (iconEmoji) return { kind: 'emoji', emoji: iconEmoji };
+    if (iconEmoji) {
+      _logAppDiscovery('manifest-icon:emoji', { appId: _normStr(appId), iconEmoji });
+      return { kind: 'emoji', emoji: iconEmoji };
+    }
+    _warnAppDiscovery('manifest-icon:none', { appId: _normStr(appId) });
     return null;
   }
 
@@ -545,6 +775,7 @@ export function initSidebarShortcuts(options = {}) {
     _applyToggleIcon(_latestUiPrefs || {}, normalized, active);
     _applyHeaderLabelAndIcon(_latestUiPrefs || {}, normalized, active);
     _renderHeaderIconList(_latestUiPrefs || {}, normalized, active);
+    _renderHeaderRunningList(_latestUiPrefs || {}, normalized, active);
     try {
       const dd = document.getElementById('fe-agent-dd');
       if (dd && dd.classList.contains('show')) _renderAgentDropdown();
@@ -586,15 +817,8 @@ export function initSidebarShortcuts(options = {}) {
     _restoreManifestIcon(sidebarHeaderIconEl);
   }
 
-  function _renderHeaderIconList(uiPrefs, shortcuts, active) {
-    const listEl = sidebarHeaderIconListEl;
-    if (!listEl) return;
-    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
-    const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
-    const activeKey = resolvedActive?.key || '';
-    const now = Date.now();
-
-    const headerItems = resolvedShortcuts
+  function _collectHeaderItems(resolvedShortcuts, activeKey, now = Date.now()) {
+    return resolvedShortcuts
       .filter((sc) => sc && sc.header)
       .map((sc, idx) => ({
         ...sc,
@@ -602,6 +826,15 @@ export function initSidebarShortcuts(options = {}) {
         _idx: idx,
       }))
       .sort((a, b) => (b._sortTs - a._sortTs) || (a._idx - b._idx));
+  }
+
+  function _renderHeaderIconList(uiPrefs, shortcuts, active) {
+    const listEl = sidebarHeaderIconListEl;
+    if (!listEl) return;
+    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
+    const activeKey = resolvedActive?.key || '';
+    const headerItems = _collectHeaderItems(resolvedShortcuts, activeKey);
 
     listEl.innerHTML = '';
     if (!headerItems.length) {
@@ -635,6 +868,36 @@ export function initSidebarShortcuts(options = {}) {
     });
   }
 
+  function _renderHeaderRunningList(uiPrefs, shortcuts, active) {
+    const listEl = sidebarHeaderRunningListEl;
+    if (!listEl) return;
+
+    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
+    const activeKey = resolvedActive?.key || '';
+    const headerItems = _collectHeaderItems(resolvedShortcuts, activeKey);
+    const appItems = headerItems.filter((sc) => sc && sc.kind === SHORTCUT_KIND_FRAMEWORK_APP && _normStr(sc.app_id));
+    const runningSet = _runningCache instanceof Set ? _runningCache : new Set();
+
+    listEl.innerHTML = '';
+    if (!appItems.length) {
+      listEl.style.display = 'none';
+      return;
+    }
+
+    appItems.forEach((sc) => {
+      const dot = document.createElement('span');
+      const appId = _normStr(sc.app_id);
+      const isRunning = !!(appId && runningSet.has(appId));
+      dot.className = 'agent-drawer__running-dot';
+      dot.classList.add(isRunning ? 'is-up' : 'is-down');
+      if (sc.key && sc.key === activeKey) dot.classList.add('is-active');
+      dot.title = `${sc.label || appId}: ${isRunning ? 'Running' : 'Not running'}`;
+      listEl.appendChild(dot);
+    });
+    listEl.style.display = 'flex';
+  }
+
   function _updateSetupPlaceholder(uiPrefs, hasActiveOverride) {
     if (!sidebarSetupPlaceholder || !sidebarIframeStack) return;
     const hasActive = typeof hasActiveOverride === 'boolean'
@@ -653,47 +916,56 @@ export function initSidebarShortcuts(options = {}) {
   async function _ensureFrameworkAppRunning(appId) {
     const id = _normStr(appId);
     if (!id) return false;
-    try {
-      const { resp, body } = await _fetchJson(`/api/apps/${encodeURIComponent(id)}/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (!resp.ok || !body?.ok) {
-        const detail = body?.detail || body?.error || `Failed to start app ${id}`;
-        throw new Error(detail);
-      }
-      // refresh running cache opportunistically
+    const existing = _startingApps.get(id);
+    if (existing) {
       try {
-        const set = await _ensureRunningCache(true);
-        set.add(id);
-      } catch (_) {}
-      return true;
-    } catch (e) {
-      toast(e?.message || `Failed to start app ${id}`);
-      return false;
+        return await existing;
+      } catch (_) {
+        return false;
+      }
     }
+    const startPromise = (async () => {
+      try {
+        const { resp, body } = await _fetchJson(`/api/apps/${encodeURIComponent(id)}/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (!resp.ok || !body?.ok) {
+          const detail = body?.detail || body?.error || `Failed to start app ${id}`;
+          throw new Error(detail);
+        }
+        // refresh running cache opportunistically
+        try {
+          const set = await _ensureRunningCache(true);
+          set.add(id);
+          _renderHeaderRunningList(_latestUiPrefs || {});
+        } catch (_) {}
+        return true;
+      } catch (e) {
+        toast(e?.message || `Failed to start app ${id}`);
+        return false;
+      } finally {
+        _startingApps.delete(id);
+      }
+    })();
+    _startingApps.set(id, startPromise);
+    return await startPromise;
   }
 
   async function _ensureIframeLoadedForShortcut(sc, entry) {
-    if (!sc || !entry || !entry.iframe || entry.loaded) return;
+    if (!sc || !entry || !entry.iframe) return false;
+    if (entry.loaded) return true;
     const url = _normStr(sc.url);
-    if (!url) return;
+    if (!url) return false;
 
     if (sc.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
-      let needsStart = true;
-      try {
-        needsStart = await _isAppBackendRequired(sc.app_id);
-      } catch (_) {
-        needsStart = true;
-      }
-      if (needsStart) {
-        const ok = await _ensureFrameworkAppRunning(sc.app_id);
-        if (!ok) return;
-      }
+      const ok = await _ensureFrameworkAppRunning(sc.app_id);
+      if (!ok) return false;
     }
 
     entry.iframe.src = url;
     entry.loaded = true;
+    return true;
   }
 
   async function _syncIframesAndActivate(uiPrefs, shortcuts, active) {
@@ -726,12 +998,13 @@ export function initSidebarShortcuts(options = {}) {
         entry = { iframe, url: sc.url, loaded: false };
         _iframeMap.set(sc.key, entry);
       }
+      const prevUrl = entry.url;
       entry.url = sc.url;
       entry.iframe.setAttribute('data-shortcut-id', sc.key);
       entry.iframe.setAttribute('data-shortcut-load', sc.load);
       entry.iframe.setAttribute('loading', sc.load === SHORTCUT_LOAD_EAGER ? 'eager' : 'lazy');
 
-      if (entry.loaded && entry.iframe.src !== sc.url) {
+      if (entry.loaded && prevUrl && prevUrl !== sc.url) {
         entry.iframe.src = sc.url;
       }
     });
@@ -755,15 +1028,17 @@ export function initSidebarShortcuts(options = {}) {
       if (isActive) hasActive = true;
     });
 
+    let activeReady = false;
     if (hasActive && resolvedActive) {
       const entry = _iframeMap.get(resolvedActive.key);
       if (entry) {
-        await _ensureIframeLoadedForShortcut(resolvedActive, entry);
+        const ok = await _ensureIframeLoadedForShortcut(resolvedActive, entry);
         if (seq !== _activateSeq) return;
+        activeReady = !!ok && !!entry.loaded;
       }
     }
 
-    _updateSetupPlaceholder(uiPrefs || _latestUiPrefs || {}, hasActive);
+    _updateSetupPlaceholder(uiPrefs || _latestUiPrefs || {}, activeReady);
   }
 
   // --- Shortcut editor UI ---
@@ -897,14 +1172,34 @@ export function initSidebarShortcuts(options = {}) {
   }
 
   async function _renderAppMenu() {
-    if (!shortcutAppDD) return;
+    if (!shortcutAppDD) {
+      _warnAppDiscovery('app-menu:render:aborted-no-dropdown');
+      return;
+    }
+    _logAppDiscovery('app-menu:render:start');
     shortcutAppDD.innerHTML = '';
 
-    const apps = await _ensureAppsCache(true);
-    const running = await _ensureRunningCache(true);
+    let apps = [];
     const current = _normStr(shortcutAppBtn?.dataset?.value);
+    try {
+      apps = await _ensureAppsCache(true);
+    } catch (e) {
+      _warnAppDiscovery('app-menu:render:prefetch-error', { message: e?.message || String(e) });
+    }
+    const running = new Set(
+      (Array.isArray(apps) ? apps : [])
+        .filter((a) => !!a?.running)
+        .map((a) => _normStr(a?.id))
+        .filter(Boolean)
+    );
+    _logAppDiscovery('app-menu:render:data', {
+      appsCount: Array.isArray(apps) ? apps.length : 0,
+      runningCount: running instanceof Set ? running.size : 0,
+      current,
+    });
 
     if (!apps.length) {
+      _warnAppDiscovery('app-menu:render:no-apps');
       const empty = document.createElement('div');
       empty.className = 'fe-dd-item';
       empty.style.opacity = '0.7';
@@ -913,51 +1208,95 @@ export function initSidebarShortcuts(options = {}) {
       return;
     }
 
-    apps.forEach((app) => {
-      const id = _normStr(app?.id);
-      if (!id) return;
-      const name = _normStr(app?.name) || id;
+    const orderedApps = apps.slice().sort((a, b) => {
+      const an = _normStr(a?.name) || _normStr(a?.id);
+      const bn = _normStr(b?.name) || _normStr(b?.id);
+      return an.localeCompare(bn, undefined, { sensitivity: 'base', numeric: true });
+    });
+    _logAppDiscovery('app-menu:render:order', {
+      ids: orderedApps.map((a) => _normStr(a?.id)).filter(Boolean),
+    });
 
-      const item = document.createElement('div');
-      item.className = 'fe-dd-item';
-      item.style.display = 'flex';
-      item.style.gap = '8px';
-      item.style.alignItems = 'center';
-      item.dataset.checkable = 'true';
-      setMenuChecked(item, id === current);
+    let rendered = 0;
+    orderedApps.forEach((app, idx) => {
+      try {
+        const id = _normStr(app?.id);
+        if (!id) {
+          _warnAppDiscovery('app-menu:render:skip-missing-id', { index: idx, app });
+          return;
+        }
+        const name = _normStr(app?.name) || id;
+        _logAppDiscovery('app-menu:render:item:start', { index: idx, id, name });
 
-      const icon = _manifestIconForApp(id);
-      item.appendChild(_renderIconNode(icon, 16));
+        const item = document.createElement('div');
+        item.className = 'fe-dd-item';
+        item.style.display = 'flex';
+        item.style.gap = '8px';
+        item.style.alignItems = 'center';
+        item.dataset.checkable = 'true';
+        setMenuChecked(item, id === current);
 
-      const text = document.createElement('span');
-      text.textContent = name;
-      item.appendChild(text);
+        try {
+          const icon = _manifestIconForApp(id);
+          _logAppDiscovery('app-menu:render:item:icon', { id, iconKind: _normStr(icon?.kind) || '' });
+          const iconNode = _renderIconNode(icon, 16);
+          if (iconNode) item.appendChild(iconNode);
+        } catch (iconErr) {
+          _warnAppDiscovery('app-menu:render:item:icon-error', { id, message: iconErr?.message || String(iconErr) });
+        }
 
-      if (running && running.has(id)) {
-        const badge = document.createElement('span');
-        badge.textContent = 'running';
-        badge.style.fontSize = '0.72rem';
-        badge.style.opacity = '0.65';
-        badge.style.marginLeft = 'auto';
-        item.appendChild(badge);
+        const text = document.createElement('span');
+        text.textContent = name;
+        item.appendChild(text);
+
+        if (running && running.has(id)) {
+          _logAppDiscovery('app-menu:render:item:running', { id });
+          const badge = document.createElement('span');
+          badge.textContent = 'running';
+          badge.style.fontSize = '0.72rem';
+          badge.style.opacity = '0.65';
+          badge.style.marginLeft = 'auto';
+          item.appendChild(badge);
+        }
+
+        item.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          _logAppDiscovery('app-menu:select', { id });
+          _applyEditingApp(id, orderedApps);
+          _closeAppMenu();
+        });
+
+        shortcutAppDD.appendChild(item);
+        rendered += 1;
+        _logAppDiscovery('app-menu:render:item:done', { index: idx, id });
+      } catch (e) {
+        _warnAppDiscovery('app-menu:render:item:error', {
+          index: idx,
+          appId: _normStr(app?.id),
+          message: e?.message || String(e),
+        });
       }
-
-      item.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        _applyEditingApp(id, apps);
-        _closeAppMenu();
-      });
-
-      shortcutAppDD.appendChild(item);
+    });
+    _logAppDiscovery('app-menu:render:done', {
+      rendered,
+      dropdownChildCount: shortcutAppDD.childElementCount,
+      clientHeight: shortcutAppDD.clientHeight,
+      scrollHeight: shortcutAppDD.scrollHeight,
+      canScroll: shortcutAppDD.scrollHeight > shortcutAppDD.clientHeight,
     });
   }
 
   function _openAppMenu() {
-    if (!shortcutAppDD) return;
+    if (!shortcutAppDD) {
+      _warnAppDiscovery('app-menu:open:aborted-no-dropdown');
+      return;
+    }
+    _logAppDiscovery('app-menu:open:start');
     try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
     void _renderAppMenu();
     shortcutAppDD.classList.add('show');
     if (shortcutAppBtn) shortcutAppBtn.setAttribute('aria-expanded', 'true');
+    _logAppDiscovery('app-menu:open:shown');
   }
 
   function _renderIconPreview() {
@@ -1303,6 +1642,7 @@ export function initSidebarShortcuts(options = {}) {
     _applyToggleIcon(_latestUiPrefs, normalized, ensured.active);
     _applyHeaderLabelAndIcon(_latestUiPrefs, normalized, ensured.active);
     _renderHeaderIconList(_latestUiPrefs, normalized, ensured.active);
+    _renderHeaderRunningList(_latestUiPrefs, normalized, ensured.active);
     void _syncIframesAndActivate(_latestUiPrefs, normalized, ensured.active);
 
     // Keep open UI surfaces in sync.
@@ -1326,6 +1666,19 @@ export function initSidebarShortcuts(options = {}) {
         });
       }
     } catch (_) {}
+
+    const needsRunning = normalized.some((sc) => (
+      sc && sc.kind === SHORTCUT_KIND_FRAMEWORK_APP && _normStr(sc.app_id)
+    ));
+    _setFrameworkEventsEnabled(needsRunning);
+    if (needsRunning) {
+      void _ensureRunningCache(false).then(() => {
+        _renderHeaderRunningList(_latestUiPrefs || {});
+      });
+    } else if (sidebarHeaderRunningListEl) {
+      sidebarHeaderRunningListEl.innerHTML = '';
+      sidebarHeaderRunningListEl.style.display = 'none';
+    }
   }
 
   async function init() {
@@ -1336,6 +1689,7 @@ export function initSidebarShortcuts(options = {}) {
     sidebarHeaderIconEl = document.getElementById('agent-drawer-icon');
     sidebarHeaderTitleEl = document.getElementById('agent-drawer-title-text');
     sidebarHeaderIconListEl = document.getElementById('agent-drawer-icon-list');
+    sidebarHeaderRunningListEl = document.getElementById('agent-drawer-running-list');
     sidebarSetupPlaceholder = document.getElementById('sidebar-setup-placeholder');
     sidebarIframeStack = document.getElementById('sidebar-iframe-stack');
 
@@ -1450,12 +1804,12 @@ export function initSidebarShortcuts(options = {}) {
           toast('Explorer connection unavailable');
           return;
         }
-        if (typeof pickFile !== 'function') {
+        if (!pickFileFn) {
           toast('File picker unavailable');
           return;
         }
         const base = _lastPickerPath || options.homeDir || '';
-        const picked = await pickFile(base);
+        const picked = await pickFileFn(base);
         if (!picked) return;
         _lastPickerPath = picked;
         try {

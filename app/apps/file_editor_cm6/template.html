@@ -988,10 +988,49 @@
     margin-left: auto;
   }
 
+  .agent-drawer__chrome {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+  }
+
   .agent-drawer__icon-list {
     display: none;
     align-items: center;
     gap: 6px;
+  }
+
+  .agent-drawer__running-list {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    min-height: 8px;
+    padding-left: 2px;
+  }
+
+  .agent-drawer__running-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.45);
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.75);
+  }
+
+  .agent-drawer__running-dot.is-up {
+    background: rgba(52, 211, 153, 0.95);
+    box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.4);
+  }
+
+  .agent-drawer__running-dot.is-down {
+    background: rgba(248, 113, 113, 0.9);
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.38);
+  }
+
+  .agent-drawer__running-dot.is-active {
+    outline: 1px solid rgba(59, 130, 246, 0.65);
+    outline-offset: 1px;
   }
 
   .agent-drawer__icon-btn {
@@ -2426,7 +2465,10 @@
         <span class="agent-drawer__icon" id="agent-drawer-icon" data-default-icon=""></span>
         <span class="agent-drawer__title-text" id="agent-drawer-title-text">Sidebar</span>
       </div>
-      <div class="agent-drawer__icon-list" id="agent-drawer-icon-list" aria-label="Side-bar header shortcuts"></div>
+      <div class="agent-drawer__chrome">
+        <div class="agent-drawer__icon-list" id="agent-drawer-icon-list" aria-label="Side-bar header shortcuts"></div>
+        <div class="agent-drawer__running-list" id="agent-drawer-running-list" aria-label="Side-bar app running status"></div>
+      </div>
       <div class="agent-drawer__actions">
         <button class="fe-btn" id="agent-new-session">New Session</button>
         <button class="fe-btn" id="agent-close">✕</button>
@@ -3114,10 +3156,7 @@
                 <span id="agent-shortcut-app-label">Select app…</span>
                 <span aria-hidden="true">▾</span>
               </button>
-              <div id="agent-shortcut-app-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 240px; overflow-y: auto;"></div>
-            </div>
-            <div style="font-size: 0.78rem; opacity: 0.65; margin-top: 4px;">
-              Loads via <code>/app/&lt;id&gt;?embed=1</code>
+              <div id="agent-shortcut-app-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: min(70vh, 480px); overflow-y: auto;"></div>
             </div>
           </div>
         </div>

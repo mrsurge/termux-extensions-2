@@ -27,6 +27,60 @@ def get_loaded_apps():
     import app.main
     return app.main.loaded_apps
 
+
+def _resolve_manifest_icon_src(manifest: dict) -> str:
+    raw = manifest.get("icon_src")
+    if not isinstance(raw, str):
+        return ""
+    value = raw.strip()
+    if not value:
+        return ""
+    if value.startswith("http://") or value.startswith("https://") or value.startswith("/"):
+        return value
+    app_dir = manifest.get("_dir")
+    if isinstance(app_dir, str) and app_dir.strip():
+        return f"/apps/{app_dir.strip()}/{value.lstrip('/')}"
+    return value
+
+
+def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> list[dict]:
+    running = running_apps or {}
+    catalog: list[dict] = []
+    for manifest in manifests:
+        if not isinstance(manifest, dict):
+            continue
+        app_id = manifest.get("id")
+        if not isinstance(app_id, str) or not app_id.strip():
+            continue
+        app_id = app_id.strip()
+        entrypoints = manifest.get("entrypoints")
+        if not isinstance(entrypoints, dict):
+            entrypoints = {}
+
+        backend_required = bool(entrypoints.get("backend_blueprint"))
+        nicegui_shell = bool(entrypoints.get("nicegui_shell"))
+        icon_src_resolved = _resolve_manifest_icon_src(manifest)
+
+        catalog.append({
+            "id": app_id,
+            "name": manifest.get("name") or app_id,
+            "description": manifest.get("description") or "",
+            "_dir": manifest.get("_dir"),
+            "icon_src": icon_src_resolved,
+            "icon_src_raw": manifest.get("icon_src") if isinstance(manifest.get("icon_src"), str) else "",
+            "icon_emoji": manifest.get("icon_emoji") if isinstance(manifest.get("icon_emoji"), str) else "",
+            "fullscreen": bool(manifest.get("fullscreen")),
+            "backend_required": backend_required,
+            "nicegui_shell": nicegui_shell,
+            "running": app_id in running,
+            "launch_url": f"/app/{app_id}",
+            "embed_url": f"/app/{app_id}?embed=1",
+        })
+
+    catalog.sort(key=lambda item: str(item.get("name") or item.get("id") or "").lower())
+    return catalog
+
+
 apps_bp = APIRouter()
 
 
@@ -156,6 +210,17 @@ def get_apps():
     The actual loading and blueprint registration still happens at startup in app/main.py.
     """
     return {"ok": True, "data": get_loaded_apps()}
+
+
+@apps_bp.get('/api/apps/catalog')
+async def get_apps_catalog():
+    """
+    Canonical launcher/sidebar catalog with normalized icon URLs and runtime flags.
+    """
+    manifests = get_loaded_apps()
+    running_apps = await app_manager.get_running_apps()
+    catalog = _build_apps_catalog(manifests, running_apps)
+    return {"ok": True, "data": catalog}
 
 
 @apps_bp.post('/api/apps/reload')

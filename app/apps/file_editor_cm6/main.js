@@ -3019,11 +3019,12 @@ function _syncSidebarIframes(uiPrefs, shortcutsOverride, activeOverride) {
       entry = { iframe, url: sc.url, loaded: false };
       _agentShortcutIframeMap.set(sc.key, entry);
     }
+    const prevUrl = entry.url;
     entry.url = sc.url;
     entry.iframe.setAttribute('data-shortcut-id', sc.key);
     entry.iframe.setAttribute('data-shortcut-load', sc.load);
     entry.iframe.setAttribute('loading', sc.load === 'eager' ? 'eager' : 'lazy');
-    if (entry.loaded && entry.iframe.src !== sc.url) {
+    if (entry.loaded && prevUrl && prevUrl !== sc.url) {
       entry.iframe.src = sc.url;
     }
     if (sc.load === 'eager') {
@@ -5336,6 +5337,7 @@ try {
   sidebarShortcuts = initSidebarShortcuts({
     host,
     homeDir: HOME_DIR,
+    pickFile,
     openDrawer: () => { try { agentDrawerHandle?.open?.(); } catch (_) {} },
     closeAllMenus,
     setMenuChecked,
