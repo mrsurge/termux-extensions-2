@@ -2074,7 +2074,7 @@
     try { _forceSemanticHighlighting(); } catch (_) {}
     try { _installMarkerNavBindings(editor); } catch (_) {}
     _syncReadOnlyInputMode(editor);
-    editor.onDidChangeConfiguration(function() { _syncReadOnlyInputMode(editor); });
+    editor.onDidChangeConfiguration(function() { _onEditorConfigChanged(editor); });
     updateDebug();
   }
 
@@ -3193,7 +3193,7 @@
     } catch (_) {}
     ensureTouchSelection('boot');
     _syncReadOnlyInputMode(editor);
-    editor.onDidChangeConfiguration(function() { _syncReadOnlyInputMode(editor); });
+    editor.onDidChangeConfiguration(function() { _onEditorConfigChanged(editor); });
     updateDebug('ssot=ok');
     ensureLayoutObserver();
 
@@ -3235,7 +3235,7 @@
     }
     ensureTouchSelection('plain');
     _syncReadOnlyInputMode(editor);
-    editor.onDidChangeConfiguration(function() { _syncReadOnlyInputMode(editor); });
+    editor.onDidChangeConfiguration(function() { _onEditorConfigChanged(editor); });
     ensureLayoutObserver();
     _layoutEditors();
 
@@ -3320,7 +3320,7 @@
     // Original pane is always readOnly — always suppress keyboard.
     _syncReadOnlyInputMode(diffEditor.getOriginalEditor());
     _syncReadOnlyInputMode(editor);
-    editor.onDidChangeConfiguration(function() { _syncReadOnlyInputMode(editor); });
+    editor.onDidChangeConfiguration(function() { _onEditorConfigChanged(editor); });
     ensureLayoutObserver();
     _layoutEditors();
 
@@ -3431,6 +3431,26 @@
       if (!ta) return;
       var ro = ed.getOption(monaco.editor.EditorOption.readOnly);
       ta.setAttribute('inputmode', ro ? 'none' : 'text');
+      // Dismiss already-visible keyboard when switching to readOnly.
+      if (ro && ta === document.activeElement) ta.blur();
+    } catch (_) {}
+  }
+
+  var _lastKnownReadOnly = null;
+  function _onEditorConfigChanged(ed) {
+    _syncReadOnlyInputMode(ed);
+    try {
+      if (!ed) return;
+      var ro = ed.getOption(monaco.editor.EditorOption.readOnly);
+      if (_lastKnownReadOnly !== null && ro !== _lastKnownReadOnly) {
+        // Persist via HTTP endpoint (server persists + broadcasts full snapshot).
+        fetch('/api/app/file_editor_cm6/editor/update_preference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'readOnly', value: ro })
+        }).catch(function(e) { console.warn('[Monaco] readOnly pref save failed', e); });
+      }
+      _lastKnownReadOnly = ro;
     } catch (_) {}
   }
 
