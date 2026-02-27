@@ -330,7 +330,9 @@
     display: none;
   }
 
-  .fe-toolbar { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); }
+  .fe-toolbar { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); min-width: 0; overflow-x: hidden; }
+  #fe-drawer-open,
+  .fe-toolbar > .fe-menu { flex: 0 0 auto; }
   .fe-file-name { display: flex; align-items: center; gap: 10px; }
   .fe-issues { display: inline-flex; align-items: center; gap: 6px; }
   .fe-issues-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.9; }
@@ -338,9 +340,38 @@
   .fe-issues-dot.error { color: #ef4444; border-color: rgba(239,68,68,0.45); }
   .fe-issues-dot.warning { color: #eab308; border-color: rgba(234,179,8,0.40); }
   .fe-btn.fe-icon-btn[disabled] { opacity: 0.45; }
-  .fe-title-block { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+  .fe-title-block { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
   .fe-file-name { font-size: 0.70rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; display: flex; align-items: center; gap: 0.35rem; width: 100%; min-width: 0; }
-  #fe-file-name { display: block; flex: 1 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fe-file-name-scroll {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  #fe-file-name { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .layout-mobile .fe-file-name-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+    scrollbar-width: none;
+    cursor: grab;
+  }
+  .layout-mobile .fe-file-name-scroll::-webkit-scrollbar { display: none; }
+  .layout-mobile .fe-file-name-scroll.is-dragging {
+    cursor: grabbing;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .layout-mobile #fe-file-name {
+    display: inline-block;
+    min-width: 100%;
+    max-width: none;
+    width: max-content;
+    overflow: visible;
+    text-overflow: clip;
+  }
   #fe-file-draft-badge { flex: 0 0 auto; }
   .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
   .fe-file-draft-indicator { font-size: 0.75rem; font-weight: 600; min-width: 0.85rem; text-align: center; }
@@ -992,22 +1023,23 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
+    gap: 2px;
     min-width: 0;
+    position: relative;
   }
 
-  .agent-drawer__icon-list {
+  .agent-drawer__icon-grid {
     display: none;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
   }
 
-  .agent-drawer__running-list {
-    display: none;
+  .agent-drawer__icon-cell {
+    display: grid;
+    grid-template-rows: 28px 7px;
+    justify-items: center;
     align-items: center;
-    gap: 6px;
-    min-height: 8px;
-    padding-left: 2px;
+    row-gap: 2px;
   }
 
   .agent-drawer__running-dot {
@@ -1031,6 +1063,10 @@
   .agent-drawer__running-dot.is-active {
     outline: 1px solid rgba(59, 130, 246, 0.65);
     outline-offset: 1px;
+  }
+
+  .agent-drawer__running-dot.is-placeholder {
+    opacity: 0;
   }
 
   .agent-drawer__icon-btn {
@@ -1062,6 +1098,14 @@
     height: 100%;
     object-fit: cover;
     display: block;
+  }
+
+  .agent-drawer__icon-menu {
+    min-width: 180px;
+    max-width: 260px;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 450 !important;
   }
 
   .agent-drawer__body {
@@ -2304,7 +2348,9 @@
 	    <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
 	    <div class="fe-title-block">
 	      <div class="fe-file-name">
-	        <span id="fe-file-name" title="Current file">Untitled</span>
+          <div id="fe-file-name-scroll" class="fe-file-name-scroll">
+            <span id="fe-file-name" title="Current file">Untitled</span>
+          </div>
 	        <span class="fe-issues">
 	          <button id="fe-issues-toggle" class="fe-btn fe-icon-btn" title="Next issue (Alt+F8)" aria-label="Next issue" disabled>💡</button>
 	          <button id="fe-issues-prev" class="fe-btn fe-icon-btn" title="Previous issue" aria-label="Previous issue" disabled>‹</button>
@@ -2466,8 +2512,8 @@
         <span class="agent-drawer__title-text" id="agent-drawer-title-text">Sidebar</span>
       </div>
       <div class="agent-drawer__chrome">
-        <div class="agent-drawer__icon-list" id="agent-drawer-icon-list" aria-label="Side-bar header shortcuts"></div>
-        <div class="agent-drawer__running-list" id="agent-drawer-running-list" aria-label="Side-bar app running status"></div>
+        <div class="agent-drawer__icon-grid" id="agent-drawer-icon-grid" aria-label="Side-bar header shortcuts"></div>
+        <div class="fe-dropdown agent-drawer__icon-menu" id="agent-drawer-icon-menu"></div>
       </div>
       <div class="agent-drawer__actions">
         <button class="fe-btn" id="agent-new-session">New Session</button>

@@ -509,11 +509,10 @@ function connectExplorerSocket() {
               try { currentPathExists = true; } catch (_) {}
               try { lastPickerPath = abs.slice(0, abs.lastIndexOf('/')); } catch (_) {}
               try { currentModeLanguage = detectLanguageFromFilename(abs); } catch (_) {}
-              // Inline toolbar update — functions declared later are out of scope
+              // Keep toolbar in sync with the explorer-authoritative active file.
               try {
                 const name = abs.slice(abs.lastIndexOf('/') + 1);
-                const el = document.getElementById('fe-file-name');
-                if (el) { el.textContent = name; el.title = name; }
+                setToolbarFileName(name);
               } catch (_) {}
             }
           } catch (_) {}
@@ -1135,12 +1134,17 @@ function initVirtualKeyboardAdjustments({ root }) {
 const container = requireEl('#editor-container');
 const editorFrame = requireEl('#editor-frame'); // Changed from cm6-host to editor-frame
 const root = requireEl('.fe-root');
+const toolbarEl = requireEl('.fe-toolbar');
+const titleBlockEl = requireEl('.fe-title-block');
+const leftToolbarControlEl = requireEl('#fe-drawer-open');
+const rightToolbarControlEl = requireEl('.fe-toolbar > .fe-menu');
 const agentDrawerEl = requireEl('#agent-drawer');
 const agentTranscript = requireEl('#agent-transcript');
 const agentComposer = requireEl('#agent-input');
 
 // Title/status & chrome
 fileNameEl = requireEl('#fe-file-name');
+const fileNameScrollEl = requireEl('#fe-file-name-scroll');
 window.fileNameEl = fileNameEl;
 const issuesToggleBtn = requireEl('#fe-issues-toggle');
 const issuesPrevBtn = requireEl('#fe-issues-prev');
@@ -1164,6 +1168,13 @@ const recentFilesBtn = requireEl('#recent-files-btn');
 const recentFilesDD  = requireEl('#recent-files-dd');
 const runActiveBtn   = requireEl('#run-active-file-btn');
 const MAX_FILENAME_DISPLAY = 34;
+let toolbarTitleBootBaselinePx = null;
+let toolbarClampRaf1 = 0;
+let toolbarClampRaf2 = 0;
+let toolbarClampObserversReady = false;
+let toolbarClampRO = null;
+let toolbarClampMO = null;
+let toolbarLastLayoutSig = '';
 
 function formatFileNameDisplay(name) {
   if (!name) return '';
@@ -1173,11 +1184,181 @@ function formatFileNameDisplay(name) {
   return `${name.slice(0, keepStart)}…${name.slice(-keepEnd)}`;
 }
 
+function scheduleToolbarTitleClamp({ doubleRaf = false, resetBaseline = false } = {}) {
+  if (resetBaseline) {
+    toolbarTitleBootBaselinePx = null;
+  }
+  if (toolbarClampRaf1) {
+    try { cancelAnimationFrame(toolbarClampRaf1); } catch (_) {}
+    toolbarClampRaf1 = 0;
+  }
+  if (toolbarClampRaf2) {
+    try { cancelAnimationFrame(toolbarClampRaf2); } catch (_) {}
+    toolbarClampRaf2 = 0;
+  }
+  toolbarClampRaf1 = requestAnimationFrame(() => {
+    toolbarClampRaf1 = 0;
+    syncToolbarTitleBlockWidth();
+    if (doubleRaf) {
+      toolbarClampRaf2 = requestAnimationFrame(() => {
+        toolbarClampRaf2 = 0;
+        syncToolbarTitleBlockWidth();
+      });
+    }
+  });
+}
+
+function syncToolbarTitleBlockWidth() {
+  if (!_isMobileLayout()) {
+    try { titleBlockEl.style.removeProperty('max-width'); } catch (_) {}
+    toolbarTitleBootBaselinePx = null;
+    return;
+  }
+  try {
+    const leftRect = leftToolbarControlEl.getBoundingClientRect();
+    const rightRect = rightToolbarControlEl.getBoundingClientRect();
+    const toolbarRect = toolbarEl.getBoundingClientRect();
+    const leftEdge = Math.max(toolbarRect.left, leftRect.right);
+    const rightEdge = Math.min(toolbarRect.right, rightRect.left);
+    const available = Math.floor(rightEdge - leftEdge - 12);
+    const currentPx = Number.isFinite(available) ? Math.max(0, available) : 0;
+    if (toolbarTitleBootBaselinePx == null && currentPx > 0) {
+      toolbarTitleBootBaselinePx = currentPx;
+    }
+    const baseline = (toolbarTitleBootBaselinePx == null) ? currentPx : toolbarTitleBootBaselinePx;
+    const clampedPx = Math.max(0, Math.min(currentPx, baseline));
+    titleBlockEl.style.maxWidth = `${clampedPx}px`;
+  } catch (_) {}
+}
 
 function setToolbarFileName(rawName) {
   const safe = rawName || '';
-  fileNameEl.textContent = formatFileNameDisplay(safe);
+  fileNameEl.textContent = safe;
   fileNameEl.title = safe;
+  if (_isMobileLayout()) {
+    fileNameScrollEl.scrollLeft = 0;
+  }
+  scheduleToolbarTitleClamp({ doubleRaf: true });
+}
+
+function initToolbarTitleClampObservers() {
+  if (toolbarClampObserversReady) return;
+  toolbarClampObserversReady = true;
+
+  const schedule = (opts = undefined) => scheduleToolbarTitleClamp(opts || { doubleRaf: true });
+  schedule({ doubleRaf: true, resetBaseline: true });
+  toolbarLastLayoutSig = root.classList.contains('layout-desktop')
+    ? 'desktop'
+    : (root.classList.contains('layout-mobile') ? 'mobile' : 'unknown');
+
+  window.addEventListener('resize', () => schedule({ doubleRaf: true }));
+  window.addEventListener('orientationchange', () => schedule({ doubleRaf: true, resetBaseline: true }));
+
+  if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+    window.visualViewport.addEventListener('resize', () => schedule({ doubleRaf: true }));
+  }
+
+  if (typeof ResizeObserver === 'function') {
+    toolbarClampRO = new ResizeObserver(() => {
+      schedule({ doubleRaf: true });
+    });
+    [
+      toolbarEl,
+      leftToolbarControlEl,
+      rightToolbarControlEl,
+      titleBlockEl,
+      fileNameScrollEl,
+      agentDrawerEl,
+    ].forEach((el) => {
+      if (!el) return;
+      try { toolbarClampRO.observe(el); } catch (_) {}
+    });
+  }
+
+  if (typeof MutationObserver === 'function') {
+    toolbarClampMO = new MutationObserver((mutations) => {
+      let resetBaseline = false;
+      for (const m of (mutations || [])) {
+        if (m?.type !== 'attributes') continue;
+        const target = m.target;
+        if (target === root && m.attributeName === 'class') {
+          const nextSig = root.classList.contains('layout-desktop')
+            ? 'desktop'
+            : (root.classList.contains('layout-mobile') ? 'mobile' : 'unknown');
+          if (nextSig !== toolbarLastLayoutSig) {
+            toolbarLastLayoutSig = nextSig;
+            resetBaseline = true;
+            break;
+          }
+        }
+      }
+      schedule({ doubleRaf: true, resetBaseline });
+    });
+    try {
+      toolbarClampMO.observe(root, { attributes: true, attributeFilter: ['class', 'style'] });
+      toolbarClampMO.observe(agentDrawerEl, { attributes: true, attributeFilter: ['class', 'style'] });
+    } catch (_) {}
+  }
+
+  try {
+    agentDrawerEl.addEventListener('transitionend', () => schedule({ doubleRaf: true }));
+  } catch (_) {}
+}
+
+function initToolbarFileNameDrag(el) {
+  if (!el) return;
+  let pointerId = null;
+  let dragging = false;
+  let moved = false;
+  let startX = 0;
+  let startScrollLeft = 0;
+
+  const canDrag = () => _isMobileLayout() && (el.scrollWidth > el.clientWidth + 1);
+
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    pointerId = null;
+    el.classList.remove('is-dragging');
+  };
+
+  el.addEventListener('pointerdown', (ev) => {
+    if (ev.pointerType === 'mouse') return;
+    if (!canDrag()) return;
+    dragging = true;
+    moved = false;
+    pointerId = ev.pointerId;
+    startX = ev.clientX;
+    startScrollLeft = el.scrollLeft;
+    el.classList.add('is-dragging');
+    try { el.setPointerCapture(ev.pointerId); } catch (_) {}
+  });
+
+  el.addEventListener('pointermove', (ev) => {
+    if (!dragging || ev.pointerId !== pointerId) return;
+    const dx = ev.clientX - startX;
+    if (Math.abs(dx) > 2) moved = true;
+    el.scrollLeft = startScrollLeft - dx;
+    ev.preventDefault();
+  }, { passive: false });
+
+  el.addEventListener('pointerup', (ev) => {
+    if (ev.pointerId !== pointerId) return;
+    endDrag();
+  });
+  el.addEventListener('pointercancel', endDrag);
+  el.addEventListener('lostpointercapture', endDrag);
+  el.addEventListener('pointerleave', (ev) => {
+    if (ev.pointerId !== pointerId) return;
+    endDrag();
+  });
+
+  el.addEventListener('click', (ev) => {
+    if (!moved) return;
+    moved = false;
+    ev.preventDefault();
+    ev.stopPropagation();
+  }, true);
 }
 
 function setIssuesButtonsEnabled(enabled) {
@@ -1202,6 +1383,7 @@ function sendIssuesCmd(action) {
 issuesToggleBtn.addEventListener('click', () => sendIssuesCmd('next'));
 issuesPrevBtn.addEventListener('click', () => sendIssuesCmd('prev'));
 issuesNextBtn.addEventListener('click', () => sendIssuesCmd('next'));
+initToolbarFileNameDrag(fileNameScrollEl);
 
 function _basenameNoExt(p) {
   const b = basename(p || '');
@@ -2630,9 +2812,11 @@ async function setFontScale(preset) {
   try {
     // 1. Update chrome immediately
     applyFontScale(scale);
+    scheduleToolbarTitleClamp({ doubleRaf: true });
     
     // 2. Update editor via backend and persist
     await updatePreference('fontScale', scale);
+    scheduleToolbarTitleClamp({ doubleRaf: true });
     
   } catch (error) {
     console.error('[FontScale] Failed to update:', error);
@@ -6212,6 +6396,8 @@ async function main() {
     update() {
       const isDesktop = window.matchMedia('(min-width: 768px) and (orientation: landscape)').matches;
       const root = document.querySelector('.fe-root');
+      const wasDesktop = root.classList.contains('layout-desktop');
+      const wasMobile = root.classList.contains('layout-mobile');
       
       if (isDesktop) {
         root.classList.add('layout-desktop');
@@ -6220,11 +6406,14 @@ async function main() {
         root.classList.add('layout-mobile');
         root.classList.remove('layout-desktop');
       }
+      const modeChanged = isDesktop ? !wasDesktop : !wasMobile;
+      scheduleToolbarTitleClamp({ doubleRaf: true, resetBaseline: modeChanged });
     }
   };
 
   // Initialize layout manager
   layoutManager.init();
+  initToolbarTitleClampObservers();
 
   // Load saved layout preferences
   loadLayoutPreferences();

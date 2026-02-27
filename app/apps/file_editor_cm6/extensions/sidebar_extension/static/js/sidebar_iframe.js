@@ -78,6 +78,8 @@ export function initSidebarIframe(options = {}) {
   }
 
   async function updateHostHints() {
+    // Internal host hint wiring only. External iframe integrations must not
+    // mutate host drawer chrome (header/close-button replacement policy).
     if (!hideDrawerHeader) return false;
     try {
       const resp = await fetch('/api/app/file_editor_cm6/agent/drawer/ui_hints', {
@@ -146,9 +148,10 @@ export function initSidebarIframe(options = {}) {
     if (!allowAnyOrigin && iframeOrigin && event.origin !== iframeOrigin) return;
     const data = event?.data;
     if (!data || typeof data !== 'object') return;
-    if (data.type === 'codex_agent_close') {
-      closeDrawer();
-    }
+    // External iframe control allowlist: close-only.
+    // Do not add header/chrome mutation commands here.
+    if (data.type !== 'codex_agent_close') return;
+    closeDrawer();
   };
 
   const onToggleClick = () => {
