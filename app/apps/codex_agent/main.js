@@ -1,5 +1,6 @@
-const TARGET_URL = 'http://localhost:12359/codex-agent';
-const HEALTH_URL = 'http://127.0.0.1:12359/';
+const PROXY_BASE = '/api/app/codex_agent/proxy';
+const TARGET_URL = `${PROXY_BASE}/codex-agent`;
+const HEALTH_URL = `${PROXY_BASE}/api/health`;
 const MAX_WAIT_MS = 30000;
 const POLL_INTERVAL_MS = 1200;
 
@@ -16,14 +17,22 @@ export default async function initCodexAgent(rootEl, _api, host) {
   }
 
   const startedAt = Date.now();
+  let ready = false;
   while (Date.now() - startedAt < MAX_WAIT_MS) {
     try {
-      await fetch(HEALTH_URL, { method: 'GET', mode: 'no-cors' });
-      break;
+      const response = await fetch(HEALTH_URL, { method: 'GET', cache: 'no-store' });
+      if (response.ok) {
+        ready = true;
+        break;
+      }
     } catch (_) {
       // Server not ready yet.
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+
+  if (!ready) {
+    throw new Error('Codex Agent server did not become ready in time');
   }
 
   frame.src = TARGET_URL;
