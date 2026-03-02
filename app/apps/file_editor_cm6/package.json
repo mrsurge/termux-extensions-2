@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "name": "file-editor-cm6",
+  "description": "TE2 file editor frontend build",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

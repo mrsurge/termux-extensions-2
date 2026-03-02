@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "rootDir": ".",
+    "baseUrl": ".",
+    "outDir": "static/dist",
+    "paths": {
+      "/static/vendor/*": ["../../static/vendor/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "main.js",
+    "static/js/**/*.js",
+    "extensions/sidebar_extension/static/js/**/*.js",
+    "monaco_editor/m_editor_app.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "static/dist",
+    "static/js/vendor",
+    "static/vendor",
+    "vendor"
+  ]
+}

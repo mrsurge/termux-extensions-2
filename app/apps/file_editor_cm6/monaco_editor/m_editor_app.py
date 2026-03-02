@@ -95,6 +95,10 @@ export default href;
 
     @fastapi_app.get(f"{mount_path}/monaco_editor/m_editor_app.js", include_in_schema=False)
     async def _serve_monaco_editor_js():
+        # Prefer bundled output from esbuild; fall back to raw source for dev.
+        dist_path = Path(__file__).resolve().parent.parent / "static" / "dist" / "editor.js"
+        if dist_path.exists():
+            return Response(dist_path.read_text(encoding="utf-8"), media_type="application/javascript")
         js_path = Path(__file__).with_name("m_editor_app.js")
         return Response(js_path.read_text(encoding="utf-8"), media_type="application/javascript")
 
