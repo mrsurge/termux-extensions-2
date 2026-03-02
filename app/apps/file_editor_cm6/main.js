@@ -28,6 +28,9 @@ import { createEditTrackerController } from './src/host/ui/edit-tracker.js';
 import { createFontScaleController } from './src/host/ui/font-scale.js';
 import { createSearchPanelController } from './src/host/ui/search-panel.js';
 import { createMenuCoreController } from './src/host/ui/menu-core.js';
+import { installBasicMenuActions } from './src/host/ui/menu-actions-basic.js';
+import { installSimplePreferenceMenuActions } from './src/host/ui/menu-actions-preferences.js';
+import { installAdvancedMenuActions } from './src/host/ui/menu-actions-advanced.js';
 import { installPrefsSync } from './src/host/ui/prefs-sync.js';
 import { createRecentsController } from './src/host/ui/recents.js';
 import { createPreferencesController } from './src/host/ui/preferences.js';
@@ -37,6 +40,8 @@ import { initDrawerAndShortcuts } from './src/host/ui/drawer-shortcuts.js';
 import { initResponsiveLayout } from './src/host/ui/layout-manager.js';
 import { createFileStatusController } from './src/host/ui/file-status.js';
 import { createSettingsBootstrap } from './src/host/ui/settings-bootstrap.js';
+import { createAutosaveModalController } from './src/host/ui/autosave-modal.js';
+import { createAutosaveRuntimeController } from './src/host/ui/autosave-runtime.js';
 import { showProjectsDebugModal } from './src/host/ui/projects-debug-modal.js';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './src/host/ui/watcher-settings.js';
 import { createUiIpcConnections } from './src/host/connections/ui-ipc.js';
@@ -45,7 +50,10 @@ import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './src/host/connectio
 import { createSessionTelemetryController } from './src/host/boot/session-telemetry.js';
 import { createEditorStateController } from './src/host/boot/editor-state.js';
 import { runBootSequence } from './src/host/boot/boot-sequence.js';
-import { installGlobalOpenHooks, installBeforeExitGuard } from './src/host/boot/public-hooks.js';
+import { installBeforeExitGuard } from './src/host/boot/public-hooks.js';
+import { createStateInitController } from './src/host/boot/state-init.js';
+import { createSaveSocketController } from './src/host/file-ops/save-socket.js';
+import { createSaveFlowController } from './src/host/file-ops/save-flow.js';
 import { createApiClient } from './src/host/api/client.js';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
@@ -3061,11 +3069,24 @@ try {
   if (typeof window.__feCursorStateDebounceMs !== 'number') window.__feCursorStateDebounceMs = 1000;
 } catch (_) {}
 let inflightOpId = null;
-let saveDebounceTimer = null;
 const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
 const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
 let lastSaveTime = 0;
 const SELF_ECHO_GRACE = 1800; // 1.8s grace period after save (avoid cursor jumps on slow typing)
+const saveSocketController = createSaveSocketController({
+  getEditorSocket: () => editorSocket,
+});
+const autosaveRuntimeController = createAutosaveRuntimeController({
+  idleDelayMs: AUTOSAVE_IDLE_DELAY,
+  activeDelayMs: AUTOSAVE_ACTIVE_DELAY,
+  getAutoSaveEnabled: () => !!(editorViewState?.autoSave),
+  getNativeSelectionActive: () => !!nativeSelectionActive,
+  getUnsaved: () => !!unsaved,
+  getCurrentPath: () => currentPath,
+  getCurrentPathExists: () => !!currentPathExists,
+  saveFile: (opts) => saveFile(opts),
+  onAutosaveError: (err) => console.error('Autosave failed:', err),
+});
 
 // Use `var` so early Socket.IO events can't hit TDZ before initialization.
 var lastScrollState = null;
@@ -3123,12 +3144,9 @@ function markUnsaved(flag) {
   unsaved = next;
   fileNameEl.classList.toggle('fe-unsaved', unsaved);
   syncSessionPath();
-  if (!unsaved && saveDebounceTimer) {
-    clearTimeout(saveDebounceTimer);
-    saveDebounceTimer = null;
-  }
+  if (!unsaved) autosaveRuntimeController.cancelAutosave();
   if (unsaved && editorViewState?.autoSave) {
-    scheduleAutosave();
+    autosaveRuntimeController.scheduleAutosave();
   }
 }
 
@@ -3524,159 +3542,54 @@ async function openFile(path, options = {}) {
   }
 }
 
-async function doSave(targetPath, content) {
-  const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  inflightOpId = opId;
-  lastSaveTime = Date.now();
-
-  const payload = {
-    path: targetPath,
-    content: content,
-    client_id: clientId,
-    op_id: opId
-  };
-
-  if (lastSha256) {
-    payload.base = { sha256: lastSha256 };
-  }
-
-  try {
-    const result = await apiPost('write', payload);
-    lastSha256 = result.sha256 || lastSha256;
-    lastSavedContent = content;
-    markUnsaved(false);
-    syncSessionPath();
-    return { success: true, result };
-  } catch (e) {
-    inflightOpId = null;
-
-    // Handle 409 conflict
-    if (e.status === 409 || (e.response && e.response.error === 'BASE_MISMATCH')) {
-      // Try to fetch latest and rebase once
-      try {
-        const latest = await apiGet(`read?path=${encodeURIComponent(targetPath)}`);
-        lastSha256 = latest.sha256 || null;
-
-        // Simple rebase: if our changes conflict, ask user
-        if (window.confirm('File was modified externally. Retry save and overwrite?')) {
-          // Retry once without base check (force overwrite)
-          const retryPayload = {
-            path: targetPath,
-            content: content,
-            client_id: clientId,
-            op_id: `${opId}_retry`
-          };
-          const retryResult = await apiPost('write', retryPayload);
-          lastSha256 = retryResult.sha256 || lastSha256;
-          lastSavedContent = content;
-          markUnsaved(false);
-          return { success: true, result: retryResult };
-        } else {
-          return { success: false, error: 'Conflict - user cancelled' };
-        }
-      } catch (retryErr) {
-        return { success: false, error: `Conflict resolution failed: ${retryErr.message}` };
-      }
-    }
-
-    return { success: false, error: e.message };
-  }
-}
-
 function saveFileViaEditorSocket(payload, timeoutMs = 8000) {
-  return new Promise((resolve, reject) => {
-    if (!editorSocket || !editorSocket.connected) {
-      reject(new Error('Editor socket not connected'));
-      return;
-    }
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error('Save timed out'));
-    }, timeoutMs);
-    editorSocket.emit('editor_save_request', payload, (response) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(response);
-    });
-  });
+  return saveSocketController.saveFileViaEditorSocket(payload, timeoutMs);
 }
+const saveFlowController = createSaveFlowController({
+  clientId,
+  setInflightOpId: (id) => { inflightOpId = id; },
+  setLastSaveTime: (ts) => { lastSaveTime = ts; },
+  getLastSha256: () => lastSha256,
+  setLastSha256: (sha) => { lastSha256 = sha; },
+  setLastSavedContent: (content) => { lastSavedContent = content; },
+  markUnsaved: (flag) => markUnsaved(flag),
+  syncSessionPath: () => syncSessionPath(),
+  apiPost: (path, body) => apiPost(path, body),
+  apiGet: (path) => apiGet(path),
+  saveFileViaEditorSocket: (payload, timeoutMs) => saveFileViaEditorSocket(payload, timeoutMs),
+  setStatus: (text) => { statusEl.textContent = text; },
+  getUnsaved: () => !!unsaved,
+  toast: (msg) => host.toast(msg),
+  pickSaveTarget: () => pickSaveTarget(),
+  toAbsolute,
+  homeDir: HOME_DIR,
+  setCurrentPath: (path) => { currentPath = path; },
+  setCurrentPathExists: (exists) => { currentPathExists = exists; },
+  setLastPickerPath: (path) => { lastPickerPath = path; },
+  setCurrentModeLanguage: (lang) => { currentModeLanguage = lang; },
+  parentDir,
+  detectLanguageFromFilename,
+  updatePathDisplay: () => updatePathDisplay(),
+  closeWebSocket: () => closeWebSocket(),
+  openWebSocket: (path) => openWebSocket(path),
+  getCachedProjectRoot: () => cachedProjectRoot,
+  getEditorState: () => editorState,
+  setEditorState: (state) => { editorState = state; },
+  setCachedProjectRoot: (path) => { cachedProjectRoot = path; },
+});
+
+async function doSave(targetPath, content) {
+  return saveFlowController.doSave(targetPath, content);
+}
+
  // getAgentHostBase
 async function saveFile(opts) {
-  if (!currentPath || !currentPathExists) return saveAsDialog();
-  const isAutosave = !!(opts && opts.isAutosave);
-  statusEl.textContent = 'Saving...';
-
-  const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const payload = {
-    path: currentPath,
-    client_id: clientId,
-    op_id: opId,
-  };
-  if (lastSha256) payload.base_sha256 = lastSha256;
-
-  try {
-    const result = await saveFileViaEditorSocket(payload);
-
-    if (!result || typeof result !== 'object') {
-      throw new Error('Invalid save response');
-    }
-    if (result.ok === false) {
-      if (result.error === 'BASE_MISMATCH') {
-        // Autosave silently skips on mismatch (mirror clients hit this)
-        if (isAutosave) {
-          statusEl.textContent = '';
-          return false;
-        }
-        if (window.confirm('File was modified externally. Retry save and overwrite?')) {
-          const retryPayload = {
-            path: currentPath,
-            client_id: clientId,
-            op_id: `${opId}_retry`,
-            force: true,
-          };
-          const retryResult = await saveFileViaEditorSocket(retryPayload);
-          if (retryResult && retryResult.ok) {
-            const fileMeta = retryResult.data || {};
-            lastSha256 = fileMeta.sha256 || lastSha256;
-            lastSavedContent = '';
-            markUnsaved(false);
-            statusEl.textContent = 'Saved';
-            setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
-            return true;
-          }
-        }
-        statusEl.textContent = '';
-        return false;
-      }
-      if (result.error) host.toast(`Save failed: ${result.error}`);
-      statusEl.textContent = '';
-      return false;
-    }
-
-    const fileMeta = result.data || {};
-    if (fileMeta && Object.keys(fileMeta).length > 0) {
-      lastSha256 = fileMeta.sha256 || lastSha256;
-      lastSavedContent = '';
-      markUnsaved(false);
-      statusEl.textContent = 'Saved';
-      setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
-      return true;
-    }
-
-    console.error('[SAVE] Failed: empty or invalid response');
-    host.toast('Save failed');
-    statusEl.textContent = '';
-    return false;
-  } catch (e) {
-    console.error('[SAVE] Exception:', e);
-    const errMsg = e.message || e.error || JSON.stringify(e);
-    host.toast(`Save failed: ${errMsg}`);
-    statusEl.textContent = '';
-    return false;
-  }
+  return saveFlowController.saveFile({
+    currentPath,
+    currentPathExists,
+    isAutosave: !!(opts && opts.isAutosave),
+    onMissingPath: () => saveAsDialog(),
+  });
 }
 
 async function runCurrentFile() {
@@ -3723,145 +3636,14 @@ async function runCurrentFile() {
 }
 
 async function saveAsDialog() {
-  const target = await pickSaveTarget();
-  if (!target || !target.path) return;
-  if (target.existed && !window.confirm('File exists. Overwrite?')) return;
-  statusEl.textContent = 'Saving...';
-
-  const content = '';
-  const targetAbs = toAbsolute(target.path, null, HOME_DIR);
-
-  // Reset SHA256 since this is a new file path
-  lastSha256 = null;
-
-  const result = await doSave(targetAbs, content);
-
-  if (result.success) {
-    currentPath = targetAbs;
-    currentPathExists = true;
-    lastPickerPath = parentDir(currentPath);
-    currentModeLanguage = detectLanguageFromFilename(currentPath);
-    updatePathDisplay();
-    statusEl.textContent = 'Saved';
-    setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
-
-    // Open WebSocket for this new file
-    closeWebSocket();
-    openWebSocket(currentPath);
-
-    apiPost('state/file_activity', {
-      path: currentPath,
-      project: cachedProjectRoot || (editorState && editorState.activeProject) || undefined,
-    }).then((data) => {
-      if (data?.state) {
-        editorState = data.state;
-        cachedProjectRoot = editorState.activeProject || cachedProjectRoot;
-        window.__cm6EditorState = editorState;
-        if (typeof window.__cm6RefreshRecents === 'function') {
-          window.__cm6RefreshRecents(editorState);
-        }
-      }
-    }).catch(err => {
-      console.error('Failed to record file activity after save-as:', err);
-    });
-  } else {
-    host.toast(`Save failed: ${result.error}`);
-    statusEl.textContent = '';
-  }
-}
-
-// Autosave: debounced save
-function scheduleAutosave() {
-  if (saveDebounceTimer) {
-    clearTimeout(saveDebounceTimer);
-  }
-
-  // Don't autosave if disabled OR if native selection is active (ZWSPs present)
-  if (!(editorViewState?.autoSave) || nativeSelectionActive) {
-    return;
-  }
-
-  const delay = editorViewState?.autoSave ? AUTOSAVE_ACTIVE_DELAY : AUTOSAVE_IDLE_DELAY;
-  saveDebounceTimer = setTimeout(() => {
-    if (unsaved && currentPath && currentPathExists && !nativeSelectionActive) {
-      saveFile({ isAutosave: true }).then((ok) => {
-        if (ok === false) {
-          console.warn('Autosave attempt failed; leaving changes unsaved');
-        }
-      }).catch(err => {
-        console.error('Autosave failed:', err);
-      });
-    }
-  }, delay);
+  return saveFlowController.saveAsDialog();
 }
 
 // Autosave confirmation modal (constructed lazily)
-let autosaveModalController = null;
-function ensureAutosaveModal() {
-  if (autosaveModalController) return autosaveModalController;
-  const modal = document.createElement('div');
-  modal.id = 'fe-autosave-modal';
-  modal.className = 'fe-modal';
-  modal.setAttribute('aria-hidden', 'true');
-  modal.innerHTML = `
-    <div class="fe-modal-card" style="max-width: 460px;">
-      <div class="fe-modal-header">
-        <strong>Enable Autosave?</strong>
-        <span style="flex:1"></span>
-        <button class="fe-btn" id="fe-autosave-close" aria-label="Close">✕</button>
-      </div>
-      <div class="fe-modal-body">
-        <p id="fe-autosave-message" style="margin:0; line-height:1.5;"></p>
-      </div>
-      <div class="fe-modal-actions">
-        <button class="fe-btn" id="fe-autosave-cancel">Cancel</button>
-        <button class="fe-btn fe-btn-primary" id="fe-autosave-confirm">Enable Autosave</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(modal);
-  autosaveModalController = {
-    root: modal,
-    messageEl: modal.querySelector('#fe-autosave-message'),
-    confirmBtn: modal.querySelector('#fe-autosave-confirm'),
-    cancelBtn: modal.querySelector('#fe-autosave-cancel'),
-    closeBtn: modal.querySelector('#fe-autosave-close'),
-  };
-  autosaveModalController.closeBtn.addEventListener('click', () => hideAutosaveModal(false));
-  autosaveModalController.root.addEventListener('click', (evt) => {
-    if (evt.target === autosaveModalController.root) {
-      hideAutosaveModal(false);
-    }
-  });
-  return autosaveModalController;
-}
-
-let autosaveModalResolve = null;
-function hideAutosaveModal(result) {
-  if (!autosaveModalController) return;
-  autosaveModalController.root.classList.remove('show');
-  autosaveModalController.root.setAttribute('aria-hidden', 'true');
-  const resolver = autosaveModalResolve;
-  autosaveModalResolve = null;
-  if (resolver) resolver(result);
-}
+const autosaveModalController = createAutosaveModalController();
 
 function showAutosaveModal(fileLabel, hasOtherDrafts) {
-  const modal = ensureAutosaveModal();
-  const safeLabel = fileLabel ? `“${fileLabel}”` : 'this document';
-  const tail = hasOtherDrafts
-    ? 'Any other unsaved drafts in different files will be discarded when autosave is on.'
-    : 'Autosave will overwrite the current document and discard draft caches for other files.';
-  modal.messageEl.textContent = `Enabling autosave will immediately save ${safeLabel}. ${tail} Continue?`;
-  modal.root.classList.add('show');
-  modal.root.setAttribute('aria-hidden', 'false');
-  return new Promise((resolve) => {
-    autosaveModalResolve = resolve;
-    const onConfirm = () => hideAutosaveModal(true);
-    const onCancel = () => hideAutosaveModal(false);
-    modal.confirmBtn.onclick = onConfirm;
-    modal.cancelBtn.onclick = onCancel;
-  });
+  return autosaveModalController.showAutosaveModal(fileLabel, hasOtherDrafts);
 }
 
 // Watcher UI (extracted to src/host/ui/watcher-settings.js)
@@ -3981,256 +3763,90 @@ function bindMenuToggle(el, action) {
   return menuCoreController.bindMenuToggle(el, action);
 }
 
-bindMenuToggle(miNew, () => {
+installBasicMenuActions({
+  bindMenuToggle,
+  els: {
+    miNew,
+    miOpen,
+    miSave,
+    miSaveAs,
+    miClose,
+    miQuit,
+    miDebugProjects,
+    miExportDiagnostics,
+    miUndo,
+    miRedo,
+    miCut,
+    miCopy,
+    miPaste,
+    miSelectAll,
+    miFind,
+    miGoto,
+  },
+  resetToNewFile: () => {
   closeWebSocket();
   currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
   lastSha256 = null;
   lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
-});
-bindMenuToggle(miOpen, async () => { const p = await pickFile(); if (p) await openFile(p); });
-bindMenuToggle(miSave, () => saveFile());
-bindMenuToggle(miSaveAs, () => saveAsDialog());
-bindMenuToggle(miClose, () => {
-  closeWebSocket();
-  currentPath=''; currentPathExists=false; lastPickerPath=HOME_DIR; currentModeLanguage=null;
-  lastSha256 = null;
-  lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
-});
-bindMenuToggle(miQuit, () => {
-  closeWebSocket();
-  currentPath=''; currentPathExists=false; lastSha256 = null;
-  lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
-});
-
-bindMenuToggle(miDebugProjects, () => {
-  showProjectsDebugModal();
-});
-
-bindMenuToggle(miExportDiagnostics, () => {
-  exportDiagnosticsToFile();
-});
-
-bindMenuToggle(miUndo, () => { document.execCommand('undo'); });
-bindMenuToggle(miRedo, () => { document.execCommand('redo'); });
-bindMenuToggle(miCut,  () => document.execCommand('cut'));
-bindMenuToggle(miCopy, () => document.execCommand('copy'));
-bindMenuToggle(miPaste, async () => {
-  document.execCommand('paste');
-});
-bindMenuToggle(miSelectAll, () => {
-  document.execCommand('selectAll');
-});
-
-bindMenuToggle(miToggleLines, async () => {
-  const success = await updatePreference('showLineNumbers', !(editorViewState?.showLineNumbers));
-  if (!success) host.toast('Failed to update preference');
-});
-
-bindMenuToggle(miToggleShading, async () => {
-  const success = await updatePreference('showShading', !(editorViewState?.showShading));
-  if (!success) host.toast('Failed to update preference');
-});
-
-bindMenuToggle(miToggleIndentGuides, async () => {
-  const success = await updatePreference('showIndentGuides', !(editorViewState?.showIndentGuides));
-  if (!success) host.toast('Failed to update preference');
-});
-
-bindMenuToggle(miToggleSyntax, async () => {
-  const success = await updatePreference('showSyntax', !(editorViewState?.showSyntax));
-  if (!success) host.toast('Failed to update preference');
-});
-
-bindMenuToggle(miToggleCloseBrackets, async () => {
-  const success = await updatePreference('autoCloseBrackets', !(editorViewState?.autoCloseBrackets));
-  if (!success) host.toast('Failed to update preference');
-});
-
-bindMenuToggle(miToggleAutocomplete, async () => {
-  const success = await updatePreference('autocompletion', !(editorViewState?.autocompletion));
-  if (!success) host.toast('Failed to update preference');
-});
-
-bindMenuToggle(miToggleWrap, async () => {
-  const success = await updatePreference('wordWrap', !(editorViewState?.wordWrap));
-  if (!success) host.toast('Failed to update preference');
-});
-
-bindMenuToggle(miToggleAutosave, async () => {
-  const currentlyEnabled = !!(editorViewState?.autoSave);
-  if (currentlyEnabled) {
-    const success = await updatePreference('autoSave', false);
-    if (!success) {
-      host.toast('Failed to update preference');
-      setMenuChecked(miToggleAutosave, true);
-    }
-    return;
-  }
-
-  if (!currentPath || !currentPathExists) {
-    host.toast('Open a file before enabling autosave');
-    setMenuChecked(miToggleAutosave, false);
-    return;
-  }
-
-  const fileLabel = basename(currentPath);
-  const confirmed = await showAutosaveModal(fileLabel, unsaved);
-  if (!confirmed) {
-    setMenuChecked(miToggleAutosave, false);
-    return;
-  }
-
-  if (unsaved && currentPath && currentPathExists) {
-    const saved = await saveFile();
-    if (!saved) {
-      host.toast('Autosave not enabled: saving failed');
-      setMenuChecked(miToggleAutosave, false);
-      return;
-    }
-  }
-
-  // Clear any cached draft for the active document (best-effort)
-  try {
-    await apiPost('editor/discard_draft', { path: currentPath });
-  } catch (err) {
-    console.warn('[Autosave] Failed to discard existing draft', err);
-  }
-
-  const success = await updatePreference('autoSave', true);
-  if (!success) {
-    host.toast('Failed to update preference');
-    setMenuChecked(miToggleAutosave, false);
-    return;
-  }
-
-  editorViewState.autoSave = true;
-  markUnsaved(false);
-
-  // Guard: autosave forces draft diffs off (there are no drafts in autosave mode)
-  if (editorViewState?.showDraftDiffs) {
-    await updatePreference('showDraftDiffs', false);
-  }
-
-  // Guard: autosave + tracked-edit auto-jump + editable is dangerous.
-  if (_isAnyEditTrackingEnabled() && !editorViewState?.readOnly) {
-    await _disableAllEditTracking('Auto-track edits disabled (incompatible with autosave)');
-  }
-});
-
-bindMenuToggle(miToggleDiffs, async () => {
-  const turningOff = !!(editorViewState?.showInlineDiffs);
-  const success = await updatePreference('showInlineDiffs', !turningOff);
-  if (!success) { host.toast('Failed to update preference'); return; }
-  // Guard: turning git diffs OFF while auto-track is on → disable auto-track
-  if (turningOff && _isAnyEditTrackingEnabled()) {
-    await _disableAllEditTracking('Auto-track edits disabled (requires git diffs)');
-  }
-});
-
-bindMenuToggle(miToggleDraftDiffs, async () => {
-  const turningOn = !(editorViewState?.showDraftDiffs);
-  if (turningOn && editorViewState?.autoSave) {
-    // Draft diffs require draft mode — disable autosave first
-    await updatePreference('autoSave', false);
-    host.toast('Autosave disabled (draft diffs require draft mode)', 'warn');
-  }
-  const success = await updatePreference('showDraftDiffs', turningOn);
-  if (!success) host.toast('Failed to update preference');
-});
-
-bindMenuToggle(miToggleColorPicker, async () => {
-  const success = await updatePreference('colorPicker', !(editorViewState?.colorPicker));
-  if (!success) host.toast('Failed to update color picker');
-});
-
-bindMenuToggle(miToggleReadonly, async () => {
-  const goingEditable = !!(editorViewState?.readOnly);
-  const success = await updatePreference('readOnly', !goingEditable);
-  if (success) {
-    host.toast(editorViewState?.readOnly ? 'Editor is now read-only' : 'Editor is now editable', 'info');
-    // Guard: if we just made it editable while autosave + trackEdits are both ON,
-    // the tracker would chase its own saves in an infinite loop. Disable tracking.
-    if (goingEditable && editorViewState?.autoSave && _isAnyEditTrackingEnabled()) {
-      await _disableAllEditTracking('Auto-track edits disabled (incompatible with autosave)');
-    }
-  } else {
-    host.toast('Failed to toggle read-only mode');
-  }
+  },
+  pickFile: () => pickFile(),
+  openFile: (path) => openFile(path),
+  saveFile: () => saveFile(),
+  saveAsDialog: () => saveAsDialog(),
+  closeWebSocket: () => closeWebSocket(),
+  clearOnQuit: () => {
+    currentPath=''; currentPathExists=false; lastSha256 = null;
+    lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
+  },
+  showProjectsDebugModal,
+  exportDiagnosticsToFile: () => exportDiagnosticsToFile(),
+  triggerEditorSearchPanel: (reason, opts) => triggerEditorSearchPanel(reason, opts),
+  jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
+  toast: (msg) => host.toast(msg),
 });
 
 const miToggleMinimap = requireEl('#mi-toggle-minimap');
-bindMenuToggle(miToggleMinimap, async () => {
-  const success = await updatePreference('showMinimap', !(editorViewState?.showMinimap));
-  if (!success) host.toast('Failed to update preference');
+installSimplePreferenceMenuActions({
+  bindMenuToggle,
+  els: {
+    miToggleLines,
+    miToggleShading,
+    miToggleIndentGuides,
+    miToggleSyntax,
+    miToggleCloseBrackets,
+    miToggleAutocomplete,
+    miToggleWrap,
+    miToggleColorPicker,
+    miToggleMinimap,
+    miToggleStickyScroll,
+  },
+  getEditorViewState: () => editorViewState,
+  updatePreference: (key, value) => updatePreference(key, value),
+  toast: (msg) => host.toast(msg),
 });
 
-// ============================================================================
-// Sticky Scroll Toggle
-// Added: 2025-12-03 by vectorArc - TE2 Team
-// ============================================================================
-bindMenuToggle(miToggleStickyScroll, async () => {
-  const success = await updatePreference('stickyScroll', !(editorViewState?.stickyScroll));
-  if (!success) host.toast('Failed to update sticky scroll preference');
-});
-
-// Saved preferences before track-edits mode forces overrides
-let _preTrackingPrefs = null;
-
-function _isAnyEditTrackingEnabled() {
-  return !!(editorViewState?.trackAgentEdits || editorViewState?.trackCodexWsEdits);
-}
-
-async function _restorePreTrackingPrefsIfIdle() {
-  if (_isAnyEditTrackingEnabled()) return;
-  if (!_preTrackingPrefs) return;
-  await updatePreference('showInlineDiffs', !!_preTrackingPrefs.showInlineDiffs);
-  await updatePreference('readOnly', !!_preTrackingPrefs.readOnly);
-  _preTrackingPrefs = null;
-}
-
-async function _disableAllEditTracking(reason) {
-  if (editorViewState?.trackAgentEdits) {
-    await updatePreference('trackAgentEdits', false);
-  }
-  if (editorViewState?.trackCodexWsEdits) {
-    await updatePreference('trackCodexWsEdits', false);
-  }
-  await _restorePreTrackingPrefsIfIdle();
-  if (reason) host.toast(reason, 'warn');
-}
-
-async function _toggleTrackedEditPreference(targetKey, otherKey) {
-  const enabling = !(editorViewState?.[targetKey]);
-  if (enabling) {
-    if (!_preTrackingPrefs) {
-      _preTrackingPrefs = {
-        showInlineDiffs: editorViewState?.showInlineDiffs ?? true,
-        readOnly: editorViewState?.readOnly ?? false,
-      };
-    }
-    await updatePreference('showInlineDiffs', true);
-    await updatePreference('readOnly', true);
-    if (editorViewState?.[otherKey]) {
-      await updatePreference(otherKey, false);
-    }
-    const success = await updatePreference(targetKey, true);
-    if (!success) host.toast('Failed to enable edit tracking');
-    return;
-  }
-  const success = await updatePreference(targetKey, false);
-  if (!success) {
-    host.toast('Failed to disable edit tracking');
-    return;
-  }
-  await _restorePreTrackingPrefsIfIdle();
-}
-
-bindMenuToggle(miTrackEdits, async () => {
-  await _toggleTrackedEditPreference('trackAgentEdits', 'trackCodexWsEdits');
-});
-
-bindMenuToggle(miTrackCodexEdits, async () => {
-  await _toggleTrackedEditPreference('trackCodexWsEdits', 'trackAgentEdits');
+installAdvancedMenuActions({
+  bindMenuToggle,
+  els: {
+    miToggleAutosave,
+    miToggleDiffs,
+    miToggleDraftDiffs,
+    miToggleReadonly,
+    miTrackEdits,
+    miTrackCodexEdits,
+  },
+  getEditorViewState: () => editorViewState,
+  updatePreference: (key, value) => updatePreference(key, value),
+  setMenuChecked,
+  getCurrentPath: () => currentPath,
+  getCurrentPathExists: () => currentPathExists,
+  showAutosaveModal: (fileLabel, hasOtherDrafts) => showAutosaveModal(fileLabel, hasOtherDrafts),
+  basename,
+  getUnsaved: () => !!unsaved,
+  saveFile: () => saveFile(),
+  apiPost: (path, body) => apiPost(path, body),
+  markUnsaved: (flag) => markUnsaved(flag),
+  toast: (msg, kind) => host.toast(msg, kind),
 });
 
 // Initialize terminal drawer
@@ -4292,39 +3908,20 @@ initDrawerAndShortcuts({
   },
 });
 
-bindMenuToggle(miFind, () => { triggerEditorSearchPanel('menu', { replace: true }); });
-bindMenuToggle(miGoto, async () => {
-  const input = window.prompt('Go to line:');
-  if (!input) return;
-  
-  const line = parseInt(input, 10);
-  if (isNaN(line) || line < 1) {
-    host.toast('Invalid line number');
-    return;
-  }
-  
-  await jumpToCurrentFileLine(line);
-});
-
-
-
-
-
- 
 // ---------- State load/init ----------
 // host.setTitle('Code CM6');
-
-installGlobalOpenHooks({
+const stateInitController = createStateInitController({
   openFile: (path) => openFile(path),
   toast: (msg) => host.toast(msg),
   toAbsolute,
   getBaseDir: (projectRoot) => projectRoot || cachedProjectRoot || HOME_DIR,
-  HOME_DIR,
+  homeDir: HOME_DIR,
+  syncEditorState: (force) => syncEditorState(force),
 });
+stateInitController.installOpenHooks();
 
 async function getCurrentProjectRoot(forceRefresh = false) {
-  const state = await syncEditorState(forceRefresh);
-  return state?.activeProject || null;
+  return stateInitController.getCurrentProjectRoot(forceRefresh);
 }
 
 async function main() {
