@@ -23,6 +23,7 @@ import { createAppContext } from './src/host/app-context.js';
 import { initVirtualKeyboardAdjustments } from './src/host/ui/virtual-keyboard.js';
 import { pickerAvailable as pickerUiAvailable, pickFileWithPicker, pickDirectoryWithPicker, pickSaveTargetWithPicker } from './src/host/io/picker-helpers.js';
 import { createPickerController } from './src/host/io/picker-controller.js';
+import { createJumpLineController } from './src/host/io/jump-line.js';
 import { createAdapterUiController } from './src/host/ui/adapter-ui.js';
 import { createEditTrackerController } from './src/host/ui/edit-tracker.js';
 import { createFontScaleController } from './src/host/ui/font-scale.js';
@@ -37,6 +38,7 @@ import { createPreferencesController } from './src/host/ui/preferences.js';
 import { createProjectSwitchController } from './src/host/ui/project-switch.js';
 import { createCacheIndicatorController } from './src/host/ui/cache-indicator.js';
 import { initDrawerAndShortcuts } from './src/host/ui/drawer-shortcuts.js';
+import { initPanelsAndDrawer } from './src/host/ui/panels-drawer.js';
 import { initResponsiveLayout } from './src/host/ui/layout-manager.js';
 import { createFileStatusController } from './src/host/ui/file-status.js';
 import { createSettingsBootstrap } from './src/host/ui/settings-bootstrap.js';
@@ -46,14 +48,19 @@ import { showProjectsDebugModal } from './src/host/ui/projects-debug-modal.js';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './src/host/ui/watcher-settings.js';
 import { createUiIpcConnections } from './src/host/connections/ui-ipc.js';
 import { createFileWebSocketManager } from './src/host/connections/file-websocket.js';
+import { createFileSyncHandler } from './src/host/connections/file-sync-handler.js';
 import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './src/host/connections/vendor-loaders.js';
 import { createSessionTelemetryController } from './src/host/boot/session-telemetry.js';
 import { createEditorStateController } from './src/host/boot/editor-state.js';
 import { runBootSequence } from './src/host/boot/boot-sequence.js';
 import { installBeforeExitGuard } from './src/host/boot/public-hooks.js';
 import { createStateInitController } from './src/host/boot/state-init.js';
+import { createBootSequenceDeps } from './src/host/boot/sequence-deps.js';
+import { applyNoProjectState, applyRestoredPathState, schedulePathDisplayFallback, applyNoRestoredPathState } from './src/host/boot/path-state.js';
 import { createSaveSocketController } from './src/host/file-ops/save-socket.js';
 import { createSaveFlowController } from './src/host/file-ops/save-flow.js';
+import { createOpenFlowController } from './src/host/file-ops/open-flow.js';
+import { createRunFileController } from './src/host/file-ops/run-file.js';
 import { createApiClient } from './src/host/api/client.js';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
@@ -2087,6 +2094,19 @@ let _agentShortcutIframeMap = new Map();
 let _lastShortcutUsageKey = '';
 let _lastShortcutUsageStamp = 0;
 
+function resetActiveFileState({ resetPicker = false } = {}) {
+  closeWebSocket();
+  currentPath = '';
+  currentPathExists = false;
+  if (resetPicker) lastPickerPath = HOME_DIR;
+  currentModeLanguage = null;
+  lastSha256 = null;
+  lastSavedContent = '';
+  markUnsaved(false);
+  updatePathDisplay();
+  syncSessionPath();
+}
+
 function _agentIconUrlFromName(name) {
   const safe = String(name || '').trim();
   if (!safe) return '';
@@ -3062,7 +3082,6 @@ try {
 let editTrackerWS = null;
 let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 let cm6NiceguiClientId = null;
-let explorerRefreshTimer = null;
 var lastSha256 = null;
 // Keep early bootstrap handlers from hitting TDZ on debounce constants.
 try {
@@ -3284,6 +3303,23 @@ async function ensureProjectContext() {
 editorStateController.installWindowHooks();
 
 // ---------- WebSocket management ----------
+const fileSyncHandler = createFileSyncHandler({
+  getLastSaveTime: () => lastSaveTime,
+  getInflightOpId: () => inflightOpId,
+  selfEchoGraceMs: SELF_ECHO_GRACE,
+  toAbsolute,
+  homeDir: HOME_DIR,
+  getCurrentPath: () => currentPath,
+  setCurrentPath: (path) => { currentPath = path; },
+  updatePathDisplay: () => updatePathDisplay(),
+  setLastSavedContent: (content) => { lastSavedContent = content; },
+  getLastSha256: () => lastSha256,
+  setLastSha256: (sha) => { lastSha256 = sha; },
+  markUnsaved: (flag) => markUnsaved(flag),
+  setStatus: (text) => { statusEl.textContent = text; },
+  getUnsaved: () => !!unsaved,
+  clearInflightOpId: () => { inflightOpId = null; },
+});
 const fileWebSocketManager = createFileWebSocketManager({
   ReconnectingWebSocket,
   clientId,
@@ -3293,7 +3329,7 @@ const fileWebSocketManager = createFileWebSocketManager({
       if (statusEl.textContent === expected) statusEl.textContent = '';
     }, delayMs);
   },
-  onMessage: (msg) => handleWSMessage(msg),
+  onMessage: (msg) => fileSyncHandler.handleWSMessage(msg),
 });
 
 function closeWebSocket() {
@@ -3302,57 +3338,6 @@ function closeWebSocket() {
 
 async function openWebSocket(path) {
   return fileWebSocketManager.openWebSocket(path);
-}
-
-function handleWSMessage(msg) {
-  const type = msg.type;
-
-  if (type === 'replace_full') {
-    // Check if we're in grace period after save
-    const timeSinceSave = Date.now() - lastSaveTime;
-    const isInGracePeriod = inflightOpId || timeSinceSave < SELF_ECHO_GRACE;
-
-    if (isInGracePeriod) {
-      console.log('Ignoring replace_full during grace period');
-      return;
-    }
-
-    if (msg.path) {
-      const normalized = toAbsolute(msg.path, null, HOME_DIR);
-      if (normalized !== currentPath) {
-        currentPath = normalized;
-        updatePathDisplay();
-      }
-    }
-
-    // Update editor content
-    const newContent = msg.content || '';
-    lastSavedContent = newContent;
-    lastSha256 = msg.sha256 || null;
-    markUnsaved(false);
-    statusEl.textContent = 'Updated from disk';
-    setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 2000);
-  } else if (type === 'save_ack') {
-    if (msg.op_id === inflightOpId) {
-      inflightOpId = null;
-      lastSha256 = msg.meta?.sha256 || lastSha256;
-      statusEl.textContent = 'Saved';
-      setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
-    }
-  }
-}
-
-function scheduleExplorerRefresh() {
-  if (explorerRefreshTimer) {
-    clearTimeout(explorerRefreshTimer);
-  }
-  explorerRefreshTimer = setTimeout(() => {
-    if (typeof window.__cm6RefreshExplorer === 'function') {
-      window.__cm6RefreshExplorer().catch(err => {
-        console.error('Failed to refresh explorer:', err);
-      });
-    }
-  }, 500);
 }
 
 // ---------- File ops ----------
@@ -3406,140 +3391,55 @@ function _applyCacheIndicatorImpl(info) {
 applyCacheIndicator = _applyCacheIndicatorImpl;
 cacheIndicatorController.installWindowHook();
 
+const openFlowController = createOpenFlowController({
+  setStatus: (text) => { statusEl.textContent = text; },
+  ensureProjectContext: () => ensureProjectContext(),
+  toAbsolute,
+  homeDir: HOME_DIR,
+  getRestoredSessionActive: () => !!restoredSessionActive,
+  getCurrentPath: () => currentPath,
+  setRestoredSessionActive: (flag) => { restoredSessionActive = flag; },
+  setIndicatorInactive: () => setIndicatorInactive(cacheStateBadge),
+  apiPost: (path, body) => apiPost(path, body),
+  apiGet: (path) => apiGet(path),
+  setCurrentPath: (path) => { currentPath = path; },
+  setCurrentPathExists: (exists) => { currentPathExists = exists; },
+  setLastPickerPath: (path) => { lastPickerPath = path; },
+  parentDir,
+  setCurrentModeLanguage: (lang) => { currentModeLanguage = lang; },
+  detectLanguageFromFilename,
+  setLastSha256: (sha) => { lastSha256 = sha; },
+  emitEditorOpenRequest: (path) => {
+    try {
+      const msg = { type: 'editor_open_request', payload: { path } };
+      if (editorSocket && editorSocket.connected) editorSocket.emit(msg.type, msg.payload);
+      else editorPending.push(msg);
+    } catch (e) { console.warn('[Editor] Failed to request open via editor socket:', e); }
+  },
+  setLastSavedContent: (content) => { lastSavedContent = content; },
+  markUnsaved: (flag) => markUnsaved(flag),
+  updatePathDisplay: () => updatePathDisplay(),
+  syncSessionPath: () => syncSessionPath(),
+  getCachedProjectRoot: () => cachedProjectRoot,
+  dispatchExplorerActiveFile: (rel) => {
+    try {
+      if (typeof window.__explorerBusDispatch === 'function') window.__explorerBusDispatch('explorer:activeFile', { rel });
+    } catch (_) {}
+  },
+  openWebSocket: (path) => openWebSocket(path),
+  getEditorState: () => editorState,
+  setEditorState: (state) => { editorState = state; },
+  setCachedProjectRoot: (path) => { cachedProjectRoot = path; },
+  broadcastRecentsUpdate: (state) => broadcastRecentsUpdate(state),
+  syncEditorState: (force) => syncEditorState(force),
+  getSessionStateActiveProject: () => sessionState.activeProject || null,
+  setSessionStateActiveProject: (path) => { sessionState.activeProject = path; },
+  jumpToCurrentFileLine: (line, opts) => jumpToCurrentFileLine(line, opts),
+  toast: (msg) => host.toast(msg),
+});
+
 async function openFile(path, options = {}) {
-  const { allowOverwrite = true, forceRefresh = false } = options;
-  if (!path) throw new Error("Path is empty");
-  statusEl.textContent = "Opening...";
-  
-  const projectState = await ensureProjectContext();
-  if (!projectState || !projectState.activeProject || !projectState.activeProjectExists) {
-    statusEl.textContent = "";
-    host.toast(projectState?.activeProjectMessage || "Select a project before opening files.");
-    return;
-  }
-
-  try {
-    const resolvedTarget = toAbsolute(path, null, HOME_DIR);
-    if (!forceRefresh && !allowOverwrite && restoredSessionActive && currentPath && resolvedTarget === currentPath) {
-      console.log("[Editor] Skipping host-side open; restored session buffer already loaded");
-      statusEl.textContent = "";
-      return;
-    }
-    
-    // Reset indicator for new file load
-    restoredSessionActive = false;
-    setIndicatorInactive(cacheStateBadge);
-
-    let contentPayload;
-    let hasDraft = false;
-    
-    try {
-        const check = await apiPost("editor/check_cache", { path: resolvedTarget });
-        if (check && check.ok && check.has_draft) {
-            contentPayload = {
-                path: resolvedTarget,
-                content: check.content,
-                sha256: check.base_sha256
-            };
-            hasDraft = true;
-            console.log("[Editor] Opening cached draft for", resolvedTarget);
-        }
-    } catch (e) { console.warn("Cache check failed", e); }
-    
-    if (!contentPayload) {
-        contentPayload = await apiGet(`read?path=${encodeURIComponent(path)}`);
-    }
-    const payload = contentPayload;
-
-    const resolved = toAbsolute(payload.path || path, null, HOME_DIR);
-    currentPath = resolved;
-    currentPathExists = true;
-    lastPickerPath = parentDir(resolved);
-    currentModeLanguage = detectLanguageFromFilename(resolved);
-
-    // Initialize SHA256 if provided
-    lastSha256 = payload.sha256 || null;
-
-    // Tell the editor runtime to open the file via the dedicated editor Socket.IO channel.
-    try {
-      const msg = { type: 'editor_open_request', payload: { path: resolved } };
-      if (editorSocket && editorSocket.connected) {
-        editorSocket.emit(msg.type, msg.payload);
-      } else {
-        editorPending.push(msg);
-      }
-    } catch (e) {
-      console.warn("[Editor] Failed to request open via editor socket:", e);
-    }
-
-    lastSavedContent = '';
-    markUnsaved(false);
-    updatePathDisplay();
-    syncSessionPath();
-    statusEl.textContent = "";
-
-    // Notify explorer of the active file (fast-path; backend seeds from HistoryStore on connect).
-    try {
-      if (typeof window.__explorerBusDispatch === 'function') {
-        const projectRoot = projectState.activeProject || cachedProjectRoot || null;
-        const rootAbs = projectRoot
-          ? toAbsolute(projectRoot, null, HOME_DIR).replace(/\/+$/, '')
-          : null;
-        let rel = null;
-        if (rootAbs && resolved.startsWith(rootAbs + '/')) {
-          rel = resolved.slice(rootAbs.length + 1);
-        }
-        window.__explorerBusDispatch('explorer:activeFile', { rel });
-      }
-    } catch (e) {
-      // Ignore explorer notification errors.
-    }
-
-    // Open WebSocket for this file
-    openWebSocket(resolved);
-
-    // Update persisted editor state (last file + recents)
-    // The returned entry includes scroll_line if previously stored
-    let scrollLineToRestore = null;
-    try {
-      const activity = await apiPost("state/file_activity", {
-        path: resolved,
-        project: cachedProjectRoot || projectState.activeProject,
-      });
-      if (activity?.data?.entry?.scroll_line) {
-        scrollLineToRestore = activity.data.entry.scroll_line;
-      }
-      if (activity?.state || activity?.data?.state) {
-        editorState = activity.state || activity.data.state;
-        cachedProjectRoot = editorState.activeProject || cachedProjectRoot;
-        broadcastRecentsUpdate(editorState);
-        syncSessionPath();
-      } else {
-        // Fallback to a fresh pull if the payload lacked state
-        const refreshed = await syncEditorState(true);
-        if (refreshed) {
-          broadcastRecentsUpdate(refreshed);
-          sessionState.activeProject = refreshed.activeProject || sessionState.activeProject;
-          syncSessionPath();
-        }
-      }
-    } catch (err) {
-      console.error("Failed to record file activity:", err);
-    }
-
-    // Restore scroll position if we have one stored for this file
-    // Use scrollToTop to position line at viewport top (symmetrical with recording)
-    if (scrollLineToRestore && scrollLineToRestore > 1) {
-      setTimeout(() => {
-        console.log("[Editor] Restoring scroll to line", scrollLineToRestore);
-        jumpToCurrentFileLine(scrollLineToRestore, { focus: false, scrollToTop: true });
-      }, 150); // Small delay to let editor render
-    }
-  } catch (e) {
-    statusEl.textContent = "";
-    host.toast(`Failed to open: ${e.message}`);
-    throw e;
-  }
+  return openFlowController.openFile(path, options);
 }
 
 function saveFileViaEditorSocket(payload, timeoutMs = 8000) {
@@ -3592,47 +3492,23 @@ async function saveFile(opts) {
   });
 }
 
+const runFileController = createRunFileController({
+  getCurrentPath: () => currentPath,
+  getCurrentPathExists: () => currentPathExists,
+  isRunnableFile,
+  setRunButtonDisabled: (flag) => { runActiveBtn.disabled = !!flag; },
+  saveFile: () => saveFile(),
+  openTerminal: async () => {
+    if (terminal && typeof terminal.open === 'function') await terminal.open();
+  },
+  apiPost: (path, body) => apiPost(path, body),
+  basename,
+  toast: (msg) => host.toast(msg),
+  updateRunButtonState: () => updateRunButtonState(),
+});
+
 async function runCurrentFile() {
-  const runnable = currentPath && currentPathExists && isRunnableFile(currentPath);
-  if (!runnable) {
-    host.toast('Open a Python, shell, or C/C++ source file to run it in the terminal');
-    return;
-  }
-
-  runActiveBtn.disabled = true;
-  try {
-    // Ensure backend buffer is flushed before running.
-    const saved = await saveFile();
-    if (!saved) {
-      host.toast('Save failed; not running file');
-      return;
-    }
-
-    if (terminal && typeof terminal.open === 'function') {
-      await terminal.open();
-    }
-
-    const response = await apiPost('terminal/run_active_file', {});
-
-    // apiPost may unwrap {ok,data} -> data. Handle both shapes.
-    const isWrapped = response && typeof response === 'object' && Object.prototype.hasOwnProperty.call(response, 'ok');
-    if (isWrapped && response.ok === false) {
-      host.toast(response.error || 'Failed to run file');
-    } else {
-      const payload = isWrapped ? (response.data || {}) : (response || {});
-      if (payload && Object.keys(payload).length > 0) {
-        const preview = payload.command_preview || basename(currentPath);
-        host.toast(`Running ${preview} in terminal`);
-      } else {
-        host.toast('Failed to run file');
-      }
-    }
-  } catch (err) {
-    console.error('[RUN] Failed to execute file:', err);
-    host.toast(err?.message || 'Failed to run file');
-  } finally {
-    updateRunButtonState();
-  }
+  return runFileController.runCurrentFile();
 }
 
 async function saveAsDialog() {
@@ -3695,42 +3571,16 @@ async function pickSaveTarget() {
   return pickerController.pickSaveTarget();
 }
 
+const jumpLineController = createJumpLineController({
+  getCurrentPath: () => window.currentPath,
+  getEditorSocket: () => editorSocket,
+  queueEditorMessage: (msg) => editorPending.push(msg),
+  toast: (msg) => host.toast(msg),
+});
+
 // Helper: Jump to line in current file
 async function jumpToCurrentFileLine(line, options = {}) {
-  const path = window.currentPath;
-  if (!path) {
-    host.toast('No file currently open');
-    return;
-  }
-  
-  try {
-    const targetLine = parseInt(line, 10);
-    if (!Number.isFinite(targetLine) || targetLine < 1) {
-      host.toast('Invalid line number');
-      return;
-    }
-    const payload = { line: targetLine, path };
-    if (options && Object.prototype.hasOwnProperty.call(options, 'focus')) {
-      payload.focus = Boolean(options.focus);
-    }
-    // scrollToTop: position line at viewport top (for scroll restore)
-    if (options && Object.prototype.hasOwnProperty.call(options, 'scrollToTop')) {
-      payload.scroll_to_top = Boolean(options.scrollToTop);
-    }
-    if (options && Object.prototype.hasOwnProperty.call(options, 'scrollY')) {
-      if (typeof options.scrollY === 'string') {
-        payload.scroll_y = options.scrollY;
-      }
-    }
-    if (editorSocket && editorSocket.connected) {
-      editorSocket.emit('editor_jump_to_line_request', payload);
-      return;
-    }
-    // Queue until editor Socket.IO connects.
-    editorPending.push({ type: 'editor_jump_to_line_request', payload });
-  } catch (e) {
-    host.toast('Failed to jump: ' + (e?.message || 'unknown error'));
-  }
+  return jumpLineController.jumpToCurrentFileLine(line, options);
 }
 
 // Expose for search overlay
@@ -3783,21 +3633,13 @@ installBasicMenuActions({
     miFind,
     miGoto,
   },
-  resetToNewFile: () => {
-  closeWebSocket();
-  currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
-  lastSha256 = null;
-  lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
-  },
+  resetToNewFile: () => resetActiveFileState({ resetPicker: true }),
   pickFile: () => pickFile(),
   openFile: (path) => openFile(path),
   saveFile: () => saveFile(),
   saveAsDialog: () => saveAsDialog(),
   closeWebSocket: () => closeWebSocket(),
-  clearOnQuit: () => {
-    currentPath=''; currentPathExists=false; lastSha256 = null;
-    lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
-  },
+  clearOnQuit: () => resetActiveFileState(),
   showProjectsDebugModal,
   exportDiagnosticsToFile: () => exportDiagnosticsToFile(),
   triggerEditorSearchPanel: (reason, opts) => triggerEditorSearchPanel(reason, opts),
@@ -3849,64 +3691,25 @@ installAdvancedMenuActions({
   toast: (msg, kind) => host.toast(msg, kind),
 });
 
-// Initialize terminal drawer
-const terminal = createTerminalDrawer({
-  onReady: () => console.log('Terminal drawer ready'),
-});
-
-// Initialize console drawer (tab alongside terminal in the drawer)
-const consoleDrawer = createConsoleDrawer();
-
-// Initialize problems panel (tab alongside terminal and console in the drawer)
-problemsPanel = createProblemsPanel({
-  containerId: 'problems-container',
-  onNavigate: (absPath, line, col) => {
-    // Open the file and jump to the diagnostic location.
-    if (editorSocket && editorSocket.connected) {
-      editorSocket.emit('editor_open_file', { path: absPath });
-      setTimeout(() => {
-        editorSocket.emit('editor_issues_cmd', { action: 'goto', line, column: col });
-      }, 300);
-    }
-  },
-});
-
-const consoleCollapseBtn = document.getElementById('console-collapse-btn');
-if (consoleCollapseBtn) {
-  consoleCollapseBtn.addEventListener('click', () => terminal.close());
-}
-
-const problemsCollapseBtn = document.getElementById('problems-collapse-btn');
-if (problemsCollapseBtn) {
-  problemsCollapseBtn.addEventListener('click', () => terminal.close());
-}
-
-// Initialize console bridge — patches console.* on the main page
-// and sends logs to the ui_ipc bus so the console drawer can receive them.
-// Actual init happens inside connectUIIPC() after the socket is created.
-
-// ─── Drawer tab switching (Terminal ↔ Console ↔ Problems) ────────────────
-initDrawerAndShortcuts({
+const { terminal, consoleDrawer, problemsPanel: drawerProblemsPanel } = initPanelsAndDrawer({
+  createTerminalDrawer,
+  createConsoleDrawer,
+  createProblemsPanel,
+  initDrawerAndShortcuts,
   bindMenuToggle,
   requireEl,
-  consoleDrawer,
-  problemsPanel,
-  toggleTerminal: () => terminal.toggle(),
+  getEditorSocket: () => editorSocket,
+  hostToast: (msg) => host.toast(msg),
   setFontScale: (preset) => setFontScale(preset),
   triggerEditorSearchPanel: (reason, opts) => triggerEditorSearchPanel(reason, opts),
-  hostToast: (msg) => host.toast(msg),
   jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
   saveFile: () => saveFile(),
-  resetToNewFile: () => {
-    closeWebSocket();
-    currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
-    lastSha256 = null;
-    lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
-  },
+  resetToNewFile: () => resetActiveFileState({ resetPicker: true }),
   openPickedFile: () => {
-    pickFile().then(p => { if (p) openFile(p); });
+    pickFile().then((p) => { if (p) openFile(p); });
   },
 });
+problemsPanel = drawerProblemsPanel;
 
 // ---------- State load/init ----------
 // host.setTitle('Code CM6');
@@ -3925,7 +3728,7 @@ async function getCurrentProjectRoot(forceRefresh = false) {
 }
 
 async function main() {
-  return runBootSequence({
+  return runBootSequence(createBootSequenceDeps({
     initResponsiveLayout: () => initResponsiveLayout({ scheduleToolbarTitleClamp: (opts) => scheduleToolbarTitleClamp(opts) }),
     initToolbarTitleClampObservers: () => initToolbarTitleClampObservers(),
     loadLayoutPreferences: () => loadLayoutPreferences(),
@@ -3951,49 +3754,49 @@ async function main() {
     queueSessionStateUpdate: (partial) => queueSessionStateUpdate(partial),
     resetSavedState: () => { lastSavedContent = ''; },
     markUnsaved: (flag) => markUnsaved(flag),
-    setNoProjectState: (msg) => {
-      statusEl.textContent = msg;
-      setToolbarFileName('No file');
-      setIssuesButtonsEnabled(false);
-    },
+    setNoProjectState: (msg) => applyNoProjectState({
+      statusEl,
+      setToolbarFileName: (name) => setToolbarFileName(name),
+      setIssuesButtonsEnabled: (enabled) => setIssuesButtonsEnabled(enabled),
+      message: msg,
+    }),
     getUrlSearch: () => window.location.search,
     toAbsolute,
     HOME_DIR,
-    applyRestoredPathState: ({ restoredPath, serverState, restoredSha }) => {
-      currentPath = restoredPath;
-      currentPathExists = !!serverState.lastFileExists;
-      lastPickerPath = parentDir(restoredPath);
-      lastSha256 = restoredSha;
-      currentModeLanguage = detectLanguageFromFilename(restoredPath);
-      syncSessionPath();
-    },
+    applyRestoredPathState: ({ restoredPath, serverState, restoredSha }) => applyRestoredPathState({
+      restoredPath,
+      serverState,
+      restoredSha,
+      parentDir,
+      detectLanguageFromFilename,
+      syncSessionPath: () => syncSessionPath(),
+      setCurrentPath: (path) => { currentPath = path; },
+      setCurrentPathExists: (exists) => { currentPathExists = exists; },
+      setLastPickerPath: (path) => { lastPickerPath = path; },
+      setLastSha256: (sha) => { lastSha256 = sha; },
+      setCurrentModeLanguage: (lang) => { currentModeLanguage = lang; },
+    }),
     openWebSocket: (path) => openWebSocket(path),
-    updatePathDisplayFallbackLater: () => {
-      setTimeout(() => {
-        try {
-          const el = document.getElementById('fe-file-name');
-          if (el && currentPath && (!el.textContent || el.textContent === 'Untitled')) updatePathDisplay();
-        } catch (_) {}
-      }, 2000);
-    },
+    updatePathDisplayFallbackLater: () => schedulePathDisplayFallback({
+      getCurrentPath: () => currentPath,
+      updatePathDisplay: () => updatePathDisplay(),
+      delayMs: 2000,
+    }),
     openFile: (path) => {
       lastPickerPath = parentDir(path);
       return openFile(path);
     },
     onOpenFileFailure: (e) => {
       host.toast(`Failed to open file: ${e.message}`);
-      currentPath = ''; currentPathExists = false; markUnsaved(false); updatePathDisplay();
+      resetActiveFileState();
     },
-    onNoRestoredPath: (serverState) => {
-      if (serverState.lastFile && !serverState.lastFileExists) {
-        statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
-      } else {
-        statusEl.textContent = 'Select a file to begin.';
-      }
-    },
+    onNoRestoredPath: (serverState) => applyNoRestoredPathState({
+      serverState,
+      setStatus: (msg) => { statusEl.textContent = msg; },
+    }),
     setBranchMenuHandle: (h) => { branchMenuHandle = h; },
     setAgentDrawerHandle: (h) => { agentDrawerHandle = h; },
-  });
+  }));
 }
 
 // Run the main boot sequence
