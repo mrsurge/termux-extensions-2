@@ -2,12 +2,8 @@
 // app/apps/file_editor_cm6/main.js
 // Iframe-based NiceGUI Editor Integration
 
-// CM6 import removed - now using NiceGUI's ui.codemirror in iframe
-// import * as CM from '/static/vendor/codemirror.3/cm6.bundle.js';
-//some comment
 // @ts-check
 import { initExplorerUI } from './static/js/explorer.js';
-import { createDiffController } from './static/js/diff_decorations.js';
 import { createTerminalDrawer } from './static/js/terminal.js';
 import { initBranchMenu } from './static/js/git_menu.js';
 // Hardcoded extension imports for now; will be dynamically loaded later.
@@ -1153,144 +1149,6 @@ function connectUIIPC() {
   });
 }
 // ─── End UI IPC ───────────────────────────────────────────────────
-
-// === CM6 Code Disabled - Using NiceGUI iframe ===
-// All CM6 initialization, themes, languages, and editor setup moved to NiceGUI
-/*
-// Core
-const EditorState = CM.EditorState;
-const { EditorView, keymap, highlightActiveLine, highlightActiveLineGutter, lineNumbers, Decoration, ViewPlugin, Compartment } = CM;
-const defaultKeymap   = CM.defaultKeymap   || [];
-const history         = CM.history         || (() => []);
-const historyKeymap   = CM.historyKeymap   || [];
-const searchKeymap    = CM.searchKeymap    || [];
-const indentWithTab   = CM.indentWithTab   || (() => {});
-const syntaxHighlighting = CM.syntaxHighlighting || (() => []);
-const StreamLanguage  = CM.StreamLanguage;
-const defaultHighlightStyle = CM.defaultHighlightStyle || null;
-const { undo, redo, oneDark, search, openSearchPanel, termuxTheme } = CM;
-
-// Import all available themes from the new bundle
-const {
-  githubDark, githubLight,
-  vscodeDark, vscodeLight,
-  xcodeDark, xcodeLight,
-  solarizedDark, solarizedLight,
-  nord, dracula, okaidia, sublime,
-  androidstudio, darcula,
-  basicDark, basicLight
-} = CM;
-
-const THEMES = {
-  'cm6-dark': EditorView.theme({}, {dark: true}),
-  'one-dark': oneDark || null,
-  'termux': termuxTheme ? termuxTheme() : null,
-  // GitHub themes
-  'github-dark': githubDark || null,
-  'github-light': githubLight || null,
-  // VS Code themes
-  'vscode-dark': vscodeDark || null,
-  'vscode-light': vscodeLight || null,
-  // Xcode themes
-  'xcode-dark': xcodeDark || null,
-  'xcode-light': xcodeLight || null,
-  // Solarized themes
-  'solarized-dark': solarizedDark || null,
-  'solarized-light': solarizedLight || null,
-  // Popular themes
-  'nord': nord || null,
-  'dracula': dracula || null,
-  'okaidia': okaidia || null,
-  'sublime': sublime || null,
-  'androidstudio': androidstudio || null,
-  'darcula': darcula || null,
-  // Basic themes
-  'basic-dark': basicDark || null,
-  'basic-light': basicLight || null,
-};
-
-const zebraStripes = EditorView.theme({
-  '& .cm-line:nth-child(even)': { 
-    backgroundColor: 'rgba(128, 128, 128, 0.1)' 
-  },
-  '.cm-dark & .cm-line:nth-child(even)': {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)'
-  }
-});
-
-// Languages (fallbacks are no-ops if missing in your bundle)
-const javascript = CM.javascript || (() => []);
-const jsonLang   = CM.json       || (() => []);
-const python     = CM.python     || (() => []);
-const htmlLang   = CM.html       || (() => []);
-const cssLang    = CM.css        || (() => []);
-const markdown   = CM.markdown   || (() => []);
-const xmlLang    = CM.xml        || (() => []);
-
-// Shell (legacy) — wrap if present in the bundle
-const shellLang = () => {
-  const mode = CM.shellMode;
-  return (mode && CM.StreamLanguage) ? CM.StreamLanguage.define(mode) : null;
-};
-
-// ---------- Empty Line Selection Anchors (for Android native selection) ----------
-// Creates invisible widgets in empty lines so Android selection can anchor properly
-// Uses WORD JOINER (\u2060) which won't create line breaks
-
-const emptyLineAnchorCompartment = new Compartment();
-
-function createEmptyLineAnchorWidget() {
-  class EmptyLineAnchor extends CM.WidgetType {
-    toDOM() {
-      const span = document.createElement('span');
-      span.className = 'cm-empty-anchor';
-      span.textContent = '\u2060'; // WORD JOINER - invisible, non-breaking
-      return span;
-    }
-    ignoreEvent() { return false; }
-  }
-
-  const emptyLinePlugin = ViewPlugin.fromClass(class {
-    constructor(view) {
-      this.decorations = this.buildDecorations(view);
-    }
-    
-    update(update) {
-      if (update.docChanged || update.viewportChanged) {
-        this.decorations = this.buildDecorations(update.view);
-      }
-    }
-    
-    buildDecorations(view) {
-      const builder = [];
-      for (let { from, to } of view.visibleRanges) {
-        for (let pos = from; pos <= to;) {
-          const line = view.state.doc.lineAt(pos);
-          if (line.length === 0) {
-            // Empty line - add anchor widget at the start
-            builder.push(
-              Decoration.widget({
-                widget: new EmptyLineAnchor(),
-                side: -1,
-              }).range(line.from)
-            );
-          }
-          pos = line.to + 1;
-        }
-      }
-      return Decoration.set(builder);
-    }
-  }, {
-    decorations: v => v.decorations,
-  });
-
-  return emptyLinePlugin;
-}
-
-// Initially disabled (will be enabled during native selection)
-const emptyLineAnchorExtension = emptyLineAnchorCompartment.of([]);
-*/
-// === End of CM6 disabled code ===
 
 // ---- host/api contract (injected by framework) ----
 /* global host, api */
@@ -2773,45 +2631,6 @@ initVirtualKeyboardAdjustments({
   editorSurface: editorFrame,
 });
 
-async function fetchDiffPayload(path) {
-  if (!path) return { hunks: [], summary: { tracked: false } };
-  try {
-    const resp = await fetch(`/api/app/file_editor_cm6/diff?path=${encodeURIComponent(path)}`, { cache: 'no-store' });
-    const json = await resp.json();
-    if (!resp.ok || json?.ok === false) {
-      throw new Error(json?.error || resp.statusText || 'Diff request failed');
-    }
-    return json?.data || { hunks: [], summary: { tracked: true } };
-  } catch (err) {
-    console.error('Diff fetch failed:', err);
-    return { hunks: [], summary: { tracked: false } };
-  }
-}
-
-function handleDiffStatus(summary) {
-  const current = statusEl.textContent || '';
-  const isDiffLabel = current.startsWith('Δ ');
-
-  if (!summary || summary.tracked === false || (!summary.added && !summary.deleted)) {
-    statusEl.dataset.diffSummary = '';
-    if (!unsaved && isDiffLabel) {
-      statusEl.textContent = '';
-    }
-    return;
-  }
-  const label = `Δ +${summary.added || 0} −${summary.deleted || 0}`;
-  statusEl.dataset.diffSummary = label;
-  if (!unsaved && (isDiffLabel || !current)) {
-    statusEl.textContent = label;
-  }
-}
-
-const diffController = createDiffController({
-  fetchDiff: fetchDiffPayload,
-  onStatus: handleDiffStatus,
-  getWordWrap: () => wordWrap,
-});
-window.__cm6Diff = diffController;
 
 // ---------- Session telemetry ----------
 async function fetchPersistedSessionState() {
@@ -2924,59 +2743,15 @@ async function autoJumpToEdit(path, line) {
       await openFile(path);
     }
     
-    // Wait 3 seconds for editor and file to fully load
+    // Wait for editor and file to fully load, then jump via iframe
     await new Promise(resolve => setTimeout(resolve, 3000));
     
-    // Scroll to line and flash highlight
-    if (view && line > 0) {
-      const docLines = view.state.doc.lines;
-      if (line <= docLines) {
-        const lineObj = view.state.doc.line(line);
-        const pos = lineObj.from;
-        
-        // Scroll into view
-        view.dispatch({
-          selection: { anchor: pos, head: pos },
-          scrollIntoView: true,
-        });
-        
-        // Flash highlight effect
-        flashLine(line);
-      }
+    if (line > 0) {
+      jumpToCurrentFileLine(line);
     }
   } catch (e) {
     console.error('[EditTracker] Auto-jump failed:', e);
   }
-}
-
-function flashLine(lineNumber) {
-  if (!view) return;
-  
-  const lineObj = view.state.doc.line(lineNumber);
-  const flashDeco = CM.Decoration.line({ class: 'cm-edit-flash' });
-  const decoSet = CM.RangeSetBuilder.of([flashDeco.range(lineObj.from)]);
-  
-  const flashField = CM.StateField.define({
-    create: () => decoSet,
-    update: (value) => value,
-    provide: field => CM.EditorView.decorations.from(field),
-  });
-  
-  // Add decoration
-  view.dispatch({
-    effects: CM.StateEffect.appendConfig.of(flashField),
-  });
-  
-  // Remove after 1 second
-  setTimeout(() => {
-    try {
-      view.dispatch({
-        effects: CM.StateEffect.reconfigure.of([]),
-      });
-    } catch (e) {
-      // Ignore if view is destroyed
-    }
-  }, 1000);
 }
 
 // ---------- small utils ----------
@@ -3136,12 +2911,10 @@ async function setFontScale(preset) {
 
 
 // ---------- Editor state ----------
-let view = null;
 let currentPath = '';
 let currentPathExists = false;
 let lastSavedContent = '';
 let unsaved = false;
-let nativeSelectionActive = false; // No NiceGUI native selection tracking; keep flag for legacy guards
 // Restored-session flags must exist before any socket events fire.
 var restoredSessionActive = false;
 var restoredSessionPath = null;
@@ -4408,75 +4181,6 @@ async function triggerExternalRefresh(path) {
   }
 }
 
-// Disabled - CM6 editor replaced with NiceGUI iframe
-/*
-function makeExtensions() {
-  const exts = [
-    history(),
-    search(),
-    keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
-    highlightActiveLine(),
-    emptyLineAnchorExtension, // Add the compartment for empty line anchors
-  ];
-  if (showLineNumbers) exts.push(lineNumbers(), highlightActiveLineGutter());
-  if (showSyntaxHighlight && defaultHighlightStyle) {
-    exts.push(syntaxHighlighting(defaultHighlightStyle, { fallback: true }));
-  }
-  if (wordWrap) {
-    exts.push(EditorView.lineWrapping);
-  }
-  if (showLineShading) {
-    exts.push(zebraStripes);
-  }
-  if (autoCloseBrackets && CM.closeBrackets) {
-    exts.push(CM.closeBrackets());
-  }
-  if (enableAutocompletion && CM.autocompletion) {
-    exts.push(CM.autocompletion());
-  }
-  
-  // Disable CM6's native double-click word selection (conflicts with our native selection)
-  exts.push(EditorView.domEventHandlers({
-    dblclick: (event, view) => {
-      event.preventDefault();
-      return true; // Mark as handled
-    }
-  }));
-
-  // Theme
-  const theme = THEMES[currentTheme] || THEMES['cm6-dark'];
-  if (theme) exts.push(theme);
-
-  if (diffController?.extension) {
-    exts.push(diffController.extension);
-  }
-
-  // Language
-  if (showSyntaxHighlight) {
-    const lang = (currentModeLanguage || 'text');
-    switch (lang) {
-      case 'javascript': exts.push(javascript()); break;
-      case 'json': exts.push(jsonLang()); break;
-      case 'python': exts.push(python()); break;
-      case 'html': exts.push(htmlLang()); break;
-      case 'css': exts.push(cssLang()); break;
-      case 'markdown': exts.push(markdown()); break;
-      case 'xml': exts.push(xmlLang()); break;
-      case 'shell': { const s = shellLang(); if (s) exts.push(s); } break;
-      default: break;
-    }
-  }
-  return exts;
-}
-*/
-
-function createView(docText='') {
-  // Disabled: CM6 editor replaced with NiceGUI iframe
-  console.log('[CM6] createView() disabled - using NiceGUI iframe instead');
-}
-
-function getText() { return ''; } // Stub: content is in iframe (legacy code still calls this)
-function setText(t) { console.log('[CM6] setText() disabled'); }
 
 function markUnsaved(flag) {
   const next = !!flag;
@@ -4723,15 +4427,10 @@ async function handleProjectOpened(newProjectPath) {
   // Reset host-side editor/file state so we don't keep editing a file
   // from the previous project while the backend has already switched.
   closeWebSocket();
-  if (currentPath) {
-    diffController.invalidateCacheForPath(currentPath);
-  }
-  diffController.setContext(null);
   currentPath = '';
   currentPathExists = false;
   lastSha256 = null;
   lastSavedContent = '';
-  setText('');
   markUnsaved(false);
   updatePathDisplay();
   syncSessionPath();
@@ -4986,30 +4685,17 @@ function handleWSMessage(msg) {
 
     // Update editor content
     const newContent = msg.content || '';
-    if (getText() !== newContent) {
-      setText(newContent);
-      lastSavedContent = newContent;
-      lastSha256 = msg.sha256 || null;
-      markUnsaved(false);
-      statusEl.textContent = 'Updated from disk';
-      setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 2000);
-      diffController.invalidateCacheForPath(currentPath);
-      diffController.setContext({ path: currentPath, sha: lastSha256 });
-      if (editorViewState?.showInlineDiffs) {
-        diffController.refresh(true);
-      }
-    }
+    lastSavedContent = newContent;
+    lastSha256 = msg.sha256 || null;
+    markUnsaved(false);
+    statusEl.textContent = 'Updated from disk';
+    setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 2000);
   } else if (type === 'save_ack') {
     if (msg.op_id === inflightOpId) {
       inflightOpId = null;
       lastSha256 = msg.meta?.sha256 || lastSha256;
       statusEl.textContent = 'Saved';
       setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
-    }
-  } else if (type === 'diff_changed') {
-    if (diffController && editorViewState?.showInlineDiffs && currentPath) {
-      diffController.invalidateCacheForPath(currentPath);
-      diffController.refresh(true);
     }
   }
 }
@@ -5203,8 +4889,7 @@ async function openFile(path, options = {}) {
       console.warn("[Editor] Failed to request open via editor socket:", e);
     }
 
-    setText(payload.content || "");
-    lastSavedContent = getText();
+    lastSavedContent = '';
     markUnsaved(false);
     updatePathDisplay();
     syncSessionPath();
@@ -5229,10 +4914,6 @@ async function openFile(path, options = {}) {
 
     // Open WebSocket for this file
     openWebSocket(resolved);
-    diffController.setContext({ path: resolved, sha: lastSha256 });
-    if (editorViewState?.showInlineDiffs) {
-      diffController.refresh(true);
-    }
 
     // Update persisted editor state (last file + recents)
     // The returned entry includes scroll_line if previously stored
@@ -5395,7 +5076,7 @@ async function saveFile(opts) {
           if (retryResult && retryResult.ok) {
             const fileMeta = retryResult.data || {};
             lastSha256 = fileMeta.sha256 || lastSha256;
-            lastSavedContent = getText();
+            lastSavedContent = '';
             markUnsaved(false);
             statusEl.textContent = 'Saved';
             setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
@@ -5413,7 +5094,7 @@ async function saveFile(opts) {
     const fileMeta = result.data || {};
     if (fileMeta && Object.keys(fileMeta).length > 0) {
       lastSha256 = fileMeta.sha256 || lastSha256;
-      lastSavedContent = getText();
+      lastSavedContent = '';
       markUnsaved(false);
       statusEl.textContent = 'Saved';
       setTimeout(() => { if (!unsaved) statusEl.textContent = ''; }, 1500);
@@ -5482,7 +5163,7 @@ async function saveAsDialog() {
   if (target.existed && !window.confirm('File exists. Overwrite?')) return;
   statusEl.textContent = 'Saving...';
 
-  const content = await getText();
+  const content = '';
   const targetAbs = toAbsolute(target.path, null, HOME_DIR);
 
   // Reset SHA256 since this is a new file path
@@ -5502,11 +5183,6 @@ async function saveAsDialog() {
     // Open WebSocket for this new file
     closeWebSocket();
     openWebSocket(currentPath);
-    diffController.invalidateCacheForPath(currentPath);
-    diffController.setContext({ path: currentPath, sha: lastSha256 });
-    if (editorViewState?.showInlineDiffs) {
-      diffController.refresh(true);
-    }
 
     apiPost('state/file_activity', {
       path: currentPath,
@@ -6236,35 +5912,23 @@ document.addEventListener('click', () => closeAllMenus());
 
 bindMenuToggle(miNew, () => {
   closeWebSocket();
-  if (currentPath) {
-    diffController.invalidateCacheForPath(currentPath);
-  }
-  diffController.setContext(null);
   currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
   lastSha256 = null;
-  setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
+  lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
 });
 bindMenuToggle(miOpen, async () => { const p = await pickFile(); if (p) await openFile(p); });
 bindMenuToggle(miSave, () => saveFile());
 bindMenuToggle(miSaveAs, () => saveAsDialog());
 bindMenuToggle(miClose, () => {
   closeWebSocket();
-  if (currentPath) {
-    diffController.invalidateCacheForPath(currentPath);
-  }
-  diffController.setContext(null);
   currentPath=''; currentPathExists=false; lastPickerPath=HOME_DIR; currentModeLanguage=null;
   lastSha256 = null;
-  setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
+  lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
 });
 bindMenuToggle(miQuit, () => {
   closeWebSocket();
-  if (currentPath) {
-    diffController.invalidateCacheForPath(currentPath);
-  }
-  diffController.setContext(null);
   currentPath=''; currentPathExists=false; lastSha256 = null;
-  setText(''); lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
+  lastSavedContent=''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
 });
 
 bindMenuToggle(miDebugProjects, () => {
@@ -6280,24 +5944,15 @@ bindMenuToggle(miExportDiagnostics, () => {
   exportDiagnosticsToFile();
 });
 
-bindMenuToggle(miUndo, () => { if (view && undo) undo(view); });
-bindMenuToggle(miRedo, () => { if (view && redo) redo(view); });
+bindMenuToggle(miUndo, () => { document.execCommand('undo'); });
+bindMenuToggle(miRedo, () => { document.execCommand('redo'); });
 bindMenuToggle(miCut,  () => document.execCommand('cut'));
 bindMenuToggle(miCopy, () => document.execCommand('copy'));
 bindMenuToggle(miPaste, async () => {
-  try {
-    const text = await navigator.clipboard?.readText?.();
-    if (text != null) {
-      view.dispatch({ changes: { from: view.state.selection.main.from, to: view.state.selection.main.to, insert: text } });
-      return;
-    }
-  } catch {}
   document.execCommand('paste');
 });
 bindMenuToggle(miSelectAll, () => {
-  // Select all text in CodeMirror
-  view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
-  view.focus();
+  document.execCommand('selectAll');
 });
 
 bindMenuToggle(miToggleLines, async () => {
@@ -6650,20 +6305,7 @@ bindMenuToggle(miGoto, async () => {
 
 
 
-// Unsaved tracking
-function onAnyChange() {
-  const now = getText();
-  const hasChanges = now !== lastSavedContent;
-  markUnsaved(hasChanges);
-}
-const changeObserver = new MutationObserver(onAnyChange);
-const observeEditor = () => {
-  changeObserver.disconnect();
-  if (view?.dom) changeObserver.observe(view.dom, { childList:true, subtree:true, characterData:true });
-};
-function reobserve() {
-  setTimeout(observeEditor, 0);
-}
+
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
@@ -6692,13 +6334,9 @@ document.addEventListener('keydown', (e) => {
   if (cmdOrCtrl && e.key === 'n') {
     e.preventDefault();
     closeWebSocket();
-    if (currentPath) {
-      diffController.invalidateCacheForPath(currentPath);
-    }
-    diffController.setContext(null);
     currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
     lastSha256 = null;
-    setText(''); lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
+    lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
   }
 
   // Ctrl/Cmd+O: Open
@@ -6870,9 +6508,7 @@ async function main() {
   initSessionStateContext(serverState);
   queueSessionStateUpdate({ activeProject: serverState?.activeProject || null });
 
-  const initialDoc = '';
-  createView(initialDoc);
-  lastSavedContent = getText();
+  lastSavedContent = '';
   markUnsaved(false);
   // Don't call updatePathDisplay() here — currentPath is empty so it would flash "Untitled".
   // The real path will arrive from editor:ssot (Socket.IO) or restoredPath (HTTP) below.
@@ -6901,7 +6537,6 @@ async function main() {
     lastPickerPath = parentDir(restoredPath);
     lastSha256 = restoredSha;
     currentModeLanguage = detectLanguageFromFilename(restoredPath);
-    setText(''); // NiceGUI iframe owns the real buffer
     syncSessionPath();
 
     // Open WebSocket for file watching
@@ -6928,7 +6563,7 @@ async function main() {
       lastPickerPath = parentDir(abs);
       await openFile(abs).catch((e) => {
         host.toast(`Failed to open file: ${e.message}`);
-        currentPath = ''; currentPathExists = false; setText(''); markUnsaved(false); updatePathDisplay();
+        currentPath = ''; currentPathExists = false; markUnsaved(false); updatePathDisplay();
       });
     }
   } else if (!restoredPath) {
@@ -6953,11 +6588,4 @@ host.onBeforeExit(() => {
   return {};
 });
 
-// Track changes: refresh unsaved flag
-// (We don't wire CM6 transactions directly since we're using bare ESM; use a lightweight observer)
-const ENABLE_LEGACY_IFRAME_DOM_UNSAVED_OBSERVER = false;
-if (ENABLE_LEGACY_IFRAME_DOM_UNSAVED_OBSERVER) {
-  const observer = new MutationObserver(() => onAnyChange());
-  observer.observe(editorFrame, { childList:true, subtree:true, characterData:true });
-}
 }

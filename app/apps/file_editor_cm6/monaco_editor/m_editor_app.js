@@ -16,7 +16,6 @@
   var gitDiskModel = null;
   var lastGitBaselines = null;
   var _workerLogOnce = Object.create(null);
-  var pending = null;
   var currentPath = null;
   var dbg = null;
   var cachedPrefs = null;
@@ -2686,7 +2685,6 @@
     }
   }
 
-  // ensureVscodeApiThemeLoaded removed — vscode: theme loading via vscode_api deprecated
 
   function _parseJsonc(text) {
     // Minimal JSONC parser (supports // and /* */ comments + trailing commas).
@@ -3895,44 +3893,6 @@
     }
   }
 
-  function applyContent(data) {
-    if (!data) return;
-    // Legacy host-driven content push. Prefer cm6_open_path + SSOT pull.
-    ensureEditor();
-    ensureTouchSelection('pre');
-    if (!editor || !window.monaco) {
-      pending = data;
-      updateDebug('pending=1');
-      return;
-    }
-    var nextPath = (typeof data.path === 'string' && data.path) ? data.path : null;
-    var lang = normalizeLanguage(data.language);
-    var content = (typeof data.content === 'string') ? data.content : '';
-
-    if (!model) {
-      try {
-        // Keep a single model to avoid editor/plugin teardown between files.
-        model = createFileModel(content, lang, nextPath);
-        editor.setModel(model);
-        applyLanguageToModel(model, lang, nextPath);
-        vscodeRpcDidOpenIfReady();
-        installVscodeRpcChangePublisher();
-      } catch (e) {
-        console.warn('[Monaco] createModel failed, falling back to setValue', e);
-        editor.setValue(content);
-      }
-    } else {
-      try { model.setValue(content); } catch (_) { editor.setValue(content); }
-      applyLanguageToModel(model, lang, nextPath);
-    }
-    currentPath = nextPath;
-    try { lastContentSha256 = data.content_sha256 || lastContentSha256; } catch (_) {}
-    applyLineNumberSizing();
-    ensureTouchSelection('post');
-    setTimeout(function(){ ensureTouchSelection('tick'); }, 0);
-    emitToHost('editor_notify', { type: 'cm6_set_content_ack', path: data.path || null });
-    updateDebug('pending=0');
-  }
 
   async function openPathFromBackend(absPath, preferredLanguage) {
     if (!absPath) return;
@@ -5427,7 +5387,6 @@
       // Initialize editor strictly from SSOT.
       await ensureEditorWithPrefs();
       try { installVscodeApiLanguageBridgeProviders(); } catch (_) {}
-      if (pending) applyContent(pending);
 
       try {
         // vscode_api bootstrap snapshot (installed VSIX, themes, grammars, enabled list).
