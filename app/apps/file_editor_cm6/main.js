@@ -19,8 +19,12 @@ import {
   RUNNABLE_EXTENSIONS, isRunnableFile, setMenuChecked, FONT_SCALE_PRESETS,
   requireEl,
 } from './src/host/utils.js';
+import { createAppContext } from './src/host/app-context.js';
+import { initVirtualKeyboardAdjustments } from './src/host/ui/virtual-keyboard.js';
+import { pickerAvailable as pickerUiAvailable, pickFileWithPicker, pickDirectoryWithPicker, pickSaveTargetWithPicker } from './src/host/io/picker-helpers.js';
 import { showProjectsDebugModal } from './src/host/ui/projects-debug-modal.js';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './src/host/ui/watcher-settings.js';
+import { createUiIpcConnections } from './src/host/connections/ui-ipc.js';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 
@@ -69,6 +73,7 @@ let agentShortcutLoadBtn = null;
 let agentShortcutLoadLabel = null;
 let agentShortcutLoadDD = null;
 let editorViewState = null; // Loaded from backend at startup via /editor/view_state
+let cachedProjectRoot = null;
 
 function _resolveUiPrefsWaiters(ui) {
   if (!_uiPrefsWaiters.length) return;
@@ -279,10 +284,7 @@ function _deriveAgentHostBaseFromRuntimeUrl(rawUrl) {
 }
 
 function _emitSidebarIpc(eventName, payload) {
-  try {
-    if (!sidebarIpcSocket || !sidebarIpcSocket.connected) return;
-    sidebarIpcSocket.emit(eventName, payload || {});
-  } catch (_) {}
+  uiIpcConnections.emitSidebarIpc(eventName, payload);
 }
 
 function _isCodexEditTrackingEnabled() {
@@ -382,7 +384,6 @@ function _handleCodexAppserverEvent(event) {
   };
 
   _emitSidebarIpc('sidebar:agent_edit', payload);
-  void _applyCodexTrackedEdit(payload);
 }
 
 function _isCodexRuntimeUrl(rawUrl) {
@@ -524,7 +525,6 @@ let editorSocket = null;
 let editorSocketId = null;
 const editorPending = [];
 const _editorIssuesDumpWaiters = new Map(); // requestId -> {resolve,reject,timer}
-let sidebarIpcSocket = null;
 let codexAppserverSocket = null;
 const _codexTrackedEditDedup = new Map();
 
@@ -1088,137 +1088,28 @@ function connectEditorSocket() {
 }
 
 // ─── UI IPC (frontend ↔ editor iframe relay) ──────────────────────
-let uiIpcSocket = null;
+const uiIpcConnections = createUiIpcConnections({
+  ensureSocketIoLoaded,
+  initConsoleBridge,
+});
 function connectSidebarIPC() {
-  ensureSocketIoLoaded().then((io) => {
-    if (!io) return;
-    if (sidebarIpcSocket) {
-      if (!sidebarIpcSocket.connected) sidebarIpcSocket.connect();
-      return;
-    }
-    sidebarIpcSocket = io('/sidebar_ipc', {
-      path: '/ui_ipc_ws/socket.io',
-      transports: ['websocket'],
-      query: { app_id: 'file_editor_cm6', source: 'main_page' },
-    });
-    sidebarIpcSocket.on('connect', () => {
-      try {
-        sidebarIpcSocket.emit('sidebar:register', { role: 'host', app: 'file_editor_cm6' });
-      } catch (_) {}
-      console.log('[Sidebar_IPC] main page connected');
-    });
-    sidebarIpcSocket.on('sidebar:agent_edit', (data) => {
-      void _applyCodexTrackedEdit(data);
-    });
-    sidebarIpcSocket.on('sidebar:event', (data) => {
-      if (!data || typeof data !== 'object') return;
-      if (data.type !== 'agent_edit') return;
-      void _applyCodexTrackedEdit(data.payload || data);
-    });
-    sidebarIpcSocket.on('connect_error', (err) => {
-      console.warn('[Sidebar_IPC] connect failed', err);
-    });
-  }).catch((err) => {
-    console.warn('[Sidebar_IPC] load failed', err);
-  });
+  uiIpcConnections.connectSidebarIPC();
 }
 
 function connectUIIPC() {
-  ensureSocketIoLoaded().then((io) => {
-    if (!io) return;
-    uiIpcSocket = io('/ui_ipc', {
-      path: '/ui_ipc_ws/socket.io',
-      transports: ['websocket'],
-      query: { app_id: 'file_editor_cm6', source: 'main_page' },
-    });
-    uiIpcSocket.on('connect', () => {
-      console.log('[UI_IPC] main page connected');
-    });
-    uiIpcSocket.on('ui_event', (data) => {
-      if (!data || typeof data !== 'object') return;
-      console.log('[focus_relay] main got ui_event', data.type);
-      if (data.type === 'save') {
-        // Dispatch synthetic Ctrl+S to trigger the existing keydown handler.
-        document.dispatchEvent(new KeyboardEvent('keydown', {
-          key: 's', code: 'KeyS', ctrlKey: true, bubbles: true,
-        }));
-      } else if (data.type === 'focus') {
-        // Dispatch synthetic click to trigger the existing document click handler.
-        console.log('[focus_relay] dispatching synthetic click');
-        document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      }
-    });
-
-    // Console bridge — reuse this socket, no second connection
-    initConsoleBridge({ workerId: 'main_page', socket: uiIpcSocket });
-  }).catch((err) => {
-    console.warn('[UI_IPC] connect failed', err);
-  });
+  uiIpcConnections.connectUIIPC();
 }
 // ─── End UI IPC ───────────────────────────────────────────────────
 
 // ---- host/api contract (injected by framework) ----
 /* global host, api */
 export default async function initFileEditor(rootEl, api, host) {
-
-window.host = host;
+const appContext = createAppContext({ rootEl, api, host });
+window.__feAppContext = appContext;
+window.host = appContext.host;
 const cacheStateBadge = requireEl('#fe-file-draft-badge');
 var fileNameEl = null;
-window.api  = api;
-
-function initVirtualKeyboardAdjustments({ root }) {
-  if (!root) return;
-
-  const docEl = document.documentElement;
-  const viewport = window.visualViewport;
-
-  // We only care about detecting if the keyboard is likely open to toggle a class.
-  // We do NOT want to manually resize elements or set CSS variables that fight native behavior.
-
-  const getViewportHeight = () => {
-    if (viewport) return viewport.height;
-    return window.innerHeight || docEl.clientHeight || 0;
-  };
-
-  let baselineHeight = getViewportHeight() || window.innerHeight || docEl.clientHeight || 0;
-  let keyboardActive = false;
-
-  const updateKeyboardState = () => {
-    const currentHeight = getViewportHeight();
-    if (!currentHeight) return;
-
-    // specific check: if height shrinks by > 150px, assume keyboard
-    const diff = baselineHeight - currentHeight;
-    const likelyKeyboard = diff > 150;
-
-    if (likelyKeyboard !== keyboardActive) {
-      keyboardActive = likelyKeyboard;
-      root.classList.toggle('keyboard-open', keyboardActive);
-    }
-    
-    // Update baseline if we get a larger height (e.g. keyboard closed or orientation changed)
-    if (currentHeight > baselineHeight) {
-      baselineHeight = currentHeight;
-    }
-  };
-
-  if (viewport) {
-    viewport.addEventListener('resize', updateKeyboardState);
-  } else {
-    window.addEventListener('resize', updateKeyboardState);
-  }
-
-  // Handle orientation changes by resetting baseline
-  window.addEventListener('orientationchange', () => {
-    setTimeout(() => {
-      baselineHeight = getViewportHeight() || window.innerHeight || baselineHeight;
-      updateKeyboardState();
-    }, 250);
-  });
-
-  // Initial check
-  updateKeyboardState();
-}
+window.api  = appContext.api;
 
 const container = requireEl('#editor-container');
 const editorFrame = requireEl('#editor-frame'); // Changed from cm6-host to editor-frame
@@ -1230,6 +1121,15 @@ const rightToolbarControlEl = requireEl('.fe-toolbar > .fe-menu');
 const agentDrawerEl = requireEl('#agent-drawer');
 const agentTranscript = requireEl('#agent-transcript');
 const agentComposer = requireEl('#agent-input');
+Object.assign(appContext.elements, {
+  cacheStateBadge,
+  container,
+  editorFrame,
+  root,
+  agentDrawerEl,
+  agentTranscript,
+  agentComposer,
+});
 
 // Title/status & chrome
 fileNameEl = requireEl('#fe-file-name');
@@ -1742,7 +1642,6 @@ const miTrackEdits   = requireEl('#mi-track-edits');
 const miTrackCodexEdits = requireEl('#mi-track-codex-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
-const miLanguageServers = requireEl('#mi-language-servers');  // Added: 2025-12-08 - LSP settings modal
 const miExportDiagnostics = requireEl('#mi-export-diagnostics');
 const miEditorSettings = requireEl('#mi-editor-settings');
 
@@ -2821,7 +2720,6 @@ var restoredSessionPath = null;
 // Preferences are managed by backend; frontend displays state only (no caching)
 
 let currentModeLanguage = null;
-let cachedProjectRoot = null;
 let editorState = null;
 let branchMenuHandle = null;
 let agentDrawerHandle = null;
@@ -5199,7 +5097,7 @@ function showAutosaveModal(fileLabel, hasOtherDrafts) {
 }
 
 // Watcher UI (extracted to src/host/ui/watcher-settings.js)
-initWatcherUI(host);
+initWatcherUI(appContext);
 
 try {
   sidebarShortcuts = initSidebarShortcuts({
@@ -5219,57 +5117,46 @@ drainPendingWatcherEvents();
 
 // Projects debug modal extracted to src/host/ui/projects-debug-modal.js
 
-// ---------- Language Servers Modal (moved to OLD/lsp-modal/) ----------
-const showLspModal = async () => {
-  host.toast('Language servers modal temporarily disabled');
-};
-
 // ---------- Picker helpers (shared modal provided by framework) ----------
 function pickerAvailable() {
-  return window.teFilePicker && typeof window.teFilePicker.openFile === 'function';
+  return pickerUiAvailable();
 }
 async function pickFile(startPath) {
-  if (!pickerAvailable()) { host.toast('File picker unavailable'); return null; }
-  const baseStart = startPath || (currentPath ? parentDir(currentPath) : lastPickerPath);
-  const initial = toAbsolute(baseStart, null, HOME_DIR);
-  try {
-    const choice = await window.teFilePicker.openFile({ title:'Open File', startPath:initial, selectLabel:'Open' });
-    if (choice && choice.path) { lastPickerPath = parentDir(choice.path); return choice.path; }
-    return null;
-  } catch (e) {
-    if (e && e.message === 'cancelled') return null;
-    host.toast(e?.message || 'Browse failed');
-    return null;
-  }
+  const res = await pickFileWithPicker({
+    startPath,
+    currentPath,
+    lastPickerPath,
+    homeDir: HOME_DIR,
+    toAbsolute,
+    parentDir,
+    toast: (m) => host.toast(m),
+  });
+  lastPickerPath = res.lastPickerPath;
+  return res.path;
 }
 async function pickDirectory(startPath) {
-  if (!pickerAvailable()) { host.toast('File picker unavailable'); return null; }
-  const baseStart = startPath || (currentPath ? parentDir(currentPath) : lastPickerPath);
-  const initial = toAbsolute(baseStart, null, HOME_DIR);
-  try {
-    const choice = await window.teFilePicker.openDirectory({ title:'Select Folder', startPath:initial, selectLabel:'Select' });
-    if (choice && choice.path) { lastPickerPath = choice.path; return choice.path; }
-    return null;
-  } catch (e) {
-    if (e && e.message === 'cancelled') return null;
-    host.toast(e?.message || 'Browse failed');
-    return null;
-  }
+  const res = await pickDirectoryWithPicker({
+    startPath,
+    currentPath,
+    lastPickerPath,
+    homeDir: HOME_DIR,
+    toAbsolute,
+    parentDir,
+    toast: (m) => host.toast(m),
+  });
+  lastPickerPath = res.lastPickerPath;
+  return res.path;
 }
 async function pickSaveTarget() {
-  if (!pickerAvailable()) { host.toast('File picker unavailable'); return null; }
-  const baseDir = currentPath ? parentDir(currentPath) : lastPickerPath;
-  const initialDir = toAbsolute(baseDir, null, HOME_DIR);
-  try {
-    const result = await window.teFilePicker.saveFile({
-      title:'Save As', startPath: initialDir, filename: currentPath ? basename(currentPath) : '', selectLabel:'Save'
-    });
-    return result || null;
-  } catch (e) {
-    if (e && e.message === 'cancelled') return null;
-    host.toast(e?.message || 'Save cancelled');
-    return null;
-  }
+  return pickSaveTargetWithPicker({
+    currentPath,
+    lastPickerPath,
+    homeDir: HOME_DIR,
+    toAbsolute,
+    parentDir,
+    basename,
+    toast: (m) => host.toast(m),
+  });
 }
 
 function _relToBase(targetAbs, baseAbs) {
@@ -5395,11 +5282,6 @@ bindMenuToggle(miQuit, () => {
 
 bindMenuToggle(miDebugProjects, () => {
   showProjectsDebugModal();
-});
-
-// Language Servers modal - Added: 2025-12-08
-bindMenuToggle(miLanguageServers, () => {
-  showLspModal();
 });
 
 bindMenuToggle(miExportDiagnostics, () => {

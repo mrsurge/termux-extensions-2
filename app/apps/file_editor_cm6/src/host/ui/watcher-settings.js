@@ -162,10 +162,13 @@ function _updateWatcherStatusIndicator(mode) {
 /**
  * Call once after DOM ready to wire up the watcher settings UI and
  * register the global window handlers used by the explorer socket.
- * @param {{ toast: (msg: string) => void }} host
+ * @param {{ toast?: (msg: string) => void, host?: { toast?: (msg: string) => void } }} hostOrContext
  */
-export function initWatcherUI(host) {
-  _toast = host.toast || _toast;
+export function initWatcherUI(hostOrContext) {
+  _toast =
+    hostOrContext?.toast ||
+    hostOrContext?.host?.toast ||
+    _toast;
 
   // Wire the settings panel radios/buttons
   try { _initWatcherSettingsUI(); } catch (_) {}
