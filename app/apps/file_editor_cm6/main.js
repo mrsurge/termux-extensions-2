@@ -2097,7 +2097,7 @@ let _lastShortcutUsageKey = '';
 let _lastShortcutUsageStamp = 0;
 
 function resetActiveFileState({ resetPicker = false } = {}) {
-  closeWebSocket();
+  fileWebSocketManager.closeWebSocket();
   currentPath = '';
   currentPathExists = false;
   if (resetPicker) lastPickerPath = HOME_DIR;
@@ -3220,10 +3220,6 @@ const preferencesController = createPreferencesController({
   }),
 });
 
-async function fetchEditorState() {
-  return preferencesController.fetchEditorState();
-}
-
 async function updatePreference(key, value) {
   return preferencesController.updatePreference(key, value);
 }
@@ -3233,10 +3229,6 @@ installPrefsSync({
   setEditorViewState: (state) => { editorViewState = state; },
   applyStateToMenus: (state) => applyStateToMenus(state),
 });
-
-async function refreshMenuState() {
-  return preferencesController.refreshMenuState();
-}
 
 function applyStateToMenus(state) {
   preferencesController.applyStateToMenus(state);
@@ -3250,15 +3242,11 @@ const recentsController = createRecentsController({
 });
 recentsController.installWindowHook();
 
-function broadcastRecentsUpdate(state) {
-  recentsController.broadcastRecentsUpdate(state);
-}
-
 // Synchronize host + iframe when a project is opened in the explorer.
 // Called from explorer.js via window.__cm6HandleProjectOpened(path).
 const projectSwitchController = createProjectSwitchController({
   getTerminal: () => terminal,
-  closeWebSocket: () => closeWebSocket(),
+  closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
   resetHostState: () => {
     currentPath = '';
     currentPathExists = false;
@@ -3270,7 +3258,7 @@ const projectSwitchController = createProjectSwitchController({
   syncSessionPath: () => syncSessionPath(),
   syncEditorState: (forceRefresh) => syncEditorState(forceRefresh),
   pushAgentHostCwd: (cwd) => pushAgentHostCwd(cwd),
-  broadcastRecentsUpdate: (state) => broadcastRecentsUpdate(state),
+  broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
   getBranchMenuHandle: () => branchMenuHandle,
   getEditorFrame: () => editorFrame,
 });
@@ -3334,14 +3322,6 @@ const fileWebSocketManager = createFileWebSocketManager({
   onMessage: (msg) => fileSyncHandler.handleWSMessage(msg),
 });
 
-function closeWebSocket() {
-  fileWebSocketManager.closeWebSocket();
-}
-
-async function openWebSocket(path) {
-  return fileWebSocketManager.openWebSocket(path);
-}
-
 // ---------- File ops ----------
 const fileStatusController = createFileStatusController({
   runActiveBtn,
@@ -3355,10 +3335,6 @@ const fileStatusController = createFileStatusController({
   setIndicatorInactive: (badge) => setIndicatorInactive(badge),
   setIssuesButtonsEnabled: (enabled) => setIssuesButtonsEnabled(enabled),
 });
-function updateRunButtonState() {
-  fileStatusController.updateRunButtonState();
-}
-
 function updatePathDisplay() {
   fileStatusController.updatePathDisplay();
 }
@@ -3373,14 +3349,6 @@ const cacheIndicatorController = createCacheIndicatorController({
   markUnsaved: (flag) => markUnsaved(flag),
   getRestoredSessionActive: () => restoredSessionActive,
 });
-
-async function handleDiscardClick(e) {
-  return cacheIndicatorController.handleDiscardClick(e);
-}
-
-function setIndicatorActive(badge, char) {
-  cacheIndicatorController.setIndicatorActive(badge, char);
-}
 
 function setIndicatorInactive(badge) {
   cacheIndicatorController.setIndicatorInactive(badge);
@@ -3428,11 +3396,11 @@ const openFlowController = createOpenFlowController({
       if (typeof window.__explorerBusDispatch === 'function') window.__explorerBusDispatch('explorer:activeFile', { rel });
     } catch (_) {}
   },
-  openWebSocket: (path) => openWebSocket(path),
+  openWebSocket: (path) => fileWebSocketManager.openWebSocket(path),
   getEditorState: () => editorState,
   setEditorState: (state) => { editorState = state; },
   setCachedProjectRoot: (path) => { cachedProjectRoot = path; },
-  broadcastRecentsUpdate: (state) => broadcastRecentsUpdate(state),
+  broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
   syncEditorState: (force) => syncEditorState(force),
   getSessionStateActiveProject: () => sessionState.activeProject || null,
   setSessionStateActiveProject: (path) => { sessionState.activeProject = path; },
@@ -3444,9 +3412,6 @@ async function openFile(path, options = {}) {
   return openFlowController.openFile(path, options);
 }
 
-function saveFileViaEditorSocket(payload, timeoutMs = 8000) {
-  return saveSocketController.saveFileViaEditorSocket(payload, timeoutMs);
-}
 const saveFlowController = createSaveFlowController({
   clientId,
   setInflightOpId: (id) => { inflightOpId = id; },
@@ -3458,7 +3423,7 @@ const saveFlowController = createSaveFlowController({
   syncSessionPath: () => syncSessionPath(),
   apiPost: (path, body) => apiPost(path, body),
   apiGet: (path) => apiGet(path),
-  saveFileViaEditorSocket: (payload, timeoutMs) => saveFileViaEditorSocket(payload, timeoutMs),
+  saveFileViaEditorSocket: (payload, timeoutMs) => saveSocketController.saveFileViaEditorSocket(payload, timeoutMs),
   setStatus: (text) => { statusEl.textContent = text; },
   getUnsaved: () => !!unsaved,
   toast: (msg) => host.toast(msg),
@@ -3472,8 +3437,8 @@ const saveFlowController = createSaveFlowController({
   parentDir,
   detectLanguageFromFilename,
   updatePathDisplay: () => updatePathDisplay(),
-  closeWebSocket: () => closeWebSocket(),
-  openWebSocket: (path) => openWebSocket(path),
+  closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
+  openWebSocket: (path) => fileWebSocketManager.openWebSocket(path),
   getCachedProjectRoot: () => cachedProjectRoot,
   getEditorState: () => editorState,
   setEditorState: (state) => { editorState = state; },
@@ -3506,7 +3471,7 @@ const runFileController = createRunFileController({
   apiPost: (path, body) => apiPost(path, body),
   basename,
   toast: (msg) => host.toast(msg),
-  updateRunButtonState: () => updateRunButtonState(),
+  updateRunButtonState: () => fileStatusController.updateRunButtonState(),
 });
 
 async function runCurrentFile() {
@@ -3636,7 +3601,7 @@ installBasicMenuActions({
   openFile: (path) => openFile(path),
   saveFile: () => saveFile(),
   saveAsDialog: () => saveAsDialog(),
-  closeWebSocket: () => closeWebSocket(),
+  closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
   clearOnQuit: () => resetActiveFileState(),
   showProjectsDebugModal,
   exportDiagnosticsToFile: () => exportDiagnosticsToFile(),
@@ -3743,8 +3708,8 @@ runBootSequence(createBootSequenceDeps({
     connectCodexAppserverSocket: (url) => connectCodexAppserverSocket(url),
     createAgentController: (cfg) => _createAgentController(cfg),
     syncEditorState: (force) => syncEditorState(force),
-    broadcastRecentsUpdate: (state) => broadcastRecentsUpdate(state),
-    refreshMenuState: () => refreshMenuState(),
+    broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
+    refreshMenuState: () => preferencesController.refreshMenuState(),
     apiPost: (path, body) => apiPost(path, body),
     fetchPersistedSessionState: () => fetchPersistedSessionState(),
     initSessionStateContext: (serverState) => initSessionStateContext(serverState),
@@ -3773,7 +3738,7 @@ runBootSequence(createBootSequenceDeps({
       setLastSha256: (sha) => { lastSha256 = sha; },
       setCurrentModeLanguage: (lang) => { currentModeLanguage = lang; },
     }),
-    openWebSocket: (path) => openWebSocket(path),
+    openWebSocket: (path) => fileWebSocketManager.openWebSocket(path),
     updatePathDisplayFallbackLater: () => schedulePathDisplayFallback({
       getCurrentPath: () => currentPath,
       updatePathDisplay: () => updatePathDisplay(),
