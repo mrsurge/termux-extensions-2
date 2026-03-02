@@ -39,6 +39,7 @@ import { createProjectSwitchController } from './src/host/ui/project-switch.js';
 import { createCacheIndicatorController } from './src/host/ui/cache-indicator.js';
 import { initDrawerAndShortcuts } from './src/host/ui/drawer-shortcuts.js';
 import { initPanelsAndDrawer } from './src/host/ui/panels-drawer.js';
+import { initSidebarShortcutsSafe } from './src/host/ui/sidebar-shortcuts-bootstrap.js';
 import { initResponsiveLayout } from './src/host/ui/layout-manager.js';
 import { createFileStatusController } from './src/host/ui/file-status.js';
 import { createSettingsBootstrap } from './src/host/ui/settings-bootstrap.js';
@@ -57,6 +58,7 @@ import { installBeforeExitGuard } from './src/host/boot/public-hooks.js';
 import { createStateInitController } from './src/host/boot/state-init.js';
 import { createBootSequenceDeps } from './src/host/boot/sequence-deps.js';
 import { applyNoProjectState, applyRestoredPathState, schedulePathDisplayFallback, applyNoRestoredPathState } from './src/host/boot/path-state.js';
+import { installHostExitGuard } from './src/host/boot/exit-guard.js';
 import { createSaveSocketController } from './src/host/file-ops/save-socket.js';
 import { createSaveFlowController } from './src/host/file-ops/save-flow.js';
 import { createOpenFlowController } from './src/host/file-ops/open-flow.js';
@@ -2581,7 +2583,7 @@ function _closeAgentDropdown() {
 function _openAgentDropdown() {
   const dd = document.getElementById('fe-agent-dd');
   if (!dd) return;
-  try { closeAllMenus(); } catch (_) {}
+  try { menuCoreController.closeAllMenus(); } catch (_) {}
   _renderAgentDropdown();
   dd.classList.add('show');
 }
@@ -2682,7 +2684,7 @@ function _renderAgentShortcutLoadMenu() {
 
 function _openAgentShortcutLoadMenu() {
   if (!agentShortcutLoadDD) return;
-  try { closeAllMenus(); } catch (_) {}
+  try { menuCoreController.closeAllMenus(); } catch (_) {}
   _renderAgentShortcutLoadMenu();
   agentShortcutLoadDD.classList.add('show');
   if (agentShortcutLoadBtn) {
@@ -3114,7 +3116,7 @@ const CURSOR_STATE_DEBOUNCE = 1000; // ms
 
 // ── Adapter dropdown (context menu on status indicator) ──────────────
 const adapterUi = createAdapterUiController({
-  closeAllMenus: () => closeAllMenus(),
+  closeAllMenus: () => menuCoreController.closeAllMenus(),
   spinnerSetStep: (msg) => _spinnerSetStep(msg),
   ensureWorkbenchAdapterReady: () => ensureWorkbenchAdapterReady(),
   setWorkbenchAdapterState: ({ readyOk, connecting }) => {
@@ -3525,19 +3527,15 @@ function showAutosaveModal(fileLabel, hasOtherDrafts) {
 // Watcher UI (extracted to src/host/ui/watcher-settings.js)
 initWatcherUI(appContext);
 
-try {
-  sidebarShortcuts = initSidebarShortcuts({
-    host,
-    homeDir: HOME_DIR,
-    pickFile,
-    openDrawer: () => { try { agentDrawerHandle?.open?.(); } catch (_) {} },
-    closeAllMenus,
-    setMenuChecked,
-  });
-  void sidebarShortcuts.init();
-} catch (e) {
-  console.warn('Failed to initialize sidebar shortcuts:', e);
-}
+sidebarShortcuts = initSidebarShortcutsSafe({
+  initSidebarShortcuts,
+  host,
+  homeDir: HOME_DIR,
+  pickFile,
+  openDrawer: () => { try { agentDrawerHandle?.open?.(); } catch (_) {} },
+  closeAllMenus,
+  setMenuChecked,
+});
 
 drainPendingWatcherEvents();
 
@@ -3727,8 +3725,7 @@ async function getCurrentProjectRoot(forceRefresh = false) {
   return stateInitController.getCurrentProjectRoot(forceRefresh);
 }
 
-async function main() {
-  return runBootSequence(createBootSequenceDeps({
+runBootSequence(createBootSequenceDeps({
     initResponsiveLayout: () => initResponsiveLayout({ scheduleToolbarTitleClamp: (opts) => scheduleToolbarTitleClamp(opts) }),
     initToolbarTitleClampObservers: () => initToolbarTitleClampObservers(),
     loadLayoutPreferences: () => loadLayoutPreferences(),
@@ -3797,12 +3794,9 @@ async function main() {
     setBranchMenuHandle: (h) => { branchMenuHandle = h; },
     setAgentDrawerHandle: (h) => { agentDrawerHandle = h; },
   }));
-}
 
-// Run the main boot sequence
-main();
-
-installBeforeExitGuard({
+installHostExitGuard({
+  installBeforeExitGuard,
   onBeforeExit: (cb) => host.onBeforeExit(cb),
   getUnsaved: () => !!unsaved,
   showConfirm: () => showConfirm(),
