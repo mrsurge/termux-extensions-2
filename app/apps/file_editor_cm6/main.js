@@ -40,6 +40,8 @@ import { createFileWebSocketManager } from './src/host/connections/file-websocke
 import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './src/host/connections/vendor-loaders.js';
 import { createSessionTelemetryController } from './src/host/boot/session-telemetry.js';
 import { createEditorStateController } from './src/host/boot/editor-state.js';
+import { runBootSequence } from './src/host/boot/boot-sequence.js';
+import { installGlobalOpenHooks, installBeforeExitGuard } from './src/host/boot/public-hooks.js';
 import { createApiClient } from './src/host/api/client.js';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
@@ -4930,21 +4932,13 @@ bindMenuToggle(miGoto, async () => {
 // ---------- State load/init ----------
 // host.setTitle('Code CM6');
 
-// Set up global file opening hooks for explorer.js
-window.appOpenFile = (absPath) => {
-  openFile(absPath).catch(e => {
-    host.toast(`Failed to open: ${e.message}`);
-  });
-};
-
-window.appOpenFileRel = (rel, projectRoot) => {
-  // Convert relative path to absolute using project root
-  const base = projectRoot || cachedProjectRoot || HOME_DIR;
-  const abs = toAbsolute(rel, base, HOME_DIR);
-  openFile(abs).catch(e => {
-    host.toast(`Failed to open: ${e.message}`);
-  });
-};
+installGlobalOpenHooks({
+  openFile: (path) => openFile(path),
+  toast: (msg) => host.toast(msg),
+  toAbsolute,
+  getBaseDir: (projectRoot) => projectRoot || cachedProjectRoot || HOME_DIR,
+  HOME_DIR,
+});
 
 async function getCurrentProjectRoot(forceRefresh = false) {
   const state = await syncEditorState(forceRefresh);
@@ -4952,168 +4946,86 @@ async function getCurrentProjectRoot(forceRefresh = false) {
 }
 
 async function main() {
-  initResponsiveLayout({
-    scheduleToolbarTitleClamp: (opts) => scheduleToolbarTitleClamp(opts),
+  return runBootSequence({
+    initResponsiveLayout: () => initResponsiveLayout({ scheduleToolbarTitleClamp: (opts) => scheduleToolbarTitleClamp(opts) }),
+    initToolbarTitleClampObservers: () => initToolbarTitleClampObservers(),
+    loadLayoutPreferences: () => loadLayoutPreferences(),
+    initResizeManager: () => initResizeManager(),
+    initExplorerUI: () => initExplorerUI(),
+    connectExplorerSocket: () => connectExplorerSocket(),
+    connectEditorSocket: () => connectEditorSocket(),
+    connectUIIPC: () => connectUIIPC(),
+    connectSidebarIPC: () => connectSidebarIPC(),
+    ensureWorkbenchAdapterReady: () => ensureWorkbenchAdapterReady(),
+    initBranchMenu: () => initBranchMenu(),
+    waitForInitialUiPrefs: (ms) => waitForInitialUiPrefs(ms),
+    applySidebarUiPrefs: (prefs) => sidebarShortcuts?.applyUiPrefs?.(prefs || {}),
+    applyAgentRuntimeConfigFromUi: (prefs) => _applyAgentRuntimeConfigFromUi(prefs),
+    connectCodexAppserverSocket: (url) => connectCodexAppserverSocket(url),
+    createAgentController: (cfg) => _createAgentController(cfg),
+    syncEditorState: (force) => syncEditorState(force),
+    broadcastRecentsUpdate: (state) => broadcastRecentsUpdate(state),
+    refreshMenuState: () => refreshMenuState(),
+    apiPost: (path, body) => apiPost(path, body),
+    fetchPersistedSessionState: () => fetchPersistedSessionState(),
+    initSessionStateContext: (serverState) => initSessionStateContext(serverState),
+    queueSessionStateUpdate: (partial) => queueSessionStateUpdate(partial),
+    resetSavedState: () => { lastSavedContent = ''; },
+    markUnsaved: (flag) => markUnsaved(flag),
+    setNoProjectState: (msg) => {
+      statusEl.textContent = msg;
+      setToolbarFileName('No file');
+      setIssuesButtonsEnabled(false);
+    },
+    getUrlSearch: () => window.location.search,
+    toAbsolute,
+    HOME_DIR,
+    applyRestoredPathState: ({ restoredPath, serverState, restoredSha }) => {
+      currentPath = restoredPath;
+      currentPathExists = !!serverState.lastFileExists;
+      lastPickerPath = parentDir(restoredPath);
+      lastSha256 = restoredSha;
+      currentModeLanguage = detectLanguageFromFilename(restoredPath);
+      syncSessionPath();
+    },
+    openWebSocket: (path) => openWebSocket(path),
+    updatePathDisplayFallbackLater: () => {
+      setTimeout(() => {
+        try {
+          const el = document.getElementById('fe-file-name');
+          if (el && currentPath && (!el.textContent || el.textContent === 'Untitled')) updatePathDisplay();
+        } catch (_) {}
+      }, 2000);
+    },
+    openFile: (path) => {
+      lastPickerPath = parentDir(path);
+      return openFile(path);
+    },
+    onOpenFileFailure: (e) => {
+      host.toast(`Failed to open file: ${e.message}`);
+      currentPath = ''; currentPathExists = false; markUnsaved(false); updatePathDisplay();
+    },
+    onNoRestoredPath: (serverState) => {
+      if (serverState.lastFile && !serverState.lastFileExists) {
+        statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
+      } else {
+        statusEl.textContent = 'Select a file to begin.';
+      }
+    },
+    setBranchMenuHandle: (h) => { branchMenuHandle = h; },
+    setAgentDrawerHandle: (h) => { agentDrawerHandle = h; },
   });
-  initToolbarTitleClampObservers();
-
-  // Load saved layout preferences
-  loadLayoutPreferences();
-
-  // Initialize resize handles
-  initResizeManager();
-
-  // Initialize explorer first to get project context
-  await initExplorerUI().catch(e => {
-    console.error('Failed to initialize explorer UI:', e);
-  });
-
-  // Connect Socket.IO-based explorer UI bus (v2)
-  try {
-    connectExplorerSocket();
-  } catch (e) {
-    console.warn('Failed to connect explorer Socket.IO bus:', e);
-  }
-
-  // Connect dedicated editor Socket.IO channel (Monaco iframe control plane).
-  try {
-    connectEditorSocket();
-  } catch (e) {
-    console.warn('Failed to connect editor Socket.IO channel:', e);
-  }
-
-  // Connect UI IPC Socket.IO (frontend-to-frontend relay with editor iframe).
-  try {
-    connectUIIPC();
-  } catch (e) {
-    console.warn('Failed to connect UI IPC channel:', e);
-  }
-  try {
-    connectSidebarIPC();
-  } catch (e) {
-    console.warn('Failed to connect Sidebar IPC channel:', e);
-  }
-
-  // Deterministic workbench adapter startup (prevents early 502/500).
-  try {
-    await ensureWorkbenchAdapterReady();
-  } catch (e) {
-    console.warn('Workbench adapter readiness failed:', e);
-  }
-
-  branchMenuHandle = initBranchMenu();
-  const initialUiPrefs = await waitForInitialUiPrefs(2200);
-  try {
-    sidebarShortcuts?.applyUiPrefs?.(initialUiPrefs || {});
-  } catch (e) {
-    console.warn('[Sidebar] Failed to apply initial prefs:', e);
-  }
-  const agentIframeConfig = await _applyAgentRuntimeConfigFromUi(initialUiPrefs);
-  try {
-    connectCodexAppserverSocket(agentIframeConfig?.url);
-  } catch (e) {
-    console.warn('Failed to connect Codex appserver socket:', e);
-  }
-  agentDrawerHandle = _createAgentController(agentIframeConfig);
-
-  const serverState = await syncEditorState(true);
-  
-  // Populate recents dropdown on initial load
-  broadcastRecentsUpdate(serverState);
-
-  // Load menu state from backend (backend already configured editor at page render)
-  await refreshMenuState();
-  // Theme selection is handled via Editor → Settings… modal (vscode_api harness).
-
-  // Ask backend to resend cache state so draft indicator is accurate
-  try {
-    await apiPost('editor/refresh_cache_state', {});
-  } catch (e) {
-    console.warn('Failed to refresh cache state on boot:', e);
-  }
-  
-  await fetchPersistedSessionState();
-  initSessionStateContext(serverState);
-  queueSessionStateUpdate({ activeProject: serverState?.activeProject || null });
-
-  lastSavedContent = '';
-  markUnsaved(false);
-  // Don't call updatePathDisplay() here — currentPath is empty so it would flash "Untitled".
-  // The real path will arrive from editor:ssot (Socket.IO) or restoredPath (HTTP) below.
-
-  if (!serverState || !serverState.activeProject || !serverState.activeProjectExists) {
-    statusEl.textContent = serverState?.activeProjectMessage || 'Select a project to begin.';
-    setToolbarFileName('No file');
-    setIssuesButtonsEnabled(false);
-    return;
-  }
-
-  // Open file via URL param or saved state.
-  // Prefer currentPath (session_state, synced by on_connect from history_store.last_file).
-  // Fall back to lastFile for compatibility.
-  const params = new URLSearchParams(window.location.search);
-  const fileFromUrl = params.get('file');
-  const restoredPath = serverState.currentPath || serverState.lastFile;
-  const restoredSha = serverState.lastFileSha256 || null;
-
-  // Sync host bookkeeping with backend SSOT - the iframe already loaded the file.
-  // Don't call updatePathDisplay() here — the explorer socket's explorer:activeFile
-  // handler will set the toolbar when the authoritative value arrives.
-  if (restoredPath) {
-    currentPath = restoredPath;
-    currentPathExists = !!serverState.lastFileExists;
-    lastPickerPath = parentDir(restoredPath);
-    lastSha256 = restoredSha;
-    currentModeLanguage = detectLanguageFromFilename(restoredPath);
-    syncSessionPath();
-
-    // Open WebSocket for file watching
-    openWebSocket(restoredPath);
-
-    console.log('[BOOT] Synced with backend SSOT:', restoredPath);
-
-    // Safety: if explorer socket hasn't updated the toolbar within 2s, do it ourselves.
-    setTimeout(() => {
-      try {
-        const el = document.getElementById('fe-file-name');
-        if (el && currentPath && (!el.textContent || el.textContent === 'Untitled')) {
-          updatePathDisplay();
-        }
-      } catch (_) {}
-    }, 2000);
-  }
-
-  // Only call openFile() for explicit URL parameter - user wants a specific file
-  if (fileFromUrl) {
-    const abs = toAbsolute(fileFromUrl, null, HOME_DIR);
-    if (abs !== restoredPath) {
-      // URL requests a DIFFERENT file than what backend loaded - honor the URL
-      lastPickerPath = parentDir(abs);
-      await openFile(abs).catch((e) => {
-        host.toast(`Failed to open file: ${e.message}`);
-        currentPath = ''; currentPathExists = false; markUnsaved(false); updatePathDisplay();
-      });
-    }
-  } else if (!restoredPath) {
-    // No file to restore
-    if (serverState.lastFile && !serverState.lastFileExists) {
-      statusEl.textContent = serverState.lastFileMessage || 'Last file not found.';
-    } else {
-      statusEl.textContent = 'Select a file to begin.';
-    }
-  }
-  // else: restoredPath exists, iframe already loaded it, we just synced - done!
-
 }
 
 // Run the main boot sequence
 main();
 
-// Save state on exit
-host.onBeforeExit(() => {
-  if (unsaved) { showConfirm(); host.toast('Unsaved changes — Save or Discard before leaving.'); return { cancel:true }; }
-  flushSessionState(true);
-  return {};
+installBeforeExitGuard({
+  onBeforeExit: (cb) => host.onBeforeExit(cb),
+  getUnsaved: () => !!unsaved,
+  showConfirm: () => showConfirm(),
+  toast: (msg) => host.toast(msg),
+  flushSessionState: (force) => flushSessionState(force),
 });
 
 }
