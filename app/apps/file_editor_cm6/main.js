@@ -25,32 +25,10 @@ import { pickerAvailable as pickerUiAvailable, pickFileWithPicker, pickDirectory
 import { showProjectsDebugModal } from './src/host/ui/projects-debug-modal.js';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './src/host/ui/watcher-settings.js';
 import { createUiIpcConnections } from './src/host/connections/ui-ipc.js';
+import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './src/host/connections/vendor-loaders.js';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 
-function ensureSocketIoLoaded() {
-  if (window.io) return Promise.resolve(window.io);
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = '/static/vendor/socket.io.min.js';
-    script.async = true;
-    script.onload = () => resolve(window.io);
-    script.onerror = () => reject(new Error('Failed to load Socket.IO client'));
-    document.head.appendChild(script);
-  });
-}
-
-function ensureVConsoleLoaded() {
-  if (window.VConsole) return Promise.resolve(window.VConsole);
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = '/apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js';
-    script.async = true;
-    script.onload = () => resolve(window.VConsole);
-    script.onerror = () => reject(new Error('Failed to load vConsole'));
-    document.head.appendChild(script);
-  });
-}
 import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
 
 const AGENT_EXTENSION_MANIFEST = '/apps/file_editor_cm6/extensions/sidebar_extension/manifest.json';
