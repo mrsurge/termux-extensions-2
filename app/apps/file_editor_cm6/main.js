@@ -22,10 +22,25 @@ import {
 import { createAppContext } from './src/host/app-context.js';
 import { initVirtualKeyboardAdjustments } from './src/host/ui/virtual-keyboard.js';
 import { pickerAvailable as pickerUiAvailable, pickFileWithPicker, pickDirectoryWithPicker, pickSaveTargetWithPicker } from './src/host/io/picker-helpers.js';
+import { createAdapterUiController } from './src/host/ui/adapter-ui.js';
+import { createEditTrackerController } from './src/host/ui/edit-tracker.js';
+import { createFontScaleController } from './src/host/ui/font-scale.js';
+import { createSearchPanelController } from './src/host/ui/search-panel.js';
+import { installPrefsSync } from './src/host/ui/prefs-sync.js';
+import { createRecentsController } from './src/host/ui/recents.js';
+import { createPreferencesController } from './src/host/ui/preferences.js';
+import { createProjectSwitchController } from './src/host/ui/project-switch.js';
+import { createCacheIndicatorController } from './src/host/ui/cache-indicator.js';
+import { initDrawerAndShortcuts } from './src/host/ui/drawer-shortcuts.js';
+import { initResponsiveLayout } from './src/host/ui/layout-manager.js';
 import { showProjectsDebugModal } from './src/host/ui/projects-debug-modal.js';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './src/host/ui/watcher-settings.js';
 import { createUiIpcConnections } from './src/host/connections/ui-ipc.js';
+import { createFileWebSocketManager } from './src/host/connections/file-websocket.js';
 import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './src/host/connections/vendor-loaders.js';
+import { createSessionTelemetryController } from './src/host/boot/session-telemetry.js';
+import { createEditorStateController } from './src/host/boot/editor-state.js';
+import { createApiClient } from './src/host/api/client.js';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 
@@ -1688,6 +1703,15 @@ function _feHostTs() {
   }
 }
 
+function _feUpdateLspSpinner() {
+  try {
+    const ui = window.__feAdapterUi;
+    if (ui && typeof ui.updateLspSpinner === 'function') {
+      ui.updateLspSpinner();
+    }
+  } catch (_) {}
+}
+
 // Readiness spinner step labels.
 const _readinessLabels = {
   iframe_ready: 'Editor iframe ready',
@@ -2509,180 +2533,75 @@ initVirtualKeyboardAdjustments({
 
 // ---------- Session telemetry ----------
 async function fetchPersistedSessionState() {
-  try {
-    const resp = await fetch('/api/app/file_editor_cm6/session_state', { cache: 'no-store' });
-    const json = await resp.json();
-    if (!resp.ok || json?.ok === false) {
-      throw new Error(json?.error || resp.statusText || 'Session state fetch failed');
-    }
-    persistedSessionSnapshot = json?.data || {};
-    return persistedSessionSnapshot;
-  } catch (err) {
-    console.warn('Failed to load session telemetry:', err);
-    persistedSessionSnapshot = null;
-    return null;
-  }
+  return sessionTelemetry.fetchPersistedSessionState();
 }
 
 function initSessionStateContext(serverState) {
-  const persisted = persistedSessionSnapshot || {};
-  sessionState.activeProject = serverState?.activeProject || persisted.activeProject || null;
-  sessionState.currentPath = persisted.currentPath || null;
-  sessionState.unsaved = !!persisted.unsaved;
-  sessionState.lastSha256 = persisted.lastSha256 || null;
-  sessionState.updatedAt = persisted.updated_at || null;
-  sessionStateInitialized = true;
+  sessionTelemetry.initSessionStateContext(serverState);
 }
 
 function queueSessionStateUpdate(partial = null) {
-  if (!sessionStateInitialized) return;
-  if (partial && Object.keys(partial).length) {
-    sessionState = { ...sessionState, ...partial };
-  }
-  sessionState.updatedAt = new Date().toISOString();
-  if (sessionStateTimer) clearTimeout(sessionStateTimer);
-  sessionStateTimer = setTimeout(() => flushSessionState(), 600);
+  sessionTelemetry.queueSessionStateUpdate(partial);
 }
 
 async function flushSessionState(force = false) {
-  if (!sessionStateInitialized) return;
-  if (sessionStateTimer) {
-    clearTimeout(sessionStateTimer);
-    sessionStateTimer = null;
-  } else if (!force) {
-    // Nothing pending; skip.
-    return;
-  }
-  try {
-    await apiPost('session_state', sessionState);
-  } catch (err) {
-    console.warn('Failed to persist session telemetry:', err);
-  }
+  return sessionTelemetry.flushSessionState(force);
 }
 
 function activeProjectPath() {
-  return cachedProjectRoot || (editorState && editorState.activeProject) || sessionState.activeProject || null;
+  return sessionTelemetry.activeProjectPath();
 }
 
 function syncSessionPath(extra = {}) {
-  queueSessionStateUpdate({
-    activeProject: activeProjectPath(),
-    currentPath: currentPath || null,
-    lastSha256,
-    unsaved,
-    ...extra,
-  });
+  sessionTelemetry.syncSessionPath(extra);
 }
 
 // ---------- Edit Tracker ----------
+const editTrackerController = createEditTrackerController({
+  apiPost,
+  getEditorViewState: () => editorViewState,
+  getCurrentPath: () => currentPath,
+  openFile: (path) => openFile(path),
+  jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
+  statusEl: editTrackerStatusEl,
+});
 function connectEditTracker() {
-  // Backend-only - no WebSocket needed
-  // Just call the backend to enable edit tracking
-  apiPost('editor/toggle_edit_tracking', { enabled: true })
-    .then(() => console.log('[EditTracker] Enabled'))
-    .catch(err => console.error('[EditTracker] Failed to enable:', err));
+  editTrackerController.connectEditTracker();
 }
 
 function disconnectEditTracker() {
-  // Backend-only - no WebSocket needed
-  apiPost('editor/toggle_edit_tracking', { enabled: false })
-    .then(() => console.log('[EditTracker] Disabled'))
-    .catch(err => console.error('[EditTracker] Failed to disable:', err));
+  editTrackerController.disconnectEditTracker();
 }
 
 function handleEditTrackerEvent(data) {
-  if (data.event === 'tracking_status') {
-    updateEditTrackerStatus(data);
-  } else if (data.event === 'edit_tracked') {
-    if (editorViewState?.trackAgentEdits || editorViewState?.trackCodexWsEdits) {
-      autoJumpToEdit(data.path, data.line);
-    }
-  }
+  editTrackerController.handleEditTrackerEvent(data);
 }
 
 function updateEditTrackerStatus(status) {
-  if (status.active && status.shells && status.shells.length > 0) {
-    const shellTypes = status.shells.map(s => s.type).join(', ');
-    editTrackerStatusEl.textContent = `🤖 Tracking (${status.shells.length} ${shellTypes})`;
-    editTrackerStatusEl.style.display = '';
-  } else {
-    editTrackerStatusEl.textContent = '';
-    editTrackerStatusEl.style.display = 'none';
-  }
+  editTrackerController.updateEditTrackerStatus(status);
 }
 
 async function autoJumpToEdit(path, line) {
-  try {
-    // Open file if not already open
-    if (currentPath !== path) {
-      await openFile(path);
-    }
-    
-    // Wait for editor and file to fully load, then jump via iframe
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    if (line > 0) {
-      jumpToCurrentFileLine(line);
-    }
-  } catch (e) {
-    console.error('[EditTracker] Auto-jump failed:', e);
-  }
+  return editTrackerController.autoJumpToEdit(path, line);
 }
 
 
+const fontScaleController = createFontScaleController({
+  presets: FONT_SCALE_PRESETS,
+  updatePreference: (key, value) => updatePreference(key, value),
+  scheduleToolbarTitleClamp: (opts) => scheduleToolbarTitleClamp(opts),
+  toast: (msg, kind) => host.toast(msg, kind),
+});
 function applyFontScale(scale) {
-  // This function applies the selected font scale to the UI.
-  // It updates the --chrome-font-scale CSS variable, which is used
-  // by the stylesheet to resize UI elements like menus and the explorer.
-  document.documentElement.style.setProperty('--chrome-font-scale', scale);
-  
-  // Update menu checkmarks
-  updateFontScaleMenuChecks(scale);
-  
-  console.log(`[FontScale] Applied scale: ${scale}`);
+  fontScaleController.applyFontScale(scale);
 }
 
 function updateFontScaleMenuChecks(currentScale) {
-  // This helper ensures the correct font size preset is checked in the menu.
-  const items = {
-    'mi-font-small': FONT_SCALE_PRESETS.small,
-    'mi-font-medium': FONT_SCALE_PRESETS.medium,
-    'mi-font-large': FONT_SCALE_PRESETS.large
-  };
-  
-  for (const [id, scale] of Object.entries(items)) {
-    const item = document.getElementById(id);
-    if (item) {
-      const isActive = Math.abs(scale - currentScale) < 0.01;
-      item.classList.toggle('fe-menu-item-checked', isActive);
-      item.setAttribute('aria-checked', isActive ? 'true' : 'false');
-    }
-  }
+  fontScaleController.updateFontScaleMenuChecks(currentScale);
 }
 
 async function setFontScale(preset) {
-  // This function orchestrates changing the font size. It applies the
-  // new scale to the UI, sends the change to the backend to update the
-  // editor iframe, and persists the setting for future sessions.
-  const scale = FONT_SCALE_PRESETS[preset];
-  if (!scale) {
-    console.error(`[FontScale] Invalid preset: ${preset}`);
-    return;
-  }
-  
-  try {
-    // 1. Update chrome immediately
-    applyFontScale(scale);
-    scheduleToolbarTitleClamp({ doubleRaf: true });
-    
-    // 2. Update editor via backend and persist
-    await updatePreference('fontScale', scale);
-    scheduleToolbarTitleClamp({ doubleRaf: true });
-    
-  } catch (error) {
-    console.error('[FontScale] Failed to update:', error);
-    host.toast('Failed to update font scale', 'error');
-  }
+  return fontScaleController.setFontScale(preset);
 }
 
 
@@ -2710,9 +2629,14 @@ let sessionState = {
   lastSha256: null,
   updatedAt: null,
 };
-let sessionStateInitialized = false;
-let sessionStateTimer = null;
-let persistedSessionSnapshot = null;
+const sessionTelemetry = createSessionTelemetryController({
+  apiPost,
+  getActiveProjectFallback: () => cachedProjectRoot || (editorState && editorState.activeProject) || null,
+  getCurrentPath: () => currentPath || null,
+  getLastSha256: () => lastSha256,
+  getUnsaved: () => !!unsaved,
+});
+sessionState = sessionTelemetry.sessionState;
 let externalRefreshInProgress = false;
 let lastPickerPath = HOME_DIR;
 let _agentShortcutsCache = [];
@@ -3694,8 +3618,6 @@ try {
 } catch (_) {}
 
 // WebSocket and autosave state
-let ws = null;
-let wsKeepaliveTimer = null;
 let editTrackerWS = null;
 let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 let cm6NiceguiClientId = null;
@@ -3718,230 +3640,35 @@ var scrollStateTimer = null;
 const CURSOR_STATE_DEBOUNCE = 1000; // ms
 
 // ── Adapter dropdown (context menu on status indicator) ──────────────
+const adapterUi = createAdapterUiController({
+  closeAllMenus: () => closeAllMenus(),
+  spinnerSetStep: (msg) => _spinnerSetStep(msg),
+  ensureWorkbenchAdapterReady: () => ensureWorkbenchAdapterReady(),
+  setWorkbenchAdapterState: ({ readyOk, connecting }) => {
+    workbenchAdapterReadyOk = readyOk;
+    workbenchAdapterConnecting = connecting;
+  },
+  toast: (msg, ms) => host.toast(msg, ms),
+});
+window.__feAdapterUi = adapterUi;
 
 function _closeAdapterDropdown() {
-  const dd = document.getElementById('fe-adapter-dd');
-  if (dd) dd.classList.remove('show');
+  adapterUi.closeAdapterDropdown();
 }
 
 function _openAdapterDropdown() {
-  const dd = document.getElementById('fe-adapter-dd');
-  if (!dd) return;
-  try { closeAllMenus(); } catch (_) {}
-  dd.innerHTML = '';
-  const item = document.createElement('div');
-  item.className = 'fe-dd-item';
-  item.textContent = 'Reload Extension Adapter';
-  item.addEventListener('click', () => {
-    _closeAdapterDropdown();
-    _requestAdapterRestart();
-  });
-  dd.appendChild(item);
-  dd.classList.add('show');
+  adapterUi.openAdapterDropdown();
 }
 
 async function _requestAdapterRestart() {
-  try {
-    if (typeof window.__explorerBusRequest !== 'function') return;
-    _spinnerSetStep('Restarting adapter\u2026');
-    await window.__explorerBusRequest('ext:restart_adapter', {}, 15000);
-    _reloadEditorIframe();
-  } catch (e) {
-    console.warn('[adapter_restart] request failed:', e);
-  }
+  return adapterUi.requestAdapterRestart();
 }
 
 function _reloadEditorIframe() {
-  window.__adapterConnected = false;
-  workbenchAdapterReadyOk = false;
-  workbenchAdapterConnecting = null;
-  _spinnerSetStep('Reloading editor\u2026');
-  setTimeout(() => {
-    try {
-      const iframe = document.getElementById('editor-frame');
-      if (iframe) iframe.src = iframe.src;
-    } catch (_) {}
-    // Re-run readiness chain so spinner picks up new readiness steps
-    setTimeout(() => {
-      try { ensureWorkbenchAdapterReady(); } catch (_) {}
-    }, 2000);
-  }, 1500);
+  adapterUi.reloadEditorIframe();
 }
 
-function _feUpdateLspSpinner() {
-  try {
-    const spinner = document.getElementById('fe-lsp-spinner');
-    if (!spinner) return;
-
-    if (!window.__feLspSpinnerUi) {
-      window.__feLspSpinnerUi = {
-        lspShow: false,
-        lspTitle: '',
-        busyShow: false,
-        busyTitle: '',
-        busyLanguageId: '',
-        busyActivity: '',
-      };
-    }
-    const ui = window.__feLspSpinnerUi;
-
-    const anyBusy = Boolean(ui.lspShow || ui.busyShow);
-    const title = ui.busyShow ? (ui.busyTitle || ui.lspTitle) : ui.lspTitle;
-
-    // Anti-flicker: keep busy state visible for a minimum window.
-    const MIN_VISIBLE_MS = 650;
-    const now = Date.now();
-    if (!window.__feLspSpinnerState) {
-      window.__feLspSpinnerState = { shownAtMs: 0, hideTimer: null };
-    }
-    const st = window.__feLspSpinnerState;
-
-    if (anyBusy) {
-      if (st.hideTimer) {
-        clearTimeout(st.hideTimer);
-        st.hideTimer = null;
-      }
-      _setSpinnerClass(spinner, 'fe-lsp-status--busy');
-      spinner.title = title || 'Working…';
-      st.shownAtMs = now;
-      return;
-    }
-
-    // Not busy — transition to ok/error after anti-flicker
-    const elapsed = now - (st.shownAtMs || 0);
-    const wait = Math.max(0, MIN_VISIBLE_MS - elapsed);
-    const applyIdle = () => {
-      try {
-        st.hideTimer = null;
-        const statusClass = window.__adapterConnected
-          ? 'fe-lsp-status--ok' : 'fe-lsp-status--error';
-        const statusTitle = window.__adapterConnected
-          ? 'Adapter connected' : 'Adapter disconnected';
-        _setSpinnerClass(spinner, statusClass);
-        spinner.title = statusTitle;
-      } catch { }
-    };
-    if (wait > 0) {
-      if (st.hideTimer) return;
-      st.hideTimer = setTimeout(applyIdle, wait);
-      return;
-    }
-    applyIdle();
-  } catch { }
-}
-
-function _setSpinnerClass(el, cls) {
-  el.classList.remove('fe-lsp-spinner', 'fe-lsp-status--ok', 'fe-lsp-status--error', 'fe-lsp-status--busy');
-  el.classList.add(cls);
-  el.style.display = 'inline-block';
-}
-
-// No host↔iframe postMessage bridge: all editor telemetry uses /editor Socket.IO.
-// The editor (Monaco) sends LSP status updates over the editor socket; this helper
-// keeps the UI spinner + toast behavior consistent with the prior CM6 implementation.
-function _feHandleLspStatusUpdate({ show, languageId, state, payload } = {}) {
-  try {
-    if (!window.__feLspSpinnerUi) {
-      window.__feLspSpinnerUi = {
-        lspShow: false,
-        lspTitle: '',
-        busyShow: false,
-        busyTitle: '',
-        busyLanguageId: '',
-        busyActivity: '',
-      };
-    }
-    const feSpinnerUi = window.__feLspSpinnerUi;
-
-    feSpinnerUi.lspShow = Boolean(show);
-
-    let title = 'Language server';
-    if (languageId) title += ` (${languageId})`;
-    if (state) title += `: ${state}`;
-    if (payload && payload.error) title += ` — ${payload.error}`;
-    feSpinnerUi.lspTitle = title;
-    _feUpdateLspSpinner();
-
-    // Toast behavior:
-    // - Show "Loading <lang> LSP…" only if the spinner stays visible long enough (avoids spam for fast servers)
-    // - Show "<lang> LSP loaded" once per successful connection attempt
-    // - Always toast errors (best-effort)
-    try {
-      if (!window.__cm6LspUi) {
-        window.__cm6LspUi = {
-          activeLang: '',
-          activeAttempt: 0,
-          loadingToastTimer: null,
-          loadingToastShown: false,
-          lastReadyToastAt: 0,
-        };
-      }
-      const ui = window.__cm6LspUi;
-
-      const langLabel = languageId ? `${languageId} LSP` : 'Language server';
-
-      const bumpAttempt = () => {
-        ui.activeAttempt = (ui.activeAttempt || 0) + 1;
-        return ui.activeAttempt;
-      };
-
-      // New attempt when we start connecting, or when language changes while spinner is visible.
-      if (state === 'connecting' || (show && languageId && ui.activeLang && ui.activeLang !== languageId)) {
-        ui.activeLang = languageId;
-        ui.loadingToastShown = false;
-        if (ui.loadingToastTimer) clearTimeout(ui.loadingToastTimer);
-        const attemptId = bumpAttempt();
-        ui.loadingToastTimer = setTimeout(() => {
-          // Only show if still the same attempt and still loading.
-          if (ui.activeAttempt !== attemptId) return;
-          if (!feSpinnerUi || !feSpinnerUi.lspShow) return;
-          if (ui.loadingToastShown) return;
-          ui.loadingToastShown = true;
-          host.toast(`Loading ${langLabel}…`, 2500);
-        }, 650);
-      }
-
-      if (state === 'ready') {
-        if (ui.loadingToastTimer) {
-          clearTimeout(ui.loadingToastTimer);
-          ui.loadingToastTimer = null;
-        }
-        const now = Date.now();
-        // Avoid repeated "loaded" toasts if something chatters ready repeatedly.
-        if (now - (ui.lastReadyToastAt || 0) > 1500) {
-          // Only toast if we likely showed (or would have shown) a loading indicator.
-          // This keeps the UI tidy for ultra-fast servers.
-          if (ui.loadingToastShown || ui.activeLang === 'kotlin') {
-            host.toast(`${langLabel} loaded`, 1800);
-            ui.lastReadyToastAt = now;
-          }
-        }
-        ui.loadingToastShown = false;
-      }
-
-      if (state === 'disconnected') {
-        if (ui.loadingToastTimer) {
-          clearTimeout(ui.loadingToastTimer);
-          ui.loadingToastTimer = null;
-        }
-        ui.loadingToastShown = false;
-      }
-
-      if (state === 'error') {
-        if (ui.loadingToastTimer) {
-          clearTimeout(ui.loadingToastTimer);
-          ui.loadingToastTimer = null;
-        }
-        ui.loadingToastShown = false;
-        const msg =
-          payload && payload.error ? String(payload.error) : `${langLabel} failed to initialize`;
-        host.toast(msg, 4500);
-      }
-    } catch { }
-  } catch { }
-}
-
-window.__cm6HandleLspStatusUpdate = _feHandleLspStatusUpdate;
+window.__cm6HandleLspStatusUpdate = adapterUi.handleLspStatusUpdate;
 
 async function triggerExternalRefresh(path) {
   if (externalRefreshInProgress) return;
@@ -3973,468 +3700,157 @@ function markUnsaved(flag) {
 }
 
 // ---------- API helpers ----------
+const apiClient = createApiClient(api);
 async function apiGet(path) {
-  const data = await api.get(path);
-  // framework returns either raw or {ok,data}; normalize:
-  return data.content ? data : (data.data || data);
+  return apiClient.apiGet(path);
 }
 async function apiPost(path, body) {
-  try {
-    const res = await api.post(path, body);
-    return res?.data || res || {};
-  } catch (error) {
-    console.error(`[apiPost] Error calling ${path}:`, error);
-    return {};
-  }
+  return apiClient.apiPost(path, body);
 }
 
 // Live draft/autosave propagation is handled by the dedicated editor Socket.IO channel.
+const searchPanelController = createSearchPanelController({
+  getEditorSocket: () => editorSocket,
+  getCurrentPath: () => currentPath || null,
+  getProjectRoot: () => cachedProjectRoot || null,
+  apiPost: (path, body) => apiPost(path, body),
+  toast: (msg) => host.toast(msg),
+});
 
 async function triggerEditorSearchPanel(reason = 'menu', opts = {}) {
-  const action = opts && opts.replace ? 'replace' : 'find';
-  console.log('[Find] triggerEditorSearchPanel', action, 'editorSocket connected=', editorSocket?.connected);
-  if (editorSocket && editorSocket.connected) {
-    editorSocket.emit('editor_find_cmd', { action, reason });
-    return;
-  }
-  const payload = {
-    path: currentPath || null,
-    project: cachedProjectRoot || null,
-    reason,
-  };
-  const result = await apiPost('editor/search/open', payload);
-  if (result?.ok === false) {
-    const message = result?.error || 'Search unavailable';
-    host.toast(message);
-  }
+  return searchPanelController.triggerEditorSearchPanel(reason, opts);
 }
 
 // ---------- Unified Preference Management (Backend as Single Source of Truth) ----------
+const preferencesController = createPreferencesController({
+  apiPost: (path, body) => apiPost(path, body),
+  getClientId: () => cm6NiceguiClientId,
+  setEditorViewState: (state) => { editorViewState = state; },
+  setMenuChecked,
+  applyFontScale: (scale) => applyFontScale(scale),
+  getMenuItems: () => ({
+    miToggleLines,
+    miToggleSyntax,
+    miToggleCloseBrackets,
+    miToggleAutocomplete,
+    miToggleShading,
+    miToggleIndentGuides,
+    miToggleWrap,
+    miToggleAutosave,
+    miToggleDiffs,
+    miToggleDraftDiffs,
+    miToggleColorPicker,
+    miToggleReadonly,
+    miToggleMinimap,
+    miToggleStickyScroll,
+    miTrackEdits,
+    miTrackCodexEdits,
+  }),
+});
 
 async function fetchEditorState() {
-  // Query backend for current editor state (for menu checkmarks only)
-  try {
-    const resp = await fetch('/api/app/file_editor_cm6/editor/view_state', { cache: 'no-store' });
-    const json = await resp.json();
-    return json?.data || null;
-  } catch (err) {
-    console.error('[EditorState] Failed to fetch:', err);
-    return null;
-  }
+  return preferencesController.fetchEditorState();
 }
 
 async function updatePreference(key, value) {
-  // Send preference change to backend; backend handles persistence + application
-  // Returns full state in single round trip (Jimmy's optimization)
-  try {
-    console.log('[Preference] updatePreference request', key, value);
-    const body = { key, value };
-    if (cm6NiceguiClientId) body.nicegui_client_id = cm6NiceguiClientId;
-    const resp = await apiPost('editor/update_preference', body);
-    
-    // apiPost already unwraps the response (returns res.data)
-    // Backend sends {ok: true, data: {...}}, apiPost returns the data object
-    if (resp && typeof resp === 'object' && Object.keys(resp).length > 0) {
-      // resp is the state object (not wrapped in {ok, data})
-      editorViewState = resp; // Update state BEFORE applying (fixes minimap toggle inversion)
-      applyStateToMenus(resp);
-      console.log('[Preference] updatePreference applied', key, value);
-      return true;
-    }
-    
-    // Empty response or error
-    console.error(`[Preference] Update ${key} failed: empty or invalid response`, resp);
-    return false;
-  } catch (err) {
-    console.error(`[Preference] Failed to update ${key}:`, err);
-    return false;
-  }
+  return preferencesController.updatePreference(key, value);
 }
 
-// Cross-client preference sync: other connected host shells apply immediately when
-// the backend broadcasts editor:prefs_changed on the explorer bus.
-window.__cm6HandlePrefsChanged = function(payload) {
-  try {
-    const viewState = payload && typeof payload === 'object'
-      ? (payload.view_state || payload.viewState || null)
-      : null;
-    if (!viewState || typeof viewState !== 'object') return;
-
-    // Ignore self-echo (originating host that initiated the preference change).
-    try {
-      if (payload.source_client && cm6NiceguiClientId && String(payload.source_client) === String(cm6NiceguiClientId)) {
-        return;
-      }
-    } catch (_) {}
-
-    editorViewState = viewState;
-    applyStateToMenus(viewState);
-  } catch (err) {
-    console.warn('[PrefsSync] Failed to apply prefs_changed:', err);
-  }
-};
-
-try {
-  if (window.__cm6PendingPrefsChanged) {
-    window.__cm6HandlePrefsChanged(window.__cm6PendingPrefsChanged);
-    window.__cm6PendingPrefsChanged = null;
-  }
-} catch (_) {}
+installPrefsSync({
+  getClientId: () => cm6NiceguiClientId,
+  setEditorViewState: (state) => { editorViewState = state; },
+  applyStateToMenus: (state) => applyStateToMenus(state),
+});
 
 async function refreshMenuState() {
-  // Query backend for current state and update menu checkmarks
-  const state = await fetchEditorState();
-  if (!state) return;
-  
-  applyStateToMenus(state);
-  editorViewState = state;
+  return preferencesController.refreshMenuState();
 }
 
 function applyStateToMenus(state) {
-  // Update all menu checkmarks from backend state
-  setMenuChecked(miToggleLines, state.showLineNumbers);
-  setMenuChecked(miToggleSyntax, state.showSyntax);
-  setMenuChecked(miToggleCloseBrackets, state.autoCloseBrackets);
-  setMenuChecked(miToggleAutocomplete, state.autocompletion);
-  setMenuChecked(miToggleShading, state.showShading);
-  setMenuChecked(miToggleIndentGuides, state.showIndentGuides);
-  setMenuChecked(miToggleWrap, state.wordWrap);
-  setMenuChecked(miToggleAutosave, state.autoSave);
-  setMenuChecked(miToggleDiffs, state.showInlineDiffs);
-  setMenuChecked(miToggleDraftDiffs, state.showDraftDiffs);
-  setMenuChecked(miToggleColorPicker, state.colorPicker);
-  setMenuChecked(miToggleReadonly, state.readOnly);
-  setMenuChecked(miToggleMinimap, state.showMinimap);
-  setMenuChecked(miToggleStickyScroll, state.stickyScroll);  // Added: 2025-12-03 by vectorArc - TE2 Team
-  setMenuChecked(miTrackEdits, state.trackAgentEdits);
-  setMenuChecked(miTrackCodexEdits, state.trackCodexWsEdits);
-  
-  // Apply font scale to UI
-  applyFontScale(state.fontScale ?? 0.85);
+  preferencesController.applyStateToMenus(state);
 }
+
+const recentsController = createRecentsController({
+  recentFilesDD,
+  recentFilesBtn,
+  formatFileNameDisplay: (name) => formatFileNameDisplay(name),
+  openFile: (path) => openFile(path),
+});
+recentsController.installWindowHook();
 
 function broadcastRecentsUpdate(state) {
-  if (!state) {
-    return;
-  }
-  window.__cm6EditorState = state;
-  if (typeof window.__cm6RefreshRecents === 'function') {
-    try {
-      window.__cm6RefreshRecents(state);
-    } catch (err) {
-      console.error('Failed to refresh recents dropdown:', err);
-    }
-  }
-  window.dispatchEvent(new CustomEvent('cm6:recents-updated', { detail: state }));
+  recentsController.broadcastRecentsUpdate(state);
 }
-
-/**
- * Populate the recents dropdown from state.recents.
- * Called by broadcastRecentsUpdate whenever editor state changes.
- */
-window.__cm6RefreshRecents = function(state) {
-  const recents = state?.recents || [];
-  
-  // Clear existing dropdown content
-  recentFilesDD.innerHTML = '';
-  
-  if (!recents.length) {
-    recentFilesBtn.disabled = true;
-    const emptyItem = document.createElement('div');
-    emptyItem.className = 'fe-dd-item fe-dd-item--disabled';
-    emptyItem.textContent = 'No recent files';
-    recentFilesDD.appendChild(emptyItem);
-    return;
-  }
-  
-  recentFilesBtn.disabled = false;
-  
-  recents.forEach((entry) => {
-    const item = document.createElement('div');
-    item.className = 'fe-dd-item';
-    if (!entry.exists) {
-      item.classList.add('fe-dd-item--missing');
-    }
-    
-    const label = entry.label || entry.path || '(unknown)';
-    const path = entry.path || '';
-    
-    // Show label, with path as tooltip
-    item.textContent = formatFileNameDisplay(label);
-    item.title = path;
-    
-    // Store scroll position if available (for per-file scroll restore)
-    const scrollLine = entry.scroll_line || entry.scrollLine || null;
-    
-    item.addEventListener('click', async () => {
-      recentFilesDD.classList.remove('show');
-      if (!entry.exists) {
-        console.warn('[Recents] File does not exist:', path);
-        return;
-      }
-      try {
-        // Open the file - openFile() now handles scroll restoration automatically
-        await openFile(path);
-        // Note: scroll restoration is now handled by openFile() with offset=5
-        // No separate jump needed here
-      } catch (err) {
-        console.error('[Recents] Failed to open file:', err);
-      }
-    });
-    
-    recentFilesDD.appendChild(item);
-  });
-};
 
 // Synchronize host + iframe when a project is opened in the explorer.
 // Called from explorer.js via window.__cm6HandleProjectOpened(path).
+const projectSwitchController = createProjectSwitchController({
+  getTerminal: () => terminal,
+  closeWebSocket: () => closeWebSocket(),
+  resetHostState: () => {
+    currentPath = '';
+    currentPathExists = false;
+    lastSha256 = null;
+    lastSavedContent = '';
+  },
+  markUnsaved: (flag) => markUnsaved(flag),
+  updatePathDisplay: () => updatePathDisplay(),
+  syncSessionPath: () => syncSessionPath(),
+  syncEditorState: (forceRefresh) => syncEditorState(forceRefresh),
+  pushAgentHostCwd: (cwd) => pushAgentHostCwd(cwd),
+  broadcastRecentsUpdate: (state) => broadcastRecentsUpdate(state),
+  getBranchMenuHandle: () => branchMenuHandle,
+  getEditorFrame: () => editorFrame,
+});
 async function handleProjectOpened(newProjectPath) {
-  // If the terminal drawer is open, shut it down first so it doesn't try to
-  // auto-rebind shells during a hot project switch.
-  try {
-    if (terminal && typeof terminal.closeAndDisconnect === 'function') {
-      terminal.closeAndDisconnect();
-    }
-  } catch (err) {
-    console.warn('[ProjectSwitch] Failed to close terminal drawer:', err);
-  }
-
-  // Reset host-side editor/file state so we don't keep editing a file
-  // from the previous project while the backend has already switched.
-  closeWebSocket();
-  currentPath = '';
-  currentPathExists = false;
-  lastSha256 = null;
-  lastSavedContent = '';
-  markUnsaved(false);
-  updatePathDisplay();
-  syncSessionPath();
-
-  // Ensure the worker process updates its active project before iframe reload.
-  try {
-    await fetch('/api/app/file_editor_cm6/editor/set_active_project', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectPath: newProjectPath }),
-    });
-  } catch (err) {
-    console.warn('[ProjectSwitch] Failed to sync worker project root:', err);
-  }
-
-  // Refresh state snapshot so cachedProjectRoot, recents, and git base reflect
-  // the new active project.
-  const newState = await syncEditorState(true);
-
-  // Notify agent host about the new project root (updates conversation list).
-  try {
-    const root = newState?.activeProject || newProjectPath || '';
-    const rootAbs = root ? String(root).replace(/\/+$/, '') : '';
-    await pushAgentHostCwd(rootAbs);
-  } catch (err) {
-    console.warn('[ProjectSwitch] Failed to push agent cwd:', err);
-  }
-  
-  // Update recents dropdown with new project's recents
-  broadcastRecentsUpdate(newState);
-  
-  // Refresh branch menu to show new project's branches
-  if (branchMenuHandle && typeof branchMenuHandle.refresh === 'function') {
-    try {
-      branchMenuHandle.refresh();
-    } catch (err) {
-      console.warn('[ProjectSwitch] Failed to refresh branch menu:', err);
-    }
-  }
-
-  // Reload the NiceGUI iframe so editor_page() re-runs under the new project.
-  try {
-    if (editorFrame && editorFrame.contentWindow && editorFrame.contentWindow.location) {
-      editorFrame.contentWindow.location.reload();
-    } else if (editorFrame) {
-      // Fallback: bump src to force a reload.
-      editorFrame.src = editorFrame.src;
-    }
-  } catch (err) {
-    console.warn('[ProjectSwitch] Failed to reload editor iframe:', err);
-  }
+  return projectSwitchController.handleProjectOpened(newProjectPath);
 }
 
 // Expose for explorer.js (project:opened handler)
-window.__cm6HandleProjectOpened = handleProjectOpened;
+projectSwitchController.installWindowHook();
 
-async function syncEditorState(forceRefresh = false) {
-  if (!forceRefresh && editorState) {
-    return editorState;
-  }
-  try {
-    const resp = await fetch('/api/app/file_editor_cm6/state', { cache: 'no-store' });
-    const json = await resp.json();
-    editorState = json?.data || {};
-    cachedProjectRoot = editorState.activeProject || null;
-    window.__cm6EditorState = editorState;
-    return editorState;
-  } catch (err) {
-    console.error('Failed to fetch editor state:', err);
-    editorState = null;
-    cachedProjectRoot = null;
-    window.__cm6EditorState = null;
-    return null;
-  }
-}
-
-window.__cm6SyncState = syncEditorState;
-
-// Expose function to reload current file (for git operations)
-window.__cm6ReloadCurrentFile = async function() {
-  if (currentPath) {
-    await openFile(currentPath, { allowOverwrite: true, forceRefresh: true });
-  }
-};
-
-window.__cm6RequestGitBaselines = function() {
-  try {
-    if (!editorSocket || !editorSocket.connected) return false;
-    if (!currentPath) return false;
-    editorSocket.emit('editor_git_baselines_request', { path: currentPath });
-    return true;
-  } catch (_) {
-    return false;
-  }
-};
-
-window.__cm6EnsureInlineDiffs = async function ensureInlineDiffsEnabled(forceOn = true) {
-  if (!forceOn) {
-    return true;
-  }
-  if (editorViewState?.showInlineDiffs) {
-    return true;
-  }
-  try {
-    return await updatePreference('showInlineDiffs', true);
-  } catch (err) {
-    console.warn('Auto-enable inline diffs failed:', err);
-    return false;
-  }
-};
-
-window.__cm6EnsureDraftDiffs = async function ensureDraftDiffsEnabled(forceOn = true) {
-  if (!forceOn) {
-    return true;
-  }
-  if (editorViewState?.showDraftDiffs) {
-    return true;
-  }
-  try {
-    return await updatePreference('showDraftDiffs', true);
-  } catch (err) {
-    console.warn('Auto-enable draft diffs failed:', err);
-    return false;
-  }
-};
-
-// Expose currentPath getter
-Object.defineProperty(window, 'currentPath', {
-  get: () => currentPath,
-  set: (value) => { currentPath = value; },
-  configurable: true
+const editorStateController = createEditorStateController({
+  getEditorState: () => editorState,
+  setEditorState: (state) => { editorState = state; },
+  getCachedProjectRoot: () => cachedProjectRoot,
+  setCachedProjectRoot: (path) => { cachedProjectRoot = path; },
+  getCurrentPath: () => currentPath,
+  setCurrentPath: (path) => { currentPath = path; },
+  getEditorSocket: () => editorSocket,
+  getEditorViewState: () => editorViewState,
+  updatePreference: (key, value) => updatePreference(key, value),
+  openFile: (path, opts) => openFile(path, opts),
 });
 
-async function ensureProjectContext() {
-  const state = await syncEditorState(!cachedProjectRoot);
-  if (!state || !state.activeProject || !state.activeProjectExists) {
-    return null;
-  }
-  cachedProjectRoot = state.activeProject;
-  return state;
+async function syncEditorState(forceRefresh = false) {
+  return editorStateController.syncEditorState(forceRefresh);
 }
 
+async function ensureProjectContext() {
+  return editorStateController.ensureProjectContext();
+}
+
+editorStateController.installWindowHooks();
+
 // ---------- WebSocket management ----------
+const fileWebSocketManager = createFileWebSocketManager({
+  ReconnectingWebSocket,
+  clientId,
+  setStatus: (msg) => { statusEl.textContent = msg; },
+  clearStatus: (expected, delayMs) => {
+    setTimeout(() => {
+      if (statusEl.textContent === expected) statusEl.textContent = '';
+    }, delayMs);
+  },
+  onMessage: (msg) => handleWSMessage(msg),
+});
+
 function closeWebSocket() {
-  if (ws) {
-    try { ws.close(); } catch {}
-    ws = null;
-  }
-  if (wsKeepaliveTimer) {
-    clearInterval(wsKeepaliveTimer);
-    wsKeepaliveTimer = null;
-  }
+  fileWebSocketManager.closeWebSocket();
 }
 
 async function openWebSocket(path) {
-  closeWebSocket();
-  if (!path) return;
-
-  let wsUrl;
-  try {
-    if (!window.wsPort || typeof window.wsPort.buildWsUrl !== 'function') {
-      throw new Error('wsPort helper unavailable');
-    }
-    wsUrl = await window.wsPort.buildWsUrl('file_editor_cm6', path, clientId);
-  } catch (err) {
-    console.error('Failed to resolve WebSocket URL:', err);
-    statusEl.textContent = 'WebSocket unavailable';
-    setTimeout(() => {
-      if (statusEl.textContent === 'WebSocket unavailable') {
-        statusEl.textContent = '';
-      }
-    }, 2000);
-    return;
-  }
-
-  try {
-    ws = new ReconnectingWebSocket(wsUrl, {
-      maxRetries: 20,
-      reconnectInterval: 1000,
-      maxReconnectInterval: 10000,
-      reconnectDecay: 1.3,
-      debug: false
-    });
-  } catch (err) {
-    console.error('Failed to open WebSocket:', err);
-    statusEl.textContent = 'WebSocket unavailable';
-    setTimeout(() => {
-      if (statusEl.textContent === 'WebSocket unavailable') {
-        statusEl.textContent = '';
-      }
-    }, 2000);
-    return;
-  }
-
-  ws.onopen = () => {
-    console.log('WebSocket connected for:', path);
-    if (!wsKeepaliveTimer) {
-      wsKeepaliveTimer = setInterval(() => {
-        try {
-          if (ws && ws.readyState === 1) ws.send('ping');
-        } catch (_) {}
-      }, 15000);
-    }
-  };
-
-  ws.onmessage = (event) => {
-    try {
-      const msg = JSON.parse(event.data);
-      handleWSMessage(msg);
-    } catch (e) {
-      console.error('Failed to parse WS message:', e);
-    }
-  };
-
-  ws.onerror = (err) => {
-    console.error('WebSocket error:', err);
-  };
-
-  ws.onclose = () => {
-    console.log('WebSocket closed');
-    if (wsKeepaliveTimer) {
-      clearInterval(wsKeepaliveTimer);
-      wsKeepaliveTimer = null;
-    }
-  };
-  
-  ws.onreconnect = (attempt, delay) => {
-    console.log(`[FileRead] Reconnecting (attempt ${attempt}) in ${delay}ms...`);
-  };
+  return fileWebSocketManager.openWebSocket(path);
 }
 
 function handleWSMessage(msg) {
@@ -4512,91 +3928,35 @@ function updatePathDisplay() {
   updateRunButtonState();
 }
 
-async function handleDiscardClick(e) {
-  e.stopPropagation();
-  e.preventDefault();
-  
-  const project = cachedProjectRoot || (await getCurrentProjectRoot());
-  if (!project) {
-    host.toast('Cannot discard: Project root unknown');
-    return;
-  }
+const cacheIndicatorController = createCacheIndicatorController({
+  getCurrentPath: () => currentPath,
+  getCachedProjectRoot: () => cachedProjectRoot,
+  getCurrentProjectRoot: () => getCurrentProjectRoot(),
+  apiDelete: (path) => api.delete(path),
+  openFile: (path, opts) => openFile(path, opts),
+  toast: (msg) => host.toast(msg),
+  markUnsaved: (flag) => markUnsaved(flag),
+  getRestoredSessionActive: () => restoredSessionActive,
+});
 
-  // Instant discard - no confirmation
-  try {
-    const url = `session_cache?project=${encodeURIComponent(project)}&path=${encodeURIComponent(currentPath)}`;
-    await api.delete(url);
-    
-    // Reload file to reset content to disk version
-    await openFile(currentPath, { forceRefresh: true });
-    host.toast('Draft discarded');
-  } catch (err) {
-    host.toast('Failed to discard draft');
-    console.error(err);
-  }
+async function handleDiscardClick(e) {
+  return cacheIndicatorController.handleDiscardClick(e);
 }
 
 function setIndicatorActive(badge, char) {
-  badge.textContent = char;
-  badge.style.color = '#ff4444'; // Red
-  badge.style.cursor = 'pointer';
-  badge.title = 'Unsaved draft available. Click to discard.';
-  badge.onclick = handleDiscardClick;
-  badge.style.display = 'inline-block';
+  cacheIndicatorController.setIndicatorActive(badge, char);
 }
 
 function setIndicatorInactive(badge) {
-  // Respect global restored flag - do not clear if we are holding a draft
-  if (restoredSessionActive) return;
-
-  badge.textContent = '*';
-  badge.style.color = '#666'; // Grey
-  badge.style.cursor = 'default';
-  badge.title = 'No unsaved draft';
-  badge.onclick = null;
-  badge.style.display = 'inline-block';
+  cacheIndicatorController.setIndicatorInactive(badge);
 }
 
 function _applyCacheIndicatorImpl(info) {
-  const badge = document.getElementById('fe-file-draft-badge');
-  if (!badge) return;
-
-  if (!info) {
-    setIndicatorInactive(badge);
-    return;
-  }
-
-  const { state, unsaved, reason, restoredActive } = info;
-  
-  // Logic to determine if we should show RED (Active)
-  const isCrashed = (state === 'crashed');
-  const isRestored = (state === 'mid_session' && (reason === 'restore' || restoredActive));
-  const isActiveDraft = (state === 'mid_session' && unsaved);
-
-  if (isCrashed || isRestored || isActiveDraft) {
-    setIndicatorActive(badge, isCrashed ? '!' : '*');
-    badge.dataset.state = isCrashed ? 'crashed' : (isRestored ? 'restored' : 'cached');
-    markUnsaved(true);
-  } else {
-    // Only turn inactive if we are NOT holding a restored session
-    // This protects against race conditions where 'clean' arrives after 'restore'
-    if (!restoredSessionActive) {
-      setIndicatorInactive(badge);
-      badge.dataset.state = '';
-      markUnsaved(false);
-    }
-  }
+  cacheIndicatorController.applyCacheIndicator(info);
 }
 
-// Install the real implementation and replay any pending payload.
 applyCacheIndicator = _applyCacheIndicatorImpl;
-window.applyCacheIndicator = applyCacheIndicator;
-try {
-  if (window.__fePendingCacheIndicator) {
-    applyCacheIndicator(window.__fePendingCacheIndicator);
-    window.__fePendingCacheIndicator = null;
-  }
-} catch (_) {}
+cacheIndicatorController.installWindowHook();
 
 async function openFile(path, options = {}) {
   const { allowOverwrite = true, forceRefresh = false } = options;
@@ -5526,90 +4886,27 @@ if (problemsCollapseBtn) {
 // Actual init happens inside connectUIIPC() after the socket is created.
 
 // ─── Drawer tab switching (Terminal ↔ Console ↔ Problems) ────────────────
-{
-  const tabBar = document.querySelector('.drawer-tab-bar');
-  const terminalHeader = document.querySelector('.terminal-header');
-  const terminalContainer = document.getElementById('terminal-container');
-  const consoleContainer = document.getElementById('console-container');
-  const problemsContainer = document.getElementById('problems-container');
-  const problemsHeader = document.getElementById('problems-header');
-
-  if (tabBar) {
-    tabBar.addEventListener('click', (e) => {
-      const tab = e.target.closest('.drawer-tab');
-      if (!tab) return;
-      const target = tab.dataset.tab;
-
-      // Update active tab
-      tabBar.querySelectorAll('.drawer-tab').forEach(t => t.classList.toggle('active', t === tab));
-
-      // Hide all panels first
-      if (terminalHeader) terminalHeader.style.display = 'none';
-      if (terminalContainer) terminalContainer.style.display = 'none';
-      if (consoleContainer) consoleContainer.style.display = 'none';
-      if (problemsContainer) problemsContainer.style.display = 'none';
-      if (problemsHeader) problemsHeader.style.display = 'none';
-      consoleDrawer.hide();
-      problemsPanel.hide();
-
-      if (target === 'terminal') {
-        if (terminalHeader) terminalHeader.style.display = '';
-        if (terminalContainer) terminalContainer.style.display = '';
-      } else if (target === 'console') {
-        consoleDrawer.show();
-      } else if (target === 'problems') {
-        problemsPanel.show();
-      }
-    });
-  }
-}
-
-// Bind terminal toggle menu item
-const miToggleTerminal = requireEl('#mi-toggle-terminal');
-bindMenuToggle(miToggleTerminal, () => {
-  terminal.toggle();
+initDrawerAndShortcuts({
+  bindMenuToggle,
+  requireEl,
+  consoleDrawer,
+  problemsPanel,
+  toggleTerminal: () => terminal.toggle(),
+  setFontScale: (preset) => setFontScale(preset),
+  triggerEditorSearchPanel: (reason, opts) => triggerEditorSearchPanel(reason, opts),
+  hostToast: (msg) => host.toast(msg),
+  jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
+  saveFile: () => saveFile(),
+  resetToNewFile: () => {
+    closeWebSocket();
+    currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
+    lastSha256 = null;
+    lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
+  },
+  openPickedFile: () => {
+    pickFile().then(p => { if (p) openFile(p); });
+  },
 });
-
-// Bind console toggle menu item (opens drawer to console tab)
-const miToggleConsole = document.getElementById('mi-toggle-console');
-if (miToggleConsole) {
-  bindMenuToggle(miToggleConsole, () => {
-    const drawer = document.getElementById('terminal-drawer');
-    const isOpen = drawer && drawer.classList.contains('open');
-    // Switch to console tab
-    const consoleTab = document.querySelector('.drawer-tab[data-tab="console"]');
-    if (consoleTab) consoleTab.click();
-    // Open the drawer if it's closed
-    if (!isOpen) terminal.toggle();
-  });
-}
-
-// Bind problems toggle menu item (opens drawer to problems tab)
-const miToggleProblems = document.getElementById('mi-toggle-problems');
-if (miToggleProblems) {
-  bindMenuToggle(miToggleProblems, () => {
-    const drawer = document.getElementById('terminal-drawer');
-    const isOpen = drawer && drawer.classList.contains('open');
-    const problemsTab = document.querySelector('.drawer-tab[data-tab="problems"]');
-    if (problemsTab) problemsTab.click();
-    if (!isOpen) terminal.toggle();
-  });
-}
-
-// NEW: Font scale radio buttons
-const miFontSmall = document.getElementById('mi-font-small');
-const miFontMedium = document.getElementById('mi-font-medium');
-const miFontLarge = document.getElementById('mi-font-large');
-
-if (miFontSmall) {
-  miFontSmall.addEventListener('click', () => setFontScale('small'));
-}
-if (miFontMedium) {
-  miFontMedium.addEventListener('click', () => setFontScale('medium'));
-}
-if (miFontLarge) {
-  miFontLarge.addEventListener('click', () => setFontScale('large'));
-}
 
 bindMenuToggle(miFind, () => { triggerEditorSearchPanel('menu', { replace: true }); });
 bindMenuToggle(miGoto, async () => {
@@ -5629,73 +4926,7 @@ bindMenuToggle(miGoto, async () => {
 
 
 
-// Keyboard shortcuts
-document.addEventListener('keydown', (e) => {
-  const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
-  const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
-
-  // Ctrl/Cmd+`: Toggle Terminal
-  if (cmdOrCtrl && e.key === '`') {
-    e.preventDefault();
-    terminal.toggle();
-  }
-
-  // Ctrl/Cmd+S: Save
-  if (cmdOrCtrl && e.key === 's') {
-    e.preventDefault();
-    saveFile();
-  }
-
-  // Ctrl/Cmd+F: Search
-  if (cmdOrCtrl && e.key === 'f') {
-    e.preventDefault();
-    triggerEditorSearchPanel('shortcut', { replace: false });
-  }
-
-  // Ctrl/Cmd+N: New
-  if (cmdOrCtrl && e.key === 'n') {
-    e.preventDefault();
-    closeWebSocket();
-    currentPath = ''; currentPathExists = false; lastPickerPath = HOME_DIR; currentModeLanguage = null;
-    lastSha256 = null;
-    lastSavedContent = ''; markUnsaved(false); updatePathDisplay(); syncSessionPath();
-  }
-
-  // Ctrl/Cmd+O: Open
-  if (cmdOrCtrl && e.key === 'o') {
-    e.preventDefault();
-    pickFile().then(p => { if (p) openFile(p); });
-  }
-
-  // NEW: Font scale shortcuts
-  if ((e.ctrlKey || e.metaKey) && e.key === '=' && !e.shiftKey) {
-    // This shortcut allows increasing the font size through presets.
-    e.preventDefault();
-    const currentScale = parseFloat(
-      getComputedStyle(document.documentElement)
-        .getPropertyValue('--chrome-font-scale') || '0.85'
-    );
-    
-    if (currentScale < 0.75) setFontScale('medium');
-    else if (currentScale < 1.0) setFontScale('large');
-    // Already at Large, do nothing
-  }
-
-  if ((e.ctrlKey || e.metaKey) && e.key === '-') {
-    // This shortcut allows decreasing the font size through presets.
-    e.preventDefault();
-    const currentScale = parseFloat(
-      getComputedStyle(document.documentElement)
-        .getPropertyValue('--chrome-font-scale') || '0.85'
-    );
-    
-    if (currentScale > 1.0) setFontScale('medium');
-    else if (currentScale > 0.75) setFontScale('small');
-    // Already at Small, do nothing
-  }
-});
-
-
+ 
 // ---------- State load/init ----------
 // host.setTitle('Code CM6');
 
@@ -5721,34 +4952,9 @@ async function getCurrentProjectRoot(forceRefresh = false) {
 }
 
 async function main() {
-  // Responsive layout manager - detects viewport and applies layout class
-  const layoutManager = {
-    init() {
-      this.update();
-      window.addEventListener('resize', () => this.update());
-      window.addEventListener('orientationchange', () => setTimeout(() => this.update(), 100));
-    },
-    
-    update() {
-      const isDesktop = window.matchMedia('(min-width: 768px) and (orientation: landscape)').matches;
-      const root = document.querySelector('.fe-root');
-      const wasDesktop = root.classList.contains('layout-desktop');
-      const wasMobile = root.classList.contains('layout-mobile');
-      
-      if (isDesktop) {
-        root.classList.add('layout-desktop');
-        root.classList.remove('layout-mobile');
-      } else {
-        root.classList.add('layout-mobile');
-        root.classList.remove('layout-desktop');
-      }
-      const modeChanged = isDesktop ? !wasDesktop : !wasMobile;
-      scheduleToolbarTitleClamp({ doubleRaf: true, resetBaseline: modeChanged });
-    }
-  };
-
-  // Initialize layout manager
-  layoutManager.init();
+  initResponsiveLayout({
+    scheduleToolbarTitleClamp: (opts) => scheduleToolbarTitleClamp(opts),
+  });
   initToolbarTitleClampObservers();
 
   // Load saved layout preferences
