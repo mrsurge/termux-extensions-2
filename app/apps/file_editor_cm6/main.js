@@ -22,10 +22,12 @@ import {
 import { createAppContext } from './src/host/app-context.js';
 import { initVirtualKeyboardAdjustments } from './src/host/ui/virtual-keyboard.js';
 import { pickerAvailable as pickerUiAvailable, pickFileWithPicker, pickDirectoryWithPicker, pickSaveTargetWithPicker } from './src/host/io/picker-helpers.js';
+import { createPickerController } from './src/host/io/picker-controller.js';
 import { createAdapterUiController } from './src/host/ui/adapter-ui.js';
 import { createEditTrackerController } from './src/host/ui/edit-tracker.js';
 import { createFontScaleController } from './src/host/ui/font-scale.js';
 import { createSearchPanelController } from './src/host/ui/search-panel.js';
+import { createMenuCoreController } from './src/host/ui/menu-core.js';
 import { installPrefsSync } from './src/host/ui/prefs-sync.js';
 import { createRecentsController } from './src/host/ui/recents.js';
 import { createPreferencesController } from './src/host/ui/preferences.js';
@@ -33,6 +35,8 @@ import { createProjectSwitchController } from './src/host/ui/project-switch.js';
 import { createCacheIndicatorController } from './src/host/ui/cache-indicator.js';
 import { initDrawerAndShortcuts } from './src/host/ui/drawer-shortcuts.js';
 import { initResponsiveLayout } from './src/host/ui/layout-manager.js';
+import { createFileStatusController } from './src/host/ui/file-status.js';
+import { createSettingsBootstrap } from './src/host/ui/settings-bootstrap.js';
 import { showProjectsDebugModal } from './src/host/ui/projects-debug-modal.js';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './src/host/ui/watcher-settings.js';
 import { createUiIpcConnections } from './src/host/connections/ui-ipc.js';
@@ -1911,618 +1915,45 @@ async function vscodeApiCall(method, params) {
   return p;
 }
 
-function openEditorSettingsModal() {
-  editorSettingsModal.classList.add('show');
-  editorSettingsModal.setAttribute('aria-hidden', 'false');
-  void refreshEditorSettingsModal();
-}
-
-function closeEditorSettingsModal() {
-  editorSettingsModal.classList.remove('show');
-  editorSettingsModal.setAttribute('aria-hidden', 'true');
-}
-
-editorSettingsClose.addEventListener('click', closeEditorSettingsModal);
-editorSettingsModal.addEventListener('click', (ev) => {
-  // click outside card closes
-  if (ev.target === editorSettingsModal) closeEditorSettingsModal();
+createSettingsBootstrap({
+  els: {
+    settingsModal: editorSettingsModal,
+    settingsClose: editorSettingsClose,
+    menuEditorSettings: miEditorSettings,
+    extManagerModal: editorExtManagerModal,
+    extManagerClose: editorExtManagerClose,
+    settingsExtStrip: editorSettingsExtStrip,
+    themesModal: editorThemesModal,
+    themesClose: editorThemesClose,
+    themesList: editorThemesList,
+    settingsThemeStrip: editorSettingsThemeStrip,
+    settingsThemeSummary: editorSettingsThemeSummary,
+    extConfigModal,
+    extConfigTitle,
+    extConfigForm,
+    extConfigClose,
+    extConfigCancel,
+    extConfigSave,
+    extManagerInstallBtn: editorExtManagerInstallBtn,
+    extCustomSettingsInput,
+    extCustomSettingsSave,
+    extSummary: editorSettingsExtSummary,
+    extManagerList: editorExtManagerList,
+  },
+  closeAllMenus,
+  getEditorViewState: () => editorViewState,
+  setEditorTheme: (themeId) => {
+    editorViewState = editorViewState || {};
+    editorViewState.theme = themeId;
+  },
+  updatePreference: (key, value) => updatePreference(key, value),
+  pickerAvailable: () => pickerAvailable(),
+  pickFile: (startPath) => pickFile(startPath),
+  getStartPath: () => lastPickerPath || HOME_DIR,
+  busRequest: (event, payload, timeoutMs) => window.__explorerBusRequest(event, payload, timeoutMs),
+  reloadEditorIframe: _reloadEditorIframe,
+  toast: (msg, ms) => host.toast(msg, ms),
 });
-miEditorSettings.addEventListener('click', () => {
-  closeAllMenus();
-  openEditorSettingsModal();
-});
-
-// --- Color Themes Modal (2nd level) ---
-function openEditorThemesModal() {
-  editorThemesModal.classList.add('show');
-  editorThemesModal.setAttribute('aria-hidden', 'false');
-  void refreshEditorThemesModal();
-}
-function closeEditorThemesModal() {
-  editorThemesModal.classList.remove('show');
-  editorThemesModal.setAttribute('aria-hidden', 'true');
-}
-editorThemesClose.addEventListener('click', closeEditorThemesModal);
-editorThemesModal.addEventListener('click', (ev) => {
-  if (ev.target === editorThemesModal) closeEditorThemesModal();
-});
-editorSettingsThemeStrip.addEventListener('click', () => {
-  openEditorThemesModal();
-});
-
-async function refreshEditorThemesModal() {
-  editorThemesList.textContent = 'Loading…';
-  let themes = [];
-  try {
-    const res = await fetch('/api/app/file_editor_cm6/ui/monaco_editor/available_themes', { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      themes = data?.themes || [];
-    }
-  } catch (_) {}
-
-  // Built-in Monaco themes (vs, vs-dark, hc-black, hc-light) are disabled —
-  // they don't carry a TextMate color map so semantic tokens resolve to wrong
-  // palette indices.  Only vscode-style themes with tokenColors are supported.
-  // TODO: revisit when we have a setColorMap(null) → retokenize pipeline.
-
-  const currentTheme = editorViewState?.theme || 'github-dark-default';
-  editorThemesList.innerHTML = '';
-
-  // Group by source
-  const vendored = themes.filter((t) => t.source === 'vendored');
-  const fromExts = themes.filter((t) => t.source === 'extension');
-  const builtins = themes.filter((t) => t.source === 'builtin');
-
-  function renderSection(title, items) {
-    if (!items.length) return;
-    const heading = document.createElement('div');
-    heading.style.cssText = 'font-weight:600; margin:12px 0 8px; font-size:13px; opacity:0.7; text-transform:uppercase; letter-spacing:0.5px;';
-    heading.textContent = title;
-    editorThemesList.appendChild(heading);
-
-    const grid = document.createElement('div');
-    grid.style.cssText = 'display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px;';
-
-    items.forEach((t) => {
-      const row = document.createElement('label');
-      row.style.cssText = 'display:flex; align-items:center; gap:10px; padding:8px 10px; border:1px solid var(--border, #333); border-radius:8px; cursor:pointer;';
-
-      const input = document.createElement('input');
-      input.type = 'radio';
-      input.name = 'te2-theme-radio';
-      input.value = t.id;
-      input.checked = String(currentTheme) === String(t.id);
-      if (input.checked) {
-        row.style.borderColor = 'var(--accent, #58a6ff)';
-        row.style.background = 'rgba(88, 166, 255, 0.08)';
-      }
-
-      const isDark = (t.uiTheme || '').includes('dark') || (t.uiTheme || '').includes('hc-black');
-      const swatch = document.createElement('span');
-      swatch.style.cssText = `display:inline-block; width:16px; height:16px; border-radius:50%; border:1px solid var(--border,#444); background:${isDark ? '#1a1a2e' : '#f0f0f0'};`;
-
-      const text = document.createElement('div');
-      text.style.flex = '1';
-      text.textContent = t.label;
-
-      input.addEventListener('change', async () => {
-        if (!input.checked) return;
-        const ok = await updatePreference('theme', t.id);
-        if (!ok) host.toast('Failed to change theme');
-        try { editorViewState = editorViewState || {}; editorViewState.theme = t.id; } catch {}
-        // Update strip summary
-        editorSettingsThemeSummary.textContent = t.label;
-        // Highlight selected row
-        editorThemesList.querySelectorAll('label').forEach((l) => {
-          l.style.borderColor = 'var(--border, #333)';
-          l.style.background = '';
-        });
-        row.style.borderColor = 'var(--accent, #58a6ff)';
-        row.style.background = 'rgba(88, 166, 255, 0.08)';
-      });
-
-      row.appendChild(input);
-      row.appendChild(swatch);
-      row.appendChild(text);
-      grid.appendChild(row);
-    });
-    editorThemesList.appendChild(grid);
-  }
-
-  renderSection('Bundled', vendored);
-  renderSection('From Extensions', fromExts);
-
-  if (!themes.length) {
-    editorThemesList.textContent = 'No themes available';
-  }
-}
-
-function openEditorExtManagerModal() {
-  editorExtManagerModal.classList.add('show');
-  editorExtManagerModal.setAttribute('aria-hidden', 'false');
-  void refreshEditorExtManagerModal();
-  void loadCustomSettings();
-}
-function closeEditorExtManagerModal() {
-  editorExtManagerModal.classList.remove('show');
-  editorExtManagerModal.setAttribute('aria-hidden', 'true');
-}
-editorExtManagerClose.addEventListener('click', closeEditorExtManagerModal);
-editorExtManagerModal.addEventListener('click', (ev) => {
-  if (ev.target === editorExtManagerModal) closeEditorExtManagerModal();
-});
-// Strip in settings modal opens the ext manager
-editorSettingsExtStrip.addEventListener('click', () => {
-  openEditorExtManagerModal();
-});
-
-// --- Extension Config Modal (3rd level) ---
-let _extConfigExtId = '';
-let _extConfigValues = {};
-
-function openExtConfigModal(extId, displayName, schema, currentValues) {
-  _extConfigExtId = extId;
-  _extConfigValues = { ...(currentValues || {}) };
-  extConfigTitle.textContent = `Configure: ${displayName || extId}`;
-  extConfigForm.innerHTML = '';
-
-  const props = schema?.properties || schema || {};
-  const propKeys = Object.keys(props);
-  if (!propKeys.length) {
-    const msg = document.createElement('div');
-    msg.style.opacity = '0.7';
-    msg.textContent = 'This extension has no configurable settings.';
-    extConfigForm.appendChild(msg);
-  } else {
-    let lastGroup = null;
-    propKeys.forEach((key) => {
-      // Add separator between different setting groups (first dot-segment)
-      const group = key.indexOf('.') > 0 ? key.slice(0, key.indexOf('.')) : '';
-      if (lastGroup !== null && group !== lastGroup) {
-        const sep = document.createElement('div');
-        sep.className = 'fe-hr-thin';
-        extConfigForm.appendChild(sep);
-      }
-      lastGroup = group;
-      const prop = props[key] || {};
-      const fieldRow = document.createElement('div');
-      fieldRow.style.marginBottom = '12px';
-
-      const label = document.createElement('label');
-      label.style.display = 'block';
-      label.style.fontWeight = '600';
-      label.style.fontSize = '0.88rem';
-      label.style.marginBottom = '4px';
-      label.textContent = key;
-      fieldRow.appendChild(label);
-
-      if (prop.description) {
-        const desc = document.createElement('div');
-        desc.style.fontSize = '12px';
-        desc.style.opacity = '0.6';
-        desc.style.marginBottom = '4px';
-        desc.textContent = prop.description;
-        fieldRow.appendChild(desc);
-      }
-
-      const curVal = _extConfigValues[key] !== undefined ? _extConfigValues[key] : prop.default;
-
-      if (prop.type === 'boolean') {
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.checked = !!curVal;
-        cb.addEventListener('change', () => { _extConfigValues[key] = cb.checked; });
-        fieldRow.appendChild(cb);
-      } else if (prop.enum && Array.isArray(prop.enum)) {
-        const wrap = document.createElement('div');
-        wrap.style.display = 'flex';
-        wrap.style.flexDirection = 'column';
-        wrap.style.gap = '4px';
-        prop.enum.forEach((opt) => {
-          const optLabel = document.createElement('label');
-          optLabel.style.display = 'flex';
-          optLabel.style.alignItems = 'center';
-          optLabel.style.gap = '6px';
-          optLabel.style.cursor = 'pointer';
-          const radio = document.createElement('input');
-          radio.type = 'radio';
-          radio.name = `ext-cfg-${key}`;
-          radio.value = String(opt);
-          radio.checked = String(curVal) === String(opt);
-          radio.addEventListener('change', () => { _extConfigValues[key] = opt; });
-          optLabel.appendChild(radio);
-          optLabel.appendChild(document.createTextNode(String(opt)));
-          wrap.appendChild(optLabel);
-        });
-        fieldRow.appendChild(wrap);
-      } else if (prop.type === 'number' || prop.type === 'integer') {
-        const input = document.createElement('input');
-        input.type = 'number';
-        input.className = 'lsp-rootrel-input';
-        input.style.width = '100%';
-        input.value = curVal != null ? String(curVal) : '';
-        if (prop.minimum != null) input.min = String(prop.minimum);
-        if (prop.maximum != null) input.max = String(prop.maximum);
-        input.addEventListener('input', () => {
-          _extConfigValues[key] = input.value === '' ? null : Number(input.value);
-        });
-        fieldRow.appendChild(input);
-      } else {
-        // string / fallback
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'lsp-rootrel-input';
-        input.style.width = '100%';
-        input.value = curVal != null ? String(curVal) : '';
-        input.placeholder = prop.default != null ? String(prop.default) : '';
-        input.addEventListener('input', () => { _extConfigValues[key] = input.value; });
-        fieldRow.appendChild(input);
-      }
-
-      extConfigForm.appendChild(fieldRow);
-    });
-  }
-
-  extConfigModal.classList.add('show');
-  extConfigModal.setAttribute('aria-hidden', 'false');
-}
-
-function closeExtConfigModal() {
-  extConfigModal.classList.remove('show');
-  extConfigModal.setAttribute('aria-hidden', 'true');
-  _extConfigExtId = '';
-  _extConfigValues = {};
-}
-
-extConfigClose.addEventListener('click', closeExtConfigModal);
-extConfigCancel.addEventListener('click', closeExtConfigModal);
-extConfigModal.addEventListener('click', (ev) => {
-  if (ev.target === extConfigModal) closeExtConfigModal();
-});
-
-extConfigSave.addEventListener('click', async () => {
-  if (!_extConfigExtId) return;
-  extConfigSave.disabled = true;
-  try {
-    const res = await window.__explorerBusRequest('ext:configure', {
-      ext_id: _extConfigExtId,
-      values: _extConfigValues,
-    }, 15000);
-    if (res?.payload?.ok) {
-      host.toast('Configuration saved — reloading adapter\u2026');
-      closeExtConfigModal();
-      void refreshEditorExtManagerModal();
-      _reloadEditorIframe();
-    } else {
-      host.toast(res?.payload?.error || 'Save failed');
-    }
-  } catch (e) {
-    host.toast(e?.message || 'Save failed');
-  } finally {
-    extConfigSave.disabled = false;
-  }
-});
-
-// --- Install extension via file picker ---
-editorExtManagerInstallBtn.addEventListener('click', async () => {
-  if (!pickerAvailable()) { host.toast('File picker unavailable'); return; }
-  const start = lastPickerPath || HOME_DIR;
-  const picked = await pickFile(start);
-  if (!picked) return;
-  if (!picked.toLowerCase().endsWith('.vsix')) {
-    host.toast('Not a .vsix file');
-    return;
-  }
-  editorExtManagerInstallBtn.disabled = true;
-  editorExtManagerInstallBtn.textContent = 'Installing…';
-  try {
-    const res = await window.__explorerBusRequest('ext:install', { vsix_path: picked }, 60000);
-    const payload = res?.payload || {};
-    if (payload.ok) {
-      const ext = payload.extension || {};
-      const schema = payload.config_schema || {};
-      host.toast(`Installed: ${ext.display_name || ext.id || 'ok'} — reloading\u2026`);
-      void refreshEditorExtManagerModal();
-      _reloadEditorIframe();
-      // If extension has config, open config modal
-      if (schema && Object.keys(schema.properties || schema || {}).length) {
-        openExtConfigModal(ext.id, ext.display_name, schema, {});
-      }
-    } else {
-      host.toast(payload.error || 'Install failed');
-    }
-  } catch (e) {
-    host.toast(e?.message || 'Install failed');
-  } finally {
-    editorExtManagerInstallBtn.disabled = false;
-    editorExtManagerInstallBtn.textContent = '+ Install';
-  }
-});
-
-// --- Custom Settings (JSON textarea) ---
-async function loadCustomSettings() {
-  try {
-    const res = await window.__explorerBusRequest('ext:custom_settings_get', {}, 8000);
-    const settings = res?.payload?.settings || {};
-    const keys = Object.keys(settings);
-    extCustomSettingsInput.value = keys.length
-      ? JSON.stringify(settings, null, 2)
-      : '';
-  } catch (_) {
-    extCustomSettingsInput.value = '';
-  }
-}
-
-extCustomSettingsSave.addEventListener('click', async () => {
-  const raw = extCustomSettingsInput.value.trim();
-  let parsed = {};
-  if (raw) {
-    try {
-      parsed = JSON.parse(raw);
-    } catch (e) {
-      host.toast('Invalid JSON: ' + e.message);
-      return;
-    }
-    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-      host.toast('Settings must be a JSON object');
-      return;
-    }
-  }
-  extCustomSettingsSave.disabled = true;
-  extCustomSettingsSave.textContent = 'Saving…';
-  try {
-    const res = await window.__explorerBusRequest('ext:custom_settings_set', {
-      settings: parsed,
-    }, 15000);
-    if (res?.payload?.ok) {
-      host.toast(`Custom settings saved (${res.payload.count} keys) — reloading adapter\u2026`);
-      _reloadEditorIframe();
-    } else {
-      host.toast(res?.payload?.error || 'Save failed');
-    }
-  } catch (e) {
-    host.toast(e?.message || 'Save failed');
-  } finally {
-    extCustomSettingsSave.disabled = false;
-    extCustomSettingsSave.textContent = 'Save';
-  }
-});
-
-async function refreshEditorSettingsModal() {
-  // Theme strip summary
-  const currentTheme = editorViewState?.theme || 'github-dark-default';
-  try {
-    const res = await fetch('/api/app/file_editor_cm6/ui/monaco_editor/available_themes', { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      const themes = data?.themes || [];
-      const active = themes.find((t) => t.id === currentTheme);
-      const label = active ? active.label : currentTheme;
-      editorSettingsThemeSummary.textContent = `${label} — ${themes.length} available`;
-    } else {
-      editorSettingsThemeSummary.textContent = currentTheme;
-    }
-  } catch (_) {
-    editorSettingsThemeSummary.textContent = currentTheme;
-  }
-
-  // Extension summary for the strip
-  try {
-    if (typeof window.__explorerBusRequest === 'function') {
-      const res = await window.__explorerBusRequest('ext:list', {}, 8000);
-      const exts = res?.payload?.extensions || [];
-      const active = exts.filter((e) => e.active);
-      const user = exts.filter((e) => e.source === 'user');
-      editorSettingsExtSummary.textContent =
-        `${active.length} active, ${user.length} user-installed, ${exts.length} total`;
-    }
-  } catch (_) {
-    editorSettingsExtSummary.textContent = 'Click to manage';
-  }
-
-  // Watcher config: request fresh state from server
-  try {
-    if (typeof window.__explorerBusSend === 'function') {
-      window.__explorerBusSend('watcher:getConfig', {});
-    }
-  } catch (_) {}
-}
-
-async function refreshEditorExtManagerModal() {
-  editorExtManagerList.textContent = 'Loading…';
-  let extensions = [];
-  let langSlots = {};
-  try {
-    const res = await window.__explorerBusRequest('ext:list', {}, 10000);
-    extensions = res?.payload?.extensions || [];
-    langSlots = res?.payload?.language_slots || {};
-  } catch (e) {
-    editorExtManagerList.textContent = `Failed to load: ${e?.message || 'unknown error'}`;
-    return;
-  }
-
-  editorExtManagerList.innerHTML = '';
-  if (!extensions.length) {
-    const empty = document.createElement('div');
-    empty.style.opacity = '0.8';
-    empty.textContent = 'No extensions registered.';
-    editorExtManagerList.appendChild(empty);
-    return;
-  }
-
-  const list = document.createElement('div');
-  list.style.display = 'flex';
-  list.style.flexDirection = 'column';
-  list.style.gap = '8px';
-
-  extensions
-    .slice()
-    .sort((a, b) => {
-      // user extensions first, then builtins
-      if (a.source !== b.source) return a.source === 'user' ? -1 : 1;
-      return String(a.display_name || a.id).localeCompare(String(b.display_name || b.id));
-    })
-    .forEach((ext) => {
-      const extId = String(ext.id || '').trim();
-      if (!extId) return;
-      const label = String(ext.display_name || extId);
-      const version = String(ext.version || '');
-      const isBuiltin = ext.source === 'builtin';
-      const isActive = !!ext.active;
-      const langs = ext.languages || [];
-      const hasConfig = !!ext.has_config;
-
-      const card = document.createElement('div');
-      card.style.display = 'flex';
-      card.style.alignItems = 'flex-start';
-      card.style.gap = '10px';
-      card.style.padding = '10px 12px';
-      card.style.border = '1px solid var(--border, #333)';
-      card.style.borderRadius = '10px';
-      if (!isActive) card.style.opacity = '0.5';
-
-      // Left: info
-      const info = document.createElement('div');
-      info.style.flex = '1';
-      info.style.minWidth = '0';
-
-      const titleRow = document.createElement('div');
-      titleRow.style.display = 'flex';
-      titleRow.style.alignItems = 'center';
-      titleRow.style.gap = '6px';
-      titleRow.style.flexWrap = 'wrap';
-
-      const nameEl = document.createElement('span');
-      nameEl.textContent = label;
-      nameEl.style.fontWeight = '700';
-      titleRow.appendChild(nameEl);
-
-      if (version) {
-        const verEl = document.createElement('span');
-        verEl.textContent = `v${version}`;
-        verEl.style.opacity = '0.5';
-        verEl.style.fontSize = '12px';
-        titleRow.appendChild(verEl);
-      }
-
-      const badge = document.createElement('span');
-      badge.textContent = isBuiltin ? 'built-in' : 'user';
-      badge.style.fontSize = '10px';
-      badge.style.padding = '1px 6px';
-      badge.style.borderRadius = '4px';
-      badge.style.border = '1px solid var(--border, #333)';
-      badge.style.opacity = '0.6';
-      titleRow.appendChild(badge);
-      info.appendChild(titleRow);
-
-      if (langs.length) {
-        const langEl = document.createElement('div');
-        langEl.style.fontSize = '12px';
-        langEl.style.opacity = '0.7';
-        langEl.style.marginTop = '2px';
-        langEl.textContent = langs.join(', ');
-        info.appendChild(langEl);
-      }
-
-      card.appendChild(info);
-
-      // Right: action buttons
-      const actions = document.createElement('div');
-      actions.style.display = 'flex';
-      actions.style.gap = '6px';
-      actions.style.alignItems = 'center';
-      actions.style.flexShrink = '0';
-
-      // Active toggle
-      const toggle = document.createElement('button');
-      toggle.className = 'fe-btn';
-      toggle.textContent = isActive ? '●' : '○';
-      toggle.title = isActive ? 'Deactivate' : 'Activate';
-      toggle.style.fontSize = '14px';
-      toggle.style.color = isActive ? 'var(--primary, #3b82f6)' : '';
-      toggle.addEventListener('click', async () => {
-        toggle.disabled = true;
-        try {
-          await window.__explorerBusRequest('ext:toggle', {
-            ext_id: extId,
-            active: !isActive,
-          }, 10000);
-          _reloadEditorIframe();
-          void refreshEditorExtManagerModal();
-        } catch (e) {
-          host.toast(e?.message || 'Toggle failed');
-        } finally {
-          toggle.disabled = false;
-        }
-      });
-      actions.appendChild(toggle);
-
-      // Configure button (only if extension has config)
-      if (hasConfig) {
-        const cfgBtn = document.createElement('button');
-        cfgBtn.className = 'fe-btn';
-        cfgBtn.textContent = '⚙';
-        cfgBtn.title = 'Configure';
-        cfgBtn.addEventListener('click', async () => {
-          cfgBtn.disabled = true;
-          try {
-            const res = await window.__explorerBusRequest('ext:configSchema', {
-              ext_id: extId,
-            }, 10000);
-            const schema = res?.payload?.schema || {};
-            // Fetch current values too
-            const currentValues = {};
-            try {
-              const listRes = await window.__explorerBusRequest('ext:list', {}, 5000);
-              const fullExt = (listRes?.payload?.extensions || []).find((e) => e.id === extId);
-              if (fullExt?.configuration_values) Object.assign(currentValues, fullExt.configuration_values);
-            } catch (_) {}
-            openExtConfigModal(extId, label, schema, currentValues);
-          } catch (e) {
-            host.toast(e?.message || 'Failed to load config');
-          } finally {
-            cfgBtn.disabled = false;
-          }
-        });
-        actions.appendChild(cfgBtn);
-      }
-
-      // Uninstall button (only for user extensions)
-      if (!isBuiltin) {
-        const trash = document.createElement('button');
-        trash.className = 'fe-btn';
-        trash.textContent = '🗑';
-        trash.title = 'Uninstall';
-        trash.addEventListener('click', async () => {
-          if (!window.confirm(`Uninstall ${label}?`)) return;
-          trash.disabled = true;
-          try {
-            const res = await window.__explorerBusRequest('ext:uninstall', {
-              ext_id: extId,
-            }, 30000);
-            if (res?.payload?.ok) {
-              host.toast(`Uninstalled: ${label} — reloading\u2026`);
-              _reloadEditorIframe();
-              void refreshEditorExtManagerModal();
-            } else {
-              host.toast(res?.payload?.error || 'Uninstall failed');
-            }
-          } catch (e) {
-            host.toast(e?.message || 'Uninstall failed');
-          } finally {
-            trash.disabled = false;
-          }
-        });
-        actions.appendChild(trash);
-      }
-
-      card.appendChild(actions);
-      list.appendChild(card);
-    });
-
-  editorExtManagerList.appendChild(list);
-}
 
 initVirtualKeyboardAdjustments({
   root,
@@ -3907,27 +3338,24 @@ function scheduleExplorerRefresh() {
 }
 
 // ---------- File ops ----------
+const fileStatusController = createFileStatusController({
+  runActiveBtn,
+  getCurrentPath: () => currentPath,
+  getCurrentPathExists: () => currentPathExists,
+  isRunnableFile,
+  toAbsolute,
+  HOME_DIR,
+  basename,
+  setToolbarFileName: (name) => setToolbarFileName(name),
+  setIndicatorInactive: (badge) => setIndicatorInactive(badge),
+  setIssuesButtonsEnabled: (enabled) => setIssuesButtonsEnabled(enabled),
+});
 function updateRunButtonState() {
-  if (!runActiveBtn) return;
-  const runnable = Boolean(currentPath && currentPathExists && isRunnableFile(currentPath));
-  runActiveBtn.disabled = !runnable;
-  runActiveBtn.title = runnable ? 'Run active file in terminal' : 'Open a Python, shell, or C/C++ source file to enable running';
+  fileStatusController.updateRunButtonState();
 }
 
 function updatePathDisplay() {
-  const badge = document.getElementById('fe-file-draft-badge');
-  if (!currentPath) {
-    setToolbarFileName('Untitled');
-    if (badge) setIndicatorInactive(badge);
-    setIssuesButtonsEnabled(false);
-    updateRunButtonState();
-    return;
-  }
-  const abs = toAbsolute(currentPath, null, HOME_DIR);
-  setToolbarFileName(basename(abs));
-  if (badge) setIndicatorInactive(badge); // Reset to grey default
-  setIssuesButtonsEnabled(true);
-  updateRunButtonState();
+  fileStatusController.updatePathDisplay();
 }
 
 const cacheIndicatorController = createCacheIndicatorController({
@@ -4458,64 +3886,31 @@ drainPendingWatcherEvents();
 // Projects debug modal extracted to src/host/ui/projects-debug-modal.js
 
 // ---------- Picker helpers (shared modal provided by framework) ----------
+const pickerController = createPickerController({
+  pickFileWithPicker,
+  pickDirectoryWithPicker,
+  pickSaveTargetWithPicker,
+  pickerAvailable: () => pickerUiAvailable(),
+  getCurrentPath: () => currentPath,
+  getLastPickerPath: () => lastPickerPath,
+  setLastPickerPath: (path) => { lastPickerPath = path; },
+  homeDir: HOME_DIR,
+  toAbsolute,
+  parentDir,
+  basename,
+  toast: (m) => host.toast(m),
+});
 function pickerAvailable() {
-  return pickerUiAvailable();
+  return pickerController.pickerAvailable();
 }
 async function pickFile(startPath) {
-  const res = await pickFileWithPicker({
-    startPath,
-    currentPath,
-    lastPickerPath,
-    homeDir: HOME_DIR,
-    toAbsolute,
-    parentDir,
-    toast: (m) => host.toast(m),
-  });
-  lastPickerPath = res.lastPickerPath;
-  return res.path;
+  return pickerController.pickFile(startPath);
 }
 async function pickDirectory(startPath) {
-  const res = await pickDirectoryWithPicker({
-    startPath,
-    currentPath,
-    lastPickerPath,
-    homeDir: HOME_DIR,
-    toAbsolute,
-    parentDir,
-    toast: (m) => host.toast(m),
-  });
-  lastPickerPath = res.lastPickerPath;
-  return res.path;
+  return pickerController.pickDirectory(startPath);
 }
 async function pickSaveTarget() {
-  return pickSaveTargetWithPicker({
-    currentPath,
-    lastPickerPath,
-    homeDir: HOME_DIR,
-    toAbsolute,
-    parentDir,
-    basename,
-    toast: (m) => host.toast(m),
-  });
-}
-
-function _relToBase(targetAbs, baseAbs) {
-  const base = String(baseAbs || '').replace(/\/+$/, '');
-  const target = String(targetAbs || '').replace(/\/+$/, '');
-  if (!base || !target) return target;
-  if (target === base) return '';
-  if (target.startsWith(base + '/')) return target.slice(base.length + 1);
-  return target;
-}
-
-function _deriveWorkerId(rootRel) {
-  const cleaned = String(rootRel || '')
-    .replace(/\\/g, '/')
-    .replace(/^\.\/+/, '')
-    .replace(/[^a-zA-Z0-9._/-]+/g, '-')
-    .replace(/\//g, '-')
-    .replace(/^-+|-+$/g, '');
-  return cleaned || 'root';
+  return pickerController.pickSaveTarget();
 }
 
 // Helper: Jump to line in current file
@@ -4560,44 +3955,31 @@ async function jumpToCurrentFileLine(line, options = {}) {
 window.jumpToCurrentFileLine = jumpToCurrentFileLine;
 
 // ---------- Menu & keyboard wiring ----------
+const menuCoreController = createMenuCoreController({
+  menuFileDD,
+  menuEditDD,
+  menuEditorDD,
+  menuViewDD,
+  recentFilesDD,
+  getAgentShortcutLoadDD: () => agentShortcutLoadDD,
+  getAgentShortcutLoadBtn: () => agentShortcutLoadBtn,
+  getBranchMenuHandle: () => branchMenuHandle,
+  menuFileBtn,
+  menuEditBtn,
+  menuEditorBtn,
+  menuViewBtn,
+  recentFilesBtn,
+  runActiveBtn,
+  runCurrentFile: () => runCurrentFile(),
+});
+menuCoreController.installPrimaryMenuButtons();
+
 function closeAllMenus() {
-  menuFileDD.classList.remove('show');
-  menuEditDD.classList.remove('show');
-  menuEditorDD.classList.remove('show');
-  menuViewDD.classList.remove('show');
-  recentFilesDD.classList.remove('show');
-  if (agentShortcutLoadDD) {
-    agentShortcutLoadDD.classList.remove('show');
-  }
-  if (agentShortcutLoadBtn) {
-    agentShortcutLoadBtn.setAttribute('aria-expanded', 'false');
-  }
-  try {
-    if (typeof window.__cm6CloseLspMenus === 'function') {
-      window.__cm6CloseLspMenus();
-    }
-  } catch { }
-  if (branchMenuHandle && typeof branchMenuHandle.close === 'function') {
-    branchMenuHandle.close();
-  }
+  return menuCoreController.closeAllMenus();
 }
 function bindMenuToggle(el, action) {
-  if (!el) return;
-  const run = () => { closeAllMenus(); action(); };
-  el.addEventListener('click', run);
-  el.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); run(); } });
+  return menuCoreController.bindMenuToggle(el, action);
 }
-
-menuFileBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuFileDD.classList.toggle('show'); if (open){menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-menuEditBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-menuEditorBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuEditorDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuViewDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-menuViewBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = menuViewDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); recentFilesDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-recentFilesBtn.addEventListener('click', (e) => { e.stopPropagation(); const open = recentFilesDD.classList.toggle('show'); if (open){menuFileDD.classList.remove('show'); menuEditDD.classList.remove('show'); menuEditorDD.classList.remove('show'); menuViewDD.classList.remove('show'); if (branchMenuHandle) branchMenuHandle.close();}});
-runActiveBtn.addEventListener('click', (e) => {
-  e.stopPropagation();
-  runCurrentFile();
-});
-document.addEventListener('click', () => closeAllMenus());
 
 bindMenuToggle(miNew, () => {
   closeWebSocket();
