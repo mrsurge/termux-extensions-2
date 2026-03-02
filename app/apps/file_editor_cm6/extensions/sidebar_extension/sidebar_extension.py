@@ -14,6 +14,10 @@ from ...stores import get_history_store
 
 bp = APIRouter()
 
+# NOTE(TE2-sidebar-ws): Legacy HTTP sidebar endpoints are kept for compatibility,
+# but all `/agent/*` routes in this file are MARKED FOR DELETION after the
+# Socket.IO sidebar/appserver transport migration is complete.
+
 _CORS_ORIGINS = {
     "http://127.0.0.1:12359",
     "http://localhost:12359",
@@ -78,6 +82,7 @@ def _resolve_open_target(payload: dict, project_root: Path) -> tuple[Path, str]:
     return target, rel
 
 
+# MARKED FOR DELETION: replace with sidebar/appserver Socket.IO transport.
 @bp.post("/agent/drawer/open")
 async def agent_drawer_open(payload: dict = Body(default=None)):
     payload = payload or {}
@@ -86,6 +91,7 @@ async def agent_drawer_open(payload: dict = Body(default=None)):
     return {"ok": True, "data": data}
 
 
+# MARKED FOR DELETION: replace with sidebar/appserver Socket.IO transport.
 @bp.post("/agent/drawer/ui_hints")
 async def agent_drawer_ui_hints(payload: dict = Body(default=None)):
     payload = payload or {}
@@ -94,6 +100,7 @@ async def agent_drawer_ui_hints(payload: dict = Body(default=None)):
     return {"ok": True, "data": data}
 
 
+# MARKED FOR DELETION: replace with sidebar/appserver Socket.IO transport.
 @bp.options("/agent/cwd")
 async def agent_cwd_options(request: Request):
     origin = _cors_origin(request)
@@ -107,6 +114,7 @@ async def agent_cwd_options(request: Request):
     return Response(status_code=204, headers=headers)
 
 
+# MARKED FOR DELETION: replace with sidebar/appserver Socket.IO transport.
 @bp.get("/agent/cwd")
 async def agent_cwd(request: Request):
     origin = _cors_origin(request)
@@ -119,6 +127,7 @@ async def agent_cwd(request: Request):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500, headers=headers)
 
 
+# MARKED FOR DELETION: replace with sidebar/appserver Socket.IO transport.
 @bp.options("/agent/open_request")
 async def agent_open_request_options(request: Request):
     origin = _cors_origin(request)
@@ -132,6 +141,7 @@ async def agent_open_request_options(request: Request):
     return Response(status_code=204, headers=headers)
 
 
+# MARKED FOR DELETION: replace with sidebar/appserver Socket.IO transport.
 @bp.post("/agent/open_request")
 async def agent_open_request(request: Request, payload: dict = Body(default=None)):
     origin = _cors_origin(request)
@@ -144,6 +154,7 @@ async def agent_open_request(request: Request, payload: dict = Body(default=None
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500, headers=headers)
 
 
+# MARKED FOR DELETION: replace with sidebar/appserver Socket.IO transport.
 @bp.get("/agent/open_request/next")
 async def agent_open_request_next(request: Request):
     origin = _cors_origin(request)
@@ -154,6 +165,7 @@ async def agent_open_request_next(request: Request):
     return JSONResponse({"ok": True, "data": data}, headers=headers)
 
 
+# MARKED FOR DELETION: replace with sidebar/appserver Socket.IO transport.
 @bp.options("/agent/open")
 async def agent_open_options(request: Request):
     origin = _cors_origin(request)
@@ -167,6 +179,7 @@ async def agent_open_options(request: Request):
     return Response(status_code=204, headers=headers)
 
 
+# MARKED FOR DELETION: replace with sidebar/appserver Socket.IO transport.
 @bp.post("/agent/open")
 async def agent_open(request: Request, payload: dict = Body(default=None)):
     """Request the host UI to open a file at a specific location.

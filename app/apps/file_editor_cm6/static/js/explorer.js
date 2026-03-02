@@ -2639,6 +2639,13 @@ export async function initExplorerUI() {
       toast('No project open');
       return;
     }
+    const hostBase = typeof window.__agentHostBase === 'string'
+      ? window.__agentHostBase.trim()
+      : '';
+    if (!hostBase) {
+      toast('Agent host unavailable');
+      return;
+    }
     let absPath = uiState.projectPath;
     if (relPath && relPath !== '.') {
       absPath =
@@ -2647,7 +2654,9 @@ export async function initExplorerUI() {
         relPath.replace(/^\/+/, '');
     }
     try {
-      const resp = await fetch(`${window.__agentHostBase || 'http://127.0.0.1:12359'}/api/appserver/mention`, {
+      // MARKED FOR DELETION: legacy HTTP transport kept while sidebar/appserver
+      // Socket.IO mention flow is rolled out end-to-end.
+      const resp = await fetch(`${hostBase}/api/appserver/mention`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: absPath }),

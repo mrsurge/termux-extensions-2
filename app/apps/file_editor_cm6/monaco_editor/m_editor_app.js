@@ -2870,6 +2870,17 @@
         }
       }
       window.monaco.editor.setTheme(resolvedId);
+      // Sync theme base class to <html> so touch-selection menu CSS can key off it.
+      // Touch menu is appended to document.documentElement, not body.
+      try {
+        document.documentElement.classList.remove('vs', 'vs-dark', 'hc-black', 'hc-light');
+        var _base = (cache[resolvedId] && cache[resolvedId].uiTheme) || '';
+        if (!_base) _base = resolvedId.toLowerCase().includes('light') ? 'vs' : 'vs-dark';
+        else if (_base.includes('light')) _base = 'vs';
+        else _base = 'vs-dark';
+        document.documentElement.classList.add(_base);
+        console.log('[touch-theme] html class set to', _base, 'for theme', resolvedId);
+      } catch (_) {}
       // Apply theme to TextMate registry so tokenizeLine2 resolves colors correctly.
       if (cache[resolvedId]) {
         tmActiveThemeJson = cache[resolvedId];
@@ -4749,8 +4760,9 @@
       editorSocket.on('editor:find_cmd', function(payload) {
         try {
           var action = payload && payload.action ? String(payload.action) : 'find';
+          console.log('[Find] iframe received editor:find_cmd action=', action, 'editor=', !!editor);
           _runFindCommand(action);
-        } catch (_) {}
+        } catch (e) { console.error('[Find] error:', e); }
       });
 
       return true;
@@ -4776,14 +4788,20 @@
   function _runFindCommand(action) {
     try {
       if (!editor) return;
-      var id = action === 'replace' ? 'editor.action.startFindReplaceAction' : 'actions.find';
-      var act = editor.getAction ? editor.getAction(id) : null;
+      // actions.find works (touch extension proves it). For replace,
+      // open find first then toggle the replace row.
+      var act = editor.getAction ? editor.getAction('actions.find') : null;
       if (act && act.run) {
         act.run();
       } else {
-        editor.trigger('keyboard', id, null);
+        editor.trigger('keyboard', 'actions.find', null);
       }
-    } catch (_) {}
+      if (action === 'replace') {
+        setTimeout(function() {
+          try { editor.trigger('keyboard', 'editor.action.startFindReplaceAction', null); } catch (_) {}
+        }, 50);
+      }
+    } catch (e) { console.error('[Find] _runFindCommand error:', e); }
   }
 
   function _installMarkerNavBindings(ed) {

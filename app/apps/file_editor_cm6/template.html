@@ -704,6 +704,117 @@
     color: var(--fg, #e6edf3);
     border-color: var(--fg-dim, #6e7681);
   }
+
+  /* Problems panel */
+  .problems-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 8px;
+    background: var(--bg, #0b0f1a);
+    border-bottom: 1px solid var(--border, #333);
+    flex-shrink: 0;
+    font-size: 12px;
+    position: relative;
+    z-index: 10;
+  }
+  .problems-header .console-clear-btn {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--border, #333);
+    color: var(--fg-dim, #6e7681);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .problems-header .console-clear-btn:hover {
+    color: var(--fg, #e6edf3);
+    border-color: var(--fg-dim, #6e7681);
+  }
+  #problems-container {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    background: var(--bg, #0b0f1a);
+    font-family: var(--font-mono, 'Fira Code', monospace);
+    font-size: 12px;
+    color: var(--fg, #e6edf3);
+  }
+  #problems-container .problems-empty {
+    padding: 16px;
+    color: var(--fg-dim, #6e7681);
+    text-align: center;
+  }
+  #problems-container .problems-file-group {
+    border-bottom: 1px solid var(--border-dim, #21262d);
+  }
+  #problems-container .problems-file-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--bg-secondary, #161b22);
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg, #e6edf3);
+  }
+  #problems-container .problems-file-header:hover {
+    background: var(--bg-highlight, #1c2129);
+  }
+  #problems-container .problems-file-header .problems-badge {
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: 8px;
+    font-weight: 700;
+    line-height: 16px;
+  }
+  #problems-container .problems-badge.error {
+    background: #da363340;
+    color: #ffa198;
+  }
+  #problems-container .problems-badge.warning {
+    background: #9e6a0340;
+    color: #d29922;
+  }
+  #problems-container .problems-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 3px 10px 3px 24px;
+    cursor: pointer;
+    line-height: 1.4;
+  }
+  #problems-container .problems-item:hover {
+    background: var(--bg-highlight, #1c2129);
+  }
+  #problems-container .problems-icon {
+    flex-shrink: 0;
+    width: 14px;
+    text-align: center;
+    line-height: 1.4;
+  }
+  #problems-container .problems-icon.error { color: #ffa198; }
+  #problems-container .problems-icon.warning { color: #d29922; }
+  #problems-container .problems-icon.info { color: #79c0ff; }
+  #problems-container .problems-msg {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+  }
+  #problems-container .problems-source {
+    color: var(--fg-dim, #6e7681);
+    margin-left: 4px;
+  }
+  #problems-container .problems-location {
+    flex-shrink: 0;
+    color: var(--fg-dim, #6e7681);
+    font-size: 11px;
+    white-space: nowrap;
+  }
   .terminal-drawer.open {
     transform: translateY(0);
   }
@@ -2421,6 +2532,7 @@
         <div class="fe-dd-separator"></div>
         <div class="fe-dd-item" id="mi-language-servers"><span>Language Servers…</span></div>
         <div class="fe-dd-item" id="mi-export-diagnostics"><span>Export Diagnostics…</span></div>
+        <div class="fe-dd-item" id="mi-toggle-problems"><span>Toggle Problems</span></div>
         <div class="fe-dd-separator"></div>
         <div class="fe-dd-item" id="mi-editor-settings"><span>Settings…</span></div>
       </div>
@@ -2437,7 +2549,8 @@
         <div class="fe-dd-item" id="mi-toggle-sticky-scroll" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Sticky Scroll</span></div>
         <div class="fe-dd-item" id="mi-toggle-color-picker" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>CSS Color Picker</span></div>
         <div class="fe-dd-item" id="mi-toggle-readonly" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Read Only Mode</span></div>
-        <div class="fe-dd-item" id="mi-track-edits" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Auto-Jump to Edits</span></div>
+        <div class="fe-dd-item" id="mi-track-edits" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Auto-Jump to External Edits</span></div>
+        <div class="fe-dd-item" id="mi-track-codex-edits" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Auto-Jump to Codex Edits</span></div>
         <div class="fe-dd-item" id="mi-toggle-autosave" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Save</span></div>
         <div class="fe-dd-item" id="mi-toggle-terminal"><span>Toggle Terminal</span><span class="fe-kbd">Ctrl/Cmd+`</span></div>
         <div class="fe-dd-item" id="mi-toggle-console"><span>Toggle Console</span></div>
@@ -2474,6 +2587,7 @@
     <div class="drawer-tab-bar">
       <button class="drawer-tab active" data-tab="terminal">Terminal</button>
       <button class="drawer-tab" data-tab="console">Console</button>
+      <button class="drawer-tab" data-tab="problems">Problems</button>
     </div>
     <div class="terminal-header" data-drawer-panel="terminal">
       <div class="terminal-shell-dropdown">
@@ -2499,6 +2613,13 @@
       </div>
     </div>
     <div id="console-container" data-drawer-panel="console" style="display:none; width:100%; height:100%; overflow:auto;"></div>
+    <div id="problems-header" class="problems-header" data-drawer-panel="problems" style="display:none;">
+      <span style="color:var(--fg-dim,#6e7681);">Problems</span>
+      <div style="margin-left:auto; display:flex; gap:8px;">
+        <button class="console-clear-btn" id="problems-collapse-btn" title="Collapse problems" style="margin-left:0;">▼</button>
+      </div>
+    </div>
+    <div id="problems-container" data-drawer-panel="problems" style="display:none; width:100%; height:100%; overflow:auto;"></div>
   </div>
 
   <!-- Resize handle for agent (desktop only) -->
@@ -2650,6 +2771,25 @@
   </div>
 
 
+</div>
+
+
+<!-- Export Diagnostics Format Modal -->
+<div id="export-diag-modal" class="fe-modal" aria-hidden="true">
+  <div class="fe-modal-card" style="max-width: 360px;">
+    <div class="fe-modal-header">
+      <strong>Export Diagnostics</strong>
+      <span style="flex:1"></span>
+      <button id="export-diag-modal-close" class="fe-btn" aria-label="Close">✕</button>
+    </div>
+    <div class="fe-modal-body" style="text-align:center; padding: 20px;">
+      <p style="margin:0 0 16px; color: var(--foreground-muted, #9ca3af);">Choose export format:</p>
+      <div style="display:flex; gap:10px; justify-content:center;">
+        <button id="export-diag-human" class="fe-btn fe-btn-primary">Human Readable</button>
+        <button id="export-diag-json" class="fe-btn">JSON</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Language Servers Modal -->

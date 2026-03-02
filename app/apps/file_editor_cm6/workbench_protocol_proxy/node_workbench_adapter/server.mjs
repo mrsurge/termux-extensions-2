@@ -22,6 +22,12 @@ const _BASE_JSON_STRINGIFY = JSON.stringify;
 const _origConsoleLog = console.log;
 console.log = (...args) => console.error(...args);
 
+// Guard against EPIPE when Python parent closes the pipe before adapter exits.
+process.stdout.on("error", (err) => {
+  if (err?.code === "EPIPE") return;
+  console.error("[server] stdout error:", err);
+});
+
 function _stackTop(skip = 2, limit = 6) {
   try {
     const s = new Error().stack || "";

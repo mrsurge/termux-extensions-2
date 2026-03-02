@@ -7,12 +7,14 @@ the room so the two pages can communicate without Python business logic.
 Python only logs traffic for observability.
 
 Console events (``console:*``) are delegated to ``console_ws`` handlers.
+Sidebar events (``sidebar:*``) are delegated to ``sidebar_ws`` handlers.
 """
 
 import socketio
 import time
 
 from . import console_ws
+from . import sidebar_ws
 
 
 class UIIPCNamespace(socketio.AsyncNamespace):
@@ -29,12 +31,16 @@ class UIIPCNamespace(socketio.AsyncNamespace):
         return await super().trigger_event(event, *args)
 
     async def on_connect(self, sid, environ):
-        await self.enter_room(sid, "ui_ipc")
-        print(f"[ui_ipc] connect sid={sid}", flush=True)
+        room = "sidebar_ipc" if self.namespace == "/sidebar_ipc" else "ui_ipc"
+        await self.enter_room(sid, room)
+        print(f"[{room}] connect sid={sid}", flush=True)
 
     async def on_disconnect(self, sid, reason=None):
-        print(f"[ui_ipc] disconnect sid={sid} reason={reason}", flush=True)
-        await console_ws.on_console_disconnect(self, sid)
+        room = "sidebar_ipc" if self.namespace == "/sidebar_ipc" else "ui_ipc"
+        print(f"[{room}] disconnect sid={sid} reason={reason}", flush=True)
+        if self.namespace == "/ui_ipc":
+            await console_ws.on_console_disconnect(self, sid)
+        await sidebar_ws.on_sidebar_disconnect(self, sid)
 
     async def on_ui_event(self, sid, data):
         """Generic UI event relay.
@@ -66,3 +72,14 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
     async def on_console_clear(self, sid, data):
         await console_ws.on_console_clear(self, sid, data)
+
+    # ─── Sidebar event delegation ──────────────────────────────
+
+    async def on_sidebar_register(self, sid, data):
+        await sidebar_ws.on_sidebar_register(self, sid, data)
+
+    async def on_sidebar_event(self, sid, data):
+        await sidebar_ws.on_sidebar_event(self, sid, data)
+
+    async def on_sidebar_agent_edit(self, sid, data):
+        await sidebar_ws.on_sidebar_agent_edit(self, sid, data)

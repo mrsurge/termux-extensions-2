@@ -206,6 +206,85 @@ async def set_consumer_ready(sio, abs_path: str, request_id: str = ""):
     _pending_entries = []
 
 
+# ── Debounce state for explorer/problems emission ───────────────────
+_diag_emit_task: Optional[asyncio.Task] = None
+_DIAG_EMIT_DEBOUNCE_S = 0.3
+
+
+async def _emit_diagnostics_to_explorer_and_ui(entries: list):
+    """Debounced: aggregate full _diag_cache and emit to explorer + problems."""
+    global _diag_emit_task
+    if _diag_emit_task and not _diag_emit_task.done():
+        _diag_emit_task.cancel()
+    _diag_emit_task = asyncio.ensure_future(_emit_diagnostics_debounced())
+
+
+async def _emit_diagnostics_debounced():
+    """Wait for debounce window, then emit aggregated diagnostics."""
+    await asyncio.sleep(_DIAG_EMIT_DEBOUNCE_S)
+    try:
+        from .explorer_socketio import EXPLORER_SIO
+        from .explorer_helper import get_project_root
+    except Exception as exc:
+        print(f"[diag_bridge] import fail for explorer emit: {exc}", flush=True)
+        return
+
+    proj = ""
+    try:
+        proj = str(get_project_root() or "").rstrip("/")
+    except Exception:
+        pass
+
+    # Build per-file summary (rel paths) and detail (abs paths) from cache.
+    summary_rel: Dict[str, Dict[str, int]] = {}   # rel_path → {errors, warnings}
+    detail_abs: Dict[str, list] = {}               # abs_path → [marker, ...]
+
+    for (abs_path, owner), entry in _diag_cache.items():
+        markers = entry.get("markers") or []
+        if not markers:
+            continue
+
+        # Detail: full marker objects keyed by abs path
+        if abs_path not in detail_abs:
+            detail_abs[abs_path] = []
+        detail_abs[abs_path].extend(markers)
+
+        # Summary: count errors/warnings, keyed by workspace-relative path
+        if proj and abs_path.startswith(proj + "/"):
+            rel = abs_path[len(proj) + 1:]
+        else:
+            rel = abs_path
+        if rel not in summary_rel:
+            summary_rel[rel] = {"errors": 0, "warnings": 0}
+        for m in markers:
+            sev = m.get("severity", 0)
+            if sev == 8:       # MarkerSeverity.Error
+                summary_rel[rel]["errors"] += 1
+            elif sev == 4:     # MarkerSeverity.Warning
+                summary_rel[rel]["warnings"] += 1
+
+    # Prune entries with zero counts
+    summary_rel = {k: v for k, v in summary_rel.items() if v["errors"] > 0 or v["warnings"] > 0}
+
+    try:
+        # Explorer tree badges
+        await EXPLORER_SIO.emit(
+            "explorer:event",
+            json.dumps({"type": "explorer:updateDiagnostics", "payload": {"diagnostics": summary_rel}}),
+            namespace="/explorer",
+        )
+        # Problems panel (full marker detail)
+        await EXPLORER_SIO.emit(
+            "explorer:event",
+            json.dumps({"type": "diagnostics:detail", "payload": detail_abs}),
+            namespace="/explorer",
+        )
+        total_markers = sum(len(v) for v in detail_abs.values())
+        print(f"[diag_bridge] emitted explorer diagnostics: {len(summary_rel)} files, {total_markers} markers", flush=True)
+    except Exception as exc:
+        print(f"[diag_bridge] explorer/problems emit error: {exc}", flush=True)
+
+
 async def _adapter_ws_loop(sio):
     """Connect to adapter WS, listen for diagnostics, broadcast via Socket.IO."""
     import websockets
@@ -366,6 +445,13 @@ async def _adapter_ws_loop(sio):
 
                     entries = _process_diagnostics_update(ev)
                     print(f"[diag_bridge] rx {len(entries)} entries, paths={[e.get('path','?') for e in entries]}", flush=True)
+
+                    # ── Emit to explorer + problems panel (pipe-direct, no iframe) ──
+                    try:
+                        await _emit_diagnostics_to_explorer_and_ui(entries)
+                    except Exception as exc:
+                        print(f"[diag_bridge] explorer/problems emit FAIL: {exc}", flush=True)
+
                     for entry in entries:
                         try:
                             path = str(entry.get("path", ""))

@@ -842,6 +842,64 @@ export function initSidebarShortcuts(options = {}) {
     _persistShortcuts(next);
   }
 
+  function _persistHeaderOrder(orderedKeys) {
+    const order = Array.isArray(orderedKeys)
+      ? orderedKeys.map((key) => _normStr(key)).filter((key) => !!key)
+      : [];
+    if (!order.length) return;
+
+    const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
+    if (!raw.length) return;
+
+    const headerRecords = [];
+    const headerByKey = new Map();
+    raw.forEach((entry) => {
+      if (!entry || typeof entry !== 'object' || !entry.header) return;
+      const key = _normStr(entry.id) || _normStr(entry.url);
+      if (!key) return;
+      const record = { key, entry };
+      headerRecords.push(record);
+      if (!headerByKey.has(key)) headerByKey.set(key, record);
+    });
+    if (headerRecords.length < 2) return;
+
+    const reordered = [];
+    const seen = new Set();
+    order.forEach((key) => {
+      if (seen.has(key)) return;
+      const record = headerByKey.get(key);
+      if (!record) return;
+      reordered.push(record);
+      seen.add(key);
+    });
+    headerRecords.forEach((record) => {
+      if (seen.has(record.key)) return;
+      reordered.push(record);
+      seen.add(record.key);
+    });
+    if (reordered.length !== headerRecords.length) return;
+
+    let changed = false;
+    for (let i = 0; i < headerRecords.length; i += 1) {
+      if (headerRecords[i].key !== reordered[i].key) {
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) return;
+
+    let cursor = 0;
+    const next = raw.map((entry) => {
+      if (!entry || typeof entry !== 'object' || !entry.header) return entry;
+      const key = _normStr(entry.id) || _normStr(entry.url);
+      if (!key) return entry;
+      const replacement = reordered[cursor]?.entry || entry;
+      cursor += 1;
+      return replacement;
+    });
+    _persistShortcuts(next);
+  }
+
   async function _quitFrameworkApp(appId) {
     const id = _normStr(appId);
     if (!id) return false;
@@ -967,7 +1025,89 @@ export function initSidebarShortcuts(options = {}) {
     }
     gridEl.style.display = 'flex';
 
-    let renderedCount = 0;
+    let headerDragState = null;
+    let dropBeforeCell = null;
+    let dropAfterCell = null;
+    let dropInsertionIndex = -1;
+    const renderedHeaderItems = [];
+
+    const clearDropMarkers = () => {
+      if (dropBeforeCell) {
+        dropBeforeCell.style.boxShadow = '';
+        dropBeforeCell = null;
+      }
+      if (dropAfterCell) {
+        dropAfterCell.style.borderInlineEnd = '';
+        dropAfterCell = null;
+      }
+    };
+
+    const getCells = () => Array.from(gridEl.querySelectorAll('.agent-drawer__icon-cell'));
+
+    const computeInsertion = (clientX, sourceCell) => {
+      const cells = getCells().filter((cell) => cell !== sourceCell);
+      let insertion = cells.length;
+      for (let i = 0; i < cells.length; i += 1) {
+        const rect = cells[i].getBoundingClientRect();
+        const mid = rect.left + (rect.width / 2);
+        if (clientX <= mid) {
+          insertion = i;
+          break;
+        }
+      }
+      return { cells, insertion };
+    };
+
+    const updateDragTarget = (clientX) => {
+      if (!headerDragState || !headerDragState.dragging || !headerDragState.cell) return;
+      clearDropMarkers();
+      const { cells, insertion } = computeInsertion(clientX, headerDragState.cell);
+      dropInsertionIndex = insertion;
+      if (insertion < cells.length) {
+        const cell = cells[insertion];
+        cell.style.boxShadow = 'inset 2px 0 0 rgba(120,170,255,0.95)';
+        dropBeforeCell = cell;
+      } else if (cells.length) {
+        const cell = cells[cells.length - 1];
+        cell.style.borderInlineEnd = '2px solid rgba(120,170,255,0.95)';
+        dropAfterCell = cell;
+      }
+    };
+
+    const beginDrag = (state) => {
+      if (!state || !state.cell || !state.btn) return;
+      state.dragging = true;
+      state.cell.classList.add('is-dragging');
+      state.cell.style.opacity = '0.72';
+      state.cell.style.transform = 'scale(0.985)';
+      state.btn.style.cursor = 'grabbing';
+      dropInsertionIndex = state.fromIndex;
+    };
+
+    const finishDrag = (commit) => {
+      if (!headerDragState) return;
+      const state = headerDragState;
+      clearDropMarkers();
+      state.cell.classList.remove('is-dragging');
+      state.cell.style.opacity = '';
+      state.cell.style.transform = '';
+      state.btn.style.cursor = 'grab';
+      if (commit && state.dragging) {
+        const moving = renderedHeaderItems[state.fromIndex];
+        if (moving) {
+          const withoutSource = renderedHeaderItems.filter((_, idx) => idx !== state.fromIndex);
+          const insertion = Number.isInteger(dropInsertionIndex) ? dropInsertionIndex : state.fromIndex;
+          const bounded = Math.max(0, Math.min(withoutSource.length, insertion));
+          const next = withoutSource.slice();
+          next.splice(bounded, 0, moving);
+          const nextKeys = next.map((item) => _normStr(item?.key)).filter((key) => !!key);
+          _persistHeaderOrder(nextKeys);
+        }
+      }
+      headerDragState = null;
+      dropInsertionIndex = -1;
+    };
+
     headerItems.forEach((sc) => {
       const effectiveIcon = _effectiveShortcutIcon(sc);
       const fallbackText = _firstGrapheme(sc.label);
@@ -981,10 +1121,41 @@ export function initSidebarShortcuts(options = {}) {
       btn.className = 'agent-drawer__icon-btn';
       if (sc.key && sc.key === activeKey) btn.classList.add('is-active');
       btn.title = sc.label || sc.url || 'Shortcut';
+      btn.style.touchAction = 'none';
+      btn.style.cursor = 'grab';
       btn.appendChild(iconNode);
+
+      const renderedIndex = renderedHeaderItems.length;
+      renderedHeaderItems.push(sc);
+      cell.dataset.headerIndex = String(renderedIndex);
+
+      let longPressTimer = null;
+      let suppressUntil = 0;
+      let pointerId = null;
+      let startX = 0;
+      let startY = 0;
+
+      const clearLp = () => {
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      };
+
+      const clearPointer = () => {
+        pointerId = null;
+        startX = 0;
+        startY = 0;
+      };
 
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
+        if (Date.now() < suppressUntil) {
+          ev.preventDefault();
+          ev.stopImmediatePropagation();
+          suppressUntil = 0;
+          return;
+        }
         _closeHeaderIconMenu();
         const targetId = sc.id || sc.url || sc.key;
         if (!targetId) return;
@@ -992,6 +1163,79 @@ export function initSidebarShortcuts(options = {}) {
         if (openDrawer) {
           setTimeout(() => { try { openDrawer(); } catch (_) {} }, 120);
         }
+      });
+
+      btn.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _openHeaderIconMenu(btn, sc);
+      });
+
+      btn.addEventListener('pointerdown', (ev) => {
+        if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+        if (ev.pointerType !== 'mouse' && typeof ev.button === 'number' && ev.button !== 0) return;
+        const fromIndex = Number(cell.dataset.headerIndex);
+        if (!Number.isInteger(fromIndex) || fromIndex < 0) return;
+        if (headerDragState) finishDrag(false);
+        pointerId = ev.pointerId;
+        startX = ev.clientX;
+        startY = ev.clientY;
+        headerDragState = {
+          cell,
+          btn,
+          fromIndex,
+          dragging: false,
+        };
+        if (ev.pointerType === 'touch') {
+          clearLp();
+          longPressTimer = setTimeout(() => {
+            if (!headerDragState || headerDragState.btn !== btn || headerDragState.dragging) return;
+            suppressUntil = Date.now() + 900;
+            finishDrag(false);
+            _openHeaderIconMenu(btn, sc);
+          }, 520);
+        }
+        try { btn.setPointerCapture(ev.pointerId); } catch (_) {}
+      });
+
+      btn.addEventListener('pointermove', (ev) => {
+        if (ev.pointerId !== pointerId) return;
+        if (!headerDragState || headerDragState.btn !== btn) return;
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (!headerDragState.dragging) {
+          if (Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+          clearLp();
+          beginDrag(headerDragState);
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+        updateDragTarget(ev.clientX);
+      }, { passive: false });
+
+      const endPointer = (ev, commit) => {
+        if (ev.pointerId !== pointerId) return;
+        clearLp();
+        if (headerDragState && headerDragState.btn === btn) {
+          if (headerDragState.dragging) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            suppressUntil = Date.now() + 900;
+            finishDrag(commit);
+          } else {
+            finishDrag(false);
+          }
+        }
+        clearPointer();
+      };
+
+      btn.addEventListener('pointerup', (ev) => endPointer(ev, true));
+      btn.addEventListener('pointercancel', (ev) => endPointer(ev, false));
+      btn.addEventListener('lostpointercapture', (ev) => {
+        if (ev.pointerId !== pointerId) return;
+        clearLp();
+        if (headerDragState && headerDragState.btn === btn) finishDrag(false);
+        clearPointer();
       });
 
       const dot = document.createElement('span');
@@ -1010,17 +1254,16 @@ export function initSidebarShortcuts(options = {}) {
       cell.appendChild(btn);
       cell.appendChild(dot);
       gridEl.appendChild(cell);
-      renderedCount += 1;
     });
 
-    if (!renderedCount) {
+    if (!renderedHeaderItems.length) {
       gridEl.style.display = 'none';
       _closeHeaderIconMenu();
       return;
     }
 
     const openKey = _normStr(_headerIconMenuKey || sidebarHeaderIconMenuEl?.dataset?.shortcutKey);
-    if (openKey && !headerItems.some((sc) => _normStr(sc?.key) === openKey)) {
+    if (openKey && !renderedHeaderItems.some((sc) => _normStr(sc?.key) === openKey)) {
       _closeHeaderIconMenu();
     }
   }
@@ -1586,10 +1829,13 @@ export function initSidebarShortcuts(options = {}) {
       if (!dragState) return;
       const state = dragState;
       clearDropMarkers();
-      if (state.longPressTimer) {
-        clearTimeout(state.longPressTimer);
-        state.longPressTimer = null;
-      }
+      try {
+        if (state.mouseMoveHandler) document.removeEventListener('mousemove', state.mouseMoveHandler);
+        if (state.mouseUpHandler) document.removeEventListener('mouseup', state.mouseUpHandler);
+        if (state.touchMoveHandler) document.removeEventListener('touchmove', state.touchMoveHandler);
+        if (state.touchEndHandler) document.removeEventListener('touchend', state.touchEndHandler);
+        if (state.touchCancelHandler) document.removeEventListener('touchcancel', state.touchCancelHandler);
+      } catch (_) {}
       state.row.style.opacity = '';
       state.row.style.transform = '';
       state.row.classList.remove('is-dragging');
@@ -1620,59 +1866,92 @@ export function initSidebarShortcuts(options = {}) {
       handle.style.touchAction = 'none';
       handle.style.cursor = 'grab';
 
-      handle.addEventListener('pointerdown', (ev) => {
+      handle.addEventListener('mousedown', (ev) => {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
         ev.stopPropagation();
         if (dragState) finishDrag(false);
         dragState = {
           row,
           handle,
           fromIndex: idx,
-          pointerId: ev.pointerId,
-          pointerType: ev.pointerType,
-          downX: ev.clientX,
-          downY: ev.clientY,
           dragging: false,
-          longPressTimer: null,
+          mouseMoveHandler: null,
+          mouseUpHandler: null,
+          touchMoveHandler: null,
+          touchEndHandler: null,
+          touchCancelHandler: null,
         };
-        try { handle.setPointerCapture(ev.pointerId); } catch (_) {}
-
-        if (ev.pointerType === 'mouse') {
-          beginDrag(dragState);
-          updateDragTarget(ev.clientY);
-          return;
-        }
-
-        dragState.longPressTimer = setTimeout(() => {
-          if (!dragState || dragState.row !== row || dragState.handle !== handle) return;
-          beginDrag(dragState);
-          updateDragTarget(dragState.downY);
-        }, 320);
-      });
-
-      handle.addEventListener('pointermove', (ev) => {
-        if (!dragState || dragState.pointerId !== ev.pointerId || dragState.handle !== handle) return;
-        const dx = Math.abs(ev.clientX - dragState.downX);
-        const dy = Math.abs(ev.clientY - dragState.downY);
-        if (!dragState.dragging) {
-          if (dragState.pointerType !== 'mouse' && (dx > 10 || dy > 10) && dragState.longPressTimer) {
-            clearTimeout(dragState.longPressTimer);
-            dragState.longPressTimer = null;
-          }
-          return;
-        }
-        ev.preventDefault();
+        beginDrag(dragState);
         updateDragTarget(ev.clientY);
+        dragState.mouseMoveHandler = (moveEv) => {
+          if (!dragState || dragState.handle !== handle) return;
+          moveEv.preventDefault();
+          updateDragTarget(moveEv.clientY);
+        };
+        dragState.mouseUpHandler = (upEv) => {
+          if (!dragState || dragState.handle !== handle) return;
+          upEv.preventDefault();
+          finishDrag(true);
+        };
+        document.addEventListener('mousemove', dragState.mouseMoveHandler);
+        document.addEventListener('mouseup', dragState.mouseUpHandler);
       });
 
-      handle.addEventListener('pointerup', (ev) => {
-        if (!dragState || dragState.pointerId !== ev.pointerId || dragState.handle !== handle) return;
-        finishDrag(true);
-      });
+      handle.addEventListener('touchstart', (ev) => {
+        const touch = ev.changedTouches && ev.changedTouches[0];
+        if (!touch) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (dragState) finishDrag(false);
+        dragState = {
+          row,
+          handle,
+          fromIndex: idx,
+          dragging: false,
+          touchId: touch.identifier,
+          mouseMoveHandler: null,
+          mouseUpHandler: null,
+          touchMoveHandler: null,
+          touchEndHandler: null,
+          touchCancelHandler: null,
+        };
+        beginDrag(dragState);
+        updateDragTarget(touch.clientY);
 
-      handle.addEventListener('pointercancel', (ev) => {
-        if (!dragState || dragState.pointerId !== ev.pointerId || dragState.handle !== handle) return;
-        finishDrag(false);
-      });
+        const getTrackedTouch = (touches) => {
+          if (!touches) return null;
+          for (let i = 0; i < touches.length; i += 1) {
+            if (touches[i].identifier === dragState?.touchId) return touches[i];
+          }
+          return null;
+        };
+
+        dragState.touchMoveHandler = (moveEv) => {
+          if (!dragState || dragState.handle !== handle) return;
+          const t = getTrackedTouch(moveEv.touches) || getTrackedTouch(moveEv.changedTouches);
+          if (!t) return;
+          moveEv.preventDefault();
+          updateDragTarget(t.clientY);
+        };
+        dragState.touchEndHandler = (endEv) => {
+          if (!dragState || dragState.handle !== handle) return;
+          const t = getTrackedTouch(endEv.changedTouches);
+          if (!t) return;
+          endEv.preventDefault();
+          finishDrag(true);
+        };
+        dragState.touchCancelHandler = (cancelEv) => {
+          if (!dragState || dragState.handle !== handle) return;
+          const t = getTrackedTouch(cancelEv.changedTouches);
+          if (!t) return;
+          cancelEv.preventDefault();
+          finishDrag(false);
+        };
+        document.addEventListener('touchmove', dragState.touchMoveHandler, { passive: false });
+        document.addEventListener('touchend', dragState.touchEndHandler, { passive: false });
+        document.addEventListener('touchcancel', dragState.touchCancelHandler, { passive: false });
+      }, { passive: false });
     };
 
     shortcuts.forEach((sc, idx) => {
@@ -1834,6 +2113,13 @@ export function initSidebarShortcuts(options = {}) {
       if (ev.target.closest('#fe-agent-toggle')) return;
       if (ev.target.closest('#fe-agent-dd')) return;
       _closeAgentDropdown();
+    }, false);
+
+    document.addEventListener('click', (ev) => {
+      if (!sidebarHeaderIconMenuEl || !sidebarHeaderIconMenuEl.classList.contains('show')) return;
+      if (ev.target.closest('#agent-drawer-icon-menu')) return;
+      if (ev.target.closest('.agent-drawer__icon-btn')) return;
+      _closeHeaderIconMenu();
     }, false);
   }
 

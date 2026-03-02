@@ -2133,7 +2133,7 @@ async def refresh_diffs(data: dict = Body(...)):
 
 @editor_router.post('/toggle_edit_tracking')
 async def toggle_edit_tracking(data: dict = Body(...)):
-    enabled = data.get('enabled', False)
+    enabled = bool(data.get('enabled', False))
     from app.apps.file_editor_cm6 import change_ledger
     if enabled:
         change_ledger.clear()  # Fresh start
@@ -2141,7 +2141,10 @@ async def toggle_edit_tracking(data: dict = Body(...)):
     else:
         change_ledger.clear()
         print("[editor_app] trackAgentEdits disabled via API — change_ledger cleared", file=sys.stderr)
-    _preferences_store.update_preferences(editor={'trackAgentEdits': enabled})
+    updates = {'trackAgentEdits': enabled}
+    if enabled:
+        updates['trackCodexWsEdits'] = False
+    _preferences_store.update_preferences(editor=updates)
     return {"ok": True, "enabled": enabled}
 
 @editor_router.post('/jump_to_line')
@@ -2310,6 +2313,7 @@ def _get_view_state_dict() -> dict:
         "autoSave": editor_prefs.get('autoSave'),
         "showInlineDiffs": editor_prefs.get('showInlineDiffs'),
         "trackAgentEdits": editor_prefs.get('trackAgentEdits'),
+        "trackCodexWsEdits": editor_prefs.get('trackCodexWsEdits'),
         "fontScale": editor_prefs.get('fontScale'),
         "showIndentGuides": editor_prefs.get('showIndentGuides'),
         "colorPicker": editor_prefs.get('colorPicker'),
@@ -2452,6 +2456,7 @@ async def update_preference(data: dict = Body(...)):
             # Refresh handled below after persistence
 
         elif key == 'trackAgentEdits':
+            value = bool(value)
             from app.apps.file_editor_cm6 import change_ledger
             if value:
                 change_ledger.clear()  # Fresh start
@@ -2459,6 +2464,9 @@ async def update_preference(data: dict = Body(...)):
             else:
                 change_ledger.clear()  # Stop tracking
                 print("[editor_app] trackAgentEdits disabled — change_ledger cleared", file=sys.stderr)
+        elif key == 'trackCodexWsEdits':
+            value = bool(value)
+            print(f"[editor_app] trackCodexWsEdits set to {value}", file=sys.stderr)
         elif key in ['showLineNumbers', 'showSyntax', 'autoCloseBrackets', 'autocompletion', 'autoSave']:
             # These require frontend to rebuild view (legacy behavior)
             # Persistence happens after this block once runtime updates succeed
@@ -2585,7 +2593,17 @@ async def update_preference(data: dict = Body(...)):
             except Exception as exc:
                 print(f"[PREFERENCE] LSP reconnect after {key} failed: {exc}", file=sys.stderr)
         else:
-            _preferences_store.update_preferences(editor={key: value})
+            editor_updates = {key: value}
+            if key == 'trackAgentEdits' and bool(value):
+                editor_updates['trackCodexWsEdits'] = False
+            elif key == 'trackCodexWsEdits' and bool(value):
+                editor_updates['trackAgentEdits'] = False
+                try:
+                    from app.apps.file_editor_cm6 import change_ledger
+                    change_ledger.clear()
+                except Exception:
+                    pass
+            _preferences_store.update_preferences(editor=editor_updates)
         
         if key in ('showInlineDiffs', 'showDraftDiffs', 'autoSave'):
             _refresh_active_diffs()

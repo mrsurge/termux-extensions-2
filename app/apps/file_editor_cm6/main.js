@@ -16,7 +16,10 @@ import { initSidebarShortcuts } from './extensions/sidebar_extension/static/js/s
 import ReconnectingWebSocket from './static/js/reconnecting_websocket.js'; // used by other WS helpers (not explorer)
 import { initLspModal } from './static/js/lsp-modal/index.js';
 import { createConsoleDrawer } from './static/js/console.js';
+import { createProblemsPanel } from './static/js/problems.js';
 import { initConsoleBridge } from './static/js/console_bridge.js';
+
+let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 
 function ensureSocketIoLoaded() {
   if (window.io) return Promise.resolve(window.io);
@@ -44,6 +47,7 @@ function ensureVConsoleLoaded() {
 import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
 
 const AGENT_EXTENSION_MANIFEST = '/apps/file_editor_cm6/extensions/sidebar_extension/manifest.json';
+const CODEX_PROXY_SOCKET_PATH = '/api/app/codex_agent/proxy/socket.io';
 const AGENT_HOST_CWD_ENDPOINT = '/api/host/project/cwd';
 const UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT = 'agentActiveShortcutId';
 const UI_PREF_KEY_AGENT_TOGGLE_DISPLAY = 'agentToggleDisplay';
@@ -61,6 +65,7 @@ let _agentConfigApplySeq = 0;
 let agentShortcutLoadBtn = null;
 let agentShortcutLoadLabel = null;
 let agentShortcutLoadDD = null;
+let editorViewState = null; // Loaded from backend at startup via /editor/view_state
 
 function _resolveUiPrefsWaiters(ui) {
   if (!_uiPrefsWaiters.length) return;
@@ -234,6 +239,8 @@ async function pushAgentHostCwd(cwd) {
   const base = getAgentHostBase();
   if (!base) return;
   try {
+    // MARKED FOR DELETION: legacy HTTP transport kept while codex appserver
+    // sidebar signaling migrates to Socket.IO.
     await fetch(`${base}${AGENT_HOST_CWD_ENDPOINT}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -246,6 +253,188 @@ async function pushAgentHostCwd(cwd) {
 
 function getAgentHostBase() {
   return typeof window.__agentHostBase === 'string' ? window.__agentHostBase : '';
+}
+
+function _deriveAgentHostBaseFromRuntimeUrl(rawUrl) {
+  try {
+    const u = new URL(String(rawUrl || ''), window.location.href);
+    const origin = (u.origin || '').replace(/\/+$/, '');
+    const pathname = u.pathname || '';
+    const proxyMatch = pathname.match(/(\/api\/app\/[^/]+\/proxy)(?:\/|$)/);
+    if (proxyMatch && proxyMatch[1]) {
+      return `${origin}${proxyMatch[1]}`;
+    }
+    const appMatch = pathname.match(/^\/app\/([^/?#]+)(?:\/|$)/);
+    if (appMatch && appMatch[1]) {
+      const appId = decodeURIComponent(appMatch[1]);
+      return `${origin}/api/app/${encodeURIComponent(appId)}/proxy`;
+    }
+    return origin;
+  } catch (_) {
+    return '';
+  }
+}
+
+function _emitSidebarIpc(eventName, payload) {
+  try {
+    if (!sidebarIpcSocket || !sidebarIpcSocket.connected) return;
+    sidebarIpcSocket.emit(eventName, payload || {});
+  } catch (_) {}
+}
+
+function _isCodexEditTrackingEnabled() {
+  return !!(editorViewState && editorViewState.trackCodexWsEdits);
+}
+
+function _rememberCodexEditKey(key) {
+  if (!key) return false;
+  const now = Date.now();
+  const seen = _codexTrackedEditDedup.get(key);
+  if (seen && (now - seen) < 30000) {
+    return true;
+  }
+  _codexTrackedEditDedup.set(key, now);
+  if (_codexTrackedEditDedup.size > 256) {
+    const cutoff = now - 120000;
+    for (const [k, ts] of _codexTrackedEditDedup.entries()) {
+      if (ts < cutoff) _codexTrackedEditDedup.delete(k);
+    }
+  }
+  return false;
+}
+
+function _extractPathFromDiff(diffText) {
+  if (typeof diffText !== 'string' || !diffText) return '';
+  const lines = diffText.split('\n');
+  for (const line of lines) {
+    if (!line.startsWith('+++ ')) continue;
+    let path = line.slice(4).trim();
+    if (!path || path === '/dev/null') return '';
+    if (path.startsWith('b/')) path = path.slice(2);
+    if (path.startsWith('a/')) path = path.slice(2);
+    return path;
+  }
+  return '';
+}
+
+function _extractLineFromDiff(diffText) {
+  if (typeof diffText !== 'string' || !diffText) return 1;
+  const lines = diffText.split('\n');
+  for (const line of lines) {
+    if (!line.startsWith('@@')) continue;
+    const match = line.match(/\+(\d+)(?:,\d+)?\s@@/);
+    if (!match) continue;
+    const parsed = Number(match[1]);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return 1;
+}
+
+async function _resolveCodexEditAbsPath(rawPath) {
+  const value = typeof rawPath === 'string' ? rawPath.trim() : '';
+  if (!value) return '';
+  if (value.startsWith('/')) return value;
+  const root = cachedProjectRoot || (await getCurrentProjectRoot(false)) || '';
+  if (!root) return '';
+  return toAbsolute(value, root, HOME_DIR);
+}
+
+async function _applyCodexTrackedEdit(edit) {
+  if (!edit || typeof edit !== 'object') return;
+  if (!_isCodexEditTrackingEnabled()) return;
+
+  const absPath = await _resolveCodexEditAbsPath(edit.path);
+  if (!absPath) return;
+  const line = Number.isFinite(Number(edit.line)) ? Number(edit.line) : 1;
+  const key = `${edit.id || ''}:${absPath}:${line}`;
+  if (_rememberCodexEditKey(key)) return;
+
+  try {
+    await openFile(absPath, { forceRefresh: true });
+    if (line >= 1) {
+      await new Promise((resolve) => setTimeout(resolve, 140));
+      await jumpToCurrentFileLine(line, { focus: true });
+    }
+  } catch (err) {
+    console.warn('[CodexEditTrack] Failed to auto-open tracked edit:', err);
+  }
+}
+
+function _handleCodexAppserverEvent(event) {
+  if (!event || typeof event !== 'object') return;
+  const type = typeof event.type === 'string' ? event.type : '';
+  if (type !== 'diff') return;
+
+  const diffText = typeof event.text === 'string' ? event.text : '';
+  const eventPath = typeof event.path === 'string' ? event.path : '';
+  const path = eventPath || _extractPathFromDiff(diffText);
+  if (!path) return;
+  const line = _extractLineFromDiff(diffText);
+  const payload = {
+    id: event.id || '',
+    path,
+    line,
+    source: 'codex_ws',
+    conversation_id: event.conversation_id || '',
+  };
+
+  _emitSidebarIpc('sidebar:agent_edit', payload);
+  void _applyCodexTrackedEdit(payload);
+}
+
+function _isCodexRuntimeUrl(rawUrl) {
+  const value = typeof rawUrl === 'string' ? rawUrl : '';
+  return (
+    value.includes('/api/app/codex_agent/proxy/')
+    || value.includes('/app/codex_agent')
+    || value.includes('/codex-agent')
+  );
+}
+
+function _disconnectCodexAppserverSocket() {
+  if (!codexAppserverSocket) return;
+  try {
+    codexAppserverSocket.disconnect();
+  } catch (_) {}
+  codexAppserverSocket = null;
+}
+
+function connectCodexAppserverSocket(runtimeUrl = '') {
+  if (!_isCodexRuntimeUrl(runtimeUrl)) {
+    _disconnectCodexAppserverSocket();
+    return;
+  }
+  ensureSocketIoLoaded().then((io) => {
+    if (!io) return;
+    if (codexAppserverSocket) {
+      if (!codexAppserverSocket.connected) codexAppserverSocket.connect();
+      return;
+    }
+
+    codexAppserverSocket = io('/appserver', {
+      path: CODEX_PROXY_SOCKET_PATH,
+      transports: ['websocket'],
+      query: { source: 'file_editor_cm6_main' },
+    });
+    codexAppserverSocket.on('connect', () => {
+      console.log('[CodexAppserverWS] connected');
+    });
+    codexAppserverSocket.on('disconnect', (reason) => {
+      console.log('[CodexAppserverWS] disconnected', reason);
+    });
+    codexAppserverSocket.on('connect_error', (err) => {
+      console.warn('[CodexAppserverWS] connect error', err);
+    });
+    codexAppserverSocket.on('appserver_event', (event) => {
+      try {
+        _handleCodexAppserverEvent(event);
+      } catch (err) {
+        console.warn('[CodexAppserverWS] event handling failed', err);
+      }
+    });
+  }).catch((err) => {
+    console.warn('[CodexAppserverWS] load failed', err);
+  });
 }
 
 function _normalizeShortcutLoad(raw) {
@@ -332,6 +521,9 @@ let editorSocket = null;
 let editorSocketId = null;
 const editorPending = [];
 const _editorIssuesDumpWaiters = new Map(); // requestId -> {resolve,reject,timer}
+let sidebarIpcSocket = null;
+let codexAppserverSocket = null;
+const _codexTrackedEditDedup = new Map();
 
 async function handleAgentOpen(payload) {
   const isMobile = _isMobileLayout();
@@ -516,6 +708,14 @@ function connectExplorerSocket() {
               } catch (_) {}
             }
           } catch (_) {}
+        }
+        if (type === 'diagnostics:detail') {
+          try {
+            const keys = payload ? Object.keys(payload) : [];
+            const sampleMarkers = keys.length > 0 ? (payload[keys[0]] || []).slice(0, 1) : [];
+            console.log('[Problems] diagnostics:detail rx', keys.length, 'files, sample:', JSON.stringify(sampleMarkers).slice(0, 300));
+            problemsPanel.update(payload);
+          } catch (e) { console.error('[Problems] update error:', e); }
         }
         if (type && typeof window.__explorerBusDispatch === 'function') {
           window.__explorerBusDispatch(type, payload);
@@ -886,6 +1086,39 @@ function connectEditorSocket() {
 
 // ─── UI IPC (frontend ↔ editor iframe relay) ──────────────────────
 let uiIpcSocket = null;
+function connectSidebarIPC() {
+  ensureSocketIoLoaded().then((io) => {
+    if (!io) return;
+    if (sidebarIpcSocket) {
+      if (!sidebarIpcSocket.connected) sidebarIpcSocket.connect();
+      return;
+    }
+    sidebarIpcSocket = io('/sidebar_ipc', {
+      path: '/ui_ipc_ws/socket.io',
+      transports: ['websocket'],
+      query: { app_id: 'file_editor_cm6', source: 'main_page' },
+    });
+    sidebarIpcSocket.on('connect', () => {
+      try {
+        sidebarIpcSocket.emit('sidebar:register', { role: 'host', app: 'file_editor_cm6' });
+      } catch (_) {}
+      console.log('[Sidebar_IPC] main page connected');
+    });
+    sidebarIpcSocket.on('sidebar:agent_edit', (data) => {
+      void _applyCodexTrackedEdit(data);
+    });
+    sidebarIpcSocket.on('sidebar:event', (data) => {
+      if (!data || typeof data !== 'object') return;
+      if (data.type !== 'agent_edit') return;
+      void _applyCodexTrackedEdit(data.payload || data);
+    });
+    sidebarIpcSocket.on('connect_error', (err) => {
+      console.warn('[Sidebar_IPC] connect failed', err);
+    });
+  }).catch((err) => {
+    console.warn('[Sidebar_IPC] load failed', err);
+  });
+}
 
 function connectUIIPC() {
   ensureSocketIoLoaded().then((io) => {
@@ -1406,7 +1639,7 @@ function _safeFilePart(s) {
   return text.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
 }
 
-function buildDefaultDiagnosticsFilename(absPath, projectRoot) {
+function buildDefaultDiagnosticsFilename(absPath, projectRoot, ext = '.json') {
   const file = String(absPath || '').trim();
   const pr = String(projectRoot || '').trim().replace(/\/+$/, '');
 
@@ -1423,7 +1656,7 @@ function buildDefaultDiagnosticsFilename(absPath, projectRoot) {
     .filter(Boolean)
     .join('.');
 
-  return `${dotted || 'untitled'}.json`;
+  return `${dotted || 'untitled'}${ext}`;
 }
 
 // NOTE: _issuesDumpRequestOnce is now implemented via the editor Socket.IO channel
@@ -1480,6 +1713,77 @@ async function writeTextFileInProject(absPath, content) {
   return res;
 }
 
+function _showExportDiagModal() {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('export-diag-modal');
+    if (!modal) { resolve(null); return; }
+    const closeBtn = document.getElementById('export-diag-modal-close');
+    const humanBtn = document.getElementById('export-diag-human');
+    const jsonBtn = document.getElementById('export-diag-json');
+
+    function cleanup(result) {
+      modal.classList.remove('show');
+      modal.setAttribute('aria-hidden', 'true');
+      closeBtn?.removeEventListener('click', onClose);
+      humanBtn?.removeEventListener('click', onHuman);
+      jsonBtn?.removeEventListener('click', onJson);
+      modal.removeEventListener('click', onBackdrop);
+      resolve(result);
+    }
+    function onClose() { cleanup(null); }
+    function onHuman() { cleanup('human'); }
+    function onJson() { cleanup('json'); }
+    function onBackdrop(e) { if (e.target === modal) cleanup(null); }
+
+    closeBtn?.addEventListener('click', onClose);
+    humanBtn?.addEventListener('click', onHuman);
+    jsonBtn?.addEventListener('click', onJson);
+    modal.addEventListener('click', onBackdrop);
+
+    modal.setAttribute('aria-hidden', 'false');
+    modal.classList.add('show');
+  });
+}
+
+function _formatDiagnosticsMarkdown(absPath, markers, projectRoot) {
+  const pr = String(projectRoot || '').replace(/\/+$/, '');
+  const rel = (pr && absPath.startsWith(pr + '/')) ? absPath.slice(pr.length + 1) : absPath;
+  const errors = markers.filter(m => m.severity === 8).length;
+  const warnings = markers.filter(m => m.severity === 4).length;
+  const infos = markers.filter(m => m.severity === 2 || m.severity === 1).length;
+
+  const lines = [];
+  lines.push(`# Diagnostics: ${rel}`);
+  lines.push('');
+  lines.push(`**Exported:** ${new Date().toISOString()}`);
+  const counts = [];
+  if (errors) counts.push(`${errors} error${errors > 1 ? 's' : ''}`);
+  if (warnings) counts.push(`${warnings} warning${warnings > 1 ? 's' : ''}`);
+  if (infos) counts.push(`${infos} info`);
+  lines.push(`**Summary:** ${counts.length ? counts.join(', ') : 'No problems'}`);
+  lines.push('');
+
+  if (markers.length === 0) {
+    lines.push('No problems detected.');
+  } else {
+    // Sort: errors first, then warnings, then by line
+    const sorted = [...markers].sort((a, b) => {
+      const sevOrder = (s) => s === 8 ? 0 : s === 4 ? 1 : 2;
+      const so = sevOrder(a.severity) - sevOrder(b.severity);
+      if (so !== 0) return so;
+      return (a.startLineNumber || 0) - (b.startLineNumber || 0);
+    });
+    for (const m of sorted) {
+      const sev = m.severity === 8 ? '🔴 Error' : m.severity === 4 ? '🟡 Warning' : 'ℹ️ Info';
+      const loc = `${m.startLineNumber || 1}:${m.startColumn || 1}`;
+      const src = m.source ? ` [${m.source}${m.code ? `(${m.code})` : ''}]` : '';
+      lines.push(`- **${sev}** at line ${loc} — ${m.message || '(no message)'}${src}`);
+    }
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
 async function exportDiagnosticsToFile() {
   if (!currentPath) {
     host.toast('Open a file first');
@@ -1490,19 +1794,20 @@ async function exportDiagnosticsToFile() {
     return;
   }
 
-  let dump = null;
-  try {
-    dump = await _issuesDumpRequestOnce();
-  } catch (err) {
-    console.error('[Diagnostics Export] Failed to request dump:', err);
-    host.toast(err?.message || 'Failed to gather diagnostics');
-    return;
-  }
+  // Get markers for current file from the problems panel cache.
+  const detail = problemsPanel.getDetail ? problemsPanel.getDetail() : {};
+  const markers = detail[currentPath] || [];
+
+  // Show format choice modal.
+  const format = await _showExportDiagModal();
+  if (!format) return;
 
   const projectRoot = String(cachedProjectRoot || '').replace(/\/+$/, '');
+  const isHuman = format === 'human';
+  const fileExt = isHuman ? '.md' : '.json';
   const defaultDirRes = await _ensureDiagnosticsDir(projectRoot);
   const startDir = defaultDirRes.dir || projectRoot;
-  const defaultName = buildDefaultDiagnosticsFilename(currentPath, projectRoot);
+  const defaultName = buildDefaultDiagnosticsFilename(currentPath, projectRoot, fileExt);
 
   if (!pickerAvailable()) { host.toast('File picker unavailable'); return; }
 
@@ -1528,13 +1833,17 @@ async function exportDiagnosticsToFile() {
   }
   if (choice.existed && !window.confirm('File exists. Overwrite?')) return;
 
-  const payload = {
-    exported_at: new Date().toISOString(),
-    project_root: projectRoot,
-    file_path: currentPath,
-    dump: dump || {},
-  };
-  const text = JSON.stringify(payload, null, 2) + '\n';
+  let text;
+  if (isHuman) {
+    text = _formatDiagnosticsMarkdown(currentPath, markers, projectRoot);
+  } else {
+    text = JSON.stringify({
+      exported_at: new Date().toISOString(),
+      project_root: projectRoot,
+      file_path: currentPath,
+      markers: markers,
+    }, null, 2) + '\n';
+  }
 
   try {
     await writeTextFileInProject(targetAbs, text);
@@ -1574,6 +1883,7 @@ const miToggleColorPicker = requireEl('#mi-toggle-color-picker');
 const miToggleReadonly = requireEl('#mi-toggle-readonly');
 const miToggleStickyScroll = requireEl('#mi-toggle-sticky-scroll');  // Added: 2025-12-03 by vectorArc - TE2 Team
 const miTrackEdits   = requireEl('#mi-track-edits');
+const miTrackCodexEdits = requireEl('#mi-track-codex-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
 const miLanguageServers = requireEl('#mi-language-servers');  // Added: 2025-12-08 - LSP settings modal
@@ -2590,7 +2900,7 @@ function handleEditTrackerEvent(data) {
   if (data.event === 'tracking_status') {
     updateEditTrackerStatus(data);
   } else if (data.event === 'edit_tracked') {
-    if (trackAgentEdits) {
+    if (editorViewState?.trackAgentEdits || editorViewState?.trackCodexWsEdits) {
       autoJumpToEdit(data.path, data.line);
     }
   }
@@ -2837,7 +3147,6 @@ var restoredSessionActive = false;
 var restoredSessionPath = null;
 
 // Preferences are managed by backend; frontend displays state only (no caching)
-let editorViewState = null; // Loaded from backend at startup via /editor/view_state
 
 let currentModeLanguage = null;
 let cachedProjectRoot = null;
@@ -3585,11 +3894,8 @@ async function _applyAgentRuntimeConfigFromUi(uiPrefs) {
   const previous = _agentRuntimeConfig;
   _agentRuntimeConfig = config;
 
-  try {
-    window.__agentHostBase = new URL(config.url, window.location.href).origin;
-  } catch (_) {
-    window.__agentHostBase = '';
-  }
+  window.__agentHostBase = _deriveAgentHostBaseFromRuntimeUrl(config.url);
+  connectCodexAppserverSocket(config.url);
 
   if (!agentDrawerHandle) {
     return config;
@@ -4207,6 +4513,7 @@ async function apiPost(path, body) {
 
 async function triggerEditorSearchPanel(reason = 'menu', opts = {}) {
   const action = opts && opts.replace ? 'replace' : 'find';
+  console.log('[Find] triggerEditorSearchPanel', action, 'editorSocket connected=', editorSocket?.connected);
   if (editorSocket && editorSocket.connected) {
     editorSocket.emit('editor_find_cmd', { action, reason });
     return;
@@ -4321,6 +4628,7 @@ function applyStateToMenus(state) {
   setMenuChecked(miToggleMinimap, state.showMinimap);
   setMenuChecked(miToggleStickyScroll, state.stickyScroll);  // Added: 2025-12-03 by vectorArc - TE2 Team
   setMenuChecked(miTrackEdits, state.trackAgentEdits);
+  setMenuChecked(miTrackCodexEdits, state.trackCodexWsEdits);
   
   // Apply font scale to UI
   applyFontScale(state.fontScale ?? 0.85);
@@ -6082,10 +6390,9 @@ bindMenuToggle(miToggleAutosave, async () => {
     await updatePreference('showDraftDiffs', false);
   }
 
-  // Guard: autosave + trackEdits + editable is dangerous — the tracker chases its own saves.
-  if (editorViewState?.trackAgentEdits && !editorViewState?.readOnly) {
-    await updatePreference('trackAgentEdits', false);
-    host.toast('Auto-track edits disabled (incompatible with autosave)', 'warn');
+  // Guard: autosave + tracked-edit auto-jump + editable is dangerous.
+  if (_isAnyEditTrackingEnabled() && !editorViewState?.readOnly) {
+    await _disableAllEditTracking('Auto-track edits disabled (incompatible with autosave)');
   }
 });
 
@@ -6094,9 +6401,8 @@ bindMenuToggle(miToggleDiffs, async () => {
   const success = await updatePreference('showInlineDiffs', !turningOff);
   if (!success) { host.toast('Failed to update preference'); return; }
   // Guard: turning git diffs OFF while auto-track is on → disable auto-track
-  if (turningOff && editorViewState?.trackAgentEdits) {
-    await updatePreference('trackAgentEdits', false);
-    host.toast('Auto-track edits disabled (requires git diffs)', 'warn');
+  if (turningOff && _isAnyEditTrackingEnabled()) {
+    await _disableAllEditTracking('Auto-track edits disabled (requires git diffs)');
   }
 });
 
@@ -6123,9 +6429,8 @@ bindMenuToggle(miToggleReadonly, async () => {
     host.toast(editorViewState?.readOnly ? 'Editor is now read-only' : 'Editor is now editable', 'info');
     // Guard: if we just made it editable while autosave + trackEdits are both ON,
     // the tracker would chase its own saves in an infinite loop. Disable tracking.
-    if (goingEditable && editorViewState?.autoSave && editorViewState?.trackAgentEdits) {
-      await updatePreference('trackAgentEdits', false);
-      host.toast('Auto-track edits disabled (incompatible with autosave)', 'warn');
+    if (goingEditable && editorViewState?.autoSave && _isAnyEditTrackingEnabled()) {
+      await _disableAllEditTracking('Auto-track edits disabled (incompatible with autosave)');
     }
   } else {
     host.toast('Failed to toggle read-only mode');
@@ -6150,30 +6455,61 @@ bindMenuToggle(miToggleStickyScroll, async () => {
 // Saved preferences before track-edits mode forces overrides
 let _preTrackingPrefs = null;
 
-bindMenuToggle(miTrackEdits, async () => {
-  const enabling = !(editorViewState?.trackAgentEdits);
+function _isAnyEditTrackingEnabled() {
+  return !!(editorViewState?.trackAgentEdits || editorViewState?.trackCodexWsEdits);
+}
+
+async function _restorePreTrackingPrefsIfIdle() {
+  if (_isAnyEditTrackingEnabled()) return;
+  if (!_preTrackingPrefs) return;
+  await updatePreference('showInlineDiffs', !!_preTrackingPrefs.showInlineDiffs);
+  await updatePreference('readOnly', !!_preTrackingPrefs.readOnly);
+  _preTrackingPrefs = null;
+}
+
+async function _disableAllEditTracking(reason) {
+  if (editorViewState?.trackAgentEdits) {
+    await updatePreference('trackAgentEdits', false);
+  }
+  if (editorViewState?.trackCodexWsEdits) {
+    await updatePreference('trackCodexWsEdits', false);
+  }
+  await _restorePreTrackingPrefsIfIdle();
+  if (reason) host.toast(reason, 'warn');
+}
+
+async function _toggleTrackedEditPreference(targetKey, otherKey) {
+  const enabling = !(editorViewState?.[targetKey]);
   if (enabling) {
-    // Save current values before forcing overrides
-    _preTrackingPrefs = {
-      showInlineDiffs: editorViewState?.showInlineDiffs ?? true,
-      readOnly: editorViewState?.readOnly ?? false,
-    };
-    // Force showInlineDiffs + readOnly ON, then enable tracking
-    // readOnly keeps autosave harmless — no edits means no save loop
+    if (!_preTrackingPrefs) {
+      _preTrackingPrefs = {
+        showInlineDiffs: editorViewState?.showInlineDiffs ?? true,
+        readOnly: editorViewState?.readOnly ?? false,
+      };
+    }
     await updatePreference('showInlineDiffs', true);
     await updatePreference('readOnly', true);
-    const success = await updatePreference('trackAgentEdits', true);
-    if (!success) host.toast('Failed to enable edit tracking');
-  } else {
-    const success = await updatePreference('trackAgentEdits', false);
-    if (!success) { host.toast('Failed to disable edit tracking'); return; }
-    // Restore pre-tracking values
-    if (_preTrackingPrefs) {
-      await updatePreference('showInlineDiffs', _preTrackingPrefs.showInlineDiffs);
-      await updatePreference('readOnly', _preTrackingPrefs.readOnly);
-      _preTrackingPrefs = null;
+    if (editorViewState?.[otherKey]) {
+      await updatePreference(otherKey, false);
     }
+    const success = await updatePreference(targetKey, true);
+    if (!success) host.toast('Failed to enable edit tracking');
+    return;
   }
+  const success = await updatePreference(targetKey, false);
+  if (!success) {
+    host.toast('Failed to disable edit tracking');
+    return;
+  }
+  await _restorePreTrackingPrefsIfIdle();
+}
+
+bindMenuToggle(miTrackEdits, async () => {
+  await _toggleTrackedEditPreference('trackAgentEdits', 'trackCodexWsEdits');
+});
+
+bindMenuToggle(miTrackCodexEdits, async () => {
+  await _toggleTrackedEditPreference('trackCodexWsEdits', 'trackAgentEdits');
 });
 
 // Initialize terminal drawer
@@ -6184,21 +6520,42 @@ const terminal = createTerminalDrawer({
 // Initialize console drawer (tab alongside terminal in the drawer)
 const consoleDrawer = createConsoleDrawer();
 
+// Initialize problems panel (tab alongside terminal and console in the drawer)
+problemsPanel = createProblemsPanel({
+  containerId: 'problems-container',
+  onNavigate: (absPath, line, col) => {
+    // Open the file and jump to the diagnostic location.
+    if (editorSocket && editorSocket.connected) {
+      editorSocket.emit('editor_open_file', { path: absPath });
+      setTimeout(() => {
+        editorSocket.emit('editor_issues_cmd', { action: 'goto', line, column: col });
+      }, 300);
+    }
+  },
+});
+
 const consoleCollapseBtn = document.getElementById('console-collapse-btn');
 if (consoleCollapseBtn) {
   consoleCollapseBtn.addEventListener('click', () => terminal.close());
+}
+
+const problemsCollapseBtn = document.getElementById('problems-collapse-btn');
+if (problemsCollapseBtn) {
+  problemsCollapseBtn.addEventListener('click', () => terminal.close());
 }
 
 // Initialize console bridge — patches console.* on the main page
 // and sends logs to the ui_ipc bus so the console drawer can receive them.
 // Actual init happens inside connectUIIPC() after the socket is created.
 
-// ─── Drawer tab switching (Terminal ↔ Console) ────────────────
+// ─── Drawer tab switching (Terminal ↔ Console ↔ Problems) ────────────────
 {
   const tabBar = document.querySelector('.drawer-tab-bar');
   const terminalHeader = document.querySelector('.terminal-header');
   const terminalContainer = document.getElementById('terminal-container');
   const consoleContainer = document.getElementById('console-container');
+  const problemsContainer = document.getElementById('problems-container');
+  const problemsHeader = document.getElementById('problems-header');
 
   if (tabBar) {
     tabBar.addEventListener('click', (e) => {
@@ -6209,15 +6566,22 @@ if (consoleCollapseBtn) {
       // Update active tab
       tabBar.querySelectorAll('.drawer-tab').forEach(t => t.classList.toggle('active', t === tab));
 
+      // Hide all panels first
+      if (terminalHeader) terminalHeader.style.display = 'none';
+      if (terminalContainer) terminalContainer.style.display = 'none';
+      if (consoleContainer) consoleContainer.style.display = 'none';
+      if (problemsContainer) problemsContainer.style.display = 'none';
+      if (problemsHeader) problemsHeader.style.display = 'none';
+      consoleDrawer.hide();
+      problemsPanel.hide();
+
       if (target === 'terminal') {
         if (terminalHeader) terminalHeader.style.display = '';
         if (terminalContainer) terminalContainer.style.display = '';
-        if (consoleContainer) consoleContainer.style.display = 'none';
-        consoleDrawer.hide();
       } else if (target === 'console') {
-        if (terminalHeader) terminalHeader.style.display = 'none';
-        if (terminalContainer) terminalContainer.style.display = 'none';
         consoleDrawer.show();
+      } else if (target === 'problems') {
+        problemsPanel.show();
       }
     });
   }
@@ -6239,6 +6603,18 @@ if (miToggleConsole) {
     const consoleTab = document.querySelector('.drawer-tab[data-tab="console"]');
     if (consoleTab) consoleTab.click();
     // Open the drawer if it's closed
+    if (!isOpen) terminal.toggle();
+  });
+}
+
+// Bind problems toggle menu item (opens drawer to problems tab)
+const miToggleProblems = document.getElementById('mi-toggle-problems');
+if (miToggleProblems) {
+  bindMenuToggle(miToggleProblems, () => {
+    const drawer = document.getElementById('terminal-drawer');
+    const isOpen = drawer && drawer.classList.contains('open');
+    const problemsTab = document.querySelector('.drawer-tab[data-tab="problems"]');
+    if (problemsTab) problemsTab.click();
     if (!isOpen) terminal.toggle();
   });
 }
@@ -6446,6 +6822,11 @@ async function main() {
   } catch (e) {
     console.warn('Failed to connect UI IPC channel:', e);
   }
+  try {
+    connectSidebarIPC();
+  } catch (e) {
+    console.warn('Failed to connect Sidebar IPC channel:', e);
+  }
 
   // Deterministic workbench adapter startup (prevents early 502/500).
   try {
@@ -6462,6 +6843,11 @@ async function main() {
     console.warn('[Sidebar] Failed to apply initial prefs:', e);
   }
   const agentIframeConfig = await _applyAgentRuntimeConfigFromUi(initialUiPrefs);
+  try {
+    connectCodexAppserverSocket(agentIframeConfig?.url);
+  } catch (e) {
+    console.warn('Failed to connect Codex appserver socket:', e);
+  }
   agentDrawerHandle = _createAgentController(agentIframeConfig);
 
   const serverState = await syncEditorState(true);
