@@ -228,7 +228,7 @@ function startAgentOpenRequestPoller() {
 
       let targetAbs = abs;
       if (!targetAbs && rel) {
-        const base = cachedProjectRoot || (await getCurrentProjectRoot(false)) || HOME_DIR;
+        const base = cachedProjectRoot || (await stateInitController.getCurrentProjectRoot(false)) || HOME_DIR;
         targetAbs = toAbsolute(rel, base, HOME_DIR);
       }
 
@@ -355,7 +355,7 @@ async function _resolveCodexEditAbsPath(rawPath) {
   const value = typeof rawPath === 'string' ? rawPath.trim() : '';
   if (!value) return '';
   if (value.startsWith('/')) return value;
-  const root = cachedProjectRoot || (await getCurrentProjectRoot(false)) || '';
+  const root = cachedProjectRoot || (await stateInitController.getCurrentProjectRoot(false)) || '';
   if (!root) return '';
   return toAbsolute(value, root, HOME_DIR);
 }
@@ -571,7 +571,7 @@ async function handleAgentOpen(payload) {
   let targetAbs = abs;
   if (!targetAbs && rel) {
     try {
-      const base = cachedProjectRoot || (await getCurrentProjectRoot(false)) || HOME_DIR;
+      const base = cachedProjectRoot || (await stateInitController.getCurrentProjectRoot(false)) || HOME_DIR;
       targetAbs = toAbsolute(rel, base, HOME_DIR);
     } catch (_) {
       targetAbs = '';
@@ -876,9 +876,7 @@ function _applyEditorCacheState(data) {
     if (typeof autosaveValue === 'boolean') {
       if (!editorViewState || typeof editorViewState !== 'object') editorViewState = {};
       editorViewState.autoSave = autosaveValue;
-      if (typeof applyStateToMenus === 'function') {
-        applyStateToMenus(editorViewState);
-      }
+      preferencesController.applyStateToMenus(editorViewState);
     }
   } catch (_) {}
 
@@ -1581,7 +1579,7 @@ async function exportDiagnosticsToFile() {
   const startDir = defaultDirRes.dir || projectRoot;
   const defaultName = buildDefaultDiagnosticsFilename(currentPath, projectRoot, fileExt);
 
-  if (!pickerAvailable()) { host.toast('File picker unavailable'); return; }
+  if (!pickerController.pickerAvailable()) { host.toast('File picker unavailable'); return; }
 
   let choice = null;
   try {
@@ -1963,8 +1961,8 @@ createSettingsBootstrap({
     editorViewState = editorViewState || {};
     editorViewState.theme = themeId;
   },
-  updatePreference: (key, value) => updatePreference(key, value),
-  pickerAvailable: () => pickerAvailable(),
+  updatePreference: (key, value) => preferencesController.updatePreference(key, value),
+  pickerAvailable: () => pickerController.pickerAvailable(),
   pickFile: (startPath) => pickFile(startPath),
   getStartPath: () => lastPickerPath || HOME_DIR,
   busRequest: (event, payload, timeoutMs) => window.__explorerBusRequest(event, payload, timeoutMs),
@@ -2038,7 +2036,7 @@ async function autoJumpToEdit(path, line) {
 
 const fontScaleController = createFontScaleController({
   presets: FONT_SCALE_PRESETS,
-  updatePreference: (key, value) => updatePreference(key, value),
+  updatePreference: (key, value) => preferencesController.updatePreference(key, value),
   scheduleToolbarTitleClamp: (opts) => scheduleToolbarTitleClamp(opts),
   toast: (msg, kind) => host.toast(msg, kind),
 });
@@ -3220,19 +3218,11 @@ const preferencesController = createPreferencesController({
   }),
 });
 
-async function updatePreference(key, value) {
-  return preferencesController.updatePreference(key, value);
-}
-
 installPrefsSync({
   getClientId: () => cm6NiceguiClientId,
   setEditorViewState: (state) => { editorViewState = state; },
-  applyStateToMenus: (state) => applyStateToMenus(state),
+  applyStateToMenus: (state) => preferencesController.applyStateToMenus(state),
 });
-
-function applyStateToMenus(state) {
-  preferencesController.applyStateToMenus(state);
-}
 
 const recentsController = createRecentsController({
   recentFilesDD,
@@ -3256,15 +3246,12 @@ const projectSwitchController = createProjectSwitchController({
   markUnsaved: (flag) => markUnsaved(flag),
   updatePathDisplay: () => updatePathDisplay(),
   syncSessionPath: () => syncSessionPath(),
-  syncEditorState: (forceRefresh) => syncEditorState(forceRefresh),
+  syncEditorState: (forceRefresh) => editorStateController.syncEditorState(forceRefresh),
   pushAgentHostCwd: (cwd) => pushAgentHostCwd(cwd),
   broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
   getBranchMenuHandle: () => branchMenuHandle,
   getEditorFrame: () => editorFrame,
 });
-async function handleProjectOpened(newProjectPath) {
-  return projectSwitchController.handleProjectOpened(newProjectPath);
-}
 
 // Expose for explorer.js (project:opened handler)
 projectSwitchController.installWindowHook();
@@ -3278,17 +3265,9 @@ const editorStateController = createEditorStateController({
   setCurrentPath: (path) => { currentPath = path; },
   getEditorSocket: () => editorSocket,
   getEditorViewState: () => editorViewState,
-  updatePreference: (key, value) => updatePreference(key, value),
+  updatePreference: (key, value) => preferencesController.updatePreference(key, value),
   openFile: (path, opts) => openFile(path, opts),
 });
-
-async function syncEditorState(forceRefresh = false) {
-  return editorStateController.syncEditorState(forceRefresh);
-}
-
-async function ensureProjectContext() {
-  return editorStateController.ensureProjectContext();
-}
 
 editorStateController.installWindowHooks();
 
@@ -3332,7 +3311,7 @@ const fileStatusController = createFileStatusController({
   HOME_DIR,
   basename,
   setToolbarFileName: (name) => setToolbarFileName(name),
-  setIndicatorInactive: (badge) => setIndicatorInactive(badge),
+  setIndicatorInactive: (badge) => cacheIndicatorController.setIndicatorInactive(badge),
   setIssuesButtonsEnabled: (enabled) => setIssuesButtonsEnabled(enabled),
 });
 function updatePathDisplay() {
@@ -3342,17 +3321,13 @@ function updatePathDisplay() {
 const cacheIndicatorController = createCacheIndicatorController({
   getCurrentPath: () => currentPath,
   getCachedProjectRoot: () => cachedProjectRoot,
-  getCurrentProjectRoot: () => getCurrentProjectRoot(),
+  getCurrentProjectRoot: () => stateInitController.getCurrentProjectRoot(),
   apiDelete: (path) => api.delete(path),
   openFile: (path, opts) => openFile(path, opts),
   toast: (msg) => host.toast(msg),
   markUnsaved: (flag) => markUnsaved(flag),
   getRestoredSessionActive: () => restoredSessionActive,
 });
-
-function setIndicatorInactive(badge) {
-  cacheIndicatorController.setIndicatorInactive(badge);
-}
 
 function _applyCacheIndicatorImpl(info) {
   cacheIndicatorController.applyCacheIndicator(info);
@@ -3363,13 +3338,13 @@ cacheIndicatorController.installWindowHook();
 
 const openFlowController = createOpenFlowController({
   setStatus: (text) => { statusEl.textContent = text; },
-  ensureProjectContext: () => ensureProjectContext(),
+  ensureProjectContext: () => editorStateController.ensureProjectContext(),
   toAbsolute,
   homeDir: HOME_DIR,
   getRestoredSessionActive: () => !!restoredSessionActive,
   getCurrentPath: () => currentPath,
   setRestoredSessionActive: (flag) => { restoredSessionActive = flag; },
-  setIndicatorInactive: () => setIndicatorInactive(cacheStateBadge),
+  setIndicatorInactive: () => cacheIndicatorController.setIndicatorInactive(cacheStateBadge),
   apiPost: (path, body) => apiPost(path, body),
   apiGet: (path) => apiGet(path),
   setCurrentPath: (path) => { currentPath = path; },
@@ -3401,7 +3376,7 @@ const openFlowController = createOpenFlowController({
   setEditorState: (state) => { editorState = state; },
   setCachedProjectRoot: (path) => { cachedProjectRoot = path; },
   broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
-  syncEditorState: (force) => syncEditorState(force),
+  syncEditorState: (force) => editorStateController.syncEditorState(force),
   getSessionStateActiveProject: () => sessionState.activeProject || null,
   setSessionStateActiveProject: (path) => { sessionState.activeProject = path; },
   jumpToCurrentFileLine: (line, opts) => jumpToCurrentFileLine(line, opts),
@@ -3427,7 +3402,7 @@ const saveFlowController = createSaveFlowController({
   setStatus: (text) => { statusEl.textContent = text; },
   getUnsaved: () => !!unsaved,
   toast: (msg) => host.toast(msg),
-  pickSaveTarget: () => pickSaveTarget(),
+  pickSaveTarget: () => pickerController.pickSaveTarget(),
   toAbsolute,
   homeDir: HOME_DIR,
   setCurrentPath: (path) => { currentPath = path; },
@@ -3445,17 +3420,13 @@ const saveFlowController = createSaveFlowController({
   setCachedProjectRoot: (path) => { cachedProjectRoot = path; },
 });
 
-async function doSave(targetPath, content) {
-  return saveFlowController.doSave(targetPath, content);
-}
-
  // getAgentHostBase
 async function saveFile(opts) {
   return saveFlowController.saveFile({
     currentPath,
     currentPathExists,
     isAutosave: !!(opts && opts.isAutosave),
-    onMissingPath: () => saveAsDialog(),
+    onMissingPath: () => saveFlowController.saveAsDialog(),
   });
 }
 
@@ -3474,20 +3445,8 @@ const runFileController = createRunFileController({
   updateRunButtonState: () => fileStatusController.updateRunButtonState(),
 });
 
-async function runCurrentFile() {
-  return runFileController.runCurrentFile();
-}
-
-async function saveAsDialog() {
-  return saveFlowController.saveAsDialog();
-}
-
 // Autosave confirmation modal (constructed lazily)
 const autosaveModalController = createAutosaveModalController();
-
-function showAutosaveModal(fileLabel, hasOtherDrafts) {
-  return autosaveModalController.showAutosaveModal(fileLabel, hasOtherDrafts);
-}
 
 // Watcher UI (extracted to src/host/ui/watcher-settings.js)
 initWatcherUI(appContext);
@@ -3521,17 +3480,8 @@ const pickerController = createPickerController({
   basename,
   toast: (m) => host.toast(m),
 });
-function pickerAvailable() {
-  return pickerController.pickerAvailable();
-}
 async function pickFile(startPath) {
   return pickerController.pickFile(startPath);
-}
-async function pickDirectory(startPath) {
-  return pickerController.pickDirectory(startPath);
-}
-async function pickSaveTarget() {
-  return pickerController.pickSaveTarget();
 }
 
 const jumpLineController = createJumpLineController({
@@ -3565,7 +3515,7 @@ const menuCoreController = createMenuCoreController({
   menuViewBtn,
   recentFilesBtn,
   runActiveBtn,
-  runCurrentFile: () => runCurrentFile(),
+  runCurrentFile: () => runFileController.runCurrentFile(),
 });
 menuCoreController.installPrimaryMenuButtons();
 
@@ -3600,7 +3550,7 @@ installBasicMenuActions({
   pickFile: () => pickFile(),
   openFile: (path) => openFile(path),
   saveFile: () => saveFile(),
-  saveAsDialog: () => saveAsDialog(),
+  saveAsDialog: () => saveFlowController.saveAsDialog(),
   closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
   clearOnQuit: () => resetActiveFileState(),
   showProjectsDebugModal,
@@ -3626,7 +3576,7 @@ installSimplePreferenceMenuActions({
     miToggleStickyScroll,
   },
   getEditorViewState: () => editorViewState,
-  updatePreference: (key, value) => updatePreference(key, value),
+  updatePreference: (key, value) => preferencesController.updatePreference(key, value),
   toast: (msg) => host.toast(msg),
 });
 
@@ -3641,11 +3591,11 @@ installAdvancedMenuActions({
     miTrackCodexEdits,
   },
   getEditorViewState: () => editorViewState,
-  updatePreference: (key, value) => updatePreference(key, value),
+  updatePreference: (key, value) => preferencesController.updatePreference(key, value),
   setMenuChecked,
   getCurrentPath: () => currentPath,
   getCurrentPathExists: () => currentPathExists,
-  showAutosaveModal: (fileLabel, hasOtherDrafts) => showAutosaveModal(fileLabel, hasOtherDrafts),
+  showAutosaveModal: (fileLabel, hasOtherDrafts) => autosaveModalController.showAutosaveModal(fileLabel, hasOtherDrafts),
   basename,
   getUnsaved: () => !!unsaved,
   saveFile: () => saveFile(),
@@ -3682,13 +3632,9 @@ const stateInitController = createStateInitController({
   toAbsolute,
   getBaseDir: (projectRoot) => projectRoot || cachedProjectRoot || HOME_DIR,
   homeDir: HOME_DIR,
-  syncEditorState: (force) => syncEditorState(force),
+  syncEditorState: (force) => editorStateController.syncEditorState(force),
 });
 stateInitController.installOpenHooks();
-
-async function getCurrentProjectRoot(forceRefresh = false) {
-  return stateInitController.getCurrentProjectRoot(forceRefresh);
-}
 
 runBootSequence(createBootSequenceDeps({
     initResponsiveLayout: () => initResponsiveLayout({ scheduleToolbarTitleClamp: (opts) => scheduleToolbarTitleClamp(opts) }),
@@ -3707,7 +3653,7 @@ runBootSequence(createBootSequenceDeps({
     applyAgentRuntimeConfigFromUi: (prefs) => _applyAgentRuntimeConfigFromUi(prefs),
     connectCodexAppserverSocket: (url) => connectCodexAppserverSocket(url),
     createAgentController: (cfg) => _createAgentController(cfg),
-    syncEditorState: (force) => syncEditorState(force),
+    syncEditorState: (force) => editorStateController.syncEditorState(force),
     broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
     refreshMenuState: () => preferencesController.refreshMenuState(),
     apiPost: (path, body) => apiPost(path, body),
