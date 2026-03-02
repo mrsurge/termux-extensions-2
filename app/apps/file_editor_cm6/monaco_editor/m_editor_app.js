@@ -1,3 +1,10 @@
+import { buildUiUrl, wsUrlFromPath, fetchJsonWithBase } from './editor_common_utils.js';
+import { normalizeLanguageId, languageIdFromPath, monacoFileUri } from './editor_language_utils.js';
+import { expandShortHex, toMonacoColorHex, parseJsonc } from './editor_parse_utils.js';
+import { setUnsavedTrace, noteGitBaselineRequest } from './editor_trace_utils.js';
+import { createFileModel as createMonacoFileModel } from './editor_model_utils.js';
+import { setDebugPart, syncTraceDebug, syncMirrorDebug } from './editor_debug_utils.js';
+import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
 /* eslint-disable no-undef */
 (function() {
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
@@ -61,22 +68,11 @@
   };
 
   function _setUnsavedTrace(reason, unsaved) {
-    try {
-      var r = reason != null ? String(reason) : '-';
-      _trace.unsaved_reason = r + ':' + (unsaved ? '1' : '0');
-      _syncTraceDebug();
-    } catch (_) {}
+    setUnsavedTrace(_trace, reason, unsaved, _syncTraceDebug);
   }
 
   function _noteGitBaselineRequest(source, immediate) {
-    try {
-      var src = source != null ? String(source) : 'unknown';
-      _trace.gb_req_total += 1;
-      if (immediate) _trace.gb_req_immediate += 1;
-      else _trace.gb_req_debounced += 1;
-      _trace.gb_last_source = src + (immediate ? ':imm' : ':deb');
-      _syncTraceDebug();
-    } catch (_) {}
+    noteGitBaselineRequest(_trace, source, immediate, _syncTraceDebug);
   }
   var apiBase = (function() {
     try {
@@ -112,8 +108,7 @@
   var tmVscodeIndex = null;
 
   function _uiUrl(relPath) {
-    var p = String(relPath || '').replace(/^\/+/, '');
-    return (apiBase || '') + '/ui/' + p;
+    return buildUiUrl(apiBase, relPath);
   }
 
   async function ensureTextmateReady() {
@@ -737,88 +732,32 @@
   }
 
   function normalizeLanguage(lang) {
-    if (!lang) return 'plaintext';
-    var s = String(lang).toLowerCase();
-    if (s === 'text') return 'plaintext';
-    if (s === 'shell') return 'shell';
-    if (s === 'cpp') return 'cpp';
-    return s;
+    return normalizeLanguageId(lang);
   }
 
   function languageFromPath(path) {
-    try {
-      var p = String(path || '').toLowerCase();
-      // Prefer VSIX-provided language contributions (when enabled) so we can
-      // resolve non-builtin language ids and apply their configuration.
-      try {
-        var full = String(path || '');
-        var base = full.split('/').pop() || full;
-        if (vscodeLanguageByFilename && vscodeLanguageByFilename.size) {
-          var byName = vscodeLanguageByFilename.get(base);
-          if (byName) return normalizeLanguage(byName);
-        }
-        if (vscodeLanguageByExtension && vscodeLanguageByExtension.size) {
-          // Prefer longest extension match (e.g. ".d.ts" over ".ts").
-          var best = null;
-          var bestLen = 0;
-          for (const [ext, langId] of vscodeLanguageByExtension.entries()) {
-            if (!ext || typeof ext !== 'string') continue;
-            if (!langId) continue;
-            if (p.endsWith(ext.toLowerCase()) && ext.length > bestLen) {
-              best = langId;
-              bestLen = ext.length;
-            }
-          }
-          if (best) return normalizeLanguage(best);
-        }
-      } catch (_) {}
-      if (p.endsWith('.py') || p.endsWith('.pyw')) return 'python';
-      if (p.endsWith('.js') || p.endsWith('.mjs') || p.endsWith('.cjs')) return 'javascript';
-      if (p.endsWith('.ts') || p.endsWith('.tsx')) return 'typescript';
-      if (p.endsWith('.c')) return 'c';
-      if (p.endsWith('.cc') || p.endsWith('.cpp') || p.endsWith('.cxx') || p.endsWith('.h') || p.endsWith('.hh') || p.endsWith('.hpp') || p.endsWith('.hxx')) return 'cpp';
-      if (p.endsWith('.kt') || p.endsWith('.kts')) return 'kotlin';
-      if (p.endsWith('.html') || p.endsWith('.htm')) return 'html';
-      if (p.endsWith('.css')) return 'css';
-      if (p.endsWith('.json') || p.endsWith('.webmanifest')) return 'json';
-      if (p.endsWith('.md') || p.endsWith('.mdx')) return 'markdown';
-      if (p.endsWith('.sh') || p.endsWith('.bash') || p.endsWith('.zsh')) return 'shell';
-      if (p.endsWith('.yml') || p.endsWith('.yaml')) return 'yaml';
-      return 'plaintext';
-    } catch (_) {
-      return 'plaintext';
-    }
+    return languageIdFromPath(path, vscodeLanguageByFilename, vscodeLanguageByExtension);
   }
 
   function _fileUri(absPath) {
-    try {
-      if (!window.monaco || !window.monaco.Uri || !window.monaco.Uri.file) return null;
-      return window.monaco.Uri.file(String(absPath || ''));
-    } catch (_) { return null; }
+    return monacoFileUri(window.monaco, absPath);
   }
 
   function createFileModel(content, lang, absPath) {
-    var m;
-    try {
-      var uri = _fileUri(absPath);
-      if (uri) m = monaco.editor.createModel(content || '', lang || 'plaintext', uri);
-    } catch (_) {}
-    if (!m) m = monaco.editor.createModel(content || '', lang || 'plaintext');
-    // Ensure hover/symbols providers are registered for this language.
-    try { setTimeout(function () { installVscodeApiLanguageBridgeProviders(); }, 0); } catch (_) {}
-    return m;
+    return createMonacoFileModel(
+      monaco,
+      _fileUri,
+      content,
+      lang,
+      absPath,
+      function () {
+        try { setTimeout(function () { installVscodeApiLanguageBridgeProviders(); }, 0); } catch (_) {}
+      }
+    );
   }
 
   function _wsUrlFromPath(p) {
-    try {
-      var proto = (window.location && window.location.protocol === 'https:') ? 'wss:' : 'ws:';
-      var host = window.location ? window.location.host : 'localhost';
-      var pathOnly = String(p || '');
-      if (!pathOnly.startsWith('/')) pathOnly = '/' + pathOnly;
-      return proto + '//' + host + pathOnly;
-    } catch (_) {
-      return null;
-    }
+    return wsUrlFromPath(window.location, p);
   }
 
   function vscodeRpcCall(method, params) {
@@ -2342,40 +2281,14 @@
     return null;
   }
 
-  // Expand CSS shorthand hex (#fff → #ffffff, #abcd → #aabbccdd).
-  // Monaco's tokenization parser rejects 3/4-char hex values.
-  function _expandShortHex(color) {
-    if (!color || typeof color !== 'string') return color;
-    var m = color.match(/^#([0-9a-fA-F]{3,4})$/);
-    if (!m) return color;
-    var s = m[1];
-    if (s.length === 3) return '#' + s[0]+s[0]+s[1]+s[1]+s[2]+s[2];
-    if (s.length === 4) return '#' + s[0]+s[0]+s[1]+s[1]+s[2]+s[2]+s[3]+s[3];
-    return color;
-  }
-
-  function _toMonacoColorHex(hex) {
-    if (!hex) return null;
-    var s = String(hex).trim();
-    if (!s) return null;
-    // Monaco expects no leading '#'
-    if (s[0] === '#') s = s.slice(1);
-    // VS Code themes sometimes use 8-digit ARGB; Monaco supports 8-digit too.
-    if (!/^[0-9a-fA-F]{3,8}$/.test(s)) return null;
-    // Expand 3-char shorthand (#fff → FFFFFF) — Monaco tokenization rejects 3-char.
-    if (s.length === 3) s = s[0]+s[0]+s[1]+s[1]+s[2]+s[2];
-    if (s.length === 4) s = s[0]+s[0]+s[1]+s[1]+s[2]+s[2]+s[3]+s[3];
-    return s.toUpperCase();
-  }
-
   function _vscodeTokenColorsToMonacoRules(tokenColors) {
     var rules = [];
     if (!Array.isArray(tokenColors)) return rules;
     for (var i = 0; i < tokenColors.length; i++) {
       var tc = tokenColors[i];
       if (!tc || !tc.settings) continue;
-      var fg = _toMonacoColorHex(tc.settings.foreground);
-      var bg = _toMonacoColorHex(tc.settings.background);
+      var fg = toMonacoColorHex(tc.settings.foreground);
+      var bg = toMonacoColorHex(tc.settings.background);
       var fontStyle = null;
       if (typeof tc.settings.fontStyle === 'string') {
         // VS Code uses space-separated: "italic bold underline". Monaco expects same.
@@ -2488,7 +2401,7 @@
     function addRule(token, settings) {
       if (!settings) return;
       var r = { token: token };
-      var fg = _toMonacoColorHex(settings.foreground);
+      var fg = toMonacoColorHex(settings.foreground);
       if (fg) r.foreground = fg;
       if (typeof settings.fontStyle === 'string') r.fontStyle = settings.fontStyle.trim();
       if (r.foreground || r.fontStyle) rules.push(r);
@@ -2529,7 +2442,7 @@
         if (!Object.prototype.hasOwnProperty.call(colorsIn, k)) continue;
         var v = colorsIn[k];
         if (typeof v === 'string') {
-          colors[k] = _expandShortHex(v);
+          colors[k] = expandShortHex(v);
         }
       }
     } catch (_) {}
@@ -2686,21 +2599,6 @@
   }
 
 
-  function _parseJsonc(text) {
-    // Minimal JSONC parser (supports // and /* */ comments + trailing commas).
-    // This is needed because many VS Code themes ship as jsonc.
-    var s = String(text || '');
-    // Strip BOM
-    if (s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
-    // Remove /* */ comments
-    s = s.replace(/\/\*[\s\S]*?\*\//g, '');
-    // Remove // comments (line)
-    s = s.replace(/(^|[^:])\/\/.*$/gm, '$1');
-    // Remove trailing commas
-    s = s.replace(/,\s*([}\]])/g, '$1');
-    return JSON.parse(s);
-  }
-
   async function ensureVscodeLanguagesInstalled() {
     if (vscodeLanguagesInstalled) return true;
     if (!window.monaco || !window.monaco.languages) return false;
@@ -2769,7 +2667,7 @@
         // Apply language configuration if provided (jsonc).
         try {
           if (l.configuration_raw) {
-            const cfg = _parseJsonc(String(l.configuration_raw));
+            const cfg = parseJsonc(String(l.configuration_raw));
             if (cfg && typeof cfg === 'object') {
               try { window.monaco.languages.setLanguageConfiguration(langId, cfg); } catch (_) {}
             }
@@ -2902,15 +2800,7 @@
   }
 
   async function fetchJson(path, options) {
-    var url = (apiBase || '') + String(path || '');
-    var resp = await fetch(url, options || { cache: 'no-store' });
-    var json = null;
-    try { json = await resp.json(); } catch (_) {}
-    if (!resp.ok || (json && json.ok === false)) {
-      var msg = (json && (json.error || json.detail)) ? (json.error || json.detail) : ('HTTP ' + resp.status);
-      throw new Error(msg);
-    }
-    return json && (json.data || json) ? (json.data || json) : json;
+    return fetchJsonWithBase(fetch, apiBase, path, options);
   }
 
   function emitToHost(eventName, payload) {
@@ -3498,55 +3388,35 @@
   }
 
   function setDebugGit(s) {
-    debugParts.git = s || null;
-    updateDebug();
+    setDebugPart(debugParts, 'git', s, updateDebug);
   }
 
   function setDebugDraft(s) {
-    debugParts.draft = s || null;
-    updateDebug();
+    setDebugPart(debugParts, 'draft', s, updateDebug);
   }
 
   function setDebugDiag(s) {
-    debugParts.diag = s || null;
-    updateDebug();
+    setDebugPart(debugParts, 'diag', s, updateDebug);
   }
 
   function setDebugFlags(s) {
-    debugParts.flags = s || null;
-    updateDebug();
+    setDebugPart(debugParts, 'flags', s, updateDebug);
   }
 
   function setDebugMirror(s) {
-    debugParts.mirror = s || null;
-    updateDebug();
+    setDebugPart(debugParts, 'mirror', s, updateDebug);
   }
 
   function setDebugTrace(s) {
-    debugParts.trace = s || null;
-    updateDebug();
+    setDebugPart(debugParts, 'trace', s, updateDebug);
   }
 
   function _syncTraceDebug() {
-    setDebugTrace(
-      'trace=mb' + _trace.mirror_bind_total +
-      '/a' + _trace.mirror_active +
-      ' us=' + _trace.unsaved_reason +
-      ' gb=' + _trace.gb_req_total +
-      '/' + _trace.gb_req_immediate +
-      '/' + _trace.gb_req_debounced +
-      ' src=' + _trace.gb_last_source
-    );
+    syncTraceDebug(_trace, setDebugTrace);
   }
 
   function _syncMirrorDebug() {
-    setDebugMirror(
-      'mir=rx' + mirrorState.rx +
-      '/ap' + mirrorState.ap +
-      '/self' + mirrorState.drop_self +
-      '/sha' + mirrorState.drop_sha +
-      '/hot' + mirrorState.drop_hot
-    );
+    syncMirrorDebug(mirrorState, setDebugMirror);
   }
 
   function clearDraftDiffDecorations() {
@@ -4733,35 +4603,11 @@
   }
 
   function _runIssuesCommand(action) {
-    try {
-      if (!editor) return;
-      var id = 'editor.action.marker.next';
-      if (action === 'toggle') action = 'next';
-      if (action === 'prev') id = 'editor.action.marker.prev';
-      var act = editor.getAction ? editor.getAction(id) : null;
-      if (act && act.run) {
-        act.run();
-      }
-    } catch (_) {}
+    runIssuesCommand(editor, action);
   }
 
   function _runFindCommand(action) {
-    try {
-      if (!editor) return;
-      // actions.find works (touch extension proves it). For replace,
-      // open find first then toggle the replace row.
-      var act = editor.getAction ? editor.getAction('actions.find') : null;
-      if (act && act.run) {
-        act.run();
-      } else {
-        editor.trigger('keyboard', 'actions.find', null);
-      }
-      if (action === 'replace') {
-        setTimeout(function() {
-          try { editor.trigger('keyboard', 'editor.action.startFindReplaceAction', null); } catch (_) {}
-        }, 50);
-      }
-    } catch (e) { console.error('[Find] _runFindCommand error:', e); }
+    runFindCommand(editor, action, function (e) { console.error('[Find] _runFindCommand error:', e); });
   }
 
   function _installMarkerNavBindings(ed) {
