@@ -43,3 +43,6 @@ A service module can export either or both:
   `/vscode_rpc_ws` that forwards frames to the `vscode_rpc` framework shell.
 - `vscode_api_transport.py` — Proxy-only WebSocket shim mounted at
   `/vscode_api_ws` that forwards frames to the `vscode_api` framework shell.
+- `sidebar_backchannel_uds.py` — Main-process Unix domain socket JSON-RPC host
+  for sidebar backchannel transport (Phase 0 scaffolding: `session.hello`,
+  `health.ping`, structured request logs, safe socket lifecycle).

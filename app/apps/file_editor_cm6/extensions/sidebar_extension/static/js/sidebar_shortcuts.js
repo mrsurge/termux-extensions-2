@@ -166,8 +166,6 @@ export function initSidebarShortcuts(options = {}) {
   let _lastPickerPath = '';
 
   let _iframeMap = new Map(); // key -> {iframe,url,loaded}
-  let _lastShortcutUsageKey = '';
-  let _lastShortcutUsageStamp = 0;
   let _activateSeq = 0;
 
   let _extensionManifestIcon = { kind: '', value: '', defaultIcon: '' };
@@ -716,29 +714,6 @@ export function initSidebarShortcuts(options = {}) {
     return { active: fallback || null, activeId: nextId };
   }
 
-  function _maybeUpdateLastUsed(uiPrefs, active, shortcuts) {
-    if (!active || !active.key) return;
-    const now = Date.now();
-    if (_lastShortcutUsageKey === active.key && (now - _lastShortcutUsageStamp) < 800) return;
-    const raw = Array.isArray(uiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? uiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
-    const idx = raw.findIndex((sc) => sc && typeof sc === 'object'
-      && (sc.id === active.key || sc.url === active.key || sc.id === active.id || sc.url === active.url));
-    if (idx < 0) return;
-    const prevTs = Number(raw[idx]?.last_used || 0);
-    if (Number.isFinite(prevTs) && (now - prevTs) < 800) {
-      _lastShortcutUsageKey = active.key;
-      _lastShortcutUsageStamp = now;
-      return;
-    }
-    const next = raw.map((sc, i) => {
-      if (i !== idx || !sc || typeof sc !== 'object') return sc;
-      return { ...sc, last_used: now };
-    });
-    _lastShortcutUsageKey = active.key;
-    _lastShortcutUsageStamp = now;
-    _sendUiPrefUpdate(UI_PREF_KEY_SHORTCUTS, next);
-  }
-
   function _applyToggleDisplay(uiPrefs) {
     const display = _normStr(uiPrefs?.[UI_PREF_KEY_TOGGLE_DISPLAY]) || 'icon';
     try {
@@ -821,15 +796,10 @@ export function initSidebarShortcuts(options = {}) {
     _restoreManifestIcon(sidebarHeaderIconEl);
   }
 
-  function _collectHeaderItems(resolvedShortcuts, activeKey, now = Date.now()) {
+  function _collectHeaderItems(resolvedShortcuts) {
     return resolvedShortcuts
       .filter((sc) => sc && sc.header)
-      .map((sc, idx) => ({
-        ...sc,
-        _sortTs: sc.last_used || (sc.key === activeKey ? now : 0),
-        _idx: idx,
-      }))
-      .sort((a, b) => (b._sortTs - a._sortTs) || (a._idx - b._idx));
+      .map((sc) => ({ ...sc }));
   }
 
   function _closeHeaderIconMenu() {
@@ -986,7 +956,7 @@ export function initSidebarShortcuts(options = {}) {
     const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
     const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
     const activeKey = resolvedActive?.key || '';
-    const headerItems = _collectHeaderItems(resolvedShortcuts, activeKey);
+    const headerItems = _collectHeaderItems(resolvedShortcuts);
     const runningSet = _runningCache instanceof Set ? _runningCache : new Set();
 
     gridEl.innerHTML = '';
@@ -1013,16 +983,8 @@ export function initSidebarShortcuts(options = {}) {
       btn.title = sc.label || sc.url || 'Shortcut';
       btn.appendChild(iconNode);
 
-      let longPressTimer = null;
-      let suppressUntil = 0;
       btn.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        if (Date.now() < suppressUntil) {
-          ev.preventDefault();
-          ev.stopImmediatePropagation();
-          suppressUntil = 0;
-          return;
-        }
         _closeHeaderIconMenu();
         const targetId = sc.id || sc.url || sc.key;
         if (!targetId) return;
@@ -1031,29 +993,6 @@ export function initSidebarShortcuts(options = {}) {
           setTimeout(() => { try { openDrawer(); } catch (_) {} }, 120);
         }
       });
-
-      btn.addEventListener('contextmenu', (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        _openHeaderIconMenu(btn, sc);
-      });
-
-      btn.addEventListener('touchstart', () => {
-        if (longPressTimer) clearTimeout(longPressTimer);
-        longPressTimer = setTimeout(() => {
-          suppressUntil = Date.now() + 900;
-          _openHeaderIconMenu(btn, sc);
-        }, 520);
-      }, { passive: true });
-
-      const clearLp = () => {
-        if (longPressTimer) {
-          clearTimeout(longPressTimer);
-          longPressTimer = null;
-        }
-      };
-      btn.addEventListener('touchend', clearLp, { passive: true });
-      btn.addEventListener('touchcancel', clearLp, { passive: true });
 
       const dot = document.createElement('span');
       dot.className = 'agent-drawer__running-dot';
@@ -1595,6 +1534,147 @@ export function initSidebarShortcuts(options = {}) {
       return;
     }
 
+    let dragState = null;
+    let dropBeforeRow = null;
+    let dropAfterRow = null;
+    let dropInsertionIndex = -1;
+
+    const clearDropMarkers = () => {
+      if (dropBeforeRow) {
+        dropBeforeRow.style.boxShadow = '';
+        dropBeforeRow = null;
+      }
+      if (dropAfterRow) {
+        dropAfterRow.style.borderBottom = '1px solid rgba(255,255,255,0.06)';
+        dropAfterRow = null;
+      }
+    };
+
+    const getRows = () => Array.from(shortcutsListEl.querySelectorAll('[data-shortcut-row="1"]'));
+
+    const computeInsertion = (clientY, sourceRow) => {
+      const rows = getRows().filter((row) => row !== sourceRow);
+      let insertion = rows.length;
+      for (let i = 0; i < rows.length; i += 1) {
+        const rect = rows[i].getBoundingClientRect();
+        const mid = rect.top + (rect.height / 2);
+        if (clientY <= mid) {
+          insertion = i;
+          break;
+        }
+      }
+      return { rows, insertion };
+    };
+
+    const updateDragTarget = (clientY) => {
+      if (!dragState || !dragState.dragging || !dragState.row) return;
+      clearDropMarkers();
+      const { rows, insertion } = computeInsertion(clientY, dragState.row);
+      dropInsertionIndex = insertion;
+      if (insertion < rows.length) {
+        const row = rows[insertion];
+        row.style.boxShadow = 'inset 0 2px 0 rgba(120,170,255,0.95)';
+        dropBeforeRow = row;
+      } else if (rows.length) {
+        const row = rows[rows.length - 1];
+        row.style.borderBottom = '2px solid rgba(120,170,255,0.95)';
+        dropAfterRow = row;
+      }
+    };
+
+    const finishDrag = (commit) => {
+      if (!dragState) return;
+      const state = dragState;
+      clearDropMarkers();
+      if (state.longPressTimer) {
+        clearTimeout(state.longPressTimer);
+        state.longPressTimer = null;
+      }
+      state.row.style.opacity = '';
+      state.row.style.transform = '';
+      state.row.classList.remove('is-dragging');
+      state.handle.style.cursor = 'grab';
+      if (commit && state.dragging) {
+        const withoutSource = shortcuts.filter((_, idx) => idx !== state.fromIndex);
+        const insertion = Number.isInteger(dropInsertionIndex) ? dropInsertionIndex : state.fromIndex;
+        const bounded = Math.max(0, Math.min(withoutSource.length, insertion));
+        const next = withoutSource.slice();
+        next.splice(bounded, 0, shortcuts[state.fromIndex]);
+        _persistShortcuts(next);
+      }
+      dragState = null;
+      dropInsertionIndex = -1;
+    };
+
+    const beginDrag = (state) => {
+      if (!state || !state.row || !state.handle) return;
+      state.dragging = true;
+      state.row.style.opacity = '0.72';
+      state.row.style.transform = 'scale(0.995)';
+      state.row.classList.add('is-dragging');
+      state.handle.style.cursor = 'grabbing';
+      dropInsertionIndex = state.fromIndex;
+    };
+
+    const bindDragHandle = (row, handle, idx) => {
+      handle.style.touchAction = 'none';
+      handle.style.cursor = 'grab';
+
+      handle.addEventListener('pointerdown', (ev) => {
+        ev.stopPropagation();
+        if (dragState) finishDrag(false);
+        dragState = {
+          row,
+          handle,
+          fromIndex: idx,
+          pointerId: ev.pointerId,
+          pointerType: ev.pointerType,
+          downX: ev.clientX,
+          downY: ev.clientY,
+          dragging: false,
+          longPressTimer: null,
+        };
+        try { handle.setPointerCapture(ev.pointerId); } catch (_) {}
+
+        if (ev.pointerType === 'mouse') {
+          beginDrag(dragState);
+          updateDragTarget(ev.clientY);
+          return;
+        }
+
+        dragState.longPressTimer = setTimeout(() => {
+          if (!dragState || dragState.row !== row || dragState.handle !== handle) return;
+          beginDrag(dragState);
+          updateDragTarget(dragState.downY);
+        }, 320);
+      });
+
+      handle.addEventListener('pointermove', (ev) => {
+        if (!dragState || dragState.pointerId !== ev.pointerId || dragState.handle !== handle) return;
+        const dx = Math.abs(ev.clientX - dragState.downX);
+        const dy = Math.abs(ev.clientY - dragState.downY);
+        if (!dragState.dragging) {
+          if (dragState.pointerType !== 'mouse' && (dx > 10 || dy > 10) && dragState.longPressTimer) {
+            clearTimeout(dragState.longPressTimer);
+            dragState.longPressTimer = null;
+          }
+          return;
+        }
+        ev.preventDefault();
+        updateDragTarget(ev.clientY);
+      });
+
+      handle.addEventListener('pointerup', (ev) => {
+        if (!dragState || dragState.pointerId !== ev.pointerId || dragState.handle !== handle) return;
+        finishDrag(true);
+      });
+
+      handle.addEventListener('pointercancel', (ev) => {
+        if (!dragState || dragState.pointerId !== ev.pointerId || dragState.handle !== handle) return;
+        finishDrag(false);
+      });
+    };
+
     shortcuts.forEach((sc, idx) => {
       const row = document.createElement('div');
       row.style.display = 'flex';
@@ -1602,6 +1682,7 @@ export function initSidebarShortcuts(options = {}) {
       row.style.alignItems = 'center';
       row.style.padding = '6px 0';
       row.style.borderBottom = '1px solid rgba(255,255,255,0.06)';
+      row.dataset.shortcutRow = '1';
 
       const effectiveIcon = _effectiveShortcutIcon(sc);
       row.appendChild(_renderIconNode(effectiveIcon, 18));
@@ -1627,31 +1708,11 @@ export function initSidebarShortcuts(options = {}) {
         return b;
       };
 
-      const up = mkBtn('↑');
-      up.title = 'Move up';
-      up.disabled = idx === 0;
-      up.addEventListener('click', () => {
-        if (idx <= 0) return;
-        const next = shortcuts.slice();
-        const t = next[idx - 1];
-        next[idx - 1] = next[idx];
-        next[idx] = t;
-        _persistShortcuts(next);
-      });
-      row.appendChild(up);
-
-      const down = mkBtn('↓');
-      down.title = 'Move down';
-      down.disabled = idx >= shortcuts.length - 1;
-      down.addEventListener('click', () => {
-        if (idx >= shortcuts.length - 1) return;
-        const next = shortcuts.slice();
-        const t = next[idx + 1];
-        next[idx + 1] = next[idx];
-        next[idx] = t;
-        _persistShortcuts(next);
-      });
-      row.appendChild(down);
+      const dragHandle = mkBtn('↕');
+      dragHandle.title = 'Drag to reorder';
+      dragHandle.setAttribute('aria-label', 'Drag to reorder');
+      bindDragHandle(row, dragHandle, idx);
+      row.appendChild(dragHandle);
 
       const edit = mkBtn('Edit');
       edit.addEventListener('click', () => _showEditor(sc));
@@ -1766,39 +1827,6 @@ export function initSidebarShortcuts(options = {}) {
   function _bindAgentDropdownInteractions() {
     const agentBtn = agentToggleBtn;
     if (!agentBtn) return;
-    let longPressTimer = null;
-    let suppressUntil = 0;
-
-    agentBtn.addEventListener('click', (ev) => {
-      if (Date.now() < suppressUntil) {
-        ev.preventDefault();
-        ev.stopImmediatePropagation();
-        suppressUntil = 0;
-      }
-    }, true);
-
-    agentBtn.addEventListener('contextmenu', (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      _openAgentDropdown();
-    });
-
-    agentBtn.addEventListener('touchstart', () => {
-      if (longPressTimer) clearTimeout(longPressTimer);
-      longPressTimer = setTimeout(() => {
-        suppressUntil = Date.now() + 900;
-        _openAgentDropdown();
-      }, 520);
-    }, { passive: true });
-
-    const clearLp = () => {
-      if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
-    };
-    agentBtn.addEventListener('touchend', clearLp, { passive: true });
-    agentBtn.addEventListener('touchcancel', clearLp, { passive: true });
 
     document.addEventListener('click', (ev) => {
       const dd = document.getElementById('fe-agent-dd');
@@ -1806,13 +1834,6 @@ export function initSidebarShortcuts(options = {}) {
       if (ev.target.closest('#fe-agent-toggle')) return;
       if (ev.target.closest('#fe-agent-dd')) return;
       _closeAgentDropdown();
-    }, false);
-
-    document.addEventListener('click', (ev) => {
-      if (!sidebarHeaderIconMenuEl || !sidebarHeaderIconMenuEl.classList.contains('show')) return;
-      if (ev.target.closest('#agent-drawer-icon-menu')) return;
-      if (ev.target.closest('.agent-drawer__icon-btn')) return;
-      _closeHeaderIconMenu();
     }, false);
   }
 
@@ -1833,7 +1854,6 @@ export function initSidebarShortcuts(options = {}) {
 
     const normalized = _collectShortcuts(_latestUiPrefs);
     const ensured = _ensureActiveSelection(_latestUiPrefs, normalized);
-    _maybeUpdateLastUsed(_latestUiPrefs, ensured.active, normalized);
     _applyToggleIcon(_latestUiPrefs, normalized, ensured.active);
     _applyHeaderLabelAndIcon(_latestUiPrefs, normalized, ensured.active);
     _renderHeaderIconGrid(_latestUiPrefs, normalized, ensured.active);

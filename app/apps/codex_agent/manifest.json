@@ -12,9 +12,24 @@
     "frontend_template": "template.html",
     "frontend_script": "main.js"
   },
-  "services": {
-    "path": "services",
-    "modules": ["appserver_transport"]
+  "proxy_shell": {
+    "enabled": true,
+    "start_path": "/codex-agent",
+    "health_path": "/api/health",
+    "rewrite": {
+      "enabled": true,
+      "path_prefixes": ["/codex-agent", "/static/"],
+      "content_types": ["text/html", "javascript", "application/json", "text/css"],
+      "absolute_root_paths": ["/api/", "/ws/", "/static/", "/codex-agent"],
+      "css_root_paths": ["/static/", "/codex-agent/"],
+      "ws_template_marker": "window.location.host}/ws/",
+      "ws_template_replacement": "window.location.host}{proxy_prefix}/ws/"
+    },
+    "socketio": {
+      "enabled": true,
+      "inject_path": true,
+      "namespace_marker": "io('/appserver', {"
+    }
   },
   "fullscreen": true
 }

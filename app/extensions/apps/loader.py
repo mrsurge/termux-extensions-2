@@ -93,5 +93,13 @@ def load_app_services(apps: List[dict], app) -> None:
 def load_apps_and_services(app) -> List[dict]:
     # App services run in the main process and are loaded here by design.
     apps = load_apps()
+    from app.extensions.apps.proxy_shell import validate_proxy_shell_manifest
+    for manifest in apps:
+        if not isinstance(manifest, dict):
+            continue
+        for err in validate_proxy_shell_manifest(manifest):
+            manifest.setdefault("__service_errors__", []).append(f"proxy_shell: {err}")
     load_app_services(apps, app)
+    from app.extensions.apps.proxy_shell import register_proxy_shell_engine
+    register_proxy_shell_engine(app)
     return apps

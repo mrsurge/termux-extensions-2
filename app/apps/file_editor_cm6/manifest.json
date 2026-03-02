@@ -21,7 +21,8 @@
       "editor_transport",
       "vscode_rpc_transport",
       "vscode_api_transport",
-      "ui_ipc_transport"
+      "ui_ipc_transport",
+      "sidebar_backchannel_uds"
     ]
   },
   "fullscreen": true,

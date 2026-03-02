@@ -1,0 +1,40 @@
+<style>
+  .ps-root {
+    position: relative;
+    height: 100%;
+    width: 100%;
+    background: #0b0f1a;
+  }
+
+  .ps-frame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    background: #ffffff;
+  }
+
+  .ps-loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #d1d5db;
+    font-family: sans-serif;
+    font-size: 14px;
+    background: #0b0f1a;
+  }
+</style>
+
+<div class="ps-root">
+  <div id="ps-loading" class="ps-loading">Waiting for proxy shell worker...</div>
+  <iframe
+    id="ps-frame"
+    class="ps-frame"
+    title="Proxy Shell App"
+    src="about:blank"
+    loading="eager"
+    referrerpolicy="no-referrer"
+  ></iframe>
+</div>

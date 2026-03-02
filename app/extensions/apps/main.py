@@ -81,6 +81,31 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
     return catalog
 
 
+def _proxy_shell_urls(app_id: str, proxy_cfg: dict) -> dict:
+    proxy_prefix = f"/api/app/{app_id}/proxy"
+    start_path = proxy_cfg.get("start_path")
+    health_path = proxy_cfg.get("health_path")
+    if not isinstance(start_path, str) or not start_path.strip():
+        raise HTTPException(status_code=500, detail=f"App '{app_id}' proxy_shell.start_path is required")
+    if not isinstance(health_path, str) or not health_path.strip():
+        raise HTTPException(status_code=500, detail=f"App '{app_id}' proxy_shell.health_path is required")
+
+    start_path = start_path.strip()
+    health_path = health_path.strip()
+    if not start_path.startswith("/"):
+        start_path = f"/{start_path}"
+    if not health_path.startswith("/"):
+        health_path = f"/{health_path}"
+
+    return {
+        "proxy_prefix": proxy_prefix,
+        "start_path": start_path,
+        "health_path": health_path,
+        "start_url": f"{proxy_prefix}{start_path}",
+        "health_url": f"{proxy_prefix}{health_path}",
+    }
+
+
 apps_bp = APIRouter()
 
 
@@ -221,6 +246,20 @@ async def get_apps_catalog():
     running_apps = await app_manager.get_running_apps()
     catalog = _build_apps_catalog(manifests, running_apps)
     return {"ok": True, "data": catalog}
+
+
+@apps_bp.get('/api/apps/{app_id}/proxy_shell')
+def get_proxy_shell(app_id: str):
+    manifest = next((app for app in get_loaded_apps() if app.get('id') == app_id), None)
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"App '{app_id}' not found")
+
+    proxy_cfg = manifest.get("proxy_shell")
+    if not isinstance(proxy_cfg, dict) or proxy_cfg.get("enabled") is False:
+        raise HTTPException(status_code=404, detail=f"App '{app_id}' does not declare an enabled proxy_shell")
+
+    urls = _proxy_shell_urls(app_id, proxy_cfg)
+    return {"ok": True, "data": {"app_id": app_id, **urls}}
 
 
 @apps_bp.post('/api/apps/reload')

@@ -1466,6 +1466,7 @@ The adapter is a headless workbench client that replaces browser-based bootstrap
   - Sends the minimal editor/document delta events required to open a file (`$acceptDocumentsAndEditorsDelta`, tab model, editor properties, dirty state)
   - Learns provider handles by observing `$register*Provider` frames (when present)
   - Universal provider lookup: `_findProviderHandle(type, languageId)` searches registered providers by language
+  - Multi-provider lookup: `_findAllProviderHandles(type, languageId)` returns **all** matching handles (used by hover to call providers in parallel, VS Code style)
 
 Python-side integration:
 - `workbench_adapter_shell_manager.py`:
@@ -3078,3 +3079,122 @@ When the user switches files (`openPathFromBackend`):
 | `m_editor_app.js` | `_applyDiagnosticsUpdate()`, `_emitAggregatedDiagCounts()`, `_clearDiagnosticsForSwitch()`, `_applyCachedDiagnosticsForActive()` |
 | `diagnostics_bridge.py` | `_process_diagnostics_update()`, `set_consumer_ready()`, `send_cached_diagnostics_to_sid()`, `_pending_entries` buffer |
 | `server.mjs` | `diagnosticsFromChangeMany()` — extracts owner from `$changeMany` args, passes through in `diagnostics/update` event |
+
+## 34) Multi-Provider Pipeline — Systemic Fix (Hover, Completions, Symbols, Semantic Tokens)
+
+### Problem: Single-provider selection (systemic)
+
+`_findProviderHandle(type, languageId)` returned only the **first** matching handle for every provider type. Extensions routinely register **multiple** providers per language — e.g. `typescript-language-features` registers 3 completion providers for JavaScript (main completions, directive comment completions like `@ts-check`, and snippet/refactoring completions). Only the first one was ever called; the rest were silently dropped.
+
+This affected **all** provider-based features: hover, completions, document symbols, semantic tokens, and semantic tokens range.
+
+Example: For JSON hover, `vscode.npm` registers with `{"language":"json","pattern":"**/package.json"}` **before** `vscode.json-language-features` registers its unrestricted `{"language":"json"}` provider. So `pyrightconfig.json` always got npm's handle → ext host rejected it (pattern mismatch) → empty reply.
+
+Example: For JS completions, the directive comment provider (`@ts-check`, `@ts-nocheck`, `@ts-ignore`, `@ts-expect-error`) was never reached because the main TS completion provider was always returned first.
+
+### Fix: Parallel multi-provider calling (VS Code approach)
+
+Added `_findAllProviderHandles(type, languageId)` — returns an array of **all** matching provider handles. **Every** provider method now fires its RPC to all matching handles simultaneously and merges/picks results:
+
+| Method | RPC | Merge Strategy |
+|--------|-----|----------------|
+| `hover()` | `$provideHover` | Concat non-empty contents, take first range |
+| `completions()` | `$provideCompletionItems` | Concat items arrays, OR isIncomplete flags |
+| `symbols()` | `$provideDocumentSymbols` | Concat symbol arrays |
+| `semanticTokens()` | `$provideDocumentSemanticTokens` | Pick richest response (binary delta encoding prevents merging) |
+| `semanticTokensRange()` | `$provideDocumentRangeSemanticTokens` | Pick richest response |
+| `getSemanticTokensLegend()` | (local lookup) | First non-null legend |
+
+```
+completions(params)
+  → _findAllProviderHandles("completions", languageId)  → [handle_A, handle_B, handle_C]
+  → Promise.all(handles.map(h → $provideCompletionItems(h, uri, position, context)))
+  → merge: concat items, OR isIncomplete, keep first cacheId
+  → return merged completions
+```
+
+Each method has a `_*Single()` helper (e.g. `_completionsSingle()`, `_hoverSingle()`, `_symbolsSingle()`, `_semanticTokensSingle()`) that preserves the old single-provider path for callers that pin a specific `providerHandle`.
+
+**Rule: `_findProviderHandle()` (single) MUST NOT be used in new code. Always use `_findAllProviderHandles()`.**
+
+### Problem 2: Cold boot hover registration timing
+
+On cold boot, hover providers registered for the **wrong language**. The sequence:
+
+1. `createFileModel(content, 'json', path)` — Monaco doesn't know `json` as a language (rich language workers removed), model gets `plaintext`
+2. `setTimeout(0)` → `installVscodeApiLanguageBridgeProviders()` → `_currentLanguageContext()` sees `plaintext` → registers hover for `plaintext` only
+3. `applyLanguageToModel()` async chain → `ensureTextmateTokenization('json')` → registers `json` language, calls `setModelLanguage(model, 'json')` → but bridge already ran
+4. User hovers on JSON → no `json` hover provider exists → request never fires
+
+Python worked because Monaco recognizes `python` natively — model gets `python` at creation time, so the immediate bridge registration sees the correct language.
+
+### Fix: Re-run bridge after async language application
+
+Added `installVscodeApiLanguageBridgeProviders()` call in `applyLanguageToModel()`'s final `.then()` (after `setModelLanguage` succeeds post-TextMate install). The `registeredHover` set prevents duplicate registration — only new language IDs get providers.
+
+### Problem 3: Extension `contributes` stripped by sanitization
+
+`_sanitizeExtensionForInit()` stripped the `contributes` property from extension data (env var `TE2_EXT_INCLUDE_CONTRIB` defaulted OFF). Without `contributes`, JSON extension couldn't see `jsonValidation` contributions from other extensions → no schema associations → no hover content.
+
+Fix: Flipped default to ON (`"1"`). The OOM bugs that originally motivated stripping are resolved.
+
+### Problem 4: `$readFile` / `$stat` crash on `vscode://` URIs
+
+JSON extension calls `workspace.fs.readFile('vscode://schemas/vscode-extensions')`. This goes to `MainThreadFileSystem.$readFile` (nid 48). The adapter's catch-all returned `encodeExtReplyOkEmpty` (void/type 7), but the caller expected a VSBuffer → `.buffer` on undefined → crash.
+
+Fix: Added method-specific handlers for `$readFile` and `$stat` that return `encodeExtReplyError` (type 11). Extension catches the error gracefully and falls back to HTTP SchemaStore.
+
+Helper functions added:
+- `encodeExtReplyOkVSBuffer(req, buf)` — type 8 reply, for returning binary data
+- `encodeExtReplyError(req, errObj)` — type 11 reply, for returning structured errors
+
+### Problem 5: JSON language registration missing
+
+After removing Monaco's rich language workers, `json` was no longer a known language ID. `createModel(content, 'json', uri)` silently fell back to `plaintext`.
+
+Fix: Added guard in `ensureTextmateTokenization()` (~line 396 of `m_editor_app.js`) that calls `monaco.languages.register({ id: lang })` if the language isn't already known. TextMate can then attach its tokenizer.
+
+### Reply type reference
+
+| Type | Name | Usage |
+|------|------|-------|
+| 5 | Ack | Fire-and-forget acknowledgment |
+| 7 | ReplyOKEmpty | Method returned void/null |
+| 8 | ReplyOKVSBuffer | Binary buffer response |
+| 9 | ReplyOKJSON | JSON payload response |
+| 10 | ReplyOKMixed | Mixed response |
+| 11 | ReplyError | Structured error |
+| 12 | ReplyErrorVSBuffer | Binary error |
+
+### Cold boot sequence (hover perspective)
+
+```
+t+0ms    editor iframe connected
+t+5ms    [editor:ssot] rx → currentPath = pyrightconfig.json
+t+5ms    [workbench-flow] generation=1
+t+50ms   open_file DEFERRED — waiting for baton
+t+50ms   [VSIX Languages] list FAILS (vscode_api deprecated)
+t+50ms   ensureTextmateTokenization(json) → registers json language ID
+t+60ms   installVscodeApiLanguageBridgeProviders() → immediate=plaintext (model still plaintext)
+         registers hover for plaintext
+t+100ms  TextMate ready → loadGrammar(source.json) → install json tokenizer
+         setModelLanguage(model, json)
+         installVscodeApiLanguageBridgeProviders() → immediate=json (NOW correct)
+         registers hover for json  ← THE FIX
+t+4000ms readiness: adapter_launched ok
+t+4100ms readiness: baton ok → replay open_file
+t+4100ms EMIT editor_workbench_open_file
+t+6000ms diagnostics arrive, symbols arrive
+t+20s    user hovers → provideHover fires → editorWorkbenchCall('hover')
+         → adapter hover() → _findAllProviderHandles → parallel $provideHover
+         → merged result returned
+```
+
+### Key files
+
+| File | Role |
+|------|------|
+| `workbench_client.mjs` | `hover()`, `completions()`, `symbols()`, `semanticTokens()`, `semanticTokensRange()`, `getSemanticTokensLegend()` — all multi-provider via `_findAllProviderHandles()`. Single-provider helpers: `_hoverSingle()`, `_completionsSingle()`, `_symbolsSingle()`, `_semanticTokensSingle()`. Shared: `_parseSemanticTokensReply()`, `encodeExtReplyError()`, `encodeExtReplyOkVSBuffer()`, `$readFile`/`$stat` handlers, `_sanitizeExtensionForInit()` contributes default |
+| `m_editor_app.js` | `installVscodeApiLanguageBridgeProviders()` (bridge registration), `applyLanguageToModel()` (re-runs bridge after async language set), `ensureTextmateTokenization()` (language registration guard), `provideHover` callback (URI guard + API call) |
+| `server.mjs` | HTTP/WS route: `editor_workbench_hover` → `client.hover()` |
+| `editor_ws.py` | `on_editor_workbench_hover` → `adapter_rpc("vscode.hover", ...)` |

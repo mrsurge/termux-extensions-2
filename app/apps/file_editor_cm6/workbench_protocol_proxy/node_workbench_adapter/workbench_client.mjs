@@ -500,6 +500,15 @@ function encodeExtReplyOkJson(req, result) {
   return Buffer.concat([Buffer.from([9]), u32be(req), u32be(jsonB.length), jsonB]);
 }
 
+function encodeExtReplyOkVSBuffer(req, buf) {
+  return Buffer.concat([Buffer.from([8]), u32be(req), u32be(buf.length), buf]);
+}
+
+function encodeExtReplyError(req, errObj) {
+  const jsonB = Buffer.from(JSON.stringify(errObj ?? null), "utf8");
+  return Buffer.concat([Buffer.from([11]), u32be(req), u32be(jsonB.length), jsonB]);
+}
+
 function decodeExtHostRpc(payload) {
   if (!payload || payload.length < 5) return { kind: "ext", error: "short" };
   const msgType = payload[0];
@@ -966,7 +975,7 @@ export class WorkbenchClient {
     const id = ext?.id || ext?.extensionId || (publisher && name ? `${publisher}.${name}` : null) || identifier;
     const targetPlatform = ext?.metadata?.targetPlatform || ext?.targetPlatform || "unknown";
 
-    const includeContributes = String(process.env.TE2_EXT_INCLUDE_CONTRIB || "") === "1";
+    const includeContributes = String(process.env.TE2_EXT_INCLUDE_CONTRIB || "1") !== "0";
     const contributes = includeContributes ? (manifest?.contributes ?? undefined) : undefined;
 
     return {
@@ -1855,6 +1864,18 @@ export class WorkbenchClient {
             const channelId = `te2-output-${msg.req}`;
             console.log(`[ext_reply] $register (OutputService) req=${msg.req} → channelId=${channelId}`);
             replyPayload = encodeExtReplyOkJson(msg.req, channelId);
+          } else if (msg.method === "$readFile") {
+            // MainThreadFileSystem.$readFile — extensions read vscode:// virtual files.
+            // Return an error so callers' try/catch handles gracefully (instead of crashing on undefined.buffer).
+            const uri = msg.args?.[0];
+            const uriStr = (uri && typeof uri === "object") ? (uri.path || uri.fsPath || JSON.stringify(uri).slice(0, 200)) : String(uri ?? "");
+            console.log(`[ext_reply] $readFile req=${msg.req} uri=${uriStr}`);
+            replyPayload = encodeExtReplyError(msg.req, { message: `TE2: $readFile not supported (${uriStr})`, code: "FileNotFound" });
+          } else if (msg.method === "$stat") {
+            const uri = msg.args?.[0];
+            const uriStr = (uri && typeof uri === "object") ? (uri.path || uri.fsPath || "") : String(uri ?? "");
+            console.log(`[ext_reply] $stat req=${msg.req} uri=${uriStr}`);
+            replyPayload = encodeExtReplyError(msg.req, { message: `TE2: $stat not supported (${uriStr})`, code: "FileNotFound" });
           } else {
             replyPayload = encodeExtReplyOkEmpty(msg.req);
           }
@@ -2330,18 +2351,70 @@ export class WorkbenchClient {
 
     console.log(`[symbols] request path=${path} lang=${languageId} registeredProviders=${[...this._providers.documentSymbols.values()].map(e => JSON.stringify(e.selector.map(s => s.language))).join(", ")}`);
 
-    let providerHandle = params.providerHandle ?? this._findProviderHandle("documentSymbols", languageId);
-    if (typeof providerHandle !== "number") {
-      console.log(`[symbols] no provider yet for '${languageId}', waiting up to ${timeoutMs}ms...`);
-      await waitFor(() => this._findProviderHandle("documentSymbols", languageId) != null, { timeoutMs, intervalMs: 50 });
-      providerHandle = params.providerHandle ?? this._findProviderHandle("documentSymbols", languageId);
+    // If caller pinned a specific handle, use single-provider path.
+    if (typeof params.providerHandle === "number") {
+      return this._symbolsSingle(params.providerHandle, path, authority, languageId, params);
     }
-    if (typeof providerHandle !== "number") {
+
+    // Multi-provider: fire $provideDocumentSymbols to ALL matching handles, merge results.
+    let handles = this._findAllProviderHandles("documentSymbols", languageId);
+    if (handles.length === 0) {
+      console.log(`[symbols] no provider yet for '${languageId}', waiting up to ${timeoutMs}ms...`);
+      await waitFor(() => this._findAllProviderHandles("documentSymbols", languageId).length > 0, { timeoutMs, intervalMs: 50 });
+      handles = this._findAllProviderHandles("documentSymbols", languageId);
+    }
+    if (handles.length === 0) {
       console.log(`[symbols] STILL no provider for '${languageId}' after timeout`);
       return { ok: false, error: `no document symbols provider for language '${languageId}'` };
     }
-    console.log(`[symbols] using providerHandle=${providerHandle} for '${languageId}'`);
+    console.log(`[symbols] multi-provider handles=[${handles.join(",")}] for '${languageId}'`);
 
+    const uriObj = this._uriForPath(path, authority);
+    try {
+      this.state.activePath = path;
+      this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
+      this.state.activeLanguageId = languageFromPath(path) ?? null;
+      this.state.lastOpenTs = Date.now();
+    } catch {}
+
+    const results = await Promise.all(handles.map(handle => {
+      const req = this._allocExtReqId();
+      const payload = encodeExtRequestJsonArgs({ req, rpcId: 94, method: "$provideDocumentSymbols", args: [handle, uriObj], cancellable: true });
+      const fut = new Promise((resolve, reject) => {
+        this._pendingExt.set(req, { resolve, reject });
+        setTimeout(() => {
+          if (this._pendingExt.has(req)) { this._pendingExt.delete(req); resolve(null); }
+        }, 15000);
+      });
+      this.ext.protocol.send(VSBuffer.wrap(payload));
+      return fut.catch(() => null);
+    }));
+
+    // Merge symbol arrays from all successful providers.
+    let merged = [];
+    let lastError = null;
+    for (const rep of results) {
+      if (!rep) continue;
+      if (rep.type === 9 && Array.isArray(rep.result)) {
+        merged = merged.concat(rep.result);
+      } else if (rep.type === 11) {
+        lastError = rep.error;
+      }
+    }
+
+    // If ALL providers returned ContentChangedError, retry once.
+    if (merged.length === 0 && lastError && !params._retried) {
+      console.log(`[symbols] all providers errored, retrying after 800ms...`);
+      await new Promise(r => setTimeout(r, 800));
+      return this.symbols({ ...params, _retried: true });
+    }
+
+    console.log(`[symbols] merged ${merged.length} symbols from ${results.filter(r => r && r.type === 9).length}/${handles.length} providers`);
+    return { ok: true, result: merged };
+  }
+
+  /** Single-provider symbols path (for pinned handle callers). */
+  async _symbolsSingle(providerHandle, path, authority, languageId, params) {
     const uriObj = this._uriForPath(path, authority);
     try {
       this.state.activePath = path;
@@ -2352,29 +2425,24 @@ export class WorkbenchClient {
 
     const req = this._allocExtReqId();
     const payload = encodeExtRequestJsonArgs({ req, rpcId: 94, method: "$provideDocumentSymbols", args: [providerHandle, uriObj], cancellable: true });
-
     const fut = new Promise((resolve, reject) => {
       this._pendingExt.set(req, { resolve, reject });
       setTimeout(() => {
-        if (this._pendingExt.has(req)) {
-          this._pendingExt.delete(req);
-          reject(new Error("timed out waiting for symbols reply"));
-        }
+        if (this._pendingExt.has(req)) { this._pendingExt.delete(req); reject(new Error("timed out waiting for symbols reply")); }
       }, 15000);
     });
-
     this.ext.protocol.send(VSBuffer.wrap(payload));
     const rep = await fut;
+
     const symCount = (rep.type === 9 && Array.isArray(rep.result)) ? rep.result.length : 'n/a';
     console.log(`[symbols] response path=${path} lang=${languageId} type=${rep.type} count=${symCount}`);
     if (rep.type === 9) return { ok: true, result: rep.result };
     if (rep.type === 11) {
       console.log(`[symbols] error reply:`, rep.error);
-      // ContentChangedError — document was re-opened; retry once after a short delay.
       if (!params._retried) {
         console.log(`[symbols] retrying after 800ms...`);
         await new Promise(r => setTimeout(r, 800));
-        return this.symbols({ ...params, _retried: true });
+        return this._symbolsSingle(providerHandle, path, authority, languageId, { ...params, _retried: true });
       }
       return { ok: false, error: rep.error };
     }
@@ -2389,14 +2457,20 @@ export class WorkbenchClient {
     const column = Number(params.column ?? 1);
     const timeoutMs = Number(params.timeoutMs ?? 8000);
     const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
-    console.log(`[hover] path=${path} languageId=${languageId} hoverMapSize=${this._providers.hover.size} immediate=${this._findProviderHandle("hover", languageId)}`);
 
-    let providerHandle = params.providerHandle ?? this._findProviderHandle("hover", languageId);
-    if (typeof providerHandle !== "number") {
-      await waitFor(() => this._findProviderHandle("hover", languageId) != null, { timeoutMs, intervalMs: 50 });
-      providerHandle = params.providerHandle ?? this._findProviderHandle("hover", languageId);
+    // If caller pinned a specific handle, use single-provider path
+    if (params.providerHandle != null) {
+      return this._hoverSingle(params.providerHandle, path, lineNumber, column, authority, languageId);
     }
-    if (typeof providerHandle !== "number") return { ok: false, error: `no hover provider for language '${languageId}'` };
+
+    let handles = this._findAllProviderHandles("hover", languageId);
+    if (!handles.length) {
+      await waitFor(() => this._findAllProviderHandles("hover", languageId).length > 0, { timeoutMs, intervalMs: 50 });
+      handles = this._findAllProviderHandles("hover", languageId);
+    }
+    if (!handles.length) return { ok: false, error: `no hover provider for language '${languageId}'` };
+
+    console.log(`[hover] path=${path} languageId=${languageId} handles=[${handles.join(",")}]`);
 
     const uriObj = this._uriForPath(path, authority);
     try {
@@ -2406,6 +2480,57 @@ export class WorkbenchClient {
       this.state.lastOpenTs = Date.now();
     } catch {}
 
+    // Fire $provideHover to ALL matching providers in parallel
+    const pending = handles.map(handle => {
+      const req = this._allocExtReqId();
+      const payload = encodeExtRequestJsonArgs({
+        req,
+        rpcId: 94,
+        method: "$provideHover",
+        args: [handle, uriObj, { lineNumber, column }, undefined],
+        cancellable: true,
+      });
+      const fut = new Promise((resolve, reject) => {
+        this._pendingExt.set(req, { resolve, reject });
+        setTimeout(() => {
+          if (this._pendingExt.has(req)) {
+            this._pendingExt.delete(req);
+            resolve({ type: 7 }); // treat timeout as empty
+          }
+        }, 15000);
+      });
+      this.ext.protocol.send(VSBuffer.wrap(payload));
+      return { handle, fut };
+    });
+
+    const results = await Promise.all(pending.map(p => p.fut));
+
+    // Merge: collect all non-empty hover results
+    let mergedContents = [];
+    let mergedRange = null;
+    for (let i = 0; i < results.length; i++) {
+      const rep = results[i];
+      console.log(`[hover:debug] handle=${pending[i].handle} repType=${rep.type} hasResult=${rep.result != null} result=${JSON.stringify(rep.result)?.slice(0,300)}`);
+      if (rep.type === 9 && rep.result != null) {
+        if (!mergedRange && rep.result.range) mergedRange = rep.result.range;
+        if (Array.isArray(rep.result.contents)) {
+          mergedContents.push(...rep.result.contents);
+        }
+      }
+    }
+
+    if (mergedContents.length > 0) {
+      return { ok: true, result: { range: mergedRange, contents: mergedContents, id: results.find(r => r.result?.id != null)?.result?.id ?? 0 } };
+    }
+
+    // All returned empty or error
+    const firstError = results.find(r => r.type === 11);
+    if (firstError) return { ok: false, error: firstError.error };
+    return { ok: true, result: null };
+  }
+
+  async _hoverSingle(providerHandle, path, lineNumber, column, authority, languageId) {
+    const uriObj = this._uriForPath(path, authority);
     const req = this._allocExtReqId();
     const payload = encodeExtRequestJsonArgs({
       req,
@@ -2414,7 +2539,6 @@ export class WorkbenchClient {
       args: [providerHandle, uriObj, { lineNumber, column }, undefined],
       cancellable: true,
     });
-
     const fut = new Promise((resolve, reject) => {
       this._pendingExt.set(req, { resolve, reject });
       setTimeout(() => {
@@ -2424,9 +2548,9 @@ export class WorkbenchClient {
         }
       }, 15000);
     });
-
     this.ext.protocol.send(VSBuffer.wrap(payload));
     const rep = await fut;
+    console.log(`[hover:debug] single handle=${providerHandle} repType=${rep.type} hasResult=${rep.result != null}`);
     if (rep.type === 9) return { ok: true, result: rep.result };
     if (rep.type === 11) return { ok: false, error: rep.error };
     return { ok: false, error: rep };
@@ -2447,9 +2571,6 @@ export class WorkbenchClient {
     console.log(`[completions] path=${path} lang=${languageId} line=${lineNumber} col=${column} trigger=${triggerKind}`);
 
     // Pre-flight: sync document content so the ext host has the latest text.
-    // The frontend's didChange may still be in-flight via Socket.IO when the
-    // completion request arrives, causing the ext host to compute completions
-    // against stale content (wrong ranges, wrong context).
     if (params.text != null && path) {
       try {
         this.didChange({ path, text: String(params.text), languageId, authority });
@@ -2458,37 +2579,80 @@ export class WorkbenchClient {
       }
     }
 
-    let providerHandle = params.providerHandle ?? this._findProviderHandle("completions", languageId);
-    if (typeof providerHandle !== "number") {
-      await waitFor(() => this._findProviderHandle("completions", languageId) != null, { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 });
-      providerHandle = params.providerHandle ?? this._findProviderHandle("completions", languageId);
+    // If caller pinned a specific handle, use single-provider path.
+    if (typeof params.providerHandle === "number") {
+      return this._completionsSingle(params.providerHandle, path, authority, lineNumber, column, triggerKind, triggerCharacter, timeoutMs);
     }
-    if (typeof providerHandle !== "number") return { ok: false, error: `no completions provider for language '${languageId}'` };
+
+    // Multi-provider: fire $provideCompletionItems to ALL matching handles in parallel,
+    // merge non-empty results.  Same pattern as hover() multi-provider.
+    let handles = this._findAllProviderHandles("completions", languageId);
+    if (handles.length === 0) {
+      await waitFor(() => this._findAllProviderHandles("completions", languageId).length > 0, { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 });
+      handles = this._findAllProviderHandles("completions", languageId);
+    }
+    if (handles.length === 0) return { ok: false, error: `no completions provider for language '${languageId}'` };
+
+    console.log(`[completions] multi-provider handles=[${handles.join(",")}] for lang=${languageId}`);
 
     const uriObj = this._uriForPath(path, authority);
+    const context = { triggerKind };
+    if (triggerCharacter != null) context.triggerCharacter = triggerCharacter;
 
+    const results = await Promise.all(handles.map(handle => {
+      const req = this._allocExtReqId();
+      const payload = encodeExtRequestJsonArgs({
+        req, rpcId: 94,
+        method: "$provideCompletionItems",
+        args: [handle, uriObj, { lineNumber, column }, context],
+        cancellable: true,
+      });
+      const fut = new Promise((resolve, reject) => {
+        this._pendingExt.set(req, { resolve, reject });
+        setTimeout(() => {
+          if (this._pendingExt.has(req)) { this._pendingExt.delete(req); resolve(null); }
+        }, timeoutMs + 5000);
+      });
+      this.ext.protocol.send(VSBuffer.wrap(payload));
+      return fut.catch(() => null);
+    }));
+
+    // Merge all non-empty results.
+    let mergedItems = [];
+    let anyIncomplete = false;
+    let firstCacheId;
+    for (const rep of results) {
+      if (!rep || rep.type !== 9 || !rep.result) continue;
+      const raw = rep.result;
+      const items = this._inflateCompletionItems(raw);
+      if (items.length > 0) mergedItems = mergedItems.concat(items);
+      if (raw.c) anyIncomplete = true;
+      if (raw.x != null && firstCacheId == null) firstCacheId = raw.x;
+    }
+
+    console.log(`[completions] merged ${mergedItems.length} items from ${results.filter(r => r && r.type === 9).length}/${handles.length} providers`);
+    return { ok: true, result: { items: mergedItems, isIncomplete: anyIncomplete, cacheId: firstCacheId } };
+  }
+
+  /** Single-provider completions path (for pinned handle callers). */
+  async _completionsSingle(providerHandle, path, authority, lineNumber, column, triggerKind, triggerCharacter, timeoutMs) {
+    const uriObj = this._uriForPath(path, authority);
     const context = { triggerKind };
     if (triggerCharacter != null) context.triggerCharacter = triggerCharacter;
 
     const req = this._allocExtReqId();
     const payload = encodeExtRequestJsonArgs({
-      req,
-      rpcId: 94,
+      req, rpcId: 94,
       method: "$provideCompletionItems",
       args: [providerHandle, uriObj, { lineNumber, column }, context],
       cancellable: true,
     });
-
     const fut = new Promise((resolve, reject) => {
       this._pendingExt.set(req, { resolve, reject });
       setTimeout(() => {
-        if (this._pendingExt.has(req)) {
-          this._pendingExt.delete(req);
-          reject(new Error("timed out waiting for completions reply"));
-        }
+        if (this._pendingExt.has(req)) { this._pendingExt.delete(req); reject(new Error("timed out waiting for completions reply")); }
       }, timeoutMs + 5000);
     });
-
     this.ext.protocol.send(VSBuffer.wrap(payload));
     const rep = await fut;
 
@@ -2496,9 +2660,7 @@ export class WorkbenchClient {
       const raw = rep.result;
       if (!raw) return { ok: true, result: { items: [], isIncomplete: false } };
       const items = this._inflateCompletionItems(raw);
-      const isIncomplete = !!raw.c;
-      const cacheId = raw.x;
-      return { ok: true, result: { items, isIncomplete, cacheId } };
+      return { ok: true, result: { items, isIncomplete: !!raw.c, cacheId: raw.x } };
     }
     if (rep.type === 11) return { ok: false, error: rep.error };
     return { ok: false, error: rep };
@@ -2556,72 +2718,128 @@ export class WorkbenchClient {
 
     console.log(`[semanticTokens] path=${path} lang=${languageId} prevResultId=${previousResultId}`);
 
-    let providerHandle = params.providerHandle ?? this._findProviderHandle("semanticTokens", languageId);
-    if (typeof providerHandle !== "number") {
-      await waitFor(() => this._findProviderHandle("semanticTokens", languageId) != null, { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 });
-      providerHandle = params.providerHandle ?? this._findProviderHandle("semanticTokens", languageId);
+    // If caller pinned a specific handle, use single-provider path.
+    if (typeof params.providerHandle === "number") {
+      return this._semanticTokensSingle(params.providerHandle, path, authority, languageId, previousResultId, timeoutMs);
     }
-    if (typeof providerHandle !== "number") return { ok: false, error: `no semanticTokens provider for language '${languageId}'` };
 
-    // Also retrieve the legend for this provider (needed by frontend)
+    // Multi-provider: fire all matching handles in parallel, return richest non-empty result.
+    // (Semantic tokens use delta-encoded binary format with per-provider legends,
+    //  so merging is impractical — but we ensure no provider is silently skipped.)
+    let handles = this._findAllProviderHandles("semanticTokens", languageId);
+    if (handles.length === 0) {
+      await waitFor(() => this._findAllProviderHandles("semanticTokens", languageId).length > 0, { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 });
+      handles = this._findAllProviderHandles("semanticTokens", languageId);
+    }
+    if (handles.length === 0) return { ok: false, error: `no semanticTokens provider for language '${languageId}'` };
+
+    console.log(`[semanticTokens] multi-provider handles=[${handles.join(",")}] for lang=${languageId}`);
+
+    const uriObj = this._uriForPath(path, authority);
+
+    const results = await Promise.all(handles.map(handle => {
+      const providerEntry = this._providers.semanticTokens.get(handle);
+      const legend = providerEntry?.legend ?? null;
+
+      const req = this._allocExtReqId();
+      const payload = encodeExtRequestJsonArgs({
+        req, rpcId: 94,
+        method: "$provideDocumentSemanticTokens",
+        args: [handle, uriObj, previousResultId],
+        cancellable: true,
+      });
+      const fut = new Promise((resolve, reject) => {
+        this._pendingExt.set(req, { resolve, reject });
+        setTimeout(() => {
+          if (this._pendingExt.has(req)) { this._pendingExt.delete(req); resolve(null); }
+        }, timeoutMs + 5000);
+      });
+      this.ext.protocol.send(VSBuffer.wrap(payload));
+      return fut.then(rep => ({ rep, legend })).catch(() => null);
+    }));
+
+    // Pick the richest successful response (most token data).
+    let best = null;
+    let bestScore = -1;
+    for (const r of results) {
+      if (!r || !r.rep) continue;
+      const rep = r.rep;
+      const legend = r.legend;
+      const parsed = this._parseSemanticTokensReply(rep, legend);
+      if (!parsed) continue;
+      // Score by data length (full) or edit count (delta).
+      const score = parsed.data ? parsed.data.length : (parsed.edits ? parsed.edits.length : 0);
+      if (score > bestScore) { bestScore = score; best = parsed; }
+    }
+
+    if (best) {
+      console.log(`[semanticTokens] picked best from ${results.filter(r => r?.rep).length}/${handles.length} providers, score=${bestScore}`);
+      return { ok: true, result: best };
+    }
+
+    // All failed — return first error or empty.
+    for (const r of results) {
+      if (r?.rep?.type === 11) return { ok: false, error: r.rep.error };
+    }
+    return { ok: true, result: { type: "full", resultId: "", data: [], legend: null } };
+  }
+
+  /** Single-provider semantic tokens path (for pinned handle callers). */
+  async _semanticTokensSingle(providerHandle, path, authority, languageId, previousResultId, timeoutMs) {
     const providerEntry = this._providers.semanticTokens.get(providerHandle);
     const legend = providerEntry?.legend ?? null;
-
     const uriObj = this._uriForPath(path, authority);
 
     const req = this._allocExtReqId();
     const payload = encodeExtRequestJsonArgs({
-      req,
-      rpcId: 94,
+      req, rpcId: 94,
       method: "$provideDocumentSemanticTokens",
       args: [providerHandle, uriObj, previousResultId],
       cancellable: true,
     });
-
     const fut = new Promise((resolve, reject) => {
       this._pendingExt.set(req, { resolve, reject });
       setTimeout(() => {
-        if (this._pendingExt.has(req)) {
-          this._pendingExt.delete(req);
-          reject(new Error("timed out waiting for semanticTokens reply"));
-        }
+        if (this._pendingExt.has(req)) { this._pendingExt.delete(req); reject(new Error("timed out waiting for semanticTokens reply")); }
       }, timeoutMs + 5000);
     });
-
     this.ext.protocol.send(VSBuffer.wrap(payload));
     const rep = await fut;
 
-    // ★★★ SEMANTIC TOKENS RESPONSE ★★★
+    const parsed = this._parseSemanticTokensReply(rep, legend);
+    if (parsed) return { ok: true, result: parsed };
+    if (rep.type === 11) return { ok: false, error: rep.error };
+    return { ok: false, error: rep };
+  }
+
+  /** Parse a semantic tokens reply (type 7/8/9) into a structured result. Returns null on unrecognized. */
+  _parseSemanticTokensReply(rep, legend) {
     const _stBufLen = rep.buffer ? rep.buffer.byteLength : 0;
-    console.log(`★★★ [SEMANTIC_TOKENS_REPLY] type=${rep.type} req=${rep.req} bufBytes=${_stBufLen} hasResult=${!!rep.result} hasError=${!!rep.error} path=${path}`);
+    console.log(`★★★ [SEMANTIC_TOKENS_REPLY] type=${rep.type} req=${rep.req} bufBytes=${_stBufLen} hasResult=${!!rep.result} hasError=${!!rep.error}`);
 
     // Type 8: ReplyOKVSBuffer — encodeSemanticTokensDto() encoded buffer
-    // Format: [id:u32][type:u32(1=full,2=delta)][...payload] (little-endian)
     if (rep.type === 8 && rep.buffer) {
       const buf = rep.buffer;
-      // Copy to aligned buffer to avoid RangeError on unaligned byteOffset
       const aligned = new Uint8Array(buf.byteLength);
       aligned.set(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
       const src = new Uint32Array(aligned.buffer, 0, aligned.byteLength >>> 2);
-      if (src.length < 2) return { ok: true, result: { type: "full", resultId: "", data: [], legend } };
+      if (src.length < 2) return { type: "full", resultId: "", data: [], legend };
 
       let offset = 0;
       const dtoId = src[offset++];
       const dtoType = src[offset++]; // 1 = full, 2 = delta
 
       if (dtoType === 1) {
-        // Full: [dataLen:u32][...data:u32×dataLen]
         const dataLen = src[offset++];
         const data = Array.from(src.subarray(offset, offset + dataLen));
         console.log(`★★★ [SEMANTIC_TOKENS_DTO] full id=${dtoId} dataLen=${dataLen} tokens=${dataLen / 5}`);
         if (dataLen >= 5) {
           console.log(`★★★ [SEMANTIC_TOKENS_DATA] first tokens: [${data.slice(0, 20).join(', ')}]`);
         }
-        return { ok: true, result: { type: "full", resultId: String(dtoId), data, legend } };
+        return { type: "full", resultId: String(dtoId), data, legend };
       }
 
       if (dtoType === 2) {
-        // Delta: [deltaCount:u32][per delta: start:u32, deleteCount:u32, dataLen:u32, ...data:u32×dataLen]
         const deltaCount = src[offset++];
         const edits = [];
         for (let i = 0; i < deltaCount; i++) {
@@ -2636,27 +2854,25 @@ export class WorkbenchClient {
           edits.push({ start, deleteCount, data });
         }
         console.log(`★★★ [SEMANTIC_TOKENS_DTO] delta id=${dtoId} edits=${edits.length}`);
-        return { ok: true, result: { type: "delta", resultId: String(dtoId), edits, legend } };
+        return { type: "delta", resultId: String(dtoId), edits, legend };
       }
 
-      // Unknown DTO type — log and return empty
       console.warn(`★★★ [SEMANTIC_TOKENS_DTO] unknown dtoType=${dtoType} id=${dtoId}`);
-      return { ok: true, result: { type: "full", resultId: "", data: [], legend } };
+      return { type: "full", resultId: "", data: [], legend };
     }
-    // Type 7: ReplyOKEmpty — no tokens available
+    // Type 7: ReplyOKEmpty
     if (rep.type === 7) {
-      return { ok: true, result: { type: "full", resultId: "", data: [], legend } };
+      return { type: "full", resultId: "", data: [], legend };
     }
-    // Type 9: ReplyOKJSON — null means no tokens, or JSON DTO for delta/full
+    // Type 9: ReplyOKJSON
     if (rep.type === 9) {
       const raw = rep.result;
-      if (!raw) return { ok: true, result: { type: "full", resultId: "", data: [], legend } };
+      if (!raw) return { type: "full", resultId: "", data: [], legend };
       const decoded = this._parseSemanticTokensDto(raw);
       decoded.legend = legend;
-      return { ok: true, result: decoded };
+      return decoded;
     }
-    if (rep.type === 11) return { ok: false, error: rep.error };
-    return { ok: false, error: rep };
+    return null;
   }
 
   // ─── Semantic Tokens Range ──────────────────────────────────────────
@@ -2672,111 +2888,79 @@ export class WorkbenchClient {
 
     console.log(`${_hts()} [semanticTokensRange] path=${path} lang=${languageId} range=${range.startLineNumber}:${range.startColumn}-${range.endLineNumber}:${range.endColumn}`);
 
-    // Find a range provider specifically (range: true flag)
-    let providerHandle = null;
-    for (const entry of this._providers.semanticTokens.values()) {
-      if (!entry.range) continue;
-      if (!Array.isArray(entry.selector)) continue;
-      for (const s of entry.selector) {
-        if (s && typeof s === "object" && s.language === languageId) {
-          providerHandle = entry.handle;
-          break;
-        }
-      }
-      if (providerHandle != null) break;
-    }
-    if (typeof providerHandle !== "number") {
-      await waitFor(() => {
-        for (const entry of this._providers.semanticTokens.values()) {
-          if (!entry.range) continue;
-          if (!Array.isArray(entry.selector)) continue;
-          for (const s of entry.selector) {
-            if (s && typeof s === "object" && s.language === languageId) return true;
-          }
-        }
-        return false;
-      }, { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 });
+    // Collect ALL range-capable providers for this language.
+    const _findRangeHandles = () => {
+      const handles = [];
       for (const entry of this._providers.semanticTokens.values()) {
         if (!entry.range) continue;
         if (!Array.isArray(entry.selector)) continue;
         for (const s of entry.selector) {
           if (s && typeof s === "object" && s.language === languageId) {
-            providerHandle = entry.handle;
+            handles.push(entry.handle);
             break;
           }
         }
-        if (providerHandle != null) break;
       }
-    }
-    if (typeof providerHandle !== "number") return { ok: false, error: `no semanticTokensRange provider for language '${languageId}'` };
+      return handles;
+    };
 
-    const providerEntry = this._providers.semanticTokens.get(providerHandle);
-    const legend = providerEntry?.legend ?? null;
+    let handles = _findRangeHandles();
+    if (handles.length === 0) {
+      await waitFor(() => _findRangeHandles().length > 0, { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 });
+      handles = _findRangeHandles();
+    }
+    if (handles.length === 0) return { ok: false, error: `no semanticTokensRange provider for language '${languageId}'` };
+
+    console.log(`${_hts()} [semanticTokensRange] multi-provider handles=[${handles.join(",")}] for lang=${languageId}`);
 
     const uriObj = this._uriForPath(path, authority);
 
-    const req = this._allocExtReqId();
-    const payload = encodeExtRequestJsonArgs({
-      req,
-      rpcId: 94,
-      method: "$provideDocumentRangeSemanticTokens",
-      args: [providerHandle, uriObj, range],
-      cancellable: true,
-    });
+    const results = await Promise.all(handles.map(handle => {
+      const providerEntry = this._providers.semanticTokens.get(handle);
+      const legend = providerEntry?.legend ?? null;
 
-    const fut = new Promise((resolve, reject) => {
-      this._pendingExt.set(req, { resolve, reject });
-      setTimeout(() => {
-        if (this._pendingExt.has(req)) {
-          this._pendingExt.delete(req);
-          reject(new Error("timed out waiting for semanticTokensRange reply"));
-        }
-      }, timeoutMs + 5000);
-    });
+      const req = this._allocExtReqId();
+      const payload = encodeExtRequestJsonArgs({
+        req, rpcId: 94,
+        method: "$provideDocumentRangeSemanticTokens",
+        args: [handle, uriObj, range],
+        cancellable: true,
+      });
+      const fut = new Promise((resolve, reject) => {
+        this._pendingExt.set(req, { resolve, reject });
+        setTimeout(() => {
+          if (this._pendingExt.has(req)) { this._pendingExt.delete(req); resolve(null); }
+        }, timeoutMs + 5000);
+      });
+      this.ext.protocol.send(VSBuffer.wrap(payload));
+      return fut.then(rep => ({ rep, legend })).catch(() => null);
+    }));
 
-    this.ext.protocol.send(VSBuffer.wrap(payload));
-    const rep = await fut;
-
-    console.log(`${_hts()} ★★★ [SEMANTIC_TOKENS_RANGE_REPLY] type=${rep.type} req=${rep.req} bufBytes=${rep.buffer ? rep.buffer.byteLength : 0} path=${path} error=${rep.type === 11 ? JSON.stringify(rep.error)?.slice(0, 500) : "none"}`);
-
-    // Type 8: DTO-encoded buffer (same format as full, but always type=full for range)
-    if (rep.type === 8 && rep.buffer) {
-      const buf = rep.buffer;
-      // Copy to aligned buffer to avoid RangeError on unaligned byteOffset
-      const aligned = new Uint8Array(buf.byteLength);
-      aligned.set(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength));
-      const src = new Uint32Array(aligned.buffer, 0, aligned.byteLength >>> 2);
-      if (src.length < 2) return { ok: true, result: { type: "full", resultId: "", data: [], legend } };
-
-      let offset = 0;
-      const dtoId = src[offset++];
-      const dtoType = src[offset++];
-
-      if (dtoType === 1) {
-        const dataLen = src[offset++];
-        const data = Array.from(src.subarray(offset, offset + dataLen));
-        console.log(`★★★ [SEMANTIC_TOKENS_RANGE_DTO] full id=${dtoId} dataLen=${dataLen} tokens=${dataLen / 5}`);
-        return { ok: true, result: { type: "full", resultId: String(dtoId), data, legend } };
-      }
-      return { ok: true, result: { type: "full", resultId: "", data: [], legend } };
+    // Pick richest successful response.
+    let best = null;
+    let bestScore = -1;
+    for (const r of results) {
+      if (!r || !r.rep) continue;
+      const parsed = this._parseSemanticTokensReply(r.rep, r.legend);
+      if (!parsed) continue;
+      const score = parsed.data ? parsed.data.length : (parsed.edits ? parsed.edits.length : 0);
+      if (score > bestScore) { bestScore = score; best = parsed; }
     }
-    if (rep.type === 7) return { ok: true, result: { type: "full", resultId: "", data: [], legend } };
-    if (rep.type === 9) {
-      const raw = rep.result;
-      if (!raw) return { ok: true, result: { type: "full", resultId: "", data: [], legend } };
-      const decoded = this._parseSemanticTokensDto(raw);
-      decoded.legend = legend;
-      return { ok: true, result: decoded };
+
+    if (best) {
+      console.log(`${_hts()} [semanticTokensRange] picked best from ${results.filter(r => r?.rep).length}/${handles.length} providers, score=${bestScore}`);
+      return { ok: true, result: best };
     }
-    if (rep.type === 11) return { ok: false, error: rep.error };
-    return { ok: false, error: rep };
+
+    for (const r of results) {
+      if (r?.rep?.type === 11) return { ok: false, error: r.rep.error };
+    }
+    return { ok: true, result: { type: "full", resultId: "", data: [], legend: null } };
   }
+
   _parseSemanticTokensDto(dto) {
     const resultId = String(dto.id ?? dto.resultId ?? "");
 
-    // Check if this is a full or delta response
-    // Full: { id, type: 1, data: number[] }
-    // Delta: { id, type: 2, deltas: [{ start, deleteCount, data?: number[] }] }
     if (dto.type === 2 || dto.edits || dto.deltas) {
       const edits = dto.deltas || dto.edits || [];
       return {
@@ -2790,7 +2974,6 @@ export class WorkbenchClient {
       };
     }
 
-    // Full response
     let data = dto.data;
     if (data && ArrayBuffer.isView(data)) {
       data = Array.from(new Uint32Array(data.buffer, data.byteOffset, data.byteLength / 4));
@@ -2807,17 +2990,20 @@ export class WorkbenchClient {
     };
   }
 
-  /** Get the semantic tokens legend for a language (needed by frontend for provider registration). */
+  /** Get the semantic tokens legend for a language (tries all providers). */
   async getSemanticTokensLegend(languageId) {
-    let handle = this._findProviderHandle("semanticTokens", languageId);
-    if (typeof handle !== "number") {
-      // Provider may not have registered yet — wait briefly
-      await waitFor(() => this._findProviderHandle("semanticTokens", languageId) != null, { timeoutMs: 8000, intervalMs: 100 });
-      handle = this._findProviderHandle("semanticTokens", languageId);
+    let handles = this._findAllProviderHandles("semanticTokens", languageId);
+    if (handles.length === 0) {
+      await waitFor(() => this._findAllProviderHandles("semanticTokens", languageId).length > 0, { timeoutMs: 8000, intervalMs: 100 });
+      handles = this._findAllProviderHandles("semanticTokens", languageId);
     }
-    if (typeof handle !== "number") return null;
-    const entry = this._providers.semanticTokens.get(handle);
-    return entry?.legend ?? null;
+    if (handles.length === 0) return null;
+    // Return the first non-null legend found.
+    for (const h of handles) {
+      const entry = this._providers.semanticTokens.get(h);
+      if (entry?.legend) return entry.legend;
+    }
+    return null;
   }
 
   // ─── File Watcher IPC ────────────────────────────────────────────────
@@ -2953,6 +3139,22 @@ export class WorkbenchClient {
       }
     }
     return null;
+  }
+
+  _findAllProviderHandles(type, languageId) {
+    const map = this._providers[type];
+    if (!map || !languageId) return [];
+    const handles = [];
+    for (const entry of map.values()) {
+      if (!Array.isArray(entry.selector)) continue;
+      for (const s of entry.selector) {
+        if (s && typeof s === "object" && s.language === languageId) {
+          handles.push(entry.handle);
+          break;
+        }
+      }
+    }
+    return handles;
   }
 
   /**

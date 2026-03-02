@@ -393,6 +393,15 @@
         _applyThemeToTextmateRegistry(tmActiveThemeJson);
       }
 
+      // Register the language if Monaco doesn't know about it yet (e.g. JSON
+      // whose registration came from the now-removed worker language contrib).
+      try {
+        var knownLangs = window.monaco.languages.getLanguages();
+        if (!knownLangs.some(function(l) { return l.id === lang; })) {
+          window.monaco.languages.register({ id: lang });
+        }
+      } catch (_) {}
+
       window.monaco.languages.setTokensProvider(lang, {
         getInitialState: function () { return _makeTextmateState(window.vscodetextmate.INITIAL); },
         // Encoded tokenization: vscode-textmate resolves full scope stack against
@@ -610,6 +619,7 @@
         .then(function (ok) {
           if (!ok) return;
           try { window.monaco.editor.setModelLanguage(nextModel, lang); } catch (_) {}
+          try { installVscodeApiLanguageBridgeProviders(); } catch (_) {}
         })
         .catch(function () { /* ignore */ });
     } catch (_) {}
@@ -1618,11 +1628,15 @@
           targets.forEach(function (langId) {
             if (!langId) return;
             if (!languageBridge.registeredHover.has(langId) && monaco.languages.registerHoverProvider) {
+              console.log('[hover:bridge] registering hover provider for lang=' + langId);
               monaco.languages.registerHoverProvider(langId, {
                 provideHover: function (m, pos, token) {
                   try {
                     var ctx = _currentLanguageContext();
-                    if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) return null;
+                    if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) {
+                      console.warn('[hover:bridge] BAIL provideHover: ctx=' + (ctx ? 'ok' : 'NULL') + ' m.uri=' + (m && m.uri ? String(m.uri.toString()).slice(-60) : 'NULL') + ' ctx.uri=' + (ctx ? String(ctx.uri).slice(-60) : 'N/A'));
+                      return null;
+                    }
                     return _callVscodeApiGuarded(
                       'hover',
                       'vscode.hover',
@@ -1782,6 +1796,7 @@
         var ctx = _currentLanguageContext();
         if (ctx && ctx.languageId) immediate.add(String(ctx.languageId));
       } catch (_) {}
+      console.log('[hover:bridge] installVscodeApiLanguageBridgeProviders immediate=' + Array.from(immediate).join(',') + ' model=' + (model ? 'yes' : 'no') + ' registeredHover=' + Array.from(languageBridge.registeredHover).join(','));
       if (immediate.size) _doRegister(immediate);
 
       // Deferred: also register for all known VSIX languages once loaded
@@ -5341,66 +5356,22 @@
           try {
             var label = String(_label || '');
             var moduleId = String(_moduleId || '');
-            // Monaco's language services are worker-backed (completion/diagnostics/etc).
-            // Route by label, mirroring Monaco's standard mapping.
+            var url;
+            // TS/JS worker provides keyword completions, snippets, signature help.
+            // Diagnostics are disabled (ext host is the sole diagnostics source).
             if (label === 'typescript' || label === 'javascript') {
-              var wts = new Worker(langBase + '/workers/ts.worker.js', { type: 'module' });
-              if (!_workerLogOnce['ts']) {
-                _workerLogOnce['ts'] = true;
-                console.log('[MonacoWorker] ts', { moduleId: moduleId, label: label, url: langBase + '/workers/ts.worker.js' });
-              }
-              wts.onerror = function(ev) { console.error('[MonacoWorker] ts error', ev); };
-              wts.onmessageerror = function(ev) { console.error('[MonacoWorker] ts messageerror', ev); };
-              return wts;
+              url = langBase + '/workers/ts.worker.js';
+            } else {
+              url = base + '/vs/editor/common/services/editorWebWorkerMain.bundle.js';
             }
-            if (label === 'json') {
-              var wj = new Worker(langBase + '/workers/json.worker.js', { type: 'module' });
-              if (!_workerLogOnce['json']) {
-                _workerLogOnce['json'] = true;
-                console.log('[MonacoWorker] json', { moduleId: moduleId, label: label, url: langBase + '/workers/json.worker.js' });
-              }
-              wj.onerror = function(ev) { console.error('[MonacoWorker] json error', ev); };
-              wj.onmessageerror = function(ev) { console.error('[MonacoWorker] json messageerror', ev); };
-              return wj;
-            }
-            if (label === 'css' || label === 'scss' || label === 'less') {
-              var wc = new Worker(langBase + '/workers/css.worker.js', { type: 'module' });
-              if (!_workerLogOnce['css']) {
-                _workerLogOnce['css'] = true;
-                console.log('[MonacoWorker] css', { moduleId: moduleId, label: label, url: langBase + '/workers/css.worker.js' });
-              }
-              wc.onerror = function(ev) { console.error('[MonacoWorker] css error', ev); };
-              wc.onmessageerror = function(ev) { console.error('[MonacoWorker] css messageerror', ev); };
-              return wc;
-            }
-            if (label === 'html' || label === 'handlebars' || label === 'razor') {
-              var wh = new Worker(langBase + '/workers/html.worker.js', { type: 'module' });
-              if (!_workerLogOnce['html']) {
-                _workerLogOnce['html'] = true;
-                console.log('[MonacoWorker] html', { moduleId: moduleId, label: label, url: langBase + '/workers/html.worker.js' });
-              }
-              wh.onerror = function(ev) { console.error('[MonacoWorker] html error', ev); };
-              wh.onmessageerror = function(ev) { console.error('[MonacoWorker] html messageerror', ev); };
-              return wh;
-            }
-
-            // Fallback: editor worker service.
-            //
-            // IMPORTANT: `vs/editor/editor.worker.start.js` only exports `start()` and does not
-            // bootstrap the worker message loop on its own. Using it directly causes Monaco's
-            // editor worker RPC to never initialize (diff computation stays pending / null).
-            //
-            // `editorWebWorkerMain.js` uses `bootstrapWebWorker(...)` and will correctly wire up
-            // the worker message handler when Monaco posts the initial "-please-ignore-" message.
-            var url = base + '/vs/editor/common/services/editorWebWorkerMain.js';
             var wk = new Worker(url, { type: 'module' });
-            var key = 'editor:' + label;
+            var key = label + ':' + url.split('/').pop();
             if (!_workerLogOnce[key]) {
               _workerLogOnce[key] = true;
-              console.log('[MonacoWorker] editor', { moduleId: moduleId, label: label, url: url });
+              console.log('[MonacoWorker]', { moduleId: moduleId, label: label, url: url });
             }
-            wk.onerror = function(ev) { console.error('[MonacoWorker] editor error', { moduleId: moduleId, label: label, ev: ev }); };
-            wk.onmessageerror = function(ev) { console.error('[MonacoWorker] editor messageerror', { moduleId: moduleId, label: label, ev: ev }); };
+            wk.onerror = function(ev) { console.error('[MonacoWorker] error', { moduleId: moduleId, label: label, ev: ev }); };
+            wk.onmessageerror = function(ev) { console.error('[MonacoWorker] messageerror', { moduleId: moduleId, label: label, ev: ev }); };
             return wk;
           } catch (e) {
             console.error('[Monaco] Failed to create worker', e);
@@ -5420,6 +5391,18 @@
 
       window.monaco = monacoNs;
       ensureTe2DiffTheme();
+
+      // TS/JS worker diagnostics — ext host is the sole diagnostics source.
+      // When TS contribution is available in the bootstrap bundle, disable worker diagnostics.
+      try {
+        var tsLang = monacoNs.languages.typescript;
+        if (tsLang && tsLang.typescriptDefaults) {
+          tsLang.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: true });
+          tsLang.javascriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: true });
+          console.log('[Monaco] TS/JS worker diagnostics disabled');
+        }
+      } catch (e) { console.warn('[Monaco] TS/JS diagnostics config failed', e); }
+
       try { await loadVscodeTextmateThemes(); } catch (_) {}
       try { await applyMonacoTheme('github-dark-default'); } catch (_) {}
 

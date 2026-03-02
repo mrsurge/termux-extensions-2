@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://te2.local/schema/proxy_shell.schema.json",
+  "title": "TE2 Proxy Shell Manifest Schema",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "proxy_shell": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "start_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "health_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rewrite": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "path_prefixes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "content_types": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "absolute_root_paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "css_root_paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "ws_template_marker": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ws_template_replacement": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\{proxy_prefix\\}"
+            }
+          }
+        },
+        "socketio": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "inject_path": {
+              "type": "boolean"
+            },
+            "namespace_marker": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "proxy_shell": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "const": false
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          }
+        }
+      },
+      "then": {},
+      "else": {
+        "properties": {
+          "proxy_shell": {
+            "required": [
+              "start_path",
+              "health_path"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "proxy_shell": {
+            "type": "object",
+            "properties": {
+              "rewrite": {
+                "type": "object",
+                "required": [
+                  "ws_template_marker"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "proxy_shell": {
+            "properties": {
+              "rewrite": {
+                "required": [
+                  "ws_template_replacement"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "proxy_shell": {
+            "type": "object",
+            "properties": {
+              "socketio": {
+                "type": "object",
+                "properties": {
+                  "inject_path": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "inject_path"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "proxy_shell": {
+            "properties": {
+              "socketio": {
+                "required": [
+                  "namespace_marker"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
