@@ -5,6 +5,21 @@ import { setUnsavedTrace, noteGitBaselineRequest } from './editor_trace_utils.js
 import { createFileModel as createMonacoFileModel } from './editor_model_utils.js';
 import { setDebugPart, syncTraceDebug, syncMirrorDebug } from './editor_debug_utils.js';
 import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
+import { deriveApiBase } from './editor_api_base_utils.js';
+import { absPathFromVscodeUri } from './editor_vscode_uri_utils.js';
+import { monacoRangeFromProtoRange, toMonacoHoverContents, isLanguageContextCurrent, monacoRangeFromCompletionRange, mapCompletionItemKind } from './editor_bridge_utils.js';
+import { te2DumpTextmateScopesForLine, te2GetActiveEditorAndModel, te2AdvanceRuleStackToLine } from './editor_textmate_debug_utils.js';
+import { installMarkerNavBindings, jumpToMarker } from './editor_marker_nav_utils.js';
+import { applyJumpToLine as applyJumpToLineAt } from './editor_jump_utils.js';
+import { resolveMonacoThemeId } from './editor_theme_resolver_utils.js';
+import { emitToHostSocket } from './editor_socket_emit_utils.js';
+import { getShowInlineDiffsFlag, getShowDraftDiffsFlag, getUseTrueInlineViewFlag, getAutoSaveFlag } from './editor_pref_flags_utils.js';
+import { localMirrorDebounceMs, mirrorHotWindowMs, gitBaselineDebounceMs, gitBaselineApplyIdleMs } from './editor_timing_policy_utils.js';
+import { wbCurrentGeneration, wbSetOpenAck, wbQueueDidChange, wbQueueSymbols } from './editor_workbench_state_utils.js';
+import { isAdapterReady, wbIsFrameworkReady, wbIsBarrierOpen } from './editor_workbench_barrier_utils.js';
+import { wbEmitDidChange } from './editor_workbench_emit_utils.js';
+import { wbBumpGeneration } from './editor_workbench_generation_utils.js';
+import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen, wbPublishDidChange } from './editor_workbench_flush_utils.js';
 /* eslint-disable no-undef */
 (function() {
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
@@ -74,13 +89,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
   function _noteGitBaselineRequest(source, immediate) {
     noteGitBaselineRequest(_trace, source, immediate, _syncTraceDebug);
   }
-  var apiBase = (function() {
-    try {
-      var p = String(window.location && window.location.pathname ? window.location.pathname : '');
-      var idx = p.indexOf('/ui/');
-      return idx >= 0 ? p.slice(0, idx) : '';
-    } catch (_) { return ''; }
-  })();
+  var apiBase = deriveApiBase(window.location);
 
   // vscode_rpc (JSON-RPC over WS) - Phase 0 POC: semantic tokens via TypeScript LSP.
   var vscodeRpcWs = null;
@@ -107,10 +116,6 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
   // - byLanguage: {languageId -> {preferred: scopeName, scopes: [scopeName,...]}}
   var tmVscodeIndex = null;
 
-  function _uiUrl(relPath) {
-    return buildUiUrl(apiBase, relPath);
-  }
-
   async function ensureTextmateReady() {
     if (tmRegistry) return tmRegistry;
     if (!window.vscodetextmate || !window.onig) {
@@ -127,7 +132,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
     }
     if (!tmGrammarIndex) {
       try {
-        tmGrammarIndex = await fetchJson('/ui/monaco_editor/textmate/grammar_index.json', { cache: 'no-store' });
+        tmGrammarIndex = await fetchJsonWithBase(fetch, apiBase, '/ui/monaco_editor/textmate/grammar_index.json', { cache: 'no-store' });
       } catch (_) {
         tmGrammarIndex = null;
       }
@@ -135,7 +140,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
 
     // Load Oniguruma WASM once.
     try {
-      var wasmResp = await fetch(_uiUrl('monaco_editor/textmate/onig.wasm'), { cache: 'force-cache' });
+      var wasmResp = await fetch(buildUiUrl(apiBase, 'monaco_editor/textmate/onig.wasm'), { cache: 'force-cache' });
       if (!wasmResp.ok) throw new Error('onig.wasm HTTP ' + wasmResp.status);
       var wasmBuf = await wasmResp.arrayBuffer();
       await window.onig.loadWASM(wasmBuf);
@@ -172,7 +177,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
           var scopes = tmGrammarIndex && tmGrammarIndex.scopes ? tmGrammarIndex.scopes : null;
           var fileName = scopes ? scopes[sn] : null;
           if (!fileName) return null;
-          var url2 = _uiUrl('monaco_editor/textmate/grammars/' + fileName);
+          var url2 = buildUiUrl(apiBase, 'monaco_editor/textmate/grammars/' + fileName);
           var resp = await fetch(url2, { cache: 'force-cache' });
           if (!resp.ok) return null;
           var content = await resp.text();
@@ -440,24 +445,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
   }
 
   function _te2DumpTextmateScopesForLine(lang, text, ruleStack) {
-    try {
-      var grammar = tmGrammarByLang[lang];
-      if (!grammar) return null;
-      var rs = ruleStack || window.vscodetextmate.INITIAL;
-      var res = grammar.tokenizeLine(String(text || ''), rs);
-      var out = [];
-      for (var i = 0; i < res.tokens.length; i++) {
-        var t = res.tokens[i];
-        out.push({
-          startIndex: t.startIndex,
-          endIndex: t.endIndex,
-          scopes: (t.scopes || []).slice(),
-        });
-      }
-      return { tokens: out, ruleStack: res.ruleStack };
-    } catch (_) {
-      return null;
-    }
+    return te2DumpTextmateScopesForLine(tmGrammarByLang, window.vscodetextmate, lang, text, ruleStack);
   }
 
   // Debug helper:
@@ -466,32 +454,11 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
   //   window.__te2DumpTextmateLine(1); // logs scopes for a specific line
   //   window.__te2DumpTextmateScopes(); // scans for import/def/class (active editor/model)
   function _te2GetActiveEditorAndModel() {
-    try {
-      // Prefer the DiffEditor's modified editor when present, since that's the editable buffer.
-      if (diffEditor && diffEditor.getModifiedEditor) {
-        var me = diffEditor.getModifiedEditor();
-        if (me && me.getModel) return { editor: me, model: me.getModel(), side: 'diff:modified' };
-      }
-    } catch (_) {}
-    try {
-      if (editor && editor.getModel) return { editor: editor, model: editor.getModel(), side: 'single' };
-    } catch (_) {}
-    return { editor: null, model: null, side: 'none' };
+    return te2GetActiveEditorAndModel(diffEditor, editor);
   }
 
   function _te2AdvanceRuleStackToLine(grammar, model, targetLine) {
-    try {
-      var maxLines = Math.min(Math.max(1, targetLine | 0), model.getLineCount());
-      var rs = window.vscodetextmate.INITIAL;
-      for (var ln = 1; ln < maxLines; ln++) {
-        var line = model.getLineContent(ln);
-        var step = grammar.tokenizeLine(String(line || ''), rs);
-        rs = step.ruleStack;
-      }
-      return rs;
-    } catch (_) {
-      return window.vscodetextmate.INITIAL;
-    }
+    return te2AdvanceRuleStackToLine(window.vscodetextmate, grammar, model, targetLine);
   }
 
   function _te2DumpTextmateLine(ln) {
@@ -645,60 +612,36 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
   }
 
   function getShowInlineDiffs() {
-    try {
-      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
-      if (prefs && prefs.editor && typeof prefs.editor.showInlineDiffs === 'boolean') return prefs.editor.showInlineDiffs;
-      if (prefs && typeof prefs.showInlineDiffs === 'boolean') return prefs.showInlineDiffs;
-    } catch (_) {}
-    return false;
+    return getShowInlineDiffsFlag(cachedPrefs);
   }
 
   function getShowDraftDiffs() {
     // Draft diffs are meaningless when autosave is ON (there are no drafts).
-    if (getAutoSave()) return false;
-    try {
-      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
-      if (prefs && prefs.editor && typeof prefs.editor.showDraftDiffs === 'boolean') return prefs.editor.showDraftDiffs;
-      if (prefs && typeof prefs.showDraftDiffs === 'boolean') return prefs.showDraftDiffs;
-    } catch (_) {}
-    return false;
+    return getShowDraftDiffsFlag(cachedPrefs, getAutoSave);
   }
 
   function getUseTrueInlineView() {
-    try {
-      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
-      if (prefs && prefs.editor && typeof prefs.editor.useTrueInlineView === 'boolean') return prefs.editor.useTrueInlineView;
-      if (prefs && typeof prefs.useTrueInlineView === 'boolean') return prefs.useTrueInlineView;
-    } catch (_) {}
-    return false;
+    return getUseTrueInlineViewFlag(cachedPrefs);
   }
 
   function getAutoSave() {
-    try {
-      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
-      if (prefs && prefs.editor && typeof prefs.editor.autoSave === 'boolean') return prefs.editor.autoSave;
-      if (prefs && typeof prefs.autoSave === 'boolean') return prefs.autoSave;
-    } catch (_) {}
-    return false;
+    return getAutoSaveFlag(cachedPrefs);
   }
 
   function _localMirrorDebounceMs() {
-    // In autosave mode, use a longer debounce to reduce echo churn while typing.
-    return getAutoSave() ? 1000 : 180;
+    return localMirrorDebounceMs(getAutoSave);
   }
 
   function _mirrorHotWindowMs() {
-    // Ignore incoming mirrors briefly after local keystrokes to avoid cursor jitter.
-    return getAutoSave() ? 850 : 250;
+    return mirrorHotWindowMs(getAutoSave);
   }
 
   function _gitBaselineDebounceMs() {
-    return getAutoSave() ? 320 : 180;
+    return gitBaselineDebounceMs(getAutoSave);
   }
 
   function _gitBaselineApplyIdleMs() {
-    // For autosave + diff view, apply baseline updates only after typing settles.
-    return (getAutoSave() && getShowInlineDiffs()) ? 1000 : 0;
+    return gitBaselineApplyIdleMs(getAutoSave, getShowInlineDiffs);
   }
 
   function _schedulePendingGitBaselineApply() {
@@ -739,14 +682,10 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
     return languageIdFromPath(path, vscodeLanguageByFilename, vscodeLanguageByExtension);
   }
 
-  function _fileUri(absPath) {
-    return monacoFileUri(window.monaco, absPath);
-  }
-
   function createFileModel(content, lang, absPath) {
     return createMonacoFileModel(
       monaco,
-      _fileUri,
+      function (p) { return monacoFileUri(window.monaco, p); },
       content,
       lang,
       absPath,
@@ -754,10 +693,6 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
         try { setTimeout(function () { installVscodeApiLanguageBridgeProviders(); }, 0); } catch (_) {}
       }
     );
-  }
-
-  function _wsUrlFromPath(p) {
-    return wsUrlFromPath(window.location, p);
   }
 
   function vscodeRpcCall(method, params) {
@@ -785,9 +720,9 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
     try {
       if (!ENABLE_VSCODE_RPC) return false;
       if (vscodeRpcWs && vscodeRpcWs.readyState === 1) return true;
-      var disc = await fetchJson('/vscode_rpc/discover', { cache: 'no-store' });
+      var disc = await fetchJsonWithBase(fetch, apiBase, '/vscode_rpc/discover', { cache: 'no-store' });
       if (!disc || !disc.ws_url) return false;
-      var wsUrl = _wsUrlFromPath(disc.ws_url);
+      var wsUrl = wsUrlFromPath(window.location, disc.ws_url);
       if (!wsUrl) return false;
 
       vscodeRpcWs = new WebSocket(wsUrl);
@@ -1050,38 +985,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
   }
 
   function _absPathFromVscodeUri(raw) {
-    try {
-      if (!raw) return '';
-      // vscode-api and workbench sometimes send URI objects (revived) not strings.
-      if (typeof raw === 'object') {
-        if (raw.fsPath) return String(raw.fsPath);
-        if (raw.path) return String(raw.path);
-        if (raw.external) return _absPathFromVscodeUri(String(raw.external));
-        if (raw.scheme && raw.authority && raw.path) return String(raw.path);
-        if (raw.scheme && raw.path) return String(raw.path);
-        return '';
-      }
-      var s = String(raw);
-      // Plain absolute paths are already normalized (no scheme).
-      if (s[0] === '/' || /^[A-Za-z]:[\\/]/.test(s)) {
-        return s;
-      }
-      // Fast path: avoid URL() differences across mobile/webview implementations.
-      if (s.indexOf('file://') === 0) {
-        return decodeURIComponent(s.slice('file://'.length));
-      }
-      if (s.indexOf('vscode-remote://') === 0) {
-        // vscode-remote://authority/<abs-path>
-        var rest = s.slice('vscode-remote://'.length);
-        var slash = rest.indexOf('/');
-        if (slash === -1) return '';
-        return decodeURIComponent(rest.slice(slash));
-      }
-      // Fallback: try URL parser for any other scheme that includes a pathname.
-      var u = new URL(s);
-      if (u && u.pathname) return decodeURIComponent(u.pathname || '');
-    } catch (_) {}
-    return '';
+    return absPathFromVscodeUri(raw);
   }
 
   function _currentLanguageContext() {
@@ -1099,31 +1003,11 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
   }
 
   function _monacoRangeFromProtoRange(range) {
-    try {
-      if (!range || !window.monaco || !window.monaco.Range) return null;
-      var sl = Math.max(1, Number(range.startLineNumber || 1));
-      var sc = Math.max(1, Number(range.startColumn || 1));
-      var el = Math.max(1, Number(range.endLineNumber || sl));
-      var ec = Math.max(1, Number(range.endColumn || sc));
-      return new monaco.Range(sl, sc, el, ec);
-    } catch (_) {
-      return null;
-    }
+    return monacoRangeFromProtoRange(window.monaco, range);
   }
 
   function _toMonacoHoverContents(raw) {
-    var out = [];
-    if (!Array.isArray(raw)) return out;
-    for (var i = 0; i < raw.length; i++) {
-      var c = raw[i];
-      if (typeof c === 'string') {
-        out.push({ value: c });
-      } else if (c && typeof c === 'object') {
-        if (typeof c.value === 'string') out.push({ value: c.value });
-        else if (typeof c.language === 'string' && typeof c.value === 'string') out.push({ value: '```' + c.language + '\n' + c.value + '\n```' });
-      }
-    }
-    return out;
+    return toMonacoHoverContents(raw);
   }
 
   var languageBridge = {
@@ -1140,16 +1024,6 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
     semanticTokensResultId: {}, // languageId -> last resultId (for delta requests)
     semanticTokensDiagGated: new Set(), // languages waiting for diagnostics before registering
   };
-
-  function _isContextCurrent(ctx) {
-    try {
-      var now = _currentLanguageContext();
-      if (!ctx || !now) return false;
-      return String(now.uri) === String(ctx.uri) && Number(now.version || 0) === Number(ctx.version || -1);
-    } catch (_) {
-      return false;
-    }
-  }
 
   // ── Workbench RPC over editor Socket.IO ──────────────────────────
   // Routes hover/symbols/openFile through editor_ws.py → adapter stdio pipe.
@@ -1169,108 +1043,74 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
   // On page reload (adapter already running), the baton arrives quickly.
   // On cold start, it arrives after code-server + adapter boot.
   function _isAdapterReady() {
-    return !!window.__te2AdapterReady;
+    return isAdapterReady(window);
   }
 
   function _wbCurrentGeneration() {
-    return Number(_wbFlow.generation || 0);
+    return wbCurrentGeneration(_wbFlow);
   }
 
   function _wbBumpGeneration(path, reason) {
-    _wbFlow.generation = _wbCurrentGeneration() + 1;
-    _wbFlow.activePath = String(path || '');
-    _wbFlow.openAckGeneration = -1;
-    _wbFlow.openAckPath = '';
-    _wbFlow.pendingDidChange = null;
-    _wbFlow.pendingSymbols = null;
-    try {
-      console.log('[workbench-flow] generation=' + _wbFlow.generation + ' reason=' + String(reason || 'unknown') + ' path=' + _wbFlow.activePath);
-    } catch (_) {}
-    return _wbFlow.generation;
+    return wbBumpGeneration(_wbFlow, path, reason);
   }
 
   function _wbIsFrameworkReady() {
-    return !!(editor && model && currentPath);
+    return wbIsFrameworkReady(editor, model, currentPath);
   }
 
   function _wbIsBarrierOpen(path, generation) {
-    if (!_isAdapterReady()) return false;
-    if (!_wbIsFrameworkReady()) return false;
-    var wantPath = String(path || currentPath || '');
-    var wantGen = Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration();
-    return Number(_wbFlow.openAckGeneration) === wantGen && String(_wbFlow.openAckPath || '') === wantPath;
+    return wbIsBarrierOpen({
+      win: window,
+      editor: editor,
+      model: model,
+      currentPath: currentPath,
+      wbFlow: _wbFlow,
+      path: path,
+      generation: generation,
+      currentGeneration: _wbCurrentGeneration(),
+    });
   }
 
   function _wbSetOpenAck(path, generation) {
-    _wbFlow.openAckPath = String(path || '');
-    _wbFlow.openAckGeneration = Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration();
+    wbSetOpenAck(_wbFlow, path, generation, _wbCurrentGeneration);
   }
 
   function _wbQueueDidChange(path, text, languageId, generation) {
-    _wbFlow.pendingDidChange = {
-      path: String(path || ''),
-      text: String(text || ''),
-      languageId: String(languageId || ''),
-      generation: Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration(),
-    };
+    wbQueueDidChange(_wbFlow, path, text, languageId, generation, _wbCurrentGeneration);
   }
 
   function _wbQueueSymbols(path, generation) {
-    _wbFlow.pendingSymbols = {
-      path: String(path || ''),
-      generation: Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration(),
-    };
+    wbQueueSymbols(_wbFlow, path, generation, _wbCurrentGeneration);
   }
 
   function _wbEmitDidChange(payload) {
-    try {
-      if (!editorSocket || !editorSocket.connected) return false;
-      if (!payload || !payload.path) return false;
-      editorSocket.emit('editor_workbench_did_change', {
-        path: payload.path,
-        text: String(payload.text || ''),
-        languageId: String(payload.languageId || ''),
-        generation: Number.isFinite(Number(payload.generation)) ? Number(payload.generation) : _wbCurrentGeneration(),
-      });
-      return true;
-    } catch (_) {
-      return false;
-    }
+    return wbEmitDidChange(editorSocket, payload, _wbCurrentGeneration);
   }
 
   function _wbFlushDidChangeIfReady() {
-    var pending = _wbFlow.pendingDidChange;
-    if (!pending) return;
-    if (!_wbIsBarrierOpen(pending.path, pending.generation)) return;
-    _wbFlow.pendingDidChange = null;
-    _wbEmitDidChange(pending);
+    wbFlushDidChangeIfReady(_wbFlow, _wbIsBarrierOpen, _wbEmitDidChange);
   }
 
   function _wbFlushSymbolsIfReady() {
-    var pending = _wbFlow.pendingSymbols;
-    if (!pending) return;
-    if (!_wbIsBarrierOpen(pending.path, pending.generation)) return;
-    _wbFlow.pendingSymbols = null;
-    _bcRequestSymbols(pending.path, { generation: pending.generation, fromQueue: true });
+    wbFlushSymbolsIfReady(_wbFlow, _wbIsBarrierOpen, _bcRequestSymbols);
   }
 
   function _wbFlushPendingAfterOpen() {
-    _wbFlushDidChangeIfReady();
-    _wbFlushSymbolsIfReady();
+    wbFlushPendingAfterOpen(_wbFlushDidChangeIfReady, _wbFlushSymbolsIfReady);
   }
 
   function _wbPublishDidChange(path, text, languageId, generation) {
-    var payload = {
-      path: String(path || ''),
-      text: String(text || ''),
-      languageId: String(languageId || ''),
-      generation: Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration(),
-    };
-    if (_wbIsBarrierOpen(payload.path, payload.generation)) {
-      return _wbEmitDidChange(payload);
-    }
-    _wbQueueDidChange(payload.path, payload.text, payload.languageId, payload.generation);
-    return false;
+    return wbPublishDidChange(
+      _wbFlow,
+      path,
+      text,
+      languageId,
+      generation,
+      _wbCurrentGeneration,
+      _wbIsBarrierOpen,
+      _wbEmitDidChange,
+      _wbQueueDidChange
+    );
   }
 
   function _wbOpenFileFlow(opts) {
@@ -1383,7 +1223,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
     else if (kind === 'completions') seq = ++languageBridge.completionsSeq;
     return editorWorkbenchCall(kind, params, { timeoutMs: timeoutMs }).then(function (res) {
       if (cancelToken && cancelToken.isCancellationRequested) return { ok: false, stale: true, canceled: true };
-      if (!_isContextCurrent(ctx)) return { ok: false, stale: true };
+      if (!isLanguageContextCurrent(ctx, _currentLanguageContext())) return { ok: false, stale: true };
       if (kind === 'hover' && seq !== languageBridge.hoverSeq) return { ok: false, stale: true };
       if (kind === 'symbols' && seq !== languageBridge.symbolsSeq) return { ok: false, stale: true };
       if (kind === 'completions' && seq !== languageBridge.completionsSeq) return { ok: false, stale: true };
@@ -1414,21 +1254,11 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
   }
 
   function _monacoRangeFromCompletionRange(range, pos) {
-    if (!range || !window.monaco) return undefined;
-    // Range can be {insert: {...}, replace: {...}} or a simple range object
-    if (range.insert || range.replace) {
-      return {
-        insert: _monacoRangeFromProtoRange(range.insert) || new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
-        replace: _monacoRangeFromProtoRange(range.replace) || new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
-      };
-    }
-    return _monacoRangeFromProtoRange(range) || new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column);
+    return monacoRangeFromCompletionRange(window.monaco, range, pos);
   }
 
   function _mapCompletionItemKind(kind) {
-    // VS Code CompletionItemKind → Monaco CompletionItemKind (they're the same enum values)
-    if (!window.monaco || !monaco.languages || !monaco.languages.CompletionItemKind) return kind || 0;
-    return kind || 0;
+    return mapCompletionItemKind(window.monaco, kind);
   }
 
   // Core registration: given a legend, register the Monaco provider immediately
@@ -2025,7 +1855,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
     // This function is only used as a last-resort guard; prefer ensureEditorWithPrefs().
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
     try { _forceSemanticHighlighting(); } catch (_) {}
-    try { _installMarkerNavBindings(editor); } catch (_) {}
+    try { installMarkerNavBindings(window.monaco, editor, function (dir) { jumpToMarker(window.monaco, editor, model, dir); }); } catch (_) {}
     _syncReadOnlyInputMode(editor);
     editor.onDidChangeConfiguration(function() { _onEditorConfigChanged(editor); });
     updateDebug();
@@ -2157,7 +1987,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
       if (rawThemeKey && rawThemeKey.toLowerCase().startsWith('vscode:')) {
         theme = 'vs-dark';
       } else {
-        theme = _resolveMonacoThemeId(rawThemeKey);
+        theme = resolveMonacoThemeId(rawThemeKey, loadVscodeTextmateThemes._jsonCache || {});
       }
     } catch (_) {
       theme = 'vs-dark';
@@ -2235,7 +2065,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
     if (_themeRegistryPromise) return _themeRegistryPromise;
     _themeRegistryPromise = (async function () {
       try {
-        var res = await fetch(_uiUrl('monaco_editor/available_themes'), { cache: 'no-store' });
+        var res = await fetch(buildUiUrl(apiBase, 'monaco_editor/available_themes'), { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         var data = await res.json();
         var themes = data && data.themes ? data.themes : [];
@@ -2261,7 +2091,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
     var id = String(themeId || '');
     // Look up in the dynamic theme registry
     if (_themeRegistry && _themeRegistry[id] && _themeRegistry[id].serveUrl) {
-      return _uiUrl(_themeRegistry[id].serveUrl);
+      return buildUiUrl(apiBase, _themeRegistry[id].serveUrl);
     }
     // Fallback: try vendored GitHub theme path directly
     var vendoredMap = {
@@ -2276,7 +2106,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
       'github-light-colorblind-beta': 'light-colorblind.json',
     };
     if (vendoredMap[id]) {
-      return _uiUrl('monaco_editor/themes/vendored/github/' + vendoredMap[id]);
+      return buildUiUrl(apiBase, 'monaco_editor/themes/vendored/github/' + vendoredMap[id]);
     }
     return null;
   }
@@ -2724,31 +2554,12 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
     return loadVscodeTextmateThemes._promise;
   }
 
-  function _resolveMonacoThemeId(themeKey) {
-    try {
-      var key = String(themeKey || '').trim();
-      // If the theme was loaded from registry, use its ID directly
-      var cache = loadVscodeTextmateThemes._jsonCache || {};
-      if (cache[key]) return key;
-      // Built-in Monaco themes are disabled — redirect to closest vendored theme.
-      // They lack a TextMate color map so semantic tokens get wrong palette indices.
-      if (key === 'vs-dark' || key === 'hc-black') return 'github-dark-default';
-      if (key === 'vs' || key === 'hc-light') return 'github-light-default';
-      // Fallback heuristic
-      var t = key.toLowerCase();
-      if (t.includes('light')) return 'github-light-default';
-      return 'github-dark-default';
-    } catch (_) {
-      return 'github-dark-default';
-    }
-  }
-
   async function applyMonacoTheme(themeKey) {
     try {
       if (!window.monaco || !window.monaco.editor || !window.monaco.editor.setTheme) return;
       ensureTe2DiffTheme();
       try { await loadVscodeTextmateThemes(); } catch (_) {}
-      var resolvedId = _resolveMonacoThemeId(themeKey);
+      var resolvedId = resolveMonacoThemeId(themeKey, loadVscodeTextmateThemes._jsonCache || {});
       var cache = loadVscodeTextmateThemes._jsonCache || {};
       // Lazy-load single theme if not yet cached (e.g. installed after initial load)
       if (!cache[resolvedId]) {
@@ -2799,18 +2610,8 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
     }
   }
 
-  async function fetchJson(path, options) {
-    return fetchJsonWithBase(fetch, apiBase, path, options);
-  }
-
   function emitToHost(eventName, payload) {
-    try {
-      if (!editorSocket || !editorSocket.connected) return false;
-      editorSocket.emit(eventName, payload || {});
-      return true;
-    } catch (_) {
-      return false;
-    }
+    return emitToHostSocket(editorSocket, eventName, payload);
   }
 
   function requestGitBaselines(opts) {
@@ -3080,7 +2881,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
 
   async function fetchSSOTState() {
     // Single call site so we can instrument/adjust behavior later.
-    return await fetchJson('/state', { cache: 'no-store' });
+    return await fetchJsonWithBase(fetch, apiBase, '/state', { cache: 'no-store' });
   }
 
   async function ensureEditorWithPrefs() {
@@ -3099,7 +2900,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
 
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
     try { _forceSemanticHighlighting(); } catch (_) {}
-    try { _installMarkerNavBindings(editor); } catch (_) {}
+    try { installMarkerNavBindings(window.monaco, editor, function (dir) { jumpToMarker(window.monaco, editor, model, dir); }); } catch (_) {}
     try {
       var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
       var t = prefs && prefs.editor && prefs.editor.theme ? prefs.editor.theme : '';
@@ -3136,7 +2937,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
 
     editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
     try { _forceSemanticHighlighting(); } catch (_) {}
-    try { _installMarkerNavBindings(editor); } catch (_) {}
+    try { installMarkerNavBindings(window.monaco, editor, function (dir) { jumpToMarker(window.monaco, editor, model, dir); }); } catch (_) {}
     try {
       var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
       var t = prefs && prefs.editor && prefs.editor.theme ? prefs.editor.theme : '';
@@ -3782,7 +3583,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
 
     var cache = null;
     try {
-      cache = await fetchJson('/editor/check_cache', {
+      cache = await fetchJsonWithBase(fetch, apiBase, '/editor/check_cache', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: absPath }),
@@ -3796,7 +3597,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
       content = typeof cache.content === 'string' ? cache.content : '';
       sha256 = (cache.base_sha256 && typeof cache.base_sha256 === 'string') ? cache.base_sha256 : null;
     } else {
-      var read = await fetchJson('/read?path=' + encodeURIComponent(absPath), { cache: 'no-store' });
+      var read = await fetchJsonWithBase(fetch, apiBase, '/read?path=' + encodeURIComponent(absPath), { cache: 'no-store' });
       content = typeof read.content === 'string' ? read.content : '';
       sha256 = (read.sha256 && typeof read.sha256 === 'string') ? read.sha256 : null;
     }
@@ -3816,7 +3617,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
       installVscodeRpcChangePublisher();
     } else {
       try {
-        var want = _fileUri(absPath);
+        var want = monacoFileUri(window.monaco, absPath);
         if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
           if (diffEditor) { try { diffEditor.setModel(null); } catch (_) {} }
           try { model.dispose(); } catch (_) {}
@@ -3944,7 +3745,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
                 // If the active file changed, recreate the model with a file:// URI so
                 // vscode_rpc semantic tokens + diagnostics can target the correct doc.
                 try {
-                  var want = _fileUri(currentPath);
+                  var want = monacoFileUri(window.monaco, currentPath);
                   if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
                     if (diffEditor) { try { diffEditor.setModel(null); } catch (_) {} }
                     try { model.dispose(); } catch (_) {}
@@ -3986,7 +3787,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
               // restore viewport to that line.
               try {
                 if (f && f.scroll_line != null && !f.has_draft) {
-                  applyJumpToLine({ line: f.scroll_line, focus: false, scroll_to_top: true });
+                  applyJumpToLineAt(editor, model, { line: f.scroll_line, focus: false, scroll_to_top: true });
                 }
               } catch (_) {}
               if (f.has_draft) {
@@ -4061,7 +3862,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
               installVscodeRpcChangePublisher();
             } else {
               try {
-                var want = _fileUri(currentPath);
+                var want = monacoFileUri(window.monaco, currentPath);
                 if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
                   // Detach diff editor model before disposing — Monaco throws
                   // BugIndicatingError if a TextModel is disposed while DiffEditorWidget
@@ -4149,7 +3950,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
             // Optional open+jump payload (used by agent drawer + explorer + go-to-line).
             try {
               if (payload.line != null) {
-                applyJumpToLine({
+                applyJumpToLineAt(editor, model, {
                   line: payload.line,
                   column: payload.column,
                   focus: payload.focus,
@@ -4173,7 +3974,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
             // Restore last scroll line if no explicit open+jump was requested.
             try {
               if (payload.line == null && payload.scroll_line != null) {
-                applyJumpToLine({ line: payload.scroll_line, focus: false, scroll_to_top: true });
+                applyJumpToLineAt(editor, model, { line: payload.scroll_line, focus: false, scroll_to_top: true });
               }
             } catch (_) {}
           });
@@ -4184,7 +3985,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
       });
 
       editorSocket.on('editor:jump_to_line', function(payload) {
-        try { applyJumpToLine(payload); } catch (e) { console.warn('[Monaco] jump_to_line failed', e); }
+        try { applyJumpToLineAt(editor, model, payload); } catch (e) { console.warn('[Monaco] jump_to_line failed', e); }
       });
 
       editorSocket.on('editor:mirror', function(payload) {
@@ -4583,7 +4384,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
         try {
           var action = payload && payload.action ? String(payload.action) : '';
           if (!action) return;
-          _runIssuesCommand(action);
+          runIssuesCommand(editor, action);
         } catch (_) {}
       });
 
@@ -4591,7 +4392,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
         try {
           var action = payload && payload.action ? String(payload.action) : 'find';
           console.log('[Find] iframe received editor:find_cmd action=', action, 'editor=', !!editor);
-          _runFindCommand(action);
+          runFindCommand(editor, action, function (e) { console.error('[Find] _runFindCommand error:', e); });
         } catch (e) { console.error('[Find] error:', e); }
       });
 
@@ -4600,90 +4401,6 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
       console.warn('[Monaco] socket connect failed', e);
       return false;
     }
-  }
-
-  function _runIssuesCommand(action) {
-    runIssuesCommand(editor, action);
-  }
-
-  function _runFindCommand(action) {
-    runFindCommand(editor, action, function (e) { console.error('[Find] _runFindCommand error:', e); });
-  }
-
-  function _installMarkerNavBindings(ed) {
-    try {
-      if (!ed || ed.__te2MarkerNavBound || !window.monaco || !monaco.KeyMod || !monaco.KeyCode) return;
-      ed.__te2MarkerNavBound = true;
-      ed.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.F8, function () { _jumpToMarker(1); });
-      ed.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.F8, function () { _jumpToMarker(-1); });
-    } catch (_) {}
-  }
-
-  function _jumpToMarker(dir) {
-    try {
-      if (!editor || !model || !window.monaco) return;
-      var markers = monaco.editor.getModelMarkers({ resource: model.uri }) || [];
-      if (!markers.length) return;
-      markers.sort(function (a, b) {
-        if (a.startLineNumber !== b.startLineNumber) return a.startLineNumber - b.startLineNumber;
-        return a.startColumn - b.startColumn;
-      });
-      var pos = editor.getPosition ? editor.getPosition() : null;
-      var line = pos && pos.lineNumber ? pos.lineNumber : 1;
-      var col = pos && pos.column ? pos.column : 1;
-      var idx = -1;
-      if (dir > 0) {
-        for (var i = 0; i < markers.length; i++) {
-          var m = markers[i];
-          if (m.startLineNumber > line || (m.startLineNumber === line && m.startColumn > col)) { idx = i; break; }
-        }
-        if (idx === -1) idx = 0;
-      } else {
-        for (var j = markers.length - 1; j >= 0; j--) {
-          var m2 = markers[j];
-          if (m2.startLineNumber < line || (m2.startLineNumber === line && m2.startColumn < col)) { idx = j; break; }
-        }
-        if (idx === -1) idx = markers.length - 1;
-      }
-      var hit = markers[idx];
-      if (!hit) return;
-      var targetLine = Math.max(1, Number(hit.startLineNumber || 1));
-      var targetCol = Math.max(1, Number(hit.startColumn || 1));
-      try { editor.setPosition({ lineNumber: targetLine, column: targetCol }); } catch (_) {}
-      try { editor.revealLineInCenter(targetLine, 0); } catch (_) {}
-      try { editor.focus(); } catch (_) {}
-    } catch (_) {}
-  }
-
-  function applyJumpToLine(payload) {
-    try {
-      if (!payload) return;
-      if (!editor || !model) return;
-
-      var line = payload.line;
-      var col = payload.column;
-      if (typeof line === 'string' && /^\d+$/.test(line)) line = parseInt(line, 10);
-      if (typeof col === 'string' && /^\d+$/.test(col)) col = parseInt(col, 10);
-      if (!Number.isFinite(line)) return;
-      line = Math.max(1, Math.min(model.getLineCount(), line));
-      if (!Number.isFinite(col)) col = 1;
-      col = Math.max(1, Math.min(model.getLineMaxColumn(line), col));
-
-      var focus = payload.focus;
-      var scrollY = payload.scroll_y;
-      var scrollToTop = payload.scroll_to_top;
-
-      if (scrollToTop) {
-        try { editor.revealLine(line, 0); } catch (_) {}
-      } else if (typeof scrollY === 'string' && String(scrollY).toLowerCase() === 'center') {
-        try { editor.revealLineInCenter(line, 0); } catch (_) {}
-      } else {
-        try { editor.revealLineNearTop(line, 0); } catch (_) {}
-      }
-
-      try { editor.setPosition({ lineNumber: line, column: col }); } catch (_) {}
-      try { if (focus !== false) editor.focus(); } catch (_) {}
-    } catch (_) {}
   }
 
   function installScrollPublisher() {
@@ -5004,7 +4721,7 @@ import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
       var line = parseInt(el.dataset.line, 10);
       var col = parseInt(el.dataset.col, 10) || 1;
       if (Number.isFinite(line)) {
-        applyJumpToLine({ line: line, column: col, focus: true, scroll_y: 'center' });
+        applyJumpToLineAt(editor, model, { line: line, column: col, focus: true, scroll_y: 'center' });
       }
     } catch (_) {}
   }
