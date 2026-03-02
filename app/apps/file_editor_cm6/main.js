@@ -711,7 +711,7 @@ function connectExplorerSocket() {
             let abs = payload.abs || null;
             if (!abs && payload.rel) {
               let projRoot = null;
-              try { projRoot = activeProjectPath(); } catch (_) {}
+              try { projRoot = sessionTelemetry.activeProjectPath(); } catch (_) {}
               if (!projRoot) try { projRoot = sessionState?.activeProject; } catch (_) {}
               abs = projRoot ? toAbsolute(payload.rel, projRoot, HOME_DIR) : null;
             }
@@ -1996,10 +1996,6 @@ async function flushSessionState(force = false) {
   return sessionTelemetry.flushSessionState(force);
 }
 
-function activeProjectPath() {
-  return sessionTelemetry.activeProjectPath();
-}
-
 function syncSessionPath(extra = {}) {
   sessionTelemetry.syncSessionPath(extra);
 }
@@ -2013,27 +2009,6 @@ const editTrackerController = createEditTrackerController({
   jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
   statusEl: editTrackerStatusEl,
 });
-function connectEditTracker() {
-  editTrackerController.connectEditTracker();
-}
-
-function disconnectEditTracker() {
-  editTrackerController.disconnectEditTracker();
-}
-
-function handleEditTrackerEvent(data) {
-  editTrackerController.handleEditTrackerEvent(data);
-}
-
-function updateEditTrackerStatus(status) {
-  editTrackerController.updateEditTrackerStatus(status);
-}
-
-async function autoJumpToEdit(path, line) {
-  return editTrackerController.autoJumpToEdit(path, line);
-}
-
-
 const fontScaleController = createFontScaleController({
   presets: FONT_SCALE_PRESETS,
   updatePreference: (key, value) => preferencesController.updatePreference(key, value),
@@ -2047,11 +2022,6 @@ function applyFontScale(scale) {
 function updateFontScaleMenuChecks(currentScale) {
   fontScaleController.updateFontScaleMenuChecks(currentScale);
 }
-
-async function setFontScale(preset) {
-  return fontScaleController.setFontScale(preset);
-}
-
 
 // ---------- Editor state ----------
 let currentPath = '';
@@ -3187,10 +3157,6 @@ const searchPanelController = createSearchPanelController({
   toast: (msg) => host.toast(msg),
 });
 
-async function triggerEditorSearchPanel(reason = 'menu', opts = {}) {
-  return searchPanelController.triggerEditorSearchPanel(reason, opts);
-}
-
 // ---------- Unified Preference Management (Backend as Single Source of Truth) ----------
 const preferencesController = createPreferencesController({
   apiPost: (path, body) => apiPost(path, body),
@@ -3555,7 +3521,7 @@ installBasicMenuActions({
   clearOnQuit: () => resetActiveFileState(),
   showProjectsDebugModal,
   exportDiagnosticsToFile: () => exportDiagnosticsToFile(),
-  triggerEditorSearchPanel: (reason, opts) => triggerEditorSearchPanel(reason, opts),
+  triggerEditorSearchPanel: (reason, opts) => searchPanelController.triggerEditorSearchPanel(reason, opts),
   jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
   toast: (msg) => host.toast(msg),
 });
@@ -3613,8 +3579,8 @@ const { terminal, consoleDrawer, problemsPanel: drawerProblemsPanel } = initPane
   requireEl,
   getEditorSocket: () => editorSocket,
   hostToast: (msg) => host.toast(msg),
-  setFontScale: (preset) => setFontScale(preset),
-  triggerEditorSearchPanel: (reason, opts) => triggerEditorSearchPanel(reason, opts),
+  setFontScale: (preset) => fontScaleController.setFontScale(preset),
+  triggerEditorSearchPanel: (reason, opts) => searchPanelController.triggerEditorSearchPanel(reason, opts),
   jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
   saveFile: () => saveFile(),
   resetToNewFile: () => resetActiveFileState({ resetPicker: true }),
