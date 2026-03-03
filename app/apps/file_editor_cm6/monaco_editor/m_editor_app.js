@@ -34,6 +34,46 @@ import { syncReadOnlyInputMode } from './editor_readonly_input_mode_utils.js';
 import { onEditorConfigChanged } from './editor_config_change_utils.js';
 import { clearDraftDiffZonesState } from './editor_draft_zone_clear_utils.js';
 import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear_utils.js';
+import { startVscodeApiService } from './editor_vscode_api_start_utils.js';
+import { discoverVscodeApiWsPath } from './editor_vscode_api_discover_utils.js';
+import { buildVscodeApiWsUrl } from './editor_vscode_api_ws_url_utils.js';
+import { handleVscodeApiMessageData } from './editor_vscode_api_message_utils.js';
+import { rejectAndClearVscodeApiPending } from './editor_vscode_api_close_utils.js';
+import { createVscodeApiCallPromise } from './editor_vscode_api_call_request_utils.js';
+import { vscodeApiNotify } from './editor_vscode_api_notify_utils.js';
+import { buildVscodeApiRequestPayload } from './editor_vscode_api_payload_utils.js';
+import { getVscodeLanguagesList } from './editor_vscode_languages_source_utils.js';
+import { resetVscodeLanguageMatchers } from './editor_vscode_language_matchers_reset_utils.js';
+import { registerVscodeLanguageId } from './editor_vscode_language_register_utils.js';
+import { mapVscodeLanguageExtensions } from './editor_vscode_language_extensions_utils.js';
+import { mapVscodeLanguageFilenames } from './editor_vscode_language_filenames_utils.js';
+import { applyVscodeLanguageConfiguration } from './editor_vscode_language_config_utils.js';
+import { installVscodeLanguagesLoop } from './editor_vscode_languages_install_loop_utils.js';
+import { finalizeVscodeLanguagesInstall } from './editor_vscode_languages_finalize_utils.js';
+import { resolveAutoSaveFromPrefs } from './editor_open_autosave_pref_utils.js';
+import { fetchOpenCache } from './editor_open_cache_fetch_utils.js';
+import { resolveOpenContent } from './editor_open_content_resolve_utils.js';
+import { resolveOpenLanguage } from './editor_open_lang_resolve_utils.js';
+import { initOpenModel } from './editor_open_model_init_utils.js';
+import { shouldRecreateOpenModel, applyOpenModelTextSafely } from './editor_open_model_update_utils.js';
+import { emitOpenCacheState } from './editor_open_emit_cache_state_utils.js';
+import { queueBackendWorkbenchOpen } from './editor_open_workbench_open_utils.js';
+import { isMirrorPayloadValid } from './editor_mirror_payload_valid_utils.js';
+import { shouldDropMirrorForSource } from './editor_mirror_source_drop_utils.js';
+import { shouldDropMirrorForPath } from './editor_mirror_path_drop_utils.js';
+import { shouldDropMirrorForNoModel } from './editor_mirror_model_drop_utils.js';
+import { shouldDropMirrorForSha } from './editor_mirror_sha_drop_utils.js';
+import { shouldDropMirrorForHotWindow } from './editor_mirror_hot_drop_utils.js';
+import { applyMirrorContentToModel } from './editor_mirror_apply_content_utils.js';
+import { emitMirrorCacheState } from './editor_mirror_emit_cache_utils.js';
+import { handleReadinessStep } from './editor_socket_readiness_step_handler_utils.js';
+import { handleJumpToLineEvent } from './editor_socket_jump_handler_utils.js';
+import { handleDraftDiffEvent } from './editor_socket_draft_diff_handler_utils.js';
+import { handleWorkbenchResponseEvent } from './editor_socket_workbench_response_handler_utils.js';
+import { handleSemanticTokensProviderRegistered } from './editor_socket_semantic_registered_handler_utils.js';
+import { handleIssuesDumpRequest } from './editor_socket_issues_dump_handler_utils.js';
+import { handleIssuesCommand } from './editor_socket_issues_cmd_handler_utils.js';
+import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
 /* eslint-disable no-undef */
 (function() {
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
@@ -2001,40 +2041,9 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
     if (vscodeApiConnecting) return vscodeApiConnecting;
 
     vscodeApiConnecting = (async function () {
-      // 1) Start the service explicitly (separate endpoint), then 2) discover WS url.
-      // This avoids racy "discover starts the service" behavior.
-      var startResp = await fetch('/api/app/file_editor_cm6/vscode_api/start', { cache: 'no-store' });
-      var startJson = null;
-      try { startJson = await startResp.json(); } catch (_) {}
-      if (!startResp.ok || (startJson && startJson.ok === false)) {
-        var startMsg = (startJson && (startJson.error || startJson.detail)) ? (startJson.error || startJson.detail) : ('HTTP ' + startResp.status);
-        throw new Error('vscode_api start failed: ' + startMsg);
-      }
-
-      // Discover can still briefly 503 while the shell proxy route is wiring up; retry lightly.
-      var json = null;
-      var resp = null;
-      for (var attempt = 0; attempt < 25; attempt++) {
-        resp = await fetch('/api/app/file_editor_cm6/vscode_api/discover', { cache: 'no-store' });
-        json = null;
-        try { json = await resp.json(); } catch (_) {}
-        if (resp.ok && !(json && json.ok === false)) break;
-        if (resp.status === 503) {
-          await new Promise(function (r) { setTimeout(r, 120); });
-          continue;
-        }
-        var msg0 = (json && (json.error || json.detail)) ? (json.error || json.detail) : ('HTTP ' + resp.status);
-        throw new Error(msg0);
-      }
-      if (!resp || !resp.ok || (json && json.ok === false)) {
-        var msg = (json && (json.error || json.detail)) ? (json.error || json.detail) : (resp ? ('HTTP ' + resp.status) : 'unknown');
-        throw new Error('vscode_api discover failed: ' + msg);
-      }
-      var wsPath = null;
-      try { wsPath = (json && json.data && json.data.ws_url) ? json.data.ws_url : (json && json.ws_url ? json.ws_url : null); } catch (_) {}
-      if (!wsPath) throw new Error('vscode_api discover missing ws_url');
-      var proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-      var wsUrl = proto + '://' + location.host + wsPath;
+      await startVscodeApiService(_fetch);
+      var wsPath = await discoverVscodeApiWsPath(_fetch, setTimeout);
+      var wsUrl = buildVscodeApiWsUrl(location, wsPath);
 
       var ws = new WebSocket(wsUrl);
       vscodeApiWs = ws;
@@ -2045,38 +2054,13 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
       try {} catch (_) {}
 
       ws.onmessage = function (ev) {
-        var msg2 = null;
-        try { msg2 = JSON.parse(String(ev.data || '')); } catch (_) { return; }
-        var handleOne = function (m) {
-          if (!m) return;
-          var id = m.id;
-          if (id != null) {
-            var pending = vscodeApiPending.get(id);
-            if (!pending) return;
-            vscodeApiPending.delete(id);
-            if (m.error) pending.reject(new Error(m.error.message || 'jsonrpc error'));
-            else pending.resolve(m.result);
-            return;
-          }
-
-          // Notifications from vscode_api (workbench adapter events)
-          try {
-            if (m.method && vscodeApiHandlers && vscodeApiHandlers.has(m.method)) {
-              vscodeApiHandlers.get(m.method)(m.params);
-            }
-          } catch (_) {}
-        };
-        if (Array.isArray(msg2)) msg2.forEach(handleOne);
-        else handleOne(msg2);
+        handleVscodeApiMessageData(ev.data, vscodeApiPending, vscodeApiHandlers);
       };
 
       ws.onclose = function () {
         vscodeApiWs = null;
         vscodeApiConnecting = null;
-        try {
-          vscodeApiPending.forEach(function (p) { try { p.reject(new Error('vscode_api ws closed')); } catch (_) {} });
-          vscodeApiPending.clear();
-        } catch (_) {}
+        rejectAndClearVscodeApiPending(vscodeApiPending, 'vscode_api ws closed');
       };
 
       await new Promise(function (resolve, reject) {
@@ -2095,31 +2079,18 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
   async function vscodeApiCall(method, params, opts) {
     var ws = await ensureVscodeApiWs();
     var id = vscodeApiNextId++;
-    var payload = { jsonrpc: '2.0', id: id, method: String(method || ''), params: params || {} };
+    var payload = buildVscodeApiRequestPayload(id, method, params);
     var timeoutMs = 12000;
     try {
       if (opts && Number.isFinite(Number(opts.timeoutMs))) timeoutMs = Math.max(250, Number(opts.timeoutMs));
     } catch (_) {}
-    var p = new Promise(function (resolve, reject) {
-      vscodeApiPending.set(id, { resolve: resolve, reject: reject });
-      setTimeout(function () {
-        if (!vscodeApiPending.has(id)) return;
-        vscodeApiPending.delete(id);
-        reject(new Error('vscode_api timeout: ' + method));
-      }, timeoutMs);
-    });
+    var p = createVscodeApiCallPromise(vscodeApiPending, id, method, timeoutMs, setTimeout);
     ws.send(JSON.stringify(payload));
     return p;
   }
 
   function _vscodeApiNotify(method, params) {
-    try {
-      if (!vscodeApiWs || vscodeApiWs.readyState !== WebSocket.OPEN) return false;
-      vscodeApiWs.send(JSON.stringify({ jsonrpc: '2.0', method: String(method || ''), params: params || {} }));
-      return true;
-    } catch (_) {
-      return false;
-    }
+    return vscodeApiNotify(vscodeApiWs, method, params);
   }
 
 
@@ -2128,82 +2099,17 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
     if (!window.monaco || !window.monaco.languages) return false;
 
     try {
-      // Prefer bootstrap snapshot languages when available (single request at boot),
-      // otherwise query vscode_api directly.
-      var langs = null;
-      try {
-        if (window.__te2VscodeBootstrap && Array.isArray(window.__te2VscodeBootstrap.languages)) {
-          langs = window.__te2VscodeBootstrap.languages;
-        }
-      } catch (_) {}
-      if (!Array.isArray(langs)) {
-        const res = await vscodeApiCall('vscode.languages.list', {});
-        langs = res && res.languages ? res.languages : [];
-      }
-      if (!Array.isArray(langs)) return false;
-
-      // Reset matchers each time we build them (future-proof for re-install).
-      try { vscodeLanguageByExtension.clear(); } catch (_) {}
-      try { vscodeLanguageByFilename.clear(); } catch (_) {}
-
-      for (let i = 0; i < langs.length; i++) {
-        const l = langs[i];
-        if (!l || !l.id) continue;
-        const langId = normalizeLanguage(l.id);
-        if (!langId) continue;
-
-        // Register language id if it isn't already known.
-        try {
-          if (!vscodeLanguageIds.has(langId)) {
-            try {
-              window.monaco.languages.register({
-                id: langId,
-                aliases: Array.isArray(l.aliases) ? l.aliases : undefined,
-                extensions: Array.isArray(l.extensions) ? l.extensions : undefined,
-                filenames: Array.isArray(l.filenames) ? l.filenames : undefined,
-                mimetypes: Array.isArray(l.mimetypes) ? l.mimetypes : undefined,
-              });
-            } catch (_) {}
-            vscodeLanguageIds.add(langId);
-          }
-        } catch (_) {}
-
-        // Build filename/extension matchers for languageFromPath().
-        try {
-          if (Array.isArray(l.extensions)) {
-            for (let j = 0; j < l.extensions.length; j++) {
-              const ext = String(l.extensions[j] || '').trim();
-              if (!ext) continue;
-              vscodeLanguageByExtension.set(ext, langId);
-            }
-          }
-        } catch (_) {}
-        try {
-          if (Array.isArray(l.filenames)) {
-            for (let j = 0; j < l.filenames.length; j++) {
-              const name = String(l.filenames[j] || '').trim();
-              if (!name) continue;
-              vscodeLanguageByFilename.set(name, langId);
-            }
-          }
-        } catch (_) {}
-
-        // Apply language configuration if provided (jsonc).
-        try {
-          if (l.configuration_raw) {
-            const cfg = parseJsonc(String(l.configuration_raw));
-            if (cfg && typeof cfg === 'object') {
-              try { window.monaco.languages.setLanguageConfiguration(langId, cfg); } catch (_) {}
-            }
-          }
-        } catch (e) {
-          console.warn('[VSIX][Languages] config parse failed', langId, e);
-        }
-      }
+      var langs = await getVscodeLanguagesList(window, vscodeApiCall);
+      resetVscodeLanguageMatchers(vscodeLanguageByExtension, vscodeLanguageByFilename);
+      installVscodeLanguagesLoop(langs, normalizeLanguage, function (l, langId) {
+        registerVscodeLanguageId(window.monaco, vscodeLanguageIds, langId, l);
+        mapVscodeLanguageExtensions(vscodeLanguageByExtension, l.extensions, langId);
+        mapVscodeLanguageFilenames(vscodeLanguageByFilename, l.filenames, langId);
+        applyVscodeLanguageConfiguration(window.monaco, langId, l.configuration_raw, parseJsonc);
+      });
 
       vscodeLanguagesInstalled = true;
-      try { installVscodeApiLanguageBridgeProviders(); } catch (_) {}
-      console.log('[VSIX][Languages] installed', langs.length, 'ext=', vscodeLanguageByExtension.size, 'files=', vscodeLanguageByFilename.size);
+      finalizeVscodeLanguagesInstall(langs, vscodeLanguageByExtension, vscodeLanguageByFilename, installVscodeApiLanguageBridgeProviders);
       return true;
     } catch (e) {
       console.warn('[VSIX][Languages] list failed', e);
@@ -3151,65 +3057,41 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
       return;
     }
 
-    var autoSave = null;
-    try {
-      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
-      autoSave = prefs && prefs.editor && typeof prefs.editor.autoSave === 'boolean' ? prefs.editor.autoSave : null;
-    } catch (_) {}
-
-    var cache = null;
-    try {
-      cache = await fetchJsonWithBase(fetch, apiBase, '/editor/check_cache', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: absPath }),
-      });
-    } catch (_) {}
-
-    var hasDraft = !!(cache && cache.has_draft);
-    var content = null;
-    var sha256 = null;
-    if (hasDraft) {
-      content = typeof cache.content === 'string' ? cache.content : '';
-      sha256 = (cache.base_sha256 && typeof cache.base_sha256 === 'string') ? cache.base_sha256 : null;
-    } else {
-      var read = await fetchJsonWithBase(fetch, apiBase, '/read?path=' + encodeURIComponent(absPath), { cache: 'no-store' });
-      content = typeof read.content === 'string' ? read.content : '';
-      sha256 = (read.sha256 && typeof read.sha256 === 'string') ? read.sha256 : null;
-    }
+    var autoSave = resolveAutoSaveFromPrefs(cachedPrefs);
+    var cache = await fetchOpenCache(fetchJsonWithBase, fetch, apiBase, absPath);
+    var openData = await resolveOpenContent(fetchJsonWithBase, fetch, apiBase, absPath, cache);
+    var hasDraft = !!openData.hasDraft;
+    var content = openData.content;
+    var sha256 = openData.sha256;
 
     // Apply to Monaco model
-    var lang = normalizeLanguage(preferredLanguage || '');
-    if (!lang || lang.indexOf('/') >= 0) {
-      lang = languageFromPath(absPath);
-    }
+    var lang = resolveOpenLanguage(preferredLanguage, absPath, normalizeLanguage, languageFromPath);
     if (!model) {
-      model = createFileModel(content || '', lang, absPath);
-      editor.setModel(model);
-      applyLanguageToModel(model, lang, absPath);
-      installMirrorPublisher();
-      installScrollPublisher();
-      vscodeRpcDidOpenIfReady();
-      installVscodeRpcChangePublisher();
+      model = initOpenModel(createFileModel, editor, content, lang, absPath, function(nextModel, nextLang, nextPath) {
+        applyLanguageToModel(nextModel, nextLang, nextPath);
+        installMirrorPublisher();
+        installScrollPublisher();
+        vscodeRpcDidOpenIfReady();
+        installVscodeRpcChangePublisher();
+      });
     } else {
       try {
-        var want = monacoFileUri(window.monaco, absPath);
-        if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
+        if (shouldRecreateOpenModel(window.monaco, monacoFileUri, model, absPath)) {
           if (diffEditor) { try { diffEditor.setModel(null); } catch (_) {} }
           try { model.dispose(); } catch (_) {}
-          model = createFileModel(content || '', lang, absPath);
-          editor.setModel(model);
-          applyLanguageToModel(model, lang, absPath);
-          installMirrorPublisher();
-          installScrollPublisher();
-          vscodeRpcDidOpenIfReady();
-          installVscodeRpcChangePublisher();
+          model = initOpenModel(createFileModel, editor, content, lang, absPath, function(nextModel, nextLang, nextPath) {
+            applyLanguageToModel(nextModel, nextLang, nextPath);
+            installMirrorPublisher();
+            installScrollPublisher();
+            vscodeRpcDidOpenIfReady();
+            installVscodeRpcChangePublisher();
+          });
         } else {
-          try { isApplyingRemote = true; model.setValue(content || ''); } catch (_) { editor.setValue(content || ''); } finally { isApplyingRemote = false; }
+          applyOpenModelTextSafely(model, editor, content, function(v) { isApplyingRemote = !!v; });
           applyLanguageToModel(model, lang, absPath);
         }
       } catch (_) {
-        try { isApplyingRemote = true; model.setValue(content || ''); } catch (_) { editor.setValue(content || ''); } finally { isApplyingRemote = false; }
+        applyOpenModelTextSafely(model, editor, content, function(v) { isApplyingRemote = !!v; });
         applyLanguageToModel(model, lang, absPath);
       }
     }
@@ -3218,40 +3100,17 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
     try { bcUpdatePath(currentPath, true); } catch (_) {}
     baseSha256 = sha256;
 
-    // Emit SSOT-derived telemetry to host (draft badge + autosave toggle sync).
-    emitToHost('editor_cache_state', {
-      path: absPath,
-      state: hasDraft ? 'mid_session' : 'clean',
-      unsaved: hasDraft,
-      reason: hasDraft ? 'restore' : 'set_content',
-      content_sha256: sha256,
-      auto_save: autoSave,
-    });
-    if (hasDraft) {
-      emitToHost('editor_draft_state', { has_draft: true, path: absPath });
-    }
+    emitOpenCacheState(emitToHost, absPath, hasDraft, sha256, autoSave);
 
-    try {
-      var backendReqId = 'diag_' + Date.now() + '_backend';
-      var backendText = model && model.getValue ? model.getValue() : '';
-      _wbQueueDidChange(
-        currentPath,
-        backendText,
-        model && model.getLanguageId ? model.getLanguageId() : lang,
-        backendGeneration
-      );
-      _wbQueueSymbols(currentPath, backendGeneration);
-      _wbOpenFileFlow({
-        path: currentPath,
-        languageId: lang,
-        uri: (model && model.uri) ? String(model.uri.toString()) : '',
-        requestId: backendReqId,
-        forceRefresh: true,
-        generation: backendGeneration,
-        source: 'openPathFromBackend',
-        timeoutMs: 8000,
-      }).catch(function () {});
-    } catch (_) {}
+    queueBackendWorkbenchOpen({
+      currentPath: currentPath,
+      lang: lang,
+      model: model,
+      generation: backendGeneration,
+      queueDidChangeFn: _wbQueueDidChange,
+      queueSymbolsFn: _wbQueueSymbols,
+      openFileFlowFn: _wbOpenFileFlow,
+    });
 
     ensureTouchSelection('open-post');
     setTimeout(function(){ ensureTouchSelection('open-tick'); }, 0);
@@ -3277,18 +3136,14 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
 
       // Readiness step events from the server-side chain.
       editorSocket.on('editor:readiness_step', function(data) {
-        var step = data && data.step || '';
-        var ok = data && data.ok;
-        console.log('[readiness] step=' + step + ' ok=' + ok + (data.error ? ' error=' + data.error : ''));
-        emitToHost('editor:readiness_step', data);
-        if (step === 'baton' && ok) {
+        handleReadinessStep(data, emitToHost, function () {
           window.__te2AdapterReady = true;
           // Replay initial open_file now that the adapter is confirmed ready.
           // This gates diagnostics/symbols to AFTER the full readiness chain.
           _replayOpenFileAfterBaton();
           // Semantic tokens: push-based flow handles registration via
           // editor:semantic_tokens_provider_registered event — no eager pull needed.
-        }
+        });
       });
 
       editorSocket.on('editor:ssot', function(snapshot) {
@@ -3561,65 +3416,48 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
       });
 
       editorSocket.on('editor:jump_to_line', function(payload) {
-        try { applyJumpToLineAt(editor, model, payload); } catch (e) { console.warn('[Monaco] jump_to_line failed', e); }
+        handleJumpToLineEvent(editor, model, payload, applyJumpToLineAt);
       });
 
       editorSocket.on('editor:mirror', function(payload) {
         try {
           mirrorState.rx += 1;
-          if (!payload || !payload.path || typeof payload.content !== 'string') return;
-          if (payload.source_client && editorSocketId && String(payload.source_client) === String(editorSocketId)) {
+          if (!isMirrorPayloadValid(payload)) return;
+          if (shouldDropMirrorForSource(payload, editorSocketId)) {
             mirrorState.drop_self += 1;
             _syncMirrorDebug();
             return;
           }
-          if (currentPath && String(payload.path) !== String(currentPath)) {
+          if (shouldDropMirrorForPath(payload.path, currentPath)) {
             mirrorState.drop_path += 1;
             _syncMirrorDebug();
             return;
           }
-          if (!model) {
+          if (shouldDropMirrorForNoModel(model)) {
             mirrorState.drop_no_model += 1;
             _syncMirrorDebug();
             return;
           }
-          if (payload.content_sha256 && lastContentSha256 && String(payload.content_sha256) === String(lastContentSha256)) {
+          if (shouldDropMirrorForSha(payload.content_sha256, lastContentSha256, model, payload.content)) {
             mirrorState.drop_sha += 1;
             _syncMirrorDebug();
             return;
           }
           var hotMs = _mirrorHotWindowMs();
-          if (hotMs > 0 && lastLocalEditAt > 0 && (Date.now() - lastLocalEditAt) < hotMs) {
+          if (shouldDropMirrorForHotWindow(lastLocalEditAt, Date.now(), hotMs)) {
             mirrorState.drop_hot += 1;
             _syncMirrorDebug();
             return;
           }
-          // Skip if content is identical (self-echo from authoring client).
-          if (model.getValue && model.getValue() === payload.content) {
-            mirrorState.drop_sha += 1;
-            _syncMirrorDebug();
-            return;
-          }
-          isApplyingRemote = true;
-          try {
-            var fullRange = model.getFullModelRange();
-            model.applyEdits([{ range: fullRange, text: payload.content }]);
-          } finally { isApplyingRemote = false; }
+          applyMirrorContentToModel(model, payload.content, function(v) { isApplyingRemote = !!v; });
           try { lastContentSha256 = payload.content_sha256 || lastContentSha256; } catch (_) {}
           mirrorState.ap += 1;
           _syncMirrorDebug();
           applyLineNumberSizing();
           var mirrorUnsaved = (payload.unsaved === true);
           _setUnsavedTrace('mirror', mirrorUnsaved);
-          emitToHost('editor_cache_state', {
-            path: payload.path,
-            state: mirrorUnsaved ? 'mid_session' : 'clean',
-            unsaved: mirrorUnsaved,
-            reason: 'mirror',
-            content_sha256: payload.content_sha256,
-          });
+          emitMirrorCacheState(emitToHost, payload, mirrorUnsaved);
           if (mirrorUnsaved) {
-            emitToHost('editor_draft_state', { has_draft: true, path: payload.path });
             // Do not refresh Git baselines on draft mirror; Git baselines must stay pinned.
             requestDraftDiff('mirror');
           } else {
@@ -3709,7 +3547,12 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
               console.warn('[Monaco] autosave diff mode switch failed', e2);
             }
           }
-          requestGitBaselines({ reason: 'prefs' });
+          if (getShowInlineDiffs()) {
+            requestGitBaselines({ immediate: true, reason: 'prefs' });
+          } else {
+            disposeGitBaselines();
+            if (diffEditor) ensurePlainEditorWithPrefs();
+          }
           if (getShowDraftDiffs()) requestDraftDiff('prefs');
           else clearDraftDiffDecorations();
           // Ensure semantic token provider is installed once monaco is live.
@@ -3725,10 +3568,7 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
 
       editorSocket.on('editor:draft_diff', function(payload) {
         try {
-          if (!payload || !payload.path || !currentPath) return;
-          if (String(payload.path) !== String(currentPath)) return;
-          if (payload.requestId && draftDiffRequestId && String(payload.requestId) !== String(draftDiffRequestId)) return;
-          applyDraftDiffDecorations(payload);
+          handleDraftDiffEvent(payload, currentPath, draftDiffRequestId, applyDraftDiffDecorations);
         } catch (e) {
           console.warn('[DraftDiff] handler failed', e);
         }
@@ -3837,139 +3677,54 @@ import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear
       });
 
       editorSocket.on('editor:workbench_open_file_response', function (data) {
-        try {
-          var rid = data && data.request_id;
-          var entry = _wbPending.get(rid);
-          if (!entry) return;
-          _wbPending.delete(rid);
-          clearTimeout(entry.timer);
-          if (data.error) entry.reject(new Error(String(data.error)));
-          else entry.resolve(data.result || data);
-        } catch (_) {}
+        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
       });
 
       editorSocket.on('editor:workbench_hover_response', function (data) {
-        try {
-          var rid = data && data.request_id;
-          var entry = _wbPending.get(rid);
-          if (!entry) return;
-          _wbPending.delete(rid);
-          clearTimeout(entry.timer);
-          if (data.error) entry.reject(new Error(String(data.error)));
-          else entry.resolve(data.result || data);
-        } catch (_) {}
+        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
       });
 
       editorSocket.on('editor:workbench_symbols_response', function (data) {
-        try {
-          var rid = data && data.request_id;
-          var entry = _wbPending.get(rid);
-          if (!entry) return;
-          _wbPending.delete(rid);
-          clearTimeout(entry.timer);
-          if (data.error) entry.reject(new Error(String(data.error)));
-          else entry.resolve(data.result || data);
-        } catch (_) {}
+        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
       });
 
       editorSocket.on('editor:workbench_completions_response', function (data) {
-        try {
-          var rid = data && data.request_id;
-          var entry = _wbPending.get(rid);
-          if (!entry) return;
-          _wbPending.delete(rid);
-          clearTimeout(entry.timer);
-          if (data.error) entry.reject(new Error(String(data.error)));
-          else entry.resolve(data.result || data);
-        } catch (_) {}
+        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
       });
 
       editorSocket.on('editor:workbench_semantic_tokens_response', function (data) {
-        try {
-          var rid = data && data.request_id;
-          var entry = _wbPending.get(rid);
-          if (!entry) return;
-          _wbPending.delete(rid);
-          clearTimeout(entry.timer);
-          if (data.error) entry.reject(new Error(String(data.error)));
-          else entry.resolve(data.result || data);
-        } catch (_) {}
+        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
       });
 
       editorSocket.on('editor:workbench_semantic_tokens_legend_response', function (data) {
-        try {
-          var rid = data && data.request_id;
-          var entry = _wbPending.get(rid);
-          if (!entry) return;
-          _wbPending.delete(rid);
-          clearTimeout(entry.timer);
-          if (data.error) entry.reject(new Error(String(data.error)));
-          else entry.resolve(data.result || data);
-        } catch (_) {}
+        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
       });
 
       editorSocket.on('editor:workbench_semantic_tokens_range_response', function (data) {
-        try {
-          var rid = data && data.request_id;
-          var entry = _wbPending.get(rid);
-          if (!entry) return;
-          _wbPending.delete(rid);
-          clearTimeout(entry.timer);
-          if (data.error) entry.reject(new Error(String(data.error)));
-          else entry.resolve(data.result || data);
-        } catch (_) {}
+        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
       });
 
       // Push-based: adapter notifies when a semantic tokens provider registers.
       // Cache the legend but DON'T register the Monaco provider yet — wait for
       // diagnostics to prove the language server has analyzed the file first.
       editorSocket.on('editor:semantic_tokens_provider_registered', function (data) {
-        try {
-          var lang = data && data.language;
-          var legend = data && data.legend;
-          if (!lang || !legend || !legend.tokenTypes || !legend.tokenModifiers) return;
-          if (languageBridge.registeredSemanticTokens.has(lang)) return;
-          console.log('[semanticTokens] push cached legend for ' + lang + ' types=' + legend.tokenTypes.length + ' mods=' + legend.tokenModifiers.length + ' range=' + !!data.range);
-          languageBridge.semanticTokensLegendCache[lang] = legend;
-          if (data.range) languageBridge.semanticTokensRangeFlag[lang] = true;
-          // Register immediately — no need to wait for diagnostics.
-          _registerSemanticTokensWithLegend(lang, legend, !!data.range);
-        } catch (_) {}
+        try { handleSemanticTokensProviderRegistered(data, languageBridge, _registerSemanticTokensWithLegend); } catch (_) {}
       });
 
       editorSocket.on('editor:issues_dump_request', function(payload) {
         try {
-          var requestId = payload && (payload.requestId || payload.request_id)
-            ? String(payload.requestId || payload.request_id)
-            : '';
-          if (!requestId) return;
-          var dump = {};
-          try {
-            if (window.monaco && model) {
-              var markers = monaco.editor.getModelMarkers({ resource: model.uri }) || [];
-              dump = { markers: markers };
-            }
-          } catch (_) {}
-          emitToHost('editor_issues_dump_response', { requestId: requestId, dump: dump });
+          handleIssuesDumpRequest(payload, monaco, model, emitToHost);
         } catch (e) {
           console.warn('[Monaco] issues dump response failed', e);
         }
       });
 
       editorSocket.on('editor:issues_cmd', function(payload) {
-        try {
-          var action = payload && payload.action ? String(payload.action) : '';
-          if (!action) return;
-          runIssuesCommand(editor, action);
-        } catch (_) {}
+        try { handleIssuesCommand(payload, editor, runIssuesCommand); } catch (_) {}
       });
 
       editorSocket.on('editor:find_cmd', function(payload) {
-        try {
-          var action = payload && payload.action ? String(payload.action) : 'find';
-          console.log('[Find] iframe received editor:find_cmd action=', action, 'editor=', !!editor);
-          runFindCommand(editor, action, function (e) { console.error('[Find] _runFindCommand error:', e); });
-        } catch (e) { console.error('[Find] error:', e); }
+        try { handleFindCommand(payload, editor, runFindCommand); } catch (e) { console.error('[Find] error:', e); }
       });
 
       return true;
