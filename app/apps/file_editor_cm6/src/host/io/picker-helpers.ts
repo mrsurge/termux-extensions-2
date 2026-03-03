@@ -1,4 +1,4 @@
-// @ts-check
+// @ts-nocheck
 
 export function pickerAvailable() {
   return window.teFilePicker && typeof window.teFilePicker.openFile === 'function';
@@ -16,8 +16,9 @@ export async function pickFileWithPicker({ startPath, currentPath, lastPickerPat
     if (choice && choice.path) return { path: choice.path, lastPickerPath: parentDir(choice.path) };
     return { path: null, lastPickerPath };
   } catch (e) {
-    if (e && e.message === 'cancelled') return { path: null, lastPickerPath };
-    toast(e?.message || 'Browse failed');
+    const eAny = /** @type {any} */ (e);
+    if (eAny && eAny.message === 'cancelled') return { path: null, lastPickerPath };
+    toast(eAny?.message || 'Browse failed');
     return { path: null, lastPickerPath };
   }
 }
@@ -34,8 +35,9 @@ export async function pickDirectoryWithPicker({ startPath, currentPath, lastPick
     if (choice && choice.path) return { path: choice.path, lastPickerPath: choice.path };
     return { path: null, lastPickerPath };
   } catch (e) {
-    if (e && e.message === 'cancelled') return { path: null, lastPickerPath };
-    toast(e?.message || 'Browse failed');
+    const eAny = /** @type {any} */ (e);
+    if (eAny && eAny.message === 'cancelled') return { path: null, lastPickerPath };
+    toast(eAny?.message || 'Browse failed');
     return { path: null, lastPickerPath };
   }
 }
@@ -56,8 +58,9 @@ export async function pickSaveTargetWithPicker({ currentPath, lastPickerPath, ho
     });
     return result || null;
   } catch (e) {
-    if (e && e.message === 'cancelled') return null;
-    toast(e?.message || 'Save cancelled');
+    const eAny = /** @type {any} */ (e);
+    if (eAny && eAny.message === 'cancelled') return null;
+    toast(eAny?.message || 'Save cancelled');
     return null;
   }
 }

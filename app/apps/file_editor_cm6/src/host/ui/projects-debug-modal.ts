@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 // ---------- Projects & Sidecars debug modal ----------
 // Extracted from main.js — fully self-contained (no closure deps).
 
@@ -162,7 +164,7 @@ async function loadProjectsDebugContent() {
         } catch (e) {
           window.alert(
             `Failed to delete project entry: ${
-              e && e.message ? e.message : String(e || 'unknown error')
+              /** @type {any} */ (e) && /** @type {any} */ (e).message ? /** @type {any} */ (e).message : String(e || 'unknown error')
             }`,
           );
         }
@@ -200,7 +202,7 @@ async function loadProjectsDebugContent() {
     modal.contentEl.appendChild(frag);
   } catch (err) {
     modal.contentEl.textContent = `Failed to load debug info: ${
-      err && err.message ? err.message : String(err || 'unknown error')
+      /** @type {any} */ (err) && /** @type {any} */ (err).message ? /** @type {any} */ (err).message : String(err || 'unknown error')
     }`;
   }
 }

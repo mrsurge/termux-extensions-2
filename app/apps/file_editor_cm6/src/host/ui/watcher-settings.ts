@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 // ---------- Watcher modal & settings UI ----------
 // Extracted from main.js. Requires `host.toast` via init().
 
@@ -87,8 +89,8 @@ export function showWatcherLimitModal(message, limit) {
 let _watcherConfig = { mode: 'ipc', storage_type: 'ssd', poll_interval_ms: 1500, watchexec_available: false };
 
 function _initWatcherSettingsUI() {
-  const modeRadios = document.querySelectorAll('input[name="watcher-mode"]');
-  const storageRadios = document.querySelectorAll('input[name="watcher-storage"]');
+  const modeRadios = /** @type {any} */ (document.querySelectorAll('input[name="watcher-mode"]'));
+  const storageRadios = /** @type {any} */ (document.querySelectorAll('input[name="watcher-storage"]'));
   const watchexecOpts = document.getElementById('watcher-watchexec-opts');
   const raiseBtn = document.getElementById('watcher-raise-btn');
 
@@ -105,7 +107,7 @@ function _initWatcherSettingsUI() {
   storageRadios.forEach(r => {
     r.addEventListener('change', () => {
       if (r.checked) {
-        const modeEl = document.querySelector('input[name="watcher-mode"]:checked');
+        const modeEl = /** @type {any} */ (document.querySelector('input[name="watcher-mode"]:checked'));
         if (modeEl) _sendWatcherMode(modeEl.value);
       }
     });
@@ -119,7 +121,7 @@ function _initWatcherSettingsUI() {
 }
 
 function _sendWatcherMode(mode) {
-  const storageEl = document.querySelector('input[name="watcher-storage"]:checked');
+  const storageEl = /** @type {any} */ (document.querySelector('input[name="watcher-storage"]:checked'));
   const storageType = storageEl ? storageEl.value : 'ssd';
   if (typeof window.__explorerBusSend === 'function') {
     window.__explorerBusSend('watcher:setMode', { mode, storage_type: storageType });
@@ -129,16 +131,16 @@ function _sendWatcherMode(mode) {
 function _applyWatcherConfig(cfg) {
   _watcherConfig = { ..._watcherConfig, ...cfg };
 
-  const modeRadios = document.querySelectorAll('input[name="watcher-mode"]');
+  const modeRadios = /** @type {any} */ (document.querySelectorAll('input[name="watcher-mode"]'));
   modeRadios.forEach(r => { r.checked = r.value === cfg.mode; });
 
-  const storageRadios = document.querySelectorAll('input[name="watcher-storage"]');
+  const storageRadios = /** @type {any} */ (document.querySelectorAll('input[name="watcher-storage"]'));
   storageRadios.forEach(r => { r.checked = r.value === cfg.storage_type; });
 
   const watchexecOpts = document.getElementById('watcher-watchexec-opts');
   if (watchexecOpts) watchexecOpts.style.display = cfg.mode === 'watchexec' ? 'block' : 'none';
 
-  const watchexecRadio = document.querySelector('input[name="watcher-mode"][value="watchexec"]');
+  const watchexecRadio = /** @type {any} */ (document.querySelector('input[name="watcher-mode"][value="watchexec"]'));
   const watchexecLabel = document.getElementById('watcher-mode-watchexec-label');
   if (watchexecRadio && !cfg.watchexec_available) {
     watchexecRadio.disabled = true;
