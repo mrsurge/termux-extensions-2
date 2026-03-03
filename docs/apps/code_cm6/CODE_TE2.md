@@ -238,6 +238,39 @@ Spinner / Status indicator (host UI):
   - `renderReviewResults()`: review toolbar, Select All, Save/Discard buttons
   - Draft decorations: `applyDraftFlag(rel, hasDraft)` sets `data-hasDraft` attribute on tree nodes
 
+#### Host decomposition status (Phase 2, complete)
+`main.js` has been decomposed into focused modules under `app/apps/file_editor_cm6/src/host/` and stabilized as an orchestration layer with intentional boundary wrappers.
+Current extracted modules:
+
+| Module | Responsibility |
+|---|---|
+| `src/host/app-context.ts` | Shared runtime context scaffold for gradual closure breakup |
+| `src/host/utils.ts` | Path/display/menu utility helpers |
+| `src/host/api/client.ts` | Normalized `apiGet`/`apiPost` wrappers |
+| `src/host/connections/vendor-loaders.ts` | Dynamic Socket.IO and vConsole script loading |
+| `src/host/connections/ui-ipc.ts` | UI IPC + sidebar IPC socket wiring |
+| `src/host/connections/file-websocket.ts` | Per-file WS connect/reconnect/keepalive lifecycle |
+| `src/host/boot/session-telemetry.ts` | Session telemetry fetch/init/flush/sync |
+| `src/host/boot/editor-state.ts` | Editor state sync + global window state hooks |
+| `src/host/boot/boot-sequence.ts` | Main boot orchestration (layout/init/connect/restore flow) |
+| `src/host/ui/adapter-ui.ts` | Adapter dropdown + LSP status spinner behavior |
+| `src/host/ui/watcher-settings.ts` | Watcher mode/raise-limit UI and handlers |
+| `src/host/ui/projects-debug-modal.ts` | Projects/sidecar debug modal |
+| `src/host/ui/edit-tracker.ts` | Agent/codex edit tracker controls |
+| `src/host/ui/font-scale.ts` | Font scale apply + menu-state behavior |
+| `src/host/ui/search-panel.ts` | Search panel trigger flow |
+| `src/host/ui/prefs-sync.ts` | Cross-client prefs sync application |
+| `src/host/ui/preferences.ts` | Preferences fetch/update/menu-apply orchestration |
+| `src/host/ui/recents.ts` | Recents menu render + broadcast handling |
+| `src/host/ui/cache-indicator.ts` | Draft/crash cache badge behavior |
+| `src/host/ui/drawer-shortcuts.ts` | Drawer tabs + terminal/console/problems/font shortcuts |
+| `src/host/ui/layout-manager.ts` | Desktop/mobile layout mode management |
+
+Remaining high-value decomposition targets:
+- Editor settings/themes/extensions modal block in `main.js`
+- Remaining file-ops/open-save flow partitioning
+- Final wiring reduction so `main.js` becomes mostly boot + module assembly
+
 ### SSOT and persistence
 - `app/apps/file_editor_cm6/stores.py`
   - Singleton store instances: `_history_store`, `_preferences_store`
@@ -258,6 +291,32 @@ Spinner / Status indicator (host UI):
   - `discard_reviews(project, files)`: clears drafts, reverts active editor if file is open
 - `app/apps/file_editor_cm6/preferences_store.py`
   - Disk-backed preferences (editor settings)
+
+---
+
+## 1.5) Frontend build process (host + iframe bundles)
+
+TE2 host/iframe frontend bundling for `file_editor_cm6` uses `esbuild` (with TypeScript type-check support via `tsc --noEmit`):
+
+- Config: `app/apps/file_editor_cm6/build.mjs`
+- Scripts: `app/apps/file_editor_cm6/package.json`
+  - `npm run build` → production bundles (minified, sourcemaps)
+  - `npm run build:watch` → watch mode (non-minified)
+  - `npm run typecheck` → TypeScript checking only
+
+Current build outputs:
+- Host bundle: `static/dist/host.js` (entry: `main.js`, format: ESM)
+- Iframe bundle: `static/dist/editor.js` (entry: `monaco_editor/m_editor_app.js`, format: IIFE)
+
+Notes:
+- Vendor assets remain external (`/static/vendor/*`) and are still loaded separately.
+- This host/iframe bundle process is separate from the Monaco pinned-VSCode asset build described later in this document.
+
+### Current host TS migration state (important)
+- `src/host/**/*.js` has been migrated to `src/host/**/*.ts` and `main.js` imports those `.ts` modules directly at runtime.
+- Runtime serves source modules through `/apps/{app_dir}/{filename:path}` (see `app/extensions/apps/main.py`), so `.ts` files are treated as browser modules (`application/javascript`).
+- Because these `.ts` files are loaded directly by the browser (not transpiled first), they must stay **JS-runtime compatible** (JSDoc typing style, no TS-only syntax like `catch (e: any)` or `as Type` in served modules).
+- Current `tsconfig.json` is intentionally staged for incremental migration (`noImplicitAny: false`, `strictNullChecks: false`) and a subset of host modules is marked `// @ts-nocheck` until full typing is completed.
 
 ---
 
@@ -2219,7 +2278,7 @@ Monaco standalone has no built-in semantic token support from VS Code's extensio
 
 3. **semanticHighlighting source fix**: Changed `standaloneThemeService.ts:182` from `false` to `true` in the TE2 Monaco build. A runtime monkey-patch (`_forceSemanticHighlighting()`) also exists as a fallback.
 
-4. **Semantic token color mapping**: `_buildSemanticTokenRules()` in `m_editor_app.js` mirrors VS Code's `TokenClassificationRegistry` by mapping each semantic token type (e.g., `function`, `variable`, `parameter`) to its equivalent TextMate scope (e.g., `entity.name.function`, `variable.other.readwrite`, `variable.parameter`), resolves the color from the theme's `tokenColors`, and injects the rules into the Monaco theme.
+4. **Semantic token color mapping**: `buildSemanticTokenRules()` (in `editor_semantic_token_rules_utils.js`, called by theme conversion runtime) mirrors VS Code's `TokenClassificationRegistry` by mapping each semantic token type (e.g., `function`, `variable`, `parameter`) to its equivalent TextMate scope (e.g., `entity.name.function`, `variable.other.readwrite`, `variable.parameter`), resolves the color from the theme's `tokenColors`, and injects the rules into the Monaco theme.
 
 5. **Palette index translation**: `_patchSemanticTokenColorIndices()` monkey-patches `getTokenStyleMetadata` on the active theme object. After `setColorMap` overrides the rendering palette, the patch translates foreground indices: tokenTheme index → hex color (via `Color.toString()`) → find matching hex in TextMate color map → return TextMate index. This ensures semantic tokens render the correct color even when the rendering palette has been overridden.
 
@@ -2275,7 +2334,7 @@ cd ../.. && node ../../scripts/build_monaco_iframe_bootstrap_bundle.mjs
 | `workbench_client.mjs` | CancellationToken fix, Uint32Array alignment fix, legend extraction, semantic token RPC, `resync()` |
 | `server.mjs` | `vscode.semanticTokensRange` route, `te2.resync` RPC |
 | `editor_ws.py` | Socket.IO ↔ adapter bridge for semantic tokens, resync trigger in readiness check |
-| `m_editor_app.js` | `_buildSemanticTokenRules()`, `_forceSemanticHighlighting()`, `_patchSemanticTokenColorIndices()`, encoded TextMate provider (`tokenizeEncoded`), `_applyThemeToTextmateRegistry()` |
+| `m_editor_app.js` + `editor_*_utils.js` | Theme/runtime orchestration (`_forceSemanticHighlighting()`, `_patchSemanticTokenColorIndices()`, encoded TextMate provider `tokenizeEncoded`, `_applyThemeToTextmateRegistry()`), with semantic/theme rule builders extracted to utility modules |
 | `standaloneThemeService.ts` | Source fix: `semanticHighlighting = true` |
 | `tokenClassificationRegistry.ts` | VS Code's semantic-to-TextMate mapping (reference) |
 
@@ -2630,7 +2689,7 @@ Each entry yields `{id, label, uiTheme, path}`. These appear in the `available_t
 - `_ensureThemeRegistry()` — fetches `available_themes` once, builds a `Map<id, entry>`
 - `_getVscodeThemeJsonUrl(themeId)` — looks up serve URL from registry; fallback to vendored path map
 - `loadVscodeTextmateThemes()` — loads ALL themes from registry into `_jsonCache`, calls `defineTheme()` for each
-- `_resolveMonacoThemeId(themeKey)` — normalizes theme key to Monaco-registered theme ID
+- `resolveMonacoThemeId(themeKey)` (from `editor_theme_resolver_utils.js`) — normalizes theme key to Monaco-registered theme ID
 - `applyMonacoTheme(themeKey)` — applies theme + lazy load + TextMate sync + palette patch + retokenization
 
 ### Theme submodal (UI)
@@ -2648,7 +2707,7 @@ Sections: **Bundled** (vendored), **From Extensions** (installed).
 
 | File | Role |
 |------|------|
-| `m_editor_app.js` | Theme registry, loading, application |
+| `m_editor_app.js` + `editor_theme_*_utils.js` | Theme registry, loading, conversion, and application |
 | `m_editor_app.py` | `GET /available_themes` endpoint, vendored theme serving |
 | `extension_registry.py` | `contributes.themes[]` parsing |
 | `main.js` | Theme submodal open/close/refresh logic |
@@ -2657,8 +2716,8 @@ Sections: **Bundled** (vendored), **From Extensions** (installed).
 
 ### Gotchas
 
-- **Short hex colors**: Monaco's tokenization parser rejects 3/4-char CSS shorthand hex (`#fff`, `#0008`). The converter functions `_expandShortHex()` and `_toMonacoColorHex()` in `m_editor_app.js` expand these to 6/8-char before passing to `defineTheme()`.
-- **Built-in themes disabled**: `vs`, `vs-dark`, `hc-black`, `hc-light` are hidden from the picker. They lack `tokenColors` so semantic tokens resolve to wrong palette indices after `setColorMap()`. IDs redirect to closest GitHub vendored theme via `_resolveMonacoThemeId()`. See §28 for related retokenization details.
+- **Short hex colors**: Monaco's tokenization parser rejects 3/4-char CSS shorthand hex (`#fff`, `#0008`). Converter helpers in `editor_parse_utils.js` expand these to 6/8-char before passing to `defineTheme()`.
+- **Built-in themes disabled**: `vs`, `vs-dark`, `hc-black`, `hc-light` are hidden from the picker. They lack `tokenColors` so semantic tokens resolve to wrong palette indices after `setColorMap()`. IDs redirect to closest GitHub vendored theme via `resolveMonacoThemeId()` (`editor_theme_resolver_utils.js`). See §28 for related retokenization details.
 
 ## 28) Theme-Switch Retokenization
 
@@ -2684,7 +2743,7 @@ for (var mi = 0; mi < models.length; mi++) {
 ### Execution order in `applyMonacoTheme()`
 
 1. `loadVscodeTextmateThemes()` — ensure all themes defined
-2. `_resolveMonacoThemeId()` — normalize theme key
+2. `resolveMonacoThemeId()` — normalize theme key
 3. Lazy-load single theme if not cached
 4. `monaco.editor.setTheme(resolvedId)` — activates theme, rebuilds `tokenTheme`
 5. `_applyThemeToTextmateRegistry(tmActiveThemeJson)` — updates TextMate color map via `setColorMap()`
