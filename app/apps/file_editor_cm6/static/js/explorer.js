@@ -13,6 +13,12 @@
 import { showNewProjectModal } from './new_project_modal.js';
 import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
 import { initExplorerStickyScopes } from './explorer_extensions/sticky_scopes.js';
+import {
+  formatDiffBaseLabel,
+  formatHunkHeader,
+  truncateText,
+  firstDiffLine,
+} from './explorer_modules/explorer_search_utils.js';
 
 let treeElement = null;
 let projectLabelEl = null;
@@ -339,41 +345,6 @@ let gitDiffBase = { ref: 'HEAD', mode: 'none', commit: null };
 let searchBaseBtn = null;
 let searchBaseDropdown = null;
 
-/**
- * Format a hunk header in human-readable form.
- * @param {object} hunk - Hunk object with oldStart, oldLines, newStart, newLines
- * @returns {string} Human-readable line range description
- */
-function formatHunkHeader(hunk) {
-  const oldEnd = hunk.oldStart + hunk.oldLines - 1;
-  const newEnd = hunk.newStart + hunk.newLines - 1;
-  
-  // For single-line changes
-  if (hunk.newLines === 1) {
-    return `Line ${hunk.newStart}`;
-  }
-  
-  // For multi-line changes
-  return `Lines ${hunk.newStart}–${newEnd}`;
-}
-
-function formatDiffBaseLabel(info, withPrefix = true) {
-  if (!info || info.mode === 'none') {
-    return withPrefix ? 'Status: (no git)' : 'No Git';
-  }
-  const commit = info.commit || null;
-  const short = (commit && commit.short) || info.ref || 'HEAD';
-  const summary =
-    commit && commit.subject ? truncateText(commit.subject, 36) : '';
-  const prefix = withPrefix ? 'Status: ' : '';
-  return summary ? `${prefix}${short} · ${summary}` : `${prefix}${short}`;
-}
-
-function truncateText(text, limit = 40) {
-  if (!text) return '';
-  if (text.length <= limit) return text;
-  return `${text.slice(0, limit - 1)}…`;
-}
 
 function updateDiffBaseButtons() {
   if (gitBaseBtn) {
@@ -4138,19 +4109,6 @@ function renderContentResults(container, data) {
     notice.textContent = `Showing ${data.file_count} files, ${data.match_count} matches`;
     container.appendChild(notice);
   }
-}
-
-function firstDiffLine(change) {
-  const hunks = change?.hunks || [];
-  for (const h of hunks) {
-    if (typeof h?.newStart === 'number' && h.newStart > 0) {
-      return h.newStart;
-    }
-    if (typeof h?.oldStart === 'number' && h.oldStart > 0) {
-      return h.oldStart;
-    }
-  }
-  return 1;
 }
 
 function renderChangesResults(container, data) {

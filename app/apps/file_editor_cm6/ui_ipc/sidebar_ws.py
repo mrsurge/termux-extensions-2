@@ -9,10 +9,21 @@ from pathlib import Path
 
 from ..explorer_helper import get_project_root
 from ..explorer_ws import manager as _explorer_manager
-from ..stores import get_history_store
+from ..stores import get_history_store, get_preferences_store
 
 _registered_hosts: set[str] = set()
 _registered_iframes: set[str] = set()
+
+
+def _is_agent_sidebar_tracking_enabled() -> bool:
+    try:
+        prefs = get_preferences_store().get_preferences()
+        editor = prefs.get("editor") if isinstance(prefs, dict) else {}
+        if not isinstance(editor, dict):
+            return False
+        return bool(editor.get("trackAgentSidebarEdits", False))
+    except Exception:
+        return False
 
 
 async def _emit_presence(ns, *, to_sid: str | None = None):
@@ -69,12 +80,23 @@ async def on_sidebar_event(ns, sid, data):
     event_type = str(data.get("type") or "unknown")
     print(f"[sidebar_ipc] event type={event_type} from={sid}", flush=True)
     if event_type == "agent_edit":
+        if not _is_agent_sidebar_tracking_enabled():
+            print("[sidebar_ipc] agent_edit dropped: trackAgentSidebarEdits disabled", flush=True)
+            return
         payload = data.get("payload")
         if isinstance(payload, dict):
             try:
                 await _broadcast_agent_open(payload)
             except Exception as exc:
                 print(f"[sidebar_ipc] sidebar:event agent_edit route failed: {exc}", flush=True)
+        return
+    if event_type == "agent_open":
+        payload = data.get("payload")
+        if isinstance(payload, dict):
+            try:
+                await _broadcast_agent_open(payload)
+            except Exception as exc:
+                print(f"[sidebar_ipc] sidebar:event agent_open route failed: {exc}", flush=True)
         return
     await ns.emit("sidebar:event", data, room="sidebar_ipc", skip_sid=sid)
 
@@ -139,8 +161,22 @@ async def on_sidebar_agent_edit(ns, sid, data):
     """Route agent-edit signals through backend explorer broadcast path."""
     if not isinstance(data, dict):
         return
+    if not _is_agent_sidebar_tracking_enabled():
+        print("[sidebar_ipc] agent_edit dropped: trackAgentSidebarEdits disabled", flush=True)
+        return
     print(f"[sidebar_ipc] agent_edit from={sid}", flush=True)
     try:
         await _broadcast_agent_open(data)
     except Exception as exc:
         print(f"[sidebar_ipc] agent_edit route failed: {exc}", flush=True)
+
+
+async def on_sidebar_agent_open(ns, sid, data):
+    """Route explicit user-driven opens through backend explorer broadcast path."""
+    if not isinstance(data, dict):
+        return
+    print(f"[sidebar_ipc] agent_open from={sid}", flush=True)
+    try:
+        await _broadcast_agent_open(data)
+    except Exception as exc:
+        print(f"[sidebar_ipc] agent_open route failed: {exc}", flush=True)

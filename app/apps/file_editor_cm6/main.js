@@ -303,22 +303,22 @@ function _emitSidebarIpc(eventName, payload) {
   uiIpcConnections.emitSidebarIpc(eventName, payload);
 }
 
-function _isCodexEditTrackingEnabled() {
-  return !!(editorViewState && editorViewState.trackCodexWsEdits);
+function _isAgentSidebarEditTrackingEnabled() {
+  return !!(editorViewState && editorViewState.trackAgentSidebarEdits);
 }
 
-function _rememberCodexEditKey(key) {
+function _rememberAgentSidebarEditKey(key) {
   if (!key) return false;
   const now = Date.now();
-  const seen = _codexTrackedEditDedup.get(key);
+  const seen = _agentSidebarTrackedEditDedup.get(key);
   if (seen && (now - seen) < 30000) {
     return true;
   }
-  _codexTrackedEditDedup.set(key, now);
-  if (_codexTrackedEditDedup.size > 256) {
+  _agentSidebarTrackedEditDedup.set(key, now);
+  if (_agentSidebarTrackedEditDedup.size > 256) {
     const cutoff = now - 120000;
-    for (const [k, ts] of _codexTrackedEditDedup.entries()) {
-      if (ts < cutoff) _codexTrackedEditDedup.delete(k);
+    for (const [k, ts] of _agentSidebarTrackedEditDedup.entries()) {
+      if (ts < cutoff) _agentSidebarTrackedEditDedup.delete(k);
     }
   }
   return false;
@@ -351,7 +351,7 @@ function _extractLineFromDiff(diffText) {
   return 1;
 }
 
-async function _resolveCodexEditAbsPath(rawPath) {
+async function _resolveAgentSidebarEditAbsPath(rawPath) {
   const value = typeof rawPath === 'string' ? rawPath.trim() : '';
   if (!value) return '';
   if (value.startsWith('/')) return value;
@@ -360,15 +360,15 @@ async function _resolveCodexEditAbsPath(rawPath) {
   return toAbsolute(value, root, HOME_DIR);
 }
 
-async function _applyCodexTrackedEdit(edit) {
+async function _applyAgentSidebarTrackedEdit(edit) {
   if (!edit || typeof edit !== 'object') return;
-  if (!_isCodexEditTrackingEnabled()) return;
+  if (!_isAgentSidebarEditTrackingEnabled()) return;
 
-  const absPath = await _resolveCodexEditAbsPath(edit.path);
+  const absPath = await _resolveAgentSidebarEditAbsPath(edit.path);
   if (!absPath) return;
   const line = Number.isFinite(Number(edit.line)) ? Number(edit.line) : 1;
   const key = `${edit.id || ''}:${absPath}:${line}`;
-  if (_rememberCodexEditKey(key)) return;
+  if (_rememberAgentSidebarEditKey(key)) return;
 
   try {
     await openFile(absPath, { forceRefresh: true });
@@ -383,6 +383,7 @@ async function _applyCodexTrackedEdit(edit) {
 
 function _handleCodexAppserverEvent(event) {
   if (!event || typeof event !== 'object') return;
+  if (!_isAgentSidebarEditTrackingEnabled()) return;
   const type = typeof event.type === 'string' ? event.type : '';
   if (type !== 'diff') return;
 
@@ -542,7 +543,7 @@ let editorSocketId = null;
 const editorPending = [];
 const _editorIssuesDumpWaiters = new Map(); // requestId -> {resolve,reject,timer}
 let codexAppserverSocket = null;
-const _codexTrackedEditDedup = new Map();
+const _agentSidebarTrackedEditDedup = new Map();
 
 async function handleAgentOpen(payload) {
   const isMobile = _isMobileLayout();
@@ -1653,7 +1654,7 @@ const miToggleColorPicker = requireEl('#mi-toggle-color-picker');
 const miToggleReadonly = requireEl('#mi-toggle-readonly');
 const miToggleStickyScroll = requireEl('#mi-toggle-sticky-scroll');  // Added: 2025-12-03 by vectorArc - TE2 Team
 const miTrackEdits   = requireEl('#mi-track-edits');
-const miTrackCodexEdits = requireEl('#mi-track-codex-edits');
+const miTrackAgentSidebarEdits = requireEl('#mi-track-agent-sidebar-edits');
 const miFind          = requireEl('#mi-find');
 const miGoto          = requireEl('#mi-goto');
 const miExportDiagnostics = requireEl('#mi-export-diagnostics');
@@ -3180,7 +3181,7 @@ const preferencesController = createPreferencesController({
     miToggleMinimap,
     miToggleStickyScroll,
     miTrackEdits,
-    miTrackCodexEdits,
+    miTrackAgentSidebarEdits,
   }),
 });
 
@@ -3554,7 +3555,7 @@ installAdvancedMenuActions({
     miToggleDraftDiffs,
     miToggleReadonly,
     miTrackEdits,
-    miTrackCodexEdits,
+    miTrackAgentSidebarEdits,
   },
   getEditorViewState: () => editorViewState,
   updatePreference: (key, value) => preferencesController.updatePreference(key, value),

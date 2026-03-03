@@ -50,7 +50,7 @@ export function createEditTrackerController(deps) {
       updateEditTrackerStatus(data);
     } else if (data.event === 'edit_tracked') {
       const viewState = deps.getEditorViewState();
-      if (viewState?.trackAgentEdits || viewState?.trackCodexWsEdits) {
+      if (viewState?.trackAgentEdits || viewState?.trackAgentSidebarEdits) {
         void autoJumpToEdit(data.path, data.line);
       }
     }

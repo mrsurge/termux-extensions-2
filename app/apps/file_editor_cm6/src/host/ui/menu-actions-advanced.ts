@@ -9,7 +9,7 @@
  *     miToggleDraftDiffs: HTMLElement,
  *     miToggleReadonly: HTMLElement,
  *     miTrackEdits: HTMLElement,
- *     miTrackCodexEdits: HTMLElement,
+ *     miTrackAgentSidebarEdits: HTMLElement,
  *   },
  *   getEditorViewState: () => any,
  *   updatePreference: (key: string, value: any) => Promise<boolean>,
@@ -28,7 +28,7 @@
 export function installAdvancedMenuActions(deps) {
   let preTrackingPrefs = null;
   const s = () => deps.getEditorViewState();
-  const anyTracking = () => !!(s()?.trackAgentEdits || s()?.trackCodexWsEdits);
+  const anyTracking = () => !!(s()?.trackAgentEdits || s()?.trackAgentSidebarEdits);
 
   async function restorePreTrackingPrefsIfIdle() {
     if (anyTracking() || !preTrackingPrefs) return;
@@ -39,7 +39,7 @@ export function installAdvancedMenuActions(deps) {
 
   async function disableAllEditTracking(reason) {
     if (s()?.trackAgentEdits) await deps.updatePreference('trackAgentEdits', false);
-    if (s()?.trackCodexWsEdits) await deps.updatePreference('trackCodexWsEdits', false);
+    if (s()?.trackAgentSidebarEdits) await deps.updatePreference('trackAgentSidebarEdits', false);
     await restorePreTrackingPrefsIfIdle();
     if (reason) deps.toast(reason, 'warn');
   }
@@ -141,9 +141,9 @@ export function installAdvancedMenuActions(deps) {
   });
 
   deps.bindMenuToggle(deps.els.miTrackEdits, async () => {
-    await toggleTrackedEditPreference('trackAgentEdits', 'trackCodexWsEdits');
+    await toggleTrackedEditPreference('trackAgentEdits', 'trackAgentSidebarEdits');
   });
-  deps.bindMenuToggle(deps.els.miTrackCodexEdits, async () => {
-    await toggleTrackedEditPreference('trackCodexWsEdits', 'trackAgentEdits');
+  deps.bindMenuToggle(deps.els.miTrackAgentSidebarEdits, async () => {
+    await toggleTrackedEditPreference('trackAgentSidebarEdits', 'trackAgentEdits');
   });
 }

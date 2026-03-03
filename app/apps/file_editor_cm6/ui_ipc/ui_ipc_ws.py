@@ -83,3 +83,6 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
     async def on_sidebar_agent_edit(self, sid, data):
         await sidebar_ws.on_sidebar_agent_edit(self, sid, data)
+
+    async def on_sidebar_agent_open(self, sid, data):
+        await sidebar_ws.on_sidebar_agent_open(self, sid, data)

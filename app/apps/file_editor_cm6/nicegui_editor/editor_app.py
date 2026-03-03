@@ -2143,7 +2143,7 @@ async def toggle_edit_tracking(data: dict = Body(...)):
         print("[editor_app] trackAgentEdits disabled via API — change_ledger cleared", file=sys.stderr)
     updates = {'trackAgentEdits': enabled}
     if enabled:
-        updates['trackCodexWsEdits'] = False
+        updates['trackAgentSidebarEdits'] = False
     _preferences_store.update_preferences(editor=updates)
     return {"ok": True, "enabled": enabled}
 
@@ -2313,7 +2313,7 @@ def _get_view_state_dict() -> dict:
         "autoSave": editor_prefs.get('autoSave'),
         "showInlineDiffs": editor_prefs.get('showInlineDiffs'),
         "trackAgentEdits": editor_prefs.get('trackAgentEdits'),
-        "trackCodexWsEdits": editor_prefs.get('trackCodexWsEdits'),
+        "trackAgentSidebarEdits": editor_prefs.get('trackAgentSidebarEdits'),
         "fontScale": editor_prefs.get('fontScale'),
         "showIndentGuides": editor_prefs.get('showIndentGuides'),
         "colorPicker": editor_prefs.get('colorPicker'),
@@ -2464,9 +2464,9 @@ async def update_preference(data: dict = Body(...)):
             else:
                 change_ledger.clear()  # Stop tracking
                 print("[editor_app] trackAgentEdits disabled — change_ledger cleared", file=sys.stderr)
-        elif key == 'trackCodexWsEdits':
+        elif key == 'trackAgentSidebarEdits':
             value = bool(value)
-            print(f"[editor_app] trackCodexWsEdits set to {value}", file=sys.stderr)
+            print(f"[editor_app] trackAgentSidebarEdits set to {value}", file=sys.stderr)
         elif key in ['showLineNumbers', 'showSyntax', 'autoCloseBrackets', 'autocompletion', 'autoSave']:
             # These require frontend to rebuild view (legacy behavior)
             # Persistence happens after this block once runtime updates succeed
@@ -2595,8 +2595,8 @@ async def update_preference(data: dict = Body(...)):
         else:
             editor_updates = {key: value}
             if key == 'trackAgentEdits' and bool(value):
-                editor_updates['trackCodexWsEdits'] = False
-            elif key == 'trackCodexWsEdits' and bool(value):
+                editor_updates['trackAgentSidebarEdits'] = False
+            elif key == 'trackAgentSidebarEdits' and bool(value):
                 editor_updates['trackAgentEdits'] = False
                 try:
                     from app.apps.file_editor_cm6 import change_ledger
