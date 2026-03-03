@@ -1,6 +1,6 @@
 import { buildUiUrl, wsUrlFromPath, fetchJsonWithBase } from './editor_common_utils.js';
 import { normalizeLanguageId, languageIdFromPath, monacoFileUri } from './editor_language_utils.js';
-import { expandShortHex, toMonacoColorHex, parseJsonc } from './editor_parse_utils.js';
+import { parseJsonc } from './editor_parse_utils.js';
 import { setUnsavedTrace, noteGitBaselineRequest } from './editor_trace_utils.js';
 import { createFileModel as createMonacoFileModel } from './editor_model_utils.js';
 import { setDebugPart, syncTraceDebug, syncMirrorDebug } from './editor_debug_utils.js';
@@ -20,6 +20,20 @@ import { isAdapterReady, wbIsFrameworkReady, wbIsBarrierOpen } from './editor_wo
 import { wbEmitDidChange } from './editor_workbench_emit_utils.js';
 import { wbBumpGeneration } from './editor_workbench_generation_utils.js';
 import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen, wbPublishDidChange } from './editor_workbench_flush_utils.js';
+import { buildMonacoOptionsFromPrefsState } from './editor_monaco_options_utils.js';
+import { ensureTe2DiffThemeApplied } from './editor_diff_theme_utils.js';
+import { getVscodeThemeJsonUrl } from './editor_theme_url_utils.js';
+import { vscodeThemeToMonacoTheme } from './editor_theme_convert_utils.js';
+import { buildDebugMessage } from './editor_debug_message_utils.js';
+import { applyLineNumberSizingForEditors } from './editor_line_number_utils.js';
+import { ensureThemeRegistryState } from './editor_theme_registry_state_utils.js';
+import { loadVscodeTextmateThemesRuntime } from './editor_theme_loader_runtime_utils.js';
+import { applyMonacoThemeRuntime } from './editor_theme_apply_runtime_utils.js';
+import { requestGitBaselinesDebounced } from './editor_git_baseline_request_utils.js';
+import { syncReadOnlyInputMode } from './editor_readonly_input_mode_utils.js';
+import { onEditorConfigChanged } from './editor_config_change_utils.js';
+import { clearDraftDiffZonesState } from './editor_draft_zone_clear_utils.js';
+import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear_utils.js';
 /* eslint-disable no-undef */
 (function() {
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
@@ -81,6 +95,10 @@ import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen
     gb_req_debounced: 0,
     gb_last_source: '-',
   };
+
+  function _fetch(url, init) {
+    return window.fetch(url, init);
+  }
 
   function _setUnsavedTrace(reason, unsaved) {
     setUnsavedTrace(_trace, reason, unsaved, _syncTraceDebug);
@@ -1921,136 +1939,11 @@ import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen
   }
 
   function buildMonacoOptionsFromPrefs(state) {
-    // NOTE: "No base editor state" means: no ad-hoc defaults in the host.
-    // We still need hard fallbacks if SSOT is missing values, but the goal is
-    // that PreferencesStore always provides a complete snapshot.
-    var prefs = null;
-    try { prefs = state && state.preferences ? state.preferences : state; } catch (_) {}
-    var editorPrefs = null;
-    try { editorPrefs = prefs && prefs.editor ? prefs.editor : (prefs && prefs.preferences && prefs.preferences.editor ? prefs.preferences.editor : null); } catch (_) {}
-    try {
-      // Host shells often send a flat "view_state" (no nested {editor:{...}}).
-      // Accept that as editorPrefs so the iframe can apply prefs without SSOT re-fetch.
-      if (!editorPrefs && prefs && typeof prefs.showLineNumbers === 'boolean') editorPrefs = prefs;
-      if (!editorPrefs && state && typeof state.showLineNumbers === 'boolean') editorPrefs = state;
-      if (!editorPrefs) editorPrefs = {};
-    } catch (_) { editorPrefs = editorPrefs || {}; }
-
-    var showLineNumbers = true;
-    try { if (typeof editorPrefs.showLineNumbers === 'boolean') showLineNumbers = editorPrefs.showLineNumbers; } catch (_) {}
-
-    var wordWrap = false;
-    try { if (typeof editorPrefs.wordWrap === 'boolean') wordWrap = editorPrefs.wordWrap; } catch (_) {}
-
-    var readOnly = false;
-    try { if (typeof editorPrefs.readOnly === 'boolean') readOnly = editorPrefs.readOnly; } catch (_) {}
-
-    var showMinimap = true;
-    try { if (typeof editorPrefs.showMinimap === 'boolean') showMinimap = editorPrefs.showMinimap; } catch (_) {}
-
-    var showIndentGuides = true;
-    try { if (typeof editorPrefs.showIndentGuides === 'boolean') showIndentGuides = editorPrefs.showIndentGuides; } catch (_) {}
-
-    var autoCloseBrackets = true;
-    try { if (typeof editorPrefs.autoCloseBrackets === 'boolean') autoCloseBrackets = editorPrefs.autoCloseBrackets; } catch (_) {}
-
-    var autocompletion = true;
-    try { if (typeof editorPrefs.autocompletion === 'boolean') autocompletion = editorPrefs.autocompletion; } catch (_) {}
-
-    var fontSize = 14;
-    try {
-      // In CM6, "fontScale" is a numeric scale factor.
-      // Keep the mapping conservative.
-      if (typeof editorPrefs.fontScale === 'number' && isFinite(editorPrefs.fontScale)) {
-        var s = editorPrefs.fontScale;
-        if (s > 0 && s < 10) fontSize = Math.round(14 * s);
-        else if (s >= 10 && s <= 48) fontSize = Math.round(s);
-      }
-    } catch (_) {}
-
-    var fontFamily = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-    try {
-      if (typeof editorPrefs.fontFamily === 'string' && editorPrefs.fontFamily.trim()) {
-        fontFamily = editorPrefs.fontFamily.trim();
-      }
-    } catch (_) {}
-
-    // Theme:
-    // - For built-in/known themes, we can pass the resolved Monaco theme id directly.
-    // - For VSIX themes (`vscode:*`), Monaco requires the theme to be defined before use.
-    //   We load/define the theme asynchronously in applyMonacoTheme(), so keep the
-    //   initial theme as a safe built-in to avoid fallback-to-light behavior.
-    var rawThemeKey = '';
-    try { rawThemeKey = String(editorPrefs.theme || ''); } catch (_) { rawThemeKey = ''; }
-    var theme = 'vs-dark';
-    try {
-      if (rawThemeKey && rawThemeKey.toLowerCase().startsWith('vscode:')) {
-        theme = 'vs-dark';
-      } else {
-        theme = resolveMonacoThemeId(rawThemeKey, loadVscodeTextmateThemes._jsonCache || {});
-      }
-    } catch (_) {
-      theme = 'vs-dark';
-    }
-
-    return {
-      value: '',
-      language: 'plaintext',
-      theme: theme,
-      // IMPORTANT:
-      // - TextMate scope theming is now enabled (VS Code grammars).
-      // - Semantic tokens can override TextMate colors. Until we implement full
-      //   VS Code-style `semanticTokenColors` mapping, keep semantic highlighting
-      //   theme-controlled to avoid "overriding" scope colors with defaults.
-      //
-      // VS Code accepts: true | false | "configuredByTheme". The pinned Monaco/VSCode
-      // build supports the same option shape.
-      'semanticHighlighting.enabled': true,
-      automaticLayout: true,
-      contextmenu: false,
-      readOnly: readOnly,
-      lineNumbers: showLineNumbers ? 'on' : 'off',
-      showFoldingControls: 'always',
-      wordWrap: wordWrap ? 'on' : 'off',
-      minimap: { enabled: !!showMinimap },
-      renderIndentGuides: !!showIndentGuides,
-      autoClosingBrackets: autoCloseBrackets ? 'always' : 'never',
-      // Monaco has multiple suggestion paths:
-      // - word based suggestions (no language service needed)
-      // - language service backed suggestions (ts/css/json/html workers)
-      // Keep both enabled when `autocompletion` is enabled.
-      quickSuggestions: autocompletion ? { other: true, comments: true, strings: true } : false,
-      suggestOnTriggerCharacters: !!autocompletion,
-      wordBasedSuggestions: autocompletion ? 'currentDocument' : 'off',
-      parameterHints: { enabled: !!autocompletion },
-      tabCompletion: autocompletion ? 'on' : 'off',
-      fontSize: fontSize,
-      fontFamily: fontFamily,
-    };
+    return buildMonacoOptionsFromPrefsState(state, loadVscodeTextmateThemes._jsonCache || {});
   }
 
   function ensureTe2DiffTheme() {
-    try {
-      if (!window.monaco || !window.monaco.editor || !window.monaco.editor.defineTheme) return;
-      if (ensureTe2DiffTheme._done) return;
-      ensureTe2DiffTheme._done = true;
-
-      window.monaco.editor.defineTheme('te2-vs-dark', {
-        base: 'vs-dark',
-        inherit: true,
-        rules: [],
-        colors: {
-          // Make diff backgrounds explicit so we don't end up "invisible" due to theme config.
-          'diffEditor.insertedLineBackground': 'rgba(46, 160, 67, 0.18)',
-          'diffEditor.insertedTextBackground': 'rgba(46, 160, 67, 0.28)',
-          'diffEditor.removedLineBackground': 'rgba(248, 81, 73, 0.14)',
-          'diffEditor.removedTextBackground': 'rgba(248, 81, 73, 0.24)',
-          // Subtle separators.
-          'diffEditor.border': 'rgba(255, 255, 255, 0.10)',
-          'diffEditor.diagonalFill': 'rgba(255, 255, 255, 0.04)',
-        },
-      });
-    } catch (_) {}
+    ensureTe2DiffTheme._done = ensureTe2DiffThemeApplied(window, !!ensureTe2DiffTheme._done);
   }
 
   // ensureTe2Themes / loadOfficialThemes — replaced by loadVscodeTextmateThemes() with dynamic registry.
@@ -2059,107 +1952,19 @@ import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen
   // Maps theme ID → { serveUrl, label, uiTheme, source }.
   var _themeRegistry = null;
   var _themeRegistryPromise = null;
+  var _themeRegistryState = { registry: null, promise: null };
 
   async function _ensureThemeRegistry() {
-    if (_themeRegistry) return _themeRegistry;
-    if (_themeRegistryPromise) return _themeRegistryPromise;
-    _themeRegistryPromise = (async function () {
-      try {
-        var res = await fetch(buildUiUrl(apiBase, 'monaco_editor/available_themes'), { cache: 'no-store' });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        var data = await res.json();
-        var themes = data && data.themes ? data.themes : [];
-        var reg = {};
-        for (var i = 0; i < themes.length; i++) {
-          var t = themes[i];
-          if (t && t.id && t.serveUrl) reg[t.id] = t;
-        }
-        _themeRegistry = reg;
-        return reg;
-      } catch (e) {
-        console.warn('[MonacoTheme] _ensureThemeRegistry failed', e);
-        _themeRegistry = {};
-        return _themeRegistry;
-      } finally {
-        _themeRegistryPromise = null;
-      }
-    })();
-    return _themeRegistryPromise;
+    _themeRegistryState.registry = _themeRegistry;
+    _themeRegistryState.promise = _themeRegistryPromise;
+    var reg = await ensureThemeRegistryState(_themeRegistryState, _fetch, buildUiUrl, apiBase);
+    _themeRegistry = reg;
+    _themeRegistryPromise = _themeRegistryState.promise;
+    return reg;
   }
 
   function _getVscodeThemeJsonUrl(themeId) {
-    var id = String(themeId || '');
-    // Look up in the dynamic theme registry
-    if (_themeRegistry && _themeRegistry[id] && _themeRegistry[id].serveUrl) {
-      return buildUiUrl(apiBase, _themeRegistry[id].serveUrl);
-    }
-    // Fallback: try vendored GitHub theme path directly
-    var vendoredMap = {
-      'github-dark-default': 'dark-default.json',
-      'github-light-default': 'light-default.json',
-      'github-dark': 'dark.json',
-      'github-light': 'light.json',
-      'github-dark-dimmed': 'dark-dimmed.json',
-      'github-dark-high-contrast': 'dark-high-contrast.json',
-      'github-light-high-contrast': 'light-high-contrast.json',
-      'github-dark-colorblind-beta': 'dark-colorblind.json',
-      'github-light-colorblind-beta': 'light-colorblind.json',
-    };
-    if (vendoredMap[id]) {
-      return buildUiUrl(apiBase, 'monaco_editor/themes/vendored/github/' + vendoredMap[id]);
-    }
-    return null;
-  }
-
-  function _vscodeTokenColorsToMonacoRules(tokenColors) {
-    var rules = [];
-    if (!Array.isArray(tokenColors)) return rules;
-    for (var i = 0; i < tokenColors.length; i++) {
-      var tc = tokenColors[i];
-      if (!tc || !tc.settings) continue;
-      var fg = toMonacoColorHex(tc.settings.foreground);
-      var bg = toMonacoColorHex(tc.settings.background);
-      var fontStyle = null;
-      if (typeof tc.settings.fontStyle === 'string') {
-        // VS Code uses space-separated: "italic bold underline". Monaco expects same.
-        fontStyle = tc.settings.fontStyle.trim();
-      }
-      var scopes = tc.scope;
-      var scopeList = [];
-      if (Array.isArray(scopes)) {
-        scopeList = scopes;
-      } else if (typeof scopes === 'string') {
-        scopeList = scopes.split(',');
-      } else {
-        continue;
-      }
-      for (var j = 0; j < scopeList.length; j++) {
-        var rawScope = scopeList[j];
-        if (rawScope == null) continue;
-        var scopeStr = String(rawScope || '').trim();
-        if (!scopeStr) continue;
-
-        // VS Code tokenColors allow "compound" scope selectors (e.g.
-        // "meta.import.python keyword.control.import.python"). Monaco's standalone
-        // token theming does not understand full TextMate selector semantics, and our
-        // TextMate tokenization currently feeds Monaco the last scope as the token id.
-        //
-        // To stay compatible, split on whitespace and register each scope segment as
-        // a possible token id. This provides a best-effort mapping for common themes.
-        var parts = scopeStr.split(/\s+/g);
-        for (var p = 0; p < parts.length; p++) {
-          var scope = String(parts[p] || '').trim();
-          if (!scope) continue;
-          var rule = { token: scope };
-          if (fg) rule.foreground = fg;
-          if (bg) rule.background = bg;
-          if (fontStyle) rule.fontStyle = fontStyle;
-          // Only keep rules that actually set something.
-          if (rule.foreground || rule.background || rule.fontStyle) rules.push(rule);
-        }
-      }
-    }
-    return rules;
+    return getVscodeThemeJsonUrl(themeId, _themeRegistryState.registry || _themeRegistry, apiBase);
   }
 
   // ---------------------------------------------------------------------------
@@ -2169,119 +1974,8 @@ import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen
   // directly against theme rules, but themes only define TextMate scopes.
   // This bridge resolves each semantic type to the correct TextMate colour.
   // ---------------------------------------------------------------------------
-  var _SEMANTIC_TO_TM_SCOPES = {
-    'comment':       ['comment'],
-    'string':        ['string'],
-    'keyword':       ['keyword.control', 'keyword'],
-    'number':        ['constant.numeric', 'constant'],
-    'regexp':        ['constant.regexp', 'constant'],
-    'operator':      ['keyword.operator', 'keyword'],
-    'namespace':     ['entity.name.namespace', 'entity.name', 'entity'],
-    'type':          ['entity.name.type', 'support.type', 'entity.name', 'entity'],
-    'struct':        ['entity.name.type.struct', 'entity.name.type', 'entity.name', 'entity'],
-    'class':         ['entity.name.type.class', 'entity.name.type', 'support.class', 'entity.name', 'entity'],
-    'interface':     ['entity.name.type.interface', 'entity.name.type', 'entity.name', 'entity'],
-    'enum':          ['entity.name.type.enum', 'entity.name.type', 'entity.name', 'entity'],
-    'typeParameter': ['entity.name.type.parameter', 'entity.name.type', 'entity.name', 'entity'],
-    'function':      ['entity.name.function', 'support.function', 'entity.name', 'entity'],
-    'method':        ['entity.name.function.member', 'entity.name.function', 'support.function', 'entity.name', 'entity'],
-    'macro':         ['entity.name.function.preprocessor', 'entity.name.function', 'entity.name', 'entity'],
-    'variable':      ['variable.other.readwrite', 'entity.name.variable', 'variable.other', 'variable'],
-    'parameter':     ['variable.parameter', 'variable'],
-    'property':      ['variable.other.property', 'variable.other', 'variable'],
-    'enumMember':    ['variable.other.enummember', 'variable.other', 'variable'],
-    'event':         ['variable.other.event', 'variable.other', 'variable'],
-    'decorator':     ['entity.name.decorator', 'entity.name.function', 'entity.name', 'entity'],
-  };
-  // Modifier-qualified overrides (semantic type.modifier → TextMate scope)
-  var _SEMANTIC_MOD_TO_TM_SCOPES = {
-    'variable.readonly':           ['variable.other.constant', 'variable.other', 'variable'],
-    'property.readonly':           ['variable.other.constant.property', 'variable.other.constant', 'variable.other', 'variable'],
-    'variable.defaultLibrary':     ['support.variable', 'support'],
-    'variable.defaultLibrary.readonly': ['support.constant', 'support'],
-    'property.defaultLibrary':     ['support.variable.property', 'support.variable', 'support'],
-    'function.defaultLibrary':     ['support.function', 'support'],
-  };
-
-  function _buildSemanticTokenRules(tokenColors) {
-    // Build a scope → settings lookup from the VS Code theme tokenColors
-    var scopeSettings = {};
-    if (!Array.isArray(tokenColors)) return [];
-    for (var i = 0; i < tokenColors.length; i++) {
-      var tc = tokenColors[i];
-      if (!tc || !tc.settings) continue;
-      var scopes = tc.scope;
-      var scopeList = Array.isArray(scopes) ? scopes
-        : typeof scopes === 'string' ? scopes.split(',') : [];
-      for (var j = 0; j < scopeList.length; j++) {
-        var s = String(scopeList[j] || '').trim();
-        if (s) scopeSettings[s] = tc.settings;
-      }
-    }
-
-    // Resolve a list of candidate TM scopes (most-specific first) to settings
-    function resolve(tmScopes) {
-      for (var k = 0; k < tmScopes.length; k++) {
-        if (scopeSettings[tmScopes[k]]) return scopeSettings[tmScopes[k]];
-      }
-      return null;
-    }
-
-    var rules = [];
-    function addRule(token, settings) {
-      if (!settings) return;
-      var r = { token: token };
-      var fg = toMonacoColorHex(settings.foreground);
-      if (fg) r.foreground = fg;
-      if (typeof settings.fontStyle === 'string') r.fontStyle = settings.fontStyle.trim();
-      if (r.foreground || r.fontStyle) rules.push(r);
-    }
-
-    // Base types
-    for (var semType in _SEMANTIC_TO_TM_SCOPES) {
-      if (!Object.prototype.hasOwnProperty.call(_SEMANTIC_TO_TM_SCOPES, semType)) continue;
-      addRule(semType, resolve(_SEMANTIC_TO_TM_SCOPES[semType]));
-    }
-    // Modifier-qualified overrides
-    for (var semMod in _SEMANTIC_MOD_TO_TM_SCOPES) {
-      if (!Object.prototype.hasOwnProperty.call(_SEMANTIC_MOD_TO_TM_SCOPES, semMod)) continue;
-      addRule(semMod, resolve(_SEMANTIC_MOD_TO_TM_SCOPES[semMod]));
-    }
-    return rules;
-  }
-
   function _vscodeThemeToMonacoTheme(themeId, vscodeJson) {
-    var themeKey = String(themeId || '');
-    var uiTheme = null;
-    try {
-      uiTheme = vscodeJson && typeof vscodeJson.uiTheme === 'string' ? vscodeJson.uiTheme : null;
-    } catch (_) {}
-    var isLight = false;
-    try {
-      if (uiTheme) {
-        isLight = String(uiTheme).toLowerCase().includes('light');
-      } else {
-        isLight = themeKey.toLowerCase().includes('light');
-      }
-    } catch (_) { isLight = themeKey.toLowerCase().includes('light'); }
-    var tokenColors = vscodeJson && vscodeJson.tokenColors ? vscodeJson.tokenColors : [];
-    var colorsIn = vscodeJson && vscodeJson.colors ? vscodeJson.colors : {};
-    var colors = {};
-    try {
-      for (var k in colorsIn) {
-        if (!Object.prototype.hasOwnProperty.call(colorsIn, k)) continue;
-        var v = colorsIn[k];
-        if (typeof v === 'string') {
-          colors[k] = expandShortHex(v);
-        }
-      }
-    } catch (_) {}
-    return {
-      base: isLight ? 'vs' : 'vs-dark',
-      inherit: true,
-      rules: _vscodeTokenColorsToMonacoRules(tokenColors).concat(_buildSemanticTokenRules(tokenColors)),
-      colors: colors,
-    };
+    return vscodeThemeToMonacoTheme(themeId, vscodeJson);
   }
 
   // ------------------------------------------------------------------
@@ -2518,96 +2212,42 @@ import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen
   }
 
   async function loadVscodeTextmateThemes() {
-    if (loadVscodeTextmateThemes._done) return;
-    if (!window.monaco || !window.monaco.editor || !window.monaco.editor.defineTheme) return;
-    if (loadVscodeTextmateThemes._promise) return loadVscodeTextmateThemes._promise;
-    loadVscodeTextmateThemes._promise = (async function () {
-      if (!loadVscodeTextmateThemes._jsonCache) loadVscodeTextmateThemes._jsonCache = {};
-      // Fetch theme registry and load all available themes
-      var reg = await _ensureThemeRegistry();
-      var themeIds = Object.keys(reg);
-      if (!themeIds.length) {
-        // Fallback: try the two essential ones with vendored hardcoded paths
-        themeIds = ['github-dark-default', 'github-light-default'];
-      }
-      for (var i = 0; i < themeIds.length; i++) {
-        var id = themeIds[i];
-        var url = _getVscodeThemeJsonUrl(id);
-        if (!url) continue;
-        try {
-          var res = await fetch(url, { cache: 'no-store' });
-          if (!res.ok) {
-            console.warn('[MonacoTheme] missing vscode theme', id, res.status);
-            continue;
-          }
-          var json = await res.json();
-          loadVscodeTextmateThemes._jsonCache[id] = json;
-          var monacoTheme = _vscodeThemeToMonacoTheme(id, json);
-          window.monaco.editor.defineTheme(id, monacoTheme);
-          console.log('[MonacoTheme] loaded vscode theme', id, 'rules=', monacoTheme.rules.length);
-        } catch (e) {
-          console.warn('[MonacoTheme] failed vscode theme', id, e);
-        }
-      }
-      loadVscodeTextmateThemes._done = true;
-    })();
-    return loadVscodeTextmateThemes._promise;
+    return loadVscodeTextmateThemesRuntime({
+      win: window,
+      state: loadVscodeTextmateThemes,
+      ensureThemeRegistryFn: _ensureThemeRegistry,
+      getThemeJsonUrlFn: _getVscodeThemeJsonUrl,
+      fetchFn: _fetch,
+      toMonacoThemeFn: _vscodeThemeToMonacoTheme,
+    });
   }
 
   async function applyMonacoTheme(themeKey) {
+    var activeTheme = await applyMonacoThemeRuntime({
+      win: window,
+      doc: document,
+      themeKey: themeKey,
+      ensureTe2DiffThemeFn: ensureTe2DiffTheme,
+      loadThemesFn: loadVscodeTextmateThemes,
+      resolveThemeIdFn: function (k, c) { return resolveMonacoThemeId(k, c || {}); },
+      getThemeJsonUrlFn: _getVscodeThemeJsonUrl,
+      fetchFn: _fetch,
+      toMonacoThemeFn: _vscodeThemeToMonacoTheme,
+      getJsonCacheFn: function () { return loadVscodeTextmateThemes._jsonCache || {}; },
+      setJsonCacheFn: function (cache) { loadVscodeTextmateThemes._jsonCache = cache || {}; },
+      applyThemeToTextmateRegistryFn: _applyThemeToTextmateRegistry,
+    });
+    if (activeTheme) tmActiveThemeJson = activeTheme;
+    _forceSemanticHighlighting();
+    try { _patchSemanticTokenColorIndices('applyMonacoTheme'); } catch (_) {}
     try {
-      if (!window.monaco || !window.monaco.editor || !window.monaco.editor.setTheme) return;
-      ensureTe2DiffTheme();
-      try { await loadVscodeTextmateThemes(); } catch (_) {}
-      var resolvedId = resolveMonacoThemeId(themeKey, loadVscodeTextmateThemes._jsonCache || {});
-      var cache = loadVscodeTextmateThemes._jsonCache || {};
-      // Lazy-load single theme if not yet cached (e.g. installed after initial load)
-      if (!cache[resolvedId]) {
-        var url = _getVscodeThemeJsonUrl(resolvedId);
-        if (url) {
-          try {
-            var res = await fetch(url, { cache: 'no-store' });
-            if (res.ok) {
-              var json = await res.json();
-              cache[resolvedId] = json;
-              var monacoTheme = _vscodeThemeToMonacoTheme(resolvedId, json);
-              window.monaco.editor.defineTheme(resolvedId, monacoTheme);
-            }
-          } catch (_) {}
+      var models = window.monaco.editor.getModels();
+      for (var mi = 0; mi < models.length; mi++) {
+        if (models[mi] && typeof models[mi].resetTokenization === 'function') {
+          models[mi].resetTokenization();
         }
       }
-      window.monaco.editor.setTheme(resolvedId);
-      // Sync theme base class to <html> so touch-selection menu CSS can key off it.
-      // Touch menu is appended to document.documentElement, not body.
-      try {
-        document.documentElement.classList.remove('vs', 'vs-dark', 'hc-black', 'hc-light');
-        var _base = (cache[resolvedId] && cache[resolvedId].uiTheme) || '';
-        if (!_base) _base = resolvedId.toLowerCase().includes('light') ? 'vs' : 'vs-dark';
-        else if (_base.includes('light')) _base = 'vs';
-        else _base = 'vs-dark';
-        document.documentElement.classList.add(_base);
-        console.log('[touch-theme] html class set to', _base, 'for theme', resolvedId);
-      } catch (_) {}
-      // Apply theme to TextMate registry so tokenizeLine2 resolves colors correctly.
-      if (cache[resolvedId]) {
-        tmActiveThemeJson = cache[resolvedId];
-        _applyThemeToTextmateRegistry(tmActiveThemeJson);
-      }
-      _forceSemanticHighlighting();
-      try { _patchSemanticTokenColorIndices('applyMonacoTheme'); } catch (_) {}
-      // Force retokenization on all open models so cached line tokens
-      // pick up the new theme's color map and translation table.
-      try {
-        var models = window.monaco.editor.getModels();
-        for (var mi = 0; mi < models.length; mi++) {
-          if (models[mi] && typeof models[mi].resetTokenization === 'function') {
-            models[mi].resetTokenization();
-          }
-        }
-      } catch (_) {}
-    } catch (e) {
-      console.warn('[Monaco] applyMonacoTheme failed', e);
-    }
+    } catch (_) {}
   }
 
   function emitToHost(eventName, payload) {
@@ -2615,24 +2255,17 @@ import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen
   }
 
   function requestGitBaselines(opts) {
-    try {
-      var immediate = !!(opts && opts.immediate);
-      var reason = (opts && opts.reason) ? String(opts.reason) : 'unknown';
-      _noteGitBaselineRequest(reason, immediate);
-      if (immediate) {
-        if (gitBaselineDebounceT) clearTimeout(gitBaselineDebounceT);
-        gitBaselineDebounceT = null;
-        return _emitGitBaselineRequestNow();
-      }
-      if (gitBaselineDebounceT) clearTimeout(gitBaselineDebounceT);
-      gitBaselineDebounceT = setTimeout(function() {
-        gitBaselineDebounceT = null;
-        try { _emitGitBaselineRequestNow(); } catch (_) {}
-      }, _gitBaselineDebounceMs());
-      return true;
-    } catch (_) {
-      return false;
-    }
+    return requestGitBaselinesDebounced({
+      immediate: !!(opts && opts.immediate),
+      reason: (opts && opts.reason) ? String(opts.reason) : 'unknown',
+      timer: gitBaselineDebounceT,
+      setTimerFn: function (t) { gitBaselineDebounceT = t; },
+      noteRequestFn: _noteGitBaselineRequest,
+      emitNowFn: _emitGitBaselineRequestNow,
+      debounceMs: _gitBaselineDebounceMs(),
+      setTimeoutFn: setTimeout,
+      clearTimeoutFn: clearTimeout,
+    });
   }
 
   function applyGitBaselines(payload) {
@@ -3138,53 +2771,25 @@ import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen
 
   // Suppress soft keyboard on mobile when editor is readOnly.
   function _syncReadOnlyInputMode(ed) {
-    try {
-      if (!ed) return;
-      var dom = ed.getDomNode && ed.getDomNode();
-      if (!dom) return;
-      var ta = dom.querySelector('textarea.inputarea') || dom.querySelector('textarea');
-      if (!ta) return;
-      var ro = ed.getOption(monaco.editor.EditorOption.readOnly);
-      ta.setAttribute('inputmode', ro ? 'none' : 'text');
-      // Dismiss already-visible keyboard when switching to readOnly.
-      if (ro && ta === document.activeElement) ta.blur();
-    } catch (_) {}
+    syncReadOnlyInputMode(ed, monaco, document);
   }
 
   var _lastKnownReadOnly = null;
   function _onEditorConfigChanged(ed) {
-    _syncReadOnlyInputMode(ed);
-    try {
-      if (!ed) return;
-      var ro = ed.getOption(monaco.editor.EditorOption.readOnly);
-      if (_lastKnownReadOnly !== null && ro !== _lastKnownReadOnly) {
-        // Persist via HTTP endpoint (server persists + broadcasts full snapshot).
-        fetch('/api/app/file_editor_cm6/editor/update_preference', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: 'readOnly', value: ro })
-        }).catch(function(e) { console.warn('[Monaco] readOnly pref save failed', e); });
-      }
-      _lastKnownReadOnly = ro;
-    } catch (_) {}
+    onEditorConfigChanged(ed, {
+      syncReadOnlyInputModeFn: _syncReadOnlyInputMode,
+      lastKnownReadOnly: _lastKnownReadOnly,
+      setLastKnownReadOnlyFn: function (ro) { _lastKnownReadOnly = ro; },
+      monacoRef: monaco,
+      fetchFn: _fetch,
+    });
   }
 
   function updateDebug(extra) {
     try {
       if (!dbg) dbg = document.getElementById('fh-debug');
       if (!dbg) return;
-      var hasExt = !!(window['monaco-touch-selection'] && window['monaco-touch-selection'].editorTouchSelectionHelp);
-      var og = editor && editor.getDomNode ? editor.getDomNode().querySelector('.overflow-guard') : null;
-      var msg = 'ext=' + (hasExt ? 'yes' : 'no') + ' og=' + (og ? 'yes' : 'no');
-      if (extra) debugParts.extra = extra;
-      if (debugParts.git) msg += ' ' + debugParts.git;
-      if (debugParts.draft) msg += ' ' + debugParts.draft;
-      if (debugParts.diag) msg += ' ' + debugParts.diag;
-      if (debugParts.flags) msg += ' ' + debugParts.flags;
-      if (debugParts.mirror) msg += ' ' + debugParts.mirror;
-      if (debugParts.trace) msg += ' ' + debugParts.trace;
-      if (debugParts.extra) msg += ' ' + debugParts.extra;
-      dbg.textContent = msg;
+      dbg.textContent = buildDebugMessage(dbg, editor, debugParts, extra);
     } catch (_) {}
   }
 
@@ -3221,32 +2826,19 @@ import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen
   }
 
   function clearDraftDiffDecorations() {
-    try {
-      clearDraftDiffZones();
-      if (draftDecoCollection && draftDecoCollection.clear) {
-        draftDecoCollection.clear();
-      } else if (editor && editor.deltaDecorations) {
-        draftDecoIds = editor.deltaDecorations(draftDecoIds, []);
-      }
-    } catch (_) {}
-    setDebugDraft(null);
-    lastDraftZones = null;
+    var next = clearDraftDiffDecorationsState({
+      clearZonesFn: clearDraftDiffZones,
+      draftDecoCollection: draftDecoCollection,
+      editor: editor,
+      draftDecoIds: draftDecoIds,
+      setDebugDraftFn: setDebugDraft,
+    });
+    draftDecoIds = next.draftDecoIds;
+    lastDraftZones = next.lastDraftZones;
   }
 
   function clearDraftDiffZones() {
-    try {
-      if (!editor || !editor.changeViewZones) {
-        draftZoneIds = [];
-        return;
-      }
-      if (!draftZoneIds || !draftZoneIds.length) return;
-      editor.changeViewZones(function(accessor) {
-        for (var i = 0; i < draftZoneIds.length; i++) {
-          try { accessor.removeZone(draftZoneIds[i]); } catch (_) {}
-        }
-      });
-    } catch (_) {}
-    draftZoneIds = [];
+    draftZoneIds = clearDraftDiffZonesState(editor, draftZoneIds);
   }
 
   function applyDraftZones(zones) {
@@ -3330,23 +2922,7 @@ import { wbFlushDidChangeIfReady, wbFlushSymbolsIfReady, wbFlushPendingAfterOpen
   }
 
   function applyLineNumberSizing() {
-    try {
-      if (!editor || !window.monaco) return;
-      var maxLines = 1;
-      try { if (model && model.getLineCount) maxLines = Math.max(maxLines, model.getLineCount()); } catch (_) {}
-      try { if (gitHeadModel && gitHeadModel.getLineCount) maxLines = Math.max(maxLines, gitHeadModel.getLineCount()); } catch (_) {}
-      try { if (gitDiskModel && gitDiskModel.getLineCount) maxLines = Math.max(maxLines, gitDiskModel.getLineCount()); } catch (_) {}
-      var digits = String(maxLines || 1).length;
-      var minChars = Math.max(4, digits + 1);
-      if (diffEditor && diffEditor.getOriginalEditor && diffEditor.getModifiedEditor) {
-        var diffMin = Math.max(4, digits + 1);
-        try { diffEditor.getOriginalEditor().updateOptions({ lineNumbersMinChars: diffMin }); } catch (_) {}
-        try { diffEditor.getModifiedEditor().updateOptions({ lineNumbersMinChars: diffMin }); } catch (_) {}
-        try { editor.updateOptions({ lineNumbersMinChars: diffMin }); } catch (_) {}
-      } else {
-        try { editor.updateOptions({ lineNumbersMinChars: minChars }); } catch (_) {}
-      }
-    } catch (_) {}
+    applyLineNumberSizingForEditors(editor, diffEditor, model, gitHeadModel, gitDiskModel);
   }
 
   function _ensureDraftDecoCollection() {
