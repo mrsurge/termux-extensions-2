@@ -74,6 +74,54 @@ import { handleSemanticTokensProviderRegistered } from './editor_socket_semantic
 import { handleIssuesDumpRequest } from './editor_socket_issues_dump_handler_utils.js';
 import { handleIssuesCommand } from './editor_socket_issues_cmd_handler_utils.js';
 import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
+import { isCacheStatePayloadForCurrentPath, isCacheStateClean, isCacheStateUnsaved } from './editor_cache_state_payload_utils.js';
+import { shouldSkipAutosaveBaselineRefresh } from './editor_cache_state_autosave_skip_utils.js';
+import { resnapshotDraftBaseline } from './editor_cache_state_resnapshot_utils.js';
+import { handleCleanCacheState } from './editor_cache_state_clean_handler_utils.js';
+import { handleUnsavedCacheState } from './editor_cache_state_unsaved_handler_utils.js';
+import { logDiagnosticsEvent } from './editor_diagnostics_log_utils.js';
+import { applyDiagnosticsBridgeUpdate } from './editor_diagnostics_apply_update_utils.js';
+import { handleGitBaselinesSocketEvent } from './editor_git_baselines_socket_handler_utils.js';
+import { initBreadcrumbElement } from './editor_breadcrumb_init_utils.js';
+import { loadBreadcrumbIcons } from './editor_breadcrumb_icons_loader_utils.js';
+import { shouldUpdateBreadcrumbPath } from './editor_breadcrumb_update_path_utils.js';
+import { resolveBreadcrumbSymbolsLangId } from './editor_breadcrumb_symbols_lang_utils.js';
+import { getBreadcrumbSymbolsTimeoutMs } from './editor_breadcrumb_symbols_timeout_utils.js';
+import { unwrapBreadcrumbSymbols } from './editor_breadcrumb_symbols_unwrap_utils.js';
+import { symbolRangeToLineBounds } from './editor_breadcrumb_symbol_range_utils.js';
+import { breadcrumbSymbolIcon } from './editor_breadcrumb_symbol_icon_utils.js';
+import { canInstallScrollPublisher } from './editor_scroll_publisher_guard_utils.js';
+import { buildScrollStatePayload } from './editor_scroll_publisher_payload_utils.js';
+import { shouldSendScrollImmediately } from './editor_scroll_publisher_throttle_utils.js';
+import { scheduleScrollSend } from './editor_scroll_publisher_schedule_utils.js';
+import { shouldApplyMirrorPath } from './editor_apply_mirror_path_utils.js';
+import { applyMirrorContent } from './editor_apply_mirror_content_utils.js';
+import { connectUiIpcSocket } from './editor_ui_ipc_connect_utils.js';
+import { registerConsoleWorker } from './editor_ui_ipc_register_utils.js';
+import { safeSerializeConsoleArg } from './editor_console_safe_serialize_utils.js';
+import { serializeConsoleArg } from './editor_console_serialize_arg_utils.js';
+import { emitConsoleLog } from './editor_console_emit_log_utils.js';
+import { patchConsoleLevels } from './editor_console_patch_levels_utils.js';
+import { installConsoleErrorHooks } from './editor_console_error_hooks_utils.js';
+import { handleConsoleEval } from './editor_console_eval_handler_utils.js';
+import { bindSaveKeyCommand } from './editor_ui_ipc_save_key_utils.js';
+import { bindFocusRelay } from './editor_ui_ipc_focus_relay_utils.js';
+import { findBreadcrumbSymbolChain } from './editor_breadcrumb_find_symbol_chain_utils.js';
+import { splitBreadcrumbPathParts } from './editor_breadcrumb_split_parts_utils.js';
+import { appendBreadcrumbSeparator } from './editor_breadcrumb_append_sep_utils.js';
+import { isBreadcrumbFileSegment } from './editor_breadcrumb_is_file_segment_utils.js';
+import { createBreadcrumbPathItem } from './editor_breadcrumb_create_path_item_utils.js';
+import { getBreadcrumbIconTheme } from './editor_breadcrumb_icon_theme_utils.js';
+import { applyBreadcrumbFileIcon } from './editor_breadcrumb_apply_icon_utils.js';
+import { shouldRenderBreadcrumbSymbolChain } from './editor_breadcrumb_should_render_symbols_utils.js';
+import { getBreadcrumbSymbolPosition } from './editor_breadcrumb_symbol_position_utils.js';
+import { createBreadcrumbSymbolItem } from './editor_breadcrumb_create_symbol_item_utils.js';
+import { finalizeBreadcrumbScroll } from './editor_breadcrumb_finalize_scroll_utils.js';
+import { getBreadcrumbPathClickTarget } from './editor_breadcrumb_path_click_utils.js';
+import { getBreadcrumbSymbolClickPosition } from './editor_breadcrumb_symbol_click_utils.js';
+import { collectBootLanguageIds } from './editor_boot_language_ids_utils.js';
+import { warnIfPlaintextOnlyLanguages } from './editor_boot_plaintext_warn_utils.js';
+import { applyActiveModelLanguage } from './editor_boot_apply_active_model_language_utils.js';
 /* eslint-disable no-undef */
 (function() {
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
@@ -3563,7 +3611,7 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
       });
 
       editorSocket.on('editor:git_baselines', function(payload) {
-        applyGitBaselines(payload);
+        handleGitBaselinesSocketEvent(payload, applyGitBaselines);
       });
 
       editorSocket.on('editor:draft_diff', function(payload) {
@@ -3576,68 +3624,25 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
 
       editorSocket.on('editor:cache_state', function(payload) {
         try {
-          if (!payload || !payload.path || !currentPath) return;
-          if (String(payload.path) !== String(currentPath)) return;
-          if (payload.unsaved === false) {
-            clearDraftDiffDecorations();
-            try {
-              if (getAutoSave()) {
-                // Only refresh if diff editor isn't set up yet or flags are stale.
-                var _skipRefresh = false;
-                if (diffEditor && diffEditor.getModel) {
-                  var _dm = diffEditor.getModel();
-                  if (_dm && _dm.original === gitHeadModel && _dm.modified === model && !!_dm.te2AutosaveMode) {
-                    _skipRefresh = true;
-                  }
-                } else {
-                  _skipRefresh = true;
-                }
-                if (!_skipRefresh) requestGitBaselines({ reason: 'cache_state_clean_autosave' });
-              } else {
-                // Draft mode save: re-snapshot the modifiedBaseline so the diff
-                // recomputes against the newly saved content (clean state).
-                if (diffEditor && diffEditor.getModel && diffEditor.setModel) {
-                  try {
-                    var _dm2 = diffEditor.getModel();
-                    if (_dm2 && _dm2.te2FreezeProjection && _dm2.modifiedBaseline) {
-                      var _mvs2 = null;
-                      try {
-                        var _me3 = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
-                        if (_me3) _mvs2 = _me3.saveViewState();
-                      } catch (_) {}
-
-                      var freshContent = model.getValue ? model.getValue() : '';
-                      var freshLang = model.getLanguageId ? model.getLanguageId() : 'plaintext';
-                      var freshBaseline = monaco.editor.createModel(freshContent, freshLang);
-                      diffEditor.setModel({
-                        original: _dm2.original,
-                        modified: _dm2.modified,
-                        modifiedBaseline: freshBaseline,
-                        te2AutosaveMode: false,
-                        te2FreezeProjection: true,
-                      });
-
-                      try {
-                        if (_mvs2) {
-                          var _me4 = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
-                          if (_me4) _me4.restoreViewState(_mvs2);
-                        }
-                      } catch (_) {}
-                      console.log('[GitBaselines] draft save: re-snapshotted modifiedBaseline');
-                    }
-                  } catch (e) {
-                    console.warn('[GitBaselines] draft save baseline re-snapshot failed', e);
-                  }
-                }
-                requestGitBaselines({ immediate: true, reason: 'cache_state_clean' });
-              }
-            } catch (_) {}
-            _setUnsavedTrace(payload.reason || 'cache_state', false);
+          if (!isCacheStatePayloadForCurrentPath(payload, currentPath)) return;
+          if (isCacheStateClean(payload)) {
+            handleCleanCacheState({
+              payload: payload,
+              clearDraftDiffDecorationsFn: clearDraftDiffDecorations,
+              getAutoSaveFn: getAutoSave,
+              shouldSkipAutosaveFn: shouldSkipAutosaveBaselineRefresh,
+              diffEditor: diffEditor,
+              gitHeadModel: gitHeadModel,
+              model: model,
+              requestGitBaselinesFn: requestGitBaselines,
+              resnapshotDraftBaselineFn: resnapshotDraftBaseline,
+              monacoRef: monaco,
+              setUnsavedTraceFn: _setUnsavedTrace,
+            });
             return;
           }
-          if (payload.unsaved === true) {
-            _setUnsavedTrace(payload.reason || 'cache_state', true);
-            requestDraftDiff('cache_state');
+          if (isCacheStateUnsaved(payload)) {
+            handleUnsavedCacheState(payload, _setUnsavedTrace, requestDraftDiff);
           }
         } catch (_) {}
       });
@@ -3646,33 +3651,8 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
       // This arrives over the already-connected Socket.IO, avoiding the vscode_api_ws race.
       editorSocket.on('editor:diagnostics', function(payload) {
         try {
-          if (!payload || typeof payload !== 'object') return;
-          var _ts = '';
-          try {
-            var _t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
-              ? (Math.round(performance.now() * 10) / 10)
-              : null;
-            _ts = (_t != null ? ('t=' + _t + 'ms ') : '') + 'now=' + Date.now();
-          } catch (_) { _ts = 'now=' + Date.now(); }
-          var modelUri = (model && model.uri) ? String(model.uri.toString()) : '';
-          var activePath = currentPath ? String(currentPath) : _absPathFromVscodeUri(modelUri);
-          var payloadPath = payload.path ? String(payload.path) : '';
-          console.log(_ts, '[editor:diagnostics] rx', payload.type,
-            'path=' + (payloadPath || '?'),
-            'markers=' + ((payload.markers || []).length),
-            'currentPath=' + currentPath,
-            'modelUri=' + modelUri,
-            'activePath=' + activePath
-          );
-          // Full diagnostic objects for severity inspection
-          if (payload.markers && payload.markers.length) {
-            console.log('[editor:diagnostics] first 5 markers:', payload.markers.slice(0, 5));
-          }
-          if (payload.type === 'diagnostics/update') {
-            // Convert server-side bridge format to the format _applyDiagnosticsUpdate expects.
-            var items = [{ uri: 'file://' + (payload.path || ''), markers: payload.markers || [] }];
-            _applyDiagnosticsUpdate({ owner: payload.owner || 'workbench', items: items });
-          }
+          logDiagnosticsEvent(payload, model, currentPath, _absPathFromVscodeUri);
+          applyDiagnosticsBridgeUpdate(payload, _applyDiagnosticsUpdate);
         } catch (_) {}
       });
 
@@ -3736,8 +3716,7 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
 
   function installScrollPublisher() {
     try {
-      if (!editor || !editor.onDidScrollChange || !editor.onDidChangeCursorPosition) return;
-      if (installScrollPublisher._done) return;
+      if (!canInstallScrollPublisher(editor, installScrollPublisher._done)) return;
       installScrollPublisher._done = true;
 
       var lastSentAt = 0;
@@ -3748,31 +3727,23 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
         try {
           if (!editorSocket || !editorSocket.connected) return;
           if (!currentPath || !model) return;
-          var pos = null;
-          try { pos = editor.getPosition(); } catch (_) { pos = null; }
-          var line = pos && pos.lineNumber ? pos.lineNumber : null;
-          var col = pos && pos.column ? pos.column : null;
-          if (!line) return;
-          editorSocket.emit('editor_scroll_state', {
-            path: currentPath,
-            line: line,
-            column: col || 1,
-          });
+          var payload = buildScrollStatePayload(editor, currentPath);
+          if (!payload) return;
+          editorSocket.emit('editor_scroll_state', payload);
           lastSentAt = Date.now();
-          try { bcUpdateCursor(line); } catch (_) {}
+          try { bcUpdateCursor(payload.cursorLine); } catch (_) {}
         } catch (_) {}
       };
 
       var schedule = function() {
         try {
           var now = Date.now();
-          // Throttle: at most once every ~400ms.
-          if (now - lastSentAt > 400) {
+          if (shouldSendScrollImmediately(now, lastSentAt, 400)) {
             send();
             return;
           }
           if (pendingT) return;
-          pendingT = setTimeout(send, 450);
+          pendingT = scheduleScrollSend(setTimeout, send, 450);
         } catch (_) {}
       };
 
@@ -3788,18 +3759,11 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
     if (!editor) return;
 
     var nextPath = (typeof data.path === 'string' && data.path) ? data.path : null;
-    if (currentPath && nextPath && String(nextPath) !== String(currentPath)) return;
+    if (!shouldApplyMirrorPath(currentPath, nextPath)) return;
 
     var content = (typeof data.content === 'string') ? data.content : '';
     try {
-      if (model && model.getFullModelRange) {
-        var _mirrorRange = model.getFullModelRange();
-        model.applyEdits([{ range: _mirrorRange, text: content }]);
-      } else if (model && model.setValue) {
-        model.setValue(content);
-      } else {
-        editor.setValue(content);
-      }
+      applyMirrorContent(model, editor, content);
     } catch (_) {}
 
     ensureTouchSelection('mirror-post');
@@ -3816,19 +3780,16 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
   var _bcGetIcon = null; // seti-icons getIcon (loaded async)
 
   function bcInit() {
-    _bcEl = document.getElementById('te2-breadcrumbs');
-    // Load seti-icons ESM module for file icons
-    import('/static/vendor/seti-icons/seti-icons.js').then(function(mod) {
-      mod.ensureLoaded();
-      _bcGetIcon = mod.getIcon;
-      // Re-render if we already have a path (icons were missing on first render)
+    _bcEl = initBreadcrumbElement(document);
+    loadBreadcrumbIcons(function(path) { return import(path); }, function(getIcon) {
+      _bcGetIcon = getIcon;
       if (_bcLastPath) _bcRender();
-    }).catch(function(e) { console.warn('[BC] seti-icons load failed:', e); });
+    }, function(e) { console.warn('[BC] seti-icons load failed:', e); });
   }
 
   function bcUpdatePath(absPath, deferSymbols) {
-    if (!_bcEl || !absPath) return;
-    if (absPath === _bcLastPath && !deferSymbols) return;
+    if (!_bcEl) return;
+    if (!shouldUpdateBreadcrumbPath(absPath, _bcLastPath, deferSymbols)) return;
     _bcLastPath = absPath;
     _bcSymbols = [];
     _bcRender();
@@ -3845,8 +3806,7 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
       return;
     }
     var seq = ++_bcSymbolsSeq;
-    var langId = (model && model.getLanguageId) ? model.getLanguageId() : '';
-    if (!langId) langId = languageFromPath(absPath) || '';
+    var langId = resolveBreadcrumbSymbolsLangId(model, absPath, languageFromPath);
     // plaintext has no symbol provider and never will — skip to avoid
     // 8s timeout loops that trigger workbench re-opens and cursor resets.
     if (langId === 'plaintext') {
@@ -3855,7 +3815,7 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
       return;
     }
     // TS/JS extensions can be slow to activate on mobile — give them extra time
-    var tms = (langId === 'javascript' || langId === 'typescript' || langId === 'javascriptreact' || langId === 'typescriptreact') ? 15000 : 8000;
+    var tms = getBreadcrumbSymbolsTimeoutMs(langId);
     editorWorkbenchCall('symbols', {
       path: absPath,
       languageId: langId,
@@ -3865,11 +3825,7 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
       if (generation !== _wbCurrentGeneration()) return; // stale generation
       if (String(absPath || '') !== String(currentPath || '')) return; // stale path
       // Unwrap adapter response: {ok, result: [...]} or raw array
-      var symbols = result;
-      if (symbols && typeof symbols === 'object' && !Array.isArray(symbols)) {
-        symbols = symbols.result || symbols.symbols || [];
-      }
-      _bcSymbols = Array.isArray(symbols) ? symbols : [];
+      _bcSymbols = unwrapBreadcrumbSymbols(result);
       console.log('[BC] symbols received:', _bcSymbols.length, _bcSymbols.slice(0, 2));
       _bcRender();
     }).catch(function(e) { console.warn('[BC] symbols request failed:', e); });
@@ -3881,39 +3837,7 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
   }
 
   function _bcFindSymbolChain(symbols, line) {
-    var chain = [];
-    var cur = symbols;
-    while (cur && cur.length) {
-      var found = null;
-      for (var i = 0; i < cur.length; i++) {
-        var s = cur[i];
-        var r = s.range || (s.location && s.location.range);
-        if (!r) continue;
-        // Handle both Monaco (1-indexed) and LSP (0-indexed) range formats
-        var startLine, endLine;
-        if (typeof r.startLineNumber === 'number') {
-          startLine = r.startLineNumber;
-          endLine = r.endLineNumber || 999999;
-        } else if (r.start && typeof r.start.line === 'number') {
-          startLine = r.start.line + 1; // LSP is 0-indexed
-          endLine = (r.end && typeof r.end.line === 'number') ? r.end.line + 1 : 999999;
-        } else if (typeof r.startLine === 'number') {
-          startLine = r.startLine;
-          endLine = r.endLine || 999999;
-        } else {
-          // Try array format [startLine, startCol, endLine, endCol]
-          if (Array.isArray(r) && r.length >= 3) {
-            startLine = r[0] + 1;
-            endLine = r[2] + 1;
-          } else continue;
-        }
-        if (line >= startLine && line <= endLine) { found = s; break; }
-      }
-      if (!found) break;
-      chain.push(found);
-      cur = found.children || [];
-    }
-    return chain;
+    return findBreadcrumbSymbolChain(symbols, line, symbolRangeToLineBounds);
   }
 
   // Symbol kind -> codicon class + color (LSP SymbolKind values, VS Code-style colors)
@@ -3944,10 +3868,7 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
   };
 
   function _bcSymbolSvg(kind) {
-    var entry = _SYM_CODICON[kind];
-    var cls = entry ? entry[0] : 'codicon-symbol-misc';
-    var col = entry ? entry[1] : '#8b949e';
-    return '<span class="codicon ' + cls + '" style="color:' + col + ';font-size:14px;line-height:1"></span>';
+    return breadcrumbSymbolIcon(kind, _SYM_CODICON);
   }
 
   function _bcRender(cursorLine) {
@@ -3955,39 +3876,22 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
     _bcEl.innerHTML = '';
     if (!_bcLastPath) return;
 
-    var parts = _bcLastPath.split('/').filter(Boolean);
+    var parts = splitBreadcrumbPathParts(_bcLastPath);
     var accum = '';
 
     for (var i = 0; i < parts.length; i++) {
       accum += '/' + parts[i];
       if (i > 0) {
-        var sep = document.createElement('span');
-        sep.className = 'te2-bc-sep';
-        sep.textContent = '\u203A'; // ›
-        _bcEl.appendChild(sep);
+        appendBreadcrumbSeparator(document, _bcEl);
       }
-      var isFile = (i === parts.length - 1);
-      var item = document.createElement('span');
-      item.className = 'te2-bc-item';
-      item.dataset.path = accum;
-      item.dataset.isFile = isFile ? '1' : '0';
+      var isFile = isBreadcrumbFileSegment(i, parts.length);
+      var item = createBreadcrumbPathItem(document, accum, isFile);
       // Add seti icon for the file segment
       if (isFile && _bcGetIcon) {
         var iconSpan = document.createElement('span');
         iconSpan.className = 'te2-bc-icon';
         item.appendChild(iconSpan);
-        (function(span, name) {
-          var brightTheme = {
-            blue: '#4da6ff', green: '#a6e22e', red: '#f85149',
-            orange: '#f0883e', yellow: '#e3b341', purple: '#bc8cff',
-            pink: '#f778ba', white: '#e6edf3', grey: '#8b949e',
-            'grey-light': '#b1bac4', ignore: '#6e7681',
-          };
-          _bcGetIcon(name, brightTheme).then(function(ic) {
-            if (ic && ic.svg) span.innerHTML = ic.svg;
-            if (ic && ic.color) span.style.color = ic.color;
-          }).catch(function() {});
-        })(iconSpan, parts[i]);
+        applyBreadcrumbFileIcon(_bcGetIcon, iconSpan, parts[i], getBreadcrumbIconTheme());
       }
       var label = document.createElement('span');
       label.textContent = parts[i];
@@ -3997,48 +3901,32 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
     }
 
     // Symbol chain based on cursor
-    if (_bcSymbols.length && typeof cursorLine === 'number' && cursorLine > 0) {
+    if (shouldRenderBreadcrumbSymbolChain(_bcSymbols, cursorLine)) {
       var chain = _bcFindSymbolChain(_bcSymbols, cursorLine);
       for (var j = 0; j < chain.length; j++) {
-        var ssep = document.createElement('span');
-        ssep.className = 'te2-bc-sep';
-        ssep.textContent = '\u203A';
-        _bcEl.appendChild(ssep);
-
-        var sitem = document.createElement('span');
-        sitem.className = 'te2-bc-item';
-        // Symbol kind SVG icon
-        var si = document.createElement('span');
-        si.className = 'te2-bc-sym-icon';
-        si.innerHTML = _bcSymbolSvg(chain[j].kind);
-        sitem.appendChild(si);
-        var slabel = document.createElement('span');
-        slabel.textContent = chain[j].name || '';
-        sitem.appendChild(slabel);
-        sitem.dataset.symIdx = String(j);
+        appendBreadcrumbSeparator(document, _bcEl);
+        var sitem = createBreadcrumbSymbolItem(document, chain[j], j, _bcSymbolSvg(chain[j].kind));
         var symRange = chain[j].selectionRange || chain[j].range;
         if (symRange) {
-          var sl = symRange.startLineNumber || symRange.startLine || (symRange.start && typeof symRange.start.line === 'number' ? symRange.start.line + 1 : null) || 1;
-          var sc = symRange.startColumn || (symRange.start && typeof symRange.start.character === 'number' ? symRange.start.character + 1 : null) || 1;
-          if (Array.isArray(symRange) && symRange.length >= 2) { sl = symRange[0] + 1; sc = symRange[1] + 1; }
-          sitem.dataset.line = String(sl);
-          sitem.dataset.col = String(sc);
+          var pos = getBreadcrumbSymbolPosition(symRange);
+          sitem.dataset.line = String(pos.line);
+          sitem.dataset.col = String(pos.col);
         }
         sitem.addEventListener('click', _bcOnSymbolClick);
         _bcEl.appendChild(sitem);
       }
     }
     // Auto-scroll to show the rightmost (active) item
-    _bcEl.scrollLeft = _bcEl.scrollWidth;
+    finalizeBreadcrumbScroll(_bcEl);
   }
 
   function _bcOnPathClick(ev) {
     try {
-      var el = ev.currentTarget;
-      var isFile = el.dataset.isFile === '1';
+      var target = getBreadcrumbPathClickTarget(ev);
+      var isFile = target.isFile;
       if (isFile) return; // file segment = no-op (already open)
       // Directory click → emit to editor socket, which relays to explorer
-      var absDir = el.dataset.path || '';
+      var absDir = target.absDir;
       console.log('[BC] path click:', absDir, 'socket connected:', !!(editorSocket && editorSocket.connected));
       if (editorSocket && editorSocket.connected) {
         editorSocket.emit('editor_breadcrumb_navigate', { path: absDir, open_drawer: true });
@@ -4048,9 +3936,9 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
 
   function _bcOnSymbolClick(ev) {
     try {
-      var el = ev.currentTarget;
-      var line = parseInt(el.dataset.line, 10);
-      var col = parseInt(el.dataset.col, 10) || 1;
+      var p = getBreadcrumbSymbolClickPosition(ev);
+      var line = p.line;
+      var col = p.col;
       if (Number.isFinite(line)) {
         applyJumpToLineAt(editor, model, { line: line, column: col, focus: true, scroll_y: 'center' });
       }
@@ -4064,15 +3952,10 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
   function connectUIIPC() {
     try {
       if (!window.io) return;
-      uiIpcSocket = window.io('/ui_ipc', {
-        path: '/ui_ipc_ws/socket.io',
-        transports: ['websocket'],
-        query: { app_id: 'file_editor_cm6', source: 'editor_iframe' },
-      });
+      uiIpcSocket = connectUiIpcSocket(window.io);
       uiIpcSocket.on('connect', function() {
         console.log('[UI_IPC] editor iframe connected');
-        // Register as a console worker on the same socket
-        uiIpcSocket.emit('console:register', { workerId: 'editor_iframe', role: 'worker' });
+        registerConsoleWorker(uiIpcSocket, 'editor_iframe', 'worker');
       });
       uiIpcSocket.on('ui_event', function(data) {
         // Handle events from the main page if needed in the future
@@ -4091,73 +3974,27 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
   function _initEditorConsoleBridge(sock) {
     if (_consoleBridgeActive) return;
     var LEVELS = ['log', 'info', 'warn', 'error', 'debug'];
-    var originals = {};
     var workerId = 'editor_iframe';
 
     function safeSerialize(x) {
-      var seen = typeof WeakSet !== 'undefined' ? new WeakSet() : null;
-      return JSON.stringify(x, function(_k, v) {
-        if (typeof v === 'bigint') return 'BigInt(' + v.toString() + ')';
-        if (v instanceof Error) return { name: v.name, message: v.message, stack: v.stack };
-        if (typeof v === 'object' && v !== null && seen) {
-          if (seen.has(v)) return '[Circular]';
-          seen.add(v);
-        }
-        return v;
-      });
+      return safeSerializeConsoleArg(x);
     }
 
     function serializeArg(a) {
-      try { return JSON.parse(safeSerialize(a)); }
-      catch(_) { return String(a); }
+      return serializeConsoleArg(a);
     }
 
     function emitLog(level, rawArgs) {
-      if (!sock || !sock.connected) return;
-      sock.emit('console:log', {
-        workerId: workerId,
-        level: level,
-        ts: Date.now(),
-        args: rawArgs.map(serializeArg),
-      });
+      emitConsoleLog(sock, workerId, level, rawArgs);
     }
 
-    for (var i = 0; i < LEVELS.length; i++) {
-      (function(level) {
-        originals[level] = console[level].bind(console);
-        console[level] = function() {
-          var args = Array.prototype.slice.call(arguments);
-          try { emitLog(level, args); } catch(_) {}
-          return originals[level].apply(console, args);
-        };
-      })(LEVELS[i]);
-    }
+    patchConsoleLevels(LEVELS, emitLog);
 
-    // Capture uncaught errors
-    window.addEventListener('error', function(e) {
-      emitLog('error', [e.message, e.filename, e.lineno, e.colno, e.error || null]);
-    });
-    window.addEventListener('unhandledrejection', function(e) {
-      emitLog('error', ['UnhandledRejection', e.reason]);
-    });
+    installConsoleErrorHooks(window, emitLog);
 
     // Remote eval support
     sock.on('console:eval', function(msg) {
-      if (!msg || !msg.reqId || !msg.code) return;
-      try {
-        var result = (0, eval)(msg.code);
-        Promise.resolve(result).then(function(value) {
-          sock.emit('console:evalResult', {
-            workerId: workerId, reqId: msg.reqId, ok: true,
-            value: serializeArg(value),
-          });
-        });
-      } catch(err) {
-        sock.emit('console:evalResult', {
-          workerId: workerId, reqId: msg.reqId, ok: false,
-          error: serializeArg(err),
-        });
-      }
+      handleConsoleEval(sock, workerId, msg);
     });
 
     _consoleBridgeActive = true;
@@ -4176,12 +4013,7 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
         ? diffEditor.getModifiedEditor()
         : editor;
       if (!ed || !window.monaco) return;
-      // Ctrl+S / Cmd+S
-      ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function() {
-        if (uiIpcSocket) {
-          uiIpcSocket.emit('ui_event', { type: 'save' });
-        }
-      });
+      bindSaveKeyCommand(ed, monaco, uiIpcSocket);
     } catch (_) {}
   }
 
@@ -4200,13 +4032,7 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
         console.warn('[focus_relay] no editor instance — skipping bind');
         return;
       }
-      _uiIpcFocusDisposable = ed.onDidFocusEditorWidget(function() {
-        console.log('[focus_relay] onDidFocusEditorWidget fired, socket=' +
-          (uiIpcSocket ? (uiIpcSocket.connected ? 'connected' : 'disconnected') : 'null'));
-        if (uiIpcSocket) {
-          uiIpcSocket.emit('ui_event', { type: 'focus' });
-        }
-      });
+      _uiIpcFocusDisposable = bindFocusRelay(ed, uiIpcSocket);
       console.log('[focus_relay] bound to editor widget');
     } catch (e) {
       console.warn('[focus_relay] bind failed', e);
@@ -4293,15 +4119,9 @@ import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
           tmVscodeIndex = await _refreshVscodeGrammarIndex();
         } catch (_) {}
 
-        if (window.monaco && model && currentPath) {
-          applyLanguageToModel(model, languageFromPath(currentPath), currentPath);
-        }
-        var langs = (window.monaco && monaco.languages && monaco.languages.getLanguages)
-          ? monaco.languages.getLanguages().map(function(l){ return l && l.id; }).filter(Boolean)
-          : [];
-        if (langs.length <= 1 && langs[0] === 'plaintext') {
-          console.warn('[Monaco] language registry still plaintext-only');
-        }
+        applyActiveModelLanguage(window, model, currentPath, applyLanguageToModel, languageFromPath);
+        var langs = collectBootLanguageIds(monaco);
+        warnIfPlaintextOnlyLanguages(langs);
       } catch (_) {}
 
       // Connect editor Socket.IO transport (required for readiness chain + SSOT).
