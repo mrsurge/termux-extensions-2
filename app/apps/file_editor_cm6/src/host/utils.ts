@@ -15,7 +15,7 @@ export function simplifyAbsolute(path) {
   return '/' + segments.join('/');
 }
 
-export function toAbsolute(path, base, homeDir=HOME_DIR) {
+export function toAbsolute(path, base = null, homeDir=HOME_DIR) {
   if (!path) return simplifyAbsolute(base || homeDir);
   let value = String(path).trim();
   if (!value) return simplifyAbsolute(base || homeDir);

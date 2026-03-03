@@ -1,6 +1,6 @@
 // @ts-check
 
-import { installGlobalOpenHooks } from './public-hooks.js';
+import { installGlobalOpenHooks } from './public-hooks.ts';
 
 /**
  * @param {{

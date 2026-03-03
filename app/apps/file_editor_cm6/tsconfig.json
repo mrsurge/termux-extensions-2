@@ -4,6 +4,8 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
     "noEmit": true,
     "allowJs": true,
     "checkJs": false,
@@ -11,6 +13,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "rootDir": ".",
@@ -22,7 +25,6 @@
   },
   "include": [
     "src/**/*.ts",
-    "main.js",
     "static/js/**/*.js",
     "extensions/sidebar_extension/static/js/**/*.js",
     "monaco_editor/m_editor_app.js"

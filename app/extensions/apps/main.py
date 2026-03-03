@@ -332,13 +332,13 @@ def serve_app_file(app_dir: str, filename: str):
         raise HTTPException(status_code=404, detail="File not found")
     
     # Set no-cache headers for JS/CSS to ensure fresh code loads
-    if filename.endswith(('.js', '.mjs', '.css')):
+    if filename.endswith(('.js', '.mjs', '.ts', '.css')):
         headers = {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
             'Expires': '0'
         }
-        media_type = "application/javascript" if filename.endswith(('.js', '.mjs')) else "text/css"
+        media_type = "application/javascript" if filename.endswith(('.js', '.mjs', '.ts')) else "text/css"
         return FileResponse(full_path, media_type=media_type, headers=headers)
     
     return FileResponse(full_path)

@@ -27,7 +27,7 @@ export function initDrawerAndShortcuts(deps) {
 
     if (tabBar) {
       tabBar.addEventListener('click', (e) => {
-        const tab = e.target.closest('.drawer-tab');
+        const tab = e.target?.closest('.drawer-tab');
         if (!tab) return;
         const target = tab.dataset.tab;
         tabBar.querySelectorAll('.drawer-tab').forEach(t => t.classList.toggle('active', t === tab));

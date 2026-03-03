@@ -1,7 +1,7 @@
 // ---------- Watcher modal & settings UI ----------
 // Extracted from main.js. Requires `host.toast` via init().
 
-let _toast = () => {};
+let _toast = (_msg) => {};
 
 // ── Watcher limit warning modal ──
 

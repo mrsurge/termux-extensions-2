@@ -1,11 +1,11 @@
 // @ts-check
 
-import { createSettingsRefreshController } from './settings-refresh.js';
-import { createSettingsManagerController } from './settings-manager.js';
-import { createSettingsConfigModalController } from './settings-config-modal.js';
-import { createSettingsInstallController } from './settings-install.js';
-import { createSettingsThemesController } from './settings-themes.js';
-import { createSettingsModalsController } from './settings-modals.js';
+import { createSettingsRefreshController } from './settings-refresh.ts';
+import { createSettingsManagerController } from './settings-manager.ts';
+import { createSettingsConfigModalController } from './settings-config-modal.ts';
+import { createSettingsInstallController } from './settings-install.ts';
+import { createSettingsThemesController } from './settings-themes.ts';
+import { createSettingsModalsController } from './settings-modals.ts';
 
 /**
  * @param {{
