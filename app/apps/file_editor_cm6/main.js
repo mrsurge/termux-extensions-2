@@ -642,13 +642,13 @@ function connectExplorerSocket() {
 
         if (explorerNeedsResync) {
           explorerNeedsResync = false;
-          try {
-            if (typeof window.__cm6ExplorerOnReconnect === 'function') {
-              window.__cm6ExplorerOnReconnect();
-            }
-          } catch (e) {
-            console.warn('[ExplorerSIO] Reconnect resync failed:', e);
+        }
+        try {
+          if (typeof window.__cm6ExplorerOnReconnect === 'function') {
+            window.__cm6ExplorerOnReconnect();
           }
+        } catch (e) {
+          console.warn('[ExplorerSIO] Connect resync failed:', e);
         }
       });
 

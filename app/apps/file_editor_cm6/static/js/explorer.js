@@ -16,6 +16,7 @@ import { initExplorerStickyScopes } from './explorer_extensions/sticky_scopes.js
 import { createExplorerSearchController } from './explorer_modules/explorer_search_controller.js';
 import { createExplorerDirectoryStateHelpers } from './explorer_modules/explorer_directory_state_utils.js';
 import { createExplorerUiHelpers } from './explorer_modules/explorer_ui_helpers.js';
+import { createExplorerActiveFileUtils } from './explorer_modules/explorer_active_file_utils.js';
 import {
   renderNameResults as renderNameResultsModule,
   renderContentResults as renderContentResultsModule,
@@ -27,6 +28,13 @@ import {
   truncateText,
   firstDiffLine,
 } from './explorer_modules/explorer_search_utils.js';
+import {
+  getParentRel as getParentRelModule,
+  normalizeWatcherRel as normalizeWatcherRelModule,
+  collectWatcherRels as collectWatcherRelsModule,
+  isWatcherRelInOpenDir as isWatcherRelInOpenDirModule,
+} from './explorer_modules/explorer_path_watcher_utils.js';
+import { createExplorerGitFooterUtils } from './explorer_modules/explorer_git_footer_utils.js';
 
 let treeElement = null;
 let projectLabelEl = null;
@@ -69,177 +77,23 @@ let diagErrorDirs = new Set();
 let diagWarningDirs = new Set();
 
 function setActiveFileRel(nextRel) {
-  activeFileRel = typeof nextRel === 'string' && nextRel.trim() ? nextRel : null;
-  applyActiveFileMarker();
-  // Update toolbar filename immediately — explorer connects before main.js finishes booting.
-  try {
-    var el = document.getElementById('fe-file-name');
-    if (el && activeFileRel) {
-      var i = activeFileRel.lastIndexOf('/');
-      var name = i >= 0 ? activeFileRel.slice(i + 1) : activeFileRel;
-      if (name && (!el.textContent || el.textContent === 'Untitled')) {
-        el.textContent = name;
-        el.title = activeFileRel;
-      }
-    }
-  } catch (_) {}
+  explorerActiveFileUtils.setActiveFileRel(nextRel);
 }
 
 function applyActiveFileMarker() {
-  if (!treeElement) {
-    treeElement = document.getElementById('fe-file-tree');
-  }
-  const root = treeElement;
-  if (!root) return;
-
-  root
-    .querySelectorAll('li.fe-tree-node.fe-active-file')
-    .forEach((li) => li.classList.remove('fe-active-file'));
-
-  if (!activeFileRel) return;
-
-  // Prefer a fast selector when CSS.escape exists, otherwise fall back to scanning.
-  try {
-    const esc = window.CSS && CSS.escape ? CSS.escape(activeFileRel) : null;
-    if (esc) {
-      const node = root.querySelector(
-        `li.fe-tree-node[data-kind="file"][data-rel="${esc}"]`,
-      );
-      if (node) node.classList.add('fe-active-file');
-      return;
-    }
-  } catch {
-    // ignore selector errors and fall back to scanning
-  }
-
-  const nodes = root.querySelectorAll('li.fe-tree-node[data-kind="file"]');
-  for (const li of nodes) {
-    if ((li.dataset.rel || '') === activeFileRel) {
-      li.classList.add('fe-active-file');
-      break;
-    }
-  }
+  explorerActiveFileUtils.applyActiveFileMarker();
 }
 
 function relFromAbsPath(absPath) {
-  if (!absPath || !uiState.projectPath) return null;
-  const root = String(uiState.projectPath).replace(/\\/g, '/');
-  const normalized = String(absPath).replace(/\\/g, '/');
-  if (!normalized.startsWith(root)) return null;
-  let rel = normalized.slice(root.length);
-  if (rel.startsWith('/')) rel = rel.slice(1);
-  return rel || '.';
+  return explorerActiveFileUtils.relFromAbsPath(absPath);
 }
 
 function applyDraftFlag(rel, hasDraft) {
-  if (!treeElement) {
-    treeElement = document.getElementById('fe-file-tree');
-  }
-  const root = treeElement;
-  if (!root || !rel || rel === '.') return;
-
-  let node = null;
-  try {
-    const esc = window.CSS && CSS.escape ? CSS.escape(rel) : null;
-    if (esc) {
-      node = root.querySelector(`li.fe-tree-node[data-kind="file"][data-rel="${esc}"]`);
-    }
-  } catch {
-    node = null;
-  }
-  if (!node) {
-    const nodes = root.querySelectorAll('li.fe-tree-node[data-kind="file"]');
-    for (const li of nodes) {
-      if ((li.dataset.rel || '') === rel) {
-        node = li;
-        break;
-      }
-    }
-  }
-
-  if (node) {
-    if (hasDraft) {
-      node.dataset.hasDraft = '1';
-      node.classList.add('fe-draft');
-    } else {
-      delete node.dataset.hasDraft;
-      node.classList.remove('fe-draft');
-    }
-  }
-
-  if (!hasDraft) return;
-
-  const parts = rel.split('/');
-  for (let i = 1; i < parts.length; i += 1) {
-    const dirRel = parts.slice(0, i).join('/');
-    let dirNode = null;
-    try {
-      const esc = window.CSS && CSS.escape ? CSS.escape(dirRel) : null;
-      if (esc) {
-        dirNode = root.querySelector(
-          `li.fe-tree-node[data-kind="dir"][data-rel="${esc}"]`,
-        );
-      }
-    } catch {
-      dirNode = null;
-    }
-    if (!dirNode) continue;
-    dirNode.dataset.hasDraft = '1';
-    dirNode.classList.add('fe-dir-has-draft');
-  }
-  const rootNode = root.querySelector('li.fe-tree-node.fe-tree-root');
-  if (rootNode) {
-    rootNode.dataset.hasDraft = '1';
-    rootNode.classList.add('fe-dir-has-draft');
-  }
+  explorerActiveFileUtils.applyDraftFlag(rel, hasDraft);
 }
 
 async function scrollToActiveFile() {
-  if (!activeFileRel) {
-    toast('No opened file to reveal');
-    return;
-  }
-  if (!treeElement) {
-    treeElement = document.getElementById('fe-file-tree');
-  }
-  if (!treeElement) return;
-
-  try {
-    await expandToFile(activeFileRel);
-  } catch (err) {
-    toast('Failed to expand tree');
-    return;
-  }
-
-  applyActiveFileMarker();
-
-  // Try to locate the node after expansion/listing.
-  let node = null;
-  try {
-    const esc = window.CSS && CSS.escape ? CSS.escape(activeFileRel) : null;
-    if (esc) {
-      node = treeElement.querySelector(
-        `li.fe-tree-node[data-kind="file"][data-rel="${esc}"]`,
-      );
-    }
-  } catch {
-    node = null;
-  }
-  if (!node) {
-    const nodes = treeElement.querySelectorAll('li.fe-tree-node[data-kind="file"]');
-    for (const li of nodes) {
-      if ((li.dataset.rel || '') === activeFileRel) {
-        node = li;
-        break;
-      }
-    }
-  }
-
-  if (!node) {
-    toast('Opened file is not visible in the tree');
-    return;
-  }
-  node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  return explorerActiveFileUtils.scrollToActiveFile();
 }
 
 function setCheckableMenuItem(el, checked) {
@@ -385,6 +239,24 @@ const explorerUiHelpers = createExplorerUiHelpers({
   getExplorerMenuDropdown: () => explorerMenuDropdown,
   getExplorerStickyHeadersEnabled: () => explorerStickyHeadersEnabled,
   getExplorerMenuStickyHeadersItem: () => explorerMenuStickyHeadersItem,
+});
+const explorerActiveFileUtils = createExplorerActiveFileUtils({
+  getTreeElement: () => treeElement,
+  setTreeElement: (next) => { treeElement = next; },
+  getActiveFileRel: () => activeFileRel,
+  setActiveFileRelValue: (next) => { activeFileRel = next; },
+  getProjectPath: () => uiState.projectPath,
+  expandToFile,
+  toast,
+});
+const explorerGitFooterUtils = createExplorerGitFooterUtils({
+  getGitSummaryElement: () => gitSummaryEl,
+  getGitStatus: () => uiState.gitStatus,
+  getGitButtons: () => gitButtons,
+  hasExplorerBus: () => typeof window.__explorerBusSend === 'function',
+  sendExplorerBus: (event, payload) => window.__explorerBusSend(event, payload),
+  toast,
+  reloadCurrentFile: () => window.__cm6ReloadCurrentFile?.(),
 });
 
 let reconnectResyncPending = false;
@@ -820,10 +692,7 @@ async function expandToPath(rel) {
 }
 
 function getParentRel(rel) {
-  if (!rel || rel === '.') return '.';
-  const parts = rel.split('/').filter(Boolean);
-  if (parts.length <= 1) return '.';
-  return parts.slice(0, -1).join('/');
+  return getParentRelModule(rel);
 }
 
 async function expandToFile(fileRel) {
@@ -850,163 +719,23 @@ function renderProjectLabel() {
   projectLabelEl.classList.remove('fe-label-missing');
 }
 
-// Track previous git status values for change detection
-let prevGitStatus = { staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 };
-
 function renderGitSummary() {
-  if (!gitSummaryEl) return;
-  const s = uiState.gitStatus;
-  if (!s) {
-    gitSummaryEl.textContent = 'Git status unavailable.';
-    return;
-  }
-  const branch = s.branch || '(no branch)';
-  const detached = !!s.detached;
-  const ahead = s.ahead || 0;
-  const behind = s.behind || 0;
-  const stagedCount = Array.isArray(s.staged) ? s.staged.length : 0;
-  const unstagedCount = Array.isArray(s.unstaged) ? s.unstaged.length : 0;
-  const untrackedCount = Array.isArray(s.untracked)
-    ? s.untracked.length
-    : 0;
-
-  // Check if any counts changed
-  const changed = (
-    stagedCount !== prevGitStatus.staged ||
-    unstagedCount !== prevGitStatus.unstaged ||
-    untrackedCount !== prevGitStatus.untracked ||
-    ahead !== prevGitStatus.ahead ||
-    behind !== prevGitStatus.behind
-  );
-
-  const bits = [];
-  bits.push(detached ? 'DETACHED HEAD' : branch);
-  if (ahead) bits.push(`↑${ahead}`);
-  if (behind) bits.push(`↓${behind}`);
-
-  const counts = `staged ${stagedCount} · changes ${unstagedCount} · untracked ${untrackedCount}`;
-  gitSummaryEl.textContent = `${bits.join(' ')} · ${counts}`;
-
-  // Flash blue if values changed
-  if (changed && (prevGitStatus.staged !== 0 || prevGitStatus.unstaged !== 0 || prevGitStatus.untracked !== 0)) {
-    gitSummaryEl.style.transition = 'color 0.15s ease';
-    gitSummaryEl.style.color = '#60a5fa';
-    setTimeout(() => {
-      if (gitSummaryEl) {
-        gitSummaryEl.style.color = '';
-      }
-    }, 400);
-  }
-
-  // Update previous values
-  prevGitStatus = { staged: stagedCount, unstaged: unstagedCount, untracked: untrackedCount, ahead, behind };
+  explorerGitFooterUtils.renderGitSummary();
 }
 
 function setGitControlsEnabled(enabled, showInit = false) {
-  if (!gitButtons) return;
-  Object.entries(gitButtons).forEach(([key, btn]) => {
-    if (!btn) return;
-    if (key === 'init') {
-      // Init is only visible when we are in a non-git project.
-      btn.style.display = showInit ? 'inline-block' : 'none';
-      btn.disabled = !enabled;
-    } else if (key === 'reset') {
-      // Reset is only meaningful when regular git controls are active.
-      const visible = enabled && !showInit;
-      btn.style.display = visible ? 'inline-block' : 'none';
-      btn.disabled = !visible;
-    } else {
-      // Regular git controls (stage/unstage/commit/push/pull)
-      btn.style.display = showInit ? 'none' : 'inline-block';
-      btn.disabled = !enabled || showInit;
-    }
-  });
+  explorerGitFooterUtils.setGitControlsEnabled(enabled, showInit);
 }
 
 // --- Git Progress Bar ---
 // Ephemeral progress bar at top of git footer + progress text in status row
 
-let gitProgressBarEl = null;
-let gitProgressTextEl = null;
-
-function ensureProgressBarElements() {
-  // Progress bar: thin line at top of footer
-  if (!gitProgressBarEl) {
-    const footer = document.querySelector('.fe-git-footer');
-    if (footer) {
-      gitProgressBarEl = document.createElement('div');
-      gitProgressBarEl.className = 'fe-git-progress-bar';
-      gitProgressBarEl.style.cssText = `
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 0;
-        height: 0;
-        background: linear-gradient(90deg, #3b82f6, #60a5fa);
-        transition: width 0.2s ease, opacity 0.3s ease;
-        z-index: 10;
-        pointer-events: none;
-        opacity: 1;
-      `;
-      footer.style.position = 'relative';
-      footer.insertBefore(gitProgressBarEl, footer.firstChild);
-    }
-  }
-  
-  // Progress text: right-aligned in git summary row
-  if (!gitProgressTextEl) {
-    const summaryRow = document.querySelector('.fe-git-row.fe-git-meta');
-    if (summaryRow) {
-      gitProgressTextEl = document.createElement('span');
-      gitProgressTextEl.className = 'fe-git-progress-text';
-      gitProgressTextEl.style.cssText = `
-        margin-left: auto;
-        font-size: 0.6em;
-        color: #60a5fa;
-        white-space: nowrap;
-        opacity: 0;
-        transition: opacity 0.3s ease;
-      `;
-      summaryRow.appendChild(gitProgressTextEl);
-    }
-  }
-}
-
 function showGitProgressBar(pct, detail) {
-  ensureProgressBarElements();
-  
-  if (gitProgressBarEl) {
-    gitProgressBarEl.style.opacity = '1';
-    gitProgressBarEl.style.height = '3px';
-    gitProgressBarEl.style.width = `${Math.min(100, Math.max(0, pct))}%`;
-  }
-  
-  if (gitProgressTextEl) {
-    gitProgressTextEl.style.opacity = '1';
-    gitProgressTextEl.textContent = detail || `${pct}%`;
-  }
+  explorerGitFooterUtils.showGitProgressBar(pct, detail);
 }
 
 function hideGitProgressBar() {
-  // Fade out, then reset dimensions after transition
-  if (gitProgressBarEl) {
-    gitProgressBarEl.style.opacity = '0';
-    setTimeout(() => {
-      if (gitProgressBarEl && gitProgressBarEl.style.opacity === '0') {
-        gitProgressBarEl.style.width = '0';
-        gitProgressBarEl.style.height = '0';
-      }
-    }, 300);
-  }
-  
-  if (gitProgressTextEl) {
-    gitProgressTextEl.style.opacity = '0';
-    setTimeout(() => {
-      if (gitProgressTextEl && gitProgressTextEl.style.opacity === '0') {
-        gitProgressTextEl.textContent = '';
-      }
-    }, 300);
-  }
+  explorerGitFooterUtils.hideGitProgressBar();
 }
 
 function renderExplorerTree() {
@@ -1476,29 +1205,15 @@ function refreshOpenDirectoriesAfterGit() {
 }
 
 function _normalizeWatcherRel(rel) {
-  if (typeof rel !== 'string') return '';
-  const normalized = rel.replace(/\\/g, '/').replace(/^\.\/+/, '').trim();
-  return normalized;
+  return normalizeWatcherRelModule(rel);
 }
 
 function _collectWatcherRels(payload) {
-  const out = new Set();
-  const src = payload && typeof payload === 'object' ? payload : {};
-  ['created', 'changed', 'deleted'].forEach((key) => {
-    const items = Array.isArray(src[key]) ? src[key] : [];
-    items.forEach((rel) => {
-      const norm = _normalizeWatcherRel(rel);
-      if (!norm) return;
-      out.add(norm);
-    });
-  });
-  return out;
+  return collectWatcherRelsModule(payload);
 }
 
 function _isWatcherRelInOpenDir(rel, openDir) {
-  if (!openDir) return false;
-  if (rel === openDir) return true;
-  return rel.startsWith(openDir + '/');
+  return isWatcherRelInOpenDirModule(rel, openDir);
 }
 
 function handleExplorerEvent(type, payload) {
@@ -1764,6 +1479,10 @@ function handleExplorerEvent(type, payload) {
           }
           renderEntriesInto(childList, payload.entries || payload.nodes || []);
         }
+      }
+      // Ensure footer controls/summaries are hydrated on cold boot even before watcher activity.
+      if (!uiState.gitStatus && typeof window.__explorerBusSend === 'function') {
+        window.__explorerBusSend('git:status', {});
       }
       break;
     }
@@ -2218,6 +1937,9 @@ export async function initExplorerUI() {
   // with __cm6EditorState.
   updateDiffBaseButtons();
   initDiffBaseFromBackend();
+  if (typeof window.__explorerBusSend === 'function') {
+    window.__explorerBusSend('git:status', {});
+  }
 
   function toggleDrawer(open) {
     if (!root) return;
@@ -2453,99 +2175,7 @@ export async function initExplorerUI() {
     });
   }
 
-  if (gitButtons) {
-    const safeSend = (type, payload) => {
-      if (typeof window.__explorerBusSend !== 'function') {
-        toast('Explorer connection unavailable.');
-        return false;
-      }
-      try {
-        window.__explorerBusSend(type, payload || {});
-      } catch (err) {
-        toast(err?.message || 'Explorer command failed.');
-        return false;
-      }
-      return true;
-    };
-
-    gitButtons.stage?.addEventListener('click', () => {
-      safeSend('git:stageAll', {});
-    });
-
-    gitButtons.unstage?.addEventListener('click', () => {
-      safeSend('git:unstageAll', {});
-    });
-
-    gitButtons.commit?.addEventListener('click', () => {
-      const status = uiState.gitStatus;
-      const stagedCount = Array.isArray(status?.staged)
-        ? status.staged.length
-        : 0;
-      if (!stagedCount) {
-        toast('No staged changes to commit.');
-        return;
-      }
-      const message = window.prompt('Commit message');
-      if (!message) return;
-      const trimmed = message.trim();
-      if (!trimmed) {
-        toast('Commit message cannot be empty.');
-        return;
-      }
-      safeSend('git:commit', { message: trimmed });
-    });
-
-    gitButtons.push?.addEventListener('click', () => {
-      if (
-        !window.confirm(
-          'Are you sure you want to push changes to remote?',
-        )
-      ) {
-        return;
-      }
-      safeSend('git:push', {});
-    });
-
-    gitButtons.pull?.addEventListener('click', () => {
-      if (
-        !window.confirm(
-          'Are you sure you want to pull changes from remote?',
-        )
-      ) {
-        return;
-      }
-      safeSend('git:pull', {});
-    });
-
-    gitButtons.reset?.addEventListener('click', () => {
-      if (
-        !window.confirm(
-          '⚠️ Hard reset will discard ALL uncommitted changes!\n\nReset to HEAD?',
-        )
-      ) {
-        return;
-      }
-      if (!safeSend('git:reset', { commit: 'HEAD' })) return;
-      if (typeof window.__cm6ReloadCurrentFile === 'function') {
-        try {
-          window.__cm6ReloadCurrentFile();
-        } catch (err) {
-          console.warn('Failed to reload current file after reset:', err);
-        }
-      }
-    });
-
-    gitButtons.init?.addEventListener('click', () => {
-      if (
-        !window.confirm(
-          'Initialize a Git repository in this project?',
-        )
-      ) {
-        return;
-      }
-      safeSend('git:init', {});
-    });
-  }
+  explorerGitFooterUtils.bindGitFooterActions();
 
   // Context menu element (reused)
   let cardMenu = document.querySelector('.fe-card-menu');
