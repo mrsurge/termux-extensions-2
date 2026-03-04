@@ -175,14 +175,28 @@ async def quit_app(app_id: str, manager: FrameworkShellManager = Depends(get_fra
         print(f"[AppsExtension] quit_app: app {app_id} not running")
         raise HTTPException(status_code=404, detail="App is not running or already terminated.")
 
-    shell_id = app_to_quit["shell_id"]
-    terminated = await app_lifecycle.terminate_app(manager, shell_id)
-    print(f"[AppsExtension] quit_app terminate_app(shell_id={shell_id}) -> {terminated}")
+    shutdown_result = await app_lifecycle.terminate_app_group(manager, app_id)
+    root_pids = (
+        shutdown_result.get("data", {}).get("root_pids", [])
+        if isinstance(shutdown_result, dict)
+        else []
+    )
+    stats = (
+        shutdown_result.get("data", {}).get("stats", {})
+        if isinstance(shutdown_result, dict)
+        else {}
+    )
+    print(
+        f"[AppsExtension] quit_app terminate_app_group(app_id={app_id}) "
+        f"ok={bool(shutdown_result.get('ok')) if isinstance(shutdown_result, dict) else False} "
+        f"root_pids={root_pids} stats={stats}"
+    )
 
-    if terminated:
-        return {"ok": True, "data": {"message": f"App {app_id} terminated."}}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to terminate app.")
+    if not root_pids:
+        raise HTTPException(status_code=404, detail="App is not running or already terminated.")
+    if not (isinstance(shutdown_result, dict) and shutdown_result.get("ok")):
+        raise HTTPException(status_code=500, detail="Failed to terminate app group.")
+    return {"ok": True, "data": {"message": f"App {app_id} terminated.", "root_pids": root_pids, "stats": stats}}
 
 @apps_bp.post('/api/apps/{app_id}/lock')
 async def lock_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):

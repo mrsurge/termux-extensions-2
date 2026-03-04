@@ -19,6 +19,8 @@ const SHORTCUT_KIND_FRAMEWORK_APP = 'framework_app';
 
 const SHORTCUT_LOAD_LAZY = 'lazy';
 const SHORTCUT_LOAD_EAGER = 'eager';
+const SIDEBAR_SETUP_TITLE_DEFAULT = 'Side-bar setup';
+const SIDEBAR_SETUP_HINT_DEFAULT = 'Add shortcuts to choose what loads in the side-bar.';
 
 function _normStr(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -152,6 +154,8 @@ export function initSidebarShortcuts(options = {}) {
   let sidebarHeaderIconGridEl = null;
   let sidebarHeaderIconMenuEl = null;
   let sidebarSetupPlaceholder = null;
+  let sidebarSetupTitleEl = null;
+  let sidebarSetupHintEl = null;
   let sidebarIframeStack = null;
 
   // --- internal state ---
@@ -297,17 +301,22 @@ export function initSidebarShortcuts(options = {}) {
     return null;
   }
 
-  function _handleStoppedActiveFrameworkShortcut(appId) {
+  function _invalidateFrameworkShortcutIframes(appId) {
     const id = _normStr(appId);
     if (!id) return;
     const shortcuts = _collectShortcuts(_latestUiPrefs || {});
     const active = _resolveActive(_latestUiPrefs || {}, shortcuts);
-    if (active && active.kind === SHORTCUT_KIND_FRAMEWORK_APP && _normStr(active.app_id) === id) {
-      const entry = _iframeMap.get(active.key);
-      if (entry) {
-        entry.loaded = false;
-        try { entry.iframe.src = 'about:blank'; } catch (_) {}
-      }
+    let invalidatedActive = false;
+    shortcuts.forEach((sc) => {
+      if (!sc || sc.kind !== SHORTCUT_KIND_FRAMEWORK_APP) return;
+      if (_normStr(sc.app_id) !== id) return;
+      const entry = _iframeMap.get(sc.key);
+      if (!entry) return;
+      entry.loaded = false;
+      try { entry.iframe.src = 'about:blank'; } catch (_) {}
+      if (active && active.key === sc.key) invalidatedActive = true;
+    });
+    if (invalidatedActive) {
       _updateSetupPlaceholder(_latestUiPrefs || {}, false);
     }
   }
@@ -325,8 +334,8 @@ export function initSidebarShortcuts(options = {}) {
     _runningCacheAt = Date.now();
     _renderHeaderIconGrid(_latestUiPrefs || {});
 
-    // If the active framework shortcut backend dies, clear the iframe and show setup fallback.
-    if (!isRunning) _handleStoppedActiveFrameworkShortcut(id);
+    // If any shortcut points at a backend that dies, invalidate those iframe entries.
+    if (!isRunning) _invalidateFrameworkShortcutIframes(id);
 
     try {
       if (shortcutAppDD && shortcutAppDD.classList.contains('show')) {
@@ -921,7 +930,7 @@ export function initSidebarShortcuts(options = {}) {
       if (!(_runningCache instanceof Set)) _runningCache = new Set();
       _runningCache.delete(id);
       _runningCacheAt = Date.now();
-      _handleStoppedActiveFrameworkShortcut(id);
+      _invalidateFrameworkShortcutIframes(id);
       _refreshShortcutChrome();
       return true;
     } catch (e) {
@@ -1268,11 +1277,36 @@ export function initSidebarShortcuts(options = {}) {
     }
   }
 
-  function _updateSetupPlaceholder(uiPrefs, hasActiveOverride) {
+  function _setSetupPlaceholderMode(mode, shortcut) {
+    if (!sidebarSetupPlaceholder) return;
+    const titleEl = sidebarSetupTitleEl
+      || sidebarSetupPlaceholder.querySelector('.sidebar-setup__title');
+    const hintEl = sidebarSetupHintEl
+      || sidebarSetupPlaceholder.querySelector('.sidebar-setup__hint');
+    if (!titleEl || !hintEl) return;
+
+    if (mode === 'loading') {
+      const label = _normStr(shortcut?.label) || _normStr(shortcut?.app_id) || 'app';
+      titleEl.textContent = 'Starting side-bar app…';
+      hintEl.textContent = `Starting ${label}.`;
+      sidebarSetupPlaceholder.dataset.mode = 'loading';
+      return;
+    }
+
+    titleEl.textContent = SIDEBAR_SETUP_TITLE_DEFAULT;
+    hintEl.textContent = SIDEBAR_SETUP_HINT_DEFAULT;
+    sidebarSetupPlaceholder.dataset.mode = 'setup';
+  }
+
+  function _updateSetupPlaceholder(uiPrefs, hasActiveOverride, mode = 'setup', shortcut = null) {
     if (!sidebarSetupPlaceholder || !sidebarIframeStack) return;
     const hasActive = typeof hasActiveOverride === 'boolean'
       ? hasActiveOverride
       : !!(_resolveActive(uiPrefs)?.url);
+
+    if (hasActive) _setSetupPlaceholderMode('setup', null);
+    else _setSetupPlaceholderMode(mode, shortcut);
+
     if (hasActive) {
       sidebarSetupPlaceholder.style.display = 'none';
     } else {
@@ -1322,17 +1356,49 @@ export function initSidebarShortcuts(options = {}) {
     return await startPromise;
   }
 
-  async function _ensureIframeLoadedForShortcut(sc, entry) {
+  async function _ensureIframeLoadedForShortcut(sc, entry, options = {}) {
     if (!sc || !entry || !entry.iframe) return false;
-    if (entry.loaded) return true;
     const url = _normStr(sc.url);
     if (!url) return false;
 
     if (sc.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
-      const ok = await _ensureFrameworkAppRunning(sc.app_id);
-      if (!ok) return false;
+      const forceRunningCheck = !!options.forceRunningCheck;
+      const onBeforeStart = typeof options.onBeforeStart === 'function' ? options.onBeforeStart : null;
+      const appId = _normStr(sc.app_id);
+      if (!appId) return false;
+
+      let isRunning = false;
+      if (forceRunningCheck || !entry.loaded) {
+        try {
+          const set = await _ensureRunningCache(true);
+          isRunning = !!(set instanceof Set && set.has(appId));
+        } catch (_) {
+          isRunning = false;
+        }
+      } else {
+        return true;
+      }
+
+      let startedNow = false;
+      if (!isRunning) {
+        try { onBeforeStart?.(); } catch (_) {}
+        const ok = await _ensureFrameworkAppRunning(appId);
+        if (!ok) {
+          entry.loaded = false;
+          try { entry.iframe.src = 'about:blank'; } catch (_) {}
+          return false;
+        }
+        startedNow = true;
+      }
+
+      if (!entry.loaded || startedNow) {
+        entry.iframe.src = url;
+        entry.loaded = true;
+      }
+      return true;
     }
 
+    if (entry.loaded) return true;
     entry.iframe.src = url;
     entry.loaded = true;
     return true;
@@ -1402,7 +1468,23 @@ export function initSidebarShortcuts(options = {}) {
     if (hasActive && resolvedActive) {
       const entry = _iframeMap.get(resolvedActive.key);
       if (entry) {
-        const ok = await _ensureIframeLoadedForShortcut(resolvedActive, entry);
+        if (resolvedActive.kind === SHORTCUT_KIND_FRAMEWORK_APP && !entry.loaded) {
+          _updateSetupPlaceholder(
+            uiPrefs || _latestUiPrefs || {},
+            false,
+            'loading',
+            resolvedActive,
+          );
+        }
+        const ok = await _ensureIframeLoadedForShortcut(resolvedActive, entry, {
+          forceRunningCheck: resolvedActive.kind === SHORTCUT_KIND_FRAMEWORK_APP,
+          onBeforeStart: () => _updateSetupPlaceholder(
+            uiPrefs || _latestUiPrefs || {},
+            false,
+            'loading',
+            resolvedActive,
+          ),
+        });
         if (seq !== _activateSeq) return;
         activeReady = !!ok && !!entry.loaded;
       }
@@ -2190,6 +2272,8 @@ export function initSidebarShortcuts(options = {}) {
     sidebarHeaderIconGridEl = document.getElementById('agent-drawer-icon-grid');
     sidebarHeaderIconMenuEl = document.getElementById('agent-drawer-icon-menu');
     sidebarSetupPlaceholder = document.getElementById('sidebar-setup-placeholder');
+    sidebarSetupTitleEl = sidebarSetupPlaceholder?.querySelector('.sidebar-setup__title') || null;
+    sidebarSetupHintEl = sidebarSetupPlaceholder?.querySelector('.sidebar-setup__hint') || null;
     sidebarIframeStack = document.getElementById('sidebar-iframe-stack');
 
     shortcutsModal = document.getElementById('agent-shortcuts-modal');

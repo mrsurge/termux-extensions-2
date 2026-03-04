@@ -555,6 +555,15 @@ async function handleAgentOpen(payload) {
       : (typeof payload?.file === 'string' ? payload.file.trim() : ''));
   const line = Number.isFinite(Number(payload?.line)) ? Number(payload.line) : null;
   const source = typeof payload?.source === 'string' ? payload.source : '';
+  console.log('[AgentOpen] rx payload', {
+    path: payload?.path || '',
+    abs: payload?.abs || '',
+    rel,
+    line,
+    column: payload?.column,
+    source,
+    conversation_id: payload?.conversation_id || '',
+  });
 
   if (isMobile) {
     try {
@@ -579,7 +588,10 @@ async function handleAgentOpen(payload) {
     }
   }
 
-  if (!targetAbs) return;
+  if (!targetAbs) {
+    console.warn('[AgentOpen] drop: unable to resolve targetAbs', { rel, abs, source });
+    return;
+  }
   try {
     if (typeof openFile === 'function') {
       await openFile(targetAbs, { forceRefresh: true });
@@ -671,6 +683,14 @@ function connectExplorerSocket() {
           try { pending.resolve({ type, payload, id: msgId }); } catch (_) {}
         }
         if (type === 'agent:open') {
+          console.log('[ExplorerSIO] rx agent:open', {
+            path: payload?.path || '',
+            rel: payload?.rel || '',
+            line: payload?.line,
+            column: payload?.column,
+            source: payload?.source || '',
+            conversation_id: payload?.conversation_id || '',
+          });
           handleAgentOpen(payload);
           return;
         }

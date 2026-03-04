@@ -26,6 +26,20 @@ def _is_agent_sidebar_tracking_enabled() -> bool:
         return False
 
 
+def _payload_preview(payload: dict | None) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        "path": payload.get("path"),
+        "abs": payload.get("abs"),
+        "rel": payload.get("rel"),
+        "line": payload.get("line"),
+        "column": payload.get("column"),
+        "source": payload.get("source"),
+        "conversation_id": payload.get("conversation_id"),
+    }
+
+
 async def _emit_presence(ns, *, to_sid: str | None = None):
     payload = {
         "hosts": len(_registered_hosts),
@@ -78,7 +92,11 @@ async def on_sidebar_event(ns, sid, data):
     if not isinstance(data, dict):
         return
     event_type = str(data.get("type") or "unknown")
-    print(f"[sidebar_ipc] event type={event_type} from={sid}", flush=True)
+    print(
+        f"[sidebar_ipc] event type={event_type} from={sid} "
+        f"payload={_payload_preview(data.get('payload'))}",
+        flush=True,
+    )
     if event_type == "agent_edit":
         if not _is_agent_sidebar_tracking_enabled():
             print("[sidebar_ipc] agent_edit dropped: trackAgentSidebarEdits disabled", flush=True)
@@ -106,6 +124,7 @@ async def _broadcast_agent_open(data: dict) -> None:
     project = history.get_active_project() or str(get_project_root())
     if not project:
         raise ValueError("no active project")
+    project_key = str(project)
 
     project_root = Path(project).expanduser().resolve(strict=False)
     raw_path = (
@@ -154,7 +173,16 @@ async def _broadcast_agent_open(data: dict) -> None:
             "conversation_id": data.get("conversation_id"),
         },
     }
-    await _explorer_manager.broadcast(str(project_root), message)
+    try:
+        conn_n = _explorer_manager.get_connection_count(project_key)
+    except Exception:
+        conn_n = -1
+    print(
+        f"[sidebar_ipc] agent_open broadcast project_key={project_key} "
+        f"project_root={project_root} rel={rel} line={line} conn={conn_n}",
+        flush=True,
+    )
+    await _explorer_manager.broadcast(project_key, message)
 
 
 async def on_sidebar_agent_edit(ns, sid, data):
@@ -164,7 +192,10 @@ async def on_sidebar_agent_edit(ns, sid, data):
     if not _is_agent_sidebar_tracking_enabled():
         print("[sidebar_ipc] agent_edit dropped: trackAgentSidebarEdits disabled", flush=True)
         return
-    print(f"[sidebar_ipc] agent_edit from={sid}", flush=True)
+    print(
+        f"[sidebar_ipc] agent_edit from={sid} payload={_payload_preview(data)}",
+        flush=True,
+    )
     try:
         await _broadcast_agent_open(data)
     except Exception as exc:
@@ -175,7 +206,10 @@ async def on_sidebar_agent_open(ns, sid, data):
     """Route explicit user-driven opens through backend explorer broadcast path."""
     if not isinstance(data, dict):
         return
-    print(f"[sidebar_ipc] agent_open from={sid}", flush=True)
+    print(
+        f"[sidebar_ipc] agent_open from={sid} payload={_payload_preview(data)}",
+        flush=True,
+    )
     try:
         await _broadcast_agent_open(data)
     except Exception as exc:

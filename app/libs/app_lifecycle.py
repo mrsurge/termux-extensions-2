@@ -161,6 +161,29 @@ async def terminate_app(manager, shell_id: str) -> bool:
         print(f"[AppLifecycle] Failed to terminate shell_id={shell_id}, unregistered tracking entry")
         return False
 
+async def terminate_app_group(manager, app_id: str) -> Dict:
+    """
+    Terminate all shells for an app_id using FrameworkShellManager group shutdown.
+    Mirrors framework_shells app shutdown-group semantics and then reconciles local tracking.
+    """
+    print(f"[AppLifecycle] Terminating app group app_id={app_id}")
+    result: Dict = {"ok": False, "data": {"root_pids": [], "stats": {}}}
+    try:
+        result = await manager.shutdown_app_group(app_id)
+    except Exception as exc:
+        print(f"[AppLifecycle] shutdown_app_group failed for app_id={app_id}: {exc}")
+        result = {"ok": False, "error": str(exc), "data": {"root_pids": [], "stats": {}}}
+
+    async with _get_lock():
+        to_remove = [shell_id for shell_id, info in _running_apps.items() if info.get("app_id") == app_id]
+        for shell_id in to_remove:
+            _running_apps.pop(shell_id, None)
+    if to_remove:
+        print(f"[AppLifecycle] Unregistered {len(to_remove)} tracked shell(s) for app_id={app_id}")
+    else:
+        print(f"[AppLifecycle] No tracked shells to unregister for app_id={app_id}")
+    return result
+
 async def terminate_all_apps(manager) -> None:
     """Terminate every tracked app shell."""
     async with _get_lock():

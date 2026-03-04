@@ -13,6 +13,12 @@
 import { showNewProjectModal } from './new_project_modal.js';
 import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
 import { initExplorerStickyScopes } from './explorer_extensions/sticky_scopes.js';
+import { createExplorerSearchController } from './explorer_modules/explorer_search_controller.js';
+import {
+  renderNameResults as renderNameResultsModule,
+  renderContentResults as renderContentResultsModule,
+} from './explorer_modules/explorer_search_results_renderer.js';
+import { renderSearchOverlayBody } from './explorer_modules/explorer_search_overlay_body_renderer.js';
 import {
   formatDiffBaseLabel,
   formatHunkHeader,
@@ -337,6 +343,32 @@ let searchError = null;
 let searchDebounceTimer = null;
 let lastKnownProjectPath = '';
 const selectedReviewFiles = new Set();
+const explorerSearchController = createExplorerSearchController({
+  toast,
+  renderSearchOverlay,
+  focusSearchInput: () => {
+    const input = document.getElementById('fe-search-input');
+    if (input) input.focus();
+  },
+  hasBus: () => typeof window.__explorerBusSend === 'function',
+  sendBus: (event, payload) => window.__explorerBusSend(event, payload),
+  getProjectPath: () => uiState.projectPath || '',
+  getSearchOverlayVisible: () => searchOverlayVisible,
+  setSearchOverlayVisible: (next) => { searchOverlayVisible = !!next; },
+  getSearchMode: () => searchMode,
+  setSearchModeValue: (next) => { searchMode = next; },
+  getSearchQuery: () => searchQuery,
+  setSearchQuery: (next) => { searchQuery = next; },
+  getSearchResults: () => searchResults,
+  setSearchResults: (next) => { searchResults = next; },
+  getSearchLoading: () => searchLoading,
+  setSearchLoading: (next) => { searchLoading = !!next; },
+  getSearchError: () => searchError,
+  setSearchError: (next) => { searchError = next; },
+  getSearchDebounceTimer: () => searchDebounceTimer,
+  setSearchDebounceTimer: (next) => { searchDebounceTimer = next; },
+  setLastKnownProjectPath: (next) => { lastKnownProjectPath = next || ''; },
+});
 
 let reconnectResyncPending = false;
 
@@ -3542,194 +3574,35 @@ async function openFileAndMaybeJump(rel, lineNumber = null, jumpOptions = {}) {
 // --- Search / Review overlay wiring ---
 
 function openSearchOverlay() {
-  if (!uiState.projectPath) {
-    toast('No project open');
-    return;
-  }
-
-  searchOverlayVisible = true;
-  lastKnownProjectPath = uiState.projectPath || '';
-  renderSearchOverlay();
-
-  setTimeout(() => {
-    if (searchMode === 'changes') {
-      fetchChangesResults(true);
-    } else if (searchMode === 'review') {
-      fetchReviewResults(true);
-    } else {
-      const input = document.getElementById('fe-search-input');
-      if (input) input.focus();
-    }
-  }, 0);
+  explorerSearchController.openSearchOverlay();
 }
 
 function closeSearchOverlay() {
-  searchOverlayVisible = false;
-  clearSearchResults();
-  renderSearchOverlay();
+  explorerSearchController.closeSearchOverlay();
 }
 
 function clearSearchResults(preserveQuery = false) {
-  if (!preserveQuery) {
-    searchQuery = '';
-  }
-  searchResults = null;
-  searchError = null;
-  searchLoading = false;
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = null;
-  }
+  explorerSearchController.clearSearchResults(preserveQuery);
 }
 
 function scheduleSearch(query) {
-  if (searchMode === 'changes' || searchMode === 'review') {
-    return;
-  }
-  searchQuery = query;
-
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer);
-  }
-
-  if (query.length < 2) {
-    searchResults = null;
-    renderSearchOverlay();
-    return;
-  }
-
-  searchLoading = true;
-  renderSearchOverlay();
-
-  searchDebounceTimer = setTimeout(() => {
-    performSearch(query);
-  }, 300);
+  explorerSearchController.scheduleSearch(query);
 }
 
 async function performSearch(query) {
-  if (searchMode === 'changes' || searchMode === 'review') {
-    return;
-  }
-  if (!uiState.projectPath) {
-    searchError = 'No project open';
-    searchLoading = false;
-    renderSearchOverlay();
-    return;
-  }
-
-  lastKnownProjectPath = uiState.projectPath || '';
-  searchLoading = true;
-  searchError = null;
-  renderSearchOverlay();
-
-  if (typeof window.__explorerBusSend !== 'function') {
-    searchLoading = false;
-    searchError = 'Search bus unavailable';
-    renderSearchOverlay();
-    return;
-  }
-
-  try {
-    window.__explorerBusSend('search:run', {
-      mode: searchMode,
-      query,
-    });
-  } catch (err) {
-    searchLoading = false;
-    searchError = err?.message || 'Search request failed';
-    renderSearchOverlay();
-  }
+  return explorerSearchController.performSearch(query);
 }
 
 async function fetchChangesResults(force = false) {
-  if (searchMode !== 'changes') return;
-  if (searchLoading && !force) return;
-
-  if (!uiState.projectPath) {
-    searchError = 'No project open';
-    searchLoading = false;
-    renderSearchOverlay();
-    return;
-  }
-
-  lastKnownProjectPath = uiState.projectPath || '';
-  searchLoading = true;
-  searchError = null;
-  renderSearchOverlay();
-
-  if (typeof window.__explorerBusSend !== 'function') {
-    searchLoading = false;
-    searchError = 'Search bus unavailable';
-    renderSearchOverlay();
-    return;
-  }
-
-  try {
-    window.__explorerBusSend('search:run', { mode: 'changes' });
-  } catch (err) {
-    searchLoading = false;
-    searchError = err?.message || 'Changes lookup failed';
-    renderSearchOverlay();
-  }
+  return explorerSearchController.fetchChangesResults(force);
 }
 
 async function fetchReviewResults(force = false) {
-  if (searchMode !== 'review') return;
-  if (searchLoading && !force) return;
-
-  searchLoading = true;
-  searchError = null;
-  renderSearchOverlay();
-
-  if (typeof window.__explorerBusSend !== 'function') {
-    searchLoading = false;
-    searchError = 'Review bus unavailable';
-    renderSearchOverlay();
-    return;
-  }
-
-  try {
-    window.__explorerBusSend('review:list', { lightweight: false });
-  } catch (err) {
-    searchLoading = false;
-    searchError = err?.message || 'Failed to load review list';
-    renderSearchOverlay();
-  }
+  return explorerSearchController.fetchReviewResults(force);
 }
 
 function setSearchMode(mode) {
-  if (mode === searchMode) {
-    return;
-  }
-
-  clearSearchResults(true);
-  searchMode = mode;
-
-  if (mode === 'changes') {
-    searchLoading = true;
-    renderSearchOverlay();
-    fetchChangesResults(true);
-    return;
-  }
-
-  if (mode === 'review') {
-    searchLoading = true;
-    renderSearchOverlay();
-    fetchReviewResults(true);
-    return;
-  }
-
-  searchLoading = false;
-  searchError = null;
-  renderSearchOverlay();
-  if (searchQuery.length >= 2) {
-    performSearch(searchQuery);
-  } else {
-    setTimeout(() => {
-      const input = document.getElementById('fe-search-input');
-      if (input) input.focus();
-    }, 0);
-  }
+  explorerSearchController.setSearchMode(mode);
 }
 
 function renderSearchOverlay() {
@@ -3940,175 +3813,32 @@ function renderSearchOverlay() {
   }
 
   if (!resultsContainer) return;
-
-  resultsContainer.innerHTML = '';
-
-  if (searchLoading) {
-    const loading = document.createElement('div');
-    loading.className = 'fe-search-loading';
-    loading.textContent =
-      searchMode === 'changes'
-        ? 'Loading changes…'
-        : searchMode === 'review'
-          ? 'Loading drafts…'
-          : 'Searching…';
-    resultsContainer.appendChild(loading);
-    return;
-  }
-
-  if (searchError) {
-    const error = document.createElement('div');
-    error.className = 'fe-search-error';
-    error.textContent = searchError;
-    resultsContainer.appendChild(error);
-    return;
-  }
-
-  if (!searchResults) {
-    const hint = document.createElement('div');
-    hint.className = 'fe-search-hint';
-    if (searchMode === 'name') {
-      hint.textContent = 'Type at least 2 characters to search by name.';
-    } else if (searchMode === 'content') {
-      hint.textContent = 'Type at least 2 characters to search within files.';
-    } else if (searchMode === 'changes') {
-      hint.textContent = 'View all changes in the working tree.';
-    } else if (searchMode === 'review') {
-      hint.textContent = 'Review unsaved draft edits across files.';
-    }
-    resultsContainer.appendChild(hint);
-    return;
-  }
-
-  if (searchMode === 'name') {
-    renderNameResults(resultsContainer, searchResults);
-  } else if (searchMode === 'content') {
-    renderContentResults(resultsContainer, searchResults);
-  } else if (searchMode === 'changes') {
-    renderChangesResults(resultsContainer, searchResults);
-  } else if (searchMode === 'review') {
-    renderReviewResults(resultsContainer, searchResults);
-  }
-}
-
-function renderNameResults(container, data) {
-  const results = data.results || [];
-  const list = document.createElement('div');
-  list.className = 'fe-search-list';
-
-  results.forEach((item) => {
-    const row = document.createElement('div');
-    row.className = 'fe-search-item';
-    row.onclick = async () => {
-      if (item.type === 'file') {
-        if (window.appOpenFileRel) {
-          try {
-            // Expand tree to reveal the file
-            expandToFile(item.rel);
-            await window.appOpenFileRel(item.rel, uiState.projectPath || null);
-            closeDrawerIfMobile();
-          } catch (e) {
-            toast('Failed to open file: ' + (e?.message || 'unknown error'));
-          }
-        } else {
-          toast('File opener not available');
-        }
-      } else if (item.type === 'dir') {
-        closeSearchOverlay();
-        // Expand tree to reveal the directory
-        expandToPath(item.rel);
-      }
-    };
-
-    const icon = document.createElement('span');
-    icon.className = 'fe-search-icon';
-    if (item.type === 'dir') {
-      icon.textContent = '📁';
-    } else {
-      icon.textContent = '📄'; // fallback while Seti loads
-      applySetiIconToSpan(icon, basename(item.rel || ''), 'file');
-    }
-    row.appendChild(icon);
-
-    const name = document.createElement('span');
-    name.className = 'fe-search-name';
-    name.textContent = item.rel;
-    row.appendChild(name);
-
-    list.appendChild(row);
-  });
-
-  container.appendChild(list);
-
-  if (data.truncated) {
-    const notice = document.createElement('div');
-    notice.className = 'fe-search-notice';
-    notice.textContent = `Showing first ${data.count} results`;
-    container.appendChild(notice);
-  }
-}
-
-function renderContentResults(container, data) {
-  const list = document.createElement('div');
-  list.className = 'fe-search-list';
-
-  (data.results || []).forEach((fileResult) => {
-    const fileGroup = document.createElement('div');
-    fileGroup.className = 'fe-search-file-group';
-
-    const matches = fileResult.matches || [];
-
-    const fileHeader = document.createElement('div');
-    fileHeader.className = 'fe-search-file-header';
-    fileHeader.textContent = `${fileResult.rel} (${matches.length})`;
-    fileGroup.appendChild(fileHeader);
-
-    matches.forEach((match) => {
-      const matchRow = document.createElement('div');
-      matchRow.className = 'fe-search-match';
-      matchRow.onclick = async () => {
-        if (window.appOpenFileRel && window.jumpToCurrentFileLine) {
-          try {
-            // Expand tree to reveal the file
-            expandToFile(fileResult.rel);
-            await window.appOpenFileRel(fileResult.rel, uiState.projectPath || null);
-
-            closeDrawerIfMobile();
-
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            await window.jumpToCurrentFileLine(match.line, { focus: false });
-          } catch (e) {
-            toast('Failed to open file: ' + (e?.message || 'unknown error'));
-          }
-        } else {
-          toast('File opener not available');
-        }
-      };
-
-      const lineNum = document.createElement('span');
-      lineNum.className = 'fe-search-line-num';
-      lineNum.textContent = match.line;
-      matchRow.appendChild(lineNum);
-
-      const snippet = document.createElement('span');
-      snippet.className = 'fe-search-snippet';
-      snippet.textContent = match.snippet;
-      matchRow.appendChild(snippet);
-
-      fileGroup.appendChild(matchRow);
-    });
-
-    list.appendChild(fileGroup);
-  });
-
-  container.appendChild(list);
-
-  if (data.truncated) {
-    const notice = document.createElement('div');
-    notice.className = 'fe-search-notice';
-    notice.textContent = `Showing ${data.file_count} files, ${data.match_count} matches`;
-    container.appendChild(notice);
-  }
+  renderSearchOverlayBody(
+    resultsContainer,
+    { searchMode, searchLoading, searchError, searchResults },
+    {
+      renderNameResults: (container, data) =>
+        renderNameResultsModule(container, data, {
+          expandToFile,
+          getProjectPath: () => uiState.projectPath,
+          closeDrawerIfMobile,
+          toast,
+          closeSearchOverlay,
+          expandToPath,
+          applySetiIconToSpan,
+          basename,
+        }),
+      renderContentResults: (container, data) =>
+        renderContentResultsModule(container, data, {
+          expandToFile,
+          getProjectPath: () => uiState.projectPath,
+          closeDrawerIfMobile,
+          toast,
+        }),
+      renderChangesResults,
+      renderReviewResults,
+    },
+  );
 }
 
 function renderChangesResults(container, data) {

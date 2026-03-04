@@ -375,6 +375,25 @@ class ConnectionManager:
 
     async def broadcast(self, project_path: str, message: Dict[str, Any]):
         """Send message to all clients connected to a specific project."""
+        try:
+            msg_type = message.get("type") if isinstance(message, dict) else None
+            if msg_type == "agent:open":
+                payload = message.get("payload") if isinstance(message, dict) else {}
+                logger.info(
+                    "[explorer_broadcast] type=agent:open project=%s conn=%s payload=%s",
+                    project_path,
+                    self.get_connection_count(project_path),
+                    {
+                        "path": payload.get("path") if isinstance(payload, dict) else None,
+                        "rel": payload.get("rel") if isinstance(payload, dict) else None,
+                        "line": payload.get("line") if isinstance(payload, dict) else None,
+                        "column": payload.get("column") if isinstance(payload, dict) else None,
+                        "source": payload.get("source") if isinstance(payload, dict) else None,
+                        "conversation_id": payload.get("conversation_id") if isinstance(payload, dict) else None,
+                    },
+                )
+        except Exception:
+            pass
         if _is_worker_process() and not self.has_connections(project_path):
             _schedule_forward_broadcast(project_path, message)
             return
