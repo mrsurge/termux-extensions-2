@@ -14,6 +14,8 @@ import { showNewProjectModal } from './new_project_modal.js';
 import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
 import { initExplorerStickyScopes } from './explorer_extensions/sticky_scopes.js';
 import { createExplorerSearchController } from './explorer_modules/explorer_search_controller.js';
+import { createExplorerDirectoryStateHelpers } from './explorer_modules/explorer_directory_state_utils.js';
+import { createExplorerUiHelpers } from './explorer_modules/explorer_ui_helpers.js';
 import {
   renderNameResults as renderNameResultsModule,
   renderContentResults as renderContentResultsModule,
@@ -241,18 +243,15 @@ async function scrollToActiveFile() {
 }
 
 function setCheckableMenuItem(el, checked) {
-  if (!el) return;
-  el.classList.toggle('fe-menu-item-checked', !!checked);
-  el.setAttribute('aria-checked', checked ? 'true' : 'false');
+  explorerUiHelpers.setCheckableMenuItem(el, checked);
 }
 
 function closeExplorerMenu() {
-  explorerMenuDropdown?.classList.remove('show');
+  explorerUiHelpers.closeExplorerMenu();
 }
 
 function syncExplorerPrefsUI() {
-  const checked = explorerStickyHeadersEnabled === true;
-  setCheckableMenuItem(explorerMenuStickyHeadersItem, checked);
+  explorerUiHelpers.syncExplorerPrefsUI();
 }
 
 function applyExplorerStickyScopesPreference() {
@@ -368,6 +367,24 @@ const explorerSearchController = createExplorerSearchController({
   getSearchDebounceTimer: () => searchDebounceTimer,
   setSearchDebounceTimer: (next) => { searchDebounceTimer = next; },
   setLastKnownProjectPath: (next) => { lastKnownProjectPath = next || ''; },
+});
+const explorerDirectoryStateHelpers = createExplorerDirectoryStateHelpers({
+  getTreeElement: () => treeElement,
+  getSelectModeDir: () => selectModeDir,
+  setSelectModeDir: (next) => { selectModeDir = next; },
+  clearSelectedEntries: () => selectedEntries.clear(),
+  hasExplorerBus: () => typeof window.__explorerBusSend === 'function',
+  sendExplorerBus: (event, payload) => window.__explorerBusSend(event, payload),
+  getOpenDirectories: () => openDirectories,
+  getOpenDirsInitialized: () => openDirsInitialized,
+  getOpenDirsSyncTimer: () => openDirsSyncTimer,
+  setOpenDirsSyncTimer: (next) => { openDirsSyncTimer = next; },
+  getOpenDirsSyncDebounce: () => OPEN_DIRS_SYNC_DEBOUNCE,
+});
+const explorerUiHelpers = createExplorerUiHelpers({
+  getExplorerMenuDropdown: () => explorerMenuDropdown,
+  getExplorerStickyHeadersEnabled: () => explorerStickyHeadersEnabled,
+  getExplorerMenuStickyHeadersItem: () => explorerMenuStickyHeadersItem,
 });
 
 let reconnectResyncPending = false;
@@ -551,145 +568,59 @@ let lastChangesData = null;
 let lastChangesContainer = null;
 
 function clearElement(el) {
-  if (!el) return;
-  while (el.firstChild) el.removeChild(el.firstChild);
+  explorerUiHelpers.clearElement(el);
 }
 
 function basename(path) {
-  if (!path || path === '/') return '/';
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] || '/';
+  return explorerUiHelpers.basename(path);
 }
 
 function toast(message) {
-  if (window.host && typeof window.host.toast === 'function') {
-    window.host.toast(message);
-  } else {
-    console.log(message);
-  }
+  explorerUiHelpers.toast(message);
 }
 
 function isMobileLayout() {
-  const root = document.querySelector('.fe-root');
-  return root?.classList.contains('layout-mobile') || false;
+  return explorerUiHelpers.isMobileLayout();
 }
 
 function closeDrawerIfMobile() {
-  if (!isMobileLayout()) return;
-  const root = document.querySelector('.fe-root');
-  if (root) {
-    root.classList.remove('drawer-open');
-  }
+  explorerUiHelpers.closeDrawerIfMobile();
 }
 
 // --- Batch Select Mode helpers ---
 
 function isInSelectMode(parentRel) {
-  return selectModeDir === parentRel;
+  return explorerDirectoryStateHelpers.isInSelectMode(parentRel);
 }
 
 function enableSelectMode(dirRel) {
-  if (!dirRel) return;
-  selectModeDir = dirRel;
-  selectedEntries.clear();
-  
-  // Collapse any open subdirectories within this dir to keep UX clean
-  collapseSubdirsOf(dirRel);
-  
-  // Re-render this directory's children to show checkboxes
-  if (typeof window.__explorerBusSend === 'function') {
-    window.__explorerBusSend('explorer:list', { rel: dirRel });
-  }
+  explorerDirectoryStateHelpers.enableSelectMode(dirRel);
 }
 
 function disableSelectMode() {
-  const wasDir = selectModeDir;
-  selectModeDir = null;
-  selectedEntries.clear();
-  
-  // Re-render to remove checkboxes
-  if (wasDir && typeof window.__explorerBusSend === 'function') {
-    window.__explorerBusSend('explorer:list', { rel: wasDir });
-  }
+  explorerDirectoryStateHelpers.disableSelectMode();
 }
 
 function collapseSubdirsOf(parentRel) {
-  if (!treeElement) return;
-  
-  // Find the parent directory node
-  const parentLi = treeElement.querySelector(
-    `li.fe-tree-node[data-kind="dir"][data-rel="${parentRel}"]`
-  );
-  if (!parentLi) return;
-  
-  // Find all open subdirectories within it and collapse them
-  const openSubdirs = parentLi.querySelectorAll(
-    'li.fe-tree-node[data-kind="dir"][data-open="true"]'
-  );
-  openSubdirs.forEach((li) => {
-    li.dataset.open = 'false';
-    const childList = li.querySelector(':scope > ul.fe-tree');
-    if (childList) childList.remove();
-  });
+  explorerDirectoryStateHelpers.collapseSubdirsOf(parentRel);
 }
 
 function checkAutoDisableSelectMode(collapsedRel) {
-  // If user collapses the directory that's in select mode, auto-disable
-  if (selectModeDir && selectModeDir === collapsedRel) {
-    selectModeDir = null;
-    selectedEntries.clear();
-  }
+  explorerDirectoryStateHelpers.checkAutoDisableSelectMode(collapsedRel);
 }
 
 // --- Open Directories Persistence ---
 
 function markDirectoryOpen(rel, isOpen) {
-  /**
-   * Track directory open/close state and schedule sync to backend.
-   * Called when user expands or collapses a directory.
-   */
-  if (!rel || rel === '.') return;  // Don't track root
-  
-  if (isOpen) {
-    openDirectories.add(rel);
-  } else {
-    openDirectories.delete(rel);
-    // Also remove any children that were open under this directory
-    const prefix = rel + '/';
-    for (const dir of openDirectories) {
-      if (dir.startsWith(prefix)) {
-        openDirectories.delete(dir);
-      }
-    }
-  }
-  
-  // Only sync after initialization (don't sync during restore)
-  if (openDirsInitialized) {
-    scheduleOpenDirsSync();
-  }
+  explorerDirectoryStateHelpers.markDirectoryOpen(rel, isOpen);
 }
 
 function scheduleOpenDirsSync() {
-  /**
-   * Debounced sync of open directories to backend.
-   */
-  if (openDirsSyncTimer) {
-    clearTimeout(openDirsSyncTimer);
-  }
-  openDirsSyncTimer = setTimeout(() => {
-    openDirsSyncTimer = null;
-    syncOpenDirsToBackend();
-  }, OPEN_DIRS_SYNC_DEBOUNCE);
+  explorerDirectoryStateHelpers.scheduleOpenDirsSync();
 }
 
 function syncOpenDirsToBackend() {
-  /**
-   * Send current open directories list to backend for persistence.
-   */
-  if (typeof window.__explorerBusSend !== 'function') return;
-  
-  const dirs = Array.from(openDirectories);
-  window.__explorerBusSend('explorer:setOpenDirs', { dirs });
+  explorerDirectoryStateHelpers.syncOpenDirsToBackend();
 }
 
 async function restoreOpenDirectories(dirs) {
