@@ -64,7 +64,7 @@ def start_background_tasks():
     _cleanup_task = asyncio.create_task(_background_cleanup())
 
 
-async def _stop_background_tasks():
+async def stop_background_tasks():
     """Cancel the background cleanup task if it is running."""
     global _cleanup_task
     if _cleanup_task is None:
@@ -84,12 +84,13 @@ async def register_app(app_id: str, shell_id: str, port: int):
     """
     print(f"[AppLifecycle] Registering app_id={app_id} shell_id={shell_id} port={port}")
     async with _get_lock():
+        existing = _running_apps.get(shell_id, {})
         _running_apps[shell_id] = {
             "app_id": app_id,
             "shell_id": shell_id,
             "port": port,
-            "created_at": time.time(),
-            "locked": False,
+            "created_at": existing.get("created_at", time.time()),
+            "locked": bool(existing.get("locked", False)),
         }
 
 async def unregister_app(shell_id: str):
@@ -99,6 +100,15 @@ async def unregister_app(shell_id: str):
     print(f"[AppLifecycle] Unregistering shell_id={shell_id}")
     async with _get_lock():
         _running_apps.pop(shell_id, None)
+
+
+async def unregister_app_group(app_id: str):
+    """Remove all tracked entries for an app without issuing shutdown."""
+    print(f"[AppLifecycle] Unregistering app group app_id={app_id}")
+    async with _get_lock():
+        to_remove = [shell_id for shell_id, info in _running_apps.items() if info.get("app_id") == app_id]
+        for shell_id in to_remove:
+            _running_apps.pop(shell_id, None)
 
 async def get_running_apps(manager) -> List[Dict]:
     """
@@ -197,7 +207,7 @@ async def shutdown_lifecycle(manager) -> None:
     """Gracefully stop lifecycle background tasks and running apps."""
     print("[AppLifecycle] Shutting down lifecycle services...")
     await terminate_all_apps(manager)
-    await _stop_background_tasks()
+    await stop_background_tasks()
     print("[AppLifecycle] Lifecycle shutdown complete.")
 
 # --- End of Public API ---

@@ -9,9 +9,10 @@ import httpx
 import websockets
 from fastapi import Request, WebSocket
 from fastapi.responses import JSONResponse, Response
+from starlette.requests import ClientDisconnect
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-from app.libs import app_manager
+from app.extensions.apps import loader as apps_loader
 
 UPSTREAM_HOST = "127.0.0.1"
 HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
@@ -124,27 +125,19 @@ def _proxy_prefix(app_id: str) -> str:
 
 
 def _get_loaded_apps() -> list[dict[str, Any]]:
-    import app.main
-
-    apps = getattr(app.main, "loaded_apps", None)
-    if isinstance(apps, list):
-        return apps
-    return []
+    return apps_loader.get_loaded_apps()
 
 
 def _find_proxy_shell_config(app_id: str) -> Optional[dict[str, Any]]:
-    for manifest in _get_loaded_apps():
-        if not isinstance(manifest, dict):
-            continue
-        if manifest.get("id") != app_id:
-            continue
-        cfg = manifest.get("proxy_shell")
-        if not isinstance(cfg, dict):
-            return None
-        if cfg.get("enabled") is False:
-            return None
-        return cfg
-    return None
+    app_def = apps_loader.get_app_registry().get_app(app_id)
+    if app_def is None:
+        return None
+    cfg = app_def.proxy_shell
+    if not isinstance(cfg, dict):
+        return None
+    if cfg.get("enabled") is False:
+        return None
+    return cfg
 
 
 def _proxy_ws_max_size(cfg: dict[str, Any]) -> int:
@@ -155,8 +148,7 @@ def _proxy_ws_max_size(cfg: dict[str, Any]) -> int:
 
 
 async def _get_upstream_port(app_id: str) -> Optional[int]:
-    running = await app_manager.get_running_apps()
-    app_info = running.get(app_id)
+    app_info = await apps_loader.get_app_runtime().get_running_app(app_id)
     if not isinstance(app_info, dict):
         return None
     try:
@@ -291,7 +283,10 @@ async def _proxy_http(app_id: str, request: Request, rest: str) -> Response:
         url = f"{url}?{request.url.query}"
 
     headers = _strip_hop_headers(dict(request.headers))
-    body = await request.body()
+    try:
+        body = await request.body()
+    except ClientDisconnect:
+        return Response(status_code=499)
     try:
         async with httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT, follow_redirects=False) as client:
             upstream = await client.request(request.method, url, headers=headers, content=body)

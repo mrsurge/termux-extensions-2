@@ -3,7 +3,7 @@
   "id": "file_editor_cm6",
   "icon_src": "/apps/file_editor_cm6/static/icons/CODE_TE2.png",
   "version": "0.1.0",
-  "description": "A full-page CodeMirror 6 editor running inside the NiceGUI shell.",
+  "description": "The Monaco based code editor for TE2",
   "author": "mrSurge",
   "entrypoints": {
     "backend_blueprint": "main.py",

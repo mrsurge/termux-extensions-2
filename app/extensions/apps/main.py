@@ -11,9 +11,9 @@ import asyncio
 from pathlib import Path
 from fastapi import APIRouter, Depends, Request, HTTPException, WebSocket, Body
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
-from app.libs.app_manager import ensure_app_running
 from app.libs import app_manager
 from app.libs import app_lifecycle
+from app.extensions.apps import loader as apps_loader
 from framework_shells import FrameworkShellManager, get_manager as _get_framework_shell_manager
 
 async def get_framework_shell_manager() -> FrameworkShellManager:
@@ -23,9 +23,15 @@ from urllib.parse import urlencode
 
 # Avoid circular import - will be accessed dynamically
 def get_loaded_apps():
-    """Get loaded apps from app.main module at runtime."""
-    import app.main
-    return app.main.loaded_apps
+    return apps_loader.get_loaded_apps()
+
+
+def get_app_registry():
+    return apps_loader.get_app_registry()
+
+
+def get_app_runtime():
+    return apps_loader.get_app_runtime()
 
 
 def _resolve_manifest_icon_src(manifest: dict) -> str:
@@ -37,9 +43,9 @@ def _resolve_manifest_icon_src(manifest: dict) -> str:
         return ""
     if value.startswith("http://") or value.startswith("https://") or value.startswith("/"):
         return value
-    app_dir = manifest.get("_dir")
-    if isinstance(app_dir, str) and app_dir.strip():
-        return f"/apps/{app_dir.strip()}/{value.lstrip('/')}"
+    asset_base_url = manifest.get("asset_base_url")
+    if isinstance(asset_base_url, str) and asset_base_url.strip():
+        return f"{asset_base_url.rstrip('/')}/{value.lstrip('/')}"
     return value
 
 
@@ -58,7 +64,6 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
             entrypoints = {}
 
         backend_required = bool(entrypoints.get("backend_blueprint"))
-        nicegui_shell = bool(entrypoints.get("nicegui_shell"))
         icon_src_resolved = _resolve_manifest_icon_src(manifest)
 
         catalog.append({
@@ -71,10 +76,11 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
             "icon_emoji": manifest.get("icon_emoji") if isinstance(manifest.get("icon_emoji"), str) else "",
             "fullscreen": bool(manifest.get("fullscreen")),
             "backend_required": backend_required,
-            "nicegui_shell": nicegui_shell,
             "running": app_id in running,
             "launch_url": f"/app/{app_id}",
             "embed_url": f"/app/{app_id}?embed=1",
+            "asset_base_url": manifest.get("asset_base_url") if isinstance(manifest.get("asset_base_url"), str) else "",
+            "source_kind": manifest.get("source_kind") if isinstance(manifest.get("source_kind"), str) else "",
         })
 
     catalog.sort(key=lambda item: str(item.get("name") or item.get("id") or "").lower())
@@ -131,7 +137,7 @@ async def open_app(app_id: str, payload: dict = Body(...)):
         raise HTTPException(status_code=404, detail=f"App '{app_id}' not found")
 
     try:
-        app_info = await ensure_app_running(app_id)
+        app_info = await get_app_runtime().start_app(app_id)
     except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=500, detail=f"Failed to start app: {e}")
 
@@ -155,7 +161,7 @@ async def open_app(app_id: str, payload: dict = Body(...)):
 async def start_app(app_id: str):
     print(f"[AppsExtension] start_app requested for {app_id}")
     try:
-        app_info = await ensure_app_running(app_id)
+        app_info = await get_app_runtime().start_app(app_id)
         print(f"[AppsExtension] start_app succeeded for {app_id}: shell={app_info.get('shell_id')} port={app_info.get('port')}")
         return {"ok": True, "data": app_info}
     except (ValueError, RuntimeError) as e:
@@ -168,24 +174,10 @@ async def quit_app(app_id: str, manager: FrameworkShellManager = Depends(get_fra
     A new, specific endpoint for quitting an app.
     """
     print(f"[AppsExtension] quit_app requested for {app_id}")
-    running_apps = await app_lifecycle.get_running_apps(manager)
-    app_to_quit = next((app for app in running_apps if app.get("app_id") == app_id), None)
-
-    if not app_to_quit:
-        print(f"[AppsExtension] quit_app: app {app_id} not running")
-        raise HTTPException(status_code=404, detail="App is not running or already terminated.")
-
-    shutdown_result = await app_lifecycle.terminate_app_group(manager, app_id)
-    root_pids = (
-        shutdown_result.get("data", {}).get("root_pids", [])
-        if isinstance(shutdown_result, dict)
-        else []
-    )
-    stats = (
-        shutdown_result.get("data", {}).get("stats", {})
-        if isinstance(shutdown_result, dict)
-        else {}
-    )
+    shutdown_result = await get_app_runtime().shutdown_app(app_id)
+    shutdown = shutdown_result.get("shutdown", {}) if isinstance(shutdown_result, dict) else {}
+    root_pids = shutdown.get("root_pids", []) if isinstance(shutdown, dict) else []
+    stats = shutdown.get("stats", {}) if isinstance(shutdown, dict) else {}
     print(
         f"[AppsExtension] quit_app terminate_app_group(app_id={app_id}) "
         f"ok={bool(shutdown_result.get('ok')) if isinstance(shutdown_result, dict) else False} "
@@ -238,6 +230,8 @@ async def get_running_apps(manager: FrameworkShellManager = Depends(get_framewor
             app['icon_emoji'] = manifest_data.get('icon_emoji')
             app['icon_src'] = manifest_data.get('icon_src')
             app['_dir'] = manifest_data.get('_dir')
+            app['asset_base_url'] = manifest_data.get('asset_base_url')
+            app['source_kind'] = manifest_data.get('source_kind')
         augmented_apps.append(app)
         
     return {"ok": True, "data": augmented_apps}
@@ -257,7 +251,7 @@ async def get_apps_catalog():
     Canonical launcher/sidebar catalog with normalized icon URLs and runtime flags.
     """
     manifests = get_loaded_apps()
-    running_apps = await app_manager.get_running_apps()
+    running_apps = await get_app_runtime().get_running_app_map()
     catalog = _build_apps_catalog(manifests, running_apps)
     return {"ok": True, "data": catalog}
 
@@ -282,10 +276,9 @@ def reload_apps():
     Reload app manifests from disk without re-registering services/routers.
     Safe for launcher refresh use-cases where manifest metadata changed.
     """
-    from app.extensions.apps import loader as apps_loader
     import app.main as main_app
 
-    manifests = apps_loader.load_apps()
+    manifests = apps_loader.refresh_registry()
     main_app.loaded_apps = manifests
     app_manager._LOADED_APPS = manifests
     return {"ok": True, "data": {"count": len(manifests)}}
@@ -303,29 +296,16 @@ async def app_shell(app_id: str, request: Request):
     # Strict stale-session handling:
     # If this app requires a backend worker and the worker is not running,
     # redirect to framework root instead of attempting to auto-start.
-    if backend_required and not entrypoints.get('nicegui_shell'):
+    if backend_required:
         running_apps = await app_manager.get_running_apps()
-        if app_id not in running_apps:
+        app_info = running_apps.get(app_id) if isinstance(running_apps, dict) else None
+        if not isinstance(app_info, dict):
             return RedirectResponse(url="/")
-        if app_id == "file_editor_cm6":
-            app_info = running_apps.get(app_id) or {}
-            port = app_info.get("port")
-            if not port:
-                return RedirectResponse(url="/")
-            if not await _is_local_port_open(int(port)):
-                return RedirectResponse(url="/")
-
-    if entrypoints.get('nicegui_shell'):
-        running_apps = await app_manager.get_running_apps()
-        app_info = running_apps.get(app_id)
-        port = app_info.get('port') if isinstance(app_info, dict) else None
+        port = app_info.get("port")
         if not port:
             return RedirectResponse(url="/")
-
-        host_only = request.url.hostname
-        scheme = request.url.scheme
-        redirect_url = f"{scheme}://{host_only}:{port}/"
-        return RedirectResponse(url=redirect_url)
+        if not await _is_local_port_open(int(port)):
+            return RedirectResponse(url="/")
 
     template_path = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "app_shell.html")
     async with aiofiles.open(template_path, "r") as f:
@@ -338,23 +318,42 @@ async def app_shell(app_id: str, request: Request):
 
     return HTMLResponse(content=template_content)
 
-@apps_bp.get("/apps/{app_dir}/{filename:path}")
-def serve_app_file(app_dir: str, filename: str):
-    """Serves static assets for a specific app."""
-    full_path = os.path.join(project_root, 'app', 'apps', app_dir, filename)
+def _resolve_file_response(full_path: str):
     if not os.path.isfile(full_path):
         raise HTTPException(status_code=404, detail="File not found")
-    
+
+    suffix = Path(full_path).suffix.lower()
     # Set no-cache headers for JS/CSS to ensure fresh code loads
-    if filename.endswith(('.js', '.mjs', '.ts', '.css')):
+    if suffix in {'.js', '.mjs', '.ts', '.css'}:
         headers = {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
             'Expires': '0'
         }
-        media_type = "application/javascript" if filename.endswith(('.js', '.mjs', '.ts')) else "text/css"
+        media_type = "application/javascript" if suffix in {'.js', '.mjs', '.ts'} else "text/css"
         return FileResponse(full_path, media_type=media_type, headers=headers)
-    
+
     return FileResponse(full_path)
+
+
+@apps_bp.get("/apps/by-id/{app_id}/{filename:path}")
+def serve_app_file_by_id(app_id: str, filename: str):
+    """Serve app assets from the registry-backed app root."""
+    resolved = get_app_registry().resolve_asset_path(app_id, filename)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    return _resolve_file_response(str(resolved))
+
+
+@apps_bp.get("/apps/{app_dir}/{filename:path}")
+def serve_app_file(app_dir: str, filename: str):
+    """Compatibility alias for built-in app assets."""
+    app_def = get_app_registry().get_app_by_dir(app_dir, source_kind="builtin")
+    if app_def is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    resolved = get_app_registry().resolve_asset_path(app_def.app_id, filename)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    return _resolve_file_response(str(resolved))
 
 # Shell log viewer routes are now hosted by the framework_shells module under `/fws/`.

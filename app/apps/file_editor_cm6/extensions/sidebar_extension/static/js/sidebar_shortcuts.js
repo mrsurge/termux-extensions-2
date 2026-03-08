@@ -452,6 +452,12 @@ export function initSidebarShortcuts(options = {}) {
       _logAppDiscovery('icon-src:absolute', { appId: _normStr(appManifest?.id), iconSrc: raw });
       return raw;
     }
+    const assetBaseUrl = _normStr(appManifest?.asset_base_url);
+    if (assetBaseUrl) {
+      const resolved = `${assetBaseUrl.replace(/\/+$/, '')}/${raw.replace(/^\/+/, '')}`;
+      _logAppDiscovery('icon-src:asset-base', { appId: _normStr(appManifest?.id), iconSrc: resolved });
+      return resolved;
+    }
     const appDir = _normStr(appManifest?._dir);
     if (appDir) {
       const resolved = `/apps/${appDir}/${raw.replace(/^\/+/, '')}`;

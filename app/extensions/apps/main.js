@@ -10,6 +10,10 @@ export default function(container) {
     if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('/')) {
       return raw;
     }
+    const assetBaseUrl = typeof app.asset_base_url === 'string' ? app.asset_base_url.trim() : '';
+    if (assetBaseUrl) {
+      return `${assetBaseUrl.replace(/\/+$/, '')}/${raw.replace(/^\/+/, '')}`;
+    }
     if (app._dir) {
       return `/apps/${app._dir}/${raw}`;
     }

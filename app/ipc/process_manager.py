@@ -99,6 +99,28 @@ class ProcessRegistry:
         """Get process count."""
         with self._lock:
             return len(self._processes)
+
+    @staticmethod
+    def _is_pid_alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except Exception:
+            return True
+
+        try:
+            with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as fh:
+                stat = fh.read().split()
+            if len(stat) >= 3 and stat[2] == "Z":
+                return False
+        except (FileNotFoundError, ProcessLookupError):
+            return False
+        except Exception:
+            return True
+        return True
     
     def shutdown_all(self, logger=None, *, include_framework: bool = False) -> Dict[str, Any]:
         """Shutdown all registered processes SEQUENTIALLY.
@@ -124,14 +146,6 @@ class ProcessRegistry:
             if include_framework or rec.type != "framework"
         ]
 
-        if logger:
-            skipped_framework = len(all_processes) - len(processes)
-            logger.info(
-                "IPC shutdown: %d processes to terminate%s",
-                len(processes),
-                f" (skipping {skipped_framework} framework record(s))" if skipped_framework else "",
-            )
-
         stats = {
             "total": len(processes),
             "terminated": 0,
@@ -139,6 +153,7 @@ class ProcessRegistry:
             "force_killed": 0,
             "errors": [],
             "force_killed_shells": [],
+            "stale_pruned": 0,
             "framework_shells": {
                 "attempted": 0,
                 "terminated": 0,
@@ -179,6 +194,27 @@ class ProcessRegistry:
             stats["framework_shells"]["errors"].append(str(exc))
             if logger:
                 logger.warning(f"IPC shutdown: failed to terminate framework_shells shells: {exc}")
+
+        stale_pids = [rec.pid for rec in processes if not self._is_pid_alive(rec.pid)]
+        if stale_pids:
+            with self._lock:
+                for pid in stale_pids:
+                    self._processes.pop(pid, None)
+            processes = [rec for rec in processes if rec.pid not in stale_pids]
+            stats["stale_pruned"] = len(stale_pids)
+
+        stats["total"] = len(processes)
+        if logger:
+            skipped_framework = len(all_processes) - len([
+                rec for rec in all_processes if include_framework or rec.type != "framework"
+            ])
+            suffix_parts = []
+            if skipped_framework:
+                suffix_parts.append(f"skipping {skipped_framework} framework record(s)")
+            if stale_pids:
+                suffix_parts.append(f"pruned {len(stale_pids)} stale record(s)")
+            suffix = f" ({'; '.join(suffix_parts)})" if suffix_parts else ""
+            logger.info("IPC shutdown: %d live processes to terminate%s", len(processes), suffix)
         
         # Sort: children before parents (via parent_pid), and framework last.
         # NOTE: ordering is delegated to framework_shells (host-agnostic planner).
