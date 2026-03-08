@@ -4032,7 +4032,7 @@ import { applyActiveModelLanguage } from './editor_boot_apply_active_model_langu
         console.warn('[focus_relay] no editor instance — skipping bind');
         return;
       }
-      _uiIpcFocusDisposable = bindFocusRelay(ed, uiIpcSocket);
+      _uiIpcFocusDisposable = bindFocusRelay(ed, function() { return uiIpcSocket; });
       console.log('[focus_relay] bound to editor widget');
     } catch (e) {
       console.warn('[focus_relay] bind failed', e);

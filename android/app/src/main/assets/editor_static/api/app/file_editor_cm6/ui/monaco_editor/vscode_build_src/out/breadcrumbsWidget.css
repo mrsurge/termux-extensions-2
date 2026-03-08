@@ -1,0 +1,91 @@
+/* ../../../../../../mrselect6-2/code-server/lib/vscode/src/vs/base/browser/ui/scrollbar/media/scrollbars.css */
+.monaco-scrollable-element > .scrollbar > .scra {
+  cursor: pointer;
+  font-size: 11px !important;
+}
+.monaco-scrollable-element > .visible {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0);
+  transition: opacity 100ms linear;
+  z-index: 11;
+}
+.monaco-scrollable-element > .invisible {
+  opacity: 0;
+  pointer-events: none;
+}
+.monaco-scrollable-element > .invisible.fade {
+  transition: opacity 800ms linear;
+}
+.monaco-scrollable-element > .shadow {
+  position: absolute;
+  display: none;
+}
+.monaco-scrollable-element > .shadow.top {
+  display: block;
+  top: 0;
+  left: 3px;
+  height: 3px;
+  width: 100%;
+  box-shadow: var(--vscode-scrollbar-shadow) 0 6px 6px -6px inset;
+}
+.monaco-scrollable-element > .shadow.left {
+  display: block;
+  top: 3px;
+  left: 0;
+  height: 100%;
+  width: 3px;
+  box-shadow: var(--vscode-scrollbar-shadow) 6px 0 6px -6px inset;
+}
+.monaco-scrollable-element > .shadow.top-left-corner {
+  display: block;
+  top: 0;
+  left: 0;
+  height: 3px;
+  width: 3px;
+}
+.monaco-scrollable-element > .shadow.top.left {
+  box-shadow: var(--vscode-scrollbar-shadow) 6px 0 6px -6px inset;
+}
+.monaco-scrollable-element > .scrollbar {
+  background: var(--vscode-scrollbar-background);
+}
+.monaco-scrollable-element > .scrollbar > .slider {
+  background: var(--vscode-scrollbarSlider-background);
+}
+.monaco-scrollable-element > .scrollbar > .slider:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+.monaco-scrollable-element > .scrollbar > .slider.active {
+  background: var(--vscode-scrollbarSlider-activeBackground);
+}
+
+/* ../../../../../../mrselect6-2/code-server/lib/vscode/src/vs/base/browser/ui/breadcrumbs/breadcrumbsWidget.css */
+.monaco-breadcrumbs {
+  user-select: none;
+  -webkit-user-select: none;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  outline-style: none;
+}
+.monaco-breadcrumbs .monaco-breadcrumb-item {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  cursor: pointer;
+  align-self: center;
+  height: 100%;
+  outline: none;
+}
+.monaco-breadcrumbs.disabled .monaco-breadcrumb-item {
+  cursor: default;
+}
+.monaco-breadcrumbs .monaco-breadcrumb-item .codicon-breadcrumb-separator {
+  color: inherit;
+}
+.monaco-breadcrumbs .monaco-breadcrumb-item:first-of-type::before {
+  content: " ";
+}
+/*# sourceMappingURL=breadcrumbsWidget.css.map */

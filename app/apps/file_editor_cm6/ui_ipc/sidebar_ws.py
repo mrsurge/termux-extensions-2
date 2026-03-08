@@ -51,6 +51,43 @@ async def _emit_presence(ns, *, to_sid: str | None = None):
         await ns.emit("sidebar:presence", payload, room="sidebar_ipc")
 
 
+def _current_cwd() -> str:
+    history = get_history_store()
+    cwd = history.get_active_project() or str(get_project_root())
+    return str(cwd or "").strip()
+
+
+def _cwd_payload(reason: str = "sync") -> dict:
+    return {
+        "cwd": _current_cwd(),
+        "reason": str(reason or "sync"),
+        "ts": int(time.time() * 1000),
+    }
+
+
+async def emit_sidebar_cwd_set(ns, *, to_sid: str | None = None, reason: str = "sync") -> None:
+    payload = _cwd_payload(reason)
+    if to_sid:
+        await ns.emit("sidebar:cwd_set", payload, to=to_sid)
+    else:
+        await ns.emit("sidebar:cwd_set", payload, room="sidebar_ipc")
+    print(
+        f"[sidebar_ipc] cwd_set reason={payload.get('reason')} cwd={payload.get('cwd') or ''} to={to_sid or 'room'}",
+        flush=True,
+    )
+
+
+async def emit_sidebar_cwd_set_global(*, reason: str = "sync") -> None:
+    from .ui_ipc_socketio import UI_IPC_SIO
+
+    payload = _cwd_payload(reason)
+    await UI_IPC_SIO.emit("sidebar:cwd_set", payload, namespace="/sidebar_ipc", room="sidebar_ipc")
+    print(
+        f"[sidebar_ipc] cwd_set(global) reason={payload.get('reason')} cwd={payload.get('cwd') or ''}",
+        flush=True,
+    )
+
+
 async def on_sidebar_register(ns, sid, data):
     if not isinstance(data, dict):
         data = {}
@@ -73,6 +110,7 @@ async def on_sidebar_register(ns, sid, data):
         flush=True,
     )
     await _emit_presence(ns)
+    await emit_sidebar_cwd_set(ns, to_sid=sid, reason="register")
 
 
 async def on_sidebar_disconnect(ns, sid):
@@ -117,6 +155,22 @@ async def on_sidebar_event(ns, sid, data):
                 print(f"[sidebar_ipc] sidebar:event agent_open route failed: {exc}", flush=True)
         return
     await ns.emit("sidebar:event", data, room="sidebar_ipc", skip_sid=sid)
+
+
+async def on_sidebar_cwd_get(ns, sid, data):
+    payload = _cwd_payload("request")
+    print(
+        f"[sidebar_ipc] cwd_get from={sid} cwd={payload.get('cwd') or ''}",
+        flush=True,
+    )
+    return {"ok": True, "data": payload}
+
+
+async def on_sidebar_cwd_set(ns, sid, data):
+    # Backend is the source of truth; ignore client-supplied cwd and re-emit canonical value.
+    print(f"[sidebar_ipc] cwd_set request ignored from={sid}", flush=True)
+    await emit_sidebar_cwd_set(ns, reason="authoritative")
+    return {"ok": True}
 
 
 async def _broadcast_agent_open(data: dict) -> None:

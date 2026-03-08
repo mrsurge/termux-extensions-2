@@ -10,8 +10,20 @@ export function createUiIpcConnections(deps) {
   let sidebarIpcSocket = null;
   let uiIpcSocket = null;
 
+  function dispatchSidebarEvent(data) {
+    try {
+      if (!data || typeof data !== 'object') return;
+      window.dispatchEvent(new CustomEvent('cm6:sidebar-event', {
+        detail: data,
+      }));
+    } catch (_) {}
+  }
+
   function emitSidebarIpc(eventName, payload) {
     try {
+      if (eventName === 'sidebar:event' && payload && typeof payload === 'object') {
+        dispatchSidebarEvent(payload);
+      }
       if (!sidebarIpcSocket || !sidebarIpcSocket.connected) return;
       sidebarIpcSocket.emit(eventName, payload || {});
     } catch (_) {}
@@ -40,6 +52,7 @@ export function createUiIpcConnections(deps) {
       });
       sidebarIpcSocket.on('sidebar:event', (data) => {
         if (!data || typeof data !== 'object') return;
+        dispatchSidebarEvent(data);
       });
       sidebarIpcSocket.on('connect_error', (err) => {
         console.warn('[Sidebar_IPC] connect failed', err);

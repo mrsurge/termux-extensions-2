@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
+import android.util.Log
 import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
@@ -35,13 +36,14 @@ import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
-import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.WebExtension
+import android.view.inputmethod.InputMethodManager
+import io.flutter.embedding.android.FlutterFragment
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var geckoView: GeckoView
+    private lateinit var geckoView: FilteredGeckoView
     private lateinit var geckoSession: GeckoSession
     private lateinit var runtime: GeckoRuntime
     private lateinit var nativeHeader: View
@@ -49,6 +51,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var consoleOverlay: FrameLayout
     private lateinit var consoleScroll: ScrollView
     private lateinit var consoleText: TextView
+
+    private val editorInputFilter = EditorInputFilter()
+    private var uiIpcClient: UiIpcClient? = null
+
+    private var editorAssetManager: EditorAssetManager? = null
+    private var localAssetServer: LocalAssetServer? = null
+    private var assetExtension: WebExtension? = null
+    private var assetExtensionPort: WebExtension.Port? = null
+
+    private var consoleEventBridge: ConsoleEventBridge? = null
+    private var flutterFragment: FlutterFragment? = null
 
     private lateinit var btnConsoleBack: Button
     private lateinit var btnConsoleStart: Button
@@ -510,8 +523,8 @@ class MainActivity : AppCompatActivity() {
                             if (data != null) {
                                 val keys = data.keys()
                                 while (keys.hasNext()) {
-                                    val key = keys.next()
-                                    merged.put(key, data.opt(key))
+                                    val key = keys.next() as String
+                                    merged.put(key, data.opt(key) ?: JSONObject.NULL)
                                 }
                             }
                         }
@@ -535,7 +548,11 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // Pre-warm Flutter engine for console overlay
+        consoleEventBridge = ConsoleEventBridge(this).also { it.init() }
+
         geckoView = findViewById(R.id.geckoView)
+        geckoView.editorInputFilter = editorInputFilter
         nativeHeader = findViewById(R.id.nativeHeader)
 
         consoleOverlay = findViewById(R.id.consoleOverlay)
@@ -557,6 +574,8 @@ class MainActivity : AppCompatActivity() {
         btnConsoleBack.setOnClickListener { hideConsoleOverlay() }
         btnConsoleStart.setOnClickListener { flushBrowserCache() }
         btnConsoleStop.visibility = View.GONE
+
+        findViewById<Button>(R.id.btnUpdateTe2).setOnClickListener { updateTe2Ui() }
         consoleScroll.visibility = View.GONE
 
         // Console transport controls are intentionally dormant; overlay is now a simple tools palette.
@@ -842,6 +861,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         runtime = GeckoRuntimeProvider.get(applicationContext)
+
+        // Initialize local asset serving before any page loads
+        initEditorAssets()
+
         geckoSession.open(runtime)
 
         geckoView.setSession(geckoSession)
@@ -937,6 +960,29 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             Toast.makeText(this, "Cache flush failed", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /**
+     * Disable the asset_intercept extension (so GeckoView fetches fresh assets
+     * from the Python server), flush the browser cache, and reload.
+     */
+    private fun updateTe2Ui() {
+        // Disable asset intercept so requests go directly to the Python server
+        assetExtensionPort?.let { port ->
+            try {
+                val msg = JSONObject().apply {
+                    put("type", "set_asset_port")
+                    put("port", 0)
+                }
+                port.postMessage(msg)
+                Log.i("MainActivity", "Disabled asset intercept for UI update")
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Failed to disable asset intercept: ${e.message}")
+            }
+        }
+        // Flush cache and reload — page will now load from Python server
+        Toast.makeText(this, "Updating TE2 UI…", Toast.LENGTH_SHORT).show()
+        flushBrowserCache()
     }
 
     private fun loadHome() {
@@ -1054,14 +1100,40 @@ class MainActivity : AppCompatActivity() {
     private fun showConsoleOverlay() {
         consoleOverlay.visibility = View.VISIBLE
         consoleScroll.post { consoleScroll.fullScroll(View.FOCUS_DOWN) }
+        attachFlutterConsole()
     }
 
     private fun hideConsoleOverlay() {
         consoleOverlay.visibility = View.GONE
+        detachFlutterConsole()
     }
 
     private fun toggleConsoleOverlay() {
         if (consoleOverlay.visibility == View.VISIBLE) hideConsoleOverlay() else showConsoleOverlay()
+    }
+
+    private fun attachFlutterConsole() {
+        if (flutterFragment != null) return
+        val existing = supportFragmentManager.findFragmentByTag("flutter_console")
+        if (existing is FlutterFragment) {
+            flutterFragment = existing
+            return
+        }
+        val fragment = FlutterFragment
+            .withCachedEngine(ConsoleEventBridge.ENGINE_ID)
+            .shouldAttachEngineToActivity(false)
+            .renderMode(io.flutter.embedding.android.RenderMode.texture)
+            .transparencyMode(io.flutter.embedding.android.TransparencyMode.transparent)
+            .build<FlutterFragment>()
+        flutterFragment = fragment
+        supportFragmentManager.beginTransaction()
+            .add(R.id.flutterConsoleContainer, fragment, "flutter_console")
+            .commit()
+        Log.d("MainActivity", "FlutterFragment attached to console overlay")
+    }
+
+    private fun detachFlutterConsole() {
+        // Keep fragment alive so we don't lose state; just leave it attached
     }
 
     private fun updateConsoleControls() {
@@ -1175,6 +1247,79 @@ class MainActivity : AppCompatActivity() {
             )
     }
 
+    /**
+     * Seed bundled editor assets to filesDir and start the local asset server.
+     * Must be called after runtime is available but before pages load.
+     */
+    private fun initEditorAssets() {
+        try {
+            val mgr = EditorAssetManager(this)
+            editorAssetManager = mgr
+
+            // Seed from APK (no-op if version matches)
+            mgr.seedFromApk()
+
+            if (!mgr.getAssetRoot().exists()) {
+                Log.w("MainActivity", "No editor assets available, skipping asset server")
+                return
+            }
+
+            // Start local file server
+            val server = LocalAssetServer(mgr.getAssetRoot())
+            server.start()
+            localAssetServer = server
+            Log.i("MainActivity", "Local asset server on port ${server.port}")
+
+            // Install the asset intercept WebExtension
+            installAssetExtension(server.port)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "initEditorAssets failed", e)
+        }
+    }
+
+    private fun installAssetExtension(assetPort: Int) {
+        val extLocation = "resource://android/assets/asset_intercept/"
+        runtime.webExtensionController
+            .ensureBuiltIn(extLocation, "asset_intercept@mrselect6")
+            .accept(
+                { extension ->
+                    val ext = extension ?: return@accept
+                    assetExtension = ext
+
+                    // Send the asset server port to the extension via MessageDelegate
+                    val delegate = object : WebExtension.MessageDelegate {
+                        override fun onConnect(port: WebExtension.Port) {
+                            assetExtensionPort = port
+                            val msg = JSONObject().apply {
+                                put("type", "set_asset_port")
+                                put("port", assetPort)
+                            }
+                            port.postMessage(msg)
+                            Log.i("MainActivity", "Sent asset port $assetPort to extension")
+                        }
+
+                        override fun onMessage(
+                            nativeApp: String,
+                            message: Any,
+                            sender: WebExtension.MessageSender
+                        ): GeckoResult<Any>? = null
+                    }
+
+                    // Register for background script messaging
+                    ext.setMessageDelegate(delegate, "browser")
+
+                    try {
+                        runtime.webExtensionController.enable(ext, 0)
+                    } catch (_: Exception) {}
+
+                    Log.i("MainActivity", "Asset intercept extension installed")
+                },
+                { e ->
+                    Log.e("MainActivity", "Asset extension install failed: ${e?.message}")
+                }
+            )
+    }
+
     private fun wakeFrameworkAndLoad(forceLoadHome: Boolean = true) {
         Thread {
             val base = IPC_SLEEP_BASE_URL.trimEnd('/')
@@ -1206,6 +1351,25 @@ class MainActivity : AppCompatActivity() {
             }
 
             frameworkBaseUrl = frameworkUrl
+
+            // Connect IME filter IPC after server URL is known
+            try {
+                val port = java.net.URI(frameworkUrl).port.let { if (it == -1) 8089 else it }
+                uiIpcClient = UiIpcClient(editorInputFilter) { _ ->
+                    runOnUiThread {
+                        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.restartInput(geckoView)
+                    }
+                }
+                // Wire console events from Socket.IO → Flutter EventChannel
+                uiIpcClient?.onConsoleEvent = { eventName, data ->
+                    consoleEventBridge?.onConsoleEvent(eventName, data)
+                }
+                consoleEventBridge?.uiIpcClient = uiIpcClient
+                uiIpcClient?.connect(port)
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "UiIpcClient setup failed", e)
+            }
 
             try {
                 val androidCfgUrl = frameworkUrl.trimEnd('/') + "/api/android/config"
@@ -1245,6 +1409,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        uiIpcClient?.disconnect()
+        uiIpcClient = null
+        consoleEventBridge?.destroy()
+        consoleEventBridge = null
+        localAssetServer?.stop()
+        localAssetServer = null
         if (::geckoSession.isInitialized) {
             geckoSession.close()
         }

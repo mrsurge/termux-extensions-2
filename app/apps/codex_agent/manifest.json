@@ -16,6 +16,7 @@
     "enabled": true,
     "start_path": "/codex-agent",
     "health_path": "/api/health",
+    "ws_max_size_mb": 64,
     "rewrite": {
       "enabled": true,
       "path_prefixes": ["/codex-agent", "/static/"],

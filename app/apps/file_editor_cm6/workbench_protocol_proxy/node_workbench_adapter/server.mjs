@@ -616,6 +616,22 @@ async function handleJsonRpc(reqObj) {
     }
   }
 
+  if (method === "adapter.switchWorkspace") {
+    const p = (params && typeof params === "object") ? params : {};
+    const folder = p.folder ?? p.workspaceFolder ?? null;
+    if (!folder) {
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Missing required param: folder" } };
+    }
+    try {
+      await wb._switchWorkspace(folder);
+      state.session = { ...state.session, ...wb.state };
+      logStatus("workspace_switched");
+      return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs(), workspaceFolder: folder } };
+    } catch (e) {
+      return { jsonrpc: "2.0", id, error: { code: -32000, message: String(e?.message ?? e) } };
+    }
+  }
+
   if (method === "adapter.reconnect") {
     const p = (params && typeof params === "object") ? params : {};
     try {
@@ -717,6 +733,7 @@ async function handleJsonRpc(reqObj) {
       authority,
       forceRefresh: forceRefreshEff,
       generation: p.generation,
+      workspaceFolder: p.workspaceFolder ?? null,
     });
     console.log(`[server] wb.openFile returned for ${resolvedPath}`);
     logStatus("open_file", { path: resolvedPath });

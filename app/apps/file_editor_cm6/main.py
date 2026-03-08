@@ -1143,10 +1143,21 @@ from app.apps.file_editor_cm6.explorer_socketio import EXPLORER_ASGI_APP
 # Frontend-to-frontend relay for iframe ↔ main page communication.
 from app.apps.file_editor_cm6.ui_ipc.ui_ipc_socketio import UI_IPC_ASGI_APP
 
+# --- TE2 MCP (worker-owned HTTP transports) ---
+from app.apps.file_editor_cm6.mcps.te2_mcp.server import (
+    build_http_app as build_te2_mcp_http_app,
+    build_streamable_http_app as build_te2_mcp_streamable_http_app,
+)
+
+TE2_MCP_ASGI_APP = build_te2_mcp_http_app()
+TE2_MCP_STREAMABLE_HTTP_ASGI_APP = build_te2_mcp_streamable_http_app()
+
 SUBAPPS = [
     ("/editor_ws/socket.io", EDITOR_ASGI_APP),
     ("/explorer_ws/socket.io", EXPLORER_ASGI_APP),
     ("/ui_ipc_ws/socket.io", UI_IPC_ASGI_APP),
+    ("/te2_mcp", TE2_MCP_ASGI_APP),
+    ("/te2_mcp_http", TE2_MCP_STREAMABLE_HTTP_ASGI_APP),
 ]
 
 # Import singleton store instances
@@ -1670,9 +1681,10 @@ async def project_open(data: dict = Body(...)):
     path = (data.get('path') or '').strip()
 
     try:
+        display_path = os.path.abspath(os.path.expanduser(str(path)))
         abs_path = set_project_root(path)  # validates and sets global project root
-        _history_store.touch_project(str(abs_path))
-        _history_store.set_active_project(str(abs_path))
+        _history_store.touch_project(display_path)
+        _history_store.set_active_project(display_path)
         invalidate_diff_cache(abs_path)
         edit_tracker.set_project_root(abs_path)
         # Force terminal drawers to reconnect to the new project's shell.
@@ -1707,6 +1719,13 @@ async def project_open(data: dict = Body(...)):
         except Exception:
             pass
 
+        # Broadcast authoritative cwd update for sidebar consumers.
+        try:
+            from .ui_ipc import sidebar_ws
+            await sidebar_ws.emit_sidebar_cwd_set_global(reason="project_open")
+        except Exception:
+            pass
+
         state = _build_state_payload()
         return {"ok": True, "data": {"path": str(abs_path), "state": state}}
     except Exception as e:
@@ -1726,6 +1745,11 @@ async def project_create(data: dict = Body(...)):
         new_project_path = result['path']
         _history_store.touch_project(new_project_path)
         _history_store.set_active_project(new_project_path)
+        try:
+            from .ui_ipc import sidebar_ws
+            await sidebar_ws.emit_sidebar_cwd_set_global(reason="project_create")
+        except Exception:
+            pass
         # Force terminal drawers to reconnect to the new project's shell.
         try:
             from .terminal_backend import close_active_terminal_sockets

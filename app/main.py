@@ -442,55 +442,152 @@ def _start_framework_shell_log_monitor() -> Optional[FrameworkShellLogMonitor]:
     print(f"[FrameworkLogMonitor] Watching framework shell logs under {FRAMEWORK_LOG_ROOT} (poll={LOG_MONITOR_POLL_SECONDS}s, replay={LOG_MONITOR_REPLAY})")
     return monitor
 
-def _scandir_entries(path: str, include_hidden: bool) -> list[dict[str, str]]:
-    entries: list[dict[str, str]] = []
-    with os.scandir(path) as handle:
+def _resolve_symlink_target(full_path: str) -> tuple[str | None, bool | None, str | None]:
+    try:
+        raw_target = os.readlink(full_path)
+    except Exception:
+        return None, None, None
+
+    if os.path.isabs(raw_target):
+        target_path = os.path.abspath(raw_target)
+    else:
+        target_path = os.path.abspath(os.path.join(os.path.dirname(full_path), raw_target))
+
+    target_exists = os.path.exists(target_path)
+    if target_exists:
+        if os.path.isdir(target_path):
+            target_type = 'directory'
+        elif os.path.isfile(target_path):
+            target_type = 'file'
+        elif os.path.islink(target_path):
+            target_type = 'symlink'
+        else:
+            target_type = 'unknown'
+    else:
+        target_type = 'missing'
+
+    return target_path, target_exists, target_type
+
+
+def _scandir_entries(
+    path: str,
+    include_hidden: bool,
+    resolve_symlinks: bool = False,
+    display_path: str | None = None,
+) -> list[dict[str, Any]]:
+    scan_path = os.path.abspath(path)
+    display_base = os.path.abspath(display_path or scan_path)
+    entries: list[dict[str, Any]] = []
+    with os.scandir(scan_path) as handle:
         for entry in handle:
             name = entry.name
             if not include_hidden and name.startswith('.'):
                 continue
+            full_scan_path = os.path.abspath(os.path.join(scan_path, name))
+            full_display_path = os.path.abspath(os.path.join(display_base, name))
+            entry_type = 'unknown'
+            is_symlink = False
+            symlink_target = None
+            symlink_target_exists = None
+            symlink_target_type = None
             try:
-                if entry.is_dir(follow_symlinks=False):
-                    entry_type = 'directory'
-                elif entry.is_symlink():
+                if entry.is_symlink():
+                    is_symlink = True
                     entry_type = 'symlink'
+                    symlink_target, symlink_target_exists, symlink_target_type = _resolve_symlink_target(full_scan_path)
+                    if resolve_symlinks and symlink_target_type in {'directory', 'file'}:
+                        entry_type = symlink_target_type
+                elif entry.is_dir(follow_symlinks=False):
+                    entry_type = 'directory'
                 else:
                     entry_type = 'file'
             except PermissionError:
                 entry_type = 'unknown'
-            full_path = os.path.join(path, name)
             entries.append({
                 'name': name,
                 'type': entry_type,
-                'path': os.path.abspath(full_path),
+                'path': full_display_path,
+                'is_symlink': is_symlink,
+                'symlink_target': symlink_target,
+                'symlink_target_exists': symlink_target_exists,
+                'symlink_target_type': symlink_target_type,
             })
     entries.sort(key=lambda item: (item['type'] != 'directory', item['name'].lower()))
     return entries
 
 
-def _scandir_with_sudo(path: str, include_hidden: bool) -> list[dict[str, str]]:
+def _scandir_with_sudo(
+    path: str,
+    include_hidden: bool,
+    resolve_symlinks: bool = False,
+    display_path: str | None = None,
+) -> list[dict[str, Any]]:
+    scan_path = os.path.abspath(path)
+    display_base = os.path.abspath(display_path or scan_path)
     script = (
         'import json, os, sys\n'
-        f"path = {json.dumps(path)}\n"
+        f"path = {json.dumps(scan_path)}\n"
+        f"display_path = {json.dumps(display_base)}\n"
         f"include_hidden = { 'True' if include_hidden else 'False' }\n"
+        f"resolve_symlinks = { 'True' if resolve_symlinks else 'False' }\n"
         'entries = []\n'
+        'def resolve_target(full_path):\n'
+        '    try:\n'
+        '        raw_target = os.readlink(full_path)\n'
+        '    except Exception:\n'
+        '        return None, None, None\n'
+        '    if os.path.isabs(raw_target):\n'
+        '        target_path = os.path.abspath(raw_target)\n'
+        '    else:\n'
+        '        target_path = os.path.abspath(os.path.join(os.path.dirname(full_path), raw_target))\n'
+        '    target_exists = os.path.exists(target_path)\n'
+        '    if target_exists:\n'
+        '        if os.path.isdir(target_path):\n'
+        "            target_type = 'directory'\n"
+        '        elif os.path.isfile(target_path):\n'
+        "            target_type = 'file'\n"
+        '        elif os.path.islink(target_path):\n'
+        "            target_type = 'symlink'\n"
+        '        else:\n'
+        "            target_type = 'unknown'\n"
+        '    else:\n'
+        "        target_type = 'missing'\n"
+        '    return target_path, target_exists, target_type\n'
         'try:\n'
         '    with os.scandir(path) as handle:\n'
         '        for entry in handle:\n'
         '            name = entry.name\n'
         '            if not include_hidden and name.startswith(\'.\'):\n'
         '                continue\n'
+        '            full_scan_path = os.path.abspath(os.path.join(path, name))\n'
+        '            full_display_path = os.path.abspath(os.path.join(display_path, name))\n'
+        "            entry_type = 'unknown'\n"
+        "            is_symlink = False\n"
+        "            symlink_target = None\n"
+        "            symlink_target_exists = None\n"
+        "            symlink_target_type = None\n"
         '            try:\n'
-        '                if entry.is_dir(follow_symlinks=False):\n'
-        "                    entry_type = 'directory'\n"
-        '                elif entry.is_symlink():\n'
+        '                if entry.is_symlink():\n'
+        "                    is_symlink = True\n"
         "                    entry_type = 'symlink'\n"
+        '                    symlink_target, symlink_target_exists, symlink_target_type = resolve_target(full_scan_path)\n'
+        "                    if resolve_symlinks and symlink_target_type in ('directory', 'file'):\n"
+        '                        entry_type = symlink_target_type\n'
+        '                elif entry.is_dir(follow_symlinks=False):\n'
+        "                    entry_type = 'directory'\n"
         '                else:\n'
         "                    entry_type = 'file'\n"
         '            except PermissionError:\n'
         "                entry_type = 'unknown'\n"
-        '            full_path = os.path.join(path, name)\n'
-        '            entries.append({"name": name, "type": entry_type, "path": os.path.abspath(full_path)})\n'
+        '            entries.append({'
+        '"name": name, '
+        '"type": entry_type, '
+        '"path": full_display_path, '
+        '"is_symlink": is_symlink, '
+        '"symlink_target": symlink_target, '
+        '"symlink_target_exists": symlink_target_exists, '
+        '"symlink_target_type": symlink_target_type'
+        '})\n'
         '    entries.sort(key=lambda item: (item["type"] != "directory", item["name"].lower()))\n'
         '    json.dump(entries, sys.stdout)\n'
         'except FileNotFoundError:\n'
@@ -524,7 +621,7 @@ def _scandir_with_sudo(path: str, include_hidden: bool) -> list[dict[str, str]]:
     raise PermissionError('Invalid sudo output')
 
 
-def _resolve_browse_path(raw_path: str, root: str) -> tuple[str | None, str | None]:
+def _resolve_browse_path(raw_path: str, root: str) -> tuple[str | None, str | None, str | None]:
     home_dir = os.path.expanduser('~')
     target_root = (root or 'home').lower()
     allow_outside = target_root in {'system', 'absolute'}
@@ -540,14 +637,15 @@ def _resolve_browse_path(raw_path: str, root: str) -> tuple[str | None, str | No
             expanded = os.path.abspath(os.path.normpath(candidate))
         else:
             expanded = os.path.join(home_dir, candidate)
-        expanded = os.path.abspath(expanded)
+        logical_path = os.path.abspath(expanded)
     except Exception as exc:
-        return None, f'Invalid path: {exc}'
+        return None, None, f'Invalid path: {exc}'
 
-    if not allow_outside and not expanded.startswith(home_dir):
-        return None, 'Access denied'
+    if not allow_outside and not logical_path.startswith(home_dir):
+        return None, None, 'Access denied'
 
-    return expanded, None
+    scan_path = logical_path
+    return logical_path, scan_path, None
 
 def run_script(script_name, app_root_path, args=None):
     """Helper function to run a shell script and return its output."""
@@ -700,18 +798,26 @@ async def browse(
     root: str = Query("home"),
     sudo: bool = Query(False),
     hidden: bool = Query(False),
+    resolve_symlinks: bool = Query(False),
 ):
     try:
-        resolved, err = _resolve_browse_path(path, root)
+        logical_path, scan_path, err = _resolve_browse_path(path, root)
         if err:
             raise HTTPException(status_code=400, detail=err)
         
         if sudo:
-            entries = _scandir_with_sudo(resolved, hidden)
+            entries = _scandir_with_sudo(scan_path, hidden, resolve_symlinks, display_path=logical_path)
         else:
-            entries = _scandir_entries(resolved, hidden)
+            entries = _scandir_entries(scan_path, hidden, resolve_symlinks, display_path=logical_path)
         
-        return {"ok": True, "data": {"path": resolved, "entries": entries}}
+        return {
+            "ok": True,
+            "data": {
+                "path": logical_path,
+                "resolved_path": os.path.realpath(scan_path),
+                "entries": entries,
+            },
+        }
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Directory not found")
     except PermissionError as e:
@@ -745,6 +851,19 @@ async def get_android_config():
     enabled = bool(get_setting("persistent_network_notification", False))
     return {"ok": True, "data": {"persistent_network_notification": enabled}}
 
+
+@app.get("/api/editor_version")
+async def get_editor_version():
+    """Return the current editor static-asset version (plain text).
+
+    GeckoView's EditorAssetManager.checkServerVersion() polls this endpoint
+    to decide whether to re-fetch assets from the server, so we don't have
+    to rebuild the APK for every minor front-end change.
+    """
+    vfile = Path(__file__).parent / "apps" / "file_editor_cm6" / "static" / "version.txt"
+    if not vfile.exists():
+        raise HTTPException(status_code=404, detail="version.txt not found")
+    return Response(content=vfile.read_text().strip(), media_type="text/plain")
 
 
 @app.get("/api/state")
@@ -939,7 +1058,13 @@ async def _terminate_framework_shells(manager: FrameworkShellManager) -> None:
 # --- PWA: Service Worker ---
 @app.get("/sw.js")
 async def sw():
-    return FileResponse(os.path.join(project_root, 'app', 'static', 'js', 'sw.js'), media_type='application/javascript')
+    # Read the asset version so the SW cache name auto-bumps on asset changes
+    vfile = Path(__file__).parent / "apps" / "file_editor_cm6" / "static" / "version.txt"
+    version = vfile.read_text().strip() if vfile.exists() else "0"
+    sw_path = os.path.join(project_root, 'app', 'static', 'js', 'sw.js')
+    with open(sw_path, 'r') as f:
+        content = f.read().replace('__ASSET_VERSION__', version)
+    return Response(content=content, media_type='application/javascript')
 
 
 # --- Lazy initialization compatible with Flask 3.x (before_first_request removed) ---
@@ -1083,19 +1208,6 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 import websockets
 import asyncio
 import inspect
-
-
-def _ipc_host() -> str:
-    return os.getenv("TE_IPC_HOST", "127.0.0.1")
-
-
-def _ipc_port() -> int:
-    return int(os.getenv("TE_IPC_PORT", "9099"))
-
-
-def _format_host_for_ws(host: str) -> str:
-    return host if ":" not in host else f"[{host}]"
-
 @app.websocket('/ws/app/{app_id}/{route:path}')
 async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
     await websocket.accept()
@@ -1152,56 +1264,6 @@ async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
             print(f"[AppProxy][WebSocket] Bridge closed for app={app_id}")
     except Exception as exc:
         print(f"[AppProxy][WebSocket] Failed to proxy app={app_id}: {exc}")
-    finally:
-        if websocket.application_state != WebSocketState.DISCONNECTED:
-            with suppress(Exception):
-                await websocket.close()
-
-
-@app.websocket('/ws/ipc/{target_path:path}')
-async def proxy_ipc_websocket(websocket: WebSocket, target_path: str):
-    await websocket.accept()
-    host = _ipc_host()
-    port = _ipc_port()
-    host_fmt = _format_host_for_ws(host)
-    query = websocket.scope.get("query_string", b"").decode("utf-8")
-    ipc_url = f"ws://{host_fmt}:{port}/{target_path}"
-    if query:
-        ipc_url += f"?{query}"
-    print(f"[IPCProxy][WebSocket] Bridging to {ipc_url}")
-
-    try:
-        async with websockets.connect(ipc_url) as ipc_ws:
-
-            async def forward_client_to_ipc():
-                try:
-                    async for msg in websocket.iter_text():
-                        await ipc_ws.send(msg)
-                except WebSocketDisconnect:
-                    print("[IPCProxy][WebSocket] Client disconnected")
-                except Exception as exc:
-                    print(f"[IPCProxy][WebSocket] Error client->ipc: {exc}")
-
-            async def forward_ipc_to_client():
-                try:
-                    async for msg in ipc_ws:
-                        await websocket.send_text(msg)
-                except websockets.ConnectionClosedOK:
-                    print("[IPCProxy][WebSocket] IPC closed connection")
-                except Exception as exc:
-                    print(f"[IPCProxy][WebSocket] Error ipc->client: {exc}")
-
-            tasks = [
-                asyncio.create_task(forward_client_to_ipc(), name="ws-client-to-ipc"),
-                asyncio.create_task(forward_ipc_to_client(), name="ws-ipc-to-client"),
-            ]
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for task in pending:
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
-    except Exception as exc:
-        print(f"[IPCProxy][WebSocket] Failed to bridge: {exc}")
     finally:
         if websocket.application_state != WebSocketState.DISCONNECTED:
             with suppress(Exception):

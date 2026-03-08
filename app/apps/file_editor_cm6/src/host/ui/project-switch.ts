@@ -9,7 +9,6 @@
  *   updatePathDisplay: () => void,
  *   syncSessionPath: () => void,
  *   syncEditorState: (forceRefresh?: boolean) => Promise<any>,
- *   pushAgentHostCwd: (cwd: string) => Promise<any>,
  *   broadcastRecentsUpdate: (state: any) => void,
  *   getBranchMenuHandle: () => any,
  *   getEditorFrame: () => HTMLIFrameElement | null
@@ -41,13 +40,6 @@ export function createProjectSwitchController(deps) {
     }
 
     const newState = await deps.syncEditorState(true);
-    try {
-      const root = newState?.activeProject || newProjectPath || '';
-      const rootAbs = root ? String(root).replace(/\/+$/, '') : '';
-      await deps.pushAgentHostCwd(rootAbs);
-    } catch (err) {
-      console.warn('[ProjectSwitch] Failed to push agent cwd:', err);
-    }
 
     deps.broadcastRecentsUpdate(newState);
     const branchMenuHandle = deps.getBranchMenuHandle();

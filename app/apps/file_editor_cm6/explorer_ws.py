@@ -446,7 +446,9 @@ async def reset_project_session(new_project_path: str) -> bool:
     """
     from pathlib import Path
 
-    normalized_path = str(Path(new_project_path).expanduser().resolve())
+    # Normalize without resolving symlinks: project identity/UI should preserve
+    # the logical path the user opened (e.g. symlinked worktrees).
+    normalized_path = os.path.abspath(os.path.expanduser(str(new_project_path)))
     # Update active project in the history store (SSOT for active project)
     _history_store.set_active_project(normalized_path)
 
@@ -516,12 +518,19 @@ async def reset_project_session(new_project_path: str) -> bool:
     except Exception:
         pass
 
-    # 5. Update edit_tracker project root.
+    # 5. Update edit_tracker project root (use resolved SSOT root).
     try:
         from . import edit_tracker
-        edit_tracker.set_project_root(Path(normalized_path))
+        edit_tracker.set_project_root(get_project_root())
     except Exception:
         pass
+
+    # 6. Notify sidebar namespace that authoritative cwd changed.
+    try:
+        from .ui_ipc import sidebar_ws
+        await sidebar_ws.emit_sidebar_cwd_set_global(reason="project_switch")
+    except Exception as exc:
+        logger.warning(f"[reset_project_session] sidebar cwd emit failed: {exc}")
 
     return was_new_sidecar
 
@@ -1873,6 +1882,9 @@ class ExplorerDispatcher:
         path = payload.get("path")
         if not path:
             return await self.send_error("Path required", msg_id)
+
+        # Preserve the user-supplied (symlink) path for UI/history identity.
+        display_path = os.path.abspath(os.path.expanduser(str(path)))
         
         # Switch project for this dispatcher
         # Note: This logic is tricky with the ConnectionManager if we switch projects.
@@ -1890,19 +1902,19 @@ class ExplorerDispatcher:
 
         new_root = set_project_root(path)
         # Persist active project + reset per-project session state
-        was_new_sidecar = await reset_project_session(str(new_root))
+        was_new_sidecar = await reset_project_session(display_path)
         self.project_root = new_root
         
         # Register to new
         manager.register_existing(self.websocket, str(new_root))
 
-        # Reconnect adapter to new workspace (RPC — adapter stays alive)
+        # Switch adapter workspace (lightweight — keeps ExtHost alive, re-scopes extensions)
         try:
             from .workbench_adapter_shell_manager import adapter_rpc
-            await adapter_rpc("adapter.reconnect", {"workspaceFolder": str(new_root)})
-            logger.info(f"[project_open] adapter reconnected to {new_root}")
+            await adapter_rpc("adapter.switchWorkspace", {"folder": str(new_root)})
+            logger.info(f"[project_open] adapter workspace switched to {new_root}")
         except Exception as e:
-            logger.warning(f"[project_open] adapter reconnect failed: {e}")
+            logger.warning(f"[project_open] adapter switchWorkspace failed: {e}")
 
         # Start watchexec if this project's sidecar says so
         try:
@@ -1915,7 +1927,11 @@ class ExplorerDispatcher:
         except Exception as e:
             logger.warning(f"[project_open] watchexec start failed: {e}")
         
-        await self.emit_personal("project:opened", {"path": str(new_root), "new_sidecar": was_new_sidecar}, msg_id)
+        await self.emit_personal(
+            "project:opened",
+            {"path": display_path, "resolved_path": str(new_root), "new_sidecar": was_new_sidecar},
+            msg_id,
+        )
         # Trigger full refresh for this client
         await self.handle_explorer_refresh({}, msg_id)
 
@@ -1950,7 +1966,9 @@ class ExplorerDispatcher:
             from pathlib import Path
             from app.libs.jobs import manager as job_manager
             
-            # Expand ~ and resolve to absolute path
+            # Expand ~ and resolve to absolute path for actual filesystem operations,
+            # but preserve the user path for UI identity when possible.
+            target_display = os.path.abspath(os.path.expanduser(str(target_path)))
             target = Path(target_path).expanduser().resolve()
             logger.info(f"[GIT_CLONE] Target: {target}")
             
@@ -1971,13 +1989,17 @@ class ExplorerDispatcher:
             new_root = set_project_root(str(target))
             init_watcher(new_root)  # Start watching the new directory
             # Persist active project + reset per-project session state
-            was_new_sidecar = await reset_project_session(str(new_root))
+            was_new_sidecar = await reset_project_session(target_display)
             self.project_root = new_root
             
             manager.register_existing(self.websocket, str(new_root))
             
             # Emit project opened so frontend knows
-            await self.emit_personal("project:opened", {"path": str(new_root), "new_sidecar": was_new_sidecar}, None)
+            await self.emit_personal(
+                "project:opened",
+                {"path": target_display, "resolved_path": str(new_root), "new_sidecar": was_new_sidecar},
+                None,
+            )
             
             # Step 3: Start the clone job
             job_params = {

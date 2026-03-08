@@ -1,0 +1,24 @@
+name: fconsole_bridge
+description: "Flutter console bridge for TE2 — receives console events from Kotlin via EventChannel and renders them."
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  flutter:
+    sdk: flutter
+  fconsole:
+    path: ../../worktrees/fconsole
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
+  module:
+    androidX: true
+    androidPackage: com.termux.extensions.fconsole_bridge
+    iosBundleIdentifier: com.termux.extensions.fconsoleBridge

@@ -1161,6 +1161,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                         "requestId": request_id,
                         "forceRefresh": payload.get("forceRefresh", False),
                         "generation": generation,
+                        "workspaceFolder": project,
                     },
                 )
                 _mark_open_baseline(abs_path, generation)

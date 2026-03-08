@@ -96,7 +96,7 @@ def run(argv: List[str]) -> int:
             elapsed += poll_interval
         
         if proc.poll() is None:
-            print(f"[supervisor] Framework didn't exit after {max_wait}s, requesting IPC shutdown")
+            print(f"[supervisor] Framework didn't exit after {max_wait}s, requesting IPC cleanup")
             # Framework is hung - use IPC to force cleanup
             import requests
             ipc_host = os.environ.get("TE_IPC_HOST", "127.0.0.1")

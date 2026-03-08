@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">Termux Extensions</string>
-    <string name="error_framework_not_running">Framework not running. Please start it in Termux first.</string>
-    <string name="loading_message">Connecting to framework...</string>
-</resources>

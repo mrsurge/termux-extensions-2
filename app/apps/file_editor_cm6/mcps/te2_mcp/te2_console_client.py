@@ -1,0 +1,17 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from ...ui_ipc.console_ws import list_console_workers, request_console_eval
+
+
+@dataclass(slots=True)
+class Te2ConsoleClient:
+    """Direct in-process console adapter for worker-owned MCP."""
+
+    async def list_workers(self) -> list[str]:
+        return list_console_workers()
+
+    async def eval_in_worker(self, target_worker_id: str, code: str) -> dict[str, Any]:
+        return await request_console_eval(target_worker_id=target_worker_id, code=code)

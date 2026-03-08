@@ -71,7 +71,6 @@ import { initResizeManager, loadLayoutPreferences } from './static/js/resize_man
 
 const AGENT_EXTENSION_MANIFEST = '/apps/file_editor_cm6/extensions/sidebar_extension/manifest.json';
 const CODEX_PROXY_SOCKET_PATH = '/api/app/codex_agent/proxy/socket.io';
-const AGENT_HOST_CWD_ENDPOINT = '/api/host/project/cwd';
 const UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT = 'agentActiveShortcutId';
 const UI_PREF_KEY_AGENT_TOGGLE_DISPLAY = 'agentToggleDisplay';
 const UI_PREF_KEY_AGENT_HEADER_DISPLAY = 'agentHeaderDisplay';
@@ -255,28 +254,6 @@ function startAgentOpenRequestPoller() {
   }
 
   loop();
-}
-
-async function pushAgentHostCwd(cwd) {
-  const value = typeof cwd === 'string' ? cwd.trim() : '';
-  if (!value) return;
-  const base = getAgentHostBase();
-  if (!base) return;
-  try {
-    // MARKED FOR DELETION: legacy HTTP transport kept while codex appserver
-    // sidebar signaling migrates to Socket.IO.
-    await fetch(`${base}${AGENT_HOST_CWD_ENDPOINT}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cwd: value }),
-    });
-  } catch (err) {
-    console.warn('[Agent Host] Failed to push project cwd:', err);
-  }
-}
-
-function getAgentHostBase() {
-  return typeof window.__agentHostBase === 'string' ? window.__agentHostBase : '';
 }
 
 function _deriveAgentHostBaseFromRuntimeUrl(rawUrl) {
@@ -3234,7 +3211,6 @@ const projectSwitchController = createProjectSwitchController({
   updatePathDisplay: () => updatePathDisplay(),
   syncSessionPath: () => syncSessionPath(),
   syncEditorState: (forceRefresh) => editorStateController.syncEditorState(forceRefresh),
-  pushAgentHostCwd: (cwd) => pushAgentHostCwd(cwd),
   broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
   getBranchMenuHandle: () => branchMenuHandle,
   getEditorFrame: () => editorFrame,
@@ -3446,6 +3422,7 @@ sidebarShortcuts = initSidebarShortcutsSafe({
   openDrawer: () => { try { agentDrawerHandle?.open?.(); } catch (_) {} },
   closeAllMenus,
   setMenuChecked,
+  emitSidebarIpc: _emitSidebarIpc,
 });
 
 drainPendingWatcherEvents();

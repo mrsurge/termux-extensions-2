@@ -9,6 +9,7 @@
  *   openDrawer: () => void,
  *   closeAllMenus: () => void,
  *   setMenuChecked: (el: HTMLElement, checked: boolean) => void,
+ *   emitSidebarIpc?: (eventName: string, payload?: any) => void,
  * }} deps
  */
 export function initSidebarShortcutsSafe(deps) {
@@ -20,6 +21,7 @@ export function initSidebarShortcutsSafe(deps) {
       openDrawer: deps.openDrawer,
       closeAllMenus: deps.closeAllMenus,
       setMenuChecked: deps.setMenuChecked,
+      emitSidebarIpc: deps.emitSidebarIpc,
     });
     void shortcuts?.init?.();
     return shortcuts || null;

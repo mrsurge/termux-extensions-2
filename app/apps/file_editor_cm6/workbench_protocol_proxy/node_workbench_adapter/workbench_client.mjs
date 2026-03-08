@@ -4,12 +4,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 // ╔═══════════════════════════════════════════════════════════════════════╗
-// ║  DO NOT HARDCODE CONFIGURATION VALUES IN THIS FILE.                 ║
-// ║  All extension / editor settings belong in User/settings.json       ║
-// ║  (managed by the extension registry gate or the Custom Settings     ║
-// ║  UI).  The adapter reads that file and relays it to the extension   ║
-// ║  host.  No agent may add hardcoded config overrides here without    ║
-// ║  the user's explicit, expressed permission.                         ║
+// ║  DO NOT HARDCODE CONFIGURATION VALUES IN THIS FILE.                   ║
+// ║  All extension / editor settings belong in User/settings.json         ║
+// ║  (managed by the extension registry gate or the Custom Settings       ║
+// ║  UI).  The adapter reads that file and relays it to the extension     ║
+// ║  host.  No agent may add hardcoded config overrides here without      ║
+// ║  the user's explicit, expressed permission.                           ║ 
 // ╚═══════════════════════════════════════════════════════════════════════╝
 
 import { VSBuffer } from "./vscode_oss_runtime/base/common/buffer.mjs";
@@ -2030,6 +2030,18 @@ export class WorkbenchClient {
     const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
     const forceRefresh = params.forceRefresh === true;
     const generation = Number.isFinite(Number(params.generation)) ? Number(params.generation) : null;
+    // ── Workspace switch detection ──────────────────────────────────────
+    // If the caller supplied a workspaceFolder (SSOT-driven) and it differs
+    // from the current workspace, re-scope the ExtHost before opening.
+    const requestedWorkspace = params.workspaceFolder ? String(params.workspaceFolder) : null;
+    if (requestedWorkspace && this.state.workspaceFolder && requestedWorkspace !== this.state.workspaceFolder) {
+      console.log(`[openFile] workspace change detected: ${this.state.workspaceFolder} → ${requestedWorkspace}`);
+      await this._switchWorkspace(requestedWorkspace);
+    } else if (requestedWorkspace && !this.state.workspaceFolder) {
+      console.log(`[openFile] late workspace init: ${requestedWorkspace}`);
+      await this._switchWorkspace(requestedWorkspace);
+    }
+
     const prevEditorId = this._activeEditorId;
     const prevUriObj = this._activeUriObj;
     const prevTab = this._activeTab;
@@ -3004,6 +3016,73 @@ export class WorkbenchClient {
       if (entry?.legend) return entry.legend;
     }
     return null;
+  }
+
+  // ─── Workspace Root Detection & Switching ────────────────────────────
+
+  /**
+   * Switch the ExtHost workspace to a new folder root.
+   * Sends $acceptWorkspaceData so extensions (basedpyright, etc.) re-scope
+   * their analysis to the new project.  Also re-subscribes the file watcher.
+   */
+  async _switchWorkspace(newFolder) {
+    if (!this.ext?.protocol) return;
+    const rootPath = String(newFolder);
+    const name = rootPath.split("/").filter(Boolean).slice(-1)[0] || rootPath;
+    const wsId = crypto.createHash("sha1").update(rootPath).digest("hex").slice(0, 7);
+    const authority = this._useRemote ? this._authority : null;
+    const folderUri = this._uriForPath(rootPath, authority);
+
+    // Close the currently-active document before switching workspace.
+    if (this._activeUriObj) {
+      try {
+        this._sendExt(
+          _rpcIds.ExtHostDocumentsAndEditors,
+          "$acceptDocumentsAndEditorsDelta",
+          [{ removedDocuments: [this._activeUriObj], removedEditors: [this._activeEditorId].filter(Boolean), newActiveEditor: null }],
+          false
+        );
+        console.log(`[switchWorkspace] closed active document before workspace switch`);
+      } catch (e) {
+        console.log(`[switchWorkspace] warn: failed to close active doc: ${e?.message ?? e}`);
+      }
+      this._activeUriObj = null;
+      this._activeEditorId = null;
+      this._activeTab = null;
+    }
+
+    // Tell extensions the workspace folders changed.
+    const workspace = {
+      isUntitled: false,
+      folders: [{ uri: folderUri, name, index: 0 }],
+      id: wsId,
+      name,
+      transient: false,
+    };
+    this._sendExt(_rpcIds.ExtHostWorkspace, "$acceptWorkspaceData", [workspace], false);
+    console.log(`[switchWorkspace] $acceptWorkspaceData → ${rootPath} (id=${wsId})`);
+
+    // Update tracked state.
+    const prevFolder = this.state.workspaceFolder;
+    this.state.workspaceFolder = rootPath;
+    this.state.activePath = null;
+    this.state.activeUri = null;
+    this.state.activeLanguageId = null;
+
+    // Re-subscribe the file watcher to the new root.
+    try {
+      await this._setupFileWatcher(rootPath);
+      console.log(`[switchWorkspace] file watcher re-subscribed to ${rootPath}`);
+    } catch (e) {
+      console.log(`[switchWorkspace] warn: watcher re-subscribe failed: ${e?.message ?? e}`);
+    }
+
+    this.onEvent({
+      type: "workspace/switched",
+      ts_ms: Date.now(),
+      from: prevFolder,
+      to: rootPath,
+    });
   }
 
   // ─── File Watcher IPC ────────────────────────────────────────────────

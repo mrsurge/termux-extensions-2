@@ -111,8 +111,11 @@ class HistoryStore:
 
     def _normalize_project_path(self, project_path: str) -> str:
         try:
-            # Force resolve to handle trailing slashes, symlinks, etc.
-            return str(Path(project_path).expanduser().resolve(strict=False))
+            # Normalize to an absolute path but DO NOT resolve symlinks.
+            # The user may intentionally open a symlinked worktree path and expects
+            # that logical path to remain stable in history/UI.
+            expanded = os.path.expanduser(str(project_path))
+            return os.path.abspath(expanded)
         except Exception:
             return project_path.strip()
 

@@ -1,8 +1,7 @@
 # app/apps/file_editor_cm6/monaco_editor/m_editor_app.py
 #
-# FastHTML-served Monaco iframe editor surface (mounted under /ui).
-# This intentionally mirrors the organizational role of nicegui_editor/editor_app.py,
-# but without NiceGUI.
+# Monaco iframe editor surface (mounted under /ui).
+# Serves editor_iframe.html (static) and supporting JS/CSS/theme routes.
 #
 # The editor runtime itself lives in `m_editor_app.js` so we can keep the harness
 # modular and avoid embedding large scripts inside Python.
@@ -21,8 +20,6 @@ def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
     The host app loads the iframe at `/api/app/<app_id>/ui/nc?...` so within the
     worker process this route is available at `/ui/nc`.
     """
-
-    from fasthtml.common import Body, Div, Head, Html, Link, Meta, Script, Style, Title, to_xml
 
     # Use the vendored Monaco build artifacts (JS + CSS only, no sourcemaps).
     # These are committed to the repo under app/static/vendor/monaco-editor-core/.
@@ -200,7 +197,7 @@ export default href;
         return FileResponse(str(target))
 
     @fastapi_app.get(f"{mount_path}/nc", include_in_schema=False)
-    async def _cm6_fasthtml_monaco_iframe(app_id: str | None = None):
+    async def _cm6_monaco_iframe(app_id: str | None = None):
         # Best-effort: confirm code-server backend is ready so the readiness chain
         # (triggered by iframe JS) can skip the cold-start wait.
         try:
@@ -227,162 +224,6 @@ export default href;
                 f"<pre style='white-space:pre-wrap;padding:16px;font-family:ui-monospace'>{msg}</pre>",
                 status_code=503,
             )
-        css = Style(
-            """
-            @font-face {
-              font-family: 'JetBrains Mono';
-              src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2') format('woff2');
-              font-weight: 400;
-              font-style: normal;
-              font-display: swap;
-            }
-            @font-face {
-              font-family: 'JetBrains Mono';
-              src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Italic.woff2') format('woff2');
-              font-weight: 400;
-              font-style: italic;
-              font-display: swap;
-            }
-            @font-face {
-              font-family: 'JetBrains Mono';
-              src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Bold.woff2') format('woff2');
-              font-weight: 700;
-              font-style: normal;
-              font-display: swap;
-            }
-            @font-face {
-              font-family: 'JetBrains Mono';
-              src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-BoldItalic.woff2') format('woff2');
-              font-weight: 700;
-              font-style: italic;
-              font-display: swap;
-            }
-            html, body { height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden; background: #0b0f14; }
-            .fh-root { height: 100%; width: 100%; margin: 0; padding: 0; display: flex; flex-direction: column; }
-            #te2-breadcrumbs {
-              display: flex; align-items: center; padding: 2px 8px;
-              background: #0b0f1a; border-bottom: 1px solid #333;
-              font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-              min-height: 22px; max-height: 22px; flex-shrink: 0;
-              color: #ccc; overflow-x: auto; overflow-y: hidden;
-              flex-wrap: nowrap; scrollbar-width: none; -webkit-overflow-scrolling: touch;
-            }
-            #te2-breadcrumbs::-webkit-scrollbar { display: none; }
-            #te2-breadcrumbs:empty { display: none; }
-            #te2-breadcrumbs .monaco-breadcrumbs { flex: 1; min-width: 0; }
-            .te2-bc-item { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; opacity: 0.8; cursor: pointer; white-space: nowrap; }
-            .te2-bc-item:hover { opacity: 1; color: #e5e7eb; }
-            .te2-bc-icon { display: inline-flex; align-items: center; width: 16px; height: 16px; flex-shrink: 0; }
-            .te2-bc-icon svg { width: 16px; height: 16px; fill: currentColor; }
-            .te2-bc-sym-icon { display: inline-flex; align-items: center; width: 14px; height: 14px; flex-shrink: 0; margin-right: 2px; }
-            .te2-bc-sym-icon svg { width: 14px; height: 14px; }
-            .te2-bc-sep { opacity: 0.4; padding: 0 2px; }
-            #fh-monaco { flex: 1; min-height: 0; min-width: 0; width: 100%; -webkit-touch-callout: none; user-select: none; }
-            .fh-root, .monaco-editor { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
-            /* Draft diff decorations (Monaco) */
-            .monaco-editor .te2-draft-add-line { background: rgba(56, 139, 253, 0.22) !important; } /* blue */
-            .monaco-editor .te2-draft-del-line { background: rgba(210, 153, 34, 0.18) !important; } /* yellow */
-            .monaco-editor .margin-view-overlays .te2-draft-del-marker {
-              background: rgba(210, 153, 34, 0.90);
-              width: 3px !important;
-            }
-            .monaco-editor .te2-draft-del-zone {
-              background: rgba(210, 153, 34, 0.12);
-              color: #e6b450;
-              font-family: inherit;
-              font-size: inherit;
-              line-height: inherit;
-              white-space: pre;
-            }
-
-            /* Keep folding controls + diff revert arrows visible (disable hover-hide) */
-            .monaco-editor .margin-view-overlays .codicon-folding-expanded,
-            .monaco-editor .margin-view-overlays .codicon-folding-collapsed,
-            .monaco-editor .margin-view-overlays .codicon-folding-manual-expanded,
-            .monaco-editor .margin-view-overlays .codicon-folding-manual-collapsed,
-            .monaco-editor .arrow-revert-change {
-              opacity: 1 !important;
-              visibility: visible !important;
-            }
-            """
-        )
-
-        touch_css = Link(
-            rel="stylesheet",
-            href="/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.css",
-        )
-        bootstrap_bundle_css = Link(
-            rel="stylesheet",
-            href="/api/app/file_editor_cm6/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css?raw=1",
-        )
-        breadcrumbs_css = Link(
-            rel="stylesheet",
-            href="/apps/file_editor_cm6/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
-        )
-
-        # NOTE: Import map URLs are resolved relative to the iframe document.
-        # Use the absolute /api/app/<app_id>/ui/... path to avoid any ambiguity.
-        import_map = Script(
-            """
-            {
-              "imports": {
-                "monaco-editor-core": "/api/app/file_editor_cm6/ui/monaco_vscode/esm/vs/editor/editor.api.js"
-              }
-            }
-            """.strip(),
-            type="importmap",
-        )
-
-        html = Html(
-            Head(
-                Title("Code TE2"),
-                Meta(charset="utf-8"),
-                Meta(name="viewport", content="width=device-width, initial-scale=1"),
-                Link(rel="stylesheet", href="/static/vendor/codicons/codicon.css"),
-                css,
-                touch_css,
-                bootstrap_bundle_css,
-                breadcrumbs_css,
-                import_map,
-                # Debug: prove CSS is loaded inside the iframe
-                Style(
-                    """
-            .__fh_debug_badge {
-                      position: fixed;
-                      left: 8px;
-                      bottom: 8px;
-                      z-index: 2147483647;
-                      background: rgba(0,0,0,0.55);
-                      color: #e6edf3;
-                      border: 1px solid rgba(255,255,255,0.18);
-                      border-radius: 8px;
-                      padding: 6px 8px;
-                      font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-                      pointer-events: none;
-                    }
-
-                    """
-                ),
-            ),
-            Body(
-                Div(
-                    Div("", id="te2-breadcrumbs"),
-                    Div("", id="fh-monaco"),
-                    Div("loading…", id="fh-debug", cls="__fh_debug_badge"),
-                    cls="fh-root",
-                ),
-                # Load monaco-touch-selection BEFORE Monaco loader so AMD doesn't hijack it.
-                Script(
-                    src="/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js"
-                ),
-                # TextMate tokenization dependencies (UMD globals): `window.onig`, `window.vscodetextmate`.
-                Script(src="monaco_editor/textmate/vscode-oniguruma.umd.js"),
-                Script(src="monaco_editor/textmate/vscode-textmate.umd.js"),
-                Script(src="/static/vendor/socket.io.min.js"),
-                # Monaco editor harness (SSOT-first + editor socket transport).
-                Script(src="monaco_editor/m_editor_app.js"),
-            ),
-        )
-
-        return HTMLResponse(to_xml(html))
+        iframe_html = Path(__file__).parent / "editor_iframe.html"
+        return FileResponse(str(iframe_html), media_type="text/html")

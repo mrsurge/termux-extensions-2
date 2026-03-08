@@ -88,6 +88,8 @@ async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bo
     """Ask the adapter to re-open a file, forcing the extension host to re-emit diagnostics."""
     try:
         from .workbench_adapter_shell_manager import adapter_rpc
+        from .stores import _history_store
+        project = _history_store.get_active_project()
         request_id = f"diag_{int(time.time() * 1000)}_nudge"
         await adapter_rpc(
             "vscode.openFile",
@@ -96,6 +98,7 @@ async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bo
                 "languageId": language_id or "",
                 "requestId": request_id,
                 "forceRefresh": True,
+                "workspaceFolder": project or "",
             },
         )
         return True

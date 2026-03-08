@@ -80,6 +80,11 @@ class ProcessRegistry:
         """Get all tracked processes."""
         with self._lock:
             return list(self._processes.values())
+
+    def list_by_type(self, type_name: str) -> List[ProcessRecord]:
+        """Get all tracked processes of a specific type."""
+        with self._lock:
+            return [record for record in self._processes.values() if record.type == type_name]
     
     def ping(self, pid: int) -> bool:
         """Update last ping time."""
@@ -95,7 +100,7 @@ class ProcessRegistry:
         with self._lock:
             return len(self._processes)
     
-    def shutdown_all(self, logger=None) -> Dict[str, Any]:
+    def shutdown_all(self, logger=None, *, include_framework: bool = False) -> Dict[str, Any]:
         """Shutdown all registered processes SEQUENTIALLY.
         
         Processes are killed one at a time in dependency order:
@@ -112,10 +117,20 @@ class ProcessRegistry:
             if self._shutdown_in_progress:
                 return {"already_in_progress": True}
             self._shutdown_in_progress = True
-            processes = list(self._processes.values())
-        
+            all_processes = list(self._processes.values())
+
+        processes = [
+            rec for rec in all_processes
+            if include_framework or rec.type != "framework"
+        ]
+
         if logger:
-            logger.info(f"IPC shutdown: {len(processes)} processes to terminate")
+            skipped_framework = len(all_processes) - len(processes)
+            logger.info(
+                "IPC shutdown: %d processes to terminate%s",
+                len(processes),
+                f" (skipping {skipped_framework} framework record(s))" if skipped_framework else "",
+            )
 
         stats = {
             "total": len(processes),
@@ -212,6 +227,10 @@ class ProcessRegistry:
             except ProcessLookupError:
                 # Already gone
                 pass
+            except PermissionError as exc:
+                stats["errors"].append(f"PID {record.pid}: SIGTERM denied: {exc}")
+                if logger:
+                    logger.error(f"Failed to terminate pid={record.pid}: {exc}")
             except Exception as exc:
                 stats["errors"].append(f"PID {record.pid}: {exc}")
                 if logger:
@@ -260,6 +279,14 @@ class ProcessRegistry:
                     stats["force_killed"] += 1
                 except ProcessLookupError:
                     stats["clean_exits"] += 1
+                except PermissionError as exc:
+                    stats["errors"].append(f"PID {record.pid}: SIGKILL denied: {exc}")
+                    if logger:
+                        logger.error(f"Failed to SIGKILL pid={record.pid}: {exc}")
+                except Exception as exc:
+                    stats["errors"].append(f"PID {record.pid}: SIGKILL failed: {exc}")
+                    if logger:
+                        logger.error(f"Failed to SIGKILL pid={record.pid}: {exc}")
             
             # Remove from registry
             with self._lock:

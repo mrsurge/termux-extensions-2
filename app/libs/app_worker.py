@@ -5,6 +5,7 @@ import importlib.util
 import os
 import signal
 import sys
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, APIRouter
@@ -17,7 +18,21 @@ def main():
     parser.add_argument("--backend-module", required=True, help="The path to the backend module.")
     args = parser.parse_args()
 
-    app = FastAPI()
+    mounted_subapps = []
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        async with AsyncExitStack() as stack:
+            for path, subapp in mounted_subapps:
+                router = getattr(subapp, "router", None)
+                lifespan_context = getattr(router, "lifespan_context", None)
+                if lifespan_context is None:
+                    continue
+                print(f"DEBUG: Entering lifespan for mounted sub-app at {path}", file=sys.stderr)
+                await stack.enter_async_context(lifespan_context(subapp))
+            yield
+
+    app = FastAPI(lifespan=lifespan)
 
     try:
         # Add project root to the Python path
@@ -73,6 +88,7 @@ def main():
             print(f"DEBUG: Mounting {len(subapps)} sub-app(s)", file=sys.stderr)
             for path, subapp in subapps:
                 print(f"  - Mounting at {path}", file=sys.stderr)
+                mounted_subapps.append((path, subapp))
                 app.mount(path, subapp)
 
     except Exception as e:

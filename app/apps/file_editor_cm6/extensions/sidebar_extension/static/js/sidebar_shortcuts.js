@@ -77,6 +77,7 @@ export function initSidebarShortcuts(options = {}) {
   const pickFileFn = typeof options.pickFile === 'function' ? options.pickFile : null;
   const openDrawer = typeof options.openDrawer === 'function' ? options.openDrawer : null;
   const closeAllMenus = typeof options.closeAllMenus === 'function' ? options.closeAllMenus : null;
+  const emitSidebarIpc = typeof options.emitSidebarIpc === 'function' ? options.emitSidebarIpc : null;
   const setMenuChecked =
     typeof options.setMenuChecked === 'function'
       ? options.setMenuChecked
@@ -153,6 +154,8 @@ export function initSidebarShortcuts(options = {}) {
   let sidebarHeaderTitleEl = null;
   let sidebarHeaderIconGridEl = null;
   let sidebarHeaderIconMenuEl = null;
+  let sidebarRefreshBtn = null;
+  let sidebarRefreshMenuEl = null;
   let sidebarSetupPlaceholder = null;
   let sidebarSetupTitleEl = null;
   let sidebarSetupHintEl = null;
@@ -185,6 +188,8 @@ export function initSidebarShortcuts(options = {}) {
   let _frameworkEventsEnabled = false;
   let _appsChromeSeq = 0;
   let _headerIconMenuKey = '';
+  let _refreshMenuLongPressTimer = null;
+  let _sidebarEventListenerBound = false;
 
   function _requireEl(selector, scope = document) {
     const el = scope.querySelector(selector);
@@ -821,6 +826,49 @@ export function initSidebarShortcuts(options = {}) {
     _headerIconMenuKey = '';
   }
 
+  function _closeRefreshMenu() {
+    if (!sidebarRefreshMenuEl) return;
+    sidebarRefreshMenuEl.classList.remove('show');
+    sidebarRefreshMenuEl.innerHTML = '';
+  }
+
+  function _emitSidebarControl(type, payload = {}) {
+    const message = {
+      type: _normStr(type),
+      payload: (payload && typeof payload === 'object') ? payload : {},
+    };
+    if (!message.type) return;
+    if (emitSidebarIpc) {
+      emitSidebarIpc('sidebar:event', message);
+    } else {
+      try {
+        window.dispatchEvent(new CustomEvent('cm6:sidebar-event', { detail: message }));
+      } catch (_) {}
+    }
+  }
+
+  function _openRefreshMenu(anchorEl) {
+    if (!sidebarRefreshMenuEl || !anchorEl) return;
+    try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
+    _closeAgentDropdown();
+    _closeHeaderIconMenu();
+    _closeRefreshMenu();
+
+    const menu = sidebarRefreshMenuEl;
+    const flush = document.createElement('div');
+    flush.className = 'fe-dd-item';
+    flush.textContent = 'Flush active item cache';
+    flush.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      _closeRefreshMenu();
+      _emitSidebarControl('refresh_active', { flushCache: true, source: 'sidebar_refresh_menu' });
+    });
+    menu.appendChild(flush);
+
+    menu.classList.add('show');
+  }
+
   function _findRawShortcutIndex(sc) {
     const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
     const key = _normStr(sc?.key);
@@ -943,6 +991,7 @@ export function initSidebarShortcuts(options = {}) {
     if (!sidebarHeaderIconMenuEl || !anchorEl || !sc) return;
     try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
     _closeAgentDropdown();
+    _closeRefreshMenu();
     _closeHeaderIconMenu();
 
     const menu = sidebarHeaderIconMenuEl;
@@ -1356,10 +1405,36 @@ export function initSidebarShortcuts(options = {}) {
     return await startPromise;
   }
 
+  function _configureShortcutIframeElement(iframe, sc) {
+    if (!iframe || !sc) return;
+    iframe.className = 'sidebar-iframe';
+    iframe.setAttribute('data-shortcut-id', sc.key);
+    iframe.setAttribute('data-shortcut-load', sc.load);
+    iframe.setAttribute('loading', sc.load === SHORTCUT_LOAD_EAGER ? 'eager' : 'lazy');
+  }
+
+  function _replaceShortcutIframe(sc, entry) {
+    if (!sidebarIframeStack || !sc || !entry || !entry.iframe) return entry;
+    const nextIframe = document.createElement('iframe');
+    _configureShortcutIframeElement(nextIframe, sc);
+    if (entry.iframe.classList.contains('is-active')) {
+      nextIframe.classList.add('is-active');
+    }
+    try {
+      entry.iframe.replaceWith(nextIframe);
+    } catch (_) {
+      return entry;
+    }
+    const nextEntry = { iframe: nextIframe, url: _normStr(sc.url), loaded: false };
+    _iframeMap.set(sc.key, nextEntry);
+    return nextEntry;
+  }
+
   async function _ensureIframeLoadedForShortcut(sc, entry, options = {}) {
     if (!sc || !entry || !entry.iframe) return false;
     const url = _normStr(sc.url);
     if (!url) return false;
+    const forceReload = !!options.forceReload;
 
     if (sc.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
       const forceRunningCheck = !!options.forceRunningCheck;
@@ -1391,17 +1466,50 @@ export function initSidebarShortcuts(options = {}) {
         startedNow = true;
       }
 
-      if (!entry.loaded || startedNow) {
+      if (forceReload || !entry.loaded || startedNow) {
         entry.iframe.src = url;
         entry.loaded = true;
       }
       return true;
     }
 
-    if (entry.loaded) return true;
+    if (!forceReload && entry.loaded) return true;
     entry.iframe.src = url;
     entry.loaded = true;
     return true;
+  }
+
+  async function _refreshActiveShortcut(options = {}) {
+    const flushCache = !!options.flushCache;
+    const uiPrefs = _latestUiPrefs || {};
+    const shortcuts = _collectShortcuts(uiPrefs);
+    const active = _resolveActive(uiPrefs, shortcuts);
+    if (!active || !active.key) {
+      _updateSetupPlaceholder(uiPrefs, false, 'setup');
+      return false;
+    }
+
+    let entry = _iframeMap.get(active.key);
+    if (!entry) {
+      await _syncIframesAndActivate(uiPrefs, shortcuts, active);
+      entry = _iframeMap.get(active.key);
+    }
+    if (!entry || !entry.iframe) return false;
+
+    if (flushCache) {
+      entry = _replaceShortcutIframe(active, entry);
+    }
+
+    if (active.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
+      _updateSetupPlaceholder(uiPrefs, false, 'loading', active);
+    }
+    const ok = await _ensureIframeLoadedForShortcut(active, entry, {
+      forceReload: true,
+      forceRunningCheck: active.kind === SHORTCUT_KIND_FRAMEWORK_APP,
+      onBeforeStart: () => _updateSetupPlaceholder(uiPrefs, false, 'loading', active),
+    });
+    _updateSetupPlaceholder(uiPrefs, !!ok, ok ? 'ready' : 'setup', active);
+    return !!ok;
   }
 
   async function _syncIframesAndActivate(uiPrefs, shortcuts, active) {
@@ -1427,18 +1535,14 @@ export function initSidebarShortcuts(options = {}) {
       let entry = _iframeMap.get(sc.key);
       if (!entry) {
         const iframe = document.createElement('iframe');
-        iframe.className = 'sidebar-iframe';
-        iframe.setAttribute('data-shortcut-id', sc.key);
-        iframe.setAttribute('loading', sc.load === SHORTCUT_LOAD_EAGER ? 'eager' : 'lazy');
+        _configureShortcutIframeElement(iframe, sc);
         stack.appendChild(iframe);
         entry = { iframe, url: sc.url, loaded: false };
         _iframeMap.set(sc.key, entry);
       }
       const prevUrl = entry.url;
       entry.url = sc.url;
-      entry.iframe.setAttribute('data-shortcut-id', sc.key);
-      entry.iframe.setAttribute('data-shortcut-load', sc.load);
-      entry.iframe.setAttribute('loading', sc.load === SHORTCUT_LOAD_EAGER ? 'eager' : 'lazy');
+      _configureShortcutIframeElement(entry.iframe, sc);
 
       if (entry.loaded && prevUrl && prevUrl !== sc.url) {
         entry.iframe.src = sc.url;
@@ -2181,6 +2285,8 @@ export function initSidebarShortcuts(options = {}) {
     const dd = document.getElementById('fe-agent-dd');
     if (!dd) return;
     try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
+    _closeHeaderIconMenu();
+    _closeRefreshMenu();
     _renderAgentDropdown();
     dd.classList.add('show');
   }
@@ -2202,6 +2308,13 @@ export function initSidebarShortcuts(options = {}) {
       if (ev.target.closest('#agent-drawer-icon-menu')) return;
       if (ev.target.closest('.agent-drawer__icon-btn')) return;
       _closeHeaderIconMenu();
+    }, false);
+
+    document.addEventListener('click', (ev) => {
+      if (!sidebarRefreshMenuEl || !sidebarRefreshMenuEl.classList.contains('show')) return;
+      if (ev.target.closest('#agent-refresh-menu')) return;
+      if (ev.target.closest('#agent-refresh-active')) return;
+      _closeRefreshMenu();
     }, false);
   }
 
@@ -2271,6 +2384,8 @@ export function initSidebarShortcuts(options = {}) {
     sidebarHeaderTitleEl = document.getElementById('agent-drawer-title-text');
     sidebarHeaderIconGridEl = document.getElementById('agent-drawer-icon-grid');
     sidebarHeaderIconMenuEl = document.getElementById('agent-drawer-icon-menu');
+    sidebarRefreshBtn = document.getElementById('agent-refresh-active');
+    sidebarRefreshMenuEl = document.getElementById('agent-refresh-menu');
     sidebarSetupPlaceholder = document.getElementById('sidebar-setup-placeholder');
     sidebarSetupTitleEl = sidebarSetupPlaceholder?.querySelector('.sidebar-setup__title') || null;
     sidebarSetupHintEl = sidebarSetupPlaceholder?.querySelector('.sidebar-setup__hint') || null;
@@ -2343,6 +2458,65 @@ export function initSidebarShortcuts(options = {}) {
     if (editorSettingsShortcutsBtn) editorSettingsShortcutsBtn.addEventListener('click', _openShortcutsModal);
     if (setupShortcutsBtn) setupShortcutsBtn.addEventListener('click', _openShortcutsModal);
     if (shortcutsCloseBtn) shortcutsCloseBtn.addEventListener('click', _closeShortcutsModal);
+    if (sidebarRefreshBtn) {
+      let refreshPointerId = null;
+      let refreshStartX = 0;
+      let refreshStartY = 0;
+      let refreshSuppressUntil = 0;
+      const clearRefreshLongPress = () => {
+        if (_refreshMenuLongPressTimer) {
+          clearTimeout(_refreshMenuLongPressTimer);
+          _refreshMenuLongPressTimer = null;
+        }
+      };
+      sidebarRefreshBtn.addEventListener('click', (ev) => {
+        if (Date.now() < refreshSuppressUntil) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          refreshSuppressUntil = 0;
+          return;
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+        _closeRefreshMenu();
+        _emitSidebarControl('refresh_active', { flushCache: false, source: 'sidebar_refresh_button' });
+      });
+      sidebarRefreshBtn.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _openRefreshMenu(sidebarRefreshBtn);
+      });
+      sidebarRefreshBtn.addEventListener('pointerdown', (ev) => {
+        if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+        refreshPointerId = ev.pointerId;
+        refreshStartX = ev.clientX;
+        refreshStartY = ev.clientY;
+        if (ev.pointerType === 'touch') {
+          clearRefreshLongPress();
+          _refreshMenuLongPressTimer = setTimeout(() => {
+            _refreshMenuLongPressTimer = null;
+            if (refreshPointerId !== ev.pointerId) return;
+            refreshSuppressUntil = Date.now() + 900;
+            _openRefreshMenu(sidebarRefreshBtn);
+          }, 520);
+        }
+      });
+      const endRefreshPointer = (ev) => {
+        if (refreshPointerId !== ev.pointerId) return;
+        clearRefreshLongPress();
+        refreshPointerId = null;
+        refreshStartX = 0;
+        refreshStartY = 0;
+      };
+      sidebarRefreshBtn.addEventListener('pointermove', (ev) => {
+        if (refreshPointerId !== ev.pointerId) return;
+        if (Math.abs(ev.clientX - refreshStartX) > 8 || Math.abs(ev.clientY - refreshStartY) > 8) {
+          clearRefreshLongPress();
+        }
+      }, { passive: true });
+      sidebarRefreshBtn.addEventListener('pointerup', endRefreshPointer);
+      sidebarRefreshBtn.addEventListener('pointercancel', endRefreshPointer);
+    }
     if (shortcutsModal) {
       shortcutsModal.addEventListener('click', (ev) => {
         if (ev.target === shortcutsModal) _closeShortcutsModal();
@@ -2477,6 +2651,19 @@ export function initSidebarShortcuts(options = {}) {
     }
 
     _bindAgentDropdownInteractions();
+
+    if (!_sidebarEventListenerBound) {
+      window.addEventListener('cm6:sidebar-event', (ev) => {
+        const data = ev?.detail;
+        if (!data || typeof data !== 'object') return;
+        if (_normStr(data.type) !== 'refresh_active') return;
+        const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+        void _refreshActiveShortcut({
+          flushCache: !!payload.flushCache,
+        });
+      });
+      _sidebarEventListenerBound = true;
+    }
   }
 
   return { init, applyUiPrefs, getActiveUrl };

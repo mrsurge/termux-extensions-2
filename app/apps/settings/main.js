@@ -59,11 +59,8 @@ export default function init(root, _api, host) {
   const appTtlInput = root.querySelector('#app-ttl');
   const saveLifecycleBtn = root.querySelector('[data-action="save-lifecycle-settings"]');
   const saveIntegrationBtn = root.querySelector('[data-action="save-integration-settings"]');
-  const ipcLogOutput = root.querySelector('[data-role="ipc-log-output"]');
 
   const persistentNetworkToggle = root.querySelector('#setting-persistent-network');
-
-  let ipcEventSource = null;
 
   let frameworkToken = '';
   const savedState = typeof host.loadState === 'function' ? host.loadState({}) : null;
@@ -298,40 +295,6 @@ export default function init(root, _api, host) {
     renderExtensionOrderList(extensions || []);
   }
 
-  function appendIpcLog(message, type = 'info') {
-    if (!ipcLogOutput) return;
-    const timestamp = new Date().toISOString();
-    const prefix = type ? `[${type}]` : '';
-    const line = `[${timestamp}] ${prefix} ${message}`.trim();
-    const nextContent = ipcLogOutput.textContent ? `${ipcLogOutput.textContent}\n${line}` : line;
-    const lines = nextContent.split('\n');
-    ipcLogOutput.textContent = lines.slice(-200).join('\n');
-    ipcLogOutput.scrollTop = ipcLogOutput.scrollHeight;
-  }
-
-  function startIpcStream() {
-    if (!ipcLogOutput || typeof EventSource === 'undefined') {
-      return;
-    }
-    const url = `${IPC_BASE_URL}/stream`;
-    try {
-      ipcEventSource = new EventSource(url);
-      ipcEventSource.onopen = () => appendIpcLog(`Connected to IPC stream at ${url}`, 'status');
-      ipcEventSource.onerror = () => appendIpcLog('IPC stream error/disconnected', 'error');
-      ipcEventSource.onmessage = (event) => {
-        if (!event.data) return;
-        try {
-          const payload = JSON.parse(event.data);
-          appendIpcLog(JSON.stringify(payload), payload.event || 'event');
-        } catch (err) {
-          appendIpcLog(event.data, 'event');
-        }
-      };
-    } catch (err) {
-      appendIpcLog(`Failed to open IPC stream: ${err?.message || err}`, 'error');
-    }
-  }
-
   async function triggerIpcShutdown() {
     if (!window.confirm('Force shutdown via IPC service?')) {
       return;
@@ -349,10 +312,8 @@ export default function init(root, _api, host) {
       if (!response.ok || body.ok === false) {
         throw new Error(body.error || `HTTP ${response.status}`);
       }
-      appendIpcLog('Shutdown forwarded to supervisor via IPC', 'shutdown');
       if (host?.toast) host.toast('IPC shutdown forwarded', 3000);
     } catch (err) {
-      appendIpcLog(`IPC shutdown failed: ${err?.message || err}`, 'error');
       if (host?.toast) host.toast('IPC shutdown failed', 3000);
     }
   }
@@ -479,5 +440,4 @@ export default function init(root, _api, host) {
   }
 
   loadAndRenderAll();
-  startIpcStream();
 }

@@ -37,6 +37,10 @@ def _is_nonempty_str(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _is_positive_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 def _validate_str_list(value: Any, field_name: str, errors: list[str]) -> None:
     if not isinstance(value, list):
         errors.append(f"{field_name} must be a list of strings")
@@ -70,6 +74,8 @@ def validate_proxy_shell_manifest(manifest: dict[str, Any]) -> list[str]:
         errors.append(f"proxy_shell.start_path for '{app_id}' is required and must be a non-empty string")
     if not _is_nonempty_str(cfg.get("health_path")):
         errors.append(f"proxy_shell.health_path for '{app_id}' is required and must be a non-empty string")
+    if "ws_max_size_mb" in cfg and not _is_positive_int(cfg.get("ws_max_size_mb")):
+        errors.append(f"proxy_shell.ws_max_size_mb for '{app_id}' must be a positive integer")
 
     rewrite_cfg = cfg.get("rewrite")
     if rewrite_cfg is not None:
@@ -139,6 +145,13 @@ def _find_proxy_shell_config(app_id: str) -> Optional[dict[str, Any]]:
             return None
         return cfg
     return None
+
+
+def _proxy_ws_max_size(cfg: dict[str, Any]) -> int:
+    value = cfg.get("ws_max_size_mb")
+    if _is_positive_int(value):
+        return int(value) * 1024 * 1024
+    return 16 * 1024 * 1024
 
 
 async def _get_upstream_port(app_id: str) -> Optional[int]:
@@ -359,7 +372,7 @@ async def _proxy_websocket(app_id: str, websocket: WebSocket, rest: str) -> None
             connect_kwargs["extra_headers"] = extra_headers
 
     try:
-        async with websockets.connect(upstream_url, max_size=16 * 1024 * 1024, **connect_kwargs) as upstream_ws:
+        async with websockets.connect(upstream_url, max_size=_proxy_ws_max_size(cfg), **connect_kwargs) as upstream_ws:
 
             async def forward_client_to_upstream() -> None:
                 try:

@@ -3,9 +3,142 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <WebView
-        android:id="@+id/webview"
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:id="@+id/nativeHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="4dp"
+            android:background="#050C1F">
+
+            <Button
+                android:id="@+id/btnHome"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Home" />
+
+            <Button
+                android:id="@+id/btnReload"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Reload" />
+
+            <Button
+                android:id="@+id/btnRecents"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Recents" />
+
+            <Button
+                android:id="@+id/btnLock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Lock" />
+
+            <Button
+                android:id="@+id/btnQuit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Quit" />
+
+            <Button
+                android:id="@+id/btnConsole"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⚙️" />
+        </LinearLayout>
+
+        <com.termux.extensions.FilteredWebView
+            android:id="@+id/webview"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/consoleOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#CC000000"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/consolePanel"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/consoleHeader"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="8dp">
+
+                <Button
+                    android:id="@+id/btnConsoleBack"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Back" />
+
+                <TextView
+                    android:id="@+id/consoleTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center_vertical"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="Tools"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnConsoleStart"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Flush Cache" />
+
+                <Button
+                    android:id="@+id/btnUpdateTe2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Update UI" />
+
+                <Button
+                    android:id="@+id/btnConsoleStop"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Stop" />
+            </LinearLayout>
+
+            <ScrollView
+                android:id="@+id/consoleScroll"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <TextView
+                    android:id="@+id/consoleText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="12dp"
+                    android:textColor="#FFFFFF"
+                    android:textIsSelectable="true"
+                    android:textSize="12sp" />
+            </ScrollView>
+
+            <FrameLayout
+                android:id="@+id/flutterConsoleContainer"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="2" />
+        </LinearLayout>
+    </FrameLayout>
 
 </FrameLayout>

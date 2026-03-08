@@ -65,15 +65,3 @@ def unregister_process(pid: int) -> bool:
         return False
 
 
-def ping_ipc(pid: int) -> bool:
-    """Send health ping to IPC."""
-    try:
-        resp = requests.post(
-            f"{IPC_URL}/processes/ping",
-            json={"pid": pid},
-            timeout=1.0,
-        )
-        return resp.status_code == 200
-    except Exception:
-        return False
-

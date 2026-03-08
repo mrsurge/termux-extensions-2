@@ -21,6 +21,7 @@ export default function initialize(extensionContainer, api) {
 
     let socket = null;
     let reconnectTimer = null;
+    let statsDisabled = false;
     let coreBars = [];
     
     // IP cycling state
@@ -71,7 +72,21 @@ export default function initialize(extensionContainer, api) {
     const wsUrl = `${wsScheme}://${window.location.host}/api/ext/system_stats/ws`;
 
     const cleanup = () => {
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
         socket = null;
+    };
+
+    const disableStats = (reason) => {
+        if (statsDisabled) return;
+        statsDisabled = true;
+        cleanup();
+        if (reason) console.warn('[Stats] Disabled:', reason);
+        if (cpuValue) cpuValue.textContent = '--';
+        if (memValue) memValue.textContent = '--';
+        if (ipValue) ipValue.textContent = '--';
     };
 
     const updateIpDisplay = () => {
@@ -127,6 +142,11 @@ export default function initialize(extensionContainer, api) {
     }
 
     const handleMessage = (msg) => {
+        if (msg.type === 'error') {
+            disableStats(msg.message || 'system stats stream failed');
+            try { if (socket) socket.close(); } catch (_) {}
+            return;
+        }
         if (msg.type === 'static') {
             // System info (sent once on connect)
             const info = msg.info || {};
@@ -208,6 +228,7 @@ export default function initialize(extensionContainer, api) {
     };
 
     const connectSocket = () => {
+        if (statsDisabled) return;
         if (reconnectTimer) {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
@@ -226,16 +247,16 @@ export default function initialize(extensionContainer, api) {
                 }
             };
             socket.onclose = () => {
-                console.log('[Stats] WebSocket disconnected, retrying...');
+                console.log('[Stats] WebSocket disconnected');
                 cleanup();
-                reconnectTimer = setTimeout(connectSocket, 3000);
+                disableStats('websocket closed');
             };
             socket.onerror = (err) => {
                 console.error('[Stats] WebSocket error', err);
                 try { socket.close(); } catch (_) {}
             };
         } catch (err) {
-            reconnectTimer = setTimeout(connectSocket, 2000);
+            disableStats(err instanceof Error ? err.message : 'websocket connection failed');
         }
     };
 

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Whispered lore: this head once caught a shooting star and kept the stylesheet wish. -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Termux Extensions</title>
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/static/icon.png">
+    <meta name="theme-color" content="#4caf50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script type="module" src="/static/js/te_state.js"></script>
+    <style>
+        :root {
+            --background: hsl(224, 71%, 4%);
+            --foreground: hsl(213, 31%, 91%);
+            --card: hsl(224, 71%, 7%);
+            --card-foreground: hsl(213, 31%, 91%);
+            --popover: hsl(224, 71%, 7%);
+            --popover-foreground: hsl(213, 31%, 91%);
+            --primary: hsl(217, 91%, 60%);
+            --primary-foreground: hsl(222, 84%, 5%);
+            --secondary: hsl(222, 84%, 11%);
+            --secondary-foreground: hsl(213, 31%, 91%);
+            --muted: hsl(223, 47%, 11%);
+            --muted-foreground: hsl(215, 13%, 65%);
+            --accent: hsl(216, 87%, 52%);
+            --accent-foreground: hsl(222, 84%, 5%);
+            --destructive: hsl(0, 63%, 31%);
+            --destructive-foreground: hsl(210, 40%, 98%);
+            --border: hsl(216, 34%, 17%);
+            --input: hsl(216, 34%, 17%);
+            --ring: hsl(216, 87%, 52%);
+            --success: hsl(142, 69%, 45%);
+            --warning: hsl(38, 92%, 50%);
+        }
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: var(--background);
+            color: var(--foreground);
+            margin: 0;
+        }
+        .main-container {
+            width: 100%;
+            min-height: 100vh;
+            background-color: var(--background);
+            padding: 0;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding: 16px; /* Re-add padding for internal sections if needed */
+        }
+        .section-title {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: var(--muted-foreground);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0;
+        }
+        .refresh-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--muted-foreground);
+            padding: 4px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .refresh-btn:hover {
+            background-color: var(--secondary);
+            color: var(--foreground);
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            padding: 0 16px 16px 16px; /* Add padding to grid container */
+        }
+        .stat-card {
+            background-color: var(--secondary);
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+        .stat-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.9em;
+            color: var(--muted-foreground);
+            margin-bottom: 8px;
+        }
+        .stat-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.1em;
+            color: var(--foreground);
+        }
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            border-radius: 9999px;
+            background-color: var(--muted);
+            overflow: hidden;
+        }
+        .progress-fill-cpu { width: 60%; height: 100%; background-color: var(--accent); }
+        .progress-fill-mem { width: 45%; height: 100%; background-color: var(--warning); }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .dot-green { background-color: var(--success); }
+
+        /* Extension-specific styles will be loaded or are defined in their components */
+        .session {
+            background-color: var(--secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            padding: 12px;
+        }
+        .session-header { display: flex; justify-content: space-between; align-items: center; }
+        .session-title { font-family: 'JetBrains Mono', monospace; font-size: 1em; font-weight: 500; color: var(--primary); }
+        .session-cwd { font-family: 'JetBrains Mono', monospace; color: var(--muted-foreground); font-size: 0.8em; margin-top: 4px; }
+        .menu-btn { background: none; border: none; color: var(--muted-foreground); font-size: 1.5em; cursor: pointer; }
+        .menu-btn:hover { color: var(--foreground); }
+        .menu { display: none; position: absolute; background-color: var(--popover); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.3); z-index: 100; }
+        .menu-item { padding: 0.8em 1.2em; cursor: pointer; font-size: 0.9em; }
+        .menu-item:hover { background-color: var(--muted); }
+        .menu-item.destructive { color: var(--destructive); }
+        
+        .modal { display: none; position: fixed; z-index: 200; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); backdrop-filter: blur(2px); }
+        .modal-content { background-color: var(--card); margin: 15% auto; padding: 20px; border: 1px solid var(--border); border-radius: 8px; width: 90%; max-width: 400px; }
+        .modal-content h2 { margin-top: 0; color: var(--foreground); }
+        .modal-input { width: 100%; padding: 10px; margin: 10px 0; background-color: var(--background); border: 1px solid var(--input); color: var(--foreground); border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
+        .modal-btn { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        .btn-primary { background-color: var(--primary); color: var(--primary-foreground); }
+        .btn-secondary { background-color: var(--secondary); color: var(--secondary-foreground); }
+
+        .settings-gear { position: fixed; bottom: 16px; right: 16px; font-size: 1.8em; background-color: var(--secondary); color: var(--foreground); border: 1px solid var(--border); width: 50px; height: 50px; border-radius: 50%; cursor: pointer; z-index: 150; }
+    
+    /* Edge-to-Edge Extension Styles */
+    .extension-wrapper { 
+        border: none; 
+        border-bottom: 1px solid var(--border); /* Separator */
+        border-radius: 0; 
+        margin-bottom: 0; 
+        background-color: var(--card); 
+    }
+    .extension-header { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        padding: 12px 16px; 
+        border-bottom: 1px solid var(--border); 
+        background-color: hsl(224, 71%, 12%); /* Slightly lighter blue */
+    }
+    .extension-title { font-weight: 600; }
+    
+    .window-controls {
+        display: flex;
+        gap: 8px;
+    }
+    .window-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        color: var(--muted-foreground);
+        width: 28px;
+        height: 28px;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 16px;
+        font-weight: bold;
+        line-height: 1;
+    }
+    .window-btn:hover {
+        background: rgba(255, 255, 255, 0.2);
+        color: var(--foreground);
+    }
+
+    .extension-content { 
+        padding: 16px; 
+        background-color: hsl(224, 71%, 5%); /* Slightly darker/base blue */
+    }
+    .extension-content.collapsed { display: none; }
+
+    </style>
+</head>
+<body>
+
+    <div class="main-container">
+        <!-- Container for dynamically loaded extensions -->
+        <div id="extensions-container"></div>
+
+    </div>
+
+    <!-- Settings Gear Icon -->
+    <script type="module" src="/static/js/te_ui.js"></script>
+    <script type="module" src="/static/js/jobs_client.js"></script>
+    <script type="module" src="/static/js/file_picker.js"></script>
+    <script type="module">
+        window.teFetch = async (url, options) => {
+            const response = await fetch(url, options);
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok || !body.ok) {
+                throw new Error(body.error || `HTTP ${response.status} - ${response.statusText}`);
+            }
+            return body.data;
+        };
+
+        const SETTINGS_ENDPOINT = '/api/settings';
+        let settingsCache = {};
+        let settingsLoaded = false;
+
+        async function fetchSettings() {
+            try {
+                settingsCache = await window.teFetch(SETTINGS_ENDPOINT);
+                if (!settingsCache || typeof settingsCache !== 'object') settingsCache = {};
+            } catch (err) {
+                settingsCache = {};
+                console.error('Failed to load settings', err);
+            }
+            if (!settingsCache.extensionCollapse || typeof settingsCache.extensionCollapse !== 'object') {
+                settingsCache.extensionCollapse = {};
+            }
+            settingsLoaded = true;
+            return settingsCache;
+        }
+
+        async function persistSettings(patch) {
+            const merged = { ...(settingsCache || {}), ...(patch || {}) };
+            const saved = await window.teFetch(SETTINGS_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(merged),
+            });
+            settingsCache = saved || {};
+            settingsLoaded = true;
+            if (!settingsCache.extensionCollapse || typeof settingsCache.extensionCollapse !== 'object') {
+                settingsCache.extensionCollapse = {};
+            }
+            return settingsCache;
+        }
+
+        // --- Main Application Loader ---
+        const extensionsContainer = document.getElementById('extensions-container');
+
+        async function loadExtensions() {
+            try {
+                const response = await fetch('/api/extensions');
+                const result = await response.json();
+                if (!result.ok) throw new Error(result.error);
+                let extensions = result.data;
+
+                // Check for and apply saved order from settings (migrate legacy key if needed)
+                if (!settingsLoaded) {
+                    await fetchSettings();
+                }
+                const savedOrder = Array.isArray(settingsCache.extensionOrder) ? settingsCache.extensionOrder : null;
+                if (savedOrder) {
+                    extensions.sort((a, b) => {
+                        const aId = `extension-${a._ext_dir}`;
+                        const bId = `extension-${b._ext_dir}`;
+                        const aIdx = savedOrder.indexOf(aId);
+                        const bIdx = savedOrder.indexOf(bId);
+                        if (aIdx === -1 && bIdx === -1) return 0;
+                        if (aIdx === -1) return 1;
+                        if (bIdx === -1) return -1;
+                        return aIdx - bIdx;
+                    });
+                }
+
+                for (const ext of extensions) {
+                    const extDir = ext._ext_dir;
+                    const wrapper = document.createElement('div');
+                    wrapper.id = `extension-${extDir}`;
+                    wrapper.className = 'extension-wrapper';
+
+                    const header = document.createElement('div');
+                    header.className = 'extension-header';
+
+                    const title = document.createElement('span');
+                    title.className = 'extension-title';
+                    title.textContent = ext.name;
+
+                    // Window Controls Container
+                    const controls = document.createElement('div');
+                    controls.className = 'window-controls';
+
+                    // Minimize Button [-]
+                    const minimizeBtn = document.createElement('button');
+                    minimizeBtn.className = 'window-btn';
+                    minimizeBtn.innerHTML = '&minus;'; // Minus sign
+                    minimizeBtn.title = 'Minimize';
+
+                    // Expand Button [□]
+                    const expandBtn = document.createElement('button');
+                    expandBtn.className = 'window-btn';
+                    expandBtn.innerHTML = '&#9633;'; // White square
+                    expandBtn.title = 'Maximize';
+
+                    controls.appendChild(minimizeBtn);
+                    controls.appendChild(expandBtn);
+
+                    header.appendChild(title);
+                    header.appendChild(controls);
+                    wrapper.appendChild(header);
+
+                    const content = document.createElement('div');
+                    content.className = 'extension-content';
+                    wrapper.appendChild(content);
+
+                    extensionsContainer.appendChild(wrapper);
+
+                    // Load template into content div
+                    const templatePath = `/extensions/${extDir}/${ext.entrypoints.frontend_template}`;
+                    try {
+                        const templateResponse = await fetch(templatePath);
+                        const html = await templateResponse.text();
+                        content.innerHTML = html;
+                    } catch (err) {
+                        content.innerHTML = `<p style="color: var(--destructive);">Failed to load template: ${err.message}</p>`;
+                        continue;
+                    }
+
+                    // Load script only after HTML is injected
+                    if (ext.entrypoints.frontend_script) {
+                        const scriptPath = `/extensions/${extDir}/${ext.entrypoints.frontend_script}`;
+                        try {
+                            const module = await import(scriptPath);
+                            const api = {
+                                get: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`),
+                                post: (endpoint, body) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
+                                delete: (endpoint) => window.teFetch(`/api/ext/${extDir}/${endpoint}`, { method: 'DELETE' })
+                            };
+                            const initResult = module.default(content, api);
+                            if (initResult && typeof initResult.then === 'function') {
+                                initResult.catch((err) => {
+                                    content.innerHTML += `<p style="color: var(--destructive);">Extension init failed: ${err.message}</p>`;
+                                });
+                            }
+                        } catch (err) {
+                            content.innerHTML += `<p style="color: var(--destructive);">Error loading script: ${err.message}</p>`;
+                        }
+                    }
+
+                    // Collapse logic
+                    const collapsedState = (settingsCache && typeof settingsCache.extensionCollapse === 'object') ? settingsCache.extensionCollapse : {};
+                    // Helper to set initial state (inverted logic: minimize button shows '+' when collapsed?)
+                    // Actually standard UI: [-] always means minimize. If minimized, content is hidden.
+                    // Maybe change icon to [+] when minimized? 
+                    // User request: "minus and a square want to expand and one to collapse"
+                    // Let's stick to standard: [-] toggles collapse.
+                    
+                    if (collapsedState[extDir]) {
+                        content.classList.add('collapsed');
+                        minimizeBtn.innerHTML = '+'; // Show plus if already collapsed to indicate "Restore"
+                    }
+
+                    minimizeBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        const isCollapsed = content.classList.toggle('collapsed');
+                        minimizeBtn.innerHTML = isCollapsed ? '+' : '&minus;';
+                        
+                        const currentState = { ...(settingsCache.extensionCollapse || {}) };
+                        currentState[extDir] = isCollapsed;
+                        settingsCache.extensionCollapse = currentState;
+                        try {
+                            await persistSettings({ extensionCollapse: currentState });
+                        } catch (err) {
+                            console.error('Failed to persist collapse state', err);
+                        }
+                    });
+                    
+                    expandBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        // Future: Maximize logic
+                        console.log('Maximize clicked for', ext.name);
+                    });
+                }
+            } catch (error) {
+                extensionsContainer.innerHTML = `
+                    <p style="color: var(--destructive);">Error loading extensions.</p>
+                    <pre style="color: var(--muted-foreground); white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; font-size: 0.8em;">${error.stack || error}</pre>
+                `;
+                console.error("Failed to load extensions:", error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            if (!settingsLoaded) {
+                await fetchSettings();
+            }
+            await loadExtensions();
+        });
+
+        // --- Extension Order Modal ---
+    </script>
+        <script>
+// Register Service Worker for PWA installability
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.error('Service worker registration failed:', err);
+        });
+    });
+}
+</script>
+</body>
+</html>

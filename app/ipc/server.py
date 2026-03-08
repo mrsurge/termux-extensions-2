@@ -1,71 +1,33 @@
-"""Standalone IPC microservice.
+"""Minimal IPC control service for TE2.
 
-Provides synchronous REST endpoints and an SSE stream that other services can
-use to communicate with the Termux Extensions framework without depending on
-its ASGI event loop. The service acts as a lightweight control plane that can
-forward control commands (e.g., shutdown, agent spawn) to the framework and
-broadcast status updates to connected listeners.
+This service exists only to provide:
+- a small process registry used by shutdown orchestration
+- sleep / wake / exit control around the framework supervisor
+- a last-resort shutdown path when the framework is hung
 """
 
 from __future__ import annotations
 
-import importlib
 import json
 import logging
 import os
-import queue
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Set, List
+from typing import Any, Dict, Optional, List
 
 import signal
 import subprocess
 
 from werkzeug.serving import make_server
 
-import requests
-from flask import Flask, Response, jsonify, request
-from flask_socketio import Namespace, SocketIO, emit
+from flask import Flask, jsonify, request
 
-from .control import FrameworkError, spawn_agent
 from .process_manager import ProcessRegistry
 
 LOGGER = logging.getLogger("te.ipc")
-FRAMEWORK_URL = os.environ.get("TE_FRAMEWORK_URL", "http://127.0.0.1:8089")
-FRAMEWORK_TOKEN = os.environ.get("TE_FRAMEWORK_SHELL_TOKEN")
-_REGISTERED_IPC_MODULES: Set[str] = set()
-_APPS_DIR = Path(__file__).resolve().parent.parent / "apps"
 
 _PROCESS_REGISTRY = ProcessRegistry()
-
-_listeners_lock = threading.Lock()
-_listeners: Set[queue.Queue] = set()
-
-
-def _broadcast(event: Dict[str, Any]) -> None:
-    """Push an event to all connected SSE listeners."""
-    with _listeners_lock:
-        listeners = list(_listeners)
-    for listener in listeners:
-        try:
-            listener.put_nowait(event)
-        except Exception:
-            with _listeners_lock:
-                _listeners.discard(listener)
-
-
-def _register_listener() -> queue.Queue:
-    q: queue.Queue = queue.Queue()
-    with _listeners_lock:
-        _listeners.add(q)
-    return q
-
-
-def _unregister_listener(q: queue.Queue) -> None:
-    with _listeners_lock:
-        _listeners.discard(q)
 
 
 def _cors_headers(response) -> Any:
@@ -84,45 +46,6 @@ def _setup_logging(level: str) -> None:
         level=getattr(logging, level.upper(), logging.INFO),
         format=("[ipc] %(message)s" if _log_prefix_enabled() else "%(message)s"),
     )
-
-
-def _load_ipc_modules(app: Flask, socketio: SocketIO) -> None:
-    """Discover and register app-level IPC stacks."""
-    if not _APPS_DIR.exists():
-        LOGGER.debug("IPC module scan skipped; %s missing", _APPS_DIR)
-        return
-
-    for app_dir in _APPS_DIR.iterdir():
-        if not app_dir.is_dir():
-            continue
-        manifest_path = app_dir / "manifest.json"
-        if not manifest_path.exists():
-            continue
-
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            LOGGER.error("Failed to parse manifest %s: %s", manifest_path, exc)
-            continue
-
-        modules = manifest.get("ipc_modules") or []
-        if not isinstance(modules, list):
-            continue
-
-        for module_path in modules:
-            if not isinstance(module_path, str):
-                continue
-            if module_path in _REGISTERED_IPC_MODULES:
-                continue
-            try:
-                module = importlib.import_module(module_path)
-                register = getattr(module, "register_ipc_routes", None)
-                if callable(register):
-                    register(app, socketio)
-                    _REGISTERED_IPC_MODULES.add(module_path)
-                    LOGGER.info("Loaded IPC module %s", module_path)
-            except Exception as exc:
-                LOGGER.error("Failed to load IPC module %s: %s", module_path, exc)
 
 
 def create_app() -> Flask:
@@ -195,42 +118,6 @@ def create_app() -> Flask:
             }
         })
     
-    @app.route("/processes/ping", methods=["POST", "OPTIONS"])
-    def ping_process() -> Any:
-        """Update process health ping."""
-        if request.method == "OPTIONS":
-            return ("", 204)
-        
-        payload = request.get_json(silent=True) or {}
-        pid = payload.get("pid")
-        
-        if not pid:
-            return jsonify({"ok": False, "error": "pid required"}), 400
-        
-        success = process_registry.ping(int(pid))
-        return jsonify({"ok": True, "pinged": success})
-    
-    @app.route("/actions/shutdown-all", methods=["POST", "OPTIONS"])
-    def shutdown_all_processes() -> Any:
-        """Shutdown all registered processes (IPC-orchestrated)."""
-        if request.method == "OPTIONS":
-            return ("", 204)
-        
-        LOGGER.info("=== IPC SHUTDOWN INITIATED ===")
-        stats = process_registry.shutdown_all(logger=LOGGER)
-        LOGGER.info("=== IPC SHUTDOWN COMPLETE ===")
-        
-        return jsonify({"ok": True, "data": stats})
-
-    @app.route("/messages", methods=["POST", "OPTIONS"])
-    def dispatch_message() -> Any:
-        if request.method == "OPTIONS":
-            return ("", 204)
-        payload = request.get_json(silent=True) or {}
-        LOGGER.info("received message: %s", payload)
-        _broadcast({"event": "message", "payload": payload})
-        return jsonify({"ok": True, "echo": payload})
-
     @app.route("/actions/shutdown", methods=["POST", "OPTIONS"])
     def runtime_shutdown() -> Any:
         """Shutdown the framework (IPC-orchestrated)."""
@@ -241,68 +128,7 @@ def create_app() -> Flask:
         LOGGER.info("Shutdown request - initiating IPC shutdown")
         stats = process_registry.shutdown_all(logger=LOGGER)
         
-        _broadcast({"event": "shutdown", "status": "complete", "stats": stats})
         return jsonify({"ok": True, "data": stats})
-
-
-    @app.route("/actions/agent-spawn", methods=["POST", "OPTIONS"])
-    def spawn_agent_route() -> Any:
-        if request.method == "OPTIONS":
-            return ("", 204)
-        payload = request.get_json(silent=True) or {}
-        agent = payload.get("agent", "codex")
-        cwd = payload.get("cwd")
-        session_id = payload.get("session_id")
-        LOGGER.info("spawn agent request: agent=%s session=%s cwd=%s", agent, session_id, cwd)
-        _broadcast({"event": "agent_spawn", "status": "queued", "agent": agent, "session_id": session_id})
-        try:
-            result = spawn_agent(agent, cwd=cwd, session_id=session_id)
-            event = {
-                "event": "agent_spawn",
-                "status": "running",
-                "agent": agent,
-                "session_id": session_id,
-                "shell": result,
-            }
-            _broadcast(event)
-            return jsonify({"ok": True, "data": result})
-        except FrameworkError as exc:
-            LOGGER.error("agent spawn failed: %s", exc)
-            _broadcast({
-                "event": "agent_spawn",
-                "status": "error",
-                "agent": agent,
-                "session_id": session_id,
-                "error": str(exc),
-            })
-            return jsonify({"ok": False, "error": str(exc)}), 502
-        except Exception as exc:  # pragma: no cover - defensive
-            LOGGER.exception("unexpected agent spawn failure")
-            _broadcast({
-                "event": "agent_spawn",
-                "status": "error",
-                "agent": agent,
-                "session_id": session_id,
-                "error": str(exc),
-            })
-            return jsonify({"ok": False, "error": str(exc)}), 500
-
-    @app.route("/stream", methods=["GET"])
-    def stream() -> Response:
-        def event_stream() -> Iterable[str]:
-            listener = _register_listener()
-            try:
-                yield "data: {\"event\": \"connected\"}\n\n"
-                while True:
-                    try:
-                        event = listener.get(timeout=5.0)
-                        yield f"data: {json.dumps(event)}\n\n"
-                    except queue.Empty:
-                        yield ": ping\n\n"
-            finally:
-                _unregister_listener(listener)
-
-        return Response(event_stream(), mimetype="text/event-stream")
 
     return app
 
@@ -394,6 +220,19 @@ def _stop_supervisor() -> bool:
         return False
 
 
+def _kill_framework_records(sig: signal.Signals) -> bool:
+    ok = True
+    for record in _PROCESS_REGISTRY.list_by_type("framework"):
+        try:
+            os.kill(record.pid, sig)
+        except ProcessLookupError:
+            continue
+        except Exception as exc:
+            LOGGER.error("failed to signal framework pid=%s with %s: %s", record.pid, sig.name, exc)
+            ok = False
+    return ok
+
+
 @app.route("/actions/wake", methods=["POST", "OPTIONS"])
 def wake_framework() -> Any:
     if request.method == "OPTIONS":
@@ -401,7 +240,6 @@ def wake_framework() -> Any:
     pid = _start_supervisor()
     if not pid:
         return jsonify({"ok": False, "error": "failed to start supervisor"}), 500
-    _broadcast({"event": "wake", "status": "started", "supervisor_pid": pid})
     return jsonify({"ok": True, "data": {"supervisor_pid": pid}})
 
 
@@ -410,7 +248,6 @@ def sleep_framework() -> Any:
     if request.method == "OPTIONS":
         return ("", 204)
     ok = _stop_supervisor()
-    _broadcast({"event": "sleep", "status": "requested"})
     return jsonify({"ok": ok})
 
 
@@ -433,7 +270,6 @@ def exit_ipc() -> Any:
     """
     if request.method == "OPTIONS":
         return ("", 204)
-    _broadcast({"event": "exit", "status": "requested"})
 
     # IMPORTANT: Do not exit IPC until shutdown work is done. Otherwise, the
     # supervisor may lose its "last resort" killer, and orphaned shells can
@@ -441,10 +277,9 @@ def exit_ipc() -> Any:
     ok = True
     try:
         stats = _PROCESS_REGISTRY.shutdown_all(logger=LOGGER)
-        _broadcast({"event": "exit", "status": "shutdown_complete", "stats": stats})
     except Exception as exc:
         ok = False
-        _broadcast({"event": "exit", "status": "shutdown_failed", "error": str(exc)})
+        LOGGER.exception("exit shutdown failed: %s", exc)
 
     # Allow the supervisor (if running) to observe the framework exit before
     # IPC terminates. This avoids noisy "IPC connection refused" fallback logs.
@@ -459,43 +294,6 @@ def exit_ipc() -> Any:
 
     _schedule_process_exit()
     return jsonify({"ok": ok})
-
-
-@app.route("/state", methods=["GET"])
-def state() -> Any:
-    return jsonify({
-        "ok": True,
-        "data": {
-            "sleep": bool(_SLEEP_STATE.enabled),
-            "sleep_port": int(_SLEEP_STATE.sleep_port),
-            "framework_running": _framework_running(),
-            "framework_args": _framework_args_from_env(),
-            "ipc_host": os.environ.get("TE_IPC_HOST", "127.0.0.1"),
-            "ipc_port": int(os.environ.get("TE_IPC_PORT", "9099")),
-            "framework_url": _framework_url(),
-            "framework_port": _framework_port_from_args(_framework_args_from_env()),
-        },
-    })
-
-
-def _init_socketio(app: Flask) -> SocketIO:
-    preferred_modes = ["gevent", "eventlet", "threading"]
-    last_error: Optional[Exception] = None
-    for mode in preferred_modes:
-        try:
-            LOGGER.info("initializing Socket.IO server (async_mode=%s)", mode)
-            return SocketIO(app, cors_allowed_origins="*", async_mode=mode)
-        except ValueError as exc:
-            LOGGER.warning("async_mode '%s' unavailable: %s", mode, exc)
-            last_error = exc
-        except Exception as exc:  # pragma: no cover - defensive
-            LOGGER.error("failed to init Socket.IO with mode %s: %s", mode, exc)
-            last_error = exc
-    raise RuntimeError(f"Unable to initialize Socket.IO: {last_error}")
-
-
-socketio = _init_socketio(app)
-_load_ipc_modules(app, socketio)
 
 
 @dataclass
@@ -554,37 +352,34 @@ def main() -> None:
             if request.method == "OPTIONS":
                 return ("", 204)
             ok = True
-            try:
-                _PROCESS_REGISTRY.shutdown_all(logger=LOGGER)
-            except Exception:
-                LOGGER.exception("sleep_exit: shutdown_all failed")
+            if not _stop_supervisor():
                 ok = False
-
             try:
                 proc = _SLEEP_STATE.supervisor_proc
                 if proc and proc.poll() is None:
-                    deadline = time.monotonic() + 2.0
+                    deadline = time.monotonic() + 45.0
                     while time.monotonic() < deadline and proc.poll() is None:
                         time.sleep(0.1)
             except Exception:
-                pass
+                ok = False
+
+            proc = _SLEEP_STATE.supervisor_proc
+            if proc and proc.poll() is None:
+                LOGGER.warning("sleep_exit: supervisor still running after grace period; forcing framework fallback termination")
+                if not _kill_framework_records(signal.SIGTERM):
+                    ok = False
+                time.sleep(1.0)
+                if not _kill_framework_records(signal.SIGKILL):
+                    ok = False
+                try:
+                    os.kill(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except Exception as exc:
+                    LOGGER.error("sleep_exit: failed to SIGKILL supervisor pid=%s: %s", proc.pid, exc)
+                    ok = False
             _schedule_process_exit()
             return jsonify({"ok": ok})
-
-        @sleep_app.route("/config", methods=["GET"])
-        def sleep_config() -> Any:
-            return jsonify({
-                "ok": True,
-                "data": {
-                    "sleep": True,
-                    "sleep_port": _SLEEP_STATE.sleep_port,
-                    "ipc_host": os.environ.get("TE_IPC_HOST", "127.0.0.1"),
-                    "ipc_port": int(os.environ.get("TE_IPC_PORT", "9099")),
-                    "framework_url": _framework_url(),
-                    "framework_port": _framework_port_from_args(_framework_args_from_env()),
-                    "framework_args": _framework_args_from_env(),
-                },
-            })
 
         def _run_sleep_listener() -> None:
             server = make_server(args.host, int(args.sleep_port), sleep_app)
@@ -595,17 +390,7 @@ def main() -> None:
         LOGGER.info("sleep listener enabled on %s:%s", args.host, args.sleep_port)
 
     LOGGER.info("starting IPC service on %s:%s", args.host, args.port)
-    run_kwargs = {
-        "host": args.host,
-        "port": args.port,
-        "use_reloader": False,
-    }
-    if getattr(socketio, "async_mode", None) == "threading":
-        LOGGER.warning(
-            "Socket.IO is running in 'threading' mode; enabling allow_unsafe_werkzeug."
-        )
-        run_kwargs["allow_unsafe_werkzeug"] = True
-    socketio.run(app, **run_kwargs)
+    app.run(host=args.host, port=args.port, debug=False, use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":
