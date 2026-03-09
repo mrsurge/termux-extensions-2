@@ -361,6 +361,12 @@ TE_FRAMEWORK_ARGS_JSON_IN="$(python -c 'import json,sys; print(json.dumps(sys.ar
 start_ipc_server
 
 shutdown_ipc() {
+  if [ "${_TE2_SHUTDOWN_IN_PROGRESS:-0}" = "1" ]; then
+    return 0
+  fi
+  _TE2_SHUTDOWN_IN_PROGRESS=1
+  trap - EXIT INT TERM
+
   # Let IPC orchestrate shutdown (sleep supervisor) and then exit itself.
   curl -fsS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/exit" >/dev/null 2>&1 || \
     curl -fsS -X POST "http://${IPC_HOST}:${SLEEP_PORT}/actions/sleep" >/dev/null 2>&1 || true

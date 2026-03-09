@@ -3257,3 +3257,122 @@ t+20s    user hovers → provideHover fires → editorWorkbenchCall('hover')
 | `m_editor_app.js` | `installVscodeApiLanguageBridgeProviders()` (bridge registration), `applyLanguageToModel()` (re-runs bridge after async language set), `ensureTextmateTokenization()` (language registration guard), `provideHover` callback (URI guard + API call) |
 | `server.mjs` | HTTP/WS route: `editor_workbench_hover` → `client.hover()` |
 | `editor_ws.py` | `on_editor_workbench_hover` → `adapter_rpc("vscode.hover", ...)` |
+
+## 35) GeckoView IME Filter (Gboard Fix)
+
+### Problem
+
+Gboard (and any IME-composition keyboard) causes cursor mismatch chaos in Monaco on Android. The IME composition pipeline (`setComposingText`, composition spans) conflicts with Monaco's internal cursor positioning. "Dumb" keyboards (Hacker Keyboard, physical) work fine because they send raw key events. Additionally, Monaco's built-in `Gesture.onTap` (touch→cursor positioning) is not firing in our deployment, so cursor placement relies entirely on the touch extension teardrops.
+
+### Root cause
+
+Monaco's `PointerEventHandler._onMouseDown()` returns early for `pointerType === "touch"` — intentional, it relies on `Gesture.onTap` instead. But `Gesture.onTap` custom events are not dispatched despite `touchstart`/`touchend` reaching the document. Result: tapping content produces no `mousedown`/`mouseup`/`click` events, so Monaco never positions the cursor from touch. When Gboard starts composing at the wrong position, cursor chaos ensues.
+
+### Fix: Termux-pattern InputConnection filtering
+
+Instead of fixing Monaco's gesture pipeline, we intercept at the Android/Kotlin layer (same approach as Termux's terminal keyboard handling):
+
+1. **`FilteredGeckoView.kt`** — Subclasses `GeckoView`, overrides `onCreateInputConnection()`. When filter active: sets `inputType = TYPE_TEXT_VARIATION_VISIBLE_PASSWORD | TYPE_TEXT_FLAG_NO_SUGGESTIONS`, wraps the `InputConnection` with `EditorInputFilter`.
+
+2. **`EditorInputFilter.kt`** — `InputConnectionWrapper` that converts `setComposingText()` → `commitText()` (strips composition) and no-ops `setComposingRegion()`. Makes Gboard send character-by-character input.
+
+3. **`UiIpcClient.kt`** — Socket.IO client connecting to `/ui_ipc` namespace (path `/ui_ipc_ws/socket.io`). Listens for `ui_event` with `type: "focus"` → activates filter, `type: "blur"` → deactivates. Default inactive on disconnect.
+
+4. **`editor_ui_ipc_focus_relay_utils.js`** — Frontend emits both `{ type: 'focus' }` on `onDidFocusEditorWidget` and `{ type: 'blur' }` on `onDidBlurEditorWidget` to the UI IPC bus.
+
+5. **`InputMethodManager.restartInput(geckoView)`** — Called on filter state change to force `onCreateInputConnection()` to re-fire with updated inputType.
+
+### Key files
+
+| File | Role |
+|------|------|
+| `android/.../FilteredGeckoView.kt` | GeckoView subclass, IC interception point |
+| `android/.../EditorInputFilter.kt` | InputConnection wrapper, composition stripping |
+| `android/.../UiIpcClient.kt` | Socket.IO client for focus/blur events |
+| `editor_ui_ipc_focus_relay_utils.js` | Emits focus + blur events to UI IPC |
+| `android/.../MainActivity.kt` | Wires filter, IPC client, restartInput callback |
+
+## 36) GeckoView Static Asset Bundling
+
+### Problem
+
+The GeckoView app fetches all static editor assets over HTTP from the Python server on every load. This adds latency on first load and makes the app dependent on the server being immediately responsive.
+
+### Architecture
+
+**Two-tier storage:**
+- **APK `assets/editor_static/`** — Read-only seed, ships with build (~52MB uncompressed, ~20MB compressed in APK)
+- **`filesDir/editor_static/`** — Runtime source of truth, seeded from APK on first boot
+
+**Request interception via WebExtension:**
+- `asset_intercept` extension uses `webRequest.onBeforeRequest` to redirect matching static asset URLs to a local HTTP file server
+- Local server (`LocalAssetServer.kt`) runs on a random port, serves from `filesDir/editor_static/`
+- Port communicated to extension via native messaging (`MessageDelegate`)
+
+### What gets bundled
+
+**INCLUDED (~28MB uncompressed):**
+- Monaco bootstrap bundle (JS+CSS) — 8.6MB
+- Monaco chunks, basic-languages, language contributions — 1.2MB
+- Monaco ESM modules — 16MB
+- TE2 editor libs (m_editor_app.js, editor_*_utils.js, textmate UMDs)
+- file_editor_cm6/static/ (dist, icons, js, vendor)
+- app/static/ non-vendor (fonts, js, icon.png)
+- Vendor: codicons, seti-icons, socket.io, es-module-shims, xterm, ws
+
+**EXCLUDED (server-fetched):**
+- Workers (`te2-lang/workers/` — 33MB)
+- nicegui, codemirror, lsp_servers
+- All Python-rendered pages (dynamic)
+
+### Asset versioning
+
+- **`0.0.x`** — Asset-only updates (re-run bundle script, rebuild APK)
+- **`0.x.x`** — New GeckoView APK release (code + asset changes)
+- Version stored in `editor_static/version.txt`
+- `EditorAssetManager.seedFromApk()` compares bundled vs local version; skips copy if matching
+
+### URL pattern interception
+
+The WebExtension intercepts these URL patterns (redirecting to local server):
+
+| URL Pattern | Local Path (mirrors server structure) |
+|-------------|--------------------------------------|
+| `/static/vendor/codicons/*` | `static/vendor/codicons/*` |
+| `/static/vendor/monaco-editor-core/te2-lang/*` (not workers) | `static/vendor/monaco-editor-core/te2-lang/*` |
+| `/static/vendor/monaco-editor-core/esm/*` | `static/vendor/monaco-editor-core/esm/*` |
+| `/static/fonts/*`, `/static/js/*` | `static/fonts/*`, `static/js/*` |
+| `/apps/file_editor_cm6/static/*` | `apps/file_editor_cm6/static/*` |
+| `/api/app/file_editor_cm6/static/*` | → remapped to `apps/file_editor_cm6/static/*` |
+| `/api/app/file_editor_cm6/ui/monaco_editor/*` | `api/app/file_editor_cm6/ui/monaco_editor/*` |
+| `/api/app/file_editor_cm6/ui/monaco_vscode/lang/*` | `static/vendor/monaco-editor-core/te2-lang/*` |
+| `/api/app/file_editor_cm6/ui/monaco_vscode/esm/*` | `static/vendor/monaco-editor-core/esm/*` |
+
+### Bundle script
+
+```bash
+# Re-bundle assets (from repo root):
+./scripts/bundle_gecko_assets.sh 0.0.2
+
+# Then rebuild APK:
+cd android && ./gradlew :app:assembleGeckoDebug
+```
+
+### Boot sequence
+
+1. `onCreate()` → `initEditorAssets()`
+2. `EditorAssetManager.seedFromApk()` — copies APK assets → filesDir (skips if version matches)
+3. `LocalAssetServer.start()` — binds random port
+4. `installAssetExtension()` — installs `asset_intercept` WebExtension, sends port via `MessageDelegate`
+5. GeckoSession opens → pages load → WebExtension intercepts static requests → local server responds
+
+### Key files
+
+| File | Role |
+|------|------|
+| `scripts/bundle_gecko_assets.sh` | Copies qualifying files from `app/` to APK assets dir |
+| `android/.../EditorAssetManager.kt` | APK→filesDir seeding, version comparison |
+| `android/.../LocalAssetServer.kt` | Lightweight HTTP file server for local assets |
+| `android/.../assets/asset_intercept/manifest.json` | WebExtension manifest |
+| `android/.../assets/asset_intercept/background.js` | URL pattern matching + redirect logic |
+| `android/.../MainActivity.kt` | `initEditorAssets()`, `installAssetExtension()`, lifecycle cleanup |

@@ -815,6 +815,21 @@
     font-size: 11px;
     white-space: nowrap;
   }
+  #problems-container .problems-mention-btn {
+    flex-shrink: 0;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    font-size: 12px;
+    padding: 0 2px;
+    margin-left: 4px;
+  }
+  #problems-container .problems-item:hover .problems-mention-btn {
+    opacity: 0.7;
+  }
+  #problems-container .problems-mention-btn:hover {
+    opacity: 1 !important;
+  }
   .terminal-drawer.open {
     transform: translateY(0);
   }
@@ -1175,6 +1190,14 @@
     justify-items: center;
     align-items: center;
     row-gap: 2px;
+  }
+
+  .agent-drawer__icon-cell--explorer {
+    display: none;
+  }
+
+  .layout-mobile .agent-drawer__icon-cell--explorer {
+    display: grid;
   }
 
   .agent-drawer__running-dot {

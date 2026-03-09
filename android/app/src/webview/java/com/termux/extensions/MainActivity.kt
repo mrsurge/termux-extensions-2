@@ -468,7 +468,11 @@ class MainActivity : AppCompatActivity() {
             val mgr = EditorAssetManager(this)
             editorAssetManager = mgr
 
-            mgr.seedFromApk()
+            val seeded = mgr.seedFromApk()
+            if (seeded) {
+                val ver = mgr.getLocalVersion() ?: "?"
+                Toast.makeText(this, "Assets seeded from APK: v$ver", Toast.LENGTH_SHORT).show()
+            }
 
             if (!mgr.getAssetRoot().exists()) {
                 Log.w("MainActivity", "No editor assets available, skipping asset server")
@@ -525,8 +529,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateTe2Ui() {
-        Toast.makeText(this, "Updating TE2 UI…", Toast.LENGTH_SHORT).show()
-        flushBrowserCache()
+        Toast.makeText(this, "Force-updating assets…", Toast.LENGTH_SHORT).show()
+        Thread {
+            try {
+                val port = java.net.URI(frameworkBaseUrl).port.let { if (it == -1) 8089 else it }
+                val mgr = editorAssetManager
+                if (mgr != null) {
+                    val ok = mgr.forceUpdateFromServer(port)
+                    runOnUiThread {
+                        if (ok) {
+                            val ver = mgr.getLocalVersion() ?: "?"
+                            Toast.makeText(this, "Assets updated to v$ver — reloading", Toast.LENGTH_SHORT).show()
+                            findViewById<TextView>(R.id.consoleTitle)?.let {
+                                if (consoleOverlay.visibility == View.VISIBLE)
+                                    it.text = "Tools · v$ver"
+                            }
+                            flushBrowserCache()
+                        } else {
+                            Toast.makeText(this, "Asset update failed", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    Toast.makeText(this, "Update failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
     }
 
     // ── Navigation ──────────────────────────────────────────────────
@@ -643,6 +672,11 @@ class MainActivity : AppCompatActivity() {
     private fun showConsoleOverlay() {
         consoleOverlay.visibility = View.VISIBLE
         attachFlutterConsole()
+        // Show asset version inline with title
+        try {
+            val ver = editorAssetManager?.getLocalVersion() ?: "unknown"
+            findViewById<TextView>(R.id.consoleTitle)?.text = "Tools · v$ver"
+        } catch (_: Exception) {}
     }
 
     private fun hideConsoleOverlay() {
@@ -705,6 +739,38 @@ class MainActivity : AppCompatActivity() {
             }
 
             frameworkBaseUrl = frameworkUrl
+
+            // Check server for newer assets and download bundle if needed
+            try {
+                val port = java.net.URI(frameworkUrl).port.let { if (it == -1) 8089 else it }
+                val mgr = editorAssetManager
+                if (mgr != null) {
+                    val serverVer = mgr.checkServerVersion(port)
+                    if (serverVer != null) {
+                        val localVer = mgr.getLocalVersion() ?: "none"
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity,
+                                "Updating assets: v$localVer → v$serverVer…",
+                                Toast.LENGTH_LONG).show()
+                        }
+                        val ok = mgr.downloadFromServer(port)
+                        if (ok) {
+                            runOnUiThread {
+                                Toast.makeText(this@MainActivity,
+                                    "Assets updated to v$serverVer",
+                                    Toast.LENGTH_SHORT).show()
+                                // Refresh title if overlay is showing
+                                findViewById<TextView>(R.id.consoleTitle)?.let {
+                                    if (consoleOverlay.visibility == View.VISIBLE)
+                                        it.text = "Tools · v$serverVer"
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Asset server check failed", e)
+            }
 
             // Connect IME filter IPC
             try {

@@ -75,7 +75,7 @@ Keep the wrapper thin:
 
 ## Wrapper Tooling Bias
 
-If the current session is already TE2-integrated and the task involves a standalone web app, server app, dev server, JSON-RPC service, or similar process, strongly prefer the TE2 wrapper workflow over manually starting the process first.
+If the task involves a standalone web app, server app, dev server, JSON-RPC service, or similar process, strongly prefer the TE2 wrapper workflow over manually starting the process first.
 
 When TE2 MCP wrapper tools are available:
 1. scaffold the wrapper under `~/.local/share/te2/apps`
@@ -85,7 +85,20 @@ When TE2 MCP wrapper tools are available:
 5. add it to the sidebar if user-facing access inside TE2 is part of the goal
 
 Do not manually run `node`, `npm run dev`, `python`, `uvicorn`, or similar commands first if the goal is TE2-hosted execution and the TE2 wrapper tools are available.
-Use the wrapper as the thin harness and keep the user's repo free of TE2-specific product logic unless the user explicitly asks otherwise.
+
+When integrating an existing repo into TE2, do not invent a second process model. Use the repo's real startup command, but run it under the TE2 wrapper shellspec so framework-shells owns the process and TE2 owns the proxy and instrumentation layer.
+
+When the target is an existing repo and you want it integrated into TE2, wire the repo into TE2 through a thin wrapper app and let TE2 own the process/runtime layer.
+
+The normal TE2 integration path for an existing repo is:
+1. create or update a thin wrapper app under `~/.local/share/te2/apps/<app_id>`
+2. point the wrapper at the existing repo with the real `project_root`
+3. keep the wrapper limited to TE2-facing files such as `manifest.json`, `shellspec/app_worker.yaml`, and minimal wrapper or proxy configuration
+4. launch the repo's real dev server, app server, or JSON-RPC service through the wrapper shellspec
+5. set readiness correctly using the real TCP port, health endpoint, or log marker for that repo
+6. proxy the running app into TE2 through the wrapper so the TE2 path is the development harness entry point
+
+Keep the repo as the product and the wrapper as the harness. Do not move core product logic into the wrapper.
 
 ## Integration Surfaces
 
@@ -155,10 +168,23 @@ When using TE2 console tools, do not start with a global console tail unless you
 
 TE2's global console transcript can include internal and dev-environment workers such as `main_page`, `editor_iframe`, `codex_agent`, and other framework activity. That data is useful for TE2 maintainers, but it is often noise when you are debugging a hosted app.
 
-If you want console visibility into the target app, first ensure the app is instrumented with the TE2 console bridge. Then:
+If the target includes a browser or frontend surface, install the TE2 console bridge as part of the normal integration flow.
+
+Use the cached bridge file at:
+- `~/.cache/app_server/te2_console_bridge.js`
+
+Inject it at the app's real frontend entry point, based on the stack:
+- for SPA or bundler apps, wire it into the main browser bootstrap entry such as `src/main.js`, `src/main.ts`, `src/index.js`, or `src/index.tsx`
+- for server-rendered or template-driven apps, include it from the root HTML template, base template, shared layout, or document shell
+- for multi-page apps, place it in the shared layout or page shell, not one leaf page
+
+When the repo already has an existing framework, follow that framework's normal client-entry conventions instead of inventing a parallel injection path. Put the bridge where the app already boots in the browser.
+
+After wiring the bridge:
 1. use `te2_console_workers_live` or `te2_console_workers` to discover the relevant worker
 2. filter console inspection by that worker ID
-3. use `te2_console_eval` only after you have identified the correct worker
+3. use `te2_console_tail` or `te2_console_search` against that worker
+4. use `te2_console_eval` only after you have identified the correct worker
 
 Treat `main_page` and `editor_iframe` as internal TE2 workers unless you are specifically debugging TE2 itself.
 
@@ -231,12 +257,14 @@ You are operating inside TE2, an IDE/runtime platform that can host and instrume
 
 If the target is a web app, prefer TE2's reverse-proxy wrapper as a development harness when useful, but do not make the app depend on TE2 in order to function as a shippable product. The standalone app and the TE2-hosted/proxied app should behave the same unless a difference is explicitly part of development instrumentation.
 
+If the target is an existing repo that should run inside TE2, create or update a thin wrapper app under `~/.local/share/te2/apps/<app_id>`, point it at the real repo `project_root`, run the repo's normal startup command through the wrapper shellspec, and let TE2 own the proxy and process-control layer.
+
 Use sidebar integration for UI embedding, drawer control, navigation, and user-facing IDE actions.
 Use TE2 MCP for structured runtime inspection, console access, and framework-shell inspection. Prefer MCP/runtime surfaces before guessing from visible UI.
 
 Treat TE2 console data as frontend/runtime observability, not shell stdin/stdout. Treat framework-shell data as process/runtime observability. Do not claim per-line timestamps for raw framework-shell logs unless they are explicitly provided by the runtime surface.
 
-When using TE2 console tools, do not begin with a global console tail unless you are debugging TE2 itself. Global console output can include internal workers such as `main_page`, `editor_iframe`, `codex_agent`, and other framework activity. For app debugging, first identify the correct worker with `te2_console_workers_live` or `te2_console_workers`, then inspect or evaluate against that worker specifically. If you need logs from the target app, make sure the app is instrumented with the TE2 console bridge first.
+If the target includes a browser or frontend surface, install the TE2 console bridge from `~/.cache/app_server/te2_console_bridge.js` at the app's real browser entry point. For app debugging, first identify the correct worker with `te2_console_workers_live` or `te2_console_workers`, then inspect or evaluate against that worker specifically.
 
 Do not invent alternate transports or TE2-only product dependencies when existing TE2 control surfaces already solve the task.
 ```

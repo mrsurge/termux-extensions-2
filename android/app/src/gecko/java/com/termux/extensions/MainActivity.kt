@@ -967,22 +967,33 @@ class MainActivity : AppCompatActivity() {
      * from the Python server), flush the browser cache, and reload.
      */
     private fun updateTe2Ui() {
-        // Disable asset intercept so requests go directly to the Python server
-        assetExtensionPort?.let { port ->
+        Toast.makeText(this, "Force-updating assets…", Toast.LENGTH_SHORT).show()
+        Thread {
             try {
-                val msg = JSONObject().apply {
-                    put("type", "set_asset_port")
-                    put("port", 0)
+                val port = java.net.URI(frameworkBaseUrl).port.let { if (it == -1) 8089 else it }
+                val mgr = editorAssetManager
+                if (mgr != null) {
+                    val ok = mgr.forceUpdateFromServer(port)
+                    runOnUiThread {
+                        if (ok) {
+                            val ver = mgr.getLocalVersion() ?: "?"
+                            Toast.makeText(this, "Assets updated to v$ver — reloading", Toast.LENGTH_SHORT).show()
+                            findViewById<TextView>(R.id.consoleTitle)?.let {
+                                if (consoleOverlay.visibility == View.VISIBLE)
+                                    it.text = "Tools · v$ver"
+                            }
+                            flushBrowserCache()
+                        } else {
+                            Toast.makeText(this, "Asset update failed", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
-                port.postMessage(msg)
-                Log.i("MainActivity", "Disabled asset intercept for UI update")
             } catch (e: Exception) {
-                Log.w("MainActivity", "Failed to disable asset intercept: ${e.message}")
+                runOnUiThread {
+                    Toast.makeText(this, "Update failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
-        }
-        // Flush cache and reload — page will now load from Python server
-        Toast.makeText(this, "Updating TE2 UI…", Toast.LENGTH_SHORT).show()
-        flushBrowserCache()
+        }.start()
     }
 
     private fun loadHome() {
@@ -1101,6 +1112,11 @@ class MainActivity : AppCompatActivity() {
         consoleOverlay.visibility = View.VISIBLE
         consoleScroll.post { consoleScroll.fullScroll(View.FOCUS_DOWN) }
         attachFlutterConsole()
+        // Show asset version inline with title
+        try {
+            val ver = editorAssetManager?.getLocalVersion() ?: "unknown"
+            findViewById<TextView>(R.id.consoleTitle)?.text = "Tools · v$ver"
+        } catch (_: Exception) {}
     }
 
     private fun hideConsoleOverlay() {
@@ -1257,7 +1273,11 @@ class MainActivity : AppCompatActivity() {
             editorAssetManager = mgr
 
             // Seed from APK (no-op if version matches)
-            mgr.seedFromApk()
+            val seeded = mgr.seedFromApk()
+            if (seeded) {
+                val ver = mgr.getLocalVersion() ?: "?"
+                Toast.makeText(this, "Assets seeded from APK: v$ver", Toast.LENGTH_SHORT).show()
+            }
 
             if (!mgr.getAssetRoot().exists()) {
                 Log.w("MainActivity", "No editor assets available, skipping asset server")
@@ -1351,6 +1371,38 @@ class MainActivity : AppCompatActivity() {
             }
 
             frameworkBaseUrl = frameworkUrl
+
+            // Check server for newer assets and download bundle if needed
+            try {
+                val port = java.net.URI(frameworkUrl).port.let { if (it == -1) 8089 else it }
+                val mgr = editorAssetManager
+                if (mgr != null) {
+                    val serverVer = mgr.checkServerVersion(port)
+                    if (serverVer != null) {
+                        val localVer = mgr.getLocalVersion() ?: "none"
+                        runOnUiThread {
+                            Toast.makeText(this@MainActivity,
+                                "Updating assets: v$localVer → v$serverVer…",
+                                Toast.LENGTH_LONG).show()
+                        }
+                        val ok = mgr.downloadFromServer(port)
+                        if (ok) {
+                            runOnUiThread {
+                                Toast.makeText(this@MainActivity,
+                                    "Assets updated to v$serverVer",
+                                    Toast.LENGTH_SHORT).show()
+                                // Refresh title if overlay is showing
+                                findViewById<TextView>(R.id.consoleTitle)?.let {
+                                    if (consoleOverlay.visibility == View.VISIBLE)
+                                        it.text = "Tools · v$serverVer"
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MainActivity", "Asset server check failed", e)
+            }
 
             // Connect IME filter IPC after server URL is known
             try {

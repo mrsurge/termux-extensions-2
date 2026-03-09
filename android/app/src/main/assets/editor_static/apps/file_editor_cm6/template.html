@@ -815,6 +815,21 @@
     font-size: 11px;
     white-space: nowrap;
   }
+  #problems-container .problems-mention-btn {
+    flex-shrink: 0;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    font-size: 12px;
+    padding: 0 2px;
+    margin-left: 4px;
+  }
+  #problems-container .problems-item:hover .problems-mention-btn {
+    opacity: 0.7;
+  }
+  #problems-container .problems-mention-btn:hover {
+    opacity: 1 !important;
+  }
   .terminal-drawer.open {
     transform: translateY(0);
   }
@@ -1106,6 +1121,18 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    order: 2;
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+    text-align: right;
+  }
+
+  .agent-drawer__title-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .agent-drawer__icon {
@@ -1127,7 +1154,17 @@
   .agent-drawer__actions {
     display: flex;
     gap: 8px;
-    margin-left: auto;
+    order: 3;
+    position: relative;
+    flex: 0 0 auto;
+  }
+
+  .agent-drawer__refresh-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 36px;
+    min-width: 190px;
+    z-index: 80;
   }
 
   .agent-drawer__chrome {
@@ -1137,6 +1174,8 @@
     gap: 2px;
     min-width: 0;
     position: relative;
+    order: 1;
+    flex: 0 0 auto;
   }
 
   .agent-drawer__icon-grid {
@@ -1151,6 +1190,14 @@
     justify-items: center;
     align-items: center;
     row-gap: 2px;
+  }
+
+  .agent-drawer__icon-cell--explorer {
+    display: none;
+  }
+
+  .layout-mobile .agent-drawer__icon-cell--explorer {
+    display: grid;
   }
 
   .agent-drawer__running-dot {
@@ -2637,7 +2684,9 @@
       </div>
       <div class="agent-drawer__actions">
         <button class="fe-btn" id="agent-new-session">New Session</button>
+        <button class="fe-btn" id="agent-refresh-active" type="button" title="Refresh active side-bar item" aria-label="Refresh active side-bar item">↻</button>
         <button class="fe-btn" id="agent-close">✕</button>
+        <div class="fe-dropdown agent-drawer__refresh-menu" id="agent-refresh-menu"></div>
       </div>
     </header>
     <div class="agent-drawer__iframe" id="agent-iframe-wrap">

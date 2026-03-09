@@ -1093,6 +1093,39 @@ function connectEditorSocket() {
           if (nextBtn) nextBtn.disabled = (total === 0);
         } catch (_) {}
       });
+
+      // Code mention requests from iframe → POST to appserver.
+      editorSocket.on('editor:mention_request', async (payload) => {
+        try {
+          const p = payload && typeof payload === 'object' ? payload : {};
+          const hostBase = typeof window.__agentHostBase === 'string'
+            ? window.__agentHostBase.trim()
+            : '';
+          if (!hostBase) {
+            console.warn('[mention] Agent host unavailable');
+            return;
+          }
+          const body = { path: p.path || '' };
+          if (p.lineNo != null) body.lineNo = p.lineNo;
+          if (p.endLineNo != null) body.endLineNo = p.endLineNo;
+          if (p.col != null) body.col = p.col;
+          if (p.endCol != null) body.endCol = p.endCol;
+          if (p.content) body.content = p.content;
+          const resp = await fetch(`${hostBase}/api/appserver/mention`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const result = await resp.json();
+          if (result && result.ok) {
+            console.log('[mention] Mentioned in conversation:', body.path);
+          } else {
+            console.warn('[mention] Failed:', result?.error || 'unknown');
+          }
+        } catch (err) {
+          console.warn('[mention] Request failed:', err);
+        }
+      });
     })
     .catch((err) => {
       console.warn('[EditorSIO] Failed to open editor Socket.IO:', err);
@@ -1112,6 +1145,40 @@ function connectUIIPC() {
   uiIpcConnections.connectUIIPC();
 }
 // ─── End UI IPC ───────────────────────────────────────────────────
+
+// ─── Mention requests via UI IPC CustomEvent ─────────────────────
+window.addEventListener('cm6:mention-request', async (evt) => {
+  try {
+    const data = evt.detail || {};
+    const hostBase = typeof window.__agentHostBase === 'string'
+      ? window.__agentHostBase.trim()
+      : '';
+    if (!hostBase) {
+      console.warn('[mention] Agent host unavailable');
+      return;
+    }
+    const body = { path: data.path || '' };
+    if (data.lineNo != null) body.lineNo = data.lineNo;
+    if (data.endLineNo != null) body.endLineNo = data.endLineNo;
+    if (data.col != null) body.col = data.col;
+    if (data.endCol != null) body.endCol = data.endCol;
+    if (data.content) body.content = data.content;
+    const resp = await fetch(`${hostBase}/api/appserver/mention`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const result = await resp.json();
+    if (result && result.ok) {
+      console.log('[mention] Mentioned in conversation:', body.path);
+    } else {
+      console.warn('[mention] Failed:', result?.error || 'unknown');
+    }
+  } catch (err) {
+    console.warn('[mention] Request failed:', err);
+  }
+});
+// ─── End Mention ─────────────────────────────────────────────────
 
 // ---- host/api contract (injected by framework) ----
 /* global host, api */
@@ -3422,6 +3489,7 @@ sidebarShortcuts = initSidebarShortcutsSafe({
   openDrawer: () => { try { agentDrawerHandle?.open?.(); } catch (_) {} },
   closeAllMenus,
   setMenuChecked,
+  emitSidebarIpc: _emitSidebarIpc,
 });
 
 drainPendingWatcherEvents();

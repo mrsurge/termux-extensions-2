@@ -870,14 +870,166 @@ async def get_android_config():
 async def get_editor_version():
     """Return the current editor static-asset version (plain text).
 
-    GeckoView's EditorAssetManager.checkServerVersion() polls this endpoint
-    to decide whether to re-fetch assets from the server, so we don't have
-    to rebuild the APK for every minor front-end change.
+    The Android app's EditorAssetManager.checkServerVersion() polls this
+    endpoint to decide whether to download a fresh asset bundle.
     """
     vfile = Path(__file__).parent / "apps" / "file_editor_cm6" / "static" / "version.txt"
     if not vfile.exists():
         raise HTTPException(status_code=404, detail="version.txt not found")
     return Response(content=vfile.read_text().strip(), media_type="text/plain")
+
+
+# ── Asset bundle zip (Android OTA-style update) ─────────────────────
+import zipfile
+import tempfile
+
+_asset_bundle_cache: Dict[str, str] = {}  # version -> zip path
+
+def _get_editor_version_str() -> str:
+    vfile = Path(__file__).parent / "apps" / "file_editor_cm6" / "static" / "version.txt"
+    return vfile.read_text().strip() if vfile.exists() else "0"
+
+
+def _build_asset_bundle_zip() -> str:
+    """Build a zip of editor static assets, mirroring bundle_gecko_assets.sh.
+
+    Returns the path to the cached zip file.  Re-uses a cached zip if the
+    version hasn't changed.
+    """
+    version = _get_editor_version_str()
+    if version in _asset_bundle_cache:
+        cached = _asset_bundle_cache[version]
+        if os.path.exists(cached):
+            return cached
+
+    app_dir = Path(__file__).parent
+    tmp = tempfile.NamedTemporaryFile(
+        prefix=f"editor_assets_{version}_", suffix=".zip", delete=False
+    )
+    tmp.close()
+
+    EXCLUDE_EXT = {'.map', '.bak', '.bak2', '.pyc'}
+    EXCLUDE_DIRS = {'__pycache__', 'node_modules'}
+
+    def _should_include(p: Path) -> bool:
+        if p.suffix in EXCLUDE_EXT:
+            return False
+        for part in p.parts:
+            if part in EXCLUDE_DIRS:
+                return False
+        return True
+
+    def _add_tree(zf: zipfile.ZipFile, src: Path, arc_prefix: str):
+        if not src.is_dir():
+            return
+        for f in src.rglob("*"):
+            if f.is_file() and _should_include(f):
+                arcname = arc_prefix + "/" + str(f.relative_to(src))
+                zf.write(str(f), arcname)
+
+    def _add_file(zf: zipfile.ZipFile, src: Path, arcname: str):
+        if src.is_file():
+            zf.write(str(src), arcname)
+
+    with zipfile.ZipFile(tmp.name, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # 1. Shared statics
+        _add_tree(zf, app_dir / "static" / "fonts", "static/fonts")
+        _add_tree(zf, app_dir / "static" / "js", "static/js")
+        for fname in ("icon.png", "move.png", "manifest.webmanifest", "bookmarks.json"):
+            _add_file(zf, app_dir / "static" / fname, f"static/{fname}")
+
+        # 2. Vendor libs
+        for vdir in ("codicons", "seti-icons", "es-module-shims", "xterm", "ws"):
+            _add_tree(zf, app_dir / "static" / "vendor" / vdir, f"static/vendor/{vdir}")
+        _add_file(zf, app_dir / "static" / "vendor" / "socket.io.min.js",
+                  "static/vendor/socket.io.min.js")
+
+        # 3. Monaco te2-lang (no workers)
+        te2lang = app_dir / "static" / "vendor" / "monaco-editor-core" / "te2-lang"
+        for ext in ("js", "css"):
+            bfile = te2lang / "bootstrap" / f"monaco.bootstrap.bundle.{ext}"
+            _add_file(zf, bfile, f"static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.{ext}")
+        # chunks
+        if te2lang.is_dir():
+            for f in te2lang.glob("chunk-*.js"):
+                _add_file(zf, f, f"static/vendor/monaco-editor-core/te2-lang/{f.name}")
+        _add_tree(zf, te2lang / "basic-languages",
+                  "static/vendor/monaco-editor-core/te2-lang/basic-languages")
+        _add_tree(zf, te2lang / "language",
+                  "static/vendor/monaco-editor-core/te2-lang/language")
+
+        # 4. Monaco ESM
+        _add_tree(zf, app_dir / "static" / "vendor" / "monaco-editor-core" / "esm",
+                  "static/vendor/monaco-editor-core/esm")
+
+        # 5. file_editor_cm6 statics
+        _add_tree(zf, app_dir / "apps" / "file_editor_cm6" / "static",
+                  "apps/file_editor_cm6/static")
+
+        # 6. TE2 editor libs
+        cm6_monaco = app_dir / "apps" / "file_editor_cm6" / "monaco_editor"
+        ui_prefix = "api/app/file_editor_cm6/ui/monaco_editor"
+        if cm6_monaco.is_dir():
+            for f in cm6_monaco.glob("*.js"):
+                _add_file(zf, f, f"{ui_prefix}/{f.name}")
+        # Overwrite m_editor_app.js with IIFE bundle
+        iife = app_dir / "apps" / "file_editor_cm6" / "static" / "dist" / "editor.js"
+        if iife.is_file():
+            zf.write(str(iife), f"{ui_prefix}/m_editor_app.js")
+        _add_tree(zf, cm6_monaco / "textmate", f"{ui_prefix}/textmate")
+        _add_tree(zf, cm6_monaco / "themes", f"{ui_prefix}/themes")
+        _add_tree(zf, cm6_monaco / "vscode_build_src", f"{ui_prefix}/vscode_build_src")
+        # top-level files
+        for fname in ("main.js", "template.html"):
+            _add_file(zf, app_dir / "apps" / "file_editor_cm6" / fname,
+                      f"apps/file_editor_cm6/{fname}")
+        # editor_iframe.html → nc.html
+        _add_file(zf, cm6_monaco / "editor_iframe.html",
+                  "api/app/file_editor_cm6/ui/nc.html")
+
+        # 7. HTML pages
+        _add_file(zf, app_dir / "templates" / "index.html", "index.html")
+        app_shell = app_dir / "templates" / "app_shell.html"
+        if app_shell.is_file():
+            content = app_shell.read_text()
+            content = content.replace("{{ app_id|tojson }}", '"file_editor_cm6"')
+            content = content.replace(
+                "{{ url_for('static', filename='js/ws_port.js') }}",
+                "/static/js/ws_port.js")
+            zf.writestr("app_shell_file_editor_cm6.html", content)
+
+        # Version file
+        zf.writestr("version.txt", version)
+
+    # Update cache (clear old entries)
+    for old_ver, old_path in list(_asset_bundle_cache.items()):
+        try:
+            os.unlink(old_path)
+        except OSError:
+            pass
+    _asset_bundle_cache.clear()
+    _asset_bundle_cache[version] = tmp.name
+    return tmp.name
+
+
+@app.get("/api/editor_assets_bundle")
+async def get_editor_assets_bundle():
+    """Serve the editor static assets as a zip bundle.
+
+    The Android app downloads this when its local version differs from
+    the server's.  The zip mirrors the directory structure expected by
+    filesDir/editor_static/.
+    """
+    from anyio import to_thread
+    zip_path = await to_thread.run_sync(_build_asset_bundle_zip)
+    if not os.path.exists(zip_path):
+        raise HTTPException(status_code=500, detail="Bundle generation failed")
+    version = _get_editor_version_str()
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=f"editor_assets_{version}.zip"
+    )
 
 
 @app.get("/api/state")

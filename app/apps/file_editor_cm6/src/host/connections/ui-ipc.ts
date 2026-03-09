@@ -83,6 +83,11 @@ export function createUiIpcConnections(deps) {
         } else if (data.type === 'focus') {
           console.log('[focus_relay] dispatching synthetic click');
           document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        } else if (data.type === 'mention_request') {
+          console.log('[mention] UI IPC received mention_request');
+          window.dispatchEvent(new CustomEvent('cm6:mention-request', {
+            detail: data,
+          }));
         }
       });
 

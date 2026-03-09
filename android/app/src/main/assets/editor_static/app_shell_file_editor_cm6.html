@@ -137,7 +137,7 @@
             color: var(--foreground);
             width: 36px;
             height: 36px;
-            border-radius: 2px%;
+            border-radius: 2px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -469,10 +469,21 @@
                 if (raw.startsWith('http://') || raw.startsWith('https://') || raw.startsWith('/')) {
                     return raw;
                 }
+                const assetBaseUrl = typeof app.asset_base_url === 'string' ? app.asset_base_url.trim() : '';
+                if (assetBaseUrl) {
+                    return `${assetBaseUrl.replace(/\/+$/, '')}/${raw.replace(/^\/+/, '')}`;
+                }
                 if (app._dir) {
                     return `/apps/${app._dir}/${raw}`;
                 }
                 return raw;
+            };
+            const resolveIconText = (app) => {
+                const text = typeof app.icon_text === 'string' ? app.icon_text.trim() : '';
+                if (text) return text;
+                const emoji = typeof app.icon_emoji === 'string' ? app.icon_emoji.trim() : '';
+                if (emoji) return emoji;
+                return '⚙️';
             };
 
             btnRecents.addEventListener('click', async () => {
@@ -525,7 +536,7 @@
                                     img.referrerPolicy = 'no-referrer';
                                     iconContainer.appendChild(img);
                                 } else {
-                                    iconContainer.textContent = app.icon_emoji || '⚙️';
+                                    iconContainer.textContent = resolveIconText(app);
                                 }
                             }
                             recentsList.appendChild(card);
@@ -608,12 +619,17 @@
 
                 host.setTitle(appDef.name || 'Termux App');
                 await ensureStatePreloaded(stateKey);
-                const templatePath = `/apps/${appDef._dir}/${appDef.entrypoints.frontend_template}`;
+                const assetBaseUrl = typeof appDef.asset_base_url === 'string' ? appDef.asset_base_url.trim() : '';
+                const templatePath = assetBaseUrl
+                    ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_template.replace(/^\/+/, '')}`
+                    : `/apps/${appDef._dir}/${appDef.entrypoints.frontend_template}`;
                 const template = await fetch(templatePath).then(res => res.text());
                 appContainer.innerHTML = template;
 
                 if (appDef.entrypoints.frontend_script) {
-                    const scriptPath = `/apps/${appDef._dir}/${appDef.entrypoints.frontend_script}`;
+                    const scriptPath = assetBaseUrl
+                        ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_script.replace(/^\/+/, '')}`
+                        : `/apps/${appDef._dir}/${appDef.entrypoints.frontend_script}`;
                     const module = await import(scriptPath);
                     const api = {
                         get: (endpoint) => teFetch(`/api/app/${appId}/${endpoint}`),

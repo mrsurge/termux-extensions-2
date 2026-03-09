@@ -1126,9 +1126,10 @@ export function initSidebarShortcuts(options = {}) {
     const activeKey = resolvedActive?.key || '';
     const headerItems = _collectHeaderItems(resolvedShortcuts);
     const runningSet = _runningCache instanceof Set ? _runningCache : new Set();
+    const isMobileLayout = !!document.querySelector('.fe-root.layout-mobile');
 
     gridEl.innerHTML = '';
-    if (!headerItems.length) {
+    if (!headerItems.length && !isMobileLayout) {
       gridEl.style.display = 'none';
       _closeHeaderIconMenu();
       return;
@@ -1217,6 +1218,37 @@ export function initSidebarShortcuts(options = {}) {
       headerDragState = null;
       dropInsertionIndex = -1;
     };
+
+    if (isMobileLayout) {
+      const cell = document.createElement('div');
+      cell.className = 'agent-drawer__icon-cell agent-drawer__icon-cell--explorer';
+
+      const btn = document.createElement('button');
+      btn.className = 'agent-drawer__icon-btn';
+      btn.title = 'Open Explorer';
+      btn.setAttribute('aria-label', 'Open Explorer');
+      btn.textContent = '☰';
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        _closeHeaderIconMenu();
+        try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
+        const explorerBtn = document.getElementById('fe-drawer-open');
+        if (explorerBtn && typeof explorerBtn.click === 'function') {
+          explorerBtn.click();
+          return;
+        }
+        const root = document.querySelector('.fe-root');
+        if (root) root.classList.add('drawer-open');
+      });
+
+      const dot = document.createElement('span');
+      dot.className = 'agent-drawer__running-dot is-placeholder';
+      dot.setAttribute('aria-hidden', 'true');
+
+      cell.appendChild(btn);
+      cell.appendChild(dot);
+      gridEl.appendChild(cell);
+    }
 
     headerItems.forEach((sc) => {
       const effectiveIcon = _effectiveShortcutIcon(sc);

@@ -122,6 +122,7 @@ import { getBreadcrumbSymbolClickPosition } from './editor_breadcrumb_symbol_cli
 import { collectBootLanguageIds } from './editor_boot_language_ids_utils.js';
 import { warnIfPlaintextOnlyLanguages } from './editor_boot_plaintext_warn_utils.js';
 import { applyActiveModelLanguage } from './editor_boot_apply_active_model_language_utils.js';
+import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_menu_utils.js';
 /* eslint-disable no-undef */
 (function() {
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
@@ -2208,6 +2209,7 @@ import { applyActiveModelLanguage } from './editor_boot_apply_active_model_langu
     return emitToHostSocket(editorSocket, eventName, payload);
   }
 
+
   function requestGitBaselines(opts) {
     return requestGitBaselinesDebounced({
       immediate: !!(opts && opts.immediate),
@@ -2706,21 +2708,13 @@ import { applyActiveModelLanguage } from './editor_boot_apply_active_model_langu
   }
 
   function ensureTouchSelection(reason) {
-    try {
-      if (!editor) return;
-      if (!(window['monaco-touch-selection'] && window['monaco-touch-selection'].editorTouchSelectionHelp)) return;
-      var dom = editor.getDomNode && editor.getDomNode();
-      if (!dom) return;
-      // If Monaco rebuilt the editor DOM (common on language switches), re-install.
-      var hasUI = !!dom.querySelector('.monaco-editor-touch-selections');
-      if (!hasUI) {
-        window['monaco-touch-selection'].editorTouchSelectionHelp(editor);
-        updateDebug('touch=reinit' + (reason ? ':' + reason : ''));
-      }
-      // Long-press hover path disabled (use touch menu Hover instead).
-    } catch (e) {
-      console.warn('[MonacoTouchSelection] ensure failed', e);
-    }
+    _ensureTouchSelection(reason, {
+      getEditor: function() { return editor; },
+      getDiffEditor: function() { return diffEditor; },
+      getCurrentPath: function() { return currentPath; },
+      getUiIpcSocket: function() { return uiIpcSocket; },
+      updateDebug: updateDebug,
+    });
   }
 
   // Suppress soft keyboard on mobile when editor is readOnly.

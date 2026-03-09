@@ -34,6 +34,31 @@ export function initPanelsAndDrawer(deps) {
         }, 300);
       }
     },
+    onMention: async (payload) => {
+      try {
+        const hostBase = typeof window.__agentHostBase === 'string'
+          ? window.__agentHostBase.trim()
+          : '';
+        if (!hostBase) {
+          deps.hostToast('Agent host unavailable');
+          return;
+        }
+        const resp = await fetch(`${hostBase}/api/appserver/mention`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const result = await resp.json();
+        if (result && result.ok) {
+          deps.hostToast('Mentioned in conversation');
+        } else {
+          deps.hostToast(result?.error || 'Failed to mention');
+        }
+      } catch (err) {
+        console.warn('[Problems] mention failed:', err);
+        deps.hostToast('Failed to mention in conversation');
+      }
+    },
   });
 
   const consoleCollapseBtn = document.getElementById('console-collapse-btn');

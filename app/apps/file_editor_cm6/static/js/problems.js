@@ -39,12 +39,14 @@ function basename(p) {
  * @param {Object} options
  * @param {string} [options.containerId='problems-container']
  * @param {function(string, number, number):void} [options.onNavigate] - (absPath, line, col)
+ * @param {function(Object):void} [options.onMention] - mention a diagnostic in conversation
  * @returns {{ show, hide, update, destroy, get isVisible() }}
  */
 export function createProblemsPanel(options = {}) {
   const {
     containerId = 'problems-container',
     onNavigate = () => {},
+    onMention = null,
   } = options;
 
   const container = document.getElementById(containerId);
@@ -148,6 +150,31 @@ export function createProblemsPanel(options = {}) {
         item.appendChild(icon);
         item.appendChild(msg);
         item.appendChild(loc);
+
+        if (onMention) {
+          const mentionBtn = document.createElement('span');
+          mentionBtn.className = 'problems-mention-btn';
+          mentionBtn.textContent = '💬';
+          mentionBtn.title = 'Mention in conversation';
+          mentionBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const sevLabel = m.severity === SEV_ERROR ? 'error'
+              : m.severity === SEV_WARNING ? 'warning' : 'info';
+            let content = '[' + sevLabel + '] ';
+            if (m.code) content += m.code + ': ';
+            content += m.message || '(no message)';
+            if (m.source) content += ' (' + m.source + ')';
+            onMention({
+              path: absPath,
+              lineNo: m.startLineNumber || 1,
+              col: m.startColumn || 1,
+              endLineNo: m.endLineNumber || m.startLineNumber || 1,
+              endCol: m.endColumn || m.startColumn || 1,
+              content: content,
+            });
+          });
+          item.appendChild(mentionBtn);
+        }
 
         item.addEventListener('click', () => {
           onNavigate(absPath, m.startLineNumber || 1, m.startColumn || 1);
