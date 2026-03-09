@@ -2,6 +2,7 @@ import os
 import json
 import aiofiles
 import contextlib
+import asyncio
 
 # Get project root reliably - app module's parent
 import app
@@ -10,10 +11,16 @@ import time
 import asyncio
 from pathlib import Path
 from fastapi import APIRouter, Depends, Request, HTTPException, WebSocket, Body
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse
 from app.libs import app_manager
 from app.libs import app_lifecycle
 from app.extensions.apps import loader as apps_loader
+from app.extensions.apps.events import app_registry_events
+from app.extensions.apps.scaffold import (
+    list_templates as list_app_templates,
+    scaffold_proxy_shell_wrapper,
+    validate_proxy_shell_wrapper,
+)
 from framework_shells import FrameworkShellManager, get_manager as _get_framework_shell_manager
 
 async def get_framework_shell_manager() -> FrameworkShellManager:
@@ -73,6 +80,7 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
             "_dir": manifest.get("_dir"),
             "icon_src": icon_src_resolved,
             "icon_src_raw": manifest.get("icon_src") if isinstance(manifest.get("icon_src"), str) else "",
+            "icon_text": manifest.get("icon_text") if isinstance(manifest.get("icon_text"), str) else "",
             "icon_emoji": manifest.get("icon_emoji") if isinstance(manifest.get("icon_emoji"), str) else "",
             "fullscreen": bool(manifest.get("fullscreen")),
             "backend_required": backend_required,
@@ -228,6 +236,7 @@ async def get_running_apps(manager: FrameworkShellManager = Depends(get_framewor
         if manifest_data:
             app['name'] = manifest_data.get('name')
             app['icon_emoji'] = manifest_data.get('icon_emoji')
+            app['icon_text'] = manifest_data.get('icon_text')
             app['icon_src'] = manifest_data.get('icon_src')
             app['_dir'] = manifest_data.get('_dir')
             app['asset_base_url'] = manifest_data.get('asset_base_url')
@@ -256,6 +265,59 @@ async def get_apps_catalog():
     return {"ok": True, "data": catalog}
 
 
+@apps_bp.get('/api/apps/templates')
+def get_apps_templates():
+    return {"ok": True, "data": list_app_templates()}
+
+
+@apps_bp.get('/api/apps/events')
+async def apps_events(request: Request):
+    async def stream():
+        queue = app_registry_events.subscribe()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=25.0)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                payload = json.dumps(event.payload, ensure_ascii=False)
+                yield f"event: {event.type}\ndata: {payload}\n\n"
+        finally:
+            app_registry_events.unsubscribe(queue)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+    }
+    return StreamingResponse(stream(), media_type="text/event-stream", headers=headers)
+
+
+@apps_bp.post('/api/apps/scaffold/proxy_shell_wrapper')
+def scaffold_proxy_shell_wrapper_route(payload: dict = Body(...)):
+    try:
+        result = scaffold_proxy_shell_wrapper(payload or {})
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "data": result}
+
+
+@apps_bp.post('/api/apps/{app_id}/validate_wrapper')
+def validate_proxy_shell_wrapper_route(app_id: str):
+    try:
+        result = validate_proxy_shell_wrapper(app_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True, "data": result}
+
+
 @apps_bp.get('/api/apps/{app_id}/proxy_shell')
 def get_proxy_shell(app_id: str):
     manifest = next((app for app in get_loaded_apps() if app.get('id') == app_id), None)
@@ -271,7 +333,7 @@ def get_proxy_shell(app_id: str):
 
 
 @apps_bp.post('/api/apps/reload')
-def reload_apps():
+async def reload_apps():
     """
     Reload app manifests from disk without re-registering services/routers.
     Safe for launcher refresh use-cases where manifest metadata changed.
@@ -281,6 +343,7 @@ def reload_apps():
     manifests = apps_loader.refresh_registry()
     main_app.loaded_apps = manifests
     app_manager._LOADED_APPS = manifests
+    await app_registry_events.publish("registry_reloaded", {"count": len(manifests)})
     return {"ok": True, "data": {"count": len(manifests)}}
 
 @apps_bp.get("/app/{app_id}", response_class=HTMLResponse)

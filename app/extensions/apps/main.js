@@ -3,6 +3,7 @@ export default function(container) {
   const refreshBtn = container.querySelector('#apps-refresh-btn');
 
   const state = { apps: [], loading: false };
+  let appsEvents = null;
   
   function resolveIconSrc(app) {
     const raw = typeof app.icon_src === 'string' ? app.icon_src.trim() : '';
@@ -107,6 +108,24 @@ export default function(container) {
     }
   }
 
+  function connectAppsEvents() {
+    if (typeof window.EventSource !== 'function') return;
+    try {
+      appsEvents = new EventSource('/api/apps/events');
+    } catch (e) {
+      console.warn('Failed to connect app registry events:', e);
+      return;
+    }
+
+    appsEvents.addEventListener('registry_reloaded', () => {
+      void loadApps();
+    });
+
+    appsEvents.onerror = () => {
+      // Let EventSource handle reconnection silently.
+    };
+  }
+
   refreshBtn?.addEventListener('click', async () => {
     try {
       await window.teFetch('/api/apps/reload', { method: 'POST' });
@@ -118,6 +137,7 @@ export default function(container) {
     }
   });
 
+  connectAppsEvents();
   // Initial fetch
   loadApps();
 }

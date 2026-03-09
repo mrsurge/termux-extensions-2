@@ -20,3 +20,10 @@ Current tools:
 - `te2_fws_shell_get`
 - `te2_fws_log_tail`
 - `te2_fws_log_search`
+- `te2_apps_templates`
+- `te2_scaffold_proxy_wrapper`
+- `te2_validate_proxy_wrapper`
+- `te2_apps_reload`
+- `te2_app_start`
+- `te2_app_open`
+- `te2_sidebar_add_app_shortcut`

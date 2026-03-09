@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -14,10 +15,39 @@ def _builtin_apps_root() -> Path:
     return project_root / "app" / "apps"
 
 
+def builtin_templates_root() -> Path:
+    return _builtin_apps_root() / "_templates"
+
+
+def te2_data_root() -> Path:
+    return Path.home() / ".local" / "share" / "te2"
+
+
+def te2_apps_root() -> Path:
+    return te2_data_root() / "apps"
+
+
+def te2_templates_root() -> Path:
+    return te2_data_root() / "templates"
+
+
+def ensure_user_local_layout() -> None:
+    data_root = te2_data_root()
+    apps_root = te2_apps_root()
+    templates_root = te2_templates_root()
+    builtin_templates = builtin_templates_root()
+
+    data_root.mkdir(parents=True, exist_ok=True)
+    apps_root.mkdir(parents=True, exist_ok=True)
+
+    if not templates_root.exists() and builtin_templates.exists():
+        shutil.copytree(builtin_templates, templates_root)
+
+
 def default_app_roots() -> list[tuple[str, Path]]:
     return [
         ("builtin", _builtin_apps_root()),
-        ("user_local", Path.home() / ".local" / "share" / "te2" / "apps"),
+        ("user_local", te2_apps_root()),
     ]
 
 
@@ -50,6 +80,7 @@ class AppDefinition:
     proxy_shell: Optional[dict[str, Any]] = None
     framework_shell_ui: Optional[dict[str, Any]] = None
     icon_src_raw: str = ""
+    icon_text: str = ""
     icon_emoji: str = ""
     fullscreen: bool = False
     enabled: bool = True
@@ -89,6 +120,7 @@ class AppDefinition:
             "fullscreen": self.fullscreen,
             "icon_src": self.icon_src,
             "icon_src_raw": self.icon_src_raw,
+            "icon_text": self.icon_text,
             "icon_emoji": self.icon_emoji,
             "source_kind": self.source_kind,
             "source_root": str(self.source_root),
@@ -112,6 +144,7 @@ class AppDefinition:
             "_dir": self.dir_name,
             "icon_src": self.icon_src,
             "icon_src_raw": self.icon_src_raw,
+            "icon_text": self.icon_text,
             "icon_emoji": self.icon_emoji,
             "fullscreen": self.fullscreen,
             "backend_required": bool(self.backend_module),
@@ -188,6 +221,8 @@ class AppRegistry:
             for app_dir in sorted(source_root.iterdir(), key=lambda path: path.name.lower()):
                 if not app_dir.is_dir():
                     continue
+                if app_dir.name.startswith("_"):
+                    continue
                 manifest_path = app_dir / "manifest.json"
                 if not manifest_path.exists():
                     continue
@@ -251,6 +286,10 @@ class AppRegistry:
                 if not isinstance(icon_src_raw, str):
                     icon_src_raw = ""
 
+                icon_text = manifest.get("icon_text")
+                if not isinstance(icon_text, str):
+                    icon_text = ""
+
                 icon_emoji = manifest.get("icon_emoji")
                 if not isinstance(icon_emoji, str):
                     icon_emoji = ""
@@ -272,6 +311,7 @@ class AppRegistry:
                     proxy_shell=proxy_shell,
                     framework_shell_ui=framework_shell_ui,
                     icon_src_raw=icon_src_raw.strip(),
+                    icon_text=icon_text.strip(),
                     icon_emoji=icon_emoji.strip(),
                     fullscreen=bool(manifest.get("fullscreen")),
                     enabled=bool(manifest.get("enabled", True)),

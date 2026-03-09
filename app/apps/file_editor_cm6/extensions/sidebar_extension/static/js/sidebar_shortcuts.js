@@ -186,6 +186,7 @@ export function initSidebarShortcuts(options = {}) {
   let _frameworkEventsReconnectTimer = null;
   let _frameworkEventsBackoffMs = 600;
   let _frameworkEventsEnabled = false;
+  let _appsEventsSource = null;
   let _appsChromeSeq = 0;
   let _headerIconMenuKey = '';
   let _refreshMenuLongPressTimer = null;
@@ -271,6 +272,10 @@ export function initSidebarShortcuts(options = {}) {
   function _frameworkEventsUrl() {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${window.location.host}/ws/events`;
+  }
+
+  function _appsEventsUrl() {
+    return '/api/apps/events';
   }
 
   function _deriveAppIdFromShellEvent(evt) {
@@ -431,6 +436,37 @@ export function initSidebarShortcuts(options = {}) {
     _connectFrameworkEvents();
   }
 
+  function _handleAppsRegistryReload() {
+    _appsCache = null;
+    _appsCacheAt = 0;
+    const seq = ++_appsChromeSeq;
+    void _ensureAppsCache(true).then(() => {
+      if (seq !== _appsChromeSeq) return;
+      _refreshShortcutChrome();
+      _renderHeaderIconGrid(_latestUiPrefs || {});
+      if (shortcutAppDD && shortcutAppDD.classList.contains('show')) {
+        void _renderAppMenu();
+      }
+    });
+  }
+
+  function _connectAppsEvents() {
+    if (typeof window.EventSource !== 'function') return;
+    if (_appsEventsSource) return;
+    try {
+      _appsEventsSource = new EventSource(_appsEventsUrl());
+    } catch (_) {
+      _appsEventsSource = null;
+      return;
+    }
+    _appsEventsSource.addEventListener('registry_reloaded', () => {
+      _handleAppsRegistryReload();
+    });
+    _appsEventsSource.onerror = () => {
+      // EventSource handles reconnects.
+    };
+  }
+
   function _findAppManifest(appId) {
     const id = _normStr(appId);
     if (!id || !Array.isArray(_appsCache)) {
@@ -479,6 +515,11 @@ export function initSidebarShortcuts(options = {}) {
       _logAppDiscovery('manifest-icon:image', { appId: _normStr(appId), iconSrc });
       return { kind: 'image', src: iconSrc };
     }
+    const iconText = _normStr(m.icon_text);
+    if (iconText) {
+      _logAppDiscovery('manifest-icon:text', { appId: _normStr(appId), iconText });
+      return { kind: 'text', text: iconText };
+    }
     const iconEmoji = _normStr(m.icon_emoji);
     if (iconEmoji) {
       _logAppDiscovery('manifest-icon:emoji', { appId: _normStr(appId), iconEmoji });
@@ -515,6 +556,11 @@ export function initSidebarShortcuts(options = {}) {
 
     if (i.kind === 'emoji') {
       wrap.textContent = _normStr(i.emoji);
+      return wrap;
+    }
+
+    if (i.kind === 'text') {
+      wrap.textContent = _normStr(i.text);
       return wrap;
     }
 
@@ -2437,6 +2483,7 @@ export function initSidebarShortcuts(options = {}) {
     // App list for framework-app shortcuts (icons + picker).
     void _ensureAppsCache(false);
     void _ensureRunningCache(false);
+    _connectAppsEvents();
 
     // Settings radios: update prefs.
     try {

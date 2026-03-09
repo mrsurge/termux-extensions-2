@@ -10,18 +10,18 @@ from framework_shells import get_manager
 class FrameworkShellsClient:
     """Direct in-process framework-shells adapter for worker-owned MCP."""
 
-    async def get_running(self, *, include_stats: bool = True) -> dict[str, Any]:
+    async def get_running(self) -> dict[str, Any]:
         mgr = await get_manager()
-        shells = await mgr.list_shells(include_stats=include_stats)
+        shells = await mgr.list_shells()
         return {
             "ok": True,
             "data": [self._shell_payload(shell) for shell in shells],
             "source": "framework_shells.direct",
         }
 
-    async def get_shell(self, shell_id: str, *, include_stats: bool = True) -> dict[str, Any]:
+    async def get_shell(self, shell_id: str) -> dict[str, Any]:
         mgr = await get_manager()
-        shell = await mgr.get_shell(str(shell_id or "").strip(), include_stats=include_stats)
+        shell = await mgr.get_shell(str(shell_id or "").strip())
         if not shell:
             return {"ok": False, "error": f"Shell not found: {shell_id}"}
         return {

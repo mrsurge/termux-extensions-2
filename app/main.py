@@ -8,7 +8,6 @@ from pathlib import Path
 vendor_dir = Path(__file__).parent / 'static' / 'vendor'
 sys.path.insert(0, str(vendor_dir))
 
-import errno
 import importlib
 import importlib.util
 import json
@@ -16,12 +15,10 @@ import os
 import re
 import signal
 import subprocess
-import sys
 import threading
 import time
 import traceback
 import uuid
-from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 # Add project root to the Python path
@@ -30,7 +27,6 @@ sys.path.insert(0, project_root)
 
 from fastapi import FastAPI, Request, Query, Body, HTTPException, Header, Response
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
-import requests
 from app.libs.app_lifecycle import start_background_tasks, stop_background_tasks
 from app.libs.app_manager import get_running_apps, initialize_running_apps
 
@@ -38,7 +34,7 @@ from app.libs.app_manager import get_running_apps, initialize_running_apps
 from contextlib import asynccontextmanager, suppress
 
 @asynccontextmanager
-async def lifespan(app_instance):
+async def lifespan(_app_instance: FastAPI):
     """Startup/shutdown logic for FastAPI app."""
     
     # Register framework with IPC
@@ -89,6 +85,8 @@ async def lifespan(app_instance):
     print("--- Loading Apps ---")
     # App services are loaded in the main process via the apps extension loader.
     from app.extensions.apps import loader as apps_loader
+    from app.extensions.apps.registry import ensure_user_local_layout
+    ensure_user_local_layout()
     loaded_apps = apps_loader.load_apps_and_services(app)
     # Store in app_manager module so ensure_app_running can access it
     from app.libs import app_manager
@@ -133,11 +131,10 @@ async def lifespan(app_instance):
     print("--- Framework shutdown complete ---")
 
 
-app = FastAPI(lifespan=lifespan)
+app: FastAPI = FastAPI(lifespan=lifespan)
 
 # Mount static files
 from fastapi.staticfiles import StaticFiles
-import os
 static_dir = os.path.join(os.path.dirname(__file__), 'static')
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
@@ -146,7 +143,6 @@ from framework_shells import FrameworkShellManager, get_manager
 from framework_shells.api.fastapi_router import router as framework_shells_router
 from framework_shells.api.websocket import router as framework_shells_ws_router
 from framework_shells.api.fws_ui import router as fws_ui_router
-from app.apps.file_editor_cm6.agent_bridge import get_bridge # This has to go... ASAP
 
 # Mount the framework shells API router
 app.include_router(framework_shells_router)
@@ -155,20 +151,15 @@ app.include_router(fws_ui_router)
 
 
 
-RUN_ID = os.environ.get("TE_RUN_ID")
-if not RUN_ID:
-    RUN_ID = f"run_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
-    os.environ["TE_RUN_ID"] = RUN_ID
+run_id_env = os.environ.get("TE_RUN_ID")
+if not run_id_env:
+    run_id_env = f"run_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
+    os.environ["TE_RUN_ID"] = run_id_env
 else:
-    os.environ.setdefault("TE_RUN_ID", RUN_ID)
+    os.environ.setdefault("TE_RUN_ID", run_id_env)
 
 
 APP_STARTED_AT = time.time()
-
-try:  # Optional dependency for richer process metrics
-    import psutil  # type: ignore
-except Exception:  # pragma: no cover - psutil may be unavailable.
-    psutil = None  # type: ignore
 
 # Pre-initialize to avoid NameError if imported differently
 _loaded_extensions = []
@@ -193,7 +184,7 @@ try:
     def _module_from_spec_with_runid(spec):
         mod = _orig_module_from_spec(spec)
         try:
-            run_id = app.config.get("TE_RUN_ID")
+            run_id = os.environ.get("TE_RUN_ID")
         except Exception:
             run_id = None
         if run_id is not None:
@@ -213,7 +204,7 @@ try:
     def _import_module_with_runid(name, package=None):
         mod = _orig_import_module(name, package=package)
         try:
-            run_id = app.config.get("TE_RUN_ID")
+            run_id = os.environ.get("TE_RUN_ID")
         except Exception:
             run_id = None
         if run_id is not None:
@@ -226,7 +217,7 @@ except Exception:
     pass
 
 
-def _load_settings() -> dict:
+def _load_settings() -> dict[str, Any]:
     try:
         if SETTINGS_FILE.is_file():
             with SETTINGS_FILE.open('r', encoding='utf-8') as fh:
@@ -238,7 +229,7 @@ def _load_settings() -> dict:
     return {}
 
 
-def _save_settings(payload: dict) -> dict:
+def _save_settings(payload: dict[str, Any]) -> dict[str, Any]:
     SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with SETTINGS_FILE.open('w', encoding='utf-8') as fh:
         json.dump(payload, fh, indent=2, ensure_ascii=False)
@@ -267,7 +258,7 @@ def _apply_settings_to_config():
         
 
 
-def _load_state_store() -> dict:
+def _load_state_store() -> dict[str, Any]:
     with STATE_STORE_LOCK:
         try:
             if STATE_STORE_FILE.is_file():
@@ -280,7 +271,7 @@ def _load_state_store() -> dict:
         return {}
 
 
-def _save_state_store(store: dict) -> None:
+def _save_state_store(store: dict[str, Any]) -> None:
     with STATE_STORE_LOCK:
         STATE_STORE_FILE.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = STATE_STORE_FILE.with_suffix('.tmp')
@@ -653,6 +644,18 @@ def _resolve_browse_path(raw_path: str, root: str) -> tuple[str | None, str | No
     scan_path = logical_path
     return logical_path, scan_path, None
 
+
+def _ipc_host() -> str:
+    return os.environ.get("TE_IPC_HOST", "127.0.0.1")
+
+
+def _ipc_port() -> int:
+    raw = os.environ.get("TE_IPC_PORT", "9099")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 9099
+
 def run_script(script_name, app_root_path, args=None):
     """Helper function to run a shell script and return its output."""
     project_root = os.path.dirname(app_root_path)
@@ -721,6 +724,9 @@ def load_extensions():
             print(f"[LOAD]   - Found backend_blueprint: {backend_file}")
             module_name = f"app.extensions.{ext_name}.{backend_file.replace('.py', '')}"
             spec = importlib.util.spec_from_file_location(module_name, os.path.join(ext_path, backend_file))
+            if spec is None or spec.loader is None:
+                manifest['__load_error__'] = f"ImportError: failed to create module spec for {module_name}"
+                continue
             try:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)  # may raise anything
@@ -773,7 +779,7 @@ async def get_extensions():
 
 
 @app.post('/api/run_command')
-async def run_command_endpoint(payload: dict = Body(...)):
+async def run_command_endpoint(payload: dict[str, Any] = Body(...)):
     """Executes a shell command and returns its stdout."""
     import subprocess
     if not payload or 'command' not in payload:
@@ -782,7 +788,7 @@ async def run_command_endpoint(payload: dict = Body(...)):
     command = payload['command']
     
     try:
-        result = await anyio.to_thread.run_sync(
+        result = await to_thread.run_sync(
             lambda: subprocess.run(
                 command,
                 shell=True,
@@ -810,6 +816,8 @@ async def browse(
         logical_path, scan_path, err = _resolve_browse_path(path, root)
         if err:
             raise HTTPException(status_code=400, detail=err)
+        if logical_path is None or scan_path is None:
+            raise HTTPException(status_code=400, detail="Invalid path")
         
         if sudo:
             entries = _scandir_with_sudo(scan_path, hidden, resolve_symlinks, display_path=logical_path)
@@ -837,7 +845,7 @@ async def get_settings():
     return {"ok": True, "data": data}
 
 @app.post("/api/settings")
-async def post_settings(payload: dict = Body(...)):
+async def post_settings(payload: dict[str, Any] = Body(...)):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
     try:
@@ -882,7 +890,7 @@ async def get_state(key: List[str] = Query(...)):
     return {"ok": True, "data": data}
 
 @app.post("/api/state")
-async def post_state(payload: dict = Body(...)):
+async def post_state(payload: dict[str, Any] = Body(...)):
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="JSON object required")
     key = payload.get('key')
@@ -1075,10 +1083,9 @@ async def sw():
 
 # --- Lazy initialization compatible with Flask 3.x (before_first_request removed) ---
 _initialized = False
-_init_lock = None
+_init_lock: Any = None
 try:
-    import threading as _threading
-    _init_lock = _threading.Lock()
+    _init_lock = threading.Lock()
 except Exception:
     class _DummyLock:
         def __enter__(self):
@@ -1091,7 +1098,10 @@ def _ensure_initialized():
     global _initialized, loaded_extensions, loaded_apps
     if _initialized:
         return
-    with _init_lock:
+    lock = _init_lock
+    if lock is None:
+        return
+    with lock:
         if _initialized:
             return
         try:
@@ -1126,7 +1136,7 @@ def _ensure_initialized():
 
 
 import httpx
-import anyio
+from anyio import to_thread
 
 @app.api_route('/api/app/{app_id}/{subpath:path}', methods=['GET','POST','PUT','DELETE','PATCH','OPTIONS'])
 async def proxy_app_request(app_id: str, subpath: str, request: Request):
@@ -1215,7 +1225,6 @@ async def proxy_app_request(app_id: str, subpath: str, request: Request):
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 import websockets
 import asyncio
-import inspect
 @app.websocket('/ws/app/{app_id}/{route:path}')
 async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
     await websocket.accept()
@@ -1256,7 +1265,10 @@ async def proxy_app_websocket(websocket: WebSocket, app_id: str, route: str):
             async def forward_worker_to_client():
                 try:
                     async for msg in worker_ws:
-                        await websocket.send_text(msg)
+                        if isinstance(msg, (bytes, bytearray)):
+                            await websocket.send_bytes(bytes(msg))
+                        else:
+                            await websocket.send_text(msg)
                 except websockets.ConnectionClosedOK:
                     print(f"[AppProxy][WebSocket] Worker closed connection app={app_id}")
                 except WebSocketDisconnect:
@@ -1286,13 +1298,11 @@ if __name__ == '__main__':
     # with extensions that import 'app.main'.
     # This prevents "split-brain" where __main__.app runs but extensions
     # attach to/read from app.main.app.
-    import app.main
-    app = app.main.app
+    from app import main as app_main_module
+    fastapi_app = app_main_module.app
 
     import argparse
     import uvicorn
-    import subprocess
-    import re
     from ipaddress import ip_address, ip_network, AddressValueError
     
     parser = argparse.ArgumentParser(description='Termux Extensions Framework')
@@ -1424,7 +1434,13 @@ if __name__ == '__main__':
     if use_middleware and not allow_all:
         @app.middleware("http")
         async def ip_filter_middleware(request: Request, call_next):
-            client_ip = request.client.host
+            client = request.client
+            if client is None:
+                return JSONResponse(
+                    status_code=403,
+                    content={"ok": False, "error": "Missing client information"}
+                )
+            client_ip = client.host
             
             # Check if IP is allowed
             try:
@@ -1474,8 +1490,8 @@ if __name__ == '__main__':
         print(f"[main] IP filtering DISABLED (Performance Mode)")
     
     uvicorn.run(
-        app,
+        fastapi_app,
         host=host_ip,
         port=args.port,
-        timeout_graceful_shutdown=2.0,
+        timeout_graceful_shutdown=2,
     )

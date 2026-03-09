@@ -54,6 +54,39 @@ Do not treat the wrapper as:
 - the canonical production deployment requirement
 - a reason to add TE2-only code to the app core
 
+When the target is a standalone web/server app and you want TE2 integration without modifying the user's repo, prefer scaffolding a thin wrapper app under:
+- `~/.local/share/te2/apps`
+
+The local first-run template seed lives under:
+- `~/.local/share/te2/templates/proxy_shell_wrapper`
+
+The preferred execution order is:
+1. use TE2 MCP scaffold tools to build the wrapper
+2. use TE2 MCP validation tools to validate the wrapper
+3. only after validation succeeds, reload the app registry and start/open the wrapper app
+
+If MCP scaffold fails, manual wrapper creation in `~/.local/share/te2/apps` is acceptable.
+If MCP validation fails or is unavailable, manually validate the wrapper files before reloading or starting the app.
+
+Keep the wrapper thin:
+- manifest, shellspec, proxy configuration, and minimal TE2-facing glue live in the wrapper app
+- the user's actual app repo should continue to run correctly without the wrapper
+- do not move core product logic into the TE2 wrapper
+
+## Wrapper Tooling Bias
+
+If the current session is already TE2-integrated and the task involves a standalone web app, server app, dev server, JSON-RPC service, or similar process, strongly prefer the TE2 wrapper workflow over manually starting the process first.
+
+When TE2 MCP wrapper tools are available:
+1. scaffold the wrapper under `~/.local/share/te2/apps`
+2. validate the wrapper
+3. reload the TE2 app registry
+4. start or open the wrapper app through TE2
+5. add it to the sidebar if user-facing access inside TE2 is part of the goal
+
+Do not manually run `node`, `npm run dev`, `python`, `uvicorn`, or similar commands first if the goal is TE2-hosted execution and the TE2 wrapper tools are available.
+Use the wrapper as the thin harness and keep the user's repo free of TE2-specific product logic unless the user explicitly asks otherwise.
+
 ## Integration Surfaces
 
 There are two distinct integration layers.

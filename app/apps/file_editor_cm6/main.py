@@ -11,17 +11,15 @@ sys.path.insert(0, str(vendor_dir))
 import os
 import json
 import time
-from pathlib import Path
 import shutil
-from typing import Optional
+from typing import Any
 from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
 from fastapi.responses import JSONResponse, FileResponse, Response
 import asyncio
-import anyio
+from anyio import to_thread
 from .agent_ws import agent_websocket
 from .explorer_ws import explorer_websocket
 from .history_store import HistoryStore
-from .preferences_store import PreferencesStore
 from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
 # vscode_api_shell_manager import removed — shell is deprecated (see endpoints below)
 from .code_server_shell_manager import ensure_code_server_shell
@@ -62,7 +60,7 @@ from .core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe
 from .explorer_ws import manager as explorer_manager
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
-from .explorer import search as explorer_search
+from .explorer import search as explorer_search_module
 
 IGNORE_PATTERNS = [
     '.git', '__pycache__', 'node_modules', '.venv', 'venv',
@@ -71,11 +69,12 @@ IGNORE_PATTERNS = [
 ]
 
 AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
+JsonDict = dict[str, Any]
 
 # Workbench adapter boot record (per worker process).
 # Purpose: make `/workbench_adapter/start` idempotent for page refresh / new clients
 # by reusing the adapter shell that was started at worker boot, when still alive.
-_workbench_adapter_boot = {
+_workbench_adapter_boot: JsonDict = {
     "worker_shell_id": None,
     "project_root": None,
     "adapter_shell_id": None,
@@ -98,11 +97,11 @@ STATUS_TEXT_MAP = {
     '!': 'Ignored',
 }
 
-async def _search_by_name(root: Path, query: str) -> dict:
+async def _search_by_name(root: Path, query: str) -> JsonDict:
     """Search files/folders by name."""
-    return await explorer_search.search_by_name(root, query)
+    return await explorer_search_module.search_by_name(root, query)
 
-async def _search_by_content(root: Path, query: str) -> dict:
+async def _search_by_content(root: Path, query: str) -> JsonDict:
     """Search file contents using ripgrep or fallback."""
     rg_path = shutil.which('rg')
     if rg_path:
@@ -110,7 +109,7 @@ async def _search_by_content(root: Path, query: str) -> dict:
     else:
         return await _search_with_python(root, query)
 
-async def _search_with_ripgrep(root: Path, query: str, rg_path: str) -> dict:
+async def _search_with_ripgrep(root: Path, query: str, rg_path: str) -> JsonDict:
     """Use ripgrep for fast content search."""
     cmd = [
         rg_path,
@@ -190,7 +189,7 @@ async def _search_with_ripgrep(root: Path, query: str, rg_path: str) -> dict:
     except asyncio.TimeoutError:
         raise TimeoutError("Ripgrep search timed out")
 
-async def _search_with_python(root: Path, query: str) -> dict:
+async def _search_with_python(root: Path, query: str) -> JsonDict:
     """Fallback Python content search."""
     results_by_file = {}
     query_lower = query.lower()
@@ -275,7 +274,7 @@ def _status_meta_from_code(code: str) -> tuple[str, str]:
     return primary, STATUS_TEXT_MAP[key]
 
 
-def _search_by_changes(project_root: Path) -> dict:
+def _search_by_changes(project_root: Path) -> JsonDict:
     project_path = _history_store.get_active_project()
     if not project_path:
         return {
@@ -349,7 +348,7 @@ file_editor_cm6_bp = APIRouter()
 
 # --- LSP shell debug endpoints (Dex, 2025-12-08) ---
 @file_editor_cm6_bp.post("/api/lsp/switch")
-async def api_switch_lsp(payload: dict = Body(...)):
+async def api_switch_lsp(payload: JsonDict = Body(...)):
     language_id = payload.get("languageId")
     if not language_id:
         raise HTTPException(status_code=400, detail="languageId is required")
@@ -376,7 +375,7 @@ async def api_active_lsp():
 
 
 @file_editor_cm6_bp.post("/api/lsp/shutdown")
-async def api_shutdown_lsp(payload: dict = Body(...)):
+async def api_shutdown_lsp(payload: JsonDict = Body(...)):
     language_id = payload.get("languageId")
     if not language_id:
         raise HTTPException(status_code=400, detail="languageId is required")
@@ -385,7 +384,7 @@ async def api_shutdown_lsp(payload: dict = Body(...)):
 
 
 @file_editor_cm6_bp.post("/api/lsp/start")
-async def api_start_lsp(payload: dict = Body(...)):
+async def api_start_lsp(payload: JsonDict = Body(...)):
     """Manually start an LSP server (as Framework Shell pipe processes).
 
     This is used by the Language Servers modal to pre-warm servers before a file is opened.
@@ -429,7 +428,7 @@ async def api_start_lsp(payload: dict = Body(...)):
     except Exception:
         effective_root = project_root
 
-    started: list[dict] = []
+    started: list[JsonDict] = []
     for language_id in language_ids:
         record = await get_or_spawn_lsp_shell(language_id, Path(effective_root))
         if record:
@@ -880,7 +879,7 @@ async def vscode_api_get_enabled_extensions():
 
 
 @file_editor_cm6_bp.post("/vscode_api/extensions/enabled")
-async def vscode_api_set_enabled_extensions(payload: dict = Body(...)):
+async def vscode_api_set_enabled_extensions(payload: JsonDict = Body(...)):
     """Set or toggle enabled extensions for the active project.
 
     Accepts either:
@@ -933,7 +932,7 @@ async def vscode_api_set_enabled_extensions(payload: dict = Body(...)):
 
 
 @file_editor_cm6_bp.post("/api/lsp/stop")
-async def api_stop_lsp(payload: dict = Body(...)):
+async def api_stop_lsp(payload: JsonDict = Body(...)):
     """Manually stop an LSP server (terminates its Framework Shell processes)."""
 
     server_id = (payload.get("serverId") or "").strip().lower()
@@ -1164,7 +1163,7 @@ SUBAPPS = [
 from .stores import _history_store, _preferences_store
 
 
-def initialize_project_session() -> Optional[ProjectSidecar]:
+def initialize_project_session() -> ProjectSidecar | None:
     """Called once at editor worker boot to bump the project session counter.
 
     IMPORTANT:
@@ -1270,12 +1269,12 @@ def _get_active_project_root() -> Path:
     return project
 
 
-def _resolve_diff_base(project_path: Optional[str]) -> str:
+def _resolve_diff_base(project_path: str | None) -> str:
     base = _history_store.get_diff_base(project_path)
     return base.strip() if base else 'HEAD'
 
 
-def _diff_base_payload(project_path: Optional[str]) -> dict:
+def _diff_base_payload(project_path: str | None) -> JsonDict:
     base_ref = _resolve_diff_base(project_path)
     mode = 'none'
     commit_info = None
@@ -1308,7 +1307,7 @@ def _diff_base_payload(project_path: Optional[str]) -> dict:
 
 
 
-def _status_to_payload(status) -> dict:
+def _status_to_payload(status: Any) -> JsonDict:
     return {
         "branch": status.branch,
         "detached": status.detached,
@@ -1319,7 +1318,7 @@ def _status_to_payload(status) -> dict:
         "untracked": status.untracked,
     }
 
-def _get_runtime_metadata() -> dict:
+def _get_runtime_metadata() -> JsonDict:
     """Collect runtime metadata for crash detection."""
     import os
     return {
@@ -1330,7 +1329,7 @@ def _get_runtime_metadata() -> dict:
         "worker_pid": os.getpid(),
     }
 
-def _build_state_payload() -> dict:
+def _build_state_payload() -> JsonDict:
     project_path = _history_store.get_active_project()
     project_exists = bool(project_path and Path(project_path).is_dir())
     project_label = HistoryStore.format_label(project_path)
@@ -1355,13 +1354,14 @@ def _build_state_payload() -> dict:
         last_file_message = f'File "{last_file_label or last_file}" not found.'
 
     recents_raw = _history_store.list_files(project_path) if project_path else []
-    recents = []
+    recents: list[JsonDict] = []
     for entry in recents_raw:
         entry_path = entry.get("path")
-        exists = bool(entry_path and Path(entry_path).is_file())
+        entry_path_str = entry_path if isinstance(entry_path, str) else None
+        exists = bool(entry_path_str and Path(entry_path_str).is_file())
         recents.append({
-            "path": entry_path,
-            "label": entry.get("label") or HistoryStore.format_label(entry_path),
+            "path": entry_path_str,
+            "label": entry.get("label") or HistoryStore.format_label(entry_path_str),
             "opened_at": entry.get("opened_at"),
             "exists": exists,
             "scroll_line": entry.get("scroll_line"),
@@ -1386,7 +1386,7 @@ def _build_state_payload() -> dict:
         "runtime": runtime_meta,
     }
 
-def _expand_and_validate_path(path):
+def _expand_and_validate_path(path: str) -> tuple[str | None, str | None]:
     base_home = os.path.expanduser('~')
     expanded = os.path.normpath(os.path.expanduser(path))
     if not os.path.abspath(expanded).startswith(base_home):
@@ -1409,11 +1409,11 @@ def get_session_cache(
 ):
     """Retrieve cached session for a document."""
     expanded_project, err = _expand_and_validate_path(project)
-    if err:
+    if err or expanded_project is None:
         raise HTTPException(status_code=403, detail=err)
     
     expanded_path, err = _expand_and_validate_path(path)
-    if err:
+    if err or expanded_path is None:
         raise HTTPException(status_code=403, detail=err)
     
     cached = _history_store.get_cached_document(expanded_project, expanded_path)
@@ -1454,11 +1454,11 @@ def delete_session_cache(
 ):
     """Discard cached session for a document."""
     expanded_project, err = _expand_and_validate_path(project)
-    if err:
+    if err or expanded_project is None:
         raise HTTPException(status_code=403, detail=err)
     
     expanded_path, err = _expand_and_validate_path(path)
-    if err:
+    if err or expanded_path is None:
         raise HTTPException(status_code=403, detail=err)
     
     existed = _history_store.clear_cached_document(expanded_project, expanded_path)
@@ -1482,7 +1482,7 @@ def delete_session_cache(
 @file_editor_cm6_bp.get('/read')
 def read_file(path: str = Query(...)):
     expanded, err = _expand_and_validate_path(path)
-    if err:
+    if err or expanded is None:
         raise HTTPException(status_code=403, detail=err)
     if not os.path.isfile(expanded):
         raise HTTPException(status_code=404, detail='File not found')
@@ -1495,18 +1495,24 @@ def read_file(path: str = Query(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.post('/write')
-async def write_file_route(data: dict = Body(...)):
+async def write_file_route(data: JsonDict = Body(...)):
     # Edit 2025-11-17T00:13:07+00:00: This is the legacy write endpoint.
     # It was updated to capture the original file's mode before writing and
     # pass it to the `write_full` function to preserve permissions.
-    path = data.get('path')
-    content = data.get('content')
-    client_id = data.get('client_id', 'unknown')
-    op_id = data.get('op_id', '')
+    path_value = data.get('path')
+    content_value = data.get('content')
+    path = path_value if isinstance(path_value, str) else None
+    content = content_value if isinstance(content_value, str) else None
+    client_id_value = data.get('client_id', 'unknown')
+    client_id = client_id_value if isinstance(client_id_value, str) else 'unknown'
+    op_id_value = data.get('op_id', '')
+    op_id = op_id_value if isinstance(op_id_value, str) else ''
     base_sha256 = None
 
     if not path:
         raise HTTPException(status_code=400, detail="Path is required")
+    if content is None:
+        raise HTTPException(status_code=400, detail="Content is required")
 
     if data.get('base') and isinstance(data['base'], dict):
         base_sha256 = data['base'].get('sha256')
@@ -1534,7 +1540,7 @@ async def write_file_route(data: dict = Body(...)):
             await _broadcast_watcher_error(project_root, str(e))
 
         # NEW: Pass mode to write_full
-        file_meta = await anyio.to_thread.run_sync(
+        file_meta = await to_thread.run_sync(
             lambda: write_full(project_root, str(rel_path), content, 
                              base_sha256=base_sha256, mode=orig_mode)
         )
@@ -1676,7 +1682,7 @@ async def ws_read(websocket: WebSocket):
         print(f"[ws/read] closed path={path} client={client_id}", file=sys.stderr)
 
 @file_editor_cm6_bp.post('/project/open')
-async def project_open(data: dict = Body(...)):
+async def project_open(data: JsonDict = Body(...)):
     """Open a project directory."""
     path = (data.get('path') or '').strip()
 
@@ -1732,10 +1738,14 @@ async def project_open(data: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.post('/project/create')
-async def project_create(data: dict = Body(...)):
+async def project_create(data: JsonDict = Body(...)):
     """Create a new project directory."""
-    parent_path = data.get('parent_path')
-    name = data.get('name')
+    parent_path_value = data.get('parent_path')
+    name_value = data.get('name')
+    parent_path = parent_path_value if isinstance(parent_path_value, str) else None
+    name = name_value if isinstance(name_value, str) else None
+    if not parent_path or not name:
+        raise HTTPException(status_code=400, detail="parent_path and name are required")
 
     try:
         from .explorer_helper import create_project
@@ -1778,7 +1788,7 @@ def git_branches():
 
 
 @file_editor_cm6_bp.post('/git/checkout')
-async def git_checkout_route(data: dict = Body(...)):
+async def git_checkout_route(data: JsonDict = Body(...)):
     name = (data.get('name') or '').strip()
     if not name:
         raise HTTPException(status_code=400, detail="Branch name required")
@@ -1791,7 +1801,7 @@ async def git_checkout_route(data: dict = Body(...)):
 
 
 @file_editor_cm6_bp.post('/git/branch')
-async def git_create_branch_route(data: dict = Body(...)):
+async def git_create_branch_route(data: JsonDict = Body(...)):
     name = (data.get('name') or '').strip()
     if not name:
         raise HTTPException(status_code=400, detail="Branch name required")
@@ -1819,7 +1829,7 @@ def git_diff_base_route():
 
 
 @file_editor_cm6_bp.post('/git/diff_base')
-def git_set_diff_base_route(payload: dict = Body(...)):
+def git_set_diff_base_route(payload: JsonDict = Body(...)):
     project_path = _history_store.get_active_project()
     if not project_path:
         raise HTTPException(status_code=400, detail="No project selected")
@@ -1864,7 +1874,7 @@ def git_unstage_all_route():
 
 
 @file_editor_cm6_bp.post('/git/commit')
-async def git_commit_route(data: dict = Body(...)):
+async def git_commit_route(data: JsonDict = Body(...)):
     message = (data.get('message') or '').strip()
     amend = bool(data.get('amend'))
     if not message:
@@ -1878,7 +1888,7 @@ async def git_commit_route(data: dict = Body(...)):
 
 
 @file_editor_cm6_bp.post('/git/push')
-async def git_push_route(data: dict = Body(...)):
+async def git_push_route(data: JsonDict = Body(...)):
     remote = (data.get('remote') or '').strip() or None
     branch = (data.get('branch') or '').strip() or None
     force = bool(data.get('force'))
@@ -1891,7 +1901,7 @@ async def git_push_route(data: dict = Body(...)):
 
 
 @file_editor_cm6_bp.post('/git/pull')
-async def git_pull_route(data: dict = Body(...)):
+async def git_pull_route(data: JsonDict = Body(...)):
     remote = (data.get('remote') or '').strip() or None
     branch = (data.get('branch') or '').strip() or None
     rebase = bool(data.get('rebase'))
@@ -1913,10 +1923,11 @@ def debug_projects():
 
     active_project = _history_store.get_active_project()
 
-    results = []
+    results: list[JsonDict] = []
     for entry in projects:
         project_path = entry.get("path")
-        label = entry.get("label") or HistoryStore.format_label(project_path)
+        project_path_str = project_path if isinstance(project_path, str) else None
+        label = entry.get("label") or HistoryStore.format_label(project_path_str)
         opened_at = entry.get("opened_at")
 
         sidecar_path = None
@@ -1925,13 +1936,13 @@ def debug_projects():
         last_boot_at = None
         draft_count = 0
 
-        if project_path:
+        if project_path_str:
             try:
-                sc_path = ProjectSidecar.get_sidecar_path(project_path)
+                sc_path = ProjectSidecar.get_sidecar_path(project_path_str)
                 sidecar_path = str(sc_path)
                 sidecar_exists = sc_path.exists()
                 if sidecar_exists:
-                    sc = ProjectSidecar.load_or_create(project_path)
+                    sc = ProjectSidecar.load_or_create(project_path_str)
                     session_count = sc.session_count
                     last_boot_at = sc.last_boot_at
                     draft_count = sc.get_draft_count()
@@ -1940,14 +1951,14 @@ def debug_projects():
                 pass
 
         is_active = bool(
-            project_path
+            project_path_str
             and active_project
-            and str(project_path) == str(active_project)
+            and str(project_path_str) == str(active_project)
         )
 
         results.append(
             {
-                "path": project_path,
+                "path": project_path_str,
                 "label": label,
                 "opened_at": opened_at,
                 "sidecar_path": sidecar_path,
@@ -1963,7 +1974,7 @@ def debug_projects():
 
 
 @file_editor_cm6_bp.delete('/debug/projects')
-def debug_delete_project(payload: dict = Body(...)):
+def debug_delete_project(payload: JsonDict = Body(...)):
     """Delete or reset a project entry from history and its sidecar (debugging helper).
 
     Semantics:
@@ -2033,7 +2044,7 @@ def debug_delete_project(payload: dict = Body(...)):
     }
 
 @file_editor_cm6_bp.post('/git/stage')
-async def git_stage_route(data: dict = Body(...)):
+async def git_stage_route(data: JsonDict = Body(...)):
     paths = data.get('paths', [])
     if not paths:
         raise HTTPException(status_code=400, detail="Paths required")
@@ -2046,7 +2057,7 @@ async def git_stage_route(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @file_editor_cm6_bp.post('/git/unstage')
-async def git_unstage_route(data: dict = Body(...)):
+async def git_unstage_route(data: JsonDict = Body(...)):
     paths = data.get('paths', [])
     if not paths:
         raise HTTPException(status_code=400, detail="Paths required")
@@ -2077,7 +2088,7 @@ async def git_commits_for_path(path: str = Query(...), limit: int = Query(20)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @file_editor_cm6_bp.post('/git/restore')
-async def git_restore_route(data: dict = Body(...)):
+async def git_restore_route(data: JsonDict = Body(...)):
     path = data.get('path')
     commit = data.get('commit', 'HEAD')
     if not path:
@@ -2110,7 +2121,7 @@ async def git_commits():
         raise HTTPException(status_code=400, detail=str(exc))
 
 @file_editor_cm6_bp.post('/git/reset_hard')
-async def git_reset_hard_route(data: dict = Body(...)):
+async def git_reset_hard_route(data: JsonDict = Body(...)):
     commit = data.get('commit', 'HEAD')
     try:
         project_root = _get_active_project_root()
@@ -2174,7 +2185,7 @@ async def git_init_route():
     }
 
 @file_editor_cm6_bp.post('/git/remote/add')
-async def add_git_remote(data: dict = Body(...)):
+async def add_git_remote(data: JsonDict = Body(...)):
     name = data.get('name')
     url = data.get('url')
     if not name or not url:
@@ -2186,6 +2197,7 @@ async def add_git_remote(data: dict = Body(...)):
         git_helper.add_remote(root, name, url)
         
         # Refresh cache
+        history = _history_store
         origin = git_helper.get_origin_url(root)
         history.set_project_origin(str(root), origin)
         
@@ -2236,7 +2248,7 @@ def get_session_state():
     return {"ok": True, "data": state}
 
 @file_editor_cm6_bp.post('/session_state')
-def update_session_state(payload: dict = Body(...)):
+def update_session_state(payload: JsonDict = Body(...)):
     """Persist lightweight session telemetry for crash/reconnect recovery."""
     state = _history_store.update_session_state(payload or {})
     return {"ok": True, "data": state}
@@ -2251,7 +2263,7 @@ def get_preferences():
 
 
 @file_editor_cm6_bp.post('/preferences')
-async def update_preferences(payload: dict = Body(...)):
+async def update_preferences(payload: JsonDict = Body(...)):
     """Persist editor/UI preference changes."""
     editor = payload.get('editor')
     ui = payload.get('ui')
@@ -2277,7 +2289,7 @@ async def update_preferences(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @file_editor_cm6_bp.post('/state/file_activity')
-async def record_file_activity(data: dict = Body(...)):
+async def record_file_activity(data: JsonDict = Body(...)):
     """Persist last-opened file and recents for the active project."""
     path = data.get('path')
     if not path:
@@ -2308,7 +2320,7 @@ async def record_file_activity(data: dict = Body(...)):
 
 
 @file_editor_cm6_bp.post('/state/file_scroll')
-async def update_file_scroll(data: dict = Body(...)):
+async def update_file_scroll(data: JsonDict = Body(...)):
     """Update just the scroll position for a file (debounced from frontend)."""
     path = data.get('path')
     scroll_line = data.get('scroll_line') or data.get('scrollLine')
@@ -2366,7 +2378,7 @@ def explorer_list(rel: str = Query('.')):
         raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/search')
-async def explorer_search(data: dict = Body(...)):
+async def explorer_search(data: JsonDict = Body(...)):
     """Search files by name or content within project."""
     mode = data.get('mode', 'name')
     query = (data.get('query') or '').strip()
@@ -2412,13 +2424,16 @@ async def review_list(lightweight: bool = Query(False)):
         return {"ok": True, "data": []}
     
     root_path = Path(project_root)
-    results = []
+    results: list[JsonDict] = []
     
     try:
         drafts = _history_store.list_project_drafts(project_root)
         for draft in drafts:
             # draft entry contains 'file_path' (abs)
-            abs_path = Path(draft['file_path'])
+            file_path_value = draft.get('file_path')
+            if not isinstance(file_path_value, str) or not file_path_value:
+                continue
+            abs_path = Path(file_path_value)
             try:
                 rel_path = str(abs_path.relative_to(root_path))
             except ValueError:
@@ -2428,7 +2443,8 @@ async def review_list(lightweight: bool = Query(False)):
             if not lightweight:
                 # Compute diff
                 try:
-                    draft_content = draft.get('content', '')
+                    draft_content_value = draft.get('content', '')
+                    draft_content = draft_content_value if isinstance(draft_content_value, str) else ''
                     if abs_path.exists():
                         disk_content = abs_path.read_text(encoding='utf-8', errors='replace')
                     else:
@@ -2453,7 +2469,7 @@ async def review_list(lightweight: bool = Query(False)):
     return {"ok": True, "data": results}
 
 @file_editor_cm6_bp.post('/review/save')
-async def review_save(data: dict = Body(...)):
+async def review_save(data: JsonDict = Body(...)):
     """Save selected files from drafts to disk with full lifecycle notifications."""
     files = data.get('files', [])
     if not files:
@@ -2483,8 +2499,10 @@ async def review_save(data: dict = Body(...)):
             if not cached:
                 continue
                 
-            content = cached.get('content', '')
-            base_sha = cached.get('base_sha256')
+            content_value = cached.get('content', '')
+            content = content_value if isinstance(content_value, str) else ''
+            base_sha_value = cached.get('base_sha256')
+            base_sha = base_sha_value if isinstance(base_sha_value, str) else None
             
             # Check original mode
             orig_mode = None
@@ -2495,7 +2513,7 @@ async def review_save(data: dict = Body(...)):
                     pass
             
             # Write to disk
-            await anyio.to_thread.run_sync(
+            await to_thread.run_sync(
                 lambda: write_full(root_path, rel_path, content, 
                                  base_sha256=base_sha, mode=orig_mode)
             )
@@ -2531,7 +2549,7 @@ async def review_save(data: dict = Body(...)):
     return {"ok": True, "saved_count": saved_count, "errors": errors}
 
 @file_editor_cm6_bp.post('/review/discard')
-async def review_discard(data: dict = Body(...)):
+async def review_discard(data: JsonDict = Body(...)):
     """Discard drafts for selected files."""
     files = data.get('files', [])
     if not files:
@@ -2564,7 +2582,7 @@ async def review_discard(data: dict = Body(...)):
     return {"ok": True, "discarded_count": discarded_count}
 
 @file_editor_cm6_bp.post('/explorer/mkdir')
-async def explorer_mkdir(data: dict = Body(...)):
+async def explorer_mkdir(data: JsonDict = Body(...)):
     project = data.get('project')
     parent_rel = data.get('parent_rel', '.')
     name = data.get('name', '').strip()
@@ -2583,7 +2601,7 @@ async def explorer_mkdir(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/touch')
-async def explorer_touch(data: dict = Body(...)):
+async def explorer_touch(data: JsonDict = Body(...)):
     project = data.get('project')
     parent_rel = data.get('parent_rel', '.')
     name = data.get('name', '').strip()
@@ -2602,7 +2620,7 @@ async def explorer_touch(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/rename')
-async def explorer_rename(data: dict = Body(...)):
+async def explorer_rename(data: JsonDict = Body(...)):
     rel = data.get('rel')
     new_name = data.get('new_name', '').strip()
     
@@ -2622,7 +2640,7 @@ async def explorer_rename(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/delete')
-async def explorer_delete(data: dict = Body(...)):
+async def explorer_delete(data: JsonDict = Body(...)):
     rel = data.get('rel')
     if not rel:
         raise HTTPException(status_code=400, detail="Path required")
@@ -2635,7 +2653,7 @@ async def explorer_delete(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/batch_delete')
-async def explorer_batch_delete(data: dict = Body(...)):
+async def explorer_batch_delete(data: JsonDict = Body(...)):
     rels = data.get('rels', [])
     if not rels:
         raise HTTPException(status_code=400, detail="Paths required")
@@ -2648,7 +2666,7 @@ async def explorer_batch_delete(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/copy')
-async def explorer_copy(data: dict = Body(...)):
+async def explorer_copy(data: JsonDict = Body(...)):
     rel = data.get('rel')
     dest_path = data.get('dest_path')
     if not rel or not dest_path:
@@ -2662,7 +2680,7 @@ async def explorer_copy(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/move')
-async def explorer_move(data: dict = Body(...)):
+async def explorer_move(data: JsonDict = Body(...)):
     rel = data.get('rel')
     dest_path = data.get('dest_path')
     if not rel or not dest_path:
@@ -2676,7 +2694,7 @@ async def explorer_move(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/batch_copy')
-async def explorer_batch_copy(data: dict = Body(...)):
+async def explorer_batch_copy(data: JsonDict = Body(...)):
     rels = data.get('rels', [])
     dest_path = data.get('dest_path')
     if not rels or not dest_path:
@@ -2690,7 +2708,7 @@ async def explorer_batch_copy(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/batch_move')
-async def explorer_batch_move(data: dict = Body(...)):
+async def explorer_batch_move(data: JsonDict = Body(...)):
     rels = data.get('rels', [])
     dest_path = data.get('dest_path')
     if not rels or not dest_path:
@@ -2704,7 +2722,7 @@ async def explorer_batch_move(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/copy_from')
-async def explorer_copy_from(data: dict = Body(...)):
+async def explorer_copy_from(data: JsonDict = Body(...)):
     """Import (copy) a file/folder from an absolute path into the project."""
     source_path = data.get('source_path')
     dest_rel = data.get('dest_rel')
@@ -2719,7 +2737,7 @@ async def explorer_copy_from(data: dict = Body(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.post('/explorer/move_from')
-async def explorer_move_from(data: dict = Body(...)):
+async def explorer_move_from(data: JsonDict = Body(...)):
     """Import (move) a file/folder from an absolute path into the project."""
     source_path = data.get('source_path')
     dest_rel = data.get('dest_rel')
@@ -2739,12 +2757,13 @@ def get_recent_files():
     project_root = _history_store.get_active_project() or str(get_project_root())
     try:
         files_raw = _history_store.list_files(str(project_root))
-        files = []
+        files: list[JsonDict] = []
         for entry in files_raw:
             entry_path = entry.get("path")
+            entry_path_str = entry_path if isinstance(entry_path, str) else None
             files.append({
                 **entry,
-                "exists": bool(entry_path and Path(entry_path).is_file()),
+                "exists": bool(entry_path_str and Path(entry_path_str).is_file()),
             })
         return {"ok": True, "data": files}
     except Exception as e:
@@ -2788,9 +2807,12 @@ def get_debug_state_raw():
         raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.post('/history/touch')
-async def touch_file_history(data: dict = Body(...)):
+async def touch_file_history(data: JsonDict = Body(...)):
     """Add a file to the recent files list."""
-    path = data.get('path')
+    path_value = data.get('path')
+    path = path_value if isinstance(path_value, str) else None
+    if not path:
+        raise HTTPException(status_code=400, detail="Path is required")
 
     project_root = _history_store.get_active_project() or str(get_project_root())
     try:
@@ -2892,5 +2914,5 @@ async def debug_console_ws(websocket: WebSocket):
         pass  # Stay silent on disconnect too
 
 @file_editor_cm6_bp.post('/editor/update_diffs')
-async def update_diffs(data: dict = Body(...)):
+async def update_diffs(data: JsonDict = Body(...)):
     """Update diff hunks in editor state - for testing inline diffs"""

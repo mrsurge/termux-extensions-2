@@ -478,6 +478,13 @@
                 }
                 return raw;
             };
+            const resolveIconText = (app) => {
+                const text = typeof app.icon_text === 'string' ? app.icon_text.trim() : '';
+                if (text) return text;
+                const emoji = typeof app.icon_emoji === 'string' ? app.icon_emoji.trim() : '';
+                if (emoji) return emoji;
+                return '⚙️';
+            };
 
             btnRecents.addEventListener('click', async () => {
                 try {
@@ -529,7 +536,7 @@
                                     img.referrerPolicy = 'no-referrer';
                                     iconContainer.appendChild(img);
                                 } else {
-                                    iconContainer.textContent = app.icon_emoji || '⚙️';
+                                    iconContainer.textContent = resolveIconText(app);
                                 }
                             }
                             recentsList.appendChild(card);
