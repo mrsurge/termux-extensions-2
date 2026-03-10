@@ -8,7 +8,7 @@
   "entrypoints": {
     "backend_blueprint": "main.py",
     "frontend_template": "template.html",
-    "frontend_script": "main.js?v=theme_system_2"
+    "frontend_script": "static/dist/host.js?v=0.2.0"
   },
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"

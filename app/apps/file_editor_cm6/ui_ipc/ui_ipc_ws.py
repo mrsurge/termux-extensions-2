@@ -34,6 +34,14 @@ class UIIPCNamespace(socketio.AsyncNamespace):
         room = "sidebar_ipc" if self.namespace == "/sidebar_ipc" else "ui_ipc"
         await self.enter_room(sid, room)
         print(f"[{room}] connect sid={sid}", flush=True)
+        # Push current adapter state to the newly connected client.
+        if room == "ui_ipc":
+            try:
+                from ..workbench_adapter_shell_manager import get_adapter_state
+                state = get_adapter_state()
+                await self.emit("ui_event", {"type": "adapter_state", **state}, to=sid)
+            except Exception:
+                pass
 
     async def on_disconnect(self, sid, reason=None):
         room = "sidebar_ipc" if self.namespace == "/sidebar_ipc" else "ui_ipc"

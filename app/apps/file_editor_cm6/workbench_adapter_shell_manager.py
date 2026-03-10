@@ -26,6 +26,35 @@ _rpc_pending: dict[int, asyncio.Future] = {}
 _stdout_reader_task: Optional[asyncio.Task] = None
 _rpc_write_lock: Optional[asyncio.Lock] = None
 
+# Adapter lifecycle state — broadcast to all UI IPC clients on change.
+_adapter_state: dict = {"status": "idle", "project": None, "error": None}
+
+
+def get_adapter_state() -> dict:
+    """Return a copy of the current adapter lifecycle state."""
+    return dict(_adapter_state)
+
+
+async def _broadcast_adapter_state() -> None:
+    """Push current adapter state to all UI IPC clients."""
+    try:
+        from .ui_ipc.ui_ipc_socketio import UI_IPC_SIO
+        await UI_IPC_SIO.emit(
+            "ui_event",
+            {"type": "adapter_state", **_adapter_state},
+            namespace="/ui_ipc",
+            room="ui_ipc",
+        )
+    except Exception as exc:
+        log.warning("[adapter_state] broadcast failed: %s", exc)
+
+
+def _set_adapter_state(status: str, project: str = None, error: str = None) -> None:
+    """Update state dict. Caller must await _broadcast_adapter_state() after."""
+    _adapter_state["status"] = status
+    _adapter_state["project"] = project
+    _adapter_state["error"] = error
+
 
 def _project_hash(project_root: str) -> str:
     return hashlib.sha1(project_root.encode("utf-8")).hexdigest()[:8]
@@ -185,6 +214,11 @@ async def terminate_adapter_shell() -> bool:
     _rpc_pending.clear()
     _rpc_counter = 0
     _rpc_write_lock = None
+    _set_adapter_state("idle")
+    try:
+        await _broadcast_adapter_state()
+    except Exception:
+        pass
     return True
 
 
@@ -215,6 +249,15 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
         if cached and cached.label == label:
             if _matches_expected_port(cached):
                 if _pipe_state is not None:
+                    if _adapter_state["status"] != "ready":
+                        _set_adapter_state("ready", project=project_root)
+                        await _broadcast_adapter_state()
+                    # Resync: replay cached provider registrations so late-joining
+                    # clients receive semantic tokens legends, etc.
+                    try:
+                        await adapter_rpc("te2.resync", timeout=5.0)
+                    except Exception:
+                        pass
                     return cached
                 # Pipe state lost (process restart) — kill and re-spawn for fresh pipe
                 log.info("[adapter] cached shell alive but pipe lost, re-spawning")
@@ -230,6 +273,10 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
         if _matches_expected_port(existing):
             if _pipe_state is not None:
                 _active_shell_id = existing.id
+                try:
+                    await adapter_rpc("te2.resync", timeout=5.0)
+                except Exception:
+                    pass
                 return existing
             # Pipe state lost — kill and re-spawn
             log.info("[adapter] existing shell alive but pipe lost, re-spawning")
@@ -244,24 +291,32 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
     code_server_port = u.port or (443 if u.scheme == "https" else 80)
     remote_authority = f"localhost:{code_server_port}"
 
-    shell = await orch.start_from_ref(
-        SHELLSPEC_REF,
-        base_dir=SHELLSPEC_DIR,
-        ctx={
-            "APP_ID": APP_ID,
-            "REPO_ROOT": str(repo_root),
-            "PROJECT_ROOT": str(project_root_abs),
-            "PROJECT_HASH": _project_hash(str(project_root_abs)),
-            "INSTANCE_ID": "primary",
-            "WORKBENCH_ADAPTER_PORT": str(WORKBENCH_ADAPTER_FIXED_PORT),
-            "WORKBENCH_ADAPTER_ENTRY": str(adapter_entry),
-            "CODE_SERVER_HTTP": str(code_server_http),
-            "REMOTE_AUTHORITY": remote_authority,
-        },
-        label=label,
-        record_spec_id=f"service:{APP_ID}:workbench_adapter",
-        wait_ready=False,  # We do our own readiness check via stdio ping
-    )
+    _set_adapter_state("starting", project=project_root)
+    await _broadcast_adapter_state()
+
+    try:
+        shell = await orch.start_from_ref(
+            SHELLSPEC_REF,
+            base_dir=SHELLSPEC_DIR,
+            ctx={
+                "APP_ID": APP_ID,
+                "REPO_ROOT": str(repo_root),
+                "PROJECT_ROOT": str(project_root_abs),
+                "PROJECT_HASH": _project_hash(str(project_root_abs)),
+                "INSTANCE_ID": "primary",
+                "WORKBENCH_ADAPTER_PORT": str(WORKBENCH_ADAPTER_FIXED_PORT),
+                "WORKBENCH_ADAPTER_ENTRY": str(adapter_entry),
+                "CODE_SERVER_HTTP": str(code_server_http),
+                "REMOTE_AUTHORITY": remote_authority,
+            },
+            label=label,
+            record_spec_id=f"service:{APP_ID}:workbench_adapter",
+            wait_ready=False,  # We do our own readiness check via stdio ping
+        )
+    except Exception as exc:
+        _set_adapter_state("error", project=project_root, error=str(exc))
+        await _broadcast_adapter_state()
+        raise
 
     _active_shell_id = shell.id
     # Stash pipe state and start stdout reader
@@ -277,17 +332,23 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
         log.info("[adapter] pipe state stashed, stdout reader started for shell=%s", shell.id)
 
         # Readiness: ping the adapter over stdio until it responds
+        ping_ok = False
         for attempt in range(20):
             try:
                 ping_resp = await adapter_rpc("te2.ping", timeout=2.0)
                 if ping_resp.get("result"):
                     print(f"[adapter_shell_mgr] stdio ping OK on attempt {attempt + 1}")
+                    ping_ok = True
                     break
             except Exception as exc:
                 print(f"[adapter_shell_mgr] stdio ping attempt {attempt + 1} failed: {exc}")
                 await asyncio.sleep(0.5)
-        else:
+
+        if not ping_ok:
             print("[adapter_shell_mgr] stdio ping failed after 20 attempts")
+            _set_adapter_state("error", project=project_root, error="Adapter ping timeout")
+            await _broadcast_adapter_state()
+            return shell
 
         # Bootstrap: connect adapter to code-server
         try:
@@ -302,8 +363,20 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
                 timeout=15.0,
             )
             print(f"[adapter_shell_mgr] bootstrap connect resp: {connect_resp}")
+            # Resync: replay cached provider registrations so late-joining
+            # frontends receive semantic tokens legends etc.
+            try:
+                await adapter_rpc("te2.resync", timeout=5.0)
+            except Exception:
+                pass
+            _set_adapter_state("ready", project=project_root)
+            await _broadcast_adapter_state()
         except Exception as exc:
             print(f"[adapter_shell_mgr] bootstrap adapter.connect FAILED: {exc}")
+            _set_adapter_state("error", project=project_root, error=str(exc))
+            await _broadcast_adapter_state()
     else:
         log.warning("[adapter] no pipe state for shell=%s — stdio RPC unavailable", shell.id)
+        _set_adapter_state("error", project=project_root, error="No pipe state")
+        await _broadcast_adapter_state()
     return shell

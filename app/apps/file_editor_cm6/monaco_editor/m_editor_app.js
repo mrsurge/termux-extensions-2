@@ -66,7 +66,7 @@ import { shouldDropMirrorForSha } from './editor_mirror_sha_drop_utils.js';
 import { shouldDropMirrorForHotWindow } from './editor_mirror_hot_drop_utils.js';
 import { applyMirrorContentToModel } from './editor_mirror_apply_content_utils.js';
 import { emitMirrorCacheState } from './editor_mirror_emit_cache_utils.js';
-import { handleReadinessStep } from './editor_socket_readiness_step_handler_utils.js';
+// editor_socket_readiness_step_handler_utils.js removed — readiness is now push-based via UI IPC adapter_state
 import { handleJumpToLineEvent } from './editor_socket_jump_handler_utils.js';
 import { handleDraftDiffEvent } from './editor_socket_draft_diff_handler_utils.js';
 import { handleWorkbenchResponseEvent } from './editor_socket_workbench_response_handler_utils.js';
@@ -3171,21 +3171,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       editorSocket.on('connect', function() {
         editorSocketId = editorSocket.id || null;
         emitToHost('editor_ready', {});
-        // Kick off sequential readiness chain: code-server -> adapter -> baton.
         emitToHost('editor:iframe_ready', {});
-        editorSocket.emit('editor_readiness_check', {});
-      });
-
-      // Readiness step events from the server-side chain.
-      editorSocket.on('editor:readiness_step', function(data) {
-        handleReadinessStep(data, emitToHost, function () {
-          window.__te2AdapterReady = true;
-          // Replay initial open_file now that the adapter is confirmed ready.
-          // This gates diagnostics/symbols to AFTER the full readiness chain.
-          _replayOpenFileAfterBaton();
-          // Semantic tokens: push-based flow handles registration via
-          // editor:semantic_tokens_provider_registered event — no eager pull needed.
-        });
       });
 
       editorSocket.on('editor:ssot', function(snapshot) {
@@ -3952,7 +3938,17 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
         registerConsoleWorker(uiIpcSocket, 'editor_iframe', 'worker');
       });
       uiIpcSocket.on('ui_event', function(data) {
-        // Handle events from the main page if needed in the future
+        if (!data || typeof data !== 'object') return;
+        if (data.type === 'adapter_state') {
+          var status = data.status;
+          console.log('[adapter_state] iframe received:', status);
+          if (status === 'ready') {
+            window.__te2AdapterReady = true;
+            _replayOpenFileAfterBaton();
+          } else if (status === 'error') {
+            console.warn('[adapter_state] error:', data.error);
+          }
+        }
       });
 
       // Console bridge — monkey-patch console.* to emit on the ui_ipc bus

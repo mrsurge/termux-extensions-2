@@ -10,7 +10,8 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(app.__file__)))
 import time
 import asyncio
 from pathlib import Path
-from fastapi import APIRouter, Depends, Request, HTTPException, WebSocket, Body
+from typing import Any
+from fastapi import APIRouter, Depends, Request, HTTPException, WebSocket, Body, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, StreamingResponse
 from app.libs import app_manager
 from app.libs import app_lifecycle
@@ -21,7 +22,7 @@ from app.extensions.apps.scaffold import (
     scaffold_proxy_shell_wrapper,
     validate_proxy_shell_wrapper,
 )
-from framework_shells import FrameworkShellManager, get_manager as _get_framework_shell_manager
+from framework_shells import FrameworkShellManager, get_event_bus, get_manager as _get_framework_shell_manager
 
 async def get_framework_shell_manager() -> FrameworkShellManager:
     """FastAPI dependency wrapper (framework_shells.get_manager has **kwargs)."""
@@ -93,6 +94,35 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
 
     catalog.sort(key=lambda item: str(item.get("name") or item.get("id") or "").lower())
     return catalog
+
+
+async def _build_apps_snapshot() -> dict[str, Any]:
+    manifests = get_loaded_apps()
+    running_apps = await get_app_runtime().get_running_app_map()
+    return {
+        "catalog": _build_apps_catalog(manifests, running_apps),
+        "running_ids": sorted(str(app_id).strip() for app_id in running_apps.keys() if str(app_id).strip()),
+    }
+
+
+def _derive_app_id_from_shell_event(event: dict[str, Any]) -> str:
+    app_id = str(event.get("app_id") or event.get("data", {}).get("app_id") or "").strip()
+    if app_id:
+        return app_id
+
+    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    label = str(data.get("label") or "").strip()
+    if label.startswith("app-worker:"):
+        return label.split(":", 1)[1].strip()
+    if label.startswith("asgi-app:"):
+        return label.split(":", 1)[1].strip()
+
+    spec_id = str(data.get("spec_id") or "").strip()
+    if spec_id.startswith("app:"):
+        parts = spec_id.split(":")
+        if len(parts) >= 2:
+            return parts[1].strip()
+    return ""
 
 
 def _proxy_shell_urls(app_id: str, proxy_cfg: dict) -> dict:
@@ -294,6 +324,76 @@ async def apps_events(request: Request):
         "X-Accel-Buffering": "no",
     }
     return StreamingResponse(stream(), media_type="text/event-stream", headers=headers)
+
+
+@apps_bp.websocket('/ws/apps')
+async def apps_ws(websocket: WebSocket):
+    await websocket.accept()
+    registry_queue = app_registry_events.subscribe()
+    shell_queue = get_event_bus().subscribe()
+    receive_task: asyncio.Task | None = None
+    registry_task: asyncio.Task | None = None
+    shell_task: asyncio.Task | None = None
+
+    async def _send_snapshot(event_type: str) -> None:
+        await websocket.send_json({
+            "type": event_type,
+            "payload": await _build_apps_snapshot(),
+        })
+
+    try:
+        await _send_snapshot("apps_snapshot")
+        while True:
+            receive_task = asyncio.create_task(websocket.receive())
+            registry_task = asyncio.create_task(registry_queue.get())
+            shell_task = asyncio.create_task(shell_queue.get())
+            done, pending = await asyncio.wait(
+                {receive_task, registry_task, shell_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+            if receive_task in done:
+                message = receive_task.result()
+                if message.get("type") == "websocket.disconnect":
+                    break
+                continue
+
+            if registry_task in done:
+                _ = registry_task.result()
+                await _send_snapshot("catalog_snapshot")
+                continue
+
+            if shell_task in done:
+                shell_event = shell_task.result()
+                event_dict = shell_event.to_dict() if hasattr(shell_event, "to_dict") else {}
+                app_id = _derive_app_id_from_shell_event(event_dict if isinstance(event_dict, dict) else {})
+                if not app_id or get_app_registry().get_app(app_id) is None:
+                    continue
+                running = await get_app_runtime().get_running_app(app_id)
+                await websocket.send_json({
+                    "type": "app_running_changed",
+                    "payload": {
+                        "app_id": app_id,
+                        "running": bool(running),
+                        "event_type": event_dict.get("type"),
+                        "shell_id": event_dict.get("shell_id"),
+                    },
+                })
+    except WebSocketDisconnect:
+        pass
+    finally:
+        for task in (receive_task, registry_task, shell_task):
+            if task is None:
+                continue
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        app_registry_events.unsubscribe(registry_queue)
+        get_event_bus().unsubscribe(shell_queue)
 
 
 @apps_bp.post('/api/apps/scaffold/proxy_shell_wrapper')

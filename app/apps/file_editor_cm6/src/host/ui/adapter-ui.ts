@@ -4,7 +4,6 @@
  * @param {{
  *   closeAllMenus: () => void,
  *   spinnerSetStep: (msg: string) => void,
- *   ensureWorkbenchAdapterReady: () => void | Promise<void>,
  *   setWorkbenchAdapterState: (next: { readyOk: boolean, connecting: any }) => void,
  *   toast: (msg: string, ms?: number) => void
  * }} deps
@@ -51,9 +50,7 @@ export function createAdapterUiController(deps) {
         const iframe = document.getElementById('editor-frame');
         if (iframe) { const frameAny = /** @type {any} */ (iframe); frameAny.src = frameAny.src; }
       } catch (_) {}
-      setTimeout(() => {
-        try { deps.ensureWorkbenchAdapterReady(); } catch (_) {}
-      }, 2000);
+      // Adapter state will arrive via UI IPC push — no need to poll.
     }, 1500);
   }
 

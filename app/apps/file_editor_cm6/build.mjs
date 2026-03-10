@@ -7,7 +7,7 @@ const isWatch = process.argv.includes('--watch');
 /** Shared config for both bundles */
 const shared = {
   bundle: true,
-  sourcemap: true,
+  sourcemap: isWatch,
   minify: !isWatch,
   logLevel: 'info',
   external: [

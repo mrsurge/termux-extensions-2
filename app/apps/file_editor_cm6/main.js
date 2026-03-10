@@ -1798,14 +1798,6 @@ function _feUpdateLspSpinner() {
   } catch (_) {}
 }
 
-// Readiness spinner step labels.
-const _readinessLabels = {
-  iframe_ready: 'Editor iframe ready',
-  code_server: 'Code-server backend',
-  adapter_launched: 'Workbench adapter',
-  baton: 'Session ready',
-};
-
 function _spinnerSetStep(title, failed) {
   try {
     if (!window.__feLspSpinnerUi) {
@@ -1843,83 +1835,61 @@ function _spinnerHide(ok) {
   } catch (_) {}
 }
 
-async function ensureWorkbenchAdapterReady() {
-  try {
-    if (workbenchAdapterReadyOk) return;
-    if (workbenchAdapterConnecting) return await workbenchAdapterConnecting;
-
-    workbenchAdapterConnecting = (async () => {
-      let ok = false;
-      try {
-        _spinnerSetStep('Waiting for editor\u2026');
-        try { console.log(_feHostTs(), '[spinner] START request_id=- path=- reason=readiness_chain'); } catch (_) {}
-
-        // Wait for readiness steps relayed from iframe via postMessage/editorSocket.
-        // The iframe triggers the chain (editor_readiness_check) on connect,
-        // and relays editor:readiness_step events to us.
-        ok = await new Promise((resolve) => {
-          const timeout = setTimeout(() => {
-            _spinnerSetStep('Readiness timeout', true);
-            resolve(false);
-          }, 60000);
-
-          const stepHandler = (ev) => {
-            const step = ev && ev.step || '';
-            const stepOk = ev && ev.ok;
-            const label = _readinessLabels[step] || step;
-
-            if (!stepOk) {
-              _spinnerSetStep(label + ': failed' + (ev.error ? ' (' + ev.error.slice(0, 60) + ')' : ''), true);
-              clearTimeout(timeout);
-              resolve(false);
-              return;
-            }
-
-            if (step === 'baton') {
-              _spinnerSetStep(label);
-              clearTimeout(timeout);
-              resolve(true);
-              return;
-            }
-
-            _spinnerSetStep(label + '\u2026');
-          };
-
-          // Listen for steps via editorSocket (from iframe relay).
-          if (editorSocket && editorSocket.connected) {
-            editorSocket.on('editor:readiness_step', stepHandler);
-          } else {
-            const check = setInterval(() => {
-              if (editorSocket && editorSocket.connected) {
-                clearInterval(check);
-                editorSocket.on('editor:readiness_step', stepHandler);
-              }
-            }, 200);
-            setTimeout(() => clearInterval(check), 60000);
-          }
-
-          // Also listen for editor:adapter_ready (from diagnostics_bridge, backwards compat).
-          const adapterHandler = () => {
-            clearTimeout(timeout);
-            if (!ok) resolve(true);
-          };
-          if (editorSocket && editorSocket.connected) {
-            editorSocket.once('editor:adapter_ready', adapterHandler);
-          }
-        });
-      } catch (e) {
-        console.warn('[readiness] chain failed', e);
-      } finally {
-        workbenchAdapterReadyOk = Boolean(ok);
-        _spinnerHide(ok);
-      }
-      return ok;
-    })();
-
-    return await workbenchAdapterConnecting;
-  } finally {
-    try { workbenchAdapterConnecting = null; } catch (_) {}
+// Adapter state listener — driven by server-pushed events via UI IPC.
+function _handleAdapterState(detail) {
+  const status = detail && detail.status;
+  console.log(_feHostTs(), '[adapter_state]', status, detail && detail.error || '');
+  if (status === 'starting') {
+    _spinnerSetStep('Starting adapter\u2026');
+  } else if (status === 'ready') {
+    workbenchAdapterReadyOk = true;
+    _spinnerHide(true);
+    // Resolve any pending readiness promise.
+    if (window.__adapterReadyResolve) {
+      window.__adapterReadyResolve(true);
+      window.__adapterReadyResolve = null;
+    }
+  } else if (status === 'error') {
+    workbenchAdapterReadyOk = false;
+    _spinnerHide(false);
+    if (window.__adapterReadyResolve) {
+      window.__adapterReadyResolve(false);
+      window.__adapterReadyResolve = null;
+    }
+  } else if (status === 'idle') {
+    workbenchAdapterReadyOk = false;
+    window.__adapterConnected = false;
+    _feUpdateLspSpinner();
   }
+}
+
+// Install once — listens for adapter_state events from UI IPC.
+window.addEventListener('cm6:adapter-state', (evt) => {
+  try { _handleAdapterState(evt.detail); } catch (_) {}
+});
+
+async function ensureWorkbenchAdapterReady() {
+  if (workbenchAdapterReadyOk) return true;
+  if (workbenchAdapterConnecting) return await workbenchAdapterConnecting;
+
+  _spinnerSetStep('Waiting for adapter\u2026');
+  try { console.log(_feHostTs(), '[spinner] START request_id=- path=- reason=readiness_chain'); } catch (_) {}
+
+  workbenchAdapterConnecting = new Promise((resolve) => {
+    window.__adapterReadyResolve = resolve;
+    // Timeout — if no state arrives within 60s, give up.
+    setTimeout(() => {
+      if (!workbenchAdapterReadyOk && window.__adapterReadyResolve) {
+        _spinnerSetStep('Readiness timeout', true);
+        window.__adapterReadyResolve = null;
+        resolve(false);
+      }
+    }, 60000);
+  });
+
+  const result = await workbenchAdapterConnecting;
+  workbenchAdapterConnecting = null;
+  return result;
 }
 
 async function ensureVscodeApiWs() {
@@ -3151,7 +3121,6 @@ const CURSOR_STATE_DEBOUNCE = 1000; // ms
 const adapterUi = createAdapterUiController({
   closeAllMenus: () => menuCoreController.closeAllMenus(),
   spinnerSetStep: (msg) => _spinnerSetStep(msg),
-  ensureWorkbenchAdapterReady: () => ensureWorkbenchAdapterReady(),
   setWorkbenchAdapterState: ({ readyOk, connecting }) => {
     workbenchAdapterReadyOk = readyOk;
     workbenchAdapterConnecting = connecting;
@@ -3735,7 +3704,15 @@ runBootSequence(createBootSequenceDeps({
     }),
     setBranchMenuHandle: (h) => { branchMenuHandle = h; },
     setAgentDrawerHandle: (h) => { agentDrawerHandle = h; },
-  }));
+  })).then(() => {
+  // Defer sidebar init until after core boot completes.
+  const deferInit = typeof requestIdleCallback === 'function'
+    ? (fn) => requestIdleCallback(fn)
+    : (fn) => setTimeout(fn, 0);
+  deferInit(() => {
+    try { sidebarShortcuts?.init?.(); } catch (e) { console.warn('[Sidebar] deferred init failed:', e); }
+  });
+});
 
 installHostExitGuard({
   installBeforeExitGuard,

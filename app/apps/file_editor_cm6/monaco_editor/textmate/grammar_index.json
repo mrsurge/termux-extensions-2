@@ -34,6 +34,7 @@
     "source.json.lines": "json.JSONL.tmLanguage.json",
     "source.json.comments.snippets": "json.snippets.tmLanguage.json",
     "source.julia": "julia.julia.tmLanguage.json",
+    "source.kotlin": "kotlin.Kotlin.tmLanguage",
     "text.tex": "latex.TeX.tmLanguage.json",
     "text.tex.latex": "latex.LaTeX.tmLanguage.json",
     "text.bibtex": "latex.Bibtex.tmLanguage.json",

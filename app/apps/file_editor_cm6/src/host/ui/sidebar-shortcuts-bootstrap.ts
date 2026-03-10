@@ -23,7 +23,8 @@ export function initSidebarShortcutsSafe(deps) {
       setMenuChecked: deps.setMenuChecked,
       emitSidebarIpc: deps.emitSidebarIpc,
     });
-    void shortcuts?.init?.();
+    // init() is deferred — called after runBootSequence completes
+    // so sidebar loading doesn't compete with core editor boot.
     return shortcuts || null;
   } catch (e) {
     console.warn('Failed to initialize sidebar shortcuts:', e);

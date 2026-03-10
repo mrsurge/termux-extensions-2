@@ -94,25 +94,9 @@ export function initSidebarShortcuts(options = {}) {
     } catch (_) {}
   };
 
-  function _logAppDiscovery(step, data) {
-    try {
-      if (typeof data === 'undefined') {
-        console.log(`[SidebarShortcuts][AppDiscovery] ${step}`);
-      } else {
-        console.log(`[SidebarShortcuts][AppDiscovery] ${step}`, data);
-      }
-    } catch (_) {}
-  }
+  function _logAppDiscovery(_step, _data) {}
 
-  function _warnAppDiscovery(step, data) {
-    try {
-      if (typeof data === 'undefined') {
-        console.warn(`[SidebarShortcuts][AppDiscovery] ${step}`);
-      } else {
-        console.warn(`[SidebarShortcuts][AppDiscovery] ${step}`, data);
-      }
-    } catch (_) {}
-  }
+  function _warnAppDiscovery(_step, _data) {}
 
   // --- DOM elements (resolved on init) ---
   let agentToggleBtn = null;
@@ -178,19 +162,21 @@ export function initSidebarShortcuts(options = {}) {
   let _extensionManifestIcon = { kind: '', value: '', defaultIcon: '' };
 
   let _appsCache = null; // canonical apps catalog from /api/apps/catalog
-  let _appsCacheAt = 0;
+  let _appsCachePromise = null;
   let _runningCache = null; // Set(app_id)
-  let _runningCacheAt = 0;
+  let _runningCachePromise = null;
+  let _runningCachePrimed = false;
   let _startingApps = new Map(); // app_id -> Promise<boolean>
   let _frameworkEventsWs = null;
   let _frameworkEventsReconnectTimer = null;
   let _frameworkEventsBackoffMs = 600;
   let _frameworkEventsEnabled = false;
-  let _appsEventsSource = null;
   let _appsChromeSeq = 0;
   let _headerIconMenuKey = '';
   let _refreshMenuLongPressTimer = null;
   let _sidebarEventListenerBound = false;
+  let _appsStateReadyPromise = null;
+  let _appsStateReadyResolve = null;
 
   function _requireEl(selector, scope = document) {
     const el = scope.querySelector(selector);
@@ -207,75 +193,45 @@ export function initSidebarShortcuts(options = {}) {
   }
 
   async function _ensureAppsCache(force = false) {
-    const now = Date.now();
-    _logAppDiscovery('apps-cache:begin', { force, hasCache: !!_appsCache, ageMs: now - _appsCacheAt });
-    if (!force && _appsCache && (now - _appsCacheAt) < 2500) {
-      _logAppDiscovery('apps-cache:hit', { count: Array.isArray(_appsCache) ? _appsCache.length : 0 });
+    _setFrameworkEventsEnabled(true);
+    if (!force && Array.isArray(_appsCache)) {
       return _appsCache;
     }
-    try {
-      _logAppDiscovery('apps-cache:fetch:start', { url: '/api/apps/catalog' });
-      const { resp, body } = await _fetchJson('/api/apps/catalog', { cache: 'no-store' });
-      _logAppDiscovery('apps-cache:fetch:response', {
-        ok: !!resp?.ok,
-        status: resp?.status,
-        hasBody: !!body,
-        bodyKeys: body && typeof body === 'object' ? Object.keys(body) : [],
-      });
-      const list = Array.isArray(body?.data) ? body.data : [];
-      _logAppDiscovery('apps-cache:fetch:parsed', { count: list.length });
-      _appsCache = list;
-      _appsCacheAt = now;
-      return list;
-    } catch (e) {
-      _warnAppDiscovery('apps-cache:fetch:error', { message: e?.message || String(e) });
-      toast(e?.message || 'Failed to fetch app list');
-      _appsCache = [];
-      _appsCacheAt = now;
-      return _appsCache;
-    }
+    await _ensureAppsStateReady();
+    return Array.isArray(_appsCache) ? _appsCache : [];
   }
 
   async function _ensureRunningCache(force = false) {
-    const now = Date.now();
-    _logAppDiscovery('running-cache:begin', { force, hasCache: !!_runningCache, ageMs: now - _runningCacheAt });
-    if (!force && _runningCache && (now - _runningCacheAt) < 1500) {
-      _logAppDiscovery('running-cache:hit', { count: _runningCache instanceof Set ? _runningCache.size : 0 });
+    _setFrameworkEventsEnabled(true);
+    if (!force && _runningCachePrimed && _runningCache instanceof Set) {
       return _runningCache;
     }
-    try {
-      _logAppDiscovery('running-cache:fetch:start', { url: '/api/apps/running' });
-      const { resp, body } = await _fetchJson('/api/apps/running', { cache: 'no-store' });
-      _logAppDiscovery('running-cache:fetch:response', {
-        ok: !!resp?.ok,
-        status: resp?.status,
-        hasBody: !!body,
-      });
-      const list = Array.isArray(body?.data) ? body.data : [];
-      const set = new Set();
-      list.forEach((rec) => {
-        const id = _normStr(rec?.app_id);
-        if (id) set.add(id);
-      });
-      _logAppDiscovery('running-cache:fetch:parsed', { runningCount: set.size });
-      _runningCache = set;
-      _runningCacheAt = now;
-      return set;
-    } catch (e) {
-      _warnAppDiscovery('running-cache:fetch:error', { message: e?.message || String(e) });
-      _runningCache = new Set();
-      _runningCacheAt = now;
-      return _runningCache;
-    }
+    await _ensureAppsStateReady();
+    return _runningCache instanceof Set ? _runningCache : new Set();
   }
 
   function _frameworkEventsUrl() {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${window.location.host}/ws/events`;
+    return `${proto}//${window.location.host}/ws/apps`;
   }
 
-  function _appsEventsUrl() {
-    return '/api/apps/events';
+  function _ensureAppsStateReadyPromise() {
+    if (_appsStateReadyPromise) return _appsStateReadyPromise;
+    _appsStateReadyPromise = new Promise((resolve) => {
+      _appsStateReadyResolve = resolve;
+    });
+    return _appsStateReadyPromise;
+  }
+
+  function _resolveAppsStateReady() {
+    const resolve = _appsStateReadyResolve;
+    _appsStateReadyResolve = null;
+    if (resolve) resolve();
+  }
+
+  async function _ensureAppsStateReady() {
+    _ensureAppsStateReadyPromise();
+    await _appsStateReadyPromise;
   }
 
   function _deriveAppIdFromShellEvent(evt) {
@@ -341,8 +297,7 @@ export function initSidebarShortcuts(options = {}) {
     else _runningCache.delete(id);
     if (had === isRunning) return;
 
-    _runningCacheAt = Date.now();
-    _renderHeaderIconGrid(_latestUiPrefs || {});
+    _refreshShortcutChrome();
 
     // If any shortcut points at a backend that dies, invalidate those iframe entries.
     if (!isRunning) _invalidateFrameworkShortcutIframes(id);
@@ -363,12 +318,32 @@ export function initSidebarShortcuts(options = {}) {
     }
     if (!evt || typeof evt !== 'object') return;
 
-    const appId = _deriveAppIdFromShellEvent(evt);
-    if (!appId) return;
+    const type = _normStr(evt?.type);
+    const payload = (evt?.payload && typeof evt.payload === 'object') ? evt.payload : {};
 
-    const running = _runningStateFromShellEvent(evt);
-    if (running === null) return;
-    _applyRunningDelta(appId, running);
+    if (type === 'apps_snapshot' || type === 'catalog_snapshot') {
+      const catalog = Array.isArray(payload?.catalog) ? payload.catalog : [];
+      const runningIds = Array.isArray(payload?.running_ids)
+        ? payload.running_ids.map((id) => _normStr(id)).filter((id) => !!id)
+        : [];
+      _appsCache = catalog;
+      _runningCache = new Set(runningIds);
+      _runningCachePrimed = true;
+      _resolveAppsStateReady();
+      _refreshShortcutChrome();
+      try {
+        if (shortcutAppDD && shortcutAppDD.classList.contains('show')) {
+          void _renderAppMenu();
+        }
+      } catch (_) {}
+      return;
+    }
+
+    if (type === 'app_running_changed') {
+      const appId = _normStr(payload?.app_id);
+      if (!appId) return;
+      _applyRunningDelta(appId, !!payload?.running);
+    }
   }
 
   function _scheduleFrameworkEventsReconnect() {
@@ -400,9 +375,6 @@ export function initSidebarShortcuts(options = {}) {
 
     ws.addEventListener('open', () => {
       _frameworkEventsBackoffMs = 600;
-      void _ensureRunningCache(true).then(() => {
-        _renderHeaderIconGrid(_latestUiPrefs || {});
-      });
     });
 
     ws.addEventListener('message', (ev) => {
@@ -437,34 +409,7 @@ export function initSidebarShortcuts(options = {}) {
   }
 
   function _handleAppsRegistryReload() {
-    _appsCache = null;
-    _appsCacheAt = 0;
-    const seq = ++_appsChromeSeq;
-    void _ensureAppsCache(true).then(() => {
-      if (seq !== _appsChromeSeq) return;
-      _refreshShortcutChrome();
-      _renderHeaderIconGrid(_latestUiPrefs || {});
-      if (shortcutAppDD && shortcutAppDD.classList.contains('show')) {
-        void _renderAppMenu();
-      }
-    });
-  }
-
-  function _connectAppsEvents() {
-    if (typeof window.EventSource !== 'function') return;
-    if (_appsEventsSource) return;
-    try {
-      _appsEventsSource = new EventSource(_appsEventsUrl());
-    } catch (_) {
-      _appsEventsSource = null;
-      return;
-    }
-    _appsEventsSource.addEventListener('registry_reloaded', () => {
-      _handleAppsRegistryReload();
-    });
-    _appsEventsSource.onerror = () => {
-      // EventSource handles reconnects.
-    };
+    // Registry changes arrive through the apps state websocket snapshot path.
   }
 
   function _findAppManifest(appId) {
@@ -1029,7 +974,7 @@ export function initSidebarShortcuts(options = {}) {
       }
       if (!(_runningCache instanceof Set)) _runningCache = new Set();
       _runningCache.delete(id);
-      _runningCacheAt = Date.now();
+      _runningCachePrimed = true;
       _invalidateFrameworkShortcutIframes(id);
       _refreshShortcutChrome();
       return true;
@@ -1471,12 +1416,7 @@ export function initSidebarShortcuts(options = {}) {
           const detail = body?.detail || body?.error || `Failed to start app ${id}`;
           throw new Error(detail);
         }
-        // refresh running cache opportunistically
-        try {
-          const set = await _ensureRunningCache(true);
-          set.add(id);
-          _renderHeaderIconGrid(_latestUiPrefs || {});
-        } catch (_) {}
+        _applyRunningDelta(id, true);
         return true;
       } catch (e) {
         toast(e?.message || `Failed to start app ${id}`);
@@ -1521,21 +1461,20 @@ export function initSidebarShortcuts(options = {}) {
     const forceReload = !!options.forceReload;
 
     if (sc.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
-      const forceRunningCheck = !!options.forceRunningCheck;
       const onBeforeStart = typeof options.onBeforeStart === 'function' ? options.onBeforeStart : null;
       const appId = _normStr(sc.app_id);
       if (!appId) return false;
 
-      let isRunning = false;
-      if (forceRunningCheck || !entry.loaded) {
-        try {
-          const set = await _ensureRunningCache(true);
-          isRunning = !!(set instanceof Set && set.has(appId));
-        } catch (_) {
-          isRunning = false;
-        }
-      } else {
+      if (entry.loaded && _runningCachePrimed && _runningCache instanceof Set && _runningCache.has(appId)) {
         return true;
+      }
+
+      let isRunning = false;
+      try {
+        const set = _runningCachePrimed ? _runningCache : await _ensureRunningCache(false);
+        isRunning = !!(set instanceof Set && set.has(appId));
+      } catch (_) {
+        isRunning = false;
       }
 
       let startedNow = false;
@@ -2446,16 +2385,19 @@ export function initSidebarShortcuts(options = {}) {
       }
     } catch (_) {}
 
-    const needsRunning = normalized.some((sc) => (
+    const needsFrameworkState = normalized.some((sc) => (
       sc && sc.kind === SHORTCUT_KIND_FRAMEWORK_APP && _normStr(sc.app_id)
     ));
-    _setFrameworkEventsEnabled(needsRunning);
-    if (needsRunning) {
-      void _ensureRunningCache(false).then(() => {
-        _renderHeaderIconGrid(_latestUiPrefs || {});
-      });
-    } else {
-      _renderHeaderIconGrid(_latestUiPrefs || {});
+    if (needsFrameworkState) {
+      _setFrameworkEventsEnabled(true);
+      if (!Array.isArray(_appsCache) || !_runningCachePrimed) {
+        void Promise.all([
+          _ensureAppsCache(false),
+          _ensureRunningCache(false),
+        ]).then(() => {
+          _refreshShortcutChrome();
+        });
+      }
     }
   }
 
@@ -2512,10 +2454,7 @@ export function initSidebarShortcuts(options = {}) {
 
     // Extension manifest icon for the toggle/header defaults.
     void _bootstrapExtensionManifest();
-    // App list for framework-app shortcuts (icons + picker).
-    void _ensureAppsCache(false);
-    void _ensureRunningCache(false);
-    _connectAppsEvents();
+    _setFrameworkEventsEnabled(true);
 
     // Settings radios: update prefs.
     try {
@@ -2748,6 +2687,11 @@ export function initSidebarShortcuts(options = {}) {
         });
       });
       _sidebarEventListenerBound = true;
+    }
+
+    // Replay prefs that may have arrived before init() ran (deferred boot).
+    if (_latestUiPrefs && Object.keys(_latestUiPrefs).length > 0) {
+      applyUiPrefs(_latestUiPrefs);
     }
   }
 

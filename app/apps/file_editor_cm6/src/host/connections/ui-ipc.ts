@@ -88,6 +88,10 @@ export function createUiIpcConnections(deps) {
           window.dispatchEvent(new CustomEvent('cm6:mention-request', {
             detail: data,
           }));
+        } else if (data.type === 'adapter_state') {
+          window.dispatchEvent(new CustomEvent('cm6:adapter-state', {
+            detail: data,
+          }));
         }
       });
 
