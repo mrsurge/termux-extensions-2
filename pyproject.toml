@@ -14,7 +14,7 @@ dynamic = ["dependencies"]
 te2 = "app.cli.run_framework:main"
 
 [tool.setuptools]
-include-package-data = true
+include-package-data = false
 
 [tool.setuptools.packages.find]
 where = ["."]

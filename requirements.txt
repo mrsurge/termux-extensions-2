@@ -11,8 +11,6 @@ fastmcp
 flask
 flask-socketio
 framework-shells @ git+https://github.com/mrsurge/framework-shells.git
-gevent
-gevent-websocket
 libarchive-c>=5.1
 requests
 libarchive
