@@ -365,9 +365,30 @@ class ConnectionManager:
         except Exception as e:
             logger.warning(f"[DIAGNOSTICS] loop error: {e}")
     
+    def _resolve_project_key(self, project_path: str) -> Optional[str]:
+        """Find the connection key that matches this project path.
+
+        Tries the literal key first, then falls back to comparing resolved
+        (realpath) values so symlinked project roots still match.
+        """
+        if project_path in self.active_connections:
+            return project_path
+        try:
+            resolved = str(Path(project_path).expanduser().resolve(strict=False))
+            if resolved in self.active_connections:
+                return resolved
+            # Reverse: check if any registered key resolves to the same path.
+            for key in list(self.active_connections.keys()):
+                if str(Path(key).expanduser().resolve(strict=False)) == resolved:
+                    return key
+        except Exception:
+            pass
+        return None
+
     def get_connection_count(self, project_path: str) -> int:
         """Returns the number of active connections for a project."""
-        return len(self.active_connections.get(project_path, []))
+        key = self._resolve_project_key(project_path)
+        return len(self.active_connections.get(key, [])) if key else 0
     
     def has_connections(self, project_path: str) -> bool:
         """Returns True if there are any active connections for a project."""
@@ -394,13 +415,17 @@ class ConnectionManager:
                 )
         except Exception:
             pass
-        if _is_worker_process() and not self.has_connections(project_path):
-            _schedule_forward_broadcast(project_path, message)
+        resolved_key = self._resolve_project_key(project_path)
+        if not resolved_key:
+            logger.debug(
+                "[explorer_broadcast] no connections for project=%s (keys=%s)",
+                project_path, list(self.active_connections.keys()),
+            )
             return
-        if project_path in self.active_connections:
+        if resolved_key in self.active_connections:
             # Create text message once
             text = json.dumps(message)
-            for connection in self.active_connections[project_path]:
+            for connection in self.active_connections[resolved_key]:
                 try:
                     await connection.send_text(text)
                 except Exception as e:
@@ -772,25 +797,6 @@ def _schedule_forward_draft_refresh(project_path: str) -> None:
         timer = Timer(0.5, do_forward)
         _explorer_refresh_timers[debounce_key] = timer
         timer.start()
-
-
-def _forward_explorer_broadcast(project_path: str, message: Dict[str, Any]) -> None:
-    url = f"{_framework_url()}/api/apps/file_editor_cm6/explorer/broadcast"
-    payload = {"project": project_path, "message": message}
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=2.0) as resp:
-            resp.read()
-    except Exception as exc:
-        logger.debug(f"Failed to forward explorer broadcast to main: {exc}")
-
-
-def _schedule_forward_broadcast(project_path: str, message: Dict[str, Any]) -> None:
-    # Avoid flooding the main server with redundant pulses.
-    if message.get("type") == "pulse":
-        return
-    Timer(0, lambda: _forward_explorer_broadcast(project_path, message)).start()
 
 
 def notify_draft_state_changed(project_path: str):

@@ -140,6 +140,14 @@ export function createExplorerSearchController(deps) {
       return;
     }
 
+    if (mode === 'diagnostics') {
+      // Diagnostics tab renders from cached detail data — no fetch needed.
+      deps.setSearchLoading(false);
+      deps.setSearchError(null);
+      deps.renderSearchOverlay();
+      return;
+    }
+
     deps.setSearchLoading(false);
     deps.setSearchError(null);
     deps.renderSearchOverlay();

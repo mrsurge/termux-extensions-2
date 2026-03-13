@@ -962,19 +962,6 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
           });
         }
 
-        // Cache per-path per-owner (so we can replay all owners after model/currentPath is ready).
-        try {
-          if (!_diagCache) _diagCache = new Map();
-          var pathOwnerMap = _diagCache.get(itemPath);
-          if (!pathOwnerMap) { pathOwnerMap = new Map(); _diagCache.set(itemPath, pathOwnerMap); }
-          pathOwnerMap.set(owner, { ts_ms: Date.now(), markers: outMarkers });
-          // Evict oldest paths if cache too large.
-          while (_diagCache.size > DIAG_CACHE_MAX) {
-            var firstKey = _diagCache.keys().next().value;
-            _diagCache.delete(firstKey);
-          }
-        } catch (_) {}
-
         // Apply to active model if it matches.
         if (model && model.uri && activePath && itemPath === activePath) {
           try {
@@ -1004,17 +991,14 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       try { setDebugDiag('diag=rx' + _diagState.rx + '/ap' + _diagState.apply + '/np' + _diagState.drop_no_path + '/nm' + _diagState.drop_no_model + '/mm' + _diagState.drop_mismatch); } catch (_) {}
 
       if (!didApply) {
-        try { _applyCachedDiagnosticsForActive(); } catch (_) {}
-        // Mobile/WebView timing: diagnostics can land before the model swap completes.
-        // Retry a few times after caching without spamming.
-        try { _scheduleDiagReapply(); } catch (_) {}
+        // Diagnostics arrived for a file/model that isn't active — dropped.
+        // Fresh diagnostics will be requested via _wbQueueDidChange when the
+        // file is opened or the adapter re-sends via $changeMany.
       }
     } catch (_) {}
   }
 
-  var _diagCache = null; // Map(absPath -> Map(owner -> {ts_ms, markers}))
   var _diagState = null; // counters
-  var DIAG_CACHE_MAX = 50;
   var _diagKnownOwners = null; // Set of owner strings seen for active path
 
   /** Aggregate marker counts across all owners from the model and emit to host toolbar. */
@@ -1035,21 +1019,6 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     } catch (_) {}
   }
 
-  var _diagReapplyScheduled = false;
-  function _scheduleDiagReapply() {
-    if (_diagReapplyScheduled) return;
-    _diagReapplyScheduled = true;
-    var delays = [0, 50, 250];
-    delays.forEach(function (ms) {
-      try {
-        setTimeout(function () {
-          try { _applyCachedDiagnosticsForActive(); } catch (_) {}
-        }, ms);
-      } catch (_) {}
-    });
-    try { setTimeout(function () { _diagReapplyScheduled = false; }, 300); } catch (_) { _diagReapplyScheduled = false; }
-  }
-
   /** Clear markers for all known owners and emit zero diagnostic counts (used on file switch). */
   function _clearDiagnosticsForSwitch() {
     try {
@@ -1064,30 +1033,6 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       }
       _diagKnownOwners = new Set();
       emitToHost('editor_diagnostics_counts', { errors: 0, warnings: 0, hints: 0, total: 0, path: currentPath || '' });
-    } catch (_) {}
-  }
-
-  function _applyCachedDiagnosticsForActive() {
-    try {
-      if (!window.monaco || !window.monaco.editor) return;
-      if (!_diagCache || !_diagCache.size) return;
-      if (!model || !model.uri) return;
-      var activeUri = String(model.uri.toString());
-      var activePath = currentPath ? String(currentPath) : _absPathFromVscodeUri(activeUri);
-      if (!activePath) return;
-      var pathOwnerMap = _diagCache.get(activePath);
-      if (!pathOwnerMap || !pathOwnerMap.size) return;
-      if (!_diagKnownOwners) _diagKnownOwners = new Set();
-      var applied = 0;
-      pathOwnerMap.forEach(function(cached, own) {
-        var markers = Array.isArray(cached.markers) ? cached.markers : [];
-        monaco.editor.setModelMarkers(model, own, markers);
-        _diagKnownOwners.add(own);
-        applied += markers.length;
-      });
-      if (_diagState) _diagState.apply += 1;
-      _emitAggregatedDiagCounts(activePath);
-      try { setDebugDiag('diag=rx' + (_diagState ? _diagState.rx : 0) + '/ap' + (_diagState ? _diagState.apply : 0) + '/np' + (_diagState ? _diagState.drop_no_path : 0) + '/nm' + (_diagState ? _diagState.drop_no_model : 0) + '/mm' + (_diagState ? _diagState.drop_mismatch : 0)); } catch (_) {}
     } catch (_) {}
   }
 
@@ -3284,8 +3229,8 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
                 }).catch(function () {});
               } catch (_) {}
 
-              // If diagnostics arrived early (before model/currentPath), apply from cache now.
-              try { _applyCachedDiagnosticsForActive(); } catch (_) {}
+              // Diagnostics will arrive fresh via $changeMany from the adapter
+              // after _wbQueueDidChange notifies the extension host above.
             });
           } else {
             updateDebug('ws=ssot-empty');
@@ -3298,6 +3243,19 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       editorSocket.on('editor:open', function(payload) {
         try {
           if (!payload || !payload.path) return;
+
+          // Guard: external_change events that don't match the loaded model URI
+          // are irrelevant to this editor — skip entirely.
+          if (payload.reason === 'external_change' && model && model.uri) {
+            try {
+              var incomingUri = monacoFileUri(window.monaco, payload.path);
+              if (incomingUri && String(model.uri.toString()) !== String(incomingUri.toString())) {
+                console.log('[editor:open] skip external_change: URI mismatch', payload.path);
+                return;
+              }
+            } catch (_) {}
+          }
+
           try {
             var _t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
               ? (Math.round(performance.now() * 10) / 10)
@@ -3357,29 +3315,32 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
 
             // After external edit, re-snapshot modifiedBaseline so the diff
             // recomputes even when te2FreezeProjection is active (draft/auto-track).
-            try {
-              if (diffEditor && diffEditor.getModel) {
-                var dm = diffEditor.getModel();
-                if (dm && dm.te2FreezeProjection && dm.modifiedBaseline && model) {
-                  var freshContent = model.getValue();
-                  var freshLang = model.getLanguageId ? model.getLanguageId() : 'plaintext';
-                  dm.modifiedBaseline.setValue(freshContent);
-                  // Force diff recomputation by calling setModel with updated baseline.
-                  var modViewState = null;
-                  try {
-                    var me = diffEditor.getModifiedEditor();
-                    if (me) modViewState = me.saveViewState();
-                  } catch (_) {}
-                  diffEditor.setModel(dm);
-                  try {
-                    if (modViewState) {
-                      var me2 = diffEditor.getModifiedEditor();
-                      if (me2) me2.restoreViewState(modViewState);
-                    }
-                  } catch (_) {}
+            // Skip for external_change — diff recalc is deferred to avoid thrash.
+            if (payload.reason !== 'external_change') {
+              try {
+                if (diffEditor && diffEditor.getModel) {
+                  var dm = diffEditor.getModel();
+                  if (dm && dm.te2FreezeProjection && dm.modifiedBaseline && model) {
+                    var freshContent = model.getValue();
+                    var freshLang = model.getLanguageId ? model.getLanguageId() : 'plaintext';
+                    dm.modifiedBaseline.setValue(freshContent);
+                    // Force diff recomputation by calling setModel with updated baseline.
+                    var modViewState = null;
+                    try {
+                      var me = diffEditor.getModifiedEditor();
+                      if (me) modViewState = me.saveViewState();
+                    } catch (_) {}
+                    diffEditor.setModel(dm);
+                    try {
+                      if (modViewState) {
+                        var me2 = diffEditor.getModifiedEditor();
+                        if (me2) me2.restoreViewState(modViewState);
+                      }
+                    } catch (_) {}
+                  }
                 }
-              }
-            } catch (_) {}
+              } catch (_) {}
+            }
             // Notify the language sidecar so extension activation + provider registration can happen.
             // This is intentionally best-effort and must not block the editor UI.
             try {
@@ -3404,8 +3365,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
                 timeoutMs: 8000,
               }).catch(function () {});
             } catch (_) {}
-            // Apply cached diagnostics for this file immediately after open/model swap.
-            try { _applyCachedDiagnosticsForActive(); } catch (_) {}
+            // Diagnostics will arrive fresh via $changeMany after _wbQueueDidChange above.
             // Optional open+jump payload (used by agent drawer + explorer + go-to-line).
             try {
               if (payload.line != null) {
@@ -3437,7 +3397,12 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
               }
             } catch (_) {}
           });
-          requestGitBaselines({ reason: 'open' });
+          // Skip git baselines for external_change — content is already updated
+          // from disk; the diff recompute is expensive and should not fire on
+          // every watcher hit during bundler runs.
+          if (payload.reason !== 'external_change') {
+            requestGitBaselines({ reason: 'open' });
+          }
         } catch (e) {
           console.warn('[Monaco] open apply failed', e);
         }

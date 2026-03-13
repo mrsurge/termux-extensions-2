@@ -1,21 +1,18 @@
 
-import asyncio
-import json
 import sys
 import time
-import anyio
 from pathlib import Path
-from typing import List, Dict, Any, Optional
 
+from anyio import to_thread
 from ..explorer_helper import mark_git_cache_dirty
 from ..core_read import init_watcher, push_save_ack, emit_diff_changed
 from ..core_write import write_full, _get_file_meta
 from ..diff_helper import invalidate_diff_cache
 from ..draft_diff_helper import compute_draft_diff
 from ..stores import _history_store
-from ..nicegui_editor.editor_app import handle_external_discard
+from ..editor_discard import handle_external_discard
 
-async def list_reviews(project_root: Path, lightweight: bool = False) -> List[Dict[str, Any]]:
+async def list_reviews(project_root: Path, lightweight: bool = False) -> list[dict[str, object]]:
     """Get list of files with unsaved drafts."""
     if not project_root or not project_root.exists():
         return []
@@ -26,7 +23,10 @@ async def list_reviews(project_root: Path, lightweight: bool = False) -> List[Di
     try:
         drafts = _history_store.list_project_drafts(str(project_root))
         for draft in drafts:
-            abs_path = Path(draft['file_path'])
+            file_path = draft.get('file_path')
+            if not isinstance(file_path, str) or not file_path:
+                continue
+            abs_path = Path(file_path)
             try:
                 rel_path = str(abs_path.relative_to(root_path))
             except ValueError:
@@ -35,7 +35,7 @@ async def list_reviews(project_root: Path, lightweight: bool = False) -> List[Di
             hunks = []
             if not lightweight:
                 try:
-                    draft_content = draft.get('content', '')
+                    draft_content = str(draft.get('content') or '')
                     if abs_path.exists():
                         disk_content = abs_path.read_text(encoding='utf-8', errors='replace')
                     else:
@@ -59,7 +59,7 @@ async def list_reviews(project_root: Path, lightweight: bool = False) -> List[Di
         
     return results
 
-async def save_reviews(project_root: Path, files: List[str]) -> Dict[str, Any]:
+async def save_reviews(project_root: Path, files: list[str]) -> dict[str, object]:
     """Save selected files from drafts to disk."""
     if not files:
         return {"saved_count": 0}
@@ -77,8 +77,9 @@ async def save_reviews(project_root: Path, files: List[str]) -> Dict[str, Any]:
             if not cached:
                 continue
                 
-            content = cached.get('content', '')
-            base_sha = cached.get('base_sha256')
+            content = str(cached.get('content') or '')
+            base_sha_raw = cached.get('base_sha256')
+            base_sha = str(base_sha_raw) if isinstance(base_sha_raw, str) else None
             
             orig_mode = None
             if abs_path.exists():
@@ -87,7 +88,7 @@ async def save_reviews(project_root: Path, files: List[str]) -> Dict[str, Any]:
                 except OSError:
                     pass
             
-            await anyio.to_thread.run_sync(
+            _ = await to_thread.run_sync(
                 lambda: write_full(root_path, rel_path, content, 
                                  base_sha256=base_sha, mode=orig_mode)
             )
@@ -98,7 +99,7 @@ async def save_reviews(project_root: Path, files: List[str]) -> Dict[str, Any]:
             emit_diff_changed(str(rel_path), file_meta["sha256"])
             invalidate_diff_cache(root_path, str(rel_path))
             
-            _history_store.clear_cached_document(str(project_root), str(abs_path))
+            _ = _history_store.clear_cached_document(str(project_root), str(abs_path))
             saved_count += 1
             
         except Exception as e:
@@ -108,7 +109,7 @@ async def save_reviews(project_root: Path, files: List[str]) -> Dict[str, Any]:
     
     return {"saved_count": saved_count, "errors": errors}
 
-async def discard_reviews(project_root: Path, files: List[str]) -> Dict[str, Any]:
+async def discard_reviews(project_root: Path, files: list[str]) -> dict[str, object]:
     """Discard drafts for selected files."""
     if not files:
         return {"discarded_count": 0}

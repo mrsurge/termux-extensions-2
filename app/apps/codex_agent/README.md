@@ -56,14 +56,14 @@ Framework path:
 
 ```bash
 curl -i http://127.0.0.1:8089/api/app/codex_agent/proxy/api/health
-curl -i http://127.0.0.1:8089/api/app/codex_agent/proxy/codex-agent/
+curl -i http://127.0.0.1:8089/api/app/codex_agent/proxy/
 ```
 
 Worker direct:
 
 ```bash
 curl -i http://127.0.0.1:12359/api/health
-curl -i http://127.0.0.1:12359/codex-agent/
+curl -i http://127.0.0.1:12359/
 ```
 
 ## Converting Another Non-Native App

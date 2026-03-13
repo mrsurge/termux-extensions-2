@@ -59,20 +59,37 @@ def _resolve_open_target(payload: dict, project_root: Path) -> tuple[Path, str]:
         rel_path = rel.lstrip("/")
         target = (project_root / rel_path).expanduser().resolve(strict=False)
     elif raw_abs:
-        target = Path(raw_abs).expanduser().resolve(strict=False)
-        try:
-            # Canonicalize rel for response.
-            rel = str(target.relative_to(project_root.resolve(strict=False)))
-        except Exception:
-            rel = ""
+        target = Path(raw_abs).expanduser()
+        # Try logical path first, then resolved — tolerates symlinked project roots.
+        rel = ""
+        for proj_candidate, tgt_candidate in [
+            (project_root, target),
+            (project_root.resolve(strict=False), target.resolve(strict=False)),
+        ]:
+            try:
+                rel = str(tgt_candidate.relative_to(proj_candidate))
+                target = tgt_candidate
+                break
+            except ValueError:
+                continue
     else:
         raise ValueError("missing path (expected rel or path/abs/file)")
 
     # Enforce that target stays within the active project root.
-    try:
-        target.relative_to(project_root.resolve(strict=False))
-    except Exception as exc:
-        raise PermissionError("path is outside active project root") from exc
+    # Check both logical and resolved paths for symlink tolerance.
+    inside = False
+    for proj_candidate, tgt_candidate in [
+        (project_root, target),
+        (project_root.resolve(strict=False), target.resolve(strict=False)),
+    ]:
+        try:
+            tgt_candidate.relative_to(proj_candidate)
+            inside = True
+            break
+        except ValueError:
+            continue
+    if not inside:
+        raise PermissionError("path is outside active project root")
 
     if target.is_dir():
         raise IsADirectoryError("target is a directory")
@@ -198,8 +215,8 @@ async def agent_open(request: Request, payload: dict = Body(default=None)):
         if not project:
             return JSONResponse({"ok": False, "error": "no active project"}, status_code=409, headers=headers)
 
-        project_root = Path(project).expanduser().resolve(strict=False)
-        if not project_root.exists():
+        project_root = Path(project).expanduser()
+        if not project_root.exists() and not project_root.resolve(strict=False).exists():
             return JSONResponse({"ok": False, "error": "active project root does not exist"}, status_code=409, headers=headers)
 
         try:

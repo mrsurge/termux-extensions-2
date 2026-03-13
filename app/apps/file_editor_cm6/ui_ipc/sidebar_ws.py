@@ -180,7 +180,7 @@ async def _broadcast_agent_open(data: dict) -> None:
         raise ValueError("no active project")
     project_key = str(project)
 
-    project_root = Path(project).expanduser().resolve(strict=False)
+    project_path = Path(project).expanduser()
     raw_path = (
         str(
             data.get("path")
@@ -195,14 +195,26 @@ async def _broadcast_agent_open(data: dict) -> None:
         raise ValueError("missing path")
 
     if raw_path.startswith("/"):
-        target = Path(raw_path).expanduser().resolve(strict=False)
+        target = Path(raw_path).expanduser()
     else:
-        target = (project_root / raw_path.lstrip("/")).expanduser().resolve(strict=False)
+        target = (project_path / raw_path.lstrip("/")).expanduser()
 
-    try:
-        rel = str(target.relative_to(project_root))
-    except Exception as exc:
-        raise PermissionError("path is outside active project root") from exc
+    # Try relative_to with the logical paths first, then fall back to
+    # resolved (realpath) paths so symlinked project roots still match.
+    rel = None
+    for proj_candidate, tgt_candidate in [
+        (project_path, target),
+        (project_path.resolve(strict=False), target.resolve(strict=False)),
+    ]:
+        try:
+            rel = str(tgt_candidate.relative_to(proj_candidate))
+            target = tgt_candidate
+            break
+        except ValueError:
+            continue
+
+    if rel is None:
+        raise PermissionError("path is outside active project root")
 
     if not target.exists():
         raise FileNotFoundError("target does not exist")
@@ -233,7 +245,7 @@ async def _broadcast_agent_open(data: dict) -> None:
         conn_n = -1
     print(
         f"[sidebar_ipc] agent_open broadcast project_key={project_key} "
-        f"project_root={project_root} rel={rel} line={line} conn={conn_n}",
+        f"rel={rel} line={line} conn={conn_n}",
         flush=True,
     )
     await _explorer_manager.broadcast(project_key, message)

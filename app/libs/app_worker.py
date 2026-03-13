@@ -76,12 +76,6 @@ def main():
         if not router_found:
             raise RuntimeError(f"No FastAPI APIRouter named '{expected_router_name}' found in {args.backend_module}")
         
-        # Check for NiceGUI or other init hooks
-        nicegui_init = getattr(module, 'NICEGUI_INIT_HOOK', None)
-        if nicegui_init:
-            print(f"DEBUG: Calling NICEGUI_INIT_HOOK", file=sys.stderr)
-            nicegui_init(app)
-        
         # Mount optional sub-apps if the backend module provides them (fallback)
         subapps = getattr(module, 'SUBAPPS', None)
         if subapps:

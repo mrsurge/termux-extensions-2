@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "te2"
+version = "0.1.0"
+description = "TE2 framework runtime and tooling"
+readme = "README.md"
+requires-python = ">=3.12"
+dynamic = ["dependencies"]
+
+[project.scripts]
+te2 = "app.cli.run_framework:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+namespaces = true
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.package-data]
+app = [
+  "apps/_templates/**/*",
+  "apps/**/manifest.json",
+  "apps/**/template.html",
+  "apps/**/shellspec/**/*",
+  "apps/**/static/**/*",
+  "apps/**/icons/**/*",
+  "apps/**/vendor/**/*",
+  "apps/**/extensions/**/*",
+  "apps/**/monaco_editor/textmate/**/*",
+  "apps/**/monaco_editor/themes/**/*",
+  "apps/**/workbench_protocol_proxy/node_workbench_adapter/**/*",
+  "extensions/**/*",
+  "static/**/*",
+  "templates/**/*",
+]

@@ -1,17 +1,11 @@
-
 # /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/main.py
 
 import sys
-from pathlib import Path
-
-# CRITICAL: Setup vendor path BEFORE any imports that might use nicegui
-vendor_dir = Path(__file__).parent.parent.parent / 'static' / 'vendor'
-sys.path.insert(0, str(vendor_dir))
-
 import os
 import json
 import time
 import shutil
+from pathlib import Path
 from typing import Any
 from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
 from fastapi.responses import JSONResponse, FileResponse, Response
@@ -1049,86 +1043,11 @@ file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
 file_editor_cm6_bp.add_api_websocket_route("/ws/explorer", explorer_websocket)
 
 # Include the self-contained editor routes
-from .nicegui_editor.editor_app import editor_router, handle_external_discard
+from .monaco_editor.editor_backend import editor_router
+from .monaco_editor import register_monaco_editor_routes
+from .editor_discard import handle_external_discard
 file_editor_cm6_bp.include_router(editor_router)
-
-# Mount NiceGUI editor as sub-application (picked up by app_worker.py)
-# NiceGUI requires ui.run_with() for proper initialization when embedding
-from nicegui import ui
-
-# Configure and initialize NiceGUI with the FastAPI app
-# This will be called after the FastAPI app is created in app_worker.py
-def init_nicegui_with_app(fastapi_app):
-    """Initialize NiceGUI by attaching it to the existing FastAPI app"""
-    mount = '/ui'
-
-    # --- Monaco (FastHTML) iframe editor at /ui/nc ---
-    # Kept in a dedicated module so the editor runtime can be split out later.
-    try:
-        from .monaco_editor import register_monaco_editor_routes
-        register_monaco_editor_routes(fastapi_app, mount_path=mount)
-    except Exception as e:
-        # Don't silently fail: if this throws, the host will see `/api/app/<app>/ui/nc` as 404.
-        import sys
-        import traceback
-        from fastapi.responses import HTMLResponse
-
-        print("[MonacoEditor] Failed to register routes:", repr(e), file=sys.stderr, flush=True)
-        traceback.print_exc()
-
-        # Keep the worker bootable, but make the failure visible (no silent 404s).
-        @fastapi_app.get(f"{mount}/nc", include_in_schema=False)
-        async def _monaco_editor_registration_failed(app_id: str | None = None):
-            return HTMLResponse(
-                f"<pre style='white-space:pre-wrap;padding:16px;font-family:ui-monospace'>"
-                f"Monaco editor routes failed to register:\\n\\n{traceback.format_exc()}"
-                f"</pre>",
-                status_code=503,
-            )
-    
-    # Critical: Set Socket.IO path BEFORE calling ui.run_with()
-    # This ensures the client connects to /ui/_nicegui_ws/socket.io
-    # which matches our main server's dynamic WS proxy route
-    import nicegui.nicegui as ng
-    # Engine.IO path must be a pure path (no query string)
-    # Routing to the correct worker is handled by the main server proxy.
-    # Use NiceGUI's default engine.io path; NiceGUI mounts its Socket.IO app
-    # internally at '/_nicegui_ws/', so externally this resolves to
-    # f"{mount}/_nicegui_ws/socket.io" which matches the client's URL.
-    ng.sio_app.engineio_path = '/socket.io'
-
-    # Ensure the NiceGUI client includes app_id in its Socket.IO query so the main proxy
-    # can route /ui/_nicegui_ws/socket.io reliably even when Referer is absent.
-    try:
-        from nicegui import core as ng_core
-        ng_core.app.config.socket_io_js_query_params["app_id"] = "file_editor_cm6"
-    except Exception:
-        pass
-
-    ui.run_with(
-        fastapi_app,
-        mount_path=mount,
-        storage_secret='file-editor-cm6-secret',  # For session management
-        reconnect_timeout=1200.0,  # Allow long reconnect window (prune_instances uses this)
-    )
-
-    # Now import the page definitions
-    from app.apps.file_editor_cm6.nicegui_editor import editor_app
-    # Explorer Socket.IO transport is registered in main server via app services.
-    
-    # Register LSP Socket.IO namespace
-    try:
-        from app.apps.file_editor_cm6.lsp_ws import LSPSocketIONamespace
-        ng.sio.register_namespace(LSPSocketIONamespace('/lsp'))
-        import sys
-        print("[LSPSIO] Successfully registered /lsp namespace", file=sys.stderr, flush=True)
-    except Exception as e:
-        import sys
-        print(f"[LSPSIO] Failed to register namespace: {e}", file=sys.stderr, flush=True)
-
-# Don't expose SUBAPPS - ui.run_with() handles the mounting
-# Just expose the init hook for app_worker.py to call
-NICEGUI_INIT_HOOK = init_nicegui_with_app
+register_monaco_editor_routes(file_editor_cm6_bp, mount_path="/ui")
 
 # --- Monaco editor Socket.IO (worker-owned) ---
 # The main framework process proxies /editor_ws/socket.io to this worker endpoint.

@@ -2,6 +2,15 @@ export function renderSearchOverlayBody(resultsContainer, state, deps) {
   const { searchMode, searchLoading, searchError, searchResults } = state;
   resultsContainer.innerHTML = '';
 
+  // Diagnostics tab is self-contained — it renders from its own cached data,
+  // not from the search loading/results state.
+  if (searchMode === 'diagnostics') {
+    if (deps.renderDiagnosticsResults) {
+      deps.renderDiagnosticsResults(resultsContainer);
+    }
+    return;
+  }
+
   if (searchLoading) {
     const loading = document.createElement('div');
     loading.className = 'fe-search-loading';

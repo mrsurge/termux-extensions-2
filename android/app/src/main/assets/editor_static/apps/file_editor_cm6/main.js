@@ -518,6 +518,28 @@ const _explorerReqPending = new Map(); // id -> {resolve,reject,timer}
 let editorSocket = null;
 let editorSocketId = null;
 const editorPending = [];
+let editorIframeReady = false;
+let editorIframeReadyResolver = null;
+let editorIframeReadyPromise = null;
+
+function ensureEditorIframeReady() {
+  if (editorIframeReady) return Promise.resolve(true);
+  if (editorIframeReadyPromise) return editorIframeReadyPromise;
+  editorIframeReadyPromise = new Promise((resolve) => {
+    editorIframeReadyResolver = resolve;
+  });
+  return editorIframeReadyPromise;
+}
+
+function markEditorIframeReady() {
+  if (editorIframeReady) return;
+  editorIframeReady = true;
+  const resolve = editorIframeReadyResolver;
+  editorIframeReadyResolver = null;
+  if (resolve) {
+    try { resolve(true); } catch (_) {}
+  }
+}
 const _editorIssuesDumpWaiters = new Map(); // requestId -> {resolve,reject,timer}
 let codexAppserverSocket = null;
 const _agentSidebarTrackedEditDedup = new Map();
@@ -996,6 +1018,10 @@ function connectEditorSocket() {
 
       editorSocket.on('connect_error', (err) => {
         console.warn('[EditorSIO] Connect error', err);
+      });
+
+      editorSocket.on('editor:ready', () => {
+        markEditorIframeReady();
       });
 
       editorSocket.on('editor:ssot', (snapshot) => {
@@ -3705,12 +3731,21 @@ runBootSequence(createBootSequenceDeps({
     setBranchMenuHandle: (h) => { branchMenuHandle = h; },
     setAgentDrawerHandle: (h) => { agentDrawerHandle = h; },
   })).then(() => {
-  // Defer sidebar init until after core boot completes.
-  const deferInit = typeof requestIdleCallback === 'function'
+  try { sidebarShortcuts?.init?.(); } catch (e) { console.warn('[Sidebar] init failed:', e); }
+
+  const deferHydrate = typeof requestIdleCallback === 'function'
     ? (fn) => requestIdleCallback(fn)
     : (fn) => setTimeout(fn, 0);
-  deferInit(() => {
-    try { sidebarShortcuts?.init?.(); } catch (e) { console.warn('[Sidebar] deferred init failed:', e); }
+  deferHydrate(() => {
+    try {
+      void ensureEditorIframeReady()
+        .then(() => Promise.resolve(sidebarShortcuts?.hydrate?.()))
+        .catch((e) => {
+          console.warn('[Sidebar] deferred hydrate failed:', e);
+        });
+    } catch (e) {
+      console.warn('[Sidebar] deferred hydrate failed:', e);
+    }
   });
 });
 

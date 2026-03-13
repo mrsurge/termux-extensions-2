@@ -177,6 +177,9 @@ export function initSidebarShortcuts(options = {}) {
   let _sidebarEventListenerBound = false;
   let _appsStateReadyPromise = null;
   let _appsStateReadyResolve = null;
+  let _lightInitDone = false;
+  let _hydrated = false;
+  let _hydratePromise = null;
 
   function _requireEl(selector, scope = document) {
     const el = scope.querySelector(selector);
@@ -2341,7 +2344,7 @@ export function initSidebarShortcuts(options = {}) {
     }, false);
   }
 
-  function applyUiPrefs(uiPrefs) {
+  function _stageUiPrefs(uiPrefs) {
     const ui = uiPrefs && typeof uiPrefs === 'object' ? uiPrefs : {};
     _latestUiPrefs = { ...ui };
 
@@ -2355,6 +2358,10 @@ export function initSidebarShortcuts(options = {}) {
     } finally {
       _settingsUiMutating = false;
     }
+  }
+
+  function _applyUiPrefsHydrated() {
+    if (!_hydrated) return;
 
     const normalized = _collectShortcuts(_latestUiPrefs);
     const ensured = _ensureActiveSelection(_latestUiPrefs, normalized);
@@ -2399,6 +2406,28 @@ export function initSidebarShortcuts(options = {}) {
         });
       }
     }
+  }
+
+  function applyUiPrefs(uiPrefs) {
+    _stageUiPrefs(uiPrefs);
+    if (!_hydrated) return;
+    _applyUiPrefsHydrated();
+  }
+
+  async function hydrate() {
+    if (_hydratePromise) return _hydratePromise;
+    if (_hydrated) return;
+    _hydratePromise = (async () => {
+      try {
+        await _bootstrapExtensionManifest();
+      } finally {
+        _setFrameworkEventsEnabled(true);
+        _hydrated = true;
+        _applyUiPrefsHydrated();
+        _hydratePromise = null;
+      }
+    })();
+    return _hydratePromise;
   }
 
   async function init() {
@@ -2451,10 +2480,6 @@ export function initSidebarShortcuts(options = {}) {
 
     // Hide URL/app rows until kind is selected (defaults to URL).
     _setKind(SHORTCUT_KIND_URL);
-
-    // Extension manifest icon for the toggle/header defaults.
-    void _bootstrapExtensionManifest();
-    _setFrameworkEventsEnabled(true);
 
     // Settings radios: update prefs.
     try {
@@ -2689,11 +2714,11 @@ export function initSidebarShortcuts(options = {}) {
       _sidebarEventListenerBound = true;
     }
 
-    // Replay prefs that may have arrived before init() ran (deferred boot).
+    _lightInitDone = true;
     if (_latestUiPrefs && Object.keys(_latestUiPrefs).length > 0) {
-      applyUiPrefs(_latestUiPrefs);
+      _stageUiPrefs(_latestUiPrefs);
     }
   }
 
-  return { init, applyUiPrefs, getActiveUrl };
+  return { init, hydrate, applyUiPrefs, getActiveUrl };
 }

@@ -830,6 +830,108 @@
   #problems-container .problems-mention-btn:hover {
     opacity: 1 !important;
   }
+
+  /* ── Diagnostics tab inside search overlay (mirrors #problems-container styles) ── */
+  .fe-search-diagnostics-container {
+    font-family: var(--font-mono, 'Fira Code', monospace);
+    font-size: 12px;
+    color: var(--fg, #e6edf3);
+  }
+  .fe-search-diagnostics-container .problems-empty {
+    padding: 16px;
+    color: var(--fg-dim, #6e7681);
+    text-align: center;
+  }
+  .fe-search-diagnostics-container .problems-file-group {
+    border-bottom: 1px solid var(--border-dim, #21262d);
+  }
+  .fe-search-diagnostics-container .problems-file-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--bg-secondary, #161b22);
+    cursor: pointer;
+    user-select: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg, #e6edf3);
+  }
+  .fe-search-diagnostics-container .problems-file-header:hover {
+    background: var(--bg-highlight, #1c2129);
+  }
+  .fe-search-diagnostics-container .problems-badge {
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: 8px;
+    font-weight: 700;
+    line-height: 16px;
+  }
+  .fe-search-diagnostics-container .problems-badge.error {
+    background: #da363340;
+    color: #ffa198;
+  }
+  .fe-search-diagnostics-container .problems-badge.warning {
+    background: #9e6a0340;
+    color: #d29922;
+  }
+  .fe-search-diagnostics-container .problems-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 3px 10px 3px 24px;
+    cursor: pointer;
+    line-height: 1.4;
+  }
+  .fe-search-diagnostics-container .problems-item:hover {
+    background: var(--bg-highlight, #1c2129);
+  }
+  .fe-search-diagnostics-container .problems-icon {
+    flex-shrink: 0;
+    width: 14px;
+    text-align: center;
+    line-height: 1.4;
+  }
+  .fe-search-diagnostics-container .problems-icon.error { color: #ffa198; }
+  .fe-search-diagnostics-container .problems-icon.warning { color: #d29922; }
+  .fe-search-diagnostics-container .problems-icon.info { color: #79c0ff; }
+  .fe-search-diagnostics-container .problems-msg {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+  }
+  .fe-search-diagnostics-container .problems-source {
+    color: var(--fg-dim, #6e7681);
+    margin-left: 4px;
+  }
+  .fe-search-diagnostics-container .problems-location {
+    flex-shrink: 0;
+    color: var(--fg-dim, #6e7681);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .fe-search-diagnostics-container .problems-mention-btn {
+    flex-shrink: 0;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+    font-size: 12px;
+    padding: 0 2px;
+    margin-left: 4px;
+  }
+  .fe-search-diagnostics-container .problems-item:hover .problems-mention-btn {
+    opacity: 0.7;
+  }
+  .fe-search-diagnostics-container .problems-mention-btn:hover {
+    opacity: 1 !important;
+  }
+  /* Inner panel container inherits the parent styling scope */
+  #explorer-diagnostics-container {
+    font-family: var(--font-mono, 'Fira Code', monospace);
+    font-size: 12px;
+    color: var(--fg, #e6edf3);
+  }
+
   .terminal-drawer.open {
     transform: translateY(0);
   }

@@ -73,17 +73,6 @@ def _abs_path_from_vscode_uri(raw: Any) -> str:
     return ""
 
 
-def get_cached_diagnostics(abs_path: str) -> Optional[list]:
-    """Return list of cached diagnostics entries for a path (one per owner), or None."""
-    entries = [v for (p, o), v in _diag_cache.items() if p == abs_path]
-    return entries if entries else None
-
-
-def get_all_cached_diagnostics() -> Dict[tuple, Dict[str, Any]]:
-    """Return the full cache (read-only snapshot)."""
-    return dict(_diag_cache)
-
-
 async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bool:
     """Ask the adapter to re-open a file, forcing the extension host to re-emit diagnostics."""
     try:
@@ -105,17 +94,6 @@ async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bo
     except Exception as exc:
         logger.debug("[diag_bridge] nudge failed: %s", exc)
         return False
-
-
-async def send_cached_diagnostics_to_sid(sio, sid: str, abs_path: str):
-    """Send cached diagnostics for a specific file to a specific Socket.IO client (all owners)."""
-    for (cached_path, cached_owner), cached in _diag_cache.items():
-        if cached_path != abs_path:
-            continue
-        try:
-            await sio.emit("editor:diagnostics", cached, room=sid, namespace="/editor")
-        except Exception as exc:
-            logger.debug("[diag_bridge] send_cached owner=%s to %s failed: %s", cached_owner, sid, exc)
 
 
 def _process_diagnostics_update(params: dict):
@@ -513,11 +491,19 @@ def start_bridge(sio):
 
 
 def stop_bridge():
-    """Stop the background bridge task."""
-    global _bridge_running, _bridge_task, _enospc_forwarded
+    """Stop the background bridge task and clear stale diagnostics state."""
+    global _bridge_running, _bridge_task, _enospc_forwarded, _diag_cache
+    global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entries
 
     _bridge_running = False
     _enospc_forwarded = False
     if _bridge_task and not _bridge_task.done():
         _bridge_task.cancel()
     _bridge_task = None
+    # Purge the diagnostics cache so stale markers are never replayed
+    # after the adapter shuts down or a project switch occurs.
+    _diag_cache.clear()
+    _consumer_expected_path = None
+    _consumer_expected_request_id = ""
+    _consumer_ready = False
+    _pending_entries = []

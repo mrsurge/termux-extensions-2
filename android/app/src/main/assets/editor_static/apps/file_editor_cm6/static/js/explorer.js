@@ -35,6 +35,7 @@ import {
   isWatcherRelInOpenDir as isWatcherRelInOpenDirModule,
 } from './explorer_modules/explorer_path_watcher_utils.js';
 import { createExplorerGitFooterUtils } from './explorer_modules/explorer_git_footer_utils.js';
+import { renderExplorerDiagnostics } from './explorer_modules/explorer_diagnostics_renderer.js';
 
 let treeElement = null;
 let projectLabelEl = null;
@@ -188,13 +189,14 @@ let openDirsInitialized = false;  // True after we've received initial open dirs
 
 // --- Search / Review overlay state ---
 let searchOverlayVisible = false;
-let searchMode = 'name'; // 'name' | 'content' | 'changes' | 'review'
+let searchMode = 'name'; // 'name' | 'content' | 'changes' | 'review' | 'diagnostics'
 let searchQuery = '';
 let searchResults = null;
 let searchLoading = false;
 let searchError = null;
 let searchDebounceTimer = null;
 let lastKnownProjectPath = '';
+let _explorerDiagDetail = {}; // { absPath: markers[] } — latest diagnostics:detail snapshot
 const selectedReviewFiles = new Set();
 const explorerSearchController = createExplorerSearchController({
   toast,
@@ -1650,6 +1652,15 @@ function handleExplorerEvent(type, payload) {
       const diagnostics = (payload && payload.diagnostics) || {};
       _setDiagnosticsSummary(diagnostics);
       applyAggregatedDiagnosticFlags();
+      break;
+    }
+    case 'diagnostics:detail': {
+      // Full marker detail from the diagnostics bridge — store for the Diagnostics tab.
+      _explorerDiagDetail = (payload && typeof payload === 'object') ? payload : {};
+      // If the Diagnostics tab is currently visible, re-render it.
+      if (searchOverlayVisible && searchMode === 'diagnostics') {
+        renderSearchOverlay();
+      }
       break;
     }
     case 'draft:content': {
@@ -3117,14 +3128,17 @@ async function openFileAndMaybeJump(rel, lineNumber = null, jumpOptions = {}) {
     return;
   }
   try {
-    // Expand tree to reveal the file in the background
-    expandToFile(rel);
-    
-    await window.appOpenFileRel(rel, uiState.projectPath || null);
+    const alreadyOpen = rel && rel === activeFileRel;
+
+    if (!alreadyOpen) {
+      expandToFile(rel);
+      await window.appOpenFileRel(rel, uiState.projectPath || null);
+    }
+
     closeDrawerIfMobile();
 
     if (typeof lineNumber === 'number' && window.jumpToCurrentFileLine) {
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      if (!alreadyOpen) await new Promise((resolve) => setTimeout(resolve, 120));
       await window.jumpToCurrentFileLine(lineNumber, jumpOptions);
     }
   } catch (err) {
@@ -3191,6 +3205,7 @@ function renderSearchOverlay() {
       { id: 'content', label: 'By contents' },
       { id: 'changes', label: 'By changes' },
       { id: 'review', label: 'Review edits' },
+      { id: 'diagnostics', label: 'Diagnostics' },
     ];
 
     modes.forEach((m) => {
@@ -3398,6 +3413,12 @@ function renderSearchOverlay() {
         }),
       renderChangesResults,
       renderReviewResults,
+      renderDiagnosticsResults: (container) =>
+        renderExplorerDiagnostics(container, _explorerDiagDetail, {
+          openFileAndMaybeJump,
+          toast,
+          getProjectPath: () => uiState.projectPath,
+        }),
     },
   );
 }

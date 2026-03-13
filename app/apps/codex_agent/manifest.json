@@ -14,15 +14,15 @@
   },
   "proxy_shell": {
     "enabled": true,
-    "start_path": "/codex-agent",
+    "start_path": "/",
     "health_path": "/api/health",
     "ws_max_size_mb": 64,
     "rewrite": {
       "enabled": true,
-      "path_prefixes": ["/codex-agent", "/static/"],
+      "path_prefixes": ["/", "/static/"],
       "content_types": ["text/html", "javascript", "application/json", "text/css"],
-      "absolute_root_paths": ["/api/", "/ws/", "/static/", "/codex-agent"],
-      "css_root_paths": ["/static/", "/codex-agent/"],
+      "absolute_root_paths": ["/api/", "/ws/", "/static/"],
+      "css_root_paths": ["/static/"],
       "ws_template_marker": "window.location.host}/ws/",
       "ws_template_replacement": "window.location.host}{proxy_prefix}/ws/"
     },

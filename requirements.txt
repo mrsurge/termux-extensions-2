@@ -5,7 +5,12 @@ httpx
 websockets
 sse-starlette
 simple-websocket
+aiohttp
+anyio
+fastmcp
+flask
 flask-socketio
+framework-shells @ git+https://github.com/mrsurge/framework-shells.git
 gevent
 gevent-websocket
 libarchive-c>=5.1
@@ -14,10 +19,13 @@ libarchive
 aiofiles>=23.0.0
 watchdog
 git-python
+psutil
+pydantic
+python-socketio
+pyyaml
+werkzeug
 pyright
-python-multipart
 markdown2
 pygments
 docutils
-python-fasthtml
 ifaddr
