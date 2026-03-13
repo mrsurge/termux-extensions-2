@@ -9,7 +9,7 @@ const PRECACHE = [
   '/static/manifest.webmanifest',
   '/static/icon.png',
   '/static/vendor/socket.io.min.js',
-  '/static/vendor/es-module-shims/es-module-shims.js',
+  '/static/vendor/es-module-shims/dist/es-module-shims.js',
   '/static/js/ws_port.js',
   '/static/js/te_state.js',
   '/static/js/te_ui.js',
