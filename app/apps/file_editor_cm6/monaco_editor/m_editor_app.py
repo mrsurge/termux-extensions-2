@@ -24,8 +24,8 @@ def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
     # Use the vendored Monaco build artifacts (JS + CSS only, no sourcemaps).
     # These are committed to the repo under app/static/vendor/monaco-editor-core/.
     # To rebuild: run `worktrees/vscode-te2-diff/build_monaco_te2.sh`.
-    repo_root = Path(__file__).resolve().parents[4]
-    vendored_monaco = repo_root / "app" / "static" / "vendor" / "monaco-editor-core"
+    _app_pkg_root = Path(__file__).resolve().parents[3]   # …/app/
+    vendored_monaco = _app_pkg_root / "static" / "vendor" / "monaco-editor-core"
     vscode_monaco_esm_dir = vendored_monaco / "esm"
     esm_ok = vscode_monaco_esm_dir.exists()
 
