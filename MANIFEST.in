@@ -1,0 +1,3 @@
+graft app
+prune app/**/node_modules
+global-exclude __pycache__/* *.pyc

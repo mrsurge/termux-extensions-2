@@ -14,7 +14,7 @@ dynamic = ["dependencies"]
 te2 = "app.cli.run_framework:main"
 
 [tool.setuptools]
-include-package-data = false
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -23,21 +23,3 @@ namespaces = true
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
-
-[tool.setuptools.package-data]
-app = [
-  "apps/_templates/**/*",
-  "apps/**/manifest.json",
-  "apps/**/template.html",
-  "apps/**/shellspec/**/*",
-  "apps/**/static/**/*",
-  "apps/**/icons/**/*",
-  "apps/**/vendor/**/*",
-  "apps/**/extensions/**/*",
-  "apps/**/monaco_editor/textmate/**/*",
-  "apps/**/monaco_editor/themes/**/*",
-  "apps/**/workbench_protocol_proxy/node_workbench_adapter/**/*",
-  "extensions/**/*",
-  "static/**/*",
-  "templates/**/*",
-]
