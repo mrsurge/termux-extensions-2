@@ -341,9 +341,6 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
           window.monaco.languages.setColorMap(colorMap);
           var installedLangs = Object.keys(tmInstalled).filter(function(k) { return tmInstalled[k]; });
           console.log('[TextMate:DIAG] setColorMap called, colors=' + colorMap.length + ', already installed langs: [' + installedLangs.join(', ') + ']');
-          // After setColorMap overrides the rendering palette, patch semantic
-          // token metadata to translate indices to the new palette.
-          try { _patchSemanticTokenColorIndices('setColorMap'); } catch (_) {}
         }
       }
     } catch (e) {
@@ -541,9 +538,6 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
 
       tmInstalled[lang] = true;
       console.log('[TextMate] installed', lang, '->', scopeName);
-      // Now that tmRegistry exists and setColorMap has been called, patch
-      // semantic token color indices (editor should exist by now too).
-      try { _patchSemanticTokenColorIndices('tmInstall:' + lang); } catch (_) {}
       return true;
     } catch (e) {
       console.warn('[TextMate] install failed', languageId, e);
@@ -1415,8 +1409,6 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       },
       releaseDocumentSemanticTokens: function (resultId) {},
     });
-    // Ensure semantic token color indices are patched for the TextMate color map.
-    try { _patchSemanticTokenColorIndices('semanticProvider'); } catch (_) {}
   }
 
   // Pull-based fallback: fetch legend then register (used from baton/doRegister)
@@ -1752,153 +1744,6 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     } catch (_) { return null; }
   }
 
-  // After setColorMap() overrides the rendering palette with the TextMate color
-  // map, semantic token foreground indices (from tokenTheme._match) reference
-  // the WRONG palette. This patches getTokenStyleMetadata on the active theme
-  // to translate indices: tokenTheme palette → hex color → TextMate palette index.
-  function _patchSemanticTokenColorIndices(caller) {
-    var tag = '[semanticTokens:patch' + (caller ? ':' + caller : '') + ']';
-    try {
-      if (!tmRegistry) { console.log(tag, 'SKIP: no tmRegistry'); return; }
-      var svc = _getThemeService();
-      if (!svc) { console.log(tag, 'SKIP: no themeService'); return; }
-      var theme = svc.getColorTheme();
-      if (!theme) { console.log(tag, 'SKIP: no theme'); return; }
-      if (!theme.tokenTheme) { console.log(tag, 'SKIP: no theme.tokenTheme'); return; }
-
-      console.log(tag, 'theme obj id=', theme.id || '?', 'already patched=', !!theme._te2PatchedGetTokenStyleMetadata);
-
-      // Build the tokenTheme's internal color map (index → hex string).
-      var themeColorMap = theme.tokenTheme.getColorMap(); // Color[] objects
-      if (!themeColorMap || !themeColorMap.length) { console.log(tag, 'SKIP: empty themeColorMap'); return; }
-
-      // Build the TextMate color map (index → lowercase hex string).
-      var tmColorMap = tmRegistry.getColorMap(); // string[] like ["#000000", "#e6edf3", ...]
-      if (!tmColorMap || !tmColorMap.length) { console.log(tag, 'SKIP: empty tmColorMap'); return; }
-
-      console.log(tag, 'themeColorMap.length=' + themeColorMap.length, 'tmColorMap.length=' + tmColorMap.length);
-
-      // Build TextMate hex → index reverse lookup.
-      var tmHexToIdx = {};
-      for (var i = 0; i < tmColorMap.length; i++) {
-        if (!tmColorMap[i]) continue;
-        tmHexToIdx[String(tmColorMap[i]).toLowerCase()] = i;
-      }
-
-      // Build tokenTheme index → hex string lookup.
-      var themeIdxToHex = [];
-      for (var j = 0; j < themeColorMap.length; j++) {
-        try {
-          // Color objects have toString() that returns '#rrggbb' or similar.
-          var hex = themeColorMap[j].toString().toLowerCase();
-          themeIdxToHex[j] = hex;
-        } catch (_) {
-          themeIdxToHex[j] = null;
-        }
-      }
-
-      // Log first few entries from both palettes for comparison
-      var sampleTheme = themeIdxToHex.slice(0, 6).map(function(h, i) { return i + ':' + h; }).join(' ');
-      var sampleTm = tmColorMap.slice(0, 6).map(function(h, i) { return i + ':' + (h || '').toLowerCase(); }).join(' ');
-      console.log(tag, 'themeHex sample:', sampleTheme);
-      console.log(tag, 'tmHex sample:', sampleTm);
-
-      // Helper: parse "#rrggbb" to [r, g, b]
-      function hexToRgb(hex) {
-        var h = hex.replace('#', '');
-        if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
-        return [parseInt(h.substr(0,2),16), parseInt(h.substr(2,2),16), parseInt(h.substr(4,2),16)];
-      }
-      // Helper: find nearest color in TextMate palette by Euclidean RGB distance
-      function findNearestTmIndex(hex) {
-        var rgb = hexToRgb(hex);
-        var bestIdx = 1; // skip index 0 (null/transparent)
-        var bestDist = Infinity;
-        for (var ti = 1; ti < tmColorMap.length; ti++) {
-          if (!tmColorMap[ti]) continue;
-          var trgb = hexToRgb(String(tmColorMap[ti]).toLowerCase());
-          var dr = rgb[0]-trgb[0], dg = rgb[1]-trgb[1], db = rgb[2]-trgb[2];
-          var dist = dr*dr + dg*dg + db*db;
-          if (dist < bestDist) { bestDist = dist; bestIdx = ti; }
-          if (dist === 0) break;
-        }
-        return bestIdx;
-      }
-
-      // Build translation table: tokenTheme index → TextMate index.
-      var indexTranslation = [];
-      var translatedCount = 0;
-      var unmatchedHexes = [];
-      var nearestMapped = [];
-      for (var k = 0; k < themeIdxToHex.length; k++) {
-        var h = themeIdxToHex[k];
-        if (h && tmHexToIdx[h] !== undefined) {
-          indexTranslation[k] = tmHexToIdx[h];
-          if (indexTranslation[k] !== k) translatedCount++;
-        } else if (h) {
-          // No exact match — find nearest color in TextMate palette
-          var nearest = findNearestTmIndex(h);
-          indexTranslation[k] = nearest;
-          translatedCount++;
-          if (nearestMapped.length < 5) nearestMapped.push(k + ':' + h + '->' + nearest + ':' + (tmColorMap[nearest] || '?').toLowerCase());
-        } else {
-          indexTranslation[k] = k;
-        }
-      }
-
-      if (nearestMapped.length > 0) {
-        console.log(tag, 'nearest-color mapped:', nearestMapped.join(' '));
-      }
-
-      if (translatedCount === 0) {
-        console.log(tag, 'no index translation needed (themeColors=' + themeColorMap.length + ', tmColors=' + tmColorMap.length + ')');
-        if (themeIdxToHex.length > 1 && tmColorMap.length > 1) {
-          console.log(tag, 'DEBUG themeHex[1]=' + themeIdxToHex[1] + ' tmHex[1]=' + tmColorMap[1].toLowerCase());
-        }
-        return;
-      }
-
-      // Monkey-patch getTokenStyleMetadata to translate foreground indices.
-      // Always get the ORIGINAL unpatched method (unwrap if already patched).
-      var origMethod = theme._te2OrigGetTokenStyleMetadata || theme.getTokenStyleMetadata;
-      if (!origMethod) { console.log(tag, 'SKIP: no getTokenStyleMetadata method'); return; }
-      theme._te2OrigGetTokenStyleMetadata = origMethod;
-      theme._te2PatchedGetTokenStyleMetadata = true;
-      theme.getTokenStyleMetadata = function(type, modifiers, modelLanguage) {
-        var result = origMethod.call(this, type, modifiers, modelLanguage);
-        if (result && typeof result.foreground === 'number') {
-          var orig = result.foreground;
-          if (orig >= 0 && orig < indexTranslation.length) {
-            result.foreground = indexTranslation[orig];
-          }
-        }
-        return result;
-      };
-      console.log(tag, 'PATCHED getTokenStyleMetadata, translated ' + translatedCount + '/' + themeIdxToHex.length + ' color indices');
-
-      // TE2: Also set translation on tokenTheme so Monarch match() translates
-      // foreground indices too (not just semantic tokens).
-      try {
-        if (theme.tokenTheme) {
-          if (typeof theme.tokenTheme.setColorIndexTranslation === 'function') {
-            theme.tokenTheme.setColorIndexTranslation(indexTranslation);
-          } else {
-            // Direct field set if method was tree-shaken from bundle
-            theme.tokenTheme._colorIndexTranslation = indexTranslation;
-            if (theme.tokenTheme._cache && typeof theme.tokenTheme._cache.clear === 'function') {
-              theme.tokenTheme._cache.clear();
-            }
-          }
-          console.log(tag, 'SET tokenTheme colorIndexTranslation for Monarch fix (' + indexTranslation.length + ' entries)');
-        }
-      } catch (monarchErr) {
-        console.warn(tag, 'tokenTheme colorIndexTranslation failed', monarchErr);
-      }
-    } catch (e) {
-      console.warn(tag, 'FAILED', e);
-    }
-  }
-
   function ensureEditor() {
     if (editor) return;
     var el = getEditorContainer();
@@ -2139,7 +1984,6 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     });
     if (activeTheme) tmActiveThemeJson = activeTheme;
     _forceSemanticHighlighting();
-    try { _patchSemanticTokenColorIndices('applyMonacoTheme'); } catch (_) {}
     try {
       var models = window.monaco.editor.getModels();
       for (var mi = 0; mi < models.length; mi++) {

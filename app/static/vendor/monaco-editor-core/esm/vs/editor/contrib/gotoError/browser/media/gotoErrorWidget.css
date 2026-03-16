@@ -13,7 +13,7 @@
 
 .monaco-editor .marker-widget {
 	text-overflow: ellipsis;
-	white-space: nowrap;
+	white-space: normal;
 }
 
 .monaco-editor .marker-widget > .stale {
@@ -28,7 +28,8 @@
 
 .monaco-editor .marker-widget .descriptioncontainer {
 	position: absolute;
-	white-space: pre;
+	white-space: pre-wrap;
+	word-wrap: break-word;
 	user-select: text;
 	-webkit-user-select: text;
 	padding: 8px 12px 0 20px;

@@ -45,8 +45,6 @@ class StandaloneTheme {
         this.colors = null;
         this.defaultColors = Object.create(null);
         this._tokenTheme = null;
-        this._colorMapOverride = null;
-        this._colorIndexTranslation = null;
     }
     get base() {
         return this.themeData.base;
@@ -141,12 +139,8 @@ class StandaloneTheme {
         // use theme rules match
         const style = this.tokenTheme._match([type].concat(modifiers).join('.'));
         const metadata = style.metadata;
-        let foreground = TokenMetadata.getForeground(metadata);
+        const foreground = TokenMetadata.getForeground(metadata);
         const fontStyle = TokenMetadata.getFontStyle(metadata);
-        // TE2: translate foreground index from tokenTheme palette to override palette
-        if (this._colorIndexTranslation && foreground >= 0 && foreground < this._colorIndexTranslation.length) {
-            foreground = this._colorIndexTranslation[foreground];
-        }
         return {
             foreground: foreground,
             italic: Boolean(fontStyle & 1 /* FontStyle.Italic */),
@@ -272,10 +266,14 @@ export class StandaloneThemeService extends Disposable {
     }
     setColorMapOverride(colorMapOverride) {
         this._colorMapOverride = colorMapOverride;
-        // TE2: forward override to the active theme so it can build
-        // the index translation table for getTokenStyleMetadata
-        if (this._theme && typeof this._theme.setColorMapOverride === 'function') {
-            this._theme.setColorMapOverride(colorMapOverride);
+        // TE2: reindex the tokenTheme's rule trie so foreground/background
+        // indices match the authoritative (TextMate) palette.  After this,
+        // match() returns indices that correspond directly to the CSS .mtk*
+        // rules — no runtime translation needed.
+        if (colorMapOverride && this._theme) {
+            try {
+                this._theme.tokenTheme.reindexToColorMap(colorMapOverride);
+            } catch (_) { /* best-effort */ }
         }
         this._updateThemeOrColorMap();
     }

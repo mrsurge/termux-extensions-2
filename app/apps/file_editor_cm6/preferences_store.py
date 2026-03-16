@@ -43,6 +43,9 @@ DEFAULT_UI_PREFS: Dict[str, Any] = {
     # Explorer drawer (Monaco-ish sticky scope headers)
     "explorerStickyHeaders": True,
     # Side-bar (iframe) shortcuts + toggle chrome (global).
+    # Legacy compatibility:
+    # - agentActiveShortcutId is ignored by the clientized sidebar tab/view model
+    # - agentShortcuts[*].header is accepted on input but ignored by rendering
     "agentActiveShortcutId": "",
     "agentToggleDisplay": "icon",  # "icon" | "text" | "both"
     "agentHeaderDisplay": "text",  # "icon" | "text" | "both"

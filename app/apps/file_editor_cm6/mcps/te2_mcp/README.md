@@ -27,3 +27,28 @@ Current tools:
 - `te2_app_start`
 - `te2_app_open`
 - `te2_sidebar_add_app_shortcut`
+
+## Observed Workflow Wins
+
+These tools have already proven useful in real TE2-hosted development loops.
+
+Most valuable combinations:
+- live worker-targeted console eval against the actual frontend worker, instead of guessing from static code
+- console transcript tail/search to distinguish current failures from stale logs
+- direct framework-shells visibility for the TE2-owned process/runtime
+- using the sidebar-hosted app as the real development harness instead of a parallel ad hoc server
+
+Practical effect:
+- reproduce the bug in the hosted app
+- patch the bridge or runtime code
+- rebuild
+- validate against the live worker and TE2-owned shell state in one loop
+
+## Operational Caveat
+
+The main recurring ambiguity is not the tool surface itself. It is runtime state drift:
+- reload state
+- current bundle state
+- current process state
+
+When debugging through TE2, be explicit about whether you are looking at the current bundle and the current worker/process. The tooling is strong, but it still depends on disciplined validation of what is actually live.

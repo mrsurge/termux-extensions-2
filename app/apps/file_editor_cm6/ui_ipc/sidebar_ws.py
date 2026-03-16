@@ -13,6 +13,8 @@ from ..stores import get_history_store, get_preferences_store
 
 _registered_hosts: set[str] = set()
 _registered_iframes: set[str] = set()
+_client_ids_by_sid: dict[str, str] = {}
+_client_active_shortcuts: dict[str, str] = {}
 
 
 def _is_agent_sidebar_tracking_enabled() -> bool:
@@ -38,6 +40,52 @@ def _payload_preview(payload: dict | None) -> dict:
         "source": payload.get("source"),
         "conversation_id": payload.get("conversation_id"),
     }
+
+
+def _norm(value) -> str:
+    return str(value or "").strip()
+
+
+def _client_room(client_id: str) -> str:
+    return f"sidebar:client:{_norm(client_id) or 'unknown'}"
+
+
+def _client_state_payload(client_id: str) -> dict:
+    safe_client_id = _norm(client_id)
+    return {
+        "client_id": safe_client_id,
+        "activeShortcutId": _norm(_client_active_shortcuts.get(safe_client_id)),
+        "ts": int(time.time() * 1000),
+    }
+
+
+async def _emit_client_state(ns, client_id: str, *, to_sid: str | None = None, skip_sid: str | None = None):
+    payload = {
+        "type": "client_state",
+        "payload": _client_state_payload(client_id),
+    }
+    if to_sid:
+        await ns.emit("sidebar:event", payload, to=to_sid)
+        return
+    await ns.emit("sidebar:event", payload, room=_client_room(client_id), skip_sid=skip_sid)
+
+
+async def _resolve_client_id(ns, sid: str, payload: dict | None = None) -> str:
+    candidate = _norm(payload.get("client_id")) if isinstance(payload, dict) else ""
+    if candidate:
+        return candidate
+    cached = _norm(_client_ids_by_sid.get(sid))
+    if cached:
+        return cached
+    try:
+        session = await ns.get_session(sid)
+    except Exception:
+        session = {}
+    if isinstance(session, dict):
+        candidate = _norm(session.get("clientId"))
+        if candidate:
+            return candidate
+    return sid
 
 
 async def _emit_presence(ns, *, to_sid: str | None = None):
@@ -94,9 +142,12 @@ async def on_sidebar_register(ns, sid, data):
     role = str(data.get("role") or "host").strip().lower()
     if role not in {"host", "iframe"}:
         role = "host"
+    client_id = _norm(data.get("client_id")) or sid
 
     await ns.enter_room(sid, "sidebar_ipc")
-    await ns.save_session(sid, {"sidebarRole": role})
+    await ns.enter_room(sid, _client_room(client_id))
+    await ns.save_session(sid, {"sidebarRole": role, "clientId": client_id})
+    _client_ids_by_sid[sid] = client_id
 
     if role == "iframe":
         _registered_iframes.add(sid)
@@ -111,6 +162,7 @@ async def on_sidebar_register(ns, sid, data):
     )
     await _emit_presence(ns)
     await emit_sidebar_cwd_set(ns, to_sid=sid, reason="register")
+    await _emit_client_state(ns, client_id, to_sid=sid)
 
 
 async def on_sidebar_disconnect(ns, sid):
@@ -121,6 +173,7 @@ async def on_sidebar_disconnect(ns, sid):
     if sid in _registered_iframes:
         _registered_iframes.discard(sid)
         removed = True
+    _client_ids_by_sid.pop(sid, None)
     if removed:
         await _emit_presence(ns)
 
@@ -153,6 +206,18 @@ async def on_sidebar_event(ns, sid, data):
                 await _broadcast_agent_open(payload)
             except Exception as exc:
                 print(f"[sidebar_ipc] sidebar:event agent_open route failed: {exc}", flush=True)
+        return
+    if event_type == "active_shortcut:set":
+        payload = data.get("payload")
+        client_id = await _resolve_client_id(ns, sid, payload if isinstance(payload, dict) else None)
+        shortcut_id = _norm(payload.get("shortcutId") or payload.get("activeShortcutId")) if isinstance(payload, dict) else ""
+        _client_active_shortcuts[client_id] = shortcut_id
+        await _emit_client_state(ns, client_id, skip_sid=sid)
+        return
+    if event_type == "refresh_active":
+        payload = data.get("payload")
+        client_id = await _resolve_client_id(ns, sid, payload if isinstance(payload, dict) else None)
+        await ns.emit("sidebar:event", data, room=_client_room(client_id), skip_sid=sid)
         return
     await ns.emit("sidebar:event", data, room="sidebar_ipc", skip_sid=sid)
 

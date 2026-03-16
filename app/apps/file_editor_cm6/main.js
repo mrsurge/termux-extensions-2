@@ -478,7 +478,7 @@ function _collectSidebarShortcuts(uiPrefs) {
       url,
       icon: sc.icon || null,
       load: _normalizeShortcutLoad(sc.load),
-      header: !!sc.header,
+      header: true,
       last_used: Number.isFinite(Number(sc.last_used)) ? Number(sc.last_used) : 0,
     });
   });
@@ -1162,6 +1162,7 @@ function connectEditorSocket() {
 const uiIpcConnections = createUiIpcConnections({
   ensureSocketIoLoaded,
   initConsoleBridge,
+  getClientId: () => clientId,
 });
 function connectSidebarIPC() {
   uiIpcConnections.connectSidebarIPC();
@@ -1770,7 +1771,7 @@ const agentShortcutsList = requireEl('#agent-shortcuts-list');
 const agentShortcutsEditor = requireEl('#agent-shortcuts-editor');
 const agentShortcutLabel = requireEl('#agent-shortcut-label');
 const agentShortcutUrl = requireEl('#agent-shortcut-url');
-const agentShortcutHeader = requireEl('#agent-shortcut-header');
+const agentShortcutHeader = document.getElementById('agent-shortcut-header');
 agentShortcutLoadBtn = requireEl('#agent-shortcut-load-btn');
 agentShortcutLoadLabel = requireEl('#agent-shortcut-load-label');
 agentShortcutLoadDD = requireEl('#agent-shortcut-load-dd');
@@ -2635,7 +2636,7 @@ function _hideAgentShortcutEditor() {
   _agentShortcutEditingAssetName = null;
   agentShortcutLabel.value = '';
   agentShortcutUrl.value = '';
-  agentShortcutHeader.checked = false;
+  if (agentShortcutHeader) agentShortcutHeader.checked = false;
   _setAgentShortcutLoadValue('lazy');
   agentShortcutEmoji.value = '';
   agentShortcutIconPreview.textContent = '';
@@ -2648,7 +2649,7 @@ function _showAgentShortcutEditor(entry) {
   _agentShortcutEditingId = typeof e.id === 'string' && e.id.trim() ? e.id.trim() : null;
   agentShortcutLabel.value = typeof e.label === 'string' ? e.label : '';
   agentShortcutUrl.value = typeof e.url === 'string' ? e.url : '';
-  agentShortcutHeader.checked = !!e.header;
+  if (agentShortcutHeader) agentShortcutHeader.checked = true;
   _setAgentShortcutLoadValue(e.load);
 
   const icon = e.icon && typeof e.icon === 'object' ? e.icon : null;
@@ -2967,7 +2968,7 @@ function _initAgentSettingsUI() {
     const label = (agentShortcutLabel.value || '').trim();
     const url = (agentShortcutUrl.value || '').trim();
     const load = _getAgentShortcutLoadValue();
-    const header = !!agentShortcutHeader.checked;
+    const header = true;
     if (!label || !url) {
       host.toast('Label and URL are required');
       return;

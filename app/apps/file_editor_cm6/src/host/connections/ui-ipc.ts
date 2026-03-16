@@ -3,7 +3,8 @@
 /**
  * @param {{
  *   ensureSocketIoLoaded: () => Promise<any>,
- *   initConsoleBridge: (args: { workerId: string, socket: any }) => void
+ *   initConsoleBridge: (args: { workerId: string, socket: any }) => void,
+ *   getClientId: () => string
  * }} deps
  */
 export function createUiIpcConnections(deps) {
@@ -43,7 +44,11 @@ export function createUiIpcConnections(deps) {
       });
       sidebarIpcSocket.on('connect', () => {
         try {
-          sidebarIpcSocket.emit('sidebar:register', { role: 'host', app: 'file_editor_cm6' });
+          sidebarIpcSocket.emit('sidebar:register', {
+            role: 'host',
+            app: 'file_editor_cm6',
+            client_id: deps.getClientId(),
+          });
         } catch (_) {}
         console.log('[Sidebar_IPC] main page connected');
       });

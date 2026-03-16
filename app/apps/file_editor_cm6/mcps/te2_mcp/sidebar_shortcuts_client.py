@@ -72,8 +72,6 @@ class SidebarShortcutsClient:
             next_shortcuts.append(shortcut)
 
         updates: dict[str, Any] = {"agentShortcuts": next_shortcuts}
-        if activate:
-            updates["agentActiveShortcutId"] = shortcut_id
 
         updated = _preferences_store.update_preferences(ui=updates)
         ui_snapshot = updated.get("ui") or {}

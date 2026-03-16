@@ -77,6 +77,18 @@ Minimum pattern:
 
 No per-endpoint proxy module should be needed.
 
+## TE2 Harness Value
+
+As a sidebar-hosted TE2 app, `codex_agent` is useful as more than a wrapper smoke test.
+
+It has already validated this development loop:
+- use the sidebar-hosted app as the real harness instead of a parallel ad hoc server
+- use TE2 console tools against the live frontend worker
+- use framework-shells visibility against the TE2-owned runtime
+- iterate by patching, rebuilding, and validating inside the hosted path
+
+That combination is materially better than debugging from static code or visible UI guesswork alone.
+
 ## TODO
 
 - Ensure `/api/apps/reload` applies the same `proxy_shell` manifest validation used at startup (`validate_proxy_shell_manifest`) before refreshed manifests are exposed.

@@ -125,7 +125,6 @@ export function initSidebarShortcuts(options = {}) {
   let shortcutLoadBtn = null;
   let shortcutLoadLabel = null;
   let shortcutLoadDD = null;
-  let shortcutHeaderCheck = null;
 
   let shortcutEmojiInput = null;
   let shortcutIconBrowseBtn = null;
@@ -155,6 +154,9 @@ export function initSidebarShortcuts(options = {}) {
   let _editingKind = SHORTCUT_KIND_URL;
   let _editingAppId = '';
   let _lastPickerPath = '';
+  let _clientActiveShortcutId = '';
+  let _lastShortcutUsageKey = '';
+  let _lastShortcutUsageStamp = 0;
 
   let _iframeMap = new Map(); // key -> {iframe,url,loaded}
   let _activateSeq = 0;
@@ -301,6 +303,7 @@ export function initSidebarShortcuts(options = {}) {
     if (had === isRunning) return;
 
     _refreshShortcutChrome();
+    if (isRunning) _ensureRunningFrameworkShortcutIframesLoaded();
 
     // If any shortcut points at a backend that dies, invalidate those iframe entries.
     if (!isRunning) _invalidateFrameworkShortcutIframes(id);
@@ -334,6 +337,7 @@ export function initSidebarShortcuts(options = {}) {
       _runningCachePrimed = true;
       _resolveAppsStateReady();
       _refreshShortcutChrome();
+      _ensureRunningFrameworkShortcutIframesLoaded();
       try {
         if (shortcutAppDD && shortcutAppDD.classList.contains('show')) {
           void _renderAppMenu();
@@ -692,7 +696,7 @@ export function initSidebarShortcuts(options = {}) {
         url,
         icon: sc.icon || null,
         load: _normalizeLoad(sc.load),
-        header: !!sc.header,
+        header: true,
         last_used: Number.isFinite(Number(sc.last_used)) ? Number(sc.last_used) : 0,
       });
     });
@@ -700,7 +704,7 @@ export function initSidebarShortcuts(options = {}) {
   }
 
   function _resolveActive(uiPrefs, shortcuts) {
-    const activeId = _normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
+    const activeId = _normStr(_clientActiveShortcutId) || _normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
     if (!activeId) return null;
     const list = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
     return (
@@ -714,17 +718,30 @@ export function initSidebarShortcuts(options = {}) {
     return active ? active.url : '';
   }
 
+  function _pickMruShortcut(shortcuts) {
+    const list = Array.isArray(shortcuts) ? shortcuts : [];
+    let best = null;
+    let bestTs = 0;
+    list.forEach((sc) => {
+      if (!sc) return;
+      const ts = Number(sc.last_used) || 0;
+      if (!best || ts > bestTs) {
+        best = sc;
+        bestTs = ts;
+      }
+    });
+    return best;
+  }
+
   function _ensureActiveSelection(uiPrefs, shortcuts) {
-    const activeId = _normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
+    const activeId = _normStr(_clientActiveShortcutId) || _normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
     const list = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
     if (!list.length) return { active: null, activeId: '' };
     const active = _resolveActive(uiPrefs, list);
     if (active) return { active, activeId: activeId || active.key };
-    const fallback = list[0];
+    const fallback = _pickMruShortcut(list) || list[0];
     const nextId = fallback?.id || fallback?.url || fallback?.key || '';
-    if (nextId && nextId !== activeId) {
-      _sendUiPrefUpdate(UI_PREF_KEY_ACTIVE, nextId);
-    }
+    if (nextId && nextId !== activeId) _clientActiveShortcutId = nextId;
     return { active: fallback || null, activeId: nextId };
   }
 
@@ -811,9 +828,42 @@ export function initSidebarShortcuts(options = {}) {
   }
 
   function _collectHeaderItems(resolvedShortcuts) {
-    return resolvedShortcuts
-      .filter((sc) => sc && sc.header)
+    const list = Array.isArray(resolvedShortcuts) ? resolvedShortcuts : [];
+    return list
+      .filter((sc) => !!sc)
       .map((sc) => ({ ...sc }));
+  }
+
+  function _maybeUpdateShortcutLastUsed(shortcutId) {
+    const nextId = _normStr(shortcutId);
+    if (!nextId) return;
+
+    const now = Date.now();
+    if (_lastShortcutUsageKey === nextId && (now - _lastShortcutUsageStamp) < 800) return;
+
+    const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
+    const idx = raw.findIndex((sc) => {
+      if (!sc || typeof sc !== 'object') return false;
+      const id = _normStr(sc.id);
+      const url = _normStr(sc.url);
+      return id === nextId || url === nextId;
+    });
+    if (idx < 0) return;
+
+    const prevTs = Number(raw[idx]?.last_used || 0);
+    if (Number.isFinite(prevTs) && (now - prevTs) < 800) {
+      _lastShortcutUsageKey = nextId;
+      _lastShortcutUsageStamp = now;
+      return;
+    }
+
+    const next = raw.map((sc, i) => {
+      if (i !== idx || !sc || typeof sc !== 'object') return sc;
+      return { ...sc, last_used: now };
+    });
+    _lastShortcutUsageKey = nextId;
+    _lastShortcutUsageStamp = now;
+    _sendUiPrefUpdate(UI_PREF_KEY_SHORTCUTS, next);
   }
 
   function _closeHeaderIconMenu() {
@@ -845,6 +895,38 @@ export function initSidebarShortcuts(options = {}) {
         window.dispatchEvent(new CustomEvent('cm6:sidebar-event', { detail: message }));
       } catch (_) {}
     }
+  }
+
+  function _setClientActiveShortcut(shortcutId, options = {}) {
+    const nextId = _normStr(shortcutId);
+    const prevId = _clientActiveShortcutId;
+    _clientActiveShortcutId = nextId;
+
+    if (options.updateLastUsed && nextId) {
+      _maybeUpdateShortcutLastUsed(nextId);
+    }
+
+    if (options.emit && nextId && nextId !== prevId) {
+      _emitSidebarControl('active_shortcut:set', {
+        shortcutId: nextId,
+        source: options.source || 'sidebar_shortcuts',
+      });
+      return;
+    }
+
+    if (!_hydrated) return;
+
+    const normalized = _collectShortcuts(_latestUiPrefs || {});
+    const ensured = _ensureActiveSelection(_latestUiPrefs || {}, normalized);
+    _applyToggleIcon(_latestUiPrefs || {}, normalized, ensured.active);
+    _applyHeaderLabelAndIcon(_latestUiPrefs || {}, normalized, ensured.active);
+    _renderHeaderIconGrid(_latestUiPrefs || {}, normalized, ensured.active);
+    void _syncIframesAndActivate(_latestUiPrefs || {}, normalized, ensured.active);
+
+    try {
+      const dd = document.getElementById('fe-agent-dd');
+      if (dd && dd.classList.contains('show')) _renderAgentDropdown();
+    } catch (_) {}
   }
 
   function _openRefreshMenu(anchorEl) {
@@ -885,20 +967,6 @@ export function initSidebarShortcuts(options = {}) {
     });
   }
 
-  function _setShortcutHeaderFlag(sc, enabled) {
-    const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
-    const idx = _findRawShortcutIndex(sc);
-    if (idx < 0) return;
-    const current = !!raw[idx]?.header;
-    const nextVal = !!enabled;
-    if (current === nextVal) return;
-    const next = raw.map((entry, i) => {
-      if (i !== idx || !entry || typeof entry !== 'object') return entry;
-      return { ...entry, header: nextVal };
-    });
-    _persistShortcuts(next);
-  }
-
   function _persistHeaderOrder(orderedKeys) {
     const order = Array.isArray(orderedKeys)
       ? orderedKeys.map((key) => _normStr(key)).filter((key) => !!key)
@@ -908,52 +976,53 @@ export function initSidebarShortcuts(options = {}) {
     const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
     if (!raw.length) return;
 
-    const headerRecords = [];
-    const headerByKey = new Map();
+    const records = [];
+    const byKey = new Map();
     raw.forEach((entry) => {
-      if (!entry || typeof entry !== 'object' || !entry.header) return;
+      if (!entry || typeof entry !== 'object') return;
       const key = _normStr(entry.id) || _normStr(entry.url);
       if (!key) return;
       const record = { key, entry };
-      headerRecords.push(record);
-      if (!headerByKey.has(key)) headerByKey.set(key, record);
+      records.push(record);
+      if (!byKey.has(key)) byKey.set(key, record);
     });
-    if (headerRecords.length < 2) return;
+    if (records.length < 2) return;
 
     const reordered = [];
     const seen = new Set();
     order.forEach((key) => {
       if (seen.has(key)) return;
-      const record = headerByKey.get(key);
+      const record = byKey.get(key);
       if (!record) return;
       reordered.push(record);
       seen.add(key);
     });
-    headerRecords.forEach((record) => {
+    records.forEach((record) => {
       if (seen.has(record.key)) return;
       reordered.push(record);
       seen.add(record.key);
     });
-    if (reordered.length !== headerRecords.length) return;
+    if (reordered.length !== records.length) return;
 
     let changed = false;
-    for (let i = 0; i < headerRecords.length; i += 1) {
-      if (headerRecords[i].key !== reordered[i].key) {
+    for (let i = 0; i < records.length; i += 1) {
+      if (records[i].key !== reordered[i].key) {
         changed = true;
         break;
       }
     }
     if (!changed) return;
 
-    let cursor = 0;
-    const next = raw.map((entry) => {
-      if (!entry || typeof entry !== 'object' || !entry.header) return entry;
-      const key = _normStr(entry.id) || _normStr(entry.url);
-      if (!key) return entry;
-      const replacement = reordered[cursor]?.entry || entry;
-      cursor += 1;
-      return replacement;
-    });
+    const next = reordered.map((record) => record.entry);
+    _persistShortcuts(next);
+  }
+
+  function _removeShortcut(sc) {
+    const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
+    const idx = _findRawShortcutIndex(sc);
+    if (idx < 0) return;
+    const next = raw.slice();
+    next.splice(idx, 1);
     _persistShortcuts(next);
   }
 
@@ -1032,11 +1101,11 @@ export function initSidebarShortcuts(options = {}) {
     addSeparator();
     const remove = document.createElement('div');
     remove.className = 'fe-dd-item';
-    remove.textContent = 'Remove from header';
+    remove.textContent = 'Remove shortcut';
     remove.addEventListener('click', (ev) => {
       ev.stopPropagation();
       _closeHeaderIconMenu();
-      _setShortcutHeaderFlag(sc, false);
+      _removeShortcut(sc);
     });
     menu.appendChild(remove);
 
@@ -1249,7 +1318,7 @@ export function initSidebarShortcuts(options = {}) {
         _closeHeaderIconMenu();
         const targetId = sc.id || sc.url || sc.key;
         if (!targetId) return;
-        _sendUiPrefUpdate(UI_PREF_KEY_ACTIVE, targetId);
+        _setClientActiveShortcut(targetId, { emit: true, source: 'header_icon', updateLastUsed: true });
         if (openDrawer) {
           setTimeout(() => { try { openDrawer(); } catch (_) {} }, 120);
         }
@@ -1505,6 +1574,21 @@ export function initSidebarShortcuts(options = {}) {
     return true;
   }
 
+  function _ensureRunningFrameworkShortcutIframesLoaded(shortcutsOverride) {
+    const shortcuts = Array.isArray(shortcutsOverride) ? shortcutsOverride : _collectShortcuts(_latestUiPrefs || {});
+    const runningSet = _runningCache instanceof Set ? _runningCache : null;
+    if (!runningSet || !runningSet.size) return;
+
+    shortcuts.forEach((sc) => {
+      if (!sc || sc.kind !== SHORTCUT_KIND_FRAMEWORK_APP) return;
+      const appId = _normStr(sc.app_id);
+      if (!appId || !runningSet.has(appId)) return;
+      const entry = _iframeMap.get(sc.key);
+      if (!entry) return;
+      void _ensureIframeLoadedForShortcut(sc, entry);
+    });
+  }
+
   async function _refreshActiveShortcut(options = {}) {
     const flushCache = !!options.flushCache;
     const uiPrefs = _latestUiPrefs || {};
@@ -1585,6 +1669,8 @@ export function initSidebarShortcuts(options = {}) {
       if (!entry) continue;
       void _ensureIframeLoadedForShortcut(sc, entry);
     }
+
+    _ensureRunningFrameworkShortcutIframesLoaded(resolvedShortcuts);
 
     // Mark active + lazy-load active.
     let hasActive = false;
@@ -1921,7 +2007,6 @@ export function initSidebarShortcuts(options = {}) {
     _setKind(SHORTCUT_KIND_URL);
     if (shortcutLabelInput) shortcutLabelInput.value = '';
     if (shortcutUrlInput) shortcutUrlInput.value = '';
-    if (shortcutHeaderCheck) shortcutHeaderCheck.checked = false;
     _setLoadValue(SHORTCUT_LOAD_LAZY);
     if (shortcutEmojiInput) shortcutEmojiInput.value = '';
     if (shortcutIconPreview) shortcutIconPreview.textContent = '';
@@ -1937,7 +2022,6 @@ export function initSidebarShortcuts(options = {}) {
     _editingId = _normStr(e.id) || null;
     if (shortcutLabelInput) shortcutLabelInput.value = _normStr(e.label);
     if (shortcutUrlInput) shortcutUrlInput.value = _normStr(e.url);
-    if (shortcutHeaderCheck) shortcutHeaderCheck.checked = !!e.header;
     _setLoadValue(e.load);
 
     _editingAssetName = null;
@@ -1965,7 +2049,7 @@ export function initSidebarShortcuts(options = {}) {
   function _persistShortcuts(nextList) {
     _sendUiPrefUpdate(UI_PREF_KEY_SHORTCUTS, nextList);
 
-    const activeId = _normStr(_latestUiPrefs?.[UI_PREF_KEY_ACTIVE]);
+    const activeId = _normStr(_clientActiveShortcutId) || _normStr(_latestUiPrefs?.[UI_PREF_KEY_ACTIVE]);
     const hasActive = !!(
       activeId
       && Array.isArray(nextList)
@@ -1973,7 +2057,7 @@ export function initSidebarShortcuts(options = {}) {
     );
     if (!hasActive) {
       const fallback = Array.isArray(nextList) && nextList.length ? (_normStr(nextList[0].id) || _normStr(nextList[0].url)) : '';
-      _sendUiPrefUpdate(UI_PREF_KEY_ACTIVE, fallback);
+      _setClientActiveShortcut(fallback, { emit: true, source: 'shortcut_persist' });
     }
   }
 
@@ -2284,7 +2368,7 @@ export function initSidebarShortcuts(options = {}) {
         item.addEventListener('click', (ev) => {
           ev.stopPropagation();
           _closeAgentDropdown();
-          _sendUiPrefUpdate(UI_PREF_KEY_ACTIVE, activeId);
+          _setClientActiveShortcut(activeId, { emit: true, source: 'agent_dropdown', updateLastUsed: true });
           if (openDrawer) setTimeout(() => { try { openDrawer(); } catch (_) {} }, 120);
         });
         dd.appendChild(item);
@@ -2469,8 +2553,6 @@ export function initSidebarShortcuts(options = {}) {
     shortcutLoadBtn = document.getElementById('agent-shortcut-load-btn');
     shortcutLoadLabel = document.getElementById('agent-shortcut-load-label');
     shortcutLoadDD = document.getElementById('agent-shortcut-load-dd');
-    shortcutHeaderCheck = document.getElementById('agent-shortcut-header');
-
     shortcutEmojiInput = document.getElementById('agent-shortcut-emoji');
     shortcutIconBrowseBtn = document.getElementById('agent-shortcut-icon-browse');
     shortcutIconClearBtn = document.getElementById('agent-shortcut-icon-clear');
@@ -2644,8 +2726,6 @@ export function initSidebarShortcuts(options = {}) {
         const label = _normStr(shortcutLabelInput?.value);
         const kind = _getKind();
         const load = _getLoadValue();
-        const header = !!shortcutHeaderCheck?.checked;
-
         let appId = '';
         let url = '';
         if (kind === SHORTCUT_KIND_FRAMEWORK_APP) {
@@ -2688,7 +2768,6 @@ export function initSidebarShortcuts(options = {}) {
           url,
           icon,
           load,
-          header,
           last_used: lastUsed,
         };
 
@@ -2705,7 +2784,19 @@ export function initSidebarShortcuts(options = {}) {
       window.addEventListener('cm6:sidebar-event', (ev) => {
         const data = ev?.detail;
         if (!data || typeof data !== 'object') return;
-        if (_normStr(data.type) !== 'refresh_active') return;
+        const eventType = _normStr(data.type);
+        if (eventType === 'active_shortcut:set') {
+          const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+          const shortcutId = _normStr(payload.shortcutId || payload.activeShortcutId);
+          if (shortcutId) _setClientActiveShortcut(shortcutId, { emit: false });
+          return;
+        }
+        if (eventType === 'client_state') {
+          const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+          _setClientActiveShortcut(_normStr(payload.activeShortcutId), { emit: false });
+          return;
+        }
+        if (eventType !== 'refresh_active') return;
         const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
         void _refreshActiveShortcut({
           flushCache: !!payload.flushCache,
