@@ -27,7 +27,6 @@ export function createTerminalDrawer(options = {}) {
   let desiredShellId = 'auto';
   let socketRegistered = false;
   let pendingInput = [];
-  let terminalTraceSeq = 0;
 
   const drawer = document.getElementById('terminal-drawer');
   const container = document.getElementById('terminal-container');
@@ -416,11 +415,6 @@ export function createTerminalDrawer(options = {}) {
     if (!hasBoundShell() || !pendingInput.length) return;
     const queued = pendingInput;
     pendingInput = [];
-    console.log('[terminal-trace][flush-pending-input]', {
-      shellId,
-      desiredShellId,
-      count: queued.length,
-    });
     queued.forEach((data) => {
       if (typeof data === 'string' && data) {
         ws.emit('terminal:input', { data, shell_id: shellId });
@@ -432,19 +426,8 @@ export function createTerminalDrawer(options = {}) {
     desiredShellId = String(requestedShellId || 'auto').trim() || 'auto';
     if (!socketConnected()) {
       socketRegistered = false;
-      console.log('[terminal-trace][emit-register:skip]', {
-        requestedShellId: desiredShellId,
-        connected: false,
-      });
       return;
     }
-    console.log('[terminal-trace][emit-register]', {
-      requestedShellId: desiredShellId,
-      socketId: ws?.id || null,
-      shellId,
-      lastShellId,
-      shellHistoryPrimed,
-    });
     ws.emit('terminal:register', {
       shellId: desiredShellId,
       client_id: 'terminal-drawer',
@@ -471,12 +454,6 @@ export function createTerminalDrawer(options = {}) {
 
     socket.on('connect', () => {
       console.log('Terminal Socket.IO connected');
-      console.log('[terminal-trace][socket-connect]', {
-        socketId: socket.id || null,
-        desiredShellId,
-        shellId,
-        lastShellId,
-      });
       socketRegistered = false;
       if (desiredShellId) {
         emitTerminalRegister(desiredShellId);
@@ -485,13 +462,6 @@ export function createTerminalDrawer(options = {}) {
 
     socket.on('disconnect', (reason) => {
       console.log('Terminal Socket.IO disconnected', reason);
-      console.log('[terminal-trace][socket-disconnect]', {
-        reason,
-        socketId: socket.id || null,
-        shellId,
-        desiredShellId,
-        pendingInput: pendingInput.length,
-      });
       socketRegistered = false;
       pendingInput = [];
     });
@@ -504,15 +474,6 @@ export function createTerminalDrawer(options = {}) {
       desiredShellId = receivedShellId;
       socketRegistered = true;
       console.log('Received shell ID from server:', shellId);
-      console.log('[terminal-trace][shell-id]', {
-        shellId,
-        requestedShellId: msg?.requested_shell_id || null,
-        projectPath: msg?.project_path || null,
-        isNewShell,
-        lastShellId,
-        termCols: term?.cols || null,
-        termRows: term?.rows || null,
-      });
 
       try {
         if (fitAddon && term && isOpen) {
@@ -524,17 +485,9 @@ export function createTerminalDrawer(options = {}) {
       } catch (_) {}
 
       if (isNewShell) {
-        console.log('[terminal-trace][shell-id:reset]', {
-          shellId,
-          via: 'term.reset',
-        });
         try {
           term?.reset();
         } catch (_) {
-          console.log('[terminal-trace][shell-id:reset-fallback]', {
-            shellId,
-            via: 'term.clear',
-          });
           try { term?.clear(); } catch (_) {}
         }
         shellHistoryPrimed = false;
@@ -549,25 +502,13 @@ export function createTerminalDrawer(options = {}) {
       if (term && !shellHistoryPrimed) {
         let primed = false;
         try {
-          console.log('[terminal-trace][history-preload:start]', {
-            shellId,
-          });
           const res = await fetch(`/api/app/file_editor_cm6/terminal/${shellId}?logs=true&tail=2000`);
           const result = await res.json();
           if (result.ok && result.data.logs && Array.isArray(result.data.logs.stdout_tail)) {
             const priming = result.data.logs.stdout_tail.join('');
             if (priming) {
-              console.log('[terminal-trace][history-preload:write]', {
-                shellId,
-                len: priming.length,
-                sample: JSON.stringify(priming.slice(0, 64)),
-              });
               term.write(priming);
               console.log('Preloaded terminal history:', result.data.logs.stdout_tail.length, 'lines');
-            } else {
-              console.log('[terminal-trace][history-preload:empty]', {
-                shellId,
-              });
             }
           }
           primed = true;
@@ -577,9 +518,6 @@ export function createTerminalDrawer(options = {}) {
 
         if (primed) {
           shellHistoryPrimed = true;
-          console.log('[terminal-trace][history-preload:done]', {
-            shellId,
-          });
         }
       }
     });
@@ -596,14 +534,6 @@ export function createTerminalDrawer(options = {}) {
     socket.on('terminal:output', (msg) => {
       if (!term) return;
       const data = typeof msg?.data === 'string' ? msg.data : '';
-      terminalTraceSeq += 1;
-      console.log('[terminal-trace][dom-output]', {
-        seq: terminalTraceSeq,
-        shellId,
-        msgShellId: msg?.shell_id || null,
-        len: data.length,
-        sample: data ? JSON.stringify(data.slice(0, 24)) : null,
-      });
       if (data) {
         term.write(data);
       }
@@ -627,11 +557,6 @@ export function createTerminalDrawer(options = {}) {
     });
 
     socket.on('terminal:rebind_required', () => {
-      console.log('[terminal-trace][rebind-required]', {
-        shellId,
-        desiredShellId,
-        pendingInput: pendingInput.length,
-      });
       shellId = null;
       shellHistoryPrimed = false;
       socketRegistered = false;
@@ -680,14 +605,6 @@ export function createTerminalDrawer(options = {}) {
 
     // Send user input to PTY
     term.onData((data) => {
-      console.log('[terminal-trace][dom-input]', {
-        shellId,
-        desiredShellId,
-        bound: hasBoundShell(),
-        connected: socketConnected(),
-        len: typeof data === 'string' ? data.length : 0,
-        sample: typeof data === 'string' ? JSON.stringify(data.slice(0, 8)) : null,
-      });
       if (hasBoundShell()) {
         ws.emit('terminal:input', { data, shell_id: shellId });
       } else if (socketConnected()) {
@@ -708,23 +625,9 @@ export function createTerminalDrawer(options = {}) {
     term.onResize(({ cols, rows }) => {
       console.log('Terminal resized:', cols, 'x', rows, 'shellId:', shellId);
       if (hasBoundShell()) {
-        console.log('[terminal-trace][dom-resize:emit]', {
-          shellId,
-          cols,
-          rows,
-          socketId: ws?.id || null,
-        });
         ws.emit('terminal:resize', { cols, rows, shell_id: shellId });
       } else {
         console.warn('No shellId yet, skipping resize');
-        console.log('[terminal-trace][dom-resize:skip]', {
-          shellId,
-          desiredShellId,
-          cols,
-          rows,
-          connected: socketConnected(),
-          registered: socketRegistered,
-        });
       }
     });
 

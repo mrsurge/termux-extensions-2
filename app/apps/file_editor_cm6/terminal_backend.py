@@ -106,35 +106,18 @@ async def _resolve_terminal_shell_id(
 ) -> tuple[str, Optional[str]]:
     shell_id = str(requested_shell_id or "").strip() or "auto"
     shell_project_path = history_store.get_active_project()
-    print(
-        f"[terminal-trace][resolve-shell] requested={shell_id} active_project={shell_project_path!r}",
-        flush=True,
-    )
-
     if shell_id != "auto":
         rec = await mgr.get_shell(shell_id)
         if not rec or rec.status != "running" or not rec.pid:
             raise RuntimeError("Shell is not running")
-        print(
-            f"[terminal-trace][resolve-shell] using-explicit shell_id={shell_id} label={getattr(rec, 'label', None)!r}",
-            flush=True,
-        )
         return shell_id, shell_project_path
 
     saved_shell_id = history_store.get_terminal_shell_id(shell_project_path)
     if saved_shell_id:
         rec = await mgr.get_shell(saved_shell_id)
         if rec and rec.status == "running" and rec.pid:
-            print(
-                f"[terminal-trace][resolve-shell] using-saved shell_id={saved_shell_id} label={getattr(rec, 'label', None)!r}",
-                flush=True,
-            )
             return saved_shell_id, shell_project_path
         history_store.set_terminal_shell_id(None, shell_project_path)
-        print(
-            f"[terminal-trace][resolve-shell] cleared-stale shell_id={saved_shell_id}",
-            flush=True,
-        )
 
     project_path = shell_project_path
     cwd = project_path if project_path and Path(project_path).is_dir() else str(Path.home())
@@ -143,10 +126,6 @@ async def _resolve_terminal_shell_id(
         preferred_cwd=cwd,
         mgr=mgr,
         history_store=history_store,
-    )
-    print(
-        f"[terminal-trace][resolve-shell] created-or-restored shell_id={shell_id} cwd={cwd!r}",
-        flush=True,
     )
     return shell_id, shell_project_path
 
@@ -168,8 +147,6 @@ async def _forward_terminal_stream(shell_id: str, output_queue) -> None:
     mgr = await get_manager()
     exit_notified = False
     last_status_check = 0.0
-    print(f"[terminal-trace][stream-task] start shell_id={shell_id}", flush=True)
-
     try:
         while True:
             try:
@@ -224,21 +201,12 @@ async def _forward_terminal_stream(shell_id: str, output_queue) -> None:
                         pass
                 return
 
-            print(
-                f"[terminal-trace][stream-chunk] shell_id={shell_id} len={len(chunk) if isinstance(chunk, str) else 'bytes'} sample={repr(chunk[:24] if isinstance(chunk, str) else chunk[:24])}",
-                flush=True,
-            )
             await _emit_terminal_to_shell(
                 "terminal:output",
                 {"shell_id": shell_id, "data": chunk},
                 shell_id,
             )
-            print(
-                f"[terminal-trace][stream-output] shell_id={shell_id} len={len(chunk) if isinstance(chunk, str) else 'bytes'} sample={repr(chunk[:24] if isinstance(chunk, str) else chunk[:24])}",
-                flush=True,
-            )
     finally:
-        print(f"[terminal-trace][stream-task] stop shell_id={shell_id}", flush=True)
         try:
             await mgr.unsubscribe_output(shell_id, output_queue)
         except Exception:
@@ -262,11 +230,6 @@ async def _ensure_terminal_stream(shell_id: str) -> None:
                 _forward_terminal_stream(shell_id, output_queue),
                 name=f"terminal-stream-{shell_id}",
             )
-        pty_state = getattr(mgr, "_pty", {}).get(shell_id) if hasattr(mgr, "_pty") else None
-        print(
-            f"[terminal-trace][ensure-stream] shell_id={shell_id} refs={refs} start_task={start_task} has_pty={bool(pty_state)} proxy_pid={getattr(pty_state, 'proxy_pid', None)}",
-            flush=True,
-        )
     if not start_task:
         return
 
@@ -282,10 +245,6 @@ async def _release_terminal_stream(shell_id: Optional[str]) -> None:
             task = _terminal_stream_tasks.pop(shell_id, None)
         else:
             _terminal_stream_refcounts[shell_id] = refs - 1
-        print(
-            f"[terminal-trace][release-stream] shell_id={shell_id} refs_before={refs} has_task={bool(task)}",
-            flush=True,
-        )
     if task:
         task.cancel()
         try:
@@ -326,11 +285,6 @@ async def _bind_terminal_sid(
         old_client_id = _terminal_sid_clients.get(sid)
         old_project_path = _active_terminal_sids.get(sid)
     same_shell = bool(old_shell_id and old_shell_id == shell_id)
-    print(
-        f"[terminal-trace][bind-sid] sid={sid} old_shell={old_shell_id} new_shell={shell_id} same_shell={same_shell} old_client={old_client_id} req_client={requested_client_id} old_project={old_project_path!r} req_project={requested_project_path!r}",
-        flush=True,
-    )
-
     if old_shell_id and old_shell_id != shell_id:
         try:
             await ns.leave_room(sid, _terminal_shell_room(old_shell_id))
@@ -350,10 +304,6 @@ async def _bind_terminal_sid(
         _terminal_sid_clients[sid] = active_client_id
         _terminal_sid_shells[sid] = shell_id
         _active_terminal_sids[sid] = active_project_path
-    print(
-        f"[terminal-trace][bind-sid] active sid={sid} shell={shell_id} client={active_client_id} project={active_project_path!r}",
-        flush=True,
-    )
 
     return same_shell, active_project_path
 
@@ -405,11 +355,6 @@ class TerminalSocketIONamespace(socketio.AsyncNamespace):
         requested_shell_id = str(payload.get("shellId") or payload.get("shell_id") or "auto").strip() or "auto"
         history_store = get_history_store()
         mgr = await get_manager()
-        print(
-            f"[terminal-trace][register] sid={sid} client_id={client_id} requested_shell={requested_shell_id}",
-            flush=True,
-        )
-
         try:
             shell_id, shell_project_path = await _resolve_terminal_shell_id(
                 requested_shell_id,
@@ -430,10 +375,6 @@ class TerminalSocketIONamespace(socketio.AsyncNamespace):
             shell_id,
             client_id=client_id,
             project_path=shell_project_path,
-        )
-        print(
-            f"[terminal-trace][register] resolved sid={sid} shell_id={shell_id} project={shell_project_path!r}",
-            flush=True,
         )
 
         await self.emit(
@@ -468,15 +409,7 @@ class TerminalSocketIONamespace(socketio.AsyncNamespace):
             await self.emit("terminal:error", {"message": "No shell bound to this client or payload"}, to=sid)
             return
         try:
-            print(
-                f"[terminal-trace][socket-input] sid={sid} shell_id={shell_id} len={len(str(text))} sample={repr(str(text)[:8])}",
-                flush=True,
-            )
             mgr = await get_manager()
-            print(
-                f"[terminal-trace][pty-write] shell_id={shell_id} len={len(str(text))} sample={repr(str(text)[:8])}",
-                flush=True,
-            )
             await mgr.write_to_pty(shell_id, str(text))
         except Exception as exc:
             await self.emit("terminal:error", {"message": str(exc), "shell_id": shell_id}, to=sid)
