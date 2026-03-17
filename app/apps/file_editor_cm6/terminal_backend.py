@@ -208,6 +208,10 @@ async def _forward_terminal_stream(shell_id: str, output_queue) -> None:
                 {"shell_id": shell_id, "data": chunk},
                 shell_id,
             )
+            print(
+                f"[terminal-trace][stream-output] shell_id={shell_id} len={len(chunk) if isinstance(chunk, str) else 'bytes'} sample={repr(chunk[:24] if isinstance(chunk, str) else chunk[:24])}",
+                flush=True,
+            )
     finally:
         try:
             await mgr.unsubscribe_output(shell_id, output_queue)
@@ -413,7 +417,15 @@ class TerminalSocketIONamespace(socketio.AsyncNamespace):
             await self.emit("terminal:error", {"message": "No shell bound to this client or payload"}, to=sid)
             return
         try:
+            print(
+                f"[terminal-trace][socket-input] sid={sid} shell_id={shell_id} len={len(str(text))} sample={repr(str(text)[:8])}",
+                flush=True,
+            )
             mgr = await get_manager()
+            print(
+                f"[terminal-trace][pty-write] shell_id={shell_id} len={len(str(text))} sample={repr(str(text)[:8])}",
+                flush=True,
+            )
             await mgr.write_to_pty(shell_id, str(text))
         except Exception as exc:
             await self.emit("terminal:error", {"message": str(exc), "shell_id": shell_id}, to=sid)

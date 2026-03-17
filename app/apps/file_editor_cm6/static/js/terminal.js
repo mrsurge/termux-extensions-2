@@ -534,6 +534,12 @@ export function createTerminalDrawer(options = {}) {
     socket.on('terminal:output', (msg) => {
       if (!term) return;
       const data = typeof msg?.data === 'string' ? msg.data : '';
+      console.log('[terminal-trace][dom-output]', {
+        shellId,
+        msgShellId: msg?.shell_id || null,
+        len: data.length,
+        sample: data ? JSON.stringify(data.slice(0, 24)) : null,
+      });
       if (data) {
         term.write(data);
       }
@@ -605,6 +611,14 @@ export function createTerminalDrawer(options = {}) {
 
     // Send user input to PTY
     term.onData((data) => {
+      console.log('[terminal-trace][dom-input]', {
+        shellId,
+        desiredShellId,
+        bound: hasBoundShell(),
+        connected: socketConnected(),
+        len: typeof data === 'string' ? data.length : 0,
+        sample: typeof data === 'string' ? JSON.stringify(data.slice(0, 8)) : null,
+      });
       if (hasBoundShell()) {
         ws.emit('terminal:input', { data, shell_id: shellId });
       } else if (socketConnected()) {
