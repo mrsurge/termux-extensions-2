@@ -78,16 +78,23 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
         }));
         this._setRenderedHover(undefined);
         this._editor.addContentWidget(this);
+        this._lastTouchInteraction = 0;
         this._initTouchDrag();
+        this._initTouchScroll();
     }
     dispose() {
         super.dispose();
         this._renderedHover?.dispose();
         this._editor.removeContentWidget(this);
     }
+    wasTouchInteraction() {
+        return (Date.now() - this._lastTouchInteraction) < 400;
+    }
     _initTouchDrag() {
         const domNode = this._resizableNode.domNode;
         let dragState = null;
+        let longPressTimer = null;
+        const LONG_PRESS_MS = 400;
         const onTouchStart = (e) => {
             if (!this.isVisible || this._isResizing) {
                 return;
@@ -96,24 +103,56 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
                 return;
             }
             const target = e.target;
-            // Only drag from the status-bar row or sash edges — let content area scroll
-            if (!target.closest('.status-bar, .monaco-sash')) {
-                return;
-            }
             if (target.closest('a, button, input, textarea, select, [contenteditable]')) {
                 return;
             }
-            const touch = e.touches[0];
-            const rect = domNode.getBoundingClientRect();
-            dragState = {
-                startTouchX: touch.clientX,
-                startTouchY: touch.clientY,
-                startLeft: rect.left,
-                startTop: rect.top,
-                moved: false
-            };
+            // Sash edges always start drag immediately
+            if (target.closest('.monaco-sash')) {
+                const touch = e.touches[0];
+                const rect = domNode.getBoundingClientRect();
+                dragState = {
+                    startTouchX: touch.clientX,
+                    startTouchY: touch.clientY,
+                    startLeft: rect.left,
+                    startTop: rect.top,
+                    moved: false
+                };
+                return;
+            }
+            // For status-bar: long press to initiate drag
+            if (target.closest('.status-bar')) {
+                const touch = e.touches[0];
+                const startX = touch.clientX;
+                const startY = touch.clientY;
+                longPressTimer = setTimeout(() => {
+                    longPressTimer = null;
+                    const rect = domNode.getBoundingClientRect();
+                    dragState = {
+                        startTouchX: startX,
+                        startTouchY: startY,
+                        startLeft: rect.left,
+                        startTop: rect.top,
+                        moved: false
+                    };
+                }, LONG_PRESS_MS);
+            }
         };
         const onTouchMove = (e) => {
+            // Cancel long press if finger moves before timer fires
+            if (longPressTimer && e.touches.length === 1) {
+                const touch = e.touches[0];
+                const target = e.target;
+                const startState = dragState;
+                if (!startState) {
+                    // Long press hasn't fired yet — check distance
+                    // If moved more than 8px, cancel the long press (it's a scroll)
+                    if (longPressTimer) {
+                        clearTimeout(longPressTimer);
+                        longPressTimer = null;
+                    }
+                    return;
+                }
+            }
             if (!dragState || e.touches.length !== 1) {
                 return;
             }
@@ -131,23 +170,90 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
                 return;
             }
             const editorRect = editorDomNode.getBoundingClientRect();
+            const layoutInfo = this._editor.getLayoutInfo();
             const widgetW = domNode.offsetWidth;
             const widgetH = domNode.offsetHeight;
             let newLeft = dragState.startLeft + dx;
             let newTop = dragState.startTop + dy;
-            newLeft = Math.max(editorRect.left, Math.min(newLeft, editorRect.right - widgetW));
+            // Bound: left edge of editor, right edge minus minimap
+            const rightBound = editorRect.right - (layoutInfo.minimap?.minimapWidth || 0);
+            newLeft = Math.max(editorRect.left, Math.min(newLeft, rightBound - widgetW));
             newTop = Math.max(editorRect.top, Math.min(newTop, editorRect.bottom - widgetH));
             domNode.style.position = 'fixed';
             domNode.style.left = newLeft + 'px';
             domNode.style.top = newTop + 'px';
         };
         const onTouchEnd = () => {
+            if (longPressTimer) {
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+            }
+            if (dragState && dragState.moved) {
+                this._lastTouchInteraction = Date.now();
+            }
             dragState = null;
         };
         domNode.addEventListener('touchstart', onTouchStart, { passive: true });
         domNode.addEventListener('touchmove', onTouchMove, { passive: false });
         domNode.addEventListener('touchend', onTouchEnd, { passive: true });
         domNode.addEventListener('touchcancel', onTouchEnd, { passive: true });
+        // Suppress native context menu during long-press drag
+        domNode.addEventListener('contextmenu', (e) => {
+            if (longPressTimer || dragState) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        });
+    }
+    _initTouchScroll() {
+        const scrollbar = this._hover.scrollbar;
+        const contentNode = this._hover.contentsDomNode;
+        let scrollState = null;
+        contentNode.addEventListener('touchstart', (e) => {
+            if (!this.isVisible || e.touches.length !== 1) {
+                return;
+            }
+            const target = e.target;
+            // Don't intercept touches on drag surfaces or interactive elements
+            if (target.closest('.status-bar, .monaco-sash, a, button, input, textarea, select, [contenteditable]')) {
+                return;
+            }
+            const touch = e.touches[0];
+            const pos = scrollbar.getScrollPosition();
+            scrollState = {
+                startTouchX: touch.clientX,
+                startTouchY: touch.clientY,
+                startScrollTop: pos.scrollTop,
+                startScrollLeft: pos.scrollLeft,
+                moved: false
+            };
+        }, { passive: true });
+        contentNode.addEventListener('touchmove', (e) => {
+            if (!scrollState || e.touches.length !== 1) {
+                return;
+            }
+            const touch = e.touches[0];
+            const dx = scrollState.startTouchX - touch.clientX;
+            const dy = scrollState.startTouchY - touch.clientY;
+            if (!scrollState.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) {
+                return;
+            }
+            scrollState.moved = true;
+            e.preventDefault();
+            e.stopPropagation();
+            scrollbar.setScrollPosition({
+                scrollTop: scrollState.startScrollTop + dy,
+                scrollLeft: scrollState.startScrollLeft + dx
+            });
+        }, { passive: false });
+        const onEnd = () => {
+            if (scrollState && scrollState.moved) {
+                this._lastTouchInteraction = Date.now();
+            }
+            scrollState = null;
+        };
+        contentNode.addEventListener('touchend', onEnd, { passive: true });
+        contentNode.addEventListener('touchcancel', onEnd, { passive: true });
     }
     getId() {
         return ContentHoverWidget_1.ID;
@@ -249,7 +355,8 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
             ? 0
             : this._contentWidth);
         if (overflowing || this._hover.containerDomNode.clientWidth < initialWidth) {
-            const editorWidth = this._editor.getLayoutInfo().width;
+            const layoutInfo = this._editor.getLayoutInfo();
+            const editorWidth = layoutInfo.width - (layoutInfo.minimap?.minimapWidth || 0);
             const horizontalPadding = 14;
             return editorWidth - horizontalPadding;
         }
@@ -301,11 +408,42 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
     }
     _layoutContentWidget() {
         this._editor.layoutContentWidget(this);
+        this._clampToEditor();
         this._hover.onContentsChanged();
     }
+    _clampToEditor() {
+        const domNode = this._resizableNode.domNode;
+        const editorDomNode = this._editor.getDomNode();
+        if (!editorDomNode || !domNode.offsetParent) {
+            return;
+        }
+        const layoutInfo = this._editor.getLayoutInfo();
+        const editorRect = editorDomNode.getBoundingClientRect();
+        const widgetRect = domNode.getBoundingClientRect();
+        const rightBound = editorRect.right - (layoutInfo.minimap?.minimapWidth || 0);
+        // Clamp right edge: widget must not extend past minimap
+        if (widgetRect.right > rightBound) {
+            const overflow = widgetRect.right - rightBound;
+            const currentLeft = parseFloat(domNode.style.left) || 0;
+            domNode.style.left = (currentLeft - overflow) + 'px';
+        }
+        // Clamp left edge: widget must not go past editor left
+        const updatedRect = domNode.getBoundingClientRect();
+        if (updatedRect.left < editorRect.left) {
+            const currentLeft = parseFloat(domNode.style.left) || 0;
+            domNode.style.left = (currentLeft + (editorRect.left - updatedRect.left)) + 'px';
+            // If still too wide, constrain width
+            const finalRect = domNode.getBoundingClientRect();
+            if (finalRect.right > rightBound) {
+                domNode.style.width = (rightBound - editorRect.left) + 'px';
+            }
+        }
+    }
     _updateMaxDimensions() {
-        const height = Math.max(this._editor.getLayoutInfo().height / 4, 250, ContentHoverWidget_1._lastDimensions.height);
-        const width = Math.max(this._editor.getLayoutInfo().width * 0.66, 750, ContentHoverWidget_1._lastDimensions.width);
+        const layoutInfo = this._editor.getLayoutInfo();
+        const availableWidth = layoutInfo.width - (layoutInfo.minimap?.minimapWidth || 0);
+        const height = Math.max(layoutInfo.height / 4, 250, ContentHoverWidget_1._lastDimensions.height);
+        const width = Math.max(availableWidth * 0.66, 750, ContentHoverWidget_1._lastDimensions.width);
         this._resizableNode.maxSize = new dom.Dimension(width, height);
         this._setHoverWidgetMaxDimensions(width, height);
     }

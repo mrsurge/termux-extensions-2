@@ -347,6 +347,9 @@ let ContentHoverWidgetWrapper = class ContentHoverWidgetWrapper extends Disposab
     get isResizing() {
         return this._contentHoverWidget.isResizing;
     }
+    wasTouchInteraction() {
+        return this._contentHoverWidget.wasTouchInteraction();
+    }
     get widget() {
         return this._contentHoverWidget;
     }

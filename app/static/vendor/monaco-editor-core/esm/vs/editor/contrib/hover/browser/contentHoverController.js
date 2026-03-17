@@ -112,6 +112,9 @@ let ContentHoverController = class ContentHoverController extends Disposable {
         this.hideContentHover();
     }
     _shouldKeepHoverWidgetVisible(mouseEvent) {
+        if (this._contentWidget?.wasTouchInteraction?.()) {
+            return true;
+        }
         return this._isMouseOnContentHoverWidget(mouseEvent) || this._isContentWidgetResizing() || isOnColorDecorator(mouseEvent);
     }
     _isMouseOnContentHoverWidget(mouseEvent) {
@@ -147,6 +150,9 @@ let ContentHoverController = class ContentHoverController extends Disposable {
         const contentWidget = this._contentWidget;
         if (!contentWidget) {
             return false;
+        }
+        if (contentWidget.wasTouchInteraction?.()) {
+            return true;
         }
         const isHoverSticky = this._hoverSettings.sticky;
         const isMouseOnStickyContentHoverWidget = (mouseEvent, isHoverSticky) => {

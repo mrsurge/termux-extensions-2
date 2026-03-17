@@ -318,20 +318,22 @@ def main(argv: list[str] | None = None) -> int:
         _shutdown_ipc(ipc_host, sleep_port, ipc_pid)
         raise SystemExit(0)
 
-    atexit.register(_shutdown_ipc, ipc_host, sleep_port, ipc_pid)
-    signal.signal(signal.SIGINT, _handle_signal)
-    signal.signal(signal.SIGTERM, _handle_signal)
-
     for _ in range(50):
         if _http_get_ok(f"http://{ipc_host}:{sleep_port}/health"):
             break
         time.sleep(0.1)
 
     if not args.sleep:
-        print("[run_framework] Waking framework via sleep listener")
-        _http_post(f"http://{ipc_host}:{sleep_port}/actions/wake")
+        python_bin = os.environ.get("PYTHON_BIN", sys.executable)
+        cmd = [python_bin, "-m", "app.supervisor", *framework_args]
+        print("[run_framework] Starting supervisor directly")
+        os.execvpe(python_bin, cmd, os.environ.copy())
     else:
         print(f"[run_framework] Sleep mode: framework not started (wake via http://{ipc_host}:{sleep_port}/actions/wake)")
+
+    atexit.register(_shutdown_ipc, ipc_host, sleep_port, ipc_pid)
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
 
     tty_enabled = False
     saved_attrs = None

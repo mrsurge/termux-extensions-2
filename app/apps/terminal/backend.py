@@ -6,14 +6,18 @@ import asyncio
 import shutil
 import re
 import signal
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Body, Query, WebSocket
 
 # Reuse the core framework shells manager/config
 from framework_shells import get_manager as _manager
+from framework_shells.orchestrator import Orchestrator
 
 terminal_bp = APIRouter()
+SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
+SHELLSPEC_REF = "terminal.yaml#terminal"
 
 async def mgr():
     return await _manager()
@@ -24,6 +28,12 @@ def _default_shell_command() -> list[str]:
     if os.path.basename((os.environ.get("SHELL") or "")).endswith("bash") or shutil.which("bash"):
         return ["bash", "-l", "-i"]
     return ["sh", "-i"]
+
+
+def _shell_cmd_string(shell_cmd: list[str] | tuple[str, ...] | str) -> str:
+    if isinstance(shell_cmd, str):
+        return shell_cmd
+    return shlex.join([str(part) for part in shell_cmd])
 
 
 async def _next_terminal_sequence(m) -> int:
@@ -74,16 +84,18 @@ async def create_shell(payload: dict = Body(...)) -> Any:
     cwd = str(payload.get("cwd") or "~")
 
     m = await mgr()
+    orch = Orchestrator(m)
     label = f"terminal-app:{await _next_terminal_sequence(m)}"
     try:
-        # Use dtach-backed terminals (matches Code CM6 terminal behavior):
-        # - better mobile UX consistency
-        # - persistence across worker restarts
-        record = await m.spawn_shell_dtach(
-            shell_cmd,
-            cwd=cwd,
+        record = await orch.start_from_ref(
+            SHELLSPEC_REF,
+            base_dir=SHELLSPEC_DIR,
+            ctx={
+                "CWD": cwd,
+                "SHELL_CMD": _shell_cmd_string(shell_cmd),
+            },
             label=label,
-            subgroups=["terminal", "shell"],
+            wait_ready=False,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to spawn shell: {exc}")

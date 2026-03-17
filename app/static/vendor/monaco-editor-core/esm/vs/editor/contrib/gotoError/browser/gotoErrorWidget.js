@@ -321,7 +321,7 @@ let MarkerNavigationWidget = class MarkerNavigationWidget extends PeekViewWidget
     _doLayoutBody(heightInPixel, widthInPixel) {
         super._doLayoutBody(heightInPixel, widthInPixel);
         this._heightInPixel = heightInPixel;
-        const effectiveWidth = widthInPixel - this.editor.getLayoutInfo().minimapWidth;
+        const effectiveWidth = widthInPixel - (this.editor.getLayoutInfo().minimap?.minimapWidth || 0);
         this._message.layout(heightInPixel, effectiveWidth);
         this._container.style.height = `${heightInPixel}px`;
         // After layout/measure, check if wrapping requires more height
@@ -339,7 +339,7 @@ let MarkerNavigationWidget = class MarkerNavigationWidget extends PeekViewWidget
         }
     }
     _onWidth(widthInPixel) {
-        const effectiveWidth = widthInPixel - this.editor.getLayoutInfo().minimapWidth;
+        const effectiveWidth = widthInPixel - (this.editor.getLayoutInfo().minimap?.minimapWidth || 0);
         this._message.layout(this._heightInPixel, effectiveWidth);
     }
     _relayout() {

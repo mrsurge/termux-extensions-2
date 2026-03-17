@@ -1,0 +1,11 @@
+version: "1"
+
+shells:
+  terminal:
+    backend: dtach
+    pty_mode: interactive
+    cwd: ${ctx:CWD}
+    command: ${ctx:SHELL_CMD}
+    subgroups:
+      - terminal
+      - shell

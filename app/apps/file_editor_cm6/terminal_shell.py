@@ -2,10 +2,15 @@
 
 import os
 import hashlib
+import shlex
 import signal
 from pathlib import Path
 
 from framework_shells import get_manager as _manager
+from framework_shells.orchestrator import Orchestrator
+
+SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
+SHELLSPEC_REF = "terminal.yaml#terminal"
 
 
 def _terminal_subgroups(project_path: str | None) -> list[str]:
@@ -53,6 +58,12 @@ def _terminal_label(project_path: str | None, sequence: int | None = None) -> st
     return label
 
 
+def _shell_cmd_string(shell_cmd: list[str] | tuple[str, ...] | str) -> str:
+    if isinstance(shell_cmd, str):
+        return shell_cmd
+    return shlex.join([str(part) for part in shell_cmd])
+
+
 async def create_editor_shell(cwd=None, shell_cmd=None, project_path: str | None = None, sequence: int | None = None):
     """
     Create a new PTY-backed shell session for the code editor terminal drawer.
@@ -65,6 +76,7 @@ async def create_editor_shell(cwd=None, shell_cmd=None, project_path: str | None
         dict: Shell session info including ID
     """
     mgr = await _manager()
+    orch = Orchestrator(mgr)
     
     if shell_cmd is None:
         shell_cmd = ['bash', '-l', '-i']
@@ -81,11 +93,16 @@ async def create_editor_shell(cwd=None, shell_cmd=None, project_path: str | None
 
     # Create dtach-backed shell for persistence
     subgroups = _terminal_subgroups(project_path)
-    rec = await mgr.spawn_shell_dtach(
-        shell_cmd,
+    rec = await orch.start_from_ref(
+        SHELLSPEC_REF,
+        base_dir=SHELLSPEC_DIR,
+        ctx={
+            "CWD": cwd,
+            "SHELL_CMD": _shell_cmd_string(shell_cmd),
+        },
         label=label,
-        subgroups=subgroups,
-        cwd=cwd
+        wait_ready=False,
+        subgroups_overrides=subgroups,
     )
     
     return await mgr.describe(rec)
