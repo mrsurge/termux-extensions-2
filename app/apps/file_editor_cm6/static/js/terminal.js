@@ -1,7 +1,5 @@
 // app/apps/file_editor_cm6/static/js/terminal.js
 
-import ReconnectingWebSocket from './reconnecting_websocket.js';
-
 /**
  * Terminal drawer for the code editor.
  * Embeds xterm.js with WebSocket PTY streaming.
@@ -26,6 +24,9 @@ export function createTerminalDrawer(options = {}) {
   let isFullscreen = false;
   let lastShellId = null;
   let shellHistoryPrimed = false;
+  let desiredShellId = 'auto';
+  let socketRegistered = false;
+  let pendingInput = [];
 
   const drawer = document.getElementById('terminal-drawer');
   const container = document.getElementById('terminal-container');
@@ -302,10 +303,9 @@ export function createTerminalDrawer(options = {}) {
 
     setShellMenuOpen(false);
 
-    // Stop reconnect attempts and drop the socket so a future open()
-    // will establish a fresh /ws/.../auto connection for the new project.
+    // Drop the socket so a future open() establishes a fresh bind.
     if (ws) {
-      try { ws.close(); } catch (_) {}
+      try { ws.disconnect(); } catch (_) {}
       ws = null;
     }
 
@@ -313,6 +313,9 @@ export function createTerminalDrawer(options = {}) {
     shellId = null;
     lastShellId = null;
     shellHistoryPrimed = false;
+    desiredShellId = 'auto';
+    socketRegistered = false;
+    pendingInput = [];
 
     if (shellToggle) {
       shellToggle.textContent = 'Terminal';
@@ -359,6 +362,13 @@ export function createTerminalDrawer(options = {}) {
     });
   }
 
+  async function ensureSocketIoClient() {
+    if (window.io) return window.io;
+    await loadScript('/static/vendor/socket.io.min.js');
+    if (window.io) return window.io;
+    throw new Error('Failed to load Socket.IO client');
+  }
+
   /**
    * Get or create terminal shell - backend handles everything.
    * Just connect to the WebSocket and let the server manage persistence.
@@ -376,164 +386,189 @@ export function createTerminalDrawer(options = {}) {
     if (!shellId) return;
 
     const currentShellId = shellId;
-    shellId = null;  // Clear immediately to prevent reconnection
+    shellId = null;
     lastShellId = null;
     shellHistoryPrimed = false;
+    desiredShellId = null;
+    socketRegistered = false;
+    pendingInput = [];
 
-    // Send destroy command through WebSocket
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      try {
-        ws.send(JSON.stringify({ action: 'destroy' }));
-        console.log('Sent destroy command for shell:', currentShellId);
-        
-        // Wait briefly for backend to process
-        await new Promise(resolve => setTimeout(resolve, 100));
-      } catch (err) {
-        console.error('Failed to send destroy command:', err);
-      }
+    try {
+      await fetch(`/api/app/file_editor_cm6/terminal/${encodeURIComponent(currentShellId)}`, {
+        method: 'DELETE',
+      });
+      console.log('Destroyed shell:', currentShellId);
+    } catch (err) {
+      console.error('Failed to destroy terminal shell:', err);
     }
   }
 
-  /**
-   * Connect WebSocket to PTY and preload history
-   */
-  async function connectWebSocket(id) {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${location.host}/ws/app/file_editor_cm6/terminal/${id}`;
+  function socketConnected() {
+    return !!(ws && ws.connected);
+  }
 
-    const socket = new ReconnectingWebSocket(url, {
-      maxRetries: 15,
-      reconnectInterval: 500,
-      maxReconnectInterval: 5000,
-      debug: true
+  function hasBoundShell() {
+    return !!(socketConnected() && shellId && desiredShellId && shellId === desiredShellId);
+  }
+
+  function flushPendingInput() {
+    if (!hasBoundShell() || !pendingInput.length) return;
+    const queued = pendingInput;
+    pendingInput = [];
+    queued.forEach((data) => {
+      if (typeof data === 'string' && data) {
+        ws.emit('terminal:input', { data, shell_id: shellId });
+      }
+    });
+  }
+
+  function emitTerminalRegister(requestedShellId = 'auto') {
+    desiredShellId = String(requestedShellId || 'auto').trim() || 'auto';
+    if (!socketConnected()) {
+      socketRegistered = false;
+      return;
+    }
+    ws.emit('terminal:register', {
+      shellId: desiredShellId,
+      client_id: 'terminal-drawer',
+    });
+    socketRegistered = false;
+  }
+
+  async function ensureTerminalSocket() {
+    if (ws) {
+      if (ws.connected) return ws;
+      try { ws.connect(); } catch (_) {}
+      return ws;
+    }
+
+    const io = await ensureSocketIoClient();
+    const socket = io('/terminal', {
+      path: '/terminal_ws/socket.io',
+      transports: ['websocket'],
+      query: {
+        app_id: 'file_editor_cm6',
+        source: 'terminal_drawer',
+      },
     });
 
-    socket.onopen = () => {
-      console.log('Terminal WebSocket connected');
-    };
+    socket.on('connect', () => {
+      console.log('Terminal Socket.IO connected');
+      socketRegistered = false;
+      if (desiredShellId) {
+        emitTerminalRegister(desiredShellId);
+      }
+    });
 
-    socket.onmessage = async (event) => {
-      // Handle JSON messages from server
+    socket.on('disconnect', (reason) => {
+      console.log('Terminal Socket.IO disconnected', reason);
+      socketRegistered = false;
+      pendingInput = [];
+    });
+
+    socket.on('terminal:shell_id', async (msg) => {
+      const receivedShellId = msg?.shell_id;
+      if (!receivedShellId) return;
+      const isNewShell = receivedShellId !== lastShellId;
+      shellId = receivedShellId;
+      desiredShellId = receivedShellId;
+      socketRegistered = true;
+      console.log('Received shell ID from server:', shellId);
+
       try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'shell_id') {
-          const receivedShellId = msg.shell_id;
-          const isNewShell = receivedShellId !== lastShellId;
-          shellId = receivedShellId;
-          console.log('Received shell ID from server:', shellId);
-
-          // Ensure the backend PTY winsize is synced as soon as we have a real shell id.
-          // On first open the dtach attach proxy can come up slightly after fit/resize,
-          // so we retry resize a few times to avoid wrap/overwrite glitches.
-          try {
-            if (fitAddon && term && isOpen) {
-              try { fitAddon.fit(); } catch (_) {}
-            }
-            if (term && term.cols && term.rows) {
-              const cols = term.cols;
-              const rows = term.rows;
-              let attempts = 0;
-              const tryResize = async () => {
-                attempts += 1;
-                try {
-                  await fetch(`/api/app/file_editor_cm6/terminal/${shellId}/resize`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ cols, rows }),
-                  });
-                  return;
-                } catch (_) {
-                  if (attempts >= 12) return;
-                  const delay = Math.min(1500, 80 * attempts);
-                  setTimeout(() => { void tryResize(); }, delay);
-                }
-              };
-              void tryResize();
-            }
-          } catch (_) {}
-          
-          if (isNewShell) {
-            // Backend switched us to a different shell (e.g., project change).
-            // Clear the in-browser buffer so the next history load is unambiguous.
-            try {
-              term?.reset();
-            } catch (err) {
-              // reset() may not exist on older xterm versions; fallback to clear.
-              try { term?.clear(); } catch (_) {}
-            }
-            shellHistoryPrimed = false;
-          }
-          lastShellId = receivedShellId;
-
-          // Sync dropdown to backend active shell.
-          try {
-            await refreshShellMenu();
-          } catch (_) {}
-
-          // Now fetch logs with the real shell ID (only once per shell)
-          if (term && !shellHistoryPrimed) {
-            let primed = false;
-            try {
-              const res = await fetch(`/api/app/file_editor_cm6/terminal/${shellId}?logs=true&tail=2000`);
-              const result = await res.json();
-              
-              if (result.ok && result.data.logs && Array.isArray(result.data.logs.stdout_tail)) {
-                const priming = result.data.logs.stdout_tail.join('');
-                if (priming) {
-                  term.write(priming);
-                  console.log('Preloaded terminal history:', result.data.logs.stdout_tail.length, 'lines');
-                }
-              }
-              primed = true;
-            } catch (err) {
-              console.warn('Failed to preload terminal history:', err);
-            }
-
-            if (primed) {
-              shellHistoryPrimed = true;
-            }
-          }
-          return;
-        } else if (msg.type === 'shell_list') {
-          try {
-            renderShellMenu(msg.shells || [], msg.active_shell_id || shellId);
-            const activeShellId = msg.active_shell_id || shellId;
-            const activeShell = (msg.shells || []).find((s) => s.id === activeShellId);
-            setShellToggleShell(activeShell || null, activeShellId);
-          } catch (_) {}
-          return;
-        } else if (msg.type === 'error') {
-          console.error('Terminal error:', msg.message);
-          return;
+        if (fitAddon && term && isOpen) {
+          try { fitAddon.fit(); } catch (_) {}
         }
-      } catch (e) {
-        // Not JSON, treat as terminal output
-      }
-      
-      // Regular terminal output
-      if (term) {
-        term.write(event.data);
-      }
-    };
+        if (term && term.cols && term.rows && socketConnected()) {
+          ws.emit('terminal:resize', { cols: term.cols, rows: term.rows, shell_id: receivedShellId });
+        }
+      } catch (_) {}
 
-    socket.onerror = (err) => {
-      console.error('Terminal WebSocket error:', err);
-    };
-
-    socket.onclose = (event) => {
-      console.log('Terminal WebSocket closed', event?.code);
-      // Only drop reference if we intentionally closed the socket
-      if (socket.forcedClose && ws === socket) {
-        ws = null;
+      if (isNewShell) {
+        try {
+          term?.reset();
+        } catch (_) {
+          try { term?.clear(); } catch (_) {}
+        }
+        shellHistoryPrimed = false;
       }
-    };
+      lastShellId = receivedShellId;
+      flushPendingInput();
 
-    socket.onreconnect = (attempt) => {
-      if (term) {
-        term.writeln(`\r\nReconnecting (attempt ${attempt})...`);
+      try {
+        await refreshShellMenu();
+      } catch (_) {}
+
+      if (term && !shellHistoryPrimed) {
+        let primed = false;
+        try {
+          const res = await fetch(`/api/app/file_editor_cm6/terminal/${shellId}?logs=true&tail=2000`);
+          const result = await res.json();
+          if (result.ok && result.data.logs && Array.isArray(result.data.logs.stdout_tail)) {
+            const priming = result.data.logs.stdout_tail.join('');
+            if (priming) {
+              term.write(priming);
+              console.log('Preloaded terminal history:', result.data.logs.stdout_tail.length, 'lines');
+            }
+          }
+          primed = true;
+        } catch (err) {
+          console.warn('Failed to preload terminal history:', err);
+        }
+
+        if (primed) {
+          shellHistoryPrimed = true;
+        }
       }
-    };
+    });
 
+    socket.on('terminal:shell_list', (msg) => {
+      try {
+        renderShellMenu(msg?.shells || [], msg?.active_shell_id || shellId);
+        const activeShellId = msg?.active_shell_id || shellId;
+        const activeShell = (msg?.shells || []).find((s) => s.id === activeShellId);
+        setShellToggleShell(activeShell || null, activeShellId);
+      } catch (_) {}
+    });
+
+    socket.on('terminal:output', (msg) => {
+      if (!term) return;
+      const data = typeof msg?.data === 'string' ? msg.data : '';
+      if (data) {
+        term.write(data);
+      }
+    });
+
+    socket.on('terminal:closed', async (msg) => {
+      console.warn('Terminal closed:', msg);
+      if (msg?.shell_id && msg.shell_id === shellId) {
+        shellId = null;
+        shellHistoryPrimed = false;
+        desiredShellId = null;
+        socketRegistered = false;
+        pendingInput = [];
+      } else if (!msg?.shell_id) {
+        socketRegistered = false;
+        pendingInput = [];
+      }
+      try {
+        await refreshShellMenu();
+      } catch (_) {}
+    });
+
+    socket.on('terminal:rebind_required', () => {
+      shellId = null;
+      shellHistoryPrimed = false;
+      socketRegistered = false;
+      pendingInput = [];
+      emitTerminalRegister('auto');
+    });
+
+    socket.on('terminal:error', (msg) => {
+      console.error('Terminal error:', msg?.message || msg);
+    });
+
+    ws = socket;
     return socket;
   }
 
@@ -570,8 +605,13 @@ export function createTerminalDrawer(options = {}) {
 
     // Send user input to PTY
     term.onData((data) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
+      if (hasBoundShell()) {
+        ws.emit('terminal:input', { data, shell_id: shellId });
+      } else if (socketConnected()) {
+        pendingInput.push(data);
+        if (pendingInput.length > 64) {
+          pendingInput = pendingInput.slice(-64);
+        }
       }
     });
 
@@ -584,12 +624,8 @@ export function createTerminalDrawer(options = {}) {
     // Handle terminal resize
     term.onResize(({ cols, rows }) => {
       console.log('Terminal resized:', cols, 'x', rows, 'shellId:', shellId);
-      if (shellId) {
-        fetch(`/api/app/file_editor_cm6/terminal/${shellId}/resize`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cols, rows }),
-        }).catch(console.error);
+      if (hasBoundShell()) {
+        ws.emit('terminal:resize', { cols, rows, shell_id: shellId });
       } else {
         console.warn('No shellId yet, skipping resize');
       }
@@ -776,30 +812,15 @@ export function createTerminalDrawer(options = {}) {
       console.log('Shell will be managed by backend via WebSocket');
     }
 
-    // Connect WebSocket - use 'auto' to let backend manage shell ID
-    if (!ws) {
-      ws = await connectWebSocket('auto');
-    } else if (ws.readyState === WebSocket.CLOSED && ws.forcedClose) {
-      ws = await connectWebSocket('auto');
-    } else if (ws.readyState === WebSocket.CLOSED) {
-      ws.reconnect();
-    }
+    await ensureTerminalSocket();
+    emitTerminalRegister(shellId || 'auto');
 
-    // Fit terminal to drawer size and manually send initial resize
+    // Fit terminal to drawer size and sync the PTY once the socket is up.
     if (fitAddon && term) {
       setTimeout(() => {
         fitAddon.fit();
-        // Manually send resize since shellId is now available
-        const cols = term.cols;
-        const rows = term.rows;
-        console.log('Sending initial resize:', cols, 'x', rows, 'to shell:', shellId);
-        if (shellId && cols && rows) {
-          fetch(`/api/app/file_editor_cm6/terminal/${shellId}/resize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cols, rows }),
-          }).then(() => console.log('Resize sent successfully'))
-            .catch(console.error);
+        if (hasBoundShell() && term.cols && term.rows) {
+          ws.emit('terminal:resize', { cols: term.cols, rows: term.rows, shell_id: shellId });
         }
       }, 150);
     }
@@ -830,7 +851,7 @@ export function createTerminalDrawer(options = {}) {
     
     // Close WebSocket (backend already terminated shell)
     if (ws) {
-      ws.close();
+      try { ws.disconnect(); } catch (_) {}
       ws = null;
     }
     
@@ -872,12 +893,8 @@ export function createTerminalDrawer(options = {}) {
     if (fitAddon && isOpen) {
       setTimeout(() => {
         fitAddon.fit();
-        if (shellId && term) {
-          fetch(`/api/app/file_editor_cm6/terminal/${shellId}/resize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ cols: term.cols, rows: term.rows }),
-          }).catch(console.error);
+        if (hasBoundShell() && term) {
+          ws.emit('terminal:resize', { cols: term.cols, rows: term.rows, shell_id: shellId });
         }
       }, 350);
     }
@@ -927,12 +944,8 @@ export function createTerminalDrawer(options = {}) {
       document.body.style.cursor = '';
       
       // Send final size to backend
-      if (shellId && term) {
-        fetch(`/api/app/file_editor_cm6/terminal/${shellId}/resize`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cols: term.cols, rows: term.rows }),
-        }).catch(console.error);
+      if (hasBoundShell() && term) {
+        ws.emit('terminal:resize', { cols: term.cols, rows: term.rows, shell_id: shellId });
       }
     });
   }
@@ -951,6 +964,7 @@ export function createTerminalDrawer(options = {}) {
         console.warn('Failed to create new terminal shell:', err);
       } finally {
         await refreshShellMenu();
+        emitTerminalRegister('auto');
       }
     });
   }

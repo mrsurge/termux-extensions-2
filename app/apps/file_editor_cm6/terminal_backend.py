@@ -10,9 +10,11 @@ import json
 import shlex
 import re
 import shutil
+import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query, Depends
+import socketio
 
 from framework_shells import FrameworkShellManager, get_manager
 
@@ -35,6 +37,44 @@ terminal_router = APIRouter()
 _active_terminal_sockets: Dict[WebSocket, Optional[str]] = {}
 _active_terminal_lock = asyncio.Lock()
 _shell_create_locks: Dict[str, asyncio.Lock] = {}
+_TERMINAL_SIO: socketio.AsyncServer | None = None
+_active_terminal_sids: Dict[str, Optional[str]] = {}
+_terminal_sid_shells: Dict[str, str] = {}
+_terminal_sid_clients: Dict[str, str] = {}
+_terminal_sid_lock = asyncio.Lock()
+_terminal_stream_tasks: Dict[str, asyncio.Task[Any]] = {}
+_terminal_stream_refcounts: Dict[str, int] = {}
+_terminal_stream_lock = asyncio.Lock()
+
+
+def attach_terminal_socketio_server(server: socketio.AsyncServer) -> None:
+    global _TERMINAL_SIO
+    _TERMINAL_SIO = server
+
+
+def _terminal_shell_room(shell_id: str) -> str:
+    return f"terminal:shell:{str(shell_id or '').strip() or 'unknown'}"
+
+
+def _terminal_client_room(client_id: str) -> str:
+    return f"terminal:client:{str(client_id or '').strip() or 'unknown'}"
+
+
+async def _emit_terminal_to_sid(event: str, payload: dict, sid: str) -> None:
+    if not _TERMINAL_SIO or not sid:
+        return
+    await _TERMINAL_SIO.emit(event, payload, namespace="/terminal", to=sid)
+
+
+async def _emit_terminal_to_shell(event: str, payload: dict, shell_id: str) -> None:
+    if not _TERMINAL_SIO or not shell_id:
+        return
+    await _TERMINAL_SIO.emit(
+        event,
+        payload,
+        namespace="/terminal",
+        room=_terminal_shell_room(shell_id),
+    )
 
 
 def _shell_lock_key(project_path: Optional[str], fallback: str) -> str:
@@ -58,6 +98,373 @@ def _get_shell_create_lock(key: str) -> asyncio.Lock:
     return lock
 
 
+async def _resolve_terminal_shell_id(
+    requested_shell_id: str,
+    *,
+    mgr: FrameworkShellManager,
+    history_store,
+) -> tuple[str, Optional[str]]:
+    shell_id = str(requested_shell_id or "").strip() or "auto"
+    shell_project_path = history_store.get_active_project()
+
+    if shell_id != "auto":
+        rec = await mgr.get_shell(shell_id)
+        if not rec or rec.status != "running" or not rec.pid:
+            raise RuntimeError("Shell is not running")
+        return shell_id, shell_project_path
+
+    saved_shell_id = history_store.get_terminal_shell_id(shell_project_path)
+    if saved_shell_id:
+        rec = await mgr.get_shell(saved_shell_id)
+        if rec and rec.status == "running" and rec.pid:
+            return saved_shell_id, shell_project_path
+        history_store.set_terminal_shell_id(None, shell_project_path)
+
+    project_path = shell_project_path
+    cwd = project_path if project_path and Path(project_path).is_dir() else str(Path.home())
+    shell_id = await _ensure_terminal_shell(
+        project_path=project_path,
+        preferred_cwd=cwd,
+        mgr=mgr,
+        history_store=history_store,
+    )
+    return shell_id, shell_project_path
+
+
+async def _terminal_projects_for_shell(shell_id: str) -> set[str]:
+    async with _terminal_sid_lock:
+        items = list(_active_terminal_sids.items())
+        sid_shells = dict(_terminal_sid_shells)
+    projects: set[str] = set()
+    for sid, project_path in items:
+        if sid_shells.get(sid) != shell_id:
+            continue
+        if project_path:
+            projects.add(project_path)
+    return projects
+
+
+async def _forward_terminal_stream(shell_id: str, output_queue) -> None:
+    mgr = await get_manager()
+    exit_notified = False
+    last_status_check = 0.0
+
+    try:
+        while True:
+            try:
+                chunk = await asyncio.wait_for(output_queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                if exit_notified:
+                    continue
+                now = asyncio.get_running_loop().time()
+                if now - last_status_check < 2.0:
+                    continue
+                last_status_check = now
+
+                try:
+                    rec = await mgr.get_shell(shell_id)
+                except Exception:
+                    rec = None
+
+                live = bool(rec and rec.status == "running" and rec.pid)
+                if live:
+                    continue
+
+                status_tag = _terminal_status_tag(
+                    rec.status if rec else "missing",
+                    rec.pid if rec else None,
+                )
+                exit_code = rec.exit_code if rec else None
+                marker = f"\r\n\r\n[{status_tag}]\r\n"
+                if exit_code is not None and status_tag in ("exited", "live"):
+                    marker = f"\r\n\r\n[{status_tag}: {exit_code}]\r\n"
+
+                exit_notified = True
+                await _emit_terminal_to_shell(
+                    "terminal:output",
+                    {"shell_id": shell_id, "data": marker},
+                    shell_id,
+                )
+                await _emit_terminal_to_shell(
+                    "terminal:closed",
+                    {
+                        "shell_id": shell_id,
+                        "status": status_tag,
+                        "exit_code": exit_code,
+                        "marker": marker,
+                        "ts": int(time.time() * 1000),
+                    },
+                    shell_id,
+                )
+                for project_path in await _terminal_projects_for_shell(shell_id):
+                    try:
+                        await _broadcast_terminal_shell_list(project_path)
+                    except Exception:
+                        pass
+                return
+
+            await _emit_terminal_to_shell(
+                "terminal:output",
+                {"shell_id": shell_id, "data": chunk},
+                shell_id,
+            )
+    finally:
+        try:
+            await mgr.unsubscribe_output(shell_id, output_queue)
+        except Exception:
+            pass
+        async with _terminal_stream_lock:
+            _terminal_stream_tasks.pop(shell_id, None)
+            _terminal_stream_refcounts.pop(shell_id, None)
+
+
+async def _ensure_terminal_stream(shell_id: str) -> None:
+    mgr = await get_manager()
+    start_task = False
+    output_queue = None
+    async with _terminal_stream_lock:
+        refs = _terminal_stream_refcounts.get(shell_id, 0) + 1
+        _terminal_stream_refcounts[shell_id] = refs
+        if shell_id not in _terminal_stream_tasks:
+            output_queue = await mgr.subscribe_output(shell_id)
+            start_task = True
+            _terminal_stream_tasks[shell_id] = asyncio.create_task(
+                _forward_terminal_stream(shell_id, output_queue),
+                name=f"terminal-stream-{shell_id}",
+            )
+    if not start_task:
+        return
+
+
+async def _release_terminal_stream(shell_id: Optional[str]) -> None:
+    if not shell_id:
+        return
+    task: asyncio.Task[Any] | None = None
+    async with _terminal_stream_lock:
+        refs = _terminal_stream_refcounts.get(shell_id, 0)
+        if refs <= 1:
+            _terminal_stream_refcounts.pop(shell_id, None)
+            task = _terminal_stream_tasks.pop(shell_id, None)
+        else:
+            _terminal_stream_refcounts[shell_id] = refs - 1
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+async def _detach_terminal_sid(ns: socketio.AsyncNamespace, sid: str) -> None:
+    async with _terminal_sid_lock:
+        old_shell_id = _terminal_sid_shells.pop(sid, None)
+        _terminal_sid_clients.pop(sid, None)
+        _active_terminal_sids.pop(sid, None)
+    if old_shell_id:
+        try:
+            await ns.leave_room(sid, _terminal_shell_room(old_shell_id))
+        except Exception:
+            pass
+        await _release_terminal_stream(old_shell_id)
+
+
+async def _bind_terminal_sid(
+    ns: socketio.AsyncNamespace,
+    sid: str,
+    shell_id: str,
+    *,
+    client_id: str | None = None,
+    project_path: str | None = None,
+) -> tuple[bool, str | None]:
+    shell_id = str(shell_id or "").strip()
+    if not shell_id:
+        raise RuntimeError("Missing shell id")
+    requested_client_id = str(client_id or "").strip() or sid
+    requested_project_path = str(project_path or "").strip() or None
+
+    async with _terminal_sid_lock:
+        old_shell_id = _terminal_sid_shells.get(sid)
+        old_client_id = _terminal_sid_clients.get(sid)
+        old_project_path = _active_terminal_sids.get(sid)
+    same_shell = bool(old_shell_id and old_shell_id == shell_id)
+
+    if old_shell_id and old_shell_id != shell_id:
+        try:
+            await ns.leave_room(sid, _terminal_shell_room(old_shell_id))
+        except Exception:
+            pass
+        await _release_terminal_stream(old_shell_id)
+
+    active_client_id = old_client_id or requested_client_id
+    active_project_path = requested_project_path if requested_project_path is not None else old_project_path
+
+    await ns.enter_room(sid, _terminal_client_room(active_client_id))
+    if not same_shell:
+        await ns.enter_room(sid, _terminal_shell_room(shell_id))
+        await _ensure_terminal_stream(shell_id)
+
+    async with _terminal_sid_lock:
+        _terminal_sid_clients[sid] = active_client_id
+        _terminal_sid_shells[sid] = shell_id
+        _active_terminal_sids[sid] = active_project_path
+
+    return same_shell, active_project_path
+
+
+async def _resolve_terminal_event_shell(
+    ns: socketio.AsyncNamespace,
+    sid: str,
+    payload: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    requested_shell_id = str(payload.get("shell_id") or payload.get("shellId") or "").strip()
+    requested_client_id = str(payload.get("client_id") or "").strip() or None
+    requested_project_path = str(payload.get("project_path") or "").strip() or None
+    if requested_shell_id:
+        mgr = await get_manager()
+        rec = await mgr.get_shell(requested_shell_id)
+        if not rec or rec.status != "running" or not rec.pid:
+            raise RuntimeError("Shell is not running")
+        _, active_project_path = await _bind_terminal_sid(
+            ns,
+            sid,
+            requested_shell_id,
+            client_id=requested_client_id,
+            project_path=requested_project_path,
+        )
+        return requested_shell_id, active_project_path
+
+    async with _terminal_sid_lock:
+        return _terminal_sid_shells.get(sid), _active_terminal_sids.get(sid)
+
+
+class TerminalSocketIONamespace(socketio.AsyncNamespace):
+    async def trigger_event(self, event, *args):
+        normalized = event.replace(":", "_") if event else event
+        handler = getattr(self, "on_" + (normalized or ""), None)
+        if handler:
+            return await handler(*args)
+        return await super().trigger_event(event, *args)
+
+    async def on_connect(self, sid, environ):
+        print(f"[terminal_ws] connect sid={sid}", flush=True)
+
+    async def on_disconnect(self, sid, reason=None):
+        print(f"[terminal_ws] disconnect sid={sid} reason={reason}", flush=True)
+        await _detach_terminal_sid(self, sid)
+
+    async def on_terminal_register(self, sid, data):
+        payload = data if isinstance(data, dict) else {}
+        client_id = str(payload.get("client_id") or sid).strip() or sid
+        requested_shell_id = str(payload.get("shellId") or payload.get("shell_id") or "auto").strip() or "auto"
+        history_store = get_history_store()
+        mgr = await get_manager()
+
+        try:
+            shell_id, shell_project_path = await _resolve_terminal_shell_id(
+                requested_shell_id,
+                mgr=mgr,
+                history_store=history_store,
+            )
+        except Exception as exc:
+            await self.emit(
+                "terminal:error",
+                {"message": str(exc), "shell_id": requested_shell_id, "ts": int(time.time() * 1000)},
+                to=sid,
+            )
+            return
+
+        await _bind_terminal_sid(
+            self,
+            sid,
+            shell_id,
+            client_id=client_id,
+            project_path=shell_project_path,
+        )
+
+        await self.emit(
+            "terminal:shell_id",
+            {
+                "shell_id": shell_id,
+                "project_path": shell_project_path,
+                "requested_shell_id": requested_shell_id,
+                "ts": int(time.time() * 1000),
+            },
+            to=sid,
+        )
+
+        if shell_project_path:
+            try:
+                snapshot = await _build_terminal_shell_list(shell_project_path, include_exited=True)
+                await self.emit("terminal:shell_list", snapshot, to=sid)
+            except Exception:
+                pass
+
+    async def on_terminal_input(self, sid, data):
+        payload = data if isinstance(data, dict) else {}
+        text = payload.get("data")
+        if text is None:
+            return
+        try:
+            shell_id, _project_path = await _resolve_terminal_event_shell(self, sid, payload)
+        except Exception as exc:
+            await self.emit("terminal:error", {"message": str(exc)}, to=sid)
+            return
+        if not shell_id:
+            await self.emit("terminal:error", {"message": "No shell bound to this client or payload"}, to=sid)
+            return
+        try:
+            mgr = await get_manager()
+            await mgr.write_to_pty(shell_id, str(text))
+        except Exception as exc:
+            await self.emit("terminal:error", {"message": str(exc), "shell_id": shell_id}, to=sid)
+
+    async def on_terminal_resize(self, sid, data):
+        payload = data if isinstance(data, dict) else {}
+        cols = int(payload.get("cols") or 80)
+        rows = int(payload.get("rows") or 24)
+        try:
+            shell_id, _project_path = await _resolve_terminal_event_shell(self, sid, payload)
+        except Exception as exc:
+            await self.emit("terminal:error", {"message": str(exc)}, to=sid)
+            return
+        if not shell_id:
+            return
+        try:
+            await resize_editor_shell(shell_id, cols, rows)
+        except Exception as exc:
+            await self.emit("terminal:error", {"message": str(exc), "shell_id": shell_id}, to=sid)
+
+    async def on_terminal_action(self, sid, data):
+        payload = data if isinstance(data, dict) else {}
+        action = str(payload.get("action") or "").strip().lower()
+        async with _terminal_sid_lock:
+            shell_id = _terminal_sid_shells.get(sid)
+            project_path = _active_terminal_sids.get(sid)
+        if not shell_id:
+            return
+        if action not in {"destroy"}:
+            await self.emit(
+                "terminal:error",
+                {"message": f"Unsupported action '{action}'", "shell_id": shell_id},
+                to=sid,
+            )
+            return
+        try:
+            await destroy_editor_shell(shell_id)
+            if project_path:
+                sidecar = ProjectSidecar.load_or_create(project_path)
+                sidecar.remove_terminal_shell_id(shell_id)
+                sidecar.save()
+            await self.emit(
+                "terminal:closed",
+                {"shell_id": shell_id, "status": "destroyed", "ts": int(time.time() * 1000)},
+                to=sid,
+            )
+            await close_active_terminal_sockets("terminal destroyed")
+        except Exception as exc:
+            await self.emit("terminal:error", {"message": str(exc), "shell_id": shell_id}, to=sid)
+
+
 async def close_active_terminal_sockets(reason: str = "project switch") -> None:
     """Close all live terminal websocket connections.
 
@@ -78,6 +485,16 @@ async def close_active_terminal_sockets(reason: str = "project switch") -> None:
 
     for ws in sockets:
         asyncio.create_task(_close_one(ws))
+
+    if _TERMINAL_SIO:
+        async with _terminal_sid_lock:
+            sids = list(_active_terminal_sids.keys())
+        payload = {"reason": str(reason or "project switch"), "ts": int(time.time() * 1000)}
+        for sid in sids:
+            try:
+                await _emit_terminal_to_sid("terminal:rebind_required", payload, sid)
+            except Exception:
+                pass
 
 
 def _terminal_display_label(title: Optional[str], shell_id: str) -> str:
@@ -142,6 +559,17 @@ async def _broadcast_terminal_shell_list(project_path: str) -> None:
             # Drop dead sockets.
             async with _active_terminal_lock:
                 _active_terminal_sockets.pop(ws, None)
+
+    if _TERMINAL_SIO:
+        async with _terminal_sid_lock:
+            sid_targets = [(sid, proj) for sid, proj in _active_terminal_sids.items()]
+        for sid, proj in sid_targets:
+            if proj != project_path:
+                continue
+            try:
+                await _emit_terminal_to_sid("terminal:shell_list", dict(payload), sid)
+            except Exception:
+                pass
 
 def get_history_store():
     """Return the shared HistoryStore instance used across the app."""
@@ -591,53 +1019,34 @@ async def terminal_ws(websocket: WebSocket, shell_id: str):
     shell_project_path: str | None = None
     
     # Handle auto shell management
-    if shell_id == 'auto':
-        print(f"[Terminal WS] Auto shell management requested")
-        shell_project_path = history_store.get_active_project()
-        saved_shell_id = history_store.get_terminal_shell_id(shell_project_path)
-        print(f"[Terminal WS] Saved shell ID from history: {saved_shell_id}")
-        
-        # Validate saved shell - DIRECT AWAIT
-        if saved_shell_id:
-            rec = await mgr.get_shell(saved_shell_id)
-            if rec and rec.status == 'running' and rec.pid:
-                print(f"[Terminal WS] Reconnecting to existing shell: {saved_shell_id}")
-                shell_id = saved_shell_id
-            else:
-                print(f"[Terminal WS] Saved shell no longer running (status={rec.status if rec else 'not found'})")
-                history_store.set_terminal_shell_id(None, shell_project_path)
-                saved_shell_id = None
-        else:
-            print(f"[Terminal WS] No saved shell ID found")
-        
-        # Create new shell if needed - DIRECT AWAIT
-        if not saved_shell_id:
-            project_path = shell_project_path
-            cwd = project_path if project_path and Path(project_path).is_dir() else str(Path.home())
-            print(f"[Terminal WS] Ensuring terminal shell exists (cwd={cwd})")
-            shell_id = await _ensure_terminal_shell(
-                project_path=project_path,
-                preferred_cwd=cwd,
-                mgr=mgr,
-                history_store=history_store,
-            )
-            print(f"[Terminal WS] Using shell: {shell_id}")
-        
-        # Send shell ID to client
-        print(f"[Terminal WS] Sending shell_id to client: {shell_id}")
-        await websocket.send_json({"type": "shell_id", "shell_id": shell_id})
+    try:
+        shell_id, shell_project_path = await _resolve_terminal_shell_id(
+            shell_id,
+            mgr=mgr,
+            history_store=history_store,
+        )
+    except Exception as e:
+        await websocket.send_json({"type": "error", "message": str(e)})
+        await websocket.close()
+        return
 
-        # Track project association for UI update broadcasts.
-        async with _active_terminal_lock:
-            _active_terminal_sockets[websocket] = shell_project_path
+    print(f"[Terminal WS] Using shell: {shell_id}")
 
-        # Send initial shell list snapshot (titles + statuses) to seed the header.
-        if shell_project_path:
-            try:
-                snapshot = await _build_terminal_shell_list(shell_project_path, include_exited=True)
-                await websocket.send_json({"type": "shell_list", **snapshot})
-            except Exception:
-                pass
+    # Send shell ID to client
+    print(f"[Terminal WS] Sending shell_id to client: {shell_id}")
+    await websocket.send_json({"type": "shell_id", "shell_id": shell_id})
+
+    # Track project association for UI update broadcasts.
+    async with _active_terminal_lock:
+        _active_terminal_sockets[websocket] = shell_project_path
+
+    # Send initial shell list snapshot (titles + statuses) to seed the header.
+    if shell_project_path:
+        try:
+            snapshot = await _build_terminal_shell_list(shell_project_path, include_exited=True)
+            await websocket.send_json({"type": "shell_list", **snapshot})
+        except Exception:
+            pass
     
     # Subscribe to output - DIRECT AWAIT, AsyncQueue returned
     try:

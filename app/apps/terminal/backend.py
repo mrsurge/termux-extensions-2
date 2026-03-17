@@ -255,3 +255,13 @@ async def terminal_ws(websocket: WebSocket, shell_id: str):
         except asyncio.CancelledError:
             pass
         await m.unsubscribe_output(shell_id, q)
+
+
+def _build_subapps():
+    from .terminal_socketio import TERMINAL_ASGI_APP
+    return [
+        ("/terminal_app_ws/socket.io", TERMINAL_ASGI_APP),
+    ]
+
+
+SUBAPPS = _build_subapps()

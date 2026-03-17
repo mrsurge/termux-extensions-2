@@ -1061,6 +1061,10 @@ from app.apps.file_editor_cm6.explorer_socketio import EXPLORER_ASGI_APP
 # Frontend-to-frontend relay for iframe ↔ main page communication.
 from app.apps.file_editor_cm6.ui_ipc.ui_ipc_socketio import UI_IPC_ASGI_APP
 
+# --- Terminal Socket.IO (worker-owned) ---
+# The main framework process proxies /terminal_ws/socket.io to this worker endpoint.
+from app.apps.file_editor_cm6.terminal_socketio import TERMINAL_ASGI_APP
+
 # --- TE2 MCP (worker-owned HTTP transports) ---
 from app.apps.file_editor_cm6.mcps.te2_mcp.server import (
     build_http_app as build_te2_mcp_http_app,
@@ -1074,6 +1078,7 @@ SUBAPPS = [
     ("/editor_ws/socket.io", EDITOR_ASGI_APP),
     ("/explorer_ws/socket.io", EXPLORER_ASGI_APP),
     ("/ui_ipc_ws/socket.io", UI_IPC_ASGI_APP),
+    ("/terminal_ws/socket.io", TERMINAL_ASGI_APP),
     ("/te2_mcp", TE2_MCP_ASGI_APP),
     ("/te2_mcp_http", TE2_MCP_STREAMABLE_HTTP_ASGI_APP),
 ]

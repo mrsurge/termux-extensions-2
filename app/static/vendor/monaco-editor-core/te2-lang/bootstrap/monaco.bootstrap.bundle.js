@@ -182676,11 +182676,75 @@ var ContentHoverWidget = class ContentHoverWidget2 extends ResizableContentWidge
     }));
     this._setRenderedHover(void 0);
     this._editor.addContentWidget(this);
+    this._initTouchDrag();
   }
   dispose() {
     super.dispose();
     this._renderedHover?.dispose();
     this._editor.removeContentWidget(this);
+  }
+  _initTouchDrag() {
+    const domNode = this._resizableNode.domNode;
+    let dragState = null;
+    const onTouchStart = (e) => {
+      if (!this.isVisible || this._isResizing) {
+        return;
+      }
+      if (e.touches.length !== 1) {
+        return;
+      }
+      const target = e.target;
+      if (!target.closest(".status-bar, .monaco-sash")) {
+        return;
+      }
+      if (target.closest("a, button, input, textarea, select, [contenteditable]")) {
+        return;
+      }
+      const touch = e.touches[0];
+      const rect = domNode.getBoundingClientRect();
+      dragState = {
+        startTouchX: touch.clientX,
+        startTouchY: touch.clientY,
+        startLeft: rect.left,
+        startTop: rect.top,
+        moved: false
+      };
+    };
+    const onTouchMove = (e) => {
+      if (!dragState || e.touches.length !== 1) {
+        return;
+      }
+      const touch = e.touches[0];
+      const dx = touch.clientX - dragState.startTouchX;
+      const dy = touch.clientY - dragState.startTouchY;
+      if (!dragState.moved && Math.abs(dx) < 6 && Math.abs(dy) < 6) {
+        return;
+      }
+      dragState.moved = true;
+      e.preventDefault();
+      e.stopPropagation();
+      const editorDomNode = this._editor.getDomNode();
+      if (!editorDomNode) {
+        return;
+      }
+      const editorRect = editorDomNode.getBoundingClientRect();
+      const widgetW = domNode.offsetWidth;
+      const widgetH = domNode.offsetHeight;
+      let newLeft = dragState.startLeft + dx;
+      let newTop = dragState.startTop + dy;
+      newLeft = Math.max(editorRect.left, Math.min(newLeft, editorRect.right - widgetW));
+      newTop = Math.max(editorRect.top, Math.min(newTop, editorRect.bottom - widgetH));
+      domNode.style.position = "fixed";
+      domNode.style.left = newLeft + "px";
+      domNode.style.top = newTop + "px";
+    };
+    const onTouchEnd = () => {
+      dragState = null;
+    };
+    domNode.addEventListener("touchstart", onTouchStart, { passive: true });
+    domNode.addEventListener("touchmove", onTouchMove, { passive: false });
+    domNode.addEventListener("touchend", onTouchEnd, { passive: true });
+    domNode.addEventListener("touchcancel", onTouchEnd, { passive: true });
   }
   getId() {
     return ContentHoverWidget_1.ID;
@@ -182777,9 +182841,9 @@ var ContentHoverWidget = class ContentHoverWidget2 extends ResizableContentWidge
     const overflowing = this._isHoverTextOverflowing();
     const initialWidth = typeof this._contentWidth === "undefined" ? 0 : this._contentWidth;
     if (overflowing || this._hover.containerDomNode.clientWidth < initialWidth) {
-      const bodyBoxWidth = getClientArea(this._hover.containerDomNode.ownerDocument.body).width;
+      const editorWidth = this._editor.getLayoutInfo().width;
       const horizontalPadding = 14;
-      return bodyBoxWidth - horizontalPadding;
+      return editorWidth - horizontalPadding;
     } else {
       return this._hover.containerDomNode.clientWidth;
     }
@@ -191481,8 +191545,10 @@ var MessageWidget2 = class {
     this._relatedDiagnostics = /* @__PURE__ */ new WeakMap();
     this._disposables = new DisposableStore();
     this._editor = editor2;
+    this._measuredLines = 0;
     const domNode = document.createElement("div");
     domNode.className = "descriptioncontainer";
+    this._domNode = domNode;
     this._messageBlock = document.createElement("div");
     this._messageBlock.classList.add("message");
     this._messageBlock.setAttribute("aria-live", "assertive");
@@ -191608,9 +191674,23 @@ var MessageWidget2 = class {
     this._scrollable.getDomNode().style.height = `${height}px`;
     this._scrollable.getDomNode().style.width = `${width2}px`;
     this._scrollable.setScrollDimensions({ width: width2, height });
+    this._domNode.style.width = `${width2}px`;
+    const fontInfo = this._editor.getOption(
+      59
+      /* EditorOption.fontInfo */
+    );
+    const actualHeight = this._domNode.scrollHeight;
+    if (actualHeight > 0 && fontInfo.lineHeight > 0) {
+      this._measuredLines = Math.ceil(actualHeight / fontInfo.lineHeight);
+      this._scrollable.setScrollDimensions({
+        scrollWidth: width2,
+        scrollHeight: actualHeight
+      });
+    }
   }
   getHeightInLines() {
-    return Math.min(17, this._lines);
+    const lines = this._measuredLines > 0 ? Math.max(this._lines, this._measuredLines) : this._lines;
+    return Math.min(17, lines);
   }
   getAriaLabel(marker) {
     let severityLabel = "";
@@ -191656,6 +191736,7 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
     this.onDidSelectRelatedInformation = this._onDidSelectRelatedInformation.event;
     this._severity = MarkerSeverity.Warning;
     this._backgroundColor = Color.white;
+    this._relayoutScheduled = false;
     this._applyTheme(_themeService.getColorTheme());
     this._callOnDispose.add(_themeService.onDidColorThemeChange(this._applyTheme.bind(this)));
     this.create();
@@ -191747,11 +191828,28 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
   _doLayoutBody(heightInPixel, widthInPixel) {
     super._doLayoutBody(heightInPixel, widthInPixel);
     this._heightInPixel = heightInPixel;
-    this._message.layout(heightInPixel, widthInPixel);
+    const effectiveWidth = widthInPixel - this.editor.getLayoutInfo().minimapWidth;
+    this._message.layout(heightInPixel, effectiveWidth);
     this._container.style.height = `${heightInPixel}px`;
+    if (!this._relayoutScheduled) {
+      const fontInfo = this.editor.getOption(
+        59
+        /* EditorOption.fontInfo */
+      );
+      const currentLines = Math.floor(heightInPixel / fontInfo.lineHeight);
+      const neededLines = this._message.getHeightInLines();
+      if (neededLines > currentLines) {
+        this._relayoutScheduled = true;
+        queueMicrotask(() => {
+          this._relayoutScheduled = false;
+          this._relayout();
+        });
+      }
+    }
   }
   _onWidth(widthInPixel) {
-    this._message.layout(this._heightInPixel, widthInPixel);
+    const effectiveWidth = widthInPixel - this.editor.getLayoutInfo().minimapWidth;
+    this._message.layout(this._heightInPixel, effectiveWidth);
   }
   _relayout() {
     super._relayout(this.computeRequiredHeight());

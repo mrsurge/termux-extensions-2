@@ -78,11 +78,76 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
         }));
         this._setRenderedHover(undefined);
         this._editor.addContentWidget(this);
+        this._initTouchDrag();
     }
     dispose() {
         super.dispose();
         this._renderedHover?.dispose();
         this._editor.removeContentWidget(this);
+    }
+    _initTouchDrag() {
+        const domNode = this._resizableNode.domNode;
+        let dragState = null;
+        const onTouchStart = (e) => {
+            if (!this.isVisible || this._isResizing) {
+                return;
+            }
+            if (e.touches.length !== 1) {
+                return;
+            }
+            const target = e.target;
+            // Only drag from the status-bar row or sash edges — let content area scroll
+            if (!target.closest('.status-bar, .monaco-sash')) {
+                return;
+            }
+            if (target.closest('a, button, input, textarea, select, [contenteditable]')) {
+                return;
+            }
+            const touch = e.touches[0];
+            const rect = domNode.getBoundingClientRect();
+            dragState = {
+                startTouchX: touch.clientX,
+                startTouchY: touch.clientY,
+                startLeft: rect.left,
+                startTop: rect.top,
+                moved: false
+            };
+        };
+        const onTouchMove = (e) => {
+            if (!dragState || e.touches.length !== 1) {
+                return;
+            }
+            const touch = e.touches[0];
+            const dx = touch.clientX - dragState.startTouchX;
+            const dy = touch.clientY - dragState.startTouchY;
+            if (!dragState.moved && Math.abs(dx) < 6 && Math.abs(dy) < 6) {
+                return;
+            }
+            dragState.moved = true;
+            e.preventDefault();
+            e.stopPropagation();
+            const editorDomNode = this._editor.getDomNode();
+            if (!editorDomNode) {
+                return;
+            }
+            const editorRect = editorDomNode.getBoundingClientRect();
+            const widgetW = domNode.offsetWidth;
+            const widgetH = domNode.offsetHeight;
+            let newLeft = dragState.startLeft + dx;
+            let newTop = dragState.startTop + dy;
+            newLeft = Math.max(editorRect.left, Math.min(newLeft, editorRect.right - widgetW));
+            newTop = Math.max(editorRect.top, Math.min(newTop, editorRect.bottom - widgetH));
+            domNode.style.position = 'fixed';
+            domNode.style.left = newLeft + 'px';
+            domNode.style.top = newTop + 'px';
+        };
+        const onTouchEnd = () => {
+            dragState = null;
+        };
+        domNode.addEventListener('touchstart', onTouchStart, { passive: true });
+        domNode.addEventListener('touchmove', onTouchMove, { passive: false });
+        domNode.addEventListener('touchend', onTouchEnd, { passive: true });
+        domNode.addEventListener('touchcancel', onTouchEnd, { passive: true });
     }
     getId() {
         return ContentHoverWidget_1.ID;
@@ -184,9 +249,9 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
             ? 0
             : this._contentWidth);
         if (overflowing || this._hover.containerDomNode.clientWidth < initialWidth) {
-            const bodyBoxWidth = dom.getClientArea(this._hover.containerDomNode.ownerDocument.body).width;
+            const editorWidth = this._editor.getLayoutInfo().width;
             const horizontalPadding = 14;
-            return bodyBoxWidth - horizontalPadding;
+            return editorWidth - horizontalPadding;
         }
         else {
             return this._hover.containerDomNode.clientWidth;

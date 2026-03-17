@@ -43,8 +43,10 @@ class MessageWidget {
         this._relatedDiagnostics = new WeakMap();
         this._disposables = new DisposableStore();
         this._editor = editor;
+        this._measuredLines = 0;
         const domNode = document.createElement('div');
         domNode.className = 'descriptioncontainer';
+        this._domNode = domNode;
         this._messageBlock = document.createElement('div');
         this._messageBlock.classList.add('message');
         this._messageBlock.setAttribute('aria-live', 'assertive');
@@ -166,9 +168,22 @@ class MessageWidget {
         this._scrollable.getDomNode().style.height = `${height}px`;
         this._scrollable.getDomNode().style.width = `${width}px`;
         this._scrollable.setScrollDimensions({ width, height });
+        // Constrain descriptioncontainer width so text wraps within bounds
+        this._domNode.style.width = `${width}px`;
+        // Measure actual content height after wrapping
+        const fontInfo = this._editor.getOption(59 /* EditorOption.fontInfo */);
+        const actualHeight = this._domNode.scrollHeight;
+        if (actualHeight > 0 && fontInfo.lineHeight > 0) {
+            this._measuredLines = Math.ceil(actualHeight / fontInfo.lineHeight);
+            this._scrollable.setScrollDimensions({
+                scrollWidth: width,
+                scrollHeight: actualHeight
+            });
+        }
     }
     getHeightInLines() {
-        return Math.min(17, this._lines);
+        const lines = this._measuredLines > 0 ? Math.max(this._lines, this._measuredLines) : this._lines;
+        return Math.min(17, lines);
     }
     getAriaLabel(marker) {
         let severityLabel = '';
@@ -210,6 +225,7 @@ let MarkerNavigationWidget = class MarkerNavigationWidget extends PeekViewWidget
         this.onDidSelectRelatedInformation = this._onDidSelectRelatedInformation.event;
         this._severity = MarkerSeverity.Warning;
         this._backgroundColor = Color.white;
+        this._relayoutScheduled = false;
         this._applyTheme(_themeService.getColorTheme());
         this._callOnDispose.add(_themeService.onDidColorThemeChange(this._applyTheme.bind(this)));
         this.create();
@@ -305,11 +321,26 @@ let MarkerNavigationWidget = class MarkerNavigationWidget extends PeekViewWidget
     _doLayoutBody(heightInPixel, widthInPixel) {
         super._doLayoutBody(heightInPixel, widthInPixel);
         this._heightInPixel = heightInPixel;
-        this._message.layout(heightInPixel, widthInPixel);
+        const effectiveWidth = widthInPixel - this.editor.getLayoutInfo().minimapWidth;
+        this._message.layout(heightInPixel, effectiveWidth);
         this._container.style.height = `${heightInPixel}px`;
+        // After layout/measure, check if wrapping requires more height
+        if (!this._relayoutScheduled) {
+            const fontInfo = this.editor.getOption(59 /* EditorOption.fontInfo */);
+            const currentLines = Math.floor(heightInPixel / fontInfo.lineHeight);
+            const neededLines = this._message.getHeightInLines();
+            if (neededLines > currentLines) {
+                this._relayoutScheduled = true;
+                queueMicrotask(() => {
+                    this._relayoutScheduled = false;
+                    this._relayout();
+                });
+            }
+        }
     }
     _onWidth(widthInPixel) {
-        this._message.layout(this._heightInPixel, widthInPixel);
+        const effectiveWidth = widthInPixel - this.editor.getLayoutInfo().minimapWidth;
+        this._message.layout(this._heightInPixel, effectiveWidth);
     }
     _relayout() {
         super._relayout(this.computeRequiredHeight());

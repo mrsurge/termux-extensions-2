@@ -144,8 +144,9 @@ export default function initTerminalApp(root, api, host) {
   function sendSeq(seq) {
     if (!seq) return;
     const ws = state.ws;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(seq);
+    const shellId = state.activeId || state.wsDesiredId;
+    if (ws && ws.connected && shellId) {
+      ws.emit('terminal:input', { data: seq, shell_id: shellId });
     }
   }
 
@@ -180,6 +181,14 @@ export default function initTerminalApp(root, api, host) {
       s.onerror = (e) => reject(e);
       document.head.appendChild(s);
     });
+  }
+
+  async function ensureSocketIoClient() {
+    if (window.io) return window.io;
+    // Standalone terminal app owns this client dependency explicitly.
+    await loadScript('/static/vendor/socket.io.min.js');
+    if (window.io) return window.io;
+    throw new Error('Failed to load Socket.IO client');
   }
 
   function ensureXtermCSS() {
@@ -251,48 +260,87 @@ export default function initTerminalApp(root, api, host) {
     if (!desired) return;
 
     clearWsReconnectTimer();
+    state.wsDesiredId = desired;
+
+    const register = () => {
+      if (!state.ws || !state.ws.connected || !state.wsDesiredId) return;
+      state.ws.emit('terminal:register', { shellId: state.wsDesiredId });
+    };
 
     const existing = state.ws;
-    if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+    if (existing) {
+      if (existing.connected) {
+        register();
+        return;
+      }
+      try { existing.connect(); } catch (_) {}
       return;
     }
 
-    try { existing && existing.close(); } catch (_) {}
-    state.ws = null;
+    ensureSocketIoClient().then((io) => {
+      if (state.ws) return;
+      const socket = io('/terminal', {
+        path: '/terminal_app_ws/socket.io',
+        transports: ['websocket'],
+        query: {
+          app_id: 'terminal',
+          source: 'terminal_app',
+        },
+      });
+      state.ws = socket;
 
-    const ws = new WebSocket(wsUrlFor(desired));
-    state.ws = ws;
+      socket.on('connect', () => {
+        state.wsReconnectAttempts = 0;
+        ui.status.textContent = 'connected';
+        host.toast && host.toast('Connected');
+        register();
+        requestFit(6);
+      });
 
-    ws.onopen = () => {
-      state.wsReconnectAttempts = 0;
-      ui.status.textContent = 'connected';
-      host.toast && host.toast('Connected');
-      requestFit(6);
-      // Ensure the PTY has a winsize after the dtach attach proxy is live.
-      try {
-        if (state.term?.cols && state.term?.rows) {
-          scheduleResizeSync(desired, state.term.cols, state.term.rows, { force: true });
+      socket.on('disconnect', (reason) => {
+        ui.status.textContent = 'disconnected';
+        host.toast && host.toast(`Disconnected: ${reason || 'socket'}`);
+      });
+
+      socket.on('terminal:shell_id', (msg) => {
+        const shellId = String(msg?.shell_id || '').trim();
+        if (!shellId) return;
+        state.wsDesiredId = shellId;
+        ui.status.textContent = 'connected';
+        requestFit(6);
+        try {
+          if (state.term?.cols && state.term?.rows) {
+            state.ws.emit('terminal:resize', { cols: state.term.cols, rows: state.term.rows, shell_id: shellId });
+          }
+        } catch (_) {}
+      });
+
+      socket.on('terminal:output', (msg) => {
+        const data = typeof msg?.data === 'string' ? msg.data : '';
+        if (data && state.term) {
+          state.term.write(data);
         }
-      } catch (_) {}
-    };
+      });
 
-    ws.onclose = () => {
-      if (state.ws === ws) state.ws = null;
-      ui.status.textContent = 'disconnected';
-      host.toast && host.toast('Disconnected');
-      scheduleWsReconnect('close');
-    };
+      socket.on('terminal:closed', async (msg) => {
+        if (msg?.shell_id && msg.shell_id === state.activeId) {
+          state.wsDesiredId = null;
+          ui.status.textContent = msg?.status || 'closed';
+        }
+        try {
+          await listShells();
+        } catch (_) {}
+      });
 
-    ws.onerror = () => {
+      socket.on('terminal:error', (msg) => {
+        const message = msg?.message || 'Terminal socket error';
+        ui.status.textContent = message;
+        host.toast && host.toast(message);
+      });
+    }).catch((err) => {
       ui.status.textContent = 'socket error';
-      host.toast && host.toast('WebSocket error');
-    };
-
-    ws.onmessage = (evt) => {
-      const data = typeof evt.data === 'string' ? evt.data : '';
-      // Let xterm handle CR/LF semantics (convertEol handles bare LF as CRLF).
-      state.term && state.term.write(data);
-    };
+      host.toast && host.toast(err?.message || 'Socket.IO load failed');
+    });
   }
 
   function disposeSession() {
@@ -303,7 +351,7 @@ export default function initTerminalApp(root, api, host) {
       state.resizeSyncTimer = null;
     }
     state.lastResizeSent = null;
-    try { state.ws && state.ws.close(); } catch (_) {}
+    try { state.ws && state.ws.disconnect(); } catch (_) {}
     state.ws = null;
     try { state.term && state.term.dispose(); } catch (_) {}
     state.term = null;
@@ -386,7 +434,7 @@ export default function initTerminalApp(root, api, host) {
       requestFit(10);
       if (state.wsDesiredId && !state.ws) {
         connectWs(state.wsDesiredId);
-      } else if (state.wsDesiredId && state.ws && state.ws.readyState === WebSocket.CLOSED) {
+      } else if (state.wsDesiredId && state.ws && !state.ws.connected) {
         connectWs(state.wsDesiredId);
       }
     });
@@ -439,27 +487,9 @@ export default function initTerminalApp(root, api, host) {
       const key = `${shellId}:${c}x${r}`;
       if (!opts.force && state.lastResizeSent === key) return;
       state.lastResizeSent = key;
-
-      if (state.resizeSyncTimer) {
-        try { clearTimeout(state.resizeSyncTimer); } catch (_) {}
-        state.resizeSyncTimer = null;
+      if (state.ws && state.ws.connected) {
+        state.ws.emit('terminal:resize', { cols: c, rows: r, shell_id: shellId });
       }
-
-      let attempts = 0;
-      const tryOnce = async () => {
-        attempts += 1;
-        try {
-          await api.post(`shells/${shellId}/resize`, { cols: c, rows: r });
-          return;
-        } catch (_) {
-          if (attempts >= 12) return;
-          // If the dtach attach proxy isn't ready yet, retries usually succeed shortly after.
-          const delay = Math.min(1500, 80 * attempts);
-          state.resizeSyncTimer = setTimeout(tryOnce, delay);
-        }
-      };
-
-      void tryOnce();
     }
 
     // Keep backend PTY size in sync with viewport changes and font changes.
@@ -519,8 +549,8 @@ export default function initTerminalApp(root, api, host) {
         }
       }
       const ws = state.ws;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(payload);
+      if (ws && ws.connected) {
+        ws.emit('terminal:input', { data: payload, shell_id: id });
       }
     });
 
