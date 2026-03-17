@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "te2"
-version = "0.2.12"
+version = "0.2.24"
 description = "TE2 framework runtime and tooling"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -15,6 +15,12 @@ te2 = "app.cli.run_framework:main"
 
 [tool.setuptools]
 include-package-data = true
+
+[tool.setuptools.package-data]
+"app" = [
+    "static/**/*",
+    "apps/**/*",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
