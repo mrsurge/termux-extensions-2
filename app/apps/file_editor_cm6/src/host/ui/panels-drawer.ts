@@ -36,24 +36,12 @@ export function initPanelsAndDrawer(deps) {
     },
     onMention: async (payload) => {
       try {
-        const hostBase = typeof window.__agentHostBase === 'string'
-          ? window.__agentHostBase.trim()
-          : '';
-        if (!hostBase) {
-          deps.hostToast('Agent host unavailable');
+        if (typeof window.__explorerBusSend !== 'function') {
+          deps.hostToast('Explorer bus unavailable');
           return;
         }
-        const resp = await fetch(`${hostBase}/api/appserver/mention`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const result = await resp.json();
-        if (result && result.ok) {
-          deps.hostToast('Mentioned in conversation');
-        } else {
-          deps.hostToast(result?.error || 'Failed to mention');
-        }
+        window.__explorerBusSend('mention:agent', payload);
+        deps.hostToast('Mentioned in conversation');
       } catch (err) {
         console.warn('[Problems] mention failed:', err);
         deps.hostToast('Failed to mention in conversation');

@@ -1,0 +1,2 @@
+# Packages that require tur-repo.
+code-server

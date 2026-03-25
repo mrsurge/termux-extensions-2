@@ -1,15 +1,19 @@
 export function renderSearchOverlayBody(resultsContainer, state, deps) {
   const { searchMode, searchLoading, searchError, searchResults } = state;
-  resultsContainer.innerHTML = '';
 
-  // Diagnostics tab is self-contained — it renders from its own cached data,
-  // not from the search loading/results state.
+  // Diagnostics tab owns its own DOM lifecycle (persistent panel for
+  // diff-aware updates). Do NOT wipe the container — the renderer manages
+  // its children directly. Other mode leftovers are cleaned by the renderer.
   if (searchMode === 'diagnostics') {
     if (deps.renderDiagnosticsResults) {
       deps.renderDiagnosticsResults(resultsContainer);
     }
     return;
   }
+
+  // All other modes: clear and rebuild (this also clears any leftover
+  // diagnostics container when switching away from that tab).
+  resultsContainer.innerHTML = '';
 
   if (searchLoading) {
     const loading = document.createElement('div');

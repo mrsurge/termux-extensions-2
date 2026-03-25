@@ -1255,20 +1255,91 @@ export class WorkbenchClient {
       keys: userRemoteKeys,
     };
 
+    // ── Read workspace-scoped .vscode/settings.json ──────────────
+    // If a workspace folder is provided, read project-level settings.
+    // These populate the "workspace" section which overrides user settings.
+    const wsContents = {};
+    const wsKeys = [];
+    const wsOverrides = [];
+
+    if (folder) {
+      const wsSettingsPath = path.join(String(folder), ".vscode", "settings.json");
+      try {
+        const wsRaw = readFileSync(wsSettingsPath, "utf8");
+        const wsParsed = JSON.parse(wsRaw);
+        if (wsParsed && typeof wsParsed === "object" && !Array.isArray(wsParsed)) {
+          for (const [flatKey, value] of Object.entries(wsParsed)) {
+            if (flatKey.startsWith("[") && flatKey.endsWith("]")) {
+              if (value && typeof value === "object" && !Array.isArray(value)) {
+                const lang = flatKey.slice(1, -1);
+                const oKeys = Object.keys(value);
+                const oContents = {};
+                for (const [oKey, oVal] of Object.entries(value)) {
+                  const oDotIdx = oKey.indexOf(".");
+                  if (oDotIdx > 0) {
+                    const oSec = oKey.substring(0, oDotIdx);
+                    const oProp = oKey.substring(oDotIdx + 1);
+                    if (!oContents[oSec]) oContents[oSec] = {};
+                    const oParts = oProp.split(".");
+                    let oTarget = oContents[oSec];
+                    for (let j = 0; j < oParts.length - 1; j++) {
+                      if (!oTarget[oParts[j]] || typeof oTarget[oParts[j]] !== "object") oTarget[oParts[j]] = {};
+                      oTarget = oTarget[oParts[j]];
+                    }
+                    oTarget[oParts[oParts.length - 1]] = oVal;
+                  } else {
+                    oContents[oKey] = oVal;
+                  }
+                }
+                wsOverrides.push({ identifiers: [lang], keys: oKeys, contents: oContents });
+              }
+              continue;
+            }
+            const dotIdx = flatKey.indexOf(".");
+            if (dotIdx <= 0) continue;
+            const section = flatKey.substring(0, dotIdx);
+            const prop = flatKey.substring(dotIdx + 1);
+            if (!wsContents[section]) wsContents[section] = {};
+            const parts = prop.split(".");
+            let target = wsContents[section];
+            for (let i = 0; i < parts.length - 1; i++) {
+              if (!target[parts[i]] || typeof target[parts[i]] !== "object") target[parts[i]] = {};
+              target = target[parts[i]];
+            }
+            target[parts[parts.length - 1]] = value;
+            if (!wsKeys.includes(flatKey)) wsKeys.push(flatKey);
+          }
+          console.log(`[config] loaded ${wsKeys.length} workspace settings from ${wsSettingsPath}`);
+        }
+      } catch (e) {
+        // Missing .vscode/settings.json is normal — not an error
+        if (e?.code !== "ENOENT") {
+          console.log(`[config] could not read workspace settings (${wsSettingsPath}): ${e?.message ?? e}`);
+        }
+      }
+    }
+
+    const workspaceConfig = {
+      contents: wsContents,
+      overrides: wsOverrides,
+      keys: wsKeys,
+    };
+
     const data = {
       defaults,
       policy: empty,
       application: empty,
       userLocal: empty,
       userRemote,
-      workspace: empty,
+      workspace: workspaceConfig,
       folders: [],
       configurationScopes: [],
     };
     if (folder) {
       const rootPath = String(folder);
       const folderUri = this._uriForPath(rootPath, authority);
-      data.folders = [[folderUri, empty]];
+      // Folder config mirrors workspace config (single-root workspace)
+      data.folders = [[folderUri, { contents: { ...wsContents }, overrides: [...wsOverrides], keys: [...wsKeys] }]];
     }
     return data;
   }
@@ -1940,7 +2011,7 @@ export class WorkbenchClient {
       try {
         // In a real workbench session, configuration is then synced via `$acceptConfigurationChanged`.
         // Some extensions (including ms-python.python) appear to rely on this to observe settings.
-        const allChangedKeys = [...new Set([...configInit.defaults.keys, ...configInit.userRemote.keys])];
+        const allChangedKeys = [...new Set([...configInit.defaults.keys, ...configInit.userRemote.keys, ...configInit.workspace.keys])];
         this._sendExt(_rpcIds.ExtHostConfiguration, "$acceptConfigurationChanged", [configInit, { keys: allChangedKeys, overrides: [] }], false);
       } catch {}
 

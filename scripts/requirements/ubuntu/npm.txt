@@ -1,0 +1,2 @@
+# Debian / Ubuntu app-level packages installed via npm.
+code-server

@@ -61,7 +61,8 @@ export function createSettingsBootstrap(deps) {
   });
 
   function openExtConfigModal(extId, displayName, schema, currentValues) {
-    settingsConfigModalController?.openExtConfigModal(extId, displayName, schema, currentValues);
+    const scope = settingsRefreshController.getActiveScope();
+    settingsConfigModalController?.openExtConfigModal(extId, displayName, schema, currentValues, scope);
   }
 
   async function refreshEditorExtManagerModal() {
@@ -122,10 +123,13 @@ export function createSettingsBootstrap(deps) {
     busRequest: deps.busRequest,
     reloadEditorIframe: deps.reloadEditorIframe,
     openExtConfigModal,
+    getActiveScope: () => settingsRefreshController.getActiveScope(),
     toast: deps.toast,
   });
 
   settingsRefreshController.installCustomSettingsSaveHandler();
+  settingsRefreshController.installWorkspaceSettingsSaveHandler();
+  settingsRefreshController.installScopeTabs();
 
   const settingsInstallController = createSettingsInstallController({
     installBtn: deps.els.extManagerInstallBtn,

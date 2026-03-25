@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,32 +17,61 @@ const outLangRoot = path.resolve(
 );
 const outBootstrapDir = path.resolve(outLangRoot, "bootstrap");
 
-const esbuildEntry = path.resolve(monacoSrcRoot, "node_modules/esbuild/lib/main.js");
+// Use worktree esbuild if available, otherwise fall back to local node_modules
+let esbuildEntry = path.resolve(monacoSrcRoot, "node_modules/esbuild/lib/main.js");
+if (!fs.existsSync(esbuildEntry)) {
+  esbuildEntry = path.resolve(repoRoot, "node_modules/esbuild/lib/main.js");
+}
 const { build } = await import(pathToFileURL(esbuildEntry).href);
 
+// Check if worktree TS sources are available; if not, use pre-built JS contributions
+const worktreeAvailable = fs.existsSync(path.resolve(monacoSrcRoot, "src/basic-languages/monaco.contribution.ts"));
+
 function pluginResolveMonacoEntryAndContrib() {
-  const entry = (p) => path.resolve(monacoSrcRoot, p);
   const monacoMain = path.resolve(vscodeMonacoEsmRoot, "vs/editor/editor.main.js");
 
   return {
     name: "te2-monaco-bootstrap-alias",
     setup(ctx) {
       ctx.onResolve({ filter: /^@te2-monaco-main$/ }, () => ({ path: monacoMain }));
-      ctx.onResolve({ filter: /^@te2-contrib-basic$/ }, () => ({
-        path: entry("src/basic-languages/monaco.contribution.ts"),
-      }));
-      ctx.onResolve({ filter: /^@te2-contrib-typescript$/ }, () => ({
-        path: entry("src/language/typescript/monaco.contribution.ts"),
-      }));
-      ctx.onResolve({ filter: /^@te2-contrib-json$/ }, () => ({
-        path: entry("src/language/json/monaco.contribution.ts"),
-      }));
-      ctx.onResolve({ filter: /^@te2-contrib-css$/ }, () => ({
-        path: entry("src/language/css/monaco.contribution.ts"),
-      }));
-      ctx.onResolve({ filter: /^@te2-contrib-html$/ }, () => ({
-        path: entry("src/language/html/monaco.contribution.ts"),
-      }));
+
+      if (worktreeAvailable) {
+        const entry = (p) => path.resolve(monacoSrcRoot, p);
+        ctx.onResolve({ filter: /^@te2-contrib-basic$/ }, () => ({
+          path: entry("src/basic-languages/monaco.contribution.ts"),
+        }));
+        ctx.onResolve({ filter: /^@te2-contrib-typescript$/ }, () => ({
+          path: entry("src/language/typescript/monaco.contribution.ts"),
+        }));
+        ctx.onResolve({ filter: /^@te2-contrib-json$/ }, () => ({
+          path: entry("src/language/json/monaco.contribution.ts"),
+        }));
+        ctx.onResolve({ filter: /^@te2-contrib-css$/ }, () => ({
+          path: entry("src/language/css/monaco.contribution.ts"),
+        }));
+        ctx.onResolve({ filter: /^@te2-contrib-html$/ }, () => ({
+          path: entry("src/language/html/monaco.contribution.ts"),
+        }));
+      } else {
+        // Use pre-built JS contributions from te2-lang/
+        console.log("[bootstrap] Worktree not available, using pre-built contributions from te2-lang/");
+        ctx.onResolve({ filter: /^@te2-contrib-basic$/ }, () => ({
+          path: path.resolve(outLangRoot, "basic-languages/monaco.contribution.js"),
+        }));
+        ctx.onResolve({ filter: /^@te2-contrib-typescript$/ }, () => ({
+          path: path.resolve(outLangRoot, "language/typescript/monaco.contribution.js"),
+        }));
+        ctx.onResolve({ filter: /^@te2-contrib-json$/ }, () => ({
+          path: path.resolve(outLangRoot, "language/json/monaco.contribution.js"),
+        }));
+        ctx.onResolve({ filter: /^@te2-contrib-css$/ }, () => ({
+          path: path.resolve(outLangRoot, "language/css/monaco.contribution.js"),
+        }));
+        ctx.onResolve({ filter: /^@te2-contrib-html$/ }, () => ({
+          path: path.resolve(outLangRoot, "language/html/monaco.contribution.js"),
+        }));
+      }
+
       // Force monaco-editor-core imports from contributions to the same pinned editor API source.
       ctx.onResolve({ filter: /^monaco-editor-core$/ }, () => ({
         path: path.resolve(vscodeMonacoEsmRoot, "vs/editor/editor.api.js"),

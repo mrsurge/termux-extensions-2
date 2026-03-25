@@ -17,11 +17,14 @@
 export function createSettingsConfigModalController(deps) {
   let extConfigExtId = '';
   let extConfigValues = {};
+  let extConfigScope = 'user';
 
-  function openExtConfigModal(extId, displayName, schema, currentValues) {
+  function openExtConfigModal(extId, displayName, schema, currentValues, scope = 'user') {
     extConfigExtId = extId;
+    extConfigScope = scope;
     extConfigValues = { ...(currentValues || {}) };
-    deps.titleEl.textContent = `Configure: ${displayName || extId}`;
+    const scopeLabel = extConfigScope === 'workspace' ? ' (Workspace)' : ' (User)';
+    deps.titleEl.textContent = `Configure: ${displayName || extId}${scopeLabel}`;
     deps.formEl.innerHTML = '';
 
     const props = schema?.properties || schema || {};
@@ -103,6 +106,203 @@ export function createSettingsConfigModalController(deps) {
             extConfigValues[key] = input.value === '' ? null : Number(input.value);
           });
           fieldRow.appendChild(input);
+        } else if (prop.type === 'array') {
+          // ── VS Code-style array editor ──────────────────────────
+          const itemSchema = prop.items || {};
+          const itemType = itemSchema.type || 'string';
+
+          // Normalize current value to a proper JS array
+          let arr: any[] = [];
+          if (Array.isArray(curVal)) {
+            arr = curVal.slice();
+          } else if (typeof curVal === 'string' && curVal.trim()) {
+            try { const p = JSON.parse(curVal); if (Array.isArray(p)) arr = p; } catch (_) {}
+          }
+          extConfigValues[key] = arr.slice();
+
+          const arrayContainer = document.createElement('div');
+          arrayContainer.className = 'ext-cfg-array';
+          const rowsEl = document.createElement('div');
+          rowsEl.className = 'ext-cfg-array-rows';
+          arrayContainer.appendChild(rowsEl);
+
+          let activeEdit: { cancel: () => void } | null = null;
+
+          function itemToStr(val: any): string {
+            if (val == null) return '';
+            if (typeof val === 'object') return JSON.stringify(val);
+            return String(val);
+          }
+
+          function parseItem(raw: string): any {
+            const s = raw.trim();
+            if (itemType === 'number' || itemType === 'integer') {
+              const n = Number(s);
+              return isNaN(n) ? s : n;
+            }
+            if (itemType === 'object') {
+              try { return JSON.parse(s); } catch (_) { return s; }
+            }
+            return s;
+          }
+
+          function buildRow(idx: number): HTMLElement {
+            const row = document.createElement('div');
+            row.className = 'ext-cfg-array-row';
+
+            const valSpan = document.createElement('span');
+            valSpan.className = 'ext-cfg-array-val';
+            valSpan.textContent = itemToStr(extConfigValues[key][idx]);
+            row.appendChild(valSpan);
+
+            const acts = document.createElement('span');
+            acts.className = 'ext-cfg-array-acts';
+
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'ext-cfg-arr-btn ext-cfg-arr-edit';
+            editBtn.textContent = '✏';
+            editBtn.title = 'Edit';
+            editBtn.addEventListener('click', () => {
+              if (activeEdit) activeEdit.cancel();
+              startEdit(row, idx);
+            });
+
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'ext-cfg-arr-btn ext-cfg-arr-del';
+            delBtn.textContent = '✕';
+            delBtn.title = 'Remove';
+            delBtn.addEventListener('click', () => {
+              if (activeEdit) activeEdit.cancel();
+              extConfigValues[key].splice(idx, 1);
+              rebuild();
+            });
+
+            acts.appendChild(editBtn);
+            acts.appendChild(delBtn);
+            row.appendChild(acts);
+            return row;
+          }
+
+          function startEdit(row: HTMLElement, idx: number) {
+            row.innerHTML = '';
+            row.classList.add('ext-cfg-array-row-editing');
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'lsp-rootrel-input ext-cfg-arr-input';
+            input.value = itemToStr(extConfigValues[key][idx]);
+
+            const acts = document.createElement('span');
+            acts.className = 'ext-cfg-array-acts';
+
+            const doConfirm = () => {
+              const v = input.value.trim();
+              if (v) extConfigValues[key][idx] = parseItem(v);
+              activeEdit = null;
+              rebuild();
+            };
+            const doCancel = () => { activeEdit = null; rebuild(); };
+
+            const okBtn = document.createElement('button');
+            okBtn.type = 'button';
+            okBtn.className = 'ext-cfg-arr-btn ext-cfg-arr-ok';
+            okBtn.textContent = '✓';
+            okBtn.title = 'Confirm';
+            okBtn.addEventListener('click', doConfirm);
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'ext-cfg-arr-btn ext-cfg-arr-cancel';
+            cancelBtn.textContent = '✕';
+            cancelBtn.title = 'Cancel';
+            cancelBtn.addEventListener('click', doCancel);
+
+            input.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter') { e.preventDefault(); doConfirm(); }
+              if (e.key === 'Escape') { e.preventDefault(); doCancel(); }
+            });
+
+            acts.appendChild(okBtn);
+            acts.appendChild(cancelBtn);
+            row.appendChild(input);
+            row.appendChild(acts);
+            activeEdit = { cancel: doCancel };
+            input.focus();
+          }
+
+          function rebuild() {
+            rowsEl.innerHTML = '';
+            (extConfigValues[key] as any[]).forEach((_, i) => {
+              rowsEl.appendChild(buildRow(i));
+            });
+          }
+
+          const addBtn = document.createElement('button');
+          addBtn.type = 'button';
+          addBtn.className = 'ext-cfg-arr-add';
+          addBtn.textContent = '+ Add Item';
+          addBtn.addEventListener('click', () => {
+            if (activeEdit) activeEdit.cancel();
+            addBtn.style.display = 'none';
+
+            const addRow = document.createElement('div');
+            addRow.className = 'ext-cfg-array-row ext-cfg-array-row-editing';
+
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'lsp-rootrel-input ext-cfg-arr-input';
+            input.placeholder = itemType === 'object' ? 'JSON object…' : 'Enter value…';
+
+            const acts = document.createElement('span');
+            acts.className = 'ext-cfg-array-acts';
+
+            const doAdd = () => {
+              const v = input.value.trim();
+              if (v) extConfigValues[key].push(parseItem(v));
+              activeEdit = null;
+              addRow.remove();
+              addBtn.style.display = '';
+              rebuild();
+            };
+            const doCancelAdd = () => {
+              activeEdit = null;
+              addRow.remove();
+              addBtn.style.display = '';
+            };
+
+            const okBtn = document.createElement('button');
+            okBtn.type = 'button';
+            okBtn.className = 'ext-cfg-arr-btn ext-cfg-arr-ok';
+            okBtn.textContent = '✓';
+            okBtn.title = 'Add';
+            okBtn.addEventListener('click', doAdd);
+
+            const cancelBtnAdd = document.createElement('button');
+            cancelBtnAdd.type = 'button';
+            cancelBtnAdd.className = 'ext-cfg-arr-btn ext-cfg-arr-cancel';
+            cancelBtnAdd.textContent = '✕';
+            cancelBtnAdd.title = 'Cancel';
+            cancelBtnAdd.addEventListener('click', doCancelAdd);
+
+            input.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+              if (e.key === 'Escape') { e.preventDefault(); doCancelAdd(); }
+            });
+
+            acts.appendChild(okBtn);
+            acts.appendChild(cancelBtnAdd);
+            addRow.appendChild(input);
+            addRow.appendChild(acts);
+            rowsEl.appendChild(addRow);
+            activeEdit = { cancel: doCancelAdd };
+            input.focus();
+          });
+
+          rebuild();
+          arrayContainer.appendChild(addBtn);
+          fieldRow.appendChild(arrayContainer);
         } else {
           const input = document.createElement('input');
           input.type = 'text';
@@ -138,17 +338,47 @@ export function createSettingsConfigModalController(deps) {
       if (!extConfigExtId) return;
       deps.saveBtn.disabled = true;
       try {
-        const res = await deps.busRequest('ext:configure', {
-          ext_id: extConfigExtId,
-          values: extConfigValues,
-        }, 15000);
-        if (res?.payload?.ok) {
-          deps.toast('Configuration saved — reloading adapter…');
-          closeExtConfigModal();
-          void deps.refreshExtManager();
-          deps.reloadEditorIframe();
+        if (extConfigScope === 'workspace') {
+          // Workspace scope: merge changed keys into .vscode/settings.json
+          let wsSettings = {};
+          try {
+            const getRes = await deps.busRequest('ext:workspace_settings_get', {}, 5000);
+            wsSettings = getRes?.payload?.settings || {};
+          } catch (_) {}
+          // Merge our values into workspace settings (flat dotted keys)
+          for (const [k, v] of Object.entries(extConfigValues)) {
+            if (v === undefined || v === null || v === '' ||
+                (Array.isArray(v) && v.length === 0)) {
+              delete wsSettings[k];
+            } else {
+              wsSettings[k] = v;
+            }
+          }
+          const res = await deps.busRequest('ext:workspace_settings_set', {
+            settings: wsSettings,
+          }, 15000);
+          if (res?.payload?.ok) {
+            deps.toast('Workspace configuration saved — reloading adapter…');
+            closeExtConfigModal();
+            void deps.refreshExtManager();
+            deps.reloadEditorIframe();
+          } else {
+            deps.toast(res?.payload?.error || 'Save failed');
+          }
         } else {
-          deps.toast(res?.payload?.error || 'Save failed');
+          // User scope: existing global config flow
+          const res = await deps.busRequest('ext:configure', {
+            ext_id: extConfigExtId,
+            values: extConfigValues,
+          }, 15000);
+          if (res?.payload?.ok) {
+            deps.toast('Configuration saved — reloading adapter…');
+            closeExtConfigModal();
+            void deps.refreshExtManager();
+            deps.reloadEditorIframe();
+          } else {
+            deps.toast(res?.payload?.error || 'Save failed');
+          }
         }
       } catch (e) {
         deps.toast(/** @type {any} */ (e)?.message || 'Save failed');

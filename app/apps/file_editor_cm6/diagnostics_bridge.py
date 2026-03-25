@@ -45,6 +45,11 @@ _bridge_running = False
 _enospc_forwarded = False
 
 
+def is_bridge_active() -> bool:
+    """Return True if the diagnostics bridge WS listener is active."""
+    return _bridge_running and _bridge_task is not None and not _bridge_task.done()
+
+
 def _abs_path_from_vscode_uri(raw: Any) -> str:
     """Extract absolute filesystem path from a vscode-remote:// or file:// URI."""
     if not raw:

@@ -13,32 +13,35 @@ cd termux-extensions-2
 
 ## 2. Install dependencies
 
-The repository ships with an installation helper (`scripts/bootstrap_termux.sh`, see below) that automates package and Python dependency installation. Run it directly:
+Install the external non-Python dependencies first:
 
 ```bash
-./scripts/bootstrap_termux.sh
+./scripts/install_dependencies.sh --platform termux
 ```
 
-The script performs the following:
+Then install the Python package in editable mode:
 
-1. Confirms you are running `bash` (the framework assumes shells source `.bashrc`).
-2. Installs Termux packages: `python`, `python-pip`, `clang`, `git`, `make`, `pkg-config`, `libffi`, `openssl`, `llama-cpp`, and (optionally) `llama-cpp-backend-opencl` for Snapdragon/OpenCL acceleration.
-3. Installs Python requirements via `pip install -r requirements.txt` (inside a framework-friendly `~/.local` environment).
-4. Ensures `scripts/init.sh` is sourced from `~/.bashrc` so interactive shells show up in the framework UI.
-5. Adds `scripts/` to your PATH and symlinks `start-te` (wrapper for `run_framework.sh`) into `~/bin/`.
-6. Ensures `scripts/run_framework.sh` is executable.
+```bash
+python -m pip install -e .
+```
 
-> **Manual alternative:** if you prefer to run commands yourself, follow the same steps manually: `pkg install` dependencies, run `pip install -r requirements.txt`, append `source ~/termux-extensions-2/scripts/init.sh` to `~/.bashrc`, and add `~/termux-extensions-2/scripts` to your PATH.
+The dependency installer performs the following:
+
+1. Installs official Termux `apt` packages from `scripts/requirements/termux/apt.txt`.
+2. Enables `tur-repo` and installs `tur` packages from `scripts/requirements/termux/tur.txt`.
+3. Installs any Termux npm fallbacks from `scripts/requirements/termux/npm.txt` if that file is populated.
+
+> **Manual alternative:** if you prefer to run commands yourself, use the package lists under `scripts/requirements/termux/`, then run `python -m pip install -e .`.
 
 ## 3. Launch the framework
 
-After the script completes, open a new Termux session (so `.bashrc` is reloaded) and start the supervisor:
+After installation completes, start the framework with the packaged entrypoint:
 
 ```bash
-start-te
+te2
 ```
 
-This runs `python -m app.supervisor`, loads extensions/apps, and exposes the framework at `http://localhost:8088`. Access it locally via a browser (e.g. `http://127.0.0.1:8088`) or over LAN if you bind externally.
+This launches the framework, loads extensions/apps, and exposes it at the configured local port. Access it locally via a browser (for example `http://127.0.0.1:8089` if you use the default current port).
 
 ## 4. Post-install checklist
 
@@ -50,12 +53,12 @@ This runs `python -m app.supervisor`, loads extensions/apps, and exposes the fra
   tail -f ~/.cache/termux_lm/stream.log
   ```
 
-- To stop the framework, press `Ctrl+C` in the shell running `start-te`; the supervisor will shut down all framework shells automatically.
+- To stop the framework, press `Ctrl+C` in the shell running `te2`; the supervisor will shut down framework shells automatically.
 
 ## Notes
 
 - The framework expects Termux’s default file hierarchy. If you use external storage, update model paths accordingly when configuring Termux-LM cards.
 - For remote models, ensure outbound network access is allowed (Termux typically permits this by default).
-- When installing additional Termux packages for extensions, prefer adding them to the bootstrap script to keep new devices reproducible.
+- When installing additional Termux packages for extensions, prefer updating the package lists under `scripts/requirements/termux/` so new devices stay reproducible.
 
 Refer back to `WARP.md` for deeper architecture and operational details once the environment is up and running.

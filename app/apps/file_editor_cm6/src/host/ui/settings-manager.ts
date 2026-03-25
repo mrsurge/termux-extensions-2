@@ -6,6 +6,7 @@
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
  *   reloadEditorIframe: () => void,
  *   openExtConfigModal: (extId: string, displayName: string, schema: any, currentValues: any) => void,
+ *   getActiveScope: () => string,
  *   toast: (msg: string, ms?: number) => void
  * }} deps
  */
@@ -117,7 +118,7 @@ export function createSettingsManagerController(deps) {
 
         // Active toggle
         const toggle = document.createElement('button');
-        toggle.className = 'fe-btn';
+        toggle.className = 'fe-btn ext-toggle-btn';
         toggle.textContent = isActive ? '●' : '○';
         toggle.title = isActive ? 'Deactivate' : 'Activate';
         toggle.style.fontSize = '14px';
@@ -152,13 +153,27 @@ export function createSettingsManagerController(deps) {
                 ext_id: extId,
               }, 10000);
               const schema = res?.payload?.schema || {};
-              // Fetch current values too
+              const schemaKeys = Object.keys(schema?.properties || schema || {});
+              const scope = deps.getActiveScope();
+
               const currentValues = {};
-              try {
-                const listRes = await deps.busRequest('ext:list', {}, 5000);
-                const fullExt = (listRes?.payload?.extensions || []).find((e) => e.id === extId);
-                if (fullExt?.configuration_values) Object.assign(currentValues, fullExt.configuration_values);
-              } catch (_) {}
+              if (scope === 'workspace') {
+                // Load from .vscode/settings.json — extract keys matching this extension's schema
+                try {
+                  const wsRes = await deps.busRequest('ext:workspace_settings_get', {}, 5000);
+                  const wsSettings = wsRes?.payload?.settings || {};
+                  for (const k of schemaKeys) {
+                    if (k in wsSettings) currentValues[k] = wsSettings[k];
+                  }
+                } catch (_) {}
+              } else {
+                // Load from global extension config
+                try {
+                  const listRes = await deps.busRequest('ext:list', {}, 5000);
+                  const fullExt = (listRes?.payload?.extensions || []).find((e) => e.id === extId);
+                  if (fullExt?.configuration_values) Object.assign(currentValues, fullExt.configuration_values);
+                } catch (_) {}
+              }
               deps.openExtConfigModal(extId, label, schema, currentValues);
             } catch (e) {
               deps.toast(/** @type {any} */ (e)?.message || 'Failed to load config');
@@ -172,7 +187,7 @@ export function createSettingsManagerController(deps) {
         // Uninstall button (only for user extensions)
         if (!isBuiltin) {
           const trash = document.createElement('button');
-          trash.className = 'fe-btn';
+          trash.className = 'fe-btn ext-uninstall-btn';
           trash.textContent = '🗑';
           trash.title = 'Uninstall';
           trash.addEventListener('click', async () => {

@@ -35,7 +35,7 @@ import {
   isWatcherRelInOpenDir as isWatcherRelInOpenDirModule,
 } from './explorer_modules/explorer_path_watcher_utils.js';
 import { createExplorerGitFooterUtils } from './explorer_modules/explorer_git_footer_utils.js';
-import { renderExplorerDiagnostics } from './explorer_modules/explorer_diagnostics_renderer.js';
+import { renderExplorerDiagnostics, getExplorerDiagnosticsPanel } from './explorer_modules/explorer_diagnostics_renderer.js';
 
 let treeElement = null;
 let projectLabelEl = null;
@@ -1561,9 +1561,9 @@ function handleExplorerEvent(type, payload) {
       root.querySelectorAll('li.fe-tree-node').forEach((li) => {
         const classesToRemove = [];
         li.classList.forEach((cls) => {
-          // Remove git-related classes but NOT draft-related ones
+          // Remove git-related classes but NOT draft or diagnostic ones
           if (cls.startsWith('fe-git-') || 
-              (cls.startsWith('fe-dir-has-') && !cls.includes('draft'))) {
+              (cls.startsWith('fe-dir-has-') && !cls.includes('draft') && !cls.includes('diag'))) {
             classesToRemove.push(cls);
           }
         });
@@ -1645,18 +1645,58 @@ function handleExplorerEvent(type, payload) {
           }
         }
       }
-      break;
-    }
-    case 'explorer:updateDiagnostics': {
-      // Save snapshot + apply to current DOM.
-      const diagnostics = (payload && payload.diagnostics) || {};
-      _setDiagnosticsSummary(diagnostics);
+      // Reapply diagnostic flags that may have been touched by class removal
       applyAggregatedDiagnosticFlags();
       break;
     }
+    case 'explorer:updateDiagnostics': {
+      // Only use summary from polling loop as fallback when bridge detail is empty.
+      // When _explorerDiagDetail has data, the bridge is active and detail is authoritative.
+      if (Object.keys(_explorerDiagDetail).length === 0) {
+        const diagnostics = (payload && payload.diagnostics) || {};
+        _setDiagnosticsSummary(diagnostics);
+        applyAggregatedDiagnosticFlags();
+      }
+      break;
+    }
     case 'diagnostics:detail': {
-      // Full marker detail from the diagnostics bridge — store for the Diagnostics tab.
+      // Full marker detail from the diagnostics bridge — SSOT for both
+      // the Diagnostics tab AND the explorer tree badges.
       _explorerDiagDetail = (payload && typeof payload === 'object') ? payload : {};
+
+      // If the explorer diagnostics panel is alive, let it process the
+      // update (diff-aware) and derive the tree summary from its curated data.
+      const livePanel = getExplorerDiagnosticsPanel();
+      if (livePanel) {
+        const proj = (uiState.projectPath || '').replace(/\/+$/, '');
+        const activeAbs = activeFileRel && proj
+          ? proj + '/' + activeFileRel : null;
+        if (activeAbs) livePanel.setActiveFile(activeAbs);
+        livePanel.update(_explorerDiagDetail);
+
+        // Tree badges from the panel's manicured data
+        const panelSummary = livePanel.getSummary(proj);
+        _setDiagnosticsSummary(panelSummary);
+        applyAggregatedDiagnosticFlags();
+      } else {
+        // No live panel — derive summary inline (same as before)
+        const proj = (uiState.projectPath || '').replace(/\/+$/, '');
+        const summary = {};
+        Object.entries(_explorerDiagDetail).forEach(([absPath, markers]) => {
+          if (!Array.isArray(markers) || markers.length === 0) return;
+          const rel = proj && absPath.startsWith(proj + '/')
+            ? absPath.slice(proj.length + 1) : absPath;
+          if (!summary[rel]) summary[rel] = { errors: 0, warnings: 0 };
+          for (const m of markers) {
+            const sev = m.severity || 0;
+            if (sev === 8) summary[rel].errors++;        // MarkerSeverity.Error
+            else if (sev === 4) summary[rel].warnings++; // MarkerSeverity.Warning
+          }
+        });
+        _setDiagnosticsSummary(summary);
+        applyAggregatedDiagnosticFlags();
+      }
+
       // If the Diagnostics tab is currently visible, re-render it.
       if (searchOverlayVisible && searchMode === 'diagnostics') {
         renderSearchOverlay();
@@ -2214,11 +2254,8 @@ export async function initExplorerUI() {
       toast('No project open');
       return;
     }
-    const hostBase = typeof window.__agentHostBase === 'string'
-      ? window.__agentHostBase.trim()
-      : '';
-    if (!hostBase) {
-      toast('Agent host unavailable');
+    if (typeof window.__explorerBusSend !== 'function') {
+      toast('Explorer bus unavailable');
       return;
     }
     let absPath = uiState.projectPath;
@@ -2229,19 +2266,8 @@ export async function initExplorerUI() {
         relPath.replace(/^\/+/, '');
     }
     try {
-      // MARKED FOR DELETION: legacy HTTP transport kept while sidebar/appserver
-      // Socket.IO mention flow is rolled out end-to-end.
-      const resp = await fetch(`${hostBase}/api/appserver/mention`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: absPath }),
-      });
-      const body = await resp.json();
-      if (body && body.ok) {
-        toast('Mentioned in conversation');
-      } else {
-        toast(body?.error || 'Failed to mention in conversation');
-      }
+      window.__explorerBusSend('mention:agent', { path: absPath });
+      toast('Mentioned in conversation');
     } catch (err) {
       console.error('Failed to send mention:', err);
       toast('Failed to mention in conversation');
@@ -3413,12 +3439,17 @@ function renderSearchOverlay() {
         }),
       renderChangesResults,
       renderReviewResults,
-      renderDiagnosticsResults: (container) =>
+      renderDiagnosticsResults: (container) => {
+        const proj = uiState.projectPath || '';
+        const activeAbs = activeFileRel && proj
+          ? proj + '/' + activeFileRel : null;
         renderExplorerDiagnostics(container, _explorerDiagDetail, {
           openFileAndMaybeJump,
           toast,
           getProjectPath: () => uiState.projectPath,
-        }),
+          activeFileAbs: activeAbs,
+        });
+      },
     },
   );
 }

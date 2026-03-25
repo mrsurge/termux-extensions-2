@@ -7,7 +7,7 @@ shells:
     command:
       - sh
       - -lc
-      - codex-agent --log app-server.log --port 12359 --host 127.0.0.1 --debug --broadcast-all
+      - codex-agent --log agent_chat.log.jsonl --port 12359 --host 127.0.0.1 --debug --broadcast-all
     env:
       PYTHONPATH: ${env:PYTHONPATH}:${ctx:PROJECT_ROOT}
       TE_APP_ID: ${ctx:APP_ID}

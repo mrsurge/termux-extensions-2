@@ -1,0 +1,11 @@
+# Debian / Ubuntu base system packages.
+python3-pip
+cargo
+dtach
+openssl
+git
+curl
+aria2
+build-essential
+nodejs
+npm

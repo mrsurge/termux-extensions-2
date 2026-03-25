@@ -311,6 +311,9 @@ class ConnectionManager:
         """Poll LSP diagnostics and broadcast summary to explorer clients.
 
         This provides explorer UI hints (red/yellow dots) for files with errors/warnings.
+        Skips broadcasting when the diagnostics bridge (adapter WS) is active,
+        since the bridge is the authoritative source and this polling loop can
+        send transient empty data during git-induced extension host churn.
         """
 
         from .lsp_ws import get_diagnostics_summary_for_project
@@ -320,6 +323,16 @@ class ConnectionManager:
                 await asyncio.sleep(1.0)
                 if not any(self.active_connections.values()):
                     break
+
+                # When the adapter bridge is running, it emits authoritative
+                # diagnostics via diagnostics:detail. Skip polling to avoid
+                # conflicting/transient updates that clear explorer badges.
+                try:
+                    from .diagnostics_bridge import is_bridge_active
+                    if is_bridge_active():
+                        continue
+                except Exception:
+                    pass
 
                 for project_path in list(self.active_connections.keys()):
                     try:
@@ -1225,6 +1238,30 @@ class ExplorerDispatcher:
 
         if msg_id:
             await self.emit_personal("cm6:mirror:ack", {"ok": True}, msg_id)
+
+    async def handle_mention_agent(self, payload: dict, msg_id: str):
+        """Relay a file mention to the agent via /sidebar_ipc."""
+        path = payload.get("path")
+        if not isinstance(path, str) or not path.strip():
+            return await self.send_error("Missing path for mention", msg_id)
+        try:
+            from .ui_ipc.ui_ipc_socketio import UI_IPC_SIO
+
+            mention_payload = {"path": path.strip(), "source": "explorer"}
+            for key in ("lineNo", "endLineNo", "col", "endCol", "content"):
+                if payload.get(key) is not None:
+                    mention_payload[key] = payload[key]
+
+            await UI_IPC_SIO.emit(
+                "sidebar:mention",
+                mention_payload,
+                namespace="/sidebar_ipc",
+                room="sidebar_ipc",
+            )
+            logger.info(f"[mention:agent] relayed to sidebar_ipc path={path}")
+        except Exception as exc:
+            logger.warning(f"[mention:agent] relay failed: {exc}")
+            return await self.send_error(f"Mention relay failed: {exc}", msg_id)
 
     async def handle_explorer_setOpenDirs(self, payload: dict, msg_id: str):
         """Persist the list of open directories in explorer tree."""
@@ -2192,6 +2229,53 @@ class ExplorerDispatcher:
             }, msg_id)
             # Kill adapter directly — custom settings need a reload
             await self._restart_adapter_only("custom_settings")
+        except Exception as e:
+            await self.send_error(str(e), msg_id)
+
+    async def handle_ext_workspace_settings_get(self, payload: dict, msg_id: str):
+        """Return workspace-scoped .vscode/settings.json for the active project."""
+        proj = str(self.project_root) if self.project_root else ""
+        if not proj:
+            return await self.emit_personal("ext:workspace_settings_get", {
+                "ok": True, "settings": {}, "path": "",
+            }, msg_id)
+        settings_path = os.path.join(proj, ".vscode", "settings.json")
+        settings = {}
+        try:
+            if os.path.isfile(settings_path):
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    raw = json.loads(f.read())
+                if isinstance(raw, dict):
+                    settings = raw
+        except Exception as e:
+            logger.warning(f"[workspace_settings] read error: {e}")
+        await self.emit_personal("ext:workspace_settings_get", {
+            "ok": True,
+            "settings": settings,
+            "path": settings_path,
+        }, msg_id)
+
+    async def handle_ext_workspace_settings_set(self, payload: dict, msg_id: str):
+        """Save workspace-scoped .vscode/settings.json and restart adapter."""
+        proj = str(self.project_root) if self.project_root else ""
+        if not proj:
+            return await self.send_error("No active project", msg_id)
+        settings = payload.get("settings", {})
+        if not isinstance(settings, dict):
+            return await self.send_error("settings must be a JSON object", msg_id)
+        settings_dir = os.path.join(proj, ".vscode")
+        settings_path = os.path.join(settings_dir, "settings.json")
+        try:
+            os.makedirs(settings_dir, exist_ok=True)
+            with open(settings_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(settings, indent=2) + "\n")
+            await self.emit_personal("ext:workspace_settings_set", {
+                "ok": True,
+                "count": len(settings),
+                "path": settings_path,
+            }, msg_id)
+            # Adapter reload needed for extensions to see new workspace config
+            await self._restart_adapter_only("workspace_settings")
         except Exception as e:
             await self.send_error(str(e), msg_id)
 

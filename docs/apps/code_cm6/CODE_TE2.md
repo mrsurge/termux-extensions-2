@@ -265,9 +265,12 @@ Current extracted modules:
 | `src/host/ui/cache-indicator.ts` | Draft/crash cache badge behavior |
 | `src/host/ui/drawer-shortcuts.ts` | Drawer tabs + terminal/console/problems/font shortcuts |
 | `src/host/ui/layout-manager.ts` | Desktop/mobile layout mode management |
+| `src/host/ui/settings-refresh.ts` | Settings load/save, scope tabs (User/Workspace), workspace settings |
+| `src/host/ui/settings-bootstrap.ts` | Settings controller assembly and wiring |
+| `src/host/ui/settings-manager.ts` | Extension card rendering (ext manager modal list) |
+| `src/host/ui/settings-modals.ts` | Settings and ext manager modal open/close lifecycle |
 
 Remaining high-value decomposition targets:
-- Editor settings/themes/extensions modal block in `main.js`
 - Remaining file-ops/open-save flow partitioning
 - Final wiring reduction so `main.js` becomes mostly boot + module assembly
 
@@ -2132,8 +2135,9 @@ Each section is an `IConfigurationModel`:
 { contents: { section: { key: value, ... } }, overrides: [], keys: ["section.key", ...] }
 ```
 
-`defaults` carries the extension-contributed defaults. `userRemote` carries TE2 overrides.
-All other sections are empty.
+`defaults` carries the extension-contributed defaults. `userRemote` carries TE2 overrides
+from `User/settings.json`. `workspace` and `folders[0]` carry project-scoped overrides
+from `<projectRoot>/.vscode/settings.json` (see §29). All other sections are empty.
 
 After `$initializeConfiguration`, we also send `$acceptConfigurationChanged` with the same
 data and the full key list so extensions that listen for config changes pick up the values.
@@ -2141,13 +2145,16 @@ data and the full key list so extensions that listen for config changes pick up 
 ### TE2 overrides (applied after scan)
 
 No hardcoded overrides remain in `_buildConfigurationInitData()`. All extension
-settings now flow from two external sources:
+settings now flow from three external sources:
 
 1. **Extension config UI** → `configuration_values` in the registry
-2. **Custom Settings textarea** → `custom_settings` in the registry
+2. **Custom Settings textarea (User scope)** → `custom_settings` in the registry
+3. **Workspace settings** → `<projectRoot>/.vscode/settings.json`
 
-Both are written to `User/settings.json` by `rebuild_settings_gate()`, and the
-adapter reads that file into `userRemote` at boot (see §29).
+Sources 1 and 2 are written to `User/settings.json` by `rebuild_settings_gate()`,
+and the adapter reads that file into `userRemote` at boot. Source 3 is read
+directly by the adapter into the `workspace` and `folders[0]` config sections.
+VS Code precedence applies: workspace settings override userRemote.
 
 To add a forced override, use the Custom Settings UI in the extension manager
 or set keys directly in `User/settings.json` (non-managed keys are preserved).
@@ -2157,36 +2164,38 @@ or set keys directly in `User/settings.json` (non-managed keys are preserved).
 `workbench_client.mjs` → `_buildConfigurationInitData()` (~line 1120)
 
 
-## 29) Settings Pipeline — Extension Config, Custom Settings, and Adapter Relay
+## 29) Settings Pipeline — Extension Config, Custom Settings, Workspace Settings, and Adapter Relay
 
 ### Overview
 
-TE2 has three layers that produce the final `User/settings.json` that the
-workbench adapter reads at boot:
+TE2 has four layers that produce the final configuration the workbench adapter
+sends to the ExtHost:
 
 ```
-┌──────────────────────┐   ┌──────────────────────────┐
-│  Extension Config UI │   │  Custom Settings textarea │
-│  (per-extension)     │   │  (global JSON)            │
-└──────────┬───────────┘   └─────────┬────────────────┘
-           │ configuration_values     │ custom_settings
-           ▼                          ▼
-┌─────────────────────────────────────────────────────┐
-│              te2_extension_registry.json             │
-└──────────────────────┬──────────────────────────────┘
-                       │ rebuild_settings_gate()
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│              User/settings.json                      │
-│  (global gate + per-language overrides + ext config  │
-│   + custom settings)                                 │
-└──────────────────────┬──────────────────────────────┘
-                       │ readFileSync() at boot
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│  workbench_client.mjs  _buildConfigurationInitData() │
-│  → $initializeConfiguration (rpcId=80) userRemote    │
-└─────────────────────────────────────────────────────┘
+┌──────────────────────┐   ┌──────────────────────────┐   ┌──────────────────────────┐
+│  Extension Config UI │   │  Custom Settings (User)   │   │  Workspace Settings      │
+│  (per-extension)     │   │  (global JSON textarea)   │   │  (.vscode/settings.json) │
+└──────────┬───────────┘   └─────────┬────────────────┘   └─────────┬────────────────┘
+           │ configuration_values     │ custom_settings              │ per-project JSON
+           ▼                          ▼                              │
+┌─────────────────────────────────────────────────────┐              │
+│              te2_extension_registry.json             │              │
+└──────────────────────┬──────────────────────────────┘              │
+                       │ rebuild_settings_gate()                     │
+                       ▼                                             │
+┌─────────────────────────────────────────────────────┐              │
+│              User/settings.json                      │              │
+│  (global gate + per-language overrides + ext config  │              │
+│   + custom settings)                                 │              │
+└──────────────────────┬──────────────────────────────┘              │
+                       │ readFileSync() at boot                      │ readFileSync() at boot
+                       ▼                                             ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  workbench_client.mjs  _buildConfigurationInitData()                            │
+│  → User/settings.json  → userRemote                                             │
+│  → .vscode/settings.json → workspace + folders[0]   (workspace overrides user)  │
+│  → $initializeConfiguration (rpcId=80)                                          │
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Merge priority in `rebuild_settings_gate()`
@@ -2206,18 +2215,36 @@ Applied in this order (later wins, with one exception):
    skipped. This ensures the extension config UI always wins over the raw
    JSON escape hatch.
 
+### VS Code configuration precedence (adapter-level)
+
+The adapter builds `IConfigurationInitData` with these sections, low to high:
+
+1. `defaults` — extension `contributes.configuration` defaults
+2. `userRemote` — from `User/settings.json` (global gate + custom settings)
+3. `workspace` — from `<projectRoot>/.vscode/settings.json` (project overrides)
+4. `folders[0]` — mirrors `workspace` for single-root workspaces
+
+Workspace settings override user settings for any key they both define. This
+matches VS Code's standard precedence model.
+
 ### Adapter relay (`workbench_client.mjs`)
 
-`_buildConfigurationInitData()` (~line 1120) reads `User/settings.json` and
-populates the `userRemote` section of `IConfigurationInitData`:
+`_buildConfigurationInitData()` (~line 1120) reads both settings files:
 
+**User settings** (`User/settings.json` → `userRemote`):
 - Flat keys like `basedpyright.analysis.typeCheckingMode` are split at dots and
   nested: `{ basedpyright: { analysis: { typeCheckingMode: "off" } } }`
 - Language-scoped overrides like `[python]` become `IOverrides` entries with
   `identifiers: ["python"]`
-- Sent via `$initializeConfiguration` (rpcId=80), then immediately followed by
-  `$acceptConfigurationChanged` so extensions listening for config changes pick
-  up the values
+
+**Workspace settings** (`<folder>/.vscode/settings.json` → `workspace` + `folders[0]`):
+- Same flat-key-to-nested and language-scope parsing as user settings
+- Only read when `folder` parameter is provided to the adapter
+- ENOENT silently ignored (missing `.vscode/settings.json` is normal)
+
+Both are sent via `$initializeConfiguration` (rpcId=80), then immediately followed
+by `$acceptConfigurationChanged` (including workspace keys) so extensions
+listening for config changes pick up the values.
 
 ### Project config files override everything
 
@@ -2228,10 +2255,11 @@ disk (e.g. `pyrightconfig.json`, `pyproject.toml [tool.basedpyright]`). These
 of what the UI shows. If the project config has an invalid value, the extension
 falls back to its **compiled-in default** (not `settings.json`).
 
-### Custom Settings UI
+### Custom Settings UI (User scope)
 
-Accessible from the extension manager modal (collapsible "⚙ Custom Settings
-(JSON)" section). Accepts arbitrary JSON key-value pairs:
+The extension manager modal header contains **User / Workspace** scope tabs.
+The **User** tab shows the global custom settings textarea. Accepts arbitrary
+JSON key-value pairs:
 
 ```json
 {
@@ -2241,17 +2269,33 @@ Accessible from the extension manager modal (collapsible "⚙ Custom Settings
 ```
 
 Values are persisted in the registry under `custom_settings` and merged into
-`settings.json` on save. Requires code-server restart to take effect.
+`User/settings.json` on save. Requires adapter restart to take effect.
+
+### Workspace Settings UI
+
+The **Workspace** tab in the extension manager modal reads/writes the active
+project's `.vscode/settings.json` directly. These settings override user
+settings for any overlapping keys.
+
+When workspace scope is active, extension cards hide their toggle (●/○) and
+uninstall (🗑) buttons — only the ⚙ configure button remains visible. Extension
+enable/disable is global only; workspace scope is settings-only.
+
+The workspace textarea lazy-loads on first tab click via `ext:workspace_settings_get`.
+Save writes to `.vscode/settings.json` (creating the `.vscode/` directory if
+needed) and triggers an adapter restart.
 
 ### Key files
 
 | File | Role |
 |------|------|
 | `extension_registry.py` | `rebuild_settings_gate()`, `get/set_custom_settings()` |
-| `explorer_ws.py` | `handle_ext_configure`, `handle_ext_custom_settings_get/set` |
-| `workbench_client.mjs` | `_buildConfigurationInitData()` reads `settings.json` |
-| `main.js` | Extension config modal, Custom Settings textarea UI |
-| `template.html` | Modal markup for ext config + custom settings |
+| `explorer_ws.py` | `handle_ext_configure`, `handle_ext_custom_settings_get/set`, `handle_ext_workspace_settings_get/set` |
+| `workbench_client.mjs` | `_buildConfigurationInitData()` reads both `User/settings.json` and `.vscode/settings.json` |
+| `src/host/ui/settings-refresh.ts` | `installScopeTabs()`, `loadWorkspaceSettings()`, save handlers |
+| `src/host/ui/settings-bootstrap.ts` | Wires settings controllers together |
+| `src/host/ui/settings-manager.ts` | Extension card rendering (toggle, configure, uninstall buttons with CSS classes) |
+| `template.html` | Modal markup with User/Workspace scope tabs in header + CSS for workspace button hiding |
 
 
 ## 23) Semantic Tokens Pipeline (End-to-End)
@@ -2502,7 +2546,8 @@ The bridge is **not** a vConsole instance — it's a lightweight monkey-patcher 
 3. Adds `Date.now()` timestamp and `workerId`
 4. Emits over socket as `console:log`
 5. Captures `window.onerror` and `unhandledrejection` as error-level entries
-6. Supports `console:eval` for remote code execution from the drawer
+6. Supports `console:eval` for remote code execution from the drawer — retries
+   bare object literals wrapped in parens on SyntaxError (matches browser DevTools behavior)
 
 vConsole is only needed on the **drawer side** for rendering. The bridge just ships data.
 

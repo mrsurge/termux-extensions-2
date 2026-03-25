@@ -100,3 +100,6 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
     async def on_sidebar_cwd_set(self, sid, data):
         return await sidebar_ws.on_sidebar_cwd_set(self, sid, data)
+
+    async def on_sidebar_mention(self, sid, data):
+        await sidebar_ws.on_sidebar_mention(self, sid, data)

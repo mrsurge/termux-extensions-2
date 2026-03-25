@@ -345,3 +345,21 @@ async def on_sidebar_agent_open(ns, sid, data):
         await _broadcast_agent_open(data)
     except Exception as exc:
         print(f"[sidebar_ipc] agent_open route failed: {exc}", flush=True)
+
+
+async def on_sidebar_mention(ns, sid, data):
+    """Relay a file mention from a client to all sidebar_ipc listeners.
+
+    The explorer emits sidebar:mention server-side (via UI_IPC_SIO.emit),
+    which reaches all clients in the room directly.  This handler covers
+    the case where a *client* (e.g. a sidebar iframe) emits sidebar:mention
+    so it gets rebroadcast to the room.
+    """
+    if not isinstance(data, dict):
+        return
+    path = data.get("path")
+    print(
+        f"[sidebar_ipc] mention from={sid} path={path}",
+        flush=True,
+    )
+    await ns.emit("sidebar:mention", data, room="sidebar_ipc", skip_sid=sid)

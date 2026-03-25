@@ -1,0 +1,17 @@
+# Official Termux repository packages.
+python
+clang
+build-essential
+libev
+c-ares
+rust
+binutils
+curl
+wget
+aria2
+openssl
+openssl-tool
+git
+dtach
+watchexec
+ndk-sysroot
