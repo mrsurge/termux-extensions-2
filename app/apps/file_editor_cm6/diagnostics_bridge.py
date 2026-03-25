@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 ADAPTER_PORT = 18181
-DIAG_CACHE_MAX = 100
+DIAG_CACHE_MAX = 500
 
 # Server-side diagnostics cache: (abs_path, owner) -> {ts_ms, owner, path, markers, type}
 _diag_cache: Dict[tuple, Dict[str, Any]] = {}
@@ -193,21 +193,32 @@ async def set_consumer_ready(sio, abs_path: str, request_id: str = ""):
 
 
 # ── Debounce state for explorer/problems emission ───────────────────
+# Trailing-edge debounce: once a timer starts, it runs to completion.
+# New events during the window just mark dirty so the timer re-fires
+# instead of cancelling/restarting (which starves emission during bursts
+# like pyright's clear-then-re-emit cycle).
 _diag_emit_task: Optional[asyncio.Task] = None
+_diag_emit_dirty: bool = False
 _DIAG_EMIT_DEBOUNCE_S = 0.3
 
 
 async def _emit_diagnostics_to_explorer_and_ui(entries: list):
     """Debounced: aggregate full _diag_cache and emit to explorer + problems."""
-    global _diag_emit_task
+    global _diag_emit_task, _diag_emit_dirty
+    _diag_emit_dirty = True
+    # If a timer is already running, let it fire — it will see dirty and re-loop.
     if _diag_emit_task and not _diag_emit_task.done():
-        _diag_emit_task.cancel()
+        return
     _diag_emit_task = asyncio.ensure_future(_emit_diagnostics_debounced())
 
 
 async def _emit_diagnostics_debounced():
-    """Wait for debounce window, then emit aggregated diagnostics."""
-    await asyncio.sleep(_DIAG_EMIT_DEBOUNCE_S)
+    """Wait for debounce window, then emit aggregated diagnostics.
+    Re-fires if new events arrived during the wait (trailing edge)."""
+    global _diag_emit_dirty
+    while _diag_emit_dirty:
+        _diag_emit_dirty = False
+        await asyncio.sleep(_DIAG_EMIT_DEBOUNCE_S)
     try:
         from .explorer_socketio import EXPLORER_SIO
         from .explorer_helper import get_project_root
@@ -499,9 +510,14 @@ def stop_bridge():
     """Stop the background bridge task and clear stale diagnostics state."""
     global _bridge_running, _bridge_task, _enospc_forwarded, _diag_cache
     global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entries
+    global _diag_emit_dirty, _diag_emit_task
 
     _bridge_running = False
     _enospc_forwarded = False
+    _diag_emit_dirty = False
+    if _diag_emit_task and not _diag_emit_task.done():
+        _diag_emit_task.cancel()
+    _diag_emit_task = None
     if _bridge_task and not _bridge_task.done():
         _bridge_task.cancel()
     _bridge_task = None

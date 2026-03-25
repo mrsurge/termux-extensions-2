@@ -54,7 +54,10 @@ from .git_helper import (
 )
 from .stores import _history_store, _preferences_store
 from .project_sidecar import ProjectSidecar
-from .explorer import search, review
+# NOTE: search and review are imported lazily inside handler methods
+# to break a circular import chain:
+#   diagnostics_bridge → explorer_socketio → explorer_ws → explorer/review
+#   → editor_discard → editor_backend → editor_socketio → editor_ws
 from .preferences_store import DEFAULT_UI_PREFS
 
 # Logger setup
@@ -962,9 +965,17 @@ class ExplorerDispatcher:
         except Exception as e:
             logger.warning(f"Failed to load open directories: {e}")
 
-        # 6. Active file — NOT set here. The worker process (editor_ws.py) is the
-        #    authority for which file is open. It broadcasts explorer:activeFile
-        #    via the explorer forward-broadcast endpoint on editor connect.
+        # 6. Active file — rehydrate from history store so the explorer survives
+        #    reconnects without waiting for a new editor:activeFile broadcast.
+        try:
+            session_state = _history_store.get_session_state()
+            current_path = session_state.get("currentPath") if session_state else None
+            if current_path:
+                rel = abs_to_rel(str(current_path), str(self.project_root))
+                if rel and rel != ".":
+                    await self.emit_personal("explorer:activeFile", {"rel": rel, "abs": str(current_path)})
+        except Exception as e:
+            logger.warning(f"Failed to rehydrate active file: {e}")
 
         # 7. Watcher config (current mode + watchexec availability)
         try:
@@ -1118,6 +1129,7 @@ class ExplorerDispatcher:
     async def broadcast_review_state(self):
         """Broadcast updated review entries and decoration updates."""
         # 1. Review List
+        from .explorer import review
         reviews = await review.list_reviews(self.project_root, lightweight=True)
         await self.broadcast("review:setEntries", {"entries": reviews})
         
@@ -2077,6 +2089,7 @@ class ExplorerDispatcher:
         mode = payload.get("mode", "name")
         query = payload.get("query", "")
         
+        from .explorer import search
         if mode == "name":
             res = await search.search_by_name(self.project_root, query)
         elif mode == "content":
@@ -2089,11 +2102,13 @@ class ExplorerDispatcher:
         await self.emit_personal("search:setResults", res, msg_id)
 
     async def handle_review_list(self, payload: dict, msg_id: str):
+        from .explorer import review
         lightweight = payload.get("lightweight", False)
         res = await review.list_reviews(self.project_root, lightweight)
         await self.emit_personal("review:setEntries", {"entries": res}, msg_id)
 
     async def handle_review_save(self, payload: dict, msg_id: str):
+        from .explorer import review
         files = payload.get("files", [])
         res = await review.save_reviews(self.project_root, files)
         # Save changes disk -> affects git status and draft state
@@ -2107,6 +2122,7 @@ class ExplorerDispatcher:
         await self._notify_editor_draft_cleared(files)
 
     async def handle_review_discard(self, payload: dict, msg_id: str):
+        from .explorer import review
         files = payload.get("files", [])
         res = await review.discard_reviews(self.project_root, files)
         await self.emit_personal("review:discarded", res, msg_id)

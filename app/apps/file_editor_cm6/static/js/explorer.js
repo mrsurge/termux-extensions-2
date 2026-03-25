@@ -1354,13 +1354,13 @@ function handleExplorerEvent(type, payload) {
       // When the active project changes, refresh diff base from backend
       // so both footer and overlay selectors stay in sync with HistoryStore.
       initDiffBaseFromBackend();
-      setActiveFileRel(null);
 
-      // Only reset open directory tracking when the project actually changes.
-      // On Android, a Socket.IO reconnect can re-send project:setActive for the
-      // same project; clearing here makes the explorer appear "empty" until a
-      // manual directory open triggers fresh listings.
+      // Only reset active file and open directory tracking when the project
+      // actually changes. On Android, Socket.IO reconnects and workspace
+      // settings saves re-fire project:setActive for the same project;
+      // clearing here would lose track of the open file.
       if (prevProjectPath && nextProjectPath && prevProjectPath !== nextProjectPath) {
+        setActiveFileRel(null);
         openDirectories.clear();
         openDirsInitialized = false;
       }

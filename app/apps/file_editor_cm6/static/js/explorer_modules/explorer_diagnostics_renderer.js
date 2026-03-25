@@ -52,17 +52,12 @@ function _ensurePanel(resultsContainer, callbacks) {
     },
     onMention: async (payload) => {
       try {
-        const hostBase = typeof window.__agentHostBase === 'string'
-          ? window.__agentHostBase.trim() : '';
-        if (!hostBase) { callbacks.toast('Agent host unavailable'); return; }
-        const resp = await fetch(`${hostBase}/api/appserver/mention`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const result = await resp.json();
-        if (result && result.ok) callbacks.toast('Mentioned in conversation');
-        else callbacks.toast(result?.error || 'Failed to mention');
+        if (typeof window.__explorerBusSend !== 'function') {
+          callbacks.toast('Explorer bus unavailable');
+          return;
+        }
+        window.__explorerBusSend('mention:agent', payload);
+        callbacks.toast('Mentioned in conversation');
       } catch (err) {
         console.warn('[ExplorerDiagnostics] mention failed:', err);
         callbacks.toast('Failed to mention in conversation');
