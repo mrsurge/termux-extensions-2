@@ -100,7 +100,7 @@ def _find_pyright_config_root(file_path: Path, project_root: Path) -> tuple[Path
 
 async def _broadcast_lsp_busy(*, project_path: str, payload: dict) -> None:
     try:
-        from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+        from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
 
         await _explorer_manager.broadcast(str(project_path), {"type": "lsp:busy", "payload": payload})
     except Exception:
@@ -1628,7 +1628,7 @@ class LSPSocketIONamespace(socketio.AsyncNamespace):
 
                                                 # Push updated explorer snapshot immediately (don't wait for 1s poll loop).
                                                 try:
-                                                    from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+                                                    from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
 
                                                     summary = get_diagnostics_summary_for_project(project_root=str(base_p))
                                                     await _explorer_manager.broadcast(

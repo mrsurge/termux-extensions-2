@@ -165,7 +165,7 @@ def _normalize_project_path_for_broadcast(project_path: str | Path) -> str:
 
 async def _broadcast_lsp_busy(*, project_path: str, payload: dict) -> None:
     try:
-        from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+        from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
 
         await _explorer_manager.broadcast(str(project_path), {"type": "lsp:busy", "payload": payload})
     except Exception:
@@ -836,7 +836,7 @@ def _persist_to_cache_debounced():
         state = _history_store.get_session_state() or {}
         ssot_current = state.get("currentPath")
         if isinstance(ssot_current, str) and ssot_current.strip() and str(ssot_current) == str(current_file):
-            from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+            from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
 
             proj_norm = str(Path(project_path).expanduser().resolve(strict=False))
             source_client = source_client_id
@@ -1900,7 +1900,7 @@ async def update_preference(data: dict = Body(...)):
             proj_norm = str(Path(project_path).expanduser().resolve(strict=False)) if project_path else None
             if proj_norm:
                 preferences = _preferences_store.get_preferences(proj_norm)
-                from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+                from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
                 asyncio.create_task(
                     _explorer_manager.broadcast(
                         proj_norm,
@@ -2241,7 +2241,7 @@ async def save_current_file(data: dict = Body(...)):
                         "content_sha256": content_hash or '',
                         "source_client": nicegui_client_id,
                     }
-                    from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+                    from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
                     asyncio.create_task(
                         _explorer_manager.broadcast(
                             proj_norm,
@@ -2446,7 +2446,7 @@ async def pyright_scan_project(data: dict = Body(...)):
         try:
             from app.apps.file_editor_cm6.python_lang.pyright_workspace_scan import run_pyright_workspace_scan
             from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
-            from app.apps.file_editor_cm6.explorer_ws import manager as _explorer_manager
+            from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
             from app.apps.file_editor_cm6.lsp_ws import get_diagnostics_summary_for_project, _compute_repo_fingerprint
 
             summary_by_rel: dict[str, dict[str, int]] = {}

@@ -386,7 +386,7 @@ async def handle_tracked_edit(edit_result: dict) -> None:
         # Notify explorer so breadcrumb/toolbar filename updates
         try:
             from ..explorer_socketio import EXPLORER_SIO
-            from ..explorer_ws import abs_to_rel
+            from ..explorer_manager import abs_to_rel
             rel = abs_to_rel(abs_path, project)
             if rel and rel != ".":
                 await EXPLORER_SIO.emit(
@@ -494,7 +494,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         if current_path and project:
             try:
                 from ..explorer_socketio import EXPLORER_SIO
-                from ..explorer_ws import abs_to_rel
+                from ..explorer_manager import abs_to_rel
                 rel = abs_to_rel(str(current_path), str(project))
                 if rel and rel != ".":
                     await EXPLORER_SIO.emit(
@@ -758,7 +758,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         # Broadcast explorer:activeFile so every explorer/host client updates.
         try:
             from ..explorer_socketio import EXPLORER_SIO
-            from ..explorer_ws import abs_to_rel
+            from ..explorer_manager import abs_to_rel
             rel = abs_to_rel(path, project)
             if rel and rel != ".":
                 await EXPLORER_SIO.emit(

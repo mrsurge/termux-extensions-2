@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from ..explorer_helper import get_project_root
-from ..explorer_ws import manager as _explorer_manager
+from ..explorer_manager import manager as _explorer_manager
 from ..stores import get_history_store, get_preferences_store
 
 _registered_hosts: set[str] = set()

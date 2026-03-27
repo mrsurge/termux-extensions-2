@@ -94,7 +94,8 @@ export function createProblemsPanel(options = {}) {
     if (m.source) {
       const src = document.createElement('span');
       src.className = 'problems-source';
-      src.textContent = '[' + m.source + (m.code ? '(' + m.code + ')' : '') + ']';
+      const codeStr = m.code && typeof m.code === 'object' ? m.code.value : m.code;
+      src.textContent = '[' + m.source + (codeStr ? '(' + codeStr + ')' : '') + ']';
       msg.appendChild(src);
     }
 
@@ -116,7 +117,8 @@ export function createProblemsPanel(options = {}) {
         const sevLabel = m.severity === SEV_ERROR ? 'error'
           : m.severity === SEV_WARNING ? 'warning' : 'info';
         let content = '[' + sevLabel + '] ';
-        if (m.code) content += m.code + ': ';
+        const code = m.code && typeof m.code === 'object' ? m.code.value : m.code;
+        if (code) content += code + ': ';
         content += m.message || '(no message)';
         if (m.source) content += ' (' + m.source + ')';
         onMention({

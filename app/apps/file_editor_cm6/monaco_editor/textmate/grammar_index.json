@@ -84,6 +84,7 @@
     "source.yaml.1.2": "yaml.yaml-1.2.tmLanguage.json",
     "source.yaml.1.1": "yaml.yaml-1.1.tmLanguage.json",
     "source.yaml.1.0": "yaml.yaml-1.0.tmLanguage.json",
-    "source.yaml.embedded": "yaml.yaml-embedded.tmLanguage.json"
+    "source.yaml.embedded": "yaml.yaml-embedded.tmLanguage.json",
+    "source.toml": "toml.toml.tmLanguage.json"
   }
 }

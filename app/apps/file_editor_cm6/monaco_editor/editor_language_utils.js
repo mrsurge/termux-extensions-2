@@ -43,6 +43,7 @@ export function languageIdFromPath(path, byFilename, byExtension) {
     if (p.endsWith('.md') || p.endsWith('.mdx')) return 'markdown';
     if (p.endsWith('.sh') || p.endsWith('.bash') || p.endsWith('.zsh')) return 'shell';
     if (p.endsWith('.yml') || p.endsWith('.yaml')) return 'yaml';
+    if (p.endsWith('.toml')) return 'toml';
     return 'plaintext';
   } catch (_) {
     return 'plaintext';

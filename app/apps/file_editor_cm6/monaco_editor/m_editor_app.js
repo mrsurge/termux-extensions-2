@@ -3848,32 +3848,55 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
 
       // Monaco ESM expects a global MonacoEnvironment.getWorker for editor services.
       // Provide worker entrypoints for Monaco language services + editor services.
+      // Language workers are gated by the webWorkersEnabled UI preference (default OFF).
       window.MonacoEnvironment = {
         getWorker: function(_moduleId, _label) {
-          try {
-            var label = String(_label || '');
-            var moduleId = String(_moduleId || '');
-            var url;
-            // TS/JS worker provides keyword completions, snippets, signature help.
-            // Diagnostics are disabled (ext host is the sole diagnostics source).
-            if (label === 'typescript' || label === 'javascript') {
-              url = langBase + '/workers/ts.worker.js';
-            } else {
-              url = base + '/vs/editor/common/services/editorWebWorkerMain.bundle.js';
-            }
-            var wk = new Worker(url, { type: 'module' });
-            var key = label + ':' + url.split('/').pop();
-            if (!_workerLogOnce[key]) {
-              _workerLogOnce[key] = true;
-              console.log('[MonacoWorker]', { moduleId: moduleId, label: label, url: url });
-            }
-            wk.onerror = function(ev) { console.error('[MonacoWorker] error', { moduleId: moduleId, label: label, ev: ev }); };
-            wk.onmessageerror = function(ev) { console.error('[MonacoWorker] messageerror', { moduleId: moduleId, label: label, ev: ev }); };
-            return wk;
-          } catch (e) {
-            console.error('[Monaco] Failed to create worker', e);
-            throw e;
+          var label = String(_label || '');
+          var moduleId = String(_moduleId || '');
+
+          // Language-specific worker labels
+          var langWorkerMap = {
+            'typescript': '/workers/ts.worker.js',
+            'javascript': '/workers/ts.worker.js',
+            'json': '/workers/json.worker.js',
+            'css': '/workers/css.worker.js',
+            'scss': '/workers/css.worker.js',
+            'less': '/workers/css.worker.js',
+            'html': '/workers/html.worker.js',
+            'handlebars': '/workers/html.worker.js',
+            'razor': '/workers/html.worker.js',
+          };
+          var isLangWorker = langWorkerMap.hasOwnProperty(label);
+
+          // Read at call time — cachedPrefs is populated after bootMonaco fetches /state
+          var wwEnabled = !!(cachedPrefs && cachedPrefs.preferences && cachedPrefs.preferences.ui
+            && cachedPrefs.preferences.ui.webWorkersEnabled === true);
+
+          if (isLangWorker && !wwEnabled) {
+            // Return a silent no-op worker — Monaco caches the client so this
+            // runs once per label.  Requests never resolve, so built-in language
+            // contributions (folding, validation, symbols) silently degrade
+            // while the extension-host adapter handles everything.
+            var noop = new Blob(['self.onmessage=function(){}'], {type:'application/javascript'});
+            return new Worker(URL.createObjectURL(noop));
           }
+
+          var url;
+          if (isLangWorker) {
+            url = langBase + langWorkerMap[label];
+          } else {
+            url = base + '/vs/editor/common/services/editorWebWorkerMain.bundle.js';
+          }
+
+          var wk = new Worker(url, { type: 'module' });
+          var key = label + ':' + url.split('/').pop();
+          if (!_workerLogOnce[key]) {
+            _workerLogOnce[key] = true;
+            console.log('[MonacoWorker]', { moduleId: moduleId, label: label, url: url });
+          }
+          wk.onerror = function(ev) { console.error('[MonacoWorker] error', { moduleId: moduleId, label: label, ev: ev }); };
+          wk.onmessageerror = function(ev) { console.error('[MonacoWorker] messageerror', { moduleId: moduleId, label: label, ev: ev }); };
+          return wk;
         },
       };
 

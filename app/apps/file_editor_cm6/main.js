@@ -75,6 +75,7 @@ const UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT = 'agentActiveShortcutId';
 const UI_PREF_KEY_AGENT_TOGGLE_DISPLAY = 'agentToggleDisplay';
 const UI_PREF_KEY_AGENT_HEADER_DISPLAY = 'agentHeaderDisplay';
 const UI_PREF_KEY_AGENT_SHORTCUTS = 'agentShortcuts';
+const UI_PREF_KEY_WEB_WORKERS_ENABLED = 'webWorkersEnabled';
 const SHORTCUT_KIND_URL = 'url';
 const SHORTCUT_KIND_FRAMEWORK_APP = 'framework_app';
 
@@ -2369,6 +2370,12 @@ function _applyAgentSettingsControls(uiPrefs) {
       headerRadios.forEach((r) => { r.checked = (r.value === headerDisplay); });
     } catch (_) {}
 
+    // Web workers toggle
+    try {
+      const wwToggle = document.getElementById('editor-settings-webworkers');
+      if (wwToggle) wwToggle.checked = uiPrefs?.[UI_PREF_KEY_WEB_WORKERS_ENABLED] === true;
+    } catch (_) {}
+
     _agentShortcutsCache = shortcuts.slice();
   } finally {
     _agentSettingsUiMutating = false;
@@ -2891,6 +2898,17 @@ function _initAgentSettingsUI() {
         _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_HEADER_DISPLAY, r.value);
       });
     });
+  } catch (_) {}
+
+  // Web workers toggle
+  try {
+    const wwToggle = document.getElementById('editor-settings-webworkers');
+    if (wwToggle) {
+      wwToggle.addEventListener('change', () => {
+        if (_agentSettingsUiMutating) return;
+        _sendAgentUiPrefUpdate(UI_PREF_KEY_WEB_WORKERS_ENABLED, wwToggle.checked);
+      });
+    }
   } catch (_) {}
 
   editorSettingsAgentShortcutsBtn.addEventListener('click', () => {

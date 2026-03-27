@@ -51,7 +51,7 @@ from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
 from .draft_diff_helper import compute_draft_diff
 from .core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
-from .explorer_ws import manager as explorer_manager
+from .explorer_manager import manager as explorer_manager
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
 from .explorer import search as explorer_search_module

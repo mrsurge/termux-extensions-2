@@ -78,7 +78,7 @@ class SidebarShortcutsClient:
 
         active_project = _history_store.get_active_project()
         if active_project:
-            from ...explorer_ws import manager as explorer_manager
+            from ...explorer_manager import manager as explorer_manager
             await explorer_manager.broadcast(
                 str(active_project),
                 {"type": "prefs:setUi", "payload": {"ui": ui_snapshot}},

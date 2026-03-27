@@ -52,6 +52,9 @@ DEFAULT_UI_PREFS: Dict[str, Any] = {
     # Shortcuts list:
     #   [{"id": "...", "kind": "url"|"framework_app", "app_id": "...", "label": "...", "url": "...", "icon": {...}, "load": "...", "header": bool, "last_used": int}]
     "agentShortcuts": [],
+    # Monaco web workers (JSON, CSS, HTML, TS language services).
+    # OFF by default — the workbench adapter extension host handles everything.
+    "webWorkersEnabled": False,
 }
 
 
