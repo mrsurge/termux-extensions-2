@@ -265,19 +265,21 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
         try {
           var sn = String(scopeName || '');
 
-          // 1) Prefer vscode_api grammar (installed VSIX).
+          // 1) Prefer extension grammar via adapter WS.
           try {
             if (!tmVscodeIndex) tmVscodeIndex = await _refreshVscodeGrammarIndex();
             var entry = tmVscodeIndex && tmVscodeIndex.byScope ? tmVscodeIndex.byScope[sn] : null;
             if (entry && entry.id) {
-              var res = await vscodeApiCall('vscode.textmate.grammars.load', { id: entry.id });
-              if (res && res.ok && res.raw) {
-                var url = 'vscode_api://textmate/' + encodeURIComponent(entry.id);
-                return window.vscodetextmate.parseRawGrammar(String(res.raw), url);
+              var loadRes = await editorWorkbenchCall('grammars_load', { id: entry.id }, { timeoutMs: 8000 });
+              var loadResult = loadRes && loadRes.result ? loadRes.result : loadRes;
+              if (loadResult && loadResult.ok && loadResult.raw) {
+                var url = 'adapter://textmate/' + encodeURIComponent(entry.id);
+                console.log('[TextMate] loaded extension grammar', sn, '->', entry.id);
+                return window.vscodetextmate.parseRawGrammar(String(loadResult.raw), url);
               }
             }
           } catch (e1) {
-            // fall through to legacy
+            // fall through to static bundle
           }
 
           // 2) Legacy static grammars.
@@ -404,8 +406,10 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     // Build a tiny in-memory index so TextMate registry can resolve scope -> raw grammar.
     var idx = { byScope: Object.create(null), byLanguage: Object.create(null) };
     try {
-      var res = await vscodeApiCall('vscode.textmate.grammars.list', {});
-      var arr = res && res.grammars ? res.grammars : [];
+      // Route through adapter WS (via editorWorkbenchCall → Python → adapter_rpc).
+      var res = await editorWorkbenchCall('grammars_list', {}, { timeoutMs: 8000 });
+      var result = res && res.result ? res.result : res;
+      var arr = result && result.grammars ? result.grammars : [];
       if (!Array.isArray(arr)) arr = [];
       var byLangScopes = Object.create(null); // lang -> Set(scope)
       for (var i = 0; i < arr.length; i++) {
@@ -1063,6 +1067,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     semanticTokensSeq: 0,
     registeredHover: new Set(),
     registeredSymbols: new Set(),
+    registeredFolding: new Set(),
     registeredCompletions: new Set(),
     registeredSemanticTokens: new Set(),
     semanticTokensLegendCache: {}, // languageId -> legend
@@ -1265,13 +1270,16 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     var cancelToken = (opts && opts.cancelToken) ? opts.cancelToken : null;
     var seq = 0;
     if (kind === 'hover') seq = ++languageBridge.hoverSeq;
-    else if (kind === 'symbols') seq = ++languageBridge.symbolsSeq;
     else if (kind === 'completions') seq = ++languageBridge.completionsSeq;
     return editorWorkbenchCall(kind, params, { timeoutMs: timeoutMs }).then(function (res) {
-      if (cancelToken && cancelToken.isCancellationRequested) return { ok: false, stale: true, canceled: true };
-      if (!isLanguageContextCurrent(ctx, _currentLanguageContext())) return { ok: false, stale: true };
+      var nowCtx = _currentLanguageContext();
+      if (kind === 'symbols' || kind === 'folding_ranges') {
+        if (!ctx || !nowCtx || String(nowCtx.uri) !== String(ctx.uri)) return { ok: false, stale: true };
+      } else {
+        if (cancelToken && cancelToken.isCancellationRequested) return { ok: false, stale: true, canceled: true };
+        if (!isLanguageContextCurrent(ctx, nowCtx)) return { ok: false, stale: true };
+      }
       if (kind === 'hover' && seq !== languageBridge.hoverSeq) return { ok: false, stale: true };
-      if (kind === 'symbols' && seq !== languageBridge.symbolsSeq) return { ok: false, stale: true };
       if (kind === 'completions' && seq !== languageBridge.completionsSeq) return { ok: false, stale: true };
       return { ok: true, result: res };
     }).catch(function (e) {
@@ -1279,17 +1287,45 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     });
   }
 
+  function _languageWorkersEnabled() {
+    return !!(cachedPrefs && cachedPrefs.preferences && cachedPrefs.preferences.ui
+      && cachedPrefs.preferences.ui.webWorkersEnabled === true);
+  }
+
+  function _documentSymbolProviderSelector(langId) {
+    if (_languageWorkersEnabled()) return langId;
+    // With language workers OFF, worker-backed JS/HTML symbol adapters stay
+    // registered but can hang OutlineModel.create(). Use an exclusive file-only
+    // selector so Monaco prefers the bridge provider for the real editor model.
+    return { language: langId, scheme: 'file', exclusive: true };
+  }
+
+  function _foldingRangeProviderSelector(langId) {
+    if (_languageWorkersEnabled()) return langId;
+    // When workers are OFF, keep file-backed folding on the WBA bridge path so
+    // Monaco doesn't sit behind a worker adapter that never resolves.
+    return { language: langId, scheme: 'file', exclusive: true };
+  }
+
   function _normalizeDocumentSymbols(raw) {
     if (!Array.isArray(raw) || !window.monaco || !monaco.languages) return [];
     var defaultKind = monaco.languages.SymbolKind ? monaco.languages.SymbolKind.Function : 11;
+    function _symbolProtoRange(s) {
+      return (s && s.range) ? s.range : ((s && s.location && s.location.range) ? s.location.range : null);
+    }
     var mapOne = function (s) {
-      var range = _monacoRangeFromProtoRange(s && s.range ? s.range : null);
-      var sel = _monacoRangeFromProtoRange(s && s.selectionRange ? s.selectionRange : (s && s.range ? s.range : null));
+      // Some built-in providers still return SymbolInformation-style entries
+      // with location.range/containerName instead of DocumentSymbol fields.
+      var protoRange = _symbolProtoRange(s);
+      var range = _monacoRangeFromProtoRange(protoRange);
+      var sel = _monacoRangeFromProtoRange(s && s.selectionRange ? s.selectionRange : protoRange);
       var kids = Array.isArray(s && s.children) ? s.children.map(mapOne) : [];
+      var detail = (s && s.detail != null) ? String(s.detail) : '';
+      if (!detail && s && s.containerName != null) detail = String(s.containerName);
       return {
         name: String((s && s.name) || ''),
-        detail: (s && s.detail != null) ? String(s.detail) : '',
-        kind: Number((s && s.kind) || defaultKind),
+        detail: detail,
+        kind: Number((s && s.kind) != null ? s.kind : defaultKind),
         tags: Array.isArray(s && s.tags) ? s.tags : [],
         range: range || new monaco.Range(1, 1, 1, 1),
         selectionRange: sel || range || new monaco.Range(1, 1, 1, 1),
@@ -1297,6 +1333,36 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       };
     };
     return raw.map(mapOne);
+  }
+
+  function _monacoFoldingRangeKindFromProto(kind) {
+    if (!kind || !window.monaco || !monaco.languages || !monaco.languages.FoldingRangeKind) return undefined;
+    var value = '';
+    if (typeof kind === 'string') value = kind;
+    else if (kind && typeof kind.value === 'string') value = kind.value;
+    if (!value) return undefined;
+    var kinds = monaco.languages.FoldingRangeKind;
+    if (typeof kinds.fromValue === 'function') return kinds.fromValue(value);
+    if (value === 'comment' && kinds.Comment) return kinds.Comment;
+    if (value === 'imports' && kinds.Imports) return kinds.Imports;
+    if (value === 'region' && kinds.Region) return kinds.Region;
+    return undefined;
+  }
+
+  function _normalizeFoldingRanges(raw) {
+    if (!Array.isArray(raw)) return null;
+    var out = [];
+    for (var i = 0; i < raw.length; i++) {
+      var r = raw[i];
+      var start = Number(r && r.start);
+      var end = Number(r && r.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 1 || end <= start) continue;
+      var item = { start: start, end: end };
+      var kind = _monacoFoldingRangeKindFromProto(r && r.kind);
+      if (kind) item.kind = kind;
+      out.push(item);
+    }
+    return out;
   }
 
   function _monacoRangeFromCompletionRange(range, pos) {
@@ -1313,7 +1379,6 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     languageBridge.registeredSemanticTokens.add(langId);
 
     if (isRange && monaco.languages.registerDocumentRangeSemanticTokensProvider) {
-      console.log('[semanticTokens] registering RANGE provider for ' + langId + ' types=' + legend.tokenTypes.length + ' mods=' + legend.tokenModifiers.length);
       monaco.languages.registerDocumentRangeSemanticTokensProvider(langId, {
         getLegend: function () {
           return legend;
@@ -1324,7 +1389,6 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
             var uri = String(m.uri.toString());
             var p = currentPath ? String(currentPath) : _pathFromUriString(uri);
             var lang = String(m.getLanguageId ? m.getLanguageId() : langId);
-            console.log('[semanticTokens] RANGE REQUEST ' + lang + ' path=' + p + ' range=' + range.startLineNumber + ':' + range.startColumn + '-' + range.endLineNumber + ':' + range.endColumn);
             return editorWorkbenchCall('semantic_tokens_range', {
               uri: uri,
               path: p,
@@ -1337,18 +1401,16 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
               },
               timeoutMs: 10000,
             }, { timeoutMs: 12000 }).then(function (out) {
-              if (!out || out.ok === false) { console.log('[semanticTokens] RANGE RESPONSE not ok', out); return null; }
+              if (!out || out.ok === false) return null;
               var payload = out.result || out;
-              if (!payload) { console.log('[semanticTokens] RANGE RESPONSE no payload'); return null; }
+              if (!payload) return null;
               var data = payload.data;
-              if (!data || !data.length) { console.log('[semanticTokens] RANGE RESPONSE no data, payload keys=' + Object.keys(payload).join(','), 'type=' + payload.type, 'resultId=' + payload.resultId); return null; }
-              console.log('[semanticTokens] RANGE RESPONSE OK tokens=' + (data.length / 5) + ' resultId=' + (payload.resultId || '') + ' first5=[' + Array.from(data).slice(0, 5).join(',') + ']');
+              if (!data || !data.length) return null;
               return {
                 resultId: payload.resultId || '',
                 data: new Uint32Array(data),
               };
-            }).catch(function (e) {
-              console.warn('[semanticTokens] range request failed', e);
+            }).catch(function () {
               return null;
             });
           } catch (_) {
@@ -1480,7 +1542,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
             }
 
             if (!languageBridge.registeredSymbols.has(langId) && monaco.languages.registerDocumentSymbolProvider) {
-              monaco.languages.registerDocumentSymbolProvider(langId, {
+              monaco.languages.registerDocumentSymbolProvider(_documentSymbolProviderSelector(langId), {
                 provideDocumentSymbols: function (m, token) {
                   try {
                     var ctx = _currentLanguageContext();
@@ -1498,7 +1560,9 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
                       { timeoutMs: 6500, cancelToken: token },
                     ).then(function (out) {
                       if (!out || !out.ok || !out.result || out.result.ok === false) return [];
-                      var payload = out.result.result || [];
+                      var payload = Array.isArray(out.result)
+                        ? out.result
+                        : (Array.isArray(out.result.result) ? out.result.result : []);
                       return _normalizeDocumentSymbols(payload);
                     });
                   } catch (_) {
@@ -1507,6 +1571,38 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
                 },
               });
               languageBridge.registeredSymbols.add(langId);
+            }
+
+            if (!languageBridge.registeredFolding.has(langId) && monaco.languages.registerFoldingRangeProvider) {
+              monaco.languages.registerFoldingRangeProvider(_foldingRangeProviderSelector(langId), {
+                provideFoldingRanges: function (m, context, token) {
+                  try {
+                    var ctx = _currentLanguageContext();
+                    if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) return null;
+                    return _callVscodeApiGuarded(
+                      'folding_ranges',
+                      'vscode.foldingRanges',
+                      {
+                        uri: ctx.uri,
+                        path: ctx.path,
+                        languageId: ctx.languageId,
+                        context: (context && typeof context === 'object') ? context : {},
+                        timeoutMs: 6000,
+                      },
+                      ctx,
+                      { timeoutMs: 6500, cancelToken: token },
+                    ).then(function (out) {
+                      if (!out || !out.ok || !out.result || out.result.ok === false) return null;
+                      var payload = Array.isArray(out.result) ? out.result : out.result.result;
+                      var normalized = _normalizeFoldingRanges(payload);
+                      return normalized == null ? null : normalized;
+                    });
+                  } catch (_) {
+                    return null;
+                  }
+                },
+              });
+              languageBridge.registeredFolding.add(langId);
             }
 
             if (!languageBridge.registeredCompletions.has(langId) && monaco.languages.registerCompletionItemProvider) {
@@ -3473,6 +3569,18 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
         try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
       });
 
+      editorSocket.on('editor:workbench_folding_ranges_response', function (data) {
+        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
+      });
+
+      editorSocket.on('editor:workbench_grammars_list_response', function (data) {
+        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
+      });
+
+      editorSocket.on('editor:workbench_grammars_load_response', function (data) {
+        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
+      });
+
       // Push-based: adapter notifies when a semantic tokens provider registers.
       // Cache the legend but DON'T register the Monaco provider yet — wait for
       // diagnostics to prove the language server has analyzed the file first.
@@ -3737,6 +3845,22 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
 
   // ─── UI IPC (frontend-to-frontend relay) ────────────────
   var uiIpcSocket = null;
+  var _editorConsoleWorkerId = null;
+
+  function _randomConsoleWorkerSuffix() {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID().split('-')[0];
+      }
+    } catch (_) {}
+    return Math.random().toString(36).slice(2, 10);
+  }
+
+  function _getEditorConsoleWorkerId() {
+    if (_editorConsoleWorkerId) return _editorConsoleWorkerId;
+    _editorConsoleWorkerId = 'editor_iframe:' + _randomConsoleWorkerSuffix();
+    return _editorConsoleWorkerId;
+  }
 
   function connectUIIPC() {
     try {
@@ -3744,7 +3868,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       uiIpcSocket = connectUiIpcSocket(window.io);
       uiIpcSocket.on('connect', function() {
         console.log('[UI_IPC] editor iframe connected');
-        registerConsoleWorker(uiIpcSocket, 'editor_iframe', 'worker');
+        registerConsoleWorker(uiIpcSocket, _getEditorConsoleWorkerId(), 'worker');
       });
       uiIpcSocket.on('ui_event', function(data) {
         if (!data || typeof data !== 'object') return;
@@ -3773,7 +3897,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
   function _initEditorConsoleBridge(sock) {
     if (_consoleBridgeActive) return;
     var LEVELS = ['log', 'info', 'warn', 'error', 'debug'];
-    var workerId = 'editor_iframe';
+    var workerId = _getEditorConsoleWorkerId();
 
     function safeSerialize(x) {
       return safeSerializeConsoleArg(x);
@@ -3869,8 +3993,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
           var isLangWorker = langWorkerMap.hasOwnProperty(label);
 
           // Read at call time — cachedPrefs is populated after bootMonaco fetches /state
-          var wwEnabled = !!(cachedPrefs && cachedPrefs.preferences && cachedPrefs.preferences.ui
-            && cachedPrefs.preferences.ui.webWorkersEnabled === true);
+          var wwEnabled = _languageWorkersEnabled();
 
           if (isLangWorker && !wwEnabled) {
             // Return a silent no-op worker — Monaco caches the client so this
@@ -3931,14 +4054,9 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       try { installVscodeApiLanguageBridgeProviders(); } catch (_) {}
 
       try {
-        // vscode_api bootstrap snapshot (installed VSIX, themes, grammars, enabled list).
-        // This is used for TextMate apply (grammars) today, and will become the basis
-        // for extension host bootstrapping in later phases.
+        // vscode_api bootstrap snapshot — deprecated, kept for backward compat.
         try {
           window.__te2VscodeBootstrap = await vscodeApiCall('vscode.bootstrap.snapshot', {});
-        } catch (_) {}
-        try {
-          tmVscodeIndex = await _refreshVscodeGrammarIndex();
         } catch (_) {}
 
         applyActiveModelLanguage(window, model, currentPath, applyLanguageToModel, languageFromPath);

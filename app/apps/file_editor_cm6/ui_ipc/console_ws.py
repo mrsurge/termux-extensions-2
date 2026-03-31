@@ -120,7 +120,7 @@ async def request_console_eval(
     target_worker_id: str,
     code: str,
     *,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float = 20.0,
 ) -> dict:
     """Emit console:eval directly from Python and await the matching result."""
     target = str(target_worker_id or "").strip()

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import v8 from "node:v8";
 import path from "node:path";
 import readline from "node:readline";
+import fs from "node:fs/promises";
 
 import { WorkbenchClient } from "./workbench_client.mjs";
 
@@ -759,6 +760,25 @@ async function handleJsonRpc(reqObj) {
     return { jsonrpc: "2.0", id, result };
   }
 
+  if (method === "vscode.foldingRanges") {
+    const p = (params && typeof params === "object") ? params : {};
+    const resolvedPath = normalizePathParam(p);
+    if (!resolvedPath) {
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Invalid params: provide path or uri" } };
+    }
+    const authority = normalizeAuthorityParam(p, DEFAULT_REMOTE_AUTHORITY);
+    const result = await wb.foldingRanges({
+      path: resolvedPath,
+      authority,
+      providerHandle: p.providerHandle,
+      languageId: p.languageId,
+      timeoutMs: p.timeoutMs,
+      generation: p.generation,
+      context: p.context,
+    });
+    return { jsonrpc: "2.0", id, result };
+  }
+
   if (method === "vscode.hover") {
     const p = (params && typeof params === "object") ? params : {};
     const resolvedPath = normalizePathParam(p);
@@ -864,6 +884,70 @@ async function handleJsonRpc(reqObj) {
     if (typeof obj.upstreamHttp === "string") state.config.upstreamHttp = obj.upstreamHttp;
     if (typeof obj.proxyHttp === "string") state.config.proxyHttp = obj.proxyHttp;
     return { jsonrpc: "2.0", id, result: { ok: true, ts_ms: nowMs(), config: state.config } };
+  }
+
+  // ── TextMate grammar serving ──────────────────────────────────────
+  if (method === "vscode.textmate.grammars.list") {
+    const exts = wb.getExtensions?.() ?? [];
+    const grammars = [];
+    for (const ext of exts) {
+      const contribGrammars = ext?.contributes?.grammars;
+      if (!Array.isArray(contribGrammars)) continue;
+      const extId = ext?.id ?? ext?.identifier?.value ?? "unknown";
+      const extLocPath = ext?.extensionLocation?.path ?? null;
+      for (const g of contribGrammars) {
+        if (!g || !g.scopeName) continue;
+        const grammarRelPath = g.path ?? null;
+        const grammarId = `${extId}/${grammarRelPath ?? g.scopeName}`;
+        grammars.push({
+          id: grammarId,
+          scopeName: g.scopeName,
+          language: g.language ?? null,
+          extensionId: extId,
+          _extPath: extLocPath,
+          _grammarRelPath: grammarRelPath,
+        });
+      }
+    }
+    console.log(`[grammars.list] found ${grammars.length} grammars from ${exts.length} extensions`);
+    return { jsonrpc: "2.0", id, result: { ok: true, grammars } };
+  }
+
+  if (method === "vscode.textmate.grammars.load") {
+    const p = (params && typeof params === "object") ? params : {};
+    const grammarId = typeof p.id === "string" ? p.id : null;
+    if (!grammarId) {
+      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Missing required param: id" } };
+    }
+    // Resolve the grammar file from extension path + relative grammar path.
+    const exts = wb.getExtensions?.() ?? [];
+    let grammarRaw = null;
+    for (const ext of exts) {
+      const contribGrammars = ext?.contributes?.grammars;
+      if (!Array.isArray(contribGrammars)) continue;
+      const extId = ext?.id ?? ext?.identifier?.value ?? "unknown";
+      const extLocPath = ext?.extensionLocation?.path ?? null;
+      if (!extLocPath) continue;
+      for (const g of contribGrammars) {
+        if (!g || !g.path) continue;
+        const thisId = `${extId}/${g.path}`;
+        if (thisId === grammarId) {
+          const absPath = path.resolve(extLocPath, g.path);
+          try {
+            grammarRaw = await fs.readFile(absPath, "utf8");
+          } catch (e) {
+            return { jsonrpc: "2.0", id, error: { code: -32000, message: `Failed to read grammar: ${e?.message ?? e}` } };
+          }
+          break;
+        }
+      }
+      if (grammarRaw !== null) break;
+    }
+    if (grammarRaw === null) {
+      return { jsonrpc: "2.0", id, error: { code: -32000, message: `Grammar not found: ${grammarId}` } };
+    }
+    console.log(`[grammars.load] loaded ${grammarId} (${grammarRaw.length} bytes)`);
+    return { jsonrpc: "2.0", id, result: { ok: true, raw: grammarRaw } };
   }
 
   // Placeholder: next step will implement connect/bootstrap and high-level calls

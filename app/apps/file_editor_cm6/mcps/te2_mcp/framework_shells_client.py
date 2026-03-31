@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Any
 
 from framework_shells import get_manager
@@ -15,7 +16,7 @@ class FrameworkShellsClient:
         shells = await mgr.list_shells()
         return {
             "ok": True,
-            "data": [self._shell_payload(shell) for shell in shells],
+            "data": [self._shell_payload(shell) for shell in shells if self._shell_is_running(shell)],
             "source": "framework_shells.direct",
         }
 
@@ -63,3 +64,30 @@ class FrameworkShellsClient:
         if isinstance(shell, dict):
             return dict(shell)
         raise TypeError("Unsupported shell payload type")
+
+    @staticmethod
+    def _shell_attr(shell: Any, key: str, default: Any = None) -> Any:
+        if isinstance(shell, dict):
+            return shell.get(key, default)
+        return getattr(shell, key, default)
+
+    @classmethod
+    def _shell_is_running(cls, shell: Any) -> bool:
+        if str(cls._shell_attr(shell, "status", "")).strip().lower() != "running":
+            return False
+
+        pid = cls._shell_attr(shell, "pid")
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            return False
+        if pid_int <= 0:
+            return False
+
+        try:
+            os.kill(pid_int, 0)
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True

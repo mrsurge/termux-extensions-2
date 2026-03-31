@@ -83,6 +83,12 @@ const PARSE_ARGS_ONLY_METHODS = new Set([
   "$changeMany",
   "$provideHover",
   "$provideDocumentSymbols",
+
+  // File system + content provider methods (need parsed URIs).
+  "$readFile",
+  "$stat",
+  "$tryOpenDocument",
+  "$registerTextDocumentContentProvider",
 ]);
 for (const s of String(process.env.TE2_PARSE_ARGS_ONLY_METHODS || "").split(",")) {
   const v = s.trim();
@@ -115,9 +121,11 @@ const EXT_MSG_TRACE_MAX = Number(process.env.TE2_EXT_MSG_TRACE_MAX ?? "2000");
 // If te2_rpc_config.json exists, values are overridden from it.
 const _RPC_DEFAULTS = {
   MainThreadOutputService: 29,
+  MainThreadDocumentContentProviders: 18,
   ExtHostConfiguration: 80,
   ExtHostDocumentsAndEditors: 84,
   ExtHostDocuments: 85,
+  ExtHostDocumentContentProviders: 86,
   ExtHostEditors: 88,
   ExtHostFileSystemInfo: 91,
   ExtHostLanguages: 93,
@@ -259,6 +267,12 @@ async function waitFor(pred, { timeoutMs = 8000, intervalMs = 50 } = {}) {
     await sleep(intervalMs);
   }
   return false;
+}
+
+function _coerceOptionalGeneration(raw) {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
 }
 
 function memSnapshot() {
@@ -743,11 +757,14 @@ export class WorkbenchClient {
     this._nextModelNumber = 1;
     this._activeEditorId = null;   // track current editor for close-before-open
     this._activeUriObj = null;     // track current URI object for close-before-open
+    this._backgroundDocuments = new Set(); // uri string -> addedDocuments sent without active editor churn
     this._docVersions = new Map(); // path -> versionId for didChange tracking
     this._docLineCount = new Map(); // path -> line count for didChange range
     this._docCharCount = new Map(); // path -> char count for didChange rangeLength
     this._docLastLineLength = new Map(); // path -> length of last line (for valid endColumn)
     this._docOpenGeneration = new Map(); // path -> generation token from open_file flow
+    this._extensions = []; // sanitized extensions (populated after connect)
+    this._textContentProviders = new Map(); // scheme -> handle (from $registerTextDocumentContentProvider)
     this._useRemote = true;
     this._authority = DEFAULT_REMOTE_AUTHORITY;
     this._productVersion = null;
@@ -762,6 +779,7 @@ export class WorkbenchClient {
     this._providers = {
       hover: new Map(), // handle -> { handle, selector, label }
       documentSymbols: new Map(), // handle -> { handle, selector, label }
+      foldingRanges: new Map(), // handle -> { handle, selector, label, eventHandle }
       completions: new Map(), // handle -> { handle, selector, supportsResolve }
       semanticTokens: new Map(), // handle -> { handle, selector, legend, eventHandle }
     };
@@ -860,6 +878,45 @@ export class WorkbenchClient {
 
   status() {
     return { ...this.state };
+  }
+
+  getExtensions() {
+    return this._extensions;
+  }
+
+  /**
+   * Ask the ext host to provide content for a virtual document URI.
+   * @param {number} handle - The content provider handle (from $registerTextDocumentContentProvider).
+   * @param {object} uri - The URI object to resolve.
+   * @returns {Promise<string|null>} The document content or null.
+   */
+  async _provideTextDocumentContent(handle, uri) {
+    if (!this.ext?.protocol) throw new Error("not connected");
+    const req = this._allocExtReqId();
+    const payload = encodeExtRequestJsonArgs({
+      req,
+      rpcId: _rpcIds.ExtHostDocumentContentProviders,
+      method: "$provideTextDocumentContent",
+      args: [handle, uri],
+      cancellable: true,
+    });
+    const fut = new Promise((resolve, reject) => {
+      this._pendingExt.set(req, { resolve, reject });
+      setTimeout(() => {
+        if (this._pendingExt.has(req)) {
+          this._pendingExt.delete(req);
+          reject(new Error("timed out waiting for $provideTextDocumentContent"));
+        }
+      }, 5000);
+    });
+    this.ext.protocol.send(VSBuffer.wrap(payload));
+    const reply = await fut;
+    if (!reply) return null;
+    // Reply type 9 = JSON, type 8 = VSBuffer
+    if (reply.type === 9) return typeof reply.result === "string" ? reply.result : JSON.stringify(reply.result);
+    if (reply.type === 8 && reply.result) return Buffer.isBuffer(reply.result) ? reply.result.toString("utf8") : String(reply.result);
+    if (reply.type === 11) throw new Error(reply.error?.message ?? "content provider error");
+    return null;
   }
 
   async _discoverServerRootPath(httpBase, folder) {
@@ -1126,6 +1183,295 @@ export class WorkbenchClient {
       path: p,
       scheme: "file",
     };
+  }
+
+  _uriObjToStringSafe(uri) {
+    if (!uri || typeof uri !== "object") return String(uri ?? "");
+    if (typeof uri.external === "string" && uri.external) return uri.external;
+    const scheme = typeof uri.scheme === "string" ? uri.scheme : "";
+    const authority = typeof uri.authority === "string" ? uri.authority : "";
+    const p = typeof uri.path === "string" && uri.path ? uri.path : (typeof uri.fsPath === "string" ? uri.fsPath : "");
+    if (scheme) return `${scheme}://${authority}${p}`;
+    return p;
+  }
+
+  _fsPathFromUri(uri) {
+    if (!uri || typeof uri !== "object") return null;
+    const scheme = typeof uri.scheme === "string" ? uri.scheme : "";
+    if (scheme === "vscode") return null;
+    if (typeof uri.fsPath === "string" && uri.fsPath) return uri.fsPath;
+    if (typeof uri.path === "string" && uri.path) return uri.path;
+    return null;
+  }
+
+  _statPayloadFromFsStats(st) {
+    let type = 0;
+    if (typeof st?.isFile === "function" && st.isFile()) type |= 1;
+    else if (typeof st?.isDirectory === "function" && st.isDirectory()) type |= 2;
+    if (typeof st?.isSymbolicLink === "function" && st.isSymbolicLink()) type |= 64;
+    return {
+      type,
+      size: Number(st?.size ?? 0),
+      mtime: Number.isFinite(Number(st?.mtimeMs)) ? Number(st.mtimeMs) : Date.now(),
+      ctime: Number.isFinite(Number(st?.ctimeMs)) ? Number(st.ctimeMs) : Date.now(),
+    };
+  }
+
+  async _readLocalUriBuffer(uri) {
+    const fsPath = this._fsPathFromUri(uri);
+    if (!fsPath) throw new Error(`no local fs path for ${this._uriObjToStringSafe(uri)}`);
+    return await fs.readFile(fsPath);
+  }
+
+  async _statLocalUri(uri) {
+    const fsPath = this._fsPathFromUri(uri);
+    if (!fsPath) throw new Error(`no local fs path for ${this._uriObjToStringSafe(uri)}`);
+    const st = await fs.lstat(fsPath);
+    return this._statPayloadFromFsStats(st);
+  }
+
+  async _tryOpenDocument(uri, options = {}) {
+    if (!this.ext?.protocol) throw new Error("not connected");
+    const uriObj = (uri && typeof uri === "object") ? uri : null;
+    if (!uriObj) throw new Error("missing uri");
+    const uriStr = this._uriObjToStringSafe(uriObj);
+    const fsPath = this._fsPathFromUri(uriObj);
+    if (!fsPath) throw new Error(`unsupported document uri: ${uriStr}`);
+
+    if (!this._backgroundDocuments.has(uriStr)) {
+      const text = await fs.readFile(fsPath, "utf8");
+      const lines = text.split(/\r?\n/);
+      const languageId = _languageIdFromPath(fsPath) || "plaintext";
+      const encoding = typeof options?.encoding === "string" && options.encoding ? options.encoding : "utf8";
+      const docDelta = {
+        addedDocuments: [{
+          uri: uriObj,
+          versionId: 1,
+          lines,
+          EOL: "\n",
+          languageId,
+          isDirty: false,
+          encoding,
+        }],
+      };
+      this._sendExt(_rpcIds.ExtHostDocumentsAndEditors, "$acceptDocumentsAndEditorsDelta", [docDelta], false);
+      this._backgroundDocuments.add(uriStr);
+      try {
+        console.log(`[schema_doc] opened background document uri=${uriStr} lines=${lines.length} lang=${languageId}`);
+      } catch {}
+      try {
+        if (docDelta?.addedDocuments?.[0]) docDelta.addedDocuments[0].lines = null;
+      } catch {}
+    }
+    return uriObj;
+  }
+
+  _cloneJsonValue(value) {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== "object") return value;
+    try {
+      return structuredClone(value);
+    } catch {
+      return JSON.parse(JSON.stringify(value));
+    }
+  }
+
+  _visitConfigurationNodes(node, visit) {
+    if (!node || typeof node !== "object") return;
+    visit(node);
+    if (Array.isArray(node.allOf)) {
+      for (const child of node.allOf) this._visitConfigurationNodes(child, visit);
+    }
+  }
+
+  _collectExtensionConfigurationBuckets() {
+    const buckets = {
+      all: {},
+      application: {},
+      applicationMachine: {},
+      machine: {},
+      machineOverridable: {},
+      window: {},
+      resource: {},
+      languageOverridable: {},
+    };
+    const addProp = (fullKey, rawSchema) => {
+      if (!fullKey || typeof fullKey !== "string") return;
+      if (!rawSchema || typeof rawSchema !== "object") return;
+      const schema = this._cloneJsonValue(rawSchema);
+      const scope = String(schema.scope || "window");
+      buckets.all[fullKey] = schema;
+      switch (scope) {
+        case "application":
+          buckets.application[fullKey] = schema;
+          break;
+        case "application-machine":
+          buckets.applicationMachine[fullKey] = schema;
+          break;
+        case "machine":
+          buckets.machine[fullKey] = schema;
+          break;
+        case "machine-overridable":
+          buckets.machineOverridable[fullKey] = schema;
+          break;
+        case "resource":
+          buckets.resource[fullKey] = schema;
+          break;
+        case "language-overridable":
+          buckets.resource[fullKey] = schema;
+          buckets.languageOverridable[fullKey] = schema;
+          break;
+        case "window":
+        default:
+          buckets.window[fullKey] = schema;
+          break;
+      }
+    };
+
+    for (const ext of Array.isArray(this._extensions) ? this._extensions : []) {
+      const manifest = ext?.packageJSON ?? ext;
+      let configs = manifest?.contributes?.configuration;
+      if (!configs) continue;
+      if (!Array.isArray(configs)) configs = [configs];
+      for (const cfg of configs) {
+        this._visitConfigurationNodes(cfg, (node) => {
+          const props = node?.properties;
+          if (!props || typeof props !== "object") return;
+          for (const [fullKey, rawSchema] of Object.entries(props)) addProp(fullKey, rawSchema);
+        });
+      }
+    }
+    return buckets;
+  }
+
+  _settingsSchemaFlags() {
+    return {
+      additionalProperties: true,
+      allowTrailingCommas: true,
+      allowComments: true,
+    };
+  }
+
+  _settingsOverridePatternProperties() {
+    return {
+      "^(\\[([^\\]]+)\\])+$": {
+        type: "object",
+        description: "Configure editor settings to be overridden for a language.",
+        errorMessage: "This setting does not support per-language configuration.",
+        $ref: "vscode://schemas/settings/resourceLanguage",
+      },
+    };
+  }
+
+  _mergeSchemaPropertySets(...maps) {
+    return Object.assign({}, ...maps.filter((m) => m && typeof m === "object"));
+  }
+
+  _buildSettingsSchema(kind) {
+    const buckets = this._collectExtensionConfigurationBuckets();
+    const flags = this._settingsSchemaFlags();
+    const patternProperties = this._settingsOverridePatternProperties();
+    switch (kind) {
+      case "settings/default":
+        return {
+          properties: this._mergeSchemaPropertySets(buckets.all),
+          patternProperties,
+          ...flags,
+        };
+      case "settings/user":
+        return {
+          properties: this._mergeSchemaPropertySets(
+            buckets.application,
+            buckets.applicationMachine,
+            buckets.machine,
+            buckets.machineOverridable,
+            buckets.window,
+            buckets.resource,
+          ),
+          patternProperties,
+          ...flags,
+        };
+      case "settings/profile":
+        return {
+          properties: this._mergeSchemaPropertySets(
+            buckets.machine,
+            buckets.machineOverridable,
+            buckets.window,
+            buckets.resource,
+          ),
+          patternProperties,
+          ...flags,
+        };
+      case "settings/machine":
+        return {
+          properties: this._mergeSchemaPropertySets(
+            buckets.applicationMachine,
+            buckets.machine,
+            buckets.machineOverridable,
+            buckets.window,
+            buckets.resource,
+          ),
+          patternProperties,
+          ...flags,
+        };
+      case "settings/workspace":
+        return {
+          properties: this._mergeSchemaPropertySets(
+            buckets.machineOverridable,
+            buckets.window,
+            buckets.resource,
+          ),
+          patternProperties,
+          ...flags,
+        };
+      case "settings/folder":
+        return {
+          properties: this._mergeSchemaPropertySets(
+            buckets.machineOverridable,
+            buckets.resource,
+          ),
+          patternProperties,
+          ...flags,
+        };
+      case "settings/resourceLanguage":
+        return {
+          properties: this._mergeSchemaPropertySets(buckets.languageOverridable),
+          patternProperties: {},
+          ...flags,
+        };
+      default:
+        return null;
+    }
+  }
+
+  _getVirtualVscodeContent(uri) {
+    if (!uri || typeof uri !== "object") return null;
+    const scheme = typeof uri.scheme === "string" ? uri.scheme : "";
+    const authority = typeof uri.authority === "string" ? uri.authority : "";
+    const p = typeof uri.path === "string" ? uri.path : "";
+    if (scheme !== "vscode") return null;
+
+    if (authority === "schemas" && p.startsWith("/settings/")) {
+      const schemaKind = p.slice(1); // settings/folder, settings/user, ...
+      const schema = this._buildSettingsSchema(schemaKind);
+      return schema ? JSON.stringify(schema) : null;
+    }
+    if (authority === "schemas-associations" && p === "/schemas-associations.json") {
+      return JSON.stringify({});
+    }
+    return null;
+  }
+
+  _readVirtualVscodeUriBuffer(uri) {
+    const content = this._getVirtualVscodeContent(uri);
+    return content == null ? null : Buffer.from(String(content), "utf8");
+  }
+
+  _statVirtualVscodeUri(uri) {
+    const content = this._getVirtualVscodeContent(uri);
+    if (content == null) return null;
+    const now = Date.now();
+    return { type: 1, size: Buffer.byteLength(String(content), "utf8"), mtime: now, ctime: now };
   }
 
   _emptyConfigSection() {
@@ -1516,6 +1862,7 @@ export class WorkbenchClient {
         const userCount = extIds.length - builtinCount;
         console.log(`[extensions] loaded ${extIds.length} extensions (${builtinCount} builtin, ${userCount} user): ${extIds.join(", ")}`);
       } catch {}
+      this._extensions = Array.isArray(scannedExtensions) ? scannedExtensions : [];
       try {
         if (String(process.env.TE2_SKIP_MGMT_SCAN || "") !== "1") {
           await spanTraceAsync("connect.whenExtensionsReady", () => this._mgmtIpc.call("remoteExtensionsScanner", "whenExtensionsReady", undefined));
@@ -1743,6 +2090,14 @@ export class WorkbenchClient {
           if (msg.method === "$register") {
             console.log(`[ext_register] $register rpcId=${msg.rpcId} args=${JSON.stringify(msg.args ?? []).slice(0, 500)}`);
           }
+          if (msg.method === "$registerTextDocumentContentProvider" && Array.isArray(msg.args) && msg.args.length >= 2) {
+            const handle = Number(msg.args[0]);
+            const scheme = typeof msg.args[1] === "string" ? msg.args[1] : null;
+            if (Number.isFinite(handle) && scheme) {
+              this._textContentProviders.set(scheme, handle);
+              console.log(`[contentProvider] registered scheme=${scheme} handle=${handle}`);
+            }
+          }
           if (msg.method === "$onExtensionRuntimeError") {
             console.log(`[ext_error] $onExtensionRuntimeError args=${JSON.stringify(msg.args ?? []).slice(0, 500)}`);
           }
@@ -1792,6 +2147,27 @@ export class WorkbenchClient {
                 }
               }
               console.log(`[providers] hover map size=${this._providers.hover.size} languages=[${Array.from(this._providers.hover.values()).map(e => e.selector?.map(s => s?.language).filter(Boolean)).flat().join(',')}]`);
+            }
+          }
+          if (msg.method === "$registerFoldingRangeProvider" && Array.isArray(msg.args) && msg.args.length >= 2) {
+            const handle = Number(msg.args[0]);
+            const selector = msg.args[1];
+            const label = (typeof msg.args[2] === "string")
+              ? msg.args[2]
+              : ((msg.args[2] && typeof msg.args[2] === "object" && typeof msg.args[2].value === "string") ? msg.args[2].value : null);
+            const eventHandle = (typeof msg.args[3] === "number" && Number.isFinite(msg.args[3])) ? msg.args[3] : null;
+            console.log(`[providers] $registerFoldingRangeProvider handle=${handle} selector=${JSON.stringify(selector)?.slice(0,200)} eventHandle=${eventHandle ?? 'none'} isArr=${Array.isArray(selector)} isFinite=${Number.isFinite(handle)}`);
+            if (Number.isFinite(handle) && Array.isArray(selector)) {
+              try {
+                this._providers.foldingRanges.set(handle, { handle, selector, label, eventHandle });
+              } catch {}
+              for (const s of selector) {
+                if (s && typeof s === "object" && s.language) {
+                  this.onEvent({ type: "provider/foldingRanges", ts_ms: Date.now(), handle, language: s.language, eventHandle });
+                  break;
+                }
+              }
+              console.log(`[providers] foldingRanges map size=${this._providers.foldingRanges.size} languages=[${Array.from(this._providers.foldingRanges.values()).map(e => e.selector?.map(s => s?.language).filter(Boolean)).flat().join(',')}]`);
             }
           }
           if (msg.method === "$registerCompletionsProvider" && Array.isArray(msg.args) && msg.args.length >= 2) {
@@ -1935,18 +2311,94 @@ export class WorkbenchClient {
             const channelId = `te2-output-${msg.req}`;
             console.log(`[ext_reply] $register (OutputService) req=${msg.req} → channelId=${channelId}`);
             replyPayload = encodeExtReplyOkJson(msg.req, channelId);
+          } else if (msg.method === "$tryOpenDocument") {
+            const uri = msg.args?.[0];
+            const options = msg.args?.[1] ?? {};
+            const uriStr = this._uriObjToStringSafe(uri);
+            console.log(`[ext_reply] $tryOpenDocument req=${msg.req} uri=${uriStr}`);
+            this._tryOpenDocument(uri, options).then((openedUri) => {
+              const rp = encodeExtReplyOkJson(msg.req, openedUri);
+              try { this.ext?.protocol.send(VSBuffer.wrap(rp)); } catch {}
+            }).catch((e) => {
+              console.log(`[ext_reply] $tryOpenDocument error: ${e?.message ?? e}`);
+              const rp = encodeExtReplyError(msg.req, { message: `TE2: cannot open document (${uriStr}): ${e?.message ?? e}`, code: "FileNotFound" });
+              try { this.ext?.protocol.send(VSBuffer.wrap(rp)); } catch {}
+            });
+            return; // reply sent async from .then()
           } else if (msg.method === "$readFile") {
             // MainThreadFileSystem.$readFile — extensions read vscode:// virtual files.
-            // Return an error so callers' try/catch handles gracefully (instead of crashing on undefined.buffer).
             const uri = msg.args?.[0];
-            const uriStr = (uri && typeof uri === "object") ? (uri.path || uri.fsPath || JSON.stringify(uri).slice(0, 200)) : String(uri ?? "");
-            console.log(`[ext_reply] $readFile req=${msg.req} uri=${uriStr}`);
-            replyPayload = encodeExtReplyError(msg.req, { message: `TE2: $readFile not supported (${uriStr})`, code: "FileNotFound" });
+            const uriStr = this._uriObjToStringSafe(uri);
+            const uriScheme = (uri && typeof uri === "object") ? (uri.scheme ?? null) : null;
+            const virtualBuf = this._readVirtualVscodeUriBuffer(uri);
+            const fsPath = this._fsPathFromUri(uri);
+            const contentHandle = uriScheme ? this._textContentProviders.get(uriScheme) : null;
+            if (virtualBuf) {
+              console.log(`[ext_reply] $readFile req=${msg.req} uri=${uriStr} → virtual vscode schema`);
+              replyPayload = encodeExtReplyOkVSBuffer(msg.req, virtualBuf);
+            } else if (fsPath) {
+              console.log(`[ext_reply] $readFile req=${msg.req} uri=${uriStr} → local fsPath=${fsPath}`);
+              this._readLocalUriBuffer(uri).then((buf) => {
+                const rp = encodeExtReplyOkVSBuffer(msg.req, buf);
+                try { this.ext?.protocol.send(VSBuffer.wrap(rp)); } catch {}
+              }).catch((e) => {
+                console.log(`[ext_reply] $readFile local-file error: ${e?.message ?? e}`);
+                const rp = encodeExtReplyError(msg.req, { message: `TE2: readFile failed (${uriStr}): ${e?.message ?? e}`, code: "FileNotFound" });
+                try { this.ext?.protocol.send(VSBuffer.wrap(rp)); } catch {}
+              });
+              return; // reply sent async from .then()
+            } else if (contentHandle != null) {
+              // Round-trip: ask ext host for document content via the registered provider.
+              // This handler is sync (non-async), so use .then() and send reply from callback.
+              console.log(`[ext_reply] $readFile req=${msg.req} uri=${uriStr} → round-trip via contentProvider handle=${contentHandle}`);
+              this._provideTextDocumentContent(contentHandle, uri).then((content) => {
+                let rp;
+                if (content != null) {
+                  const buf = Buffer.from(String(content), "utf8");
+                  rp = encodeExtReplyOkVSBuffer(msg.req, buf);
+                } else {
+                  rp = encodeExtReplyError(msg.req, { message: `Content provider returned null for ${uriStr}`, code: "FileNotFound" });
+                }
+                try { this.ext?.protocol.send(VSBuffer.wrap(rp)); } catch {}
+              }).catch((e) => {
+                console.log(`[ext_reply] $readFile content-provider error: ${e?.message ?? e}`);
+                const rp = encodeExtReplyError(msg.req, { message: `TE2: content provider error (${uriStr}): ${e?.message ?? e}`, code: "FileNotFound" });
+                try { this.ext?.protocol.send(VSBuffer.wrap(rp)); } catch {}
+              });
+              return; // reply sent async from .then()
+            } else {
+              console.log(`[ext_reply] $readFile req=${msg.req} uri=${uriStr} → no provider for scheme=${uriScheme}`);
+              replyPayload = encodeExtReplyError(msg.req, { message: `TE2: $readFile not supported (${uriStr})`, code: "FileNotFound" });
+            }
           } else if (msg.method === "$stat") {
             const uri = msg.args?.[0];
-            const uriStr = (uri && typeof uri === "object") ? (uri.path || uri.fsPath || "") : String(uri ?? "");
-            console.log(`[ext_reply] $stat req=${msg.req} uri=${uriStr}`);
-            replyPayload = encodeExtReplyError(msg.req, { message: `TE2: $stat not supported (${uriStr})`, code: "FileNotFound" });
+            const uriStr = this._uriObjToStringSafe(uri);
+            const uriScheme = (uri && typeof uri === "object") ? (uri.scheme ?? null) : null;
+            const virtualStat = this._statVirtualVscodeUri(uri);
+            const fsPath = this._fsPathFromUri(uri);
+            if (virtualStat) {
+              console.log(`[ext_reply] $stat req=${msg.req} uri=${uriStr} → virtual vscode schema`);
+              replyPayload = encodeExtReplyOkJson(msg.req, virtualStat);
+            } else if (fsPath) {
+              console.log(`[ext_reply] $stat req=${msg.req} uri=${uriStr} → local fsPath=${fsPath}`);
+              this._statLocalUri(uri).then((st) => {
+                const rp = encodeExtReplyOkJson(msg.req, st);
+                try { this.ext?.protocol.send(VSBuffer.wrap(rp)); } catch {}
+              }).catch((e) => {
+                console.log(`[ext_reply] $stat local-file error: ${e?.message ?? e}`);
+                const rp = encodeExtReplyError(msg.req, { message: `TE2: $stat failed (${uriStr}): ${e?.message ?? e}`, code: "FileNotFound" });
+                try { this.ext?.protocol.send(VSBuffer.wrap(rp)); } catch {}
+              });
+              return; // reply sent async from .then()
+            } else if (uriScheme && this._textContentProviders.has(uriScheme)) {
+              // Return a synthetic stat for URIs with registered content providers.
+              // type=1 (File), size=0 (unknown), mtime=now, ctime=now
+              console.log(`[ext_reply] $stat req=${msg.req} uri=${uriStr} → synthetic stat for scheme=${uriScheme}`);
+              replyPayload = encodeExtReplyOkJson(msg.req, { type: 1, size: 0, mtime: Date.now(), ctime: Date.now() });
+            } else {
+              console.log(`[ext_reply] $stat req=${msg.req} uri=${uriStr}`);
+              replyPayload = encodeExtReplyError(msg.req, { message: `TE2: $stat not supported (${uriStr})`, code: "FileNotFound" });
+            }
           } else {
             replyPayload = encodeExtReplyOkEmpty(msg.req);
           }
@@ -2100,7 +2552,7 @@ export class WorkbenchClient {
     const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
     const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
     const forceRefresh = params.forceRefresh === true;
-    const generation = Number.isFinite(Number(params.generation)) ? Number(params.generation) : null;
+    const generation = _coerceOptionalGeneration(params.generation);
     // ── Workspace switch detection ──────────────────────────────────────
     // If the caller supplied a workspaceFolder (SSOT-driven) and it differs
     // from the current workspace, re-scope the ExtHost before opening.
@@ -2363,7 +2815,7 @@ export class WorkbenchClient {
     const text = String(params.text ?? "");
     const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
     const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
-    const generation = Number.isFinite(Number(params.generation)) ? Number(params.generation) : null;
+    const generation = _coerceOptionalGeneration(params.generation);
 
     if (!this._docVersions.has(path) || !this._docLineCount.has(path) || !this._docCharCount.has(path)) {
       console.warn(`[didChange] drop path=${path} reason=document_not_open`);
@@ -2422,7 +2874,7 @@ export class WorkbenchClient {
     const path = String(params.path ?? "");
     const timeoutMs = Number(params.timeoutMs ?? 8000);
     const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
-    const generation = Number.isFinite(Number(params.generation)) ? Number(params.generation) : null;
+    const generation = _coerceOptionalGeneration(params.generation);
 
     if (!this._docVersions.has(path)) {
       return { ok: false, error: "document_not_open" };
@@ -2496,6 +2948,102 @@ export class WorkbenchClient {
     return { ok: true, result: merged };
   }
 
+  async foldingRanges(params = {}) {
+    if (!this.ext?.protocol) throw new Error("not connected");
+    const authority = String(params.authority ?? this._authority ?? DEFAULT_REMOTE_AUTHORITY);
+    const path = String(params.path ?? "");
+    const timeoutMs = Number(params.timeoutMs ?? 8000);
+    const languageId = String(params.languageId || "") || _languageIdFromPath(path) || "plaintext";
+    const generation = _coerceOptionalGeneration(params.generation);
+    const context = (params.context && typeof params.context === "object") ? params.context : {};
+
+    if (!this._docVersions.has(path)) {
+      return { ok: false, error: "document_not_open" };
+    }
+    const openGeneration = this._docOpenGeneration.get(path);
+    if (generation !== null && openGeneration !== undefined && openGeneration !== null && openGeneration !== generation) {
+      return { ok: false, error: "stale_generation", openGeneration };
+    }
+
+    console.log(`[folding] request path=${path} lang=${languageId} registeredProviders=${[...this._providers.foldingRanges.values()].map(e => JSON.stringify(e.selector.map(s => s.language))).join(", ")}`);
+
+    if (typeof params.providerHandle === "number") {
+      return this._foldingRangesSingle(params.providerHandle, path, authority, languageId, context, params);
+    }
+
+    let handles = this._findAllProviderHandles("foldingRanges", languageId);
+    if (handles.length === 0) {
+      console.log(`[folding] no provider yet for '${languageId}', waiting up to ${timeoutMs}ms...`);
+      await waitFor(() => this._findAllProviderHandles("foldingRanges", languageId).length > 0, { timeoutMs, intervalMs: 50 });
+      handles = this._findAllProviderHandles("foldingRanges", languageId);
+    }
+    if (handles.length === 0) {
+      console.log(`[folding] STILL no provider for '${languageId}' after timeout`);
+      return { ok: false, error: `no folding range provider for language '${languageId}'` };
+    }
+    console.log(`[folding] multi-provider handles=[${handles.join(",")}] for '${languageId}'`);
+
+    const uriObj = this._uriForPath(path, authority);
+    try {
+      this.state.activePath = path;
+      this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
+      this.state.activeLanguageId = languageFromPath(path) ?? null;
+      this.state.lastOpenTs = Date.now();
+    } catch {}
+
+    const results = await Promise.all(handles.map(handle => {
+      const req = this._allocExtReqId();
+      const payload = encodeExtRequestJsonArgs({
+        req,
+        rpcId: _rpcIds.ExtHostLanguageFeatures,
+        method: "$provideFoldingRanges",
+        args: [handle, uriObj, context],
+        cancellable: true,
+      });
+      const fut = new Promise((resolve) => {
+        this._pendingExt.set(req, { resolve, reject: resolve });
+        setTimeout(() => {
+          if (this._pendingExt.has(req)) { this._pendingExt.delete(req); resolve(null); }
+        }, 15000);
+      });
+      this.ext.protocol.send(VSBuffer.wrap(payload));
+      return fut.catch(() => null);
+    }));
+
+    let merged = [];
+    let sawArray = false;
+    let sawJson = false;
+    let lastError = null;
+    for (const rep of results) {
+      if (!rep) continue;
+      if (rep.type === 9) {
+        sawJson = true;
+        if (Array.isArray(rep.result)) {
+          sawArray = true;
+          merged = merged.concat(rep.result);
+        }
+      } else if (rep.type === 11) {
+        lastError = rep.error;
+      }
+    }
+
+    if (!sawArray && lastError && !params._retried) {
+      console.log(`[folding] all providers errored, retrying after 800ms...`);
+      await new Promise(r => setTimeout(r, 800));
+      return this.foldingRanges({ ...params, _retried: true });
+    }
+
+    if (sawArray) {
+      console.log(`[folding] merged ${merged.length} ranges from ${results.filter(r => r && r.type === 9 && Array.isArray(r.result)).length}/${handles.length} providers`);
+      return { ok: true, result: merged };
+    }
+    if (sawJson) {
+      console.log(`[folding] providers returned no ranges for path=${path} lang=${languageId}`);
+      return { ok: true, result: null };
+    }
+    return { ok: false, error: lastError || "no folding range results" };
+  }
+
   /** Single-provider symbols path (for pinned handle callers). */
   async _symbolsSingle(providerHandle, path, authority, languageId, params) {
     const uriObj = this._uriForPath(path, authority);
@@ -2526,6 +3074,47 @@ export class WorkbenchClient {
         console.log(`[symbols] retrying after 800ms...`);
         await new Promise(r => setTimeout(r, 800));
         return this._symbolsSingle(providerHandle, path, authority, languageId, { ...params, _retried: true });
+      }
+      return { ok: false, error: rep.error };
+    }
+    return { ok: false, error: rep };
+  }
+
+  async _foldingRangesSingle(providerHandle, path, authority, languageId, context, params) {
+    const uriObj = this._uriForPath(path, authority);
+    try {
+      this.state.activePath = path;
+      this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
+      this.state.activeLanguageId = languageFromPath(path) ?? null;
+      this.state.lastOpenTs = Date.now();
+    } catch {}
+
+    const req = this._allocExtReqId();
+    const payload = encodeExtRequestJsonArgs({
+      req,
+      rpcId: _rpcIds.ExtHostLanguageFeatures,
+      method: "$provideFoldingRanges",
+      args: [providerHandle, uriObj, context],
+      cancellable: true,
+    });
+    const fut = new Promise((resolve, reject) => {
+      this._pendingExt.set(req, { resolve, reject });
+      setTimeout(() => {
+        if (this._pendingExt.has(req)) { this._pendingExt.delete(req); reject(new Error("timed out waiting for folding ranges reply")); }
+      }, 15000);
+    });
+    this.ext.protocol.send(VSBuffer.wrap(payload));
+    const rep = await fut;
+
+    const rangeCount = (rep.type === 9 && Array.isArray(rep.result)) ? rep.result.length : (rep.type === 9 && rep.result == null ? "null" : "n/a");
+    console.log(`[folding] response path=${path} lang=${languageId} type=${rep.type} count=${rangeCount}`);
+    if (rep.type === 9) return { ok: true, result: Array.isArray(rep.result) ? rep.result : null };
+    if (rep.type === 11) {
+      console.log(`[folding] error reply:`, rep.error);
+      if (!params._retried) {
+        console.log(`[folding] retrying after 800ms...`);
+        await new Promise(r => setTimeout(r, 800));
+        return this._foldingRangesSingle(providerHandle, path, authority, languageId, context, { ...params, _retried: true });
       }
       return { ok: false, error: rep.error };
     }
@@ -3273,6 +3862,7 @@ export class WorkbenchClient {
     return {
       hover: toList(this._providers.hover),
       documentSymbols: toList(this._providers.documentSymbols),
+      foldingRanges: toList(this._providers.foldingRanges),
       completions: toList(this._providers.completions),
       semanticTokens: toList(this._providers.semanticTokens),
     };
@@ -3313,7 +3903,7 @@ export class WorkbenchClient {
    * receives the same events it would have seen during initial ext host boot.
    */
   resync() {
-    const replayed = { semanticTokens: 0, hover: 0, completions: 0, documentSymbols: 0 };
+    const replayed = { semanticTokens: 0, hover: 0, completions: 0, documentSymbols: 0, foldingRanges: 0 };
     // Replay semantic token provider registrations
     for (const entry of this._providers.semanticTokens.values()) {
       const language = entry.selector?.[0]?.language ?? null;
@@ -3329,7 +3919,7 @@ export class WorkbenchClient {
       });
       replayed.semanticTokens++;
     }
-    console.error(`[resync] replayed providers: semTok=${replayed.semanticTokens}`);
+    console.error(`[resync] replayed providers: semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges}`);
     return { ok: true, ts_ms: Date.now(), replayed };
   }
 }

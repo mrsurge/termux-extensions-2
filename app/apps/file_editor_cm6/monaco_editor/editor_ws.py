@@ -1453,6 +1453,67 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                     room=sid,
                 )
 
+    async def on_editor_workbench_folding_ranges(self, sid, data):
+        """Folding ranges request via workbench adapter (stdio pipe)."""
+        payload = data if isinstance(data, dict) else {}
+        request_id = payload.get("request_id", f"fold_{int(time.time() * 1000)}")
+        abs_path = payload.get("path", "")
+        generation = _coerce_generation(payload.get("generation"))
+        lang_id = payload.get("languageId", "")
+        context_obj = payload.get("context", {})
+
+        project = _active_project()
+        if not project or not abs_path:
+            await self.emit(
+                "editor:workbench_folding_ranges_response",
+                {"request_id": request_id, "error": "missing_path_or_project"},
+                room=sid,
+            )
+            return
+
+        lock = _workbench_get_lock(abs_path)
+        async with lock:
+            if not _has_open_baseline(abs_path, generation):
+                await self.emit(
+                    "editor:workbench_folding_ranges_response",
+                    {"request_id": request_id, "error": "document_not_ready"},
+                    room=sid,
+                )
+                return
+
+            try:
+                from ..workbench_adapter_shell_manager import adapter_rpc
+
+                resp = await adapter_rpc(
+                    "vscode.foldingRanges",
+                    {
+                        "path": abs_path,
+                        "languageId": lang_id,
+                        "generation": generation,
+                        "context": context_obj,
+                        "timeoutMs": payload.get("timeoutMs"),
+                    },
+                )
+                result = resp.get("result", resp)
+                range_count = "null"
+                if isinstance(result, dict):
+                    inner = result.get("result")
+                    if isinstance(inner, list):
+                        range_count = len(inner)
+                _wb_log.info("[folding] response path=%s lang=%s count=%s ok=%s", abs_path, lang_id, range_count, resp.get("ok"))
+                await self.emit(
+                    "editor:workbench_folding_ranges_response",
+                    {"request_id": request_id, "result": result},
+                    room=sid,
+                )
+            except Exception as exc:
+                _wb_log.error("[folding] FAILED path=%s lang=%s err=%s", abs_path, lang_id, exc)
+                await self.emit(
+                    "editor:workbench_folding_ranges_response",
+                    {"request_id": request_id, "error": str(exc)},
+                    room=sid,
+                )
+
     async def on_editor_breadcrumb_navigate(self, sid, data):
         """Breadcrumb directory click → relay to explorer socket + open drawer."""
         payload = data if isinstance(data, dict) else {}
@@ -1516,6 +1577,56 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 )
             except Exception as exc:
                 _wb_log.error("[workbench] didChange failed: %s", exc)
+
+    async def on_editor_workbench_grammars_list(self, sid, data):
+        """List TextMate grammars from installed extensions via adapter."""
+        payload = data if isinstance(data, dict) else {}
+        request_id = payload.get("request_id", f"gl_{int(time.time() * 1000)}")
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            resp = await adapter_rpc("vscode.textmate.grammars.list", {})
+            await self.emit(
+                "editor:workbench_grammars_list_response",
+                {"request_id": request_id, "result": resp.get("result", resp)},
+                room=sid,
+            )
+        except Exception as exc:
+            _wb_log.error("[grammars.list] FAILED: %s", exc)
+            await self.emit(
+                "editor:workbench_grammars_list_response",
+                {"request_id": request_id, "error": str(exc)},
+                room=sid,
+            )
+
+    async def on_editor_workbench_grammars_load(self, sid, data):
+        """Load a TextMate grammar by ID from an installed extension via adapter."""
+        payload = data if isinstance(data, dict) else {}
+        request_id = payload.get("request_id", f"gld_{int(time.time() * 1000)}")
+        grammar_id = payload.get("id", "")
+        if not grammar_id:
+            await self.emit(
+                "editor:workbench_grammars_load_response",
+                {"request_id": request_id, "error": "missing_grammar_id"},
+                room=sid,
+            )
+            return
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            resp = await adapter_rpc("vscode.textmate.grammars.load", {"id": grammar_id})
+            await self.emit(
+                "editor:workbench_grammars_load_response",
+                {"request_id": request_id, "result": resp.get("result", resp)},
+                room=sid,
+            )
+        except Exception as exc:
+            _wb_log.error("[grammars.load] FAILED id=%s: %s", grammar_id, exc)
+            await self.emit(
+                "editor:workbench_grammars_load_response",
+                {"request_id": request_id, "error": str(exc)},
+                room=sid,
+            )
 
     # NOTE: on_editor_readiness_check removed — adapter state is now pushed
     # via UI IPC from workbench_adapter_shell_manager._broadcast_adapter_state().

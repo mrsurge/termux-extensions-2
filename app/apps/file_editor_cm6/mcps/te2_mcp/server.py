@@ -79,8 +79,12 @@ def build_server() -> FastMCP:
         return result.model_dump(mode="json")
 
     @server.tool(description="Execute JavaScript in a live TE2 console worker through the in-process console relay.")
-    async def te2_console_eval(target_worker_id: str, code: str) -> dict:
-        return await te2_console.eval_in_worker(target_worker_id=target_worker_id, code=code)
+    async def te2_console_eval(target_worker_id: str, code: str, timeout_seconds: float = 20.0) -> dict:
+        return await te2_console.eval_in_worker(
+            target_worker_id=target_worker_id,
+            code=code,
+            timeout_seconds=timeout_seconds,
+        )
 
     @server.tool(description="List framework-shells records directly from the shared runtime store.")
     async def te2_fws_running() -> dict:
