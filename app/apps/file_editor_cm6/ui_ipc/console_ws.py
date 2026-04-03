@@ -25,6 +25,8 @@ from pathlib import Path
 _LOG_DIR = Path.home() / ".cache" / "cm6_editor"
 _LOG_FILE = _LOG_DIR / "console_log.jsonl"
 _REPLAY_MAX_BYTES = 6 * 1024 * 1024
+_DEFAULT_REPLAY_MAX_LINES = 500
+_MAX_REPLAY_LINES = 5000
 
 # ---------- boot-time wipe ----------
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -47,7 +49,17 @@ def _append_log(data: dict):
         pass  # never crash the relay over a write failure
 
 
-async def _replay_to_sid(ns, sid):
+def _normalize_tail_lines(value) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        return _DEFAULT_REPLAY_MAX_LINES
+    if parsed <= 0:
+        return _DEFAULT_REPLAY_MAX_LINES
+    return min(parsed, _MAX_REPLAY_LINES)
+
+
+async def _replay_to_sid(ns, sid, max_lines: int | None = None):
     """Stream the newest disk log entries that fit within the replay budget."""
     try:
         with open(_LOG_FILE, "r", encoding="utf-8") as f:
@@ -56,6 +68,8 @@ async def _replay_to_sid(ns, sid):
         return
 
     total_lines = len(lines)
+    if max_lines is not None and max_lines > 0 and total_lines > max_lines:
+        lines = lines[-max_lines:]
     selected: list[str] = []
     selected_bytes = 0
 
@@ -163,16 +177,26 @@ async def on_console_register(ns, sid, data):
 
     if role == "drawer":
         await ns.enter_room(sid, "console:drawers")
+        tail_lines = _normalize_tail_lines(data.get("tail_lines"))
         print(f"[console] drawer registered sid={sid} — replaying log", flush=True)
         # Send current worker list first, then replay logs
         await ns.emit("console:workers", sorted(_registered_workers), to=sid)
-        await _replay_to_sid(ns, sid)
+        await _replay_to_sid(ns, sid, max_lines=tail_lines)
     elif worker_id:
         await ns.enter_room(sid, f"console:{worker_id}")
         await ns.save_session(sid, {"consoleWorkerId": worker_id})
         _registered_workers.add(worker_id)
         print(f"[console] worker registered sid={sid} workerId={worker_id}", flush=True)
         await _broadcast_workers(ns)
+
+
+async def on_console_unregister(ns, sid, data):
+    """Remove a drawer from the live console room without dropping the socket."""
+    try:
+        await ns.leave_room(sid, "console:drawers")
+    except Exception:
+        return
+    print(f"[console] drawer unregistered sid={sid}", flush=True)
 
 
 async def on_console_disconnect(ns, sid):
@@ -232,4 +256,5 @@ async def on_console_clear(ns, sid, data):
     except Exception:
         pass
     # Broadcast to all drawers so they sync their UI
+    await ns.emit("console:clear", {}, room="console:drawers")
     await ns.emit("console:cleared", {}, room="console:drawers")

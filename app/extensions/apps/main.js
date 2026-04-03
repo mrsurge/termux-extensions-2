@@ -6,6 +6,19 @@ export default function(container) {
   let appsWs = null;
   let reconnectTimer = null;
   let reconnectBackoffMs = 600;
+  let activeCardMenu = null;
+
+  function closeActiveCardMenu() {
+    if (!activeCardMenu) return;
+    activeCardMenu.dataset.open = 'false';
+    activeCardMenu = null;
+  }
+
+  function clampMenuOffset(value, min, max) {
+    if (!Number.isFinite(value)) return min;
+    if (max <= min) return min;
+    return Math.max(min, Math.min(max, value));
+  }
   
   function resolveIconSrc(app) {
     const raw = typeof app.icon_src === 'string' ? app.icon_src.trim() : '';
@@ -32,6 +45,7 @@ export default function(container) {
   }
 
   function render() {
+    closeActiveCardMenu();
     if (state.loading) {
       grid.innerHTML = `<p class="apps-empty">Loading apps…</p>`;
       return;
@@ -80,6 +94,19 @@ export default function(container) {
       let startX = 0;
       let startY = 0;
 
+      const menuGroup = document.createElement('div');
+      menuGroup.className = 'app-card-menu-group';
+      menuGroup.dataset.open = 'false';
+
+      const menuDropdown = document.createElement('div');
+      menuDropdown.className = 'app-card-menu-dropdown';
+
+      const quitButton = document.createElement('button');
+      quitButton.type = 'button';
+      quitButton.innerHTML = '<span>❌</span><span>Quit</span>';
+      menuDropdown.appendChild(quitButton);
+      menuGroup.appendChild(menuDropdown);
+
       async function quitApp(ev) {
         if (!app.running) return;
         ev?.preventDefault?.();
@@ -87,6 +114,7 @@ export default function(container) {
         try {
           window.teUI?.toast?.(`Stopping ${app.name || app.id}...`);
           await window.teFetch(`/api/apps/${app.id}/quit`, { method: 'POST' });
+          closeActiveCardMenu();
           applyRunningDelta(app.id, false);
         } catch (e) {
           console.error(e);
@@ -94,8 +122,32 @@ export default function(container) {
         }
       }
 
-      card.addEventListener('contextmenu', (ev) => {
+      function openCardMenu(ev) {
+        if (!app.running) return;
+        ev?.preventDefault?.();
+        ev?.stopPropagation?.();
+
+        const rect = card.getBoundingClientRect();
+        const localX = (typeof ev?.clientX === 'number') ? (ev.clientX - rect.left) : (rect.width - 20);
+        const localY = (typeof ev?.clientY === 'number') ? (ev.clientY - rect.top) : 18;
+        const left = clampMenuOffset(localX, 10, rect.width - 160);
+        const top = clampMenuOffset(localY, 10, rect.height - 44);
+
+        closeActiveCardMenu();
+        menuDropdown.style.left = `${left}px`;
+        menuDropdown.style.top = `${top}px`;
+        menuGroup.dataset.open = 'true';
+        activeCardMenu = menuGroup;
+        suppressClickUntil = Date.now() + 900;
+      }
+
+      quitButton.addEventListener('click', (ev) => {
         void quitApp(ev);
+      });
+
+      card.addEventListener('contextmenu', (ev) => {
+        if (!app.running) return;
+        openCardMenu(ev);
       });
 
       card.addEventListener('pointerdown', (ev) => {
@@ -105,8 +157,7 @@ export default function(container) {
         startX = ev.clientX;
         startY = ev.clientY;
         longPressTimer = setTimeout(() => {
-          suppressClickUntil = Date.now() + 900;
-          void quitApp(ev);
+          openCardMenu(ev);
         }, 520);
       });
 
@@ -137,6 +188,7 @@ export default function(container) {
           suppressClickUntil = 0;
           return;
         }
+        closeActiveCardMenu();
         try {
           if (!app.id) throw new Error('App missing id');
           
@@ -153,6 +205,7 @@ export default function(container) {
         }
       });
 
+      card.appendChild(menuGroup);
       grid.appendChild(card);
     });
   }
@@ -253,4 +306,14 @@ export default function(container) {
   connectAppsEvents();
   state.loading = true;
   render();
+
+  document.addEventListener('click', (ev) => {
+    if (!activeCardMenu) return;
+    if (activeCardMenu.contains(ev.target)) return;
+    closeActiveCardMenu();
+  });
+
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') closeActiveCardMenu();
+  });
 }

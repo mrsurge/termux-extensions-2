@@ -66,6 +66,9 @@ class UIIPCNamespace(socketio.AsyncNamespace):
     async def on_console_register(self, sid, data):
         await console_ws.on_console_register(self, sid, data)
 
+    async def on_console_unregister(self, sid, data):
+        await console_ws.on_console_unregister(self, sid, data)
+
     async def on_console_log(self, sid, data):
         await console_ws.on_console_log(self, sid, data)
 

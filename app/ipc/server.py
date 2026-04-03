@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import errno
 import threading
 import time
 from dataclasses import dataclass
@@ -184,12 +185,70 @@ def _framework_url() -> Optional[str]:
 
 
 def _framework_running() -> bool:
-    return bool(_SLEEP_STATE.supervisor_proc and _SLEEP_STATE.supervisor_proc.poll() is None)
+    if _SLEEP_STATE.supervisor_proc and _SLEEP_STATE.supervisor_proc.poll() is None:
+        return True
+    return _first_live_framework_pid() is not None
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return False
+        return True
+    except Exception:
+        return True
+
+    try:
+        with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as fh:
+            stat = fh.read().split()
+        if len(stat) >= 3 and stat[2] == "Z":
+            return False
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    except Exception:
+        return True
+    return True
+
+
+def _first_live_framework_pid() -> Optional[int]:
+    for record in _PROCESS_REGISTRY.list_by_type("framework"):
+        pid = int(getattr(record, "pid", 0) or 0)
+        if pid > 0 and _pid_alive(pid):
+            return pid
+    return None
+
+
+def _wake_framework_result() -> tuple[bool, Dict[str, Any]]:
+    supervisor_proc = _SLEEP_STATE.supervisor_proc
+    supervisor_pid = supervisor_proc.pid if supervisor_proc and supervisor_proc.poll() is None else None
+    framework_pid = _first_live_framework_pid()
+
+    if supervisor_pid or framework_pid:
+        return True, {
+            "started": False,
+            "already_running": True,
+            "supervisor_pid": supervisor_pid,
+            "framework_pid": framework_pid,
+        }
+
+    pid = _start_supervisor()
+    if not pid:
+        return False, {"error": "failed to start supervisor"}
+
+    return True, {
+        "started": True,
+        "already_running": False,
+        "supervisor_pid": pid,
+        "framework_pid": _first_live_framework_pid(),
+    }
 
 
 def _start_supervisor() -> Optional[int]:
     if _framework_running():
-        return _SLEEP_STATE.supervisor_proc.pid
+        proc = _SLEEP_STATE.supervisor_proc
+        return proc.pid if proc and proc.poll() is None else None
 
     args = _framework_args_from_env()
     env = os.environ.copy()
@@ -237,10 +296,10 @@ def _kill_framework_records(sig: signal.Signals) -> bool:
 def wake_framework() -> Any:
     if request.method == "OPTIONS":
         return ("", 204)
-    pid = _start_supervisor()
-    if not pid:
-        return jsonify({"ok": False, "error": "failed to start supervisor"}), 500
-    return jsonify({"ok": True, "data": {"supervisor_pid": pid}})
+    ok, data = _wake_framework_result()
+    if not ok:
+        return jsonify({"ok": False, **data}), 500
+    return jsonify({"ok": True, "data": data})
 
 
 @app.route("/actions/sleep", methods=["POST", "OPTIONS"])
@@ -335,10 +394,10 @@ def main() -> None:
         def sleep_wake() -> Any:
             if request.method == "OPTIONS":
                 return ("", 204)
-            pid = _start_supervisor()
-            if not pid:
-                return jsonify({"ok": False, "error": "failed to start supervisor"}), 500
-            return jsonify({"ok": True, "data": {"supervisor_pid": pid}})
+            ok, data = _wake_framework_result()
+            if not ok:
+                return jsonify({"ok": False, **data}), 500
+            return jsonify({"ok": True, "data": data})
 
         @sleep_app.route("/actions/sleep", methods=["POST", "OPTIONS"])
         def sleep_sleep() -> Any:

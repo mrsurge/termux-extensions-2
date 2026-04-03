@@ -1043,7 +1043,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       if (!model || !model.uri) return null;
       var uri = String(model.uri.toString());
       if (!uri) return null;
-      var p = currentPath ? String(currentPath) : _pathFromUriString(uri);
+      var p = currentPath ? String(currentPath) : _absPathFromVscodeUri(uri);
       var lang = String(model.getLanguageId ? model.getLanguageId() : languageFromPath(p));
       var v = Number(model.getVersionId ? model.getVersionId() : 1) || 1;
       return { uri: uri, path: p, languageId: lang, version: v };
@@ -1081,6 +1081,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
   // Replaces the old vscode_api_ws raw WebSocket path.
   var _wbPending = new Map(); // request_id -> {resolve, reject, timer}
   var _wbNextId = 1;
+  var _wbPostReadyRefreshSeq = 0;
   var _wbFlow = {
     generation: 0,
     activePath: '',
@@ -1150,6 +1151,69 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     wbFlushPendingAfterOpen(_wbFlushDidChangeIfReady, _wbFlushSymbolsIfReady);
   }
 
+  function _wbSchedulePostReadyStructureRefresh(path, generation, reason) {
+    if (_languageWorkersEnabled()) return;
+    var wantPath = String(path || '');
+    if (!wantPath) return;
+    var wantGeneration = Number.isFinite(Number(generation)) ? Number(generation) : _wbCurrentGeneration();
+    var refreshSeq = ++_wbPostReadyRefreshSeq;
+    setTimeout(function () {
+      Promise.resolve().then(async function () {
+        if (refreshSeq !== _wbPostReadyRefreshSeq) return;
+        if (!_wbIsBarrierOpen(wantPath, wantGeneration)) return;
+        if (String(currentPath || '') !== wantPath) return;
+        if (_wbCurrentGeneration() !== wantGeneration) return;
+
+        var activeEditor = editor;
+        var activeModel = activeEditor && activeEditor.getModel ? activeEditor.getModel() : null;
+        if (!activeEditor || !activeModel || !activeModel.uri) return;
+        if (String(_absPathFromVscodeUri(String(activeModel.uri.toString()))) !== wantPath) return;
+
+        var folding = null;
+        try {
+          folding = activeEditor.getContribution ? activeEditor.getContribution('editor.contrib.folding') : null;
+          if (folding && typeof folding.triggerFoldingModelChanged === 'function') {
+            folding.triggerFoldingModelChanged();
+          }
+        } catch (e) {
+          console.warn('[readiness] post-ready folding trigger failed (' + String(reason || 'open') + ')', e);
+        }
+
+        try {
+          var sticky = activeEditor.getContribution
+            ? (activeEditor.getContribution('store.contrib.stickyScrollController') || activeEditor.getContribution('editor.contrib.stickyScrollController'))
+            : null;
+          var stickyProvider = sticky && sticky._stickyLineCandidateProvider;
+          if (stickyProvider && typeof stickyProvider.update === 'function') {
+            await stickyProvider.update();
+          }
+          if (refreshSeq !== _wbPostReadyRefreshSeq) return;
+          if (!_wbIsBarrierOpen(wantPath, wantGeneration)) return;
+          if (String(currentPath || '') !== wantPath) return;
+          if (_wbCurrentGeneration() !== wantGeneration) return;
+          if (sticky && typeof sticky._updateState === 'function') {
+            await sticky._updateState();
+          }
+        } catch (e) {
+          console.warn('[readiness] post-ready sticky refresh failed (' + String(reason || 'open') + ')', e);
+        }
+
+        try {
+          var foldingModelPromise = folding && typeof folding.getFoldingModel === 'function'
+            ? folding.getFoldingModel()
+            : null;
+          if (foldingModelPromise && typeof foldingModelPromise.then === 'function') {
+            foldingModelPromise.then(function () {}, function () {});
+          }
+        } catch (e) {
+          console.warn('[readiness] post-ready folding warmup failed (' + String(reason || 'open') + ')', e);
+        }
+      }).catch(function (e) {
+        console.warn('[readiness] post-ready structure refresh failed (' + String(reason || 'open') + ')', e);
+      });
+    }, 0);
+  }
+
   function _wbPublishDidChange(path, text, languageId, generation) {
     return wbPublishDidChange(
       _wbFlow,
@@ -1202,6 +1266,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
         editorSocket.emit('editor_diagnostics_consumer_ready', { path: path, request_id: requestId });
       } catch (_) {}
       _wbFlushPendingAfterOpen();
+      _wbSchedulePostReadyStructureRefresh(path, generation, source);
       return res;
     });
   }
@@ -1387,7 +1452,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
           try {
             if (!m || !m.uri || !range) return null;
             var uri = String(m.uri.toString());
-            var p = currentPath ? String(currentPath) : _pathFromUriString(uri);
+            var p = currentPath ? String(currentPath) : _absPathFromVscodeUri(uri);
             var lang = String(m.getLanguageId ? m.getLanguageId() : langId);
             return editorWorkbenchCall('semantic_tokens_range', {
               uri: uri,
@@ -1430,7 +1495,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
         try {
           if (!m || !m.uri) return null;
           var uri = String(m.uri.toString());
-          var p = currentPath ? String(currentPath) : _pathFromUriString(uri);
+          var p = currentPath ? String(currentPath) : _absPathFromVscodeUri(uri);
           var lang = String(m.getLanguageId ? m.getLanguageId() : langId);
           console.log('[semanticTokens] FULL REQUEST ' + lang + ' path=' + p + ' prevResultId=' + (lastResultId || '0'));
           return editorWorkbenchCall('semantic_tokens', {
