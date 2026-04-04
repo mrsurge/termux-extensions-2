@@ -20,7 +20,16 @@ class UiIpcClient(
     private val filter: EditorInputFilter,
     private val onFilterChanged: ((Boolean) -> Unit)? = null
 ) {
-    private var socket: Socket? = null
+    companion object {
+        private const val TAG = "UiIpcClient"
+        private const val DEFAULT_CONSOLE_TAIL_LINES = 500
+    }
+
+    private var uiIpcSocket: Socket? = null
+    private var consoleSocket: Socket? = null
+    private var serverPort: Int? = null
+    private var consoleDrawerEnabled = false
+    private var consoleTailLines = DEFAULT_CONSOLE_TAIL_LINES
 
     /** Callback for console events — receives (eventName, JSONObject) */
     var onConsoleEvent: ((String, JSONObject) -> Unit)? = null
@@ -30,6 +39,7 @@ class UiIpcClient(
      * @param port The server port (e.g. 8089)
      */
     fun connect(port: Int) {
+        serverPort = port
         try {
             val opts = IO.Options().apply {
                 path = "/ui_ipc_ws/socket.io"
@@ -40,10 +50,9 @@ class UiIpcClient(
                 reconnectionDelayMax = 10000
             }
             val uri = URI.create("http://127.0.0.1:$port/ui_ipc")
-            socket = IO.socket(uri, opts).apply {
+            uiIpcSocket = IO.socket(uri, opts).apply {
                 on(Socket.EVENT_CONNECT) {
                     Log.i(TAG, "Connected to UI IPC on port $port")
-                    registerAsDrawer()
                 }
                 on(Socket.EVENT_DISCONNECT) {
                     Log.i(TAG, "Disconnected from UI IPC — deactivating filter")
@@ -70,7 +79,39 @@ class UiIpcClient(
                         Log.w(TAG, "Error processing ui_event", e)
                     }
                 }
-                // Console events from the server
+                connect()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create Socket.IO client", e)
+        }
+    }
+
+    private fun ensureConsoleSocket() {
+        if (consoleSocket != null) return
+        val port = serverPort ?: return
+        try {
+            val opts = IO.Options().apply {
+                path = "/te2_console_ws/socket.io"
+                transports = arrayOf("websocket")
+                query = "app_id=file_editor_cm6&source=android_console"
+                reconnection = true
+                reconnectionDelay = 2000
+                reconnectionDelayMax = 10000
+            }
+            val uri = URI.create("http://127.0.0.1:$port/te2_console")
+            consoleSocket = IO.socket(uri, opts).apply {
+                on(Socket.EVENT_CONNECT) {
+                    Log.i(TAG, "Connected to TE2 console on port $port")
+                    if (consoleDrawerEnabled) {
+                        registerAsDrawer()
+                    }
+                }
+                on(Socket.EVENT_DISCONNECT) {
+                    Log.i(TAG, "Disconnected from TE2 console")
+                }
+                on(Socket.EVENT_CONNECT_ERROR) { args ->
+                    Log.w(TAG, "TE2 console connect error: ${args.firstOrNull()}")
+                }
                 on("console:log") { args ->
                     parseJsonArg(args.firstOrNull())?.let {
                         onConsoleEvent?.invoke("console:log", it)
@@ -101,10 +142,14 @@ class UiIpcClient(
                     val json = parseJsonArg(args.firstOrNull()) ?: JSONObject()
                     onConsoleEvent?.invoke("console:clear", json)
                 }
+                on("console:cleared") { args ->
+                    val json = parseJsonArg(args.firstOrNull()) ?: JSONObject()
+                    onConsoleEvent?.invoke("console:cleared", json)
+                }
                 connect()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to create Socket.IO client", e)
+            Log.e(TAG, "Failed to create TE2 console socket", e)
         }
     }
 
@@ -113,26 +158,77 @@ class UiIpcClient(
         try {
             val payload = JSONObject().apply {
                 put("role", "drawer")
+                put("tail_lines", consoleTailLines)
             }
-            socket?.emit("console:register", payload)
+            consoleSocket?.emit("console:register", payload)
             Log.d(TAG, "Registered as console drawer")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to register as drawer", e)
         }
     }
 
+    fun setConsoleDrawerEnabled(enabled: Boolean, tailLines: Int = DEFAULT_CONSOLE_TAIL_LINES) {
+        consoleDrawerEnabled = enabled
+        if (tailLines > 0) {
+            consoleTailLines = tailLines
+        }
+        if (enabled) {
+            ensureConsoleSocket()
+            if (consoleSocket?.connected() == true) {
+                registerAsDrawer()
+            }
+        } else {
+            unregisterAsDrawer()
+            disconnectConsoleSocket()
+        }
+    }
+
+    private fun unregisterAsDrawer() {
+        try {
+            val payload = JSONObject().apply {
+                put("role", "drawer")
+            }
+            consoleSocket?.emit("console:unregister", payload)
+            Log.d(TAG, "Unregistered as console drawer")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to unregister drawer", e)
+        }
+    }
+
+    private fun disconnectConsoleSocket() {
+        try {
+            consoleSocket?.disconnect()
+            consoleSocket?.off()
+            consoleSocket = null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error disconnecting TE2 console socket", e)
+        }
+    }
+
     /** Send a console eval request to a specific worker. */
     fun sendConsoleEval(code: String, targetWorkerId: String = "editor_iframe") {
+        ensureConsoleSocket()
         try {
             val payload = JSONObject().apply {
                 put("targetWorkerId", targetWorkerId)
                 put("reqId", java.util.UUID.randomUUID().toString())
                 put("code", code)
             }
-            socket?.emit("console:eval", payload)
+            consoleSocket?.emit("console:eval", payload)
             Log.d(TAG, "Sent console:eval to $targetWorkerId")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to send console:eval", e)
+        }
+    }
+
+    /** Request backend transcript truncation for the TE2 console. */
+    fun sendConsoleClear() {
+        ensureConsoleSocket()
+        try {
+            consoleSocket?.emit("console:clear", JSONObject())
+            Log.d(TAG, "Sent console:clear")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to send console:clear", e)
         }
     }
 
@@ -151,16 +247,13 @@ class UiIpcClient(
 
     fun disconnect() {
         try {
-            socket?.disconnect()
-            socket?.off()
-            socket = null
+            uiIpcSocket?.disconnect()
+            uiIpcSocket?.off()
+            uiIpcSocket = null
+            disconnectConsoleSocket()
             filter.isActive = false
         } catch (e: Exception) {
             Log.w(TAG, "Error disconnecting", e)
         }
-    }
-
-    companion object {
-        private const val TAG = "UiIpcClient"
     }
 }

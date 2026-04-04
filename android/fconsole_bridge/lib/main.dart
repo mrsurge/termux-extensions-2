@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -40,6 +41,7 @@ class ConsoleBridgeView extends StatefulWidget {
 enum _LevelFilter { all, log, warn, error }
 
 class _ConsoleBridgeViewState extends State<ConsoleBridgeView> {
+  static const int _maxEntries = 500;
   static const _eventChannel =
       EventChannel('com.termux.extensions/console_events');
   static const _methodChannel =
@@ -49,6 +51,7 @@ class _ConsoleBridgeViewState extends State<ConsoleBridgeView> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<_ConsoleEntry> _allEntries = [];
+  StreamSubscription<dynamic>? _eventSubscription;
 
   // Filtering state
   final Set<String> _knownWorkers = {};
@@ -81,7 +84,7 @@ class _ConsoleBridgeViewState extends State<ConsoleBridgeView> {
   @override
   void initState() {
     super.initState();
-    _eventChannel.receiveBroadcastStream().listen(
+    _eventSubscription = _eventChannel.receiveBroadcastStream().listen(
       _onConsoleEvent,
       onError: (e) => debugPrint('Console EventChannel error: $e'),
     );
@@ -101,6 +104,7 @@ class _ConsoleBridgeViewState extends State<ConsoleBridgeView> {
           _addEvalResult(data);
           break;
         case 'console:clear':
+        case 'console:cleared':
           setState(() => _allEntries.clear());
           break;
         case 'console:workers':
@@ -142,10 +146,7 @@ class _ConsoleBridgeViewState extends State<ConsoleBridgeView> {
       time: time,
     );
 
-    setState(() {
-      _allEntries.add(entry);
-      if (_allEntries.length > 1000) _allEntries.removeAt(0);
-    });
+    _appendEntry(entry);
     _autoScroll();
   }
 
@@ -162,8 +163,17 @@ class _ConsoleBridgeViewState extends State<ConsoleBridgeView> {
       time: DateTime.now(),
     );
 
-    setState(() => _allEntries.add(entry));
+    _appendEntry(entry);
     _autoScroll();
+  }
+
+  void _appendEntry(_ConsoleEntry entry) {
+    setState(() {
+      _allEntries.add(entry);
+      while (_allEntries.length > _maxEntries) {
+        _allEntries.removeAt(0);
+      }
+    });
   }
 
   String _formatArg(dynamic arg) {
@@ -193,27 +203,23 @@ class _ConsoleBridgeViewState extends State<ConsoleBridgeView> {
     if (code.isEmpty) return;
     _evalController.clear();
 
-    setState(() {
-      _allEntries.add(_ConsoleEntry(
+    _appendEntry(_ConsoleEntry(
         level: 'debug',
         workerId: 'eval',
         message: '\u2192 $code',
         time: DateTime.now(),
       ));
-    });
     _autoScroll();
 
     try {
       await _methodChannel.invokeMethod('eval', {'code': code});
     } catch (e) {
-      setState(() {
-        _allEntries.add(_ConsoleEntry(
+      _appendEntry(_ConsoleEntry(
           level: 'error',
           workerId: 'eval',
           message: 'Send failed: $e',
           time: DateTime.now(),
         ));
-      });
     }
   }
 
@@ -584,6 +590,7 @@ class _ConsoleBridgeViewState extends State<ConsoleBridgeView> {
 
   @override
   void dispose() {
+    _eventSubscription?.cancel();
     _evalController.dispose();
     _searchController.dispose();
     _scrollController.dispose();

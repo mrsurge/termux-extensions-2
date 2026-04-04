@@ -22,6 +22,7 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import android.net.Uri
+import androidx.compose.ui.platform.ComposeView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -39,29 +40,26 @@ import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.WebExtension
 import android.view.inputmethod.InputMethodManager
-import io.flutter.embedding.android.FlutterFragment
 
 class MainActivity : AppCompatActivity() {
-
     private lateinit var geckoView: FilteredGeckoView
     private lateinit var geckoSession: GeckoSession
     private lateinit var runtime: GeckoRuntime
     private lateinit var nativeHeader: View
 
     private lateinit var consoleOverlay: FrameLayout
+    private lateinit var composeConsoleContainer: ComposeView
     private lateinit var consoleScroll: ScrollView
     private lateinit var consoleText: TextView
 
     private val editorInputFilter = EditorInputFilter()
+    private val composeConsoleState = ComposeConsoleState()
     private var uiIpcClient: UiIpcClient? = null
 
     private var editorAssetManager: EditorAssetManager? = null
     private var localAssetServer: LocalAssetServer? = null
     private var assetExtension: WebExtension? = null
     private var assetExtensionPort: WebExtension.Port? = null
-
-    private var consoleEventBridge: ConsoleEventBridge? = null
-    private var flutterFragment: FlutterFragment? = null
 
     private lateinit var btnConsoleBack: Button
     private lateinit var btnConsoleStart: Button
@@ -548,17 +546,24 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Pre-warm Flutter engine for console overlay
-        consoleEventBridge = ConsoleEventBridge(this).also { it.init() }
-
         geckoView = findViewById(R.id.geckoView)
         geckoView.editorInputFilter = editorInputFilter
         nativeHeader = findViewById(R.id.nativeHeader)
 
         consoleOverlay = findViewById(R.id.consoleOverlay)
+        composeConsoleContainer = findViewById(R.id.composeConsoleContainer)
         consoleScroll = findViewById(R.id.consoleScroll)
         consoleText = findViewById(R.id.consoleText)
         consoleText.typeface = Typeface.MONOSPACE
+        composeConsoleState.bind(
+            composeConsoleContainer,
+            onSendEval = { code, target ->
+                uiIpcClient?.sendConsoleEval(code, target)
+            },
+            onRequestClear = {
+                uiIpcClient?.sendConsoleClear()
+            },
+        )
 
         btnConsoleBack = findViewById(R.id.btnConsoleBack)
         btnConsoleStart = findViewById(R.id.btnConsoleStart)
@@ -1110,8 +1115,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showConsoleOverlay() {
         consoleOverlay.visibility = View.VISIBLE
-        consoleScroll.post { consoleScroll.fullScroll(View.FOCUS_DOWN) }
-        attachFlutterConsole()
+        composeConsoleState.resetSession()
+        uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
         // Show asset version inline with title
         try {
             val ver = editorAssetManager?.getLocalVersion() ?: "unknown"
@@ -1121,35 +1126,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun hideConsoleOverlay() {
         consoleOverlay.visibility = View.GONE
-        detachFlutterConsole()
+        uiIpcClient?.setConsoleDrawerEnabled(false)
+        composeConsoleState.resetSession()
     }
 
     private fun toggleConsoleOverlay() {
         if (consoleOverlay.visibility == View.VISIBLE) hideConsoleOverlay() else showConsoleOverlay()
-    }
-
-    private fun attachFlutterConsole() {
-        if (flutterFragment != null) return
-        val existing = supportFragmentManager.findFragmentByTag("flutter_console")
-        if (existing is FlutterFragment) {
-            flutterFragment = existing
-            return
-        }
-        val fragment = FlutterFragment
-            .withCachedEngine(ConsoleEventBridge.ENGINE_ID)
-            .shouldAttachEngineToActivity(false)
-            .renderMode(io.flutter.embedding.android.RenderMode.texture)
-            .transparencyMode(io.flutter.embedding.android.TransparencyMode.transparent)
-            .build<FlutterFragment>()
-        flutterFragment = fragment
-        supportFragmentManager.beginTransaction()
-            .add(R.id.flutterConsoleContainer, fragment, "flutter_console")
-            .commit()
-        Log.d("MainActivity", "FlutterFragment attached to console overlay")
-    }
-
-    private fun detachFlutterConsole() {
-        // Keep fragment alive so we don't lose state; just leave it attached
     }
 
     private fun updateConsoleControls() {
@@ -1343,31 +1325,24 @@ class MainActivity : AppCompatActivity() {
     private fun wakeFrameworkAndLoad(forceLoadHome: Boolean = true) {
         Thread {
             val base = IPC_SLEEP_BASE_URL.trimEnd('/')
-            try {
-                // best-effort wake
-                val wakeReq = Request.Builder()
-                    .url("$base/actions/wake")
-                    .post("".toRequestBody("application/json".toMediaType()))
-                    .build()
-                httpClient.newCall(wakeReq).execute().close()
-            } catch (_: Exception) {
-            }
+            var frameworkUrl = loadFrameworkUrl(base)
+            if (!isFrameworkReachable(frameworkUrl)) {
+                try {
+                    val wakeReq = Request.Builder()
+                        .url("$base/actions/wake")
+                        .post("".toRequestBody("application/json".toMediaType()))
+                        .build()
+                    httpClient.newCall(wakeReq).execute().close()
+                } catch (_: Exception) {
+                }
 
-            var frameworkUrl = DEFAULT_FRAMEWORK_URL
-            try {
-                val cfgReq = Request.Builder().url("$base/config").get().build()
-                httpClient.newCall(cfgReq).execute().use { resp ->
-                    val body = resp.body?.string()
-                    if (resp.isSuccessful && !body.isNullOrBlank()) {
-                        val json = JSONObject(body)
-                        val data = json.optJSONObject("data")
-                        val candidate = data?.optString("framework_url")
-                        if (!candidate.isNullOrBlank()) {
-                            frameworkUrl = candidate
-                        }
+                for (_attempt in 0 until 10) {
+                    Thread.sleep(200)
+                    frameworkUrl = loadFrameworkUrl(base)
+                    if (isFrameworkReachable(frameworkUrl)) {
+                        break
                     }
                 }
-            } catch (_: Exception) {
             }
 
             frameworkBaseUrl = frameworkUrl
@@ -1413,12 +1388,13 @@ class MainActivity : AppCompatActivity() {
                         imm?.restartInput(geckoView)
                     }
                 }
-                // Wire console events from Socket.IO → Flutter EventChannel
                 uiIpcClient?.onConsoleEvent = { eventName, data ->
-                    consoleEventBridge?.onConsoleEvent(eventName, data)
+                    composeConsoleState.onConsoleEvent(eventName, data)
                 }
-                consoleEventBridge?.uiIpcClient = uiIpcClient
                 uiIpcClient?.connect(port)
+                if (consoleOverlay.visibility == View.VISIBLE) {
+                    uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
+                }
             } catch (e: Exception) {
                 android.util.Log.w("MainActivity", "UiIpcClient setup failed", e)
             }
@@ -1452,6 +1428,36 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    private fun loadFrameworkUrl(base: String): String {
+        var frameworkUrl = DEFAULT_FRAMEWORK_URL
+        try {
+            val cfgReq = Request.Builder().url("$base/config").get().build()
+            httpClient.newCall(cfgReq).execute().use { resp ->
+                val body = resp.body?.string()
+                if (resp.isSuccessful && !body.isNullOrBlank()) {
+                    val json = JSONObject(body)
+                    val data = json.optJSONObject("data")
+                    val candidate = data?.optString("framework_url")
+                    if (!candidate.isNullOrBlank()) {
+                        frameworkUrl = candidate
+                    }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return frameworkUrl
+    }
+
+    private fun isFrameworkReachable(frameworkUrl: String): Boolean {
+        val probeUrl = frameworkUrl.trimEnd('/') + "/api/android/config"
+        return try {
+            val req = Request.Builder().url(probeUrl).get().build()
+            httpClient.newCall(req).execute().use { resp -> resp.isSuccessful }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     override fun onBackPressed() {
         if (::geckoSession.isInitialized && canNavigateBack) {
             geckoSession.goBack()
@@ -1463,8 +1469,6 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         uiIpcClient?.disconnect()
         uiIpcClient = null
-        consoleEventBridge?.destroy()
-        consoleEventBridge = null
         localAssetServer?.stop()
         localAssetServer = null
         if (::geckoSession.isInitialized) {
@@ -1474,6 +1478,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val CONSOLE_TAIL_LINES = 500
         private const val DEFAULT_FRAMEWORK_URL = "http://127.0.0.1:8089"
         private const val IPC_SLEEP_BASE_URL = "http://127.0.0.1:9100"
         private const val DEFAULT_APP_ID = "file_editor_cm6"

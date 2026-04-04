@@ -410,6 +410,10 @@
   .fe-modal-card { width: min(800px, 92vw); max-height: 80vh; background: var(--card, #0b0f1a); color: var(--foreground, #e5e7eb); border: 1px solid var(--border, #333); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
   .fe-modal-header { display: flex; align-items: center; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border, #333); }
   .fe-modal-body { padding: 16px 20px; overflow-y: auto; overflow-x: hidden; }
+  /* Workspace scope: hide toggle, uninstall, and install — settings-only */
+  .fe-modal.ext-scope-workspace .ext-toggle-btn,
+  .fe-modal.ext-scope-workspace .ext-uninstall-btn,
+  .fe-modal.ext-scope-workspace #editor-ext-manager-install { display: none !important; }
   .fe-confirm-body { padding: 16px; }
   .fe-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px; border-top: 1px solid var(--border, #333); }
   .fe-hr-thin { height: 1px; background: rgba(255,255,255,0.10); margin: 12px 0; }
@@ -762,6 +766,13 @@
     font-weight: 600;
     color: var(--fg, #e6edf3);
   }
+  #problems-container .problems-chevron {
+    flex-shrink: 0;
+    width: 12px;
+    font-size: 10px;
+    text-align: center;
+    color: var(--fg-dim, #6e7681);
+  }
   #problems-container .problems-file-header:hover {
     background: var(--bg-highlight, #1c2129);
   }
@@ -856,6 +867,13 @@
     font-size: 12px;
     font-weight: 600;
     color: var(--fg, #e6edf3);
+  }
+  .fe-search-diagnostics-container .problems-chevron {
+    flex-shrink: 0;
+    width: 12px;
+    font-size: 10px;
+    text-align: center;
+    color: var(--fg-dim, #6e7681);
   }
   .fe-search-diagnostics-container .problems-file-header:hover {
     background: var(--bg-highlight, #1c2129);
@@ -2197,6 +2215,70 @@
     cursor: not-allowed;
   }
 
+  /* ── Array settings widget ─────────────────────────────────── */
+  .ext-cfg-array {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+  }
+  .ext-cfg-array-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .ext-cfg-array-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.15);
+    min-height: 32px;
+  }
+  .ext-cfg-array-row-editing {
+    background: rgba(0, 0, 0, 0.3);
+  }
+  .ext-cfg-array-val {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.84rem;
+    color: var(--foreground, #e5e7eb);
+  }
+  .ext-cfg-array-acts {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .ext-cfg-arr-btn {
+    all: unset;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.82rem;
+    line-height: 1;
+    opacity: 0.65;
+  }
+  .ext-cfg-arr-btn:hover { opacity: 1; }
+  .ext-cfg-arr-edit { color: var(--foreground, #e5e7eb); }
+  .ext-cfg-arr-del  { color: #f87171; }
+  .ext-cfg-arr-ok   { color: #4ade80; opacity: 1; font-weight: 700; }
+  .ext-cfg-arr-cancel { color: #f87171; }
+  .ext-cfg-arr-input {
+    flex: 1;
+    width: auto !important;
+  }
+  .ext-cfg-arr-add {
+    all: unset;
+    cursor: pointer;
+    padding: 6px 0;
+    font-size: 0.82rem;
+    color: var(--link, #60a5fa);
+    margin-top: 4px;
+  }
+  .ext-cfg-arr-add:hover { text-decoration: underline; }
+
   .lsp-radio-group {
     display: flex;
     align-items: center;
@@ -3439,6 +3521,18 @@
           <button class="fe-btn" id="editor-settings-agent-shortcuts">Shortcuts…</button>
         </div>
       </div>
+
+      <hr style="border:0; border-top:1px solid var(--fe-border, #333); margin:14px 0 10px;" />
+
+      <div style="font-weight: 600; margin-bottom: 6px;">Monaco Web Workers</div>
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.88rem;">
+        <input type="checkbox" id="editor-settings-webworkers" />
+        <span>Enable language web workers <span style="opacity:0.55; font-size:0.82rem;">(requires reload)</span></span>
+      </label>
+      <div style="font-size:0.78rem; opacity:0.5; margin-top:4px; line-height:1.4;">
+        JSON, CSS, HTML &amp; TypeScript built-in language services.<br/>
+        Usually redundant — the extension host provides the same features.
+      </div>
     </div>
   </div>
 </div>
@@ -3546,8 +3640,14 @@
 <!-- Extensions Manager Modal (registry-based) -->
 <div id="editor-ext-manager-modal" class="fe-modal" aria-hidden="true" style="z-index: 350;">
   <div class="fe-modal-card" style="max-width: 760px;">
-    <div class="fe-modal-header">
+    <div class="fe-modal-header" style="flex-wrap:wrap;">
       <strong>Languages &amp; Extensions</strong>
+      <div id="settings-scope-tabs" style="display:flex; gap:0; margin-left:12px;">
+        <button class="settings-scope-tab active" data-scope="user"
+          style="padding:4px 14px; font-size:12px; font-weight:600; background:none; border:none; border-bottom:2px solid var(--fe-accent, #58a6ff); color:var(--fg, #e6edf3); cursor:pointer;">User</button>
+        <button class="settings-scope-tab" data-scope="workspace"
+          style="padding:4px 14px; font-size:12px; font-weight:600; background:none; border:none; border-bottom:2px solid transparent; color:var(--fg-dim, #6e7681); cursor:pointer;">Workspace</button>
+      </div>
       <span style="flex:1"></span>
       <button class="fe-btn fe-btn-primary" id="editor-ext-manager-install" aria-label="Install extension">+ Install</button>
       <button class="fe-btn" id="editor-ext-manager-close" aria-label="Close">✕</button>
@@ -3555,17 +3655,29 @@
     <div class="fe-modal-body">
       <div id="editor-ext-manager-list"></div>
       <hr style="border-color: var(--fe-border); margin: 16px 0 12px;">
-      <details id="editor-ext-custom-settings-section">
+      <details id="editor-ext-custom-settings-section" open>
         <summary style="cursor:pointer; font-weight:600; font-size:0.9rem;">⚙ Custom Settings (JSON)</summary>
-        <p style="font-size:12px; opacity:0.6; margin:6px 0 8px;">
-          Arbitrary key–value pairs merged into code-server User/settings.json.
-          Requires code-server restart to take effect.
-        </p>
-        <textarea id="editor-ext-custom-settings-input" class="lsp-rootrel-input"
-          rows="6" style="width:100%; font-family:monospace; font-size:12px; resize:vertical;"
-          placeholder='{ "editor.semanticHighlighting.enabled": true }'></textarea>
-        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
-          <button class="fe-btn fe-btn-primary" id="editor-ext-custom-settings-save">Save</button>
+        <div id="settings-scope-user">
+          <p style="font-size:12px; opacity:0.6; margin:6px 0 8px;">
+            Global user settings merged into code-server User/settings.json.
+          </p>
+          <textarea id="editor-ext-custom-settings-input" class="lsp-rootrel-input"
+            rows="6" style="width:100%; font-family:monospace; font-size:12px; resize:vertical;"
+            placeholder='{ "editor.semanticHighlighting.enabled": true }'></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+            <button class="fe-btn fe-btn-primary" id="editor-ext-custom-settings-save">Save</button>
+          </div>
+        </div>
+        <div id="settings-scope-workspace" style="display:none;">
+          <p style="font-size:12px; opacity:0.6; margin:6px 0 8px;">
+            Project settings stored in <code>.vscode/settings.json</code>. Overrides user settings for this workspace.
+          </p>
+          <textarea id="editor-ext-workspace-settings-input" class="lsp-rootrel-input"
+            rows="6" style="width:100%; font-family:monospace; font-size:12px; resize:vertical;"
+            placeholder='{ "python.analysis.diagnosticMode": "workspace" }'></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">
+            <button class="fe-btn fe-btn-primary" id="editor-ext-workspace-settings-save">Save</button>
+          </div>
         </div>
       </details>
     </div>

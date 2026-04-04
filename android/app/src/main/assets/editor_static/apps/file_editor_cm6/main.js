@@ -75,6 +75,7 @@ const UI_PREF_KEY_AGENT_ACTIVE_SHORTCUT = 'agentActiveShortcutId';
 const UI_PREF_KEY_AGENT_TOGGLE_DISPLAY = 'agentToggleDisplay';
 const UI_PREF_KEY_AGENT_HEADER_DISPLAY = 'agentHeaderDisplay';
 const UI_PREF_KEY_AGENT_SHORTCUTS = 'agentShortcuts';
+const UI_PREF_KEY_WEB_WORKERS_ENABLED = 'webWorkersEnabled';
 const SHORTCUT_KIND_URL = 'url';
 const SHORTCUT_KIND_FRAMEWORK_APP = 'framework_app';
 
@@ -740,6 +741,8 @@ function connectExplorerSocket() {
               try { currentPathExists = true; } catch (_) {}
               try { lastPickerPath = abs.slice(0, abs.lastIndexOf('/')); } catch (_) {}
               try { currentModeLanguage = detectLanguageFromFilename(abs); } catch (_) {}
+              // Notify the problems panel of the active file change
+              try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(abs); } catch (_) {}
               // Keep toolbar in sync with the explorer-authoritative active file.
               try {
                 const name = abs.slice(abs.lastIndexOf('/') + 1);
@@ -859,6 +862,8 @@ function _applyEditorCacheState(data) {
       const idx = trimmed.lastIndexOf('/');
       lastPickerPath = idx > 0 ? trimmed.slice(0, idx) : '/';
     } catch (_) {}
+    // Notify the problems panel of the active file change
+    try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(normalizedPath); } catch (_) {}
     const nameEl = window.fileNameEl || fileNameEl || null;
     if (pathChanged || (nameEl && (!nameEl.textContent || nameEl.textContent === 'Untitled'))) {
       try {
@@ -1120,15 +1125,12 @@ function connectEditorSocket() {
         } catch (_) {}
       });
 
-      // Code mention requests from iframe → POST to appserver.
+      // Code mention requests from iframe → relay via explorer bus → sidebar_ipc.
       editorSocket.on('editor:mention_request', async (payload) => {
         try {
           const p = payload && typeof payload === 'object' ? payload : {};
-          const hostBase = typeof window.__agentHostBase === 'string'
-            ? window.__agentHostBase.trim()
-            : '';
-          if (!hostBase) {
-            console.warn('[mention] Agent host unavailable');
+          if (typeof window.__explorerBusSend !== 'function') {
+            console.warn('[mention] Explorer bus unavailable');
             return;
           }
           const body = { path: p.path || '' };
@@ -1137,17 +1139,8 @@ function connectEditorSocket() {
           if (p.col != null) body.col = p.col;
           if (p.endCol != null) body.endCol = p.endCol;
           if (p.content) body.content = p.content;
-          const resp = await fetch(`${hostBase}/api/appserver/mention`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          const result = await resp.json();
-          if (result && result.ok) {
-            console.log('[mention] Mentioned in conversation:', body.path);
-          } else {
-            console.warn('[mention] Failed:', result?.error || 'unknown');
-          }
+          window.__explorerBusSend('mention:agent', body);
+          console.log('[mention] Mentioned in conversation:', body.path);
         } catch (err) {
           console.warn('[mention] Request failed:', err);
         }
@@ -1177,11 +1170,8 @@ function connectUIIPC() {
 window.addEventListener('cm6:mention-request', async (evt) => {
   try {
     const data = evt.detail || {};
-    const hostBase = typeof window.__agentHostBase === 'string'
-      ? window.__agentHostBase.trim()
-      : '';
-    if (!hostBase) {
-      console.warn('[mention] Agent host unavailable');
+    if (typeof window.__explorerBusSend !== 'function') {
+      console.warn('[mention] Explorer bus unavailable');
       return;
     }
     const body = { path: data.path || '' };
@@ -1190,17 +1180,8 @@ window.addEventListener('cm6:mention-request', async (evt) => {
     if (data.col != null) body.col = data.col;
     if (data.endCol != null) body.endCol = data.endCol;
     if (data.content) body.content = data.content;
-    const resp = await fetch(`${hostBase}/api/appserver/mention`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const result = await resp.json();
-    if (result && result.ok) {
-      console.log('[mention] Mentioned in conversation:', body.path);
-    } else {
-      console.warn('[mention] Failed:', result?.error || 'unknown');
-    }
+    window.__explorerBusSend('mention:agent', body);
+    console.log('[mention] Mentioned in conversation:', body.path);
   } catch (err) {
     console.warn('[mention] Request failed:', err);
   }
@@ -2389,6 +2370,12 @@ function _applyAgentSettingsControls(uiPrefs) {
       headerRadios.forEach((r) => { r.checked = (r.value === headerDisplay); });
     } catch (_) {}
 
+    // Web workers toggle
+    try {
+      const wwToggle = document.getElementById('editor-settings-webworkers');
+      if (wwToggle) wwToggle.checked = uiPrefs?.[UI_PREF_KEY_WEB_WORKERS_ENABLED] === true;
+    } catch (_) {}
+
     _agentShortcutsCache = shortcuts.slice();
   } finally {
     _agentSettingsUiMutating = false;
@@ -2911,6 +2898,17 @@ function _initAgentSettingsUI() {
         _sendAgentUiPrefUpdate(UI_PREF_KEY_AGENT_HEADER_DISPLAY, r.value);
       });
     });
+  } catch (_) {}
+
+  // Web workers toggle
+  try {
+    const wwToggle = document.getElementById('editor-settings-webworkers');
+    if (wwToggle) {
+      wwToggle.addEventListener('change', () => {
+        if (_agentSettingsUiMutating) return;
+        _sendAgentUiPrefUpdate(UI_PREF_KEY_WEB_WORKERS_ENABLED, wwToggle.checked);
+      });
+    }
   } catch (_) {}
 
   editorSettingsAgentShortcutsBtn.addEventListener('click', () => {
