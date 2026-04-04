@@ -25,6 +25,49 @@ class ConsoleSearchResult(BaseModel):
     log_path: str
 
 
+class FwsLogStreamMeta(BaseModel):
+    stream: str
+    path: str = ""
+    size: int = 0
+    mtime: Optional[float] = None
+    age_seconds: Optional[float] = None
+
+
+class FwsLogInspectRecord(BaseModel):
+    stream: str
+    ordinal: int
+    line_number: Optional[int] = None
+    prefix: Optional[str] = None
+    raw_length: int = 0
+    text: str = ""
+    body: str = ""
+    text_truncated: bool = False
+    kinds: list[str] = Field(default_factory=list)
+    urls: list[str] = Field(default_factory=list)
+    key_values: dict[str, str] = Field(default_factory=dict)
+    json_payloads: list[Any] = Field(default_factory=list)
+
+
+class FwsLogInspectSummary(BaseModel):
+    mode: str
+    query: Optional[str] = None
+    total_records: int = 0
+    stream_counts: dict[str, int] = Field(default_factory=dict)
+    kind_counts: dict[str, int] = Field(default_factory=dict)
+    prefix_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class FwsLogInspectResult(BaseModel):
+    shell_id: str
+    status: str = ""
+    mode: str
+    query: Optional[str] = None
+    records: list[FwsLogInspectRecord] = Field(default_factory=list)
+    total_returned: int = 0
+    summary: FwsLogInspectSummary
+    stream_meta: list[FwsLogStreamMeta] = Field(default_factory=list)
+
+
 class FrameworkShellsConfig(BaseModel):
     base_url: str = "http://127.0.0.1:0"
     enabled: bool = False

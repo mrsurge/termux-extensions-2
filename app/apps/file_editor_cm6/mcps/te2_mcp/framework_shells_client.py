@@ -6,6 +6,8 @@ from typing import Any
 
 from framework_shells import get_manager
 
+from .fws_log_analysis import build_inspect_result
+
 
 @dataclass(slots=True)
 class FrameworkShellsClient:
@@ -56,6 +58,41 @@ class FrameworkShellsClient:
             ignore_case=ignore_case,
         )
         return {"ok": True, "data": data, "source": "framework_shells.direct"}
+
+    async def inspect_logs(
+        self,
+        shell_id: str,
+        *,
+        stream: str = "both",
+        query: str | None = None,
+        lines: int = 200,
+        limit: int = 100,
+        regex: bool = False,
+        ignore_case: bool = False,
+    ) -> dict[str, Any]:
+        mgr = await get_manager()
+        normalized_shell_id = str(shell_id or "").strip()
+        if query:
+            data = await mgr.search_logs(
+                normalized_shell_id,
+                stream=stream,
+                query=str(query),
+                limit=limit,
+                regex=regex,
+                ignore_case=ignore_case,
+            )
+            mode = "search"
+        else:
+            data = await mgr.get_log_tail(normalized_shell_id, stream=stream, lines=lines)
+            mode = "tail"
+        result = build_inspect_result(
+            shell_id=normalized_shell_id,
+            status=str(data.get("status") or ""),
+            payload=data,
+            mode=mode,
+            query=str(query) if query else None,
+        )
+        return {"ok": True, "data": result.model_dump(mode="json"), "source": "framework_shells.direct"}
 
     @staticmethod
     def _shell_payload(shell: Any) -> dict[str, Any]:

@@ -107,11 +107,31 @@ def build_server() -> FastMCP:
         limit: int = 100,
         regex: bool = False,
         ignore_case: bool = False,
-    ) -> dict:
+        ) -> dict:
         return await framework_shells.search_logs(
             shell_id=shell_id,
             stream=stream,
             query=query,
+            limit=limit,
+            regex=regex,
+            ignore_case=ignore_case,
+        )
+
+    @server.tool(description="Tail or search framework-shell logs and return structured records for long-line inspection, JSON payload extraction, and generalized log analysis.")
+    async def te2_fws_log_inspect(
+        shell_id: str,
+        stream: str = "both",
+        query: str = "",
+        lines: int = 200,
+        limit: int = 100,
+        regex: bool = False,
+        ignore_case: bool = False,
+    ) -> dict:
+        return await framework_shells.inspect_logs(
+            shell_id=shell_id,
+            stream=stream,
+            query=query or None,
+            lines=lines,
             limit=limit,
             regex=regex,
             ignore_case=ignore_case,
