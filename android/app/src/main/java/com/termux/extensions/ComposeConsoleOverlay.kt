@@ -11,9 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +25,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -34,7 +33,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -65,6 +63,41 @@ private val LevelInfoColor = Color(0xFF7FC8F8)
 
 private val TimeFormatter = SimpleDateFormat("HH:mm:ss", Locale.US)
 
+enum class ConsolePrimitiveKind {
+    TEXT,
+    STRING,
+    NUMBER,
+    BOOLEAN,
+    NULL,
+}
+
+sealed interface ConsoleValueNode {
+    val searchText: String
+}
+
+data class ConsolePrimitiveNode(
+    val text: String,
+    val kind: ConsolePrimitiveKind = ConsolePrimitiveKind.TEXT,
+    override val searchText: String = text,
+) : ConsoleValueNode
+
+data class ConsoleObjectField(
+    val key: String,
+    val value: ConsoleValueNode,
+)
+
+data class ConsoleObjectNode(
+    val fields: List<ConsoleObjectField>,
+    val collapseKey: String,
+    override val searchText: String,
+) : ConsoleValueNode
+
+data class ConsoleArrayNode(
+    val items: List<ConsoleValueNode>,
+    val collapseKey: String,
+    override val searchText: String,
+) : ConsoleValueNode
+
 enum class ConsoleLevelFilter {
     ALL,
     LOG,
@@ -82,7 +115,9 @@ enum class ConsoleLevelFilter {
 data class ConsoleEntry(
     val level: String,
     val workerId: String,
-    val message: String,
+    val leadText: String? = null,
+    val parts: List<ConsoleValueNode> = emptyList(),
+    val searchText: String,
     val timestampLabel: String,
 )
 
@@ -152,7 +187,8 @@ class ComposeConsoleState(
             ConsoleEntry(
                 level = "debug",
                 workerId = "eval",
-                message = "→ $code",
+                leadText = "→ $code",
+                searchText = code,
                 timestampLabel = TimeFormatter.format(Date()),
             )
         )
@@ -191,7 +227,7 @@ class ComposeConsoleState(
         val workerId = data.optString("workerId", "?")
         val args = data.optJSONArray("args")
         val ts = if (data.has("ts")) data.optLong("ts") else System.currentTimeMillis()
-        val message = formatArgs(args)
+        val parts = argsToNodes(args, "log:$ts:$workerId")
         if (workerId.isNotBlank() && workerId != "?" && workerId !in knownWorkerIds) {
             knownWorkerIds.add(workerId)
             knownWorkerIds.sort()
@@ -200,7 +236,8 @@ class ComposeConsoleState(
             ConsoleEntry(
                 level = level,
                 workerId = workerId,
-                message = message,
+                parts = parts,
+                searchText = buildSearchText(null, parts),
                 timestampLabel = TimeFormatter.format(Date(ts)),
             )
         )
@@ -209,11 +246,15 @@ class ComposeConsoleState(
     private fun appendEvalResult(data: JSONObject) {
         val ok = data.optBoolean("ok", false)
         val payload = if (ok) data.opt("value") else data.opt("error")
+        val parts = listOf(jsonValueToNode(payload, "eval:${entries.size}"))
+        val leadText = if (ok) "←" else "✗"
         appendEntry(
             ConsoleEntry(
                 level = if (ok) "info" else "error",
                 workerId = "eval",
-                message = if (ok) "← ${formatJsonValue(payload)}" else "✗ ${formatJsonValue(payload)}",
+                leadText = leadText,
+                parts = parts,
+                searchText = buildSearchText(leadText, parts),
                 timestampLabel = TimeFormatter.format(Date()),
             )
         )
@@ -226,21 +267,87 @@ class ComposeConsoleState(
         }
     }
 
-    private fun formatArgs(args: JSONArray?): String {
-        if (args == null || args.length() == 0) return ""
+    private fun argsToNodes(args: JSONArray?, basePath: String): List<ConsoleValueNode> {
+        if (args == null || args.length() == 0) return emptyList()
         return buildList {
             for (i in 0 until args.length()) {
-                add(formatJsonValue(args.opt(i)))
+                add(jsonValueToNode(args.opt(i), "$basePath[$i]"))
             }
-        }.joinToString(" ")
+        }
     }
 
-    private fun formatJsonValue(value: Any?): String {
+    private fun jsonValueToNode(value: Any?, path: String): ConsoleValueNode {
         return when (value) {
-            null, JSONObject.NULL -> "null"
-            is JSONObject -> value.toString(2)
-            is JSONArray -> value.toString(2)
-            else -> value.toString()
+            null, JSONObject.NULL -> ConsolePrimitiveNode(
+                text = "null",
+                kind = ConsolePrimitiveKind.NULL,
+                searchText = "null",
+            )
+            is String -> ConsolePrimitiveNode(
+                text = value,
+                kind = ConsolePrimitiveKind.STRING,
+                searchText = value,
+            )
+            is Number -> ConsolePrimitiveNode(
+                text = value.toString(),
+                kind = ConsolePrimitiveKind.NUMBER,
+                searchText = value.toString(),
+            )
+            is Boolean -> ConsolePrimitiveNode(
+                text = value.toString(),
+                kind = ConsolePrimitiveKind.BOOLEAN,
+                searchText = value.toString(),
+            )
+            is JSONObject -> {
+                val fields = buildList {
+                    val iterator = value.keys()
+                    val keys = mutableListOf<String>()
+                    while (iterator.hasNext()) {
+                        keys.add(iterator.next().toString())
+                    }
+                    keys.sorted().forEach { key ->
+                        add(ConsoleObjectField(key, jsonValueToNode(value.opt(key), "$path.$key")))
+                    }
+                }
+                val searchText = fields.joinToString(" ") { field ->
+                    "${field.key} ${field.value.searchText}"
+                }
+                ConsoleObjectNode(
+                    fields = fields,
+                    collapseKey = path,
+                    searchText = searchText,
+                )
+            }
+            is JSONArray -> {
+                val items = buildList {
+                    for (i in 0 until value.length()) {
+                        add(jsonValueToNode(value.opt(i), "$path[$i]"))
+                    }
+                }
+                val searchText = items.joinToString(" ") { it.searchText }
+                ConsoleArrayNode(
+                    items = items,
+                    collapseKey = path,
+                    searchText = searchText,
+                )
+            }
+            else -> ConsolePrimitiveNode(
+                text = value.toString(),
+                kind = ConsolePrimitiveKind.TEXT,
+                searchText = value.toString(),
+            )
+        }
+    }
+
+    private fun buildSearchText(leadText: String?, parts: List<ConsoleValueNode>): String {
+        return buildString {
+            if (!leadText.isNullOrBlank()) {
+                append(leadText)
+            }
+            parts.forEach { part ->
+                if (isNotEmpty()) append(' ')
+                append(part.searchText)
+            }
         }
     }
 }
@@ -261,7 +368,7 @@ private fun ComposeConsoleOverlay(
                 if (!state.activeLevelFilter.matches(entry.level)) {
                     return@filter false
                 }
-                if (query.isNotEmpty() && !entry.message.lowercase(Locale.US).contains(query)) {
+                if (query.isNotEmpty() && !entry.searchText.lowercase(Locale.US).contains(query)) {
                     return@filter false
                 }
                 true
@@ -418,17 +525,15 @@ private fun ComposeConsoleOverlay(
                         fontSize = 12.sp,
                     )
                 } else {
-                    SelectionContainer {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(scrollState)
-                                .padding(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            filteredEntries.forEach { entry ->
-                                ConsoleEntryRow(entry)
-                            }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollState)
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        filteredEntries.forEach { entry ->
+                            ConsoleEntryRow(entry)
                         }
                     }
                 }
@@ -513,15 +618,218 @@ private fun ConsoleEntryRow(entry: ConsoleEntry) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                text = entry.message,
-                color = ConsoleText,
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-                lineHeight = 16.sp,
-            )
+            if (!entry.leadText.isNullOrBlank()) {
+                SelectionContainer {
+                    Text(
+                        text = entry.leadText,
+                        color = ConsoleText,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        lineHeight = 16.sp,
+                    )
+                }
+            }
+            val inlineMessage = entry.parts.takeIf {
+                it.isNotEmpty() && it.all { part -> part is ConsolePrimitiveNode } &&
+                    it.none { part -> (part as ConsolePrimitiveNode).text.contains('\n') }
+            }
+            if (inlineMessage != null) {
+                val message = inlineMessage.joinToString(" ") { (it as ConsolePrimitiveNode).text }
+                SelectionContainer {
+                    Text(
+                        text = message,
+                        color = ConsoleText,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        lineHeight = 16.sp,
+                    )
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    entry.parts.forEach { part ->
+                        ConsoleValueNodeView(part, depth = 0)
+                    }
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun ConsoleValueNodeView(node: ConsoleValueNode, depth: Int) {
+    when (node) {
+        is ConsolePrimitiveNode -> ConsolePrimitiveValue(node, depth)
+        is ConsoleObjectNode -> ConsoleObjectValue(node, depth)
+        is ConsoleArrayNode -> ConsoleArrayValue(node, depth)
+    }
+}
+
+@Composable
+private fun ConsolePrimitiveValue(node: ConsolePrimitiveNode, depth: Int) {
+    val color = when (node.kind) {
+        ConsolePrimitiveKind.NULL -> ConsoleDim
+        ConsolePrimitiveKind.NUMBER -> LevelInfoColor
+        ConsolePrimitiveKind.BOOLEAN -> LevelWarnColor
+        else -> ConsoleText
+    }
+    SelectionContainer {
+        Text(
+            text = node.text,
+            color = color,
+            modifier = Modifier.padding(start = (depth * 14).dp),
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+            lineHeight = 16.sp,
+        )
+    }
+}
+
+@Composable
+private fun ConsoleObjectValue(node: ConsoleObjectNode, depth: Int) {
+    var expanded by remember(node.collapseKey) { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = (depth * 14).dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Surface(
+            modifier = Modifier.clickable { expanded = !expanded },
+            color = ConsolePanel.copy(alpha = 0.6f),
+            shape = RoundedCornerShape(8.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (expanded) "▾" else "▸",
+                    color = ConsoleMuted,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Text(
+                    text = objectSummary(node),
+                    color = ConsoleText,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 15.sp,
+                )
+            }
+        }
+        if (expanded) {
+            Column(
+                modifier = Modifier.padding(start = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                node.fields.forEach { field ->
+                    Text(
+                        text = field.key,
+                        color = ConsoleMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    ConsoleValueNodeView(field.value, depth = depth + 1)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConsoleArrayValue(node: ConsoleArrayNode, depth: Int) {
+    var expanded by remember(node.collapseKey) { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = (depth * 14).dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Surface(
+            modifier = Modifier.clickable { expanded = !expanded },
+            color = ConsolePanel.copy(alpha = 0.6f),
+            shape = RoundedCornerShape(8.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, ConsoleBorder),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (expanded) "▾" else "▸",
+                    color = ConsoleMuted,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Text(
+                    text = arraySummary(node),
+                    color = ConsoleText,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    lineHeight = 15.sp,
+                )
+            }
+        }
+        if (expanded) {
+            Column(
+                modifier = Modifier.padding(start = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                node.items.forEachIndexed { index, item ->
+                    Text(
+                        text = "[$index]",
+                        color = ConsoleMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    ConsoleValueNodeView(item, depth = depth + 1)
+                }
+            }
+        }
+    }
+}
+
+private fun objectSummary(node: ConsoleObjectNode): String {
+    if (node.fields.isEmpty()) return "{}"
+    val preview = node.fields.take(3).joinToString(", ") { field ->
+        "${field.key}: ${inlineSummary(field.value)}"
+    }
+    val suffix = if (node.fields.size > 3) ", …" else ""
+    return "{$preview$suffix}"
+}
+
+private fun arraySummary(node: ConsoleArrayNode): String {
+    if (node.items.isEmpty()) return "[]"
+    val preview = node.items.take(3).joinToString(", ") { inlineSummary(it) }
+    val suffix = if (node.items.size > 3) ", …" else ""
+    return "[$preview$suffix]"
+}
+
+private fun inlineSummary(node: ConsoleValueNode): String {
+    return when (node) {
+        is ConsolePrimitiveNode -> inlineTextSummary(node.text)
+        is ConsoleObjectNode -> if (node.fields.isEmpty()) "{}" else "{… ${node.fields.size} keys}"
+        is ConsoleArrayNode -> if (node.items.isEmpty()) "[]" else "[… ${node.items.size} items]"
+    }
+}
+
+private fun inlineTextSummary(text: String, limit: Int = 72): String {
+    val normalized = text
+        .replace("\r", "")
+        .replace("\n", " ↵ ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+    if (normalized.length <= limit) return normalized
+    return normalized.take(limit) + "…"
 }
 
 @Composable
