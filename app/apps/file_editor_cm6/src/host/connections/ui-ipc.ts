@@ -3,7 +3,7 @@
 /**
  * @param {{
  *   ensureSocketIoLoaded: () => Promise<any>,
- *   initConsoleBridge: (args: { workerId: string, socket: any }) => void,
+ *   initConsoleBridge: (args: { workerId: string, socketPath?: string, namespace?: string }) => void,
  *   getClientId: () => string
  * }} deps
  */
@@ -100,7 +100,11 @@ export function createUiIpcConnections(deps) {
         }
       });
 
-      deps.initConsoleBridge({ workerId: 'main_page', socket: uiIpcSocket });
+      deps.initConsoleBridge({
+        workerId: 'main_page',
+        socketPath: '/te2_console_ws/socket.io',
+        namespace: '/te2_console',
+      });
     }).catch((err) => {
       console.warn('[UI_IPC] connect failed', err);
     });

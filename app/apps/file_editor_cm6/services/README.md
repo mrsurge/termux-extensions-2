@@ -46,3 +46,13 @@ A service module can export either or both:
 - `sidebar_backchannel_uds.py` — Main-process Unix domain socket JSON-RPC host
   for sidebar backchannel transport (Phase 0 scaffolding: `session.hello`,
   `health.ping`, structured request logs, safe socket lifecycle).
+
+## TE2 runtime-owned mounts
+
+The framework-owned TE2 console and TE2 MCP transports are mounted from the
+runtime layer, not from this app-service directory:
+
+- `app/te2_console_runtime.py` — canonical TE2 console runtime and Socket.IO
+  namespace/path definitions
+- `app/te2_runtime_mounts.py` — mounts `/te2_console_ws/socket.io`, `/te2_mcp`,
+  and `/te2_mcp_http` from `app/main.py`

@@ -4,9 +4,10 @@ import json
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
+from app.te2_console_runtime import TE2_CONSOLE_LOG_PATH
 from .models import ConsoleLogEntry
 
-DEFAULT_CONSOLE_LOG_PATH = Path.home() / ".cache" / "cm6_editor" / "console_log.jsonl"
+DEFAULT_CONSOLE_LOG_PATH = TE2_CONSOLE_LOG_PATH
 
 
 class ConsoleStore:

@@ -1,6 +1,7 @@
 // console.js — Console drawer module (vConsole-based observability UI)
 //
-// Connects to the ui_ipc Socket.IO namespace as a "drawer" role,
+// Connects to the framework-owned TE2 console Socket.IO namespace as a
+// "drawer" role,
 // receives console:log events from all workers, and renders them
 // via vConsole's built-in log panel.
 //
@@ -11,8 +12,8 @@
 export function createConsoleDrawer(options = {}) {
   const {
     containerId = 'console-container',
-    socketPath = '/ui_ipc_ws/socket.io',
-    namespace = '/ui_ipc',
+    socketPath = '/te2_console_ws/socket.io',
+    namespace = '/te2_console',
   } = options;
 
   let vConsoleInstance = null;
@@ -25,6 +26,19 @@ export function createConsoleDrawer(options = {}) {
   const originToggle = document.getElementById('console-origin-toggle');
   const originDropdown = document.getElementById('console-origin-dd');
   const consoleHeader = document.getElementById('console-header');
+
+  function _resetDrawerState() {
+    knownWorkers.clear();
+    activeFilter = 'all';
+    if (originToggle) originToggle.textContent = 'All';
+    if (originDropdown) {
+      originDropdown.classList.remove('show');
+      originDropdown.innerHTML = '';
+    }
+    if (vConsoleInstance && vConsoleInstance.log) {
+      vConsoleInstance.log.clear();
+    }
+  }
 
   // ─── vConsole initialization ──────────────────────────────
 
@@ -243,7 +257,6 @@ export function createConsoleDrawer(options = {}) {
       if (!Array.isArray(workers)) return;
       for (const w of workers) _trackWorker(w);
     });
-
   }
 
   // ─── Log rendering via vConsole plugin API ────────────────
@@ -319,6 +332,12 @@ export function createConsoleDrawer(options = {}) {
 
   function hide() {
     if (!container) return;
+    if (socket) {
+      try { socket.emit('console:unregister', { role: 'drawer' }); } catch (_) {}
+      try { socket.disconnect(); } catch (_) {}
+      socket = null;
+    }
+    _resetDrawerState();
     container.style.display = 'none';
     if (consoleHeader) consoleHeader.style.display = 'none';
     isVisible = false;
@@ -337,6 +356,7 @@ export function createConsoleDrawer(options = {}) {
       socket.disconnect();
       socket = null;
     }
+    _resetDrawerState();
     isVisible = false;
   }
 

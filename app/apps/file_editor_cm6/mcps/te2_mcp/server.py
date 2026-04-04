@@ -22,7 +22,8 @@ def build_server() -> FastMCP:
         name="te2-mcp",
         instructions=(
             "TE2-owned MCP server for Code TE2 console access and framework-shells integration. "
-            "This server runs inside the TE2 worker and prefers direct Python access to worker-owned state."
+            "This server runs on the main framework process and prefers direct Python access to "
+            "framework-owned console/runtime state."
         ),
     )
 
@@ -39,7 +40,7 @@ def build_server() -> FastMCP:
             framework_shells_enabled=True,
         )
         payload = status.model_dump(mode="json")
-        payload["mode"] = "worker_owned_sse"
+        payload["mode"] = "framework_owned_sse"
         return payload
 
     @server.tool(description="List worker IDs seen in the persisted TE2 console transcript.")
@@ -50,11 +51,11 @@ def build_server() -> FastMCP:
             "log_path": str(console_store.log_path),
         }
 
-    @server.tool(description="List currently registered live TE2 console workers from the in-process worker runtime.")
+    @server.tool(description="List currently registered live TE2 console workers from the framework-owned console runtime.")
     async def te2_console_workers_live() -> dict:
         return {
             "workers": await te2_console.list_workers(),
-            "source": "console_ws.runtime",
+            "source": "te2_console.runtime",
         }
 
     @server.tool(description="Return the last N TE2 console log entries from the persisted transcript.")
@@ -78,7 +79,7 @@ def build_server() -> FastMCP:
         result.total_returned = len(result.entries)
         return result.model_dump(mode="json")
 
-    @server.tool(description="Execute JavaScript in a live TE2 console worker through the in-process console relay.")
+    @server.tool(description="Execute JavaScript in a live TE2 console worker through the framework-owned console relay.")
     async def te2_console_eval(target_worker_id: str, code: str, timeout_seconds: float = 20.0) -> dict:
         return await te2_console.eval_in_worker(
             target_worker_id=target_worker_id,

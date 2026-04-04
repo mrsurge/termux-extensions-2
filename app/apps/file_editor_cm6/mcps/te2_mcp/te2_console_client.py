@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ...ui_ipc.console_ws import list_console_workers, request_console_eval
+from app.te2_console_runtime import list_console_workers, request_console_eval
 
 
 @dataclass(slots=True)
 class Te2ConsoleClient:
-    """Direct in-process console adapter for worker-owned MCP."""
+    """Direct in-process console adapter for the framework-owned console runtime."""
 
     async def list_workers(self) -> list[str]:
         return list_console_workers()

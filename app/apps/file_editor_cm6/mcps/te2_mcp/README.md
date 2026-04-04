@@ -6,8 +6,8 @@ TE2-owned MCP server for:
 - direct framework-shells inspection through imported manager calls
 
 Serving mode:
-- worker-owned SSE/HTTP ASGI app
-- intended to be mounted inside the `file_editor_cm6` worker
+- framework-owned SSE/HTTP ASGI app
+- intended to be mounted by the main TE2 framework service layer
 
 Current tools:
 - `te2_mcp_status`

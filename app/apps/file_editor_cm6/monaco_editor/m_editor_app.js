@@ -3910,6 +3910,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
 
   // ─── UI IPC (frontend-to-frontend relay) ────────────────
   var uiIpcSocket = null;
+  var consoleSocket = null;
   var _editorConsoleWorkerId = null;
 
   function _randomConsoleWorkerSuffix() {
@@ -3927,13 +3928,26 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     return _editorConsoleWorkerId;
   }
 
+  function connectConsoleSocket(ioRef) {
+    if (!ioRef) return null;
+    return ioRef('/te2_console', {
+      path: '/te2_console_ws/socket.io',
+      transports: ['websocket'],
+      query: {
+        app_id: 'file_editor_cm6',
+        source: 'editor_iframe_console',
+        workerId: _getEditorConsoleWorkerId(),
+      },
+    });
+  }
+
   function connectUIIPC() {
     try {
       if (!window.io) return;
       uiIpcSocket = connectUiIpcSocket(window.io);
+      consoleSocket = connectConsoleSocket(window.io);
       uiIpcSocket.on('connect', function() {
         console.log('[UI_IPC] editor iframe connected');
-        registerConsoleWorker(uiIpcSocket, _getEditorConsoleWorkerId(), 'worker');
       });
       uiIpcSocket.on('ui_event', function(data) {
         if (!data || typeof data !== 'object') return;
@@ -3949,8 +3963,15 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
         }
       });
 
-      // Console bridge — monkey-patch console.* to emit on the ui_ipc bus
-      _initEditorConsoleBridge(uiIpcSocket);
+      if (consoleSocket) {
+        consoleSocket.on('connect', function() {
+          console.log('[TE2_CONSOLE] editor iframe connected');
+          registerConsoleWorker(consoleSocket, _getEditorConsoleWorkerId(), 'worker');
+        });
+
+        // Console bridge — monkey-patch console.* to emit on the framework-owned console bus
+        _initEditorConsoleBridge(consoleSocket);
+      }
     } catch (e) {
       console.warn('[UI_IPC] connect failed', e);
     }

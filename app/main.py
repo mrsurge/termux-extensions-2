@@ -36,99 +36,99 @@ from contextlib import asynccontextmanager, suppress
 @asynccontextmanager
 async def lifespan(_app_instance: FastAPI):
     """Startup/shutdown logic for FastAPI app."""
-    
-    # Register framework with IPC
-    from app.ipc.client import register_process
-    framework_pid = os.getpid()
-    registered = register_process(
-        pid=framework_pid,
-        type="framework",
-        label="main-framework",
-        parent_pid=os.getppid(),
-        metadata={
-            "run_id": os.environ.get("TE_RUN_ID"),
-            "port": 8089,
-        }
-    )
-    if registered:
-        print(f"[framework] Registered with IPC (PID {framework_pid})")
-    else:
-        print(f"[framework] Warning: Failed to register with IPC", file=sys.stderr)
-
-    # Enable SIGWINCH-on-resize for framework_shells by default.
-    # This helps interactive shells (readline/TUIs) stay in sync with xterm's
-    # computed cols/rows, especially for dtach-backed PTYs.
-    os.environ.setdefault("FRAMEWORK_SHELLS_SIGWINCH_ON_RESIZE", "1")
-
-    # Initialize framework_shells early with IPC lifecycle hooks so shell PIDs
-    # are registered (and adoption re-registers as needed).
-    try:
-        from app.ipc.framework_shells_hooks import build_ipc_shell_hooks
-        from app.ipc.fws_process_provider import IpcProcessProvider
-        await get_manager(
-            run_id=os.environ.get("TE_RUN_ID"),
-            process_hooks=build_ipc_shell_hooks(),
-            external_process_provider=IpcProcessProvider(),
+    async with te2_runtime_lifespan():
+        # Register framework with IPC
+        from app.ipc.client import register_process
+        framework_pid = os.getpid()
+        registered = register_process(
+            pid=framework_pid,
+            type="framework",
+            label="main-framework",
+            parent_pid=os.getppid(),
+            metadata={
+                "run_id": os.environ.get("TE_RUN_ID"),
+                "port": 8089,
+            }
         )
-    except Exception as exc:
-        print(f"[framework] Warning: Failed to init framework_shells IPC hooks: {exc}", file=sys.stderr)
-    
-    # Startup
-    print("--- Loading Settings ---")
-    _apply_settings_to_config()
-    print("--- Loading Services ---")
-    load_services()
-    print("--- Loading Extensions ---")
-    global _loaded_extensions, loaded_apps
-    _loaded_extensions = load_extensions()
-    print(f"Loaded {len(_loaded_extensions)} extensions.")
-    print("--- Loading Apps ---")
-    # App services are loaded in the main process via the apps extension loader.
-    from app.extensions.apps import loader as apps_loader
-    from app.extensions.apps.registry import ensure_user_local_layout
-    ensure_user_local_layout()
-    loaded_apps = apps_loader.load_apps_and_services(app)
-    # Store in app_manager module so ensure_app_running can access it
-    from app.libs import app_manager
-    app_manager._LOADED_APPS = loaded_apps
-    print(f"Loaded {len(loaded_apps)} apps.")
-    print("--- Restoring Running Apps ---")
-    await initialize_running_apps()
-    print("--- Starting Framework Shell Log Monitor ---")
-    global _log_monitor_thread
-    _log_monitor_thread = _start_framework_shell_log_monitor()
-    print("--- Starting Lifecycle Background Tasks ---")
-    start_background_tasks()
+        if registered:
+            print(f"[framework] Registered with IPC (PID {framework_pid})")
+        else:
+            print(f"[framework] Warning: Failed to register with IPC", file=sys.stderr)
 
-    yield
+        # Enable SIGWINCH-on-resize for framework_shells by default.
+        # This helps interactive shells (readline/TUIs) stay in sync with xterm's
+        # computed cols/rows, especially for dtach-backed PTYs.
+        os.environ.setdefault("FRAMEWORK_SHELLS_SIGWINCH_ON_RESIZE", "1")
 
-    # Terminate all framework shells before exiting
-    # This runs when framework receives SIGTERM from supervisor
-    print("--- Stopping lifecycle background tasks ---")
-    try:
-        await stop_background_tasks()
-    except Exception as e:
-        print(f"  Error stopping lifecycle background tasks: {e}")
+        # Initialize framework_shells early with IPC lifecycle hooks so shell PIDs
+        # are registered (and adoption re-registers as needed).
+        try:
+            from app.ipc.framework_shells_hooks import build_ipc_shell_hooks
+            from app.ipc.fws_process_provider import IpcProcessProvider
+            await get_manager(
+                run_id=os.environ.get("TE_RUN_ID"),
+                process_hooks=build_ipc_shell_hooks(),
+                external_process_provider=IpcProcessProvider(),
+            )
+        except Exception as exc:
+            print(f"[framework] Warning: Failed to init framework_shells IPC hooks: {exc}", file=sys.stderr)
+        
+        # Startup
+        print("--- Loading Settings ---")
+        _apply_settings_to_config()
+        print("--- Loading Services ---")
+        load_services()
+        print("--- Loading Extensions ---")
+        global _loaded_extensions, loaded_apps
+        _loaded_extensions = load_extensions()
+        print(f"Loaded {len(_loaded_extensions)} extensions.")
+        print("--- Loading Apps ---")
+        # App services are loaded in the main process via the apps extension loader.
+        from app.extensions.apps import loader as apps_loader
+        from app.extensions.apps.registry import ensure_user_local_layout
+        ensure_user_local_layout()
+        loaded_apps = apps_loader.load_apps_and_services(app)
+        # Store in app_manager module so ensure_app_running can access it
+        from app.libs import app_manager
+        app_manager._LOADED_APPS = loaded_apps
+        print(f"Loaded {len(loaded_apps)} apps.")
+        print("--- Restoring Running Apps ---")
+        await initialize_running_apps()
+        print("--- Starting Framework Shell Log Monitor ---")
+        global _log_monitor_thread
+        _log_monitor_thread = _start_framework_shell_log_monitor()
+        print("--- Starting Lifecycle Background Tasks ---")
+        start_background_tasks()
 
-    print("--- Terminating framework shells ---")
-    terminated_count = 0
-    try:
-        mgr = await get_manager()
-        shells = await mgr.list_shells()
-        for shell in shells:
-            if shell.status != "running":
-                continue
-            try:
-                await mgr.terminate_shell(shell.id, force=True)
-                terminated_count += 1
-                print(f"  Terminated: {shell.id} ({shell.label or 'unlabeled'})")
-            except Exception as e:
-                print(f"  Failed to terminate {shell.id}: {e}")
-        print(f"--- Terminated {terminated_count} framework shell(s) ---")
-    except Exception as e:
-        print(f"  Error during shell termination: {e}")
-    
-    print("--- Framework shutdown complete ---")
+        yield
+
+        # Terminate all framework shells before exiting
+        # This runs when framework receives SIGTERM from supervisor
+        print("--- Stopping lifecycle background tasks ---")
+        try:
+            await stop_background_tasks()
+        except Exception as e:
+            print(f"  Error stopping lifecycle background tasks: {e}")
+
+        print("--- Terminating framework shells ---")
+        terminated_count = 0
+        try:
+            mgr = await get_manager()
+            shells = await mgr.list_shells()
+            for shell in shells:
+                if shell.status != "running":
+                    continue
+                try:
+                    await mgr.terminate_shell(shell.id, force=True)
+                    terminated_count += 1
+                    print(f"  Terminated: {shell.id} ({shell.label or 'unlabeled'})")
+                except Exception as e:
+                    print(f"  Failed to terminate {shell.id}: {e}")
+            print(f"--- Terminated {terminated_count} framework shell(s) ---")
+        except Exception as e:
+            print(f"  Error during shell termination: {e}")
+        
+        print("--- Framework shutdown complete ---")
 
 
 app: FastAPI = FastAPI(lifespan=lifespan)
@@ -143,11 +143,13 @@ from framework_shells import FrameworkShellManager, get_manager
 from framework_shells.api.fastapi_router import router as framework_shells_router
 from framework_shells.api.websocket import router as framework_shells_ws_router
 from framework_shells.api.fws_ui import router as fws_ui_router
+from app.te2_runtime_mounts import mount_te2_runtime_services, te2_runtime_lifespan
 
 # Mount the framework shells API router
 app.include_router(framework_shells_router)
 app.include_router(framework_shells_ws_router)
 app.include_router(fws_ui_router)
+mount_te2_runtime_services(app)
 
 
 
