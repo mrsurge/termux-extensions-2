@@ -6,7 +6,7 @@ from typing import TypeAlias, cast
 
 from fastapi import FastAPI
 from fastmcp.server.http import StarletteWithLifespan
-from app.apps.file_editor_cm6.mcps.te2_mcp.server import (
+from app.te2_mcp.server import (
     build_http_app,
     build_streamable_http_app,
 )

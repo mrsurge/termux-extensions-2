@@ -13,7 +13,7 @@ The main goal is:
 ## Core Positioning
 
 TE2 is an IDE/runtime platform with:
-- a worker-owned editor/runtime
+- a TE2-owned IDE/runtime
 - framework-shell execution and process management
 - a reverse-proxy wrapper pattern for hosted web apps
 - a sidebar embedding surface
@@ -120,7 +120,7 @@ It is not the structured debugging/tool surface.
 Use MCP integration for:
 - structured runtime inspection
 - TE2 console transcript search/tail
-- live TE2 console eval through the worker-owned relay
+- live TE2 console eval through the framework-owned relay
 - framework-shell process and log inspection
 - runtime/debugging workflows that should not depend on scraping visible UI
 
@@ -152,7 +152,7 @@ Do not start by guessing when structured runtime surfaces can answer the questio
 
 ## Console Guidance
 
-TE2 provides a worker-owned console system.
+TE2 provides a framework-owned console system.
 Use it for:
 - frontend runtime diagnostics
 - browser-side errors

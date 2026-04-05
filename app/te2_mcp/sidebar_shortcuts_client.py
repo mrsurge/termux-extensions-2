@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ...stores import _history_store, _preferences_store
+from app.apps.file_editor_cm6.stores import _history_store, _preferences_store
 
 from .framework_apps_client import FrameworkAppsClient
 
@@ -78,7 +78,7 @@ class SidebarShortcutsClient:
 
         active_project = _history_store.get_active_project()
         if active_project:
-            from ...explorer_manager import manager as explorer_manager
+            from app.apps.file_editor_cm6.explorer_manager import manager as explorer_manager
             await explorer_manager.broadcast(
                 str(active_project),
                 {"type": "prefs:setUi", "payload": {"ui": ui_snapshot}},

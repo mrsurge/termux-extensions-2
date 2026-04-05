@@ -38,6 +38,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--ipc-port", type=int, default=None)
     parser.add_argument("--sleep", action="store_true", help="Start IPC sleep listener only")
     parser.add_argument(
+        "--no-fws-autoupdate",
+        action="store_true",
+        help="Skip the framework-shells remote version check and pip auto-update/install path.",
+    )
+    parser.add_argument(
         "--broadcast",
         nargs="+",
         metavar="IP_SUBNET_OR_IFACE",
@@ -295,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
 
     _ensure_run_id()
     _ensure_framework_secret(root)
+    if args.no_fws_autoupdate:
+        os.environ["TE2_DISABLE_FWS_AUTOUPDATE"] = "1"
     _maybe_autoupdate_framework_shells(argv)
     _cleanup_framework_shell_logs()
     _cleanup_pycache(root)

@@ -117,7 +117,7 @@ def build_server() -> FastMCP:
             ignore_case=ignore_case,
         )
 
-    @server.tool(description="Tail or search framework-shell logs and return structured records for long-line inspection, JSON payload extraction, and generalized log analysis.")
+    @server.tool(description="Inspect framework-shell log events with generic plain/json/jsonrpc classification, plain-prefix signatures for prefixed plain logs, and optional format/signature exclusion filters.")
     async def te2_fws_log_inspect(
         shell_id: str,
         stream: str = "both",
@@ -126,6 +126,10 @@ def build_server() -> FastMCP:
         limit: int = 100,
         regex: bool = False,
         ignore_case: bool = False,
+        format: str = "",
+        signature: str = "",
+        exclude_query: str = "",
+        exclude_signature: str = "",
     ) -> dict:
         return await framework_shells.inspect_logs(
             shell_id=shell_id,
@@ -135,6 +139,10 @@ def build_server() -> FastMCP:
             limit=limit,
             regex=regex,
             ignore_case=ignore_case,
+            format=format or None,
+            signature=signature or None,
+            exclude_query=exclude_query or None,
+            exclude_signature=exclude_signature or None,
         )
 
     @server.tool(description="List available local TE2 app templates from the user-local templates directory.")
