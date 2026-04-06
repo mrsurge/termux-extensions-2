@@ -853,27 +853,6 @@ class ExplorerDispatcher:
         data = await asyncio.to_thread(list_dir, '.')
         await self.broadcast("explorer:setList", data)
 
-    async def handle_explorer_getDiagnostics(self, payload: dict, msg_id: str):
-        """Return a point-in-time diagnostics summary snapshot.
-
-        This is used by the explorer frontend to proactively fetch the current
-        diagnostics state after it installs its dispatch hook, preventing races
-        where the periodic broadcast arrives before the UI is ready.
-        """
-
-        try:
-            from .lsp_ws import get_diagnostics_summary_for_project
-
-            summary = get_diagnostics_summary_for_project(project_root=str(self.project_root))
-        except Exception:
-            summary = {}
-
-        await self.emit_personal(
-            "explorer:updateDiagnostics",
-            {"diagnostics": summary},
-            msg_id,
-        )
-
     async def handle_cm6_mirror(self, payload: dict, msg_id: str):
         """Relay live CM6 buffer mirroring payloads to connected clients."""
         if not isinstance(payload, dict):
@@ -927,62 +906,6 @@ class ExplorerDispatcher:
             sidecar.save()
         except Exception as e:
             logger.warning(f"Failed to save open directories: {e}")
-
-    async def handle_lsp_status(self, payload: dict, msg_id: str):
-        """Return a point-in-time LSP status snapshot (via Framework Shells labels).
-
-        The Language Servers modal calls this when opened so buttons reflect the real
-        running state immediately, without relying on periodic broadcasts.
-        """
-
-        from framework_shells import get_manager
-
-        server_groups = {
-            "pyright": ["python"],
-            "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
-            "clangd": ["c", "cpp"],
-            "kotlin": ["kotlin"],
-            "kotlin-android": ["kotlin-android"],
-        }
-
-        try:
-            mgr = await get_manager()
-        except Exception as e:
-            return await self.send_error(f"Failed to query shell manager: {e}", msg_id)
-
-        try:
-            shells = await mgr.list_shells()
-        except Exception:
-            shells = []
-
-        running_labels: list[str] = []
-        for rec in shells:
-            try:
-                if rec and rec.pid and rec.status == "running" and rec.label:
-                    running_labels.append(rec.label)
-            except Exception:
-                continue
-
-        def _is_running_label(language_id: str) -> bool:
-            prefix = f"lsp:{language_id}"
-            return any(lbl == prefix or lbl.startswith(prefix + ":") for lbl in running_labels)
-
-        snapshot = {"servers": {}}
-        for server_id, langs in server_groups.items():
-            running = False
-            for lang in langs:
-                if _is_running_label(lang):
-                    running = True
-                    break
-            snapshot["servers"][server_id] = {"running": running}
-
-        # Prime last snapshot for this project so background broadcasts won't lag.
-        try:
-            manager._last_lsp_status[str(self.project_root)] = snapshot
-        except Exception:
-            pass
-
-        await self.emit_personal("lsp:status", snapshot, msg_id)
 
     async def handle_watcher_raiseLimit(self, payload: dict, msg_id: str):
         limit = payload.get("limit", 524288)

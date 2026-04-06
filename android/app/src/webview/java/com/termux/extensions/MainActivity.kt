@@ -90,6 +90,8 @@ class MainActivity : AppCompatActivity() {
         "/static/vendor/monaco-editor-core/esm/",
         "/static/fonts/",
         "/static/js/",
+        "/extensions/",
+        "/apps/file_editor_cm6/",
         "/apps/file_editor_cm6/static/",
         "/api/app/file_editor_cm6/ui/monaco_editor/",
         "/api/app/file_editor_cm6/ui/monaco_vscode/lang/",
@@ -115,8 +117,8 @@ class MainActivity : AppCompatActivity() {
         if (urlPath == "/api/app/file_editor_cm6/ui/nc") {
             return "/api/app/file_editor_cm6/ui/nc.html"
         }
-        if (urlPath == "/app/file_editor_cm6") {
-            return "/app_shell_file_editor_cm6.html"
+        if (urlPath.startsWith("/app/")) {
+            return "/app_shell.html"
         }
         if (urlPath == "/") {
             return "/index.html"
@@ -127,7 +129,7 @@ class MainActivity : AppCompatActivity() {
     private fun shouldIntercept(urlPath: String): Boolean {
         if (WORKER_RE.containsMatchIn(urlPath)) return false
         if (TE2_LANG_CHUNK_RE.matches(urlPath)) return true
-        if (urlPath == "/" || urlPath == "/app/file_editor_cm6" || urlPath == "/api/app/file_editor_cm6/ui/nc") return true
+        if (urlPath == "/" || urlPath.startsWith("/app/") || urlPath == "/api/app/file_editor_cm6/ui/nc") return true
         for (f in INTERCEPT_FILES) {
             if (urlPath == f) return true
         }

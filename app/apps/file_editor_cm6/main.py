@@ -40,13 +40,6 @@ from .git_helper import (
     get_worktree_changes,
     get_commit_info,
 )
-from .lsp_shell_manager import (
-    get_active_lsp_shell,
-    get_or_spawn_lsp_shell,
-    list_lsp_shells,
-    shutdown_lsp_shell,
-    switch_lsp_shell,
-)
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
 from .draft_diff_helper import compute_draft_diff
@@ -339,98 +332,6 @@ file_editor_cm6_bp = APIRouter()
 
 # # Register terminal routes and WebSocket handler
 # register_terminal_routes(file_editor_cm6_bp, sock)
-
-# --- LSP shell debug endpoints (Dex, 2025-12-08) ---
-@file_editor_cm6_bp.post("/api/lsp/switch")
-async def api_switch_lsp(payload: JsonDict = Body(...)):
-    language_id = payload.get("languageId")
-    if not language_id:
-        raise HTTPException(status_code=400, detail="languageId is required")
-
-    project_root = payload.get("projectRoot") or get_project_root()
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    record = await switch_lsp_shell(language_id, Path(project_root))
-    if not record:
-        return JSONResponse(
-            {"ok": False, "error": "Unsupported language or missing binary"},
-            status_code=424,
-        )
-    return {"ok": True, "data": record.to_payload()}
-
-
-@file_editor_cm6_bp.get("/api/lsp/active")
-async def api_active_lsp():
-    record = await get_active_lsp_shell()
-    if not record:
-        return {"ok": True, "data": None}
-    return {"ok": True, "data": record.to_payload()}
-
-
-@file_editor_cm6_bp.post("/api/lsp/shutdown")
-async def api_shutdown_lsp(payload: JsonDict = Body(...)):
-    language_id = payload.get("languageId")
-    if not language_id:
-        raise HTTPException(status_code=400, detail="languageId is required")
-    await shutdown_lsp_shell(language_id)
-    return {"ok": True}
-
-
-@file_editor_cm6_bp.post("/api/lsp/start")
-async def api_start_lsp(payload: JsonDict = Body(...)):
-    """Manually start an LSP server (as Framework Shell pipe processes).
-
-    This is used by the Language Servers modal to pre-warm servers before a file is opened.
-    """
-
-    server_id = (payload.get("serverId") or "").strip().lower()
-    if not server_id:
-        raise HTTPException(status_code=400, detail="serverId is required")
-
-    # Map UI server IDs to the language IDs used by the backend bridge.
-    server_languages = {
-        "pyright": ["python"],
-        "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
-        "clangd": ["c", "cpp"],
-        "kotlin": ["kotlin"],
-        "kotlin-android": ["kotlin-android"],
-    }
-    language_ids = server_languages.get(server_id)
-    if not language_ids:
-        raise HTTPException(status_code=400, detail=f"Unknown serverId: {server_id}")
-
-    project_root = payload.get("projectRoot") or (_history_store.get_active_project() or str(get_project_root()))
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    # Apply per-server root override (project-scoped via sidecar SSOT).
-    effective_root = project_root
-    try:
-        root_map = {
-            "pyright": _history_store.get_lsp_server_root_rel(project_root, "pyright"),
-            "typescript": _history_store.get_lsp_server_root_rel(project_root, "typescript"),
-            "clangd": _history_store.get_lsp_server_root_rel(project_root, "clangd"),
-            "kotlin": _history_store.get_lsp_server_root_rel(project_root, "kotlin"),
-            "kotlin-android": _history_store.get_lsp_server_root_rel(project_root, "kotlin-android"),
-        }
-        rel = root_map.get(server_id) or ""
-        if rel:
-            candidate = (Path(project_root) / rel).expanduser().resolve(strict=False)
-            if candidate.exists() and candidate.is_dir():
-                effective_root = str(candidate)
-    except Exception:
-        effective_root = project_root
-
-    started: list[JsonDict] = []
-    for language_id in language_ids:
-        record = await get_or_spawn_lsp_shell(language_id, Path(effective_root))
-        if record:
-            started.append({"languageId": language_id, "shellId": record.id})
-
-    if not started:
-        return JSONResponse({"ok": False, "error": "Failed to start server (missing binary?)"}, status_code=424)
-
 
 @file_editor_cm6_bp.get("/vscode_api/discover")
 async def vscode_api_discover():
@@ -925,88 +826,6 @@ async def vscode_api_set_enabled_extensions(payload: JsonDict = Body(...)):
     return {"ok": True, "data": {"project_root": project_root, "enabled": sidecar.get_vscode_api_enabled_extensions()}}
 
 
-@file_editor_cm6_bp.post("/api/lsp/stop")
-async def api_stop_lsp(payload: JsonDict = Body(...)):
-    """Manually stop an LSP server (terminates its Framework Shell processes)."""
-
-    server_id = (payload.get("serverId") or "").strip().lower()
-    if not server_id:
-        raise HTTPException(status_code=400, detail="serverId is required")
-
-    server_languages = {
-        "pyright": ["python"],
-        "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
-        "clangd": ["c", "cpp"],
-        "kotlin": ["kotlin"],
-        "kotlin-android": ["kotlin-android"],
-    }
-    language_ids = server_languages.get(server_id)
-    if not language_ids:
-        raise HTTPException(status_code=400, detail=f"Unknown serverId: {server_id}")
-
-    for language_id in language_ids:
-        try:
-            await shutdown_lsp_shell(language_id)
-        except Exception:
-            pass
-
-    return {"ok": True, "data": {"serverId": server_id}}
-
-
-@file_editor_cm6_bp.get("/api/lsp/debug/cache")
-async def api_list_lsp_cache():
-    snapshot = await list_lsp_shells()
-    return {
-        "ok": True,
-        "data": {k: v.to_payload() if v else None for k, v in snapshot.items()},
-    }
-
-
-@file_editor_cm6_bp.get("/api/lsp/status")
-async def api_lsp_status():
-    """Return current LSP running status as seen by Framework Shells (label lookup).
-
-    This is used by the Language Servers modal to reflect real running state when opened,
-    even if the in-process LSP pipe cache is empty.
-    """
-
-    from framework_shells import get_manager
-
-    mgr = await get_manager()
-    try:
-        shells = await mgr.list_shells()
-    except Exception:
-        shells = []
-
-    running_labels: list[str] = []
-    for rec in shells:
-        try:
-            if rec and rec.pid and rec.status == "running" and rec.label:
-                running_labels.append(rec.label)
-        except Exception:
-            continue
-
-    async def _is_running(language_id: str) -> bool:
-        prefix = f"lsp:{language_id}"
-        return any(lbl == prefix or lbl.startswith(prefix + ":") for lbl in running_labels)
-
-    async def _any_running(language_ids: list[str]) -> bool:
-        for lang in language_ids:
-            if await _is_running(lang):
-                return True
-        return False
-
-    servers = {
-        "pyright": {"running": await _any_running(["python"])},
-        "typescript": {"running": await _any_running(["typescript", "typescriptreact", "javascript", "javascriptreact"])},
-        "clangd": {"running": await _any_running(["c", "cpp"])},
-        "kotlin": {"running": await _any_running(["kotlin"])},
-        "kotlin-android": {"running": await _any_running(["kotlin-android"])},
-    }
-
-    return {"ok": True, "data": {"servers": servers}}
-
-
 # Sidebar extension routes (hardwired until dynamic extension loading lands).
 # Register before agent routes to avoid /agent/{session_id} shadowing static paths.
 from .extensions.sidebar_extension.sidebar_extension import bp as sidebar_extension_bp
@@ -1479,28 +1298,6 @@ async def write_file_route(data: JsonDict = Body(...)):
         # Refresh caches so explorer + diff stay accurate
         mark_git_cache_dirty(project_root)
         invalidate_diff_cache(project_root, str(rel_path))
-
-        # Notify kotlin-android LSP that a real disk save occurred.
-        # IMPORTANT: use the same effective project root (rootRel override) that connect_lsp uses.
-        try:
-            from .lsp_ws import send_android_did_save_for_path
-
-            base_project_root = Path(_history_store.get_active_project() or str(project_root))
-            effective_project_root = base_project_root
-            try:
-                rel_root = _history_store.get_lsp_server_root_rel(str(base_project_root), "kotlin-android")
-                if rel_root:
-                    candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
-                    if candidate.exists() and candidate.is_dir():
-                        effective_project_root = candidate
-            except Exception:
-                effective_project_root = base_project_root
-
-            ok = await send_android_did_save_for_path(project_root=effective_project_root, abs_path=target_path)
-            if not ok:
-                print(f"[LSP SAVE HOOK] didSave injection failed path={target_path}", file=sys.stderr)
-        except Exception as e:
-            print(f"[LSP SAVE HOOK] exception: {e}", file=sys.stderr)
 
         return {
             "ok": True,

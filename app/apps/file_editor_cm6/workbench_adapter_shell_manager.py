@@ -8,7 +8,6 @@ import logging
 
 from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
-from framework_shells.pty import PipeState
 from framework_shells.record import ShellRecord
 
 APP_ID = "file_editor_cm6"
@@ -20,10 +19,11 @@ WORKBENCH_ADAPTER_FIXED_PORT = 18181
 log = logging.getLogger("workbench_adapter_shell_manager")
 
 _active_shell_id: Optional[str] = None
-_pipe_state: Optional[PipeState] = None
 _rpc_counter: int = 0
 _rpc_pending: dict[int, asyncio.Future] = {}
 _stdout_reader_task: Optional[asyncio.Task] = None
+_stdout_bytes_queue: Optional[asyncio.Queue[bytes]] = None
+_stdout_subscription_shell_id: Optional[str] = None
 _rpc_write_lock: Optional[asyncio.Lock] = None
 
 # Adapter lifecycle state — broadcast to all UI IPC clients on change.
@@ -82,24 +82,112 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
     return None
 
 
-async def _stdout_reader_loop(proc: asyncio.subprocess.Process) -> None:
-    """Read adapter stdout, route RPC responses to pending futures, log the rest."""
-    RPC_PREFIX = "<<<RPC>>> "
-    PUSH_PREFIX = "<<<PUSH>>> "
-    # asyncio subprocess default limit is 64KB which is too small for hover responses.
-    # Read raw chunks and split on newlines ourselves.
+def _fail_pending_rpcs(message: str) -> None:
+    for fut in list(_rpc_pending.values()):
+        if not fut.done():
+            fut.set_exception(RuntimeError(message))
+    _rpc_pending.clear()
+
+
+async def _clear_stdout_subscription() -> None:
+    global _stdout_reader_task, _stdout_bytes_queue, _stdout_subscription_shell_id
+
+    task = _stdout_reader_task
+    queue = _stdout_bytes_queue
+    shell_id = _stdout_subscription_shell_id
+
+    _stdout_reader_task = None
+    _stdout_bytes_queue = None
+    _stdout_subscription_shell_id = None
+
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
+
+    if queue is not None and shell_id:
+        try:
+            mgr = await get_manager()
+            await mgr.unsubscribe_output_bytes(shell_id, queue)
+        except Exception as exc:
+            log.debug("[adapter_stdio] unsubscribe failed shell=%s: %s", shell_id, exc)
+
+
+async def _ensure_stdout_subscription(shell_id: str) -> None:
+    global _stdout_reader_task, _stdout_bytes_queue, _stdout_subscription_shell_id
+
+    if (
+        _stdout_subscription_shell_id == shell_id
+        and _stdout_bytes_queue is not None
+        and _stdout_reader_task is not None
+        and not _stdout_reader_task.done()
+    ):
+        return
+
+    await _clear_stdout_subscription()
+
+    mgr = await get_manager()
+    queue = await mgr.subscribe_output_bytes(shell_id)
+    _stdout_bytes_queue = queue
+    _stdout_subscription_shell_id = shell_id
+    _stdout_reader_task = asyncio.create_task(
+        _stdout_reader_loop(shell_id, queue),
+        name="adapter_stdout_reader",
+    )
+
+
+async def _ensure_live_adapter_io(shell_id: str) -> bool:
+    record = await _get_alive(shell_id)
+    if record is None:
+        return False
+
+    mgr = await get_manager()
+    try:
+        caps = await mgr.get_shell_capabilities(record)
+    except Exception as exc:
+        log.warning("[adapter] capability check failed shell=%s: %s", shell_id, exc)
+        return False
+
+    if (
+        caps.get("backend") != "pipe"
+        or not caps.get("stdin_write")
+        or not caps.get("stdout_subscribe_bytes")
+    ):
+        log.warning("[adapter] shell=%s lacks live pipe capabilities: %s", shell_id, caps)
+        return False
+
+    try:
+        await _ensure_stdout_subscription(shell_id)
+    except Exception as exc:
+        log.warning("[adapter] stdout subscription failed shell=%s: %s", shell_id, exc)
+        return False
+
+    return True
+
+
+async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> None:
+    """Read adapter stdout chunks from FWS, route RPC responses, and log the rest."""
+    global _stdout_reader_task
+
+    RPC_PREFIX = b"<<<RPC>>> "
+    PUSH_PREFIX = b"<<<PUSH>>> "
     buf = b""
     try:
         while True:
-            chunk = await proc.stdout.read(1024 * 1024)  # 1MB reads
+            chunk = await queue.get()
             if not chunk:
-                break
+                continue
             buf += chunk
             while b"\n" in buf:
                 line_bytes, buf = buf.split(b"\n", 1)
-                line = line_bytes.decode("utf-8", errors="replace")
-                if line.startswith(RPC_PREFIX):
-                    payload = line[len(RPC_PREFIX):]
+                if line_bytes.endswith(b"\r"):
+                    line_bytes = line_bytes[:-1]
+                if line_bytes.startswith(RPC_PREFIX):
+                    payload = line_bytes[len(RPC_PREFIX):].decode("utf-8", errors="replace")
                     try:
                         obj = json.loads(payload)
                         rid = obj.get("id")
@@ -110,21 +198,26 @@ async def _stdout_reader_loop(proc: asyncio.subprocess.Process) -> None:
                             log.debug("[adapter_stdio] unmatched RPC response id=%s", rid)
                     except json.JSONDecodeError:
                         log.warning("[adapter_stdio] bad RPC JSON: %s", payload[:200])
-                elif line.startswith(PUSH_PREFIX):
-                    payload = line[len(PUSH_PREFIX):]
+                elif line_bytes.startswith(PUSH_PREFIX):
+                    payload = line_bytes[len(PUSH_PREFIX):].decode("utf-8", errors="replace")
                     try:
                         obj = json.loads(payload)
                         asyncio.create_task(_handle_push_event(obj))
                     except json.JSONDecodeError:
                         log.warning("[adapter_stdio] bad PUSH JSON: %s", payload[:200])
                 else:
+                    line = line_bytes.decode("utf-8", errors="replace")
                     if line.startswith("[rpc-config]"):
                         print(f"[adapter_stdout] {line[:500]}", flush=True)
                     log.debug("[adapter_stdout] %s", line[:500])
     except asyncio.CancelledError:
         pass
     except Exception as exc:
-        log.error("[adapter_stdio] reader crashed: %s", exc)
+        log.error("[adapter_stdio] reader crashed shell=%s: %s", shell_id, exc)
+        _fail_pending_rpcs("adapter stdout reader crashed")
+    finally:
+        if _stdout_reader_task is asyncio.current_task():
+            _stdout_reader_task = None
 
 
 async def _handle_push_event(obj: dict) -> None:
@@ -151,14 +244,22 @@ async def adapter_rpc(method: str, params: Optional[dict] = None, timeout: float
     """
     global _rpc_counter
 
-    if _pipe_state is None or _pipe_state.process.stdin is None:
-        raise RuntimeError("Adapter pipe not available — shell not started or stdin closed")
+    if not _active_shell_id:
+        raise RuntimeError("Adapter pipe not available — shell not started")
 
     global _rpc_write_lock
     if _rpc_write_lock is None:
         _rpc_write_lock = asyncio.Lock()
 
     async with _rpc_write_lock:
+        shell_id = _active_shell_id
+        if not shell_id:
+            raise RuntimeError("Adapter pipe not available — shell not started")
+
+        if not await _ensure_live_adapter_io(shell_id):
+            raise RuntimeError("Adapter pipe not available — shell missing live pipe capabilities")
+
+        mgr = await get_manager()
         _rpc_counter += 1
         rid = _rpc_counter
         msg = {"jsonrpc": "2.0", "id": rid, "method": method}
@@ -170,8 +271,7 @@ async def adapter_rpc(method: str, params: Optional[dict] = None, timeout: float
 
         line = json.dumps(msg) + "\n"
         try:
-            _pipe_state.process.stdin.write(line.encode("utf-8"))
-            await _pipe_state.process.stdin.drain()
+            await mgr.write_to_pipe(shell_id, line)
         except Exception:
             _rpc_pending.pop(rid, None)
             raise
@@ -190,10 +290,12 @@ async def terminate_adapter_shell() -> bool:
     Returns True if a shell was terminated, False if nothing was running.
     Safe to call even if no adapter is active.
     """
-    global _active_shell_id, _pipe_state, _stdout_reader_task, _rpc_counter, _rpc_write_lock
+    global _active_shell_id, _rpc_counter, _rpc_write_lock
 
     if not _active_shell_id:
         return False
+
+    await _clear_stdout_subscription()
 
     try:
         mgr = await get_manager()
@@ -203,15 +305,8 @@ async def terminate_adapter_shell() -> bool:
         log.warning("[adapter_shell_mgr] terminate error: %s", exc)
 
     _active_shell_id = None
-    _pipe_state = None
-    if _stdout_reader_task and not _stdout_reader_task.done():
-        _stdout_reader_task.cancel()
-    _stdout_reader_task = None
     # Clear pending RPC futures so callers don't hang
-    for fut in _rpc_pending.values():
-        if not fut.done():
-            fut.set_exception(RuntimeError("adapter shell terminated"))
-    _rpc_pending.clear()
+    _fail_pending_rpcs("adapter shell terminated")
     _rpc_counter = 0
     _rpc_write_lock = None
     _set_adapter_state("idle")
@@ -229,7 +324,7 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
     openFile → (hover/symbols/diagnostics) via code-server remote extension host.
     """
 
-    global _active_shell_id, _pipe_state, _stdout_reader_task
+    global _active_shell_id
 
     # Generate / validate rpc-config.json before launching the adapter.
     # The adapter reads this file synchronously on startup.
@@ -248,7 +343,7 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
         cached = await _get_alive(_active_shell_id)
         if cached and cached.label == label:
             if _matches_expected_port(cached):
-                if _pipe_state is not None:
+                if await _ensure_live_adapter_io(cached.id):
                     if _adapter_state["status"] != "ready":
                         _set_adapter_state("ready", project=project_root)
                         await _broadcast_adapter_state()
@@ -259,11 +354,13 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
                     except Exception:
                         pass
                     return cached
-                # Pipe state lost (process restart) — kill and re-spawn for fresh pipe
-                log.info("[adapter] cached shell alive but pipe lost, re-spawning")
+                # Live pipe capabilities lost (process restart or FWS owner change) — re-spawn.
+                log.info("[adapter] cached shell alive but live pipe unavailable, re-spawning")
+                await _clear_stdout_subscription()
                 await mgr.terminate_shell(cached.id, force=True)
                 await asyncio.sleep(1.5)  # let port 18181 release
             else:
+                await _clear_stdout_subscription()
                 await mgr.terminate_shell(cached.id, force=True)
                 await asyncio.sleep(1.5)
         _active_shell_id = None
@@ -271,15 +368,16 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
     existing = await mgr.find_shell_by_label(label, status="running")
     if existing:
         if _matches_expected_port(existing):
-            if _pipe_state is not None:
+            if await _ensure_live_adapter_io(existing.id):
                 _active_shell_id = existing.id
                 try:
                     await adapter_rpc("te2.resync", timeout=5.0)
                 except Exception:
                     pass
                 return existing
-            # Pipe state lost — kill and re-spawn
-            log.info("[adapter] existing shell alive but pipe lost, re-spawning")
+            # Live pipe capabilities lost — kill and re-spawn.
+            log.info("[adapter] existing shell alive but live pipe unavailable, re-spawning")
+        await _clear_stdout_subscription()
         await mgr.terminate_shell(existing.id, force=True)
         await asyncio.sleep(1.5)  # let port 18181 release
 
@@ -319,18 +417,8 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
         raise
 
     _active_shell_id = shell.id
-    # Stash pipe state and start stdout reader
-    mgr_inst = await get_manager()
-    ps = mgr_inst.get_pipe_state(shell.id)
-    if ps is not None:
-        _pipe_state = ps
-        if _stdout_reader_task is None or _stdout_reader_task.done():
-            _stdout_reader_task = asyncio.create_task(
-                _stdout_reader_loop(ps.process),
-                name="adapter_stdout_reader",
-            )
-        log.info("[adapter] pipe state stashed, stdout reader started for shell=%s", shell.id)
-
+    if await _ensure_live_adapter_io(shell.id):
+        log.info("[adapter] live pipe subscription started for shell=%s", shell.id)
         # Readiness: ping the adapter over stdio until it responds
         ping_ok = False
         for attempt in range(20):
@@ -376,7 +464,7 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
             _set_adapter_state("error", project=project_root, error=str(exc))
             await _broadcast_adapter_state()
     else:
-        log.warning("[adapter] no pipe state for shell=%s — stdio RPC unavailable", shell.id)
-        _set_adapter_state("error", project=project_root, error="No pipe state")
+        log.warning("[adapter] no live pipe capabilities for shell=%s — stdio RPC unavailable", shell.id)
+        _set_adapter_state("error", project=project_root, error="No live pipe capabilities")
         await _broadcast_adapter_state()
     return shell

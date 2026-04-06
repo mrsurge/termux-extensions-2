@@ -43,7 +43,7 @@ def build_server() -> FastMCP:
         payload["mode"] = "framework_owned_sse"
         return payload
 
-    @server.tool(description="List worker IDs seen in the persisted TE2 console transcript.")
+    @server.tool(description="List worker IDs seen in the persisted TE2 console transcript, including historical workers that may no longer be connected.")
     def te2_console_workers() -> dict:
         return {
             "workers": console_store.list_workers(),

@@ -264,13 +264,7 @@ async def _emit_diagnostics_debounced():
     summary_rel = {k: v for k, v in summary_rel.items() if v["errors"] > 0 or v["warnings"] > 0}
 
     try:
-        # Explorer tree badges
-        await EXPLORER_SIO.emit(
-            "explorer:event",
-            json.dumps({"type": "explorer:updateDiagnostics", "payload": {"diagnostics": summary_rel}}),
-            namespace="/explorer",
-        )
-        # Problems panel (full marker detail)
+        # Problems panel + explorer tree badges (full marker detail)
         await EXPLORER_SIO.emit(
             "explorer:event",
             json.dumps({"type": "diagnostics:detail", "payload": detail_abs}),

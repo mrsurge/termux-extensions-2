@@ -52,10 +52,6 @@ class ConnectionManager:
         # Map: websocket -> project_path (for cleanup)
         self.ws_project_map: Dict[WebSocket, str] = {}
         self.pulse_task: Optional[asyncio.Task] = None
-        self.lsp_status_task: Optional[asyncio.Task] = None
-        self.diagnostics_task: Optional[asyncio.Task] = None
-        self._last_lsp_status: Dict[str, dict] = {}
-        self._last_diagnostics: Dict[str, dict] = {}
 
     async def accept_and_register(self, websocket: WebSocket, project_path: str):
         # Some shims (Socket.IO) don't need accept; provide no-op if missing
@@ -78,8 +74,6 @@ class ConnectionManager:
         
         if was_empty:
             self.start_pulse()
-            self.start_lsp_status()
-            self.start_diagnostics()
             # Start watcher for the project (using SSOT active project)
             try:
                 from .core_read import init_watcher
@@ -103,8 +97,6 @@ class ConnectionManager:
         # Check if no connections remain globally
         if not any(self.active_connections.values()):
             self.stop_pulse()
-            self.stop_lsp_status()
-            self.stop_diagnostics()
             # Stop watcher to save resources
             try:
                 from .core_read import stop_watcher
@@ -126,46 +118,6 @@ class ConnectionManager:
             self.pulse_task = None
             logger.info("[PULSE] Heart monitor stopped")
 
-    def start_lsp_status(self):
-        """Start LSP status broadcaster task (Socket.IO + WS clients)."""
-        if self.lsp_status_task is None or self.lsp_status_task.done():
-            loop = asyncio.get_event_loop()
-            self.lsp_status_task = loop.create_task(self._lsp_status_loop())
-            logger.info("[LSP_STATUS] Broadcaster started")
-
-    def stop_lsp_status(self):
-        """Stop the LSP status broadcaster task."""
-        if self.lsp_status_task:
-            self.lsp_status_task.cancel()
-            self.lsp_status_task = None
-            self._last_lsp_status = {}
-            logger.info("[LSP_STATUS] Broadcaster stopped")
-
-    def start_diagnostics(self):
-        """Start diagnostics broadcaster task."""
-        if self.diagnostics_task is None or self.diagnostics_task.done():
-            loop = asyncio.get_event_loop()
-            self.diagnostics_task = loop.create_task(self._diagnostics_loop())
-            try:
-                import sys
-                print("[DIAGNOSTICS] Broadcaster started", file=sys.stderr, flush=True)
-            except Exception:
-                pass
-        else:
-            try:
-                import sys
-                print("[DIAGNOSTICS] Broadcaster already running", file=sys.stderr, flush=True)
-            except Exception:
-                pass
-
-    def stop_diagnostics(self):
-        """Stop the diagnostics broadcaster task."""
-        if self.diagnostics_task:
-            self.diagnostics_task.cancel()
-            self.diagnostics_task = None
-            self._last_diagnostics = {}
-            logger.info("[DIAGNOSTICS] Broadcaster stopped")
-
     async def _pulse_loop(self):
         """Periodically ping clients to ensure they are alive and keep connection active."""
         try:
@@ -181,127 +133,6 @@ class ConnectionManager:
             pass
         except Exception as e:
             logger.error(f"[PULSE] Error in pulse loop: {e}")
-
-    async def _lsp_status_loop(self):
-        """Poll Framework Shells for LSP status and broadcast on change."""
-        from framework_shells import get_manager
-
-        server_groups = {
-            "pyright": ["python"],
-            "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
-            "clangd": ["c", "cpp"],
-            "kotlin": ["kotlin"],
-            "kotlin-android": ["kotlin-android"],
-        }
-
-        try:
-            while True:
-                await asyncio.sleep(1.0)
-                if not any(self.active_connections.values()):
-                    break
-
-                try:
-                    mgr = await get_manager()
-                except Exception:
-                    continue
-                try:
-                    shells = await mgr.list_shells()
-                except Exception:
-                    shells = []
-
-                running_labels: list[str] = []
-                for rec in shells:
-                    try:
-                        if rec and rec.pid and rec.status == "running" and rec.label:
-                            running_labels.append(rec.label)
-                    except Exception:
-                        continue
-
-                def _is_running_label(language_id: str) -> bool:
-                    prefix = f"lsp:{language_id}"
-                    return any(lbl == prefix or lbl.startswith(prefix + ":") for lbl in running_labels)
-
-                snapshot = {"servers": {}}
-                for server_id, langs in server_groups.items():
-                    running = False
-                    for lang in langs:
-                        if _is_running_label(lang):
-                            running = True
-                            break
-                    snapshot["servers"][server_id] = {"running": running}
-
-                for project_path in list(self.active_connections.keys()):
-                    last = self._last_lsp_status.get(project_path)
-                    if last == snapshot:
-                        continue
-                    self._last_lsp_status[project_path] = snapshot
-                    await self.broadcast(project_path, {"type": "lsp:status", "payload": snapshot})
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.warning(f"[LSP_STATUS] loop error: {e}")
-
-    async def _diagnostics_loop(self):
-        """Poll LSP diagnostics and broadcast summary to explorer clients.
-
-        Skips broadcasting when the diagnostics bridge (adapter WS) is active,
-        since the bridge is the authoritative source.
-        """
-        from .lsp_ws import get_diagnostics_summary_for_project
-
-        try:
-            while True:
-                await asyncio.sleep(1.0)
-                if not any(self.active_connections.values()):
-                    break
-
-                try:
-                    from .diagnostics_bridge import is_bridge_active
-                    if is_bridge_active():
-                        continue
-                except Exception:
-                    pass
-
-                for project_path in list(self.active_connections.keys()):
-                    try:
-                        summary = get_diagnostics_summary_for_project(project_root=project_path)
-                    except Exception as e:
-                        try:
-                            import sys
-                            print(
-                                f"[DIAGNOSTICS] summary compute failed project={project_path}: {e}",
-                                file=sys.stderr,
-                                flush=True,
-                            )
-                        except Exception:
-                            pass
-                        continue
-
-                    last = self._last_diagnostics.get(project_path)
-                    if last == summary:
-                        continue
-                    self._last_diagnostics[project_path] = summary
-
-                    try:
-                        import sys
-                        count = len(summary) if isinstance(summary, dict) else -1
-                        conn_n = len(self.active_connections.get(project_path, []) or [])
-                        print(
-                            f"[DIAGNOSTICS] broadcast project={project_path} connections={conn_n} entries={count}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-                    except Exception:
-                        pass
-
-                    await self.broadcast(
-                        project_path,
-                        {"type": "explorer:updateDiagnostics", "payload": {"diagnostics": summary}},
-                    )
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.warning(f"[DIAGNOSTICS] loop error: {e}")
 
     def _resolve_project_key(self, project_path: str) -> Optional[str]:
         """Find the connection key that matches this project path."""

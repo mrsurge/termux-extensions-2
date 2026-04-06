@@ -40,6 +40,25 @@ export function createConsoleDrawer(options = {}) {
     }
   }
 
+  function _replaceWorkers(workerIds) {
+    knownWorkers.clear();
+    for (const workerId of workerIds) {
+      if (!workerId) continue;
+      knownWorkers.add(workerId);
+    }
+    if (activeFilter !== 'all' && !knownWorkers.has(activeFilter)) {
+      activeFilter = 'all';
+      if (originToggle) originToggle.textContent = 'All';
+      if (vConsoleInstance && vConsoleInstance.log) {
+        vConsoleInstance.log.clear();
+      }
+      if (socket && socket.connected) {
+        socket.emit('console:replay', {});
+      }
+    }
+    _rebuildOriginDropdown();
+  }
+
   // ─── vConsole initialization ──────────────────────────────
 
   function _ensureVConsole() {
@@ -206,12 +225,6 @@ export function createConsoleDrawer(options = {}) {
     }
   }
 
-  function _trackWorker(workerId) {
-    if (!workerId || knownWorkers.has(workerId)) return;
-    knownWorkers.add(workerId);
-    _rebuildOriginDropdown();
-  }
-
   // Wire origin toggle button
   if (originToggle && originDropdown) {
     originToggle.addEventListener('click', (e) => {
@@ -255,7 +268,7 @@ export function createConsoleDrawer(options = {}) {
     // Server pushes the worker list on register changes
     socket.on('console:workers', (workers) => {
       if (!Array.isArray(workers)) return;
-      for (const w of workers) _trackWorker(w);
+      _replaceWorkers(workers);
     });
   }
 
@@ -268,7 +281,6 @@ export function createConsoleDrawer(options = {}) {
     if (!vConsoleInstance) return;
 
     const workerId = msg.workerId || '?';
-    _trackWorker(workerId);
 
     // Filter by selected origin
     if (activeFilter !== 'all' && workerId !== activeFilter) return;

@@ -20,7 +20,11 @@ _DEFAULT_REPLAY_MAX_LINES = 500
 _MAX_REPLAY_LINES = 5000
 
 TE2_CONSOLE_LOG_DIR.mkdir(parents=True, exist_ok=True)
-TE2_CONSOLE_LOG_PATH.touch(exist_ok=True)
+# Match the old worker-owned console session behavior: a framework restart
+# starts a fresh transcript instead of replaying stale history forever.
+if TE2_CONSOLE_LOG_PATH.exists():
+    TE2_CONSOLE_LOG_PATH.unlink()
+TE2_CONSOLE_LOG_PATH.touch()
 _log_fh: TextIO = open(TE2_CONSOLE_LOG_PATH, "a", encoding="utf-8")
 
 ConsolePayload = dict[str, Any]

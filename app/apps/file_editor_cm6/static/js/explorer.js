@@ -1308,32 +1308,6 @@ function handleExplorerEvent(type, payload) {
     } catch (_) {}
     // Don't return — let main.js also handle via __cm6HandleWatcherConfig
   }
-  if (type === 'lsp:status') {
-    try {
-      const next = payload || {};
-      if (typeof window.__cm6HandleLspStatus === 'function') {
-        window.__cm6HandleLspStatus(next);
-      } else {
-        window.__cm6PendingLspStatus = next;
-      }
-    } catch (err) {
-      console.warn('[Explorer] lsp:status handler failed', err);
-    }
-    return;
-  }
-  if (type === 'lsp:busy') {
-    try {
-      const next = payload || {};
-      if (typeof window.__cm6HandleLspBusy === 'function') {
-        window.__cm6HandleLspBusy(next);
-      } else {
-        window.__cm6PendingLspBusy = next;
-      }
-    } catch (err) {
-      console.warn('[Explorer] lsp:busy handler failed', err);
-    }
-    return;
-  }
   switch (type) {
     case 'prefs:setUi': {
       const ui =
@@ -1365,16 +1339,6 @@ function handleExplorerEvent(type, payload) {
         openDirsInitialized = false;
       }
 
-      // New-project prompt: if backend reports this is a newly-created sidecar, offer LSP setup.
-      try {
-        if (payload && payload.new_sidecar) {
-          if (typeof window.__cm6PromptLspSetup === 'function') {
-            window.__cm6PromptLspSetup({ projectPath: uiState.projectPath });
-          } else {
-            window.__cm6PendingLspSetupPrompt = { projectPath: uiState.projectPath };
-          }
-        }
-      } catch (_) {}
       break;
     }
     case 'explorer:activeFile': {
@@ -1649,16 +1613,6 @@ function handleExplorerEvent(type, payload) {
       applyAggregatedDiagnosticFlags();
       break;
     }
-    case 'explorer:updateDiagnostics': {
-      // Only use summary from polling loop as fallback when bridge detail is empty.
-      // When _explorerDiagDetail has data, the bridge is active and detail is authoritative.
-      if (Object.keys(_explorerDiagDetail).length === 0) {
-        const diagnostics = (payload && payload.diagnostics) || {};
-        _setDiagnosticsSummary(diagnostics);
-        applyAggregatedDiagnosticFlags();
-      }
-      break;
-    }
     case 'diagnostics:detail': {
       // Full marker detail from the diagnostics bridge — SSOT for both
       // the Diagnostics tab AND the explorer tree badges.
@@ -1764,16 +1718,6 @@ function handleExplorerEvent(type, payload) {
         }
       }
 
-      // New-project prompt: show once when a project is first opened/cloned/created.
-      try {
-        if (payload && payload.new_sidecar) {
-          if (typeof window.__cm6PromptLspSetup === 'function') {
-            window.__cm6PromptLspSetup({ projectPath: uiState.projectPath });
-          } else {
-            window.__cm6PendingLspSetupPrompt = { projectPath: uiState.projectPath };
-          }
-        }
-      } catch (_) {}
       break;
     }
     case 'git:status': {
@@ -3101,7 +3045,6 @@ export async function initExplorerUI() {
     try {
       window.__explorerBusSend('explorer:list', { rel: '.' });
       window.__explorerBusSend('git:status', {});
-      window.__explorerBusSend('explorer:getDiagnostics', {});
     } catch (_) {}
   };
 
@@ -3125,16 +3068,6 @@ export async function initExplorerUI() {
         });
       }
     });
-  }
-
-  // Proactively fetch diagnostics after the dispatch hook is installed.
-  // This prevents a race where the periodic broadcast arrives before initExplorerUI runs.
-  try {
-    if (typeof window.__explorerBusSend === 'function') {
-      window.__explorerBusSend('explorer:getDiagnostics', {});
-    }
-  } catch {
-    // ignore
   }
 
   // Initial render placeholders until first snapshot arrives

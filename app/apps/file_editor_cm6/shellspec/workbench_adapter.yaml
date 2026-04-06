@@ -3,6 +3,8 @@ version: "1"
 shells:
   workbench-adapter:
     backend: pipe
+    pipe:
+      mode: native_pipe_testing
     cwd: ${ctx:REPO_ROOT}
     command:
       - sh

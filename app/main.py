@@ -1,6 +1,7 @@
 #!/bin/env python
 # /data/data/com.termux/files/home/mrselect/app/main.py
 # main.py (project_root)
+import asyncio
 import sys
 from pathlib import Path
 
@@ -176,6 +177,18 @@ LOG_MONITOR_ENABLED = os.getenv("TE_MONITOR_FRAMEWORK_LOGS", "1").lower() not in
 LOG_MONITOR_POLL_SECONDS = float(os.getenv("TE_MONITOR_FRAMEWORK_LOGS_INTERVAL", "1.0"))
 LOG_MONITOR_REPLAY = os.getenv("TE_MONITOR_FRAMEWORK_LOGS_REPLAY", "0").lower() in {"1", "true", "yes"}
 _log_monitor_thread: Optional["FrameworkShellLogMonitor"] = None
+
+
+def _runtime_loop_probe_payload(process_kind: str) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    loop_type = type(loop)
+    return {
+        "process_kind": process_kind,
+        "pid": os.getpid(),
+        "loop_module": loop_type.__module__,
+        "loop_class": loop_type.__name__,
+        "is_uvloop": loop_type.__module__.startswith("uvloop"),
+    }
 
 
 # Ensure importlib-based imports and spec-based module loads receive the current run id
@@ -1118,6 +1131,14 @@ async def find_internal_shell(
     if not shell:
         return None
     return await manager.describe(shell)
+
+
+@app.get("/api/internal/runtime/loop")
+async def get_internal_runtime_loop(
+    token: Optional[str] = Header(default=None, alias="X-Framework-Key"),
+):
+    _verify_internal_token(token)
+    return {"ok": True, "data": _runtime_loop_probe_payload("framework")}
 
 
 @app.post("/api/internal/shells/spawn")

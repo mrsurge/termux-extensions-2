@@ -1,5 +1,6 @@
 # /data/data/com.termux/files/home/mrselect/app/libs/app_worker.py
 
+import asyncio
 import argparse
 import importlib.util
 import os
@@ -10,6 +11,19 @@ from pathlib import Path
 
 from fastapi import FastAPI, APIRouter
 import uvicorn
+
+
+def _runtime_loop_probe_payload(app_id: str) -> dict:
+    loop = asyncio.get_running_loop()
+    loop_type = type(loop)
+    return {
+        "process_kind": "app_worker",
+        "app_id": app_id,
+        "pid": os.getpid(),
+        "loop_module": loop_type.__module__,
+        "loop_class": loop_type.__name__,
+        "is_uvloop": loop_type.__module__.startswith("uvloop"),
+    }
 
 def main():
     parser = argparse.ArgumentParser(description="Termux Extensions App Worker")
@@ -33,6 +47,10 @@ def main():
             yield
 
     app = FastAPI(lifespan=lifespan)
+
+    @app.get("/__te2/runtime/loop")
+    async def te2_runtime_loop_probe():
+        return {"ok": True, "data": _runtime_loop_probe_payload(args.app_id)}
 
     try:
         # Add project root to the Python path

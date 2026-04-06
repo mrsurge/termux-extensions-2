@@ -9,7 +9,6 @@ from typing import Optional
 from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
 from framework_shells.record import ShellRecord
-from framework_shells.pty import PipeState
 
 APP_ID = "file_editor_cm6"
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
@@ -166,6 +165,53 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
     return None
 
 
+async def _has_live_pipe(record: ShellRecord) -> bool:
+    mgr = await get_manager()
+    try:
+        caps = await mgr.get_shell_capabilities(record)
+    except Exception:
+        return False
+    return caps.get("backend") == "pipe" and bool(caps.get("stdout_subscribe_bytes"))
+
+
+async def _wait_for_code_server_readiness(shell_id: str, timeout_s: float = 60.0) -> None:
+    mgr = await get_manager()
+    queue = await mgr.subscribe_output_bytes(shell_id)
+    ready_re = re.compile(rb"HTTP server listening")
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout_s
+    buf = b""
+
+    try:
+        while loop.time() < deadline:
+            remaining = deadline - loop.time()
+            try:
+                chunk = await asyncio.wait_for(queue.get(), timeout=min(5.0, remaining))
+            except asyncio.TimeoutError:
+                continue
+
+            if not chunk:
+                continue
+
+            buf += chunk
+            while b"\n" in buf:
+                line_bytes, buf = buf.split(b"\n", 1)
+                if line_bytes.endswith(b"\r"):
+                    line_bytes = line_bytes[:-1]
+                line = line_bytes.decode("utf-8", errors="replace")
+                print(f"[code_server] stdout: {line}", flush=True)
+                if ready_re.search(line_bytes):
+                    print("[code_server] readiness detected via subscribed output", flush=True)
+                    return
+
+        print(f"[code_server] WARNING: readiness timeout ({timeout_s}s), continuing anyway", flush=True)
+    finally:
+        try:
+            await mgr.unsubscribe_output_bytes(shell_id, queue)
+        except Exception:
+            pass
+
+
 async def terminate_code_server_shell() -> bool:
     """Kill the active code-server shell and reset state.
 
@@ -199,11 +245,9 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
 
     # Fast path: if a previous spawn already completed, check cached shell
     if _ready_event is not None and _ready_event.is_set() and _active_shell_id:
-        mgr = await get_manager()
         cached = await _get_alive(_active_shell_id)
         if cached and _matches_expected_port(cached):
-            ps = mgr.get_pipe_state(cached.id)
-            if ps and ps.process and ps.process.stdout:
+            if await _has_live_pipe(cached):
                 return cached
 
     # If another coroutine is spawning, wait for it then retry
@@ -211,10 +255,10 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         print("[code_server] waiting for concurrent spawn to finish", flush=True)
         await _ready_event.wait()
         if _active_shell_id:
-            mgr = await get_manager()
             cached = await _get_alive(_active_shell_id)
             if cached and _matches_expected_port(cached):
-                return cached
+                if await _has_live_pipe(cached):
+                    return cached
 
     # We are the spawner — set up the event
     _ready_event = asyncio.Event()
@@ -228,10 +272,9 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
             cached = await _get_alive(_active_shell_id)
             if cached and cached.label == label:
                 if _matches_expected_port(cached):
-                    ps = mgr.get_pipe_state(cached.id)
-                    if ps and ps.process and ps.process.stdout:
+                    if await _has_live_pipe(cached):
                         return cached
-                    print(f"[code_server] cached shell {cached.id} has no pipe state, re-spawning", flush=True)
+                    print(f"[code_server] cached shell {cached.id} has no live pipe, re-spawning", flush=True)
                 await mgr.terminate_shell(cached.id, force=True)
                 await asyncio.sleep(1.5)
             _active_shell_id = None
@@ -239,11 +282,10 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         existing = await mgr.find_shell_by_label(label, status="running")
         if existing:
             if _matches_expected_port(existing):
-                ps = mgr.get_pipe_state(existing.id)
-                if ps and ps.process and ps.process.stdout:
+                if await _has_live_pipe(existing):
                     _active_shell_id = existing.id
                     return existing
-                print(f"[code_server] existing shell {existing.id} has no pipe state, re-spawning", flush=True)
+                print(f"[code_server] existing shell {existing.id} has no live pipe, re-spawning", flush=True)
             await mgr.terminate_shell(existing.id, force=True)
             await asyncio.sleep(1.5)
 
@@ -294,30 +336,10 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
 
         _active_shell_id = shell.id
 
-        # Readiness: read pipe stdout for "HTTP server listening" line.
-        pipe_state: Optional[PipeState] = mgr.get_pipe_state(shell.id)
-        print(f"[code_server] pipe_state={pipe_state is not None}, has_stdout={pipe_state and pipe_state.process and pipe_state.process.stdout is not None}", flush=True)
-        if pipe_state and pipe_state.process and pipe_state.process.stdout:
-            ready_re = re.compile(r"HTTP server listening")
-            deadline = asyncio.get_event_loop().time() + 60
-            while asyncio.get_event_loop().time() < deadline:
-                try:
-                    line_bytes = await asyncio.wait_for(
-                        pipe_state.process.stdout.readline(), timeout=5.0
-                    )
-                except asyncio.TimeoutError:
-                    continue
-                if not line_bytes:
-                    break
-                line = line_bytes.decode("utf-8", errors="replace").rstrip()
-                print(f"[code_server] stdout: {line}", flush=True)
-                if ready_re.search(line):
-                    print("[code_server] readiness detected via pipe stdout", flush=True)
-                    break
-            else:
-                print("[code_server] WARNING: readiness timeout (60s), continuing anyway", flush=True)
+        if await _has_live_pipe(shell):
+            await _wait_for_code_server_readiness(shell.id)
         else:
-            print("[code_server] WARNING: no pipe state, cannot read stdout for readiness", flush=True)
+            print("[code_server] WARNING: no live pipe, cannot subscribe for readiness", flush=True)
 
         return shell
     finally:

@@ -1619,7 +1619,9 @@ function _formatDiagnosticsMarkdown(absPath, markers, projectRoot) {
     for (const m of sorted) {
       const sev = m.severity === 8 ? '🔴 Error' : m.severity === 4 ? '🟡 Warning' : 'ℹ️ Info';
       const loc = `${m.startLineNumber || 1}:${m.startColumn || 1}`;
-      const src = m.source ? ` [${m.source}${m.code ? `(${m.code})` : ''}]` : '';
+      const code = m.code && typeof m.code === 'object' ? m.code.value : m.code;
+      const codeText = code == null || code === '' ? '' : String(code);
+      const src = m.source ? ` [${m.source}${codeText ? `(${codeText})` : ''}]` : '';
       lines.push(`- **${sev}** at line ${loc} — ${m.message || '(no message)'}${src}`);
     }
   }

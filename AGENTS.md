@@ -13,6 +13,12 @@ Parent/orchestrator rule: The workflow/orchestration steps below are intended fo
 - **Mandate:** I operate in an unsandboxed environment ("YOLO mode"). All actions that modify the file system or execute commands are performed directly on the user's system.
 - **Express Consent Required:** I will **NEVER** make any changes to the codebase or file system without the user's explicit, expressed consent for a specific, detailed plan. There is no implied consent.
 
+### Shared Framework Server
+
+- I will **NEVER** restart the shared main framework server (`python -m app.main`) as part of feature work, verification, or debugging unless the user explicitly tells me to do that exact action.
+- I will treat the main `app.main` process as shared infrastructure that may be serving the harness and other active agents/projects at the same time.
+- If I think a restart is needed, I will stop and ask the user first. I will not infer permission from generic language about restarting shells, services, or workers.
+
 ## Memory
 
 If I am working on the workbench adapter, the Monaco frontend, Code TE2, or anything related to an IDE, and I do not know what is going on, I lost context, or I need to figure out what is going on, I will immediately consult `docs/apps/code_cm6/CODE_TE2.md` and/or ask the user before I make anything up, make any stupid changes, or waste more time.
@@ -114,6 +120,7 @@ If I use a choice-capable approval tool in Step 1 or Step 2, the prompt must inc
   - Python `on_editor_workbench_*` handlers in `editor_ws.py`
   - `adapter_rpc()` into the Node WBA
   - response on `editor:workbench_<method>_response`
+- The WBA control plane is an RPC pipe. `adapter_rpc()` sends JSON-RPC over the live framework-shell pipe, and the stdout stream now also gives observability on that path. Do not mistake stdout observability for the transport definition itself.
 - Real UI file switching is **not** `editor_workbench_open_file`. The real SSOT/cross-client open path is `editor_open_request`, which updates `currentPath` and broadcasts `editor:open`.
 - FWS usually owns at least these live `file_editor_cm6` processes:
   - app worker
@@ -184,6 +191,11 @@ cd app/apps/file_editor_cm6 && node build.mjs
 ```
 
 Rationale: `template.html` loads `static/dist/host.js`, so source edits are not guaranteed to be served until the bundle is rebuilt unless an explicit watch-build is already running.
+
+- Smoke tests must start as their own command. Do not chain setup or any other command before a smoke with `&&` unless the user explicitly approves it first.
+- If a smoke needs a different working directory, change directories separately or start the smoke in the correct cwd; do not use `cd ... && <smoke>` without explicit permission.
+- Chaining after a smoke step is allowed, so `<smoke> && ...` is acceptable.
+- After follow-up work such as a build, rerun smoke as a separate command when feasible.
 
 ## Android Asset Publication Rule
 

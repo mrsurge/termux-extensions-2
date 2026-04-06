@@ -164,12 +164,7 @@ def _normalize_project_path_for_broadcast(project_path: str | Path) -> str:
         return str(project_path)
 
 async def _broadcast_lsp_busy(*, project_path: str, payload: dict) -> None:
-    try:
-        from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
-
-        await _explorer_manager.broadcast(str(project_path), {"type": "lsp:busy", "payload": payload})
-    except Exception:
-        return
+    return
 
 
 async def _lsp_busy_begin(*, project_path: str | Path, language_id: str, activity: str, detail: str = "") -> str:
@@ -879,145 +874,6 @@ def _persist_to_cache_debounced():
             _schedule_diff_refresh(project_root, current_file, current_content, editor, "persist")
     except Exception as e:
         print(f"[PERSIST] Failed to refresh diffs: {e}", file=sys.stderr)
-
-    # Sprint E: publish WARNING-level Android draft diagnostics (draft mode only).
-    try:
-        if Path(current_file).suffix in ('.kt', '.kts'):
-            base_project_root = Path(project_path)
-            base_project_path = str(base_project_root)
-            if _history_store.get_lsp_enabled(base_project_path) and _history_store.get_lsp_server_enabled(base_project_path, 'kotlin-android'):
-                cfg = _get_android_lsp_config(base_project_root)
-                effective_project_root = base_project_root
-                rel_root = str(cfg.get("rootRel") or "").strip()
-                if rel_root:
-                    candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
-                    if candidate.exists() and candidate.is_dir():
-                        effective_project_root = candidate
-
-                uri = f"file://{current_file}"
-                sig_key = f"{effective_project_root}::{uri}"
-                sig = f"draft:{current_hash}"
-                if _android_draft_diag_sig.get(sig_key) != sig:
-                    _android_draft_diag_sig[sig_key] = sig
-
-                    async def _publish_android_draft_diags_bg() -> None:
-                        try:
-                            from app.apps.file_editor_cm6.android_lang.android_sidecar import resolve_te2_android_sidecar_path
-                            from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
-                            from app.apps.file_editor_cm6.android_lang.draft_diagnostics import build_draft_diagnostics
-                            from app.apps.file_editor_cm6.android_lang.android_lsp_bridge import update_android_sidecar_for_project
-                            from ..lsp_ws import publish_draft_diagnostics_to_client
-
-                            sidecar_path = resolve_te2_android_sidecar_path(project_root=base_project_root)
-                            if not sidecar_path.exists():
-                                sidecar_path = await anyio.to_thread.run_sync(
-                                    lambda: (
-                                        lambda _cfg: update_android_sidecar_for_project(
-                                            project_root=base_project_root,
-                                            effective_project_root=effective_project_root,
-                                            module=str((_cfg or {}).get('module') or 'app'),
-                                            variant=str((_cfg or {}).get('variant') or 'GeckoDebug'),
-                                        )
-                                    )(
-                                        _get_android_lsp_config(base_project_root)
-                                    )
-                                )
-
-                            def _load_sidecar() -> dict:
-                                try:
-                                    if sidecar_path and Path(sidecar_path).exists():
-                                        return json.loads(Path(sidecar_path).read_text(encoding='utf-8'))
-                                except Exception:
-                                    return {}
-                                return {}
-
-                            te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar)
-
-                            # Compute cache key (draft content + sync/index version).
-                            sync_fp = str((te2_sidecar or {}).get('syncFingerprint') or '')
-                            idx = (te2_sidecar or {}).get('dependencyIndex') or {}
-                            idx_built = str(idx.get('builtAtMs') or '') if isinstance(idx, dict) else ''
-                            cache_key = f"{sync_fp}|{idx_built}|{current_hash}"
-
-                            cached = _android_draft_diag_cache.get(sig_key)
-                            if cached and cached[0] == cache_key:
-                                diags = cached[1]
-                            else:
-                                # Do NOT spawn Gradle here; build partial index only.
-                                te2_sidecar = await anyio.to_thread.run_sync(
-                                    lambda: ensure_compiled_dependency_index(
-                                        sidecar_path=Path(sidecar_path),
-                                        te2_sidecar=te2_sidecar or {},
-                                        effective_project_root=effective_project_root,
-                                        allow_gradle_resolve=False,
-                                    )
-                                )
-
-                                diags = build_draft_diagnostics(te2_sidecar=te2_sidecar or {}, uri=uri, content=current_content)
-                                _android_draft_diag_cache[sig_key] = (cache_key, diags)
-
-                                # If no dependency index yet, kick off one build per syncFingerprint.
-                                try:
-                                    idx2 = (te2_sidecar or {}).get('dependencyIndex') or {}
-                                    has_index = isinstance(idx2, dict) and bool(idx2.get('classes'))
-                                    if not has_index:
-                                        build_key = f"{effective_project_root}::{sync_fp}"
-                                        now_ms = int(time.time() * 1000)
-                                        started = _android_dep_index_build_inflight.get(build_key)
-                                        if not started or (now_ms - int(started)) > 30_000:
-                                            _android_dep_index_build_inflight[build_key] = now_ms
-
-                                            async def _build_index_bg() -> None:
-                                                busy_token = ""
-                                                ok = True
-                                                err = ""
-                                                try:
-                                                    busy_token = await _lsp_busy_begin(
-                                                        project_path=base_project_root,
-                                                        language_id="kotlin-android",
-                                                        activity="gradle_dependency_index",
-                                                        detail="Building dependency index (Gradle)…",
-                                                    )
-                                                    sidecar2 = await anyio.to_thread.run_sync(_load_sidecar)
-                                                    await anyio.to_thread.run_sync(
-                                                        lambda: ensure_compiled_dependency_index(
-                                                            sidecar_path=Path(sidecar_path),
-                                                            te2_sidecar=sidecar2 or {},
-                                                            effective_project_root=effective_project_root,
-                                                            allow_gradle_resolve=True,
-                                                        )
-                                                    )
-                                                except Exception as exc:
-                                                    ok = False
-                                                    err = str(exc)
-                                                finally:
-                                                    try:
-                                                        if busy_token:
-                                                            await _lsp_busy_end(token=busy_token, ok=ok, error=err)
-                                                    except Exception:
-                                                        pass
-                                                    try:
-                                                        _android_dep_index_build_inflight.pop(build_key, None)
-                                                    except Exception:
-                                                        pass
-
-                                            asyncio.create_task(_build_index_bg())
-                                except Exception:
-                                    pass
-
-                            await publish_draft_diagnostics_to_client(
-                                language_id='kotlin-android',
-                                project_root=effective_project_root,
-                                uri=uri,
-                                draft_diagnostics=diags,
-                                has_drafts=bool(cache_entry.get('unsaved', False)),
-                            )
-                        except Exception as exc:
-                            print(f"[ANDROID DRAFT DIAGS] failed: {exc}", file=sys.stderr)
-
-                    asyncio.create_task(_publish_android_draft_diags_bg())
-    except Exception:
-        pass
 
 def _cancel_cache_persist_timer():
     """Cancel any pending cache persist timer."""
@@ -2085,12 +1941,7 @@ async def save_current_file(data: dict = Body(...)):
     try:
         file_meta = await _write_editor_buffer_to_disk(client_id=client_id, op_id=op_id)
 
-        # Notify kotlin-android LSP that a real disk save occurred (iframe save path).
-        # IMPORTANT: use the same effective project root (rootRel override) that connect_lsp uses,
-        # otherwise repoFingerprint won't match the LSP sidecar and cache replay will fail.
         try:
-            from ..lsp_ws import send_android_did_save_for_path
-
             base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
             effective_project_root = base_project_root
             cfg = _get_android_lsp_config(base_project_root)
@@ -2100,12 +1951,7 @@ async def save_current_file(data: dict = Body(...)):
                 if candidate.exists() and candidate.is_dir():
                     effective_project_root = candidate
 
-            if current_file:
-                ok = await send_android_did_save_for_path(project_root=effective_project_root, abs_path=Path(current_file))
-                if not ok:
-                    print(f"[LSP SAVE HOOK] didSave injection failed path={current_file}", file=sys.stderr)
-
-            # Sprint A: persist TE2-side Android sidecar (dependency model skeleton + fingerprints).
+            # Persist the TE2-side Android sidecar (dependency model skeleton + fingerprints).
             try:
                 base_project_path = str(base_project_root)
                 if _history_store.get_lsp_enabled(base_project_path) and _history_store.get_lsp_server_enabled(base_project_path, "kotlin-android"):
@@ -2125,16 +1971,10 @@ async def save_current_file(data: dict = Body(...)):
                                 )
                             )
 
-                            # 2) Sprint B: publish conservative draft diagnostics (WARNING-level)
                             if not current_file:
                                 return
                             if Path(current_file).suffix not in ('.kt', '.kts'):
                                 return
-
-                            from app.apps.file_editor_cm6.android_lang.draft_diagnostics import build_draft_diagnostics
-                            from ..lsp_ws import publish_draft_diagnostics_to_client
-
-                            uri = f"file://{current_file}"
 
                             def _load_sidecar_json() -> dict:
                                 try:
@@ -2146,7 +1986,6 @@ async def save_current_file(data: dict = Body(...)):
 
                             te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar_json)
 
-                            # Sprint E: build/refresh dependency index on save (authoritative, may spawn Gradle).
                             try:
                                 from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
 
@@ -2159,7 +1998,7 @@ async def save_current_file(data: dict = Body(...)):
                                 ok = True
                                 err = ""
                                 try:
-                                    te2_sidecar = await anyio.to_thread.run_sync(
+                                    await anyio.to_thread.run_sync(
                                         lambda: ensure_compiled_dependency_index(
                                             sidecar_path=Path(sidecar_path),
                                             te2_sidecar=te2_sidecar or {},
@@ -2177,35 +2016,8 @@ async def save_current_file(data: dict = Body(...)):
                                         pass
                             except Exception:
                                 pass
-
-                            # Include current file content so we don't accidentally wipe draft import
-                            # diagnostics (which are content-derived) during the save path.
-                            try:
-                                current_content = Path(current_file).read_text(encoding='utf-8', errors='replace')
-                            except Exception:
-                                current_content = None
-                            diags = build_draft_diagnostics(te2_sidecar=te2_sidecar or {}, uri=uri, content=current_content)
-
-                            dep = (te2_sidecar or {}).get('dependencyModel') or {}
-                            android_jar = ((dep.get('androidSdk') or {}).get('androidJar') or '')
-                            java_home = ((dep.get('jvm') or {}).get('javaHome') or '')
-                            sync_fp = (te2_sidecar or {}).get('syncFingerprint') or ''
-
-                            sig = f"{sync_fp}|aj={bool(android_jar)}|jh={bool(java_home)}|n={len(diags)}"
-                            sig_key = f"{effective_project_root}::{uri}"
-                            if _android_draft_diag_sig.get(sig_key) == sig:
-                                return
-                            _android_draft_diag_sig[sig_key] = sig
-
-                            await publish_draft_diagnostics_to_client(
-                                language_id='kotlin-android',
-                                project_root=effective_project_root,
-                                uri=uri,
-                                draft_diagnostics=diags,
-                                has_drafts=False,  # Just saved, no unsaved changes
-                            )
                         except Exception as exc:
-                            print(f"[ANDROID SIDECAR] update/publish failed: {exc}", file=sys.stderr)
+                            print(f"[ANDROID SIDECAR] update failed: {exc}", file=sys.stderr)
 
                     asyncio.create_task(_update_android_sidecar_bg())
             except Exception:
@@ -2346,36 +2158,8 @@ async def android_sync_project(data: dict = Body(...)):
             except Exception:
                 pass
             
-            # 4) Compute repo fingerprint for LSP notification
-            from ..lsp_ws import send_lsp_notification, _compute_repo_fingerprint
-            
-            repo_fp = await anyio.to_thread.run_sync(
-                lambda: _compute_repo_fingerprint(effective_project_root)
-            )
-            
-            # 5) Collect dirty files from ProjectSidecar
-            # NOTE: Temporarily disabled until Sprint E draft-buffer diagnostics land.
-            dirty_files: list[str] = []
-            
-            # 6) Notify kotlin-android LSP so it consumes updated model
-            lsp_notified = await send_lsp_notification(
-                language_id="kotlin-android",
-                project_root=effective_project_root,
-                message={
-                    "jsonrpc": "2.0",
-                    "method": "workspace/didChangeConfiguration",
-                    "params": {
-                        "settings": {
-                            "te2Android": {
-                                "repoFingerprint": repo_fp,
-                                "dirtyFiles": dirty_files,
-                            }
-                        }
-                    },
-                },
-                spawn_if_missing=False,
-            )
-            
+            lsp_notified = False
+
             print(f"[ANDROID SYNC] OK sidecar={sidecar_path} lsp_notified={lsp_notified}", file=sys.stderr)
             return {
                 "ok": True,
@@ -2385,464 +2169,6 @@ async def android_sync_project(data: dict = Body(...)):
         except Exception as e:
             print(f"[ANDROID SYNC] ERROR: {e}", file=sys.stderr)
             return {"ok": False, "error": str(e)}
-
-
-# --- Pyright Workspace Scan Endpoint (repo-wide diagnostics dots) ---
-
-@editor_router.post('/pyright/scan')
-async def pyright_scan_project(data: dict = Body(...)):
-    """Run Pyright (CLI) across the configured Pyright workspace root.
-
-    This populates explorer warning/error dots for *all* Python files under the
-    effective Pyright root, and persists a lightweight summary in ProjectSidecar
-    so dots survive worker restarts.
-    """
-
-    base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
-    effective_project_root = base_project_root
-    try:
-        rel_root = _history_store.get_lsp_server_root_rel(str(base_project_root), "pyright")
-        if rel_root:
-            candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
-            if candidate.exists() and candidate.is_dir():
-                effective_project_root = candidate
-    except Exception:
-        pass
-
-    pyright_mode = "root"
-    try:
-        pyright_mode = _history_store.get_lsp_pyright_config_mode(str(base_project_root))
-    except Exception:
-        pyright_mode = "root"
-
-    worker_entries = []
-    try:
-        from app.apps.file_editor_cm6.python_lang.worker_registry import list_python_worker_roots
-
-        if pyright_mode == "workers":
-            worker_entries = list_python_worker_roots(base_project_root)
-    except Exception:
-        worker_entries = []
-
-    lock_key = str(base_project_root)
-
-    # Supersede any in-flight scan for this project.
-    try:
-        existing = _pyright_scan_tasks.get(lock_key)
-        if existing and not existing.done():
-            existing.cancel()
-    except Exception:
-        pass
-
-    async def _scan_bg() -> None:
-        busy_token = await _lsp_busy_begin(
-            project_path=base_project_root,
-            language_id="python",
-            activity="pyright_scan",
-            detail="Scanning workspace (pyright)…",
-        )
-        ok = True
-        err = ""
-        try:
-            from app.apps.file_editor_cm6.python_lang.pyright_workspace_scan import run_pyright_workspace_scan
-            from app.apps.file_editor_cm6.project_sidecar import ProjectSidecar
-            from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
-            from app.apps.file_editor_cm6.lsp_ws import get_diagnostics_summary_for_project, _compute_repo_fingerprint
-
-            summary_by_rel: dict[str, dict[str, int]] = {}
-            if worker_entries:
-                for entry in worker_entries:
-                    project_path = entry.pyright_project or entry.root
-                    scan = await run_pyright_workspace_scan(
-                        base_project_root=base_project_root,
-                        effective_project_root=entry.root,
-                        project_path=project_path,
-                        timeout_s=180.0,
-                    )
-                    for rel, counts in (scan.summary_by_rel or {}).items():
-                        bucket = summary_by_rel.get(rel)
-                        if not bucket:
-                            bucket = {"errors": 0, "warnings": 0}
-                            summary_by_rel[rel] = bucket
-                        try:
-                            bucket["errors"] += int((counts or {}).get("errors") or 0)
-                            bucket["warnings"] += int((counts or {}).get("warnings") or 0)
-                        except Exception:
-                            continue
-            else:
-                scan = await run_pyright_workspace_scan(
-                    base_project_root=base_project_root,
-                    effective_project_root=effective_project_root,
-                    timeout_s=180.0,
-                )
-                summary_by_rel = scan.summary_by_rel or {}
-
-            repo_fp = ""
-            try:
-                fp_root = base_project_root if worker_entries else effective_project_root
-                repo_fp = await anyio.to_thread.run_sync(lambda: _compute_repo_fingerprint(fp_root))
-            except Exception:
-                repo_fp = ""
-
-            sidecar = ProjectSidecar.load_or_create(str(base_project_root))
-            sidecar.set_pyright_diagnostics_summary(
-                summary_by_rel=summary_by_rel,
-                effective_root=str(base_project_root if worker_entries else effective_project_root),
-                repo_fingerprint=repo_fp or None,
-            )
-            try:
-                sidecar.save()
-            except Exception:
-                pass
-
-            # Reconcile any stale in-memory LSP diagnostics cache for Python so explorer dots clear
-            # after a scan even if the pyright LSP hasn't re-published empty diagnostics for a file.
-            try:
-                import app.apps.file_editor_cm6.lsp_ws as _lsp_ws_mod
-
-                ns = getattr(_lsp_ws_mod, "_LSP_NAMESPACE_INSTANCE", None)
-                if ns is not None:
-                    base_root = base_project_root.expanduser().resolve(strict=False)
-                    # Build a set of file:// URIs that should remain flagged after this scan.
-                    keep_uris: set[str] = set()
-                    for rel, counts in (summary_by_rel or {}).items():
-                        try:
-                            e = int((counts or {}).get("errors") or 0)
-                            w = int((counts or {}).get("warnings") or 0)
-                        except Exception:
-                            e = 0
-                            w = 0
-                        if e <= 0 and w <= 0:
-                            continue
-                        if not isinstance(rel, str) or not rel:
-                            continue
-                        try:
-                            abs_p = (base_root / rel).expanduser().resolve(strict=False)
-                            keep_uris.add(f"file://{str(abs_p)}")
-                        except Exception:
-                            continue
-
-                    for (_lang, sess_root), sess in list(getattr(ns, "backend_sessions", {}).items()):
-                        try:
-                            if str(_lang) not in ("python", "pyright"):
-                                continue
-                            if not isinstance(sess, dict):
-                                continue
-                            sess_root_p = Path(str(sess_root)).expanduser().resolve(strict=False)
-                            # Only reconcile sessions under this base project root.
-                            try:
-                                sess_root_p.relative_to(base_root)
-                            except ValueError:
-                                continue
-
-                            cache = sess.get("diagnostics_by_uri")
-                            if not isinstance(cache, dict) or not cache:
-                                continue
-
-                            # Clear anything not present in the scan results set.
-                            for uri in list(cache.keys()):
-                                if not isinstance(uri, str) or not uri.startswith("file://"):
-                                    continue
-                                abs_path = uri[7:]
-                                try:
-                                    Path(abs_path).expanduser().resolve(strict=False).relative_to(base_root)
-                                except Exception:
-                                    continue
-                                if uri not in keep_uris:
-                                    cache.pop(uri, None)
-                        except Exception:
-                            continue
-            except Exception:
-                pass
-
-            # Trigger an immediate explorer refresh (the periodic loop will also pick it up).
-            try:
-                summary = get_diagnostics_summary_for_project(project_root=str(base_project_root))
-                await _explorer_manager.broadcast(
-                    str(base_project_root),
-                    {"type": "explorer:updateDiagnostics", "payload": {"diagnostics": summary}},
-                )
-            except Exception:
-                pass
-        except asyncio.CancelledError:
-            ok = False
-            err = "superseded"
-        except Exception as exc:
-            ok = False
-            err = str(exc)
-        finally:
-            try:
-                await _lsp_busy_end(token=busy_token, ok=ok, error=err)
-            except Exception:
-                pass
-
-    task = asyncio.create_task(_scan_bg())
-    _pyright_scan_tasks[lock_key] = task
-
-    return {
-        "ok": True,
-        "started": True,
-        "baseProjectRoot": str(base_project_root),
-        "effectiveProjectRoot": str(effective_project_root),
-    }
-
-
-# --- Pyright worker registry endpoints (repo-scoped config) ---
-
-@editor_router.get('/pyright/workers')
-async def pyright_workers_get():
-    base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
-    try:
-        from app.apps.file_editor_cm6.python_lang.worker_registry import (
-            load_python_worker_registry,
-            serialize_worker_entries,
-            get_registry_path,
-        )
-
-        entries = load_python_worker_registry(base_project_root)
-        payload = serialize_worker_entries(base_project_root, entries)
-        mode = _history_store.get_lsp_pyright_config_mode(str(base_project_root))
-        return {
-            "ok": True,
-            "data": {
-                "projectRoot": str(base_project_root),
-                "registryPath": str(get_registry_path(base_project_root)),
-                "mode": mode,
-                "workers": payload,
-            },
-        }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-@editor_router.post('/pyright/workers/save')
-async def pyright_workers_save(data: dict = Body(...)):
-    base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
-    items = data.get("workers", [])
-    try:
-        from app.apps.file_editor_cm6.python_lang.worker_registry import (
-            normalize_worker_payload,
-            save_python_worker_registry,
-            serialize_worker_entries,
-        )
-
-        entries, errors = normalize_worker_payload(base_project_root, items if isinstance(items, list) else [])
-        path = save_python_worker_registry(base_project_root, entries, generated=False)
-        payload = serialize_worker_entries(base_project_root, entries)
-        return {
-            "ok": True,
-            "data": {
-                "projectRoot": str(base_project_root),
-                "path": str(path),
-                "workers": payload,
-                "errors": errors,
-            },
-        }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-@editor_router.post('/pyright/workers/generate')
-async def pyright_workers_generate(data: dict = Body(...)):
-    base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
-    save = bool(data.get("save", False))
-    try:
-        from app.apps.file_editor_cm6.python_lang.worker_registry import (
-            discover_python_worker_entries,
-            save_python_worker_registry,
-            serialize_worker_entries,
-        )
-
-        entries = discover_python_worker_entries(base_project_root)
-        if save:
-            save_python_worker_registry(base_project_root, entries, generated=True)
-        payload = serialize_worker_entries(base_project_root, entries)
-        return {
-            "ok": True,
-            "data": {
-                "projectRoot": str(base_project_root),
-                "workers": payload,
-                "saved": save,
-            },
-        }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
-
-# --- Pyright config endpoints (pyrightconfig.json / pyproject.toml) ---
-
-_PYRIGHT_SIMPLE_KEYS = (
-    "typeCheckingMode",
-    "pythonVersion",
-    "pythonPlatform",
-    "include",
-    "exclude",
-    "ignore",
-    "venvPath",
-    "venv",
-)
-
-
-def _resolve_project_file(project_root: Path, raw_path: str) -> Path:
-    rel = _normalize_rel_path(project_root, raw_path)
-    return (project_root / rel).expanduser().resolve(strict=False)
-
-
-def _toml_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _toml_value(value) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (int, float)):
-        return str(value)
-    if isinstance(value, list):
-        items = []
-        for item in value:
-            if isinstance(item, (int, float)):
-                items.append(str(item))
-            else:
-                items.append(f"\"{_toml_escape(str(item))}\"")
-        return f"[{', '.join(items)}]"
-    return f"\"{_toml_escape(str(value))}\""
-
-
-def _toml_block_lines(config: dict) -> list[str]:
-    lines = ["[tool.pyright]"]
-    for key in _PYRIGHT_SIMPLE_KEYS:
-        if key not in config:
-            continue
-        val = config.get(key)
-        if val is None:
-            continue
-        if isinstance(val, str) and not val.strip():
-            continue
-        if isinstance(val, list) and not val:
-            continue
-        lines.append(f"{key} = {_toml_value(val)}")
-    return lines
-
-
-def _update_pyright_toml(text: str, config: dict) -> str:
-    import re
-
-    pattern = re.compile(r"(?ms)^\\[tool\\.pyright\\]\\s*$.*?(?=^\\[[^\\]]+\\]\\s*$|\\Z)")
-    match = pattern.search(text or "")
-    new_lines = _toml_block_lines(config)
-
-    if match:
-        block = match.group(0)
-        block_lines = block.splitlines()
-        kept = [block_lines[0]]
-        for line in block_lines[1:]:
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or stripped.startswith(";"):
-                kept.append(line)
-                continue
-            key = stripped.split("=", 1)[0].strip()
-            if key in _PYRIGHT_SIMPLE_KEYS:
-                continue
-            kept.append(line)
-
-        # Ensure a blank line before new keys if existing content present.
-        if len(kept) > 1 and kept[-1].strip():
-            kept.append("")
-        kept.extend(new_lines[1:])
-
-        replacement = "\n".join(kept).rstrip() + "\n"
-        return text[: match.start()] + replacement + text[match.end() :]
-
-    # No existing block: append one.
-    base = text or ""
-    if base and not base.endswith("\n"):
-        base += "\n"
-    if base and not base.endswith("\n\n"):
-        base += "\n"
-    return base + "\n".join(new_lines).rstrip() + "\n"
-
-
-@editor_router.get('/pyright/config')
-async def pyright_config_get(path: str = Query(...)):
-    project_root = Path(_history_store.get_active_project() or str(get_project_root()))
-    try:
-        abs_path = _resolve_project_file(project_root, path)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    kind = "toml" if abs_path.suffix.lower() == ".toml" else "json"
-    config: dict = {}
-
-    if abs_path.exists():
-        try:
-            raw = abs_path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            raw = ""
-        if kind == "json":
-            try:
-                config = json.loads(raw) if raw.strip() else {}
-            except Exception:
-                config = {}
-        else:
-            try:
-                import tomllib  # Python 3.11+
-
-                data = tomllib.loads(raw) if raw.strip() else {}
-                tool = data.get("tool") if isinstance(data, dict) else None
-                if isinstance(tool, dict):
-                    pyright_cfg = tool.get("pyright")
-                    if isinstance(pyright_cfg, dict):
-                        config = dict(pyright_cfg)
-            except Exception:
-                config = {}
-
-    return {
-        "ok": True,
-        "data": {
-            "path": str(abs_path),
-            "kind": kind,
-            "config": config or {},
-        },
-    }
-
-
-@editor_router.post('/pyright/config/save')
-async def pyright_config_save(data: dict = Body(...)):
-    project_root = Path(_history_store.get_active_project() or str(get_project_root()))
-    raw_path = data.get("path") or ""
-    config_in = data.get("config") or {}
-    if not isinstance(config_in, dict):
-        raise HTTPException(status_code=400, detail="config must be an object")
-
-    try:
-        abs_path = _resolve_project_file(project_root, raw_path)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    abs_path.parent.mkdir(parents=True, exist_ok=True)
-    kind = "toml" if abs_path.suffix.lower() == ".toml" else "json"
-
-    if kind == "json":
-        abs_path.write_text(json.dumps(config_in, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        return {"ok": True, "data": {"path": str(abs_path), "kind": kind, "config": config_in}}
-
-    # TOML (pyproject.toml): update [tool.pyright] block
-    existing = ""
-    try:
-        if abs_path.exists():
-            existing = abs_path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        existing = ""
-
-    # Keep only known simple keys (others stay in file untouched).
-    config: dict = {}
-    for key in _PYRIGHT_SIMPLE_KEYS:
-        if key in config_in:
-            config[key] = config_in.get(key)
-
-    updated = _update_pyright_toml(existing, config)
-    abs_path.write_text(updated, encoding="utf-8")
-    return {"ok": True, "data": {"path": str(abs_path), "kind": kind, "config": config}}
 
 
 # --- Android config endpoints (Gradle/LSP support) ---

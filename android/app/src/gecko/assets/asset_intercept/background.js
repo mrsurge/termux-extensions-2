@@ -22,6 +22,8 @@ const INTERCEPT_PREFIXES = [
   "/static/vendor/monaco-editor-core/esm/",
   "/static/fonts/",
   "/static/js/",
+  "/extensions/",
+  "/apps/file_editor_cm6/",
   "/apps/file_editor_cm6/static/",
   "/api/app/file_editor_cm6/ui/monaco_editor/",
   "/api/app/file_editor_cm6/ui/monaco_vscode/lang/",
@@ -53,9 +55,9 @@ function mapPath(urlPath) {
   if (urlPath === "/api/app/file_editor_cm6/ui/nc") {
     return "/api/app/file_editor_cm6/ui/nc.html";
   }
-  // app shell for file_editor_cm6
-  if (urlPath === "/app/file_editor_cm6") {
-    return "/app_shell_file_editor_cm6.html";
+  // generic app shell
+  if (urlPath.startsWith("/app/")) {
+    return "/app_shell.html";
   }
   // index page
   if (urlPath === "/") {
@@ -68,7 +70,7 @@ function shouldIntercept(urlPath) {
   if (WORKER_RE.test(urlPath)) return false;
   if (TE2_LANG_CHUNK_RE.test(urlPath)) return true;
   // HTML pages
-  if (urlPath === "/" || urlPath === "/app/file_editor_cm6" || urlPath === "/api/app/file_editor_cm6/ui/nc") return true;
+  if (urlPath === "/" || urlPath.startsWith("/app/") || urlPath === "/api/app/file_editor_cm6/ui/nc") return true;
   for (const f of INTERCEPT_FILES) {
     if (urlPath === f) return true;
   }
@@ -91,7 +93,14 @@ browser.webRequest.onBeforeRequest.addListener(
       if (!shouldIntercept(path)) return {};
 
       const localPath = mapPath(path);
-      const redirectUrl = `http://127.0.0.1:${assetServerPort}${localPath}${url.search || ""}`;
+      let search = url.search || "";
+      if (path.startsWith("/app/")) {
+        const appId = path.slice("/app/".length);
+        const params = new URLSearchParams(search);
+        if (appId && !params.has("app_id")) params.set("app_id", appId);
+        search = `?${params.toString()}`;
+      }
+      const redirectUrl = `http://127.0.0.1:${assetServerPort}${localPath}${search}`;
       return { redirectUrl };
     } catch (e) {
       return {};

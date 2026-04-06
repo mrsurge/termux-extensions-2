@@ -1,0 +1,54 @@
+<div class="apps-launcher">
+  <div class="apps-toolbar">
+    <button id="apps-refresh-btn" class="apps-btn">Refresh</button>
+  </div>
+  <div id="apps-grid" class="apps-grid">
+    <!-- App icons will be rendered here by main.js -->
+  </div>
+</div>
+
+<style>
+  .apps-launcher { display: flex; flex-direction: column; gap: 12px; }
+  .apps-toolbar { display: flex; justify-content: flex-end; }
+  .apps-btn { background: var(--secondary); color: var(--secondary-foreground); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+  .apps-btn:hover { background: var(--primary); color: var(--primary-foreground); }
+  .apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
+  .app-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); cursor: pointer; text-align: center; position: relative; overflow: visible; }
+  .app-card:hover { outline: 1px solid var(--ring); }
+  .app-card.is-running { outline: 2px solid rgba(63, 185, 80, 0.95); outline-offset: 0; }
+  .app-card.is-running:hover { outline: 2px solid rgba(63, 185, 80, 0.95); }
+  .app-card-menu-group { position: absolute; inset: 0; pointer-events: none; z-index: 12; }
+  .app-card-menu-dropdown {
+    position: absolute;
+    min-width: 150px;
+    display: none;
+    flex-direction: column;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 0;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+    pointer-events: auto;
+  }
+  .app-card-menu-group[data-open="true"] .app-card-menu-dropdown { display: flex; }
+  .app-card-menu-dropdown button {
+    background: transparent;
+    border: none;
+    color: var(--foreground);
+    padding: 8px 14px;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-start;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .app-card-menu-dropdown button:hover {
+    background: rgba(80, 120, 255, 0.18);
+  }
+  .app-icon { width: 56px; height: 56px; border-radius: 12px; display: grid; place-items: center; background: var(--secondary); color: var(--foreground); font-size: 28px; }
+  .app-icon-img { width: 100%; height: 100%; object-fit: contain; display: block; border-radius: 12px; }
+  .app-title { font-size: 0.95em; font-weight: 600; color: var(--foreground); word-break: break-word; }
+  .apps-empty { color: var(--muted-foreground); font-style: italic; }
+</style>

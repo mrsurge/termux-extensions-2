@@ -65,7 +65,6 @@ Main framework process (app/main.py)
   ├─ Proxies /app/file_editor_cm6 → worker port
   ├─ Loads app services declared in manifest.json
   ├─ Explorer transport service (WS proxy): /explorer_ws/socket.io → worker
-  ├─ LSP transport service (Socket.IO)    : /lsp_ws/socket.io
   ├─ Editor transport service (WS proxy)  : /editor_ws/socket.io  → worker
   └─ UI IPC transport service (WS proxy)  : /ui_ipc_ws/socket.io  → worker
 
@@ -353,7 +352,7 @@ Services declared in `app/apps/file_editor_cm6/manifest.json`:
 ```json
 "services": {
   "path": "services",
-  "modules": ["explorer_transport", "lsp_transport", "editor_transport"]
+  "modules": ["explorer_transport", "editor_transport"]
 }
 ```
 
