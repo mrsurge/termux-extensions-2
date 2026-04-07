@@ -44,6 +44,38 @@ function writeFrame(frame) {
   process.stdout.write(JSON.stringify(frame) + '\n');
 }
 
+function isObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseJsonRpcNotification(line) {
+  let parsed;
+  try {
+    parsed = JSON.parse(line);
+  } catch (error) {
+    logError(`bad JSON command: ${line.slice(0, 200)}`, error);
+    return null;
+  }
+
+  if (!isObject(parsed)) {
+    return null;
+  }
+
+  if (String(parsed.jsonrpc || '') !== '2.0') {
+    logError(`unexpected stdin payload without jsonrpc envelope: ${line.slice(0, 200)}`);
+    return null;
+  }
+
+  const method = String(parsed.method || '');
+  if (!method) {
+    logError(`stdin payload missing method: ${line.slice(0, 200)}`);
+    return null;
+  }
+
+  const params = isObject(parsed.params) ? parsed.params : {};
+  return { method, params };
+}
+
 function encodeDataFrame(data, nextSeq) {
   return {
     type: 'data',
@@ -120,36 +152,31 @@ rl.on('line', (line) => {
     return;
   }
 
-  let frame;
-  try {
-    frame = JSON.parse(line);
-  } catch (error) {
-    logError(`bad JSON command: ${line.slice(0, 200)}`, error);
+  const notification = parseJsonRpcNotification(line);
+  if (!notification) {
     return;
   }
 
-  if (!frame || typeof frame !== 'object') {
+  const { method, params } = notification;
+
+  if (method === 'terminal.connect') {
+    const nextCols = parsePositiveInt(params.cols, cols);
+    const nextRows = parsePositiveInt(params.rows, rows);
+    try {
+      pty.resize(nextCols, nextRows);
+    } catch (error) {
+      logError(`connect resize failed cols=${nextCols} rows=${nextRows}`, error);
+    }
     return;
   }
 
-  const frameType = String(frame.type || '');
-  if (frameType === 'hello') {
-    writeFrame({
-      type: 'hello',
-      ts: Date.now(),
-      pid: pty.pid,
-      next_seq: seq + 1,
-    });
+  if (method === 'terminal.ping') {
+    writeFrame({ type: 'pong', nonce: params.nonce ?? null });
     return;
   }
 
-  if (frameType === 'ping') {
-    writeFrame({ type: 'pong', nonce: frame.nonce ?? null });
-    return;
-  }
-
-  if (frameType === 'input') {
-    const dataB64 = frame.data_b64;
+  if (method === 'terminal.input') {
+    const dataB64 = params.data_b64;
     if (typeof dataB64 !== 'string' || !dataB64) {
       return;
     }
@@ -162,9 +189,9 @@ rl.on('line', (line) => {
     return;
   }
 
-  if (frameType === 'resize') {
-    const nextCols = parsePositiveInt(frame.cols, cols);
-    const nextRows = parsePositiveInt(frame.rows, rows);
+  if (method === 'terminal.resize') {
+    const nextCols = parsePositiveInt(params.cols, cols);
+    const nextRows = parsePositiveInt(params.rows, rows);
     try {
       pty.resize(nextCols, nextRows);
     } catch (error) {
@@ -173,13 +200,16 @@ rl.on('line', (line) => {
     return;
   }
 
-  if (frameType === 'destroy') {
+  if (method === 'terminal.destroy') {
     try {
       pty.kill();
     } catch (error) {
       logError('destroy failed', error);
     }
+    return;
   }
+
+  logError(`unsupported JSON-RPC method: ${method}`);
 });
 
 rl.on('close', () => {

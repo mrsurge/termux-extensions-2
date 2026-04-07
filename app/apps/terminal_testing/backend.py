@@ -189,7 +189,25 @@ def _frame_seq(frame: Mapping[str, object]) -> int:
     return _coerce_non_negative_int(frame.get("seq"), 0)
 
 
-def _json_line(payload: Mapping[str, object]) -> str:
+def _jsonrpc_method(payload: Mapping[str, object]) -> str:
+    if _coerce_string(payload.get("jsonrpc")) != "2.0":
+        return ""
+    return _coerce_string(payload.get("method"))
+
+
+def _jsonrpc_params(payload: Mapping[str, object]) -> Mapping[str, object]:
+    raw = payload.get("params")
+    if isinstance(raw, Mapping):
+        return cast(Mapping[str, object], raw)
+    return {}
+
+
+def _jsonrpc_line(method: str, params: Mapping[str, object] | None = None) -> str:
+    payload: JsonObject = {
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": dict(params or {}),
+    }
     return json.dumps(payload, separators=(",", ":")) + "\n"
 
 
@@ -554,7 +572,7 @@ async def _attach_connection(
         session.subscribers[conn_id] = queue
 
 
-async def _resolve_shell_for_hello(payload: Mapping[str, object]) -> str:
+async def _resolve_shell_for_connect(payload: Mapping[str, object]) -> str:
     requested_shell_id = _coerce_optional_string(payload.get("shell_id"))
     if requested_shell_id:
         manager = await mgr()
@@ -587,11 +605,15 @@ async def _resolve_shell_for_hello(payload: Mapping[str, object]) -> str:
     raise RuntimeError("Missing shell_id and no resumable session was found")
 
 
-async def _send_broker_frame(shell_id: str, payload: Mapping[str, object]) -> None:
+async def _send_broker_notification(
+    shell_id: str,
+    method: str,
+    params: Mapping[str, object] | None = None,
+) -> None:
     if not await _ensure_live_broker_io(shell_id):
         raise RuntimeError("Broker shell is not writable")
     manager = await mgr()
-    await manager.write_to_pipe(shell_id, _json_line(payload))
+    await manager.write_to_pipe(shell_id, _jsonrpc_line(method, params))
 
 
 async def _drop_session(shell_id: str) -> None:
@@ -650,7 +672,11 @@ async def send_input(shell_id: str, payload: ShellInputRequest) -> JsonObject:
         text += "\n"
     try:
         encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
-        await _send_broker_frame(shell_id, {"type": "input", "data_b64": encoded, "flush": "immediate"})
+        await _send_broker_notification(
+            shell_id,
+            "terminal.input",
+            {"data_b64": encoded, "flush": "immediate"},
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to write broker input: {exc}") from exc
     return _ok({"id": shell_id})
@@ -661,7 +687,11 @@ async def resize_shell(shell_id: str, payload: ShellResizeRequest) -> JsonObject
     cols = max(1, payload.cols)
     rows = max(1, payload.rows)
     try:
-        await _send_broker_frame(shell_id, {"type": "resize", "cols": cols, "rows": rows})
+        await _send_broker_notification(
+            shell_id,
+            "terminal.resize",
+            {"cols": cols, "rows": rows},
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Resize failed: {exc}") from exc
     return _ok({"id": shell_id, "cols": cols, "rows": rows})
@@ -724,7 +754,7 @@ async def terminal_ws(websocket: WebSocket) -> None:
                 {
                     "type": "error",
                     "code": "bad_json",
-                    "message": "Expected JSON hello frame",
+                    "message": "Expected JSON-RPC connect notification",
                     "fatal": True,
                 }
             )
@@ -735,28 +765,30 @@ async def terminal_ws(websocket: WebSocket) -> None:
                 {
                     "type": "error",
                     "code": "expected_object",
-                    "message": "Hello frame must be a JSON object",
+                    "message": "Connect notification must be a JSON object",
                     "fatal": True,
                 }
             )
             return
 
         payload = cast(BrokerFrame, loaded)
-        if _frame_type(payload) != "hello":
+        if _jsonrpc_method(payload) != "terminal.connect":
             send_queue.put_nowait(
                 {
                     "type": "error",
-                    "code": "expected_hello",
-                    "message": "First frame must be hello",
+                    "code": "expected_connect",
+                    "message": "First notification must be terminal.connect",
                     "fatal": True,
                 }
             )
             return
 
+        connect_params = _jsonrpc_params(payload)
+
         try:
-            shell_id = await _resolve_shell_for_hello(payload)
-            requested_session_id = _coerce_optional_string(payload.get("session_id"))
-            resume_after_seq = _coerce_non_negative_int(payload.get("resume_after_seq"), 0)
+            shell_id = await _resolve_shell_for_connect(connect_params)
+            requested_session_id = _coerce_optional_string(connect_params.get("session_id"))
+            resume_after_seq = _coerce_non_negative_int(connect_params.get("resume_after_seq"), 0)
             session = await _get_or_create_session(shell_id, requested_session_id)
             await _attach_connection(session, conn_id, send_queue, resume_after_seq)
         except HTTPException as exc:
@@ -781,11 +813,23 @@ async def terminal_ws(websocket: WebSocket) -> None:
             return
         active_session = session
 
-        cols = _coerce_positive_int(payload.get("cols"), 0)
-        rows = _coerce_positive_int(payload.get("rows"), 0)
-        if cols > 0 and rows > 0:
-            with suppress(Exception):
-                await _send_broker_frame(active_session.shell_id, {"type": "resize", "cols": cols, "rows": rows})
+        connect_notice: JsonObject = {
+            "session_id": active_session.session_id,
+            "shell_id": active_session.shell_id,
+            "resume_after_seq": resume_after_seq,
+        }
+        cols = _coerce_positive_int(connect_params.get("cols"), 0)
+        rows = _coerce_positive_int(connect_params.get("rows"), 0)
+        if cols > 0:
+            connect_notice["cols"] = cols
+        if rows > 0:
+            connect_notice["rows"] = rows
+        with suppress(Exception):
+            await _send_broker_notification(
+                active_session.shell_id,
+                "terminal.connect",
+                connect_notice,
+            )
 
         async for raw_frame in websocket.iter_text():
             try:
@@ -795,7 +839,7 @@ async def terminal_ws(websocket: WebSocket) -> None:
                     {
                         "type": "error",
                         "code": "bad_json",
-                        "message": "Malformed frame",
+                        "message": "Malformed JSON-RPC notification",
                         "fatal": False,
                     }
                 )
@@ -806,29 +850,30 @@ async def terminal_ws(websocket: WebSocket) -> None:
                     {
                         "type": "error",
                         "code": "expected_object",
-                        "message": "Frame must be a JSON object",
+                        "message": "Notification must be a JSON object",
                         "fatal": False,
                     }
                 )
                 continue
 
             frame = cast(BrokerFrame, loaded_frame)
-            frame_type = _frame_type(frame)
-            if frame_type == "ping":
-                send_queue.put_nowait({"type": "pong", "nonce": frame.get("nonce")})
+            frame_method = _jsonrpc_method(frame)
+            frame_params = _jsonrpc_params(frame)
+            if frame_method == "terminal.ping":
+                send_queue.put_nowait({"type": "pong", "nonce": frame_params.get("nonce")})
                 continue
 
-            if frame_type == "input":
-                data_b64 = _coerce_optional_string(frame.get("data_b64"))
+            if frame_method == "terminal.input":
+                data_b64 = _coerce_optional_string(frame_params.get("data_b64"))
                 if not data_b64:
                     continue
                 try:
-                    await _send_broker_frame(
+                    await _send_broker_notification(
                         active_session.shell_id,
+                        "terminal.input",
                         {
-                            "type": "input",
                             "data_b64": data_b64,
-                            "flush": _coerce_optional_string(frame.get("flush")) or "auto",
+                            "flush": _coerce_optional_string(frame_params.get("flush")) or "auto",
                         },
                     )
                 except Exception as exc:
@@ -842,13 +887,14 @@ async def terminal_ws(websocket: WebSocket) -> None:
                     )
                 continue
 
-            if frame_type == "resize":
+            if frame_method == "terminal.resize":
                 try:
-                    resize_cols = _coerce_positive_int(frame.get("cols"), DEFAULT_COLS)
-                    resize_rows = _coerce_positive_int(frame.get("rows"), DEFAULT_ROWS)
-                    await _send_broker_frame(
+                    resize_cols = _coerce_positive_int(frame_params.get("cols"), DEFAULT_COLS)
+                    resize_rows = _coerce_positive_int(frame_params.get("rows"), DEFAULT_ROWS)
+                    await _send_broker_notification(
                         active_session.shell_id,
-                        {"type": "resize", "cols": resize_cols, "rows": resize_rows},
+                        "terminal.resize",
+                        {"cols": resize_cols, "rows": resize_rows},
                     )
                 except Exception as exc:
                     send_queue.put_nowait(
@@ -861,9 +907,9 @@ async def terminal_ws(websocket: WebSocket) -> None:
                     )
                 continue
 
-            if frame_type == "destroy":
+            if frame_method == "terminal.destroy":
                 try:
-                    await _send_broker_frame(active_session.shell_id, {"type": "destroy"})
+                    await _send_broker_notification(active_session.shell_id, "terminal.destroy")
                 except Exception as exc:
                     send_queue.put_nowait(
                         {
@@ -878,8 +924,8 @@ async def terminal_ws(websocket: WebSocket) -> None:
             send_queue.put_nowait(
                 {
                     "type": "error",
-                    "code": "unknown_frame",
-                    "message": f"Unsupported frame '{frame_type}'",
+                    "code": "unknown_method",
+                    "message": f"Unsupported notification '{frame_method or '<missing>'}'",
                     "fatal": False,
                 }
             )

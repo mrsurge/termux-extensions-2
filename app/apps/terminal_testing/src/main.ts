@@ -28,38 +28,48 @@ interface ShellRecord {
   logs?: ShellLogs;
 }
 
-interface HelloFrame {
-  type: 'hello';
+interface TerminalConnectParams {
   session_id?: string;
   shell_id?: string;
   cols?: number;
   rows?: number;
   resume_after_seq?: number;
   create_if_missing?: boolean;
+  cwd?: string;
+  shell?: string | string[];
 }
 
-interface InputFrame {
-  type: 'input';
+interface TerminalInputParams {
   data_b64: string;
   flush?: 'auto' | 'immediate';
 }
 
-interface ResizeFrame {
-  type: 'resize';
+interface TerminalResizeParams {
   cols: number;
   rows: number;
 }
 
-interface DestroyFrame {
-  type: 'destroy';
-}
+interface TerminalDestroyParams {}
 
-interface PingFrame {
-  type: 'ping';
+interface TerminalPingParams {
   nonce?: string;
 }
 
-type ClientFrame = HelloFrame | InputFrame | ResizeFrame | DestroyFrame | PingFrame;
+interface ClientNotificationMap {
+  'terminal.connect': TerminalConnectParams;
+  'terminal.input': TerminalInputParams;
+  'terminal.resize': TerminalResizeParams;
+  'terminal.destroy': TerminalDestroyParams;
+  'terminal.ping': TerminalPingParams;
+}
+
+type ClientMethod = keyof ClientNotificationMap;
+
+interface JsonRpcNotification<M extends ClientMethod> {
+  jsonrpc: '2.0';
+  method: M;
+  params: ClientNotificationMap[M];
+}
 
 interface ServerHelloFrame {
   type: 'hello';
@@ -198,8 +208,8 @@ const FONT_SIZE_MIN = 10;
 const FONT_SIZE_MAX = 28;
 const FONT_SIZE_STEP = 1;
 const FONT_SIZE_STORAGE_KEY = 'te2_terminal_testing_font_size';
-const INPUT_FLUSH_DELAY_MS = 8;
-const INPUT_FLUSH_THRESHOLD = 256;
+const INPUT_FLUSH_DELAY_MS = 32;
+const INPUT_FLUSH_THRESHOLD = 1024;
 
 function getRequired<T extends HTMLElement>(root: ParentNode, selector: string): T {
   const node = root.querySelector<T>(selector);
@@ -462,10 +472,11 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
   }
 
-  function sendFrame(frame: ClientFrame): void {
+  function sendNotification<M extends ClientMethod>(method: M, params: ClientNotificationMap[M]): void {
     const ws = state.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify(frame));
+    const payload: JsonRpcNotification<M> = { jsonrpc: '2.0', method, params };
+    ws.send(JSON.stringify(payload));
   }
 
   function shouldFlushImmediately(data: string): boolean {
@@ -477,7 +488,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     const data = state.inputBuffer;
     clearInputBuffer();
     const bytes = state.encoder.encode(data);
-    sendFrame({ type: 'input', data_b64: toBase64(bytes), flush });
+    sendNotification('terminal.input', {
+      data_b64: toBase64(bytes),
+      flush,
+    });
   }
 
   function queueInput(data: string): void {
@@ -519,7 +533,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       requestFit(6);
       try {
         if (state.term?.cols && state.term?.rows) {
-          sendFrame({ type: 'resize', cols: state.term.cols, rows: state.term.rows });
+          sendNotification('terminal.resize', { cols: state.term.cols, rows: state.term.rows });
         }
       } catch {
         // ignore
@@ -570,8 +584,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     state.ws = ws;
 
     ws.addEventListener('open', () => {
-      const hello: HelloFrame = {
-        type: 'hello',
+      const params: TerminalConnectParams = {
         shell_id: shellId,
         session_id: state.sessionId || undefined,
         resume_after_seq: state.lastSeqApplied,
@@ -579,7 +592,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
         rows: state.term?.rows || undefined,
       };
       setStatus('connecting…');
-      sendFrame(hello);
+      sendNotification('terminal.connect', params);
     });
 
     ws.addEventListener('message', (event: MessageEvent) => {
@@ -723,7 +736,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     const key = `${shellId}:${nextCols}x${nextRows}`;
     if (!force && state.lastResizeSent === key) return;
     state.lastResizeSent = key;
-    sendFrame({ type: 'resize', cols: nextCols, rows: nextRows });
+    sendNotification('terminal.resize', { cols: nextCols, rows: nextRows });
   }
 
   async function selectShell(id: string): Promise<void> {
