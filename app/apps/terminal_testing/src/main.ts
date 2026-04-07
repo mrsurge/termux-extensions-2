@@ -198,17 +198,29 @@ interface AppState {
   mode: 'list' | 'terminal';
   ctrlActive: boolean;
   inputBuffer: string;
+  inputBatchMode: InputBatchMode | null;
+  inputBufferStartedAt: number | null;
   inputFlushTimer: number | null;
+  inputLastChunk: string | null;
+  inputLastChunkAt: number | null;
   decoder: TextDecoder;
   encoder: TextEncoder;
 }
+
+type InputBatchMode = 'normal' | 'fast' | 'repeat';
 
 const INITIAL_TAIL = 2000;
 const FONT_SIZE_MIN = 10;
 const FONT_SIZE_MAX = 28;
 const FONT_SIZE_STEP = 1;
 const FONT_SIZE_STORAGE_KEY = 'te2_terminal_testing_font_size';
-const INPUT_FLUSH_DELAY_MS = 32;
+const INPUT_NORMAL_DELAY_MS = 16;
+const INPUT_NORMAL_MAX_HOLD_MS = 48;
+const INPUT_FAST_DELAY_MS = 24;
+const INPUT_FAST_MAX_HOLD_MS = 72;
+const INPUT_REPEAT_DELAY_MS = 64;
+const INPUT_REPEAT_MAX_HOLD_MS = 176;
+const INPUT_REPEAT_GAP_MS = 42;
 const INPUT_FLUSH_THRESHOLD = 1024;
 
 function getRequired<T extends HTMLElement>(root: ParentNode, selector: string): T {
@@ -298,7 +310,11 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     mode: 'list',
     ctrlActive: false,
     inputBuffer: '',
+    inputBatchMode: null,
+    inputBufferStartedAt: null,
     inputFlushTimer: null,
+    inputLastChunk: null,
+    inputLastChunkAt: null,
     decoder: new TextDecoder(),
     encoder: new TextEncoder(),
   };
@@ -466,6 +482,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
   function clearInputBuffer(): void {
     state.inputBuffer = '';
+    state.inputBatchMode = null;
+    state.inputBufferStartedAt = null;
     if (state.inputFlushTimer !== null) {
       clearTimeout(state.inputFlushTimer);
       state.inputFlushTimer = null;
@@ -480,7 +498,40 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function shouldFlushImmediately(data: string): boolean {
-    return data.includes('\r') || data.includes('\n') || data === '\u0003' || data === '\u0004' || data.startsWith('\u001b');
+    return data.includes('\r') || data.includes('\n') || data === '\u0003' || data === '\u0004' || data === '\u001b';
+  }
+
+  function isAnsiControlSequence(data: string): boolean {
+    return data.startsWith('\u001b') && data.length > 1;
+  }
+
+  function isLikelyBulkInput(data: string): boolean {
+    return data.length > 1 && !isAnsiControlSequence(data);
+  }
+
+  function mergeBatchMode(current: InputBatchMode | null, next: InputBatchMode): InputBatchMode {
+    if (current === 'repeat' || next === 'repeat') return 'repeat';
+    if (current === 'fast' || next === 'fast') return 'fast';
+    return 'normal';
+  }
+
+  function classifyBatchMode(data: string, now: number): InputBatchMode {
+    const gapMs = state.inputLastChunkAt === null ? Number.POSITIVE_INFINITY : now - state.inputLastChunkAt;
+    if (gapMs <= INPUT_REPEAT_GAP_MS) {
+      if (state.inputLastChunk === data) return 'repeat';
+      return 'fast';
+    }
+    return 'normal';
+  }
+
+  function batchPolicy(mode: InputBatchMode): { delayMs: number; maxHoldMs: number } {
+    if (mode === 'repeat') {
+      return { delayMs: INPUT_REPEAT_DELAY_MS, maxHoldMs: INPUT_REPEAT_MAX_HOLD_MS };
+    }
+    if (mode === 'fast') {
+      return { delayMs: INPUT_FAST_DELAY_MS, maxHoldMs: INPUT_FAST_MAX_HOLD_MS };
+    }
+    return { delayMs: INPUT_NORMAL_DELAY_MS, maxHoldMs: INPUT_NORMAL_MAX_HOLD_MS };
   }
 
   function flushInput(flush: 'auto' | 'immediate' = 'auto'): void {
@@ -495,16 +546,34 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function queueInput(data: string): void {
+    const now = performance.now();
+    const nextMode = classifyBatchMode(data, now);
+    state.inputLastChunk = data;
+    state.inputLastChunkAt = now;
     state.inputBuffer += data;
+    if (state.inputBufferStartedAt === null) {
+      state.inputBufferStartedAt = now;
+    }
     const bytes = state.encoder.encode(state.inputBuffer);
-    if (shouldFlushImmediately(data) || bytes.byteLength >= INPUT_FLUSH_THRESHOLD) {
+    if (shouldFlushImmediately(data) || isLikelyBulkInput(data) || bytes.byteLength >= INPUT_FLUSH_THRESHOLD) {
       flushInput('immediate');
       return;
     }
-    if (state.inputFlushTimer !== null) {
+
+    state.inputBatchMode = mergeBatchMode(state.inputBatchMode, nextMode);
+    const mode = state.inputBatchMode || 'normal';
+    const { delayMs, maxHoldMs } = batchPolicy(mode);
+    const heldForMs = now - state.inputBufferStartedAt;
+    if (heldForMs >= maxHoldMs) {
+      flushInput('auto');
       return;
     }
-    state.inputFlushTimer = window.setTimeout(() => flushInput('auto'), INPUT_FLUSH_DELAY_MS);
+
+    if (state.inputFlushTimer !== null) {
+      clearTimeout(state.inputFlushTimer);
+    }
+    const nextDelayMs = Math.max(0, Math.min(delayMs, maxHoldMs - heldForMs));
+    state.inputFlushTimer = window.setTimeout(() => flushInput('auto'), nextDelayMs);
   }
 
   function clearSocket(): void {
