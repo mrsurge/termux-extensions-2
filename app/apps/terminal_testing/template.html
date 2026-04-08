@@ -28,6 +28,16 @@
     flex: 1 1 auto;
     min-width: 0;
   }
+  .ta-shell-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+  }
+  .ta-shell-remove {
+    font-size: 0.8em;
+    padding: 4px 8px;
+  }
   .ta-shell-title {
     font-family: 'JetBrains Mono', monospace;
     font-weight: 600;
@@ -140,7 +150,7 @@
       </div>
     </div>
     <div class="ta-list-scroll">
-      <div style="font-size:0.85em; color:var(--muted-foreground); margin-bottom:8px;">Broker shells</div>
+      <div style="font-size:0.85em; color:var(--muted-foreground); margin-bottom:8px;">Shells</div>
       <div id="ta-shell-list"></div>
     </div>
   </div>

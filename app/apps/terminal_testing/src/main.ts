@@ -29,6 +29,13 @@ interface ShellRecord {
   logs?: ShellLogs;
 }
 
+interface ShellHistoryPayload {
+  frames: ServerFrame[];
+  after_seq: number;
+  count: number;
+  total_count: number;
+}
+
 interface TerminalConnectParams {
   session_id?: string;
   shell_id?: string;
@@ -763,7 +770,12 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     if (frame.type === 'error') {
       const message = frame.message || 'Terminal socket error';
       setStatus(message);
-      host.toast?.(message);
+      const expectedDeadShellWrite =
+        (frame.code === 'write_failed' || frame.code === 'resize_failed' || frame.code === 'destroy_failed')
+        && message.startsWith('Shell is not writable');
+      if (!expectedDeadShellWrite) {
+        host.toast?.(message);
+      }
     }
   }
 
@@ -862,7 +874,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   function renderShellList(): void {
     ui.list.innerHTML = '';
     if (!state.shells.length) {
-      ui.list.innerHTML = '<div style="color:var(--muted-foreground);">No broker shells yet.</div>';
+      ui.list.innerHTML = '<div style="color:var(--muted-foreground);">No shells yet.</div>';
       return;
     }
 
@@ -871,6 +883,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       const uptime = formatUptime(rec.stats?.uptime);
       const el = document.createElement('div');
       el.className = `ta-shell-item${state.activeId === rec.id ? ' active' : ''}`;
+      const removeMarkup = alive ? '' : '<button class="app-btn ta-shell-remove" type="button">Close</button>';
       el.innerHTML = `
         <div class="ta-status-dot ${alive ? 'ta-dot-alive' : 'ta-dot-dead'}"></div>
         <div class="ta-shell-main">
@@ -881,7 +894,16 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
             ${uptime ? `<span>uptime ${uptime}</span>` : ''}
           </div>
         </div>
+        <div class="ta-shell-actions">${removeMarkup}</div>
       `;
+      const removeButton = el.querySelector<HTMLButtonElement>('.ta-shell-remove');
+      if (removeButton) {
+        removeButton.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void removeShellById(rec.id);
+        });
+      }
       el.addEventListener('click', () => {
         void selectShell(rec.id);
         Array.from(ui.list.children).forEach((child) => child.classList.remove('active'));
@@ -904,26 +926,34 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
   }
 
-  async function primeFromLogTail(shellId: string): Promise<void> {
-    const detail = await api.get<ShellRecord>(`shells/${shellId}?logs=true&tail=${INITIAL_TAIL}`);
-    const lines = detail.logs?.stdout_tail;
-    if (!Array.isArray(lines) || !state.term) {
-      return;
-    }
-
-    for (const rawLine of lines) {
-      const frame = parseServerFrame(rawLine);
-      if (!frame || frame.type !== 'data') {
-        continue;
-      }
-      if (frame.seq <= state.lastSeqApplied) {
-        continue;
-      }
+  function applyReplayFrame(frame: ServerFrame): void {
+    if (frame.type === 'data') {
+      if (!state.term) return;
+      if (frame.seq <= state.lastSeqApplied) return;
       state.lastSeqApplied = frame.seq;
       const text = state.decoder.decode(fromBase64(frame.data_b64), { stream: true });
       if (text) {
         state.term.write(text);
       }
+      return;
+    }
+
+    if (frame.type === 'closed') {
+      if (frameHasSeq(frame) && typeof frame.seq === 'number') {
+        state.lastSeqApplied = Math.max(state.lastSeqApplied, frame.seq);
+      }
+    }
+  }
+
+  async function primeFromHistory(shellId: string): Promise<void> {
+    const detail = await api.get<ShellHistoryPayload>(`shells/${shellId}/history?after_seq=0`);
+    const frames = detail.frames;
+    if (!Array.isArray(frames) || !state.term) {
+      return;
+    }
+
+    for (const frame of frames) {
+      applyReplayFrame(frame);
     }
   }
 
@@ -1000,7 +1030,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
 
     applyFontSize(getCurrentFontSize());
-    await primeFromLogTail(id);
+    await primeFromHistory(id);
     connectWs(id);
 
     try {
@@ -1025,15 +1055,17 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
   }
 
-  async function removeShell(): Promise<void> {
-    if (!state.activeId) return;
+  async function removeShellById(shellId: string | null): Promise<void> {
+    if (!shellId) return;
     if (!confirm('Remove this shell? It will be killed if running.')) return;
     try {
-      await api.delete(`shells/${state.activeId}`);
-      disposeSession();
-      state.activeId = null;
-      ui.title.textContent = 'No shell selected';
-      setStatus('');
+      await api.delete(`shells/${shellId}`);
+      if (state.activeId === shellId) {
+        disposeSession();
+        state.activeId = null;
+        ui.title.textContent = 'No shell selected';
+        setStatus('');
+      }
       await listShells();
     } catch (error) {
       console.error(error);
@@ -1049,7 +1081,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
         const data = await api.post<ShellRecord>('shells', { cwd: '~' });
         await listShells();
         await selectShell(data.id);
-        host.toast?.('New broker shell started');
+        host.toast?.('New shell started');
       } catch (error) {
         console.error(error);
         alert(`Failed to start terminal: ${error instanceof Error ? error.message : String(error)}`);
@@ -1059,7 +1091,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   ui.btnRefresh.addEventListener('click', () => void listShells());
   ui.btnStop.addEventListener('click', () => void doAction('stop'));
   ui.btnKill.addEventListener('click', () => void doAction('kill'));
-  ui.btnRemove.addEventListener('click', () => void removeShell());
+  ui.btnRemove.addEventListener('click', () => void removeShellById(state.activeId));
   ui.btnMenu.addEventListener('click', openDrawer);
   ui.drawerOverlay.addEventListener('click', closeDrawer);
   ui.zoomOut.addEventListener('pointerdown', softKey(() => applyFontSize(getCurrentFontSize() - FONT_SIZE_STEP)), { passive: false });

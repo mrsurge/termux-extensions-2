@@ -3,7 +3,7 @@
   "name": "Terminal Testing",
   "icon_emoji": ">_",
   "version": "0.1.0",
-  "description": "Broker-backed terminal stream prototype for TE2.",
+  "description": "Terminal stream prototype for TE2.",
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"
   },

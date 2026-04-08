@@ -308,7 +308,7 @@ async def _create_shell_record(payload: CreateShellRequest | None = None) -> Jso
             wait_ready=False,
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to spawn broker shell: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to start shell: {exc}") from exc
 
     return await manager.describe(record)
 
@@ -403,6 +403,32 @@ async def _read_log_frames_after(path: str, after_seq: int) -> list[BrokerFrame]
     return await asyncio.to_thread(_read_log_after, path, after_seq)
 
 
+def _slice_history_frames(frames: list[BrokerFrame], limit: int) -> list[BrokerFrame]:
+    if limit <= 0 or len(frames) <= limit:
+        return frames
+    return frames[-limit:]
+
+
+async def _prime_dead_session_from_log(
+    session: TerminalSession,
+    *,
+    fallback_reason: str,
+    fallback_exit_code: int | None,
+) -> None:
+    frames = await _read_log_frames_after(session.stdout_log_path, 0)
+    if frames:
+        replay_tail = _slice_history_frames(frames, SESSION_RING_MAX)
+        async with session.lock:
+            session.last_seq = max((_frame_seq(frame) for frame in frames), default=0)
+            session.ring_buffer.extend(dict(frame) for frame in replay_tail)
+            for frame in reversed(frames):
+                if _frame_type(frame) == "closed":
+                    session.closed_payload = dict(frame)
+                    break
+    if session.closed_payload is None:
+        _ = await _make_synthetic_closed(session, fallback_reason, fallback_exit_code)
+
+
 async def _session_output_loop(session: TerminalSession) -> None:
     manager = await mgr()
     queue: OutputSubscriptionProtocol | None = None
@@ -483,23 +509,28 @@ async def _get_or_create_session(shell_id: str, requested_session_id: str | None
             if existing is not None:
                 return existing
 
-        if not await _ensure_live_broker_io(shell_id):
-            raise RuntimeError("Broker shell missing live pipe capabilities")
-
         manager = await mgr()
         rec = await manager.get_shell(shell_id)
         if rec is None:
-            raise RuntimeError("Broker shell not found")
+            raise RuntimeError("Shell not found")
+        live_broker_io = await _ensure_live_broker_io(shell_id)
 
         session = TerminalSession(
             session_id=uuid.uuid4().hex,
             shell_id=shell_id,
             stdout_log_path=rec.stdout_log,
         )
-        session.reader_task = asyncio.create_task(
-            _session_output_loop(session),
-            name=f"terminal-testing-reader-{shell_id}",
-        )
+        if live_broker_io:
+            session.reader_task = asyncio.create_task(
+                _session_output_loop(session),
+                name=f"terminal-testing-reader-{shell_id}",
+            )
+        else:
+            await _prime_dead_session_from_log(
+                session,
+                fallback_reason=rec.status or "missing",
+                fallback_exit_code=rec.exit_code,
+            )
         _sessions[session.session_id] = session
         _shell_to_session[shell_id] = session.session_id
         return session
@@ -610,9 +641,13 @@ async def _send_broker_notification(
     method: str,
     params: Mapping[str, object] | None = None,
 ) -> None:
-    if not await _ensure_live_broker_io(shell_id):
-        raise RuntimeError("Broker shell is not writable")
     manager = await mgr()
+    rec = await manager.get_shell(shell_id)
+    if rec is None:
+        raise RuntimeError("Shell not found")
+    if not await _ensure_live_broker_io(shell_id):
+        status = (rec.status or "").strip() or "not running"
+        raise RuntimeError(f"Shell is not writable ({status})")
     await manager.write_to_pipe(shell_id, _jsonrpc_line(method, params))
 
 
@@ -665,6 +700,28 @@ async def get_shell(
     return _ok(data)
 
 
+@terminal_testing_bp.get("/shells/{shell_id}/history")
+async def get_shell_history(
+    shell_id: str,
+    after_seq: int = 0,
+    limit: int = 0,
+) -> JsonObject:
+    manager = await mgr()
+    rec = await manager.get_shell(shell_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Shell not found")
+    frames = await _read_log_frames_after(rec.stdout_log, max(0, after_seq))
+    sliced = _slice_history_frames(frames, max(0, limit))
+    return _ok(
+        {
+            "frames": sliced,
+            "after_seq": max(0, after_seq),
+            "count": len(sliced),
+            "total_count": len(frames),
+        }
+    )
+
+
 @terminal_testing_bp.post("/shells/{shell_id}/input")
 async def send_input(shell_id: str, payload: ShellInputRequest) -> JsonObject:
     text = payload.data
@@ -678,7 +735,7 @@ async def send_input(shell_id: str, payload: ShellInputRequest) -> JsonObject:
             {"data_b64": encoded, "flush": "immediate"},
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to write broker input: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Failed to write shell input: {exc}") from exc
     return _ok({"id": shell_id})
 
 
