@@ -1,7 +1,5 @@
 import ReconnectingWebSocket from 'reconnecting-websocket';
-import { HtermTerminalLike } from 'hterm/public.js';
 import { initConsoleBridge } from 'te2-console-bridge';
-import htermModule from './hterm-runtime';
 
 interface AppApi {
   get<T>(path: string): Promise<T>;
@@ -112,7 +110,6 @@ interface ServerReadyFrame {
 }
 
 type ServerFrame = ServerHelloFrame | ServerDataFrame | ServerClosedFrame | ServerErrorFrame | ServerPongFrame | ServerReadyFrame;
-type MaybeInputEvent = InputEvent & { inputType?: string; data?: string | null };
 
 interface UiRefs {
   list: HTMLElement;
@@ -130,7 +127,6 @@ interface UiRefs {
   title: HTMLElement;
   status: HTMLElement;
   termContainer: HTMLElement;
-  keySelect: HTMLButtonElement;
   keyCtrl: HTMLButtonElement;
   keyTab: HTMLButtonElement;
   keyEsc: HTMLButtonElement;
@@ -140,6 +136,51 @@ interface UiRefs {
   keyRight: HTMLButtonElement;
 }
 
+interface XtermTheme {
+  background?: string;
+  cursor?: string;
+}
+
+interface XtermOptions {
+  convertEol?: boolean;
+  cursorBlink?: boolean;
+  scrollback?: number;
+  fontFamily?: string;
+  fontSize?: number;
+  theme?: XtermTheme;
+}
+
+interface XtermDisposable {
+  dispose(): void;
+}
+
+interface XtermFitAddonLike {
+  fit(): void;
+}
+
+interface XtermFitAddonConstructor {
+  new (): XtermFitAddonLike;
+}
+
+interface XtermTerminalLike {
+  cols: number;
+  rows: number;
+  options: { fontSize?: number };
+  open(container: HTMLElement): void;
+  focus(): void;
+  dispose(): void;
+  write(data: string): void;
+  loadAddon(addon: XtermFitAddonLike): void;
+  onData(handler: (data: string) => void): XtermDisposable;
+  onResize(handler: (event: { cols: number; rows: number }) => void): XtermDisposable;
+  attachCustomKeyEventHandler?(handler: (event: KeyboardEvent) => boolean): void;
+  setOption?(key: string, value: unknown): void;
+}
+
+interface XtermTerminalConstructor {
+  new (options?: XtermOptions): XtermTerminalLike;
+}
+
 interface AppState {
   shells: ShellRecord[];
   activeId: string | null;
@@ -147,15 +188,14 @@ interface AppState {
   wsDesiredId: string | null;
   sessionId: string | null;
   lastSeqApplied: number;
-  term: HtermTerminalLike | null;
+  term: XtermTerminalLike | null;
+  fitAddon: XtermFitAddonLike | null;
   doFit: (() => void) | null;
   fitRaf: number | null;
   fitFramesRemaining: number;
   lastResizeSent: string | null;
   resizeObserver: ResizeObserver | null;
   mode: 'list' | 'terminal';
-  selectMode: boolean;
-  setSelectMode: ((enabled: boolean, options?: { focus?: boolean }) => void) | null;
   ctrlActive: boolean;
   inputBuffer: string;
   inputBatchMode: InputBatchMode | null;
@@ -186,6 +226,17 @@ let terminalConsoleBridgeInitialized = false;
 
 function getSocketIoGlobal(): unknown {
   return (window as Window & { io?: unknown }).io;
+}
+
+function getXtermGlobal(): XtermTerminalConstructor | null {
+  return ((window as Window & { Terminal?: XtermTerminalConstructor }).Terminal) ?? null;
+}
+
+function getFitAddonGlobal(): XtermFitAddonConstructor | null {
+  const fitGlobal = (window as Window & { FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor } }).FitAddon;
+  if (!fitGlobal) return null;
+  if (typeof fitGlobal === 'function') return fitGlobal;
+  return fitGlobal.FitAddon ?? null;
 }
 
 function loadScript(src: string): Promise<void> {
@@ -222,6 +273,38 @@ async function ensureTerminalConsoleBridge(): Promise<void> {
   } catch (error) {
     console.warn('[terminal_testing] failed to init console bridge', error);
   }
+}
+
+function ensureXtermCSS(): void {
+  const href = '/static/vendor/xterm/xterm.css';
+  const exists = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).some((node) => {
+    const link = node as HTMLLinkElement;
+    return typeof link.href === 'string' && link.href.includes('/static/vendor/xterm/xterm.css');
+  });
+  if (exists) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = href;
+  document.head.appendChild(link);
+}
+
+async function ensureXterm(): Promise<XtermTerminalConstructor> {
+  const existing = getXtermGlobal();
+  if (existing) return existing;
+  ensureXtermCSS();
+  await loadScript('/static/vendor/xterm/xterm.js');
+  const loaded = getXtermGlobal();
+  if (!loaded) throw new Error('Failed to load xterm');
+  return loaded;
+}
+
+async function ensureFitAddon(): Promise<XtermFitAddonConstructor> {
+  const existing = getFitAddonGlobal();
+  if (existing) return existing;
+  await loadScript('/static/vendor/xterm/addon-fit.js');
+  const loaded = getFitAddonGlobal();
+  if (!loaded) throw new Error('Failed to load xterm fit addon');
+  return loaded;
 }
 
 function getRequired<T extends HTMLElement>(root: ParentNode, selector: string): T {
@@ -268,8 +351,39 @@ function frameHasSeq(frame: ServerFrame): frame is ServerDataFrame | ServerClose
   return typeof (frame as { seq?: unknown }).seq === 'number';
 }
 
+function mapCtrlCharacter(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const char = raw.charAt(raw.length - 1);
+  if (!char) return null;
+  const code = char.charCodeAt(0);
+  if (code >= 64 && code <= 95) {
+    return String.fromCharCode(code - 64);
+  }
+  const lowerCode = char.toLowerCase().charCodeAt(0);
+  if (lowerCode >= 97 && lowerCode <= 122) {
+    return String.fromCharCode(lowerCode - 96);
+  }
+  return null;
+}
+
+function getComposedTargetChar(target: EventTarget | null): string | null {
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return null;
+  const value = target.value || '';
+  if (!value) return null;
+  const selectionStart = typeof target.selectionStart === 'number' ? target.selectionStart : value.length;
+  const index = Math.max(0, selectionStart - 1);
+  return value.charAt(index) || null;
+}
+
+function trimComposedTargetValue(target: EventTarget | null): void {
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
+  if (!target.value) return;
+  target.value = target.value.slice(0, -1);
+}
+
 export default function initTerminalApp(root: HTMLElement, api: AppApi, host: HostBridge): void {
   void ensureTerminalConsoleBridge();
+
   const ui: UiRefs = {
     list: getRequired(root, '#ta-shell-list'),
     listContainer: getRequired(root, '#ta-list-container'),
@@ -286,7 +400,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     title: getRequired(root, '#ta-shell-title'),
     status: getRequired(root, '#ta-shell-status'),
     termContainer: getRequired(root, '#ta-term'),
-    keySelect: getRequired(root, '#k-select'),
     keyCtrl: getRequired(root, '#k-ctrl'),
     keyTab: getRequired(root, '#k-tab'),
     keyEsc: getRequired(root, '#k-esc'),
@@ -304,14 +417,13 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     sessionId: null,
     lastSeqApplied: 0,
     term: null,
+    fitAddon: null,
     doFit: null,
     fitRaf: null,
     fitFramesRemaining: 0,
     lastResizeSent: null,
     resizeObserver: null,
     mode: 'list',
-    selectMode: false,
-    setSelectMode: null,
     ctrlActive: false,
     inputBuffer: '',
     inputBatchMode: null,
@@ -324,13 +436,13 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   };
 
   function requestFit(frames = 8): void {
-    if (!state.term || !state.doFit) return;
+    if (!state.term || !state.fitAddon || !state.doFit) return;
     state.fitFramesRemaining = Math.max(state.fitFramesRemaining, Math.max(1, Number(frames) || 1));
     if (state.fitRaf !== null) return;
 
     const step = (): void => {
       state.fitRaf = null;
-      if (!state.term || !state.doFit) return;
+      if (!state.term || !state.fitAddon || !state.doFit) return;
       try {
         state.doFit();
       } catch {
@@ -372,7 +484,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function getCurrentFontSize(): number {
-    const size = state.term?.getFontSize();
+    const size = state.term?.options?.fontSize;
     return typeof size === 'number' && Number.isFinite(size) ? size : getStoredFontSize();
   }
 
@@ -380,9 +492,13 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     if (!state.term) return;
     const clamped = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(size)));
     try {
-      state.term.setFontSize(clamped);
+      state.term.options.fontSize = clamped;
     } catch {
-      return;
+      try {
+        state.term.setOption?.('fontSize', clamped);
+      } catch {
+        return;
+      }
     }
     try {
       localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(clamped));
@@ -409,12 +525,16 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function refocusTerm(): void {
-    if (state.selectMode) return;
     try {
       state.term?.focus();
     } catch {
       return;
     }
+  }
+
+  function clearCtrlMode(): void {
+    state.ctrlActive = false;
+    ui.keyCtrl.classList.remove('toggle');
   }
 
   function softKey(handler: () => void): (ev: Event) => void {
@@ -436,33 +556,12 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     return `${proto}//${location.host}/ws/app/terminal_testing/terminal`;
   }
 
-  function getTerminalCols(term: HtermTerminalLike | null): number {
-    return Math.max(1, Number(term?.screenSize.width) || 0);
+  function getTerminalCols(term: XtermTerminalLike | null): number {
+    return Math.max(1, Number(term?.cols) || 0);
   }
 
-  function getTerminalRows(term: HtermTerminalLike | null): number {
-    return Math.max(1, Number(term?.screenSize.height) || 0);
-  }
-
-  function fitHterm(term: HtermTerminalLike): { cols: number; rows: number } | null {
-    const screen = term.scrollPort_.getScreenSize();
-    const charSize = term.scrollPort_.characterSize;
-    const width = Number(screen.width) || 0;
-    const height = Number(screen.height) || 0;
-    const charWidth = Number(charSize.width) || 0;
-    const charHeight = Number(charSize.height) || 0;
-    if (!width || !height || !charWidth || !charHeight) {
-      return null;
-    }
-
-    return {
-      cols: Math.max(1, Math.floor(width / charWidth)),
-      rows: Math.max(1, Math.floor(height / charHeight)),
-    };
-  }
-
-  function getImeTarget(term: HtermTerminalLike | null): HTMLTextAreaElement | null {
-    return term?.scrollPort_?.pasteTarget_ ?? null;
+  function getTerminalRows(term: XtermTerminalLike | null): number {
+    return Math.max(1, Number(term?.rows) || 0);
   }
 
   function clearInputBuffer(): void {
@@ -603,7 +702,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       state.lastSeqApplied = frame.seq;
       const text = state.decoder.decode(fromBase64(frame.data_b64), { stream: true });
       if (text) {
-        state.term.interpret(text);
+        state.term.write(text);
       }
       return;
     }
@@ -621,7 +720,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       const message = frame.message || 'Terminal socket error';
       setStatus(message);
       host.toast?.(message);
-      return;
     }
   }
 
@@ -654,13 +752,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     });
 
     ws.addEventListener('message', (event: MessageEvent) => {
-      if (typeof event.data !== 'string') {
-        return;
-      }
+      if (typeof event.data !== 'string') return;
       const frame = parseServerFrame(event.data);
-      if (!frame) {
-        return;
-      }
+      if (!frame) return;
       handleServerFrame(frame);
     });
 
@@ -675,10 +769,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function disposeSession(): void {
-    state.setSelectMode?.(false, { focus: false });
-    state.setSelectMode = null;
-    state.selectMode = false;
-    ui.keySelect.classList.remove('toggle');
     state.wsDesiredId = null;
     state.sessionId = null;
     state.lastSeqApplied = 0;
@@ -697,13 +787,15 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
     state.resizeObserver = null;
     try {
-      state.term?.uninstallKeyboard();
+      state.term?.dispose();
     } catch {
       // ignore
     }
     state.term = null;
+    state.fitAddon = null;
     state.doFit = null;
     ui.termContainer.innerHTML = '';
+    clearCtrlMode();
   }
 
   async function listShells(): Promise<void> {
@@ -785,7 +877,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       state.lastSeqApplied = frame.seq;
       const text = state.decoder.decode(fromBase64(frame.data_b64), { stream: true });
       if (text) {
-        state.term.interpret(text);
+        state.term.write(text);
       }
     }
   }
@@ -800,6 +892,34 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     sendNotification('terminal.resize', { cols: nextCols, rows: nextRows });
   }
 
+  function consumeCtrlInput(data: string): string {
+    if (!state.ctrlActive) return data;
+    const mapped = mapCtrlCharacter(data);
+    if (!mapped) return data;
+    clearCtrlMode();
+    return mapped;
+  }
+
+  function installCtrlKeyHandler(term: XtermTerminalLike): void {
+    if (typeof term.attachCustomKeyEventHandler !== 'function') return;
+    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      if (!state.ctrlActive) return true;
+      let mapped: string | null = null;
+      if (event.keyCode === 229) {
+        mapped = mapCtrlCharacter(getComposedTargetChar(event.target));
+      } else if (typeof event.key === 'string' && event.key.length === 1) {
+        mapped = mapCtrlCharacter(event.key);
+      }
+      if (!mapped) return true;
+      if (event.type === 'keyup') {
+        queueInput(mapped);
+        trimComposedTargetValue(event.target);
+        clearCtrlMode();
+      }
+      return false;
+    });
+  }
+
   async function selectShell(id: string): Promise<void> {
     state.activeId = id;
     const rec = state.shells.find((item) => item.id === id) || null;
@@ -812,271 +932,58 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
     await ensureFontLoaded('JetBrains Mono', 900);
 
-    const term = new htermModule.Terminal();
-    term.decorate(ui.termContainer);
-    term.setBackgroundColor('#0b1020');
-    term.setCursorColor('#9cc3ff');
-    term.setCursorBlink(true);
-    term.setSelectionEnabled(true);
-    term.setFontFamily('"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace');
-    term.setFontSize(getStoredFontSize());
-    term.installKeyboard();
+    const TerminalCtor = await ensureXterm();
+    const term = new TerminalCtor({
+      convertEol: true,
+      cursorBlink: true,
+      scrollback: 5000,
+      fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      fontSize: getStoredFontSize(),
+      theme: {
+        background: '#0b1020',
+        cursor: '#9cc3ff',
+      },
+    });
+    term.open(ui.termContainer);
     term.focus();
     state.term = term;
 
-    let suppressResizeCallback = false;
     const handleInput = (data: string): void => {
-      let payload = data;
-      if (state.ctrlActive && data.length === 1) {
-        const code = data.toLowerCase().charCodeAt(0);
-        if (code >= 97 && code <= 122) {
-          payload = String.fromCharCode(code - 96);
-          state.ctrlActive = false;
-          ui.keyCtrl.classList.remove('toggle');
-        }
-      }
-      queueInput(payload);
+      queueInput(consumeCtrlInput(data));
     };
 
-    const imeTarget = getImeTarget(term);
-    const screenNode = term.scrollPort_.getScreenNode();
-    const iframeDoc = term.scrollPort_.getDocument();
-    let selectModeCleanupTimer: number | null = null;
-    let touchTapPointerId: number | null = null;
-    let touchTapArmed = false;
+    installCtrlKeyHandler(term);
+    term.onData(handleInput);
+    term.onResize(({ cols, rows }) => {
+      scheduleResizeSync(id, cols, rows);
+    });
 
-    const clearSelectionSurface = (): void => {
-      try {
-        screenNode.removeAttribute('contenteditable');
-        screenNode.removeAttribute('inputmode');
-      } catch {
-        // ignore
-      }
-    };
-
-    const focusImeTarget = (): void => {
-      if (!imeTarget) {
-        refocusTerm();
-        return;
-      }
-      clearSelectionSurface();
-
-      try {
-        imeTarget.value = '';
-      } catch {
-        // ignore
-      }
-
-      try {
-        imeTarget.style.opacity = '0.01';
-      } catch {
-        // ignore
-      }
-
-      try {
-        imeTarget.focus();
-      } catch {
-        refocusTerm();
-      }
-    };
-
-    const setSelectMode = (enabled: boolean, options?: { focus?: boolean }): void => {
-      const shouldFocus = options?.focus !== false;
-      state.selectMode = enabled;
-      ui.keySelect.classList.toggle('toggle', enabled);
-
-      if (selectModeCleanupTimer !== null) {
-        clearTimeout(selectModeCleanupTimer);
-        selectModeCleanupTimer = null;
-      }
-
-      if (enabled) {
-        clearInputBuffer();
+    try {
+      const FitAddonCtor = await ensureFitAddon();
+      const fitAddon = new FitAddonCtor();
+      term.loadAddon(fitAddon);
+      state.fitAddon = fitAddon;
+      state.doFit = () => {
         try {
-          screenNode.setAttribute('contenteditable', 'plaintext-only');
-          screenNode.setAttribute('inputmode', 'text');
+          fitAddon.fit();
         } catch {
           // ignore
         }
-        if (shouldFocus) {
-          try {
-            screenNode.focus({ preventScroll: true });
-          } catch {
-            try {
-              screenNode.focus();
-            } catch {
-              // ignore
-            }
-          }
-        }
-        selectModeCleanupTimer = window.setTimeout(() => {
-          selectModeCleanupTimer = null;
-          if (!state.selectMode) {
-            clearSelectionSurface();
-          }
-        }, 3000);
-      } else {
-        clearSelectionSurface();
-        if (shouldFocus) {
-          focusImeTarget();
-        }
-      }
-
-      console.info('[terminal_testing] select mode', enabled ? 'on' : 'off');
-    };
-    state.setSelectMode = setSelectMode;
-
-    if (imeTarget) {
-      imeTarget.setAttribute('inputmode', 'text');
-      imeTarget.setAttribute('autocapitalize', 'off');
-      imeTarget.setAttribute('autocomplete', 'off');
-      imeTarget.setAttribute('autocorrect', 'off');
-      imeTarget.spellcheck = false;
-
-      imeTarget.addEventListener('beforeinput', (event) => {
-        const inputEvent = event as MaybeInputEvent;
-        const inputType = String(inputEvent.inputType || '');
-        if (inputType === 'deleteContentBackward') {
-          event.preventDefault();
-          handleInput('\u007f');
-          return;
-        }
-        if (inputType === 'insertLineBreak' || inputType === 'insertParagraph') {
-          event.preventDefault();
-          handleInput('\r');
-          return;
-        }
-        if (typeof inputEvent.data === 'string' && inputEvent.data.length > 0) {
-          event.preventDefault();
-          handleInput(inputEvent.data);
-          try {
-            imeTarget.value = '';
-          } catch {
-            // ignore
-          }
-        }
-      });
-
-      imeTarget.addEventListener('input', () => {
-        if (!imeTarget.value) return;
-        const payload = imeTarget.value;
-        imeTarget.value = '';
-        handleInput(payload);
-      });
-    }
-
-    const isTouchTargetWithinScreen = (target: EventTarget | null): boolean => {
-      return target instanceof Node && screenNode.contains(target);
-    };
-
-    const clearTouchTapArm = (): void => {
-      touchTapPointerId = null;
-      touchTapArmed = false;
-    };
-
-    const handleTouchPointerDown = (event: PointerEvent): void => {
-      if (event.pointerType && event.pointerType !== 'touch') return;
-      if (!isTouchTargetWithinScreen(event.target)) return;
-      if (state.selectMode) {
-        event.stopPropagation();
-        return;
-      }
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      touchTapPointerId = event.pointerId ?? null;
-      touchTapArmed = true;
-    };
-
-    const handleTouchPointerUp = (event: PointerEvent): void => {
-      if (event.pointerType && event.pointerType !== 'touch') return;
-      if (!isTouchTargetWithinScreen(event.target)) return;
-      if (state.selectMode) {
-        event.stopPropagation();
-        return;
-      }
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      const pointerMatches = touchTapPointerId === null || touchTapPointerId === (event.pointerId ?? null);
-      const shouldFocus = touchTapArmed && pointerMatches;
-      clearTouchTapArm();
-      if (shouldFocus) {
-        focusImeTarget();
-      }
-    };
-
-    const handleTouchPointerCancel = (event: PointerEvent): void => {
-      if (event.pointerType && event.pointerType !== 'touch') return;
-      if (!isTouchTargetWithinScreen(event.target)) return;
-      clearTouchTapArm();
-    };
-
-    const handleScreenClick = (event: MouseEvent): void => {
-      if (!isTouchTargetWithinScreen(event.target)) return;
-      if (state.selectMode) {
-        event.stopPropagation();
-        return;
-      }
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    };
-
-    if (term.screen_ && typeof term.screen_.expandSelection === 'function') {
-      const originalExpandSelection = term.screen_.expandSelection.bind(term.screen_);
-      term.screen_.expandSelection = (selection) => {
-        try {
-          originalExpandSelection(selection);
-        } catch (error) {
-          console.warn('hterm expandSelection failed', error);
-        }
       };
-    }
-
-    iframeDoc.addEventListener('pointerdown', handleTouchPointerDown, true);
-    iframeDoc.addEventListener('pointerup', handleTouchPointerUp, true);
-    iframeDoc.addEventListener('pointercancel', handleTouchPointerCancel, true);
-    iframeDoc.addEventListener('click', handleScreenClick, true);
-
-    term.io.onVTKeystroke = handleInput;
-    term.io.sendString = handleInput;
-    term.io.onTerminalResize = (cols, rows) => {
-      if (suppressResizeCallback) return;
-      scheduleResizeSync(id, Number(cols), Number(rows));
-    };
-
-    state.doFit = () => {
-      if (!state.term) return;
-      const nextSize = fitHterm(state.term);
-      if (!nextSize) return;
-      if (nextSize.cols === getTerminalCols(state.term) && nextSize.rows === getTerminalRows(state.term)) {
-        return;
+      requestFit(18);
+      if (typeof ResizeObserver !== 'undefined') {
+        state.resizeObserver = new ResizeObserver(() => requestFit(8));
+        state.resizeObserver.observe(ui.termContainer);
       }
-
-      suppressResizeCallback = true;
-      try {
-        if (nextSize.cols !== getTerminalCols(state.term)) {
-          state.term.setWidth(nextSize.cols);
-        }
-        if (nextSize.rows !== getTerminalRows(state.term)) {
-          state.term.setHeight(nextSize.rows);
-        }
-        state.term.scrollPort_.scheduleRedraw();
-      } finally {
-        suppressResizeCallback = false;
-      }
-
-      scheduleResizeSync(id, nextSize.cols, nextSize.rows, true);
-    };
-
-    requestFit(18);
-    if (typeof ResizeObserver !== 'undefined') {
-      state.resizeObserver = new ResizeObserver(() => requestFit(8));
-      state.resizeObserver.observe(ui.termContainer);
+    } catch (error) {
+      console.warn('[terminal_testing] fit addon unavailable', error);
+      state.fitAddon = null;
+      state.doFit = null;
     }
 
     applyFontSize(getCurrentFontSize());
     await primeFromLogTail(id);
     connectWs(id);
-    setSelectMode(false, { focus: true });
 
     try {
       const cols = getTerminalCols(term);
@@ -1116,6 +1023,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
   }
 
+  ui.termContainer.addEventListener('pointerdown', () => refocusTerm(), { passive: true });
+
   ui.btnNew.addEventListener('click', () => {
     void (async () => {
       try {
@@ -1137,15 +1046,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   ui.drawerOverlay.addEventListener('click', closeDrawer);
   ui.zoomOut.addEventListener('pointerdown', softKey(() => applyFontSize(getCurrentFontSize() - FONT_SIZE_STEP)), { passive: false });
   ui.zoomIn.addEventListener('pointerdown', softKey(() => applyFontSize(getCurrentFontSize() + FONT_SIZE_STEP)), { passive: false });
-  ui.keySelect.addEventListener(
-    'pointerdown',
-    (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      state.setSelectMode?.(!state.selectMode, { focus: true });
-    },
-    { passive: false },
-  );
   ui.keyCtrl.addEventListener('pointerdown', softKey(toggleCtrl), { passive: false });
   ui.keyTab.addEventListener('pointerdown', softKey(() => queueInput('\t')), { passive: false });
   ui.keyEsc.addEventListener('pointerdown', softKey(() => queueInput('\u001b')), { passive: false });
