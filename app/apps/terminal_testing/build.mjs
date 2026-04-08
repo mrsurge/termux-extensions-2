@@ -1,6 +1,9 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { build, context } from 'esbuild';
 
 const isWatch = process.argv.includes('--watch');
+const appRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const shared = {
   bundle: true,
@@ -9,6 +12,10 @@ const shared = {
   logLevel: 'info',
   format: 'esm',
   target: 'es2022',
+  alias: {
+    hterm: path.join(appRoot, 'vendor', 'hterm'),
+    'te2-console-bridge': path.join(appRoot, '..', 'file_editor_cm6', 'static', 'js', 'console_bridge.js'),
+  },
   external: [
     '/static/vendor/*',
   ],

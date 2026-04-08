@@ -12,7 +12,11 @@
     "isolatedModules": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "rootDir": ".",
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "hterm/*": ["vendor/hterm/*"],
+      "te2-console-bridge": ["../file_editor_cm6/static/js/console_bridge.js"]
+    }
   },
   "include": [
     "src/**/*.ts",
