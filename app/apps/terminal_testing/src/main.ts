@@ -181,6 +181,10 @@ interface XtermTerminalConstructor {
   new (options?: XtermOptions): XtermTerminalLike;
 }
 
+interface XtermRuntimeBridge extends XtermTerminalLike {
+  input(data: string): void;
+}
+
 interface AppState {
   shells: ShellRecord[];
   activeId: string | null;
@@ -222,6 +226,7 @@ const INPUT_REPEAT_DELAY_MS = 64;
 const INPUT_REPEAT_MAX_HOLD_MS = 176;
 const INPUT_REPEAT_GAP_MS = 42;
 const INPUT_FLUSH_THRESHOLD = 1024;
+const HELPER_BASE_URL = '/apps/terminal_testing/vendor/android-terminalapp-assets-js';
 let terminalConsoleBridgeInitialized = false;
 
 function getSocketIoGlobal(): unknown {
@@ -239,6 +244,24 @@ function getFitAddonGlobal(): XtermFitAddonConstructor | null {
   return fitGlobal.FitAddon ?? null;
 }
 
+function getRuntimeWindow(): Window & {
+  io?: unknown;
+  Terminal?: XtermTerminalConstructor;
+  FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor };
+  term?: XtermRuntimeBridge;
+  ctrl?: boolean;
+  __terminalTestingTouchToMouseLoaded?: boolean;
+} {
+  return window as Window & {
+    io?: unknown;
+    Terminal?: XtermTerminalConstructor;
+    FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor };
+    term?: XtermRuntimeBridge;
+    ctrl?: boolean;
+    __terminalTestingTouchToMouseLoaded?: boolean;
+  };
+}
+
 function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
@@ -248,6 +271,51 @@ function loadScript(src: string): Promise<void> {
     script.onerror = (event) => reject(event);
     document.head.appendChild(script);
   });
+}
+
+function loadHelperScript(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => {
+      script.remove();
+      resolve();
+    };
+    script.onerror = (event) => {
+      script.remove();
+      reject(event);
+    };
+    document.head.appendChild(script);
+  });
+}
+
+function helperUrl(name: string, fresh = false): string {
+  const url = `${HELPER_BASE_URL}/${name}`;
+  if (!fresh) return url;
+  return `${url}?ts=${Date.now()}`;
+}
+
+async function ensureTouchToMouseHelper(): Promise<void> {
+  const runtimeWindow = getRuntimeWindow();
+  if (runtimeWindow.__terminalTestingTouchToMouseLoaded) return;
+  await loadHelperScript(helperUrl('touch_to_mouse_handler.js'));
+  runtimeWindow.__terminalTestingTouchToMouseLoaded = true;
+}
+
+async function bindVendoredCtrlHandler(term: XtermTerminalLike, input: (data: string) => void): Promise<void> {
+  const runtimeWindow = getRuntimeWindow();
+  const bridge = term as XtermRuntimeBridge;
+  bridge.input = input;
+  runtimeWindow.term = bridge;
+  runtimeWindow.ctrl = false;
+  await loadHelperScript(helperUrl('ctrl_key_handler.js', true));
+}
+
+async function setVendoredCtrlState(enabled: boolean): Promise<void> {
+  const runtimeWindow = getRuntimeWindow();
+  runtimeWindow.ctrl = enabled;
+  await loadHelperScript(helperUrl(enabled ? 'enable_ctrl_key.js' : 'disable_ctrl_key.js', true));
 }
 
 async function ensureSocketIoClient(): Promise<void> {
@@ -349,36 +417,6 @@ function parseServerFrame(raw: string): ServerFrame | null {
 
 function frameHasSeq(frame: ServerFrame): frame is ServerDataFrame | ServerClosedFrame {
   return typeof (frame as { seq?: unknown }).seq === 'number';
-}
-
-function mapCtrlCharacter(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const char = raw.charAt(raw.length - 1);
-  if (!char) return null;
-  const code = char.charCodeAt(0);
-  if (code >= 64 && code <= 95) {
-    return String.fromCharCode(code - 64);
-  }
-  const lowerCode = char.toLowerCase().charCodeAt(0);
-  if (lowerCode >= 97 && lowerCode <= 122) {
-    return String.fromCharCode(lowerCode - 96);
-  }
-  return null;
-}
-
-function getComposedTargetChar(target: EventTarget | null): string | null {
-  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return null;
-  const value = target.value || '';
-  if (!value) return null;
-  const selectionStart = typeof target.selectionStart === 'number' ? target.selectionStart : value.length;
-  const index = Math.max(0, selectionStart - 1);
-  return value.charAt(index) || null;
-}
-
-function trimComposedTargetValue(target: EventTarget | null): void {
-  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) return;
-  if (!target.value) return;
-  target.value = target.value.slice(0, -1);
 }
 
 export default function initTerminalApp(root: HTMLElement, api: AppApi, host: HostBridge): void {
@@ -535,6 +573,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   function clearCtrlMode(): void {
     state.ctrlActive = false;
     ui.keyCtrl.classList.remove('toggle');
+    void setVendoredCtrlState(false).catch((error) => {
+      console.warn('[terminal_testing] failed to disable vendored ctrl helper', error);
+    });
   }
 
   function softKey(handler: () => void): (ev: Event) => void {
@@ -549,6 +590,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   function toggleCtrl(): void {
     state.ctrlActive = !state.ctrlActive;
     ui.keyCtrl.classList.toggle('toggle', state.ctrlActive);
+    void setVendoredCtrlState(state.ctrlActive).catch((error) => {
+      console.warn('[terminal_testing] failed to toggle vendored ctrl helper', error);
+    });
   }
 
   function wsUrl(): string {
@@ -795,6 +839,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     state.fitAddon = null;
     state.doFit = null;
     ui.termContainer.innerHTML = '';
+    getRuntimeWindow().term = undefined;
     clearCtrlMode();
   }
 
@@ -892,34 +937,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     sendNotification('terminal.resize', { cols: nextCols, rows: nextRows });
   }
 
-  function consumeCtrlInput(data: string): string {
-    if (!state.ctrlActive) return data;
-    const mapped = mapCtrlCharacter(data);
-    if (!mapped) return data;
-    clearCtrlMode();
-    return mapped;
-  }
-
-  function installCtrlKeyHandler(term: XtermTerminalLike): void {
-    if (typeof term.attachCustomKeyEventHandler !== 'function') return;
-    term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
-      if (!state.ctrlActive) return true;
-      let mapped: string | null = null;
-      if (event.keyCode === 229) {
-        mapped = mapCtrlCharacter(getComposedTargetChar(event.target));
-      } else if (typeof event.key === 'string' && event.key.length === 1) {
-        mapped = mapCtrlCharacter(event.key);
-      }
-      if (!mapped) return true;
-      if (event.type === 'keyup') {
-        queueInput(mapped);
-        trimComposedTargetValue(event.target);
-        clearCtrlMode();
-      }
-      return false;
-    });
-  }
-
   async function selectShell(id: string): Promise<void> {
     state.activeId = id;
     const rec = state.shells.find((item) => item.id === id) || null;
@@ -949,10 +966,11 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     state.term = term;
 
     const handleInput = (data: string): void => {
-      queueInput(consumeCtrlInput(data));
+      queueInput(data);
     };
 
-    installCtrlKeyHandler(term);
+    await ensureTouchToMouseHelper();
+    await bindVendoredCtrlHandler(term, handleInput);
     term.onData(handleInput);
     term.onResize(({ cols, rows }) => {
       scheduleResizeSync(id, cols, rows);
