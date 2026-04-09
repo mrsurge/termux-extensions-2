@@ -4,13 +4,9 @@ shells:
   terminal-stream:
     backend: pipe
     pipe:
-      mode: native_pipe_testing
+      mode: native_terminal_pipe_testing
     cwd: ${ctx:CWD}
-    command:
-      - sh
-      - -lc
-      - >-
-        node "${ctx:BROKER_ENTRY}"
+    
     env:
       TE_APP_ID: ${ctx:APP_ID}
       TERMINAL_STREAM_CWD: ${ctx:CWD}

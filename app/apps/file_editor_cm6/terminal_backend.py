@@ -6,6 +6,7 @@ Provides REST endpoints and WebSocket PTY streaming for embedded terminal.
 """
 
 import asyncio
+from collections import deque
 import json
 import shlex
 import re
@@ -45,6 +46,18 @@ _terminal_sid_lock = asyncio.Lock()
 _terminal_stream_tasks: Dict[str, asyncio.Task[Any]] = {}
 _terminal_stream_refcounts: Dict[str, int] = {}
 _terminal_stream_lock = asyncio.Lock()
+
+
+def _read_terminal_log_tail_text(path: Path, lines: int) -> str:
+    if lines <= 0 or not path.exists():
+        return ""
+    with path.open("r", encoding="utf-8", errors="replace") as fh:
+        tail_lines = deque(fh, maxlen=lines)
+    return "".join(tail_lines)
+
+
+async def _read_terminal_log_tail_text_async(path: Path, lines: int) -> str:
+    return await asyncio.to_thread(_read_terminal_log_tail_text, path, lines)
 
 
 def attach_terminal_socketio_server(server: socketio.AsyncServer) -> None:
@@ -981,6 +994,27 @@ async def terminal_info(shell_id: str, logs: bool = Query(False), tail: int = Qu
         return {"ok": True, "data": info}
     except HTTPException:
         raise  # Re-raise HTTPException as-is
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@terminal_router.get('/terminal/{shell_id}/history')
+async def terminal_history(shell_id: str, tail: int = Query(2000), mgr: FrameworkShellManager = Depends(get_manager_dep)):
+    """
+    Return uncapped terminal stdout history as plain text.
+
+    Unlike mgr.describe(... include_logs=True ...), this reads the shell stdout log
+    directly so history preload is not constrained by FWS LOG_TAIL_BYTES.
+    """
+    try:
+        rec = await mgr.get_shell(shell_id)
+        if not rec:
+            raise HTTPException(status_code=404, detail="Shell not found")
+
+        stdout_text = await _read_terminal_log_tail_text_async(Path(rec.stdout_log), max(0, tail))
+        return {"ok": True, "data": {"stdout_text": stdout_text}}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

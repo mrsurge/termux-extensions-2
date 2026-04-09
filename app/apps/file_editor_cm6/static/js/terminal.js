@@ -502,13 +502,13 @@ export function createTerminalDrawer(options = {}) {
       if (term && !shellHistoryPrimed) {
         let primed = false;
         try {
-          const res = await fetch(`/api/app/file_editor_cm6/terminal/${shellId}?logs=true&tail=2000`);
+          const res = await fetch(`/api/app/file_editor_cm6/terminal/${shellId}/history?tail=2000`);
           const result = await res.json();
-          if (result.ok && result.data.logs && Array.isArray(result.data.logs.stdout_tail)) {
-            const priming = result.data.logs.stdout_tail.join('');
+          if (result.ok && typeof result.data?.stdout_text === 'string') {
+            const priming = result.data.stdout_text;
             if (priming) {
               term.write(priming);
-              console.log('Preloaded terminal history:', result.data.logs.stdout_tail.length, 'lines');
+              console.log('Preloaded terminal history');
             }
           }
           primed = true;
