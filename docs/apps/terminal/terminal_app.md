@@ -1,70 +1,49 @@
 # Terminal App
 
-The Terminal app is a full-screen experience located under `app/apps/terminal/`. It
-exposes embedded shells powered by the framework shell manager so users can launch,
-monitor, and interact with long-lived terminals without leaving the browser UI.
+The Terminal app lives under `app/apps/terminal/` and is now the canonical broker-backed terminal implementation for TE2.
 
 ## Overview
-- **Backend**: `backend.py` registers a Flask blueprint under `/api/app/terminal/`.
-  It uses the shared `FrameworkShellManager` to spawn PTY-backed shells (labelled
-  `terminal-app`) and to stream their output.
-- **Frontend**: `main.js` renders the list/terminal views, drives the WebSocket
-  connection, and layers basic soft-keys. `template.html` defines the responsive
-  layout (list drawer + terminal viewport) and action buttons.
-- **Manifest**: `manifest.json` describes the app for the launcher: id, name,
-  backend, template, and frontend module.
+- **Backend**: `backend.py` exposes `/api/app/terminal/` and manages pipe-backed terminal shells through framework-shells.
+- **Frontend**: `src/main.ts` is bundled to `static/dist/main.js` and provides the shell list, xterm renderer, replay/hydration, reconnect handling, and mobile helper-key support.
+- **Shell contract**: browser input/control uses JSON-RPC notifications over the worker WebSocket, while shell output/replay is framed as JSONL events from the terminal stream backend.
+- **Shellspec**: `shellspec/terminal_stream.yaml` is the active shellspec for the native terminal pipe path. `shellspec/node_terminal_stream.yaml` remains as the parked Node broker reference.
 
 ## Backend Endpoints
-All responses use the `{ "ok": true|false, ... }` envelope.
+All responses use the `{ "ok": true, "data": ... }` envelope.
 
 | Method & Path | Purpose |
 | --- | --- |
-| `GET /api/app/terminal/shells` | List existing terminal shells (filtered by `label == "terminal-app"`). |
-| `POST /api/app/terminal/shells` | Spawn a new PTY shell. Body accepts `shell` (array or string command) and `cwd` (defaults to `~`). |
-| `GET /api/app/terminal/shells/<id>` | Describe a shell. Query `logs=true&tail=N` fetches recent stdout/stderr tail. |
-| `POST /api/app/terminal/shells/<id>/input` | Write text to the PTY (`{ data: "...", newline?: true }`). |
-| `POST /api/app/terminal/shells/<id>/resize` | Resize the PTY (`{ cols, rows }`). |
-| `POST /api/app/terminal/shells/<id>/action` | `stop`, `kill`, or `restart` the shell via the manager. |
-| `DELETE /api/app/terminal/shells/<id>` | Remove the shell, forcing termination and deleting logs/metadata. |
+| `GET /api/app/terminal/shells` | List terminal shells owned by this app. |
+| `POST /api/app/terminal/shells` | Start a new shell with optional `shell`, `cwd`, `cols`, and `rows`. |
+| `GET /api/app/terminal/shells/<id>` | Describe a shell. |
+| `GET /api/app/terminal/shells/<id>/history?after_seq=N` | Read replayable framed history directly from the shell stdout log. |
+| `POST /api/app/terminal/shells/<id>/input` | Send terminal input through the broker/control path. |
+| `POST /api/app/terminal/shells/<id>/resize` | Resize the shell. |
+| `POST /api/app/terminal/shells/<id>/action` | `stop`, `kill`, or `restart` the shell. |
+| `DELETE /api/app/terminal/shells/<id>` | Remove a shell and its session state. |
 
-### WebSocket
-A module-level `Sock` exposes `/ws/terminal/<id>` inside the worker. Browsers
-connect through the main proxy at `/ws/app/terminal/terminal/<id>`, which forwards
-traffic to the worker route. The handler:
-1. Subscribes to PTY output (`manager.subscribe_output`) and streams chunks until
-   the socket closes.
-2. Relays incoming WebSocket messages back to the PTY input.
-3. Cleans up subscriptions/threads when the socket closes.
+## WebSocket
+The worker WebSocket endpoint is `/ws/terminal`, proxied to the browser as `/ws/app/terminal/terminal`.
 
-## Frontend Behaviour (`main.js`)
-- **List View**: Fetches `/shells` and renders a card for each shell (status dot,
-  uptime, cwd). Clicking a card activates the shell.
-- **Terminal View**: Uses `xterm.js` (lazy loaded) and websocket streaming to
-  display interactive output. A fit addon keeps the terminal sized to the viewport.
-- **Soft Keys**: Provides on-screen controls for Ctrl, Tab, Esc, and arrow keys.
-  `Ctrl` toggles a chord mode (Ctrl+A..Z) when the next key is pressed.
-- **Actions**: Buttons allow Stop, Kill, Remove (DELETE) and a drawer button shows
-  the list on narrow screens. New terminals spawn via `POST /shells` (defaulting to
-  `bash -l -i` unless overridden).
-- **Log Priming**: When a shell is selected the frontend requests
-  `GET /shells/<id>?logs=true&tail=2000` to pre-fill the terminal with recent output
-  so context survives reloads.
-## Template Highlights (`template.html`)
-- Defines a responsive layout with a list drawer and terminal pane.
-- Includes buttons for spawning, refreshing, and shell actions.
-- Creates the soft-key toolbar and placeholders used by `main.js`.
-- Applies styling for list items, status dots, control buttons, and the drawer
-  overlay.
+The client sends JSON-RPC notifications such as:
+- `terminal.connect`
+- `terminal.input`
+- `terminal.resize`
+- `terminal.destroy`
+- `terminal.ping`
 
-## Interaction Flow
-1. Launcher instantiates the app via `manifest.json`.
-2. `main.js` loads, requests `/api/app/terminal/shells`, and renders the list.
-3. When a shell is selected the app:
-   - Creates an `xterm.js` instance and primes recent logs.
-   - Opens a WebSocket subscription to stream live output.
-   - Sends resize and input actions through the REST/WebSocket channels.
-4. Users can spawn additional shells, stop/kill/restart existing ones, or remove
-   them entirely. Removing a shell disposes of the PTY and deletes its metadata.
+The server streams framed events such as:
+- `hello`
+- `data`
+- `closed`
+- `error`
+- `pong`
 
-This document serves as the canonical overview for the Terminal app; update it when
-behaviour or endpoints change.
+## Frontend Behavior
+- xterm is loaded from shared vendored assets under `/static/vendor/xterm/`.
+- Reconnects use `reconnecting-websocket`.
+- History hydration comes from the explicit `/history` endpoint rather than the old 4 KB log-tail path.
+- Vendored Android helper scripts under `vendor/android-terminalapp-assets-js/` provide Ctrl-key and touch-to-mouse behavior.
+- The frontend keeps dead-shell history visible and suppresses unnecessary "Shell is not writable" toasts.
+
+Update this document whenever the terminal app contract, shellspec, or frontend transport changes.

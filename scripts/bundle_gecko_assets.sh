@@ -50,7 +50,7 @@ copy_file() {
 # ===================================================================
 # 1. /static/ (shared statics — excluding heavy vendor dirs)
 # ===================================================================
-echo "[1/7] Shared statics..."
+echo "[1/8] Shared statics..."
 
 # /static/fonts/
 copy_tree "$APP_DIR/static/fonts" "$DEST/static/fonts"
@@ -66,7 +66,7 @@ done
 # ===================================================================
 # 2. /static/vendor/ (selected vendor libs only)
 # ===================================================================
-echo "[2/7] Selected vendor libs..."
+echo "[2/8] Selected vendor libs..."
 
 for vdir in codicons seti-icons es-module-shims xterm ws; do
     [ -d "$APP_DIR/static/vendor/$vdir" ] && copy_tree "$APP_DIR/static/vendor/$vdir" "$DEST/static/vendor/$vdir"
@@ -79,7 +79,7 @@ done
 # ===================================================================
 # 3. Monaco bootstrap + chunks + basic-languages + language (NOT workers)
 # ===================================================================
-echo "[3/7] Monaco te2-lang (no workers)..."
+echo "[3/8] Monaco te2-lang (no workers)..."
 
 MONACO_SRC="$APP_DIR/static/vendor/monaco-editor-core/te2-lang"
 MONACO_DST="$DEST/static/vendor/monaco-editor-core/te2-lang"
@@ -101,35 +101,60 @@ done
 [ -d "$MONACO_SRC/language" ] && copy_tree "$MONACO_SRC/language" "$MONACO_DST/language"
 
 # ===================================================================
-# 4. Monaco ESM
+# 4. Monaco ESM (worker-only)
 # ===================================================================
-echo "[4/7] Monaco ESM..."
+echo "[4/8] Monaco ESM worker bundle..."
 
-copy_tree "$APP_DIR/static/vendor/monaco-editor-core/esm" "$DEST/static/vendor/monaco-editor-core/esm"
+MONACO_ESM_SRC="$APP_DIR/static/vendor/monaco-editor-core/esm"
+MONACO_ESM_DST="$DEST/static/vendor/monaco-editor-core/esm"
+
+# The main Monaco UI is already bundled into te2-lang/bootstrap/monaco.bootstrap.bundle.js.
+# Android still needs the editor web worker entrypoint because m_editor_app.js loads it from
+# /ui/monaco_vscode/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js at runtime.
+[ -f "$MONACO_ESM_SRC/vs/editor/common/services/editorWebWorkerMain.bundle.js" ] && \
+    copy_file \
+        "$MONACO_ESM_SRC/vs/editor/common/services/editorWebWorkerMain.bundle.js" \
+        "$MONACO_ESM_DST/vs/editor/common/services/editorWebWorkerMain.bundle.js"
 
 # ===================================================================
-# 5. file_editor_cm6/static/ (dist, icons, js, vendor)
+# 5. file_editor_cm6/static/ (Android-needed subset only)
 # ===================================================================
-echo "[5/7] file_editor_cm6 statics..."
+echo "[5/8] file_editor_cm6 statics..."
 
-# /apps/file_editor_cm6/static/ and /api/app/file_editor_cm6/static/
-# Both URL prefixes map to the same source dir. We store under the /apps/ prefix
-# and the WebExtension will handle both patterns.
-copy_tree "$APP_DIR/apps/file_editor_cm6/static" "$DEST/apps/file_editor_cm6/static"
+CM6_STATIC_SRC="$APP_DIR/apps/file_editor_cm6/static"
+CM6_STATIC_DST="$DEST/apps/file_editor_cm6/static"
+
+# The Android shell loads the built host bundle, not the raw host source tree.
+[ -f "$CM6_STATIC_SRC/dist/host.js" ] && \
+    copy_file "$CM6_STATIC_SRC/dist/host.js" "$CM6_STATIC_DST/dist/host.js"
+
+# Version surface kept in sync with the server and APK bundle.
+[ -f "$CM6_STATIC_SRC/version.txt" ] && \
+    copy_file "$CM6_STATIC_SRC/version.txt" "$CM6_STATIC_DST/version.txt"
+
+# Direct host-page runtime references that are not bundled into host.js.
+[ -f "$CM6_STATIC_SRC/js/explorer.css" ] && \
+    copy_file "$CM6_STATIC_SRC/js/explorer.css" "$CM6_STATIC_DST/js/explorer.css"
+
+# App icons referenced by manifests/sidebar surfaces.
+[ -d "$CM6_STATIC_SRC/icons" ] && copy_tree "$CM6_STATIC_SRC/icons" "$CM6_STATIC_DST/icons"
+
+# Runtime-loaded vendor assets that remain separate from the built bundles.
+[ -d "$CM6_STATIC_SRC/vendor/monaco-touch-selection" ] && \
+    copy_tree "$CM6_STATIC_SRC/vendor/monaco-touch-selection" "$CM6_STATIC_DST/vendor/monaco-touch-selection"
+[ -f "$CM6_STATIC_SRC/vendor/vconsole/vconsole.min.js" ] && \
+    copy_file "$CM6_STATIC_SRC/vendor/vconsole/vconsole.min.js" "$CM6_STATIC_DST/vendor/vconsole/vconsole.min.js"
 
 # ===================================================================
 # 6. TE2 editor libs (served under /api/app/file_editor_cm6/ui/)
 # ===================================================================
-echo "[6/7] TE2 editor libs..."
+echo "[6/8] TE2 editor libs..."
 
 CM6_MONACO="$APP_DIR/apps/file_editor_cm6/monaco_editor"
 UI_DST="$DEST/api/app/file_editor_cm6/ui"
 
-# m_editor_app.js + all editor_*_utils.js
+# Android only needs the built editor bundle here, not the raw per-module source tree.
 mkdir -p "$UI_DST/monaco_editor"
-for f in "$CM6_MONACO"/*.js; do
-    [ -f "$f" ] && cp "$f" "$UI_DST/monaco_editor/$(basename "$f")"
-done
 
 # The Python server serves the IIFE bundle (static/dist/editor.js) when the
 # browser requests m_editor_app.js.  The raw source is ESM and will crash in a
@@ -162,18 +187,49 @@ done
     copy_file "$CM6_MONACO/editor_iframe.html" "$UI_DST/nc.html"
 
 # ===================================================================
-# 7. HTML pages (index, app_shell)
+# 7. TE2 extension frontend assets
 # ===================================================================
-echo "[7/8] HTML pages..."
+echo "[7/8] TE2 extension frontend assets..."
+
+EXT_SRC="$APP_DIR/extensions"
+EXT_DST="$DEST/extensions"
+
+copy_extension_frontend_tree() {
+    local src="$1" dst="$2"
+    mkdir -p "$dst"
+    find "$src" -type f \
+        ! -name '*.py' \
+        ! -name '*.pyc' \
+        ! -name '*.md' \
+        ! -path '*/__pycache__/*' \
+        ! -path '*/node_modules/*' \
+        -print0 | while IFS= read -r -d '' f; do
+            rel="${f#$src/}"
+            mkdir -p "$dst/$(dirname "$rel")"
+            cp "$f" "$dst/$rel"
+        done
+}
+
+if [ -d "$EXT_SRC" ]; then
+    for ext_dir in "$EXT_SRC"/*; do
+        [ -d "$ext_dir" ] || continue
+        copy_extension_frontend_tree "$ext_dir" "$EXT_DST/$(basename "$ext_dir")"
+    done
+fi
+
+# ===================================================================
+# 8. HTML pages (index, app_shell)
+# ===================================================================
+echo "[8/8] HTML pages..."
 
 # index.html (served at /)
 [ -f "$APP_DIR/templates/index.html" ] && \
     copy_file "$APP_DIR/templates/index.html" "$DEST/index.html"
 
-# app_shell.html pre-rendered for file_editor_cm6 (served at /app/file_editor_cm6)
+# generic app_shell.html served locally for /app/<app_id>
 if [ -f "$APP_DIR/templates/app_shell.html" ]; then
-    sed 's/{{ app_id|tojson }}/"file_editor_cm6"/g; s|{{ url_for('\''static'\'', filename='\''js/ws_port.js'\'') }}|/static/js/ws_port.js|g' \
-        "$APP_DIR/templates/app_shell.html" > "$DEST/app_shell_file_editor_cm6.html"
+    sed 's/{{ app_id|tojson }}/null/g; s|{{ url_for('\''static'\'', filename='\''js/ws_port.js'\'') }}|/static/js/ws_port.js|g' \
+        "$APP_DIR/templates/app_shell.html" > "$DEST/app_shell.html"
 fi
 
 # ===================================================================

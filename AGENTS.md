@@ -467,3 +467,8 @@ The intent is:
 - Prefer KB updates over thread-only memory for long-lived repo facts.
 - Prefer concise, maintainable KB notes over bloated one-off summaries.
 - When a new durable policy, plan, or architectural constraint emerges, consider whether it belongs in KB so future agents inherit it automatically.
+
+### live in app smoke testing
+
+- The code is continuously being live validated after patches are in place
+- Backend/frotnend smoke testing/validation is still encouraged while this is going on.
