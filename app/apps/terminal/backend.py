@@ -1,279 +1,1034 @@
-from __future__ import annotations
-
-import os
-import shlex
 import asyncio
-import shutil
-import re
-import signal
+import base64
+from collections import deque
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from contextlib import suppress
+from dataclasses import dataclass, field
+import json
+import logging
+import os
 from pathlib import Path
-from typing import Any
+import re
+import shlex
+import shutil
+import time
+from typing import ClassVar, Protocol, cast
+import uuid
 
-from fastapi import APIRouter, HTTPException, Body, Query, WebSocket
+from fastapi import APIRouter, HTTPException, WebSocket
+from pydantic import BaseModel, ConfigDict
+from starlette.websockets import WebSocketDisconnect
 
-# Reuse the core framework shells manager/config
-from framework_shells import get_manager as _manager
-from framework_shells.orchestrator import Orchestrator
+from framework_shells import get_manager as _manager  # pyright: ignore[reportMissingImports,reportUnknownVariableType]
+from framework_shells.orchestrator import Orchestrator  # pyright: ignore[reportMissingImports,reportUnknownVariableType]
+
+APP_ID = "terminal"
+SHELLSPEC_DIR = Path(__file__).resolve().parent / "shellspec"
+DEFAULT_SHELL_KIND = "python"
+TERMINAL_STREAM_KIND_ENV = "TERMINAL_STREAM_KIND"
+SHELLSPEC_REFS: dict[str, str] = {
+    "python": "terminal_stream.yaml#terminal-stream",
+    "native": "native_terminal_stream.yaml#terminal-stream",
+    "node": "node_terminal_stream.yaml#terminal-stream",
+}
+BROKER_ENTRY = Path(__file__).resolve().parent / "terminal_stream_broker.mjs"
+LABEL_PREFIX = "terminal-stream"
+LEGACY_LABEL_PREFIXES = ("terminal-testing-stream",)
+SESSION_RING_MAX = 2048
+DEFAULT_COLS = 80
+DEFAULT_ROWS = 24
 
 terminal_bp = APIRouter()
-SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
-SHELLSPEC_REF = "terminal.yaml#terminal"
+log = logging.getLogger("terminal_backend")
 
-async def mgr():
-    return await _manager()
+JsonObject = dict[str, object]
+BrokerFrame = dict[str, object]
+
+
+class ShellRecordProtocol(Protocol):
+    id: str
+    label: str | None
+    pid: int | None
+    status: str | None
+    exit_code: int | None
+    stdout_log: str
+    env_overrides: dict[str, str]
+
+
+class OutputSubscriptionProtocol(Protocol):
+    async def get(self) -> bytes | bytearray | None: ...
+
+
+class ManagerProtocol(Protocol):
+    async def list_shells(self) -> list[ShellRecordProtocol]: ...
+    async def get_shell(self, shell_id: str) -> ShellRecordProtocol | None: ...
+    async def get_shell_capabilities(self, record: ShellRecordProtocol) -> Mapping[str, object]: ...
+    async def describe(
+        self,
+        record: ShellRecordProtocol,
+        include_logs: bool = False,
+        tail_lines: int = 0,
+    ) -> JsonObject: ...
+    async def subscribe_output_bytes(self, shell_id: str) -> OutputSubscriptionProtocol: ...
+    async def unsubscribe_output_bytes(
+        self,
+        shell_id: str,
+        queue: OutputSubscriptionProtocol,
+    ) -> None: ...
+    async def write_to_pipe(self, shell_id: str, data: str) -> None: ...
+    async def terminate_shell(self, shell_id: str, force: bool = False) -> ShellRecordProtocol: ...
+    async def restart_shell(self, shell_id: str) -> ShellRecordProtocol: ...
+    async def remove_shell(self, shell_id: str, force: bool = False) -> None: ...
+
+
+class OrchestratorProtocol(Protocol):
+    async def start_from_ref(
+        self,
+        ref: str,
+        *,
+        base_dir: Path | None = None,
+        ctx: Mapping[str, object] | None = None,
+        label: str | None = None,
+        record_spec_id: str | None = None,
+        ui: dict[str, object] | None = None,
+        env_overrides: dict[str, str] | None = None,
+        subgroups_overrides: list[str] | None = None,
+        parent_shell_id: str | None = None,
+        wait_ready: bool = True,
+    ) -> ShellRecordProtocol: ...
+
+
+ManagerFactory = Callable[[], Awaitable[ManagerProtocol]]
+OrchestratorCtor = Callable[[ManagerProtocol], OrchestratorProtocol]
+manager_factory = cast(ManagerFactory, _manager)
+orchestrator_ctor = cast(OrchestratorCtor, Orchestrator)
+
+
+class CreateShellRequest(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
+
+    shell: str | list[str] | None = None
+    cwd: str = "~"
+    cols: int = DEFAULT_COLS
+    rows: int = DEFAULT_ROWS
+    kind: str | None = None
+
+
+class ShellInputRequest(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
+
+    data: str
+    newline: bool = True
+
+
+class ShellResizeRequest(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
+
+    cols: int = DEFAULT_COLS
+    rows: int = DEFAULT_ROWS
+
+
+class ShellActionRequest(BaseModel):
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="ignore")
+
+    action: str
+
+
+@dataclass(slots=True)
+class TerminalSession:
+    session_id: str
+    shell_id: str
+    stdout_log_path: str
+    last_seq: int = 0
+    ring_buffer: deque[BrokerFrame] = field(default_factory=lambda: deque(maxlen=SESSION_RING_MAX))
+    subscribers: dict[str, asyncio.Queue[BrokerFrame | None]] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    stop: asyncio.Event = field(default_factory=asyncio.Event)
+    reader_task: asyncio.Task[None] | None = None
+    closed_payload: BrokerFrame | None = None
+
+
+_sessions: dict[str, TerminalSession] = {}
+_shell_to_session: dict[str, str] = {}
+_sessions_lock = asyncio.Lock()
+
+
+async def mgr() -> ManagerProtocol:
+    return await manager_factory()
+
+
+def _ok(data: object) -> JsonObject:
+    return {"ok": True, "data": data}
+
+
+def _coerce_positive_int(raw: object, fallback: int) -> int:
+    if isinstance(raw, bool):
+        return fallback
+    if isinstance(raw, int):
+        return raw if raw > 0 else fallback
+    if isinstance(raw, str) and raw.strip().isdigit():
+        parsed = int(raw)
+        return parsed if parsed > 0 else fallback
+    return fallback
+
+
+def _coerce_non_negative_int(raw: object, fallback: int = 0) -> int:
+    if isinstance(raw, bool):
+        return fallback
+    if isinstance(raw, int):
+        return raw if raw >= 0 else fallback
+    if isinstance(raw, str) and raw.strip().isdigit():
+        parsed = int(raw)
+        return parsed if parsed >= 0 else fallback
+    return fallback
+
+
+def _coerce_string(raw: object) -> str:
+    if isinstance(raw, str):
+        return raw
+    return ""
+
+
+def _coerce_optional_string(raw: object) -> str | None:
+    value = _coerce_string(raw).strip()
+    return value or None
+
+
+def _frame_type(frame: Mapping[str, object]) -> str:
+    return _coerce_string(frame.get("type"))
+
+
+def _frame_seq(frame: Mapping[str, object]) -> int:
+    return _coerce_non_negative_int(frame.get("seq"), 0)
+
+
+def _jsonrpc_method(payload: Mapping[str, object]) -> str:
+    if _coerce_string(payload.get("jsonrpc")) != "2.0":
+        return ""
+    return _coerce_string(payload.get("method"))
+
+
+def _jsonrpc_params(payload: Mapping[str, object]) -> Mapping[str, object]:
+    raw = payload.get("params")
+    if isinstance(raw, Mapping):
+        return cast(Mapping[str, object], raw)
+    return {}
+
+
+def _jsonrpc_line(method: str, params: Mapping[str, object] | None = None) -> str:
+    payload: JsonObject = {
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": dict(params or {}),
+    }
+    return json.dumps(payload, separators=(",", ":")) + "\n"
 
 
 def _default_shell_command() -> list[str]:
-    # Prefer bash with login+interactive; fallback to sh -i
-    if os.path.basename((os.environ.get("SHELL") or "")).endswith("bash") or shutil.which("bash"):
+    shell_env = os.environ.get("SHELL") or ""
+    if os.path.basename(shell_env).endswith("bash") or shutil.which("bash"):
         return ["bash", "-l", "-i"]
     return ["sh", "-i"]
 
 
-def _shell_cmd_string(shell_cmd: list[str] | tuple[str, ...] | str) -> str:
-    if isinstance(shell_cmd, str):
-        return shell_cmd
-    return shlex.join([str(part) for part in shell_cmd])
+def _coerce_shell_command(raw: str | Sequence[str] | None) -> list[str]:
+    if isinstance(raw, str):
+        parts = shlex.split(raw)
+        return parts or _default_shell_command()
+    if isinstance(raw, Sequence):
+        parts = [str(part) for part in raw if str(part).strip()]
+        return parts or _default_shell_command()
+    return _default_shell_command()
 
 
-async def _next_terminal_sequence(m) -> int:
-    """Return next terminal-app sequence number (1-based)."""
+def _normalize_cwd(raw: str | None) -> str:
+    value = (raw or "~").strip() or "~"
+    expanded = os.path.expandvars(os.path.expanduser(value))
+    return os.path.abspath(expanded)
+
+
+def _normalize_shell_kind(raw: str | None) -> str:
+    value = (raw or DEFAULT_SHELL_KIND).strip().lower()
+    if value in SHELLSPEC_REFS:
+        return value
+    return DEFAULT_SHELL_KIND
+
+
+def _record_shell_kind(record: ShellRecordProtocol) -> str | None:
+    raw = record.env_overrides.get(TERMINAL_STREAM_KIND_ENV)
+    if raw is None:
+        return None
+    return _normalize_shell_kind(raw)
+
+
+def _annotate_shell_payload(record: ShellRecordProtocol, payload: JsonObject) -> JsonObject:
+    kind = _record_shell_kind(record)
+    if kind is not None:
+        payload["kind"] = kind
+    return payload
+
+
+async def _next_terminal_sequence(manager: ManagerProtocol) -> int:
     max_seq = 0
     try:
-        records = await m.list_shells()
+        records = await manager.list_shells()
     except Exception:
         records = []
     for rec in records:
-        label = rec.label or ''
-        if label == 'terminal-app':
-            max_seq = max(max_seq, 1)
-            continue
-        m_label = re.match(r'^terminal-app:(\\d+)$', label)
-        if not m_label:
-            continue
-        try:
-            max_seq = max(max_seq, int(m_label.group(1)))
-        except Exception:
-            continue
+        label = rec.label or ""
+        for prefix in (LABEL_PREFIX, *LEGACY_LABEL_PREFIXES):
+            if label == prefix:
+                max_seq = max(max_seq, 1)
+                break
+            match = re.match(rf"^{re.escape(prefix)}:(\d+)$", label)
+            if match:
+                max_seq = max(max_seq, int(match.group(1)))
+                break
     return max_seq + 1
 
 
-@terminal_bp.get("/shells")
-async def list_shells() -> Any:
-    """List framework shells created by this app (label startswith 'terminal-app')."""
-    m = await mgr()
-    records = [
-        await m.describe(r)
-        for r in await m.list_shells()
-        if (r.label or "").startswith("terminal-app")
-    ]
-    return {"ok": True, "data": records}
+async def _get_alive(shell_id: str) -> ShellRecordProtocol | None:
+    manager = await mgr()
+    record = await manager.get_shell(shell_id)
+    if record and record.pid and record.status == "running":
+        return record
+    return None
 
 
-@terminal_bp.post("/shells")
-async def create_shell(payload: dict = Body(...)) -> Any:
-    """Spawn a new interactive shell as a framework shell.
+async def _ensure_live_broker_io(shell_id: str) -> bool:
+    record = await _get_alive(shell_id)
+    if record is None:
+        return False
 
-    Body (JSON): { shell?: string[], cwd?: string }
-    """
-    shell_cmd = payload.get("shell")
-    if isinstance(shell_cmd, str):
-        shell_cmd = shlex.split(shell_cmd)
-    if not shell_cmd:
-        shell_cmd = _default_shell_command()
-    cwd = str(payload.get("cwd") or "~")
+    manager = await mgr()
+    try:
+        caps = await manager.get_shell_capabilities(record)
+    except Exception as exc:
+        log.warning("[terminal] capability check failed shell=%s: %s", shell_id, exc)
+        return False
 
-    m = await mgr()
-    orch = Orchestrator(m)
-    label = f"terminal-app:{await _next_terminal_sequence(m)}"
+    backend = _coerce_string(caps.get("backend"))
+    stdin_write = bool(caps.get("stdin_write"))
+    stdout_subscribe = bool(caps.get("stdout_subscribe_bytes"))
+    if backend != "pipe" or not stdin_write or not stdout_subscribe:
+        log.warning("[terminal] shell=%s lacks live pipe capabilities: %s", shell_id, caps)
+        return False
+
+    return True
+
+
+async def _create_shell_record(payload: CreateShellRequest | None = None) -> JsonObject:
+    request = payload or CreateShellRequest()
+    shell_cmd = _coerce_shell_command(request.shell)
+    cwd = _normalize_cwd(request.cwd)
+    cols = max(1, request.cols)
+    rows = max(1, request.rows)
+    kind = _normalize_shell_kind(request.kind)
+    shellspec_ref = SHELLSPEC_REFS[kind]
+
+    manager = await mgr()
+    orch = orchestrator_ctor(manager)
+    label = f"{LABEL_PREFIX}:{await _next_terminal_sequence(manager)}"
     try:
         record = await orch.start_from_ref(
-            SHELLSPEC_REF,
+            shellspec_ref,
             base_dir=SHELLSPEC_DIR,
             ctx={
+                "APP_ID": APP_ID,
+                "BROKER_ENTRY": str(BROKER_ENTRY),
                 "CWD": cwd,
-                "SHELL_CMD": _shell_cmd_string(shell_cmd),
+                "COLS": str(cols),
+                "ROWS": str(rows),
+                "SHELL_CMD_JSON": json.dumps(shell_cmd),
             },
             label=label,
+            env_overrides={
+                TERMINAL_STREAM_KIND_ENV: kind,
+            },
             wait_ready=False,
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to spawn shell: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to start shell: {exc}") from exc
 
-    data = await m.describe(record)
-    return {"ok": True, "data": data}
+    return _annotate_shell_payload(record, await manager.describe(record))
+
+
+async def _drop_subscriber(session: TerminalSession, conn_id: str) -> None:
+    async with session.lock:
+        queue = session.subscribers.pop(conn_id, None)
+    if queue is not None:
+        with suppress(asyncio.QueueFull):
+            queue.put_nowait(None)
+
+
+async def _broadcast(session: TerminalSession, payload: BrokerFrame) -> None:
+    async with session.lock:
+        items = list(session.subscribers.items())
+    stale: list[str] = []
+    for conn_id, queue in items:
+        try:
+            queue.put_nowait(dict(payload))
+        except Exception:
+            stale.append(conn_id)
+    for conn_id in stale:
+        await _drop_subscriber(session, conn_id)
+
+
+async def _sender_loop(
+    websocket: WebSocket,
+    queue: asyncio.Queue[BrokerFrame | None],
+) -> None:
+    while True:
+        payload = await queue.get()
+        if payload is None:
+            break
+        await websocket.send_text(json.dumps(payload, separators=(",", ":")))
+
+
+async def _record_stream_frame(session: TerminalSession, frame: BrokerFrame) -> None:
+    seq = _frame_seq(frame)
+    async with session.lock:
+        if seq > 0:
+            session.last_seq = max(session.last_seq, seq)
+            session.ring_buffer.append(dict(frame))
+        if _frame_type(frame) == "closed":
+            session.closed_payload = dict(frame)
+
+
+async def _make_synthetic_closed(
+    session: TerminalSession,
+    reason: str,
+    exit_code: int | None,
+) -> BrokerFrame:
+    async with session.lock:
+        if session.closed_payload is not None:
+            return dict(session.closed_payload)
+        session.last_seq += 1
+        record: BrokerFrame = {
+            "type": "closed",
+            "seq": session.last_seq,
+            "ts": int(time.time() * 1000),
+            "exit_code": exit_code,
+            "reason": reason,
+        }
+        session.closed_payload = dict(record)
+        session.ring_buffer.append(dict(record))
+        return record
+
+
+def _read_log_after(path: str, after_seq: int) -> list[BrokerFrame]:
+    out: list[BrokerFrame] = []
+    log_path = Path(path)
+    if not log_path.exists():
+        return out
+    with log_path.open("r", encoding="utf-8", errors="replace") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                loaded = cast(object, json.loads(line))
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(loaded, dict):
+                continue
+            frame = cast(BrokerFrame, loaded)
+            seq = _frame_seq(frame)
+            if seq > after_seq:
+                out.append(frame)
+    return out
+
+
+async def _read_log_frames_after(path: str, after_seq: int) -> list[BrokerFrame]:
+    return await asyncio.to_thread(_read_log_after, path, after_seq)
+
+
+def _slice_history_frames(frames: list[BrokerFrame], limit: int) -> list[BrokerFrame]:
+    if limit <= 0 or len(frames) <= limit:
+        return frames
+    return frames[-limit:]
+
+
+async def _prime_dead_session_from_log(
+    session: TerminalSession,
+    *,
+    fallback_reason: str,
+    fallback_exit_code: int | None,
+) -> None:
+    frames = await _read_log_frames_after(session.stdout_log_path, 0)
+    if frames:
+        replay_tail = _slice_history_frames(frames, SESSION_RING_MAX)
+        async with session.lock:
+            session.last_seq = max((_frame_seq(frame) for frame in frames), default=0)
+            session.ring_buffer.extend(dict(frame) for frame in replay_tail)
+            for frame in reversed(frames):
+                if _frame_type(frame) == "closed":
+                    session.closed_payload = dict(frame)
+                    break
+    if session.closed_payload is None:
+        _ = await _make_synthetic_closed(session, fallback_reason, fallback_exit_code)
+
+
+async def _session_output_loop(session: TerminalSession) -> None:
+    manager = await mgr()
+    queue: OutputSubscriptionProtocol | None = None
+    buf = b""
+    last_status_check = 0.0
+    try:
+        queue = await manager.subscribe_output_bytes(session.shell_id)
+        while not session.stop.is_set():
+            try:
+                chunk = await asyncio.wait_for(queue.get(), timeout=0.5)
+            except asyncio.TimeoutError:
+                now = asyncio.get_running_loop().time()
+                if now - last_status_check < 2.0:
+                    continue
+                last_status_check = now
+                rec = await manager.get_shell(session.shell_id)
+                live = bool(rec and rec.status == "running" and rec.pid)
+                if live:
+                    continue
+                closed = await _make_synthetic_closed(
+                    session,
+                    (rec.status if rec and rec.status else "missing"),
+                    rec.exit_code if rec else None,
+                )
+                await _broadcast(session, closed)
+                break
+
+            if not chunk:
+                continue
+            buf += bytes(chunk)
+            while b"\n" in buf:
+                line_bytes, buf = buf.split(b"\n", 1)
+                if line_bytes.endswith(b"\r"):
+                    line_bytes = line_bytes[:-1]
+                if not line_bytes:
+                    continue
+                try:
+                    loaded = cast(object, json.loads(line_bytes.decode("utf-8", errors="replace")))
+                except json.JSONDecodeError:
+                    log.warning("[terminal] bad broker JSON: %s", line_bytes[:200])
+                    continue
+                if not isinstance(loaded, dict):
+                    continue
+                frame = cast(BrokerFrame, loaded)
+                if _frame_type(frame) == "ready":
+                    continue
+                await _record_stream_frame(session, frame)
+                await _broadcast(session, frame)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        log.exception("[terminal] broker stdout reader crashed shell=%s", session.shell_id)
+        await _broadcast(
+            session,
+            {
+                "type": "error",
+                "code": "broker_stream_failed",
+                "message": str(exc),
+                "fatal": False,
+            },
+        )
+    finally:
+        if queue is not None:
+            with suppress(Exception):
+                await manager.unsubscribe_output_bytes(session.shell_id, queue)
+
+
+async def _get_or_create_session(shell_id: str, requested_session_id: str | None) -> TerminalSession:
+    async with _sessions_lock:
+        if requested_session_id:
+            existing = _sessions.get(requested_session_id)
+            if existing is not None and existing.shell_id == shell_id:
+                return existing
+
+        existing_id = _shell_to_session.get(shell_id)
+        if existing_id:
+            existing = _sessions.get(existing_id)
+            if existing is not None:
+                return existing
+
+        manager = await mgr()
+        rec = await manager.get_shell(shell_id)
+        if rec is None:
+            raise RuntimeError("Shell not found")
+        live_broker_io = await _ensure_live_broker_io(shell_id)
+
+        session = TerminalSession(
+            session_id=uuid.uuid4().hex,
+            shell_id=shell_id,
+            stdout_log_path=rec.stdout_log,
+        )
+        if live_broker_io:
+            session.reader_task = asyncio.create_task(
+                _session_output_loop(session),
+                name=f"terminal-reader-{shell_id}",
+            )
+        else:
+            await _prime_dead_session_from_log(
+                session,
+                fallback_reason=rec.status or "missing",
+                fallback_exit_code=rec.exit_code,
+            )
+        _sessions[session.session_id] = session
+        _shell_to_session[shell_id] = session.session_id
+        return session
+
+
+async def _plan_replay(
+    session: TerminalSession,
+    after_seq: int,
+) -> tuple[str, list[BrokerFrame], BrokerFrame | None]:
+    if after_seq <= 0:
+        return "fresh", [], None
+
+    async with session.lock:
+        if session.ring_buffer:
+            first_seq = _frame_seq(session.ring_buffer[0])
+            last_seq = _frame_seq(session.ring_buffer[-1])
+            if after_seq >= last_seq:
+                return "noop", [], None
+            if after_seq >= first_seq - 1:
+                frames = [dict(item) for item in session.ring_buffer if _frame_seq(item) > after_seq]
+                return "memory", frames, None
+
+    log_frames = await _read_log_frames_after(session.stdout_log_path, after_seq)
+    if log_frames:
+        return "log", log_frames, None
+
+    async with session.lock:
+        current_seq = session.last_seq
+    if current_seq > after_seq:
+        return "fresh", [], {
+            "type": "error",
+            "code": "resume_gap",
+            "message": "Replay history unavailable; continuing from live stream.",
+            "fatal": False,
+        }
+    return "noop", [], None
+
+
+async def _attach_connection(
+    session: TerminalSession,
+    conn_id: str,
+    queue: asyncio.Queue[BrokerFrame | None],
+    after_seq: int,
+) -> None:
+    resume_mode, replay_frames, resume_error = await _plan_replay(session, after_seq)
+    last_replayed_seq = after_seq
+    if replay_frames:
+        last_replayed_seq = _frame_seq(replay_frames[-1])
+
+    async with session.lock:
+        queue.put_nowait(
+            {
+                "type": "hello",
+                "session_id": session.session_id,
+                "shell_id": session.shell_id,
+                "next_seq": session.last_seq + 1,
+                "resume_mode": resume_mode,
+            }
+        )
+        for frame in replay_frames:
+            queue.put_nowait(dict(frame))
+        if last_replayed_seq < session.last_seq:
+            for frame in session.ring_buffer:
+                if _frame_seq(frame) > last_replayed_seq:
+                    queue.put_nowait(dict(frame))
+        if resume_error is not None:
+            queue.put_nowait(dict(resume_error))
+        if session.closed_payload is not None:
+            queue.put_nowait(dict(session.closed_payload))
+        session.subscribers[conn_id] = queue
+
+
+async def _resolve_shell_for_connect(payload: Mapping[str, object]) -> str:
+    requested_shell_id = _coerce_optional_string(payload.get("shell_id"))
+    if requested_shell_id:
+        manager = await mgr()
+        rec = await manager.get_shell(requested_shell_id)
+        if rec is None:
+            raise RuntimeError("Shell not found")
+        return requested_shell_id
+
+    requested_session_id = _coerce_optional_string(payload.get("session_id"))
+    if requested_session_id:
+        async with _sessions_lock:
+            session = _sessions.get(requested_session_id)
+            if session is not None:
+                return session.shell_id
+
+    create_if_missing = bool(payload.get("create_if_missing"))
+    if create_if_missing:
+        create_request = CreateShellRequest(
+            shell=cast(str | list[str] | None, payload.get("shell")),
+            cwd=_normalize_cwd(_coerce_string(payload.get("cwd")) or "~"),
+            cols=_coerce_positive_int(payload.get("cols"), DEFAULT_COLS),
+            rows=_coerce_positive_int(payload.get("rows"), DEFAULT_ROWS),
+            kind=_coerce_optional_string(payload.get("kind")),
+        )
+        created = await _create_shell_record(create_request)
+        shell_id = _coerce_optional_string(created.get("id"))
+        if shell_id is None:
+            raise RuntimeError("Created shell did not return an id")
+        return shell_id
+
+    raise RuntimeError("Missing shell_id and no resumable session was found")
+
+
+async def _send_broker_notification(
+    shell_id: str,
+    method: str,
+    params: Mapping[str, object] | None = None,
+) -> None:
+    manager = await mgr()
+    await manager.write_to_pipe(shell_id, _jsonrpc_line(method, params))
+
+
+async def _drop_session(shell_id: str) -> None:
+    session: TerminalSession | None = None
+    async with _sessions_lock:
+        session_id = _shell_to_session.pop(shell_id, None)
+        if session_id:
+            session = _sessions.pop(session_id, None)
+    if session is None:
+        return
+    session.stop.set()
+    async with session.lock:
+        subscribers = list(session.subscribers.keys())
+    for conn_id in subscribers:
+        await _drop_subscriber(session, conn_id)
+    if session.reader_task is not None:
+        _ = session.reader_task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await session.reader_task
+
+
+@terminal_bp.get("/shells")
+async def list_shells() -> JsonObject:
+    manager = await mgr()
+    prefixes = (LABEL_PREFIX, *LEGACY_LABEL_PREFIXES)
+    records = [
+        _annotate_shell_payload(record, await manager.describe(record))
+        for record in await manager.list_shells()
+        if any((record.label or "").startswith(prefix) for prefix in prefixes)
+    ]
+    return _ok(records)
+
+
+@terminal_bp.post("/shells")
+async def create_shell(payload: CreateShellRequest) -> JsonObject:
+    return _ok(await _create_shell_record(payload))
 
 
 @terminal_bp.get("/shells/{shell_id}")
-async def get_shell(shell_id: str, tail: int = Query(0), logs: bool = Query(False)) -> Any:
-    m = await mgr()
-    rec = await m.get_shell(shell_id)
-    if not rec:
+async def get_shell(
+    shell_id: str,
+    tail: int = 0,
+    logs: bool = False,
+) -> JsonObject:
+    manager = await mgr()
+    rec = await manager.get_shell(shell_id)
+    if rec is None:
         raise HTTPException(status_code=404, detail="Shell not found")
-    
-    include_logs = logs
-    data = await m.describe(rec, include_logs=include_logs, tail_lines=tail)
-    return {"ok": True, "data": data}
+    data = await manager.describe(rec, include_logs=logs, tail_lines=tail)
+    return _ok(_annotate_shell_payload(rec, data))
+
+
+@terminal_bp.get("/shells/{shell_id}/history")
+async def get_shell_history(
+    shell_id: str,
+    after_seq: int = 0,
+    limit: int = 0,
+) -> JsonObject:
+    manager = await mgr()
+    rec = await manager.get_shell(shell_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Shell not found")
+    frames = await _read_log_frames_after(rec.stdout_log, max(0, after_seq))
+    sliced = _slice_history_frames(frames, max(0, limit))
+    return _ok(
+        {
+            "frames": sliced,
+            "after_seq": max(0, after_seq),
+            "count": len(sliced),
+            "total_count": len(frames),
+        }
+    )
 
 
 @terminal_bp.post("/shells/{shell_id}/input")
-async def send_input(shell_id: str, payload: dict = Body(...)) -> Any:
-    """Send input (string) to the PTY of a shell.
-
-    Body: { data: string, newline?: boolean }
-    """
-    m = await mgr()
-    rec = await m.get_shell(shell_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail="Shell not found")
-
-    data = payload.get("data")
-    add_newline = bool(payload.get("newline", True))
-    if data is None:
-        raise HTTPException(status_code=400, detail="data is required")
-
-    text = str(data)
-    if add_newline:
+async def send_input(shell_id: str, payload: ShellInputRequest) -> JsonObject:
+    text = payload.data
+    if payload.newline:
         text += "\n"
     try:
-        await m.write_to_pty(shell_id, text)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write to PTY: {e}")
-    return {"ok": True, "data": {"id": shell_id}}
+        encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        await _send_broker_notification(
+            shell_id,
+            "terminal.input",
+            {"data_b64": encoded, "flush": "immediate"},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to write shell input: {exc}") from exc
+    return _ok({"id": shell_id})
 
 
 @terminal_bp.post("/shells/{shell_id}/resize")
-async def resize_shell(shell_id: str, payload: dict = Body(...)) -> Any:
-    cols = int(payload.get("cols") or 80)
-    rows = int(payload.get("rows") or 24)
+async def resize_shell(shell_id: str, payload: ShellResizeRequest) -> JsonObject:
+    cols = max(1, payload.cols)
+    rows = max(1, payload.rows)
     try:
-        m = await mgr()
-        await m.resize_pty(shell_id, cols, rows)
-
-        # Help interactive shells (readline) notice size changes.
-        # In dtach mode, the interactive "front" of the session is often the
-        # dtach attach proxy process; if it misses SIGWINCH, its notion of cols
-        # can diverge from xterm's, causing wrap/overwrite glitches.
-        try:
-            rec = await m.get_shell(shell_id)
-        except Exception:
-            rec = None
-
-        # Prefer signalling the dtach proxy (if present), since it's the process
-        # directly attached to the resized PTY master.
-        try:
-            proxy_pid = None
-            pty_state = getattr(m, "_pty", {}).get(shell_id) if hasattr(m, "_pty") else None
-            if pty_state is not None:
-                proxy_pid = getattr(pty_state, "proxy_pid", None)
-            if proxy_pid:
-                try:
-                    os.killpg(os.getpgid(proxy_pid), signal.SIGWINCH)
-                except Exception:
-                    try:
-                        os.kill(proxy_pid, signal.SIGWINCH)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        if rec and rec.pid:
-            try:
-                os.killpg(os.getpgid(rec.pid), signal.SIGWINCH)
-            except Exception:
-                try:
-                    os.kill(rec.pid, signal.SIGWINCH)
-                except Exception:
-                    pass
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Resize failed: {e}")
-    return {"ok": True, "data": {"id": shell_id, "cols": cols, "rows": rows}}
+        await _send_broker_notification(
+            shell_id,
+            "terminal.resize",
+            {"cols": cols, "rows": rows},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Resize failed: {exc}") from exc
+    return _ok({"id": shell_id, "cols": cols, "rows": rows})
 
 
 @terminal_bp.post("/shells/{shell_id}/action")
-async def shell_action(shell_id: str, payload: dict = Body(...)) -> Any:
-    action = str(payload.get("action") or "").lower()
-    m = await mgr()
+async def shell_action(shell_id: str, payload: ShellActionRequest) -> JsonObject:
+    action = payload.action.lower().strip()
+    manager = await mgr()
     try:
         if action in {"stop", "terminate"}:
-            record = await m.terminate_shell(shell_id, force=False)
+            record = await manager.terminate_shell(shell_id, force=False)
         elif action in {"kill", "force"}:
-            record = await m.terminate_shell(shell_id, force=True)
+            record = await manager.terminate_shell(shell_id, force=True)
         elif action == "restart":
-            record = await m.restart_shell(shell_id)
+            await _drop_session(shell_id)
+            record = await manager.restart_shell(shell_id)
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported action '{action}'")
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Shell not found")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Shell not found") from exc
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Shell action failed: {exc}")
-    return {"ok": True, "data": await m.describe(record)}
+        raise HTTPException(status_code=500, detail=f"Shell action failed: {exc}") from exc
+    return _ok(_annotate_shell_payload(record, await manager.describe(record)))
 
 
 @terminal_bp.delete("/shells/{shell_id}")
-async def delete_shell(shell_id: str) -> Any:
-    m = await mgr()
+async def delete_shell(shell_id: str) -> JsonObject:
+    manager = await mgr()
     try:
-        await m.remove_shell(shell_id, force=True)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Shell not found")
+        await manager.remove_shell(shell_id, force=True)
+        await _drop_session(shell_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Shell not found") from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to remove shell: {exc}")
-    return {"ok": True, "data": {"id": shell_id}}
+        raise HTTPException(status_code=500, detail=f"Failed to remove shell: {exc}") from exc
+    return _ok({"id": shell_id})
 
 
-# WebSocket wiring for streaming PTY output and receiving input
-
-
-@terminal_bp.websocket("/ws/terminal/{shell_id}")
-async def terminal_ws(websocket: WebSocket, shell_id: str):
+@terminal_bp.websocket("/ws/terminal")
+async def terminal_ws(websocket: WebSocket) -> None:
     await websocket.accept()
-    m = await _manager()
+
+    conn_id = uuid.uuid4().hex
+    send_queue: asyncio.Queue[BrokerFrame | None] = asyncio.Queue()
+    sender_task = asyncio.create_task(
+        _sender_loop(websocket, send_queue),
+        name=f"terminal-sender-{conn_id}",
+    )
+    session: TerminalSession | None = None
+
     try:
-        q = await m.subscribe_output(shell_id)
-    except Exception:
-        await websocket.close()
-        return
-
-    stop = asyncio.Event()
-
-    async def sender():
-        while not stop.is_set():
-            try:
-                chunk = await asyncio.wait_for(q.get(), timeout=0.5)
-            except asyncio.TimeoutError:
-                continue
-            try:
-                await websocket.send_text(chunk)
-            except Exception:
-                stop.set()
-                break
-
-    sender_task = asyncio.create_task(sender())
-    try:
-        while not stop.is_set():
-            msg = await websocket.receive_text()
-            if msg is None:
-                break
-            try:
-                await m.write_to_pty(shell_id, msg)
-            except Exception:
-                pass
-    finally:
-        stop.set()
-        sender_task.cancel()
+        raw = await websocket.receive_text()
         try:
+            loaded = cast(object, json.loads(raw))
+        except json.JSONDecodeError:
+            send_queue.put_nowait(
+                {
+                    "type": "error",
+                    "code": "bad_json",
+                    "message": "Expected JSON-RPC connect notification",
+                    "fatal": True,
+                }
+            )
+            return
+
+        if not isinstance(loaded, dict):
+            send_queue.put_nowait(
+                {
+                    "type": "error",
+                    "code": "expected_object",
+                    "message": "Connect notification must be a JSON object",
+                    "fatal": True,
+                }
+            )
+            return
+
+        payload = cast(BrokerFrame, loaded)
+        if _jsonrpc_method(payload) != "terminal.connect":
+            send_queue.put_nowait(
+                {
+                    "type": "error",
+                    "code": "expected_connect",
+                    "message": "First notification must be terminal.connect",
+                    "fatal": True,
+                }
+            )
+            return
+
+        connect_params = _jsonrpc_params(payload)
+
+        try:
+            shell_id = await _resolve_shell_for_connect(connect_params)
+            requested_session_id = _coerce_optional_string(connect_params.get("session_id"))
+            resume_after_seq = _coerce_non_negative_int(connect_params.get("resume_after_seq"), 0)
+            session = await _get_or_create_session(shell_id, requested_session_id)
+            await _attach_connection(session, conn_id, send_queue, resume_after_seq)
+        except HTTPException as exc:
+            send_queue.put_nowait(
+                {
+                    "type": "error",
+                    "code": "session_init_failed",
+                    "message": str(exc.detail),
+                    "fatal": True,
+                }
+            )
+            return
+        except RuntimeError as exc:
+            send_queue.put_nowait(
+                {
+                    "type": "error",
+                    "code": "session_init_failed",
+                    "message": str(exc),
+                    "fatal": True,
+                }
+            )
+            return
+        active_session = session
+        connect_notice: JsonObject = {
+            "session_id": active_session.session_id,
+            "shell_id": active_session.shell_id,
+            "resume_after_seq": resume_after_seq,
+        }
+        cols = _coerce_positive_int(connect_params.get("cols"), 0)
+        rows = _coerce_positive_int(connect_params.get("rows"), 0)
+        if cols > 0:
+            connect_notice["cols"] = cols
+        if rows > 0:
+            connect_notice["rows"] = rows
+        with suppress(Exception):
+            await _send_broker_notification(
+                active_session.shell_id,
+                "terminal.connect",
+                connect_notice,
+            )
+
+        async for raw_frame in websocket.iter_text():
+            try:
+                loaded_frame = cast(object, json.loads(raw_frame))
+            except json.JSONDecodeError:
+                send_queue.put_nowait(
+                    {
+                        "type": "error",
+                        "code": "bad_json",
+                        "message": "Malformed JSON-RPC notification",
+                        "fatal": False,
+                    }
+                )
+                continue
+
+            if not isinstance(loaded_frame, dict):
+                send_queue.put_nowait(
+                    {
+                        "type": "error",
+                        "code": "expected_object",
+                        "message": "Notification must be a JSON object",
+                        "fatal": False,
+                    }
+                )
+                continue
+
+            frame = cast(BrokerFrame, loaded_frame)
+            frame_method = _jsonrpc_method(frame)
+            frame_params = _jsonrpc_params(frame)
+            if frame_method == "terminal.ping":
+                send_queue.put_nowait({"type": "pong", "nonce": frame_params.get("nonce")})
+                continue
+
+            if frame_method == "terminal.input":
+                data_b64 = _coerce_optional_string(frame_params.get("data_b64"))
+                if not data_b64:
+                    continue
+                flush = _coerce_optional_string(frame_params.get("flush")) or "auto"
+                try:
+                    await _send_broker_notification(
+                        active_session.shell_id,
+                        "terminal.input",
+                        {
+                            "data_b64": data_b64,
+                            "flush": flush,
+                        },
+                    )
+                except Exception as exc:
+                    send_queue.put_nowait(
+                        {
+                            "type": "error",
+                            "code": "write_failed",
+                            "message": str(exc),
+                            "fatal": False,
+                        }
+                    )
+                continue
+
+            if frame_method == "terminal.resize":
+                try:
+                    resize_cols = _coerce_positive_int(frame_params.get("cols"), DEFAULT_COLS)
+                    resize_rows = _coerce_positive_int(frame_params.get("rows"), DEFAULT_ROWS)
+                    await _send_broker_notification(
+                        active_session.shell_id,
+                        "terminal.resize",
+                        {"cols": resize_cols, "rows": resize_rows},
+                    )
+                except Exception as exc:
+                    send_queue.put_nowait(
+                        {
+                            "type": "error",
+                            "code": "resize_failed",
+                            "message": str(exc),
+                            "fatal": False,
+                        }
+                    )
+                continue
+
+            if frame_method == "terminal.destroy":
+                try:
+                    await _send_broker_notification(active_session.shell_id, "terminal.destroy")
+                except Exception as exc:
+                    send_queue.put_nowait(
+                        {
+                            "type": "error",
+                            "code": "destroy_failed",
+                            "message": str(exc),
+                            "fatal": False,
+                        }
+                    )
+                continue
+
+            send_queue.put_nowait(
+                {
+                    "type": "error",
+                    "code": "unknown_method",
+                    "message": f"Unsupported notification '{frame_method or '<missing>'}'",
+                    "fatal": False,
+                }
+            )
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if session is not None:
+            await _drop_subscriber(session, conn_id)
+        with suppress(Exception):
+            send_queue.put_nowait(None)
+        _ = sender_task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
             await sender_task
-        except asyncio.CancelledError:
-            pass
-        await m.unsubscribe_output(shell_id, q)
-
-
-def _build_subapps():
-    from .terminal_socketio import TERMINAL_ASGI_APP
-    return [
-        ("/terminal_app_ws/socket.io", TERMINAL_ASGI_APP),
-    ]
-
-
-SUBAPPS = _build_subapps()

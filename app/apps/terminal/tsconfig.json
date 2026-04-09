@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "te2-console-bridge": ["../file_editor_cm6/static/js/console_bridge.js"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "static/dist"
+  ]
+}

@@ -106,6 +106,7 @@ import { installConsoleErrorHooks } from './editor_console_error_hooks_utils.js'
 import { handleConsoleEval } from './editor_console_eval_handler_utils.js';
 import { bindSaveKeyCommand } from './editor_ui_ipc_save_key_utils.js';
 import { bindFocusRelay } from './editor_ui_ipc_focus_relay_utils.js';
+import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.js';
 import { findBreadcrumbSymbolChain } from './editor_breadcrumb_find_symbol_chain_utils.js';
 import { splitBreadcrumbPathParts } from './editor_breadcrumb_split_parts_utils.js';
 import { appendBreadcrumbSeparator } from './editor_breadcrumb_append_sep_utils.js';
@@ -4014,6 +4015,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
   function bindUIIPCEditorHooks() {
     _bindEditorSaveKey();
     _bindEditorFocusRelay();
+    _bindEditorMobileCtrlHelper();
   }
 
   function _bindEditorSaveKey() {
@@ -4027,6 +4029,7 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
   }
 
   var _uiIpcFocusDisposable = null;
+  var _mobileCtrlFocusDisposable = null;
 
   function _bindEditorFocusRelay() {
     try {
@@ -4045,6 +4048,26 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       console.log('[focus_relay] bound to editor widget');
     } catch (e) {
       console.warn('[focus_relay] bind failed', e);
+    }
+  }
+
+  function _bindEditorMobileCtrlHelper() {
+    try {
+      if (_mobileCtrlFocusDisposable) {
+        try { _mobileCtrlFocusDisposable.dispose(); } catch (_) {}
+        _mobileCtrlFocusDisposable = null;
+      }
+      var ed = (diffEditor && diffEditor.getModifiedEditor)
+        ? diffEditor.getModifiedEditor()
+        : editor;
+      if (!ed) {
+        console.warn('[editor_ctrl_helper] no editor instance — skipping bind');
+        return;
+      }
+      _mobileCtrlFocusDisposable = bindVendoredCtrlHelperFocus(ed, window.monaco);
+      console.log('[editor_ctrl_helper] bound to editor widget');
+    } catch (e) {
+      console.warn('[editor_ctrl_helper] bind failed', e);
     }
   }
   // ─── End UI IPC ─────────────────────────────────────────

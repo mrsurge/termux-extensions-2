@@ -329,6 +329,13 @@ async def _resolve_terminal_event_shell(
     requested_shell_id = str(payload.get("shell_id") or payload.get("shellId") or "").strip()
     requested_client_id = str(payload.get("client_id") or "").strip() or None
     requested_project_path = str(payload.get("project_path") or "").strip() or None
+    async with _terminal_sid_lock:
+        bound_shell_id = _terminal_sid_shells.get(sid)
+        bound_project_path = _active_terminal_sids.get(sid)
+    if requested_shell_id and bound_shell_id and requested_shell_id == bound_shell_id and not requested_client_id and requested_project_path is None:
+        return bound_shell_id, bound_project_path
+    if not requested_shell_id:
+        return bound_shell_id, bound_project_path
     if requested_shell_id:
         mgr = await get_manager()
         rec = await mgr.get_shell(requested_shell_id)
@@ -342,9 +349,7 @@ async def _resolve_terminal_event_shell(
             project_path=requested_project_path,
         )
         return requested_shell_id, active_project_path
-
-    async with _terminal_sid_lock:
-        return _terminal_sid_shells.get(sid), _active_terminal_sids.get(sid)
+    return None, None
 
 
 class TerminalSocketIONamespace(socketio.AsyncNamespace):

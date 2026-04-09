@@ -1,6 +1,41 @@
-
 <style>
-  /* Terminal App specific styles */
+  .fe-menu {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .fe-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 180px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    display: none;
+    z-index: 400 !important;
+  }
+  .fe-dropdown.show { display: block; }
+  .fe-dd-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    cursor: pointer;
+    align-items: center;
+    font-size: 0.95rem;
+  }
+  .fe-dd-item:hover { background: rgba(255,255,255,0.06); }
+  .fe-dd-item-label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .fe-dd-item-note {
+    font-size: 0.78rem;
+    color: var(--muted-foreground);
+  }
   .ta-shell-item {
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -16,34 +51,96 @@
   .ta-shell-item:hover { border-color: var(--accent); }
   .ta-shell-item.active { border-color: var(--primary); background: rgba(80,120,255,0.08); }
   .ta-status-dot {
-    width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex: 0 0 auto;
   }
   .ta-dot-alive { background: var(--success); }
   .ta-dot-dead { background: var(--destructive); }
-  .ta-shell-main { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
-  .ta-shell-title { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--foreground); }
-  .ta-shell-meta { font-size: 0.8em; color: var(--muted-foreground); display: flex; gap: 10px; flex-wrap: wrap; }
-  .ta-badge { border: 1px solid var(--border); padding: 2px 6px; border-radius: 999px; font-size: 0.75em; color: var(--muted-foreground); }
-  .ta-shell-actions { display: flex; gap: 6px; }
-</style>
-<style>
-  /* View modes and drawer */
-.mode-list #ta-terminal-container { display: none !important; }
+  .ta-shell-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .ta-shell-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+  }
+  .ta-shell-remove {
+    font-size: 0.8em;
+    padding: 4px 8px;
+  }
+  .ta-shell-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    color: var(--foreground);
+  }
+  .ta-shell-meta {
+    font-size: 0.8em;
+    color: var(--muted-foreground);
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .ta-badge {
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 999px;
+    font-size: 0.75em;
+    color: var(--muted-foreground);
+  }
+  .mode-list #ta-terminal-container { display: none !important; }
   .mode-terminal #ta-terminal-container { display: flex; flex-direction: column; }
   .mode-list #ta-list-container { position: static; transform: none; max-height: 70vh; overflow: auto; }
-  .mode-terminal #ta-list-container { position: fixed; top: 0; left: 0; bottom: 0; width: 80%; max-width: 320px; background: var(--card); border-right: 1px solid var(--border); padding: 8px; transform: translateX(-100%); transition: transform 160ms ease; z-index: 300; }
+  .mode-terminal #ta-list-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 80%;
+    max-width: 320px;
+    background: var(--card);
+    border-right: 1px solid var(--border);
+    padding: 8px;
+    transform: translateX(-100%);
+    transition: transform 160ms ease;
+    z-index: 300;
+  }
   .drawer-open #ta-list-container { transform: translateX(0); }
-  #ta-drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 290; }
+  #ta-drawer-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 290;
+  }
   .drawer-open #ta-drawer-overlay { display: block; }
   .ta-list-scroll { max-height: calc(100vh - 120px); overflow: auto; }
-  /* Keys toolbar */
-  #ta-keys { display: flex; gap: 6px; margin: 0; padding: 8px 10px calc(env(safe-area-inset-bottom, 0px) + 8px); border-top: 1px solid var(--border); background: var(--card); }
-  #ta-keys .kbtn { font-size: 0.85em; padding: 4px 8px; border: 1px solid var(--border); background: var(--secondary); color: var(--foreground); border-radius: 6px; }
+  #ta-keys {
+    display: flex;
+    gap: 6px;
+    margin: 0;
+    padding: 8px 10px calc(env(safe-area-inset-bottom, 0px) + 8px);
+    border-top: 1px solid var(--border);
+    background: var(--card);
+  }
+  #ta-keys .kbtn {
+    font-size: 0.85em;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    background: var(--secondary);
+    color: var(--foreground);
+    border-radius: 6px;
+    touch-action: manipulation;
+    user-select: none;
+  }
   #ta-keys .kbtn.toggle { background: var(--accent); color: var(--primary-foreground); }
-  #ta-keys .kbtn { touch-action: manipulation; user-select: none; }
   #ta-keys .kbtn:focus { outline: none; }
-
-  /* Edge-to-edge terminal layout */
   .terminal-app {
     height: 100%;
     min-height: 100%;
@@ -51,7 +148,6 @@
     overflow: hidden;
     overscroll-behavior: contain;
   }
-
   #ta-terminal-container {
     flex: 1 1 auto;
     min-height: 0;
@@ -61,14 +157,12 @@
     padding: 0 !important;
     background: var(--background);
   }
-
   #ta-shell-header {
     margin: 0 !important;
     padding: 8px 10px;
     border-bottom: 1px solid var(--border);
     background: var(--card);
   }
-
   #ta-term {
     flex: 1 1 auto;
     min-height: 0;
@@ -78,18 +172,42 @@
     position: relative;
     background: var(--background);
   }
-
   #ta-term .xterm {
     width: 100%;
     height: 100%;
   }
+  .ta-new-menu .fe-dropdown {
+    min-width: 210px;
+  }
 </style>
 <div class="terminal-app" style="display:flex; flex-direction:column; gap:0;">
-<div id="ta-list-container" class="ta-list-container">
+  <div id="ta-list-container" class="ta-list-container">
     <div class="section-header">
-      <h3 class="section-title">Terminal App</h3>
-      <div>
-        <button id="ta-btn-new" class="app-btn">New Terminal</button>
+      <h3 class="section-title">Terminal</h3>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div class="fe-menu ta-new-menu">
+          <button id="ta-btn-new" class="app-btn" aria-haspopup="menu" aria-expanded="false">New Terminal</button>
+          <div id="ta-btn-new-dd" class="fe-dropdown" role="menu" aria-label="New terminal type">
+            <div class="fe-dd-item" data-terminal-kind="python" role="menuitem" tabindex="0">
+              <div class="fe-dd-item-label">
+                <span>Python</span>
+                <span class="fe-dd-item-note">Default</span>
+              </div>
+            </div>
+            <div class="fe-dd-item" data-terminal-kind="native" role="menuitem" tabindex="0">
+              <div class="fe-dd-item-label">
+                <span>Native</span>
+                <span class="fe-dd-item-note">Native path</span>
+              </div>
+            </div>
+            <div class="fe-dd-item" data-terminal-kind="node" role="menuitem" tabindex="0">
+              <div class="fe-dd-item-label">
+                <span>Node</span>
+                <span class="fe-dd-item-note">Node path</span>
+              </div>
+            </div>
+          </div>
+        </div>
         <button id="ta-btn-refresh" class="app-btn">Refresh</button>
       </div>
     </div>
@@ -99,7 +217,7 @@
     </div>
   </div>
 
-<div id="ta-terminal-container" style="min-height:40vh;">
+  <div id="ta-terminal-container" style="min-height:40vh;">
     <div id="ta-shell-header" style="display:flex; align-items:center; gap:8px;">
       <button id="ta-btn-menu" class="app-btn">&#9776;</button>
       <span id="ta-shell-title" style="font-weight:600;">No shell selected</span>

@@ -134,7 +134,7 @@ export function createTerminalDrawer(options = {}) {
     const key = `${shellId}:${cols}x${rows}`;
     if (!force && lastResizeSent === key) return;
     lastResizeSent = key;
-    ws.emit('terminal:resize', { cols, rows, shell_id: shellId });
+    ws.emit('terminal:resize', { cols, rows });
   }
 
   function requestFit(frames = 8) {
@@ -544,7 +544,7 @@ export function createTerminalDrawer(options = {}) {
 
   function sendTerminalInput(data) {
     if (hasBoundShell()) {
-      ws.emit('terminal:input', { data, shell_id: shellId });
+      ws.emit('terminal:input', { data });
     } else if (socketConnected()) {
       pendingInput.push(data);
       if (pendingInput.length > 64) {
@@ -640,7 +640,7 @@ export function createTerminalDrawer(options = {}) {
     pendingInput = [];
     queued.forEach((data) => {
       if (typeof data === 'string' && data) {
-        ws.emit('terminal:input', { data, shell_id: shellId });
+        ws.emit('terminal:input', { data });
       }
     });
   }
