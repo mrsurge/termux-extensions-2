@@ -2,7 +2,7 @@ version: "1"
 
 shells:
   terminal:
-    backend: dtach
+    backend: pty
     pty_mode: interactive
     cwd: ${ctx:CWD}
     command: ${ctx:SHELL_CMD}

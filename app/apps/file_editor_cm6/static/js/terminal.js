@@ -27,6 +27,14 @@ export function createTerminalDrawer(options = {}) {
   let desiredShellId = 'auto';
   let socketRegistered = false;
   let pendingInput = [];
+  let pendingOutput = [];
+  let lastResizeSent = null;
+  let fitRaf = null;
+  let fitFramesRemaining = 0;
+  let viewportHandlersInstalled = false;
+  let resizeObserver = null;
+  let startupSizing = false;
+  let startupFitTimer = null;
 
   const drawer = document.getElementById('terminal-drawer');
   const container = document.getElementById('terminal-container');
@@ -47,6 +55,8 @@ export function createTerminalDrawer(options = {}) {
   const FONT_SIZE_MIN = 10;
   const FONT_SIZE_MAX = 28;
   const FONT_SIZE_STEP = 1;
+  const HELPER_BASE_URL = '/apps/file_editor_cm6/vendor/android-terminalapp-assets-js';
+  let vendoredCtrlTerm = null;
 
   function formatShellLabel(id) {
     if (!id) return 'Terminal';
@@ -104,12 +114,157 @@ export function createTerminalDrawer(options = {}) {
     if (zoomOutBtn) zoomOutBtn.title = `Zoom out (${clamped}px)`;
     if (zoomInBtn) zoomInBtn.title = `Zoom in (${clamped}px)`;
 
-    if (fitAddon && isOpen) {
-      // Let the layout settle before fitting, then backend resize is handled by onResize.
-      setTimeout(() => {
-        try { fitAddon.fit(); } catch (_) {}
-      }, 0);
+    requestFit(6);
+  }
+
+  function getTerminalCols() {
+    return Math.max(1, Number(term?.cols) || 0);
+  }
+
+  function getTerminalRows() {
+    return Math.max(1, Number(term?.rows) || 0);
+  }
+
+  function syncTerminalSize(force = false) {
+    if (!hasBoundShell() || !term) return;
+    if (startupSizing && !force) return;
+    const cols = getTerminalCols();
+    const rows = getTerminalRows();
+    if (!cols || !rows) return;
+    const key = `${shellId}:${cols}x${rows}`;
+    if (!force && lastResizeSent === key) return;
+    lastResizeSent = key;
+    ws.emit('terminal:resize', { cols, rows, shell_id: shellId });
+  }
+
+  function requestFit(frames = 8) {
+    if (!term || !fitAddon || !isOpen || startupSizing) return;
+    fitFramesRemaining = Math.max(fitFramesRemaining, Math.max(1, Number(frames) || 1));
+    if (fitRaf !== null) return;
+
+    const step = () => {
+      fitRaf = null;
+      if (!term || !fitAddon || !isOpen) return;
+      try {
+        fitAddon.fit();
+      } catch (_) {
+        return;
+      }
+      syncTerminalSize();
+      fitFramesRemaining = Math.max(0, fitFramesRemaining - 1);
+      if (fitFramesRemaining > 0) {
+        fitRaf = requestAnimationFrame(step);
+      }
+    };
+
+    fitRaf = requestAnimationFrame(step);
+  }
+
+  function installViewportHandlers() {
+    if (viewportHandlersInstalled) return;
+    viewportHandlersInstalled = true;
+    window.addEventListener('resize', () => requestFit(8), { passive: true });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => requestFit(10), { passive: true });
+      window.visualViewport.addEventListener('scroll', () => requestFit(4), { passive: true });
     }
+  }
+
+  function clearStartupFitTimer() {
+    if (startupFitTimer !== null) {
+      clearTimeout(startupFitTimer);
+      startupFitTimer = null;
+    }
+  }
+
+  function getDrawerHeightTransitionMs() {
+    if (!drawer || typeof window.getComputedStyle !== 'function') return 0;
+    try {
+      const style = window.getComputedStyle(drawer);
+      const props = String(style.transitionProperty || '').split(',').map((part) => part.trim());
+      const durations = String(style.transitionDuration || '').split(',').map((part) => part.trim());
+      const delays = String(style.transitionDelay || '').split(',').map((part) => part.trim());
+
+      const parseMs = (value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return 0;
+        if (raw.endsWith('ms')) return Number.parseFloat(raw.slice(0, -2)) || 0;
+        if (raw.endsWith('s')) return (Number.parseFloat(raw.slice(0, -1)) || 0) * 1000;
+        return Number.parseFloat(raw) || 0;
+      };
+
+      let maxMs = 0;
+      const count = Math.max(props.length, durations.length, delays.length);
+      for (let index = 0; index < count; index += 1) {
+        const prop = props[index] ?? props[props.length - 1] ?? '';
+        if (prop && prop !== 'all' && prop !== 'height') continue;
+        const durationMs = parseMs(durations[index] ?? durations[durations.length - 1] ?? 0);
+        const delayMs = parseMs(delays[index] ?? delays[delays.length - 1] ?? 0);
+        maxMs = Math.max(maxMs, durationMs + delayMs);
+      }
+      return Math.max(0, Math.round(maxMs));
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function scheduleStartupResizeSync(reason = 'open') {
+    if (!term || !fitAddon || !isOpen) return;
+    startupSizing = true;
+    clearStartupFitTimer();
+
+    const settleMs = getDrawerHeightTransitionMs();
+    const waitMs = Math.max(0, settleMs + 34);
+
+    startupFitTimer = setTimeout(() => {
+      startupFitTimer = null;
+      if (!term || !fitAddon || !isOpen) {
+        startupSizing = false;
+        return;
+      }
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!term || !fitAddon || !isOpen) {
+            startupSizing = false;
+            return;
+          }
+          try {
+            fitAddon.fit();
+          } catch (_) {
+            startupSizing = false;
+            return;
+          }
+          lastResizeSent = null;
+          startupSizing = false;
+          syncTerminalSize(true);
+          console.log(`Terminal startup resize synced after ${reason}`);
+        });
+      });
+    }, waitMs);
+  }
+
+  function flushPendingOutput() {
+    if (!term || !pendingOutput.length) return;
+    const chunk = pendingOutput.join('');
+    pendingOutput = [];
+    if (chunk) {
+      term.write(chunk);
+    }
+  }
+
+  function trimPrimedOverlap(historyText, liveText) {
+    const history = typeof historyText === 'string' ? historyText : '';
+    const live = typeof liveText === 'string' ? liveText : '';
+    if (!history || !live) return live;
+
+    const maxOverlap = Math.min(history.length, live.length, 8192);
+    for (let len = maxOverlap; len > 0; len -= 1) {
+      if (history.slice(-len) === live.slice(0, len)) {
+        return live.slice(len);
+      }
+    }
+    return live;
   }
 
   function updateCopyButtonState() {
@@ -352,6 +507,74 @@ export function createTerminalDrawer(options = {}) {
     });
   }
 
+  function loadHelperScript(src) {
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.onload = () => {
+        script.remove();
+        resolve();
+      };
+      script.onerror = (event) => {
+        script.remove();
+        reject(event);
+      };
+      document.head.appendChild(script);
+    });
+  }
+
+  function helperUrl(name, fresh = false) {
+    const url = `${HELPER_BASE_URL}/${name}`;
+    if (!fresh) return url;
+    return `${url}?ts=${Date.now()}`;
+  }
+
+  function getRuntimeWindow() {
+    return window;
+  }
+
+  async function ensureDrawerTouchToMouseHelper() {
+    const runtimeWindow = getRuntimeWindow();
+    if (runtimeWindow.__fileEditorCm6DrawerTouchToMouseLoaded) return;
+    runtimeWindow.__fileEditorCm6TerminalHelpersActive = false;
+    await loadHelperScript(helperUrl('touch_to_mouse_handler.js'));
+    runtimeWindow.__fileEditorCm6DrawerTouchToMouseLoaded = true;
+  }
+
+  function sendTerminalInput(data) {
+    if (hasBoundShell()) {
+      ws.emit('terminal:input', { data, shell_id: shellId });
+    } else if (socketConnected()) {
+      pendingInput.push(data);
+      if (pendingInput.length > 64) {
+        pendingInput = pendingInput.slice(-64);
+      }
+    }
+  }
+
+  async function bindDrawerVendoredCtrlHandler(currentTerm) {
+    if (!currentTerm) return;
+    const runtimeWindow = getRuntimeWindow();
+    currentTerm.input = sendTerminalInput;
+    runtimeWindow.term = currentTerm;
+    runtimeWindow.ctrl = !!runtimeWindow.ctrl;
+    if (vendoredCtrlTerm === currentTerm) return;
+    vendoredCtrlTerm = currentTerm;
+    await loadHelperScript(helperUrl('ctrl_key_handler.js', true));
+  }
+
+  function setDrawerHelperFocusActive(active) {
+    const runtimeWindow = getRuntimeWindow();
+    runtimeWindow.__fileEditorCm6TerminalHelpersActive = !!active;
+    if (active && term) {
+      runtimeWindow.term = term;
+      void bindDrawerVendoredCtrlHandler(term).catch((err) => {
+        console.warn('Failed to bind vendored ctrl helper:', err);
+      });
+    }
+  }
+
   function loadStylesheet(href) {
     return new Promise((resolve) => {
       const link = document.createElement('link');
@@ -473,16 +696,8 @@ export function createTerminalDrawer(options = {}) {
       shellId = receivedShellId;
       desiredShellId = receivedShellId;
       socketRegistered = true;
+      lastResizeSent = null;
       console.log('Received shell ID from server:', shellId);
-
-      try {
-        if (fitAddon && term && isOpen) {
-          try { fitAddon.fit(); } catch (_) {}
-        }
-        if (term && term.cols && term.rows && socketConnected()) {
-          ws.emit('terminal:resize', { cols: term.cols, rows: term.rows, shell_id: receivedShellId });
-        }
-      } catch (_) {}
 
       if (isNewShell) {
         try {
@@ -491,9 +706,9 @@ export function createTerminalDrawer(options = {}) {
           try { term?.clear(); } catch (_) {}
         }
         shellHistoryPrimed = false;
+        pendingOutput = [];
       }
       lastShellId = receivedShellId;
-      flushPendingInput();
 
       try {
         await refreshShellMenu();
@@ -502,14 +717,20 @@ export function createTerminalDrawer(options = {}) {
       if (term && !shellHistoryPrimed) {
         let primed = false;
         try {
+          let priming = '';
           const res = await fetch(`/api/app/file_editor_cm6/terminal/${shellId}/history?tail=2000`);
           const result = await res.json();
           if (result.ok && typeof result.data?.stdout_text === 'string') {
-            const priming = result.data.stdout_text;
+            priming = result.data.stdout_text;
             if (priming) {
               term.write(priming);
               console.log('Preloaded terminal history');
             }
+          }
+          if (pendingOutput.length) {
+            const liveChunk = pendingOutput.join('');
+            const deduped = trimPrimedOverlap(priming, liveChunk);
+            pendingOutput = deduped ? [deduped] : [];
           }
           primed = true;
         } catch (err) {
@@ -518,7 +739,16 @@ export function createTerminalDrawer(options = {}) {
 
         if (primed) {
           shellHistoryPrimed = true;
+          flushPendingOutput();
+          flushPendingInput();
+          scheduleStartupResizeSync('history-prime');
         }
+      }
+
+      if (shellHistoryPrimed) {
+        flushPendingOutput();
+        flushPendingInput();
+        scheduleStartupResizeSync('shell-bind');
       }
     });
 
@@ -535,6 +765,13 @@ export function createTerminalDrawer(options = {}) {
       if (!term) return;
       const data = typeof msg?.data === 'string' ? msg.data : '';
       if (data) {
+        if (!shellHistoryPrimed) {
+          pendingOutput.push(data);
+          if (pendingOutput.length > 256) {
+            pendingOutput = pendingOutput.slice(-256);
+          }
+          return;
+        }
         term.write(data);
       }
     });
@@ -546,7 +783,9 @@ export function createTerminalDrawer(options = {}) {
         shellHistoryPrimed = false;
         desiredShellId = null;
         socketRegistered = false;
+        lastResizeSent = null;
         pendingInput = [];
+        pendingOutput = [];
       } else if (!msg?.shell_id) {
         socketRegistered = false;
         pendingInput = [];
@@ -560,7 +799,9 @@ export function createTerminalDrawer(options = {}) {
       shellId = null;
       shellHistoryPrimed = false;
       socketRegistered = false;
+      lastResizeSent = null;
       pendingInput = [];
+      pendingOutput = [];
       emitTerminalRegister('auto');
     });
 
@@ -586,7 +827,9 @@ export function createTerminalDrawer(options = {}) {
     }
 
     term = new Terminal({
+      convertEol: true,
       cursorBlink: true,
+      scrollback: 5000,
       fontSize: 14,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
       theme: {
@@ -598,21 +841,18 @@ export function createTerminalDrawer(options = {}) {
     fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(container);
-    // Don't fit here - we'll fit after shell is created in open()
+    installViewportHandlers();
+    await ensureDrawerTouchToMouseHelper();
+    await bindDrawerVendoredCtrlHandler(term);
 
-    // Touch UX: install handlers once after open() creates the terminal element.
-    installTouchHandlers();
+    container.addEventListener('pointerdown', () => {
+      setDrawerHelperFocusActive(true);
+      try { term.focus(); } catch (_) {}
+    }, { passive: true });
 
     // Send user input to PTY
     term.onData((data) => {
-      if (hasBoundShell()) {
-        ws.emit('terminal:input', { data, shell_id: shellId });
-      } else if (socketConnected()) {
-        pendingInput.push(data);
-        if (pendingInput.length > 64) {
-          pendingInput = pendingInput.slice(-64);
-        }
-      }
+      sendTerminalInput(data);
     });
 
     // Selection-driven UI affordances.
@@ -624,20 +864,20 @@ export function createTerminalDrawer(options = {}) {
     // Handle terminal resize
     term.onResize(({ cols, rows }) => {
       console.log('Terminal resized:', cols, 'x', rows, 'shellId:', shellId);
+      if (startupSizing) return;
       if (hasBoundShell()) {
-        ws.emit('terminal:resize', { cols, rows, shell_id: shellId });
+        syncTerminalSize();
       } else {
         console.warn('No shellId yet, skipping resize');
       }
     });
 
     // Fit terminal when drawer size changes
-    const resizeObserver = new ResizeObserver(() => {
-      if (fitAddon && isOpen) {
-        fitAddon.fit();
-      }
+    resizeObserver?.disconnect();
+    resizeObserver = new ResizeObserver(() => {
+      requestFit(8);
     });
-    resizeObserver.observe(drawer);
+    resizeObserver.observe(container);
 
     return term;
   }
@@ -797,6 +1037,8 @@ export function createTerminalDrawer(options = {}) {
 
     drawer.classList.add('open');
     isOpen = true;
+    setDrawerHelperFocusActive(true);
+    startupSizing = true;
 
     // Create terminal instance if first time
     if (!term) {
@@ -814,16 +1056,6 @@ export function createTerminalDrawer(options = {}) {
 
     await ensureTerminalSocket();
     emitTerminalRegister(shellId || 'auto');
-
-    // Fit terminal to drawer size and sync the PTY once the socket is up.
-    if (fitAddon && term) {
-      setTimeout(() => {
-        fitAddon.fit();
-        if (hasBoundShell() && term.cols && term.rows) {
-          ws.emit('terminal:resize', { cols: term.cols, rows: term.rows, shell_id: shellId });
-        }
-      }, 150);
-    }
   }
 
   /**
@@ -834,6 +1066,10 @@ export function createTerminalDrawer(options = {}) {
 
     drawer.classList.remove('open');
     isOpen = false;
+    setDrawerHelperFocusActive(false);
+    startupSizing = false;
+    clearStartupFitTimer();
+    lastResizeSent = null;
     // Note: Terminal shell and WebSocket stay alive!
   }
 
@@ -860,6 +1096,20 @@ export function createTerminalDrawer(options = {}) {
       term.dispose();
       term = null;
     }
+    vendoredCtrlTerm = null;
+    const runtimeWindow = getRuntimeWindow();
+    runtimeWindow.term = null;
+    runtimeWindow.ctrl = false;
+    setDrawerHelperFocusActive(false);
+    resizeObserver?.disconnect();
+    resizeObserver = null;
+    clearStartupFitTimer();
+    startupSizing = false;
+    if (fitRaf !== null) {
+      cancelAnimationFrame(fitRaf);
+      fitRaf = null;
+    }
+    fitFramesRemaining = 0;
     
     container.innerHTML = '';
     console.log('Terminal destroy() complete');
@@ -891,12 +1141,8 @@ export function createTerminalDrawer(options = {}) {
     
     // Refit terminal after resize
     if (fitAddon && isOpen) {
-      setTimeout(() => {
-        fitAddon.fit();
-        if (hasBoundShell() && term) {
-          ws.emit('terminal:resize', { cols: term.cols, rows: term.rows, shell_id: shellId });
-        }
-      }, 350);
+      lastResizeSent = null;
+      scheduleStartupResizeSync('fullscreen');
     }
   }
 
@@ -932,8 +1178,9 @@ export function createTerminalDrawer(options = {}) {
       drawer.style.height = `${newHeight}px`;
       
       // Refit terminal during resize
-      if (fitAddon) {
-        fitAddon.fit();
+      if (fitAddon && isOpen) {
+        try { fitAddon.fit(); } catch (_) {}
+        syncTerminalSize();
       }
     });
 
@@ -944,9 +1191,9 @@ export function createTerminalDrawer(options = {}) {
       document.body.style.cursor = '';
       
       // Send final size to backend
-      if (hasBoundShell() && term) {
-        ws.emit('terminal:resize', { cols: term.cols, rows: term.rows, shell_id: shellId });
-      }
+      lastResizeSent = null;
+      requestFit(6);
+      syncTerminalSize(true);
     });
   }
 
