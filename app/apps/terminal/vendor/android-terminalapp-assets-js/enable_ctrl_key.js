@@ -15,5 +15,16 @@
  */
 
 (function() {
-window.ctrl = true;
+const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
+const setCtrl = typeof window.__androidTerminalSetCtrl === 'function'
+  ? window.__androidTerminalSetCtrl
+  : function(active) {
+      window.ctrl = !!active;
+      try {
+        window.dispatchEvent(new CustomEvent(CTRL_STATE_EVENT, {
+          detail: { active: !!active },
+        }));
+      } catch (_) {}
+    };
+setCtrl(true);
 })();

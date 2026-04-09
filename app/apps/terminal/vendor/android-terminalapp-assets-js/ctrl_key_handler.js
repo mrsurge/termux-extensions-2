@@ -15,31 +15,131 @@
  */
 
 (function() {
+const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
+
+function emitCtrlState(active) {
+  try {
+    window.dispatchEvent(new CustomEvent(CTRL_STATE_EVENT, {
+      detail: { active: !!active },
+    }));
+  } catch (_) {}
+}
+
+function setCtrl(active) {
+  window.ctrl = !!active;
+  emitCtrlState(window.ctrl);
+}
+
+window.__androidTerminalSetCtrl = setCtrl;
+
+const previousCleanup = window.__androidTerminalCtrlCleanup;
+if (typeof previousCleanup === 'function') {
+  try {
+    previousCleanup();
+  } catch (_) {}
+  window.__androidTerminalCtrlCleanup = null;
+}
+
+const term = window.term;
+if (!term || typeof term.attachCustomKeyEventHandler !== 'function') {
+  return;
+}
+
+const textarea = term.textarea instanceof HTMLTextAreaElement ? term.textarea : null;
+const cleanups = [];
+
+function clearTextInput(target) {
+  const input = target && typeof target.value === 'string' ? target : textarea;
+  if (!input) return;
+  try {
+    input.value = '';
+  } catch (_) {}
+  try {
+    if (typeof input.setSelectionRange === 'function') {
+      input.setSelectionRange(0, 0);
+    }
+  } catch (_) {}
+}
+
+function suppressComposition(event) {
+  if (!window.ctrl) return;
+  if (event.cancelable) {
+    try {
+      event.preventDefault();
+    } catch (_) {}
+  }
+  try {
+    event.stopImmediatePropagation();
+  } catch (_) {}
+  try {
+    event.stopPropagation();
+  } catch (_) {}
+  clearTextInput(event.target);
+}
+
+if (textarea) {
+  const events = [
+    'focus',
+    'beforeinput',
+    'input',
+    'compositionstart',
+    'compositionupdate',
+    'compositionend',
+  ];
+  for (const type of events) {
+    const handler = type === 'focus' ? () => clearTextInput(textarea) : suppressComposition;
+    textarea.addEventListener(type, handler, true);
+    cleanups.push(() => textarea.removeEventListener(type, handler, true));
+  }
+}
+
+window.__androidTerminalCtrlCleanup = function() {
+  while (cleanups.length) {
+    const cleanup = cleanups.pop();
+    try {
+      cleanup();
+    } catch (_) {}
+  }
+};
+
 // keyCode 229 means composing text, so get the last character in
 // e.target.value.
 // keycode 64(@)-95(_) is mapped to a ctrl code
 // keycode 97(A)-122(Z) is converted to a small letter, and mapped to ctrl code
-window.term.attachCustomKeyEventHandler((e) => {
-  if (window.ctrl) {
-    keyCode = e.keyCode;
-    if (keyCode === 229) {
-      keyCode = e.target.value.charAt(e.target.selectionStart - 1).charCodeAt();
+term.attachCustomKeyEventHandler((e) => {
+  if (!window.ctrl) {
+    return true;
+  }
+
+  let keyCode = Number(e.keyCode) || 0;
+  if (keyCode === 229) {
+    const target = e.target && typeof e.target.value === 'string' ? e.target : textarea;
+    const value = typeof target?.value === 'string' ? target.value : '';
+    const selectionStart = typeof target?.selectionStart === 'number'
+      ? target.selectionStart
+      : value.length;
+    const index = Math.max(0, Math.min(value.length - 1, Math.max(0, selectionStart - 1)));
+    if (!value || index >= value.length) {
+      clearTextInput(target);
+      return false;
     }
-    if (64 <= keyCode && keyCode <= 95) {
-      input = String.fromCharCode(keyCode - 64);
-    } else if (97 <= keyCode && keyCode <= 122) {
-      input = String.fromCharCode(keyCode - 96);
-    } else {
-      return true;
-    }
-    if (e.type === 'keyup') {
-      window.term.input(input);
-      e.target.value = e.target.value.slice(0, -1);
-      window.ctrl = false;
-    }
-    return false;
+    keyCode = value.charCodeAt(index);
+  }
+
+  let input = null;
+  if (64 <= keyCode && keyCode <= 95) {
+    input = String.fromCharCode(keyCode - 64);
+  } else if (97 <= keyCode && keyCode <= 122) {
+    input = String.fromCharCode(keyCode - 96);
   } else {
     return true;
   }
+
+  if (e.type === 'keyup') {
+    term.input(input);
+    clearTextInput(e.target);
+    setCtrl(false);
+  }
+  return false;
 });
 })();

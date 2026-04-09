@@ -188,6 +188,11 @@ interface XtermTerminalLike {
   setOption?(key: string, value: unknown): void;
 }
 
+type VendoredCtrlTerminal = XtermTerminalLike & {
+  input?: (data: string) => void;
+  textarea?: HTMLTextAreaElement | null;
+};
+
 interface XtermTerminalConstructor {
   new (options?: XtermOptions): XtermTerminalLike;
 }
@@ -208,6 +213,7 @@ interface AppState {
   resizeObserver: ResizeObserver | null;
   mode: 'list' | 'terminal';
   ctrlActive: boolean;
+  ctrlFocusCleanup: (() => void) | null;
   inputBuffer: string;
   inputBatchMode: InputBatchMode | null;
   inputBufferStartedAt: number | null;
@@ -234,6 +240,7 @@ const INPUT_REPEAT_MAX_HOLD_MS = 176;
 const INPUT_REPEAT_GAP_MS = 42;
 const INPUT_FLUSH_THRESHOLD = 1024;
 const HELPER_BASE_URL = '/apps/terminal/vendor/android-terminalapp-assets-js';
+const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
 const NEW_TERMINAL_LONG_PRESS_MS = 450;
 let terminalConsoleBridgeInitialized = false;
 
@@ -257,12 +264,16 @@ function getRuntimeWindow(): Window & {
   Terminal?: XtermTerminalConstructor;
   FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor };
   __terminalTestingTouchToMouseLoaded?: boolean;
+  ctrl?: boolean;
+  term?: VendoredCtrlTerminal | null;
 } {
   return window as Window & {
     io?: unknown;
     Terminal?: XtermTerminalConstructor;
     FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor };
     __terminalTestingTouchToMouseLoaded?: boolean;
+    ctrl?: boolean;
+    term?: VendoredCtrlTerminal | null;
   };
 }
 
@@ -460,6 +471,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     resizeObserver: null,
     mode: 'list',
     ctrlActive: false,
+    ctrlFocusCleanup: null,
     inputBuffer: '',
     inputBatchMode: null,
     inputBufferStartedAt: null,
@@ -610,9 +622,92 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
   }
 
+  function setCtrlUi(active: boolean): void {
+    state.ctrlActive = active;
+    ui.keyCtrl.classList.toggle('toggle', active);
+  }
+
   function clearCtrlMode(): void {
-    state.ctrlActive = false;
-    ui.keyCtrl.classList.remove('toggle');
+    const runtimeWindow = getRuntimeWindow();
+    runtimeWindow.ctrl = false;
+    runtimeWindow.term = null;
+    clearVendoredCtrlFocusBinding();
+    setCtrlUi(false);
+  }
+
+  function getTermTextarea(term: XtermTerminalLike | null): HTMLTextAreaElement | null {
+    const textarea = (term as VendoredCtrlTerminal | null)?.textarea;
+    return textarea instanceof HTMLTextAreaElement ? textarea : null;
+  }
+
+  function clearVendoredCtrlFocusBinding(): void {
+    if (!state.ctrlFocusCleanup) return;
+    try {
+      state.ctrlFocusCleanup();
+    } catch {
+      // ignore
+    }
+    state.ctrlFocusCleanup = null;
+  }
+
+  async function bindVendoredCtrlHandler(currentTerm: XtermTerminalLike | null): Promise<void> {
+    if (!currentTerm) return;
+    const runtimeWindow = getRuntimeWindow();
+    const vendoredTerm = currentTerm as VendoredCtrlTerminal;
+    vendoredTerm.input = (data: string) => queueInput(data);
+    runtimeWindow.term = vendoredTerm;
+    await loadHelperScript(helperUrl('ctrl_key_handler.js', true));
+  }
+
+  function installVendoredCtrlFocusBinding(currentTerm: XtermTerminalLike | null): void {
+    clearVendoredCtrlFocusBinding();
+    const textarea = getTermTextarea(currentTerm);
+    if (!textarea || !currentTerm) return;
+    const handleFocus = () => {
+      void bindVendoredCtrlHandler(currentTerm).catch((error) => {
+        console.warn('[terminal] failed to rebind vendored ctrl helper', error);
+      });
+    };
+    textarea.addEventListener('focus', handleFocus, true);
+    state.ctrlFocusCleanup = () => {
+      textarea.removeEventListener('focus', handleFocus, true);
+    };
+  }
+
+  async function setVendoredCtrlEnabled(active: boolean): Promise<void> {
+    await loadHelperScript(helperUrl(active ? 'enable_ctrl_key.js' : 'disable_ctrl_key.js', true));
+    setCtrlUi(active);
+  }
+
+  function toggleCtrl(): void {
+    const next = !state.ctrlActive;
+    setCtrlUi(next);
+    void setVendoredCtrlEnabled(next).catch((error) => {
+      console.warn('[terminal] failed to toggle vendored ctrl helper', error);
+      setCtrlUi(Boolean(getRuntimeWindow().ctrl));
+    });
+  }
+
+  function syncVendoredCtrlFromEvent(event: Event): void {
+    const detail = (event as CustomEvent<{ active?: boolean }>).detail;
+    setCtrlUi(Boolean(detail?.active));
+  }
+
+  function installVendoredCtrlStateListener(): void {
+    window.addEventListener(CTRL_STATE_EVENT, syncVendoredCtrlFromEvent as EventListener);
+    setCtrlUi(Boolean(getRuntimeWindow().ctrl));
+  }
+
+  function clearVendoredCtrlRuntime(): void {
+    const runtimeWindow = getRuntimeWindow();
+    runtimeWindow.term = null;
+    runtimeWindow.ctrl = false;
+  }
+
+  function bindVendoredCtrlOnPointerDown(): void {
+    void bindVendoredCtrlHandler(state.term).catch((error) => {
+      console.warn('[terminal] failed to rebind vendored ctrl helper', error);
+    });
   }
 
   function softKey(handler: () => void): (ev: Event) => void {
@@ -622,11 +717,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       handler();
       refocusTerm();
     };
-  }
-
-  function toggleCtrl(): void {
-    state.ctrlActive = !state.ctrlActive;
-    ui.keyCtrl.classList.toggle('toggle', state.ctrlActive);
   }
 
   function wsUrl(): string {
@@ -879,6 +969,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     state.doFit = null;
     ui.termContainer.innerHTML = '';
     clearCtrlMode();
+    clearVendoredCtrlRuntime();
   }
 
   async function listShells(): Promise<void> {
@@ -1025,16 +1116,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     state.term = term;
 
     await ensureTouchToMouseHelper();
+    await bindVendoredCtrlHandler(term);
+    installVendoredCtrlFocusBinding(term);
     term.onData((data) => {
-      let payload = data;
-      if (state.ctrlActive && data.length === 1) {
-        const code = data.toLowerCase().charCodeAt(0);
-        if (code >= 97 && code <= 122) {
-          payload = String.fromCharCode(code - 96);
-          clearCtrlMode();
-        }
-      }
-      queueInput(payload);
+      queueInput(data);
     });
     term.onResize(({ cols, rows }) => {
       scheduleResizeSync(id, cols, rows);
@@ -1107,7 +1192,11 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
   }
 
-  ui.termContainer.addEventListener('pointerdown', () => refocusTerm(), { passive: true });
+  installVendoredCtrlStateListener();
+  ui.termContainer.addEventListener('pointerdown', () => {
+    bindVendoredCtrlOnPointerDown();
+    refocusTerm();
+  }, { passive: true });
 
   ui.btnNew.addEventListener('contextmenu', (event) => {
     event.preventDefault();

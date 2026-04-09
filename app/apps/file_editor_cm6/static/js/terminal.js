@@ -56,7 +56,7 @@ export function createTerminalDrawer(options = {}) {
   const FONT_SIZE_MAX = 28;
   const FONT_SIZE_STEP = 1;
   const HELPER_BASE_URL = '/apps/file_editor_cm6/vendor/android-terminalapp-assets-js';
-  let vendoredCtrlTerm = null;
+  let vendoredCtrlFocusCleanup = null;
 
   function formatShellLabel(id) {
     if (!id) return 'Terminal';
@@ -534,6 +534,19 @@ export function createTerminalDrawer(options = {}) {
     return window;
   }
 
+  function getTermTextarea(currentTerm) {
+    const textarea = currentTerm?.textarea;
+    return textarea instanceof HTMLTextAreaElement ? textarea : null;
+  }
+
+  function clearDrawerCtrlFocusBinding() {
+    if (!vendoredCtrlFocusCleanup) return;
+    try {
+      vendoredCtrlFocusCleanup();
+    } catch (_) {}
+    vendoredCtrlFocusCleanup = null;
+  }
+
   async function ensureDrawerTouchToMouseHelper() {
     const runtimeWindow = getRuntimeWindow();
     if (runtimeWindow.__fileEditorCm6DrawerTouchToMouseLoaded) return;
@@ -559,9 +572,22 @@ export function createTerminalDrawer(options = {}) {
     currentTerm.input = sendTerminalInput;
     runtimeWindow.term = currentTerm;
     runtimeWindow.ctrl = !!runtimeWindow.ctrl;
-    if (vendoredCtrlTerm === currentTerm) return;
-    vendoredCtrlTerm = currentTerm;
     await loadHelperScript(helperUrl('ctrl_key_handler.js', true));
+  }
+
+  function installDrawerVendoredCtrlFocusBinding(currentTerm) {
+    clearDrawerCtrlFocusBinding();
+    const textarea = getTermTextarea(currentTerm);
+    if (!textarea || !currentTerm) return;
+    const handleFocus = () => {
+      void bindDrawerVendoredCtrlHandler(currentTerm).catch((err) => {
+        console.warn('Failed to rebind vendored ctrl helper:', err);
+      });
+    };
+    textarea.addEventListener('focus', handleFocus, true);
+    vendoredCtrlFocusCleanup = () => {
+      textarea.removeEventListener('focus', handleFocus, true);
+    };
   }
 
   function setDrawerHelperFocusActive(active) {
@@ -572,7 +598,10 @@ export function createTerminalDrawer(options = {}) {
       void bindDrawerVendoredCtrlHandler(term).catch((err) => {
         console.warn('Failed to bind vendored ctrl helper:', err);
       });
+      return;
     }
+    runtimeWindow.ctrl = false;
+    runtimeWindow.term = null;
   }
 
   function loadStylesheet(href) {
@@ -698,6 +727,13 @@ export function createTerminalDrawer(options = {}) {
       socketRegistered = true;
       lastResizeSent = null;
       console.log('Received shell ID from server:', shellId);
+      if (term) {
+        try {
+          await bindDrawerVendoredCtrlHandler(term);
+        } catch (err) {
+          console.warn('Failed to bind vendored ctrl helper:', err);
+        }
+      }
 
       if (isNewShell) {
         try {
@@ -844,9 +880,13 @@ export function createTerminalDrawer(options = {}) {
     installViewportHandlers();
     await ensureDrawerTouchToMouseHelper();
     await bindDrawerVendoredCtrlHandler(term);
+    installDrawerVendoredCtrlFocusBinding(term);
 
     container.addEventListener('pointerdown', () => {
       setDrawerHelperFocusActive(true);
+      void bindDrawerVendoredCtrlHandler(term).catch((err) => {
+        console.warn('Failed to bind vendored ctrl helper:', err);
+      });
       try { term.focus(); } catch (_) {}
     }, { passive: true });
 
@@ -1043,6 +1083,9 @@ export function createTerminalDrawer(options = {}) {
     // Create terminal instance if first time
     if (!term) {
       await initTerminal();
+    } else {
+      await bindDrawerVendoredCtrlHandler(term);
+      installDrawerVendoredCtrlFocusBinding(term);
     }
 
     // Refresh shell selector from backend (project-agnostic, backend-owned).
@@ -1096,7 +1139,7 @@ export function createTerminalDrawer(options = {}) {
       term.dispose();
       term = null;
     }
-    vendoredCtrlTerm = null;
+    clearDrawerCtrlFocusBinding();
     const runtimeWindow = getRuntimeWindow();
     runtimeWindow.term = null;
     runtimeWindow.ctrl = false;
