@@ -16,6 +16,7 @@
 
 (function() {
 const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
+const CTRL_DESIRED_KEY = '__androidTerminalCtrlDesired';
 
 function emitCtrlState(active) {
   try {
@@ -25,12 +26,34 @@ function emitCtrlState(active) {
   } catch (_) {}
 }
 
-function setCtrl(active) {
+function setCtrl(active, options) {
+  const persistDesired = options?.persistDesired !== false;
+  if (persistDesired) {
+    window[CTRL_DESIRED_KEY] = !!active;
+  }
   window.ctrl = !!active;
   emitCtrlState(window.ctrl);
 }
 
+function isCtrlDesired() {
+  return !!window[CTRL_DESIRED_KEY];
+}
+
+function ensureCtrlLatched() {
+  if (!isCtrlDesired()) {
+    return false;
+  }
+  if (!window.ctrl) {
+    setCtrl(true, { persistDesired: false });
+  }
+  return true;
+}
+
 window.__androidTerminalSetCtrl = setCtrl;
+window.__androidTerminalEnsureCtrlLatched = ensureCtrlLatched;
+if (window[CTRL_DESIRED_KEY] == null) {
+  window[CTRL_DESIRED_KEY] = !!window.ctrl;
+}
 
 const previousCleanup = window.__androidTerminalCtrlCleanup;
 if (typeof previousCleanup === 'function') {
@@ -62,7 +85,7 @@ function clearTextInput(target) {
 }
 
 function suppressComposition(event) {
-  if (!window.ctrl) return;
+  if (!ensureCtrlLatched()) return;
   if (event.cancelable) {
     try {
       event.preventDefault();
@@ -87,7 +110,12 @@ if (textarea) {
     'compositionend',
   ];
   for (const type of events) {
-    const handler = type === 'focus' ? () => clearTextInput(textarea) : suppressComposition;
+    const handler = type === 'focus'
+      ? () => {
+          clearTextInput(textarea);
+          ensureCtrlLatched();
+        }
+      : suppressComposition;
     textarea.addEventListener(type, handler, true);
     cleanups.push(() => textarea.removeEventListener(type, handler, true));
   }
@@ -107,12 +135,14 @@ window.__androidTerminalCtrlCleanup = function() {
 // keycode 64(@)-95(_) is mapped to a ctrl code
 // keycode 97(A)-122(Z) is converted to a small letter, and mapped to ctrl code
 term.attachCustomKeyEventHandler((e) => {
-  if (!window.ctrl) {
+  if (!ensureCtrlLatched()) {
     return true;
   }
 
   let keyCode = Number(e.keyCode) || 0;
+  let fromImeComposition = false;
   if (keyCode === 229) {
+    fromImeComposition = true;
     const target = e.target && typeof e.target.value === 'string' ? e.target : textarea;
     const value = typeof target?.value === 'string' ? target.value : '';
     const selectionStart = typeof target?.selectionStart === 'number'
@@ -138,7 +168,11 @@ term.attachCustomKeyEventHandler((e) => {
   if (e.type === 'keyup') {
     term.input(input);
     clearTextInput(e.target);
-    setCtrl(false);
+    if (fromImeComposition) {
+      ensureCtrlLatched();
+    } else {
+      setCtrl(false);
+    }
   }
   return false;
 });
