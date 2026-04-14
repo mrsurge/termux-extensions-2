@@ -49,6 +49,15 @@ function getTerminalRoot(rawTarget) {
   return element ? element.closest('.xterm') : null;
 }
 
+function findTouchById(touchList, touchId) {
+  if (!touchList || touchId == null) return null;
+  for (let index = 0; index < touchList.length; index += 1) {
+    const touch = touchList[index];
+    if (touch?.identifier === touchId) return touch;
+  }
+  return null;
+}
+
 function getMouseTarget(rawTarget) {
   const root = getTerminalRoot(rawTarget);
   return root?.querySelector('.xterm-screen') || root || getElementTarget(rawTarget);
@@ -65,9 +74,35 @@ function clearLongPress() {
   state.longPressTimer = null;
 }
 
+function unlockGestureRoot() {
+  const root = state?.terminalRoot;
+  const lockedStyle = state?.lockedRootStyle;
+  if (!root || !lockedStyle) return;
+  root.style.touchAction = lockedStyle.touchAction;
+  root.style.webkitUserSelect = lockedStyle.webkitUserSelect;
+  root.style.userSelect = lockedStyle.userSelect;
+  root.style.webkitTouchCallout = lockedStyle.webkitTouchCallout;
+}
+
 function resetState() {
   clearLongPress();
+  unlockGestureRoot();
   state = null;
+}
+
+function lockGestureRoot(root) {
+  if (!root) return null;
+  const lockedStyle = {
+    touchAction: root.style.touchAction,
+    webkitUserSelect: root.style.webkitUserSelect,
+    userSelect: root.style.userSelect,
+    webkitTouchCallout: root.style.webkitTouchCallout,
+  };
+  root.style.touchAction = 'none';
+  root.style.webkitUserSelect = 'none';
+  root.style.userSelect = 'none';
+  root.style.webkitTouchCallout = 'none';
+  return lockedStyle;
 }
 
 function buildPointerLike(point, fallbackTarget) {
@@ -122,6 +157,12 @@ function startSelection(point) {
   dispatchMouse('mousedown', point, state.mouseTarget);
 }
 
+function getTrackedTouch(event) {
+  if (!state) return null;
+  return findTouchById(event.touches, state.touchId)
+    || findTouchById(event.changedTouches, state.touchId);
+}
+
 function handleTouchStart(event) {
   if (!helpersEnabled()) return;
   if (!event.touches || event.touches.length !== 1) {
@@ -129,33 +170,36 @@ function handleTouchStart(event) {
     return;
   }
   const point = event.touches[0];
+  const terminalRoot = getTerminalRoot(point.target);
   const mouseTarget = getMouseTarget(point.target);
   const wheelTarget = getWheelTarget(point.target);
-  if (!mouseTarget && !wheelTarget) {
+  if (!terminalRoot || (!mouseTarget && !wheelTarget)) {
     resetState();
     return;
   }
 
   state = {
+    touchId: point.identifier,
     mode: 'pending',
     startX: point.clientX,
     startY: point.clientY,
     lastY: point.clientY,
     point,
+    terminalRoot,
     mouseTarget,
     wheelTarget,
+    lockedRootStyle: lockGestureRoot(terminalRoot),
     longPressTimer: setTimeout(() => startSelection(point), LONG_PRESS_MS),
   };
 }
 
 function handleTouchMove(event) {
   if (!helpersEnabled() || !state) return;
-  if (!event.touches || event.touches.length !== 1) {
-    resetState();
+  const point = getTrackedTouch(event);
+  if (!point) return;
+  if (!event.touches || event.touches.length < 1) {
     return;
   }
-
-  const point = event.touches[0];
   state.point = point;
 
   const dx = point.clientX - state.startX;
@@ -189,7 +233,8 @@ function handleTouchMove(event) {
 
 function handleTouchEnd(event) {
   if (!state) return;
-  const point = getPoint(event);
+  const point = getTrackedTouch(event);
+  if (!point) return;
 
   if (state.mode === 'select') {
     dispatchMouse('mouseup', point, state.mouseTarget);
@@ -208,17 +253,21 @@ function handleContextMenu(event) {
   const isTouchContextMenu = event.pointerType === 'touch' || !!state;
   if (!isTouchContextMenu) return;
   if (!state) {
+    const terminalRoot = getTerminalRoot(event.target);
     const mouseTarget = getMouseTarget(event.target);
     const wheelTarget = getWheelTarget(event.target);
-    if (!mouseTarget && !wheelTarget) return;
+    if (!terminalRoot || (!mouseTarget && !wheelTarget)) return;
     state = {
+      touchId: null,
       mode: 'pending',
       startX: event.clientX,
       startY: event.clientY,
       lastY: event.clientY,
       point: event,
+      terminalRoot,
       mouseTarget,
       wheelTarget,
+      lockedRootStyle: lockGestureRoot(terminalRoot),
       longPressTimer: null,
     };
   }
