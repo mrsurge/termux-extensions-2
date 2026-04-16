@@ -143,13 +143,13 @@ if os.path.exists(static_dir):
 from framework_shells import FrameworkShellManager, get_manager
 from framework_shells.api.fastapi_router import router as framework_shells_router
 from framework_shells.api.websocket import router as framework_shells_ws_router
-from framework_shells.api.fws_ui import router as fws_ui_router
+from framework_shells.api.socketio_backend import mount_fws_dashboard_runtime
 from app.te2_runtime_mounts import mount_te2_runtime_services, te2_runtime_lifespan
 
 # Mount the framework shells API router
 app.include_router(framework_shells_router)
 app.include_router(framework_shells_ws_router)
-app.include_router(fws_ui_router)
+mount_fws_dashboard_runtime(app)
 mount_te2_runtime_services(app)
 
 
