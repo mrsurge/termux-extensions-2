@@ -413,17 +413,69 @@ function fromBase64(raw: string): Uint8Array {
   return bytes;
 }
 
+function isObjectRecord(raw: unknown): raw is Record<string, unknown> {
+  return !!raw && typeof raw === 'object' && !Array.isArray(raw);
+}
+
+function isServerHelloFrame(raw: unknown): raw is ServerHelloFrame {
+  if (!isObjectRecord(raw)) return false;
+  return raw.type === 'hello'
+    && typeof raw.session_id === 'string'
+    && typeof raw.shell_id === 'string'
+    && (raw.next_seq === undefined || typeof raw.next_seq === 'number')
+    && (raw.resume_mode === undefined || typeof raw.resume_mode === 'string');
+}
+
+function isServerDataFrame(raw: unknown): raw is ServerDataFrame {
+  if (!isObjectRecord(raw)) return false;
+  return raw.type === 'data'
+    && typeof raw.seq === 'number'
+    && typeof raw.data_b64 === 'string';
+}
+
+function isServerClosedFrame(raw: unknown): raw is ServerClosedFrame {
+  if (!isObjectRecord(raw)) return false;
+  return raw.type === 'closed'
+    && (raw.seq === undefined || typeof raw.seq === 'number')
+    && (raw.exit_code === undefined || raw.exit_code === null || typeof raw.exit_code === 'number')
+    && (raw.reason === undefined || typeof raw.reason === 'string');
+}
+
+function isServerErrorFrame(raw: unknown): raw is ServerErrorFrame {
+  if (!isObjectRecord(raw)) return false;
+  return raw.type === 'error'
+    && (raw.code === undefined || typeof raw.code === 'string')
+    && (raw.message === undefined || typeof raw.message === 'string')
+    && (raw.fatal === undefined || typeof raw.fatal === 'boolean');
+}
+
+function isServerPongFrame(raw: unknown): raw is ServerPongFrame {
+  if (!isObjectRecord(raw)) return false;
+  return raw.type === 'pong'
+    && (raw.nonce === undefined || typeof raw.nonce === 'string');
+}
+
+function isServerReadyFrame(raw: unknown): raw is ServerReadyFrame {
+  return isObjectRecord(raw) && raw.type === 'ready';
+}
+
 function parseServerFrame(raw: string): ServerFrame | null {
   try {
-    const parsed = JSON.parse(raw) as ServerFrame;
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    const parsed: unknown = JSON.parse(raw);
+    if (isServerHelloFrame(parsed)) return parsed;
+    if (isServerDataFrame(parsed)) return parsed;
+    if (isServerClosedFrame(parsed)) return parsed;
+    if (isServerErrorFrame(parsed)) return parsed;
+    if (isServerPongFrame(parsed)) return parsed;
+    if (isServerReadyFrame(parsed)) return parsed;
+    return null;
   } catch {
     return null;
   }
 }
 
 function frameHasSeq(frame: ServerFrame): frame is ServerDataFrame | ServerClosedFrame {
-  return typeof (frame as { seq?: unknown }).seq === 'number';
+  return 'seq' in frame && typeof frame.seq === 'number';
 }
 
 export default function initTerminalApp(root: HTMLElement, api: AppApi, host: HostBridge): void {

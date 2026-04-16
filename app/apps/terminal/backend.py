@@ -12,7 +12,7 @@ import re
 import shlex
 import shutil
 import time
-from typing import ClassVar, Protocol, cast
+from typing import ClassVar, Literal, NotRequired, Protocol, TypeAlias, TypedDict, cast
 import uuid
 
 from fastapi import APIRouter, HTTPException, WebSocket
@@ -42,7 +42,91 @@ terminal_bp = APIRouter()
 log = logging.getLogger("terminal_backend")
 
 JsonObject = dict[str, object]
-BrokerFrame = dict[str, object]
+TerminalMethod: TypeAlias = Literal[
+    "terminal.connect",
+    "terminal.input",
+    "terminal.resize",
+    "terminal.destroy",
+    "terminal.ping",
+]
+FlushMode: TypeAlias = Literal["auto", "immediate"]
+
+
+class TerminalConnectParams(TypedDict, total=False):
+    session_id: str
+    shell_id: str
+    cols: int
+    rows: int
+    resume_after_seq: int
+    create_if_missing: bool
+    cwd: str
+    shell: str | list[str]
+    kind: str
+
+
+class TerminalInputParams(TypedDict):
+    data_b64: str
+    flush: NotRequired[FlushMode]
+
+
+class TerminalResizeParams(TypedDict):
+    cols: int
+    rows: int
+
+
+class TerminalDestroyParams(TypedDict):
+    pass
+
+
+class TerminalPingParams(TypedDict, total=False):
+    nonce: str
+
+
+class TerminalHelloFrame(TypedDict):
+    type: Literal["hello"]
+    session_id: str
+    shell_id: str
+    next_seq: NotRequired[int]
+    resume_mode: NotRequired[str]
+
+
+class TerminalDataFrame(TypedDict):
+    type: Literal["data"]
+    seq: int
+    data_b64: str
+
+
+class TerminalClosedFrame(TypedDict, total=False):
+    type: Literal["closed"]
+    seq: int
+    exit_code: int | None
+    reason: str
+
+
+class TerminalErrorFrame(TypedDict, total=False):
+    type: Literal["error"]
+    code: str
+    message: str
+    fatal: bool
+
+
+class TerminalPongFrame(TypedDict, total=False):
+    type: Literal["pong"]
+    nonce: str
+
+
+class TerminalReadyFrame(TypedDict):
+    type: Literal["ready"]
+
+
+BrokerFrame: TypeAlias = (
+    TerminalHelloFrame
+    | TerminalDataFrame
+    | TerminalClosedFrame
+    | TerminalErrorFrame
+    | TerminalPongFrame
+    | TerminalReadyFrame
+)
 
 
 class ShellRecordProtocol(Protocol):
@@ -194,12 +278,58 @@ def _coerce_optional_string(raw: object) -> str | None:
     return value or None
 
 
-def _frame_type(frame: Mapping[str, object]) -> str:
-    return _coerce_string(frame.get("type"))
+def _coerce_optional_bool(raw: object) -> bool | None:
+    if isinstance(raw, bool):
+        return raw
+    return None
 
 
-def _frame_seq(frame: Mapping[str, object]) -> int:
-    return _coerce_non_negative_int(frame.get("seq"), 0)
+def _coerce_optional_int(raw: object) -> int | None:
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text.startswith("-"):
+            body = text[1:]
+            if body.isdigit():
+                return int(text)
+        elif text.isdigit():
+            return int(text)
+    return None
+
+
+def _coerce_optional_non_negative_int(raw: object) -> int | None:
+    value = _coerce_optional_int(raw)
+    if value is None or value < 0:
+        return None
+    return value
+
+
+def _coerce_json_object(raw: object) -> JsonObject | None:
+    if not isinstance(raw, Mapping):
+        return None
+    payload: JsonObject = {}
+    for key, value in raw.items():
+        if isinstance(key, str):
+            payload[key] = value
+    return payload
+
+
+def _coerce_string_list(raw: object) -> list[str] | None:
+    if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+        values = [str(item) for item in raw if str(item).strip()]
+        return values or None
+    return None
+
+
+def _frame_type(frame: BrokerFrame) -> str:
+    return frame["type"]
+
+
+def _frame_seq(frame: BrokerFrame) -> int:
+    return frame["seq"] if frame["type"] in {"data", "closed"} and "seq" in frame else 0
 
 
 def _jsonrpc_method(payload: Mapping[str, object]) -> str:
@@ -208,14 +338,173 @@ def _jsonrpc_method(payload: Mapping[str, object]) -> str:
     return _coerce_string(payload.get("method"))
 
 
-def _jsonrpc_params(payload: Mapping[str, object]) -> Mapping[str, object]:
+def _jsonrpc_params(payload: Mapping[str, object]) -> JsonObject:
     raw = payload.get("params")
-    if isinstance(raw, Mapping):
-        return cast(Mapping[str, object], raw)
-    return {}
+    return _coerce_json_object(raw) or {}
 
 
-def _jsonrpc_line(method: str, params: Mapping[str, object] | None = None) -> str:
+def _parse_connect_params(payload: Mapping[str, object]) -> TerminalConnectParams:
+    params: TerminalConnectParams = {}
+    session_id = _coerce_optional_string(payload.get("session_id"))
+    if session_id is not None:
+        params["session_id"] = session_id
+    shell_id = _coerce_optional_string(payload.get("shell_id"))
+    if shell_id is not None:
+        params["shell_id"] = shell_id
+    cols = _coerce_optional_non_negative_int(payload.get("cols"))
+    if cols is not None and cols > 0:
+        params["cols"] = cols
+    rows = _coerce_optional_non_negative_int(payload.get("rows"))
+    if rows is not None and rows > 0:
+        params["rows"] = rows
+    resume_after_seq = _coerce_optional_non_negative_int(payload.get("resume_after_seq"))
+    if resume_after_seq is not None:
+        params["resume_after_seq"] = resume_after_seq
+    create_if_missing = _coerce_optional_bool(payload.get("create_if_missing"))
+    if create_if_missing is not None:
+        params["create_if_missing"] = create_if_missing
+    cwd = _coerce_optional_string(payload.get("cwd"))
+    if cwd is not None:
+        params["cwd"] = cwd
+    shell_value = payload.get("shell")
+    shell_parts = _coerce_string_list(shell_value)
+    if shell_parts is not None:
+        params["shell"] = shell_parts
+    else:
+        shell_text = _coerce_optional_string(shell_value)
+        if shell_text is not None:
+            params["shell"] = shell_text
+    kind = _coerce_optional_string(payload.get("kind"))
+    if kind is not None:
+        params["kind"] = kind
+    return params
+
+
+def _parse_input_params(payload: Mapping[str, object]) -> TerminalInputParams | None:
+    data_b64 = _coerce_optional_string(payload.get("data_b64"))
+    if data_b64 is None:
+        return None
+    params: TerminalInputParams = {"data_b64": data_b64}
+    flush = _coerce_optional_string(payload.get("flush"))
+    if flush in {"auto", "immediate"}:
+        params["flush"] = cast(FlushMode, flush)
+    return params
+
+
+def _parse_resize_params(payload: Mapping[str, object]) -> TerminalResizeParams:
+    return {
+        "cols": _coerce_positive_int(payload.get("cols"), DEFAULT_COLS),
+        "rows": _coerce_positive_int(payload.get("rows"), DEFAULT_ROWS),
+    }
+
+
+def _parse_ping_params(payload: Mapping[str, object]) -> TerminalPingParams:
+    params: TerminalPingParams = {}
+    nonce = _coerce_optional_string(payload.get("nonce"))
+    if nonce is not None:
+        params["nonce"] = nonce
+    return params
+
+
+def _error_frame(code: str, message: str, *, fatal: bool) -> TerminalErrorFrame:
+    return {
+        "type": "error",
+        "code": code,
+        "message": message,
+        "fatal": fatal,
+    }
+
+
+def _pong_frame(nonce: str | None = None) -> TerminalPongFrame:
+    frame: TerminalPongFrame = {"type": "pong"}
+    if nonce is not None:
+        frame["nonce"] = nonce
+    return frame
+
+
+def _hello_frame(
+    *,
+    session_id: str,
+    shell_id: str,
+    next_seq: int | None = None,
+    resume_mode: str | None = None,
+) -> TerminalHelloFrame:
+    frame: TerminalHelloFrame = {
+        "type": "hello",
+        "session_id": session_id,
+        "shell_id": shell_id,
+    }
+    if next_seq is not None:
+        frame["next_seq"] = next_seq
+    if resume_mode is not None:
+        frame["resume_mode"] = resume_mode
+    return frame
+
+
+def _closed_frame(
+    *,
+    seq: int | None = None,
+    exit_code: int | None = None,
+    reason: str | None = None,
+) -> TerminalClosedFrame:
+    frame: TerminalClosedFrame = {"type": "closed"}
+    if seq is not None:
+        frame["seq"] = seq
+    if exit_code is not None or exit_code is None:
+        frame["exit_code"] = exit_code
+    if reason is not None:
+        frame["reason"] = reason
+    return frame
+
+
+def _coerce_broker_frame(raw: object) -> BrokerFrame | None:
+    payload = _coerce_json_object(raw)
+    if payload is None:
+        return None
+    frame_type = _coerce_string(payload.get("type"))
+    if frame_type == "hello":
+        session_id = _coerce_optional_string(payload.get("session_id"))
+        shell_id = _coerce_optional_string(payload.get("shell_id"))
+        if session_id is None or shell_id is None:
+            return None
+        return _hello_frame(
+            session_id=session_id,
+            shell_id=shell_id,
+            next_seq=_coerce_optional_non_negative_int(payload.get("next_seq")),
+            resume_mode=_coerce_optional_string(payload.get("resume_mode")),
+        )
+    if frame_type == "data":
+        seq = _coerce_optional_non_negative_int(payload.get("seq"))
+        data_b64 = _coerce_optional_string(payload.get("data_b64"))
+        if seq is None or data_b64 is None:
+            return None
+        return {"type": "data", "seq": seq, "data_b64": data_b64}
+    if frame_type == "closed":
+        return _closed_frame(
+            seq=_coerce_optional_non_negative_int(payload.get("seq")),
+            exit_code=_coerce_optional_int(payload.get("exit_code")),
+            reason=_coerce_optional_string(payload.get("reason")),
+        )
+    if frame_type == "error":
+        code = _coerce_optional_string(payload.get("code"))
+        message = _coerce_optional_string(payload.get("message"))
+        fatal = _coerce_optional_bool(payload.get("fatal"))
+        frame: TerminalErrorFrame = {"type": "error"}
+        if code is not None:
+            frame["code"] = code
+        if message is not None:
+            frame["message"] = message
+        if fatal is not None:
+            frame["fatal"] = fatal
+        return frame
+    if frame_type == "pong":
+        return _pong_frame(_coerce_optional_string(payload.get("nonce")))
+    if frame_type == "ready":
+        return {"type": "ready"}
+    return None
+
+
+def _jsonrpc_line(method: TerminalMethod, params: JsonObject | None = None) -> str:
     payload: JsonObject = {
         "jsonrpc": "2.0",
         "method": method,
@@ -404,13 +693,7 @@ async def _make_synthetic_closed(
         if session.closed_payload is not None:
             return dict(session.closed_payload)
         session.last_seq += 1
-        record: BrokerFrame = {
-            "type": "closed",
-            "seq": session.last_seq,
-            "ts": int(time.time() * 1000),
-            "exit_code": exit_code,
-            "reason": reason,
-        }
+        record = _closed_frame(seq=session.last_seq, exit_code=exit_code, reason=reason)
         session.closed_payload = dict(record)
         session.ring_buffer.append(dict(record))
         return record
@@ -430,9 +713,9 @@ def _read_log_after(path: str, after_seq: int) -> list[BrokerFrame]:
                 loaded = cast(object, json.loads(line))
             except json.JSONDecodeError:
                 continue
-            if not isinstance(loaded, dict):
+            frame = _coerce_broker_frame(loaded)
+            if frame is None:
                 continue
-            frame = cast(BrokerFrame, loaded)
             seq = _frame_seq(frame)
             if seq > after_seq:
                 out.append(frame)
@@ -510,9 +793,9 @@ async def _session_output_loop(session: TerminalSession) -> None:
                 except json.JSONDecodeError:
                     log.warning("[terminal] bad broker JSON: %s", line_bytes[:200])
                     continue
-                if not isinstance(loaded, dict):
+                frame = _coerce_broker_frame(loaded)
+                if frame is None:
                     continue
-                frame = cast(BrokerFrame, loaded)
                 if _frame_type(frame) == "ready":
                     continue
                 await _record_stream_frame(session, frame)
@@ -523,12 +806,7 @@ async def _session_output_loop(session: TerminalSession) -> None:
         log.exception("[terminal] broker stdout reader crashed shell=%s", session.shell_id)
         await _broadcast(
             session,
-            {
-                "type": "error",
-                "code": "broker_stream_failed",
-                "message": str(exc),
-                "fatal": False,
-            },
+            _error_frame("broker_stream_failed", str(exc), fatal=False),
         )
     finally:
         if queue is not None:
@@ -600,12 +878,11 @@ async def _plan_replay(
     async with session.lock:
         current_seq = session.last_seq
     if current_seq > after_seq:
-        return "fresh", [], {
-            "type": "error",
-            "code": "resume_gap",
-            "message": "Replay history unavailable; continuing from live stream.",
-            "fatal": False,
-        }
+        return "fresh", [], _error_frame(
+            "resume_gap",
+            "Replay history unavailable; continuing from live stream.",
+            fatal=False,
+        )
     return "noop", [], None
 
 
@@ -622,13 +899,12 @@ async def _attach_connection(
 
     async with session.lock:
         queue.put_nowait(
-            {
-                "type": "hello",
-                "session_id": session.session_id,
-                "shell_id": session.shell_id,
-                "next_seq": session.last_seq + 1,
-                "resume_mode": resume_mode,
-            }
+            _hello_frame(
+                session_id=session.session_id,
+                shell_id=session.shell_id,
+                next_seq=session.last_seq + 1,
+                resume_mode=resume_mode,
+            )
         )
         for frame in replay_frames:
             queue.put_nowait(dict(frame))
@@ -643,8 +919,8 @@ async def _attach_connection(
         session.subscribers[conn_id] = queue
 
 
-async def _resolve_shell_for_connect(payload: Mapping[str, object]) -> str:
-    requested_shell_id = _coerce_optional_string(payload.get("shell_id"))
+async def _resolve_shell_for_connect(payload: TerminalConnectParams) -> str:
+    requested_shell_id = payload.get("shell_id")
     if requested_shell_id:
         manager = await mgr()
         rec = await manager.get_shell(requested_shell_id)
@@ -652,7 +928,7 @@ async def _resolve_shell_for_connect(payload: Mapping[str, object]) -> str:
             raise RuntimeError("Shell not found")
         return requested_shell_id
 
-    requested_session_id = _coerce_optional_string(payload.get("session_id"))
+    requested_session_id = payload.get("session_id")
     if requested_session_id:
         async with _sessions_lock:
             session = _sessions.get(requested_session_id)
@@ -662,11 +938,11 @@ async def _resolve_shell_for_connect(payload: Mapping[str, object]) -> str:
     create_if_missing = bool(payload.get("create_if_missing"))
     if create_if_missing:
         create_request = CreateShellRequest(
-            shell=cast(str | list[str] | None, payload.get("shell")),
-            cwd=_normalize_cwd(_coerce_string(payload.get("cwd")) or "~"),
-            cols=_coerce_positive_int(payload.get("cols"), DEFAULT_COLS),
-            rows=_coerce_positive_int(payload.get("rows"), DEFAULT_ROWS),
-            kind=_coerce_optional_string(payload.get("kind")),
+            shell=payload.get("shell"),
+            cwd=_normalize_cwd(payload.get("cwd") or "~"),
+            cols=payload.get("cols", DEFAULT_COLS),
+            rows=payload.get("rows", DEFAULT_ROWS),
+            kind=payload.get("kind"),
         )
         created = await _create_shell_record(create_request)
         shell_id = _coerce_optional_string(created.get("id"))
@@ -679,8 +955,8 @@ async def _resolve_shell_for_connect(payload: Mapping[str, object]) -> str:
 
 async def _send_broker_notification(
     shell_id: str,
-    method: str,
-    params: Mapping[str, object] | None = None,
+    method: TerminalMethod,
+    params: JsonObject | None = None,
 ) -> None:
     manager = await mgr()
     await manager.write_to_pipe(shell_id, _jsonrpc_line(method, params))
@@ -843,66 +1119,31 @@ async def terminal_ws(websocket: WebSocket) -> None:
         try:
             loaded = cast(object, json.loads(raw))
         except json.JSONDecodeError:
-            send_queue.put_nowait(
-                {
-                    "type": "error",
-                    "code": "bad_json",
-                    "message": "Expected JSON-RPC connect notification",
-                    "fatal": True,
-                }
-            )
+            send_queue.put_nowait(_error_frame("bad_json", "Expected JSON-RPC connect notification", fatal=True))
             return
 
-        if not isinstance(loaded, dict):
-            send_queue.put_nowait(
-                {
-                    "type": "error",
-                    "code": "expected_object",
-                    "message": "Connect notification must be a JSON object",
-                    "fatal": True,
-                }
-            )
+        payload = _coerce_json_object(loaded)
+        if payload is None:
+            send_queue.put_nowait(_error_frame("expected_object", "Connect notification must be a JSON object", fatal=True))
             return
 
-        payload = cast(BrokerFrame, loaded)
         if _jsonrpc_method(payload) != "terminal.connect":
-            send_queue.put_nowait(
-                {
-                    "type": "error",
-                    "code": "expected_connect",
-                    "message": "First notification must be terminal.connect",
-                    "fatal": True,
-                }
-            )
+            send_queue.put_nowait(_error_frame("expected_connect", "First notification must be terminal.connect", fatal=True))
             return
 
-        connect_params = _jsonrpc_params(payload)
+        connect_params = _parse_connect_params(_jsonrpc_params(payload))
 
         try:
             shell_id = await _resolve_shell_for_connect(connect_params)
-            requested_session_id = _coerce_optional_string(connect_params.get("session_id"))
-            resume_after_seq = _coerce_non_negative_int(connect_params.get("resume_after_seq"), 0)
+            requested_session_id = connect_params.get("session_id")
+            resume_after_seq = connect_params.get("resume_after_seq", 0)
             session = await _get_or_create_session(shell_id, requested_session_id)
             await _attach_connection(session, conn_id, send_queue, resume_after_seq)
         except HTTPException as exc:
-            send_queue.put_nowait(
-                {
-                    "type": "error",
-                    "code": "session_init_failed",
-                    "message": str(exc.detail),
-                    "fatal": True,
-                }
-            )
+            send_queue.put_nowait(_error_frame("session_init_failed", str(exc.detail), fatal=True))
             return
         except RuntimeError as exc:
-            send_queue.put_nowait(
-                {
-                    "type": "error",
-                    "code": "session_init_failed",
-                    "message": str(exc),
-                    "fatal": True,
-                }
-            )
+            send_queue.put_nowait(_error_frame("session_init_failed", str(exc), fatal=True))
             return
         active_session = session
         connect_notice: JsonObject = {
@@ -910,8 +1151,8 @@ async def terminal_ws(websocket: WebSocket) -> None:
             "shell_id": active_session.shell_id,
             "resume_after_seq": resume_after_seq,
         }
-        cols = _coerce_positive_int(connect_params.get("cols"), 0)
-        rows = _coerce_positive_int(connect_params.get("rows"), 0)
+        cols = connect_params.get("cols", 0)
+        rows = connect_params.get("rows", 0)
         if cols > 0:
             connect_notice["cols"] = cols
         if rows > 0:
@@ -927,100 +1168,60 @@ async def terminal_ws(websocket: WebSocket) -> None:
             try:
                 loaded_frame = cast(object, json.loads(raw_frame))
             except json.JSONDecodeError:
-                send_queue.put_nowait(
-                    {
-                        "type": "error",
-                        "code": "bad_json",
-                        "message": "Malformed JSON-RPC notification",
-                        "fatal": False,
-                    }
-                )
+                send_queue.put_nowait(_error_frame("bad_json", "Malformed JSON-RPC notification", fatal=False))
                 continue
 
-            if not isinstance(loaded_frame, dict):
-                send_queue.put_nowait(
-                    {
-                        "type": "error",
-                        "code": "expected_object",
-                        "message": "Notification must be a JSON object",
-                        "fatal": False,
-                    }
-                )
+            frame = _coerce_json_object(loaded_frame)
+            if frame is None:
+                send_queue.put_nowait(_error_frame("expected_object", "Notification must be a JSON object", fatal=False))
                 continue
 
-            frame = cast(BrokerFrame, loaded_frame)
             frame_method = _jsonrpc_method(frame)
             frame_params = _jsonrpc_params(frame)
             if frame_method == "terminal.ping":
-                send_queue.put_nowait({"type": "pong", "nonce": frame_params.get("nonce")})
+                ping_params = _parse_ping_params(frame_params)
+                send_queue.put_nowait(_pong_frame(ping_params.get("nonce")))
                 continue
 
             if frame_method == "terminal.input":
-                data_b64 = _coerce_optional_string(frame_params.get("data_b64"))
-                if not data_b64:
+                input_params = _parse_input_params(frame_params)
+                if input_params is None:
                     continue
-                flush = _coerce_optional_string(frame_params.get("flush")) or "auto"
                 try:
                     await _send_broker_notification(
                         active_session.shell_id,
                         "terminal.input",
-                        {
-                            "data_b64": data_b64,
-                            "flush": flush,
-                        },
+                        dict(input_params),
                     )
                 except Exception as exc:
-                    send_queue.put_nowait(
-                        {
-                            "type": "error",
-                            "code": "write_failed",
-                            "message": str(exc),
-                            "fatal": False,
-                        }
-                    )
+                    send_queue.put_nowait(_error_frame("write_failed", str(exc), fatal=False))
                 continue
 
             if frame_method == "terminal.resize":
                 try:
-                    resize_cols = _coerce_positive_int(frame_params.get("cols"), DEFAULT_COLS)
-                    resize_rows = _coerce_positive_int(frame_params.get("rows"), DEFAULT_ROWS)
+                    resize_params = _parse_resize_params(frame_params)
                     await _send_broker_notification(
                         active_session.shell_id,
                         "terminal.resize",
-                        {"cols": resize_cols, "rows": resize_rows},
+                        dict(resize_params),
                     )
                 except Exception as exc:
-                    send_queue.put_nowait(
-                        {
-                            "type": "error",
-                            "code": "resize_failed",
-                            "message": str(exc),
-                            "fatal": False,
-                        }
-                    )
+                    send_queue.put_nowait(_error_frame("resize_failed", str(exc), fatal=False))
                 continue
 
             if frame_method == "terminal.destroy":
                 try:
                     await _send_broker_notification(active_session.shell_id, "terminal.destroy")
                 except Exception as exc:
-                    send_queue.put_nowait(
-                        {
-                            "type": "error",
-                            "code": "destroy_failed",
-                            "message": str(exc),
-                            "fatal": False,
-                        }
-                    )
+                    send_queue.put_nowait(_error_frame("destroy_failed", str(exc), fatal=False))
                 continue
 
             send_queue.put_nowait(
-                {
-                    "type": "error",
-                    "code": "unknown_method",
-                    "message": f"Unsupported notification '{frame_method or '<missing>'}'",
-                    "fatal": False,
-                }
+                _error_frame(
+                    "unknown_method",
+                    f"Unsupported notification '{frame_method or '<missing>'}'",
+                    fatal=False,
+                )
             )
     except WebSocketDisconnect:
         pass
