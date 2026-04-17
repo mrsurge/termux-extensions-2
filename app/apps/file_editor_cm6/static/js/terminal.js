@@ -39,6 +39,7 @@ export function createTerminalDrawer(options = {}) {
   const drawer = document.getElementById('terminal-drawer');
   const container = document.getElementById('terminal-container');
   const header = drawer?.querySelector('.terminal-header');
+  const resizeHandle = document.querySelector('.resize-handle--terminal');
   const shellToggle = drawer?.querySelector('#terminal-shell-toggle');
   const shellMenu = drawer?.querySelector('#terminal-shell-menu');
   const toggleBtn = document.getElementById('terminal-toggle');
@@ -69,6 +70,17 @@ export function createTerminalDrawer(options = {}) {
     if (shell.title) return `${String(shell.title).trim()}/${String(shell.id || '').slice(-4)}`;
     if (shell.id) return `Terminal/${String(shell.id).slice(-4)}`;
     return 'Terminal';
+  }
+
+  function setTerminalResizeHandleActive(active) {
+    if (!(resizeHandle instanceof HTMLElement)) return;
+    resizeHandle.hidden = !active;
+    resizeHandle.setAttribute('aria-hidden', active ? 'false' : 'true');
+  }
+
+  function setDrawerCollapsedState(collapsed) {
+    if (!(drawer instanceof HTMLElement)) return;
+    drawer.classList.toggle('terminal-drawer--collapsed', !!collapsed);
   }
 
   function isShellExited(shell) {
@@ -1075,7 +1087,9 @@ export function createTerminalDrawer(options = {}) {
   async function open() {
     if (isOpen) return;
 
+    setDrawerCollapsedState(false);
     drawer.classList.add('open');
+    setTerminalResizeHandleActive(true);
     isOpen = true;
     setDrawerHelperFocusActive(true);
     startupSizing = true;
@@ -1108,6 +1122,8 @@ export function createTerminalDrawer(options = {}) {
     if (!isOpen) return;
 
     drawer.classList.remove('open');
+    setDrawerCollapsedState(true);
+    setTerminalResizeHandleActive(true);
     isOpen = false;
     setDrawerHelperFocusActive(false);
     startupSizing = false;
@@ -1287,6 +1303,11 @@ export function createTerminalDrawer(options = {}) {
       await copySelection();
     });
   }
+
+  setDrawerCollapsedState(!drawer?.classList.contains('open'));
+  setTerminalResizeHandleActive(
+    drawer?.classList.contains('open') || drawer?.classList.contains('terminal-drawer--collapsed')
+  );
 
   // Enable draggable resize
   enableManualResize();

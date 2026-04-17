@@ -93,27 +93,11 @@
         }
       }
     </script>
-    <style>
-      .__fh_debug_badge {
-        position: fixed;
-        left: 8px;
-        bottom: 8px;
-        z-index: 2147483647;
-        background: rgba(0,0,0,0.55);
-        color: #e6edf3;
-        border: 1px solid rgba(255,255,255,0.18);
-        border-radius: 8px;
-        padding: 6px 8px;
-        font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        pointer-events: none;
-      }
-    </style>
   </head>
   <body>
     <div class="fh-root">
       <div id="te2-breadcrumbs"></div>
       <div id="fh-monaco"></div>
-      <div id="fh-debug" class="__fh_debug_badge">loading…</div>
     </div>
     <!-- Load monaco-touch-selection BEFORE Monaco loader so AMD doesn't hijack it. -->
     <script src="/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js"></script>

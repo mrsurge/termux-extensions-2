@@ -48,6 +48,8 @@ export function initResizeManager() {
       const clientY = e.clientY || e.touches?.[0]?.clientY;
       
       const panelType = handle.dataset.panel;
+      const terminalDrawer = panelType === 'terminal' ? document.getElementById('terminal-drawer') : null;
+      const terminalCollapsed = !!(terminalDrawer && terminalDrawer.classList.contains('terminal-drawer--collapsed'));
       isDragging = true;
       panel = panelType;
 
@@ -65,8 +67,12 @@ export function initResizeManager() {
         startSize = parseInt(currentWidth) || (panelType === 'explorer' ? 320 : 400);
       } else if (panelType === 'terminal') {
         startPos = clientY;
-        const currentHeight = getComputedStyle(document.documentElement).getPropertyValue('--terminal-height');
-        startSize = parseInt(currentHeight) || 340;
+        if (terminalCollapsed) {
+          startSize = 2;
+        } else {
+          const currentHeight = getComputedStyle(document.documentElement).getPropertyValue('--terminal-height');
+          startSize = parseInt(currentHeight) || 340;
+        }
       }
       
       handle.classList.add('dragging');
@@ -93,6 +99,11 @@ export function initResizeManager() {
         const newWidth = Math.max(250, Math.min(700, startSize + delta));
         document.documentElement.style.setProperty('--agent-width', `${newWidth}px`);
       } else if (panel === 'terminal') {
+        const terminalDrawer = document.getElementById('terminal-drawer');
+        if (terminalDrawer && terminalDrawer.classList.contains('terminal-drawer--collapsed')) {
+          e.preventDefault();
+          return;
+        }
         const delta = startPos - clientY;
         const newHeight = Math.max(150, Math.min(800, startSize + delta));
         document.documentElement.style.setProperty('--terminal-height', `${newHeight}px`);

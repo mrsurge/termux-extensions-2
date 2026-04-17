@@ -64,6 +64,7 @@ import { createSaveFlowController } from './src/host/file-ops/save-flow.ts';
 import { createOpenFlowController } from './src/host/file-ops/open-flow.ts';
 import { createRunFileController } from './src/host/file-ops/run-file.ts';
 import { createApiClient } from './src/host/api/client.ts';
+import { bootInlineEditorHost } from './monaco_editor/inline_host.js';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 
@@ -1199,7 +1200,7 @@ var fileNameEl = null;
 window.api  = appContext.api;
 
 const container = requireEl('#editor-container');
-const editorFrame = requireEl('#editor-frame'); // Changed from cm6-host to editor-frame
+const editorFrame = requireEl('#editor-frame');
 const root = requireEl('.fe-root');
 const toolbarEl = requireEl('.fe-toolbar');
 const titleBlockEl = requireEl('.fe-title-block');
@@ -1217,6 +1218,7 @@ Object.assign(appContext.elements, {
   agentTranscript,
   agentComposer,
 });
+bootInlineEditorHost(editorFrame, { ensureSocketIoLoaded });
 
 // Title/status & chrome
 fileNameEl = requireEl('#fe-file-name');
@@ -2015,13 +2017,23 @@ createSettingsBootstrap({
   toast: (msg, ms) => host.toast(msg, ms),
 });
 
-initVirtualKeyboardAdjustments({
-  root,
-  agentDrawer: agentDrawerEl,
-  composer: agentComposer,
-  transcript: agentTranscript,
-  editorSurface: editorFrame,
-});
+function shouldUseLocalKeyboardViewportAdjustments() {
+  try {
+    return document.documentElement?.dataset?.shellMode !== 'mobile-tab';
+  } catch (_) {
+    return true;
+  }
+}
+
+if (shouldUseLocalKeyboardViewportAdjustments()) {
+  initVirtualKeyboardAdjustments({
+    root,
+    agentDrawer: agentDrawerEl,
+    composer: agentComposer,
+    transcript: agentTranscript,
+    editorSurface: editorFrame,
+  });
+}
 
 
 // ---------- Session telemetry ----------
@@ -3276,7 +3288,7 @@ const projectSwitchController = createProjectSwitchController({
   syncEditorState: (forceRefresh) => editorStateController.syncEditorState(forceRefresh),
   broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
   getBranchMenuHandle: () => branchMenuHandle,
-  getEditorFrame: () => editorFrame,
+  reloadEditorSurface: () => window.location.reload(),
 });
 
 // Expose for explorer.js (project:opened handler)

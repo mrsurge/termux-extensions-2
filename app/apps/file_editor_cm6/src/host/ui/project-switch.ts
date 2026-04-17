@@ -11,7 +11,7 @@
  *   syncEditorState: (forceRefresh?: boolean) => Promise<any>,
  *   broadcastRecentsUpdate: (state: any) => void,
  *   getBranchMenuHandle: () => any,
- *   getEditorFrame: () => HTMLIFrameElement | null
+ *   reloadEditorSurface: () => void
  * }} deps
  */
 export function createProjectSwitchController(deps) {
@@ -49,15 +49,8 @@ export function createProjectSwitchController(deps) {
       }
     }
 
-    try {
-      const editorFrame = deps.getEditorFrame();
-      if (editorFrame && editorFrame.contentWindow && editorFrame.contentWindow.location) {
-        editorFrame.contentWindow.location.reload();
-      } else if (editorFrame) {
-        editorFrame.src = editorFrame.src;
-      }
-    } catch (err) {
-      console.warn('[ProjectSwitch] Failed to reload editor iframe:', err);
+    try { deps.reloadEditorSurface(); } catch (err) {
+      console.warn('[ProjectSwitch] Failed to reload editor surface:', err);
     }
   }
 

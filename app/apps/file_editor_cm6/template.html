@@ -32,7 +32,15 @@
     --chrome-base-font: calc(14px * var(--chrome-font-scale));
   }
 
-  .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
+  .fe-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 100%;
+    min-width: 0;
+    background:var(--bg);
+    color:var(--fg);
+  }
 
   body.keyboard-locked {
     overflow: hidden;
@@ -57,6 +65,8 @@
     grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
     grid-template-rows: auto auto 1fr auto;
     height: 100%;
+    min-height: 0;
+    min-width: 0;
     overflow: hidden;
   }
 
@@ -147,7 +157,7 @@
     top: 0;
     right: -9999px;
     width: var(--agent-width, 400px);
-    height: 100vh;
+    height: var(--te-app-container-height, 100vh);
   }
 
   /* Terminal is tiled in editor column only in desktop mode */
@@ -165,7 +175,7 @@
   }
 
   /* When terminal is "closed" (open class NOT present) */
-  .layout-desktop .terminal-drawer:not(.open) {
+  .layout-desktop .terminal-drawer:not(.open):not(.terminal-drawer--collapsed) {
     opacity: 0;
     visibility: hidden;
     height: 0;
@@ -174,8 +184,28 @@
   }
 
   /* Adjust grid when terminal is closed in desktop */
-  .layout-desktop:has(.terminal-drawer:not(.open)) {
+  .layout-desktop:has(.terminal-drawer:not(.open):not(.terminal-drawer--collapsed)) {
     grid-template-rows: auto auto 1fr 0px;
+  }
+
+  .layout-desktop .terminal-drawer.terminal-drawer--collapsed {
+    height: 2px;
+    min-height: 2px;
+    max-height: 2px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    pointer-events: auto;
+  }
+
+  .layout-desktop .terminal-drawer.terminal-drawer--collapsed::after {
+    content: '';
+    display: block;
+    flex: 0 0 2px;
+    height: 2px;
+  }
+
+  .layout-desktop:has(.terminal-drawer.terminal-drawer--collapsed) {
+    grid-template-rows: auto auto 1fr 2px;
   }
 
   /* Fix z-index for dropdowns in desktop mode */
@@ -192,6 +222,8 @@
     grid-template-columns: 1fr;
     grid-template-rows: auto auto 1fr auto;
     height: 100%;
+    min-height: 0;
+    min-width: 0;
     overflow: hidden;
   }
 
@@ -243,7 +275,7 @@
   }
 
   /* When terminal is "closed" (open class NOT present) */
-  .layout-mobile .terminal-drawer:not(.open) {
+  .layout-mobile .terminal-drawer:not(.open):not(.terminal-drawer--collapsed) {
     opacity: 0;
     visibility: hidden;
     height: 0;
@@ -252,8 +284,67 @@
   }
 
   /* Adjust grid when terminal is closed */
-  .layout-mobile:has(.terminal-drawer:not(.open)) {
+  .layout-mobile:has(.terminal-drawer:not(.open):not(.terminal-drawer--collapsed)) {
     grid-template-rows: auto auto 1fr 0px;
+  }
+
+  .layout-mobile .terminal-drawer.terminal-drawer--collapsed {
+    height: 2px;
+    min-height: 2px;
+    max-height: 2px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    pointer-events: auto;
+  }
+
+  .layout-mobile .terminal-drawer.terminal-drawer--collapsed::after {
+    content: '';
+    display: block;
+    flex: 0 0 2px;
+    height: 2px;
+  }
+
+  .layout-mobile:has(.terminal-drawer.terminal-drawer--collapsed) {
+    grid-template-rows: auto auto 1fr 2px;
+  }
+
+  .terminal-drawer.terminal-drawer--collapsed .drawer-tab-bar {
+    height: 1px;
+    min-height: 1px;
+    max-height: 1px;
+    padding: 0;
+    border-bottom: 0;
+    overflow: hidden;
+    flex: 0 0 1px;
+  }
+
+  .terminal-drawer.terminal-drawer--collapsed .drawer-tab {
+    min-height: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    font-size: 0;
+    line-height: 0;
+    overflow: hidden;
+  }
+
+  .terminal-drawer.terminal-drawer--collapsed .terminal-header,
+  .terminal-drawer.terminal-drawer--collapsed .console-header,
+  .terminal-drawer.terminal-drawer--collapsed .problems-header {
+    display: none !important;
+  }
+
+  .terminal-drawer.terminal-drawer--collapsed #terminal-container,
+  .terminal-drawer.terminal-drawer--collapsed #console-container,
+  .terminal-drawer.terminal-drawer--collapsed #problems-container {
+    height: 1px;
+    min-height: 1px;
+    max-height: 1px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    overflow: auto;
+    flex: 0 0 1px;
   }
 
   /* ========================================
@@ -303,7 +394,6 @@
 
   /* Terminal resize handle (horizontal, desktop only - in editor column) */
   .layout-desktop .resize-handle--terminal {
-    display: block;
     height: 5px;
     cursor: row-resize;
     grid-column: 2;
@@ -314,7 +404,6 @@
 
   /* Terminal resize handle (horizontal, mobile only) */
   .layout-mobile .resize-handle--terminal {
-    display: block;
     height: 5px;
     cursor: row-resize;
     grid-column: 1;
@@ -323,10 +412,25 @@
     margin-top: -5px;
   }
 
+  .layout-desktop:has(.terminal-drawer.open) .resize-handle--terminal,
+  .layout-desktop:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal,
+  .layout-mobile:has(.terminal-drawer.open) .resize-handle--terminal {
+    display: block;
+  }
+
+  .layout-mobile:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal {
+    display: block;
+  }
+
+  .layout-desktop:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal:hover,
+  .layout-desktop:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal.dragging,
+  .layout-mobile:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal:hover,
+  .layout-mobile:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal.dragging {
+    background: transparent;
+  }
+
   /* Hide resize handles when panels are closed */
-  .layout-desktop .agent-drawer:not(.open) ~ .resize-handle--agent,
-  .layout-desktop .terminal-drawer:not(.open) ~ .resize-handle--terminal,
-  .layout-mobile .terminal-drawer:not(.open) ~ .resize-handle--terminal {
+  .layout-desktop .agent-drawer:not(.open) ~ .resize-handle--agent {
     display: none;
   }
 
@@ -483,6 +587,69 @@
     height: 100% !important;
     display: block;
     border: 0 !important;
+    overflow: hidden;
+    background: #0b0f14;
+  }
+  #editor-frame .fh-root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  #editor-frame #te2-breadcrumbs {
+    display: flex;
+    align-items: center;
+    padding: 2px 8px;
+    background: #0b0f1a;
+    border-bottom: 1px solid #333;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    min-height: 22px;
+    max-height: 22px;
+    flex-shrink: 0;
+    color: #ccc;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  #editor-frame #te2-breadcrumbs::-webkit-scrollbar { display: none; }
+  #editor-frame #te2-breadcrumbs:empty { display: none; }
+  #editor-frame #te2-breadcrumbs .monaco-breadcrumbs { flex: 1; min-width: 0; }
+  #editor-frame .te2-bc-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px;
+    opacity: 0.8;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #editor-frame .te2-bc-item:hover { opacity: 1; color: #e5e7eb; }
+  #editor-frame .te2-bc-icon {
+    display: inline-flex;
+    align-items: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  #editor-frame .te2-bc-icon svg { width: 16px; height: 16px; fill: currentColor; }
+  #editor-frame .te2-bc-sym-icon {
+    display: inline-flex;
+    align-items: center;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    margin-right: 2px;
+  }
+  #editor-frame .te2-bc-sym-icon svg { width: 14px; height: 14px; }
+  #editor-frame .te2-bc-sep { opacity: 0.4; padding: 0 2px; }
+  #editor-frame #fh-monaco { flex: 1; min-height: 0; min-width: 0; width: 100%; }
+  #editor-frame .fh-root,
+  #editor-frame .monaco-editor {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
   #cm6-host { position:absolute; inset:0; display:flex; }
   .cm-editor { flex:1; height:100%; }
@@ -954,7 +1121,7 @@
     transform: translateY(0);
   }
   .terminal-drawer.fullscreen {
-    height: calc(100vh - 80px) !important;
+    height: calc(var(--te-app-container-height, 100vh) - 80px) !important;
   }
   .terminal-header {
     display: flex;
@@ -1137,6 +1304,13 @@
     backdrop-filter: blur(12px);
     color: var(--foreground, #e5e7eb);
     border-left: 1px solid var(--border);
+  }
+
+  html[data-shell-mode="mobile-tab"] .agent-drawer {
+    top: var(--framework-toolbar-height, 0px);
+    bottom: auto;
+    height: var(--te-app-container-height, var(--te-shell-viewport-height, 100dvh));
+    max-height: var(--te-app-container-height, var(--te-shell-viewport-height, 100dvh));
   }
 
   .agent-drawer.open {
@@ -2480,14 +2654,7 @@
   </div>
 
 	  <div class="fe-editor-container" id="editor-container">
-	    <iframe 
-	      id="editor-frame" 
-	      src="/api/app/file_editor_cm6/ui/nc?app_id=file_editor_cm6"
-	      frameborder="0"
-	      scrolling="no"
-	      allow="clipboard-read; clipboard-write"
-	      style="width: 100%; height: 100%; border: none; display: block; overflow: hidden;">
-	    </iframe>
+	    <div id="editor-frame" data-editor-mode="inline" aria-label="Code editor"></div>
 	  </div>
 
   <!-- Resize handle for terminal (mobile only) -->

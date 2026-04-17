@@ -46,10 +46,7 @@ export function createAdapterUiController(deps) {
     deps.setWorkbenchAdapterState({ readyOk: false, connecting: null });
     deps.spinnerSetStep('Reloading editor…');
     setTimeout(() => {
-      try {
-        const iframe = document.getElementById('editor-frame');
-        if (iframe) { const frameAny = /** @type {any} */ (iframe); frameAny.src = frameAny.src; }
-      } catch (_) {}
+      try { window.location.reload(); } catch (_) {}
       // Adapter state will arrive via UI IPC push — no need to poll.
     }, 1500);
   }

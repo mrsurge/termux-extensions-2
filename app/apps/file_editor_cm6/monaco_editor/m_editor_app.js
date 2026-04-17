@@ -97,13 +97,6 @@ import { scheduleScrollSend } from './editor_scroll_publisher_schedule_utils.js'
 import { shouldApplyMirrorPath } from './editor_apply_mirror_path_utils.js';
 import { applyMirrorContent } from './editor_apply_mirror_content_utils.js';
 import { connectUiIpcSocket } from './editor_ui_ipc_connect_utils.js';
-import { registerConsoleWorker } from './editor_ui_ipc_register_utils.js';
-import { safeSerializeConsoleArg } from './editor_console_safe_serialize_utils.js';
-import { serializeConsoleArg } from './editor_console_serialize_arg_utils.js';
-import { emitConsoleLog } from './editor_console_emit_log_utils.js';
-import { patchConsoleLevels } from './editor_console_patch_levels_utils.js';
-import { installConsoleErrorHooks } from './editor_console_error_hooks_utils.js';
-import { handleConsoleEval } from './editor_console_eval_handler_utils.js';
 import { bindSaveKeyCommand } from './editor_ui_ipc_save_key_utils.js';
 import { bindFocusRelay } from './editor_ui_ipc_focus_relay_utils.js';
 import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.js';
@@ -3911,42 +3904,11 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
 
   // ─── UI IPC (frontend-to-frontend relay) ────────────────
   var uiIpcSocket = null;
-  var consoleSocket = null;
-  var _editorConsoleWorkerId = null;
-
-  function _randomConsoleWorkerSuffix() {
-    try {
-      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-        return window.crypto.randomUUID().split('-')[0];
-      }
-    } catch (_) {}
-    return Math.random().toString(36).slice(2, 10);
-  }
-
-  function _getEditorConsoleWorkerId() {
-    if (_editorConsoleWorkerId) return _editorConsoleWorkerId;
-    _editorConsoleWorkerId = 'editor_iframe:' + _randomConsoleWorkerSuffix();
-    return _editorConsoleWorkerId;
-  }
-
-  function connectConsoleSocket(ioRef) {
-    if (!ioRef) return null;
-    return ioRef('/te2_console', {
-      path: '/te2_console_ws/socket.io',
-      transports: ['websocket'],
-      query: {
-        app_id: 'file_editor_cm6',
-        source: 'editor_iframe_console',
-        workerId: _getEditorConsoleWorkerId(),
-      },
-    });
-  }
 
   function connectUIIPC() {
     try {
       if (!window.io) return;
       uiIpcSocket = connectUiIpcSocket(window.io);
-      consoleSocket = connectConsoleSocket(window.io);
       uiIpcSocket.on('connect', function() {
         console.log('[UI_IPC] editor iframe connected');
       });
@@ -3963,52 +3925,9 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
           }
         }
       });
-
-      if (consoleSocket) {
-        consoleSocket.on('connect', function() {
-          console.log('[TE2_CONSOLE] editor iframe connected');
-          registerConsoleWorker(consoleSocket, _getEditorConsoleWorkerId(), 'worker');
-        });
-
-        // Console bridge — monkey-patch console.* to emit on the framework-owned console bus
-        _initEditorConsoleBridge(consoleSocket);
-      }
     } catch (e) {
       console.warn('[UI_IPC] connect failed', e);
     }
-  }
-
-  // ─── Console bridge (inline for non-module iframe) ────────
-  var _consoleBridgeActive = false;
-
-  function _initEditorConsoleBridge(sock) {
-    if (_consoleBridgeActive) return;
-    var LEVELS = ['log', 'info', 'warn', 'error', 'debug'];
-    var workerId = _getEditorConsoleWorkerId();
-
-    function safeSerialize(x) {
-      return safeSerializeConsoleArg(x);
-    }
-
-    function serializeArg(a) {
-      return serializeConsoleArg(a);
-    }
-
-    function emitLog(level, rawArgs) {
-      emitConsoleLog(sock, workerId, level, rawArgs);
-    }
-
-    patchConsoleLevels(LEVELS, emitLog);
-
-    installConsoleErrorHooks(window, emitLog);
-
-    // Remote eval support
-    sock.on('console:eval', function(msg) {
-      handleConsoleEval(sock, workerId, msg);
-    });
-
-    _consoleBridgeActive = true;
-    console.log('[console_bridge] editor iframe bridge active');
   }
 
   /** Call after editor/diffEditor is created to bind Ctrl+S and focus relay. */
