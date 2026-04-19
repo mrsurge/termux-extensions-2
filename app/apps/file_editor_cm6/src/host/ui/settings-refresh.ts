@@ -1,5 +1,7 @@
 // @ts-nocheck
 
+import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
+
 /**
  * @param {{
  *   getEditorViewState: () => any,
@@ -8,6 +10,7 @@
  *   customSettingsInputEl: HTMLTextAreaElement,
  *   customSettingsSaveEl: HTMLButtonElement,
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
+ *   busNotify: (event: string, payload?: any) => void,
  *   toast: (msg: string, ms?: number) => void,
  *   reloadEditorIframe: () => void
  * }} deps
@@ -52,8 +55,8 @@ export function createSettingsRefreshController(deps) {
   // ── User settings (existing) ──
   async function loadCustomSettings() {
     try {
-      const res = await window.__explorerBusRequest('ext:custom_settings_get', {}, 8000);
-      const settings = res?.payload?.settings || {};
+      const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsCustomSettingsGet, {}, 8000);
+      const settings = res?.settings || {};
       const keys = Object.keys(settings);
       deps.customSettingsInputEl.value = keys.length
         ? JSON.stringify(settings, null, 2)
@@ -69,8 +72,8 @@ export function createSettingsRefreshController(deps) {
       document.getElementById('editor-ext-workspace-settings-input'));
     if (!input) return;
     try {
-      const res = await window.__explorerBusRequest('ext:workspace_settings_get', {}, 8000);
-      const settings = res?.payload?.settings || {};
+      const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet, {}, 8000);
+      const settings = res?.settings || {};
       const keys = Object.keys(settings);
       input.value = keys.length ? JSON.stringify(settings, null, 2) : '';
     } catch (_) {
@@ -103,12 +106,12 @@ export function createSettingsRefreshController(deps) {
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving…';
       try {
-        const res = await deps.busRequest('ext:workspace_settings_set', { settings: parsed }, 15000);
-        if (res?.payload?.ok) {
-          deps.toast(`Workspace settings saved (${res.payload.count} keys) — reloading adapter…`);
+        const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsSet, { settings: parsed }, 15000);
+        if (res?.ok) {
+          deps.toast(`Workspace settings saved (${res.count} keys) — reloading adapter…`);
           deps.reloadEditorIframe();
         } else {
-          deps.toast(res?.payload?.error || 'Save failed');
+          deps.toast(res?.error || 'Save failed');
         }
       } catch (e) {
         deps.toast(/** @type {any} */ (e)?.message || 'Save failed');
@@ -137,9 +140,9 @@ export function createSettingsRefreshController(deps) {
     }
 
     try {
-      if (typeof window.__explorerBusRequest === 'function') {
-        const res = await window.__explorerBusRequest('ext:list', {}, 8000);
-        const exts = res?.payload?.extensions || [];
+      if (typeof deps.busRequest === 'function') {
+        const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 8000);
+        const exts = res?.extensions || [];
         const active = exts.filter((e) => e.active);
         const user = exts.filter((e) => e.source === 'user');
         deps.extSummaryEl.textContent =
@@ -150,8 +153,8 @@ export function createSettingsRefreshController(deps) {
     }
 
     try {
-      if (typeof window.__explorerBusSend === 'function') {
-        window.__explorerBusSend('watcher:getConfig', {});
+      if (typeof deps.busNotify === 'function') {
+        deps.busNotify(EXPLORER_RPC_METHODS.watcherConfigGet, {});
       }
     } catch (_) {}
   }
@@ -175,12 +178,12 @@ export function createSettingsRefreshController(deps) {
       deps.customSettingsSaveEl.disabled = true;
       deps.customSettingsSaveEl.textContent = 'Saving…';
       try {
-        const res = await deps.busRequest('ext:custom_settings_set', { settings: parsed }, 15000);
-        if (res?.payload?.ok) {
-          deps.toast(`Custom settings saved (${res.payload.count} keys) — reloading adapter…`);
+        const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsCustomSettingsSet, { settings: parsed }, 15000);
+        if (res?.ok) {
+          deps.toast(`Custom settings saved (${res.count} keys) — reloading adapter…`);
           deps.reloadEditorIframe();
         } else {
-          deps.toast(res?.payload?.error || 'Save failed');
+          deps.toast(res?.error || 'Save failed');
         }
       } catch (e) {
         deps.toast(/** @type {any} */ (e)?.message || 'Save failed');

@@ -70,13 +70,15 @@ export function renderContentResults(container, data, deps) {
       const matchRow = document.createElement('div');
       matchRow.className = 'fe-search-match';
       matchRow.onclick = async () => {
-        if (window.appOpenFileRel && window.jumpToCurrentFileLine) {
+        if (window.appOpenFileRel) {
           try {
             deps.expandToFile(fileResult.rel);
-            await window.appOpenFileRel(fileResult.rel, deps.getProjectPath() || null);
+            await window.appOpenFileRel(fileResult.rel, deps.getProjectPath() || null, {
+              line: match.line,
+              focus: false,
+              scrollY: 'center',
+            });
             deps.closeDrawerIfMobile();
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            await window.jumpToCurrentFileLine(match.line, { focus: false });
           } catch (e) {
             deps.toast('Failed to open file: ' + (e?.message || 'unknown error'));
           }

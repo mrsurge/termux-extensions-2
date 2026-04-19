@@ -1,5 +1,7 @@
 // @ts-nocheck
 
+import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
+
 /**
  * @param {{
  *   installBtn: HTMLButtonElement,
@@ -30,11 +32,10 @@ export function createSettingsInstallController(deps) {
       deps.installBtn.disabled = true;
       deps.installBtn.textContent = 'Installing…';
       try {
-        const res = await deps.busRequest('ext:install', { vsix_path: picked }, 60000);
-        const payload = res?.payload || {};
-        if (payload.ok) {
-          const ext = payload.extension || {};
-          const schema = payload.config_schema || {};
+        const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsInstall, { vsix_path: picked }, 60000);
+        if (res?.ok) {
+          const ext = res.extension || {};
+          const schema = res.config_schema || {};
           deps.toast(`Installed: ${ext.display_name || ext.id || 'ok'} — reloading…`);
           void deps.refreshExtManager();
           deps.reloadEditorIframe();
@@ -42,7 +43,7 @@ export function createSettingsInstallController(deps) {
             deps.openExtConfigModal(ext.id, ext.display_name, schema, {});
           }
         } else {
-          deps.toast(payload.error || 'Install failed');
+          deps.toast(res?.error || 'Install failed');
         }
       } catch (e) {
         deps.toast(/** @type {any} */ (e)?.message || 'Install failed');

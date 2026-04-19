@@ -125,6 +125,39 @@ def _role_from_environ(environ: dict) -> str:
         return ""
 
 
+async def _broadcast_active_file_update(project: str, abs_path: str) -> None:
+    """Emit active-file updates on both legacy explorer and RPC notification surfaces."""
+    try:
+        from ..explorer_manager import abs_to_rel
+
+        rel = abs_to_rel(abs_path, project)
+        if not rel or rel == ".":
+            return
+
+        try:
+            from ..explorer_socketio import EXPLORER_SIO
+
+            await EXPLORER_SIO.emit(
+                "explorer:event",
+                {"type": "explorer:activeFile", "payload": {"rel": rel, "abs": abs_path}},
+                namespace="/explorer",
+            )
+        except Exception:
+            pass
+
+        try:
+            from ..explorer_rpc_emit import emit_explorer_rpc_notification
+
+            await emit_explorer_rpc_notification(
+                "explorer.activeFile.updated",
+                {"rel": rel, "abs": abs_path},
+            )
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def _read_file_payload(project: str, abs_path: str) -> Dict[str, Any]:
     """Return SSOT-derived snapshot for a file (draft cache wins)."""
 
@@ -384,18 +417,7 @@ async def handle_tracked_edit(edit_result: dict) -> None:
         await EDITOR_SIO.emit("editor:open", payload, room="file_editor_cm6", namespace="/editor")
 
         # Notify explorer so breadcrumb/toolbar filename updates
-        try:
-            from ..explorer_socketio import EXPLORER_SIO
-            from ..explorer_manager import abs_to_rel
-            rel = abs_to_rel(abs_path, project)
-            if rel and rel != ".":
-                await EXPLORER_SIO.emit(
-                    "explorer:event",
-                    {"type": "explorer:activeFile", "payload": {"rel": rel, "abs": abs_path}},
-                    namespace="/explorer",
-                )
-        except Exception:
-            pass
+        await _broadcast_active_file_update(project, abs_path)
 
         print(f"[change_ledger] open+jump {rel_path}:{line}", file=sys.stderr)
 
@@ -492,18 +514,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
 
         # Broadcast explorer:activeFile so explorer highlights the open file.
         if current_path and project:
-            try:
-                from ..explorer_socketio import EXPLORER_SIO
-                from ..explorer_manager import abs_to_rel
-                rel = abs_to_rel(str(current_path), str(project))
-                if rel and rel != ".":
-                    await EXPLORER_SIO.emit(
-                        "explorer:event",
-                        {"type": "explorer:activeFile", "payload": {"rel": rel}},
-                        namespace="/explorer",
-                    )
-            except Exception:
-                pass
+            await _broadcast_active_file_update(str(project), str(current_path))
 
         # Diagnostics bridge: ensure the background adapter→editor bridge is running.
         try:
@@ -570,6 +581,14 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload = dict(payload)
         payload["source_client"] = sid
         await self.emit("editor:notify", payload, room="file_editor_cm6")
+
+    async def on_editor_open_complete(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            return
+        payload = dict(payload)
+        payload["source_client"] = sid
+        await self.emit("editor:open_complete", payload, room="file_editor_cm6")
 
     async def on_editor_issues_cmd(self, sid, data):
         payload = data or {}
@@ -743,6 +762,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload["source_client"] = sid
         payload["request_id"] = request_id
         if line is not None:
+            payload.pop("scroll_line", None)
             payload["line"] = line
         if column is not None:
             payload["column"] = column
@@ -756,18 +776,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         await self.emit("editor:open", payload, room="file_editor_cm6")
 
         # Broadcast explorer:activeFile so every explorer/host client updates.
-        try:
-            from ..explorer_socketio import EXPLORER_SIO
-            from ..explorer_manager import abs_to_rel
-            rel = abs_to_rel(path, project)
-            if rel and rel != ".":
-                await EXPLORER_SIO.emit(
-                    "explorer:event",
-                    {"type": "explorer:activeFile", "payload": {"rel": rel, "abs": path}},
-                    namespace="/explorer",
-                )
-        except Exception:
-            pass
+        await _broadcast_active_file_update(project, path)
 
         # Diagnostics bridge: send cached diagnostics for the new file.
         # NOTE: do not replay cached diagnostics on open. Diagnostics should be driven
@@ -1535,12 +1544,11 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
 
         # Relay to explorer socket (cross-transport, same worker process)
         try:
-            from ..explorer_socketio import EXPLORER_SIO
+            from ..explorer_rpc_emit import emit_explorer_rpc_notification
             _wb_log.info("[bc-navigate] rel=%s abs=%s external=%s drawer=%s", rel, abs_path, is_external, open_drawer)
-            await EXPLORER_SIO.emit(
-                "explorer:navigate",
+            await emit_explorer_rpc_notification(
+                "explorer.navigate",
                 {"rel": rel, "abs_path": abs_path, "is_external": is_external, "open_drawer": open_drawer},
-                namespace="/explorer",
             )
             _wb_log.info("[bc-navigate] emit OK")
         except Exception as exc:

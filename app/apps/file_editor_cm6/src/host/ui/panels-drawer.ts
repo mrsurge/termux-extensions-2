@@ -1,5 +1,7 @@
 // @ts-check
 
+import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
+
 /**
  * @param {{
  *   createTerminalDrawer: (opts?: any) => any,
@@ -36,11 +38,11 @@ export function initPanelsAndDrawer(deps) {
     },
     onMention: async (payload) => {
       try {
-        if (typeof window.__explorerBusSend !== 'function') {
+        if (!window.__explorerRpc) {
           deps.hostToast('Explorer bus unavailable');
           return;
         }
-        window.__explorerBusSend('mention:agent', payload);
+        window.__explorerRpc.notify(EXPLORER_RPC_METHODS.mentionAgent, payload);
         deps.hostToast('Mentioned in conversation');
       } catch (err) {
         console.warn('[Problems] mention failed:', err);

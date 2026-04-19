@@ -41,6 +41,7 @@ import { createSettingsModalsController } from './settings-modals.ts';
  *   pickFile: (startPath: string) => Promise<string | null>,
  *   getStartPath: () => string,
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
+ *   busNotify: (event: string, payload?: any) => void,
  *   reloadEditorIframe: () => void,
  *   toast: (msg: string, ms?: number) => void,
  * }} deps
@@ -56,6 +57,7 @@ export function createSettingsBootstrap(deps) {
     customSettingsInputEl: deps.els.extCustomSettingsInput,
     customSettingsSaveEl: deps.els.extCustomSettingsSave,
     busRequest: deps.busRequest,
+    busNotify: deps.busNotify,
     toast: deps.toast,
     reloadEditorIframe: deps.reloadEditorIframe,
   });

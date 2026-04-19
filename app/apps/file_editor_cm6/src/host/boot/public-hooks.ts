@@ -2,7 +2,7 @@
 
 /**
  * @param {{
- *   openFile: (path: string) => Promise<any>,
+ *   openFile: (path: string, options?: any) => Promise<any>,
  *   toast: (msg: string) => void,
  *   toAbsolute: (path: string, base?: any, homeDir?: string) => string,
  *   getBaseDir: (projectRoot?: string | null) => string,
@@ -10,17 +10,19 @@
  * }} deps
  */
 export function installGlobalOpenHooks(deps) {
-  window.appOpenFile = (absPath) => {
-    deps.openFile(absPath).catch(e => {
+  window.appOpenFile = (absPath, options = {}) => {
+    return deps.openFile(absPath, options).catch(e => {
       deps.toast(`Failed to open: ${e.message}`);
+      throw e;
     });
   };
 
-  window.appOpenFileRel = (rel, projectRoot) => {
+  window.appOpenFileRel = (rel, projectRoot, options = {}) => {
     const base = deps.getBaseDir(projectRoot);
     const abs = deps.toAbsolute(rel, base, deps.HOME_DIR);
-    deps.openFile(abs).catch(e => {
+    return deps.openFile(abs, options).catch(e => {
       deps.toast(`Failed to open: ${e.message}`);
+      throw e;
     });
   };
 }

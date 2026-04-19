@@ -7,6 +7,8 @@
 // - Shortcuts editor modal (URL + framework_app)
 // - Iframe stack lifecycle (lazy/eager) with framework app start-before-load
 
+import { EXPLORER_RPC_METHODS } from '../../../../src/explorer/rpc/contract.ts';
+
 const EXTENSION_MANIFEST_URL = '/apps/file_editor_cm6/extensions/sidebar_extension/manifest.json';
 
 const UI_PREF_KEY_ACTIVE = 'agentActiveShortcutId';
@@ -190,11 +192,11 @@ export function initSidebarShortcuts(options = {}) {
   }
 
   function _sendUiPrefUpdate(key, value) {
-    if (typeof window.__explorerBusSend !== 'function') {
+    if (!window.__explorerRpc) {
       toast('Explorer WebSocket is not connected yet.');
       return;
     }
-    window.__explorerBusSend('prefs:updateUi', { key, value });
+    window.__explorerRpc.notify(EXPLORER_RPC_METHODS.prefsUiUpdate, { key, value });
   }
 
   async function _ensureAppsCache(force = false) {
@@ -911,7 +913,6 @@ export function initSidebarShortcuts(options = {}) {
         shortcutId: nextId,
         source: options.source || 'sidebar_shortcuts',
       });
-      return;
     }
 
     if (!_hydrated) return;
@@ -2701,9 +2702,10 @@ export function initSidebarShortcuts(options = {}) {
         if (!picked) return;
         _lastPickerPath = picked;
         try {
-          const res = await window.__explorerBusRequest('prefs:vendorAgentIcon', { abs_path: picked }, 12000);
-          if (res?.payload?.ok && res.payload.name) {
-            _editingAssetName = res.payload.name;
+          if (!window.__explorerRpc) throw new Error('Explorer RPC unavailable');
+          const res = await window.__explorerRpc.request(EXPLORER_RPC_METHODS.prefsAgentIconVendor, { abs_path: picked }, 12000);
+          if (res?.ok && res.name) {
+            _editingAssetName = res.name;
             if (shortcutEmojiInput) shortcutEmojiInput.value = '';
             _renderIconPreview();
           }

@@ -7,7 +7,7 @@ import urllib.request
 import hashlib
 import shutil
 from contextlib import suppress
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, cast
 from fastapi import WebSocket, WebSocketDisconnect
 from pathlib import Path
 
@@ -89,13 +89,13 @@ class SocketIOSocketShim:
         # Socket.IO is already connected; nothing to do
         return
 
-    async def send_text(self, text: str):
-        await self.namespace.emit('explorer:event', text, room=self.sid)
+    async def send_text(self, data: str):
+        await self.namespace.emit('explorer:event', data, room=self.sid)
 
 # --- Connection Manager ---
 # Extracted to explorer_manager.py to break circular import chains.
 # Re-exported here for backward compatibility.
-from .explorer_manager import ConnectionManager, manager
+from .explorer_manager import ConnectionManager, ExplorerConnection, manager
 
 # --- Watcher -> Explorer Bridge ---
 # This allows the file watcher (running in a background thread) to trigger
@@ -492,9 +492,12 @@ def notify_draft_state_changed(project_path: str):
         def do_broadcast():
             with _explorer_refresh_lock:
                 _explorer_refresh_timers.pop(debounce_key, None)
+            loop = _explorer_event_loop
+            if loop is None:
+                return
             asyncio.run_coroutine_threadsafe(
                 _broadcast_draft_decorations(normalized_path),
-                _explorer_event_loop
+                loop,
             )
         
         # Use a slightly longer debounce for drafts (500ms) since autosave is frequent
@@ -527,10 +530,24 @@ def _get_rel_from_abs(abs_path: str, project_root) -> str:
         pass
     return '.'
 
+
+def _payload_str(payload: dict, key: str, default: Optional[str] = None) -> Optional[str]:
+    value = payload.get(key, default)
+    if isinstance(value, str):
+        return value
+    return default
+
+
+def _payload_str_list(payload: dict, key: str) -> List[str]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
 # --- Dispatcher ---
 
 class ExplorerDispatcher:
-    def __init__(self, websocket: WebSocket):
+    def __init__(self, websocket: ExplorerConnection):
         self.websocket = websocket
         self.project_root = get_project_root()
         self._job_queue: Optional[Queue] = None
@@ -643,7 +660,11 @@ class ExplorerDispatcher:
         while True:
             try:
                 # Non-blocking check with short timeout
-                payload = await asyncio.to_thread(self._job_queue.get, timeout=0.5)
+                queue = self._job_queue
+                if queue is None:
+                    await asyncio.sleep(0.5)
+                    continue
+                payload = await asyncio.to_thread(queue.get, timeout=0.5)
                 if not isinstance(payload, dict):
                     continue
                 
@@ -843,7 +864,7 @@ class ExplorerDispatcher:
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
-    async def handle_explorer_refresh(self, payload: dict, msg_id: str):
+    async def handle_explorer_refresh(self, payload: dict, msg_id: Optional[str]):
         # Refresh everything
         mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
@@ -1246,29 +1267,42 @@ class ExplorerDispatcher:
     # --- File Operations (Broadcasts updates) ---
 
     async def handle_explorer_createFile(self, payload: dict, msg_id: str):
-        res = create_file(payload.get("parent_rel", "."), payload.get("name"))
+        parent_rel = _payload_str(payload, "parent_rel", ".") or "."
+        name = _payload_str(payload, "name")
+        if not name:
+            return await self.send_error("File name required", msg_id)
+        res = create_file(parent_rel, name)
         await self.broadcast("explorer:created", res)
         # Implicitly refresh parent dir? Client should request or we push?
         # Ideally we push the updated list of the parent.
-        parent_list = await asyncio.to_thread(list_dir, payload.get("parent_rel", "."))
+        parent_list = await asyncio.to_thread(list_dir, parent_rel)
         await self.broadcast("explorer:setList", parent_list)
 
     async def handle_explorer_createDir(self, payload: dict, msg_id: str):
-        res = create_directory(payload.get("parent_rel", "."), payload.get("name"))
+        parent_rel = _payload_str(payload, "parent_rel", ".") or "."
+        name = _payload_str(payload, "name")
+        if not name:
+            return await self.send_error("Directory name required", msg_id)
+        res = create_directory(parent_rel, name)
         await self.broadcast("explorer:created", res)
-        parent_list = await asyncio.to_thread(list_dir, payload.get("parent_rel", "."))
+        parent_list = await asyncio.to_thread(list_dir, parent_rel)
         await self.broadcast("explorer:setList", parent_list)
 
     async def handle_explorer_rename(self, payload: dict, msg_id: str):
-        rel = payload.get("rel")
+        rel = _payload_str(payload, "rel")
+        new_name = _payload_str(payload, "new_name")
+        if not rel or not new_name:
+            return await self.send_error("Rename requires rel and new_name", msg_id)
         parent_rel = _get_parent_rel(rel)
-        res = rename_entry(rel, payload.get("new_name"))
+        res = rename_entry(rel, new_name)
         await self.broadcast("explorer:renamed", res)
         # Refresh parent directory
         await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
 
     async def handle_explorer_delete(self, payload: dict, msg_id: str):
-        rel = payload.get("rel")
+        rel = _payload_str(payload, "rel")
+        if not rel:
+            return await self.send_error("Delete requires rel", msg_id)
         parent_rel = _get_parent_rel(rel)
         res = delete_entry(rel)
         await self.broadcast("explorer:deleted", res)
@@ -1280,7 +1314,7 @@ class ExplorerDispatcher:
         await self.broadcast_git_decorations()
 
     async def handle_explorer_batchDelete(self, payload: dict, msg_id: str):
-        rels = payload.get("rels", [])
+        rels = _payload_str_list(payload, "rels")
         res = batch_delete(rels)
         await self.broadcast("explorer:batchDeleted", res)
         # Collect unique parent directories and refresh each
@@ -1296,8 +1330,10 @@ class ExplorerDispatcher:
         await self.broadcast_git_decorations()
 
     async def handle_explorer_batchCopy(self, payload: dict, msg_id: str):
-        rels = payload.get("rels", [])
-        dest_path = payload.get("dest_path")
+        rels = _payload_str_list(payload, "rels")
+        dest_path = _payload_str(payload, "dest_path")
+        if not dest_path:
+            return await self.send_error("Batch copy requires dest_path", msg_id)
         res = batch_copy(rels, dest_path)
         await self.broadcast("explorer:batchCopied", res)
         # Refresh destination directory (source unchanged for copy)
@@ -1308,8 +1344,10 @@ class ExplorerDispatcher:
             pass
 
     async def handle_explorer_batchMove(self, payload: dict, msg_id: str):
-        rels = payload.get("rels", [])
-        dest_path = payload.get("dest_path")
+        rels = _payload_str_list(payload, "rels")
+        dest_path = _payload_str(payload, "dest_path")
+        if not dest_path:
+            return await self.send_error("Batch move requires dest_path", msg_id)
         res = batch_move(rels, dest_path)
         await self.broadcast("explorer:batchMoved", res)
         # Refresh source parent directories and destination
@@ -1323,8 +1361,10 @@ class ExplorerDispatcher:
                 pass
 
     async def handle_explorer_move(self, payload: dict, msg_id: str):
-        rel = payload.get("rel")
-        dest_path = payload.get("dest_path")
+        rel = _payload_str(payload, "rel")
+        dest_path = _payload_str(payload, "dest_path")
+        if not rel or not dest_path:
+            return await self.send_error("Move requires rel and dest_path", msg_id)
         source_parent = _get_parent_rel(rel)
         res = move_entry(rel, dest_path)
         await self.broadcast("explorer:moved", res)
@@ -1337,8 +1377,10 @@ class ExplorerDispatcher:
                 pass
 
     async def handle_explorer_copy(self, payload: dict, msg_id: str):
-        rel = payload.get("rel")
-        dest_path = payload.get("dest_path")
+        rel = _payload_str(payload, "rel")
+        dest_path = _payload_str(payload, "dest_path")
+        if not rel or not dest_path:
+            return await self.send_error("Copy requires rel and dest_path", msg_id)
         res = copy_entry(rel, dest_path)
         await self.broadcast("explorer:copied", res)
         # Refresh destination directory only (source unchanged)
@@ -1349,8 +1391,11 @@ class ExplorerDispatcher:
             pass
 
     async def handle_explorer_copyFrom(self, payload: dict, msg_id: str):
-        dest_rel = payload.get("dest_rel")
-        res = copy_entry_inbound(payload.get("source_path"), dest_rel)
+        dest_rel = _payload_str(payload, "dest_rel")
+        source_path = _payload_str(payload, "source_path")
+        if not source_path or not dest_rel:
+            return await self.send_error("Copy-from requires source_path and dest_rel", msg_id)
+        res = copy_entry_inbound(source_path, dest_rel)
         await self.broadcast("explorer:copied", res)
         # Refresh destination directory
         try:
@@ -1359,8 +1404,11 @@ class ExplorerDispatcher:
             pass
 
     async def handle_explorer_moveFrom(self, payload: dict, msg_id: str):
-        dest_rel = payload.get("dest_rel")
-        res = move_entry_inbound(payload.get("source_path"), dest_rel)
+        dest_rel = _payload_str(payload, "dest_rel")
+        source_path = _payload_str(payload, "source_path")
+        if not source_path or not dest_rel:
+            return await self.send_error("Move-from requires source_path and dest_rel", msg_id)
+        res = move_entry_inbound(source_path, dest_rel)
         await self.broadcast("explorer:moved", res)
         # Refresh destination directory
         try:
@@ -1400,14 +1448,21 @@ class ExplorerDispatcher:
         await self.broadcast_git_decorations()
 
     async def handle_git_restore(self, payload: dict, msg_id: str):
-        restore_path(self.project_root, payload.get("path"), payload.get("commit", "HEAD"))
+        path = _payload_str(payload, "path")
+        commit = _payload_str(payload, "commit", "HEAD") or "HEAD"
+        if not path:
+            return await self.send_error("Restore requires path", msg_id)
+        restore_path(self.project_root, path, commit)
         mark_git_cache_dirty(self.project_root)
-        await self.broadcast("git:restored", {"path": payload.get("path")})
+        await self.broadcast("git:restored", {"path": path})
         await self.broadcast_git_status()
         await self.broadcast_git_decorations()
 
     async def handle_git_commit(self, payload: dict, msg_id: str):
-        commit_changes(self.project_root, payload.get("message"), payload.get("amend", False))
+        message = _payload_str(payload, "message")
+        if not message:
+            return await self.send_error("Commit message required", msg_id)
+        commit_changes(self.project_root, message, bool(payload.get("amend", False)))
         mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
         await self.broadcast_git_decorations()
@@ -1555,7 +1610,11 @@ class ExplorerDispatcher:
         await self.handle_explorer_refresh({}, msg_id)
 
     async def handle_project_create(self, payload: dict, msg_id: str):
-        res = create_project(payload.get("parent_path"), payload.get("name"))
+        parent_path = _payload_str(payload, "parent_path")
+        name = _payload_str(payload, "name")
+        if not parent_path or not name:
+            return await self.send_error("Project create requires parent_path and name", msg_id)
+        res = create_project(parent_path, name)
         # Auto open
         await self.handle_project_open({"path": res["path"]}, msg_id)
 
@@ -2006,3 +2065,4 @@ class ExplorerSocketIONamespace(socketio.AsyncNamespace):
         if not isinstance(data, dict):
             return
         await disp.handle_message_json(data)
+

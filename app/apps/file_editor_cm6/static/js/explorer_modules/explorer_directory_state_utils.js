@@ -1,3 +1,5 @@
+import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
+
 export function createExplorerDirectoryStateHelpers(deps) {
   function collapseSubdirsOf(parentRel) {
     const treeElement = deps.getTreeElement();
@@ -25,14 +27,14 @@ export function createExplorerDirectoryStateHelpers(deps) {
     deps.setSelectModeDir(dirRel);
     deps.clearSelectedEntries();
     collapseSubdirsOf(dirRel);
-    if (deps.hasExplorerBus()) deps.sendExplorerBus('explorer:list', { rel: dirRel });
+    if (deps.hasExplorerBus()) deps.sendExplorerBus(EXPLORER_RPC_METHODS.list, { rel: dirRel });
   }
 
   function disableSelectMode() {
     const wasDir = deps.getSelectModeDir();
     deps.setSelectModeDir(null);
     deps.clearSelectedEntries();
-    if (wasDir && deps.hasExplorerBus()) deps.sendExplorerBus('explorer:list', { rel: wasDir });
+    if (wasDir && deps.hasExplorerBus()) deps.sendExplorerBus(EXPLORER_RPC_METHODS.list, { rel: wasDir });
   }
 
   function checkAutoDisableSelectMode(collapsedRel) {
@@ -44,7 +46,7 @@ export function createExplorerDirectoryStateHelpers(deps) {
 
   function syncOpenDirsToBackend() {
     if (!deps.hasExplorerBus()) return;
-    deps.sendExplorerBus('explorer:setOpenDirs', { dirs: Array.from(deps.getOpenDirectories()) });
+    deps.sendExplorerBus(EXPLORER_RPC_METHODS.openDirsSet, { dirs: Array.from(deps.getOpenDirectories()) });
   }
 
   function scheduleOpenDirsSync() {

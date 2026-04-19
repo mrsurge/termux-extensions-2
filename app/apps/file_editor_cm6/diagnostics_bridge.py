@@ -265,11 +265,9 @@ async def _emit_diagnostics_debounced():
 
     try:
         # Problems panel + explorer tree badges (full marker detail)
-        await EXPLORER_SIO.emit(
-            "explorer:event",
-            json.dumps({"type": "diagnostics:detail", "payload": detail_abs}),
-            namespace="/explorer",
-        )
+        from .explorer_rpc_emit import emit_explorer_rpc_notification
+
+        await emit_explorer_rpc_notification("explorer.diagnostics.detail", detail_abs)
         total_markers = sum(len(v) for v in detail_abs.values())
         print(f"[diag_bridge] emitted explorer diagnostics: {len(summary_rel)} files, {total_markers} markers", flush=True)
     except Exception as exc:
@@ -341,16 +339,12 @@ async def _adapter_ws_loop(sio):
                             pass
                         _enospc_forwarded = True
                         try:
-                            from .explorer_socketio import EXPLORER_SIO
+                            from .explorer_rpc_emit import emit_explorer_rpc_notification
                             payload = {
                                 "message": ev.get("message", "Inotify limit reached (ENOSPC)"),
                                 "limit": 524288,
                             }
-                            await EXPLORER_SIO.emit(
-                                "explorer:event",
-                                {"type": "watcher:error", "payload": payload},
-                                namespace="/explorer",
-                            )
+                            await emit_explorer_rpc_notification("explorer.watcher.error", payload)
                             print(f"[diag_bridge] watcher/enospc forwarded (once)", flush=True)
                         except Exception as exc:
                             print(f"[diag_bridge] watcher/enospc emit FAIL: {exc}", flush=True)
@@ -397,12 +391,8 @@ async def _adapter_ws_loop(sio):
                                 )
                                 # Notify explorer with watcher:files type
                                 try:
-                                    from .explorer_socketio import EXPLORER_SIO
-                                    await EXPLORER_SIO.emit(
-                                        "explorer:event",
-                                        {"type": "watcher:files", "payload": payload},
-                                        namespace="/explorer",
-                                    )
+                                    from .explorer_rpc_emit import emit_explorer_rpc_notification
+                                    await emit_explorer_rpc_notification("explorer.watcher.files", payload)
                                 except Exception:
                                     pass
                                 print(f"[diag_bridge] watcher/fileChanges forwarded ({total} paths)", flush=True)

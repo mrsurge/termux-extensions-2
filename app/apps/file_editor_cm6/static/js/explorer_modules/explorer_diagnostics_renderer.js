@@ -52,11 +52,11 @@ function _ensurePanel(resultsContainer, callbacks) {
     },
     onMention: async (payload) => {
       try {
-        if (typeof window.__explorerBusSend !== 'function') {
+        if (typeof callbacks.mentionAgent !== 'function') {
           callbacks.toast('Explorer bus unavailable');
           return;
         }
-        window.__explorerBusSend('mention:agent', payload);
+        await callbacks.mentionAgent(payload);
         callbacks.toast('Mentioned in conversation');
       } catch (err) {
         console.warn('[ExplorerDiagnostics] mention failed:', err);

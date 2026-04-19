@@ -140,6 +140,9 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
   var cachedPrefs = null;
   var editorSocket = null;
   var editorSocketId = null;
+  var recentEditorOpenKeys = Object.create(null);
+  var openTransactionChain = Promise.resolve();
+  var activeOpenTransaction = null;
   var baseSha256 = null;
   var lastContentSha256 = null;
   var lastLocalEditAt = 0;
@@ -181,6 +184,146 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
 
   function _fetch(url, init) {
     return window.fetch(url, init);
+  }
+
+  function shouldDropDuplicateEditorOpen(payload) {
+    try {
+      var path = payload && payload.path ? String(payload.path) : '';
+      if (!path) return false;
+      var requestId = payload && payload.request_id ? String(payload.request_id) : '';
+      var line = payload && payload.line != null ? String(payload.line) : '';
+      var column = payload && payload.column != null ? String(payload.column) : '';
+      var key = requestId ? ('req:' + requestId) : ('path:' + path + '|line:' + line + '|column:' + column);
+      var now = Date.now();
+      var seen = recentEditorOpenKeys[key];
+      if (seen && (now - seen) < 1500) {
+        return true;
+      }
+      recentEditorOpenKeys[key] = now;
+      var keys = Object.keys(recentEditorOpenKeys);
+      if (keys.length > 256) {
+        var cutoff = now - 30000;
+        for (var i = 0; i < keys.length; i++) {
+          var existingKey = keys[i];
+          if ((recentEditorOpenKeys[existingKey] || 0) < cutoff) delete recentEditorOpenKeys[existingKey];
+        }
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function _coercePositiveInt(value) {
+    if (typeof value === 'string' && /^\d+$/.test(value)) value = parseInt(value, 10);
+    if (!Number.isFinite(Number(value))) return null;
+    value = Number(value);
+    if (value < 1) return null;
+    return value;
+  }
+
+  function _pruneOpenTransactionIfExpired() {
+    try {
+      if (!activeOpenTransaction) return;
+      var now = Date.now();
+      var guardUntil = Number(activeOpenTransaction.guardUntil || 0);
+      var createdAt = Number(activeOpenTransaction.createdAt || 0);
+      if (guardUntil > 0) {
+        if (now > guardUntil) activeOpenTransaction = null;
+        return;
+      }
+      if (createdAt > 0 && (now - createdAt) > 15000) {
+        activeOpenTransaction = null;
+      }
+    } catch (_) {
+      activeOpenTransaction = null;
+    }
+  }
+
+  function _getOpenTransactionForPath(path) {
+    try {
+      _pruneOpenTransactionIfExpired();
+      if (!activeOpenTransaction) return null;
+      if (String(activeOpenTransaction.path || '') !== String(path || '')) return null;
+      return activeOpenTransaction;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function _beginOpenTransaction(path, generation, payload) {
+    var line = _coercePositiveInt(payload && (payload.line != null ? payload.line : payload.lineNo));
+    var column = _coercePositiveInt(payload && (payload.column != null ? payload.column : payload.col));
+    activeOpenTransaction = {
+      path: String(path || ''),
+      generation: Number.isFinite(Number(generation)) ? Number(generation) : null,
+      line: line,
+      column: column || 1,
+      focus: payload && Object.prototype.hasOwnProperty.call(payload, 'focus') ? payload.focus : undefined,
+      scroll_y: payload ? payload.scroll_y : undefined,
+      scroll_to_top: payload ? payload.scroll_to_top : undefined,
+      request_id: payload && payload.request_id ? String(payload.request_id) : '',
+      hasExplicitNavigation: line != null,
+      navigationApplied: false,
+      createdAt: Date.now(),
+      guardUntil: 0,
+    };
+    return activeOpenTransaction;
+  }
+
+  function _hasExplicitNavigationGuardForPath(path) {
+    var tx = _getOpenTransactionForPath(path);
+    return !!(tx && tx.hasExplicitNavigation);
+  }
+
+  function _applyOpenTransactionNavigation(reason, tx) {
+    try {
+      var targetTx = tx || _getOpenTransactionForPath(currentPath);
+      if (!targetTx || !targetTx.hasExplicitNavigation || !editor || !model) return false;
+      if (String(targetTx.path || '') !== String(currentPath || '')) return false;
+      var activeModel = editor && editor.getModel ? editor.getModel() : model;
+      if (!activeModel || !activeModel.uri) return false;
+      if (String(_absPathFromVscodeUri(String(activeModel.uri.toString()))) !== String(targetTx.path || '')) return false;
+      applyJumpToLineAt(editor, activeModel, {
+        line: targetTx.line,
+        column: targetTx.column,
+        focus: targetTx.focus,
+        scroll_y: targetTx.scroll_y,
+        scroll_to_top: targetTx.scroll_to_top,
+      });
+      targetTx.navigationApplied = true;
+      targetTx.guardUntil = Date.now() + 5000;
+      try {
+        console.log('[editor:open] applied transaction navigation', {
+          path: currentPath,
+          line: targetTx.line,
+          column: targetTx.column,
+          request_id: targetTx.request_id || '',
+          reason: reason || '',
+        });
+      } catch (_) {}
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function _settleOpenTransaction(tx) {
+    try {
+      if (!tx || activeOpenTransaction !== tx) return;
+      if (tx.hasExplicitNavigation) {
+        tx.guardUntil = Math.max(Number(tx.guardUntil || 0), Date.now() + 5000);
+        return;
+      }
+      activeOpenTransaction = null;
+    } catch (_) {}
+  }
+
+  function _queueOpenTransaction(taskFn) {
+    openTransactionChain = openTransactionChain.catch(function () {}).then(function () {
+      return taskFn();
+    });
+    return openTransactionChain;
   }
 
   function _setUnsavedTrace(reason, unsaved) {
@@ -3103,8 +3246,178 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     updateDebug('open=ok');
   }
 
+  function _runEditorOpenTransaction(payload) {
+    if (!payload || !payload.path) return Promise.resolve();
+
+    var incomingPath = String(payload.path || '');
+    var incomingUri = null;
+    var sameFileNavigationOnly = false;
+    try {
+      incomingUri = monacoFileUri(window.monaco, incomingPath);
+      sameFileNavigationOnly = !!(
+        payload.reason !== 'external_change'
+        && model
+        && model.uri
+        && incomingUri
+        && String(model.uri.toString()) === String(incomingUri.toString())
+      );
+    } catch (_) {}
+
+    baseSha256 = payload.base_sha256 || baseSha256;
+    currentPath = incomingPath;
+    var openGeneration = sameFileNavigationOnly ? _wbCurrentGeneration() : _wbBumpGeneration(currentPath, 'editor:open');
+    var tx = _beginOpenTransaction(currentPath, openGeneration, payload);
+    try { bcUpdatePath(currentPath, true); } catch (_) {}
+
+    function _finalizeNavigationAfterOpen(reasonBase) {
+      if (!tx || !tx.hasExplicitNavigation) return Promise.resolve(false);
+      if (_applyOpenTransactionNavigation(reasonBase, tx)) return Promise.resolve(true);
+      return new Promise(function(resolve) {
+        setTimeout(function() {
+          resolve(_applyOpenTransactionNavigation(reasonBase + '-tick', tx));
+        }, 0);
+      });
+    }
+
+    return ensureEditorWithPrefs().then(function() {
+      var lang = languageFromPath(currentPath);
+
+      if (sameFileNavigationOnly) {
+        try {
+          console.log('[editor:open] same-file navigation fast path', {
+            path: currentPath,
+            request_id: payload.request_id || '',
+            line: payload.line,
+          });
+        } catch (_) {}
+      } else if (!model) {
+        model = createFileModel(payload.content || '', lang, currentPath);
+        editor.setModel(model);
+        applyLanguageToModel(model, lang, currentPath);
+        installMirrorPublisher();
+        installScrollPublisher();
+        vscodeRpcDidOpenIfReady();
+        installVscodeRpcChangePublisher();
+      } else {
+        try {
+          var want = monacoFileUri(window.monaco, currentPath);
+          if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
+            if (diffEditor) { try { diffEditor.setModel(null); } catch (_) {} }
+            try { model.dispose(); } catch (_) {}
+            model = createFileModel(payload.content || '', lang, currentPath);
+            editor.setModel(model);
+            applyLanguageToModel(model, lang, currentPath);
+            installMirrorPublisher();
+            installScrollPublisher();
+            vscodeRpcDidOpenIfReady();
+            installVscodeRpcChangePublisher();
+          } else {
+            isApplyingRemote = true;
+            try {
+              var fullRange = model.getFullModelRange();
+              model.applyEdits([{ range: fullRange, text: payload.content || '' }]);
+            } finally { isApplyingRemote = false; }
+            applyLanguageToModel(model, lang, currentPath);
+          }
+        } catch (_) {
+          isApplyingRemote = true;
+          try {
+            var fullRange2 = model.getFullModelRange();
+            model.applyEdits([{ range: fullRange2, text: payload.content || '' }]);
+          } finally { isApplyingRemote = false; }
+          applyLanguageToModel(model, lang, currentPath);
+        }
+      }
+
+      applyLineNumberSizing();
+      ensureTouchSelection('open');
+
+      if (!sameFileNavigationOnly && payload.reason !== 'external_change') {
+        try {
+          if (diffEditor && diffEditor.getModel) {
+            var dm = diffEditor.getModel();
+            if (dm && dm.te2FreezeProjection && dm.modifiedBaseline && model) {
+              var freshContent = model.getValue();
+              var modViewState = null;
+              try {
+                var me = diffEditor.getModifiedEditor();
+                if (me) modViewState = me.saveViewState();
+              } catch (_) {}
+              dm.modifiedBaseline.setValue(freshContent);
+              diffEditor.setModel(dm);
+              try {
+                if (modViewState) {
+                  var me2 = diffEditor.getModifiedEditor();
+                  if (me2) me2.restoreViewState(modViewState);
+                }
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+      }
+
+      try { lastContentSha256 = payload.content_sha256 || lastContentSha256; } catch (_) {}
+      emitToHost('editor_cache_state', {
+        path: currentPath,
+        state: payload.state || 'clean',
+        unsaved: !!payload.unsaved,
+        reason: payload.reason || 'open',
+        content_sha256: payload.content_sha256,
+        auto_save: payload.auto_save,
+      });
+      if (payload.has_draft) requestDraftDiff('open');
+      else clearDraftDiffDecorations();
+
+      return _finalizeNavigationAfterOpen('editor:open-model').then(function() {
+        if (!tx.hasExplicitNavigation && !sameFileNavigationOnly && payload.scroll_line != null && !_hasExplicitNavigationGuardForPath(currentPath)) {
+          applyJumpToLineAt(editor, model, { line: payload.scroll_line, focus: false, scroll_to_top: true });
+        }
+        emitToHost('editor_open_complete', {
+          path: currentPath,
+          request_id: payload && payload.request_id ? String(payload.request_id) : '',
+          line: tx && tx.hasExplicitNavigation ? tx.line : null,
+          column: tx && tx.hasExplicitNavigation ? tx.column : null,
+          reason: payload.reason || 'open',
+        });
+        if (!sameFileNavigationOnly) {
+          try {
+            var openReqId = (payload && payload.request_id) ? String(payload.request_id) : ('diag_' + Date.now() + '_open');
+            var openText = '';
+            try { openText = model && model.getValue ? model.getValue() : ''; } catch (_) {}
+            _wbQueueDidChange(
+              currentPath,
+              openText,
+              model && model.getLanguageId ? model.getLanguageId() : lang,
+              openGeneration
+            );
+            _wbQueueSymbols(currentPath, openGeneration);
+            _wbOpenFileFlow({
+              path: currentPath,
+              languageId: lang,
+              uri: (model && model.uri) ? String(model.uri.toString()) : '',
+              requestId: openReqId,
+              forceRefresh: true,
+              generation: openGeneration,
+              source: 'editor:open',
+              timeoutMs: 8000,
+            }).catch(function () {});
+          } catch (_) {}
+        }
+      });
+    }).then(function() {
+      if (!sameFileNavigationOnly && payload.reason !== 'external_change') {
+        requestGitBaselines({ reason: 'open' });
+      }
+      _settleOpenTransaction(tx);
+    }, function(e) {
+      _settleOpenTransaction(tx);
+      throw e;
+    });
+  }
+
   function connectEditorSocket() {
     try {
+      if (editorSocket) return true;
       if (!window.io) return false;
       editorSocket = window.io('/editor', {
         path: '/editor_ws/socket.io',
@@ -3189,7 +3502,9 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
               // Cold-open restore: if SSOT provides a last scroll line and there is no explicit jump,
               // restore viewport to that line.
               try {
-                if (f && f.scroll_line != null && !f.has_draft) {
+                if (_hasExplicitNavigationGuardForPath(currentPath)) {
+                  _applyOpenTransactionNavigation('ssot');
+                } else if (f && f.scroll_line != null && !f.has_draft) {
                   applyJumpToLineAt(editor, model, { line: f.scroll_line, focus: false, scroll_to_top: true });
                 }
               } catch (_) {}
@@ -3242,6 +3557,15 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       editorSocket.on('editor:open', function(payload) {
         try {
           if (!payload || !payload.path) return;
+          if (shouldDropDuplicateEditorOpen(payload)) {
+            try {
+              console.log('[editor:open] drop duplicate', {
+                path: payload.path,
+                request_id: payload.request_id || '',
+              });
+            } catch (_) {}
+            return;
+          }
 
           // Guard: external_change events that don't match the loaded model URI
           // are irrelevant to this editor — skip entirely.
@@ -3261,147 +3585,11 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
               : null;
             console.log((_t != null ? ('t=' + _t + 'ms ') : '') + 'now=' + Date.now(), '[editor:open] rx', { path: payload.path, request_id: payload.request_id || '' });
           } catch (_) {}
-          // Always follow SSOT open across clients.
-          baseSha256 = payload.base_sha256 || baseSha256;
-          currentPath = payload.path;
-          var openGeneration = _wbBumpGeneration(currentPath, 'editor:open');
-          try { bcUpdatePath(currentPath, true); } catch (_) {}
-          ensureEditorWithPrefs().then(function() {
-            var lang = languageFromPath(currentPath);
-            if (!model) {
-              model = createFileModel(payload.content || '', lang, currentPath);
-              editor.setModel(model);
-              applyLanguageToModel(model, lang, currentPath);
-              installMirrorPublisher();
-              installScrollPublisher();
-              vscodeRpcDidOpenIfReady();
-              installVscodeRpcChangePublisher();
-            } else {
-              try {
-                var want = monacoFileUri(window.monaco, currentPath);
-                if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
-                  // Detach diff editor model before disposing — Monaco throws
-                  // BugIndicatingError if a TextModel is disposed while DiffEditorWidget
-                  // still references it.
-                  if (diffEditor) { try { diffEditor.setModel(null); } catch (_) {} }
-                  try { model.dispose(); } catch (_) {}
-                  model = createFileModel(payload.content || '', lang, currentPath);
-                  editor.setModel(model);
-                  applyLanguageToModel(model, lang, currentPath);
-                  installMirrorPublisher();
-                  installScrollPublisher();
-                  vscodeRpcDidOpenIfReady();
-                  installVscodeRpcChangePublisher();
-                } else {
-                  isApplyingRemote = true;
-                  try {
-                    var fullRange = model.getFullModelRange();
-                    model.applyEdits([{ range: fullRange, text: payload.content || '' }]);
-                  } finally { isApplyingRemote = false; }
-                  applyLanguageToModel(model, lang, currentPath);
-                }
-              } catch (_) {
-                isApplyingRemote = true;
-                try {
-                  var fullRange2 = model.getFullModelRange();
-                  model.applyEdits([{ range: fullRange2, text: payload.content || '' }]);
-                } finally { isApplyingRemote = false; }
-                applyLanguageToModel(model, lang, currentPath);
-              }
-            }
-            applyLineNumberSizing();
-            ensureTouchSelection('open');
-
-            // After external edit, re-snapshot modifiedBaseline so the diff
-            // recomputes even when te2FreezeProjection is active (draft/auto-track).
-            // Skip for external_change — diff recalc is deferred to avoid thrash.
-            if (payload.reason !== 'external_change') {
-              try {
-                if (diffEditor && diffEditor.getModel) {
-                  var dm = diffEditor.getModel();
-                  if (dm && dm.te2FreezeProjection && dm.modifiedBaseline && model) {
-                    var freshContent = model.getValue();
-                    var freshLang = model.getLanguageId ? model.getLanguageId() : 'plaintext';
-                    dm.modifiedBaseline.setValue(freshContent);
-                    // Force diff recomputation by calling setModel with updated baseline.
-                    var modViewState = null;
-                    try {
-                      var me = diffEditor.getModifiedEditor();
-                      if (me) modViewState = me.saveViewState();
-                    } catch (_) {}
-                    diffEditor.setModel(dm);
-                    try {
-                      if (modViewState) {
-                        var me2 = diffEditor.getModifiedEditor();
-                        if (me2) me2.restoreViewState(modViewState);
-                      }
-                    } catch (_) {}
-                  }
-                }
-              } catch (_) {}
-            }
-            // Notify the language sidecar so extension activation + provider registration can happen.
-            // This is intentionally best-effort and must not block the editor UI.
-            try {
-              var openReqId = (payload && payload.request_id) ? String(payload.request_id) : ('diag_' + Date.now() + '_open');
-              var openText = '';
-              try { openText = model && model.getValue ? model.getValue() : ''; } catch (_) {}
-              _wbQueueDidChange(
-                currentPath,
-                openText,
-                model && model.getLanguageId ? model.getLanguageId() : lang,
-                openGeneration
-              );
-              _wbQueueSymbols(currentPath, openGeneration);
-              _wbOpenFileFlow({
-                path: currentPath,
-                languageId: lang,
-                uri: (model && model.uri) ? String(model.uri.toString()) : '',
-                requestId: openReqId,
-                forceRefresh: true,
-                generation: openGeneration,
-                source: 'editor:open',
-                timeoutMs: 8000,
-              }).catch(function () {});
-            } catch (_) {}
-            // Diagnostics will arrive fresh via $changeMany after _wbQueueDidChange above.
-            // Optional open+jump payload (used by agent drawer + explorer + go-to-line).
-            try {
-              if (payload.line != null) {
-                applyJumpToLineAt(editor, model, {
-                  line: payload.line,
-                  column: payload.column,
-                  focus: payload.focus,
-                  scroll_y: payload.scroll_y,
-                  scroll_to_top: payload.scroll_to_top,
-                });
-              }
-            } catch (_) {}
-            try { lastContentSha256 = payload.content_sha256 || lastContentSha256; } catch (_) {}
-            emitToHost('editor_cache_state', {
-              path: currentPath,
-              state: payload.state || 'clean',
-              unsaved: !!payload.unsaved,
-              reason: payload.reason || 'open',
-              content_sha256: payload.content_sha256,
-              auto_save: payload.auto_save,
-            });
-            if (payload.has_draft) requestDraftDiff('open');
-            else clearDraftDiffDecorations();
-
-            // Restore last scroll line if no explicit open+jump was requested.
-            try {
-              if (payload.line == null && payload.scroll_line != null) {
-                applyJumpToLineAt(editor, model, { line: payload.scroll_line, focus: false, scroll_to_top: true });
-              }
-            } catch (_) {}
+          _queueOpenTransaction(function() {
+            return _runEditorOpenTransaction(payload);
+          }).catch(function(e) {
+            console.warn('[Monaco] open apply failed', e);
           });
-          // Skip git baselines for external_change — content is already updated
-          // from disk; the diff recompute is expensive and should not fire on
-          // every watcher hit during bundler runs.
-          if (payload.reason !== 'external_change') {
-            requestGitBaselines({ reason: 'open' });
-          }
         } catch (e) {
           console.warn('[Monaco] open apply failed', e);
         }

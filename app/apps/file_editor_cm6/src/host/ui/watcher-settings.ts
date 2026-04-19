@@ -1,5 +1,7 @@
 // @ts-nocheck
 
+import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
+
 // ---------- Watcher modal & settings UI ----------
 // Extracted from main.js. Requires `host.toast` via init().
 
@@ -72,8 +74,8 @@ export function showWatcherLimitModal(message, limit) {
 
   modal.confirmBtn.onclick = () => {
     const pwd = modal.passwordEl.value || '';
-    if (typeof window.__explorerBusSend === 'function') {
-      window.__explorerBusSend('watcher:raiseLimit', {
+    if (window.__explorerRpc) {
+      window.__explorerRpc.notify(EXPLORER_RPC_METHODS.watcherLimitRaise, {
         limit: typeof limit === 'number' ? limit : 524288,
         password: pwd,
       });
@@ -123,8 +125,8 @@ function _initWatcherSettingsUI() {
 function _sendWatcherMode(mode) {
   const storageEl = /** @type {any} */ (document.querySelector('input[name="watcher-storage"]:checked'));
   const storageType = storageEl ? storageEl.value : 'ssd';
-  if (typeof window.__explorerBusSend === 'function') {
-    window.__explorerBusSend('watcher:setMode', { mode, storage_type: storageType });
+  if (window.__explorerRpc) {
+    window.__explorerRpc.notify(EXPLORER_RPC_METHODS.watcherModeSet, { mode, storage_type: storageType });
   }
 }
 

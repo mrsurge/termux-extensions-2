@@ -1,5 +1,7 @@
 // @ts-nocheck
 
+import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
+
 // ---------- Projects & Sidecars debug modal ----------
 // Extracted from main.js — fully self-contained (no closure deps).
 
@@ -188,11 +190,11 @@ async function loadProjectsDebugContent() {
           ) {
             return;
           }
-          if (typeof window.__explorerBusSend !== 'function') {
+          if (!window.__explorerRpc) {
             window.alert('Explorer connection unavailable.');
             return;
           }
-          window.__explorerBusSend('project:open', { path: p });
+          window.__explorerRpc.notify(EXPLORER_RPC_METHODS.projectOpen, { path: p });
           hideProjectsDebugModal();
         });
       }

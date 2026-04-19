@@ -24,8 +24,8 @@ declare global {
     __cm6ReloadCurrentFile?: any;
     __cm6RequestGitBaselines?: any;
     __cm6SyncState?: any;
-    __explorerBusRequest?: any;
-    __explorerBusSend?: any;
+    __explorerHandleNotification?: any;
+    __explorerRpc?: any;
     __feLspSpinnerState?: any;
     __feLspSpinnerUi?: any;
     __fePendingCacheIndicator?: any;

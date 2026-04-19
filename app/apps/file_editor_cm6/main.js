@@ -48,6 +48,8 @@ import { createAutosaveRuntimeController } from './src/host/ui/autosave-runtime.
 import { showProjectsDebugModal } from './src/host/ui/projects-debug-modal.ts';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './src/host/ui/watcher-settings.ts';
 import { createUiIpcConnections } from './src/host/connections/ui-ipc.ts';
+import { createExplorerRpcConnection } from './src/host/connections/explorer-rpc.ts';
+import { EXPLORER_RPC_METHODS, EXPLORER_RPC_NOTIFICATIONS } from './src/explorer/rpc/contract.ts';
 import { createFileWebSocketManager } from './src/host/connections/file-websocket.ts';
 import { createFileSyncHandler } from './src/host/connections/file-sync-handler.ts';
 import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './src/host/connections/vendor-loaders.ts';
@@ -236,11 +238,11 @@ function startAgentOpenRequestPoller() {
       if (!targetAbs) return;
 
       try {
-        await openFile(targetAbs, { forceRefresh: true });
-        if (typeof line === 'number' && line >= 1) {
-          await new Promise((resolve) => setTimeout(resolve, 140));
-          await jumpToCurrentFileLine(line, { focus: true });
-        }
+        await openFile(targetAbs, {
+          forceRefresh: true,
+          line,
+          focus: true,
+        });
       } catch (e) {
         host.toast(`Failed to open link: ${e?.message || 'unknown error'}`);
       }
@@ -350,11 +352,11 @@ async function _applyAgentSidebarTrackedEdit(edit) {
   if (_rememberAgentSidebarEditKey(key)) return;
 
   try {
-    await openFile(absPath, { forceRefresh: true });
-    if (line >= 1) {
-      await new Promise((resolve) => setTimeout(resolve, 140));
-      await jumpToCurrentFileLine(line, { focus: true });
-    }
+    await openFile(absPath, {
+      forceRefresh: true,
+      line,
+      focus: true,
+    });
   } catch (err) {
     console.warn('[CodexEditTrack] Failed to auto-open tracked edit:', err);
   }
@@ -510,14 +512,12 @@ async function resolveAgentIframeSettings(uiPrefs) {
   return { enabled: true, url, hideDrawerHeader: false };
 }
 
-let explorerSocket = null;
-const explorerPending = [];
+let explorerRpcConnection = null;
 let explorerNeedsResync = false;
-let _explorerReqNextId = 1;
-const _explorerReqPending = new Map(); // id -> {resolve,reject,timer}
 
 // Dedicated Editor Socket.IO transport (separate from explorer and NiceGUI).
 let editorSocket = null;
+let editorSocketConnectPromise = null;
 let editorSocketId = null;
 const editorPending = [];
 let editorIframeReady = false;
@@ -543,8 +543,27 @@ function markEditorIframeReady() {
   }
 }
 const _editorIssuesDumpWaiters = new Map(); // requestId -> {resolve,reject,timer}
+const _editorOpenWaiters = new Map(); // requestId -> {resolve,reject,timer,path}
 let codexAppserverSocket = null;
 const _agentSidebarTrackedEditDedup = new Map();
+const _recentAgentOpenKeys = new Map();
+
+function _rememberRecentAgentOpen(key) {
+  if (!key) return false;
+  const now = Date.now();
+  const seen = _recentAgentOpenKeys.get(key);
+  if (seen && (now - seen) < 1500) {
+    return true;
+  }
+  _recentAgentOpenKeys.set(key, now);
+  if (_recentAgentOpenKeys.size > 256) {
+    const cutoff = now - 30000;
+    for (const [k, ts] of _recentAgentOpenKeys.entries()) {
+      if (ts < cutoff) _recentAgentOpenKeys.delete(k);
+    }
+  }
+  return false;
+}
 
 async function handleAgentOpen(payload) {
   const isMobile = _isMobileLayout();
@@ -555,15 +574,17 @@ async function handleAgentOpen(payload) {
       ? payload.abs.trim()
       : (typeof payload?.file === 'string' ? payload.file.trim() : ''));
   const line = Number.isFinite(Number(payload?.line)) ? Number(payload.line) : null;
+  const column = Number.isFinite(Number(payload?.column)) ? Number(payload.column) : null;
   const source = typeof payload?.source === 'string' ? payload.source : '';
+  const conversationId = typeof payload?.conversation_id === 'string' ? payload.conversation_id : '';
   console.log('[AgentOpen] rx payload', {
     path: payload?.path || '',
     abs: payload?.abs || '',
     rel,
     line,
-    column: payload?.column,
+    column,
     source,
-    conversation_id: payload?.conversation_id || '',
+    conversation_id: conversationId,
   });
 
   if (isMobile) {
@@ -593,26 +614,35 @@ async function handleAgentOpen(payload) {
     console.warn('[AgentOpen] drop: unable to resolve targetAbs', { rel, abs, source });
     return;
   }
+  const dedupeKey = `${targetAbs}|${line ?? ''}|${column ?? ''}|${source}|${conversationId}`;
+  if (_rememberRecentAgentOpen(dedupeKey)) {
+    console.log('[AgentOpen] drop duplicate', {
+      path: targetAbs,
+      line,
+      column,
+      source,
+      conversation_id: conversationId,
+    });
+    return;
+  }
   try {
+    const openOptions = { forceRefresh: true };
+    if (typeof line === 'number' && line >= 1) {
+      openOptions.line = line;
+      if (typeof column === 'number' && column >= 1) {
+        openOptions.column = column;
+      }
+      openOptions.focus = !isMobile;
+      if (source === 'codex-agent') {
+        openOptions.scrollY = 'center';
+      }
+    }
     if (typeof openFile === 'function') {
-      await openFile(targetAbs, { forceRefresh: true });
+      await openFile(targetAbs, openOptions);
     } else if (typeof window.appOpenFile === 'function') {
-      window.appOpenFile(targetAbs);
-      await new Promise((resolve) => setTimeout(resolve, 220));
+      await window.appOpenFile(targetAbs, openOptions);
     } else {
       throw new Error('openFile is not available yet');
-    }
-    if (typeof line === 'number' && line >= 1) {
-      await new Promise((resolve) => setTimeout(resolve, 140));
-      const jumpOptions = { focus: !isMobile };
-      if (source === 'codex-agent') {
-        jumpOptions.scrollY = 'center';
-      }
-      if (typeof jumpToCurrentFileLine === 'function') {
-        await jumpToCurrentFileLine(line, jumpOptions);
-      } else if (typeof window.jumpToCurrentFileLine === 'function') {
-        await window.jumpToCurrentFileLine(line, jumpOptions);
-      }
     }
   } catch (e) {
     console.warn('[AgentOpen] Failed to open+jump:', e);
@@ -620,221 +650,142 @@ async function handleAgentOpen(payload) {
   }
 }
 
-function connectExplorerSocket() {
-  if (explorerSocket) return;
-  ensureSocketIoLoaded()
-    .then((io) => {
-      if (!io) throw new Error('Socket.IO client unavailable');
-      // Use dedicated Explorer Socket.IO endpoint (separate from NiceGUI transport).
-      const socketPath = '/explorer_ws/socket.io';
-      explorerSocket = io('/explorer', {
-        path: socketPath,
-        transports: ['websocket'],
-        query: { app_id: 'file_editor_cm6' },
-      });
+function handleExplorerRpcNotification(method, params) {
+  const payload = params && typeof params === 'object' ? params : {};
+  if (typeof method !== 'string' || !method) return;
 
-      explorerSocket.on('connect', () => {
-        console.log('[ExplorerSIO] Connected');
-        // Flush any queued messages
-        while (explorerPending.length) {
-          const msg = explorerPending.shift();
-          explorerSocket.emit('explorer_send', msg);
-        }
+  if (window.__debugExplorer) {
+    console.log('[ExplorerRPC:event]', { method, payload });
+  }
 
-        if (explorerNeedsResync) {
-          explorerNeedsResync = false;
-        }
-        try {
-          if (typeof window.__cm6ExplorerOnReconnect === 'function') {
-            window.__cm6ExplorerOnReconnect();
-          }
-        } catch (e) {
-          console.warn('[ExplorerSIO] Connect resync failed:', e);
-        }
-      });
-
-      explorerSocket.on('disconnect', (reason) => {
-        console.log('[ExplorerSIO] Disconnected', reason);
-        explorerNeedsResync = true;
-      });
-
-      explorerSocket.on('connect_error', (err) => {
-        console.warn('[ExplorerSIO] Connect error', err);
-      });
-
-      explorerSocket.on('explorer:event', (msg) => {
-        if (window.__debugExplorer) {
-          console.log('[ExplorerSIO:event]', msg);
-        }
-        if (!msg) return;
-        try {
-          if (typeof msg === 'string') {
-            msg = JSON.parse(msg);
-          }
-        } catch {
-          return;
-        }
-        const msgId = msg.id || msg?.data?.id || null;
-        const type = msg.type || msg?.data?.type;
-        const payload = msg.payload || msg?.data?.payload || {};
-        if (msgId && _explorerReqPending.has(msgId)) {
-          const pending = _explorerReqPending.get(msgId);
-          _explorerReqPending.delete(msgId);
-          try { clearTimeout(pending.timer); } catch (_) {}
-          try { pending.resolve({ type, payload, id: msgId }); } catch (_) {}
-        }
-        if (type === 'agent:open') {
-          console.log('[ExplorerSIO] rx agent:open', {
-            path: payload?.path || '',
-            rel: payload?.rel || '',
-            line: payload?.line,
-            column: payload?.column,
-            source: payload?.source || '',
-            conversation_id: payload?.conversation_id || '',
-          });
-          handleAgentOpen(payload);
-          return;
-        }
-        // Watcher config/status events → handled in main.js, not explorer
-        if (type === 'watcher:config' && window.__cm6HandleWatcherConfig) {
-          window.__cm6HandleWatcherConfig(payload);
-        }
-        if (type === 'watcher:modeStatus' && window.__cm6HandleWatcherModeStatus) {
-          window.__cm6HandleWatcherModeStatus(payload);
-        }
-        if (type === 'watcher:error' && window.__cm6HandleWatcherError) {
-          window.__cm6HandleWatcherError(payload);
-        }
-        if (type === 'watcher:raiseResult' && window.__cm6HandleWatcherRaiseResult) {
-          window.__cm6HandleWatcherRaiseResult(payload);
-        }
-        if (type === 'prefs:setUi' && window.__cm6HandleUiPrefs) {
-          window.__cm6HandleUiPrefs(payload);
-        } else if (type === 'prefs:setUi') {
-          try { window.__cm6PendingUiPrefs = payload; } catch (_) {}
-        }
-        // Adapter restart/settings events from backend
-        // These functions are defined later and may not be in scope during
-        // initial connect. The primary restart path is the direct call from
-        // the save handler — these are a safety net only.
-        if (type === 'ext:adapter_restarting') {
-          console.log('[adapter_restart] received', payload);
-          if (typeof _reloadEditorIframe === 'function') setTimeout(() => _reloadEditorIframe(), 0);
-        }
-        if (type === 'ext:settings_changed') {
-          console.log('[adapter_restart] settings changed', payload);
-          if (typeof _requestAdapterRestart === 'function') setTimeout(() => _requestAdapterRestart(), 0);
-        }
-        // The explorer websocket is THE authority for which file is active.
-        // Always update toolbar — no same-path guard so tracked edits
-        // and rapid switches never get silently dropped.
-        if (type === 'explorer:activeFile' && (payload.rel || payload.abs)) {
-          try {
-            let abs = payload.abs || null;
-            if (!abs && payload.rel) {
-              let projRoot = null;
-              try { projRoot = sessionTelemetry.activeProjectPath(); } catch (_) {}
-              if (!projRoot) try { projRoot = sessionState?.activeProject; } catch (_) {}
-              abs = projRoot ? toAbsolute(payload.rel, projRoot, HOME_DIR) : null;
-            }
-            if (abs) {
-              try { currentPath = abs; } catch (_) {}
-              try { currentPathExists = true; } catch (_) {}
-              try { lastPickerPath = abs.slice(0, abs.lastIndexOf('/')); } catch (_) {}
-              try { currentModeLanguage = detectLanguageFromFilename(abs); } catch (_) {}
-              // Notify the problems panel of the active file change
-              try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(abs); } catch (_) {}
-              // Keep toolbar in sync with the explorer-authoritative active file.
-              try {
-                const name = abs.slice(abs.lastIndexOf('/') + 1);
-                setToolbarFileName(name);
-              } catch (_) {}
-            }
-          } catch (_) {}
-        }
-        if (type === 'diagnostics:detail') {
-          try {
-            const keys = payload ? Object.keys(payload) : [];
-            const sampleMarkers = keys.length > 0 ? (payload[keys[0]] || []).slice(0, 1) : [];
-            console.log('[Problems] diagnostics:detail rx', keys.length, 'files, sample:', JSON.stringify(sampleMarkers).slice(0, 300));
-            problemsPanel.update(payload);
-          } catch (e) { console.error('[Problems] update error:', e); }
-        }
-        if (type && typeof window.__explorerBusDispatch === 'function') {
-          window.__explorerBusDispatch(type, payload);
-        }
-      });
-
-      explorerSocket.on('explorer:navigate', async (payload) => {
-        // Breadcrumb directory click → list the directory + open drawer
-        console.log('[explorer:navigate] received:', payload);
-        try {
-          const p = payload && typeof payload === 'object' ? payload : {};
-          const rel = p.rel || '.';
-
-          if (p.is_external && p.abs_path) {
-            // Out-of-repo directory → deep link to file_explorer app
-            const resp = await fetch('/api/apps/file_explorer/open', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ params: { path: p.abs_path } }),
-            });
-            const json = await resp.json();
-            if (json && json.ok && json.data && json.data.url) {
-              window.location.href = json.data.url;
-            }
-            return;
-          }
-
-          if (p.open_drawer) {
-            const root = document.querySelector('.fe-root');
-            if (root) root.classList.add('drawer-open');
-          }
-          // Scroll explorer tree to the currently open file
-          if (typeof window.__explorerScrollToActiveFile === 'function') {
-            window.__explorerScrollToActiveFile();
-          }
-        } catch (_) {}
-      });
-
-      window.__explorerBusSend = (type, payload, id) => {
-        const msg = { type, payload: payload || {} };
-        if (id) msg.id = id;
-        if (explorerSocket && explorerSocket.connected) {
-          explorerSocket.emit('explorer_send', msg);
-        } else {
-          explorerPending.push(msg);
-        }
-      };
-
-      window.__explorerBusRequest = (type, payload, timeoutMs) => {
-        const id = `req_${Date.now()}_${_explorerReqNextId++}`;
-        const t = Math.max(500, Number(timeoutMs) || 8000);
-        return new Promise((resolve, reject) => {
-          const timer = setTimeout(() => {
-            if (!_explorerReqPending.has(id)) return;
-            _explorerReqPending.delete(id);
-            reject(new Error(`Explorer request timeout: ${type}`));
-          }, t);
-          _explorerReqPending.set(id, { resolve, reject, timer });
-          window.__explorerBusSend(type, payload || {}, id);
-        });
-      };
-
-      // Android/Gecko often drops websockets while backgrounded; force a reconnect
-      // when returning to the foreground so explorer state can resync.
-      document.addEventListener('visibilitychange', () => {
-        try {
-          if (document.visibilityState !== 'visible') return;
-          if (explorerSocket && !explorerSocket.connected) {
-            explorerSocket.connect();
-          }
-        } catch (_) {}
-      });
-    })
-    .catch((err) => {
-      console.warn('[ExplorerSIO] Failed to open explorer Socket.IO:', err);
+  if (method === EXPLORER_RPC_NOTIFICATIONS.agentOpen) {
+    console.log('[ExplorerRPC] rx agent:open', {
+      path: payload?.path || '',
+      rel: payload?.rel || '',
+      line: payload?.line,
+      column: payload?.column,
+      source: payload?.source || '',
+      conversation_id: payload?.conversation_id || '',
     });
+    handleAgentOpen(payload);
+    return;
+  }
+  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherConfigUpdated && window.__cm6HandleWatcherConfig) {
+    window.__cm6HandleWatcherConfig(payload);
+  }
+  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherModeStatus && window.__cm6HandleWatcherModeStatus) {
+    window.__cm6HandleWatcherModeStatus(payload);
+  }
+  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherError && window.__cm6HandleWatcherError) {
+    window.__cm6HandleWatcherError(payload);
+  }
+  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherLimitRaiseResult && window.__cm6HandleWatcherRaiseResult) {
+    window.__cm6HandleWatcherRaiseResult(payload);
+  }
+  if (method === EXPLORER_RPC_NOTIFICATIONS.prefsUiUpdated && window.__cm6HandleUiPrefs) {
+    window.__cm6HandleUiPrefs(payload);
+  } else if (method === EXPLORER_RPC_NOTIFICATIONS.prefsUiUpdated) {
+    try { window.__cm6PendingUiPrefs = payload; } catch (_) {}
+  }
+  if (method === EXPLORER_RPC_NOTIFICATIONS.extensionsAdapterRestarting) {
+    console.log('[adapter_restart] received', payload);
+    if (typeof _reloadEditorIframe === 'function') setTimeout(() => _reloadEditorIframe(), 0);
+  }
+  if (method === EXPLORER_RPC_NOTIFICATIONS.extensionsSettingsChanged) {
+    console.log('[adapter_restart] settings changed', payload);
+    if (typeof _requestAdapterRestart === 'function') setTimeout(() => _requestAdapterRestart(), 0);
+  }
+  if (method === EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated && (payload.rel || payload.abs)) {
+    try {
+      let abs = payload.abs || null;
+      if (!abs && payload.rel) {
+        let projRoot = null;
+        try { projRoot = sessionTelemetry.activeProjectPath(); } catch (_) {}
+        if (!projRoot) try { projRoot = sessionState?.activeProject; } catch (_) {}
+        abs = projRoot ? toAbsolute(payload.rel, projRoot, HOME_DIR) : null;
+      }
+      if (abs) {
+        try { currentPath = abs; } catch (_) {}
+        try { currentPathExists = true; } catch (_) {}
+        try { lastPickerPath = abs.slice(0, abs.lastIndexOf('/')); } catch (_) {}
+        try { currentModeLanguage = detectLanguageFromFilename(abs); } catch (_) {}
+        try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(abs); } catch (_) {}
+        try {
+          if (typeof updatePathDisplay === 'function') updatePathDisplay();
+          else {
+            const name = abs.slice(abs.lastIndexOf('/') + 1);
+            setToolbarFileName(name);
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+  if (method === EXPLORER_RPC_NOTIFICATIONS.diagnosticsDetail) {
+    try {
+      const keys = payload ? Object.keys(payload) : [];
+      const sampleMarkers = keys.length > 0 ? (payload[keys[0]] || []).slice(0, 1) : [];
+      console.log('[Problems] diagnostics:detail rx', keys.length, 'files, sample:', JSON.stringify(sampleMarkers).slice(0, 300));
+      problemsPanel.update(payload);
+    } catch (e) { console.error('[Problems] update error:', e); }
+  }
+  if (typeof window.__explorerHandleNotification === 'function') {
+    window.__explorerHandleNotification(method, payload);
+  }
+}
+
+function connectExplorerSocket() {
+  if (explorerRpcConnection) {
+    explorerRpcConnection.reconnect();
+    return Promise.resolve(explorerRpcConnection);
+  }
+
+  explorerRpcConnection = createExplorerRpcConnection({
+    ensureSocketIoLoaded,
+    onConnect: () => {
+      console.log('[ExplorerRPC] Connected');
+      if (explorerNeedsResync) {
+        explorerNeedsResync = false;
+      }
+      try {
+        if (typeof window.__cm6ExplorerOnReconnect === 'function') {
+          window.__cm6ExplorerOnReconnect();
+        }
+      } catch (e) {
+        console.warn('[ExplorerRPC] Connect resync failed:', e);
+      }
+    },
+    onDisconnect: (reason) => {
+      console.log('[ExplorerRPC] Disconnected', reason);
+      explorerNeedsResync = true;
+    },
+    onConnectError: (err) => {
+      console.warn('[ExplorerRPC] Connect error', err);
+    },
+    onNotification: (method, params) => {
+      handleExplorerRpcNotification(method, params);
+    },
+  });
+
+  window.__explorerRpc = {
+    connect: () => explorerRpcConnection.connect(),
+    reconnect: () => explorerRpcConnection.reconnect(),
+    isConnected: () => explorerRpcConnection.isConnected(),
+    notify: (method, params = {}) => explorerRpcConnection.notify(method, params || {}),
+    request: (method, params = {}, timeoutMs) => explorerRpcConnection.request(method, params || {}, timeoutMs),
+  };
+
+  void explorerRpcConnection.connect().catch((err) => {
+    console.warn('[ExplorerRPC] Failed to open explorer Socket.IO:', err);
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    try {
+      if (document.visibilityState !== 'visible') return;
+      explorerRpcConnection?.reconnect?.();
+    } catch (_) {}
+  });
+
+  return Promise.resolve(explorerRpcConnection);
 }
 
 // Ensure lastSha256 exists before any cache-state events fire.
@@ -999,9 +950,46 @@ function _issuesDumpRequestOnce() {
   });
 }
 
+function _resolveEditorOpenWaiter(payload) {
+  try {
+    const requestId = payload && (payload.requestId || payload.request_id) ? String(payload.requestId || payload.request_id) : '';
+    if (!requestId) return;
+    const waiter = _editorOpenWaiters.get(requestId);
+    if (!waiter) return;
+    _editorOpenWaiters.delete(requestId);
+    try { clearTimeout(waiter.timer); } catch (_) {}
+    try { waiter.resolve(payload || {}); } catch (_) {}
+  } catch (_) {}
+}
+
+function _rejectAllEditorOpenWaiters(err) {
+  try {
+    for (const [requestId, waiter] of _editorOpenWaiters.entries()) {
+      try { clearTimeout(waiter.timer); } catch (_) {}
+      try { waiter.reject(err); } catch (_) {}
+      _editorOpenWaiters.delete(requestId);
+    }
+  } catch (_) {}
+}
+
+function _awaitEditorOpen(requestId, path, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    if (!requestId) {
+      reject(new Error('Missing open request id'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      _editorOpenWaiters.delete(requestId);
+      reject(new Error(`Editor open timed out for ${path || requestId}`));
+    }, Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) : 10000);
+    _editorOpenWaiters.set(requestId, { resolve, reject, timer, path: path || '' });
+  });
+}
+
 function connectEditorSocket() {
-  if (editorSocket) return;
-  ensureSocketIoLoaded()
+  if (editorSocket) return Promise.resolve(editorSocket);
+  if (editorSocketConnectPromise) return editorSocketConnectPromise;
+  editorSocketConnectPromise = ensureSocketIoLoaded()
     .then((io) => {
       if (!io) throw new Error('Socket.IO client unavailable');
       editorSocket = io('/editor', {
@@ -1020,10 +1008,12 @@ function connectEditorSocket() {
 
       editorSocket.on('disconnect', (reason) => {
         console.log('[EditorSIO] Disconnected', reason);
+        _rejectAllEditorOpenWaiters(new Error(`Editor socket disconnected: ${reason || 'unknown'}`));
       });
 
       editorSocket.on('connect_error', (err) => {
         console.warn('[EditorSIO] Connect error', err);
+        _rejectAllEditorOpenWaiters(err instanceof Error ? err : new Error(String(err || 'editor connect error')));
       });
 
       editorSocket.on('editor:ready', () => {
@@ -1052,6 +1042,26 @@ function connectEditorSocket() {
 
       editorSocket.on('editor:cache_state', (payload) => {
         _applyEditorCacheState(payload);
+      });
+
+      editorSocket.on('editor:open_complete', (payload) => {
+        try {
+          const p = payload && typeof payload === 'object' ? payload : {};
+          const filePath = typeof p.path === 'string' ? p.path : '';
+          if (filePath) {
+            try { currentPath = filePath; } catch (_) {}
+            try { currentPathExists = true; } catch (_) {}
+            try {
+              const trimmed = filePath.replace(/\/+$/, '');
+              const idx = trimmed.lastIndexOf('/');
+              lastPickerPath = idx > 0 ? trimmed.slice(0, idx) : '/';
+            } catch (_) {}
+            try { currentModeLanguage = detectLanguageFromFilename(filePath); } catch (_) {}
+            try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(filePath); } catch (_) {}
+            try { if (typeof updatePathDisplay === 'function') updatePathDisplay(); } catch (_) {}
+          }
+        } catch (_) {}
+        _resolveEditorOpenWaiter(payload);
       });
 
       editorSocket.on('editor:draft_state', (payload) => {
@@ -1130,7 +1140,7 @@ function connectEditorSocket() {
       editorSocket.on('editor:mention_request', async (payload) => {
         try {
           const p = payload && typeof payload === 'object' ? payload : {};
-          if (typeof window.__explorerBusSend !== 'function') {
+          if (!window.__explorerRpc) {
             console.warn('[mention] Explorer bus unavailable');
             return;
           }
@@ -1140,16 +1150,22 @@ function connectEditorSocket() {
           if (p.col != null) body.col = p.col;
           if (p.endCol != null) body.endCol = p.endCol;
           if (p.content) body.content = p.content;
-          window.__explorerBusSend('mention:agent', body);
+          window.__explorerRpc.notify(EXPLORER_RPC_METHODS.mentionAgent, body);
           console.log('[mention] Mentioned in conversation:', body.path);
         } catch (err) {
           console.warn('[mention] Request failed:', err);
         }
       });
+      return editorSocket;
     })
     .catch((err) => {
+      editorSocketConnectPromise = null;
       console.warn('[EditorSIO] Failed to open editor Socket.IO:', err);
     });
+  editorSocketConnectPromise.finally(() => {
+    if (editorSocket) editorSocketConnectPromise = null;
+  });
+  return editorSocketConnectPromise;
 }
 
 // ─── UI IPC (frontend ↔ editor iframe relay) ──────────────────────
@@ -1171,7 +1187,7 @@ function connectUIIPC() {
 window.addEventListener('cm6:mention-request', async (evt) => {
   try {
     const data = evt.detail || {};
-    if (typeof window.__explorerBusSend !== 'function') {
+    if (!window.__explorerRpc) {
       console.warn('[mention] Explorer bus unavailable');
       return;
     }
@@ -1181,7 +1197,7 @@ window.addEventListener('cm6:mention-request', async (evt) => {
     if (data.col != null) body.col = data.col;
     if (data.endCol != null) body.endCol = data.endCol;
     if (data.content) body.content = data.content;
-    window.__explorerBusSend('mention:agent', body);
+    window.__explorerRpc.notify(EXPLORER_RPC_METHODS.mentionAgent, body);
     console.log('[mention] Mentioned in conversation:', body.path);
   } catch (err) {
     console.warn('[mention] Request failed:', err);
@@ -2012,7 +2028,8 @@ createSettingsBootstrap({
   pickerAvailable: () => pickerController.pickerAvailable(),
   pickFile: (startPath) => pickFile(startPath),
   getStartPath: () => lastPickerPath || HOME_DIR,
-  busRequest: (event, payload, timeoutMs) => window.__explorerBusRequest(event, payload, timeoutMs),
+  busRequest: (method, payload, timeoutMs) => window.__explorerRpc.request(method, payload, timeoutMs),
+  busNotify: (method, payload) => window.__explorerRpc.notify(method, payload),
   reloadEditorIframe: _reloadEditorIframe,
   toast: (msg, ms) => host.toast(msg, ms),
 });
@@ -2062,7 +2079,7 @@ const editTrackerController = createEditTrackerController({
   apiPost,
   getEditorViewState: () => editorViewState,
   getCurrentPath: () => currentPath,
-  openFile: (path) => openFile(path),
+  openFile: (path, opts) => openFile(path, opts),
   jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
   statusEl: editTrackerStatusEl,
 });
@@ -2422,11 +2439,11 @@ function _updateSidebarSetupPlaceholder(uiPrefs, hasActiveOverride) {
 }
 
 function _sendAgentUiPrefUpdate(key, value) {
-  if (typeof window.__explorerBusSend !== 'function') {
+  if (!window.__explorerRpc) {
     host.toast('Explorer WebSocket is not connected yet.');
     return;
   }
-  window.__explorerBusSend('prefs:updateUi', { key, value });
+  window.__explorerRpc.notify(EXPLORER_RPC_METHODS.prefsUiUpdate, { key, value });
 }
 
 function _ensureSidebarIframeLoaded(entry) {
@@ -2952,16 +2969,16 @@ function _initAgentSettingsUI() {
   });
 
   agentShortcutIconBrowse.addEventListener('click', async () => {
-    if (typeof window.__explorerBusRequest !== 'function') {
+    if (!window.__explorerRpc) {
       host.toast('Explorer connection unavailable');
       return;
     }
     const picked = await pickFile(lastPickerPath || HOME_DIR);
     if (!picked) return;
     try {
-      const res = await window.__explorerBusRequest('prefs:vendorAgentIcon', { abs_path: picked }, 12000);
-      if (res?.payload?.ok && res.payload.name) {
-        _agentShortcutEditingAssetName = res.payload.name;
+      const res = await window.__explorerRpc.request(EXPLORER_RPC_METHODS.prefsAgentIconVendor, { abs_path: picked }, 12000);
+      if (res?.ok && res.name) {
+        _agentShortcutEditingAssetName = res.name;
         agentShortcutEmoji.value = '';
         _renderAgentShortcutPreview();
       }
@@ -3392,21 +3409,32 @@ const openFlowController = createOpenFlowController({
   setCurrentModeLanguage: (lang) => { currentModeLanguage = lang; },
   detectLanguageFromFilename,
   setLastSha256: (sha) => { lastSha256 = sha; },
-  emitEditorOpenRequest: (path) => {
+  emitEditorOpenRequest: (path, options = {}) => {
     try {
-      const msg = { type: 'editor_open_request', payload: { path } };
+      const payload = /** @type {any} */ ({ path });
+      const optionsAny = /** @type {any} */ (options || {});
+      if (Number.isFinite(Number(optionsAny.line))) payload.line = Number(optionsAny.line);
+      if (Number.isFinite(Number(optionsAny.column))) payload.column = Number(optionsAny.column);
+      if (typeof optionsAny.request_id === 'string' && optionsAny.request_id) payload.request_id = optionsAny.request_id;
+      if (Object.prototype.hasOwnProperty.call(optionsAny, 'focus')) payload.focus = Boolean(optionsAny.focus);
+      if (typeof optionsAny.scroll_y === 'string') payload.scroll_y = optionsAny.scroll_y;
+      if (Object.prototype.hasOwnProperty.call(optionsAny, 'scroll_to_top')) payload.scroll_to_top = Boolean(optionsAny.scroll_to_top);
+      const msg = { type: 'editor_open_request', payload };
       if (editorSocket && editorSocket.connected) editorSocket.emit(msg.type, msg.payload);
       else editorPending.push(msg);
     } catch (e) { console.warn('[Editor] Failed to request open via editor socket:', e); }
   },
   setLastSavedContent: (content) => { lastSavedContent = content; },
+  awaitEditorOpen: (requestId, path, timeoutMs) => _awaitEditorOpen(requestId, path, timeoutMs),
   markUnsaved: (flag) => markUnsaved(flag),
   updatePathDisplay: () => updatePathDisplay(),
   syncSessionPath: () => syncSessionPath(),
   getCachedProjectRoot: () => cachedProjectRoot,
   dispatchExplorerActiveFile: (rel) => {
     try {
-      if (typeof window.__explorerBusDispatch === 'function') window.__explorerBusDispatch('explorer:activeFile', { rel });
+      if (typeof window.__explorerHandleNotification === 'function') {
+        window.__explorerHandleNotification(EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated, { rel });
+      }
     } catch (_) {}
   },
   openWebSocket: (path) => fileWebSocketManager.openWebSocket(path),

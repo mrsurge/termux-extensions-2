@@ -19,7 +19,8 @@
  *   setCurrentModeLanguage: (lang: string | null) => void,
  *   detectLanguageFromFilename: (path: string) => string,
  *   setLastSha256: (sha: string | null) => void,
- *   emitEditorOpenRequest: (path: string) => void,
+ *   emitEditorOpenRequest: (path: string, options?: any) => void,
+ *   awaitEditorOpen: (requestId: string, path: string, timeoutMs?: number) => Promise<any>,
  *   setLastSavedContent: (content: string) => void,
  *   markUnsaved: (flag: boolean) => void,
  *   updatePathDisplay: () => void,
@@ -42,6 +43,24 @@ export function createOpenFlowController(deps) {
   async function openFile(path, options = {}) {
     const optionsAny = /** @type {any} */ (options || {});
     const { allowOverwrite = true, forceRefresh = false } = optionsAny;
+    const line = Number.isFinite(Number(optionsAny.line ?? optionsAny.lineNo))
+      ? Number(optionsAny.line ?? optionsAny.lineNo)
+      : null;
+    const column = Number.isFinite(Number(optionsAny.column ?? optionsAny.col))
+      ? Number(optionsAny.column ?? optionsAny.col)
+      : null;
+    const openRequestOptions = /** @type {any} */ ({});
+    if (line != null && line >= 1) openRequestOptions.line = line;
+    if (column != null && column >= 1) openRequestOptions.column = column;
+    if (Object.prototype.hasOwnProperty.call(optionsAny, 'focus')) {
+      openRequestOptions.focus = Boolean(optionsAny.focus);
+    }
+    if (Object.prototype.hasOwnProperty.call(optionsAny, 'scrollY') && typeof optionsAny.scrollY === 'string') {
+      openRequestOptions.scroll_y = optionsAny.scrollY;
+    }
+    if (Object.prototype.hasOwnProperty.call(optionsAny, 'scrollToTop')) {
+      openRequestOptions.scroll_to_top = Boolean(optionsAny.scrollToTop);
+    }
     if (!path) throw new Error('Path is empty');
     deps.setStatus('Opening...');
 
@@ -81,7 +100,7 @@ export function createOpenFlowController(deps) {
       deps.setLastPickerPath(deps.parentDir(resolved));
       deps.setCurrentModeLanguage(deps.detectLanguageFromFilename(resolved));
       deps.setLastSha256(payload.sha256 || null);
-      deps.emitEditorOpenRequest(resolved);
+      deps.emitEditorOpenRequest(resolved, openRequestOptions);
 
       deps.setLastSavedContent('');
       deps.markUnsaved(false);
@@ -89,23 +108,13 @@ export function createOpenFlowController(deps) {
       deps.syncSessionPath();
       deps.setStatus('');
 
-      try {
-        const projectRoot = projectState.activeProject || deps.getCachedProjectRoot() || null;
-        const rootAbs = projectRoot ? deps.toAbsolute(projectRoot, null, deps.homeDir).replace(/\/+$/, '') : null;
-        let rel = null;
-        if (rootAbs && resolved.startsWith(rootAbs + '/')) rel = resolved.slice(rootAbs.length + 1);
-        deps.dispatchExplorerActiveFile(rel);
-      } catch (_) {}
-
       deps.openWebSocket(resolved);
 
-      let scrollLineToRestore = null;
       try {
         const activity = await deps.apiPost('state/file_activity', {
           path: resolved,
           project: deps.getCachedProjectRoot() || projectState.activeProject,
         });
-        if (activity?.data?.entry?.scroll_line) scrollLineToRestore = activity.data.entry.scroll_line;
         if (activity?.state || activity?.data?.state) {
           const next = activity.state || activity.data.state;
           deps.setEditorState(next);
@@ -122,13 +131,6 @@ export function createOpenFlowController(deps) {
         }
       } catch (err) {
         console.error('Failed to record file activity:', err);
-      }
-
-      if (scrollLineToRestore && scrollLineToRestore > 1) {
-        setTimeout(() => {
-          console.log('[Editor] Restoring scroll to line', scrollLineToRestore);
-          deps.jumpToCurrentFileLine(scrollLineToRestore, { focus: false, scrollToTop: true });
-        }, 150);
       }
     } catch (e) {
       const eAny = /** @type {any} */ (e);

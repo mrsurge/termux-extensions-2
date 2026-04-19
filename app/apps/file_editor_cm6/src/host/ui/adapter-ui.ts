@@ -1,5 +1,7 @@
 // @ts-nocheck
 
+import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
+
 /**
  * @param {{
  *   closeAllMenus: () => void,
@@ -32,9 +34,9 @@ export function createAdapterUiController(deps) {
 
   async function requestAdapterRestart() {
     try {
-      if (typeof window.__explorerBusRequest !== 'function') return;
+      if (!window.__explorerRpc) return;
       deps.spinnerSetStep('Restarting adapter…');
-      await window.__explorerBusRequest('ext:restart_adapter', {}, 15000);
+      await window.__explorerRpc.request(EXPLORER_RPC_METHODS.extensionsAdapterRestart, {}, 15000);
       reloadEditorIframe();
     } catch (e) {
       console.warn('[adapter_restart] request failed:', e);

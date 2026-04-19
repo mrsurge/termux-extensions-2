@@ -1,5 +1,7 @@
 // @ts-nocheck
 
+import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
+
 /**
  * @param {{
  *   extManagerListEl: HTMLElement,
@@ -16,9 +18,9 @@ export function createSettingsManagerController(deps) {
     let extensions = [];
     let langSlots = {};
     try {
-      const res = await deps.busRequest('ext:list', {}, 10000);
-      extensions = res?.payload?.extensions || [];
-      langSlots = res?.payload?.language_slots || {};
+      const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 10000);
+      extensions = res?.extensions || [];
+      langSlots = res?.language_slots || {};
     } catch (e) {
       deps.extManagerListEl.textContent = `Failed to load: ${/** @type {any} */ (e)?.message || 'unknown error'}`;
       return;
@@ -126,7 +128,7 @@ export function createSettingsManagerController(deps) {
         toggle.addEventListener('click', async () => {
           toggle.disabled = true;
           try {
-            await deps.busRequest('ext:toggle', {
+            await deps.busRequest(EXPLORER_RPC_METHODS.extensionsToggle, {
               ext_id: extId,
               active: !isActive,
             }, 10000);
@@ -149,10 +151,10 @@ export function createSettingsManagerController(deps) {
           cfgBtn.addEventListener('click', async () => {
             cfgBtn.disabled = true;
             try {
-              const res = await deps.busRequest('ext:configSchema', {
+              const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsConfigSchemaGet, {
                 ext_id: extId,
               }, 10000);
-              const schema = res?.payload?.schema || {};
+              const schema = res?.schema || {};
               const schemaKeys = Object.keys(schema?.properties || schema || {});
               const scope = deps.getActiveScope();
 
@@ -160,8 +162,8 @@ export function createSettingsManagerController(deps) {
               if (scope === 'workspace') {
                 // Load from .vscode/settings.json — extract keys matching this extension's schema
                 try {
-                  const wsRes = await deps.busRequest('ext:workspace_settings_get', {}, 5000);
-                  const wsSettings = wsRes?.payload?.settings || {};
+                  const wsRes = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet, {}, 5000);
+                  const wsSettings = wsRes?.settings || {};
                   for (const k of schemaKeys) {
                     if (k in wsSettings) currentValues[k] = wsSettings[k];
                   }
@@ -169,8 +171,8 @@ export function createSettingsManagerController(deps) {
               } else {
                 // Load from global extension config
                 try {
-                  const listRes = await deps.busRequest('ext:list', {}, 5000);
-                  const fullExt = (listRes?.payload?.extensions || []).find((e) => e.id === extId);
+                  const listRes = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 5000);
+                  const fullExt = (listRes?.extensions || []).find((e) => e.id === extId);
                   if (fullExt?.configuration_values) Object.assign(currentValues, fullExt.configuration_values);
                 } catch (_) {}
               }
@@ -194,15 +196,15 @@ export function createSettingsManagerController(deps) {
             if (!window.confirm(`Uninstall ${label}?`)) return;
             trash.disabled = true;
             try {
-              const res = await deps.busRequest('ext:uninstall', {
+              const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsUninstall, {
                 ext_id: extId,
               }, 30000);
-              if (res?.payload?.ok) {
+              if (res?.ok) {
                 deps.toast(`Uninstalled: ${label} — reloading…`);
                 deps.reloadEditorIframe();
                 void refreshEditorExtManagerModal();
               } else {
-                deps.toast(res?.payload?.error || 'Uninstall failed');
+                deps.toast(res?.error || 'Uninstall failed');
               }
             } catch (e) {
               deps.toast(/** @type {any} */ (e)?.message || 'Uninstall failed');

@@ -1,3 +1,5 @@
+import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
+
 export function createExplorerSearchController(deps) {
   function clearSearchResults(preserveQuery = false) {
     if (!preserveQuery) deps.setSearchQuery('');
@@ -34,7 +36,7 @@ export function createExplorerSearchController(deps) {
     }
 
     try {
-      deps.sendBus('search:run', { mode: deps.getSearchMode(), query });
+      deps.sendBus(EXPLORER_RPC_METHODS.searchRun, { mode: deps.getSearchMode(), query });
     } catch (err) {
       deps.setSearchLoading(false);
       deps.setSearchError(err?.message || 'Search request failed');
@@ -89,7 +91,7 @@ export function createExplorerSearchController(deps) {
     }
 
     try {
-      deps.sendBus('search:run', { mode: 'changes' });
+      deps.sendBus(EXPLORER_RPC_METHODS.searchRun, { mode: 'changes' });
     } catch (err) {
       deps.setSearchLoading(false);
       deps.setSearchError(err?.message || 'Changes lookup failed');
@@ -113,7 +115,7 @@ export function createExplorerSearchController(deps) {
     }
 
     try {
-      deps.sendBus('review:list', { lightweight: false });
+      deps.sendBus(EXPLORER_RPC_METHODS.reviewList, { lightweight: false });
     } catch (err) {
       deps.setSearchLoading(false);
       deps.setSearchError(err?.message || 'Failed to load review list');

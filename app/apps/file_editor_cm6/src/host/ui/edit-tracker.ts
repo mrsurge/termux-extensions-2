@@ -5,7 +5,7 @@
  *   apiPost: (path: string, body: any) => Promise<any>,
  *   getEditorViewState: () => any,
  *   getCurrentPath: () => string,
- *   openFile: (path: string) => Promise<any>,
+ *   openFile: (path: string, options?: any) => Promise<any>,
  *   jumpToCurrentFileLine: (line: number) => void,
  *   statusEl: HTMLElement | null
  * }} deps
@@ -37,8 +37,15 @@ export function createEditTrackerController(deps) {
 
   async function autoJumpToEdit(path, line) {
     try {
-      if (deps.getCurrentPath() !== path) await deps.openFile(path);
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      if (deps.getCurrentPath() !== path) {
+        await deps.openFile(path, {
+          forceRefresh: true,
+          line,
+          focus: true,
+          scrollY: 'center',
+        });
+        return;
+      }
       if (line > 0) deps.jumpToCurrentFileLine(line);
     } catch (e) {
       console.error('[EditTracker] Auto-jump failed:', e);

@@ -13,9 +13,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-from fastapi import WebSocket
+from typing import Any, Dict, List, Optional, Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +43,21 @@ def abs_to_rel(abs_path: str, project_root: str) -> Optional[str]:
 # Connection manager
 # ---------------------------------------------------------------------------
 
+
+class ExplorerConnection(Protocol):
+    async def accept(self) -> None: ...
+
+    async def send_text(self, data: str) -> None: ...
+
 class ConnectionManager:
     def __init__(self):
         # Map: project_path -> List[WebSocket]
-        self.active_connections: Dict[str, List[WebSocket]] = {}
+        self.active_connections: Dict[str, List[ExplorerConnection]] = {}
         # Map: websocket -> project_path (for cleanup)
-        self.ws_project_map: Dict[WebSocket, str] = {}
+        self.ws_project_map: Dict[ExplorerConnection, str] = {}
         self.pulse_task: Optional[asyncio.Task] = None
 
-    async def accept_and_register(self, websocket: WebSocket, project_path: str):
+    async def accept_and_register(self, websocket: ExplorerConnection, project_path: str):
         # Some shims (Socket.IO) don't need accept; provide no-op if missing
         if hasattr(websocket, 'accept'):
             try:
@@ -62,7 +66,7 @@ class ConnectionManager:
                 pass
         self.register_existing(websocket, project_path)
 
-    def register_existing(self, websocket: WebSocket, project_path: str):
+    def register_existing(self, websocket: ExplorerConnection, project_path: str):
         # Check if this is the very first connection globally
         was_empty = not any(self.active_connections.values())
         
@@ -81,7 +85,7 @@ class ConnectionManager:
             except Exception as e:
                 logger.warning(f"Failed to start watcher on connect: {e}")
 
-    def disconnect(self, websocket: WebSocket):
+    def disconnect(self, websocket: ExplorerConnection):
         project_path = self.ws_project_map.get(websocket)
         if project_path and project_path in self.active_connections:
             if websocket in self.active_connections[project_path]:
@@ -194,7 +198,7 @@ class ConnectionManager:
                 except Exception as e:
                     logger.warning(f"Failed to send broadcast: {e}")
 
-    async def send_personal(self, websocket: WebSocket, message: Dict[str, Any]):
+    async def send_personal(self, websocket: ExplorerConnection, message: Dict[str, Any]):
         """Send message to a single client."""
         try:
             await websocket.send_text(json.dumps(message))

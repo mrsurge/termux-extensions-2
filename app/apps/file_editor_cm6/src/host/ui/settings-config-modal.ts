@@ -1,5 +1,7 @@
 // @ts-nocheck
 
+import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
+
 /**
  * @param {{
  *   modalEl: HTMLElement,
@@ -342,8 +344,8 @@ export function createSettingsConfigModalController(deps) {
           // Workspace scope: merge changed keys into .vscode/settings.json
           let wsSettings = {};
           try {
-            const getRes = await deps.busRequest('ext:workspace_settings_get', {}, 5000);
-            wsSettings = getRes?.payload?.settings || {};
+            const getRes = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet, {}, 5000);
+            wsSettings = getRes?.settings || {};
           } catch (_) {}
           // Merge our values into workspace settings (flat dotted keys)
           for (const [k, v] of Object.entries(extConfigValues)) {
@@ -354,30 +356,30 @@ export function createSettingsConfigModalController(deps) {
               wsSettings[k] = v;
             }
           }
-          const res = await deps.busRequest('ext:workspace_settings_set', {
+          const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsSet, {
             settings: wsSettings,
           }, 15000);
-          if (res?.payload?.ok) {
+          if (res?.ok) {
             deps.toast('Workspace configuration saved — reloading adapter…');
             closeExtConfigModal();
             void deps.refreshExtManager();
             deps.reloadEditorIframe();
           } else {
-            deps.toast(res?.payload?.error || 'Save failed');
+            deps.toast(res?.error || 'Save failed');
           }
         } else {
           // User scope: existing global config flow
-          const res = await deps.busRequest('ext:configure', {
+          const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsConfigure, {
             ext_id: extConfigExtId,
             values: extConfigValues,
           }, 15000);
-          if (res?.payload?.ok) {
+          if (res?.ok) {
             deps.toast('Configuration saved — reloading adapter…');
             closeExtConfigModal();
             void deps.refreshExtManager();
             deps.reloadEditorIframe();
           } else {
-            deps.toast(res?.payload?.error || 'Save failed');
+            deps.toast(res?.error || 'Save failed');
           }
         }
       } catch (e) {

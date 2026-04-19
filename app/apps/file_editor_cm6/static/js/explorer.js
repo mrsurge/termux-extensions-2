@@ -23,6 +23,10 @@ import {
 } from './explorer_modules/explorer_search_results_renderer.js';
 import { renderSearchOverlayBody } from './explorer_modules/explorer_search_overlay_body_renderer.js';
 import {
+  EXPLORER_RPC_METHODS,
+  EXPLORER_RPC_NOTIFICATIONS,
+} from '../../src/explorer/rpc/contract.ts';
+import {
   formatDiffBaseLabel,
   formatHunkHeader,
   truncateText,
@@ -68,6 +72,16 @@ let draftUpdateListenerInstalled = false;
 
 // Currently opened document (relative to project root), if known.
 let activeFileRel = null;
+
+function hasExplorerRpc() {
+  return Boolean(window.__explorerRpc);
+}
+
+function notifyExplorer(method, payload = {}) {
+  if (!window.__explorerRpc) return false;
+  window.__explorerRpc.notify(method, payload);
+  return true;
+}
 
 // Diagnostics summary (Sprint C): keep the last snapshot so newly-rendered
 // nodes can receive flags even if the first broadcast raced before UI init.
@@ -205,8 +219,8 @@ const explorerSearchController = createExplorerSearchController({
     const input = document.getElementById('fe-search-input');
     if (input) input.focus();
   },
-  hasBus: () => typeof window.__explorerBusSend === 'function',
-  sendBus: (event, payload) => window.__explorerBusSend(event, payload),
+  hasBus: () => hasExplorerRpc(),
+  sendBus: (method, payload) => notifyExplorer(method, payload),
   getProjectPath: () => uiState.projectPath || '',
   getSearchOverlayVisible: () => searchOverlayVisible,
   setSearchOverlayVisible: (next) => { searchOverlayVisible = !!next; },
@@ -229,8 +243,8 @@ const explorerDirectoryStateHelpers = createExplorerDirectoryStateHelpers({
   getSelectModeDir: () => selectModeDir,
   setSelectModeDir: (next) => { selectModeDir = next; },
   clearSelectedEntries: () => selectedEntries.clear(),
-  hasExplorerBus: () => typeof window.__explorerBusSend === 'function',
-  sendExplorerBus: (event, payload) => window.__explorerBusSend(event, payload),
+  hasExplorerBus: () => hasExplorerRpc(),
+  sendExplorerBus: (method, payload) => notifyExplorer(method, payload),
   getOpenDirectories: () => openDirectories,
   getOpenDirsInitialized: () => openDirsInitialized,
   getOpenDirsSyncTimer: () => openDirsSyncTimer,
@@ -255,8 +269,8 @@ const explorerGitFooterUtils = createExplorerGitFooterUtils({
   getGitSummaryElement: () => gitSummaryEl,
   getGitStatus: () => uiState.gitStatus,
   getGitButtons: () => gitButtons,
-  hasExplorerBus: () => typeof window.__explorerBusSend === 'function',
-  sendExplorerBus: (event, payload) => window.__explorerBusSend(event, payload),
+  hasExplorerBus: () => hasExplorerRpc(),
+  sendExplorerBus: (method, payload) => notifyExplorer(method, payload),
   toast,
   reloadCurrentFile: () => window.__cm6ReloadCurrentFile?.(),
 });
@@ -330,7 +344,7 @@ async function changeDiffBase(ref) {
   if (!ref || typeof window.__explorerBusSend !== 'function') return;
   try {
     // Persist diff base via WS (HistoryStore is the SSOT), then refresh changes.
-    window.__explorerBusSend('git:setDiffBase', { ref });
+    notifyExplorer(EXPLORER_RPC_METHODS.gitDiffBaseSet, { ref });
     if (searchMode === 'changes') {
       fetchChangesResults(true);
     }
@@ -620,7 +634,7 @@ async function _requestDirListAndWait(rel, timeoutMs = 2000) {
     
     // Send request
     if (typeof window.__explorerBusSend === 'function') {
-      window.__explorerBusSend('explorer:list', { rel });
+      notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
     } else {
       clearTimeout(timeout);
       _pendingDirListRequests.delete(rel);
@@ -1200,7 +1214,7 @@ function refreshOpenDirectoriesAfterGit() {
     const rel = li.dataset.rel || '.';
     // Root (.) is already refreshed via broadcast explorer:setList.
     if (!rel || rel === '.') return;
-    window.__explorerBusSend('explorer:list', { rel });
+    notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
   });
   // After any git change + refreshed listings, recompute aggregated flags
   applyAggregatedGitStatusFlags();
@@ -1218,8 +1232,8 @@ function _isWatcherRelInOpenDir(rel, openDir) {
   return isWatcherRelInOpenDirModule(rel, openDir);
 }
 
-function handleExplorerEvent(type, payload) {
-  if (type === 'watcher:error') {
+function handleExplorerNotification(method, payload) {
+  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherError) {
     try {
       if (typeof window.__cm6HandleWatcherError === 'function') {
         window.__cm6HandleWatcherError(payload || {});
@@ -1231,7 +1245,7 @@ function handleExplorerEvent(type, payload) {
     }
     return;
   }
-  if (type === 'watcher:raiseResult') {
+  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherLimitRaiseResult) {
     try {
       if (typeof window.__cm6HandleWatcherRaiseResult === 'function') {
         window.__cm6HandleWatcherRaiseResult(payload || {});
@@ -1243,12 +1257,12 @@ function handleExplorerEvent(type, payload) {
     }
     return;
   }
-  if (type === 'watcher:files') {
+  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherFiles) {
     try {
-      if (typeof window.__explorerBusSend !== 'function') return;
+      if (!hasExplorerRpc()) return;
 
       // Required: every watcher event triggers git status refresh.
-      window.__explorerBusSend('git:status', {});
+      notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
 
       const rels = _collectWatcherRels(payload);
       if (!rels.size) return;
@@ -1270,11 +1284,11 @@ function handleExplorerEvent(type, payload) {
       });
 
       if (refreshRoot) {
-        window.__explorerBusSend('explorer:list', { rel: '.' });
+        notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
       }
       dirsToRefresh.forEach((rel) => {
         if (!rel || rel === '.') return;
-        window.__explorerBusSend('explorer:list', { rel });
+        notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
       });
 
       if (activeFileRel) {
@@ -1288,7 +1302,7 @@ function handleExplorerEvent(type, payload) {
     }
     return;
   }
-  if (type === 'watcher:modeChanged') {
+  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherModeChanged) {
     // Show/hide manual refresh bar when watcher mode changes
     try {
       const bar = document.getElementById('fe-watcher-refresh-bar');
@@ -1298,7 +1312,7 @@ function handleExplorerEvent(type, payload) {
     } catch (_) {}
     return;
   }
-  if (type === 'watcher:config') {
+  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherConfigUpdated) {
     // On initial connect, show refresh bar if mode is "none"
     try {
       const bar = document.getElementById('fe-watcher-refresh-bar');
@@ -1308,8 +1322,8 @@ function handleExplorerEvent(type, payload) {
     } catch (_) {}
     // Don't return — let main.js also handle via __cm6HandleWatcherConfig
   }
-  switch (type) {
-    case 'prefs:setUi': {
+  switch (method) {
+    case EXPLORER_RPC_NOTIFICATIONS.prefsUiUpdated: {
       const ui =
         payload && typeof payload.ui === 'object' && payload.ui ? payload.ui : null;
       const next = ui ? ui[UI_PREF_KEY_EXPLORER_STICKY_HEADERS] : undefined;
@@ -1320,7 +1334,7 @@ function handleExplorerEvent(type, payload) {
       applyExplorerStickyScopesPreference();
       break;
     }
-    case 'project:setActive': {
+    case EXPLORER_RPC_NOTIFICATIONS.projectActiveUpdated: {
       const prevProjectPath = uiState.projectPath || '';
       const nextProjectPath = payload.path || payload.projectPath || prevProjectPath;
       uiState.projectPath = nextProjectPath;
@@ -1341,17 +1355,25 @@ function handleExplorerEvent(type, payload) {
 
       break;
     }
-    case 'explorer:activeFile': {
-      setActiveFileRel(payload && typeof payload.rel === 'string' ? payload.rel : null);
+    case EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated: {
+      const nextRel = payload && typeof payload.rel === 'string' ? payload.rel : null;
+      setActiveFileRel(nextRel);
+      if (nextRel) {
+        Promise.resolve(expandToFile(nextRel))
+          .then(() => {
+            try { applyActiveFileMarker(); } catch (_) {}
+          })
+          .catch(() => {});
+      }
       break;
     }
-    case 'explorer:setOpenDirs': {
+    case EXPLORER_RPC_NOTIFICATIONS.openDirsUpdated: {
       // Restore open directories from backend on page load
       const dirs = payload.dirs || [];
       restoreOpenDirectories(dirs);
       break;
     }
-    case 'explorer:setList': {
+    case EXPLORER_RPC_NOTIFICATIONS.listUpdated: {
       // payload: { cwd, entries: [...] }
       const cwd = payload.cwd || '.';
       if (!treeElement) {
@@ -1386,7 +1408,7 @@ function handleExplorerEvent(type, payload) {
 
         if (reconnectResyncPending) {
           reconnectResyncPending = false;
-          if (openDirectories.size && typeof window.__explorerBusSend === 'function') {
+          if (openDirectories.size && hasExplorerRpc()) {
             // Re-expand and refresh tracked open dirs after reconnect.
             restoreOpenDirectories(Array.from(openDirectories));
           }
@@ -1430,7 +1452,7 @@ function handleExplorerEvent(type, payload) {
       applyActiveFileMarker();
       break;
     }
-    case 'explorer:setTree': {
+    case EXPLORER_RPC_NOTIFICATIONS.treeUpdated: {
       uiState.projectPath = payload.projectPath || uiState.projectPath;
       renderProjectLabel();
       renderExplorerTree();
@@ -1447,12 +1469,12 @@ function handleExplorerEvent(type, payload) {
         }
       }
       // Ensure footer controls/summaries are hydrated on cold boot even before watcher activity.
-      if (!uiState.gitStatus && typeof window.__explorerBusSend === 'function') {
-        window.__explorerBusSend('git:status', {});
+      if (!uiState.gitStatus && hasExplorerRpc()) {
+        notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
       }
       break;
     }
-    case 'explorer:updateDecorations': {
+    case EXPLORER_RPC_NOTIFICATIONS.decorationsUpdated: {
       const drafts = (payload && payload.drafts) || {};
       const root = treeElement || document.getElementById('fe-file-tree');
       if (!root) break;
@@ -1509,7 +1531,7 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
-    case 'explorer:updateGitStatus': {
+    case EXPLORER_RPC_NOTIFICATIONS.gitDecorationsUpdated: {
       // Patch git status classes on existing DOM nodes without replacing the tree.
       // payload: { statuses: { rel: status, ... } }
       const statuses = (payload && payload.statuses) || {};
@@ -1613,7 +1635,7 @@ function handleExplorerEvent(type, payload) {
       applyAggregatedDiagnosticFlags();
       break;
     }
-    case 'diagnostics:detail': {
+    case EXPLORER_RPC_NOTIFICATIONS.diagnosticsDetail: {
       // Full marker detail from the diagnostics bridge — SSOT for both
       // the Diagnostics tab AND the explorer tree badges.
       _explorerDiagDetail = (payload && typeof payload === 'object') ? payload : {};
@@ -1657,7 +1679,7 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
-    case 'draft:content': {
+    case EXPLORER_RPC_NOTIFICATIONS.draftContent: {
       // Live draft propagation (SSOT active file only).
       // Only apply if we are currently on the same absolute file path.
       try {
@@ -1669,7 +1691,7 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
-    case 'autosave:content': {
+    case EXPLORER_RPC_NOTIFICATIONS.autosaveContent: {
       // Live autosave propagation (SSOT active file only).
       try {
         if (payload && typeof window.__cm6ApplyAutosaveContent === 'function') {
@@ -1680,7 +1702,7 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
-    case 'editor:prefs_changed': {
+    case EXPLORER_RPC_NOTIFICATIONS.editorPrefsChanged: {
       // Preference changes should propagate immediately across host shells.
       try {
         if (payload && typeof window.__cm6HandlePrefsChanged === 'function') {
@@ -1694,16 +1716,16 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
-    case 'project:opened': {
+    case EXPLORER_RPC_NOTIFICATIONS.projectOpened: {
       // Backend confirms a project switch (open/create).
       // Update UI state - no page reload needed, WebSocket stays connected
       if (payload && payload.path) {
         uiState.projectPath = payload.path;
         renderProjectLabel();
         // Request fresh tree and git status for the new project
-        if (typeof window.__explorerBusSend === 'function') {
-          window.__explorerBusSend('explorer:list', { rel: '.' });
-          window.__explorerBusSend('git:status', {});
+        if (hasExplorerRpc()) {
+          notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
+          notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
         }
         // Refresh diff base selector for the new project
         initDiffBaseFromBackend();
@@ -1720,7 +1742,7 @@ function handleExplorerEvent(type, payload) {
 
       break;
     }
-    case 'git:status': {
+    case EXPLORER_RPC_NOTIFICATIONS.gitStatusUpdated: {
       console.log('[GIT_STATUS_DEBUG] Received:', payload);
       uiState.gitStatus = payload || null;
       renderGitSummary();
@@ -1728,7 +1750,7 @@ function handleExplorerEvent(type, payload) {
       setGitControlsEnabled(true, false);
       break;
     }
-    case 'git:diffBaseSet': {
+    case EXPLORER_RPC_NOTIFICATIONS.gitDiffBaseUpdated: {
       if (payload && payload.ref) {
         gitDiffBase.ref = payload.ref;
         // If refresh flag is set (e.g., after commit), re-fetch full diff base info
@@ -1743,7 +1765,7 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
-    case 'git:restored': {
+    case EXPLORER_RPC_NOTIFICATIONS.gitRestored: {
       // After a file is restored from git, the backend broadcasts git:status
       // and this event. Reload the current file so restored content is shown.
       if (typeof window.__cm6ReloadCurrentFile === 'function') {
@@ -1757,7 +1779,7 @@ function handleExplorerEvent(type, payload) {
     }
     
     // --- Job Progress Events (git push/pull/clone with progress) ---
-    case 'job:progress': {
+    case EXPLORER_RPC_NOTIFICATIONS.jobProgress: {
       const { id, type, status, progress, message, error } = payload;
       
       // Only handle git-related jobs
@@ -1775,8 +1797,8 @@ function handleExplorerEvent(type, payload) {
         // Refresh git status after push/pull/clone completes
         if (type === 'git_pull' || type === 'git_push' || type === 'git_clone') {
           if (typeof window.__explorerBusSend === 'function') {
-            window.__explorerBusSend('git:status', {});
-            window.__explorerBusSend('explorer:refresh', {});
+            notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
+            notifyExplorer(EXPLORER_RPC_METHODS.refresh, {});
           }
         }
       } else if (status === 'failed') {
@@ -1788,14 +1810,14 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
-    case 'git:pushStarted':
-    case 'git:pullStarted':
-    case 'git:cloneStarted': {
+    case EXPLORER_RPC_NOTIFICATIONS.gitPushStarted:
+    case EXPLORER_RPC_NOTIFICATIONS.gitPullStarted:
+    case EXPLORER_RPC_NOTIFICATIONS.gitCloneStarted: {
       showGitProgressBar(0, 'Starting...');
       break;
     }
     
-    case 'search:setResults': {
+    case EXPLORER_RPC_NOTIFICATIONS.searchResultsUpdated: {
       searchResults = payload || null;
       searchLoading = false;
       searchError = null;
@@ -1816,7 +1838,7 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
-    case 'error': {
+    case EXPLORER_RPC_NOTIFICATIONS.error: {
       const message =
         payload && typeof payload.error === 'string'
           ? payload.error
@@ -1833,7 +1855,7 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
-    case 'review:setEntries': {
+    case EXPLORER_RPC_NOTIFICATIONS.reviewEntriesUpdated: {
       uiState.reviewEntries = payload && Array.isArray(payload.entries) ? payload.entries : [];
       if (searchMode === 'review') {
         searchResults = { mode: 'review', results: uiState.reviewEntries };
@@ -1845,11 +1867,21 @@ function handleExplorerEvent(type, payload) {
       }
       break;
     }
-    case 'pulse': {
+    case EXPLORER_RPC_NOTIFICATIONS.pulse: {
       // Heartbeat from server. Respond to confirm we are alive.
       // console.debug('[Explorer] Pulse received 💓');
-      if (typeof window.__explorerBusSend === 'function') {
-        window.__explorerBusSend('pulse:alive', {});
+      if (hasExplorerRpc()) {
+        notifyExplorer(EXPLORER_RPC_METHODS.pulseAlive, {});
+      }
+      break;
+    }
+    case EXPLORER_RPC_NOTIFICATIONS.navigate: {
+      const rel = typeof payload?.rel === 'string' ? payload.rel : '';
+      if (payload?.open_drawer) {
+        toggleDrawer(true);
+      }
+      if (rel) {
+        void expandToPath(rel);
       }
       break;
     }
@@ -1933,7 +1965,7 @@ export async function initExplorerUI() {
   updateDiffBaseButtons();
   initDiffBaseFromBackend();
   if (typeof window.__explorerBusSend === 'function') {
-    window.__explorerBusSend('git:status', {});
+    notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
   }
 
   function toggleDrawer(open) {
@@ -1978,11 +2010,11 @@ export async function initExplorerUI() {
         toast('Explorer preferences not loaded yet.');
         return;
       }
-      if (typeof window.__explorerBusSend !== 'function') {
-        toast('Explorer connection unavailable.');
-        return;
-      }
-      window.__explorerBusSend('prefs:updateUi', {
+    if (!hasExplorerRpc()) {
+      toast('Explorer connection unavailable.');
+      return;
+    }
+      notifyExplorer(EXPLORER_RPC_METHODS.prefsUiUpdate, {
         key: UI_PREF_KEY_EXPLORER_STICKY_HEADERS,
         value: !explorerStickyHeadersEnabled,
       });
@@ -2052,7 +2084,7 @@ export async function initExplorerUI() {
         // Delegate project switching to the WS dispatcher; it will emit
         // project:opened + refreshed tree/git status. We handle the event
         // below (handleExplorerEvent) and can reload if needed.
-        window.__explorerBusSend('project:open', { path: choice.path });
+        notifyExplorer(EXPLORER_RPC_METHODS.projectOpen, { path: choice.path });
       } catch (e) {
         if (e && e.message !== 'cancelled') {
           toast(`An error occurred: ${e.message || e}`);
@@ -2120,7 +2152,7 @@ export async function initExplorerUI() {
           }
 
           // Use job-based clone with progress via WebSocket
-          window.__explorerBusSend('git:clone', {
+          notifyExplorer(EXPLORER_RPC_METHODS.gitClone, {
             url: choice.url,
             target_path: result.path,
           });
@@ -2157,7 +2189,7 @@ export async function initExplorerUI() {
 
           // Let the backend validate and create the project directory, then
           // auto-open it (handle_project_create calls handle_project_open).
-          window.__explorerBusSend('project:create', {
+          notifyExplorer(EXPLORER_RPC_METHODS.projectCreate, {
             parent_path: result.directory,
             name: result.name,
           });
@@ -2210,7 +2242,7 @@ export async function initExplorerUI() {
         relPath.replace(/^\/+/, '');
     }
     try {
-      window.__explorerBusSend('mention:agent', { path: absPath });
+      notifyExplorer(EXPLORER_RPC_METHODS.mentionAgent, { path: absPath });
       toast('Mentioned in conversation');
     } catch (err) {
       console.error('Failed to send mention:', err);
@@ -2378,7 +2410,7 @@ export async function initExplorerUI() {
             const name = window.prompt('New file name:');
             if (!name) return;
             if (typeof window.__explorerBusSend === 'function') {
-              window.__explorerBusSend('explorer:createFile', {
+              notifyExplorer(EXPLORER_RPC_METHODS.fileCreate, {
                 parent_rel: rel,
                 name,
               });
@@ -2392,7 +2424,7 @@ export async function initExplorerUI() {
             const name = window.prompt('New folder name:');
             if (!name) return;
             if (typeof window.__explorerBusSend === 'function') {
-              window.__explorerBusSend('explorer:createDir', {
+              notifyExplorer(EXPLORER_RPC_METHODS.dirCreate, {
                 parent_rel: rel,
                 name,
               });
@@ -2513,7 +2545,7 @@ export async function initExplorerUI() {
                 toast('Explorer connection unavailable.');
                 break;
               }
-              window.__explorerBusSend('explorer:copy', {
+              notifyExplorer(EXPLORER_RPC_METHODS.entryCopy, {
                 rel,
                 dest_path: dest.path,
               });
@@ -2538,7 +2570,7 @@ export async function initExplorerUI() {
                 toast('Explorer connection unavailable.');
                 break;
               }
-              window.__explorerBusSend('explorer:move', {
+              notifyExplorer(EXPLORER_RPC_METHODS.entryMove, {
                 rel,
                 dest_path: dest.path,
               });
@@ -2565,7 +2597,7 @@ export async function initExplorerUI() {
                 toast('Explorer connection unavailable.');
                 break;
               }
-              window.__explorerBusSend('explorer:copyFrom', {
+              notifyExplorer(EXPLORER_RPC_METHODS.entryCopyFrom, {
                 source_path: source.path,
                 dest_rel: rel,
               });
@@ -2592,7 +2624,7 @@ export async function initExplorerUI() {
                 toast('Explorer connection unavailable.');
                 break;
               }
-              window.__explorerBusSend('explorer:moveFrom', {
+              notifyExplorer(EXPLORER_RPC_METHODS.entryMoveFrom, {
                 source_path: source.path,
                 dest_rel: rel,
               });
@@ -2606,7 +2638,7 @@ export async function initExplorerUI() {
             const newName = window.prompt('New name:', entry.name || '');
             if (!newName || newName === entry.name) return;
             if (typeof window.__explorerBusSend === 'function') {
-              window.__explorerBusSend('explorer:rename', {
+              notifyExplorer(EXPLORER_RPC_METHODS.entryRename, {
                 rel,
                 new_name: newName,
               });
@@ -2619,7 +2651,7 @@ export async function initExplorerUI() {
             );
             if (!confirmed) return;
             if (typeof window.__explorerBusSend === 'function') {
-              window.__explorerBusSend('explorer:delete', { rel });
+              notifyExplorer(EXPLORER_RPC_METHODS.entryDelete, { rel });
             }
             break;
           }
@@ -2629,7 +2661,7 @@ export async function initExplorerUI() {
               break;
             }
             try {
-              window.__explorerBusSend('git:stage', { paths: [rel] });
+              notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths: [rel] });
               toast(`Staged ${entry.name}`);
             } catch (err) {
               toast(err?.message || 'Stage failed');
@@ -2642,7 +2674,7 @@ export async function initExplorerUI() {
               break;
             }
             try {
-              window.__explorerBusSend('git:unstage', { paths: [rel] });
+              notifyExplorer(EXPLORER_RPC_METHODS.gitUnstage, { paths: [rel] });
               toast(`Unstaged ${entry.name}`);
             } catch (err) {
               toast(err?.message || 'Unstage failed');
@@ -2659,7 +2691,7 @@ export async function initExplorerUI() {
             );
             if (!stageConfirmed) break;
             try {
-              window.__explorerBusSend('git:stage', { paths: [rel] });
+              notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths: [rel] });
               toast(`Staged all in ${entry.name}`);
             } catch (err) {
               toast(err?.message || 'Stage failed');
@@ -2676,7 +2708,7 @@ export async function initExplorerUI() {
             );
             if (!unstageConfirmed) break;
             try {
-              window.__explorerBusSend('git:unstage', { paths: [rel] });
+              notifyExplorer(EXPLORER_RPC_METHODS.gitUnstage, { paths: [rel] });
               toast(`Unstaged all in ${entry.name}`);
             } catch (err) {
               toast(err?.message || 'Unstage failed');
@@ -2693,7 +2725,7 @@ export async function initExplorerUI() {
             );
             if (!confirmed) break;
             try {
-              window.__explorerBusSend('git:restore', {
+              notifyExplorer(EXPLORER_RPC_METHODS.gitRestore, {
                 path: rel,
                 commit: 'HEAD',
               });
@@ -2752,7 +2784,7 @@ export async function initExplorerUI() {
         toast('Explorer connection unavailable');
         return;
       }
-      window.__explorerBusSend('explorer:batchCopy', {
+      notifyExplorer(EXPLORER_RPC_METHODS.entriesCopy, {
         rels: paths,
         dest_path: dest.path,
       });
@@ -2785,7 +2817,7 @@ export async function initExplorerUI() {
         toast('Explorer connection unavailable');
         return;
       }
-      window.__explorerBusSend('explorer:batchMove', {
+      notifyExplorer(EXPLORER_RPC_METHODS.entriesMove, {
         rels: paths,
         dest_path: dest.path,
       });
@@ -2808,7 +2840,7 @@ export async function initExplorerUI() {
       toast('Explorer connection unavailable');
       return;
     }
-    window.__explorerBusSend('git:stage', { paths });
+    notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths });
     toast(`Staged ${paths.length} items`);
     disableSelectMode();
   }
@@ -2823,7 +2855,7 @@ export async function initExplorerUI() {
       toast('Explorer connection unavailable');
       return;
     }
-    window.__explorerBusSend('git:unstage', { paths });
+    notifyExplorer(EXPLORER_RPC_METHODS.gitUnstage, { paths });
     toast(`Unstaged ${paths.length} items`);
     disableSelectMode();
   }
@@ -2842,7 +2874,7 @@ export async function initExplorerUI() {
       toast('Explorer connection unavailable');
       return;
     }
-    window.__explorerBusSend('explorer:batchDelete', { rels: paths });
+    notifyExplorer(EXPLORER_RPC_METHODS.entriesDelete, { rels: paths });
     toast(`Deleting ${paths.length} items…`);
     disableSelectMode();
   }
@@ -2994,7 +3026,7 @@ export async function initExplorerUI() {
           // Expand: ask backend for this directory listing
           li.dataset.open = 'true';
           if (typeof window.__explorerBusSend === 'function') {
-            window.__explorerBusSend('explorer:list', { rel });
+            notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
           }
           
           // Track directory open for persistence
@@ -3025,14 +3057,14 @@ export async function initExplorerUI() {
     });
   }
 
-  // Wire up global dispatch hook for the Socket.IO bus in main.js
+  // Wire up the Explorer RPC notification hook consumed by main.js.
   window.__explorerScrollToActiveFile = scrollToActiveFile;
 
-  window.__explorerBusDispatch = (type, payload) => {
+  window.__explorerHandleNotification = (method, payload) => {
     try {
-      handleExplorerEvent(type, payload || {});
+      handleExplorerNotification(method, payload || {});
     } catch (err) {
-      console.warn('[Explorer] dispatch error', type, err);
+      console.warn('[Explorer] dispatch error', method, err);
     }
   };
 
@@ -3040,19 +3072,19 @@ export async function initExplorerUI() {
   // We request a fresh root listing (which repopulates DOM nodes), then
   // re-expand our tracked open directories once the root snapshot arrives.
   window.__cm6ExplorerOnReconnect = () => {
-    if (typeof window.__explorerBusSend !== 'function') return;
+    if (!hasExplorerRpc()) return;
     reconnectResyncPending = true;
     try {
-      window.__explorerBusSend('explorer:list', { rel: '.' });
-      window.__explorerBusSend('git:status', {});
+      notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
+      notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
     } catch (_) {}
   };
 
   // Host calls this when it wants to "refresh" the explorer.
   // For now, just ask the backend to refresh via the UI bus if available.
   window.__cm6RefreshExplorer = async () => {
-    if (typeof window.__explorerBusSend === 'function') {
-      window.__explorerBusSend('explorer:refresh', {});
+    if (hasExplorerRpc()) {
+      notifyExplorer(EXPLORER_RPC_METHODS.refresh, {});
     }
   };
 
@@ -3060,11 +3092,11 @@ export async function initExplorerUI() {
   const refreshBtn = document.getElementById('fe-watcher-refresh-btn');
   if (refreshBtn) {
     refreshBtn.addEventListener('click', () => {
-      if (typeof window.__explorerBusSend === 'function') {
-        window.__explorerBusSend('explorer:list', { rel: '.' });
-        window.__explorerBusSend('git:status', {});
+      if (hasExplorerRpc()) {
+        notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
+        notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
         openDirectories.forEach((rel) => {
-          window.__explorerBusSend('explorer:list', { rel });
+          notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
         });
       }
     });
@@ -3088,16 +3120,29 @@ async function openFileAndMaybeJump(rel, lineNumber = null, jumpOptions = {}) {
   }
   try {
     const alreadyOpen = rel && rel === activeFileRel;
+    const hasLineTarget = typeof lineNumber === 'number' && lineNumber >= 1;
+    const openOptions = {};
+    if (hasLineTarget) {
+      openOptions.line = lineNumber;
+      if (Object.prototype.hasOwnProperty.call(jumpOptions || {}, 'focus')) {
+        openOptions.focus = Boolean(jumpOptions.focus);
+      }
+      if (Object.prototype.hasOwnProperty.call(jumpOptions || {}, 'scrollToTop')) {
+        openOptions.scrollToTop = Boolean(jumpOptions.scrollToTop);
+      }
+      if (typeof jumpOptions?.scrollY === 'string') {
+        openOptions.scrollY = jumpOptions.scrollY;
+      }
+    }
 
     if (!alreadyOpen) {
       expandToFile(rel);
-      await window.appOpenFileRel(rel, uiState.projectPath || null);
+      await window.appOpenFileRel(rel, uiState.projectPath || null, openOptions);
     }
 
     closeDrawerIfMobile();
 
-    if (typeof lineNumber === 'number' && window.jumpToCurrentFileLine) {
-      if (!alreadyOpen) await new Promise((resolve) => setTimeout(resolve, 120));
+    if (alreadyOpen && hasLineTarget && window.jumpToCurrentFileLine) {
       await window.jumpToCurrentFileLine(lineNumber, jumpOptions);
     }
   } catch (err) {
@@ -3379,6 +3424,12 @@ function renderSearchOverlay() {
         renderExplorerDiagnostics(container, _explorerDiagDetail, {
           openFileAndMaybeJump,
           toast,
+          mentionAgent: (payload) => {
+            if (!hasExplorerRpc()) {
+              throw new Error('Explorer RPC unavailable');
+            }
+            notifyExplorer(EXPLORER_RPC_METHODS.mentionAgent, payload);
+          },
           getProjectPath: () => uiState.projectPath,
           activeFileAbs: activeAbs,
         });
@@ -3665,13 +3716,13 @@ function renderReviewResults(container, data) {
     const selected = Array.from(selectedReviewFiles);
     if (!selected.length) return toast('No files selected');
 
-    if (typeof window.__explorerBusSend !== 'function') {
+    if (!hasExplorerRpc()) {
       toast('Review bus unavailable');
       return;
     }
 
     try {
-      window.__explorerBusSend('review:save', { files: selected });
+      notifyExplorer(EXPLORER_RPC_METHODS.reviewSave, { files: selected });
     } catch (e) {
       toast(e.message || 'Save failed');
     }
@@ -3687,13 +3738,13 @@ function renderReviewResults(container, data) {
     if (!selected.length) return toast('No files selected');
     if (!window.confirm(`Discard drafts for ${selected.length} file(s)?`)) return;
 
-    if (typeof window.__explorerBusSend !== 'function') {
+    if (!hasExplorerRpc()) {
       toast('Review bus unavailable');
       return;
     }
 
     try {
-      window.__explorerBusSend('review:discard', { files: selected });
+      notifyExplorer(EXPLORER_RPC_METHODS.reviewDiscard, { files: selected });
     } catch (e) {
       toast(e.message || 'Discard failed');
     }
