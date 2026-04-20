@@ -72,6 +72,7 @@ import { handleDraftDiffEvent } from './editor_socket_draft_diff_handler_utils.j
 import { handleWorkbenchResponseEvent } from './editor_socket_workbench_response_handler_utils.js';
 import { handleSemanticTokensProviderRegistered } from './editor_socket_semantic_registered_handler_utils.js';
 import { handleIssuesDumpRequest } from './editor_socket_issues_dump_handler_utils.js';
+import { handleSaveSnapshotRequest } from './editor_socket_save_snapshot_handler_utils.js';
 import { handleIssuesCommand } from './editor_socket_issues_cmd_handler_utils.js';
 import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
 import { isCacheStatePayloadForCurrentPath, isCacheStateClean, isCacheStateUnsaved } from './editor_cache_state_payload_utils.js';
@@ -276,29 +277,62 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     return !!(tx && tx.hasExplicitNavigation);
   }
 
-  function _applyOpenTransactionNavigation(reason, tx) {
+  function _buildTransactionJumpPayload(tx) {
     try {
+      if (!tx || !tx.hasExplicitNavigation) return null;
+      return {
+        line: tx.line,
+        column: tx.column,
+        focus: tx.focus,
+        scroll_y: tx.scroll_y,
+        scroll_to_top: tx.scroll_to_top,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function _buildScrollLineJumpPayload(scrollLine) {
+    try {
+      var line = _coercePositiveInt(scrollLine);
+      if (line == null) return null;
+      return {
+        line: line,
+        focus: false,
+        scroll_to_top: true,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function _resolveOpenJumpPayload(tx, scrollLine, sameFileNavigationOnly) {
+    var explicitPayload = _buildTransactionJumpPayload(tx);
+    if (explicitPayload) return explicitPayload;
+    if (sameFileNavigationOnly) return null;
+    if (_hasExplicitNavigationGuardForPath(currentPath)) return null;
+    return _buildScrollLineJumpPayload(scrollLine);
+  }
+
+  function _applyResolvedOpenJump(reason, jumpPayload, tx) {
+    try {
+      if (!jumpPayload || !editor || !model) return false;
       var targetTx = tx || _getOpenTransactionForPath(currentPath);
-      if (!targetTx || !targetTx.hasExplicitNavigation || !editor || !model) return false;
-      if (String(targetTx.path || '') !== String(currentPath || '')) return false;
+      if (targetTx && String(targetTx.path || '') !== String(currentPath || '')) return false;
       var activeModel = editor && editor.getModel ? editor.getModel() : model;
       if (!activeModel || !activeModel.uri) return false;
-      if (String(_absPathFromVscodeUri(String(activeModel.uri.toString()))) !== String(targetTx.path || '')) return false;
-      applyJumpToLineAt(editor, activeModel, {
-        line: targetTx.line,
-        column: targetTx.column,
-        focus: targetTx.focus,
-        scroll_y: targetTx.scroll_y,
-        scroll_to_top: targetTx.scroll_to_top,
-      });
-      targetTx.navigationApplied = true;
-      targetTx.guardUntil = Date.now() + 5000;
+      if (String(_absPathFromVscodeUri(String(activeModel.uri.toString()))) !== String(currentPath || '')) return false;
+      applyJumpToLineAt(editor, activeModel, jumpPayload);
+      if (targetTx && targetTx.hasExplicitNavigation) {
+        targetTx.navigationApplied = true;
+        targetTx.guardUntil = Date.now() + 5000;
+      }
       try {
         console.log('[editor:open] applied transaction navigation', {
           path: currentPath,
-          line: targetTx.line,
-          column: targetTx.column,
-          request_id: targetTx.request_id || '',
+          line: jumpPayload.line,
+          column: jumpPayload.column != null ? jumpPayload.column : 1,
+          request_id: targetTx && targetTx.request_id ? targetTx.request_id : '',
           reason: reason || '',
         });
       } catch (_) {}
@@ -306,6 +340,45 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     } catch (_) {
       return false;
     }
+  }
+
+  function _isEditorOpenSatisfied(tx) {
+    try {
+      if (!editor) return false;
+      var activeModel = editor.getModel ? editor.getModel() : model;
+      if (!activeModel || !activeModel.uri) return false;
+      var activePath = String(_absPathFromVscodeUri(String(activeModel.uri.toString())) || '');
+      if (!activePath || activePath !== String(currentPath || '')) return false;
+      if (!tx || !tx.hasExplicitNavigation) return true;
+      var pos = editor.getPosition ? editor.getPosition() : null;
+      if (!pos) return false;
+      var wantLine = _coercePositiveInt(tx.line) || 1;
+      var wantCol = _coercePositiveInt(tx.column) || 1;
+      return Number(pos.lineNumber) === wantLine && Number(pos.column) === wantCol;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function _awaitOpenCompletion(tx, jumpPayload, attempts, reasonBase) {
+    var remaining = Number.isFinite(Number(attempts)) ? Number(attempts) : 0;
+    var reason = String(reasonBase || 'editor:open');
+
+    function _tick(label) {
+      if (jumpPayload) {
+        _applyResolvedOpenJump(reason + ':' + label, jumpPayload, tx);
+      }
+      if (_isEditorOpenSatisfied(tx)) return Promise.resolve(true);
+      if (remaining <= 0) return Promise.resolve(false);
+      remaining -= 1;
+      return new Promise(function(resolve) {
+        setTimeout(function() {
+          resolve(_tick('retry' + remaining));
+        }, 0);
+      });
+    }
+
+    return _tick('initial');
   }
 
   function _settleOpenTransaction(tx) {
@@ -3267,17 +3340,8 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
     currentPath = incomingPath;
     var openGeneration = sameFileNavigationOnly ? _wbCurrentGeneration() : _wbBumpGeneration(currentPath, 'editor:open');
     var tx = _beginOpenTransaction(currentPath, openGeneration, payload);
+    var postOpenJumpPayload = null;
     try { bcUpdatePath(currentPath, true); } catch (_) {}
-
-    function _finalizeNavigationAfterOpen(reasonBase) {
-      if (!tx || !tx.hasExplicitNavigation) return Promise.resolve(false);
-      if (_applyOpenTransactionNavigation(reasonBase, tx)) return Promise.resolve(true);
-      return new Promise(function(resolve) {
-        setTimeout(function() {
-          resolve(_applyOpenTransactionNavigation(reasonBase + '-tick', tx));
-        }, 0);
-      });
-    }
 
     return ensureEditorWithPrefs().then(function() {
       var lang = languageFromPath(currentPath);
@@ -3368,42 +3432,50 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
       if (payload.has_draft) requestDraftDiff('open');
       else clearDraftDiffDecorations();
 
-      return _finalizeNavigationAfterOpen('editor:open-model').then(function() {
-        if (!tx.hasExplicitNavigation && !sameFileNavigationOnly && payload.scroll_line != null && !_hasExplicitNavigationGuardForPath(currentPath)) {
-          applyJumpToLineAt(editor, model, { line: payload.scroll_line, focus: false, scroll_to_top: true });
-        }
-        emitToHost('editor_open_complete', {
+      postOpenJumpPayload = _resolveOpenJumpPayload(tx, payload.scroll_line, sameFileNavigationOnly);
+      return _awaitOpenCompletion(tx, postOpenJumpPayload, 4, 'editor:open-complete').then(function(satisfied) {
+          if (!satisfied) {
+            try {
+              console.warn('[editor:open] completion verification failed', {
+                path: currentPath,
+                request_id: tx && tx.request_id ? tx.request_id : '',
+                line: tx && tx.hasExplicitNavigation ? tx.line : null,
+                column: tx && tx.hasExplicitNavigation ? tx.column : null,
+              });
+            } catch (_) {}
+          }
+          emitToHost('editor_open_complete', {
           path: currentPath,
           request_id: payload && payload.request_id ? String(payload.request_id) : '',
           line: tx && tx.hasExplicitNavigation ? tx.line : null,
           column: tx && tx.hasExplicitNavigation ? tx.column : null,
           reason: payload.reason || 'open',
         });
-        if (!sameFileNavigationOnly) {
-          try {
-            var openReqId = (payload && payload.request_id) ? String(payload.request_id) : ('diag_' + Date.now() + '_open');
-            var openText = '';
-            try { openText = model && model.getValue ? model.getValue() : ''; } catch (_) {}
-            _wbQueueDidChange(
-              currentPath,
-              openText,
-              model && model.getLanguageId ? model.getLanguageId() : lang,
-              openGeneration
-            );
-            _wbQueueSymbols(currentPath, openGeneration);
-            _wbOpenFileFlow({
-              path: currentPath,
-              languageId: lang,
-              uri: (model && model.uri) ? String(model.uri.toString()) : '',
-              requestId: openReqId,
-              forceRefresh: true,
-              generation: openGeneration,
-              source: 'editor:open',
-              timeoutMs: 8000,
-            }).catch(function () {});
-          } catch (_) {}
-        }
-      });
+          if (!sameFileNavigationOnly) {
+            try {
+              var openReqId = (payload && payload.request_id) ? String(payload.request_id) : ('diag_' + Date.now() + '_open');
+              var openText = '';
+              try { openText = model && model.getValue ? model.getValue() : ''; } catch (_) {}
+              _wbQueueDidChange(
+                currentPath,
+                openText,
+                model && model.getLanguageId ? model.getLanguageId() : lang,
+                openGeneration
+              );
+              _wbQueueSymbols(currentPath, openGeneration);
+              _wbOpenFileFlow({
+                path: currentPath,
+                languageId: lang,
+                uri: (model && model.uri) ? String(model.uri.toString()) : '',
+                requestId: openReqId,
+                forceRefresh: true,
+                generation: openGeneration,
+                source: 'editor:open',
+                timeoutMs: 8000,
+              }).catch(function () {});
+            } catch (_) {}
+          }
+        });
     }).then(function() {
       if (!sameFileNavigationOnly && payload.reason !== 'external_change') {
         requestGitBaselines({ reason: 'open' });
@@ -3502,11 +3574,13 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
               // Cold-open restore: if SSOT provides a last scroll line and there is no explicit jump,
               // restore viewport to that line.
               try {
-                if (_hasExplicitNavigationGuardForPath(currentPath)) {
-                  _applyOpenTransactionNavigation('ssot');
-                } else if (f && f.scroll_line != null && !f.has_draft) {
-                  applyJumpToLineAt(editor, model, { line: f.scroll_line, focus: false, scroll_to_top: true });
-                }
+                var ssotTx = _getOpenTransactionForPath(currentPath);
+                var ssotJumpPayload = _resolveOpenJumpPayload(
+                  ssotTx,
+                  (f && !f.has_draft) ? f.scroll_line : null,
+                  false
+                );
+                if (ssotJumpPayload) _applyResolvedOpenJump('ssot', ssotJumpPayload, ssotTx);
               } catch (_) {}
               if (f.has_draft) {
                 emitToHost('editor_draft_state', { has_draft: true, path: currentPath });
@@ -3840,6 +3914,14 @@ import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_me
           handleIssuesDumpRequest(payload, monaco, model, emitToHost);
         } catch (e) {
           console.warn('[Monaco] issues dump response failed', e);
+        }
+      });
+
+      editorSocket.on('editor:save_snapshot_request', function(payload) {
+        try {
+          handleSaveSnapshotRequest(payload, currentPath, model, baseSha256, emitToHost);
+        } catch (e) {
+          console.warn('[Monaco] save snapshot response failed', e);
         }
       });
 

@@ -12,7 +12,6 @@ from threading import Thread, Lock, Timer
 from typing import Callable, Dict, Optional
 
 from .core_write import _get_file_meta
-from . import edit_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +283,9 @@ def _do_handle_fs_event(raw_event):
             "sha256": file_meta["sha256"]
         })
         
-        # Notify edit tracker of file modification
+        # Import lazily to avoid module-load cycles in watcher/bootstrap paths.
+        from . import edit_tracker
+
         edit_tracker.on_file_modified(path)
         
     except (FileNotFoundError, IsADirectoryError):

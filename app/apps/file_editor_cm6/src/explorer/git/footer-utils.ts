@@ -1,25 +1,91 @@
-import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
+import { EXPLORER_RPC_METHODS, type ExplorerRpcMethod } from '../rpc/contract.ts';
+import type { JsonObject } from '../../rpc/transport.ts';
+import { getErrorMessage } from '../utils/errors.ts';
 
-export function createExplorerGitFooterUtils(deps) {
-  let prevGitStatus = { staged: 0, unstaged: 0, untracked: 0, ahead: 0, behind: 0 };
-  let gitProgressBarEl = null;
-  let gitProgressTextEl = null;
+type ExplorerGitButtonKey =
+  | 'stage'
+  | 'unstage'
+  | 'commit'
+  | 'push'
+  | 'pull'
+  | 'reset'
+  | 'init';
 
-  function renderGitSummary() {
+type ExplorerGitButtons = Partial<
+  Record<ExplorerGitButtonKey, HTMLButtonElement | null>
+>;
+
+interface ExplorerGitStatus {
+  branch?: string;
+  detached?: boolean;
+  ahead?: number;
+  behind?: number;
+  staged?: unknown[];
+  unstaged?: unknown[];
+  untracked?: unknown[];
+}
+
+interface ExplorerGitFooterUtilsDeps {
+  getGitSummaryElement(): HTMLElement | null;
+  getGitStatus(): ExplorerGitStatus | null;
+  getGitButtons(): ExplorerGitButtons | null;
+  hasExplorerBus(): boolean;
+  sendExplorerBus(method: ExplorerRpcMethod, payload: JsonObject): void;
+  toast(message: string): void;
+  reloadCurrentFile?(): void;
+}
+
+interface ExplorerGitSummaryCounts {
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  ahead: number;
+  behind: number;
+}
+
+const GIT_BUTTON_KEYS: ExplorerGitButtonKey[] = [
+  'stage',
+  'unstage',
+  'commit',
+  'push',
+  'pull',
+  'reset',
+  'init',
+];
+
+export function createExplorerGitFooterUtils(
+  deps: ExplorerGitFooterUtilsDeps,
+) {
+  let prevGitStatus: ExplorerGitSummaryCounts = {
+    staged: 0,
+    unstaged: 0,
+    untracked: 0,
+    ahead: 0,
+    behind: 0,
+  };
+  let gitProgressBarEl: HTMLDivElement | null = null;
+  let gitProgressTextEl: HTMLSpanElement | null = null;
+
+  function renderGitSummary(): void {
     const gitSummaryEl = deps.getGitSummaryElement();
     if (!gitSummaryEl) return;
-    const s = deps.getGitStatus();
-    if (!s) {
+    const status = deps.getGitStatus();
+    if (!status) {
       gitSummaryEl.textContent = 'Git status unavailable.';
       return;
     }
-    const branch = s.branch || '(no branch)';
-    const detached = !!s.detached;
-    const ahead = s.ahead || 0;
-    const behind = s.behind || 0;
-    const stagedCount = Array.isArray(s.staged) ? s.staged.length : 0;
-    const unstagedCount = Array.isArray(s.unstaged) ? s.unstaged.length : 0;
-    const untrackedCount = Array.isArray(s.untracked) ? s.untracked.length : 0;
+
+    const branch = status.branch || '(no branch)';
+    const detached = status.detached === true;
+    const ahead = typeof status.ahead === 'number' ? status.ahead : 0;
+    const behind = typeof status.behind === 'number' ? status.behind : 0;
+    const stagedCount = Array.isArray(status.staged) ? status.staged.length : 0;
+    const unstagedCount = Array.isArray(status.unstaged)
+      ? status.unstaged.length
+      : 0;
+    const untrackedCount = Array.isArray(status.untracked)
+      ? status.untracked.length
+      : 0;
 
     const changed =
       stagedCount !== prevGitStatus.staged ||
@@ -28,7 +94,7 @@ export function createExplorerGitFooterUtils(deps) {
       ahead !== prevGitStatus.ahead ||
       behind !== prevGitStatus.behind;
 
-    const bits = [];
+    const bits: string[] = [];
     bits.push(detached ? 'DETACHED HEAD' : branch);
     if (ahead) bits.push(`↑${ahead}`);
     if (behind) bits.push(`↓${behind}`);
@@ -45,37 +111,42 @@ export function createExplorerGitFooterUtils(deps) {
       gitSummaryEl.style.transition = 'color 0.15s ease';
       gitSummaryEl.style.color = '#60a5fa';
       setTimeout(() => {
-        if (deps.getGitSummaryElement()) {
-          deps.getGitSummaryElement().style.color = '';
-        }
+        deps.getGitSummaryElement()?.style.setProperty('color', '');
       }, 400);
     }
 
-    prevGitStatus = { staged: stagedCount, unstaged: unstagedCount, untracked: untrackedCount, ahead, behind };
+    prevGitStatus = {
+      staged: stagedCount,
+      unstaged: unstagedCount,
+      untracked: untrackedCount,
+      ahead,
+      behind,
+    };
   }
 
-  function setGitControlsEnabled(enabled, showInit = false) {
+  function setGitControlsEnabled(enabled: boolean, showInit = false): void {
     const gitButtons = deps.getGitButtons();
     if (!gitButtons) return;
-    Object.entries(gitButtons).forEach(([key, btn]) => {
-      if (!btn) return;
+    for (const key of GIT_BUTTON_KEYS) {
+      const button = gitButtons[key];
+      if (!button) continue;
       if (key === 'init') {
-        btn.style.display = showInit ? 'inline-block' : 'none';
-        btn.disabled = !enabled;
+        button.style.display = showInit ? 'inline-block' : 'none';
+        button.disabled = !enabled;
       } else if (key === 'reset') {
         const visible = enabled && !showInit;
-        btn.style.display = visible ? 'inline-block' : 'none';
-        btn.disabled = !visible;
+        button.style.display = visible ? 'inline-block' : 'none';
+        button.disabled = !visible;
       } else {
-        btn.style.display = showInit ? 'none' : 'inline-block';
-        btn.disabled = !enabled || showInit;
+        button.style.display = showInit ? 'none' : 'inline-block';
+        button.disabled = !enabled || showInit;
       }
-    });
+    }
   }
 
-  function ensureProgressBarElements() {
+  function ensureProgressBarElements(): void {
     if (!gitProgressBarEl) {
-      const footer = document.querySelector('.fe-git-footer');
+      const footer = document.querySelector<HTMLElement>('.fe-git-footer');
       if (footer) {
         gitProgressBarEl = document.createElement('div');
         gitProgressBarEl.className = 'fe-git-progress-bar';
@@ -97,7 +168,9 @@ export function createExplorerGitFooterUtils(deps) {
     }
 
     if (!gitProgressTextEl) {
-      const summaryRow = document.querySelector('.fe-git-row.fe-git-meta');
+      const summaryRow = document.querySelector<HTMLElement>(
+        '.fe-git-row.fe-git-meta',
+      );
       if (summaryRow) {
         gitProgressTextEl = document.createElement('span');
         gitProgressTextEl.className = 'fe-git-progress-text';
@@ -114,22 +187,20 @@ export function createExplorerGitFooterUtils(deps) {
     }
   }
 
-  function showGitProgressBar(pct, detail) {
+  function showGitProgressBar(pct: number, detail?: string): void {
     ensureProgressBarElements();
-
     if (gitProgressBarEl) {
       gitProgressBarEl.style.opacity = '1';
       gitProgressBarEl.style.height = '3px';
       gitProgressBarEl.style.width = `${Math.min(100, Math.max(0, pct))}%`;
     }
-
     if (gitProgressTextEl) {
       gitProgressTextEl.style.opacity = '1';
       gitProgressTextEl.textContent = detail || `${pct}%`;
     }
   }
 
-  function hideGitProgressBar() {
+  function hideGitProgressBar(): void {
     if (gitProgressBarEl) {
       gitProgressBarEl.style.opacity = '0';
       setTimeout(() => {
@@ -139,7 +210,6 @@ export function createExplorerGitFooterUtils(deps) {
         }
       }, 300);
     }
-
     if (gitProgressTextEl) {
       gitProgressTextEl.style.opacity = '0';
       setTimeout(() => {
@@ -150,21 +220,21 @@ export function createExplorerGitFooterUtils(deps) {
     }
   }
 
-  function safeSend(type, payload) {
+  function safeSend(method: ExplorerRpcMethod, payload: JsonObject = {}): boolean {
     if (!deps.hasExplorerBus()) {
       deps.toast('Explorer connection unavailable.');
       return false;
     }
     try {
-      deps.sendExplorerBus(type, payload || {});
-    } catch (err) {
-      deps.toast(err?.message || 'Explorer command failed.');
+      deps.sendExplorerBus(method, payload);
+    } catch (error) {
+      deps.toast(getErrorMessage(error, 'Explorer command failed.'));
       return false;
     }
     return true;
   }
 
-  function bindGitFooterActions() {
+  function bindGitFooterActions(): void {
     const gitButtons = deps.getGitButtons();
     if (!gitButtons) return;
 
@@ -212,12 +282,10 @@ export function createExplorerGitFooterUtils(deps) {
         return;
       }
       if (!safeSend(EXPLORER_RPC_METHODS.gitReset, { commit: 'HEAD' })) return;
-      if (typeof deps.reloadCurrentFile === 'function') {
-        try {
-          deps.reloadCurrentFile();
-        } catch (err) {
-          console.warn('Failed to reload current file after reset:', err);
-        }
+      try {
+        deps.reloadCurrentFile?.();
+      } catch (error) {
+        console.warn('Failed to reload current file after reset:', error);
       }
     });
 

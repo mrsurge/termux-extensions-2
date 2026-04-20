@@ -1,8 +1,41 @@
-import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
+import { EXPLORER_RPC_METHODS, type ExplorerRpcMethod } from '../rpc/contract.ts';
+import type { JsonObject } from '../../rpc/transport.ts';
+import type { ExplorerSearchMode } from './types.ts';
+import { getErrorMessage } from '../utils/errors.ts';
 
-export function createExplorerSearchController(deps) {
-  function clearSearchResults(preserveQuery = false) {
-    if (!preserveQuery) deps.setSearchQuery('');
+type ExplorerSearchTimer = ReturnType<typeof setTimeout> | null;
+
+interface ExplorerSearchControllerDeps {
+  toast(message: string): void;
+  renderSearchOverlay(): void;
+  focusSearchInput(): void;
+  hasBus(): boolean;
+  sendBus(method: ExplorerRpcMethod, payload: JsonObject): void;
+  getProjectPath(): string;
+  getSearchOverlayVisible(): boolean;
+  setSearchOverlayVisible(next: boolean): void;
+  getSearchMode(): ExplorerSearchMode;
+  setSearchModeValue(next: ExplorerSearchMode): void;
+  getSearchQuery(): string;
+  setSearchQuery(next: string): void;
+  getSearchResults(): unknown;
+  setSearchResults(next: unknown): void;
+  getSearchLoading(): boolean;
+  setSearchLoading(next: boolean): void;
+  getSearchError(): string | null;
+  setSearchError(next: string | null): void;
+  getSearchDebounceTimer(): ExplorerSearchTimer;
+  setSearchDebounceTimer(next: ExplorerSearchTimer): void;
+  setLastKnownProjectPath(next: string): void;
+}
+
+export function createExplorerSearchController(
+  deps: ExplorerSearchControllerDeps,
+) {
+  function clearSearchResults(preserveQuery = false): void {
+    if (!preserveQuery) {
+      deps.setSearchQuery('');
+    }
     deps.setSearchResults(null);
     deps.setSearchError(null);
     deps.setSearchLoading(false);
@@ -13,7 +46,7 @@ export function createExplorerSearchController(deps) {
     }
   }
 
-  async function performSearch(query) {
+  async function performSearch(query: string): Promise<void> {
     const mode = deps.getSearchMode();
     if (mode === 'changes' || mode === 'review') return;
     if (!deps.getProjectPath()) {
@@ -36,21 +69,26 @@ export function createExplorerSearchController(deps) {
     }
 
     try {
-      deps.sendBus(EXPLORER_RPC_METHODS.searchRun, { mode: deps.getSearchMode(), query });
-    } catch (err) {
+      deps.sendBus(EXPLORER_RPC_METHODS.searchRun, {
+        mode: deps.getSearchMode(),
+        query,
+      });
+    } catch (error) {
       deps.setSearchLoading(false);
-      deps.setSearchError(err?.message || 'Search request failed');
+      deps.setSearchError(getErrorMessage(error, 'Search request failed'));
       deps.renderSearchOverlay();
     }
   }
 
-  function scheduleSearch(query) {
+  function scheduleSearch(query: string): void {
     const mode = deps.getSearchMode();
     if (mode === 'changes' || mode === 'review') return;
     deps.setSearchQuery(query);
 
     const timer = deps.getSearchDebounceTimer();
-    if (timer) clearTimeout(timer);
+    if (timer) {
+      clearTimeout(timer);
+    }
 
     if (query.length < 2) {
       deps.setSearchResults(null);
@@ -67,7 +105,7 @@ export function createExplorerSearchController(deps) {
     );
   }
 
-  async function fetchChangesResults(force = false) {
+  async function fetchChangesResults(force = false): Promise<void> {
     if (deps.getSearchMode() !== 'changes') return;
     if (deps.getSearchLoading() && !force) return;
 
@@ -92,14 +130,14 @@ export function createExplorerSearchController(deps) {
 
     try {
       deps.sendBus(EXPLORER_RPC_METHODS.searchRun, { mode: 'changes' });
-    } catch (err) {
+    } catch (error) {
       deps.setSearchLoading(false);
-      deps.setSearchError(err?.message || 'Changes lookup failed');
+      deps.setSearchError(getErrorMessage(error, 'Changes lookup failed'));
       deps.renderSearchOverlay();
     }
   }
 
-  async function fetchReviewResults(force = false) {
+  async function fetchReviewResults(force = false): Promise<void> {
     if (deps.getSearchMode() !== 'review') return;
     if (deps.getSearchLoading() && !force) return;
 
@@ -116,14 +154,14 @@ export function createExplorerSearchController(deps) {
 
     try {
       deps.sendBus(EXPLORER_RPC_METHODS.reviewList, { lightweight: false });
-    } catch (err) {
+    } catch (error) {
       deps.setSearchLoading(false);
-      deps.setSearchError(err?.message || 'Failed to load review list');
+      deps.setSearchError(getErrorMessage(error, 'Failed to load review list'));
       deps.renderSearchOverlay();
     }
   }
 
-  function setSearchMode(mode) {
+  function setSearchMode(mode: ExplorerSearchMode): void {
     if (mode === deps.getSearchMode()) return;
     clearSearchResults(true);
     deps.setSearchModeValue(mode);
@@ -143,7 +181,6 @@ export function createExplorerSearchController(deps) {
     }
 
     if (mode === 'diagnostics') {
-      // Diagnostics tab renders from cached detail data — no fetch needed.
       deps.setSearchLoading(false);
       deps.setSearchError(null);
       deps.renderSearchOverlay();
@@ -160,7 +197,7 @@ export function createExplorerSearchController(deps) {
     }
   }
 
-  function openSearchOverlay() {
+  function openSearchOverlay(): void {
     if (!deps.getProjectPath()) {
       deps.toast('No project open');
       return;
@@ -180,7 +217,7 @@ export function createExplorerSearchController(deps) {
     }, 0);
   }
 
-  function closeSearchOverlay() {
+  function closeSearchOverlay(): void {
     deps.setSearchOverlayVisible(false);
     clearSearchResults();
     deps.renderSearchOverlay();

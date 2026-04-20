@@ -15,6 +15,9 @@ import time
 
 from . import console_ws
 from . import sidebar_ws
+from ..stores import get_history_store
+from ..explorer_helper import get_project_root
+from ..explorer_manager import abs_to_rel
 
 
 class UIIPCNamespace(socketio.AsyncNamespace):
@@ -42,6 +45,25 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 await self.emit("ui_event", {"type": "adapter_state", **state}, to=sid)
             except Exception:
                 pass
+            try:
+                history = get_history_store()
+                session_state = history.get_session_state() or {}
+                current_path = str(session_state.get("currentPath") or "").strip()
+                project = history.get_active_project() or str(get_project_root())
+                if current_path and project:
+                    rel = abs_to_rel(current_path, project)
+                    await self.emit(
+                        "ui_event",
+                        {
+                            "type": "active_file_changed",
+                            "path": current_path,
+                            "rel": rel,
+                            "source": "ui_ipc_connect",
+                        },
+                        to=sid,
+                    )
+            except Exception:
+                pass
 
     async def on_disconnect(self, sid, reason=None):
         room = "sidebar_ipc" if self.namespace == "/sidebar_ipc" else "ui_ipc"
@@ -58,6 +80,19 @@ class UIIPCNamespace(socketio.AsyncNamespace):
         """
         event_type = data.get("type", "unknown") if isinstance(data, dict) else "unknown"
         print(f"[ui_ipc] {event_type} from={sid} ts={int(time.time()*1000)}", flush=True)
+        if event_type == "open_file" and isinstance(data, dict):
+            try:
+                await sidebar_ws.route_backend_open_request(
+                    self,
+                    data,
+                    source_name="ui_ipc",
+                    log_prefix="[ui_ipc] open_file",
+                    request_prefix="ui_open",
+                )
+                return {"ok": True}
+            except Exception as exc:
+                print(f"[ui_ipc] open_file route failed: {exc}", flush=True)
+                return {"ok": False, "error": str(exc)}
         # Broadcast to everyone else in the room (skip sender)
         await self.emit("ui_event", data, room="ui_ipc", skip_sid=sid)
 

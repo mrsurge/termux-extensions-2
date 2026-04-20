@@ -26,6 +26,7 @@
  *   parentDir: (path: string) => string,
  *   detectLanguageFromFilename: (path: string) => string,
  *   updatePathDisplay: () => void,
+ *   openFile?: (path: string, options?: any) => Promise<any>,
  *   closeWebSocket: () => void,
  *   openWebSocket: (path: string) => void,
  *   getCachedProjectRoot: () => string | null,
@@ -76,22 +77,35 @@ export function createSaveFlowController(deps) {
 
   async function saveFile(params = {}) {
     const { currentPath, currentPathExists, isAutosave = false, onMissingPath } = /** @type {any} */ (params);
-    if (!currentPath || !currentPathExists) return onMissingPath ? onMissingPath() : false;
     deps.setStatus('Saving...');
     const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const payload = /** @type {any} */ ({ path: currentPath, client_id: deps.clientId, op_id: opId });
+    const payload = /** @type {any} */ ({ client_id: deps.clientId, op_id: opId });
+    if (currentPath && currentPathExists) payload.path = currentPath;
     const lastSha = deps.getLastSha256();
-    if (lastSha) payload.base_sha256 = lastSha;
+    if (lastSha && currentPath && currentPathExists) payload.base_sha256 = lastSha;
     try {
       const result = await deps.saveFileViaEditorSocket(payload);
       if (!result || typeof result !== 'object') throw new Error('Invalid save response');
       if (result.ok === false) {
+        if (result.error === 'missing_path') {
+          deps.setStatus('');
+          return onMissingPath ? onMissingPath() : false;
+        }
         if (result.error === 'BASE_MISMATCH') {
           if (isAutosave) { deps.setStatus(''); return false; }
           if (window.confirm('File was modified externally. Retry save and overwrite?')) {
-            const retryResult = await deps.saveFileViaEditorSocket({ path: currentPath, client_id: deps.clientId, op_id: `${opId}_retry`, force: true });
+            const retryPayload = /** @type {any} */ ({ client_id: deps.clientId, op_id: `${opId}_retry`, force: true });
+            if (currentPath && currentPathExists) retryPayload.path = currentPath;
+            const retryResult = await deps.saveFileViaEditorSocket(retryPayload);
             if (retryResult && retryResult.ok) {
               const fileMeta = retryResult.data || {};
+              if ((!currentPath || !currentPathExists) && typeof fileMeta.path === 'string' && fileMeta.path) {
+                deps.setCurrentPath(fileMeta.path);
+                deps.setCurrentPathExists(true);
+                deps.setLastPickerPath(deps.parentDir(fileMeta.path));
+                deps.setCurrentModeLanguage(deps.detectLanguageFromFilename(fileMeta.path));
+                deps.updatePathDisplay();
+              }
               deps.setLastSha256(fileMeta.sha256 || deps.getLastSha256());
               deps.setLastSavedContent('');
               deps.markUnsaved(false);
@@ -109,6 +123,13 @@ export function createSaveFlowController(deps) {
       }
       const fileMeta = result.data || {};
       if (fileMeta && Object.keys(fileMeta).length > 0) {
+        if ((!currentPath || !currentPathExists) && typeof fileMeta.path === 'string' && fileMeta.path) {
+          deps.setCurrentPath(fileMeta.path);
+          deps.setCurrentPathExists(true);
+          deps.setLastPickerPath(deps.parentDir(fileMeta.path));
+          deps.setCurrentModeLanguage(deps.detectLanguageFromFilename(fileMeta.path));
+          deps.updatePathDisplay();
+        }
         deps.setLastSha256(fileMeta.sha256 || deps.getLastSha256());
         deps.setLastSavedContent('');
         deps.markUnsaved(false);
@@ -132,34 +153,35 @@ export function createSaveFlowController(deps) {
     if (!target || !target.path) return;
     if (target.existed && !window.confirm('File exists. Overwrite?')) return;
     deps.setStatus('Saving...');
-    deps.setLastSha256(null);
     const targetAbs = deps.toAbsolute(target.path, null, deps.homeDir);
-    const result = await doSave(targetAbs, '');
-    if (result.success) {
-      deps.setCurrentPath(targetAbs);
-      deps.setCurrentPathExists(true);
-      deps.setLastPickerPath(deps.parentDir(targetAbs));
-      deps.setCurrentModeLanguage(deps.detectLanguageFromFilename(targetAbs));
-      deps.updatePathDisplay();
+    try {
+      const opId = `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const response = await deps.saveFileViaEditorSocket({
+        target_path: targetAbs,
+        client_id: deps.clientId,
+        op_id: opId,
+        force: true,
+      });
+      if (!response || typeof response !== 'object') throw new Error('Invalid save response');
+      if (response.ok === false) throw new Error(String(response.error || 'Save failed'));
+
+      deps.setLastSha256((response.data || {}).sha256 || null);
+      if (typeof deps.openFile === 'function') {
+        await deps.openFile(targetAbs, { forceRefresh: true });
+      } else {
+        deps.setCurrentPath(targetAbs);
+        deps.setCurrentPathExists(true);
+        deps.setLastPickerPath(deps.parentDir(targetAbs));
+        deps.setCurrentModeLanguage(deps.detectLanguageFromFilename(targetAbs));
+        deps.updatePathDisplay();
+        deps.closeWebSocket();
+        deps.openWebSocket(targetAbs);
+      }
       deps.setStatus('Saved');
       setTimeout(() => { if (!deps.getUnsaved()) deps.setStatus(''); }, 1500);
-      deps.closeWebSocket();
-      deps.openWebSocket(targetAbs);
-      deps.apiPost('state/file_activity', {
-        path: targetAbs,
-        project: deps.getCachedProjectRoot() || (deps.getEditorState() && deps.getEditorState().activeProject) || undefined,
-      }).then((data) => {
-        if (data?.state) {
-          deps.setEditorState(data.state);
-          deps.setCachedProjectRoot(data.state.activeProject || deps.getCachedProjectRoot());
-          window.__cm6EditorState = data.state;
-          if (typeof window.__cm6RefreshRecents === 'function') window.__cm6RefreshRecents(data.state);
-        }
-      }).catch((err) => {
-        console.error('Failed to record file activity after save-as:', err);
-      });
-    } else {
-      deps.toast(`Save failed: ${result.error}`);
+    } catch (e) {
+      const eAny = /** @type {any} */ (e);
+      deps.toast(`Save failed: ${eAny.message || eAny.error || JSON.stringify(eAny)}`);
       deps.setStatus('');
     }
   }

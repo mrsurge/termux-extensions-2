@@ -24,6 +24,7 @@ _wb_log = _logging.getLogger("editor_ws.workbench")
 
 _ISSUES_DUMP_WAITING: dict[str, str] = {}
 _ISSUES_DUMP_TTL_S = 20.0
+_SAVE_SNAPSHOT_WAITING: dict[str, asyncio.Future] = {}
 _WORKBENCH_PATH_LOCKS: dict[str, asyncio.Lock] = {}
 _WORKBENCH_OPEN_BASELINE: dict[str, dict[str, Any]] = {}
 
@@ -158,6 +159,37 @@ async def _broadcast_active_file_update(project: str, abs_path: str) -> None:
         pass
 
 
+async def _emit_host_active_file_changed(
+    project: str,
+    abs_path: str,
+    *,
+    source: str | None = None,
+    request_id: str | None = None,
+) -> None:
+    try:
+        from ..explorer_manager import abs_to_rel
+        from ..ui_ipc.ui_ipc_socketio import UI_IPC_SIO
+
+        rel = abs_to_rel(abs_path, project)
+        payload: Dict[str, Any] = {
+            "type": "active_file_changed",
+            "path": abs_path,
+            "rel": rel,
+        }
+        if isinstance(source, str) and source:
+            payload["source"] = source
+        if isinstance(request_id, str) and request_id:
+            payload["request_id"] = request_id
+        await UI_IPC_SIO.emit(
+            "ui_event",
+            payload,
+            namespace="/ui_ipc",
+            room="ui_ipc",
+        )
+    except Exception:
+        pass
+
+
 def _read_file_payload(project: str, abs_path: str) -> Dict[str, Any]:
     """Return SSOT-derived snapshot for a file (draft cache wins)."""
 
@@ -222,6 +254,119 @@ def _read_disk_text(abs_path: str) -> str:
         return content_bytes.decode("utf-8", errors="replace")
     except Exception:
         return ""
+
+
+def _coerce_editor_open_request_fields(payload_in: dict, request_id: str) -> dict[str, Any]:
+    path = _normalize_abs_path(payload_in.get("path", ""))
+    if not path:
+        raise ValueError("missing_path")
+
+    project = _active_project()
+    if not project:
+        raise ValueError("no_active_project")
+    if not _is_under_project(project, path):
+        raise ValueError("outside_project")
+
+    line = payload_in.get("line")
+    column = payload_in.get("column")
+    scroll_y = payload_in.get("scroll_y") or payload_in.get("scrollY")
+    focus = payload_in.get("focus")
+    scroll_to_top = payload_in.get("scroll_to_top") or payload_in.get("scrollToTop")
+
+    if isinstance(line, str) and line.isdigit():
+        line = int(line)
+    if isinstance(column, str) and column.isdigit():
+        column = int(column)
+    if not isinstance(line, int):
+        line = None
+    if not isinstance(column, int):
+        column = None
+    if line is not None and line < 1:
+        line = 1
+    if column is not None and column < 1:
+        column = 1
+    if scroll_y is not None and not isinstance(scroll_y, str):
+        scroll_y = None
+    if focus is not None and not isinstance(focus, bool):
+        focus = None
+    if scroll_to_top is not None and not isinstance(scroll_to_top, bool):
+        scroll_to_top = None
+
+    return {
+        "project": project,
+        "path": path,
+        "request_id": request_id,
+        "line": line,
+        "column": column,
+        "scroll_y": scroll_y,
+        "focus": focus,
+        "scroll_to_top": scroll_to_top,
+    }
+
+
+async def emit_editor_open_from_backend(
+    payload_in: dict | None,
+    *,
+    source_client: str,
+    request_id: str,
+) -> dict[str, Any]:
+    normalized = payload_in if isinstance(payload_in, dict) else {}
+    fields = _coerce_editor_open_request_fields(normalized, request_id)
+    project = str(fields["project"])
+    path = str(fields["path"])
+
+    _history_store.update_session_state({"currentPath": path})
+    _history_store.set_last_file(project, path)
+
+    payload = _read_file_payload(project, path)
+    payload["source_client"] = source_client
+    payload["request_id"] = request_id
+
+    line = fields["line"]
+    column = fields["column"]
+    scroll_y = fields["scroll_y"]
+    focus = fields["focus"]
+    scroll_to_top = fields["scroll_to_top"]
+
+    if line is not None:
+        payload.pop("scroll_line", None)
+        payload["line"] = line
+    if column is not None:
+        payload["column"] = column
+    if scroll_y is not None:
+        payload["scroll_y"] = scroll_y
+    if focus is not None:
+        payload["focus"] = focus
+    if scroll_to_top is not None:
+        payload["scroll_to_top"] = scroll_to_top
+
+    from .editor_socketio import EDITOR_SIO
+
+    await EDITOR_SIO.emit("editor:open", payload, room="file_editor_cm6", namespace="/editor")
+    await _broadcast_active_file_update(project, path)
+    await _emit_host_active_file_changed(
+        project,
+        path,
+        source=str(normalized.get("source") or source_client or ""),
+        request_id=request_id,
+    )
+    return payload
+
+
+async def _request_editor_save_snapshot(ns: socketio.AsyncNamespace, request_id: str, *, timeout_s: float = 3.0) -> dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future = loop.create_future()
+    _SAVE_SNAPSHOT_WAITING[request_id] = future
+    try:
+        await ns.emit(
+            "editor:save_snapshot_request",
+            {"requestId": request_id, "requestedAtMs": int(time.time() * 1000)},
+            room="file_editor_cm6",
+        )
+        payload = await asyncio.wait_for(future, timeout=timeout_s)
+        return payload if isinstance(payload, dict) else {}
+    finally:
+        _SAVE_SNAPSHOT_WAITING.pop(request_id, None)
 
 
 async def handle_external_file_change(changed_abs_path: str) -> bool:
@@ -708,75 +853,36 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         except Exception:
             return
 
+    async def on_editor_save_snapshot_response(self, sid, data):
+        payload = data or {}
+        if not isinstance(payload, dict):
+            return
+        request_id = payload.get("requestId") or payload.get("request_id")
+        if not isinstance(request_id, str) or not request_id:
+            return
+        waiter = _SAVE_SNAPSHOT_WAITING.pop(request_id, None)
+        if waiter is None or waiter.done():
+            return
+        waiter.set_result(payload)
+
     async def on_editor_open_request(self, sid, data):
         print(f"[editor_ws] on_editor_open_request: sid={sid} data={data}", flush=True)
-        project = _active_project()
-        if not project:
-            await self.emit("editor:error", {"error": "no_active_project"}, room=sid)
-            return
         payload_in = data or {}
         if not isinstance(payload_in, dict):
             payload_in = {}
 
-        path = _normalize_abs_path(payload_in.get("path", ""))
         request_id = payload_in.get("request_id")
         if not isinstance(request_id, str) or not request_id:
             request_id = f"diag_{int(time.time() * 1000)}_{str(sid)[-6:]}"
-        if not path:
-            await self.emit("editor:error", {"error": "missing_path"}, room=sid)
+        try:
+            await emit_editor_open_from_backend(
+                payload_in,
+                source_client=str(sid),
+                request_id=request_id,
+            )
+        except ValueError as exc:
+            await self.emit("editor:error", {"error": str(exc)}, room=sid)
             return
-        if not _is_under_project(project, path):
-            await self.emit("editor:error", {"error": "outside_project"}, room=sid)
-            return
-
-        line = payload_in.get("line")
-        column = payload_in.get("column")
-        scroll_y = payload_in.get("scroll_y") or payload_in.get("scrollY")
-        focus = payload_in.get("focus")
-        scroll_to_top = payload_in.get("scroll_to_top") or payload_in.get("scrollToTop")
-
-        if isinstance(line, str) and line.isdigit():
-            line = int(line)
-        if isinstance(column, str) and column.isdigit():
-            column = int(column)
-        if not isinstance(line, int):
-            line = None
-        if not isinstance(column, int):
-            column = None
-        if line is not None and line < 1:
-            line = 1
-        if column is not None and column < 1:
-            column = 1
-        if scroll_y is not None and not isinstance(scroll_y, str):
-            scroll_y = None
-        if focus is not None and not isinstance(focus, bool):
-            focus = None
-        if scroll_to_top is not None and not isinstance(scroll_to_top, bool):
-            scroll_to_top = None
-
-        # Update SSOT session state (single-doc model).
-        _history_store.update_session_state({"currentPath": path})
-        _history_store.set_last_file(project, path)
-
-        payload = _read_file_payload(project, path)
-        payload["source_client"] = sid
-        payload["request_id"] = request_id
-        if line is not None:
-            payload.pop("scroll_line", None)
-            payload["line"] = line
-        if column is not None:
-            payload["column"] = column
-        if scroll_y is not None:
-            payload["scroll_y"] = scroll_y
-        if focus is not None:
-            payload["focus"] = focus
-        if scroll_to_top is not None:
-            payload["scroll_to_top"] = scroll_to_top
-
-        await self.emit("editor:open", payload, room="file_editor_cm6")
-
-        # Broadcast explorer:activeFile so every explorer/host client updates.
-        await _broadcast_active_file_update(project, path)
 
         # Diagnostics bridge: send cached diagnostics for the new file.
         # NOTE: do not replay cached diagnostics on open. Diagnostics should be driven
@@ -1041,12 +1147,26 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         if not isinstance(payload, dict):
             payload = {}
 
-
         project = _active_project()
         if not project:
             return {"ok": False, "error": "no_active_project"}
 
-        raw_path = payload.get("path")
+        request_id = payload.get("request_id") or payload.get("requestId") or f"save_{int(time.time() * 1000)}_{str(sid)[-6:]}"
+        if not isinstance(request_id, str) or not request_id:
+            request_id = f"save_{int(time.time() * 1000)}_{str(sid)[-6:]}"
+
+        try:
+            snapshot = await _request_editor_save_snapshot(self, request_id)
+        except asyncio.TimeoutError:
+            return {"ok": False, "error": "save_snapshot_timeout"}
+        except Exception as exc:
+            return {"ok": False, "error": f"save_snapshot_failed: {exc}"}
+
+        snapshot_error = snapshot.get("error")
+        if isinstance(snapshot_error, str) and snapshot_error:
+            return {"ok": False, "error": snapshot_error}
+
+        raw_path = payload.get("target_path") or snapshot.get("path") or payload.get("path")
         if not raw_path:
             session_state = _history_store.get_session_state()
             raw_path = session_state.get("currentPath")
@@ -1063,22 +1183,15 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         except Exception:
             pass
 
-        cached = _history_store.get_cached_document(project, abs_path)
-        if not cached or cached.get("content") is None:
-            file_meta = _get_file_meta(Path(abs_path))
-            return {"ok": True, "data": file_meta, "noop": True}
-
-        if cached.get("unsaved") is False:
-            file_meta = _get_file_meta(Path(abs_path))
-            return {"ok": True, "data": file_meta, "noop": True}
-
-        content = cached.get("content", "")
+        content = snapshot.get("content", "")
         if not isinstance(content, str):
             return {"ok": False, "error": "invalid_content"}
 
         base_sha256 = payload.get("base_sha256")
         if not isinstance(base_sha256, str) or len(base_sha256) != 64:
-            base_sha256 = cached.get("base_sha256")
+            base_sha256 = snapshot.get("base_sha256")
+        if not isinstance(base_sha256, str) or len(base_sha256) != 64:
+            base_sha256 = None
 
         if payload.get("force"):
             base_sha256 = None
@@ -1112,6 +1225,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return {"ok": False, "error": str(exc)}
 
         file_meta = _get_file_meta(Path(abs_path))
+        file_meta = {**file_meta, "path": abs_path}
 
         # Stamp save SHA to suppress watcher reload for our own write
         save_sha = file_meta.get("sha256")

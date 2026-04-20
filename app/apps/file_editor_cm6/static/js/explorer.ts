@@ -1,4 +1,4 @@
-// app/apps/file_editor_cm6/static/js/explorer.js
+// app/apps/file_editor_cm6/static/js/explorer.ts
 // Explorer v2 – Socket.IO‑driven, backend‑owned state.
 //
 // Responsibilities:
@@ -13,33 +13,75 @@
 import { showNewProjectModal } from './new_project_modal.js';
 import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
 import { initExplorerStickyScopes } from './explorer_extensions/sticky_scopes.js';
-import { createExplorerSearchController } from './explorer_modules/explorer_search_controller.js';
-import { createExplorerDirectoryStateHelpers } from './explorer_modules/explorer_directory_state_utils.js';
-import { createExplorerUiHelpers } from './explorer_modules/explorer_ui_helpers.js';
-import { createExplorerActiveFileUtils } from './explorer_modules/explorer_active_file_utils.js';
-import {
-  renderNameResults as renderNameResultsModule,
-  renderContentResults as renderContentResultsModule,
-} from './explorer_modules/explorer_search_results_renderer.js';
-import { renderSearchOverlayBody } from './explorer_modules/explorer_search_overlay_body_renderer.js';
+import { createExplorerDirectoryStateHelpers } from '../../src/explorer/tree/directory-state-utils.ts';
+import { createExplorerUiHelpers } from '../../src/explorer/chrome/ui-helpers.ts';
+import { createExplorerActiveFileUtils } from '../../src/explorer/tree/active-file-utils.ts';
+import { createExplorerFileOpenBridge } from '../../src/explorer/host/file-open-bridge.ts';
+import { createExplorerSearchOverlayController } from '../../src/explorer/search/overlay-controller.ts';
+import { getErrorMessage } from '../../src/explorer/utils/errors.ts';
 import {
   EXPLORER_RPC_METHODS,
   EXPLORER_RPC_NOTIFICATIONS,
 } from '../../src/explorer/rpc/contract.ts';
 import {
+  isExplorerRpcAvailable,
+  notifyExplorerRpc,
+} from '../../src/explorer/rpc/client.ts';
+import {
   formatDiffBaseLabel,
-  formatHunkHeader,
   truncateText,
-  firstDiffLine,
-} from './explorer_modules/explorer_search_utils.js';
+  type ExplorerDiffBaseInfo,
+} from '../../src/explorer/search/utils.ts';
 import {
   getParentRel as getParentRelModule,
   normalizeWatcherRel as normalizeWatcherRelModule,
   collectWatcherRels as collectWatcherRelsModule,
   isWatcherRelInOpenDir as isWatcherRelInOpenDirModule,
-} from './explorer_modules/explorer_path_watcher_utils.js';
-import { createExplorerGitFooterUtils } from './explorer_modules/explorer_git_footer_utils.js';
-import { renderExplorerDiagnostics, getExplorerDiagnosticsPanel } from './explorer_modules/explorer_diagnostics_renderer.js';
+} from '../../src/explorer/tree/path-watcher-utils.ts';
+import { createExplorerGitFooterUtils } from '../../src/explorer/git/footer-utils.ts';
+import {
+  renderExplorerDiagnostics,
+  getExplorerDiagnosticsPanel,
+} from '../../src/explorer/search/diagnostics-renderer.ts';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isCancelledError(error: unknown): boolean {
+  return getErrorMessage(error, '') === 'cancelled';
+}
+
+function getDiagnosticCounts(value: unknown): {
+  errors: number;
+  warnings: number;
+} {
+  if (!isRecord(value)) {
+    return { errors: 0, warnings: 0 };
+  }
+  return {
+    errors: Number(value.errors || 0),
+    warnings: Number(value.warnings || 0),
+  };
+}
+
+function hasDraftInfo(value: unknown): boolean {
+  return isRecord(value) && value.hasDraft === true;
+}
+
+function toggleDrawer(open?: boolean): void {
+  const root = document.querySelector('.fe-root');
+  if (!(root instanceof HTMLElement)) {
+    return;
+  }
+  if (open === undefined) {
+    root.classList.toggle('drawer-open');
+  } else if (open) {
+    root.classList.add('drawer-open');
+  } else {
+    root.classList.remove('drawer-open');
+  }
+}
 
 let treeElement = null;
 let projectLabelEl = null;
@@ -64,7 +106,6 @@ const stickyScopesContext = {
 const uiState = {
   projectPath: null,
   gitStatus: null,
-  reviewEntries: [],
 };
 
 let renderedProjectPath = null;
@@ -74,13 +115,11 @@ let draftUpdateListenerInstalled = false;
 let activeFileRel = null;
 
 function hasExplorerRpc() {
-  return Boolean(window.__explorerRpc);
+  return isExplorerRpcAvailable();
 }
 
 function notifyExplorer(method, payload = {}) {
-  if (!window.__explorerRpc) return false;
-  window.__explorerRpc.notify(method, payload);
-  return true;
+  return notifyExplorerRpc(method, payload);
 }
 
 // Diagnostics summary (Sprint C): keep the last snapshot so newly-rendered
@@ -88,8 +127,13 @@ function notifyExplorer(method, payload = {}) {
 let diagnosticsByRel = {};
 let diagHasErrors = false;
 let diagHasWarnings = false;
-let diagErrorDirs = new Set();
-let diagWarningDirs = new Set();
+let diagErrorDirs = new Set<string>();
+let diagWarningDirs = new Set<string>();
+let gitDiffBase: ExplorerDiffBaseInfo = {
+  ref: 'HEAD',
+  mode: 'none',
+  commit: null,
+};
 
 function setActiveFileRel(nextRel) {
   explorerActiveFileUtils.setActiveFileRel(nextRel);
@@ -192,52 +236,16 @@ function applySetiIconToSpan(span, fileName, kind = 'file') {
 }
 
 // --- Batch Select Mode state ---
-let selectModeDir = null;           // rel of directory in select mode, or null
-const selectedEntries = new Set();  // rel paths of checked items
+let selectModeDir = null; // rel of directory in select mode, or null
+const selectedEntries = new Set<string>(); // rel paths of checked items
 
 // --- Open Directories Persistence ---
-const openDirectories = new Set();  // rel paths of currently open directories
+const openDirectories = new Set<string>(); // rel paths of currently open directories
 let openDirsSyncTimer = null;
-const OPEN_DIRS_SYNC_DEBOUNCE = 500;  // ms
-let openDirsInitialized = false;  // True after we've received initial open dirs from backend
+const OPEN_DIRS_SYNC_DEBOUNCE = 500; // ms
+let openDirsInitialized = false; // True after we've received initial open dirs from backend
 
-// --- Search / Review overlay state ---
-let searchOverlayVisible = false;
-let searchMode = 'name'; // 'name' | 'content' | 'changes' | 'review' | 'diagnostics'
-let searchQuery = '';
-let searchResults = null;
-let searchLoading = false;
-let searchError = null;
-let searchDebounceTimer = null;
-let lastKnownProjectPath = '';
 let _explorerDiagDetail = {}; // { absPath: markers[] } — latest diagnostics:detail snapshot
-const selectedReviewFiles = new Set();
-const explorerSearchController = createExplorerSearchController({
-  toast,
-  renderSearchOverlay,
-  focusSearchInput: () => {
-    const input = document.getElementById('fe-search-input');
-    if (input) input.focus();
-  },
-  hasBus: () => hasExplorerRpc(),
-  sendBus: (method, payload) => notifyExplorer(method, payload),
-  getProjectPath: () => uiState.projectPath || '',
-  getSearchOverlayVisible: () => searchOverlayVisible,
-  setSearchOverlayVisible: (next) => { searchOverlayVisible = !!next; },
-  getSearchMode: () => searchMode,
-  setSearchModeValue: (next) => { searchMode = next; },
-  getSearchQuery: () => searchQuery,
-  setSearchQuery: (next) => { searchQuery = next; },
-  getSearchResults: () => searchResults,
-  setSearchResults: (next) => { searchResults = next; },
-  getSearchLoading: () => searchLoading,
-  setSearchLoading: (next) => { searchLoading = !!next; },
-  getSearchError: () => searchError,
-  setSearchError: (next) => { searchError = next; },
-  getSearchDebounceTimer: () => searchDebounceTimer,
-  setSearchDebounceTimer: (next) => { searchDebounceTimer = next; },
-  setLastKnownProjectPath: (next) => { lastKnownProjectPath = next || ''; },
-});
 const explorerDirectoryStateHelpers = createExplorerDirectoryStateHelpers({
   getTreeElement: () => treeElement,
   getSelectModeDir: () => selectModeDir,
@@ -265,6 +273,13 @@ const explorerActiveFileUtils = createExplorerActiveFileUtils({
   expandToFile,
   toast,
 });
+const explorerFileOpenBridge = createExplorerFileOpenBridge({
+  getProjectPath: () => uiState.projectPath,
+  getActiveFileRel: () => activeFileRel,
+  expandToFile,
+  closeDrawerIfMobile,
+  toast,
+});
 const explorerGitFooterUtils = createExplorerGitFooterUtils({
   getGitSummaryElement: () => gitSummaryEl,
   getGitStatus: () => uiState.gitStatus,
@@ -274,23 +289,64 @@ const explorerGitFooterUtils = createExplorerGitFooterUtils({
   toast,
   reloadCurrentFile: () => window.__cm6ReloadCurrentFile?.(),
 });
+const explorerSearchOverlayController = createExplorerSearchOverlayController({
+  toast,
+  hasExplorerRpc: () => hasExplorerRpc(),
+  notifyExplorer: (method, payload) => notifyExplorer(method, payload),
+  getProjectPath: () => uiState.projectPath || '',
+  openFileAndMaybeJump: (rel, lineNumber, jumpOptions) =>
+    explorerFileOpenBridge.openFileAndMaybeJump(rel, lineNumber, jumpOptions),
+  expandToPath,
+  applySetiIconToSpan,
+  basename,
+  ensureDraftDiffs: async () => {
+    if (typeof window.__cm6EnsureDraftDiffs === 'function') {
+      try {
+        await window.__cm6EnsureDraftDiffs(true);
+      } catch {
+        /* ignore */
+      }
+    }
+  },
+  ensureInlineDiffs: async () => {
+    if (typeof window.__cm6EnsureInlineDiffs === 'function') {
+      try {
+        await window.__cm6EnsureInlineDiffs(true);
+      } catch (err) {
+        console.warn('Failed to auto-enable inline diffs:', err);
+      }
+    }
+  },
+  renderDiagnosticsResults: (container) => {
+    const proj = uiState.projectPath || '';
+    const activeAbs = activeFileRel && proj ? `${proj}/${activeFileRel}` : null;
+    renderExplorerDiagnostics(container, _explorerDiagDetail, {
+      openFileAndMaybeJump,
+      toast,
+      mentionAgent: (payload) => {
+        if (!hasExplorerRpc()) {
+          throw new Error('Explorer RPC unavailable');
+        }
+        notifyExplorer(EXPLORER_RPC_METHODS.mentionAgent, payload);
+      },
+      getProjectPath: () => uiState.projectPath,
+      activeFileAbs: activeAbs,
+    });
+  },
+  getGitDiffBase: () => gitDiffBase,
+  setGitDiffBase: (next) => {
+    gitDiffBase = next;
+  },
+  onGitDiffBaseChanged: () => updateDiffBaseButtons(),
+  toggleDiffBaseMenu,
+});
 
 let reconnectResyncPending = false;
-
-// Minimal diff-base shell for changes note (no dropdown wiring yet)
-let gitDiffBase = { ref: 'HEAD', mode: 'none', commit: null };
-let searchBaseBtn = null;
-let searchBaseDropdown = null;
-
 
 function updateDiffBaseButtons() {
   if (gitBaseBtn) {
     gitBaseBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, true)} ▾`;
     gitBaseBtn.disabled = gitDiffBase.mode === 'none';
-  }
-  if (searchBaseBtn) {
-    searchBaseBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, false)} ▾`;
-    searchBaseBtn.disabled = gitDiffBase.mode === 'none';
   }
 }
 
@@ -328,7 +384,7 @@ async function initDiffBaseFromBackend() {
   }
 }
 
-function closeDiffBaseMenus(except) {
+function closeDiffBaseMenus(except: Element | null = null) {
   const dropdowns = document.querySelectorAll(
     '#fe-search-base-dd, #fe-git-base-dd',
   );
@@ -341,18 +397,18 @@ function closeDiffBaseMenus(except) {
 }
 
 async function changeDiffBase(ref) {
-  if (!ref || typeof window.__explorerBusSend !== 'function') return;
+  if (!ref || !hasExplorerRpc()) return;
   try {
     // Persist diff base via WS (HistoryStore is the SSOT), then refresh changes.
     notifyExplorer(EXPLORER_RPC_METHODS.gitDiffBaseSet, { ref });
-    if (searchMode === 'changes') {
+    if (explorerSearchOverlayController.getSearchMode() === 'changes') {
       fetchChangesResults(true);
     }
     if (typeof window.__cm6ReloadCurrentFile === 'function') {
       window.__cm6ReloadCurrentFile();
     }
   } catch (err) {
-    toast(err?.message || 'Failed to update diff base');
+    toast(getErrorMessage(err, 'Failed to update diff base'));
   }
 }
 
@@ -447,13 +503,9 @@ async function toggleDiffBaseMenu(button, dropdown) {
     const commits = json.data || [];
     renderDiffBaseDropdown(dropdown, commits);
   } catch (err) {
-    dropdown.innerHTML = `<div class=\"fe-dd-item\" style=\"opacity:0.7\">${err?.message || 'Failed to load commits'}</div>`;
+    dropdown.innerHTML = `<div class=\"fe-dd-item\" style=\"opacity:0.7\">${getErrorMessage(err, 'Failed to load commits')}</div>`;
   }
 }
-
-// Search by Changes – raw data cache for client-side filtering
-let lastChangesData = null;
-let lastChangesContainer = null;
 
 function clearElement(el) {
   explorerUiHelpers.clearElement(el);
@@ -603,7 +655,14 @@ async function expandDirectoryIfExists(rel) {
 // --- Expand to file/directory ---
 
 // Pending directory list requests - maps rel -> { resolve, reject, timeout }
-const _pendingDirListRequests = new Map();
+const _pendingDirListRequests = new Map<
+  string,
+  {
+    resolve: () => void;
+    reject: (reason?: unknown) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }
+>();
 
 function _notifyDirListComplete(rel) {
   /**
@@ -623,7 +682,7 @@ async function _requestDirListAndWait(rel, timeoutMs = 2000) {
    * Requests a directory listing and waits for the response.
    * Returns a promise that resolves when the listing is received.
    */
-  return new Promise((resolve, reject) => {
+  return new Promise<void>((resolve, reject) => {
     // Set up timeout
     const timeout = setTimeout(() => {
       _pendingDirListRequests.delete(rel);
@@ -633,7 +692,7 @@ async function _requestDirListAndWait(rel, timeoutMs = 2000) {
     _pendingDirListRequests.set(rel, { resolve, reject, timeout });
     
     // Send request
-    if (typeof window.__explorerBusSend === 'function') {
+    if (hasExplorerRpc()) {
       notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
     } else {
       clearTimeout(timeout);
@@ -810,8 +869,11 @@ function renderEntriesInto(containerUl, entries, parentRel = null) {
   const newRels = new Set(list.map(e => e.rel || e.path));
   
   // 1. Index existing children by rel
-  const existingNodes = new Map();
-  Array.from(containerUl.children).forEach(li => {
+  const existingNodes = new Map<string, HTMLElement>();
+  Array.from(containerUl.children).forEach((li) => {
+    if (!(li instanceof HTMLElement)) {
+      return;
+    }
     if (li.dataset.rel) {
       existingNodes.set(li.dataset.rel, li);
     }
@@ -914,7 +976,7 @@ function renderEntriesInto(containerUl, entries, parentRel = null) {
     let iconSpan = li.querySelector('.fe-entry-icon');
     let textSpan = li.querySelector('.fe-tree-text');
     let menuButton = li.querySelector('.fe-card-menu-btn');
-    let checkbox = li.querySelector('.fe-entry-checkbox');
+    let checkbox = li.querySelector<HTMLInputElement>('.fe-entry-checkbox');
 
     // If mode changed (select vs normal), we might need to swap checkbox/menu
     const hasCheckbox = !!checkbox;
@@ -938,7 +1000,11 @@ function renderEntriesInto(containerUl, entries, parentRel = null) {
         checkbox.checked = selectedEntries.has(rel);
         checkbox.addEventListener('change', (ev) => {
           ev.stopPropagation();
-          if (ev.target.checked) {
+          const target = ev.target;
+          if (!(target instanceof HTMLInputElement)) {
+            return;
+          }
+          if (target.checked) {
             selectedEntries.add(rel);
           } else {
             selectedEntries.delete(rel);
@@ -1084,8 +1150,7 @@ function _setDiagnosticsSummary(next) {
 
   Object.entries(obj).forEach(([rel, counts]) => {
     if (!counts) return;
-    const errors = Number(counts.errors || 0);
-    const warnings = Number(counts.warnings || 0);
+    const { errors, warnings } = getDiagnosticCounts(counts);
     if (errors <= 0 && warnings <= 0) return;
     if (errors > 0) diagHasErrors = true;
     if (warnings > 0) diagHasWarnings = true;
@@ -1137,11 +1202,10 @@ function applyAggregatedDiagnosticFlags() {
 
   // Apply file-level flags for nodes currently in the DOM
   try {
-    Object.entries(diagnosticsByRel || {}).forEach(([rel, counts]) => {
-      if (!counts) return;
-      const errors = Number(counts.errors || 0);
-      const warnings = Number(counts.warnings || 0);
-      if (errors <= 0 && warnings <= 0) return;
+      Object.entries(diagnosticsByRel || {}).forEach(([rel, counts]) => {
+        if (!counts) return;
+        const { errors, warnings } = getDiagnosticCounts(counts);
+        if (errors <= 0 && warnings <= 0) return;
 
       const li = _queryNodeByRel(root, 'file', rel);
       if (!li) return;
@@ -1205,7 +1269,7 @@ function refreshOpenDirectoriesAfterGit() {
     treeElement = document.getElementById('fe-file-tree');
   }
   if (!treeElement) return;
-  if (typeof window.__explorerBusSend !== 'function') return;
+  if (!hasExplorerRpc()) return;
 
   const openDirs = treeElement.querySelectorAll(
     'li.fe-tree-node[data-kind="dir"][data-open="true"]',
@@ -1489,7 +1553,7 @@ function handleExplorerNotification(method, payload) {
 
       // Step 2: Apply draft flags to files that exist in DOM
       Object.entries(drafts).forEach(([rel, info]) => {
-        if (!info || !info.hasDraft) return;
+        if (!hasDraftInfo(info)) return;
         const li = root.querySelector(
           `li.fe-tree-node[data-kind="file"][data-rel="${rel}"]`
         );
@@ -1503,7 +1567,7 @@ function handleExplorerNotification(method, payload) {
       // This ensures parents show draft indicator even when children are collapsed
       const draftDirs = new Set();
       Object.entries(drafts).forEach(([rel, info]) => {
-        if (!info || !info.hasDraft) return;
+        if (!hasDraftInfo(info)) return;
         const parts = rel.split('/');
         for (let i = 1; i < parts.length; i++) {
           draftDirs.add(parts.slice(0, i).join('/'));
@@ -1579,10 +1643,10 @@ function handleExplorerNotification(method, payload) {
         for (let i = 1; i < parts.length; i++) {
           const dirRel = parts.slice(0, i).join('/');
           
-          if (OUTLINE_STATUSES.has(status)) {
+          if (typeof status === 'string' && OUTLINE_STATUSES.has(status)) {
             modifiedDirs.add(dirRel);
           }
-          if (STAGED_STATUSES.has(status)) {
+          if (typeof status === 'string' && STAGED_STATUSES.has(status)) {
             stagedDirs.add(dirRel);
           }
           if (status === 'untracked') {
@@ -1674,7 +1738,10 @@ function handleExplorerNotification(method, payload) {
       }
 
       // If the Diagnostics tab is currently visible, re-render it.
-      if (searchOverlayVisible && searchMode === 'diagnostics') {
+      if (
+        explorerSearchOverlayController.isVisible() &&
+        explorerSearchOverlayController.getSearchMode() === 'diagnostics'
+      ) {
         renderSearchOverlay();
       }
       break;
@@ -1759,7 +1826,7 @@ function handleExplorerNotification(method, payload) {
         } else {
           updateDiffBaseButtons();
         }
-        if (searchOverlayVisible) {
+        if (explorerSearchOverlayController.isVisible()) {
           renderSearchOverlay();
         }
       }
@@ -1796,7 +1863,7 @@ function handleExplorerNotification(method, payload) {
         toast(message || `${type.replace('_', ' ')} completed`);
         // Refresh git status after push/pull/clone completes
         if (type === 'git_pull' || type === 'git_push' || type === 'git_clone') {
-          if (typeof window.__explorerBusSend === 'function') {
+          if (hasExplorerRpc()) {
             notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
             notifyExplorer(EXPLORER_RPC_METHODS.refresh, {});
           }
@@ -1818,24 +1885,7 @@ function handleExplorerNotification(method, payload) {
     }
     
     case EXPLORER_RPC_NOTIFICATIONS.searchResultsUpdated: {
-      searchResults = payload || null;
-      searchLoading = false;
-      searchError = null;
-      if (payload && typeof payload.mode === 'string') {
-        searchMode = payload.mode;
-      }
-      // Track diff base for changes mode, if provided
-      if (payload && payload.mode === 'changes' && payload.base) {
-        gitDiffBase = {
-          ref: payload.base.ref || 'HEAD',
-          mode: payload.base.mode || 'none',
-          commit: payload.base.commit || null,
-        };
-        updateDiffBaseButtons();
-      }
-      if (searchOverlayVisible) {
-        renderSearchOverlay();
-      }
+      explorerSearchOverlayController.handleSearchResultsUpdated(payload);
       break;
     }
     case EXPLORER_RPC_NOTIFICATIONS.error: {
@@ -1846,25 +1896,13 @@ function handleExplorerNotification(method, payload) {
 
       // If the search overlay is active, prefer surfacing the error there
       // (otherwise users can get stuck on "Searching…").
-      if (searchOverlayVisible && searchLoading) {
-        searchLoading = false;
-        searchError = message;
-        renderSearchOverlay();
-      } else {
+      if (!explorerSearchOverlayController.handleSearchError(message)) {
         toast(message);
       }
       break;
     }
     case EXPLORER_RPC_NOTIFICATIONS.reviewEntriesUpdated: {
-      uiState.reviewEntries = payload && Array.isArray(payload.entries) ? payload.entries : [];
-      if (searchMode === 'review') {
-        searchResults = { mode: 'review', results: uiState.reviewEntries };
-        searchLoading = false;
-        searchError = null;
-        if (searchOverlayVisible) {
-          renderSearchOverlay();
-        }
-      }
+      explorerSearchOverlayController.handleReviewEntriesUpdated(payload);
       break;
     }
     case EXPLORER_RPC_NOTIFICATIONS.pulse: {
@@ -1916,7 +1954,10 @@ export async function initExplorerUI() {
 
   if (!draftUpdateListenerInstalled) {
     window.addEventListener('cm6:draft-updated', (event) => {
-      const detail = event?.detail || {};
+      const detail =
+        event instanceof CustomEvent && isRecord(event.detail)
+          ? event.detail
+          : {};
       const rel = relFromAbsPath(detail.path);
       if (!rel || rel === '.') return;
       applyDraftFlag(rel, !!detail.unsaved);
@@ -1964,19 +2005,8 @@ export async function initExplorerUI() {
   // with __cm6EditorState.
   updateDiffBaseButtons();
   initDiffBaseFromBackend();
-  if (typeof window.__explorerBusSend === 'function') {
+  if (hasExplorerRpc()) {
     notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
-  }
-
-  function toggleDrawer(open) {
-    if (!root) return;
-    if (open === undefined) {
-      root.classList.toggle('drawer-open');
-    } else if (open) {
-      root.classList.add('drawer-open');
-    } else {
-      root.classList.remove('drawer-open');
-    }
   }
 
   drawerClose?.addEventListener('click', () => toggleDrawer(false));
@@ -2010,10 +2040,10 @@ export async function initExplorerUI() {
         toast('Explorer preferences not loaded yet.');
         return;
       }
-    if (!hasExplorerRpc()) {
-      toast('Explorer connection unavailable.');
-      return;
-    }
+      if (!hasExplorerRpc()) {
+        toast('Explorer connection unavailable.');
+        return;
+      }
       notifyExplorer(EXPLORER_RPC_METHODS.prefsUiUpdate, {
         key: UI_PREF_KEY_EXPLORER_STICKY_HEADERS,
         value: !explorerStickyHeadersEnabled,
@@ -2032,7 +2062,10 @@ export async function initExplorerUI() {
   document.addEventListener(
     'click',
     (ev) => {
-      if (ev.target.closest('#fe-explorer-menu')) return;
+      const target = ev.target;
+      if (target instanceof Element && target.closest('#fe-explorer-menu')) {
+        return;
+      }
       closeExplorerMenu();
     },
     false,
@@ -2042,12 +2075,15 @@ export async function initExplorerUI() {
   document.addEventListener(
     'click',
     (ev) => {
+      const target = ev.target;
       const inBaseButton =
-        ev.target.closest('#fe-git-base-btn') ||
-        ev.target.closest('#fe-search-base-btn');
+        target instanceof Element &&
+        (target.closest('#fe-git-base-btn') ||
+          target.closest('#fe-search-base-btn'));
       const inBaseDropdown =
-        ev.target.closest('#fe-git-base-dd') ||
-        ev.target.closest('#fe-search-base-dd');
+        target instanceof Element &&
+        (target.closest('#fe-git-base-dd') ||
+          target.closest('#fe-search-base-dd'));
       if (!inBaseButton && !inBaseDropdown) {
         closeDiffBaseMenus();
       }
@@ -2077,7 +2113,7 @@ export async function initExplorerUI() {
           selectLabel: 'Set as Project',
         });
         if (!choice || !choice.path) return;
-        if (typeof window.__explorerBusSend !== 'function') {
+        if (!hasExplorerRpc()) {
           toast('Explorer connection unavailable.');
           return;
         }
@@ -2086,8 +2122,8 @@ export async function initExplorerUI() {
         // below (handleExplorerEvent) and can reload if needed.
         notifyExplorer(EXPLORER_RPC_METHODS.projectOpen, { path: choice.path });
       } catch (e) {
-        if (e && e.message !== 'cancelled') {
-          toast(`An error occurred: ${e.message || e}`);
+        if (!isCancelledError(e)) {
+          toast(`An error occurred: ${getErrorMessage(e, 'unknown error')}`);
         }
       }
     });
@@ -2112,8 +2148,8 @@ export async function initExplorerUI() {
       try {
         choice = await showNewProjectModal(toast);
       } catch (e) {
-        if (e !== 'cancelled') {
-          toast(`An error occurred: ${e?.message || e}`);
+        if (!isCancelledError(e)) {
+          toast(`An error occurred: ${getErrorMessage(e, 'unknown error')}`);
         }
         return;
       }
@@ -2146,7 +2182,7 @@ export async function initExplorerUI() {
             if (!ok) return;
           }
 
-          if (typeof window.__explorerBusSend !== 'function') {
+          if (!hasExplorerRpc()) {
             toast('Explorer connection unavailable.');
             return;
           }
@@ -2160,8 +2196,8 @@ export async function initExplorerUI() {
           // Backend auto-switches project when target dir is created
           
         } catch (e) {
-          if (e && e.message !== 'cancelled') {
-            toast(`An error occurred: ${e?.message || e}`);
+          if (!isCancelledError(e)) {
+            toast(`An error occurred: ${getErrorMessage(e, 'unknown error')}`);
           }
         }
       } else {
@@ -2182,7 +2218,7 @@ export async function initExplorerUI() {
             if (!ok) return;
           }
 
-          if (typeof window.__explorerBusSend !== 'function') {
+          if (!hasExplorerRpc()) {
             toast('Explorer connection unavailable.');
             return;
           }
@@ -2194,8 +2230,8 @@ export async function initExplorerUI() {
             name: result.name,
           });
         } catch (e) {
-          if (e && e.message !== 'cancelled') {
-            toast(`An error occurred: ${e?.message || e}`);
+          if (!isCancelledError(e)) {
+            toast(`An error occurred: ${getErrorMessage(e, 'unknown error')}`);
           }
         }
       }
@@ -2205,7 +2241,7 @@ export async function initExplorerUI() {
   explorerGitFooterUtils.bindGitFooterActions();
 
   // Context menu element (reused)
-  let cardMenu = document.querySelector('.fe-card-menu');
+  let cardMenu = document.querySelector<HTMLElement>('.fe-card-menu');
   if (!cardMenu) {
     cardMenu = document.createElement('div');
     cardMenu.className = 'fe-card-menu';
@@ -2230,7 +2266,7 @@ export async function initExplorerUI() {
       toast('No project open');
       return;
     }
-    if (typeof window.__explorerBusSend !== 'function') {
+    if (!hasExplorerRpc()) {
       toast('Explorer bus unavailable');
       return;
     }
@@ -2409,7 +2445,7 @@ export async function initExplorerUI() {
           case 'createFile': {
             const name = window.prompt('New file name:');
             if (!name) return;
-            if (typeof window.__explorerBusSend === 'function') {
+            if (hasExplorerRpc()) {
               notifyExplorer(EXPLORER_RPC_METHODS.fileCreate, {
                 parent_rel: rel,
                 name,
@@ -2423,7 +2459,7 @@ export async function initExplorerUI() {
           case 'createDir': {
             const name = window.prompt('New folder name:');
             if (!name) return;
-            if (typeof window.__explorerBusSend === 'function') {
+            if (hasExplorerRpc()) {
               notifyExplorer(EXPLORER_RPC_METHODS.dirCreate, {
                 parent_rel: rel,
                 name,
@@ -2541,7 +2577,7 @@ export async function initExplorerUI() {
                 startPath: uiState.projectPath || '',
               });
               if (!dest || !dest.path) break;
-              if (typeof window.__explorerBusSend !== 'function') {
+              if (!hasExplorerRpc()) {
                 toast('Explorer connection unavailable.');
                 break;
               }
@@ -2550,8 +2586,8 @@ export async function initExplorerUI() {
                 dest_path: dest.path,
               });
             } catch (err) {
-              if (err && err.message === 'cancelled') break;
-              toast(err?.message || 'Copy failed');
+              if (isCancelledError(err)) break;
+              toast(getErrorMessage(err, 'Copy failed'));
             }
             break;
           }
@@ -2566,7 +2602,7 @@ export async function initExplorerUI() {
                 startPath: uiState.projectPath || '',
               });
               if (!dest || !dest.path) break;
-              if (typeof window.__explorerBusSend !== 'function') {
+              if (!hasExplorerRpc()) {
                 toast('Explorer connection unavailable.');
                 break;
               }
@@ -2575,8 +2611,8 @@ export async function initExplorerUI() {
                 dest_path: dest.path,
               });
             } catch (err) {
-              if (err && err.message === 'cancelled') break;
-              toast(err?.message || 'Move failed');
+              if (isCancelledError(err)) break;
+              toast(getErrorMessage(err, 'Move failed'));
             }
             break;
           }
@@ -2593,7 +2629,7 @@ export async function initExplorerUI() {
                 selectLabel: 'Copy Here',
               });
               if (!source || !source.path) break;
-              if (typeof window.__explorerBusSend !== 'function') {
+              if (!hasExplorerRpc()) {
                 toast('Explorer connection unavailable.');
                 break;
               }
@@ -2602,8 +2638,8 @@ export async function initExplorerUI() {
                 dest_rel: rel,
               });
             } catch (err) {
-              if (err && err.message === 'cancelled') break;
-              toast(err?.message || 'Copy failed');
+              if (isCancelledError(err)) break;
+              toast(getErrorMessage(err, 'Copy failed'));
             }
             break;
           }
@@ -2620,7 +2656,7 @@ export async function initExplorerUI() {
                 selectLabel: 'Move Here',
               });
               if (!source || !source.path) break;
-              if (typeof window.__explorerBusSend !== 'function') {
+              if (!hasExplorerRpc()) {
                 toast('Explorer connection unavailable.');
                 break;
               }
@@ -2629,15 +2665,15 @@ export async function initExplorerUI() {
                 dest_rel: rel,
               });
             } catch (err) {
-              if (err && err.message === 'cancelled') break;
-              toast(err?.message || 'Move failed');
+              if (isCancelledError(err)) break;
+              toast(getErrorMessage(err, 'Move failed'));
             }
             break;
           }
           case 'rename': {
             const newName = window.prompt('New name:', entry.name || '');
             if (!newName || newName === entry.name) return;
-            if (typeof window.__explorerBusSend === 'function') {
+            if (hasExplorerRpc()) {
               notifyExplorer(EXPLORER_RPC_METHODS.entryRename, {
                 rel,
                 new_name: newName,
@@ -2650,13 +2686,13 @@ export async function initExplorerUI() {
               `Delete ${entry.kind === 'dir' ? 'folder' : 'file'} "${entry.name}"?`
             );
             if (!confirmed) return;
-            if (typeof window.__explorerBusSend === 'function') {
+            if (hasExplorerRpc()) {
               notifyExplorer(EXPLORER_RPC_METHODS.entryDelete, { rel });
             }
             break;
           }
           case 'stage': {
-            if (typeof window.__explorerBusSend !== 'function') {
+            if (!hasExplorerRpc()) {
               toast('Explorer connection unavailable.');
               break;
             }
@@ -2664,12 +2700,12 @@ export async function initExplorerUI() {
               notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths: [rel] });
               toast(`Staged ${entry.name}`);
             } catch (err) {
-              toast(err?.message || 'Stage failed');
+              toast(getErrorMessage(err, 'Stage failed'));
             }
             break;
           }
           case 'unstage': {
-            if (typeof window.__explorerBusSend !== 'function') {
+            if (!hasExplorerRpc()) {
               toast('Explorer connection unavailable.');
               break;
             }
@@ -2677,12 +2713,12 @@ export async function initExplorerUI() {
               notifyExplorer(EXPLORER_RPC_METHODS.gitUnstage, { paths: [rel] });
               toast(`Unstaged ${entry.name}`);
             } catch (err) {
-              toast(err?.message || 'Unstage failed');
+              toast(getErrorMessage(err, 'Unstage failed'));
             }
             break;
           }
           case 'stageDir': {
-            if (typeof window.__explorerBusSend !== 'function') {
+            if (!hasExplorerRpc()) {
               toast('Explorer connection unavailable.');
               break;
             }
@@ -2694,12 +2730,12 @@ export async function initExplorerUI() {
               notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths: [rel] });
               toast(`Staged all in ${entry.name}`);
             } catch (err) {
-              toast(err?.message || 'Stage failed');
+              toast(getErrorMessage(err, 'Stage failed'));
             }
             break;
           }
           case 'unstageDir': {
-            if (typeof window.__explorerBusSend !== 'function') {
+            if (!hasExplorerRpc()) {
               toast('Explorer connection unavailable.');
               break;
             }
@@ -2711,12 +2747,12 @@ export async function initExplorerUI() {
               notifyExplorer(EXPLORER_RPC_METHODS.gitUnstage, { paths: [rel] });
               toast(`Unstaged all in ${entry.name}`);
             } catch (err) {
-              toast(err?.message || 'Unstage failed');
+              toast(getErrorMessage(err, 'Unstage failed'));
             }
             break;
           }
           case 'restore': {
-            if (typeof window.__explorerBusSend !== 'function') {
+            if (!hasExplorerRpc()) {
               toast('Explorer connection unavailable.');
               break;
             }
@@ -2730,7 +2766,7 @@ export async function initExplorerUI() {
                 commit: 'HEAD',
               });
             } catch (err) {
-              toast(err?.message || 'Restore failed');
+              toast(getErrorMessage(err, 'Restore failed'));
             }
             break;
           }
@@ -2780,7 +2816,7 @@ export async function initExplorerUI() {
         startPath: uiState.projectPath || '',
       });
       if (!dest || !dest.path) return;
-      if (typeof window.__explorerBusSend !== 'function') {
+      if (!hasExplorerRpc()) {
         toast('Explorer connection unavailable');
         return;
       }
@@ -2791,8 +2827,8 @@ export async function initExplorerUI() {
       toast(`Copying ${paths.length} items…`);
       disableSelectMode();
     } catch (err) {
-      if (err && err.message !== 'cancelled') {
-        toast(err?.message || 'Batch copy failed');
+      if (!isCancelledError(err)) {
+        toast(getErrorMessage(err, 'Batch copy failed'));
       }
     }
   }
@@ -2813,7 +2849,7 @@ export async function initExplorerUI() {
         startPath: uiState.projectPath || '',
       });
       if (!dest || !dest.path) return;
-      if (typeof window.__explorerBusSend !== 'function') {
+      if (!hasExplorerRpc()) {
         toast('Explorer connection unavailable');
         return;
       }
@@ -2824,8 +2860,8 @@ export async function initExplorerUI() {
       toast(`Moving ${paths.length} items…`);
       disableSelectMode();
     } catch (err) {
-      if (err && err.message !== 'cancelled') {
-        toast(err?.message || 'Batch move failed');
+      if (!isCancelledError(err)) {
+        toast(getErrorMessage(err, 'Batch move failed'));
       }
     }
   }
@@ -2836,7 +2872,7 @@ export async function initExplorerUI() {
       toast('No items selected');
       return;
     }
-    if (typeof window.__explorerBusSend !== 'function') {
+    if (!hasExplorerRpc()) {
       toast('Explorer connection unavailable');
       return;
     }
@@ -2851,7 +2887,7 @@ export async function initExplorerUI() {
       toast('No items selected');
       return;
     }
-    if (typeof window.__explorerBusSend !== 'function') {
+    if (!hasExplorerRpc()) {
       toast('Explorer connection unavailable');
       return;
     }
@@ -2870,7 +2906,7 @@ export async function initExplorerUI() {
       `⚠️ WARNING: Delete ${paths.length} items?\n\nThis action cannot be undone.`
     );
     if (!confirmed) return;
-    if (typeof window.__explorerBusSend !== 'function') {
+    if (!hasExplorerRpc()) {
       toast('Explorer connection unavailable');
       return;
     }
@@ -2882,8 +2918,11 @@ export async function initExplorerUI() {
   document.addEventListener(
     'click',
     (ev) => {
-      if (ev.target.closest('.fe-card-menu')) return;
-      if (ev.target.closest('.fe-card-menu-btn')) return;
+      const target = ev.target;
+      if (target instanceof Element && target.closest('.fe-card-menu')) return;
+      if (target instanceof Element && target.closest('.fe-card-menu-btn')) {
+        return;
+      }
       if (cardMenu && cardMenu.classList.contains('show')) {
         closeCardMenu();
       }
@@ -2913,8 +2952,8 @@ export async function initExplorerUI() {
           // Map the click to the sticky slot that visually contains the point.
           // The overlay itself is `pointer-events: none`, so clicks pass through
           // to the underlying tree; we intercept them here for correct behavior.
-          const slots = sticky.querySelectorAll('ul.fe-sticky-scope-slot');
-          let bestSlot = null;
+          const slots = sticky.querySelectorAll<HTMLElement>('ul.fe-sticky-scope-slot');
+          let bestSlot: HTMLElement | null = null;
           let bestZ = -Infinity;
           for (const slot of slots) {
             const rect = slot.getBoundingClientRect();
@@ -2932,7 +2971,7 @@ export async function initExplorerUI() {
             }
           }
 
-          const rel = bestSlot?.querySelector('li.fe-tree-node')?.dataset?.rel;
+          const rel = bestSlot?.querySelector<HTMLElement>('li.fe-tree-node')?.dataset?.rel;
           if (rel && rel !== '.') {
             const slotRect = bestSlot?.getBoundingClientRect?.();
             const selRel =
@@ -2983,19 +3022,26 @@ export async function initExplorerUI() {
         }
       }
 
-      const li = ev.target.closest('li.fe-tree-node');
+      const target = ev.target;
+      const li =
+        target instanceof Element
+          ? target.closest<HTMLElement>('li.fe-tree-node')
+          : null;
       if (!li) return;
       const rel = li.dataset.rel;
       const kind = li.dataset.kind;
       if (!rel) return;
 
       // Checkbox click in select mode - let it bubble to the checkbox handler
-      if (ev.target.closest('.fe-entry-checkbox')) {
+      if (target instanceof Element && target.closest('.fe-entry-checkbox')) {
         return;
       }
 
       // Card menu open
-      const menuBtn = ev.target.closest('.fe-card-menu-btn');
+      const menuBtn =
+        target instanceof Element
+          ? target.closest<HTMLElement>('.fe-card-menu-btn')
+          : null;
       if (menuBtn) {
         const entry = {
           rel,
@@ -3025,7 +3071,7 @@ export async function initExplorerUI() {
         } else {
           // Expand: ask backend for this directory listing
           li.dataset.open = 'true';
-          if (typeof window.__explorerBusSend === 'function') {
+          if (hasExplorerRpc()) {
             notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
           }
           
@@ -3037,7 +3083,7 @@ export async function initExplorerUI() {
       if (kind === 'file') {
         // In select mode, clicking a file toggles its checkbox
         if (selectModeDir) {
-          const checkbox = li.querySelector('.fe-entry-checkbox');
+          const checkbox = li.querySelector<HTMLInputElement>('.fe-entry-checkbox');
           if (checkbox) {
             checkbox.checked = !checkbox.checked;
             if (checkbox.checked) {
@@ -3114,822 +3160,19 @@ export async function initExplorerUI() {
 
 // --- Unified file open + jump helper ---
 async function openFileAndMaybeJump(rel, lineNumber = null, jumpOptions = {}) {
-  if (!window.appOpenFileRel) {
-    toast('File opener not available');
-    return;
-  }
-  try {
-    const alreadyOpen = rel && rel === activeFileRel;
-    const hasLineTarget = typeof lineNumber === 'number' && lineNumber >= 1;
-    const openOptions = {};
-    if (hasLineTarget) {
-      openOptions.line = lineNumber;
-      if (Object.prototype.hasOwnProperty.call(jumpOptions || {}, 'focus')) {
-        openOptions.focus = Boolean(jumpOptions.focus);
-      }
-      if (Object.prototype.hasOwnProperty.call(jumpOptions || {}, 'scrollToTop')) {
-        openOptions.scrollToTop = Boolean(jumpOptions.scrollToTop);
-      }
-      if (typeof jumpOptions?.scrollY === 'string') {
-        openOptions.scrollY = jumpOptions.scrollY;
-      }
-    }
-
-    if (!alreadyOpen) {
-      expandToFile(rel);
-      await window.appOpenFileRel(rel, uiState.projectPath || null, openOptions);
-    }
-
-    closeDrawerIfMobile();
-
-    if (alreadyOpen && hasLineTarget && window.jumpToCurrentFileLine) {
-      await window.jumpToCurrentFileLine(lineNumber, jumpOptions);
-    }
-  } catch (err) {
-    toast('Failed to open file: ' + (err?.message || 'unknown error'));
-  }
+  return explorerFileOpenBridge.openFileAndMaybeJump(rel, lineNumber, jumpOptions);
 }
 
 // --- Search / Review overlay wiring ---
 
 function openSearchOverlay() {
-  explorerSearchController.openSearchOverlay();
-}
-
-function closeSearchOverlay() {
-  explorerSearchController.closeSearchOverlay();
-}
-
-function clearSearchResults(preserveQuery = false) {
-  explorerSearchController.clearSearchResults(preserveQuery);
-}
-
-function scheduleSearch(query) {
-  explorerSearchController.scheduleSearch(query);
-}
-
-async function performSearch(query) {
-  return explorerSearchController.performSearch(query);
+  explorerSearchOverlayController.openSearchOverlay();
 }
 
 async function fetchChangesResults(force = false) {
-  return explorerSearchController.fetchChangesResults(force);
-}
-
-async function fetchReviewResults(force = false) {
-  return explorerSearchController.fetchReviewResults(force);
-}
-
-function setSearchMode(mode) {
-  explorerSearchController.setSearchMode(mode);
+  return explorerSearchOverlayController.fetchChangesResults(force);
 }
 
 function renderSearchOverlay() {
-  const overlay = document.getElementById('fe-search-overlay');
-  if (!overlay) return;
-
-  overlay.style.display = searchOverlayVisible ? 'flex' : 'none';
-  if (!searchOverlayVisible) return;
-
-  if (!overlay.hasChildNodes()) {
-    const header = document.createElement('div');
-    header.className = 'fe-search-header';
-
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'fe-search-close';
-    closeBtn.textContent = '✕';
-    closeBtn.onclick = closeSearchOverlay;
-    header.appendChild(closeBtn);
-
-    const modeContainer = document.createElement('div');
-    modeContainer.className = 'fe-search-mode';
-
-    const modes = [
-      { id: 'name', label: 'By name' },
-      { id: 'content', label: 'By contents' },
-      { id: 'changes', label: 'By changes' },
-      { id: 'review', label: 'Review edits' },
-      { id: 'diagnostics', label: 'Diagnostics' },
-    ];
-
-    modes.forEach((m) => {
-      const btn = document.createElement('button');
-      btn.textContent = m.label;
-      btn.dataset.mode = m.id;
-      btn.onclick = () => setSearchMode(m.id);
-      if (m.id === searchMode) btn.classList.add('active');
-      modeContainer.appendChild(btn);
-    });
-
-    header.appendChild(modeContainer);
-
-    const inputContainer = document.createElement('div');
-    inputContainer.className = 'fe-search-input-container';
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.id = 'fe-search-input';
-    input.placeholder =
-      searchMode === 'name' ? 'Search files/folders...' : 'Search in files...';
-    input.value = searchQuery;
-    input.oninput = (e) => scheduleSearch(e.target.value);
-    input.onkeydown = (e) => {
-      if (e.key === 'Escape') closeSearchOverlay();
-    };
-    inputContainer.appendChild(input);
-
-    const clearBtn = document.createElement('button');
-    clearBtn.textContent = '✕';
-    clearBtn.className = 'fe-search-clear';
-    clearBtn.style.display = searchQuery ? 'block' : 'none';
-    clearBtn.onclick = () => {
-      searchQuery = '';
-      searchResults = null;
-      renderSearchOverlay();
-    };
-    inputContainer.appendChild(clearBtn);
-
-    const changesToolbar = document.createElement('div');
-    changesToolbar.className = 'fe-search-changes-toolbar';
-
-    // Diff base selector (mirrors Git footer, backed by HistoryStore)
-    const headLabel = document.createElement('span');
-    headLabel.className = 'fe-search-changes-label';
-    headLabel.textContent = 'Diff vs';
-    changesToolbar.appendChild(headLabel);
-
-    const headBtn = document.createElement('button');
-    headBtn.type = 'button';
-    headBtn.id = 'fe-search-base-btn';
-    headBtn.className = 'fe-search-head-btn';
-    headBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, false)} ▾`;
-    headBtn.disabled = gitDiffBase.mode === 'none';
-    headBtn.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      if (!searchBaseDropdown) return;
-      toggleDiffBaseMenu(headBtn, searchBaseDropdown);
-    });
-    changesToolbar.appendChild(headBtn);
-    searchBaseBtn = headBtn;
-
-    const headDropdown = document.createElement('div');
-    headDropdown.id = 'fe-search-base-dd';
-    headDropdown.className = 'fe-dropdown';
-    changesToolbar.appendChild(headDropdown);
-    searchBaseDropdown = headDropdown;
-
-    // Filter Controls
-    const filterContainer = document.createElement('div');
-    filterContainer.className = 'fe-changes-filter-container';
-
-    const filterLabel = document.createElement('label');
-    filterLabel.className = 'fe-changes-filter-label';
-    const filterCheck = document.createElement('input');
-    filterCheck.type = 'checkbox';
-    filterCheck.id = 'fe-changes-filter-active';
-    filterLabel.appendChild(filterCheck);
-    filterLabel.appendChild(document.createTextNode(' Filter'));
-
-    const filenameLabel = document.createElement('label');
-    filenameLabel.className = 'fe-changes-filter-label';
-    const filenameCheck = document.createElement('input');
-    filenameCheck.type = 'checkbox';
-    filenameCheck.id = 'fe-changes-filter-filename';
-    filenameCheck.disabled = true;
-    filenameLabel.appendChild(filenameCheck);
-    filenameLabel.appendChild(document.createTextNode(' Filename only'));
-
-    const hunksLabel = document.createElement('label');
-    hunksLabel.className = 'fe-changes-filter-label';
-    const hunksCheck = document.createElement('input');
-    hunksCheck.type = 'checkbox';
-    hunksCheck.id = 'fe-changes-filter-hunks';
-    hunksCheck.disabled = true;
-    hunksLabel.appendChild(hunksCheck);
-    hunksLabel.appendChild(document.createTextNode(' Hunks only'));
-
-    const filterInput = document.createElement('input');
-    filterInput.type = 'text';
-    filterInput.id = 'fe-changes-filter-input';
-    filterInput.className = 'fe-changes-filter-input';
-    filterInput.placeholder = 'Filter changes...';
-    filterInput.style.display = 'none';
-
-    filterCheck.addEventListener('change', () => {
-      const active = filterCheck.checked;
-      filenameCheck.disabled = !active;
-      hunksCheck.disabled = !active;
-      filterInput.style.display = active ? 'inline-block' : 'none';
-      if (active) filterInput.focus();
-      applyChangesFilter();
-    });
-
-    filenameCheck.addEventListener('change', () => {
-      if (filenameCheck.checked) hunksCheck.checked = false;
-      applyChangesFilter();
-    });
-
-    hunksCheck.addEventListener('change', () => {
-      if (hunksCheck.checked) filenameCheck.checked = false;
-      applyChangesFilter();
-    });
-
-    filterInput.addEventListener('input', applyChangesFilter);
-
-    filterContainer.appendChild(filterLabel);
-    filterContainer.appendChild(filenameLabel);
-    filterContainer.appendChild(hunksLabel);
-    filterContainer.appendChild(filterInput);
-
-    changesToolbar.appendChild(filterContainer);
-
-    const resultsContainer = document.createElement('div');
-    resultsContainer.className = 'fe-search-results';
-
-    overlay.appendChild(header);
-    overlay.appendChild(inputContainer);
-    overlay.appendChild(changesToolbar);
-    overlay.appendChild(resultsContainer);
-  }
-
-  const resultsContainer = overlay.querySelector('.fe-search-results');
-  const input = overlay.querySelector('#fe-search-input');
-  const clearBtn = overlay.querySelector('.fe-search-clear');
-  const modeButtons = overlay.querySelectorAll('.fe-search-mode button');
-  const filterContainer = overlay.querySelector('.fe-changes-filter-container');
-
-  modeButtons.forEach((btn) => {
-    btn.classList.toggle('active', btn.dataset.mode === searchMode);
-  });
-
-  if (input) {
-    input.placeholder =
-      searchMode === 'name' ? 'Search files/folders...' : 'Search in files...';
-    input.value = searchQuery;
-    input.style.display =
-      searchMode === 'name' || searchMode === 'content' ? 'block' : 'none';
-  }
-
-  if (clearBtn) {
-    clearBtn.style.display =
-      searchQuery && (searchMode === 'name' || searchMode === 'content')
-        ? 'block'
-        : 'none';
-  }
-
-  if (filterContainer) {
-    filterContainer.style.display = searchMode === 'changes' ? 'flex' : 'none';
-  }
-
-  const changesToolbar = overlay.querySelector('.fe-search-changes-toolbar');
-  if (changesToolbar) {
-    changesToolbar.style.display = searchMode === 'changes' ? 'flex' : 'none';
-  }
-
-  const headBtn = overlay.querySelector('#fe-search-base-btn');
-  if (headBtn) {
-    headBtn.textContent = `${formatDiffBaseLabel(gitDiffBase, false)} ▾`;
-    headBtn.disabled = gitDiffBase.mode === 'none';
-  }
-
-  if (!resultsContainer) return;
-  renderSearchOverlayBody(
-    resultsContainer,
-    { searchMode, searchLoading, searchError, searchResults },
-    {
-      renderNameResults: (container, data) =>
-        renderNameResultsModule(container, data, {
-          expandToFile,
-          getProjectPath: () => uiState.projectPath,
-          closeDrawerIfMobile,
-          toast,
-          closeSearchOverlay,
-          expandToPath,
-          applySetiIconToSpan,
-          basename,
-        }),
-      renderContentResults: (container, data) =>
-        renderContentResultsModule(container, data, {
-          expandToFile,
-          getProjectPath: () => uiState.projectPath,
-          closeDrawerIfMobile,
-          toast,
-        }),
-      renderChangesResults,
-      renderReviewResults,
-      renderDiagnosticsResults: (container) => {
-        const proj = uiState.projectPath || '';
-        const activeAbs = activeFileRel && proj
-          ? proj + '/' + activeFileRel : null;
-        renderExplorerDiagnostics(container, _explorerDiagDetail, {
-          openFileAndMaybeJump,
-          toast,
-          mentionAgent: (payload) => {
-            if (!hasExplorerRpc()) {
-              throw new Error('Explorer RPC unavailable');
-            }
-            notifyExplorer(EXPLORER_RPC_METHODS.mentionAgent, payload);
-          },
-          getProjectPath: () => uiState.projectPath,
-          activeFileAbs: activeAbs,
-        });
-      },
-    },
-  );
-}
-
-function renderChangesResults(container, data) {
-  lastChangesContainer = container;
-  lastChangesData = data || null;
-  applyChangesFilter();
-}
-
-function applyChangesFilter() {
-  if (!lastChangesContainer || !lastChangesData) return;
-
-  const container = lastChangesContainer;
-  const data = lastChangesData;
-
-  const filterActive =
-    document.getElementById('fe-changes-filter-active')?.checked;
-  const filenameOnly =
-    document.getElementById('fe-changes-filter-filename')?.checked;
-  const hunksOnly =
-    document.getElementById('fe-changes-filter-hunks')?.checked;
-  const query = (
-    document.getElementById('fe-changes-filter-input')?.value || ''
-  ).toLowerCase();
-
-  let entries = data.changes || [];
-
-  if (filterActive && query) {
-    entries = entries
-      .map((change) => {
-        const newChange = { ...change };
-        const filenameMatch = change.rel.toLowerCase().includes(query);
-
-        if (hunksOnly) {
-          const matchingHunks = (change.hunks || []).filter((hunk) => {
-            for (const line of hunk.lines || []) {
-              if (line.text.toLowerCase().includes(query)) return true;
-            }
-            return false;
-          });
-
-          if (matchingHunks.length > 0) {
-            newChange.hunks = matchingHunks;
-            return newChange;
-          }
-          if (filenameMatch) {
-            newChange.hunks = [];
-            return newChange;
-          }
-          return null;
-        }
-
-        if (filenameMatch) return newChange;
-
-        if (!filenameOnly) {
-          const hunks = change.hunks || [];
-          for (const hunk of hunks) {
-            for (const line of hunk.lines || []) {
-              if (line.text.toLowerCase().includes(query)) return newChange;
-            }
-          }
-        }
-
-        return null;
-      })
-      .filter(Boolean);
-  }
-
-  const wasOriginallyEmpty = (data.changes || []).length === 0;
-  renderChangesList(
-    container,
-    { ...data, changes: entries, total: data.changes?.length },
-    wasOriginallyEmpty,
-    query,
-  );
-}
-
-function renderChangesList(container, data, wasOriginallyEmpty, query) {
-  container.innerHTML = '';
-  if (!data) {
-    container.innerHTML = '<div class="fe-search-empty">No changes loaded</div>';
-    return;
-  }
-
-  if (data.git === false) {
-    container.innerHTML =
-      '<div class="fe-search-empty">Open a Git project to view changes.</div>';
-    return;
-  }
-
-  const entries = data.changes || [];
-
-  const baseInfo = data.base || gitDiffBase;
-  if (baseInfo && baseInfo.mode !== 'none') {
-    const note = document.createElement('div');
-    note.className = 'fe-search-changes-note';
-    note.style.margin = '4px 0 8px';
-    const ref =
-      (baseInfo.commit && baseInfo.commit.short) ||
-      baseInfo.ref ||
-      gitDiffBase.ref ||
-      'HEAD';
-    note.textContent = `Comparing against ${ref}`;
-    container.appendChild(note);
-  }
-
-  if (!entries.length) {
-    const empty = document.createElement('div');
-    empty.className = 'fe-search-empty';
-    empty.textContent = wasOriginallyEmpty
-      ? 'Working tree is clean.'
-      : 'No matching changes found.';
-    container.appendChild(empty);
-    return;
-  }
-
-  const list = document.createElement('div');
-  list.className = 'fe-search-changes';
-
-  entries.forEach((change) => {
-    const group = document.createElement('div');
-    group.className = 'fe-search-file-group fe-search-change-group';
-    group.dataset.line = firstDiffLine(change) || 1;
-    group.onclick = async (event) => {
-      if (typeof window.__cm6EnsureInlineDiffs === 'function') {
-        try {
-          await window.__cm6EnsureInlineDiffs(true);
-        } catch (err) {
-          console.warn('Failed to auto-enable inline diffs:', err);
-        }
-      }
-      const lineEl = event?.target?.closest('[data-line]');
-      const lineFromTarget = lineEl ? Number(lineEl.dataset.line || 0) : 0;
-      const fallbackLine =
-        Number(event?.currentTarget?.dataset?.line || 0) || firstDiffLine(change);
-      const line = lineFromTarget || fallbackLine;
-      await openFileAndMaybeJump(change.rel, line || firstDiffLine(change), {
-        focus: false,
-      });
-    };
-
-    const header = document.createElement('div');
-    header.className = 'fe-search-file-header fe-search-change-header';
-
-    const title = document.createElement('span');
-    title.className = 'fe-search-change-path';
-    title.textContent = change.rel;
-    header.appendChild(title);
-
-    const meta = document.createElement('div');
-    meta.className = 'fe-search-change-meta';
-    const statusText = document.createElement('span');
-    statusText.className = 'fe-search-change-status-text';
-    statusText.textContent = change.statusText || '';
-    meta.appendChild(statusText);
-    header.appendChild(meta);
-    group.appendChild(header);
-
-    if (change.hunks && change.hunks.length) {
-      const hunksContainer = document.createElement('div');
-      hunksContainer.className = 'fe-search-change-hunks';
-
-      change.hunks.forEach((hunk) => {
-        const hunkBlock = document.createElement('div');
-        hunkBlock.className = 'fe-search-hunk';
-
-        const hunkHeader = document.createElement('div');
-        hunkHeader.className = 'fe-search-hunk-header';
-        hunkHeader.textContent = formatHunkHeader(hunk);
-        hunkHeader.dataset.line = Number(hunk.newStart || hunk.oldStart || 1);
-        hunkBlock.appendChild(hunkHeader);
-
-        const diffRows = document.createElement('div');
-        diffRows.className = 'fe-search-diff-rows';
-
-        let oldLine = hunk.oldStart;
-        let newLine = hunk.newStart;
-
-        hunk.lines.forEach((line) => {
-          const row = document.createElement('div');
-          row.className = 'fe-search-diff-row';
-          row.dataset.line =
-            line.type === 'add' || line.type === 'add-draft'
-              ? newLine
-              : line.type === 'del' || line.type === 'del-draft'
-                ? oldLine
-                : newLine || oldLine || 1;
-
-          const lineNum = document.createElement('span');
-          lineNum.className = 'fe-search-diff-line-num';
-
-          const sign = document.createElement('span');
-          sign.className = 'fe-search-diff-sign';
-
-          const text = document.createElement('pre');
-          text.className = 'fe-search-diff-text';
-          text.textContent = line.text;
-
-          if (line.type === 'add' || line.type === 'add-draft') {
-            row.classList.add(line.type === 'add-draft' ? 'is-add-draft' : 'is-add');
-            lineNum.textContent = newLine;
-            sign.textContent = '+';
-            newLine++;
-          } else if (line.type === 'del' || line.type === 'del-draft') {
-            row.classList.add(line.type === 'del-draft' ? 'is-del-draft' : 'is-del');
-            lineNum.textContent = oldLine;
-            sign.textContent = '-';
-            oldLine++;
-          } else {
-            row.classList.add('is-context');
-            lineNum.textContent = newLine || oldLine;
-            sign.textContent = '';
-            newLine++;
-            oldLine++;
-          }
-
-          row.appendChild(lineNum);
-          row.appendChild(sign);
-          row.appendChild(text);
-          diffRows.appendChild(row);
-        });
-
-        hunkBlock.appendChild(diffRows);
-        hunksContainer.appendChild(hunkBlock);
-      });
-
-      group.appendChild(hunksContainer);
-    }
-
-    list.appendChild(group);
-  });
-
-  container.appendChild(list);
-}
-
-function renderReviewResults(container, data) {
-  const entries = data.results || [];
-
-  const toolbar = document.createElement('div');
-  toolbar.className = 'fe-review-toolbar';
-
-  const refreshBtn = document.createElement('button');
-  refreshBtn.textContent = 'Refresh';
-  refreshBtn.className = 'fe-btn fe-btn-sm';
-  refreshBtn.onclick = () => fetchReviewResults(true);
-  toolbar.appendChild(refreshBtn);
-
-  // Select All / Clear Selection toggle button
-  const selectAllBtn = document.createElement('button');
-  selectAllBtn.className = 'fe-btn fe-btn-sm';
-  selectAllBtn.style.marginLeft = '8px';
-  const updateSelectAllLabel = () => {
-    const allSelected = entries.length > 0 && entries.every(e => selectedReviewFiles.has(e.rel));
-    selectAllBtn.textContent = allSelected ? 'Clear Selection' : 'Select All';
-  };
-  updateSelectAllLabel();
-  selectAllBtn.onclick = () => {
-    const allSelected = entries.length > 0 && entries.every(e => selectedReviewFiles.has(e.rel));
-    if (allSelected) {
-      // Clear all
-      entries.forEach(e => selectedReviewFiles.delete(e.rel));
-    } else {
-      // Select all
-      entries.forEach(e => selectedReviewFiles.add(e.rel));
-    }
-    // Update checkboxes
-    container.querySelectorAll('.fe-review-checkbox').forEach(cb => {
-      cb.checked = selectedReviewFiles.has(cb.dataset.rel);
-    });
-    updateSelectAllLabel();
-  };
-  toolbar.appendChild(selectAllBtn);
-
-  const saveBtn = document.createElement('button');
-  saveBtn.textContent = 'Save Selected';
-  saveBtn.className = 'fe-btn fe-btn-sm fe-btn-primary';
-  saveBtn.style.marginLeft = '8px';
-  saveBtn.onclick = async () => {
-    const selected = Array.from(selectedReviewFiles);
-    if (!selected.length) return toast('No files selected');
-
-    if (!hasExplorerRpc()) {
-      toast('Review bus unavailable');
-      return;
-    }
-
-    try {
-      notifyExplorer(EXPLORER_RPC_METHODS.reviewSave, { files: selected });
-    } catch (e) {
-      toast(e.message || 'Save failed');
-    }
-  };
-  toolbar.appendChild(saveBtn);
-
-  const discardBtn = document.createElement('button');
-  discardBtn.textContent = 'Discard Selected';
-  discardBtn.className = 'fe-btn fe-btn-sm fe-btn-danger';
-  discardBtn.style.marginLeft = '8px';
-  discardBtn.onclick = async () => {
-    const selected = Array.from(selectedReviewFiles);
-    if (!selected.length) return toast('No files selected');
-    if (!window.confirm(`Discard drafts for ${selected.length} file(s)?`)) return;
-
-    if (!hasExplorerRpc()) {
-      toast('Review bus unavailable');
-      return;
-    }
-
-    try {
-      notifyExplorer(EXPLORER_RPC_METHODS.reviewDiscard, { files: selected });
-    } catch (e) {
-      toast(e.message || 'Discard failed');
-    }
-  };
-  toolbar.appendChild(discardBtn);
-
-  container.appendChild(toolbar);
-
-  if (!entries.length) {
-    const empty = document.createElement('div');
-    empty.className = 'fe-search-empty';
-    empty.textContent = 'No pending draft edits.';
-    container.appendChild(empty);
-    return;
-  }
-
-  const list = document.createElement('div');
-  list.className = 'fe-review-list';
-
-  entries.forEach((entry) => {
-    const group = document.createElement('div');
-    group.className =
-      'fe-search-file-group fe-search-change-group fe-review-group';
-    group.dataset.line = firstDiffLine(entry) || 1;
-    group.onclick = async (event) => {
-      if (event?.target?.closest('.fe-review-checkbox')) return;
-      const lineEl = event?.target?.closest('[data-line]');
-      const line = lineEl
-        ? Number(lineEl.dataset.line || 0)
-        : Number(event?.currentTarget?.dataset?.line || 0);
-      if (typeof window.__cm6EnsureDraftDiffs === 'function') {
-        try {
-          await window.__cm6EnsureDraftDiffs(true);
-        } catch {
-          /* ignore */
-        }
-      }
-      if (typeof window.__cm6EnsureInlineDiffs === 'function') {
-        try {
-          await window.__cm6EnsureInlineDiffs(true);
-        } catch {
-          /* ignore */
-        }
-      }
-      await openFileAndMaybeJump(
-        entry.rel,
-        line || firstDiffLine(entry),
-        { focus: false },
-      );
-    };
-
-    const header = document.createElement('div');
-    header.className = 'fe-search-file-header fe-search-change-header';
-    header.style.cursor = 'default';
-
-    const check = document.createElement('input');
-    check.type = 'checkbox';
-    check.className = 'fe-review-checkbox';
-    check.value = entry.rel;
-    check.dataset.rel = entry.rel;  // For Select All to update checkboxes
-    if (!entry.has_draft) check.disabled = true;
-    check.checked = selectedReviewFiles.has(entry.rel);
-    check.onchange = (e) => {
-      if (e.target.checked) selectedReviewFiles.add(entry.rel);
-      else selectedReviewFiles.delete(entry.rel);
-    };
-    check.style.marginRight = '8px';
-    header.appendChild(check);
-
-    const title = document.createElement('span');
-    title.className = 'fe-search-change-path';
-    title.textContent = entry.rel;
-    title.style.cursor = 'pointer';
-    title.onclick = async () => {
-      if (typeof window.__cm6EnsureDraftDiffs === 'function') {
-        try {
-          await window.__cm6EnsureDraftDiffs(true);
-        } catch {
-          /* ignore */
-        }
-      }
-      if (typeof window.__cm6EnsureInlineDiffs === 'function') {
-        try {
-          await window.__cm6EnsureInlineDiffs(true);
-        } catch {
-          /* ignore */
-        }
-      }
-      await openFileAndMaybeJump(entry.rel, firstDiffLine(entry), {
-        focus: false,
-      });
-    };
-    header.appendChild(title);
-
-    const meta = document.createElement('div');
-    meta.className = 'fe-search-change-meta';
-
-    if (entry.has_draft) {
-      const badge = document.createElement('span');
-      badge.className = 'fe-badge fe-badge-draft';
-      badge.textContent = 'Draft';
-      badge.style.background = '#facc15';
-      badge.style.color = '#000';
-      badge.style.padding = '2px 6px';
-      badge.style.borderRadius = '4px';
-      badge.style.fontSize = '0.75rem';
-      meta.appendChild(badge);
-    }
-
-    header.appendChild(meta);
-    group.appendChild(header);
-
-    if (entry.hunks && entry.hunks.length) {
-      const hunksContainer = document.createElement('div');
-      hunksContainer.className = 'fe-search-change-hunks';
-
-      entry.hunks.forEach((hunk) => {
-        const hunkBlock = document.createElement('div');
-        hunkBlock.className = 'fe-search-hunk';
-
-        const hunkHeader = document.createElement('div');
-        hunkHeader.className = 'fe-search-hunk-header';
-        hunkHeader.textContent = formatHunkHeader(hunk);
-        hunkHeader.dataset.line = Number(hunk.newStart || hunk.oldStart || 1);
-        hunkBlock.appendChild(hunkHeader);
-
-        const diffRows = document.createElement('div');
-        diffRows.className = 'fe-search-diff-rows';
-
-        let oldLine = hunk.oldStart;
-        let newLine = hunk.newStart;
-
-        hunk.lines.forEach((line) => {
-          const row = document.createElement('div');
-          row.className = 'fe-search-diff-row';
-          row.dataset.line =
-            line.type === 'add-draft'
-              ? newLine
-              : line.type === 'del-draft'
-                ? oldLine
-                : newLine || oldLine || 1;
-
-          const lineNum = document.createElement('span');
-          lineNum.className = 'fe-search-diff-line-num';
-
-          const sign = document.createElement('span');
-          sign.className = 'fe-search-diff-sign';
-
-          const text = document.createElement('pre');
-          text.className = 'fe-search-diff-text';
-          text.textContent = line.text;
-
-          if (line.type === 'add-draft') {
-            row.classList.add('is-add-draft');
-            lineNum.textContent = newLine;
-            sign.textContent = '+';
-            newLine++;
-          } else if (line.type === 'del-draft') {
-            row.classList.add('is-del-draft');
-            lineNum.textContent = oldLine;
-            sign.textContent = '-';
-            oldLine++;
-          } else {
-            row.classList.add('is-context');
-            lineNum.textContent = newLine || oldLine;
-            sign.textContent = '';
-            newLine++;
-            oldLine++;
-          }
-
-          row.appendChild(lineNum);
-          row.appendChild(sign);
-          row.appendChild(text);
-          diffRows.appendChild(row);
-        });
-
-        hunkBlock.appendChild(diffRows);
-        hunksContainer.appendChild(hunkBlock);
-      });
-
-      group.appendChild(hunksContainer);
-    }
-
-    list.appendChild(group);
-  });
-
-  container.appendChild(list);
+  explorerSearchOverlayController.renderSearchOverlay();
 }

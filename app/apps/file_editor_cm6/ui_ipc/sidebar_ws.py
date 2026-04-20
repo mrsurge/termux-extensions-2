@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 
 from ..explorer_helper import get_project_root
-from ..explorer_manager import manager as _explorer_manager
 from ..stores import get_history_store, get_preferences_store
 
 _registered_hosts: set[str] = set()
@@ -195,7 +194,7 @@ async def on_sidebar_event(ns, sid, data):
         payload = data.get("payload")
         if isinstance(payload, dict):
             try:
-                await _broadcast_agent_open(payload)
+                await _broadcast_agent_open(ns, payload)
             except Exception as exc:
                 print(f"[sidebar_ipc] sidebar:event agent_edit route failed: {exc}", flush=True)
         return
@@ -203,7 +202,7 @@ async def on_sidebar_event(ns, sid, data):
         payload = data.get("payload")
         if isinstance(payload, dict):
             try:
-                await _broadcast_agent_open(payload)
+                await _broadcast_agent_open(ns, payload)
             except Exception as exc:
                 print(f"[sidebar_ipc] sidebar:event agent_open route failed: {exc}", flush=True)
         return
@@ -238,13 +237,18 @@ async def on_sidebar_cwd_set(ns, sid, data):
     return {"ok": True}
 
 
-async def _broadcast_agent_open(data: dict) -> None:
+async def route_backend_open_request(
+    _ns,
+    data: dict,
+    *,
+    source_name: str = "sidebar_ipc",
+    log_prefix: str = "[sidebar_ipc] agent_open",
+    request_prefix: str = "sidebar",
+) -> None:
     history = get_history_store()
     project = history.get_active_project() or str(get_project_root())
     if not project:
         raise ValueError("no active project")
-    project_key = str(project)
-
     project_path = Path(project).expanduser()
     raw_path = (
         str(
@@ -286,34 +290,36 @@ async def _broadcast_agent_open(data: dict) -> None:
     if target.is_dir():
         raise IsADirectoryError("target is a directory")
 
+    payload = {
+        "rel": rel,
+        "path": str(target),
+        "column": data.get("column"),
+        "source": data.get("source") or source_name,
+        "conversation_id": data.get("conversation_id"),
+    }
     try:
         line = int(data.get("line"))
     except Exception:
-        line = 1
-    if line < 1:
-        line = 1
-
-    message = {
-        "type": "agent:open",
-        "payload": {
-            "rel": rel,
-            "path": str(target),
-            "line": line,
-            "column": data.get("column"),
-            "source": data.get("source") or "sidebar_ipc",
-            "conversation_id": data.get("conversation_id"),
-        },
-    }
-    try:
-        conn_n = _explorer_manager.get_connection_count(project_key)
-    except Exception:
-        conn_n = -1
+        line = None
+    if isinstance(line, int) and line >= 1:
+        payload["line"] = line
     print(
-        f"[sidebar_ipc] agent_open broadcast project_key={project_key} "
-        f"rel={rel} line={line} conn={conn_n}",
+        f"{log_prefix} editor_backend project_key={project} "
+        f"rel={rel} line={line}",
         flush=True,
     )
-    await _explorer_manager.broadcast(project_key, message)
+    from ..monaco_editor.editor_ws import emit_editor_open_from_backend
+
+    request_id = f"{request_prefix}_{int(time.time() * 1000)}"
+    await emit_editor_open_from_backend(
+        payload,
+        source_client=source_name,
+        request_id=request_id,
+    )
+
+
+async def _broadcast_agent_open(_ns, data: dict) -> None:
+    await route_backend_open_request(_ns, data)
 
 
 async def on_sidebar_agent_edit(ns, sid, data):
@@ -328,7 +334,7 @@ async def on_sidebar_agent_edit(ns, sid, data):
         flush=True,
     )
     try:
-        await _broadcast_agent_open(data)
+        await _broadcast_agent_open(ns, data)
     except Exception as exc:
         print(f"[sidebar_ipc] agent_edit route failed: {exc}", flush=True)
 
@@ -342,7 +348,7 @@ async def on_sidebar_agent_open(ns, sid, data):
         flush=True,
     )
     try:
-        await _broadcast_agent_open(data)
+        await _broadcast_agent_open(ns, data)
     except Exception as exc:
         print(f"[sidebar_ipc] agent_open route failed: {exc}", flush=True)
 

@@ -8,6 +8,7 @@
  *   setCachedProjectRoot: (path: string | null) => void,
  *   getCurrentPath: () => string,
  *   setCurrentPath: (path: string) => void,
+ *   reconcileCurrentPath?: (path: string) => void,
  *   getEditorSocket: () => any,
  *   getEditorViewState: () => any,
  *   updatePreference: (key: string, value: any) => Promise<boolean>,
@@ -85,7 +86,17 @@ export function createEditorStateController(deps) {
 
     Object.defineProperty(window, 'currentPath', {
       get: () => deps.getCurrentPath(),
-      set: (value) => { deps.setCurrentPath(value); },
+      set: (value) => {
+        if (typeof value === 'string' && value) {
+          if (typeof deps.reconcileCurrentPath === 'function') {
+            deps.reconcileCurrentPath(value);
+            return;
+          }
+          deps.setCurrentPath(value);
+          return;
+        }
+        deps.setCurrentPath('');
+      },
       configurable: true,
     });
   }

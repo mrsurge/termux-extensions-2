@@ -19,7 +19,7 @@
  *   setCurrentModeLanguage: (lang: string | null) => void,
  *   detectLanguageFromFilename: (path: string) => string,
  *   setLastSha256: (sha: string | null) => void,
- *   emitEditorOpenRequest: (path: string, options?: any) => void,
+ *   requestBackendOpen: (payload: any) => Promise<any>,
  *   awaitEditorOpen: (requestId: string, path: string, timeoutMs?: number) => Promise<any>,
  *   setLastSavedContent: (content: string) => void,
  *   markUnsaved: (flag: boolean) => void,
@@ -61,6 +61,8 @@ export function createOpenFlowController(deps) {
     if (Object.prototype.hasOwnProperty.call(optionsAny, 'scrollToTop')) {
       openRequestOptions.scroll_to_top = Boolean(optionsAny.scrollToTop);
     }
+    const openRequestId = `editor_open_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    openRequestOptions.request_id = openRequestId;
     if (!path) throw new Error('Path is empty');
     deps.setStatus('Opening...');
 
@@ -82,37 +84,22 @@ export function createOpenFlowController(deps) {
       deps.setRestoredSessionActive(false);
       deps.setIndicatorInactive();
 
-      let contentPayload;
-      try {
-        const check = await deps.apiPost('editor/check_cache', { path: resolvedTarget });
-        if (check && check.ok && check.has_draft) {
-          contentPayload = { path: resolvedTarget, content: check.content, sha256: check.base_sha256 };
-          console.log('[Editor] Opening cached draft for', resolvedTarget);
-        }
-      } catch (e) { console.warn('Cache check failed', e); }
-
-      if (!contentPayload) contentPayload = await deps.apiGet(`read?path=${encodeURIComponent(path)}`);
-      const payload = contentPayload;
-
-      const resolved = deps.toAbsolute(payload.path || path, null, deps.homeDir);
-      deps.setCurrentPath(resolved);
-      deps.setCurrentPathExists(true);
-      deps.setLastPickerPath(deps.parentDir(resolved));
-      deps.setCurrentModeLanguage(deps.detectLanguageFromFilename(resolved));
-      deps.setLastSha256(payload.sha256 || null);
-      deps.emitEditorOpenRequest(resolved, openRequestOptions);
+      await deps.requestBackendOpen({
+        path: resolvedTarget,
+        ...openRequestOptions,
+      });
+      await deps.awaitEditorOpen(openRequestId, resolvedTarget, 10000);
 
       deps.setLastSavedContent('');
       deps.markUnsaved(false);
-      deps.updatePathDisplay();
       deps.syncSessionPath();
       deps.setStatus('');
 
-      deps.openWebSocket(resolved);
+      deps.openWebSocket(resolvedTarget);
 
       try {
         const activity = await deps.apiPost('state/file_activity', {
-          path: resolved,
+          path: resolvedTarget,
           project: deps.getCachedProjectRoot() || projectState.activeProject,
         });
         if (activity?.state || activity?.data?.state) {

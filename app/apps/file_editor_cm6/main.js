@@ -3,7 +3,7 @@
 // Iframe-based NiceGUI Editor Integration
 
 // @ts-check
-import { initExplorerUI } from './static/js/explorer.js';
+import { initExplorerUI } from './static/js/explorer.ts';
 import { createTerminalDrawer } from './static/js/terminal.js';
 import { initBranchMenu } from './static/js/git_menu.js';
 // Hardcoded extension imports for now; will be dynamically loaded later.
@@ -93,6 +93,17 @@ let agentShortcutLoadLabel = null;
 let agentShortcutLoadDD = null;
 let editorViewState = null; // Loaded from backend at startup via /editor/view_state
 let cachedProjectRoot = null;
+
+// Host file-state must be declared before any early reconciler/helper functions
+// that read or write it, otherwise the built host bundle can split the binding.
+let currentPath = '';
+let currentPathExists = false;
+let lastSavedContent = '';
+let unsaved = false;
+var restoredSessionActive = false;
+var restoredSessionPath = null;
+let currentModeLanguage = null;
+let lastPickerPath = HOME_DIR;
 
 function _resolveUiPrefsWaiters(ui) {
   if (!_uiPrefsWaiters.length) return;
@@ -705,18 +716,7 @@ function handleExplorerRpcNotification(method, params) {
         abs = projRoot ? toAbsolute(payload.rel, projRoot, HOME_DIR) : null;
       }
       if (abs) {
-        try { currentPath = abs; } catch (_) {}
-        try { currentPathExists = true; } catch (_) {}
-        try { lastPickerPath = abs.slice(0, abs.lastIndexOf('/')); } catch (_) {}
-        try { currentModeLanguage = detectLanguageFromFilename(abs); } catch (_) {}
-        try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(abs); } catch (_) {}
-        try {
-          if (typeof updatePathDisplay === 'function') updatePathDisplay();
-          else {
-            const name = abs.slice(abs.lastIndexOf('/') + 1);
-            setToolbarFileName(name);
-          }
-        } catch (_) {}
+        _applyHostActivePath(abs, { forceToolbar: true });
       }
     } catch (_) {}
   }
@@ -797,33 +797,57 @@ var applyCacheIndicator = function (info) {
   try { window.__fePendingCacheIndicator = info; } catch (_) {}
 };
 
+function _applyHostActivePath(filePath, options = {}) {
+  const normalizedPath = (typeof filePath === 'string' && filePath) ? filePath : '';
+  if (!normalizedPath) return;
+
+  try { currentPath = normalizedPath; } catch (_) {}
+  try { currentPathExists = true; } catch (_) {}
+  try {
+    const trimmed = normalizedPath.replace(/\/+$/, '');
+    const idx = trimmed.lastIndexOf('/');
+    lastPickerPath = idx > 0 ? trimmed.slice(0, idx) : '/';
+  } catch (_) {}
+  try { currentModeLanguage = detectLanguageFromFilename(normalizedPath); } catch (_) {}
+  try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(normalizedPath); } catch (_) {}
+
+  const trimmed = normalizedPath.replace(/\/+$/, '');
+  const idx = trimmed.lastIndexOf('/');
+  const expectedName = idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+  const nameEl = window.fileNameEl || fileNameEl || null;
+  const forceToolbar = !!(options && options.forceToolbar);
+  const toolbarStale = !!(
+    nameEl
+    && (
+      nameEl.textContent !== expectedName
+      || nameEl.title !== expectedName
+    )
+  );
+
+  if (forceToolbar || toolbarStale || !nameEl) {
+    try {
+      if (typeof updatePathDisplay === 'function') updatePathDisplay();
+      else if (typeof window.updatePathDisplay === 'function') window.updatePathDisplay();
+      else setToolbarFileName(expectedName);
+    } catch (_) {
+      try { setToolbarFileName(expectedName); } catch (_) {}
+    }
+  }
+}
+
+function _setHostCurrentPathOnly(path) {
+  if (typeof path === 'string' && path) {
+    _applyHostActivePath(path);
+    return;
+  }
+  try { currentPath = ''; } catch (_) {}
+}
+
 function _applyEditorCacheState(data) {
   if (!data || typeof data !== 'object') return;
 
-  // Editor runtime always reports absolute paths; avoid pulling in path helpers here
-  // (this function is hit early during bootstrap, before some legacy helpers exist).
   const normalizedPath = (typeof data.path === 'string' && data.path) ? data.path : null;
-  if (normalizedPath) {
-    let prevPath = null;
-    try { prevPath = currentPath; } catch (_) { prevPath = null; }
-    const pathChanged = prevPath ? (normalizedPath !== prevPath) : true;
-    try { currentPath = normalizedPath; } catch (_) {}
-    try { currentPathExists = true; } catch (_) {}
-    try {
-      const trimmed = normalizedPath.replace(/\/+$/, '');
-      const idx = trimmed.lastIndexOf('/');
-      lastPickerPath = idx > 0 ? trimmed.slice(0, idx) : '/';
-    } catch (_) {}
-    // Notify the problems panel of the active file change
-    try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(normalizedPath); } catch (_) {}
-    const nameEl = window.fileNameEl || fileNameEl || null;
-    if (pathChanged || (nameEl && (!nameEl.textContent || nameEl.textContent === 'Untitled'))) {
-      try {
-        if (typeof updatePathDisplay === 'function') updatePathDisplay();
-        else if (typeof window.updatePathDisplay === 'function') window.updatePathDisplay();
-      } catch (_) {}
-    }
-  }
+
   if (typeof data.content_sha256 === 'string' && data.content_sha256.length === 64) {
     lastSha256 = data.content_sha256;
   }
@@ -1021,9 +1045,6 @@ function connectEditorSocket() {
       });
 
       editorSocket.on('editor:ssot', (snapshot) => {
-        // Host receives its own SSOT on connect — extract currentPath so the
-        // toolbar shows the filename even if the iframe's cache_state broadcast
-        // arrived before the host Socket.IO was connected (race fix).
         try {
           const p = snapshot && typeof snapshot === 'object' ? snapshot : {};
           const filePath = (p.file && p.file.path) || p.currentPath || null;
@@ -1045,22 +1066,6 @@ function connectEditorSocket() {
       });
 
       editorSocket.on('editor:open_complete', (payload) => {
-        try {
-          const p = payload && typeof payload === 'object' ? payload : {};
-          const filePath = typeof p.path === 'string' ? p.path : '';
-          if (filePath) {
-            try { currentPath = filePath; } catch (_) {}
-            try { currentPathExists = true; } catch (_) {}
-            try {
-              const trimmed = filePath.replace(/\/+$/, '');
-              const idx = trimmed.lastIndexOf('/');
-              lastPickerPath = idx > 0 ? trimmed.slice(0, idx) : '/';
-            } catch (_) {}
-            try { currentModeLanguage = detectLanguageFromFilename(filePath); } catch (_) {}
-            try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(filePath); } catch (_) {}
-            try { if (typeof updatePathDisplay === 'function') updatePathDisplay(); } catch (_) {}
-          }
-        } catch (_) {}
         _resolveEditorOpenWaiter(payload);
       });
 
@@ -1896,6 +1901,15 @@ window.addEventListener('cm6:adapter-state', (evt) => {
   try { _handleAdapterState(evt.detail); } catch (_) {}
 });
 
+window.addEventListener('cm6:active-file-changed', (evt) => {
+  try {
+    const detail = evt && evt.detail && typeof evt.detail === 'object' ? evt.detail : {};
+    const filePath = typeof detail.path === 'string' ? detail.path : '';
+    if (!filePath) return;
+    _applyHostActivePath(filePath, { forceToolbar: true });
+  } catch (_) {}
+});
+
 async function ensureWorkbenchAdapterReady() {
   if (workbenchAdapterReadyOk) return true;
   if (workbenchAdapterConnecting) return await workbenchAdapterConnecting;
@@ -2098,17 +2112,8 @@ function updateFontScaleMenuChecks(currentScale) {
 }
 
 // ---------- Editor state ----------
-let currentPath = '';
-let currentPathExists = false;
-let lastSavedContent = '';
-let unsaved = false;
-// Restored-session flags must exist before any socket events fire.
-var restoredSessionActive = false;
-var restoredSessionPath = null;
-
 // Preferences are managed by backend; frontend displays state only (no caching)
 
-let currentModeLanguage = null;
 let editorState = null;
 let branchMenuHandle = null;
 let agentDrawerHandle = null;
@@ -2130,7 +2135,6 @@ const sessionTelemetry = createSessionTelemetryController({
 });
 sessionState = sessionTelemetry.sessionState;
 let externalRefreshInProgress = false;
-let lastPickerPath = HOME_DIR;
 let _agentShortcutsCache = [];
 let _agentShortcutEditingId = null;
 let _agentShortcutEditingAssetName = null;
@@ -3289,7 +3293,7 @@ const recentsController = createRecentsController({
 recentsController.installWindowHook();
 
 // Synchronize host + iframe when a project is opened in the explorer.
-// Called from explorer.js via window.__cm6HandleProjectOpened(path).
+// Called from explorer.ts via window.__cm6HandleProjectOpened(path).
 const projectSwitchController = createProjectSwitchController({
   getTerminal: () => terminal,
   closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
@@ -3308,7 +3312,7 @@ const projectSwitchController = createProjectSwitchController({
   reloadEditorSurface: () => window.location.reload(),
 });
 
-// Expose for explorer.js (project:opened handler)
+// Expose for explorer.ts (project:opened handler)
 projectSwitchController.installWindowHook();
 
 const editorStateController = createEditorStateController({
@@ -3317,7 +3321,8 @@ const editorStateController = createEditorStateController({
   getCachedProjectRoot: () => cachedProjectRoot,
   setCachedProjectRoot: (path) => { cachedProjectRoot = path; },
   getCurrentPath: () => currentPath,
-  setCurrentPath: (path) => { currentPath = path; },
+  setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
+  reconcileCurrentPath: (path) => { _applyHostActivePath(path, { forceToolbar: true }); },
   getEditorSocket: () => editorSocket,
   getEditorViewState: () => editorViewState,
   updatePreference: (key, value) => preferencesController.updatePreference(key, value),
@@ -3334,7 +3339,7 @@ const fileSyncHandler = createFileSyncHandler({
   toAbsolute,
   homeDir: HOME_DIR,
   getCurrentPath: () => currentPath,
-  setCurrentPath: (path) => { currentPath = path; },
+  setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
   updatePathDisplay: () => updatePathDisplay(),
   setLastSavedContent: (content) => { lastSavedContent = content; },
   getLastSha256: () => lastSha256,
@@ -3402,28 +3407,14 @@ const openFlowController = createOpenFlowController({
   setIndicatorInactive: () => cacheIndicatorController.setIndicatorInactive(cacheStateBadge),
   apiPost: (path, body) => apiPost(path, body),
   apiGet: (path) => apiGet(path),
-  setCurrentPath: (path) => { currentPath = path; },
+  setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
   setCurrentPathExists: (exists) => { currentPathExists = exists; },
   setLastPickerPath: (path) => { lastPickerPath = path; },
   parentDir,
   setCurrentModeLanguage: (lang) => { currentModeLanguage = lang; },
   detectLanguageFromFilename,
   setLastSha256: (sha) => { lastSha256 = sha; },
-  emitEditorOpenRequest: (path, options = {}) => {
-    try {
-      const payload = /** @type {any} */ ({ path });
-      const optionsAny = /** @type {any} */ (options || {});
-      if (Number.isFinite(Number(optionsAny.line))) payload.line = Number(optionsAny.line);
-      if (Number.isFinite(Number(optionsAny.column))) payload.column = Number(optionsAny.column);
-      if (typeof optionsAny.request_id === 'string' && optionsAny.request_id) payload.request_id = optionsAny.request_id;
-      if (Object.prototype.hasOwnProperty.call(optionsAny, 'focus')) payload.focus = Boolean(optionsAny.focus);
-      if (typeof optionsAny.scroll_y === 'string') payload.scroll_y = optionsAny.scroll_y;
-      if (Object.prototype.hasOwnProperty.call(optionsAny, 'scroll_to_top')) payload.scroll_to_top = Boolean(optionsAny.scroll_to_top);
-      const msg = { type: 'editor_open_request', payload };
-      if (editorSocket && editorSocket.connected) editorSocket.emit(msg.type, msg.payload);
-      else editorPending.push(msg);
-    } catch (e) { console.warn('[Editor] Failed to request open via editor socket:', e); }
-  },
+  requestBackendOpen: (payload) => uiIpcConnections.requestBackendFileOpen(payload),
   setLastSavedContent: (content) => { lastSavedContent = content; },
   awaitEditorOpen: (requestId, path, timeoutMs) => _awaitEditorOpen(requestId, path, timeoutMs),
   markUnsaved: (flag) => markUnsaved(flag),
@@ -3471,13 +3462,14 @@ const saveFlowController = createSaveFlowController({
   pickSaveTarget: () => pickerController.pickSaveTarget(),
   toAbsolute,
   homeDir: HOME_DIR,
-  setCurrentPath: (path) => { currentPath = path; },
+  setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
   setCurrentPathExists: (exists) => { currentPathExists = exists; },
   setLastPickerPath: (path) => { lastPickerPath = path; },
   setCurrentModeLanguage: (lang) => { currentModeLanguage = lang; },
   parentDir,
   detectLanguageFromFilename,
   updatePathDisplay: () => updatePathDisplay(),
+  openFile: (path, options) => openFile(path, options),
   closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
   openWebSocket: (path) => fileWebSocketManager.openWebSocket(path),
   getCachedProjectRoot: () => cachedProjectRoot,
@@ -3552,7 +3544,7 @@ async function pickFile(startPath) {
 }
 
 const jumpLineController = createJumpLineController({
-  getCurrentPath: () => window.currentPath,
+  getCurrentPath: () => currentPath,
   getEditorSocket: () => editorSocket,
   queueEditorMessage: (msg) => editorPending.push(msg),
   toast: (msg) => host.toast(msg),
@@ -3682,6 +3674,7 @@ const { terminal, consoleDrawer, problemsPanel: drawerProblemsPanel } = initPane
   hostToast: (msg) => host.toast(msg),
   setFontScale: (preset) => fontScaleController.setFontScale(preset),
   triggerEditorSearchPanel: (reason, opts) => searchPanelController.triggerEditorSearchPanel(reason, opts),
+  openFile: (path, opts) => openFile(path, opts),
   jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
   saveFile: () => saveFile(),
   resetToNewFile: () => resetActiveFileState({ resetPicker: true }),
@@ -3745,7 +3738,7 @@ runBootSequence(createBootSequenceDeps({
       parentDir,
       detectLanguageFromFilename,
       syncSessionPath: () => syncSessionPath(),
-      setCurrentPath: (path) => { currentPath = path; },
+      setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
       setCurrentPathExists: (exists) => { currentPathExists = exists; },
       setLastPickerPath: (path) => { lastPickerPath = path; },
       setLastSha256: (sha) => { lastSha256 = sha; },

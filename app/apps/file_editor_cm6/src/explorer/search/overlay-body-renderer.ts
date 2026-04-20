@@ -1,18 +1,25 @@
-export function renderSearchOverlayBody(resultsContainer, state, deps) {
+import type { ExplorerSearchOverlayState } from './types.ts';
+
+interface ExplorerSearchOverlayBodyRendererDeps {
+  renderNameResults(container: HTMLElement, data: unknown): void;
+  renderContentResults(container: HTMLElement, data: unknown): void;
+  renderChangesResults(container: HTMLElement, data: unknown): void;
+  renderReviewResults(container: HTMLElement, data: unknown): void;
+  renderDiagnosticsResults?(container: HTMLElement): void;
+}
+
+export function renderSearchOverlayBody(
+  resultsContainer: HTMLElement,
+  state: ExplorerSearchOverlayState,
+  deps: ExplorerSearchOverlayBodyRendererDeps,
+): void {
   const { searchMode, searchLoading, searchError, searchResults } = state;
 
-  // Diagnostics tab owns its own DOM lifecycle (persistent panel for
-  // diff-aware updates). Do NOT wipe the container — the renderer manages
-  // its children directly. Other mode leftovers are cleaned by the renderer.
   if (searchMode === 'diagnostics') {
-    if (deps.renderDiagnosticsResults) {
-      deps.renderDiagnosticsResults(resultsContainer);
-    }
+    deps.renderDiagnosticsResults?.(resultsContainer);
     return;
   }
 
-  // All other modes: clear and rebuild (this also clears any leftover
-  // diagnostics container when switching away from that tab).
   resultsContainer.innerHTML = '';
 
   if (searchLoading) {

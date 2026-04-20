@@ -14,6 +14,7 @@ import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
  *   hostToast: (msg: string) => void,
  *   setFontScale: (preset: any) => Promise<any>,
  *   triggerEditorSearchPanel: (reason: string, opts?: any) => Promise<any>,
+ *   openFile: (path: string, options?: any) => Promise<any>,
  *   jumpToCurrentFileLine: (line: number) => Promise<any>,
  *   saveFile: () => Promise<any>,
  *   resetToNewFile: () => void,
@@ -27,14 +28,16 @@ export function initPanelsAndDrawer(deps) {
   const consoleDrawer = deps.createConsoleDrawer();
   const problemsPanel = deps.createProblemsPanel({
     containerId: 'problems-container',
-    onNavigate: (absPath, line, col) => {
-      const editorSocket = deps.getEditorSocket();
-      if (editorSocket && editorSocket.connected) {
-        editorSocket.emit('editor_open_file', { path: absPath });
-        setTimeout(() => {
-          editorSocket.emit('editor_issues_cmd', { action: 'goto', line, column: col });
-        }, 300);
-      }
+    onNavigate: async (absPath, line, col) => {
+      const targetLine = Number.isFinite(Number(line)) ? Number(line) : 1;
+      const targetColumn = Number.isFinite(Number(col)) ? Number(col) : 1;
+      await deps.openFile(absPath, {
+        forceRefresh: true,
+        line: targetLine,
+        column: targetColumn,
+        focus: true,
+        scrollY: 'center',
+      });
     },
     onMention: async (payload) => {
       try {

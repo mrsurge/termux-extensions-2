@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Body, Request, Response
@@ -9,7 +10,6 @@ from fastapi.responses import JSONResponse
 # loader once app-level extensions are formalized.
 from .sidebar_state import enqueue_open_request, pop_open_request, record_drawer_open, update_ui_hints
 from ...explorer_helper import get_project_root
-from ...explorer_manager import manager as _explorer_manager
 from ...stores import get_history_store
 
 bp = APIRouter()
@@ -199,11 +199,7 @@ async def agent_open_options(request: Request):
 # MARKED FOR DELETION: replace with sidebar/appserver Socket.IO transport.
 @bp.post("/agent/open")
 async def agent_open(request: Request, payload: dict = Body(default=None)):
-    """Request the host UI to open a file at a specific location.
-
-    This is delivered to the active file_editor_cm6 page via the Explorer Socket.IO transport
-    (separate from NiceGUI), avoiding postMessage and polling.
-    """
+    """Request the editor backend to open a file at a specific location."""
     origin = _cors_origin(request)
     headers = _cors_headers(origin)
     payload = payload or {}
@@ -240,8 +236,14 @@ async def agent_open(request: Request, payload: dict = Body(default=None)):
             "source": payload.get("source"),
             "conversation_id": payload.get("conversation_id"),
         }
-        message = {"type": "agent:open", "payload": message_payload}
-        await _explorer_manager.broadcast(str(project), message)
+        from ...monaco_editor.editor_ws import emit_editor_open_from_backend
+
+        request_id = f"http_agent_open_{int(time.time() * 1000)}"
+        await emit_editor_open_from_backend(
+            message_payload,
+            source_client="sidebar_http",
+            request_id=request_id,
+        )
         return JSONResponse(
             {"ok": True, "data": {"rel": target_rel, "path": str(target_abs), "line": line, "column": column}},
             headers=headers,

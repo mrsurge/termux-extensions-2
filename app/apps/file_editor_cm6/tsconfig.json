@@ -16,7 +16,7 @@
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "rootDir": ".",
+    "rootDir": "../..",
     "baseUrl": ".",
     "outDir": "static/dist",
     "paths": {
@@ -26,6 +26,7 @@
   "include": [
     "src/**/*.ts",
     "static/js/**/*.js",
+    "static/js/**/*.ts",
     "extensions/sidebar_extension/static/js/**/*.js",
     "monaco_editor/m_editor_app.js"
   ],
