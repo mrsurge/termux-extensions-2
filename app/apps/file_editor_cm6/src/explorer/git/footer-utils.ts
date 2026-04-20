@@ -15,7 +15,7 @@ type ExplorerGitButtons = Partial<
   Record<ExplorerGitButtonKey, HTMLButtonElement | null>
 >;
 
-interface ExplorerGitStatus {
+export interface ExplorerGitStatus {
   branch?: string;
   detached?: boolean;
   ahead?: number;

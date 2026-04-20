@@ -60,12 +60,6 @@ import { emitOpenCacheState } from './editor_open_emit_cache_state_utils.js';
 import { queueBackendWorkbenchOpen } from './editor_open_workbench_open_utils.js';
 // editor_socket_readiness_step_handler_utils.js removed — readiness is now push-based via UI IPC adapter_state
 import { handleJumpToLineEvent } from './editor_socket_jump_handler_utils.js';
-import { handleDraftDiffEvent } from './editor_socket_draft_diff_handler_utils.js';
-import { handleWorkbenchResponseEvent } from './editor_socket_workbench_response_handler_utils.js';
-import { handleSemanticTokensProviderRegistered } from './editor_socket_semantic_registered_handler_utils.js';
-import { handleIssuesDumpRequest } from './editor_socket_issues_dump_handler_utils.js';
-import { handleIssuesCommand } from './editor_socket_issues_cmd_handler_utils.js';
-import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
 import { coercePositiveInt } from './editor_open_contract.ts';
 import {
   createEditorOpenTransactionStore,
@@ -80,8 +74,6 @@ import {
   awaitOpenCompletion,
 } from './editor_open_transaction_runner.ts';
 import { runEditorOpenTransaction } from './editor_open_transaction_runner_main.ts';
-import { logDiagnosticsEvent } from './editor_diagnostics_log_utils.js';
-import { applyDiagnosticsBridgeUpdate } from './editor_diagnostics_apply_update_utils.js';
 import { handleGitBaselinesSocketEvent } from './editor_git_baselines_socket_handler_utils.js';
 import { shouldSkipAutosaveBaselineRefresh } from './editor_cache_state_autosave_skip_utils.js';
 import { resnapshotDraftBaseline } from './editor_cache_state_resnapshot_utils.js';
@@ -120,7 +112,9 @@ import { collectBootLanguageIds } from './editor_boot_language_ids_utils.js';
 import { warnIfPlaintextOnlyLanguages } from './editor_boot_plaintext_warn_utils.js';
 import { applyActiveModelLanguage } from './editor_boot_apply_active_model_language_utils.js';
 import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_menu_utils.js';
+import { flushMirrorDebounce, installMirrorPublisher as installEditorMirrorPublisher } from './editor_mirror_publisher.ts';
 import { registerEditorSaveMirrorSocketHandlers } from './editor_save_mirror_socket_handlers.ts';
+import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_handlers.ts';
 /* eslint-disable no-undef */
 (function() {
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
@@ -152,6 +146,7 @@ import { registerEditorSaveMirrorSocketHandlers } from './editor_save_mirror_soc
   var isApplyingRemote = false;
   var mirrorPublisherDisposable = null;
   var mirrorDebounceT = null;
+  var mirrorPublisherInstalled = false;
   var gitBaselineDebounceT = null;
   var gitBaselineApplyT = null;
   var pendingGitBaselinePayload = null;
@@ -1954,7 +1949,7 @@ import { registerEditorSaveMirrorSocketHandlers } from './editor_save_mirror_soc
       }
     } catch (_) {}
     mirrorPublisherDisposable = null;
-    installMirrorPublisher._done = false;
+    mirrorPublisherInstalled = false;
     _trace.mirror_active = 0;
     _syncTraceDebug();
     try {
@@ -1979,7 +1974,7 @@ import { registerEditorSaveMirrorSocketHandlers } from './editor_save_mirror_soc
       }
     } catch (_) {}
     mirrorPublisherDisposable = null;
-    installMirrorPublisher._done = false;
+    mirrorPublisherInstalled = false;
     _trace.mirror_active = 0;
     _syncTraceDebug();
     try { if (editor && editor.dispose) editor.dispose(); } catch (_) {}
@@ -2623,66 +2618,53 @@ import { registerEditorSaveMirrorSocketHandlers } from './editor_save_mirror_soc
   // Force-flush the mirror/didChange debounce so the ext host has the latest
   // document content before we make an RPC call (e.g., completions).
   function _flushMirrorDebounce() {
-    try {
-      if (!mirrorDebounceT) return;
-      clearTimeout(mirrorDebounceT);
-      mirrorDebounceT = null;
-      if (!model || !currentPath || !editorSocket || !editorSocket.connected) return;
-      var content = model.getValue();
-      editorSocket.emit('editor_mirror', {
-        path: currentPath,
-        content: content,
-        base_sha256: baseSha256,
-      });
-      _wbPublishDidChange(
-        currentPath,
-        content,
-        model.getLanguageId ? model.getLanguageId() : '',
-        _wbCurrentGeneration()
-      );
-    } catch (_) {}
+    flushMirrorDebounce({
+      getEditor: function() { return editor; },
+      getEditorSocket: function() { return editorSocket; },
+      getCurrentPath: function() { return currentPath; },
+      getModel: function() { return model; },
+      getBaseSha256: function() { return baseSha256; },
+      getIsApplyingRemote: function() { return isApplyingRemote; },
+      setLastLocalEditAt: function(value) { lastLocalEditAt = value; },
+      getMirrorDebounceTimer: function() { return mirrorDebounceT; },
+      setMirrorDebounceTimer: function(value) { mirrorDebounceT = value; },
+      getMirrorPublisherDisposable: function() { return mirrorPublisherDisposable; },
+      setMirrorPublisherDisposable: function(value) { mirrorPublisherDisposable = value; },
+      isMirrorPublisherInstalled: function() { return mirrorPublisherInstalled; },
+      setMirrorPublisherInstalled: function(value) { mirrorPublisherInstalled = !!value; },
+      getLocalMirrorDebounceMs: _localMirrorDebounceMs,
+      publishDidChange: _wbPublishDidChange,
+      getCurrentGeneration: _wbCurrentGeneration,
+      requestDraftDiff: requestDraftDiff,
+      setTraceMirrorActive: function(value) { _trace.mirror_active = value; },
+      incrementTraceMirrorBindTotal: function() { _trace.mirror_bind_total += 1; },
+      syncTraceDebug: _syncTraceDebug,
+    });
   }
 
   function installMirrorPublisher() {
-    if (!editor) return;
-    try {
-      if (installMirrorPublisher._done) return;
-      try {
-        if (mirrorPublisherDisposable && mirrorPublisherDisposable.dispose) {
-          mirrorPublisherDisposable.dispose();
-        }
-      } catch (_) {}
-      mirrorPublisherDisposable = editor.onDidChangeModelContent(function() {
-        if (isApplyingRemote) return;
-        if (!editorSocket || !editorSocket.connected) return;
-        if (!currentPath || !model) return;
-        lastLocalEditAt = Date.now();
-        if (mirrorDebounceT) clearTimeout(mirrorDebounceT);
-        mirrorDebounceT = setTimeout(function() {
-          try {
-            var content = model.getValue();
-            editorSocket.emit('editor_mirror', {
-              path: currentPath,
-              content: content,
-              base_sha256: baseSha256,
-            });
-            _wbPublishDidChange(
-              currentPath,
-              content,
-              model.getLanguageId ? model.getLanguageId() : '',
-              _wbCurrentGeneration()
-            );
-          } catch (_) {}
-          requestDraftDiff('local');
-        }, _localMirrorDebounceMs());
-      });
-      installMirrorPublisher._done = true;
-      _trace.mirror_active = 1;
-      _trace.mirror_bind_total += 1;
-      _syncTraceDebug();
-    } catch (e) {
-      console.warn('[Monaco] Failed to install mirror publisher', e);
-    }
+    installEditorMirrorPublisher({
+      getEditor: function() { return editor; },
+      getEditorSocket: function() { return editorSocket; },
+      getCurrentPath: function() { return currentPath; },
+      getModel: function() { return model; },
+      getBaseSha256: function() { return baseSha256; },
+      getIsApplyingRemote: function() { return isApplyingRemote; },
+      setLastLocalEditAt: function(value) { lastLocalEditAt = value; },
+      getMirrorDebounceTimer: function() { return mirrorDebounceT; },
+      setMirrorDebounceTimer: function(value) { mirrorDebounceT = value; },
+      getMirrorPublisherDisposable: function() { return mirrorPublisherDisposable; },
+      setMirrorPublisherDisposable: function(value) { mirrorPublisherDisposable = value; },
+      isMirrorPublisherInstalled: function() { return mirrorPublisherInstalled; },
+      setMirrorPublisherInstalled: function(value) { mirrorPublisherInstalled = !!value; },
+      getLocalMirrorDebounceMs: _localMirrorDebounceMs,
+      publishDidChange: _wbPublishDidChange,
+      getCurrentGeneration: _wbCurrentGeneration,
+      requestDraftDiff: requestDraftDiff,
+      setTraceMirrorActive: function(value) { _trace.mirror_active = value; },
+      incrementTraceMirrorBindTotal: function() { _trace.mirror_bind_total += 1; },
+      syncTraceDebug: _syncTraceDebug,
+    });
   }
 
   function ensureTouchSelection(reason) {
@@ -3495,84 +3477,22 @@ import { registerEditorSaveMirrorSocketHandlers } from './editor_save_mirror_soc
         handleGitBaselinesSocketEvent(payload, applyGitBaselines);
       });
 
-      editorSocket.on('editor:draft_diff', function(payload) {
-        try {
-          handleDraftDiffEvent(payload, currentPath, draftDiffRequestId, applyDraftDiffDecorations);
-        } catch (e) {
-          console.warn('[DraftDiff] handler failed', e);
-        }
-      });
-
-      // Diagnostics from workbench adapter via server-side bridge (editor_ws).
-      // This arrives over the already-connected Socket.IO, avoiding the vscode_api_ws race.
-      editorSocket.on('editor:diagnostics', function(payload) {
-        try {
-          logDiagnosticsEvent(payload, model, currentPath, _absPathFromVscodeUri);
-          applyDiagnosticsBridgeUpdate(payload, _applyDiagnosticsUpdate);
-        } catch (_) {}
-      });
-
-      editorSocket.on('editor:workbench_open_file_response', function (data) {
-        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
-      });
-
-      editorSocket.on('editor:workbench_hover_response', function (data) {
-        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
-      });
-
-      editorSocket.on('editor:workbench_symbols_response', function (data) {
-        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
-      });
-
-      editorSocket.on('editor:workbench_completions_response', function (data) {
-        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
-      });
-
-      editorSocket.on('editor:workbench_semantic_tokens_response', function (data) {
-        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
-      });
-
-      editorSocket.on('editor:workbench_semantic_tokens_legend_response', function (data) {
-        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
-      });
-
-      editorSocket.on('editor:workbench_semantic_tokens_range_response', function (data) {
-        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
-      });
-
-      editorSocket.on('editor:workbench_folding_ranges_response', function (data) {
-        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
-      });
-
-      editorSocket.on('editor:workbench_grammars_list_response', function (data) {
-        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
-      });
-
-      editorSocket.on('editor:workbench_grammars_load_response', function (data) {
-        try { handleWorkbenchResponseEvent(data, _wbPending, clearTimeout); } catch (_) {}
-      });
-
-      // Push-based: adapter notifies when a semantic tokens provider registers.
-      // Cache the legend but DON'T register the Monaco provider yet — wait for
-      // diagnostics to prove the language server has analyzed the file first.
-      editorSocket.on('editor:semantic_tokens_provider_registered', function (data) {
-        try { handleSemanticTokensProviderRegistered(data, languageBridge, _registerSemanticTokensWithLegend); } catch (_) {}
-      });
-
-      editorSocket.on('editor:issues_dump_request', function(payload) {
-        try {
-          handleIssuesDumpRequest(payload, monaco, model, emitToHost);
-        } catch (e) {
-          console.warn('[Monaco] issues dump response failed', e);
-        }
-      });
-
-      editorSocket.on('editor:issues_cmd', function(payload) {
-        try { handleIssuesCommand(payload, editor, runIssuesCommand); } catch (_) {}
-      });
-
-      editorSocket.on('editor:find_cmd', function(payload) {
-        try { handleFindCommand(payload, editor, runFindCommand); } catch (e) { console.error('[Find] error:', e); }
+      registerEditorRuntimeSocketHandlers(editorSocket, {
+        getCurrentPath: function() { return currentPath; },
+        getDraftDiffRequestId: function() { return draftDiffRequestId; },
+        applyDraftDiffDecorations: applyDraftDiffDecorations,
+        getModel: function() { return model; },
+        absPathFromVscodeUri: _absPathFromVscodeUri,
+        applyDiagnosticsUpdate: _applyDiagnosticsUpdate,
+        workbenchPending: _wbPending,
+        clearTimeoutFn: clearTimeout,
+        languageBridge: languageBridge,
+        registerSemanticTokensWithLegend: _registerSemanticTokensWithLegend,
+        getMonaco: function() { return monaco; },
+        emitToHost: emitToHost,
+        getEditor: function() { return editor; },
+        runIssuesCommand: runIssuesCommand,
+        runFindCommand: runFindCommand,
       });
 
       return true;

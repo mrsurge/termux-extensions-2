@@ -23,9 +23,9 @@ interface ExplorerDiagnosticsCallbacks {
   activeFileAbs?: string | null;
 }
 
-type ExplorerDiagnosticsDetail = Record<string, unknown>;
+export type ExplorerDiagnosticsDetail = Record<string, unknown>;
 
-interface ProblemsPanelApi {
+export interface ProblemsPanelApi {
   update(detail: ExplorerDiagnosticsDetail): void;
   setActiveFile(absPath: string): void;
   getSummary(projectPath: string): Record<

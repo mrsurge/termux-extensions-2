@@ -1,12 +1,9 @@
+import type { ExplorerStickyScopesApi } from '../explorer/chrome/sticky-scopes.ts';
+
 export {};
 
 interface HostBridge {
   toast?: (message: string, ms?: number) => void;
-}
-
-interface ExplorerStickyScopesApi {
-  update?(): void;
-  destroy?(): void;
 }
 
 interface ExplorerOpenFileOptions {

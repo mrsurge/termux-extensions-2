@@ -1,10 +1,12 @@
 interface ExplorerUiHelpersDeps {
-  getExplorerMenuDropdown(): HTMLElement | null;
-  getExplorerStickyHeadersEnabled(): boolean | null;
-  getExplorerMenuStickyHeadersItem(): HTMLElement | null;
+  getExplorerMenuDropdown?(): HTMLElement | null;
+  getExplorerStickyHeadersEnabled?(): boolean | null;
+  getExplorerMenuStickyHeadersItem?(): HTMLElement | null;
 }
 
-export function createExplorerUiHelpers(deps: ExplorerUiHelpersDeps) {
+export function createExplorerUiHelpers(
+  deps: ExplorerUiHelpersDeps = {},
+) {
   function setCheckableMenuItem(
     el: HTMLElement | null,
     checked: boolean,
@@ -15,12 +17,12 @@ export function createExplorerUiHelpers(deps: ExplorerUiHelpersDeps) {
   }
 
   function closeExplorerMenu(): void {
-    deps.getExplorerMenuDropdown()?.classList.remove('show');
+    deps.getExplorerMenuDropdown?.()?.classList.remove('show');
   }
 
   function syncExplorerPrefsUI(): void {
-    const checked = deps.getExplorerStickyHeadersEnabled() === true;
-    setCheckableMenuItem(deps.getExplorerMenuStickyHeadersItem(), checked);
+    const checked = deps.getExplorerStickyHeadersEnabled?.() === true;
+    setCheckableMenuItem(deps.getExplorerMenuStickyHeadersItem?.() || null, checked);
   }
 
   function clearElement(el: HTMLElement | null): void {

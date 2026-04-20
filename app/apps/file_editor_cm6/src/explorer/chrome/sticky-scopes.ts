@@ -1,32 +1,69 @@
-// app/apps/file_editor_cm6/static/js/explorer_extensions/sticky_scopes.js
+// app/apps/file_editor_cm6/src/explorer/chrome/sticky-scopes.ts
 //
 // "Sticky scopes" for the explorer tree (Monaco-ish).
 // - Shows the directory ancestry of the first visible node.
 // - Uses geometry (DOM rects) for push-up/pull-down animation between sibling scopes.
 // - Sticky rows are non-interactive except for the ⋮ menu button.
 
-function isElementVisibleRect(rect) {
-  return !!(rect && rect.width > 0 && rect.height > 0);
+import type { ExplorerTreeMenuEntry } from '../tree/types.ts';
+
+export interface ExplorerStickyScopesDeps {
+  treeElement: HTMLElement;
+  drawerBodyEl: HTMLElement;
+  openCardMenuForEntry(
+    entry: ExplorerTreeMenuEntry,
+    anchorEl: HTMLElement,
+  ): void;
 }
 
-function findClosestTreeNode(treeElement, el) {
-  if (!el || !el.closest) return null;
-  const li = el.closest('li.fe-tree-node');
+export interface ExplorerStickyScopesApi {
+  update(): void;
+  destroy(): void;
+}
+
+interface NextTreeNodeAfterSubtree {
+  node: HTMLLIElement;
+  climbed: number;
+}
+
+function isElementVisibleRect(rect: DOMRect | null | undefined): boolean {
+  return Boolean(rect && rect.width > 0 && rect.height > 0);
+}
+
+function closestTreeNodeBySelector(
+  start: Element | null,
+  selector: string,
+): HTMLLIElement | null {
+  if (!(start instanceof Element)) return null;
+  const match = start.closest(selector);
+  return match instanceof HTMLLIElement ? match : null;
+}
+
+function findClosestTreeNode(
+  treeElement: HTMLElement,
+  el: Element | null,
+): HTMLLIElement | null {
+  const li = closestTreeNodeBySelector(el, 'li.fe-tree-node');
   if (!li) return null;
-  if (!treeElement || !treeElement.contains(li)) return null;
-  return li;
+  return treeElement.contains(li) ? li : null;
 }
 
-function getDirectoryChainFromNode(li) {
+function getDirectoryChainFromNode(li: HTMLLIElement | null): HTMLLIElement[] {
   if (!li) return [];
-  let cursor = li;
+  let cursor: HTMLLIElement | null = li;
   if (cursor.dataset.kind !== 'dir') {
-    cursor = cursor.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
+    cursor = closestTreeNodeBySelector(
+      cursor.parentElement,
+      'li.fe-tree-node[data-kind="dir"]',
+    );
   } else if (cursor.dataset.open !== 'true') {
     // Closed directories shouldn't become scopes just because they're visible.
-    cursor = cursor.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
+    cursor = closestTreeNodeBySelector(
+      cursor.parentElement,
+      'li.fe-tree-node[data-kind="dir"]',
+    );
   }
-  const chain = [];
+  const chain: HTMLLIElement[] = [];
   while (cursor) {
     const rel = cursor.dataset.rel || '';
     const isRoot = rel === '.';
@@ -34,48 +71,52 @@ function getDirectoryChainFromNode(li) {
     if (isRoot || isOpen) {
       chain.push(cursor);
     }
-    cursor = cursor.parentElement?.closest('li.fe-tree-node[data-kind="dir"]');
+    cursor = closestTreeNodeBySelector(
+      cursor.parentElement,
+      'li.fe-tree-node[data-kind="dir"]',
+    );
   }
   chain.reverse();
   return chain;
 }
 
-function findNextTreeNodeAfterSubtree(li) {
+function findNextTreeNodeAfterSubtree(
+  li: HTMLLIElement | null,
+): NextTreeNodeAfterSubtree | null {
   if (!li) return null;
   // We need the first *tree row* after this directory's entire subtree,
   // regardless of whether that row is a dir or a file. This avoids a common
   // edge case where the "last directory" in a scope never gets pushed out
   // because only files follow it.
-  let cursor = li;
+  let cursor: HTMLLIElement | null = li;
   let climbed = 0;
   while (cursor) {
-    let sib = cursor.nextElementSibling;
+    let sib: Element | null = cursor.nextElementSibling;
     while (sib) {
-      if (sib.matches && sib.matches('li.fe-tree-node')) {
+      if (sib instanceof HTMLLIElement && sib.matches('li.fe-tree-node')) {
         return { node: sib, climbed };
       }
       sib = sib.nextElementSibling;
     }
-    cursor = cursor.parentElement?.closest('li.fe-tree-node');
+    cursor = closestTreeNodeBySelector(cursor.parentElement, 'li.fe-tree-node');
     climbed += 1;
   }
   return null;
 }
 
-function buildEntryFromLi(li) {
+function buildEntryFromLi(li: HTMLLIElement): ExplorerTreeMenuEntry {
   return {
-    rel: li?.dataset?.rel || '',
-    name:
-      li?.dataset?.name ||
-      li?.querySelector('.fe-tree-text')?.textContent ||
-      '',
-    kind: li?.dataset?.kind || 'dir',
-    gitStatus: li?.dataset?.gitStatus || '',
+    rel: li.dataset.rel || '',
+    name: li.dataset.name || li.querySelector('.fe-tree-text')?.textContent || '',
+    kind: li.dataset.kind || 'dir',
+    gitStatus: li.dataset.gitStatus || '',
   };
 }
 
-function copyExplorerVisualClasses(srcLi, destLi) {
-  if (!srcLi || !destLi) return;
+function copyExplorerVisualClasses(
+  srcLi: HTMLLIElement,
+  destLi: HTMLLIElement,
+): void {
   // Keep only the classes that affect visuals (git/draft + root).
   destLi.className = 'fe-tree-node fe-sticky-scope';
   srcLi.classList.forEach((cls) => {
@@ -86,14 +127,15 @@ function copyExplorerVisualClasses(srcLi, destLi) {
   });
 }
 
-export function initExplorerStickyScopes({
+export function createExplorerStickyScopes({
   treeElement,
   drawerBodyEl,
   openCardMenuForEntry,
-}) {
+}: ExplorerStickyScopesDeps): ExplorerStickyScopesApi | null {
   if (!treeElement || !drawerBodyEl) return null;
 
-  let container = drawerBodyEl.querySelector('#fe-sticky-scopes');
+  let container =
+    drawerBodyEl.querySelector<HTMLDivElement>('#fe-sticky-scopes');
   if (!container) {
     container = document.createElement('div');
     container.id = 'fe-sticky-scopes';
@@ -104,17 +146,17 @@ export function initExplorerStickyScopes({
   // Cleanup from earlier iterations that used a single UL list container.
   container.querySelector('ul.fe-sticky-scopes-list')?.remove();
 
-  let rafId = null;
+  let rafId: number | null = null;
   let disposed = false;
   let lastKey = '';
-  let stickySlots = [];
-  let stickyUnderlays = [];
-  let stickyRows = [];
-  let stickySourceLis = [];
+  let stickySlots: HTMLUListElement[] = [];
+  let stickyUnderlays: HTMLDivElement[] = [];
+  let stickyRows: HTMLLIElement[] = [];
+  let stickySourceLis: HTMLLIElement[] = [];
   let rowStepPx = 0;
   let lastBottomTranslateY = 0;
   let lastScrollTop = 0;
-  let scrollDirection = 'down'; // 'down' | 'up'
+  let scrollDirection: 'down' | 'up' = 'down';
   let pendingKey = '';
   let pendingKeyFrames = 0;
   let stabilityResampleBudget = 0;
@@ -142,7 +184,7 @@ export function initExplorerStickyScopes({
   // without being clipped by the sticky overlay container.
   const BOTTOM_SHADOW_PAD_PX = 8;
 
-  function scheduleUpdate() {
+  function scheduleUpdate(): void {
     if (disposed) return;
     if (rafId) return;
     rafId = requestAnimationFrame(() => {
@@ -151,22 +193,22 @@ export function initExplorerStickyScopes({
     });
   }
 
-  function computeRowStep() {
+  function computeRowStep(): number {
     // Prefer measuring a "leaf" row (no child <ul>) so we don't accidentally
     // measure an expanded directory/root that contains the entire subtree.
-    const candidates = treeElement.querySelectorAll(
+    const candidates = treeElement.querySelectorAll<HTMLLIElement>(
       'li.fe-tree-node:not(.fe-tree-root)',
     );
-    let sample = null;
+    let sample: HTMLLIElement | null = null;
     for (const li of candidates) {
-      const childUl = li.querySelector(':scope > ul.fe-tree');
+      const childUl = li.querySelector<HTMLUListElement>(':scope > ul.fe-tree');
       if (!childUl) {
         sample = li;
         break;
       }
     }
     if (!sample) {
-      sample = treeElement.querySelector(
+      sample = treeElement.querySelector<HTMLLIElement>(
         'li.fe-tree-node[data-kind="file"]',
       );
     }
@@ -175,7 +217,7 @@ export function initExplorerStickyScopes({
     return Math.round(rect.height || 0);
   }
 
-  function computeFocusNode(offsetTopPx = 12) {
+  function computeFocusNode(offsetTopPx = 12): HTMLLIElement | null {
     const rect = treeElement.getBoundingClientRect();
     if (!isElementVisibleRect(rect)) return null;
 
@@ -186,7 +228,9 @@ export function initExplorerStickyScopes({
       rect.left + Math.min(160, rect.width * 0.5),
     );
     const y = Math.min(rect.bottom - 12, rect.top + Math.max(12, offsetTopPx));
-    const els = document.elementsFromPoint ? document.elementsFromPoint(x, y) : [];
+    const els = document.elementsFromPoint
+      ? document.elementsFromPoint(x, y)
+      : [];
     for (const el of els) {
       const li = findClosestTreeNode(treeElement, el);
       if (li) return li;
@@ -194,13 +238,15 @@ export function initExplorerStickyScopes({
     return findClosestTreeNode(treeElement, document.elementFromPoint(x, y));
   }
 
-  function computeStickyChainWithOffset() {
-    const rootLi = treeElement.querySelector('li.fe-tree-node.fe-tree-root');
+  function computeStickyChainWithOffset(): HTMLLIElement[] {
+    const rootLi = treeElement.querySelector<HTMLLIElement>(
+      'li.fe-tree-node.fe-tree-root',
+    );
     if (!rootLi) return [];
 
     // Start from previous chain length so we converge quickly.
     let assumedCount = Math.max(1, stickySourceLis.length || 1);
-    let chain = [];
+    let chain: HTMLLIElement[] = [];
     let lastIterKey = '';
 
     for (let i = 0; i < 5; i++) {
@@ -229,7 +275,7 @@ export function initExplorerStickyScopes({
     return chain;
   }
 
-  function ensureSlotCount(count) {
+  function ensureSlotCount(count: number): void {
     while (stickySlots.length < count) {
       const underlay = document.createElement('div');
       underlay.className = 'fe-sticky-scope-underlay';
@@ -255,8 +301,12 @@ export function initExplorerStickyScopes({
     }
   }
 
-  function fillRowFromSource(srcLi, depth, rebuild = true) {
-    const rel = srcLi?.dataset?.rel || '';
+  function fillRowFromSource(
+    srcLi: HTMLLIElement,
+    depth: number,
+    rebuild = true,
+  ): void {
+    const rel = srcLi.dataset.rel || '';
     if (!rel) return;
     const underlayEl = stickyUnderlays[depth];
     const slotEl = stickySlots[depth];
@@ -380,7 +430,7 @@ export function initExplorerStickyScopes({
     rowEl.appendChild(menuBtn);
   }
 
-  function renderChain(chain) {
+  function renderChain(chain: HTMLLIElement[]): void {
     stickySourceLis = chain.slice();
     ensureSlotCount(chain.length);
     chain.forEach((srcLi, depth) => {
@@ -388,7 +438,7 @@ export function initExplorerStickyScopes({
     });
   }
 
-  function applyPushTransforms() {
+  function applyPushTransforms(): void {
     if (!stickySlots.length || !stickySourceLis.length) return;
     const containerRect = container.getBoundingClientRect();
     if (!isElementVisibleRect(containerRect)) return;
@@ -450,7 +500,7 @@ export function initExplorerStickyScopes({
     lastBottomTranslateY = bottomTranslateY;
   }
 
-  function updateNow() {
+  function updateNow(): void {
     if (disposed) return;
 
     // Hide when drawer is closed / not measurable.
@@ -568,7 +618,7 @@ export function initExplorerStickyScopes({
   });
 
   lastScrollTop = treeElement.scrollTop || 0;
-  function onScroll() {
+  function onScroll(): void {
     const nextTop = treeElement.scrollTop || 0;
     if (nextTop < lastScrollTop) {
       scrollDirection = 'up';
@@ -585,7 +635,7 @@ export function initExplorerStickyScopes({
 
   return {
     update: scheduleUpdate,
-    destroy() {
+    destroy(): void {
       disposed = true;
       observer.disconnect();
       treeElement.removeEventListener('scroll', onScroll);
