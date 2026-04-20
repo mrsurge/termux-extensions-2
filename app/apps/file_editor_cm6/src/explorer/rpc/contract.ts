@@ -9,6 +9,7 @@ export const EXPLORER_RPC_METHODS = {
   entriesCopy: 'explorer.entries.copy',
   entriesDelete: 'explorer.entries.delete',
   entriesMove: 'explorer.entries.move',
+  editorOpen: 'explorer.editor.open',
   entryCopy: 'explorer.entry.copy',
   entryCopyFrom: 'explorer.entry.copyFrom',
   entryDelete: 'explorer.entry.delete',

@@ -16,6 +16,7 @@ LEGACY_REQUEST_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.entries.copy": "explorer:batchCopy",
     "explorer.entries.delete": "explorer:batchDelete",
     "explorer.entries.move": "explorer:batchMove",
+    "explorer.editor.open": "explorer:editor_open",
     "explorer.entry.copy": "explorer:copy",
     "explorer.entry.copyFrom": "explorer:copyFrom",
     "explorer.entry.delete": "explorer:delete",

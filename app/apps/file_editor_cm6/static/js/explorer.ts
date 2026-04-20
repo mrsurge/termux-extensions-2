@@ -275,7 +275,6 @@ const explorerActiveFileUtils = createExplorerActiveFileUtils({
 });
 const explorerFileOpenBridge = createExplorerFileOpenBridge({
   getProjectPath: () => uiState.projectPath,
-  getActiveFileRel: () => activeFileRel,
   expandToFile,
   closeDrawerIfMobile,
   toast,

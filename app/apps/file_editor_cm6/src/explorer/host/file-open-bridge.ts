@@ -1,4 +1,6 @@
 import { getErrorMessage } from '../utils/errors.ts';
+import { requestExplorerRpc } from '../rpc/client.ts';
+import { EXPLORER_RPC_METHODS } from '../rpc/contract.ts';
 
 export interface ExplorerJumpOptions {
   column?: number;
@@ -17,7 +19,6 @@ interface ExplorerFileOpenOptions {
 
 interface ExplorerFileOpenBridgeDeps {
   getProjectPath(): string | null;
-  getActiveFileRel(): string | null;
   expandToFile(rel: string): Promise<unknown>;
   closeDrawerIfMobile(): void;
   toast(message: string): void;
@@ -54,30 +55,21 @@ export function createExplorerFileOpenBridge(
     lineNumber: number | null = null,
     jumpOptions: ExplorerJumpOptions = {},
   ): Promise<void> {
-    if (typeof window.appOpenFileRel !== 'function') {
-      deps.toast('File opener not available');
-      return;
-    }
     try {
-      const alreadyOpen = Boolean(rel) && rel === deps.getActiveFileRel();
-      const hasLineTarget =
-        typeof lineNumber === 'number' && Number.isFinite(lineNumber) && lineNumber >= 1;
       const openOptions = toOpenOptions(lineNumber, jumpOptions);
 
-      if (!alreadyOpen) {
-        try {
-          await deps.expandToFile(rel);
-        } catch (error) {
-          console.warn('[Explorer] Failed to expand tree before open:', error);
-        }
-        await window.appOpenFileRel(rel, deps.getProjectPath(), openOptions);
+      try {
+        await deps.expandToFile(rel);
+      } catch (error) {
+        console.warn('[Explorer] Failed to expand tree before open:', error);
       }
+      await requestExplorerRpc(EXPLORER_RPC_METHODS.editorOpen, {
+        rel,
+        projectRoot: deps.getProjectPath(),
+        ...openOptions,
+      });
 
       deps.closeDrawerIfMobile();
-
-      if (alreadyOpen && hasLineTarget && typeof window.jumpToCurrentFileLine === 'function') {
-        await window.jumpToCurrentFileLine(lineNumber, jumpOptions);
-      }
     } catch (error) {
       deps.toast(`Failed to open file: ${getErrorMessage(error, 'unknown error')}`);
     }

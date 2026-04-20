@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 import urllib.request
 import hashlib
 import shutil
@@ -1360,6 +1361,50 @@ class ExplorerDispatcher:
             except Exception:
                 pass
 
+    async def handle_explorer_editor_open(self, payload: dict, msg_id: str):
+        raw_path = _payload_str(payload, "path") or _payload_str(payload, "abs") or _payload_str(payload, "file") or _payload_str(payload, "rel")
+        if not raw_path:
+            return await self.send_error("Open requires path", msg_id)
+
+        if raw_path.startswith("/"):
+            abs_path = str(Path(raw_path).expanduser())
+        else:
+            abs_path = str((Path(self.project_root) / raw_path.lstrip("/")).expanduser())
+
+        open_payload: dict[str, Any] = {
+            "path": abs_path,
+            "source": payload.get("source") or "explorer_rpc",
+        }
+        line = payload.get("line")
+        column = payload.get("column")
+        if isinstance(line, str) and line.isdigit():
+            line = int(line)
+        if isinstance(column, str) and column.isdigit():
+            column = int(column)
+        if isinstance(line, int) and line >= 1:
+            open_payload["line"] = line
+        if isinstance(column, int) and column >= 1:
+            open_payload["column"] = column
+        if isinstance(payload.get("focus"), bool):
+            open_payload["focus"] = payload.get("focus")
+        if isinstance(payload.get("scrollY"), str):
+            open_payload["scroll_y"] = payload.get("scrollY")
+        if isinstance(payload.get("scroll_y"), str):
+            open_payload["scroll_y"] = payload.get("scroll_y")
+        if isinstance(payload.get("scrollToTop"), bool):
+            open_payload["scroll_to_top"] = payload.get("scrollToTop")
+        if isinstance(payload.get("scroll_to_top"), bool):
+            open_payload["scroll_to_top"] = payload.get("scroll_to_top")
+
+        from .monaco_editor.editor_ws import emit_editor_open_from_backend
+
+        request_id = msg_id if isinstance(msg_id, str) and msg_id else f"explorer_{int(time.time() * 1000)}"
+        await emit_editor_open_from_backend(
+            open_payload,
+            source_client="explorer_rpc",
+            request_id=request_id,
+        )
+
     async def handle_explorer_move(self, payload: dict, msg_id: str):
         rel = _payload_str(payload, "rel")
         dest_path = _payload_str(payload, "dest_path")
@@ -2065,4 +2110,3 @@ class ExplorerSocketIONamespace(socketio.AsyncNamespace):
         if not isinstance(data, dict):
             return
         await disp.handle_message_json(data)
-
