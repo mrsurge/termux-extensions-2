@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import socketio
 from urllib.parse import parse_qs
@@ -14,14 +14,29 @@ from ..draft_diff_helper import compute_draft_diff
 from ..git_helper import _run_git_optional, is_git_repository
 from ..stores import _history_store, _preferences_store
 from .editor_open_backend import (
+    EditorOpenPayload,
     coerce_editor_open_request_fields,
     emit_editor_open_from_backend as _emit_editor_open_from_backend_impl,
 )
+from .editor_backend_services.contracts import RuntimeMeta
 from .editor_save_backend import (
     handle_editor_mirror,
     handle_editor_save_request,
     request_editor_save_snapshot,
     resolve_editor_save_snapshot_response,
+)
+from .editor_workbench_backend import (
+    handle_workbench_completions,
+    handle_workbench_did_change,
+    handle_workbench_folding_ranges,
+    handle_workbench_grammars_list,
+    handle_workbench_grammars_load,
+    handle_workbench_hover,
+    handle_workbench_open_file,
+    handle_workbench_semantic_tokens,
+    handle_workbench_semantic_tokens_legend,
+    handle_workbench_semantic_tokens_range,
+    handle_workbench_symbols,
 )
 
 import logging as _logging
@@ -29,9 +44,9 @@ _wb_log = _logging.getLogger("editor_ws.workbench")
 
 _ISSUES_DUMP_WAITING: dict[str, str] = {}
 _ISSUES_DUMP_TTL_S = 20.0
-_SAVE_SNAPSHOT_WAITING: dict[str, asyncio.Future] = {}
+_SAVE_SNAPSHOT_WAITING: dict[str, asyncio.Future[dict[str, object]]] = {}
 _WORKBENCH_PATH_LOCKS: dict[str, asyncio.Lock] = {}
-_WORKBENCH_OPEN_BASELINE: dict[str, dict[str, Any]] = {}
+_WORKBENCH_OPEN_BASELINE: dict[str, dict[str, int | None]] = {}
 
 # Tracks SHA256 of the most recent editor-initiated save per abs path.
 # Used to suppress watcher reload for our own saves.
@@ -46,11 +61,15 @@ def _workbench_get_lock(abs_path: str) -> asyncio.Lock:
     return lock
 
 
-def _coerce_generation(raw: Any) -> Optional[int]:
+def _coerce_generation(raw: object) -> Optional[int]:
     try:
         if raw is None or raw == "":
             return None
-        return int(raw)
+        if isinstance(raw, int):
+            return raw
+        if isinstance(raw, str) and raw.isdigit():
+            return int(raw)
+        return None
     except Exception:
         return None
 
@@ -71,7 +90,7 @@ def _has_open_baseline(abs_path: str, generation: Optional[int]) -> bool:
     return baseline.get("generation") == generation
 
 
-def _runtime_meta() -> dict:
+def _runtime_meta() -> RuntimeMeta:
     return {
         "run_id": os.getenv("TE_RUN_ID", "unknown"),
         "shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
@@ -112,10 +131,11 @@ def _is_under_project(project: str, abs_path: str) -> bool:
         return False
 
 
-def _role_from_environ(environ: dict) -> str:
+def _role_from_environ(environ: dict[str, object]) -> str:
     """Best-effort role extraction from Socket.IO connect environ."""
     try:
-        qs = environ.get("QUERY_STRING")
+        qs_obj = environ.get("QUERY_STRING")
+        qs = qs_obj if isinstance(qs_obj, str) else ""
         if not qs:
             scope = environ.get("asgi.scope")
             if isinstance(scope, dict):
@@ -176,7 +196,7 @@ async def _emit_host_active_file_changed(
         from ..ui_ipc.ui_ipc_socketio import UI_IPC_SIO
 
         rel = abs_to_rel(abs_path, project)
-        payload: Dict[str, Any] = {
+        payload: dict[str, object] = {
             "type": "active_file_changed",
             "path": abs_path,
             "rel": rel,
@@ -204,14 +224,14 @@ def _notify_draft_state_changed_safe(project: str) -> None:
         pass
 
 
-async def _emit_editor_open_to_default_room(payload: dict[str, Any]) -> None:
+async def _emit_editor_open_to_default_room(payload: EditorOpenPayload) -> None:
     from .editor_socketio import EDITOR_SIO
 
     await EDITOR_SIO.emit("editor:open", payload, room="file_editor_cm6", namespace="/editor")
 
 
 async def emit_editor_open_from_backend(
-    payload_in: dict[str, Any] | None,
+    payload_in: dict[str, object] | None,
     *,
     source_client: str,
     request_id: str,
@@ -224,7 +244,7 @@ async def emit_editor_open_from_backend(
     emit_editor_open=None,
     broadcast_active_file_update=None,
     emit_host_active_file_changed=None,
-) -> dict[str, Any]:
+) -> EditorOpenPayload:
     return await _emit_editor_open_from_backend_impl(
         payload_in,
         source_client=source_client,
@@ -241,17 +261,22 @@ async def emit_editor_open_from_backend(
     )
 
 
-def _read_file_payload(project: str, abs_path: str) -> Dict[str, Any]:
+def _read_file_payload(project: str, abs_path: str) -> EditorOpenPayload:
     """Return SSOT-derived snapshot for a file (draft cache wins)."""
 
-    payload: Dict[str, Any] = {"path": abs_path}
+    payload: EditorOpenPayload = {"path": abs_path}
     prefs = _preferences_store.get_preferences(project)
     payload["preferences"] = prefs
 
     # Autosave mode is SSOT (PreferencesStore)
     auto_save = None
     try:
-        auto_save = bool(prefs.get("editor", {}).get("autoSave"))  # type: ignore[assignment]
+        editor_prefs_obj = prefs.get("editor")
+        if isinstance(editor_prefs_obj, dict):
+            auto_save_raw = editor_prefs_obj.get("autoSave")
+            auto_save = auto_save_raw if isinstance(auto_save_raw, bool) else None
+        else:
+            auto_save = None
     except Exception:
         auto_save = None
     payload["auto_save"] = auto_save
@@ -266,17 +291,18 @@ def _read_file_payload(project: str, abs_path: str) -> Dict[str, Any]:
 
     cached = _history_store.get_cached_document(project, abs_path)
     if cached and cached.get("unsaved"):
-        payload.update(
-            {
-                "has_draft": True,
-                "content": cached.get("content", ""),
-                "base_sha256": cached.get("base_sha256"),
-                "content_sha256": cached.get("content_sha256"),
-                "state": "mid_session",
-                "unsaved": True,
-                "reason": "restore",
-            }
-        )
+        cached_content = cached.get("content", "")
+        cached_base_sha = cached.get("base_sha256")
+        cached_content_sha = cached.get("content_sha256")
+        payload["has_draft"] = True
+        payload["content"] = cached_content if isinstance(cached_content, str) else ""
+        if isinstance(cached_base_sha, str):
+            payload["base_sha256"] = cached_base_sha
+        if isinstance(cached_content_sha, str):
+            payload["content_sha256"] = cached_content_sha
+        payload["state"] = "mid_session"
+        payload["unsaved"] = True
+        payload["reason"] = "restore"
         return payload
 
     try:
@@ -285,17 +311,13 @@ def _read_file_payload(project: str, abs_path: str) -> Dict[str, Any]:
     except Exception:
         content = ""
     sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    payload.update(
-        {
-            "has_draft": False,
-            "content": content,
-            "base_sha256": sha256,
-            "content_sha256": sha256,
-            "state": "clean",
-            "unsaved": False,
-            "reason": "disk",
-        }
-    )
+    payload["has_draft"] = False
+    payload["content"] = content
+    payload["base_sha256"] = sha256
+    payload["content_sha256"] = sha256
+    payload["state"] = "clean"
+    payload["unsaved"] = False
+    payload["reason"] = "disk"
     return payload
 
 
@@ -307,7 +329,12 @@ def _read_disk_text(abs_path: str) -> str:
         return ""
 
 
-async def _request_editor_save_snapshot(ns: socketio.AsyncNamespace, request_id: str, *, timeout_s: float = 3.0) -> dict[str, Any]:
+async def _request_editor_save_snapshot(
+    ns: socketio.AsyncNamespace,
+    request_id: str,
+    *,
+    timeout_s: float = 3.0,
+) -> dict[str, object]:
     return await request_editor_save_snapshot(
         ns,
         request_id,
@@ -441,7 +468,7 @@ async def broadcast_git_baselines_for_active_file() -> bool:
 
         print(f"[git_baselines_push] path={active_norm} tracked={head is not None} head_sha={head_sha} disk_sha={disk_sha}", flush=True)
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, object] = {
             "path": active_norm,
             "tracked": bool(head is not None),
             "base_ref": "HEAD",
@@ -459,7 +486,7 @@ async def broadcast_git_baselines_for_active_file() -> bool:
         return False
 
 
-async def handle_tracked_edit(edit_result: dict) -> None:
+async def handle_tracked_edit(edit_result: dict[str, object]) -> None:
     """Dispatch a jump/open when trackAgentEdits is enabled and a new edit is detected.
 
     If the edited file is already active, emits ``editor:jump_to_line``.
@@ -475,9 +502,19 @@ async def handle_tracked_edit(edit_result: dict) -> None:
     if not prefs.get("editor", {}).get("trackAgentEdits", False):
         return
 
-    abs_path = edit_result.get("path", "")
-    rel_path = edit_result.get("rel_path", "")
-    line = edit_result.get("line", 1)
+    abs_path_obj = edit_result.get("path", "")
+    if not isinstance(abs_path_obj, str) or not abs_path_obj:
+        return
+    abs_path = abs_path_obj
+    rel_path_obj = edit_result.get("rel_path", "")
+    rel_path = rel_path_obj if isinstance(rel_path_obj, str) else ""
+    line_obj = edit_result.get("line", 1)
+    if isinstance(line_obj, int):
+        line = line_obj if line_obj > 0 else 1
+    elif isinstance(line_obj, str) and line_obj.isdigit():
+        line = max(1, int(line_obj))
+    else:
+        line = 1
 
     active_path = _history_store.get_last_file(project)
     try:
@@ -587,7 +624,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         if current_path and session_state.get("currentPath") != current_path:
             _history_store.update_session_state({"currentPath": current_path})
 
-        snapshot: Dict[str, Any] = {
+        snapshot: dict[str, object] = {
             "project": project,
             "session_state": session_state,
             "preferences": prefs,
@@ -908,7 +945,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         if isinstance(head, str):
             head_sha = hashlib.sha256(head.encode("utf-8")).hexdigest()
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, object] = {
             "path": path,
             "tracked": bool(head is not None),
             "base_ref": "HEAD",
@@ -974,7 +1011,8 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 )
                 return
 
-            draft_content = cached.get("content", "")
+            draft_content_obj = cached.get("content", "")
+            draft_content = draft_content_obj if isinstance(draft_content_obj, str) else ""
             diff_data = compute_draft_diff(path, draft_content, disk_content)
             hunks = diff_data.get("hunks", []) if isinstance(diff_data, dict) else []
             summary = diff_data.get("summary", {"added": 0, "deleted": 0, "tracked": False}) if isinstance(diff_data, dict) else {"added": 0, "deleted": 0, "tracked": False}
@@ -1050,375 +1088,77 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         )
 
     async def on_editor_workbench_open_file(self, sid, data):
-        """Open a file via the workbench adapter (stdio pipe). Triggers adapter bootstrap."""
-        payload = data if isinstance(data, dict) else {}
-        abs_path = payload.get("path", "")
-        request_id = payload.get("request_id", f"wb_{int(time.time() * 1000)}")
-        generation = _coerce_generation(payload.get("generation"))
-
-        project = _active_project()
-        if not project or not abs_path:
-            await self.emit(
-                "editor:workbench_open_file_response",
-                {"request_id": request_id, "error": "missing_path_or_project"},
-                room=sid,
-            )
-            return
-
-        if not _is_under_project(project, abs_path):
-            await self.emit(
-                "editor:workbench_open_file_response",
-                {"request_id": request_id, "error": "outside_project"},
-                room=sid,
-            )
-            return
-
-        lock = _workbench_get_lock(abs_path)
-        async with lock:
-            try:
-                from ..workbench_adapter_shell_manager import adapter_rpc
-
-                resp = await adapter_rpc(
-                    "vscode.openFile",
-                    {
-                        "path": abs_path,
-                        "languageId": payload.get("languageId", ""),
-                        "requestId": request_id,
-                        "forceRefresh": payload.get("forceRefresh", False),
-                        "generation": generation,
-                        "workspaceFolder": project,
-                    },
-                )
-                _mark_open_baseline(abs_path, generation)
-                result = resp.get("result", resp)
-                await self.emit(
-                    "editor:workbench_open_file_response",
-                    {"request_id": request_id, "result": result},
-                    room=sid,
-                )
-            except Exception as exc:
-                _wb_log.error("[workbench] open_file failed: %s", exc)
-                await self.emit(
-                    "editor:workbench_open_file_response",
-                    {"request_id": request_id, "error": str(exc)},
-                    room=sid,
-                )
+        await handle_workbench_open_file(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            active_project=_active_project,
+            is_under_project=_is_under_project,
+            get_lock=_workbench_get_lock,
+            coerce_generation=_coerce_generation,
+            mark_open_baseline=_mark_open_baseline,
+            logger=_wb_log,
+        )
 
     async def on_editor_workbench_hover(self, sid, data):
-        """Hover request via workbench adapter (stdio pipe)."""
-        payload = data if isinstance(data, dict) else {}
-        request_id = payload.get("request_id", f"hv_{int(time.time() * 1000)}")
-        abs_path = payload.get("path", "")
-        print(f"[editor_ws] hover request_id={request_id} path={abs_path} line={payload.get('lineNumber')} col={payload.get('column')} lang={payload.get('languageId')}", flush=True)
-
-        project = _active_project()
-        if not project or not abs_path:
-            await self.emit(
-                "editor:workbench_hover_response",
-                {"request_id": request_id, "error": "missing_path_or_project"},
-                room=sid,
-            )
-            return
-
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
-
-            resp = await adapter_rpc(
-                "vscode.hover",
-                {
-                    "path": abs_path,
-                    "lineNumber": payload.get("lineNumber", payload.get("line", 1)),
-                    "column": payload.get("column", payload.get("character", 1)),
-                    "languageId": payload.get("languageId", ""),
-                },
-            )
-            result = resp.get("result", resp)
-            await self.emit(
-                "editor:workbench_hover_response",
-                {"request_id": request_id, "result": result},
-                room=sid,
-            )
-        except Exception as exc:
-            _wb_log.error("[workbench] hover failed: %s", exc)
-            await self.emit(
-                "editor:workbench_hover_response",
-                {"request_id": request_id, "error": str(exc)},
-                room=sid,
-            )
+        await handle_workbench_hover(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            active_project=_active_project,
+            logger=_wb_log,
+        )
 
     async def on_editor_workbench_completions(self, sid, data):
-        """Completions request via workbench adapter (stdio pipe)."""
-        payload = data if isinstance(data, dict) else {}
-        request_id = payload.get("request_id", f"cmp_{int(time.time() * 1000)}")
-        abs_path = payload.get("path", "")
-        print(f"[editor_ws] completions request_id={request_id} path={abs_path} line={payload.get('lineNumber')} col={payload.get('column')} lang={payload.get('languageId')}", flush=True)
-
-        project = _active_project()
-        if not project or not abs_path:
-            await self.emit(
-                "editor:workbench_completions_response",
-                {"request_id": request_id, "error": "missing_path_or_project"},
-                room=sid,
-            )
-            return
-
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
-
-            resp = await adapter_rpc(
-                "vscode.completions",
-                {
-                    "path": abs_path,
-                    "lineNumber": payload.get("lineNumber", payload.get("line", 1)),
-                    "column": payload.get("column", payload.get("character", 1)),
-                    "languageId": payload.get("languageId", ""),
-                    "triggerKind": payload.get("triggerKind", 0),
-                    "triggerCharacter": payload.get("triggerCharacter"),
-                    "text": payload.get("text"),
-                },
-            )
-            result = resp.get("result", resp)
-            await self.emit(
-                "editor:workbench_completions_response",
-                {"request_id": request_id, "result": result},
-                room=sid,
-            )
-        except Exception as exc:
-            _wb_log.error("[workbench] completions failed: %s", exc)
-            await self.emit(
-                "editor:workbench_completions_response",
-                {"request_id": request_id, "error": str(exc)},
-                room=sid,
-            )
+        await handle_workbench_completions(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            active_project=_active_project,
+            logger=_wb_log,
+        )
 
     async def on_editor_workbench_semantic_tokens(self, sid, data):
-        """Semantic tokens request via workbench adapter (stdio pipe)."""
-        payload = data if isinstance(data, dict) else {}
-        request_id = payload.get("request_id", f"st_{int(time.time() * 1000)}")
-        abs_path = payload.get("path", "")
-        print(f"[editor_ws] semanticTokens request_id={request_id} path={abs_path} lang={payload.get('languageId')} prevResultId={payload.get('previousResultId')}", flush=True)
-
-        project = _active_project()
-        if not project or not abs_path:
-            await self.emit(
-                "editor:workbench_semantic_tokens_response",
-                {"request_id": request_id, "error": "missing_path_or_project"},
-                room=sid,
-            )
-            return
-
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
-
-            resp = await adapter_rpc(
-                "vscode.semanticTokens",
-                {
-                    "path": abs_path,
-                    "languageId": payload.get("languageId", ""),
-                    "previousResultId": payload.get("previousResultId", "0"),
-                },
-            )
-            result = resp.get("result", resp)
-            await self.emit(
-                "editor:workbench_semantic_tokens_response",
-                {"request_id": request_id, "result": result},
-                room=sid,
-            )
-        except Exception as exc:
-            _wb_log.error("[workbench] semanticTokens failed: %s", exc)
-            await self.emit(
-                "editor:workbench_semantic_tokens_response",
-                {"request_id": request_id, "error": str(exc)},
-                room=sid,
-            )
+        await handle_workbench_semantic_tokens(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            active_project=_active_project,
+            logger=_wb_log,
+        )
 
     async def on_editor_workbench_semantic_tokens_legend(self, sid, data):
-        """Get semantic tokens legend for a language."""
-        payload = data if isinstance(data, dict) else {}
-        request_id = payload.get("request_id", f"stl_{int(time.time() * 1000)}")
-        lang_id = payload.get("languageId", "")
-
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
-
-            resp = await adapter_rpc(
-                "vscode.semanticTokensLegend",
-                {"languageId": lang_id},
-            )
-            result = resp.get("result", resp)
-            await self.emit(
-                "editor:workbench_semantic_tokens_legend_response",
-                {"request_id": request_id, "result": result},
-                room=sid,
-            )
-        except Exception as exc:
-            _wb_log.error("[workbench] semanticTokensLegend failed: %s", exc)
-            await self.emit(
-                "editor:workbench_semantic_tokens_legend_response",
-                {"request_id": request_id, "error": str(exc)},
-                room=sid,
-            )
+        await handle_workbench_semantic_tokens_legend(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            logger=_wb_log,
+        )
 
     async def on_editor_workbench_semantic_tokens_range(self, sid, data):
-        """Semantic tokens range request via workbench adapter (stdio pipe)."""
-        payload = data if isinstance(data, dict) else {}
-        request_id = payload.get("request_id", f"str_{int(time.time() * 1000)}")
-        abs_path = payload.get("path", "")
-        range_obj = payload.get("range", None)
-        print(f"[editor_ws] semanticTokensRange request_id={request_id} path={abs_path} lang={payload.get('languageId')} range={range_obj}", flush=True)
-
-        project = _active_project()
-        if not project or not abs_path or not range_obj:
-            await self.emit(
-                "editor:workbench_semantic_tokens_range_response",
-                {"request_id": request_id, "error": "missing_path_or_project_or_range"},
-                room=sid,
-            )
-            return
-
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
-
-            resp = await adapter_rpc(
-                "vscode.semanticTokensRange",
-                {
-                    "path": abs_path,
-                    "languageId": payload.get("languageId", ""),
-                    "range": range_obj,
-                },
-            )
-            result = resp.get("result", resp)
-            await self.emit(
-                "editor:workbench_semantic_tokens_range_response",
-                {"request_id": request_id, "result": result},
-                room=sid,
-            )
-        except Exception as exc:
-            _wb_log.error("[workbench] semanticTokensRange failed: %s", exc)
-            await self.emit(
-                "editor:workbench_semantic_tokens_range_response",
-                {"request_id": request_id, "error": str(exc)},
-                room=sid,
-            )
+        await handle_workbench_semantic_tokens_range(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            active_project=_active_project,
+            logger=_wb_log,
+        )
 
     async def on_editor_workbench_symbols(self, sid, data):
-        """Document symbols request via workbench adapter (stdio pipe)."""
-        payload = data if isinstance(data, dict) else {}
-        request_id = payload.get("request_id", f"sym_{int(time.time() * 1000)}")
-        abs_path = payload.get("path", "")
-        generation = _coerce_generation(payload.get("generation"))
-
-        project = _active_project()
-        if not project or not abs_path:
-            await self.emit(
-                "editor:workbench_symbols_response",
-                {"request_id": request_id, "error": "missing_path_or_project"},
-                room=sid,
-            )
-            return
-
-        lang_id = payload.get("languageId", "")
-        _wb_log.info("[symbols] request path=%s lang=%s", abs_path, lang_id)
-
-        lock = _workbench_get_lock(abs_path)
-        async with lock:
-            if not _has_open_baseline(abs_path, generation):
-                await self.emit(
-                    "editor:workbench_symbols_response",
-                    {"request_id": request_id, "error": "document_not_ready"},
-                    room=sid,
-                )
-                return
-
-            try:
-                from ..workbench_adapter_shell_manager import adapter_rpc
-
-                resp = await adapter_rpc(
-                    "vscode.documentSymbols",
-                    {
-                        "path": abs_path,
-                        "languageId": lang_id,
-                        "generation": generation,
-                    },
-                )
-                result = resp.get("result", resp)
-                sym_count = len(result) if isinstance(result, list) else "non-list"
-                _wb_log.info("[symbols] response path=%s lang=%s count=%s ok=%s", abs_path, lang_id, sym_count, resp.get("ok"))
-                if not isinstance(result, list) or not result:
-                    _wb_log.warning("[symbols] raw adapter resp keys=%s", list(resp.keys()) if isinstance(resp, dict) else type(resp))
-                await self.emit(
-                    "editor:workbench_symbols_response",
-                    {"request_id": request_id, "result": result},
-                    room=sid,
-                )
-            except Exception as exc:
-                _wb_log.error("[symbols] FAILED path=%s lang=%s err=%s", abs_path, lang_id, exc)
-                await self.emit(
-                    "editor:workbench_symbols_response",
-                    {"request_id": request_id, "error": str(exc)},
-                    room=sid,
-                )
+        await handle_workbench_symbols(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            active_project=_active_project,
+            get_lock=_workbench_get_lock,
+            coerce_generation=_coerce_generation,
+            has_open_baseline=_has_open_baseline,
+            logger=_wb_log,
+        )
 
     async def on_editor_workbench_folding_ranges(self, sid, data):
-        """Folding ranges request via workbench adapter (stdio pipe)."""
-        payload = data if isinstance(data, dict) else {}
-        request_id = payload.get("request_id", f"fold_{int(time.time() * 1000)}")
-        abs_path = payload.get("path", "")
-        generation = _coerce_generation(payload.get("generation"))
-        lang_id = payload.get("languageId", "")
-        context_obj = payload.get("context", {})
-
-        project = _active_project()
-        if not project or not abs_path:
-            await self.emit(
-                "editor:workbench_folding_ranges_response",
-                {"request_id": request_id, "error": "missing_path_or_project"},
-                room=sid,
-            )
-            return
-
-        lock = _workbench_get_lock(abs_path)
-        async with lock:
-            if not _has_open_baseline(abs_path, generation):
-                await self.emit(
-                    "editor:workbench_folding_ranges_response",
-                    {"request_id": request_id, "error": "document_not_ready"},
-                    room=sid,
-                )
-                return
-
-            try:
-                from ..workbench_adapter_shell_manager import adapter_rpc
-
-                resp = await adapter_rpc(
-                    "vscode.foldingRanges",
-                    {
-                        "path": abs_path,
-                        "languageId": lang_id,
-                        "generation": generation,
-                        "context": context_obj,
-                        "timeoutMs": payload.get("timeoutMs"),
-                    },
-                )
-                result = resp.get("result", resp)
-                range_count = "null"
-                if isinstance(result, dict):
-                    inner = result.get("result")
-                    if isinstance(inner, list):
-                        range_count = len(inner)
-                _wb_log.info("[folding] response path=%s lang=%s count=%s ok=%s", abs_path, lang_id, range_count, resp.get("ok"))
-                await self.emit(
-                    "editor:workbench_folding_ranges_response",
-                    {"request_id": request_id, "result": result},
-                    room=sid,
-                )
-            except Exception as exc:
-                _wb_log.error("[folding] FAILED path=%s lang=%s err=%s", abs_path, lang_id, exc)
-                await self.emit(
-                    "editor:workbench_folding_ranges_response",
-                    {"request_id": request_id, "error": str(exc)},
-                    room=sid,
-                )
+        await handle_workbench_folding_ranges(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            active_project=_active_project,
+            get_lock=_workbench_get_lock,
+            coerce_generation=_coerce_generation,
+            has_open_baseline=_has_open_baseline,
+            logger=_wb_log,
+        )
 
     async def on_editor_breadcrumb_navigate(self, sid, data):
         """Breadcrumb directory click → relay to explorer socket + open drawer."""
@@ -1452,86 +1192,28 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             _wb_log.error("[bc-navigate] emit FAILED: %s", exc)
 
     async def on_editor_workbench_did_change(self, sid, data):
-        """Push buffer content to extension host for live diagnostics (fire-and-forget)."""
-        payload = data if isinstance(data, dict) else {}
-        abs_path = payload.get("path", "")
-        text = payload.get("text", "")
-        language_id = payload.get("languageId", "")
-        generation = _coerce_generation(payload.get("generation"))
-
-        project = _active_project()
-        if not project or not abs_path:
-            return
-
-        lock = _workbench_get_lock(abs_path)
-        async with lock:
-            if not _has_open_baseline(abs_path, generation):
-                _wb_log.warning("[workbench] didChange dropped (no open baseline) path=%s gen=%s", abs_path, generation)
-                return
-            try:
-                from ..workbench_adapter_shell_manager import adapter_rpc
-
-                await adapter_rpc(
-                    "vscode.didChange",
-                    {
-                        "path": abs_path,
-                        "text": text,
-                        "languageId": language_id,
-                        "generation": generation,
-                    },
-                )
-            except Exception as exc:
-                _wb_log.error("[workbench] didChange failed: %s", exc)
+        await handle_workbench_did_change(
+            data,
+            active_project=_active_project,
+            get_lock=_workbench_get_lock,
+            coerce_generation=_coerce_generation,
+            has_open_baseline=_has_open_baseline,
+            logger=_wb_log,
+        )
 
     async def on_editor_workbench_grammars_list(self, sid, data):
-        """List TextMate grammars from installed extensions via adapter."""
-        payload = data if isinstance(data, dict) else {}
-        request_id = payload.get("request_id", f"gl_{int(time.time() * 1000)}")
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
-
-            resp = await adapter_rpc("vscode.textmate.grammars.list", {})
-            await self.emit(
-                "editor:workbench_grammars_list_response",
-                {"request_id": request_id, "result": resp.get("result", resp)},
-                room=sid,
-            )
-        except Exception as exc:
-            _wb_log.error("[grammars.list] FAILED: %s", exc)
-            await self.emit(
-                "editor:workbench_grammars_list_response",
-                {"request_id": request_id, "error": str(exc)},
-                room=sid,
-            )
+        await handle_workbench_grammars_list(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            logger=_wb_log,
+        )
 
     async def on_editor_workbench_grammars_load(self, sid, data):
-        """Load a TextMate grammar by ID from an installed extension via adapter."""
-        payload = data if isinstance(data, dict) else {}
-        request_id = payload.get("request_id", f"gld_{int(time.time() * 1000)}")
-        grammar_id = payload.get("id", "")
-        if not grammar_id:
-            await self.emit(
-                "editor:workbench_grammars_load_response",
-                {"request_id": request_id, "error": "missing_grammar_id"},
-                room=sid,
-            )
-            return
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
-
-            resp = await adapter_rpc("vscode.textmate.grammars.load", {"id": grammar_id})
-            await self.emit(
-                "editor:workbench_grammars_load_response",
-                {"request_id": request_id, "result": resp.get("result", resp)},
-                room=sid,
-            )
-        except Exception as exc:
-            _wb_log.error("[grammars.load] FAILED id=%s: %s", grammar_id, exc)
-            await self.emit(
-                "editor:workbench_grammars_load_response",
-                {"request_id": request_id, "error": str(exc)},
-                room=sid,
-            )
+        await handle_workbench_grammars_load(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            logger=_wb_log,
+        )
 
     # NOTE: on_editor_readiness_check removed — adapter state is now pushed
     # via UI IPC from workbench_adapter_shell_manager._broadcast_adapter_state().

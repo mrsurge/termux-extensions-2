@@ -7,7 +7,13 @@ import { setDebugPart, syncTraceDebug, syncMirrorDebug } from './editor_debug_ut
 import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
 import { deriveApiBase } from './editor_api_base_utils.js';
 import { absPathFromVscodeUri } from './editor_vscode_uri_utils.js';
-import { monacoRangeFromProtoRange, toMonacoHoverContents, isLanguageContextCurrent, monacoRangeFromCompletionRange, mapCompletionItemKind } from './editor_bridge_utils.js';
+import {
+  monacoRangeFromProtoRange,
+  toMonacoHoverContents,
+  isLanguageContextCurrent,
+  monacoRangeFromCompletionRange,
+  mapCompletionItemKind,
+} from './editor_bridge_utils.js';
 import { te2DumpTextmateScopesForLine, te2GetActiveEditorAndModel, te2AdvanceRuleStackToLine } from './editor_textmate_debug_utils.js';
 import { installMarkerNavBindings, jumpToMarker } from './editor_marker_nav_utils.js';
 import { applyJumpToLine as applyJumpToLineAt } from './editor_jump_utils.js';
@@ -77,44 +83,43 @@ import { runEditorOpenTransaction } from './editor_open_transaction_runner_main.
 import { handleGitBaselinesSocketEvent } from './editor_git_baselines_socket_handler_utils.js';
 import { shouldSkipAutosaveBaselineRefresh } from './editor_cache_state_autosave_skip_utils.js';
 import { resnapshotDraftBaseline } from './editor_cache_state_resnapshot_utils.js';
-import { initBreadcrumbElement } from './editor_breadcrumb_init_utils.js';
-import { loadBreadcrumbIcons } from './editor_breadcrumb_icons_loader_utils.js';
-import { shouldUpdateBreadcrumbPath } from './editor_breadcrumb_update_path_utils.js';
-import { resolveBreadcrumbSymbolsLangId } from './editor_breadcrumb_symbols_lang_utils.js';
-import { getBreadcrumbSymbolsTimeoutMs } from './editor_breadcrumb_symbols_timeout_utils.js';
-import { unwrapBreadcrumbSymbols } from './editor_breadcrumb_symbols_unwrap_utils.js';
-import { symbolRangeToLineBounds } from './editor_breadcrumb_symbol_range_utils.js';
-import { breadcrumbSymbolIcon } from './editor_breadcrumb_symbol_icon_utils.js';
 import { canInstallScrollPublisher } from './editor_scroll_publisher_guard_utils.js';
 import { buildScrollStatePayload } from './editor_scroll_publisher_payload_utils.js';
 import { shouldSendScrollImmediately } from './editor_scroll_publisher_throttle_utils.js';
 import { scheduleScrollSend } from './editor_scroll_publisher_schedule_utils.js';
 import { shouldApplyMirrorPath } from './editor_apply_mirror_path_utils.js';
 import { applyMirrorContent } from './editor_apply_mirror_content_utils.js';
-import { connectUiIpcSocket } from './editor_ui_ipc_connect_utils.js';
-import { bindSaveKeyCommand } from './editor_ui_ipc_save_key_utils.js';
-import { bindFocusRelay } from './editor_ui_ipc_focus_relay_utils.js';
-import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.js';
-import { findBreadcrumbSymbolChain } from './editor_breadcrumb_find_symbol_chain_utils.js';
-import { splitBreadcrumbPathParts } from './editor_breadcrumb_split_parts_utils.js';
-import { appendBreadcrumbSeparator } from './editor_breadcrumb_append_sep_utils.js';
-import { isBreadcrumbFileSegment } from './editor_breadcrumb_is_file_segment_utils.js';
-import { createBreadcrumbPathItem } from './editor_breadcrumb_create_path_item_utils.js';
-import { getBreadcrumbIconTheme } from './editor_breadcrumb_icon_theme_utils.js';
-import { applyBreadcrumbFileIcon } from './editor_breadcrumb_apply_icon_utils.js';
-import { shouldRenderBreadcrumbSymbolChain } from './editor_breadcrumb_should_render_symbols_utils.js';
-import { getBreadcrumbSymbolPosition } from './editor_breadcrumb_symbol_position_utils.js';
-import { createBreadcrumbSymbolItem } from './editor_breadcrumb_create_symbol_item_utils.js';
-import { finalizeBreadcrumbScroll } from './editor_breadcrumb_finalize_scroll_utils.js';
-import { getBreadcrumbPathClickTarget } from './editor_breadcrumb_path_click_utils.js';
-import { getBreadcrumbSymbolClickPosition } from './editor_breadcrumb_symbol_click_utils.js';
 import { collectBootLanguageIds } from './editor_boot_language_ids_utils.js';
 import { warnIfPlaintextOnlyLanguages } from './editor_boot_plaintext_warn_utils.js';
 import { applyActiveModelLanguage } from './editor_boot_apply_active_model_language_utils.js';
 import { ensureTouchSelection as _ensureTouchSelection } from './editor_touch_menu_utils.js';
+import {
+  applyDraftDiffDecorations as applyDraftDiffDecorationsRuntime,
+  applyDraftZones as applyDraftZonesRuntime,
+  ensureDraftDecoCollection as ensureDraftDecoCollectionRuntime,
+  installDraftZoneOrderingHook as installDraftZoneOrderingHookRuntime,
+  reapplyDraftZones as reapplyDraftZonesRuntime,
+} from './editor_draft_diff_runtime.ts';
+import {
+  disposeDiffEditorOnly as disposeDiffEditorRuntime,
+  disposeGitBaselines as disposeGitBaselinesRuntime,
+  disposePlainEditorOnly as disposePlainEditorRuntime,
+  ensureDiffEditorWithPrefs as ensureDiffEditorWithPrefsRuntime,
+  ensureEditorWithPrefs as ensureEditorWithPrefsRuntime,
+  ensurePlainEditorWithPrefs as ensurePlainEditorWithPrefsRuntime,
+} from './editor_editor_lifecycle.ts';
+import { applyGitBaselines as applyGitBaselinesRuntime } from './editor_git_baseline_runtime.ts';
+import { createEditorLanguageBridgeProviders } from './editor_language_bridge_providers.ts';
 import { flushMirrorDebounce, installMirrorPublisher as installEditorMirrorPublisher } from './editor_mirror_publisher.ts';
 import { registerEditorSaveMirrorSocketHandlers } from './editor_save_mirror_socket_handlers.ts';
 import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_handlers.ts';
+import { createEditorBreadcrumbRuntime } from './editor_breadcrumb_runtime.ts';
+import { createEditorUiIpcRuntime } from './editor_ui_ipc_runtime.ts';
+import { bootMonacoRuntime } from './editor_monaco_boot_runtime.ts';
+import {
+  installVscodeRpcChangePublisher as installEditorVscodeRpcChangePublisher,
+  vscodeRpcDidOpenIfReady as runVscodeRpcDidOpenIfReady,
+} from './editor_vscode_rpc_document_lifecycle.ts';
 /* eslint-disable no-undef */
 (function() {
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
@@ -179,6 +184,28 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
     gb_req_debounced: 0,
     gb_last_source: '-',
   };
+
+  var breadcrumbRuntime = createEditorBreadcrumbRuntime({
+    getDocument: function() { return document; },
+    getCurrentPath: function() { return currentPath; },
+    getModel: function() { return model; },
+    getEditorSocket: function() { return editorSocket; },
+    wbCurrentGeneration: _wbCurrentGeneration,
+    wbIsBarrierOpen: _wbIsBarrierOpen,
+    wbQueueSymbols: _wbQueueSymbols,
+    languageFromPath: languageFromPath,
+    editorWorkbenchCall: editorWorkbenchCall,
+    applyJumpToLine: function(line, col) {
+      applyJumpToLineAt(editor, model, { line: line, column: col, focus: true, scroll_y: 'center' });
+    },
+  });
+
+  var uiIpcRuntime = createEditorUiIpcRuntime({
+    getWindow: function() { return window; },
+    getEditor: function() { return editor; },
+    getDiffEditor: function() { return diffEditor; },
+    replayOpenFileAfterBaton: _replayOpenFileAfterBaton,
+  });
 
   function _fetch(url, init) {
     return window.fetch(url, init);
@@ -1075,14 +1102,6 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
     }
   }
 
-  function _monacoRangeFromProtoRange(range) {
-    return monacoRangeFromProtoRange(window.monaco, range);
-  }
-
-  function _toMonacoHoverContents(raw) {
-    return toMonacoHoverContents(raw);
-  }
-
   var languageBridge = {
     hoverSeq: 0,
     symbolsSeq: 0,
@@ -1098,6 +1117,24 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
     semanticTokensResultId: {}, // languageId -> last resultId (for delta requests)
     semanticTokensDiagGated: new Set(), // languages waiting for diagnostics before registering
   };
+  var languageBridgeProviders = createEditorLanguageBridgeProviders({
+    getMonaco: function() { return window.monaco || null; },
+    getLanguageWorkersEnabled: _languageWorkersEnabled,
+    getCurrentPath: function() { return currentPath; },
+    getHasModel: function() { return !!model; },
+    getCurrentLanguageContext: _currentLanguageContext,
+    callVscodeApiGuarded: _callVscodeApiGuarded,
+    editorWorkbenchCall: editorWorkbenchCall,
+    absPathFromVscodeUri: _absPathFromVscodeUri,
+    monacoRangeFromProtoRange: function(range) { return monacoRangeFromProtoRange(window.monaco, range); },
+    toMonacoHoverContents: toMonacoHoverContents,
+    monacoRangeFromCompletionRange: function(range, pos) { return monacoRangeFromCompletionRange(window.monaco, range, pos); },
+    mapCompletionItemKind: function(kind) { return mapCompletionItemKind(window.monaco, kind); },
+    flushMirrorDebounce: _flushMirrorDebounce,
+    ensureVscodeLanguagesInstalled: ensureVscodeLanguagesInstalled,
+    getVscodeLanguageIds: function() { return vscodeLanguageIds; },
+    languageBridge: languageBridge,
+  });
 
   // ── Workbench RPC over editor Socket.IO ──────────────────────────
   // Routes hover/symbols/openFile through editor_ws.py → adapter stdio pipe.
@@ -1380,509 +1417,48 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
       && cachedPrefs.preferences.ui.webWorkersEnabled === true);
   }
 
-  function _documentSymbolProviderSelector(langId) {
-    if (_languageWorkersEnabled()) return langId;
-    // With language workers OFF, worker-backed JS/HTML symbol adapters stay
-    // registered but can hang OutlineModel.create(). Use an exclusive file-only
-    // selector so Monaco prefers the bridge provider for the real editor model.
-    return { language: langId, scheme: 'file', exclusive: true };
-  }
-
-  function _foldingRangeProviderSelector(langId) {
-    if (_languageWorkersEnabled()) return langId;
-    // When workers are OFF, keep file-backed folding on the WBA bridge path so
-    // Monaco doesn't sit behind a worker adapter that never resolves.
-    return { language: langId, scheme: 'file', exclusive: true };
-  }
-
-  function _normalizeDocumentSymbols(raw) {
-    if (!Array.isArray(raw) || !window.monaco || !monaco.languages) return [];
-    var defaultKind = monaco.languages.SymbolKind ? monaco.languages.SymbolKind.Function : 11;
-    function _symbolProtoRange(s) {
-      return (s && s.range) ? s.range : ((s && s.location && s.location.range) ? s.location.range : null);
-    }
-    var mapOne = function (s) {
-      // Some built-in providers still return SymbolInformation-style entries
-      // with location.range/containerName instead of DocumentSymbol fields.
-      var protoRange = _symbolProtoRange(s);
-      var range = _monacoRangeFromProtoRange(protoRange);
-      var sel = _monacoRangeFromProtoRange(s && s.selectionRange ? s.selectionRange : protoRange);
-      var kids = Array.isArray(s && s.children) ? s.children.map(mapOne) : [];
-      var detail = (s && s.detail != null) ? String(s.detail) : '';
-      if (!detail && s && s.containerName != null) detail = String(s.containerName);
-      return {
-        name: String((s && s.name) || ''),
-        detail: detail,
-        kind: Number((s && s.kind) != null ? s.kind : defaultKind),
-        tags: Array.isArray(s && s.tags) ? s.tags : [],
-        range: range || new monaco.Range(1, 1, 1, 1),
-        selectionRange: sel || range || new monaco.Range(1, 1, 1, 1),
-        children: kids,
-      };
-    };
-    return raw.map(mapOne);
-  }
-
-  function _monacoFoldingRangeKindFromProto(kind) {
-    if (!kind || !window.monaco || !monaco.languages || !monaco.languages.FoldingRangeKind) return undefined;
-    var value = '';
-    if (typeof kind === 'string') value = kind;
-    else if (kind && typeof kind.value === 'string') value = kind.value;
-    if (!value) return undefined;
-    var kinds = monaco.languages.FoldingRangeKind;
-    if (typeof kinds.fromValue === 'function') return kinds.fromValue(value);
-    if (value === 'comment' && kinds.Comment) return kinds.Comment;
-    if (value === 'imports' && kinds.Imports) return kinds.Imports;
-    if (value === 'region' && kinds.Region) return kinds.Region;
-    return undefined;
-  }
-
-  function _normalizeFoldingRanges(raw) {
-    if (!Array.isArray(raw)) return null;
-    var out = [];
-    for (var i = 0; i < raw.length; i++) {
-      var r = raw[i];
-      var start = Number(r && r.start);
-      var end = Number(r && r.end);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 1 || end <= start) continue;
-      var item = { start: start, end: end };
-      var kind = _monacoFoldingRangeKindFromProto(r && r.kind);
-      if (kind) item.kind = kind;
-      out.push(item);
-    }
-    return out;
-  }
-
-  function _monacoRangeFromCompletionRange(range, pos) {
-    return monacoRangeFromCompletionRange(window.monaco, range, pos);
-  }
-
-  function _mapCompletionItemKind(kind) {
-    return mapCompletionItemKind(window.monaco, kind);
-  }
-
-  // Core registration: given a legend, register the Monaco provider immediately
   function _registerSemanticTokensWithLegend(langId, legend, isRange) {
-    if (languageBridge.registeredSemanticTokens.has(langId)) return;
-    languageBridge.registeredSemanticTokens.add(langId);
-
-    if (isRange && monaco.languages.registerDocumentRangeSemanticTokensProvider) {
-      monaco.languages.registerDocumentRangeSemanticTokensProvider(langId, {
-        getLegend: function () {
-          return legend;
-        },
-        provideDocumentRangeSemanticTokens: function (m, range, token) {
-          try {
-            if (!m || !m.uri || !range) return null;
-            var uri = String(m.uri.toString());
-            var p = currentPath ? String(currentPath) : _absPathFromVscodeUri(uri);
-            var lang = String(m.getLanguageId ? m.getLanguageId() : langId);
-            return editorWorkbenchCall('semantic_tokens_range', {
-              uri: uri,
-              path: p,
-              languageId: lang,
-              range: {
-                startLineNumber: range.startLineNumber,
-                startColumn: range.startColumn,
-                endLineNumber: range.endLineNumber,
-                endColumn: range.endColumn,
-              },
-              timeoutMs: 10000,
-            }, { timeoutMs: 12000 }).then(function (out) {
-              if (!out || out.ok === false) return null;
-              var payload = out.result || out;
-              if (!payload) return null;
-              var data = payload.data;
-              if (!data || !data.length) return null;
-              return {
-                resultId: payload.resultId || '',
-                data: new Uint32Array(data),
-              };
-            }).catch(function () {
-              return null;
-            });
-          } catch (_) {
-            return null;
-          }
-        },
-      });
-      return;
-    }
-
-    console.log('[semanticTokens] registering FULL provider for ' + langId + ' types=' + legend.tokenTypes.length + ' mods=' + legend.tokenModifiers.length);
-    monaco.languages.registerDocumentSemanticTokensProvider(langId, {
-      getLegend: function () {
-        return legend;
-      },
-      provideDocumentSemanticTokens: function (m, lastResultId, token) {
-        try {
-          if (!m || !m.uri) return null;
-          var uri = String(m.uri.toString());
-          var p = currentPath ? String(currentPath) : _absPathFromVscodeUri(uri);
-          var lang = String(m.getLanguageId ? m.getLanguageId() : langId);
-          console.log('[semanticTokens] FULL REQUEST ' + lang + ' path=' + p + ' prevResultId=' + (lastResultId || '0'));
-          return editorWorkbenchCall('semantic_tokens', {
-            uri: uri,
-            path: p,
-            languageId: lang,
-            previousResultId: lastResultId || '0',
-            timeoutMs: 10000,
-          }, { timeoutMs: 12000 }).then(function (out) {
-            if (!out || out.ok === false) return null;
-            var payload = out.result || out;
-            if (!payload) return null;
-            if (payload.type === 'delta' && payload.edits) {
-              return {
-                resultId: payload.resultId || '',
-                edits: payload.edits.map(function (e) {
-                  return {
-                    start: e.start || 0,
-                    deleteCount: e.deleteCount || 0,
-                    data: e.data ? new Uint32Array(e.data) : undefined,
-                  };
-                }),
-              };
-            }
-            var data = payload.data;
-            if (!data || !data.length) return null;
-            return {
-              resultId: payload.resultId || '',
-              data: new Uint32Array(data),
-            };
-          }).catch(function (e) {
-            console.warn('[semanticTokens] request failed', e);
-            return null;
-          });
-        } catch (_) {
-          return null;
-        }
-      },
-      releaseDocumentSemanticTokens: function (resultId) {},
-    });
-  }
-
-  // Pull-based fallback: fetch legend then register (used from baton/doRegister)
-  function _registerSemanticTokensForLanguage(langId) {
-    if (languageBridge.registeredSemanticTokens.has(langId)) return;
-
-    editorWorkbenchCall('semantic_tokens_legend', { languageId: langId }, { timeoutMs: 8000 })
-      .then(function (res) {
-        var legend = res && res.legend;
-        if (!legend || !legend.tokenTypes || !legend.tokenModifiers) {
-          console.warn('[semanticTokens] no legend for ' + langId, res);
-          return;
-        }
-        languageBridge.semanticTokensLegendCache[langId] = legend;
-        _registerSemanticTokensWithLegend(langId, legend);
-      })
-      .catch(function (e) {
-        console.warn('[semanticTokens] legend fetch failed for ' + langId, e);
-      });
+    languageBridgeProviders.registerSemanticTokensWithLegend(langId, legend, !!isRange);
   }
 
   function installVscodeApiLanguageBridgeProviders() {
-    try {
-      if (!window.monaco || !window.monaco.languages) return;
-
-      // Register for the current language context immediately (no async dependency).
-      var _doRegister = function (targets) {
-        try {
-          targets.forEach(function (langId) {
-            if (!langId) return;
-            if (!languageBridge.registeredHover.has(langId) && monaco.languages.registerHoverProvider) {
-              console.log('[hover:bridge] registering hover provider for lang=' + langId);
-              monaco.languages.registerHoverProvider(langId, {
-                provideHover: function (m, pos, token) {
-                  try {
-                    var ctx = _currentLanguageContext();
-                    if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) {
-                      console.warn('[hover:bridge] BAIL provideHover: ctx=' + (ctx ? 'ok' : 'NULL') + ' m.uri=' + (m && m.uri ? String(m.uri.toString()).slice(-60) : 'NULL') + ' ctx.uri=' + (ctx ? String(ctx.uri).slice(-60) : 'N/A'));
-                      return null;
-                    }
-                    return _callVscodeApiGuarded(
-                      'hover',
-                      'vscode.hover',
-                      {
-                        uri: ctx.uri,
-                        path: ctx.path,
-                        languageId: ctx.languageId,
-                        lineNumber: Number(pos && pos.lineNumber ? pos.lineNumber : 1),
-                        column: Number(pos && pos.column ? pos.column : 1),
-                        timeoutMs: 4500,
-                      },
-                      ctx,
-                      { timeoutMs: 5000, cancelToken: token },
-                    ).then(function (out) {
-                      if (!out || !out.ok || !out.result || out.result.ok === false) return null;
-                      var payload = out.result.result || out.result.hover || null;
-                      if (!payload) return null;
-                      var range = _monacoRangeFromProtoRange(payload.range);
-                      var contents = _toMonacoHoverContents(payload.contents);
-                      if (!contents.length) return null;
-                      return { range: range || undefined, contents: contents };
-                    });
-                  } catch (_) {
-                    return null;
-                  }
-                },
-              });
-              languageBridge.registeredHover.add(langId);
-            }
-
-            if (!languageBridge.registeredSymbols.has(langId) && monaco.languages.registerDocumentSymbolProvider) {
-              monaco.languages.registerDocumentSymbolProvider(_documentSymbolProviderSelector(langId), {
-                provideDocumentSymbols: function (m, token) {
-                  try {
-                    var ctx = _currentLanguageContext();
-                    if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) return [];
-                    return _callVscodeApiGuarded(
-                      'symbols',
-                      'vscode.documentSymbols',
-                      {
-                        uri: ctx.uri,
-                        path: ctx.path,
-                        languageId: ctx.languageId,
-                        timeoutMs: 6000,
-                      },
-                      ctx,
-                      { timeoutMs: 6500, cancelToken: token },
-                    ).then(function (out) {
-                      if (!out || !out.ok || !out.result || out.result.ok === false) return [];
-                      var payload = Array.isArray(out.result)
-                        ? out.result
-                        : (Array.isArray(out.result.result) ? out.result.result : []);
-                      return _normalizeDocumentSymbols(payload);
-                    });
-                  } catch (_) {
-                    return [];
-                  }
-                },
-              });
-              languageBridge.registeredSymbols.add(langId);
-            }
-
-            if (!languageBridge.registeredFolding.has(langId) && monaco.languages.registerFoldingRangeProvider) {
-              monaco.languages.registerFoldingRangeProvider(_foldingRangeProviderSelector(langId), {
-                provideFoldingRanges: function (m, context, token) {
-                  try {
-                    var ctx = _currentLanguageContext();
-                    if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) return null;
-                    return _callVscodeApiGuarded(
-                      'folding_ranges',
-                      'vscode.foldingRanges',
-                      {
-                        uri: ctx.uri,
-                        path: ctx.path,
-                        languageId: ctx.languageId,
-                        context: (context && typeof context === 'object') ? context : {},
-                        timeoutMs: 6000,
-                      },
-                      ctx,
-                      { timeoutMs: 6500, cancelToken: token },
-                    ).then(function (out) {
-                      if (!out || !out.ok || !out.result || out.result.ok === false) return null;
-                      var payload = Array.isArray(out.result) ? out.result : out.result.result;
-                      var normalized = _normalizeFoldingRanges(payload);
-                      return normalized == null ? null : normalized;
-                    });
-                  } catch (_) {
-                    return null;
-                  }
-                },
-              });
-              languageBridge.registeredFolding.add(langId);
-            }
-
-            if (!languageBridge.registeredCompletions.has(langId) && monaco.languages.registerCompletionItemProvider) {
-              monaco.languages.registerCompletionItemProvider(langId, {
-                triggerCharacters: ['.', ':', '<', '"', "'", '/', '@', '#'],
-                provideCompletionItems: function (m, pos, token, context) {
-                  try {
-                    // Flush pending didChange so the ext host has the latest text
-                    // before we ask for completions (debounce can lag behind typing).
-                    _flushMirrorDebounce();
-                    var ctx = _currentLanguageContext();
-                    if (!ctx || !m || !m.uri || String(m.uri.toString()) !== String(ctx.uri)) return { suggestions: [] };
-                    var triggerKind = 0;
-                    var triggerCharacter = undefined;
-                    if (context && context.triggerKind === monaco.languages.CompletionTriggerKind.TriggerCharacter) {
-                      triggerKind = 1;
-                      triggerCharacter = context.triggerCharacter || undefined;
-                    } else if (context && context.triggerKind === monaco.languages.CompletionTriggerKind.TriggerForIncompleteCompletions) {
-                      triggerKind = 2;
-                    }
-                    return _callVscodeApiGuarded(
-                      'completions',
-                      'vscode.completions',
-                      {
-                        uri: ctx.uri,
-                        path: ctx.path,
-                        languageId: ctx.languageId,
-                        lineNumber: Number(pos && pos.lineNumber ? pos.lineNumber : 1),
-                        column: Number(pos && pos.column ? pos.column : 1),
-                        triggerKind: triggerKind,
-                        triggerCharacter: triggerCharacter,
-                        text: m && m.getValue ? m.getValue() : undefined,
-                        timeoutMs: 8000,
-                      },
-                      ctx,
-                      { timeoutMs: 10000, cancelToken: token },
-                    ).then(function (out) {
-                      if (!out || !out.ok || !out.result || out.result.ok === false) return { suggestions: [] };
-                      var payload = out.result.result || out.result;
-                      var rawItems = payload.items || payload.suggestions || [];
-                      if (!Array.isArray(rawItems)) return { suggestions: [] };
-                      // Debug: log first 3 items' range and filterText
-                      try {
-                        for (var di = 0; di < Math.min(3, rawItems.length); di++) {
-                          var dbg = rawItems[di];
-                          if (dbg) console.log('[completions] item[' + di + '] label=' + JSON.stringify(dbg.label) + ' filterText=' + JSON.stringify(dbg.filterText) + ' range=' + JSON.stringify(dbg.range) + ' insertText=' + JSON.stringify(dbg.insertText ? dbg.insertText.substring(0, 40) : ''));
-                        }
-                      } catch (_) {}
-                      var suggestions = rawItems.map(function (item) {
-                        if (!item) return null;
-                        var range = _monacoRangeFromCompletionRange(item.range, pos);
-                        var suggestion = {
-                          label: item.label || '',
-                          kind: _mapCompletionItemKind(item.kind),
-                          detail: item.detail || undefined,
-                          documentation: item.documentation || undefined,
-                          sortText: item.sortText || undefined,
-                          filterText: item.filterText || undefined,
-                          preselect: item.preselect || undefined,
-                          insertText: item.insertText || (typeof item.label === 'string' ? item.label : ''),
-                          insertTextRules: item.insertTextRules || undefined,
-                          range: range,
-                          commitCharacters: item.commitCharacters || undefined,
-                          additionalTextEdits: item.additionalTextEdits || undefined,
-                          tags: item.tags || undefined,
-                        };
-                        if (item.command) {
-                          suggestion.command = {
-                            id: item.command.id || '',
-                            title: item.command.title || item.command.id || '',
-                            arguments: item.command.arguments || undefined,
-                          };
-                        }
-                        return suggestion;
-                      }).filter(Boolean);
-                      return {
-                        suggestions: suggestions,
-                        incomplete: !!payload.isIncomplete,
-                      };
-                    });
-                  } catch (_) {
-                    return { suggestions: [] };
-                  }
-                },
-              });
-              languageBridge.registeredCompletions.add(langId);
-            }
-
-            // Semantic tokens: NOT registered eagerly — gated by diagnostics arrival.
-            // Legend is cached by the push handler; registration happens in
-            // _applyDiagnosticsUpdate when diagnostics first land for this language.
-          });
-        } catch (_) {}
-      };
-
-      // Immediate: register for current language context right now
-      var immediate = new Set();
-      try {
-        var ctx = _currentLanguageContext();
-        if (ctx && ctx.languageId) immediate.add(String(ctx.languageId));
-      } catch (_) {}
-      console.log('[hover:bridge] installVscodeApiLanguageBridgeProviders immediate=' + Array.from(immediate).join(',') + ' model=' + (model ? 'yes' : 'no') + ' registeredHover=' + Array.from(languageBridge.registeredHover).join(','));
-      if (immediate.size) _doRegister(immediate);
-
-      // Deferred: also register for all known VSIX languages once loaded
-      ensureVscodeLanguagesInstalled().then(function () {
-        try {
-          var all = new Set();
-          try { vscodeLanguageIds.forEach(function (id) { if (id) all.add(id); }); } catch (_) {}
-          try {
-            var ctx2 = _currentLanguageContext();
-            if (ctx2 && ctx2.languageId) all.add(String(ctx2.languageId));
-          } catch (_) {}
-          _doRegister(all);
-        } catch (_) {}
-      }).catch(function () {});
-    } catch (_) {}
+    languageBridgeProviders.installVscodeApiLanguageBridgeProviders();
   }
 
   function vscodeRpcDidOpenIfReady() {
-    try {
-      if (!model || !currentPath) return;
-      var lang = String(model.getLanguageId ? model.getLanguageId() : languageFromPath(currentPath));
-      if (lang !== 'typescript' && lang !== 'javascript') return;
-
-      ensureVscodeRpcConnected().then(function(ok) {
-        if (!ok || !vscodeRpcLegend) return;
-
-        var uri = model.uri ? model.uri.toString() : '';
-        if (!uri || !uri.startsWith('file://')) return;
-
-        // If switching docs, close old.
-        if (vscodeRpcDocUri && vscodeRpcDocUri !== uri) {
-          try { vscodeRpcWs.send(JSON.stringify({ jsonrpc: '2.0', method: 'textDocument/didClose', params: { textDocument: { uri: vscodeRpcDocUri } } })); } catch (_) {}
-        }
-
-        vscodeRpcDocUri = uri;
-        vscodeRpcDocVersion = 1;
-
-        try {
-          vscodeRpcWs.send(JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'textDocument/didOpen',
-            params: {
-              textDocument: {
-                uri: uri,
-                languageId: lang,
-                version: vscodeRpcDocVersion,
-                text: model.getValue(),
-              },
-            },
-          }));
-        } catch (_) {}
-      });
-    } catch (_) {}
+    runVscodeRpcDidOpenIfReady({
+      getModel: function() { return model; },
+      getCurrentPath: function() { return currentPath; },
+      languageFromPath: languageFromPath,
+      ensureVscodeRpcConnected: ensureVscodeRpcConnected,
+      getVscodeRpcLegend: function() { return vscodeRpcLegend; },
+      getVscodeRpcWebSocket: function() { return vscodeRpcWs; },
+      getVscodeRpcDocUri: function() { return vscodeRpcDocUri; },
+      setVscodeRpcDocUri: function(uri) { vscodeRpcDocUri = uri; },
+      getVscodeRpcDocVersion: function() { return vscodeRpcDocVersion; },
+      setVscodeRpcDocVersion: function(version) { vscodeRpcDocVersion = version; },
+      getVscodeRpcChangeDebounceTimer: function() { return vscodeRpcChangeDebounceT; },
+      setVscodeRpcChangeDebounceTimer: function(timer) { vscodeRpcChangeDebounceT = timer; },
+    });
   }
 
 
 
   function installVscodeRpcChangePublisher() {
-    try {
-      if (!model || model.__te2VscodeRpcInstalled) return;
-      model.__te2VscodeRpcInstalled = true;
-
-      model.onDidChangeContent(function(e) {
-        try {
-          if (!vscodeRpcWs || vscodeRpcWs.readyState !== 1) return;
-          if (!vscodeRpcDocUri) return;
-          if (!e || !e.changes || !e.changes.length) return;
-
-          vscodeRpcDocVersion += 1;
-          var changes = e.changes.map(function(ch) {
-            var r = ch.range;
-            return { range: { start: { line: (r.startLineNumber || 1) - 1, character: (r.startColumn || 1) - 1 }, end: { line: (r.endLineNumber || 1) - 1, character: (r.endColumn || 1) - 1 } }, text: ch.text };
-          });
-
-          var payload = {
-            jsonrpc: '2.0',
-            method: 'textDocument/didChange',
-            params: {
-              textDocument: { uri: vscodeRpcDocUri, version: vscodeRpcDocVersion },
-              contentChanges: changes,
-            },
-          };
-
-          if (vscodeRpcChangeDebounceT) clearTimeout(vscodeRpcChangeDebounceT);
-          vscodeRpcChangeDebounceT = setTimeout(function() {
-            try { if (vscodeRpcWs && vscodeRpcWs.readyState === 1) vscodeRpcWs.send(JSON.stringify(payload)); } catch (_) {}
-          }, 120);
-        } catch (_) {}
-      });
-    } catch (_) {}
+    installEditorVscodeRpcChangePublisher({
+      getModel: function() { return model; },
+      getCurrentPath: function() { return currentPath; },
+      languageFromPath: languageFromPath,
+      ensureVscodeRpcConnected: ensureVscodeRpcConnected,
+      getVscodeRpcLegend: function() { return vscodeRpcLegend; },
+      getVscodeRpcWebSocket: function() { return vscodeRpcWs; },
+      getVscodeRpcDocUri: function() { return vscodeRpcDocUri; },
+      setVscodeRpcDocUri: function(uri) { vscodeRpcDocUri = uri; },
+      getVscodeRpcDocVersion: function() { return vscodeRpcDocVersion; },
+      setVscodeRpcDocVersion: function(version) { vscodeRpcDocVersion = version; },
+      getVscodeRpcChangeDebounceTimer: function() { return vscodeRpcChangeDebounceT; },
+      setVscodeRpcChangeDebounceTimer: function(timer) { vscodeRpcChangeDebounceT = timer; },
+    });
   }
 
   // Force-enable semantic highlighting on the standalone theme object.
@@ -1902,6 +1478,107 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
         console.log('[semanticTokens] forced semanticHighlighting=true on theme');
       }
     } catch (e) { console.warn('[semanticTokens] _forceSemanticHighlighting error', e); }
+  }
+
+  function _disposeMirrorPublisherRuntime() {
+    try {
+      if (mirrorPublisherDisposable && mirrorPublisherDisposable.dispose) {
+        mirrorPublisherDisposable.dispose();
+      }
+    } catch (_) {}
+    mirrorPublisherDisposable = null;
+    mirrorPublisherInstalled = false;
+    _trace.mirror_active = 0;
+    _syncTraceDebug();
+  }
+
+  function _clearEditorDecorationStateRuntime() {
+    draftDecoCollection = null;
+    draftDecoIds = [];
+    draftZoneIds = [];
+  }
+
+  function _clearGitBaselineModelsRuntime() {
+    try { if (gitHeadModel && gitHeadModel.dispose) gitHeadModel.dispose(); } catch (_) {}
+    try { if (gitDiskModel && gitDiskModel.dispose) gitDiskModel.dispose(); } catch (_) {}
+    gitHeadModel = null;
+    gitDiskModel = null;
+    lastGitBaselines = null;
+  }
+
+  function _setScrollPublisherInstalled(value) {
+    installScrollPublisher._done = !!value;
+  }
+
+  function _installMarkerNavBindingsRuntime(targetEditor) {
+    try { installMarkerNavBindings(window.monaco, targetEditor, function (dir) { jumpToMarker(window.monaco, targetEditor, model, dir); }); } catch (_) {}
+  }
+
+  function _editorLifecycleDeps() {
+    return {
+      getMonaco: function() { return window.monaco || null; },
+      getEditorContainer: getEditorContainer,
+      fetchSSOTState: fetchSSOTState,
+      getCachedPrefs: function() { return cachedPrefs; },
+      setCachedPrefs: function(value) { cachedPrefs = value; },
+      getEditor: function() { return editor; },
+      setEditor: function(value) { editor = value; },
+      getDiffEditor: function() { return diffEditor; },
+      setDiffEditor: function(value) { diffEditor = value; },
+      getModel: function() { return model; },
+      getCurrentPath: function() { return currentPath; },
+      disposeMirrorPublisher: _disposeMirrorPublisherRuntime,
+      setScrollPublisherInstalled: _setScrollPublisherInstalled,
+      clearEditorDecorationState: _clearEditorDecorationStateRuntime,
+      clearGitBaselineModels: _clearGitBaselineModelsRuntime,
+      buildMonacoOptionsFromPrefs: buildMonacoOptionsFromPrefs,
+      forceSemanticHighlighting: _forceSemanticHighlighting,
+      installMarkerNavBindings: _installMarkerNavBindingsRuntime,
+      applyMonacoTheme: applyMonacoTheme,
+      ensureTouchSelection: ensureTouchSelection,
+      syncReadOnlyInputMode: _syncReadOnlyInputMode,
+      onEditorConfigChanged: _onEditorConfigChanged,
+      updateDebug: updateDebug,
+      ensureLayoutObserver: ensureLayoutObserver,
+      bindUIIPCEditorHooks: bindUIIPCEditorHooks,
+      installMirrorPublisher: installMirrorPublisher,
+      installScrollPublisher: installScrollPublisher,
+      requestBreadcrumbSymbols: _bcRequestSymbols,
+      layoutEditors: _layoutEditors,
+    };
+  }
+
+  function _gitBaselineRuntimeDeps() {
+    return {
+      getMonaco: function() { return window.monaco || null; },
+      getCurrentPath: function() { return currentPath; },
+      getEditor: function() { return editor; },
+      getDiffEditor: function() { return diffEditor; },
+      getModel: function() { return model; },
+      getGitHeadModel: function() { return gitHeadModel; },
+      setGitHeadModel: function(value) { gitHeadModel = value; },
+      getGitDiskModel: function() { return gitDiskModel; },
+      setGitDiskModel: function(value) { gitDiskModel = value; },
+      getLastLocalEditAt: function() { return lastLocalEditAt; },
+      getBaselineApplyIdleMs: _gitBaselineApplyIdleMs,
+      setPendingGitBaselinePayload: function(payload) { pendingGitBaselinePayload = payload; },
+      schedulePendingGitBaselineApply: _schedulePendingGitBaselineApply,
+      setLastGitBaselines: function(payload) { lastGitBaselines = payload; },
+      getShowInlineDiffs: getShowInlineDiffs,
+      getShowDraftDiffs: getShowDraftDiffs,
+      getAutoSave: getAutoSave,
+      disposeGitBaselines: disposeGitBaselines,
+      ensurePlainEditorWithPrefs: ensurePlainEditorWithPrefs,
+      ensureDiffEditorWithPrefs: ensureDiffEditorWithPrefs,
+      languageFromPath: languageFromPath,
+      applyLineNumberSizing: applyLineNumberSizing,
+      layoutEditors: _layoutEditors,
+      installDraftZoneOrderingHook: _installDraftZoneOrderingHook,
+      reapplyDraftZones: reapplyDraftZones,
+      ensureTouchSelection: ensureTouchSelection,
+      setDebugGit: setDebugGit,
+      setDebugFlags: setDebugFlags,
+    };
   }
 
   // Get the Monaco standalone theme service from the editor instance.
@@ -1943,62 +1620,15 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
   }
 
   function disposeDiffEditorOnly() {
-    try {
-      if (mirrorPublisherDisposable && mirrorPublisherDisposable.dispose) {
-        mirrorPublisherDisposable.dispose();
-      }
-    } catch (_) {}
-    mirrorPublisherDisposable = null;
-    mirrorPublisherInstalled = false;
-    _trace.mirror_active = 0;
-    _syncTraceDebug();
-    try {
-      if (diffEditor && diffEditor.setModel) {
-        diffEditor.setModel(null);
-      }
-    } catch (_) {}
-    try { if (diffEditor && diffEditor.dispose) diffEditor.dispose(); } catch (_) {}
-    diffEditor = null;
-    // Drop any cached decoration collection tied to the disposed editor.
-    draftDecoCollection = null;
-    draftDecoIds = [];
-    draftZoneIds = [];
-    // Allow scroll/cursor publisher to re-install on the next editor instance.
-    installScrollPublisher._done = false;
+    disposeDiffEditorRuntime(_editorLifecycleDeps());
   }
 
   function disposePlainEditorOnly() {
-    try {
-      if (mirrorPublisherDisposable && mirrorPublisherDisposable.dispose) {
-        mirrorPublisherDisposable.dispose();
-      }
-    } catch (_) {}
-    mirrorPublisherDisposable = null;
-    mirrorPublisherInstalled = false;
-    _trace.mirror_active = 0;
-    _syncTraceDebug();
-    try { if (editor && editor.dispose) editor.dispose(); } catch (_) {}
-    editor = null;
-    // Drop any cached decoration collection tied to the disposed editor.
-    draftDecoCollection = null;
-    draftDecoIds = [];
-    draftZoneIds = [];
-    // Allow scroll/cursor publisher to re-install on the next editor instance.
-    installScrollPublisher._done = false;
+    disposePlainEditorRuntime(_editorLifecycleDeps());
   }
 
   function disposeGitBaselines() {
-    // Ensure diff editor is not still referencing these models.
-    try {
-      if (diffEditor && diffEditor.setModel) {
-        diffEditor.setModel(null);
-      }
-    } catch (_) {}
-    try { if (gitHeadModel && gitHeadModel.dispose) gitHeadModel.dispose(); } catch (_) {}
-    try { if (gitDiskModel && gitDiskModel.dispose) gitDiskModel.dispose(); } catch (_) {}
-    gitHeadModel = null;
-    gitDiskModel = null;
-    lastGitBaselines = null;
+    disposeGitBaselinesRuntime(_editorLifecycleDeps());
   }
 
   function buildMonacoOptionsFromPrefs(state) {
@@ -2198,247 +1828,7 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
   }
 
   function applyGitBaselines(payload) {
-    try {
-      if (!payload || !payload.path || !currentPath) { console.log('[GitBaselines] skip: no path/currentPath'); return; }
-      if (String(payload.path) !== String(currentPath)) { console.log('[GitBaselines] skip: path mismatch', payload.path, currentPath); return; }
-      if (!window.monaco) { console.log('[GitBaselines] skip: no monaco'); return; }
-
-      var baselineIdleMs = _gitBaselineApplyIdleMs();
-      if (baselineIdleMs > 0 && diffEditor && lastLocalEditAt > 0) {
-        var ageMs = Date.now() - lastLocalEditAt;
-        if (ageMs < baselineIdleMs) {
-          console.log('[GitBaselines] deferred by idle guard, ageMs=' + ageMs + ' threshold=' + baselineIdleMs);
-          pendingGitBaselinePayload = payload;
-          _schedulePendingGitBaselineApply();
-          setDebugGit('git=defer ' + String(baselineIdleMs - ageMs) + 'ms');
-          return;
-        }
-      }
-
-      lastGitBaselines = payload;
-
-      // Capture scroll/cursor from whichever editor is active before any transitions.
-      var savedScrollTop = null;
-      var savedPosition = null;
-      try {
-        var activeEd = (diffEditor && diffEditor.getModifiedEditor)
-          ? diffEditor.getModifiedEditor()
-          : editor;
-        if (activeEd) {
-          savedScrollTop = activeEd.getScrollTop();
-          savedPosition = activeEd.getPosition();
-        }
-      } catch (_) {}
-
-      if (!getShowInlineDiffs()) {
-        disposeGitBaselines();
-        if (diffEditor) ensurePlainEditorWithPrefs();
-        return;
-      }
-
-      var tracked = !!payload.tracked;
-      var head = (typeof payload.head_content === 'string') ? payload.head_content : null;
-      var disk = (typeof payload.disk_content === 'string') ? payload.disk_content : '';
-      var headSha = (typeof payload.head_sha256 === 'string') ? payload.head_sha256 : null;
-      var diskSha = (typeof payload.disk_sha256 === 'string') ? payload.disk_sha256 : null;
-
-      var hasGitDiff = !!(tracked && head != null && headSha && diskSha && headSha !== diskSha);
-      if (!hasGitDiff) {
-        // No diff — use current editor content as both original and modified
-        // so the diff editor stays active with an empty diff (no editor swap).
-        head = model && model.getValue ? model.getValue() : '';
-      }
-
-      var lang = languageFromPath(currentPath);
-
-      if (!gitHeadModel) {
-        console.log('[GitBaselines] creating new gitHeadModel');
-        gitHeadModel = monaco.editor.createModel(head || '', lang);
-      } else {
-        var nextHead = head || '';
-        try {
-          var curHead = gitHeadModel.getValue ? String(gitHeadModel.getValue()) : '';
-          var headChanged = curHead !== String(nextHead);
-          console.log('[GitBaselines] gitHeadModel update: changed=' + headChanged + ' curLen=' + curHead.length + ' nextLen=' + nextHead.length);
-          if (headChanged) {
-            gitHeadModel.setValue(nextHead);
-          }
-        } catch (_) {
-          try { gitHeadModel.setValue(nextHead); } catch (_) {}
-        }
-        try { monaco.editor.setModelLanguage(gitHeadModel, lang); } catch (_) {}
-      }
-
-      if (!gitDiskModel) {
-        gitDiskModel = monaco.editor.createModel(disk || '', lang);
-      } else {
-        var nextDisk = disk || '';
-        try {
-          if (!gitDiskModel.getValue || String(gitDiskModel.getValue()) !== String(nextDisk)) {
-            gitDiskModel.setValue(nextDisk);
-          }
-        } catch (_) {
-          try { gitDiskModel.setValue(nextDisk); } catch (_) {}
-        }
-        try { monaco.editor.setModelLanguage(gitDiskModel, lang); } catch (_) {}
-      }
-
-      ensureDiffEditorWithPrefs();
-
-      var desiredAutoSave = !!getAutoSave();
-      var desiredFreeze = !desiredAutoSave;
-      var desiredHasBaseline = !desiredAutoSave;
-
-      var needsSetModel = true;
-      var needsFlagRebind = false;
-      try {
-        if (diffEditor && diffEditor.getModel) {
-          var dm = diffEditor.getModel();
-          if (dm && dm.original === gitHeadModel && dm.modified === model) {
-            needsSetModel = false;
-            var curAutoSave = !!dm.te2AutosaveMode;
-            var curFreeze = !!dm.te2FreezeProjection;
-            var curHasBaseline = !!dm.modifiedBaseline;
-            needsFlagRebind = (
-              curAutoSave !== desiredAutoSave ||
-              curFreeze !== desiredFreeze ||
-              curHasBaseline !== desiredHasBaseline
-            );
-            console.log('[GitBaselines] models match: needsSetModel=false needsFlagRebind=' + needsFlagRebind + ' hasGitDiff=' + hasGitDiff);
-          } else {
-            console.log('[GitBaselines] models differ: needsSetModel=true');
-          }
-        }
-      } catch (_) {}
-
-      if (needsSetModel || needsFlagRebind) {
-        try {
-          // Save view state before setModel to preserve cursor/scroll position.
-          var modViewState = null;
-          try {
-            var modEd = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
-            if (modEd) modViewState = modEd.saveViewState();
-          } catch (_) {}
-
-          var diffModel = {
-            original: gitHeadModel,
-            modified: model,
-            te2AutosaveMode: desiredAutoSave,
-          };
-          if (!desiredAutoSave) {
-            // Snapshot current editor content as draft baseline so edits
-            // after toggling to draft mode show as diffs.
-            var baselineContent = model.getValue ? model.getValue() : '';
-            var baselineLang = model.getLanguageId ? model.getLanguageId() : 'plaintext';
-            diffModel.modifiedBaseline = monaco.editor.createModel(baselineContent, baselineLang);
-            diffModel.te2FreezeProjection = true;
-          }
-          diffEditor.setModel(diffModel);
-
-          // Restore cursor/scroll after setModel.
-          try {
-            if (modViewState) {
-              var modEd2 = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
-              if (modEd2) modEd2.restoreViewState(modViewState);
-            }
-          } catch (_) {}
-
-          setDebugFlags('flags=set as=' + (desiredAutoSave ? '1' : '0') + ' fr=' + (desiredFreeze ? '1' : '0') + ' mb=' + (desiredHasBaseline ? '1' : '0'));
-        } catch (e) {
-          console.warn('[Monaco] diffEditor.setModel failed', e);
-          disposeGitBaselines();
-          ensurePlainEditorWithPrefs();
-          return;
-        }
-      }
-      applyLineNumberSizing();
-      _layoutEditors();
-      // Install ordering hook so draft deletion zones can be re-appended after git diff
-      // inserts its own deletion view zones.
-      try { _installDraftZoneOrderingHook(); } catch (e) { console.warn('[DraftDiff] Failed to install zone ordering hook', e); }
-      // Git diff deletion widgets are implemented as view zones; ensure our draft deletion
-      // zones are added *after* the diff engine updates so they appear below git zones.
-      try {
-        if (diffEditor && diffEditor.onDidUpdateDiff && !diffEditor.__te2DraftZoneOrderBound) {
-          diffEditor.__te2DraftZoneOrderBound = true;
-          diffEditor.onDidUpdateDiff(function() {
-            try { if (getShowDraftDiffs()) setTimeout(function(){ reapplyDraftZones(); }, 0); } catch (_) {}
-          });
-        }
-      } catch (_) {}
-      try { if (getShowDraftDiffs()) setTimeout(function(){ reapplyDraftZones(); }, 0); } catch (_) {}
-
-      // Diff computation is async; getLineChanges() may be null until it settles.
-      try {
-        if (!diffEditor.__te2_onDidUpdateDiffBound && diffEditor.onDidUpdateDiff) {
-          diffEditor.__te2_onDidUpdateDiffBound = true;
-          diffEditor.onDidUpdateDiff(function() {
-            try {
-              var lc2 = null;
-              try { lc2 = diffEditor.getLineChanges ? diffEditor.getLineChanges() : null; } catch (_) { lc2 = null; }
-              var n2 = (lc2 && lc2.length != null) ? lc2.length : (lc2 === null ? 'null' : '0');
-              setDebugGit('git=on lc=' + n2);
-            } catch (_) {}
-          });
-        }
-      } catch (_) {}
-
-      try {
-        var updateLc = function(tag) {
-          try {
-            var lc = null;
-            try { lc = diffEditor.getLineChanges ? diffEditor.getLineChanges() : null; } catch (_) { lc = null; }
-            var n = (lc && lc.length != null) ? lc.length : (lc === null ? 'null' : '0');
-            setDebugGit('git=on lc=' + n + (tag ? ' ' + tag : ''));
-            if (tag === 't800' && (lc === null || (lc && lc.length === 0))) {
-              try {
-                var res = null;
-                try { res = diffEditor.getDiffComputationResult ? diffEditor.getDiffComputationResult() : null; } catch (_) { res = null; }
-                var dm = null;
-                try { dm = diffEditor.getModel ? diffEditor.getModel() : null; } catch (_) { dm = null; }
-                console.warn('[Monaco][GitDiff] lc still empty after t800', {
-                  path: currentPath,
-                  tracked: tracked,
-                  headSha: headSha,
-                  diskSha: diskSha,
-                  hasGitDiff: hasGitDiff,
-                  diffResult: res ? { identical: res.identical, quitEarly: res.quitEarly, changesLen: res.changes ? res.changes.length : null, changes2Len: res.changes2 ? res.changes2.length : null } : null,
-                  modelKeys: dm ? Object.keys(dm) : null,
-                  hasModifiedBaselineKey: dm ? Object.prototype.hasOwnProperty.call(dm, 'modifiedBaseline') : null,
-                  modifiedBaselineType: dm && dm.modifiedBaseline ? (typeof dm.modifiedBaseline) : null,
-                });
-              } catch (_) {}
-            }
-          } catch (_) {}
-        };
-        updateLc('t0');
-        setTimeout(function(){ updateLc('t200'); }, 200);
-        setTimeout(function(){ updateLc('t800'); }, 800);
-      } catch (_) {}
-
-      ensureTouchSelection('gitdiff');
-      setTimeout(function(){ ensureTouchSelection('gitdiff-tick'); }, 0);
-
-      // Restore scroll/cursor after editor transition + setModel + async diff computation.
-      // Must be deferred because diff view zones alter scroll synchronously after computation.
-      if (savedScrollTop != null) {
-        var _restoreScroll = function() {
-          try {
-            var restoreEd = (diffEditor && diffEditor.getModifiedEditor)
-              ? diffEditor.getModifiedEditor()
-              : editor;
-            if (restoreEd && savedScrollTop != null) restoreEd.setScrollTop(savedScrollTop);
-            if (restoreEd && savedPosition) restoreEd.setPosition(savedPosition);
-          } catch (_) {}
-        };
-        // Immediate attempt + deferred attempts after diff engine settles
-        _restoreScroll();
-        setTimeout(_restoreScroll, 50);
-        setTimeout(_restoreScroll, 300);
-      }
-    } catch (e) {
-      console.warn('[Monaco] applyGitBaselines failed', e);
-    }
+    applyGitBaselinesRuntime(_gitBaselineRuntimeDeps(), payload);
   }
 
   async function fetchSSOTState() {
@@ -2447,172 +1837,15 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
   }
 
   async function ensureEditorWithPrefs() {
-    if (editor) return editor;
-    var el = getEditorContainer();
-    if (!el || !window.monaco) return null;
-
-    try {
-      if (!cachedPrefs) cachedPrefs = await fetchSSOTState();
-    } catch (e) {
-      // If SSOT is unavailable, we do NOT create a "base editor state".
-      // Leave the editor uninitialized and show debug context.
-      updateDebug('ssot=fail');
-      throw e;
-    }
-
-    editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
-    try { _forceSemanticHighlighting(); } catch (_) {}
-    try { installMarkerNavBindings(window.monaco, editor, function (dir) { jumpToMarker(window.monaco, editor, model, dir); }); } catch (_) {}
-    try {
-      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
-      var t = prefs && prefs.editor && prefs.editor.theme ? prefs.editor.theme : '';
-      applyMonacoTheme(t);
-    } catch (_) {}
-    ensureTouchSelection('boot');
-    _syncReadOnlyInputMode(editor);
-    editor.onDidChangeConfiguration(function() { _onEditorConfigChanged(editor); });
-    updateDebug('ssot=ok');
-    ensureLayoutObserver();
-
-    bindUIIPCEditorHooks();
-    return editor;
+    return await ensureEditorWithPrefsRuntime(_editorLifecycleDeps());
   }
 
   function ensurePlainEditorWithPrefs() {
-    // Capture scroll position from diff editor's modified pane before disposing.
-    var savedScrollTop = null;
-    var savedPosition = null;
-    if (diffEditor) {
-      try {
-        var me = diffEditor.getModifiedEditor();
-        if (me) {
-          savedScrollTop = me.getScrollTop();
-          savedPosition = me.getPosition();
-        }
-      } catch (_) {}
-      disposeDiffEditorOnly();
-      editor = null;
-    }
-    if (editor) return editor;
-    var el = getEditorContainer();
-    if (!el || !window.monaco) return null;
-
-    editor = monaco.editor.create(el, buildMonacoOptionsFromPrefs(cachedPrefs));
-    try { _forceSemanticHighlighting(); } catch (_) {}
-    try { installMarkerNavBindings(window.monaco, editor, function (dir) { jumpToMarker(window.monaco, editor, model, dir); }); } catch (_) {}
-    try {
-      var prefs = cachedPrefs && cachedPrefs.preferences ? cachedPrefs.preferences : cachedPrefs;
-      var t = prefs && prefs.editor && prefs.editor.theme ? prefs.editor.theme : '';
-      applyMonacoTheme(t);
-    } catch (_) {}
-    if (model) {
-      try { editor.setModel(model); } catch (_) {}
-      installMirrorPublisher();
-      installScrollPublisher();
-    }
-    ensureTouchSelection('plain');
-    _syncReadOnlyInputMode(editor);
-    editor.onDidChangeConfiguration(function() { _onEditorConfigChanged(editor); });
-    ensureLayoutObserver();
-    _layoutEditors();
-
-    // Restore scroll position from the diff editor that was disposed.
-    try {
-      if (savedScrollTop != null && editor) {
-        editor.setScrollTop(savedScrollTop);
-      }
-      if (savedPosition && editor) {
-        editor.setPosition(savedPosition);
-      }
-    } catch (_) {}
-
-    bindUIIPCEditorHooks();
-    return editor;
+    return ensurePlainEditorWithPrefsRuntime(_editorLifecycleDeps());
   }
 
   function ensureDiffEditorWithPrefs() {
-    if (diffEditor) return diffEditor;
-
-    // Capture scroll position from plain editor before disposing it.
-    var savedScrollTop = null;
-    var savedPosition = null;
-    try {
-      if (editor) {
-        savedScrollTop = editor.getScrollTop();
-        savedPosition = editor.getPosition();
-      }
-    } catch (_) {}
-
-    // Dispose the plain editor instance before creating the DiffEditor in the same container.
-    if (editor) {
-      disposePlainEditorOnly();
-    }
-
-    var el = getEditorContainer();
-    if (!el || !window.monaco) return null;
-
-    diffEditor = monaco.editor.createDiffEditor(el, {
-      renderSideBySide: false,
-      readOnly: false,
-      originalEditable: false,
-      enableSplitViewResizing: false,
-      automaticLayout: true,
-      experimental: { useTrueInlineView: false },
-      scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
-      renderGutterMenu: false
-    });
-
-    // Apply SSOT-derived options to both editors (original gutter must follow font size).
-    try {
-      var opts = buildMonacoOptionsFromPrefs(cachedPrefs);
-      var theme = null;
-      try { theme = opts && opts.theme ? opts.theme : null; } catch (_) { theme = null; }
-      try { if (opts) delete opts.theme; } catch (_) {}
-      try {
-        var diffOpts = Object.assign({}, opts || {}, { minimap: { enabled: false } });
-        diffEditor.getModifiedEditor().updateOptions(diffOpts);
-      } catch (_) {}
-      try {
-        var origOpts = Object.assign({}, opts || {}, { readOnly: true, contextmenu: false, minimap: { enabled: false } });
-        diffEditor.getOriginalEditor().updateOptions(origOpts);
-      } catch (_) {}
-      try {
-        var scrollOpts = { scrollbar: { vertical: 'hidden', verticalScrollbarSize: 0, horizontal: 'hidden', horizontalScrollbarSize: 0 } };
-        diffEditor.getModifiedEditor().updateOptions(scrollOpts);
-        diffEditor.getOriginalEditor().updateOptions(scrollOpts);
-      } catch (_) {}
-          if (theme) applyMonacoTheme(theme);
-    } catch (_) {}
-
-    editor = diffEditor.getModifiedEditor();
-
-    if (model) {
-      try { editor.setModel(model); } catch (_) {}
-      installMirrorPublisher();
-      installScrollPublisher();
-    }
-    // Request breadcrumb symbols for the diff editor's active file.
-    try { if (currentPath) _bcRequestSymbols(currentPath); } catch (_) {}
-    ensureTouchSelection('diff');
-    // Original pane is always readOnly — always suppress keyboard.
-    _syncReadOnlyInputMode(diffEditor.getOriginalEditor());
-    _syncReadOnlyInputMode(editor);
-    editor.onDidChangeConfiguration(function() { _onEditorConfigChanged(editor); });
-    ensureLayoutObserver();
-    _layoutEditors();
-
-    // Restore scroll position from the plain editor that was disposed.
-    try {
-      if (savedScrollTop != null && editor) {
-        editor.setScrollTop(savedScrollTop);
-      }
-      if (savedPosition && editor) {
-        editor.setPosition(savedPosition);
-      }
-    } catch (_) {}
-
-    bindUIIPCEditorHooks();
-    return diffEditor;
+    return ensureDiffEditorWithPrefsRuntime(_editorLifecycleDeps());
   }
 
   // Force-flush the mirror/didChange debounce so the ext host has the latest
@@ -2672,7 +1905,7 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
       getEditor: function() { return editor; },
       getDiffEditor: function() { return diffEditor; },
       getCurrentPath: function() { return currentPath; },
-      getUiIpcSocket: function() { return uiIpcSocket; },
+      getUiIpcSocket: function() { return uiIpcRuntime.getSocket(); },
       updateDebug: updateDebug,
     });
   }
@@ -2733,6 +1966,37 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
     syncMirrorDebug(mirrorState, setDebugMirror);
   }
 
+  function _draftDiffRuntimeDeps() {
+    return {
+      getCurrentPath: function() { return currentPath; },
+      getEditor: function() { return editor; },
+      getDiffEditor: function() { return diffEditor; },
+      getModel: function() { return model; },
+      getMonaco: function() { return monaco; },
+      getDocument: function() { return document; },
+      getShowDraftDiffs: getShowDraftDiffs,
+      getShowInlineDiffs: getShowInlineDiffs,
+      clearDraftDiffDecorations: clearDraftDiffDecorations,
+      clearDraftDiffZones: clearDraftDiffZones,
+      setDebugDraft: setDebugDraft,
+      applyEditorTypography: applyEditorTypography,
+      getDraftDecoCollection: function() { return draftDecoCollection; },
+      setDraftDecoCollection: function(value) { draftDecoCollection = value; },
+      getDraftDecoIds: function() { return draftDecoIds; },
+      setDraftDecoIds: function(value) { draftDecoIds = Array.isArray(value) ? value : []; },
+      setDraftZoneIds: function(value) { draftZoneIds = Array.isArray(value) ? value : []; },
+      getLastDraftZones: function() { return lastDraftZones; },
+      setLastDraftZones: function(value) { lastDraftZones = value; },
+      getIsApplyingDraftZones: function() { return isApplyingDraftZones; },
+      setIsApplyingDraftZones: function(value) { isApplyingDraftZones = !!value; },
+      getIgnoreNextModifiedViewZonesEvent: function() { return _ignoreNextModifiedViewZonesEvent; },
+      setIgnoreNextModifiedViewZonesEvent: function(value) { _ignoreNextModifiedViewZonesEvent = !!value; },
+      getReapplyDraftZonesScheduled: function() { return _reapplyDraftZonesScheduled; },
+      setReapplyDraftZonesScheduled: function(value) { _reapplyDraftZonesScheduled = !!value; },
+      schedule: function(callback, delayMs) { return setTimeout(callback, delayMs); },
+    };
+  }
+
   function clearDraftDiffDecorations() {
     var next = clearDraftDiffDecorationsState({
       clearZonesFn: clearDraftDiffZones,
@@ -2750,68 +2014,15 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
   }
 
   function applyDraftZones(zones) {
-    lastDraftZones = (zones && zones.length) ? zones.slice() : null;
-    clearDraftDiffZones();
-    if (!zones || !zones.length || !editor || !editor.changeViewZones) return;
-    isApplyingDraftZones = true;
-    try {
-      _ignoreNextModifiedViewZonesEvent = true;
-      editor.changeViewZones(function(accessor) {
-        for (var zi = 0; zi < zones.length; zi++) {
-          var z = zones[zi];
-          var node = document.createElement('div');
-          node.className = 'te2-draft-del-zone';
-          node.textContent = z.text || '';
-          node.style.whiteSpace = 'pre';
-          applyEditorTypography(node);
-          try {
-            var id = accessor.addZone({
-              afterLineNumber: z.after,
-              heightInLines: Math.max(1, z.lines || 1),
-              domNode: node,
-            });
-            draftZoneIds.push(id);
-          } catch (_) {}
-        }
-      });
-    } catch (_) {}
-    isApplyingDraftZones = false;
+    applyDraftZonesRuntime(_draftDiffRuntimeDeps(), zones);
   }
 
   function reapplyDraftZones() {
-    try {
-      if (isApplyingDraftZones) return;
-      if (!lastDraftZones || !lastDraftZones.length) return;
-      applyDraftZones(lastDraftZones);
-    } catch (_) {}
+    reapplyDraftZonesRuntime(_draftDiffRuntimeDeps());
   }
 
   function _installDraftZoneOrderingHook() {
-    try {
-      if (!diffEditor || diffEditor.__te2DraftZoneOrderingHook) return;
-      const mod = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
-      if (!mod || !mod.onDidChangeViewZones) return;
-      diffEditor.__te2DraftZoneOrderingHook = true;
-      mod.onDidChangeViewZones(function() {
-        try {
-          if (_ignoreNextModifiedViewZonesEvent) {
-            _ignoreNextModifiedViewZonesEvent = false;
-            return;
-          }
-          // When git diff inserts its own deleted-code view zones, re-append our draft zones
-          // so they appear below git zones. Avoid tight loops with a debounce.
-          if (_reapplyDraftZonesScheduled) return;
-          if (!getShowInlineDiffs()) return;
-          if (!getShowDraftDiffs()) return;
-          if (!lastDraftZones || !lastDraftZones.length) return;
-          _reapplyDraftZonesScheduled = true;
-          setTimeout(function() {
-            _reapplyDraftZonesScheduled = false;
-            try { reapplyDraftZones(); } catch (_) {}
-          }, 0);
-        } catch (_) {}
-      });
-    } catch (_) {}
+    installDraftZoneOrderingHookRuntime(_draftDiffRuntimeDeps());
   }
 
   function applyEditorTypography(node) {
@@ -2834,199 +2045,11 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
   }
 
   function _ensureDraftDecoCollection() {
-    try {
-      if (draftDecoCollection) return draftDecoCollection;
-      if (!editor) return null;
-      if (editor.createDecorationsCollection) {
-        draftDecoCollection = editor.createDecorationsCollection();
-        return draftDecoCollection;
-      }
-    } catch (_) {}
-    return null;
+    return ensureDraftDecoCollectionRuntime(_draftDiffRuntimeDeps());
   }
 
   function applyDraftDiffDecorations(payload) {
-    try {
-      if (!payload || !payload.path || !currentPath) return;
-      if (String(payload.path) !== String(currentPath)) return;
-      if (!editor || !window.monaco || !model) return;
-
-      if (!getShowDraftDiffs()) {
-        clearDraftDiffDecorations();
-        return;
-      }
-
-      var hunks = Array.isArray(payload.hunks) ? payload.hunks : [];
-      var ms = (payload.ms != null) ? payload.ms : null;
-      var debug = false;
-      try { debug = !!window.__debugDraftDiffs; } catch (_) { debug = false; }
-
-      var addLines = 0;
-      var delLines = 0;
-      var decorations = [];
-      var zones = [];
-
-      var lineCount = 0;
-      try { lineCount = model.getLineCount ? model.getLineCount() : 0; } catch (_) { lineCount = 0; }
-      if (!lineCount || lineCount < 1) {
-        clearDraftDiffDecorations();
-        setDebugDraft('draft=empty');
-        return;
-      }
-      function clampLine(n) {
-        if (n < 1) return 1;
-        if (n > lineCount) return lineCount;
-        return n;
-      }
-
-      var debugLines = null;
-      if (debug) {
-        debugLines = [];
-        console.groupCollapsed('[DraftDiff] apply ' + String(payload.path || '') + ' hunks=' + String(hunks.length) + ' lines=' + String(lineCount) + (ms != null ? (' ms=' + String(ms)) : ''));
-      }
-
-      for (var hi = 0; hi < hunks.length; hi++) {
-        var h = hunks[hi];
-        if (!h || !Array.isArray(h.lines)) continue;
-        var oldLine = (typeof h.oldStart === 'number' ? h.oldStart : 1);
-        var newLine = (typeof h.newStart === 'number' ? h.newStart : 1);
-        if (debug && debugLines) {
-          debugLines.push('hunk#' + hi + ' oldStart=' + oldLine + ' newStart=' + newLine + ' lines=' + h.lines.length);
-        }
-
-        for (var li = 0; li < h.lines.length; li++) {
-          var ln = h.lines[li];
-          var t = ln && ln.type ? String(ln.type) : '';
-          if (t === 'context') {
-            oldLine += 1;
-            newLine += 1;
-            continue;
-          }
-          if (t === 'add-draft') {
-            addLines += 1;
-            var lno = clampLine(newLine);
-            if (lno < 1 || lno > lineCount) {
-              newLine += 1;
-              continue;
-            }
-            var lineLen = 0;
-            try { lineLen = model.getLineLength(lno); } catch (_) { lineLen = 0; }
-            if (debug && debugLines) {
-              let sample = '';
-              try {
-                sample = model.getLineContent(lno);
-                if (sample && sample.length > 140) sample = sample.slice(0, 140) + '…';
-              } catch (_) {}
-              debugLines.push('  add hunk#' + hi + ' line#' + li + ' newLine=' + newLine + ' -> lno=' + lno + ' len=' + lineLen + ' sample=' + JSON.stringify(sample));
-            }
-            decorations.push({
-              range: new monaco.Range(lno, 1, lno, 1),
-              options: { isWholeLine: true, className: 'te2-draft-add-line' },
-            });
-            newLine += 1;
-            continue;
-          }
-          if (t === 'del-draft') {
-            // Group consecutive deletions into a single marker + zone so we don't
-            // stack multiple decorations on the same anchor line (Monaco will only
-            // show one marker, and ranges overlap heavily).
-            var anchor = clampLine(newLine);
-            if (anchor < 1 || anchor > lineCount) {
-              oldLine += 1;
-              continue;
-            }
-
-            var delBlock = [];
-            var delBlockPreview = [];
-            var blockStartLi = li;
-            while (li < h.lines.length) {
-              var ln2 = h.lines[li];
-              var t2 = ln2 && ln2.type ? String(ln2.type) : '';
-              if (t2 !== 'del-draft') break;
-              delLines += 1;
-              var txt = (ln2 && typeof ln2.text === 'string') ? ln2.text : '';
-              delBlock.push(txt);
-              if (debug && debugLines) {
-                const prev = txt.length > 140 ? txt.slice(0, 140) + '…' : txt;
-                delBlockPreview.push(prev);
-              }
-              oldLine += 1;
-              li += 1;
-            }
-            // We advanced li one past last del line; outer loop will li++ again.
-            li -= 1;
-
-            if (debug && debugLines) {
-              let sample2 = '';
-              try {
-                sample2 = model.getLineContent(anchor);
-                if (sample2 && sample2.length > 140) sample2 = sample2.slice(0, 140) + '…';
-              } catch (_) {}
-              debugLines.push(
-                '  del-block hunk#' + hi +
-                ' lines#' + blockStartLi + '-' + li +
-                ' newLine=' + newLine +
-                ' anchor=' + anchor +
-                ' count=' + delBlock.length +
-                ' del=' + JSON.stringify(delBlockPreview.join('\\n')) +
-                ' sample=' + JSON.stringify(sample2)
-              );
-            }
-
-            decorations.push({
-              range: new monaco.Range(anchor, 1, anchor, 1),
-              options: {
-                // Only render a gutter marker for deletions; avoid tinting the line itself.
-                // In "replace" hunks (del+add at same anchor), line tint would mix with the
-                // insertion highlight and make the first inserted line look wrong.
-                isWholeLine: false,
-                linesDecorationsClassName: 'te2-draft-del-marker',
-              },
-            });
-            zones.push({
-              after: anchor - 1,
-              text: delBlock.join('\n'),
-              lines: delBlock.length,
-            });
-            continue;
-          }
-          oldLine += 1;
-          newLine += 1;
-        }
-      }
-
-      if (debug && debugLines) {
-        // Quick overlap sanity check for line-based decorations.
-        try {
-          const lines = decorations
-            .map(d => (d && d.range) ? d.range.startLineNumber : null)
-            .filter(n => typeof n === 'number')
-            .sort((a,b) => a-b);
-          let overlaps = 0;
-          for (let i=1;i<lines.length;i++) if (lines[i] === lines[i-1]) overlaps++;
-          console.log('[DraftDiff] summary add=' + addLines + ' del=' + delLines + ' decorations=' + decorations.length + ' zones=' + zones.length + ' overlaps=' + overlaps);
-        } catch (_) {}
-        for (let i = 0; i < debugLines.length; i++) console.log('[DraftDiff] ' + debugLines[i]);
-        console.groupEnd();
-      }
-
-      var coll = _ensureDraftDecoCollection();
-      if (coll && coll.set) {
-        coll.set(decorations);
-      } else if (editor && editor.deltaDecorations) {
-        draftDecoIds = editor.deltaDecorations(draftDecoIds, decorations);
-      }
-
-      applyDraftZones(zones);
-      try { if (getShowInlineDiffs()) _installDraftZoneOrderingHook(); } catch (e) { console.warn('[DraftDiff] Failed to install zone ordering hook', e); }
-
-      var tag = 'draft=+' + addLines + ' -' + delLines;
-      if (ms != null) tag += ' ' + String(ms) + 'ms';
-      setDebugDraft(tag);
-      if (payload && payload.error) console.warn('[DraftDiff] error', payload.error);
-    } catch (e) {
-      console.warn('[DraftDiff] apply failed', e);
-    }
+    applyDraftDiffDecorationsRuntime(_draftDiffRuntimeDeps(), payload);
   }
 
   function requestDraftDiff(reason) {
@@ -3560,386 +2583,61 @@ import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_han
 
   // No host↔iframe postMessage bridge: all runtime communication uses /editor Socket.IO.
 
-  // ─── TE2 Breadcrumb Bar ──────────────────────────────────
-  var _bcEl = null;
-  var _bcSymbols = [];
-  var _bcLastPath = null;
-  var _bcSymbolsSeq = 0;
-  var _bcGetIcon = null; // seti-icons getIcon (loaded async)
-
   function bcInit() {
-    _bcEl = initBreadcrumbElement(document);
-    loadBreadcrumbIcons(function(path) { return import(path); }, function(getIcon) {
-      _bcGetIcon = getIcon;
-      if (_bcLastPath) _bcRender();
-    }, function(e) { console.warn('[BC] seti-icons load failed:', e); });
+    breadcrumbRuntime.init();
   }
 
   function bcUpdatePath(absPath, deferSymbols) {
-    if (!_bcEl) return;
-    if (!shouldUpdateBreadcrumbPath(absPath, _bcLastPath, deferSymbols)) return;
-    _bcLastPath = absPath;
-    _bcSymbols = [];
-    _bcRender();
-    if (!deferSymbols) {
-      _bcRequestSymbols(absPath);
-    }
+    breadcrumbRuntime.updatePath(absPath, deferSymbols);
   }
 
   function _bcRequestSymbols(absPath, opts) {
-    var generation = (opts && Number.isFinite(Number(opts.generation))) ? Number(opts.generation) : _wbCurrentGeneration();
-    if (!editorSocket || !editorSocket.connected) return;
-    if (!_wbIsBarrierOpen(absPath, generation)) {
-      _wbQueueSymbols(absPath, generation);
-      return;
-    }
-    var seq = ++_bcSymbolsSeq;
-    var langId = resolveBreadcrumbSymbolsLangId(model, absPath, languageFromPath);
-    // plaintext has no symbol provider and never will — skip to avoid
-    // 8s timeout loops that trigger workbench re-opens and cursor resets.
-    if (langId === 'plaintext') {
-      _bcSymbols = [];
-      _bcRender();
-      return;
-    }
-    // TS/JS extensions can be slow to activate on mobile — give them extra time
-    var tms = getBreadcrumbSymbolsTimeoutMs(langId);
-    editorWorkbenchCall('symbols', {
-      path: absPath,
-      languageId: langId,
-      generation: generation,
-    }, { timeoutMs: tms }).then(function(result) {
-      if (seq !== _bcSymbolsSeq) return; // stale
-      if (generation !== _wbCurrentGeneration()) return; // stale generation
-      if (String(absPath || '') !== String(currentPath || '')) return; // stale path
-      // Unwrap adapter response: {ok, result: [...]} or raw array
-      _bcSymbols = unwrapBreadcrumbSymbols(result);
-      console.log('[BC] symbols received:', _bcSymbols.length, _bcSymbols.slice(0, 2));
-      _bcRender();
-    }).catch(function(e) { console.warn('[BC] symbols request failed:', e); });
+    breadcrumbRuntime.requestSymbols(absPath, opts);
   }
 
   function bcUpdateCursor(line) {
-    if (!_bcEl || !_bcLastPath) return;
-    _bcRender(line);
+    breadcrumbRuntime.updateCursor(line);
   }
-
-  function _bcFindSymbolChain(symbols, line) {
-    return findBreadcrumbSymbolChain(symbols, line, symbolRangeToLineBounds);
-  }
-
-  // Symbol kind -> codicon class + color (LSP SymbolKind values, VS Code-style colors)
-  var _SYM_CODICON = {
-    1:  ['codicon-symbol-file',           '#8b949e'], // File
-    2:  ['codicon-symbol-module',         '#bc8cff'], // Module
-    3:  ['codicon-symbol-namespace',      '#bc8cff'], // Namespace
-    4:  ['codicon-symbol-package',        '#f0883e'], // Package
-    5:  ['codicon-symbol-class',          '#f0883e'], // Class
-    6:  ['codicon-symbol-method',         '#bc8cff'], // Method
-    7:  ['codicon-symbol-property',       '#4da6ff'], // Property
-    8:  ['codicon-symbol-field',          '#4da6ff'], // Field
-    9:  ['codicon-symbol-constructor',    '#bc8cff'], // Constructor
-    10: ['codicon-symbol-enum',           '#f0883e'], // Enum
-    11: ['codicon-symbol-interface',      '#4da6ff'], // Interface
-    12: ['codicon-symbol-function',       '#bc8cff'], // Function
-    13: ['codicon-symbol-variable',       '#4da6ff'], // Variable
-    14: ['codicon-symbol-constant',       '#4da6ff'], // Constant
-    15: ['codicon-symbol-string',         '#f0883e'], // String
-    16: ['codicon-symbol-number',         '#a6e22e'], // Number
-    17: ['codicon-symbol-boolean',        '#4da6ff'], // Boolean
-    18: ['codicon-symbol-array',          '#f0883e'], // Array
-    19: ['codicon-symbol-object',         '#8b949e'], // Object
-    22: ['codicon-symbol-enum-member',    '#f0883e'], // EnumMember
-    23: ['codicon-symbol-struct',         '#f0883e'], // Struct
-    25: ['codicon-symbol-operator',       '#8b949e'], // Operator
-    26: ['codicon-symbol-type-parameter', '#a6e22e'], // TypeParameter
-  };
-
-  function _bcSymbolSvg(kind) {
-    return breadcrumbSymbolIcon(kind, _SYM_CODICON);
-  }
-
-  function _bcRender(cursorLine) {
-    if (!_bcEl) return;
-    _bcEl.innerHTML = '';
-    if (!_bcLastPath) return;
-
-    var parts = splitBreadcrumbPathParts(_bcLastPath);
-    var accum = '';
-
-    for (var i = 0; i < parts.length; i++) {
-      accum += '/' + parts[i];
-      if (i > 0) {
-        appendBreadcrumbSeparator(document, _bcEl);
-      }
-      var isFile = isBreadcrumbFileSegment(i, parts.length);
-      var item = createBreadcrumbPathItem(document, accum, isFile);
-      // Add seti icon for the file segment
-      if (isFile && _bcGetIcon) {
-        var iconSpan = document.createElement('span');
-        iconSpan.className = 'te2-bc-icon';
-        item.appendChild(iconSpan);
-        applyBreadcrumbFileIcon(_bcGetIcon, iconSpan, parts[i], getBreadcrumbIconTheme());
-      }
-      var label = document.createElement('span');
-      label.textContent = parts[i];
-      item.appendChild(label);
-      item.addEventListener('click', _bcOnPathClick);
-      _bcEl.appendChild(item);
-    }
-
-    // Symbol chain based on cursor
-    if (shouldRenderBreadcrumbSymbolChain(_bcSymbols, cursorLine)) {
-      var chain = _bcFindSymbolChain(_bcSymbols, cursorLine);
-      for (var j = 0; j < chain.length; j++) {
-        appendBreadcrumbSeparator(document, _bcEl);
-        var sitem = createBreadcrumbSymbolItem(document, chain[j], j, _bcSymbolSvg(chain[j].kind));
-        var symRange = chain[j].selectionRange || chain[j].range;
-        if (symRange) {
-          var pos = getBreadcrumbSymbolPosition(symRange);
-          sitem.dataset.line = String(pos.line);
-          sitem.dataset.col = String(pos.col);
-        }
-        sitem.addEventListener('click', _bcOnSymbolClick);
-        _bcEl.appendChild(sitem);
-      }
-    }
-    // Auto-scroll to show the rightmost (active) item
-    finalizeBreadcrumbScroll(_bcEl);
-  }
-
-  function _bcOnPathClick(ev) {
-    try {
-      var target = getBreadcrumbPathClickTarget(ev);
-      var isFile = target.isFile;
-      if (isFile) return; // file segment = no-op (already open)
-      // Directory click → emit to editor socket, which relays to explorer
-      var absDir = target.absDir;
-      console.log('[BC] path click:', absDir, 'socket connected:', !!(editorSocket && editorSocket.connected));
-      if (editorSocket && editorSocket.connected) {
-        editorSocket.emit('editor_breadcrumb_navigate', { path: absDir, open_drawer: true });
-      }
-    } catch (_) {}
-  }
-
-  function _bcOnSymbolClick(ev) {
-    try {
-      var p = getBreadcrumbSymbolClickPosition(ev);
-      var line = p.line;
-      var col = p.col;
-      if (Number.isFinite(line)) {
-        applyJumpToLineAt(editor, model, { line: line, column: col, focus: true, scroll_y: 'center' });
-      }
-    } catch (_) {}
-  }
-  // ─── End Breadcrumb ──────────────────────────────────────
-
-  // ─── UI IPC (frontend-to-frontend relay) ────────────────
-  var uiIpcSocket = null;
 
   function connectUIIPC() {
-    try {
-      if (!window.io) return;
-      uiIpcSocket = connectUiIpcSocket(window.io);
-      uiIpcSocket.on('connect', function() {
-        console.log('[UI_IPC] editor iframe connected');
-      });
-      uiIpcSocket.on('ui_event', function(data) {
-        if (!data || typeof data !== 'object') return;
-        if (data.type === 'adapter_state') {
-          var status = data.status;
-          console.log('[adapter_state] iframe received:', status);
-          if (status === 'ready') {
-            window.__te2AdapterReady = true;
-            _replayOpenFileAfterBaton();
-          } else if (status === 'error') {
-            console.warn('[adapter_state] error:', data.error);
-          }
-        }
-      });
-    } catch (e) {
-      console.warn('[UI_IPC] connect failed', e);
-    }
+    uiIpcRuntime.connect();
   }
 
   /** Call after editor/diffEditor is created to bind Ctrl+S and focus relay. */
   function bindUIIPCEditorHooks() {
-    _bindEditorSaveKey();
-    _bindEditorFocusRelay();
-    _bindEditorMobileCtrlHelper();
+    uiIpcRuntime.bindEditorHooks();
   }
 
-  function _bindEditorSaveKey() {
-    try {
-      var ed = (diffEditor && diffEditor.getModifiedEditor)
-        ? diffEditor.getModifiedEditor()
-        : editor;
-      if (!ed || !window.monaco) return;
-      bindSaveKeyCommand(ed, monaco, uiIpcSocket);
-    } catch (_) {}
+  function _bootMonacoRuntimeDeps() {
+    return {
+      getWindow: function() { return window; },
+      getApiBase: function() { return apiBase; },
+      getCachedPrefs: function() { return cachedPrefs; },
+      setCachedPrefs: function(value) { cachedPrefs = value; },
+      fetchSSOTState: fetchSSOTState,
+      languageWorkersEnabled: _languageWorkersEnabled,
+      getWorkerLogOnce: function() { return _workerLogOnce; },
+      ensureTe2DiffTheme: ensureTe2DiffTheme,
+      loadVscodeTextmateThemes: loadVscodeTextmateThemes,
+      applyMonacoTheme: applyMonacoTheme,
+      ensureEditorWithPrefs: ensureEditorWithPrefs,
+      installVscodeApiLanguageBridgeProviders: installVscodeApiLanguageBridgeProviders,
+      vscodeApiCall: vscodeApiCall,
+      applyActiveModelLanguage: function() {
+        applyActiveModelLanguage(window, model, currentPath, applyLanguageToModel, languageFromPath);
+      },
+      collectBootLanguageIds: function(monacoRef) { return collectBootLanguageIds(monacoRef); },
+      warnIfPlaintextOnlyLanguages: warnIfPlaintextOnlyLanguages,
+      connectEditorSocket: connectEditorSocket,
+      connectUIIPC: connectUIIPC,
+      ensureVscodeRpcConnected: ensureVscodeRpcConnected,
+      emitToHost: emitToHost,
+      updateDebug: updateDebug,
+    };
   }
-
-  var _uiIpcFocusDisposable = null;
-  var _mobileCtrlFocusDisposable = null;
-
-  function _bindEditorFocusRelay() {
-    try {
-      if (_uiIpcFocusDisposable) {
-        try { _uiIpcFocusDisposable.dispose(); } catch (_) {}
-        _uiIpcFocusDisposable = null;
-      }
-      var ed = (diffEditor && diffEditor.getModifiedEditor)
-        ? diffEditor.getModifiedEditor()
-        : editor;
-      if (!ed) {
-        console.warn('[focus_relay] no editor instance — skipping bind');
-        return;
-      }
-      _uiIpcFocusDisposable = bindFocusRelay(ed, function() { return uiIpcSocket; });
-      console.log('[focus_relay] bound to editor widget');
-    } catch (e) {
-      console.warn('[focus_relay] bind failed', e);
-    }
-  }
-
-  function _bindEditorMobileCtrlHelper() {
-    try {
-      if (_mobileCtrlFocusDisposable) {
-        try { _mobileCtrlFocusDisposable.dispose(); } catch (_) {}
-        _mobileCtrlFocusDisposable = null;
-      }
-      var ed = (diffEditor && diffEditor.getModifiedEditor)
-        ? diffEditor.getModifiedEditor()
-        : editor;
-      if (!ed) {
-        console.warn('[editor_ctrl_helper] no editor instance — skipping bind');
-        return;
-      }
-      _mobileCtrlFocusDisposable = bindVendoredCtrlHelperFocus(ed, window.monaco);
-      console.log('[editor_ctrl_helper] bound to editor widget');
-    } catch (e) {
-      console.warn('[editor_ctrl_helper] bind failed', e);
-    }
-  }
-  // ─── End UI IPC ─────────────────────────────────────────
 
   async function bootMonaco() {
-    try {
-      // Load the pinned VS Code monaco-editor-core ESM build (served by the worker).
-      // NOTE: This is the only supported Monaco source for TE2 right now.
-      var base = (apiBase || '') + '/ui/monaco_vscode/esm';
-      var langBase = (apiBase || '') + '/ui/monaco_vscode/lang';
-
-      // Monaco ESM expects a global MonacoEnvironment.getWorker for editor services.
-      // Provide worker entrypoints for Monaco language services + editor services.
-      // Language workers are gated by the webWorkersEnabled UI preference (default OFF).
-      window.MonacoEnvironment = {
-        getWorker: function(_moduleId, _label) {
-          var label = String(_label || '');
-          var moduleId = String(_moduleId || '');
-
-          // Language-specific worker labels
-          var langWorkerMap = {
-            'typescript': '/workers/ts.worker.js',
-            'javascript': '/workers/ts.worker.js',
-            'json': '/workers/json.worker.js',
-            'css': '/workers/css.worker.js',
-            'scss': '/workers/css.worker.js',
-            'less': '/workers/css.worker.js',
-            'html': '/workers/html.worker.js',
-            'handlebars': '/workers/html.worker.js',
-            'razor': '/workers/html.worker.js',
-          };
-          var isLangWorker = langWorkerMap.hasOwnProperty(label);
-
-          // Read at call time — cachedPrefs is populated after bootMonaco fetches /state
-          var wwEnabled = _languageWorkersEnabled();
-
-          if (isLangWorker && !wwEnabled) {
-            // Return a silent no-op worker — Monaco caches the client so this
-            // runs once per label.  Requests never resolve, so built-in language
-            // contributions (folding, validation, symbols) silently degrade
-            // while the extension-host adapter handles everything.
-            var noop = new Blob(['self.onmessage=function(){}'], {type:'application/javascript'});
-            return new Worker(URL.createObjectURL(noop));
-          }
-
-          var url;
-          if (isLangWorker) {
-            url = langBase + langWorkerMap[label];
-          } else {
-            url = base + '/vs/editor/common/services/editorWebWorkerMain.bundle.js';
-          }
-
-          var wk = new Worker(url, { type: 'module' });
-          var key = label + ':' + url.split('/').pop();
-          if (!_workerLogOnce[key]) {
-            _workerLogOnce[key] = true;
-            console.log('[MonacoWorker]', { moduleId: moduleId, label: label, url: url });
-          }
-          wk.onerror = function(ev) { console.error('[MonacoWorker] error', { moduleId: moduleId, label: label, ev: ev }); };
-          wk.onmessageerror = function(ev) { console.error('[MonacoWorker] messageerror', { moduleId: moduleId, label: label, ev: ev }); };
-          return wk;
-        },
-      };
-
-      var monacoNs = null;
-      // Fetch SSOT prefs before bundle import.
-      try { cachedPrefs = await fetchSSOTState(); } catch (_) {}
-      var bundleName = 'monaco.bootstrap.bundle.js';
-      var bundled = await import(langBase + '/bootstrap/' + bundleName);
-      monacoNs = await bundled.loadMonaco();
-      window._loadedMonacoBundle = bundleName;
-      console.log('[Monaco] loaded ' + bundleName);
-
-      window.monaco = monacoNs;
-      ensureTe2DiffTheme();
-
-      // TS/JS worker diagnostics — ext host is the sole diagnostics source.
-      // When TS contribution is available in the bootstrap bundle, disable worker diagnostics.
-      try {
-        var tsLang = monacoNs.languages.typescript;
-        if (tsLang && tsLang.typescriptDefaults) {
-          tsLang.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: true });
-          tsLang.javascriptDefaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: true });
-          console.log('[Monaco] TS/JS worker diagnostics disabled');
-        }
-      } catch (e) { console.warn('[Monaco] TS/JS diagnostics config failed', e); }
-
-      try { await loadVscodeTextmateThemes(); } catch (_) {}
-      try { await applyMonacoTheme('github-dark-default'); } catch (_) {}
-
-      // Initialize editor strictly from SSOT.
-      await ensureEditorWithPrefs();
-      try { installVscodeApiLanguageBridgeProviders(); } catch (_) {}
-
-      try {
-        // vscode_api bootstrap snapshot — deprecated, kept for backward compat.
-        try {
-          window.__te2VscodeBootstrap = await vscodeApiCall('vscode.bootstrap.snapshot', {});
-        } catch (_) {}
-
-        applyActiveModelLanguage(window, model, currentPath, applyLanguageToModel, languageFromPath);
-        var langs = collectBootLanguageIds(monaco);
-        warnIfPlaintextOnlyLanguages(langs);
-      } catch (_) {}
-
-      // Connect editor Socket.IO transport (required for readiness chain + SSOT).
-      connectEditorSocket();
-
-      // Connect UI IPC Socket.IO (frontend-to-frontend relay for iframe ↔ main page).
-      connectUIIPC();
-
-      // Phase 0: connect vscode_rpc (semantic tokens via TS LSP).
-      // Best-effort: this is optional, but should be available when the shell is running.
-      try { ensureVscodeRpcConnected(); } catch (_) {}
-
-      emitToHost('editor_ready', {});
-      updateDebug('boot=ok');
-    } catch (e) {
-      console.error('[Monaco] boot failed', e);
-      updateDebug('boot=fail');
-    }
+    await bootMonacoRuntime(_bootMonacoRuntimeDeps());
   }
 
   updateDebug('boot=init');

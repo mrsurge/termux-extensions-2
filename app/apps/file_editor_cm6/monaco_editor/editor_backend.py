@@ -9,7 +9,6 @@ import asyncio
 import uuid
 from pathlib import Path
 from typing import Optional
-import anyio
 
 from fastapi import APIRouter, Body, HTTPException, Query, Response
 
@@ -23,10 +22,19 @@ from app.apps.file_editor_cm6.core_read import init_watcher, push_save_ack, emit
 from app.apps.file_editor_cm6.core_write import write_full, BaseMismatchError
 from app.apps.file_editor_cm6.diff_helper import invalidate_diff_cache, collect_diff
 from app.apps.file_editor_cm6.draft_diff_helper import compute_draft_diff
-from app.apps.file_editor_cm6.android_lang.android_config import (
-    collect_android_config,
-    update_properties_file,
-    update_build_gradle,
+from .editor_backend_services.contracts import RuntimeMeta
+from .editor_backend_services.protocols import EditorLike
+from .editor_backend_services.android_config_service import (
+    get_android_lsp_config as _get_android_lsp_config_service,
+    handle_android_config_get as _handle_android_config_get,
+    handle_android_config_save as _handle_android_config_save,
+    handle_android_source_set_create as _handle_android_source_set_create,
+    handle_android_variant_create as _handle_android_variant_create,
+    resolve_android_roots as _resolve_android_roots_service,
+)
+from .editor_backend_services.view_settings_service import (
+    handle_set_font_scale as _handle_set_font_scale,
+    handle_set_view_settings as _handle_set_view_settings,
 )
 
 
@@ -34,17 +42,17 @@ from app.apps.file_editor_cm6.android_lang.android_config import (
 editor_router = APIRouter(prefix="/editor")
 
 # --- Global State ---
-_active_editor = None
+_active_editor: EditorLike | None = None
 _active_editor_client_id: str | None = None
-_active_editors: dict[str, object] = {}
+_active_editors: dict[str, EditorLike] = {}
 _current_file_path = None
 _current_file_sha256 = None
 _current_watcher_token = None # Track active watcher subscription
 _edit_tracker_subscription = None
-_cache_persist_timer = None
+_cache_persist_timer: asyncio.TimerHandle | None = None
 # When multiple clients are connected, cache persistence must use the editor that
 # actually triggered the change (not whichever client connected last).
-_cache_persist_source_editor = None
+_cache_persist_source_editor: EditorLike | None = None
 _cache_persist_source_client_id = None
 
 # Live (non-disk) mirroring of the active buffer between connected clients.
@@ -58,7 +66,7 @@ _android_draft_diag_sig: dict[str, str] = {}
 
 # Sprint E: in-memory cache for TE2 draft diagnostics replay.
 # key: "<effective_project_root>::<uri>" -> (cache_key, diagnostics)
-_android_draft_diag_cache: dict[str, tuple[str, list[dict]]] = {}
+_android_draft_diag_cache: dict[str, tuple[str, list[dict[str, object]]]] = {}
 _nicegui_loop: Optional[asyncio.AbstractEventLoop] = None
 _nicegui_loop_thread: Optional[int] = None
 
@@ -78,11 +86,11 @@ _android_dep_index_build_inflight: dict[str, int] = {}
 _android_sync_locks: dict[str, asyncio.Lock] = {}
 
 # Workspace diagnostics scans (repo-wide, best-effort).
-_pyright_scan_tasks: dict[str, asyncio.Task] = {}
+_pyright_scan_tasks: dict[str, asyncio.Task[object]] = {}
 
 # Sprint F: broadcast "busy" signals for long-running Android LSP work (e.g., Gradle).
 _lsp_busy_counts: dict[str, int] = {}
-_lsp_busy_tasks: dict[str, dict] = {}
+_lsp_busy_tasks: dict[str, dict[str, object]] = {}
 
 # --- Constants ---
 RECONNECT_TIMEOUT_S = 1200.0
@@ -163,7 +171,7 @@ def _normalize_project_path_for_broadcast(project_path: str | Path) -> str:
     except Exception:
         return str(project_path)
 
-async def _broadcast_lsp_busy(*, project_path: str, payload: dict) -> None:
+async def _broadcast_lsp_busy(*, project_path: str, payload: dict[str, object]) -> None:
     return
 
 
@@ -214,7 +222,11 @@ async def _lsp_busy_end(*, token: str, ok: bool = True, error: str = "") -> None
         language_id = str(meta.get("languageId") or "")
         activity = str(meta.get("activity") or "")
         detail = str(meta.get("detail") or "")
-        started_mono = float(meta.get("startedMono") or time.monotonic())
+        started_mono_obj = meta.get("startedMono")
+        if isinstance(started_mono_obj, (int, float)):
+            started_mono = float(started_mono_obj)
+        else:
+            started_mono = time.monotonic()
         duration_ms = max(0, int((time.monotonic() - started_mono) * 1000))
 
         # Decrement per-(project,language) busy count (best-effort).
@@ -246,13 +258,18 @@ async def _lsp_busy_end(*, token: str, ok: bool = True, error: str = "") -> None
         return
 
 
-def _resolve_font_scale(scale_value: Optional[float]) -> float:
+def _resolve_font_scale(scale_value: object | None) -> float:
     """Validate and return the stored font scale, raising if it's missing/invalid."""
     pref_path = getattr(_preferences_store, 'path', None)
     location_hint = f" ({pref_path})" if pref_path else ''
 
     if scale_value is None:
         raise RuntimeError(f"Preference file{location_hint} is missing required 'editor.fontScale'")
+
+    if not isinstance(scale_value, (str, int, float)):
+        raise RuntimeError(
+            f"Preference file{location_hint} has non-numeric fontScale value: {scale_value!r}"
+        )
 
     try:
         numeric = float(scale_value)
@@ -277,17 +294,17 @@ class SaveValidationError(Exception):
         self.message = message
 
 # --- State Accessors ---
-def get_active_editor():
+def get_active_editor() -> EditorLike | None:
     return _active_editor
 
 
-def get_active_editors() -> list[object]:
+def get_active_editors() -> list[EditorLike]:
     if _active_editors:
         return list(_active_editors.values())
     return [_active_editor] if _active_editor else []
 
 
-def _register_editor_for_client(*, client_id: str, editor: object) -> None:
+def _register_editor_for_client(*, client_id: str, editor: EditorLike) -> None:
     global _active_editor, _active_editor_client_id
     _active_editors[client_id] = editor
     _active_editor = editor
@@ -308,7 +325,7 @@ def _unregister_editor_for_client(*, client_id: str) -> None:
             _active_editor = None
             _active_editor_client_id = None
 
-def set_current_file(path: str, sha256: str = None):
+def set_current_file(path: str, sha256: str | None = None):
     global _current_file_path, _current_file_sha256
     _current_file_path = path
     _current_file_sha256 = sha256
@@ -386,17 +403,18 @@ def _find_pyright_config_root(file_path: Path, project_root: Path) -> tuple[Path
     return None, None
 
 
-def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None) -> None:
+def _maybe_connect_lsp(editor: EditorLike | None, file_path: Path | None, project_root: Path | None) -> None:
     """Connect or disconnect the CM6 LSP client based on file/language.
 
     - If the file extension is mapped and LSP is enabled, connect the client.
     - Otherwise, ensure any existing LSP connection is torn down.
     """
-    if editor is None or file_path is None or project_root is None:
+    if editor is None:
+        return
+    if file_path is None or project_root is None:
         # No active document or project: best-effort disconnect
         try:
-            if hasattr(editor, 'disconnect_lsp'):
-                editor.disconnect_lsp()
+            editor.disconnect_lsp()
         except Exception as exc:
             print(f"[LSP] Failed to disconnect LSP for null document: {exc}", file=sys.stderr)
         return
@@ -517,7 +535,7 @@ def _maybe_connect_lsp(editor, file_path: Path | None, project_root: Path | None
         print(f"[LSP] Failed to connect LSP for {file_path} ({language_id}): {exc}", file=sys.stderr)
 
 # --- Helpers ---
-def _get_runtime_metadata() -> dict:
+def _get_runtime_metadata() -> RuntimeMeta:
     return {
         "run_id": os.getenv("TE_RUN_ID", "unknown"),
         "shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
@@ -527,8 +545,10 @@ def _get_runtime_metadata() -> dict:
     }
 
 # --- Cache Persistence ---
-def _get_cached_editor_content(editor) -> str:
-    return getattr(editor, '_cached_content', editor.value or '')
+def _get_cached_editor_content(editor: EditorLike | None) -> str:
+    if editor is None:
+        return ""
+    return getattr(editor, "_cached_content", editor.value or "")
 
 
 def _build_cache_state_payload(
@@ -537,9 +557,9 @@ def _build_cache_state_payload(
     *,
     state: str,
     unsaved: bool,
-    cache_entry: dict | None = None,
+    cache_entry: dict[str, object] | None = None,
     reason: str = 'update',
-) -> dict:
+) -> dict[str, object]:
     resolved_path = str(file_path) if file_path else ''
     project_path = str(project_path) if project_path else None
     file_label = Path(resolved_path).name if resolved_path else 'Untitled'
@@ -586,9 +606,9 @@ def _broadcast_cache_state(
     *,
     state: str,
     unsaved: bool,
-    cache_entry: dict | None = None,
+    cache_entry: dict[str, object] | None = None,
     reason: str = 'update',
-):
+) -> None:
     editors = get_active_editors()
     if not editors or not file_path:
         return
@@ -696,7 +716,7 @@ def _apply_watcher_replace(
     return True  # Content was applied to editor
 
 
-def _get_combined_diffs(project_root: Path, file_path: str, current_content: str) -> list:
+def _get_combined_diffs(project_root: Path, file_path: str, current_content: str) -> list[object]:
     """
     Calculate combined diff hunks (Git and/or Draft) based on current preferences.
     Returns a unified list of hunks to be sent to the frontend.
@@ -726,13 +746,19 @@ def _get_combined_diffs(project_root: Path, file_path: str, current_content: str
     return hunks
 
 
-async def _get_combined_diffs_async(project_root: Path, file_path: str, current_content: str) -> list:
-    return await anyio.to_thread.run_sync(
+async def _get_combined_diffs_async(project_root: Path, file_path: str, current_content: str) -> list[object]:
+    return await asyncio.to_thread(
         lambda: _get_combined_diffs(project_root, file_path, current_content)
     )
 
 
-def _schedule_diff_refresh(project_root: Path, file_path: str, current_content: str, editor, reason: str) -> None:
+def _schedule_diff_refresh(
+    project_root: Path,
+    file_path: str,
+    current_content: str,
+    editor: EditorLike | None,
+    reason: str,
+) -> None:
     async def _run():
         try:
             hunks = await _get_combined_diffs_async(project_root, file_path, current_content)
@@ -804,13 +830,7 @@ def _persist_to_cache_debounced():
         return
     
     # Collect runtime metadata for session cache persistence
-    runtime_meta = {
-        "run_id": os.getenv("TE_RUN_ID", "unknown"),
-        "shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
-        "shell_run_id": os.getenv("TE_FRAMEWORK_SHELL_RUN_ID", "unknown"),
-        "launcher_pid": int(os.getenv("TE_LAUNCHER_PID", "0")),
-        "worker_pid": os.getpid(),
-    }
+    runtime_meta = _get_runtime_metadata()
     
     cache_entry = _history_store.upsert_cached_document(
         project_path=project_path,
@@ -859,7 +879,7 @@ def _persist_to_cache_debounced():
         project_path,
         current_file,
         state='mid_session',
-        unsaved=cache_entry.get('unsaved', False),
+        unsaved=bool(cache_entry.get('unsaved', False)),
         cache_entry=cache_entry,
         reason='persist',
     )
@@ -889,16 +909,21 @@ def _cancel_cache_persist_timer():
 def _schedule_cache_persist():
     """Schedule debounced cache persistence."""
     global _cache_persist_timer
-    
+
     _cancel_cache_persist_timer()
-    _cache_persist_timer = ui.timer(
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = _nicegui_loop
+    if loop is None:
+        return
+    _cache_persist_timer = loop.call_later(
         _cache_persist_debounce_ms / 1000,
         _persist_to_cache_debounced,
-        once=True
     )
 
 
-def _schedule_cache_persist_from(*, editor: object, source_client_id: str | None) -> None:
+def _schedule_cache_persist_from(*, editor: EditorLike, source_client_id: str | None) -> None:
     """Schedule cache persistence using the editor that actually changed."""
     global _cache_persist_source_editor, _cache_persist_source_client_id
     _cache_persist_source_editor = editor
@@ -956,7 +981,7 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
         project_path,
         current_file,
         state='mid_session',
-        unsaved=cache_entry.get('unsaved', False),
+        unsaved=bool(cache_entry.get('unsaved', False)),
         cache_entry=cache_entry,
         reason=reason,
     )
@@ -971,9 +996,10 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
 # --- Editor API Endpoints ---
 
 @editor_router.post('/discard_draft')
-async def discard_draft(data: dict = Body(...)):
+async def discard_draft(data: dict[str, object] = Body(...)):
     """Discard cached session for current document."""
-    path = data.get('path')
+    path_obj = data.get('path')
+    path = path_obj if isinstance(path_obj, str) else ""
     project_path = _history_store.get_active_project()
     
     if not path or not project_path:
@@ -1056,9 +1082,10 @@ async def refresh_cache_state():
     return {"ok": True}
 
 @editor_router.post('/check_cache')
-async def check_cache(data: dict = Body(...)):
+async def check_cache(data: dict[str, object] = Body(...)):
     """Check if a file has a cached draft."""
-    path = data.get('path')
+    path_obj = data.get('path')
+    path = path_obj if isinstance(path_obj, str) else ""
     if not path:
         return {"ok": False, "error": "No path provided"}
     
@@ -1079,7 +1106,7 @@ async def check_cache(data: dict = Body(...)):
     return {"ok": True, "has_draft": False}
 
 @editor_router.post('/set_content')
-async def set_editor_content(data: dict = Body(...)):
+async def set_editor_content(data: dict[str, object] = Body(...)):
     global _current_watcher_token
     global _suppress_on_change_until
     editors = get_active_editors()
@@ -1087,10 +1114,11 @@ async def set_editor_content(data: dict = Body(...)):
     if not editors or not editor:
         return {"ok": False, "error": "Editor not ready"}
     
-    new_path = data.get('path', '')
+    path_obj = data.get('path', '')
+    new_path = path_obj if isinstance(path_obj, str) else ''
     old_path = get_current_file()
     project_path = _history_store.get_active_project()
-    has_draft = data.get('has_draft', False)
+    has_draft = bool(data.get('has_draft', False))
     
     print(f"[SET_CONTENT] path={new_path!r} old={old_path!r}", file=sys.stderr)
 
@@ -1099,10 +1127,10 @@ async def set_editor_content(data: dict = Body(...)):
         _persist_active_draft_immediately(reason='switch')
     _cancel_cache_persist_timer()
     
-    content = data.get('content')
-    if content is None:
-        content = ''
-    language = data.get('language', 'python')
+    content_obj = data.get('content')
+    content = content_obj if isinstance(content_obj, str) else ''
+    language_obj = data.get('language', 'python')
+    language = language_obj if isinstance(language_obj, str) else 'python'
     content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
 
     # Check for actual cached draft (needed both for broadcast + fallback SHA)
@@ -1113,20 +1141,22 @@ async def set_editor_content(data: dict = Body(...)):
     # Backend Safeguard: If frontend sends disk content but we have a draft, force the draft.
     if cache_entry and cache_entry.get('unsaved'):
         cached_base = cache_entry.get('base_sha256')
-        if cached_base and content_sha256 == cached_base:
+        if isinstance(cached_base, str) and cached_base and content_sha256 == cached_base:
             print(f"[SET_CONTENT] SAFEGUARD: Overriding disk content with cached draft for {new_path}", file=sys.stderr)
-            content = cache_entry.get('content', '')
+            cached_content = cache_entry.get('content', '')
+            content = cached_content if isinstance(cached_content, str) else ''
             content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
             has_draft = True # Ensure we treat this as a restore
 
-    provided_base_sha = data.get('sha256')
+    provided_base_sha_obj = data.get('sha256')
+    provided_base_sha = provided_base_sha_obj if isinstance(provided_base_sha_obj, str) else None
     
     cached_base = cache_entry.get('base_sha256') if cache_entry else None
     print(f"[SET_CONTENT] SHAs: provided={provided_base_sha} cached_base={cached_base} content_sha={content_sha256}", file=sys.stderr)
 
-    base_sha256 = (
+    base_sha256: str | None = (
         provided_base_sha
-        or cached_base
+        or (cached_base if isinstance(cached_base, str) else None)
         or content_sha256
     )
     set_current_file(new_path, base_sha256)
@@ -1155,7 +1185,7 @@ async def set_editor_content(data: dict = Body(...)):
             except Exception:
                 pass
             ed.set_value(content)
-            ed._cached_content = content
+            setattr(ed, "_cached_content", content)
             ed.set_language(language)
             ed.update()
             # Lezer nudge: occasionally the language parser can lag behind during fast switches.
@@ -1231,7 +1261,7 @@ async def set_editor_content(data: dict = Body(...)):
             # So draft diffs will be empty. Git diffs will show if enabled.
             # _get_combined_diffs handles the preferences check.
             project_path = _history_store.get_active_project() or str(get_project_root())
-            hunks = await _get_combined_diffs_async(Path(project_path).expanduser(), new_path, content)
+            hunks = await _get_combined_diffs_async(Path(project_path).expanduser(), new_path, str(content))
             editor.set_diff_decorations(hunks)
         except Exception as e: 
             print(f"[SET_CONTENT] Failed to load diffs: {e}", file=sys.stderr)
@@ -1242,8 +1272,9 @@ async def set_editor_content(data: dict = Body(...)):
     return {"ok": True, "sha256": content_sha256}
 
 @editor_router.post('/refresh_diffs')
-async def refresh_diffs(data: dict = Body(...)):
-    path = data.get('path')
+async def refresh_diffs(data: dict[str, object] = Body(...)):
+    path_obj = data.get('path')
+    path = path_obj if isinstance(path_obj, str) else ""
     if not path: return {"ok": False, "error": "No path provided"}
     editors = get_active_editors()
     if not editors:
@@ -1255,7 +1286,7 @@ async def refresh_diffs(data: dict = Body(...)):
         
         project_root = Path(project_path).expanduser()
         rel = _normalize_rel_path(project_root, path)
-        diff_data = await anyio.to_thread.run_sync(
+        diff_data = await asyncio.to_thread(
             lambda: collect_diff(project_root, rel, base_ref=_current_diff_base(project_path))
         )
         hunks = diff_data.get('hunks', [])
@@ -1269,7 +1300,7 @@ async def refresh_diffs(data: dict = Body(...)):
         return {"ok": False, "error": str(e)}
 
 @editor_router.post('/toggle_edit_tracking')
-async def toggle_edit_tracking(data: dict = Body(...)):
+async def toggle_edit_tracking(data: dict[str, object] = Body(...)):
     enabled = bool(data.get('enabled', False))
     from app.apps.file_editor_cm6 import change_ledger
     if enabled:
@@ -1285,7 +1316,7 @@ async def toggle_edit_tracking(data: dict = Body(...)):
     return {"ok": True, "enabled": enabled}
 
 @editor_router.post('/jump_to_line')
-async def jump_to_line(data: dict = Body(...)):
+async def jump_to_line(data: dict[str, object] = Body(...)):
     """Jump to a line in the currently loaded file. Does NOT load new files.
     
     Args (in data):
@@ -1300,8 +1331,9 @@ async def jump_to_line(data: dict = Body(...)):
     if not editors or not primary:
         return {"ok": False, "error": "Editor not ready"}
 
+    line_obj = data.get('line', 1)
     try:
-        target_line = int(data.get('line', 1))
+        target_line = int(line_obj) if isinstance(line_obj, (int, str)) else 1
     except (TypeError, ValueError):
         return {"ok": False, "error": "Invalid line number"}
 
@@ -1342,7 +1374,7 @@ async def jump_to_line(data: dict = Body(...)):
     }
 
 @editor_router.post('/search/open')
-async def editor_search_open(data: dict = Body(...)):
+async def editor_search_open(data: dict[str, object] = Body(...)):
     """Open the CodeMirror search panel when user presses Ctrl+F."""
     editor = get_active_editor()
     
@@ -1362,7 +1394,7 @@ async def editor_search_open(data: dict = Body(...)):
         )
 
 @editor_router.post('/color_picker/toggle')
-async def editor_toggle_color_picker(data: dict = Body(...)):
+async def editor_toggle_color_picker(data: dict[str, object] = Body(...)):
     """Toggle CSS color picker extension."""
     editor = get_active_editor()
     
@@ -1384,7 +1416,7 @@ async def editor_toggle_color_picker(data: dict = Body(...)):
         )
 
 @editor_router.post('/read_only/set')
-async def editor_set_read_only(data: dict = Body(...)):
+async def editor_set_read_only(data: dict[str, object] = Body(...)):
     """Set editor read-only mode."""
     editor = get_active_editor()
     
@@ -1406,9 +1438,10 @@ async def editor_set_read_only(data: dict = Body(...)):
         )
 
 @editor_router.post('/minimap/mode')
-async def editor_minimap_mode(data: dict = Body(...)):
+async def editor_minimap_mode(data: dict[str, object] = Body(...)):
     """Set the minimap mode for the current editor."""
-    mode = data.get('mode', 'off')
+    mode_obj = data.get('mode', 'off')
+    mode = mode_obj if isinstance(mode_obj, str) else 'off'
     editor = get_active_editor()
     if not editor:
         raise HTTPException(status_code=404, detail='Editor not initialized')
@@ -1420,7 +1453,7 @@ async def editor_minimap_mode(data: dict = Body(...)):
 
 
 # --- Helper Function for View State ---
-def _get_view_state_dict() -> dict:
+def _get_view_state_dict() -> dict[str, object]:
     """Helper to get current view state from preferences (single source of truth)."""
     prefs = _preferences_store.get_preferences()
     editor_prefs = prefs.get('editor', {})
@@ -1469,15 +1502,17 @@ async def get_view_state():
 
 
 @editor_router.post('/update_preference')
-async def update_preference(data: dict = Body(...)):
+async def update_preference(data: dict[str, object] = Body(...)):
     """
     Update a single preference and apply it to the editor immediately (if an editor is active).
     This is the ONLY way frontend should change preferences.
     Returns full view state to eliminate double round-trip (Jimmy's optimization). (also a new thing here... test)
     """
-    key = data.get('key')
+    key_obj = data.get('key')
+    key = key_obj if isinstance(key_obj, str) else ""
     value = data.get('value')
-    source_client = data.get('nicegui_client_id')
+    source_client_obj = data.get('nicegui_client_id')
+    source_client = source_client_obj if isinstance(source_client_obj, str) else None
     
     if not key:
         raise HTTPException(status_code=400, detail="key is required")
@@ -1505,13 +1540,14 @@ async def update_preference(data: dict = Body(...)):
                 ed.set_line_wrapping(bool(value))
             # If turning word wrap ON and diffs are showing, refresh them
             # Deletion widgets don't auto-adapt to word wrap changes
-            if value and get_current_file():
+            current_file = get_current_file()
+            if value and current_file:
                 current_prefs = _preferences_store.get_preferences().get('editor', {})
                 if current_prefs.get('showInlineDiffs', False):
                     project_path = _history_store.get_active_project() or str(get_project_root())
                     if project_path:
                         try:
-                            rel = _normalize_rel_path(Path(project_path).expanduser(), get_current_file())
+                            rel = _normalize_rel_path(Path(project_path).expanduser(), current_file)
                             diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
                             hunks = diff_data.get('hunks', [])
                             for ed in editors:
@@ -1843,7 +1879,7 @@ def debug_editor_state():
     return {"ok": True, "editor_exists": True, "current_file": get_current_file(), "content_length": len(content), "content_hash": hashlib.sha256(content.encode('utf-8')).hexdigest()}
 
 
-async def _write_editor_buffer_to_disk(*, client_id: str, op_id: Optional[str]) -> dict:
+async def _write_editor_buffer_to_disk(*, client_id: str, op_id: str | None) -> dict[str, object]:
     editor = get_active_editor()
     if not editor:
         raise SaveValidationError("Editor not ready")
@@ -1871,7 +1907,7 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: Optional[str]) 
 
     init_watcher(project_root)
 
-    file_meta = await anyio.to_thread.run_sync(
+    file_meta = await asyncio.to_thread(
         lambda: write_full(
             project_root,
             str(rel_path),
@@ -1895,17 +1931,17 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: Optional[str]) 
             file_path=current_file,
             content=content,
             base_sha256=file_meta["sha256"],
-            run_id=runtime_meta.get('run_id'),
-            shell_id=runtime_meta.get('shell_id'),
-            shell_run_id=runtime_meta.get('shell_run_id'),
-            launcher_pid=runtime_meta.get('launcher_pid'),
-            worker_pid=runtime_meta.get('worker_pid'),
+            run_id=runtime_meta["run_id"],
+            shell_id=runtime_meta["shell_id"],
+            shell_run_id=runtime_meta["shell_run_id"],
+            launcher_pid=runtime_meta["launcher_pid"],
+            worker_pid=runtime_meta["worker_pid"],
         )
         _broadcast_cache_state(
             project_path,
             current_file,
             state='clean',
-            unsaved=cache_entry.get('unsaved', False),
+            unsaved=bool(cache_entry.get('unsaved', False)),
             cache_entry=cache_entry,
             reason='save',
         )
@@ -1932,10 +1968,13 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: Optional[str]) 
     return file_meta
 
 @editor_router.post('/save')
-async def save_current_file(data: dict = Body(...)):
-    client_id = data.get('client_id', 'unknown')
-    nicegui_client_id = data.get('nicegui_client_id')
-    op_id = data.get('op_id')
+async def save_current_file(data: dict[str, object] = Body(...)):
+    client_id_obj = data.get('client_id', 'unknown')
+    client_id = client_id_obj if isinstance(client_id_obj, str) and client_id_obj else 'unknown'
+    nicegui_client_id_obj = data.get('nicegui_client_id')
+    nicegui_client_id = nicegui_client_id_obj if isinstance(nicegui_client_id_obj, str) else None
+    op_id_obj = data.get('op_id')
+    op_id = op_id_obj if isinstance(op_id_obj, str) else None
     current_file = get_current_file()
     base_snapshot = get_current_file_sha256()
     try:
@@ -1962,7 +2001,7 @@ async def save_current_file(data: dict = Body(...)):
                             # 1) Update Sprint A sidecar (disk)
                             cfg = _get_android_lsp_config(base_project_root)
 
-                            sidecar_path = await anyio.to_thread.run_sync(
+                            sidecar_path = await asyncio.to_thread(
                                 lambda: update_android_sidecar_for_project(
                                     project_root=base_project_root,
                                     effective_project_root=effective_project_root,
@@ -1976,7 +2015,7 @@ async def save_current_file(data: dict = Body(...)):
                             if Path(current_file).suffix not in ('.kt', '.kts'):
                                 return
 
-                            def _load_sidecar_json() -> dict:
+                            def _load_sidecar_json() -> dict[str, object]:
                                 try:
                                     if sidecar_path and Path(sidecar_path).exists():
                                         return json.loads(Path(sidecar_path).read_text(encoding='utf-8'))
@@ -1984,7 +2023,7 @@ async def save_current_file(data: dict = Body(...)):
                                     return {}
                                 return {}
 
-                            te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar_json)
+                            te2_sidecar = await asyncio.to_thread(_load_sidecar_json)
 
                             try:
                                 from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
@@ -1998,7 +2037,7 @@ async def save_current_file(data: dict = Body(...)):
                                 ok = True
                                 err = ""
                                 try:
-                                    await anyio.to_thread.run_sync(
+                                    await asyncio.to_thread(
                                         lambda: ensure_compiled_dependency_index(
                                             sidecar_path=Path(sidecar_path),
                                             te2_sidecar=te2_sidecar or {},
@@ -2077,7 +2116,7 @@ async def save_current_file(data: dict = Body(...)):
 # --- Sprint D: Android Sync Endpoint ---
 
 @editor_router.post('/android/sync')
-async def android_sync_project(data: dict = Body(...)):
+async def android_sync_project(data: dict[str, object] = Body(...)):
     """Sync Project with Gradle Files: rebuild dependency model + notify LSP.
     
     This is a fast, synchronous operation that:
@@ -2106,7 +2145,7 @@ async def android_sync_project(data: dict = Body(...)):
         try:
             # 3) Rebuild dependency model (fast, <1s)
             from app.apps.file_editor_cm6.android_lang.android_lsp_bridge import update_android_sidecar_for_project
-            sidecar_path = await anyio.to_thread.run_sync(
+            sidecar_path = await asyncio.to_thread(
                 lambda: (
                     lambda _cfg: update_android_sidecar_for_project(
                         project_root=base_project_root,
@@ -2123,13 +2162,13 @@ async def android_sync_project(data: dict = Body(...)):
             try:
                 from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
 
-                def _load_sidecar_json() -> dict:
+                def _load_sidecar_json() -> dict[str, object]:
                     try:
                         return json.loads(Path(sidecar_path).read_text(encoding='utf-8'))
                     except Exception:
                         return {}
 
-                te2_sidecar = await anyio.to_thread.run_sync(_load_sidecar_json)
+                te2_sidecar = await asyncio.to_thread(_load_sidecar_json)
                 busy_token = await _lsp_busy_begin(
                     project_path=base_project_root,
                     language_id="kotlin-android",
@@ -2139,7 +2178,7 @@ async def android_sync_project(data: dict = Body(...)):
                 ok = True
                 err = ""
                 try:
-                    await anyio.to_thread.run_sync(
+                    await asyncio.to_thread(
                         lambda: ensure_compiled_dependency_index(
                             sidecar_path=Path(sidecar_path),
                             te2_sidecar=te2_sidecar or {},
@@ -2173,58 +2212,26 @@ async def android_sync_project(data: dict = Body(...)):
 
 # --- Android config endpoints (Gradle/LSP support) ---
 
-def _get_android_lsp_config(base_root: Path) -> dict:
-    try:
-        from app.apps.file_editor_cm6.android_lang.android_lsp_config import get_android_lsp_config
-
-        return get_android_lsp_config(base_root)
-    except Exception:
-        return {"rootRel": "", "module": "app", "variant": "GeckoDebug"}
+def _get_android_lsp_config(base_root: Path) -> dict[str, object]:
+    return _get_android_lsp_config_service(base_root)
 
 def _resolve_android_roots() -> tuple[Path, Path, str]:
-    base_root = Path(_history_store.get_active_project() or str(get_project_root()))
-    effective_root = base_root
-    cfg = _get_android_lsp_config(base_root)
-    root_rel = str(cfg.get("rootRel") or "").strip()
-    if root_rel:
-        candidate = (base_root / root_rel).expanduser().resolve(strict=False)
-        if candidate.exists() and candidate.is_dir():
-            effective_root = candidate
-
-    module = str(cfg.get("module") or "app")
-
-    return base_root, effective_root, module
+    return _resolve_android_roots_service(
+        active_project=_history_store.get_active_project,
+        project_root=get_project_root,
+    )
 
 
 @editor_router.get('/android/config')
 async def android_config_get():
-    base_root, effective_root, module = _resolve_android_roots()
-    data = collect_android_config(effective_root=effective_root, module=module)
-    data["projectRoot"] = str(base_root)
-    data["effectiveRoot"] = str(effective_root)
-    data["module"] = module
-    try:
-        from app.apps.file_editor_cm6.android_lang.android_lsp_config import update_android_autodetect
-
-        autodetect = {
-            "files": data.get("files") or {},
-            "gradleProperties": data.get("gradleProperties") or {},
-            "localProperties": data.get("localProperties") or {},
-            "buildConfig": data.get("buildConfig") or {},
-            "modules": data.get("modules") or [],
-            "variants": data.get("variants") or {},
-            "sourceSets": data.get("sourceSets") or [],
-            "termuxAapt2Path": data.get("termuxAapt2Path") or "",
-            "importantGradleProperties": data.get("importantGradleProperties") or [],
-        }
-        update_android_autodetect(base_root, autodetect)
-    except Exception:
-        pass
-    return {"ok": True, "data": data}
+    return await _handle_android_config_get(
+        active_project=_history_store.get_active_project,
+        project_root=get_project_root,
+    )
 
 
 @editor_router.post('/set_active_project')
-async def set_active_project(payload: dict = Body(...)):
+async def set_active_project(payload: dict[str, object] = Body(...)):
     project_path = payload.get("projectPath") if isinstance(payload, dict) else None
     if not project_path:
         raise HTTPException(status_code=400, detail="projectPath required")
@@ -2243,350 +2250,54 @@ async def set_active_project(payload: dict = Body(...)):
 
 
 @editor_router.post('/android/config/save')
-async def android_config_save(payload: dict = Body(...)):
-    base_root, effective_root, module_default = _resolve_android_roots()
-    module = str(payload.get("module") or module_default).strip() or module_default
-    create_missing = bool(payload.get("createMissing", False))
-
-    cfg = collect_android_config(effective_root=effective_root, module=module)
-    files = cfg.get("files") or {}
-
-    gradle_updates = payload.get("gradleProperties") or {}
-    local_updates = payload.get("localProperties") or {}
-    build_updates = payload.get("buildGradle") or {}
-
-    if not isinstance(gradle_updates, dict) or not isinstance(local_updates, dict) or not isinstance(build_updates, dict):
-        raise HTTPException(status_code=400, detail="updates must be objects")
-
-    if "sdkDir" in local_updates and "sdk.dir" not in local_updates:
-        local_updates["sdk.dir"] = local_updates.get("sdkDir")
-
-    results = {"gradleProperties": {}, "localProperties": {}, "buildGradle": {}}
-
-    gradle_props_path = Path(files.get("gradleProperties", {}).get("path") or (effective_root / "gradle.properties"))
-    if gradle_updates:
-        results["gradleProperties"] = update_properties_file(
-            gradle_props_path,
-            gradle_updates,
-            create_missing=create_missing,
-        )
-
-    local_props_path = Path(files.get("localProperties", {}).get("path") or (effective_root / "local.properties"))
-    if local_updates:
-        results["localProperties"] = update_properties_file(
-            local_props_path,
-            local_updates,
-            create_missing=create_missing,
-        )
-
-    build_path = None
-    module_build = files.get("moduleBuildGradle", {}).get("path")
-    root_build = files.get("rootBuildGradle", {}).get("path")
-    if module_build:
-        build_path = Path(module_build)
-    elif root_build:
-        build_path = Path(root_build)
-
-    if build_updates:
-        results["buildGradle"] = update_build_gradle(build_path, build_updates)
-
-    updated = collect_android_config(effective_root=effective_root, module=module)
-    updated["projectRoot"] = str(base_root)
-    updated["effectiveRoot"] = str(effective_root)
-    updated["module"] = module
-    try:
-        from app.apps.file_editor_cm6.android_lang.android_lsp_config import update_android_lsp_config, update_android_autodetect
-
-        update_android_lsp_config(base_root, module=module)
-        autodetect = {
-            "files": updated.get("files") or {},
-            "gradleProperties": updated.get("gradleProperties") or {},
-            "localProperties": updated.get("localProperties") or {},
-            "buildConfig": updated.get("buildConfig") or {},
-            "modules": updated.get("modules") or [],
-            "variants": updated.get("variants") or {},
-            "sourceSets": updated.get("sourceSets") or [],
-            "termuxAapt2Path": updated.get("termuxAapt2Path") or "",
-            "importantGradleProperties": updated.get("importantGradleProperties") or [],
-        }
-        update_android_autodetect(base_root, autodetect)
-    except Exception:
-        pass
-
-    return {"ok": True, "data": {"results": results, "config": updated}}
-
-
-def _normalize_android_source_set_name(name: object) -> str:
-    if not name:
-        raise HTTPException(status_code=400, detail="name required")
-    import re
-    raw = str(name).strip()
-    if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", raw):
-        raw = re.sub(r"[^A-Za-z0-9_]", "_", raw)
-        raw = re.sub(r"_+", "_", raw).strip("_")
-        if not raw or not re.match(r"^[A-Za-z]", raw):
-            raise HTTPException(status_code=400, detail="invalid source set name")
-    return raw
-
-
-def _create_android_source_set_dirs(
-    *,
-    effective_root: Path,
-    module_name: str,
-    name: object,
-    include: dict | None,
-) -> tuple[str, list[str], list[str]]:
-    include = include if isinstance(include, dict) else {}
-    include_code = bool(include.get("code", True))
-    include_res = bool(include.get("res", True))
-    include_manifest = bool(include.get("manifest", False))
-
-    name = _normalize_android_source_set_name(name)
-
-    created: list[str] = []
-    existing: list[str] = []
-
-    src_root = (effective_root / module_name / "src").expanduser().resolve(strict=False)
-    target_root = (src_root / name).expanduser().resolve(strict=False)
-    if not str(target_root).startswith(str(effective_root.expanduser().resolve(strict=False))):
-        raise HTTPException(status_code=400, detail="invalid source set path")
-
-    def _touch_dir(path: Path) -> None:
-        if path.exists():
-            existing.append(str(path))
-            return
-        path.mkdir(parents=True, exist_ok=True)
-        created.append(str(path))
-
-    def _touch_file(path: Path, content: str) -> None:
-        if path.exists():
-            existing.append(str(path))
-            return
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        created.append(str(path))
-
-    _touch_dir(target_root)
-    if include_code:
-        _touch_dir(target_root / "java")
-        _touch_dir(target_root / "kotlin")
-    if include_res:
-        _touch_dir(target_root / "res")
-    if include_manifest:
-        _touch_file(
-            target_root / "AndroidManifest.xml",
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
-            "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n"
-            "</manifest>\n",
-        )
-
-    return name, created, existing
+async def android_config_save(payload: dict[str, object] = Body(...)):
+    return await _handle_android_config_save(
+        payload,
+        active_project=_history_store.get_active_project,
+        project_root=get_project_root,
+    )
 
 
 @editor_router.post('/android/source_set/create')
-async def android_source_set_create(payload: dict = Body(...)):
-    base_root, effective_root, module_default = _resolve_android_roots()
-    name = payload.get("name") if isinstance(payload, dict) else None
-    module_name = str(payload.get("module") or module_default or "app").strip() or "app"
-    include = payload.get("include") if isinstance(payload, dict) else None
-    name, created, existing = _create_android_source_set_dirs(
-        effective_root=effective_root,
-        module_name=module_name,
-        name=name,
-        include=include,
+async def android_source_set_create(payload: dict[str, object] = Body(...)):
+    return await _handle_android_source_set_create(
+        payload,
+        active_project=_history_store.get_active_project,
+        project_root=get_project_root,
     )
-
-    updated = collect_android_config(effective_root=effective_root, module=module_name)
-    updated["projectRoot"] = str(base_root)
-    updated["effectiveRoot"] = str(effective_root)
-    updated["module"] = module_name
-    try:
-        from app.apps.file_editor_cm6.android_lang.android_lsp_config import update_android_autodetect
-
-        autodetect = {
-            "files": updated.get("files") or {},
-            "gradleProperties": updated.get("gradleProperties") or {},
-            "localProperties": updated.get("localProperties") or {},
-            "buildConfig": updated.get("buildConfig") or {},
-            "modules": updated.get("modules") or [],
-            "variants": updated.get("variants") or {},
-            "sourceSets": updated.get("sourceSets") or [],
-            "termuxAapt2Path": updated.get("termuxAapt2Path") or "",
-            "importantGradleProperties": updated.get("importantGradleProperties") or [],
-        }
-        update_android_autodetect(base_root, autodetect)
-    except Exception:
-        pass
-
-    return {"ok": True, "data": {"created": created, "existing": existing, "name": name, "config": updated}}
 
 
 @editor_router.post('/android/variant/create')
-async def android_variant_create(payload: dict = Body(...)):
-    base_root, effective_root, module_default = _resolve_android_roots()
-    name = payload.get("name") if isinstance(payload, dict) else None
-    kind = str(payload.get("type") or "").strip()
-    if kind not in ("buildType", "flavor"):
-        raise HTTPException(status_code=400, detail="invalid variant type")
-    module_name = str(payload.get("module") or module_default or "app").strip() or "app"
-    dimension = str(payload.get("dimension") or "").strip() or None
-    create_source_set = bool(payload.get("createSourceSet", False)) if isinstance(payload, dict) else False
-
-    name = _normalize_android_source_set_name(name)
-
-    cfg = collect_android_config(effective_root=effective_root, module=module_name)
-    files = cfg.get("files") or {}
-    module_build = files.get("moduleBuildGradle", {}).get("path")
-    root_build = files.get("rootBuildGradle", {}).get("path")
-    build_path = Path(module_build or root_build or "")
-    if not build_path or not build_path.is_file():
-        raise HTTPException(status_code=400, detail="build.gradle not found")
-
-    from app.apps.file_editor_cm6.android_lang.android_config import update_build_gradle_variants
-
-    result = update_build_gradle_variants(
-        build_path,
-        kind=kind,
-        name=name,
-        flavor_dimension=dimension,
+async def android_variant_create(payload: dict[str, object] = Body(...)):
+    return await _handle_android_variant_create(
+        payload,
+        active_project=_history_store.get_active_project,
+        project_root=get_project_root,
     )
-    if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
-
-    created = []
-    existing = []
-    if create_source_set:
-        _, created, existing = _create_android_source_set_dirs(
-            effective_root=effective_root,
-            module_name=module_name,
-            name=name,
-            include={"code": True, "res": True, "manifest": False},
-        )
-
-    updated = collect_android_config(effective_root=effective_root, module=module_name)
-    updated["projectRoot"] = str(base_root)
-    updated["effectiveRoot"] = str(effective_root)
-    updated["module"] = module_name
-    try:
-        from app.apps.file_editor_cm6.android_lang.android_lsp_config import update_android_autodetect
-
-        autodetect = {
-            "files": updated.get("files") or {},
-            "gradleProperties": updated.get("gradleProperties") or {},
-            "localProperties": updated.get("localProperties") or {},
-            "buildConfig": updated.get("buildConfig") or {},
-            "modules": updated.get("modules") or [],
-            "variants": updated.get("variants") or {},
-            "sourceSets": updated.get("sourceSets") or [],
-            "termuxAapt2Path": updated.get("termuxAapt2Path") or "",
-            "importantGradleProperties": updated.get("importantGradleProperties") or [],
-        }
-        update_android_autodetect(base_root, autodetect)
-    except Exception:
-        pass
-
-    return {
-        "ok": True,
-        "data": {
-            "result": result,
-            "created": created,
-            "existing": existing,
-            "name": name,
-            "config": updated,
-        },
-    }
 
 
 @editor_router.post('/set_view_settings')
-async def set_view_settings(data: dict = Body(...)):
-    # This endpoint handles live updates to the editor's visual settings.
-    editor = get_active_editor()
-    editor_updates = {}
-    
-    if 'word_wrap' in data:
-        word_wrap = bool(data['word_wrap'])
-        editor_updates['wordWrap'] = word_wrap
-        if editor: editor.set_line_wrapping(word_wrap); editor.update()
-    
-    if 'line_shading' in data:
-        line_shading = bool(data['line_shading'])
-        editor_updates['showShading'] = line_shading
-        if editor: editor.set_zebra_stripes(line_shading)
-
-    if 'indent_guides' in data:
-        show_guides = bool(data['indent_guides'])
-        editor_updates['showIndentGuides'] = show_guides
-        if editor: editor.set_indent_guides(show_guides)
-    
-    if 'show_inline_diffs' in data:
-        show_diffs = bool(data['show_inline_diffs'])
-        editor_updates['showInlineDiffs'] = show_diffs
-        if show_diffs and editor and 'current_path' in data:
-            try:
-                project_path = _history_store.get_active_project() or str(get_project_root())
-                rel = _normalize_rel_path(Path(project_path).expanduser(), data['current_path'])
-                diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
-                editor.set_diff_decorations(diff_data.get('hunks', []))
-            except Exception as e:
-                print(f"[DIFF] Failed to load diffs on toggle: {e}", file=sys.stderr)
-        elif not show_diffs and editor:
-            editor.set_diff_decorations([])
-            
-    if 'theme' in data:
-        theme_name = str(data['theme'])
-        editor_updates['theme'] = theme_name
-        try:
-            mapped_theme = _resolve_theme_preference(theme_name)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        if editor:
-            editor.set_theme(mapped_theme)
-        
-    if editor_updates:
-        _preferences_store.update_preferences(editor=editor_updates)
-    
-    return {"ok": True}
+async def set_view_settings(data: dict[str, object] = Body(...)):
+    return _handle_set_view_settings(
+        data,
+        get_active_editor=get_active_editor,
+        update_editor_preferences=lambda updates: _preferences_store.update_preferences(editor=updates),
+        active_project=_history_store.get_active_project,
+        project_root=get_project_root,
+        normalize_rel_path=_normalize_rel_path,
+        collect_diff=collect_diff,
+        current_diff_base=_current_diff_base,
+        resolve_theme_preference=_resolve_theme_preference,
+    )
 
 @editor_router.post('/set_font_scale')
-async def set_font_scale_endpoint(data: dict = Body(...)):
-    """Set editor font scale from one of three presets: 0.70, 0.85, 1.0"""
-    try:
-        editor = get_active_editor()
-        
-        # Validate input (reuse preference helper for consistent messaging)
-        try:
-            scale = _resolve_font_scale(data.get('scale'))
-        except RuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        
-        # Apply to editor
-        if editor:
-            try:
-                editor.set_font_scale(scale)
-                print(f"[EDITOR] Font scale changed to: {scale}", file=sys.stderr)
-            except Exception as e:
-                print(f"[EDITOR] Failed to set font scale: {e}", file=sys.stderr)
-                raise HTTPException(status_code=500, detail=f"Failed to apply font scale: {e}")
-        
-        # Persist preference (GLOBALLY, not per-project)
-        try:
-            _preferences_store.update_preferences(
-                editor={"fontScale": scale}
-            )
-            print(f"[EDITOR] Persisted font scale: {scale} globally", file=sys.stderr)
-        except Exception as e:
-            print(f"[EDITOR] Failed to persist font scale: {e}", file=sys.stderr)
-            raise HTTPException(status_code=500, detail=f"Failed to persist font scale: {e}")
-        
-        return {"ok": True, "data": {"fontScale": scale}}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        import traceback
-        print(f"[EDITOR] Unexpected error in set_font_scale: {e}", file=sys.stderr)
-        print(traceback.format_exc(), file=sys.stderr)
-        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+async def set_font_scale_endpoint(data: dict[str, object] = Body(...)):
+    return _handle_set_font_scale(
+        data,
+        get_active_editor=get_active_editor,
+        resolve_font_scale=_resolve_font_scale,
+        update_editor_preferences=lambda updates: _preferences_store.update_preferences(editor=updates),
+    )
 def _refresh_active_diffs():
     """Recalculate combined diffs for the current file based on latest preferences."""
     editor = get_active_editor()
