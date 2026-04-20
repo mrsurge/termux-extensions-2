@@ -16,6 +16,9 @@ import { initExplorerStickyScopes } from './explorer_extensions/sticky_scopes.js
 import { createExplorerDirectoryStateHelpers } from '../../src/explorer/tree/directory-state-utils.ts';
 import { createExplorerUiHelpers } from '../../src/explorer/chrome/ui-helpers.ts';
 import { createExplorerActiveFileUtils } from '../../src/explorer/tree/active-file-utils.ts';
+import { createExplorerTreeRenderer } from '../../src/explorer/tree/renderer.ts';
+import { createExplorerTreeMenuController } from '../../src/explorer/tree/menu-controller.ts';
+import { createExplorerTreeClickHandler } from '../../src/explorer/tree/click-handler.ts';
 import { createExplorerFileOpenBridge } from '../../src/explorer/host/file-open-bridge.ts';
 import { createExplorerSearchOverlayController } from '../../src/explorer/search/overlay-controller.ts';
 import { getErrorMessage } from '../../src/explorer/utils/errors.ts';
@@ -239,6 +242,18 @@ function applySetiIconToSpan(span, fileName, kind = 'file') {
 let selectModeDir = null; // rel of directory in select mode, or null
 const selectedEntries = new Set<string>(); // rel paths of checked items
 
+function isEntrySelected(rel: string): boolean {
+  return selectedEntries.has(rel);
+}
+
+function setEntrySelected(rel: string, selected: boolean): void {
+  if (selected) {
+    selectedEntries.add(rel);
+  } else {
+    selectedEntries.delete(rel);
+  }
+}
+
 // --- Open Directories Persistence ---
 const openDirectories = new Set<string>(); // rel paths of currently open directories
 let openDirsSyncTimer = null;
@@ -338,6 +353,51 @@ const explorerSearchOverlayController = createExplorerSearchOverlayController({
   },
   onGitDiffBaseChanged: () => updateDiffBaseButtons(),
   toggleDiffBaseMenu,
+});
+const explorerTreeRenderer = createExplorerTreeRenderer({
+  getTreeElement: () => treeElement,
+  setTreeElement: (next) => {
+    treeElement = next;
+  },
+  getProjectPath: () => uiState.projectPath,
+  clearElement,
+  basename,
+  isInSelectMode: (parentRel) => isInSelectMode(parentRel),
+  isEntrySelected,
+  setEntrySelected,
+  applySetiIconToSpan,
+  applyAggregatedGitStatusFlags,
+  applyAggregatedDiagnosticFlags,
+});
+const explorerTreeMenuController = createExplorerTreeMenuController({
+  getTreeElement: () => treeElement,
+  getSelectedEntries: () => selectedEntries,
+  getProjectPath: () => uiState.projectPath,
+  hasExplorerRpc: () => hasExplorerRpc(),
+  notifyExplorer: (method, payload) => notifyExplorer(method, payload),
+  toast,
+  isInSelectMode: (rel) => Boolean(rel) && isInSelectMode(rel),
+  enableSelectMode: (rel) => enableSelectMode(rel),
+  disableSelectMode: () => disableSelectMode(),
+  openFileAndMaybeJump: (rel, lineNumber, jumpOptions) =>
+    explorerFileOpenBridge.openFileAndMaybeJump(rel, lineNumber, jumpOptions),
+  isCancelledError,
+  getErrorMessage,
+});
+const explorerTreeClickHandler = createExplorerTreeClickHandler({
+  getTreeElement: () => treeElement,
+  getProjectPath: () => uiState.projectPath,
+  getSelectModeDir: () => selectModeDir,
+  hasExplorerRpc: () => hasExplorerRpc(),
+  notifyExplorer: (method, payload) => notifyExplorer(method, payload),
+  checkAutoDisableSelectMode: (rel) => checkAutoDisableSelectMode(rel),
+  markDirectoryOpen: (rel, isOpen) => markDirectoryOpen(rel, isOpen),
+  setEntrySelected,
+  openCardMenuForEntry: (entry, anchorEl) =>
+    explorerTreeMenuController.openCardMenuForEntry(entry, anchorEl),
+  openFile: async (rel) => {
+    await explorerFileOpenBridge.openFileAndMaybeJump(rel);
+  },
 });
 
 let reconnectResyncPending = false;
@@ -813,240 +873,12 @@ function hideGitProgressBar() {
 }
 
 function renderExplorerTree() {
-  if (!treeElement) {
-    treeElement = document.getElementById('fe-file-tree');
-  }
-  const el = treeElement;
-  if (!el) return;
-
   renderedProjectPath = uiState.projectPath || null;
-  clearElement(el);
-
-  const rootLi = document.createElement('li');
-  rootLi.className = 'fe-tree-node fe-tree-root';
-  rootLi.dataset.kind = 'dir';
-  rootLi.dataset.rel = '.';
-  rootLi.dataset.open = 'true';
-
-  const icon = document.createElement('span');
-  icon.className = 'fe-entry-icon fe-entry-icon-dir';
-
-  const text = document.createElement('span');
-  text.className = 'fe-tree-text';
-  const baseName = basename(uiState.projectPath || '') || 'Project';
-  text.textContent = baseName;
-
-  const menuBtn = document.createElement('button');
-  menuBtn.className = 'fe-card-menu-btn';
-  menuBtn.textContent = '⋮';
-
-  const childList = document.createElement('ul');
-  childList.className = 'fe-tree';
-
-  rootLi.appendChild(icon);
-  rootLi.appendChild(text);
-  rootLi.appendChild(menuBtn);
-  rootLi.appendChild(childList);
-  el.appendChild(rootLi);
+  explorerTreeRenderer.renderExplorerTree();
 }
 
 function renderEntriesInto(containerUl, entries, parentRel = null) {
-  if (!containerUl) return;
-  
-  // Determine parent rel from container if not provided
-  if (parentRel === null) {
-    const parentLi = containerUl.closest('li.fe-tree-node[data-kind="dir"]');
-    parentRel = parentLi?.dataset?.rel || '.';
-  }
-
-  const inSelectMode = isInSelectMode(parentRel);
-  
-  // Toggle select mode class on the container
-  containerUl.classList.toggle('fe-tree-select-mode', inSelectMode);
-
-  const list = Array.isArray(entries) ? entries : [];
-  const newRels = new Set(list.map(e => e.rel || e.path));
-  
-  // 1. Index existing children by rel
-  const existingNodes = new Map<string, HTMLElement>();
-  Array.from(containerUl.children).forEach((li) => {
-    if (!(li instanceof HTMLElement)) {
-      return;
-    }
-    if (li.dataset.rel) {
-      existingNodes.set(li.dataset.rel, li);
-    }
-  });
-
-  // 2. Remove nodes that are no longer in the list
-  existingNodes.forEach((li, rel) => {
-    if (!newRels.has(rel)) {
-      li.remove();
-    }
-  });
-
-  // 3. Create or update nodes
-  list.forEach((entry, index) => {
-    const rel = entry.rel || entry.path || '';
-    let li = existingNodes.get(rel);
-    const isNew = !li;
-
-    if (isNew) {
-      li = document.createElement('li');
-      li.className = 'fe-tree-node';
-      li.dataset.rel = rel;
-      // Insert at correct position
-      if (index < containerUl.children.length) {
-        containerUl.insertBefore(li, containerUl.children[index]);
-      } else {
-        containerUl.appendChild(li);
-      }
-    } else {
-      // Ensure order: if current node at index isn't this one, move it
-      const currentNodeAtIndex = containerUl.children[index];
-      if (currentNodeAtIndex !== li) {
-        containerUl.insertBefore(li, currentNodeAtIndex);
-      }
-    }
-
-    // Update attributes (always)
-    li.dataset.kind = entry.kind || 'file';
-    li.dataset.name = entry.name || '';
-
-
-    // Update Git Status
-    if (entry.gitStatus) {
-      li.dataset.gitStatus = entry.gitStatus;
-    } else {
-      delete li.dataset.gitStatus;
-    }
-    
-    // Update Git Flags (for directories)
-    const flags = entry.gitFlags || [];
-    if (flags.length > 0) {
-      li.dataset.gitFlags = flags.join(',');
-    } else {
-      delete li.dataset.gitFlags;
-    }
-
-    // Update Draft Status
-    if (entry.hasDraft) {
-      li.dataset.hasDraft = '1';
-    } else {
-      delete li.dataset.hasDraft;
-    }
-
-    // Re-apply classes based on new data
-    // First, strip all dynamic classes to ensure clean state
-    const classesToRemove = [];
-    li.classList.forEach(cls => {
-      if (cls.startsWith('fe-git-') || 
-          cls.startsWith('fe-dir-has-') || 
-          cls === 'fe-draft') {
-        classesToRemove.push(cls);
-      }
-    });
-    classesToRemove.forEach(c => li.classList.remove(c));
-
-    // Re-add classes
-    if (li.dataset.gitStatus) {
-      li.classList.add(`fe-git-${li.dataset.gitStatus}`);
-    }
-    if (li.dataset.gitFlags) {
-      li.dataset.gitFlags.split(',').forEach(f => {
-        if (f) li.classList.add(`fe-dir-has-${f}`);
-      });
-    }
-    if (li.dataset.hasDraft === '1') {
-      if (entry.kind === 'file') {
-        li.classList.add('fe-draft');
-      } else {
-        li.classList.add('fe-dir-has-draft');
-      }
-    }
-
-    // Render/Update Content
-    // We only rebuild the inner content if it's a new node OR if we need to toggle select mode UI
-    // For existing nodes, we generally leave the structure alone to preserve the <ul> for children.
-    
-    // Check if we need to rebuild the "header" part (icon + text + menu/checkbox)
-    // We can identify the header elements easily.
-    
-    let iconSpan = li.querySelector('.fe-entry-icon');
-    let textSpan = li.querySelector('.fe-tree-text');
-    let menuButton = li.querySelector('.fe-card-menu-btn');
-    let checkbox = li.querySelector<HTMLInputElement>('.fe-entry-checkbox');
-
-    // If mode changed (select vs normal), we might need to swap checkbox/menu
-    const hasCheckbox = !!checkbox;
-    const needsCheckbox = inSelectMode;
-    
-    if (isNew || hasCheckbox !== needsCheckbox) {
-      // Rebuild header elements, but PRESERVE any existing <ul> (children)
-      const childUl = li.querySelector('ul.fe-tree');
-      
-      // Clear everything except the UL
-      Array.from(li.childNodes).forEach(node => {
-        if (node !== childUl) node.remove();
-      });
-
-      // Re-create header
-      if (inSelectMode) {
-        checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.className = 'fe-entry-checkbox';
-        checkbox.dataset.rel = rel;
-        checkbox.checked = selectedEntries.has(rel);
-        checkbox.addEventListener('change', (ev) => {
-          ev.stopPropagation();
-          const target = ev.target;
-          if (!(target instanceof HTMLInputElement)) {
-            return;
-          }
-          if (target.checked) {
-            selectedEntries.add(rel);
-          } else {
-            selectedEntries.delete(rel);
-          }
-        });
-        li.insertBefore(checkbox, childUl); // Insert before UL
-      }
-
-      iconSpan = document.createElement('span');
-      iconSpan.className = `fe-entry-icon fe-entry-icon-${entry.kind || 'file'}`;
-      li.insertBefore(iconSpan, childUl);
-      applySetiIconToSpan(iconSpan, entry.name || '', entry.kind || 'file');
-
-      textSpan = document.createElement('span');
-      textSpan.className = 'fe-tree-text';
-      textSpan.textContent = entry.name || '';
-      li.insertBefore(textSpan, childUl);
-
-      if (!inSelectMode) {
-        menuButton = document.createElement('button');
-        menuButton.className = 'fe-card-menu-btn';
-        menuButton.textContent = '⋮';
-        li.insertBefore(menuButton, childUl);
-      }
-    } else {
-      // Just update existing header elements
-      if (iconSpan) {
-        iconSpan.className = `fe-entry-icon fe-entry-icon-${entry.kind || 'file'}`;
-        applySetiIconToSpan(iconSpan, entry.name || '', entry.kind || 'file');
-      }
-      if (textSpan) textSpan.textContent = entry.name || '';
-      if (checkbox) {
-        checkbox.dataset.rel = rel;
-        checkbox.checked = selectedEntries.has(rel);
-      }
-    }
-  });
-
-  // After entries are rendered, recompute aggregated git-status flags
-  // (fe-dir-has-*) so parent directories can visually reflect dirty
-  // descendants independently of the single gitStatus value.
-  applyAggregatedGitStatusFlags();
-  applyAggregatedDiagnosticFlags();
+  explorerTreeRenderer.renderEntriesInto(containerUl, entries, parentRel);
 }
 
 function applyAggregatedGitStatusFlags() {
@@ -2238,682 +2070,6 @@ export async function initExplorerUI() {
   }
 
   explorerGitFooterUtils.bindGitFooterActions();
-
-  // Context menu element (reused)
-  let cardMenu = document.querySelector<HTMLElement>('.fe-card-menu');
-  if (!cardMenu) {
-    cardMenu = document.createElement('div');
-    cardMenu.className = 'fe-card-menu';
-    document.body.appendChild(cardMenu);
-  }
-
-  let currentMenuButton = null;
-
-  function closeCardMenu() {
-    if (cardMenu) {
-      cardMenu.classList.remove('show');
-      currentMenuButton = null;
-    }
-  }
-
-  async function sendAgentMention(relPath) {
-    if (!relPath) {
-      toast('Missing path for mention');
-      return;
-    }
-    if (!uiState.projectPath) {
-      toast('No project open');
-      return;
-    }
-    if (!hasExplorerRpc()) {
-      toast('Explorer bus unavailable');
-      return;
-    }
-    let absPath = uiState.projectPath;
-    if (relPath && relPath !== '.') {
-      absPath =
-        uiState.projectPath.replace(/\/+$/, '') +
-        '/' +
-        relPath.replace(/^\/+/, '');
-    }
-    try {
-      notifyExplorer(EXPLORER_RPC_METHODS.mentionAgent, { path: absPath });
-      toast('Mentioned in conversation');
-    } catch (err) {
-      console.error('Failed to send mention:', err);
-      toast('Failed to mention in conversation');
-    }
-  }
-
-  function openCardMenuForEntry(entry, anchorEl) {
-    if (!cardMenu || !anchorEl) return;
-
-    // Toggle behavior
-    if (currentMenuButton === anchorEl && cardMenu.classList.contains('show')) {
-      closeCardMenu();
-      return;
-    }
-
-    currentMenuButton = anchorEl;
-    cardMenu.innerHTML = '';
-    cardMenu.classList.add('show');
-
-    const items = [];
-    const isDir = entry.kind === 'dir';
-    const isFile = entry.kind === 'file';
-    const gitStatus = entry.gitStatus || '';
-
-    // Check if this directory is in select mode (menu clicked on the select-mode dir itself)
-    if (isInSelectMode(entry.rel)) {
-      // Select mode menu: batch actions
-      items.push({ label: 'Disable select mode', type: 'disableSelectMode' });
-      items.push({ divider: true });
-      const count = selectedEntries.size;
-      items.push({ label: `Copy selected (${count})`, type: 'batchCopy', disabled: count === 0 });
-      items.push({ label: `Move selected (${count})`, type: 'batchMove', disabled: count === 0 });
-      items.push({ divider: true });
-      items.push({ label: `Stage selected (${count})`, type: 'batchStage', disabled: count === 0 });
-      items.push({ label: `Unstage selected (${count})`, type: 'batchUnstage', disabled: count === 0 });
-      items.push({ divider: true });
-      items.push({ label: `Delete selected (${count})`, type: 'batchDelete', destructive: true, disabled: count === 0 });
-    } else {
-      // Normal menu
-      if (isDir) {
-        items.push({ label: 'Enable select mode', type: 'enableSelectMode' });
-        items.push({ divider: true });
-        items.push({ label: 'New File…', type: 'createFile' });
-        items.push({ label: 'New Folder…', type: 'createDir' });
-        items.push({ divider: true });
-        items.push({ label: 'Open in File Explorer', type: 'openExternal' });
-        items.push({ divider: true });
-      }
-
-      // Clipboard + move/copy actions for both files and dirs
-      items.push({ label: 'Copy Name', type: 'copyName' });
-      items.push({ label: 'Copy Path', type: 'copyPath' });
-      items.push({ label: 'Copy Relative Path', type: 'copyRelPath' });
-      items.push({ label: 'Mention in conversation', type: 'mentionAgent' });
-      items.push({ divider: true });
-      items.push({ label: 'Copy to…', type: 'copyTo' });
-      items.push({ label: 'Move to…', type: 'moveTo' });
-
-      if (isDir) {
-        items.push({ label: 'Copy from…', type: 'copyFrom' });
-        items.push({ label: 'Move from…', type: 'moveFrom' });
-      }
-
-      // Git actions for files with status
-      if (
-        isFile &&
-        gitStatus &&
-        (gitStatus === 'modified' ||
-          gitStatus === 'untracked' ||
-          gitStatus === 'added')
-      ) {
-        items.push({ label: 'Stage', type: 'stage' });
-      }
-      if (
-        isFile &&
-        gitStatus &&
-        (gitStatus === 'staged' || gitStatus === 'staged_modified')
-      ) {
-        items.push({ label: 'Unstage', type: 'unstage' });
-      }
-      if (isFile && gitStatus && gitStatus !== 'clean') {
-        items.push({ label: 'Restore…', type: 'restore' });
-      }
-
-      // Git actions for directories with dirty descendants
-      if (isDir) {
-        const dirLi = treeElement?.querySelector(
-          `li.fe-tree-node[data-kind="dir"][data-rel="${entry.rel}"]`
-        );
-        const hasDirtyDescendants = dirLi && (
-          dirLi.classList.contains('fe-dir-has-modified') ||
-          dirLi.classList.contains('fe-dir-has-untracked')
-        );
-        const hasStagedDescendants = dirLi && 
-          dirLi.classList.contains('fe-dir-has-staged');
-        
-        if (hasDirtyDescendants) {
-          items.push({ label: 'Stage All in Folder…', type: 'stageDir' });
-        }
-        if (hasStagedDescendants) {
-          items.push({ label: 'Unstage All in Folder…', type: 'unstageDir' });
-        }
-      }
-
-      items.push({ divider: true });
-      items.push({ label: 'Rename…', type: 'rename' });
-      items.push({ label: 'Delete', type: 'delete', destructive: true });
-    }
-
-    items.forEach((item) => {
-      if (item.divider) {
-        const div = document.createElement('div');
-        div.className = 'fe-dd-divider';
-        cardMenu.appendChild(div);
-        return;
-      }
-      const div = document.createElement('div');
-      div.className = 'fe-dd-item';
-      div.textContent = item.label;
-      if (item.destructive) {
-        div.dataset.destructive = 'true';
-      }
-      if (item.disabled) {
-        div.classList.add('fe-dd-item-disabled');
-        cardMenu.appendChild(div);
-        return; // Don't add click handler for disabled items
-      }
-      div.addEventListener('click', async () => {
-        closeCardMenu();
-        if (!entry.rel) return;
-        const rel = entry.rel;
-        switch (item.type) {
-          // --- Select Mode actions ---
-          case 'enableSelectMode': {
-            enableSelectMode(rel);
-            break;
-          }
-          case 'disableSelectMode': {
-            disableSelectMode();
-            break;
-          }
-          case 'batchCopy': {
-            await batchCopyTo();
-            break;
-          }
-          case 'batchMove': {
-            await batchMoveTo();
-            break;
-          }
-          case 'batchStage': {
-            await batchStage();
-            break;
-          }
-          case 'batchUnstage': {
-            await batchUnstage();
-            break;
-          }
-          case 'batchDelete': {
-            await batchDelete();
-            break;
-          }
-          // --- Normal actions ---
-          case 'createFile': {
-            const name = window.prompt('New file name:');
-            if (!name) return;
-            if (hasExplorerRpc()) {
-              notifyExplorer(EXPLORER_RPC_METHODS.fileCreate, {
-                parent_rel: rel,
-                name,
-              });
-              // Open the newly created file after a short delay for server processing.
-              const newRel = (rel && rel !== '.') ? rel.replace(/\/+$/, '') + '/' + name : name;
-              setTimeout(() => { openFileAndMaybeJump(newRel); }, 200);
-            }
-            break;
-          }
-          case 'createDir': {
-            const name = window.prompt('New folder name:');
-            if (!name) return;
-            if (hasExplorerRpc()) {
-              notifyExplorer(EXPLORER_RPC_METHODS.dirCreate, {
-                parent_rel: rel,
-                name,
-              });
-            }
-            break;
-          }
-          case 'openExternal': {
-            if (!uiState.projectPath) {
-              toast('No project open');
-              break;
-            }
-            let fullPath = uiState.projectPath;
-            if (rel && rel !== '.') {
-              fullPath =
-                uiState.projectPath.replace(/\/+$/, '') +
-                '/' +
-                rel.replace(/^\/+/, '');
-            }
-            try {
-              const resp = await fetch('/api/apps/file_explorer/open', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ params: { path: fullPath } }),
-              });
-              const json = await resp.json();
-              if (json && json.ok && json.data && json.data.url) {
-                window.location.href = json.data.url;
-              } else {
-                console.error('Launch failed', json);
-                toast('Failed to open File Explorer');
-              }
-            } catch (err) {
-              console.error(err);
-              toast('Failed to open File Explorer');
-            }
-            break;
-          }
-          case 'copyName': {
-            try {
-              if (
-                !navigator ||
-                !navigator.clipboard ||
-                !navigator.clipboard.writeText
-              ) {
-                toast('Clipboard not available');
-                break;
-              }
-              const name = entry.name || '';
-              await navigator.clipboard.writeText(name);
-              toast(`Copied "${name}" to clipboard`);
-            } catch {
-              toast('Failed to copy name');
-            }
-            break;
-          }
-          case 'copyPath': {
-            try {
-              if (
-                !navigator ||
-                !navigator.clipboard ||
-                !navigator.clipboard.writeText
-              ) {
-                toast('Clipboard not available');
-                break;
-              }
-              if (!uiState.projectPath) {
-                toast('No project open');
-                break;
-              }
-              let fullPath = uiState.projectPath;
-              if (rel && rel !== '.') {
-                fullPath =
-                  uiState.projectPath.replace(/\/+$/, '') +
-                  '/' +
-                  rel.replace(/^\/+/, '');
-              }
-              await navigator.clipboard.writeText(fullPath);
-              toast('Copied path to clipboard');
-            } catch {
-              toast('Failed to copy path');
-            }
-            break;
-          }
-          case 'copyRelPath': {
-            try {
-              if (
-                !navigator ||
-                !navigator.clipboard ||
-                !navigator.clipboard.writeText
-              ) {
-                toast('Clipboard not available');
-                break;
-              }
-              const relPath = rel || '.';
-              await navigator.clipboard.writeText(relPath);
-              toast('Copied relative path to clipboard');
-            } catch {
-              toast('Failed to copy relative path');
-            }
-            break;
-          }
-          case 'mentionAgent': {
-            await sendAgentMention(rel);
-            break;
-          }
-          case 'copyTo': {
-            if (!window.teFilePicker) {
-              toast('File picker not available');
-              break;
-            }
-            try {
-              const dest = await window.teFilePicker.openDirectory({
-                title: `Copy "${entry.name}" to…`,
-                startPath: uiState.projectPath || '',
-              });
-              if (!dest || !dest.path) break;
-              if (!hasExplorerRpc()) {
-                toast('Explorer connection unavailable.');
-                break;
-              }
-              notifyExplorer(EXPLORER_RPC_METHODS.entryCopy, {
-                rel,
-                dest_path: dest.path,
-              });
-            } catch (err) {
-              if (isCancelledError(err)) break;
-              toast(getErrorMessage(err, 'Copy failed'));
-            }
-            break;
-          }
-          case 'moveTo': {
-            if (!window.teFilePicker) {
-              toast('File picker not available');
-              break;
-            }
-            try {
-              const dest = await window.teFilePicker.openDirectory({
-                title: `Move "${entry.name}" to…`,
-                startPath: uiState.projectPath || '',
-              });
-              if (!dest || !dest.path) break;
-              if (!hasExplorerRpc()) {
-                toast('Explorer connection unavailable.');
-                break;
-              }
-              notifyExplorer(EXPLORER_RPC_METHODS.entryMove, {
-                rel,
-                dest_path: dest.path,
-              });
-            } catch (err) {
-              if (isCancelledError(err)) break;
-              toast(getErrorMessage(err, 'Move failed'));
-            }
-            break;
-          }
-          case 'copyFrom': {
-            if (!window.teFilePicker) {
-              toast('File picker not available');
-              break;
-            }
-            try {
-              const source = await window.teFilePicker.open({
-                title: `Copy into "${entry.name}"`,
-                startPath: uiState.projectPath || '',
-                mode: 'any',
-                selectLabel: 'Copy Here',
-              });
-              if (!source || !source.path) break;
-              if (!hasExplorerRpc()) {
-                toast('Explorer connection unavailable.');
-                break;
-              }
-              notifyExplorer(EXPLORER_RPC_METHODS.entryCopyFrom, {
-                source_path: source.path,
-                dest_rel: rel,
-              });
-            } catch (err) {
-              if (isCancelledError(err)) break;
-              toast(getErrorMessage(err, 'Copy failed'));
-            }
-            break;
-          }
-          case 'moveFrom': {
-            if (!window.teFilePicker) {
-              toast('File picker not available');
-              break;
-            }
-            try {
-              const source = await window.teFilePicker.open({
-                title: `Move into "${entry.name}"`,
-                startPath: uiState.projectPath || '',
-                mode: 'any',
-                selectLabel: 'Move Here',
-              });
-              if (!source || !source.path) break;
-              if (!hasExplorerRpc()) {
-                toast('Explorer connection unavailable.');
-                break;
-              }
-              notifyExplorer(EXPLORER_RPC_METHODS.entryMoveFrom, {
-                source_path: source.path,
-                dest_rel: rel,
-              });
-            } catch (err) {
-              if (isCancelledError(err)) break;
-              toast(getErrorMessage(err, 'Move failed'));
-            }
-            break;
-          }
-          case 'rename': {
-            const newName = window.prompt('New name:', entry.name || '');
-            if (!newName || newName === entry.name) return;
-            if (hasExplorerRpc()) {
-              notifyExplorer(EXPLORER_RPC_METHODS.entryRename, {
-                rel,
-                new_name: newName,
-              });
-            }
-            break;
-          }
-          case 'delete': {
-            const confirmed = window.confirm(
-              `Delete ${entry.kind === 'dir' ? 'folder' : 'file'} "${entry.name}"?`
-            );
-            if (!confirmed) return;
-            if (hasExplorerRpc()) {
-              notifyExplorer(EXPLORER_RPC_METHODS.entryDelete, { rel });
-            }
-            break;
-          }
-          case 'stage': {
-            if (!hasExplorerRpc()) {
-              toast('Explorer connection unavailable.');
-              break;
-            }
-            try {
-              notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths: [rel] });
-              toast(`Staged ${entry.name}`);
-            } catch (err) {
-              toast(getErrorMessage(err, 'Stage failed'));
-            }
-            break;
-          }
-          case 'unstage': {
-            if (!hasExplorerRpc()) {
-              toast('Explorer connection unavailable.');
-              break;
-            }
-            try {
-              notifyExplorer(EXPLORER_RPC_METHODS.gitUnstage, { paths: [rel] });
-              toast(`Unstaged ${entry.name}`);
-            } catch (err) {
-              toast(getErrorMessage(err, 'Unstage failed'));
-            }
-            break;
-          }
-          case 'stageDir': {
-            if (!hasExplorerRpc()) {
-              toast('Explorer connection unavailable.');
-              break;
-            }
-            const stageConfirmed = window.confirm(
-              `Stage all changes in "${entry.name}"?\n\nThis will stage all modified and untracked files in this directory.`,
-            );
-            if (!stageConfirmed) break;
-            try {
-              notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths: [rel] });
-              toast(`Staged all in ${entry.name}`);
-            } catch (err) {
-              toast(getErrorMessage(err, 'Stage failed'));
-            }
-            break;
-          }
-          case 'unstageDir': {
-            if (!hasExplorerRpc()) {
-              toast('Explorer connection unavailable.');
-              break;
-            }
-            const unstageConfirmed = window.confirm(
-              `Unstage all changes in "${entry.name}"?\n\nThis will unstage all staged files in this directory.`,
-            );
-            if (!unstageConfirmed) break;
-            try {
-              notifyExplorer(EXPLORER_RPC_METHODS.gitUnstage, { paths: [rel] });
-              toast(`Unstaged all in ${entry.name}`);
-            } catch (err) {
-              toast(getErrorMessage(err, 'Unstage failed'));
-            }
-            break;
-          }
-          case 'restore': {
-            if (!hasExplorerRpc()) {
-              toast('Explorer connection unavailable.');
-              break;
-            }
-            const confirmed = window.confirm(
-              `⚠️ WARNING: This will discard changes to ${entry.name}\n\nRestore from HEAD?`,
-            );
-            if (!confirmed) break;
-            try {
-              notifyExplorer(EXPLORER_RPC_METHODS.gitRestore, {
-                path: rel,
-                commit: 'HEAD',
-              });
-            } catch (err) {
-              toast(getErrorMessage(err, 'Restore failed'));
-            }
-            break;
-          }
-          default:
-            break;
-        }
-      });
-      cardMenu.appendChild(div);
-    });
-
-    const rect = anchorEl.getBoundingClientRect();
-    const menuWidth = cardMenu.offsetWidth || 200;
-    const menuHeight = cardMenu.offsetHeight || 200;
-    const viewportWidth = document.documentElement.clientWidth;
-    const viewportHeight = document.documentElement.clientHeight;
-
-    let left = rect.right - menuWidth;
-    if (left < 8) left = 8;
-    if (left + menuWidth > viewportWidth - 8) {
-      left = Math.max(8, viewportWidth - menuWidth - 8);
-    }
-
-    let top = rect.bottom;
-    if (top + menuHeight > viewportHeight - 8) {
-      top = Math.max(8, rect.top - menuHeight);
-    }
-
-    cardMenu.style.left = `${left}px`;
-    cardMenu.style.top = `${top}px`;
-  }
-
-  // --- Batch action functions ---
-  
-  async function batchCopyTo() {
-    const paths = Array.from(selectedEntries);
-    if (!paths.length) {
-      toast('No items selected');
-      return;
-    }
-    if (!window.teFilePicker) {
-      toast('File picker not available');
-      return;
-    }
-    try {
-      const dest = await window.teFilePicker.openDirectory({
-        title: `Copy ${paths.length} items to…`,
-        startPath: uiState.projectPath || '',
-      });
-      if (!dest || !dest.path) return;
-      if (!hasExplorerRpc()) {
-        toast('Explorer connection unavailable');
-        return;
-      }
-      notifyExplorer(EXPLORER_RPC_METHODS.entriesCopy, {
-        rels: paths,
-        dest_path: dest.path,
-      });
-      toast(`Copying ${paths.length} items…`);
-      disableSelectMode();
-    } catch (err) {
-      if (!isCancelledError(err)) {
-        toast(getErrorMessage(err, 'Batch copy failed'));
-      }
-    }
-  }
-
-  async function batchMoveTo() {
-    const paths = Array.from(selectedEntries);
-    if (!paths.length) {
-      toast('No items selected');
-      return;
-    }
-    if (!window.teFilePicker) {
-      toast('File picker not available');
-      return;
-    }
-    try {
-      const dest = await window.teFilePicker.openDirectory({
-        title: `Move ${paths.length} items to…`,
-        startPath: uiState.projectPath || '',
-      });
-      if (!dest || !dest.path) return;
-      if (!hasExplorerRpc()) {
-        toast('Explorer connection unavailable');
-        return;
-      }
-      notifyExplorer(EXPLORER_RPC_METHODS.entriesMove, {
-        rels: paths,
-        dest_path: dest.path,
-      });
-      toast(`Moving ${paths.length} items…`);
-      disableSelectMode();
-    } catch (err) {
-      if (!isCancelledError(err)) {
-        toast(getErrorMessage(err, 'Batch move failed'));
-      }
-    }
-  }
-
-  async function batchStage() {
-    const paths = Array.from(selectedEntries);
-    if (!paths.length) {
-      toast('No items selected');
-      return;
-    }
-    if (!hasExplorerRpc()) {
-      toast('Explorer connection unavailable');
-      return;
-    }
-    notifyExplorer(EXPLORER_RPC_METHODS.gitStage, { paths });
-    toast(`Staged ${paths.length} items`);
-    disableSelectMode();
-  }
-
-  async function batchUnstage() {
-    const paths = Array.from(selectedEntries);
-    if (!paths.length) {
-      toast('No items selected');
-      return;
-    }
-    if (!hasExplorerRpc()) {
-      toast('Explorer connection unavailable');
-      return;
-    }
-    notifyExplorer(EXPLORER_RPC_METHODS.gitUnstage, { paths });
-    toast(`Unstaged ${paths.length} items`);
-    disableSelectMode();
-  }
-
-  async function batchDelete() {
-    const paths = Array.from(selectedEntries);
-    if (!paths.length) {
-      toast('No items selected');
-      return;
-    }
-    const confirmed = window.confirm(
-      `⚠️ WARNING: Delete ${paths.length} items?\n\nThis action cannot be undone.`
-    );
-    if (!confirmed) return;
-    if (!hasExplorerRpc()) {
-      toast('Explorer connection unavailable');
-      return;
-    }
-    notifyExplorer(EXPLORER_RPC_METHODS.entriesDelete, { rels: paths });
-    toast(`Deleting ${paths.length} items…`);
-    disableSelectMode();
-  }
-
   document.addEventListener(
     'click',
     (ev) => {
@@ -2922,11 +2078,9 @@ export async function initExplorerUI() {
       if (target instanceof Element && target.closest('.fe-card-menu-btn')) {
         return;
       }
-      if (cardMenu && cardMenu.classList.contains('show')) {
-        closeCardMenu();
-      }
+      explorerTreeMenuController.closeCardMenu();
     },
-    false
+    false,
   );
 
   // Initialize explorer dropdown UI with any already-known prefs snapshot.
@@ -2936,169 +2090,14 @@ export async function initExplorerUI() {
   // Uses geometry; does not change backend/SSOT behavior.
   stickyScopesContext.treeElement = treeElement;
   stickyScopesContext.drawerBodyEl = drawerBody;
-  stickyScopesContext.openCardMenuForEntry = openCardMenuForEntry;
+  stickyScopesContext.openCardMenuForEntry = (entry, anchorEl) =>
+    explorerTreeMenuController.openCardMenuForEntry(entry, anchorEl);
   applyExplorerStickyScopesPreference();
 
   // Basic click handling: expand/collapse dirs, open files, open context menu
   if (treeElement) {
     treeElement.addEventListener('click', (ev) => {
-      // Sticky scopes overlay: clicking the docked rows should collapse that scope.
-      // (Menu clicks are handled by the overlay itself.)
-      const sticky = document.getElementById('fe-sticky-scopes');
-      if (sticky && sticky.style.display !== 'none') {
-        const r = sticky.getBoundingClientRect();
-        if (ev.clientY >= r.top && ev.clientY <= r.bottom) {
-          // Map the click to the sticky slot that visually contains the point.
-          // The overlay itself is `pointer-events: none`, so clicks pass through
-          // to the underlying tree; we intercept them here for correct behavior.
-          const slots = sticky.querySelectorAll<HTMLElement>('ul.fe-sticky-scope-slot');
-          let bestSlot: HTMLElement | null = null;
-          let bestZ = -Infinity;
-          for (const slot of slots) {
-            const rect = slot.getBoundingClientRect();
-            if (
-              ev.clientX >= rect.left &&
-              ev.clientX <= rect.right &&
-              ev.clientY >= rect.top &&
-              ev.clientY <= rect.bottom
-            ) {
-              const z = Number(slot.style.zIndex || 0);
-              if (z > bestZ) {
-                bestZ = z;
-                bestSlot = slot;
-              }
-            }
-          }
-
-          const rel = bestSlot?.querySelector<HTMLElement>('li.fe-tree-node')?.dataset?.rel;
-          if (rel && rel !== '.') {
-            const slotRect = bestSlot?.getBoundingClientRect?.();
-            const selRel =
-              (window.CSS && typeof window.CSS.escape === 'function')
-                ? window.CSS.escape(rel)
-                : rel.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-            const dirLi = treeElement.querySelector(
-              `li.fe-tree-node[data-kind="dir"][data-rel="${selRel}"]`
-            );
-            if (dirLi && dirLi.dataset.open === 'true') {
-              dirLi.dataset.open = 'false';
-              const childList = dirLi.querySelector(':scope > ul.fe-tree');
-              if (childList) childList.remove();
-
-              // Auto-disable select mode if collapsing the select-mode directory
-              checkAutoDisableSelectMode(rel);
-
-              // Track directory close for persistence
-              markDirectoryOpen(rel, false);
-
-              // "Magic" UX: after closing a sticky scope, scroll so the closed
-              // directory row lands exactly where the sticky header was.
-              if (slotRect) {
-                const dirRect = dirLi.getBoundingClientRect();
-                const delta = dirRect.top - slotRect.top;
-                if (Math.abs(delta) >= 1) {
-                  const maxScroll = Math.max(
-                    0,
-                    treeElement.scrollHeight - treeElement.clientHeight,
-                  );
-                  const nextTop = Math.min(
-                    maxScroll,
-                    Math.max(0, treeElement.scrollTop + delta),
-                  );
-                  treeElement.scrollTop = nextTop;
-                }
-              }
-
-              // Nudge sticky overlay to recompute immediately (some engines may not
-              // emit a scroll event for programmatic `scrollTop` changes).
-              const stickyApi = window.__explorerStickyScopes;
-              if (stickyApi && typeof stickyApi.update === 'function') {
-                stickyApi.update();
-              }
-            }
-          }
-          return;
-        }
-      }
-
-      const target = ev.target;
-      const li =
-        target instanceof Element
-          ? target.closest<HTMLElement>('li.fe-tree-node')
-          : null;
-      if (!li) return;
-      const rel = li.dataset.rel;
-      const kind = li.dataset.kind;
-      if (!rel) return;
-
-      // Checkbox click in select mode - let it bubble to the checkbox handler
-      if (target instanceof Element && target.closest('.fe-entry-checkbox')) {
-        return;
-      }
-
-      // Card menu open
-      const menuBtn =
-        target instanceof Element
-          ? target.closest<HTMLElement>('.fe-card-menu-btn')
-          : null;
-      if (menuBtn) {
-        const entry = {
-          rel,
-          name: li.dataset.name || li.querySelector('.fe-tree-text')?.textContent || '',
-          kind: kind || 'file',
-          gitStatus: li.dataset.gitStatus || '',
-        };
-        openCardMenuForEntry(entry, menuBtn);
-        return;
-      }
-
-      if (kind === 'dir') {
-        // Do not collapse the synthetic project root card
-        if (rel === '.') return;
-        const isOpen = li.dataset.open === 'true';
-        if (isOpen) {
-          // Collapse: remove children list
-          li.dataset.open = 'false';
-          const childList = li.querySelector(':scope > ul.fe-tree');
-          if (childList) childList.remove();
-          
-          // Auto-disable select mode if collapsing the select-mode directory
-          checkAutoDisableSelectMode(rel);
-          
-          // Track directory close for persistence
-          markDirectoryOpen(rel, false);
-        } else {
-          // Expand: ask backend for this directory listing
-          li.dataset.open = 'true';
-          if (hasExplorerRpc()) {
-            notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
-          }
-          
-          // Track directory open for persistence
-          markDirectoryOpen(rel, true);
-        }
-        return;
-      }
-      if (kind === 'file') {
-        // In select mode, clicking a file toggles its checkbox
-        if (selectModeDir) {
-          const checkbox = li.querySelector<HTMLInputElement>('.fe-entry-checkbox');
-          if (checkbox) {
-            checkbox.checked = !checkbox.checked;
-            if (checkbox.checked) {
-              selectedEntries.add(rel);
-            } else {
-              selectedEntries.delete(rel);
-            }
-          }
-          return;
-        }
-        
-        if (typeof window.appOpenFileRel === 'function') {
-          window.appOpenFileRel(rel, uiState.projectPath || null);
-          closeDrawerIfMobile();
-        }
-      }
+      void explorerTreeClickHandler.handleTreeClick(ev);
     });
   }
 

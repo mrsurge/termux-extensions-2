@@ -17,6 +17,57 @@ interface ExplorerOpenFileOptions {
   scrollY?: string;
 }
 
+interface TeFilePickerOpenDirectoryOptions {
+  title: string;
+  startPath?: string;
+  selectLabel?: string;
+}
+
+interface TeFilePickerOpenOptions {
+  title: string;
+  startPath?: string;
+  mode?: 'any' | 'file' | 'dir';
+  selectLabel?: string;
+}
+
+interface TeFilePickerOpenFileOptions {
+  title: string;
+  startPath?: string;
+  selectLabel?: string;
+}
+
+interface TeFilePickerSaveFileOptions {
+  title: string;
+  startPath?: string;
+  filename?: string;
+  selectLabel?: string;
+}
+
+interface TeFilePickerPathChoice {
+  path: string;
+}
+
+interface TeFilePickerSaveChoice extends TeFilePickerPathChoice {
+  directory: string;
+  name: string;
+  existed?: boolean;
+}
+
+interface TeFilePicker {
+  openDirectory(
+    options: TeFilePickerOpenDirectoryOptions,
+  ): Promise<TeFilePickerPathChoice | null>;
+  open(
+    options: TeFilePickerOpenOptions,
+  ): Promise<TeFilePickerPathChoice | null>;
+  openFile?(
+    options: TeFilePickerOpenFileOptions,
+  ): Promise<TeFilePickerPathChoice | null>;
+  saveFile(
+    options: TeFilePickerSaveFileOptions,
+  ): Promise<TeFilePickerSaveChoice | null>;
+}
+
 type ExplorerOpenFileAbsFn = (
   path: string,
   options?: ExplorerOpenFileOptions,
@@ -72,8 +123,10 @@ declare global {
     appOpenFileRel?: ExplorerOpenFileRelFn;
     jumpToCurrentFileLine?: ExplorerJumpToLineFn;
     applyCacheIndicator?: any;
+    currentPath?: string | null;
+    monaco?: any;
     io?: any;
-    teFilePicker?: any;
+    teFilePicker?: TeFilePicker;
     wsPort?: any;
   }
 }

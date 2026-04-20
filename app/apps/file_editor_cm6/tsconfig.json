@@ -25,6 +25,7 @@
   },
   "include": [
     "src/**/*.ts",
+    "monaco_editor/**/*.ts",
     "static/js/**/*.js",
     "static/js/**/*.ts",
     "extensions/sidebar_extension/static/js/**/*.js",
