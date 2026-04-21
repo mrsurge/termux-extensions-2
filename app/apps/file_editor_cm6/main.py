@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, FileResponse, Response
 import asyncio
 from anyio import to_thread
 from .agent_ws import agent_websocket
-from .explorer_ws import explorer_websocket
+from .explorer_runtime import explorer_websocket
 from .history_store import HistoryStore
 from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
 # vscode_api_shell_manager import removed — shell is deprecated (see endpoints below)
@@ -901,7 +901,7 @@ def initialize_project_session() -> ProjectSidecar | None:
     IMPORTANT:
     - This function must NOT clear session_cache or tracked_jobs.
       Clearing per-project state happens only on explicit project switches
-      in reset_project_session() (explorer_ws.py), so that a plain worker
+      in reset_project_session() (explorer/services/project_session.py), so that a plain worker
       restart for the same project never wipes drafts.
     """
     project_path = _history_store.get_active_project()
@@ -1198,7 +1198,7 @@ def delete_session_cache(
     # Notify explorer of draft state change
     if existed:
         try:
-            from .explorer_ws import notify_draft_state_changed
+            from .explorer.services.runtime_notifications import notify_draft_state_changed
             notify_draft_state_changed(expanded_project)
         except Exception:
             pass
@@ -1284,7 +1284,7 @@ async def write_file_route(data: JsonDict = Body(...)):
             removed_clean = _history_store.prune_clean_drafts(project_path)
             if removed_clean:
                 try:
-                    from .explorer_ws import notify_draft_state_changed
+                    from .explorer.services.runtime_notifications import notify_draft_state_changed
                     notify_draft_state_changed(project_path)
                 except Exception:
                     pass
@@ -2251,7 +2251,7 @@ async def review_save(data: JsonDict = Body(...)):
     
     # Notify explorer of draft state change
     try:
-        from .explorer_ws import notify_draft_state_changed
+        from .explorer.services.runtime_notifications import notify_draft_state_changed
         notify_draft_state_changed(project_root)
     except Exception:
         pass
@@ -2284,7 +2284,7 @@ async def review_discard(data: JsonDict = Body(...)):
     
     # Notify explorer of draft state change
     try:
-        from .explorer_ws import notify_draft_state_changed
+        from .explorer.services.runtime_notifications import notify_draft_state_changed
         notify_draft_state_changed(project_root)
     except Exception:
         pass

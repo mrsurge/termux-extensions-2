@@ -24,16 +24,16 @@ import type {
 
 interface SaveMirrorSocketHandlerDeps {
   getCurrentPath(): string | null;
-  getModel(): any;
-  getDiffEditor(): any;
-  getGitHeadModel(): any;
+  getModel(): unknown;
+  getDiffEditor(): unknown;
+  getGitHeadModel(): unknown;
   getBaseSha256(): string | null;
   getLastContentSha256(): string | null;
   setLastContentSha256(value: string | null): void;
   getLastLocalEditAt(): number;
   getMirrorHotWindowMs(): number;
   getEditorSocketId(): string | null;
-  getMonaco(): any;
+  getMonaco(): unknown;
   setApplyingRemote(value: boolean): void;
   applyLineNumberSizing(): void;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
@@ -41,9 +41,9 @@ interface SaveMirrorSocketHandlerDeps {
   requestDraftDiff(reason: string): void;
   clearDraftDiffDecorations(): void;
   getAutoSave(): boolean;
-  shouldSkipAutosave(diffEditor: any, gitHeadModel: any, model: any): boolean;
+  shouldSkipAutosave(diffEditor: unknown, gitHeadModel: unknown, model: unknown): boolean;
   requestGitBaselines(payload: { immediate?: boolean; reason: string }): void;
-  resnapshotDraftBaseline(diffEditor: any, monacoRef: any, model: any): void;
+  resnapshotDraftBaseline(diffEditor: unknown, monacoRef: unknown, model: unknown): void;
   incrementMirrorState(metric: keyof EditorMirrorState): void;
   syncMirrorDebug(): void;
 }

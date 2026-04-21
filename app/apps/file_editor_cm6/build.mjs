@@ -27,7 +27,7 @@ const hostConfig = {
 /** Monaco editor iframe bundle (IIFE — no module system in iframe) */
 const editorConfig = {
   ...shared,
-  entryPoints: ['monaco_editor/m_editor_app.js'],
+  entryPoints: ['monaco_editor/m_editor_app.ts'],
   outfile: 'static/dist/editor.js',
   format: 'iife',
 };

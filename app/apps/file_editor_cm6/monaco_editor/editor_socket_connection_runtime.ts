@@ -1,0 +1,398 @@
+interface EditorSocketLike {
+  id?: string | null;
+  on(eventName: string, handler: (payload: unknown) => void): void;
+}
+
+interface MonacoUriLike {
+  toString(): string;
+}
+
+interface MonacoModelLike {
+  uri?: MonacoUriLike;
+  getLanguageId?(): string;
+  getValue?(): string;
+  getFullModelRange?(): unknown;
+  applyEdits?(edits: Array<{ range: unknown; text: string }>): void;
+  dispose?(): void;
+}
+
+interface MonacoEditorLike {
+  setModel?(model: MonacoModelLike | null): void;
+  saveViewState?(): unknown;
+  restoreViewState?(state: unknown): void;
+  updateOptions?(options: Record<string, unknown>): void;
+  layout?(): void;
+}
+
+interface MonacoDiffEditorLike {
+  setModel?(model: Record<string, unknown> | null): void;
+  getOriginalEditor?(): MonacoEditorLike | null;
+  getModifiedEditor?(): MonacoEditorLike | null;
+  getModel?(): Record<string, unknown> | null;
+  layout?(): void;
+}
+
+interface EditorSocketConnectionDeps {
+  setEditorSocketId(value: string | null): void;
+  emitToHost(eventName: string, payload: Record<string, unknown>): void;
+  getCachedPrefs(): unknown;
+  setCachedPrefs(snapshot: unknown): void;
+  getBaseSha256(): string | null;
+  setBaseSha256(value: string | null): void;
+  getCurrentPath(): string | null;
+  setCurrentPath(value: string | null): void;
+  wbBumpGeneration(path: string | null, reason: string): number;
+  wbQueueDidChange(path: string, text: string, languageId: string, generation: number): void;
+  wbQueueSymbols(path: string, generation: number): void;
+  wbOpenFileFlow(opts: Record<string, unknown>): Promise<unknown>;
+  bcUpdatePath(path: string | null, deferSymbols?: boolean): void;
+  ensureEditorWithPrefs(): Promise<unknown>;
+  getEditor(): MonacoEditorLike | null;
+  getDiffEditor(): MonacoDiffEditorLike | null;
+  getModel(): MonacoModelLike | null;
+  setModel(model: MonacoModelLike | null): void;
+  createFileModel(content: string, lang: string, absPath: string): MonacoModelLike;
+  applyLanguageToModel(model: MonacoModelLike, languageId: string, filePath: string): void;
+  installMirrorPublisher(): void;
+  installScrollPublisher(): void;
+  vscodeRpcDidOpenIfReady(): void;
+  installVscodeRpcChangePublisher(): void;
+  languageFromPath(path: string): string;
+  monacoFileUri(path: string): MonacoUriLike | null;
+  setApplyingRemote(value: boolean): void;
+  ensureTouchSelection(reason: string): void;
+  getLastContentSha256(): string | null;
+  setLastContentSha256(value: string | null): void;
+  updateDebug(extra: string): void;
+  getOpenTransactionForPath(path: string): unknown;
+  resolveOpenJumpPayload(tx: unknown, scrollLine: number | null, preferCursor: boolean): unknown;
+  applyResolvedOpenJump(source: string, payload: unknown, tx: unknown): void;
+  requestDraftDiff(reason: string): void;
+  clearDraftDiffDecorations(): void;
+  requestGitBaselines(opts: { immediate?: boolean; reason: string }): void;
+  shouldDropDuplicateEditorOpen(payload: unknown): boolean;
+  queueOpenTransaction(task: () => Promise<void>): Promise<void>;
+  runEditorOpenTransaction(payload: unknown): Promise<void>;
+  handleJumpToLine(payload: unknown): void;
+  buildMonacoOptionsFromPrefs(state: unknown): Record<string, unknown>;
+  applyLineNumberSizing(): void;
+  applyMonacoTheme(themeKey: string): Promise<void> | void;
+  getAutoSave(): boolean;
+  getShowInlineDiffs(): boolean;
+  getShowDraftDiffs(): boolean;
+  disposeGitBaselines(): void;
+  ensurePlainEditorWithPrefs(): MonacoEditorLike | null;
+  getGitHeadModel(): MonacoModelLike | null;
+  getMonaco(): { editor?: { createModel?(value: string, language: string): unknown } };
+  applyGitBaselines(payload: unknown): void;
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function applyModelLifecycle(deps: EditorSocketConnectionDeps, content: string, lang: string, currentPath: string): void {
+  const editor = deps.getEditor();
+  const diffEditor = deps.getDiffEditor();
+  const model = deps.getModel();
+
+  if (!model) {
+    const nextModel = deps.createFileModel(content || '', lang, currentPath);
+    deps.setModel(nextModel);
+    if (editor && typeof editor.setModel === 'function') editor.setModel(nextModel);
+    deps.applyLanguageToModel(nextModel, lang, currentPath);
+    deps.installMirrorPublisher();
+    deps.installScrollPublisher();
+    deps.vscodeRpcDidOpenIfReady();
+    deps.installVscodeRpcChangePublisher();
+    return;
+  }
+
+  try {
+    const want = deps.monacoFileUri(currentPath);
+    if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
+      if (diffEditor && typeof diffEditor.setModel === 'function') {
+        try { diffEditor.setModel(null); } catch (_) {}
+      }
+      try { if (typeof model.dispose === 'function') model.dispose(); } catch (_) {}
+      const recreated = deps.createFileModel(content || '', lang, currentPath);
+      deps.setModel(recreated);
+      if (editor && typeof editor.setModel === 'function') editor.setModel(recreated);
+      deps.applyLanguageToModel(recreated, lang, currentPath);
+      deps.installMirrorPublisher();
+      deps.installScrollPublisher();
+      deps.vscodeRpcDidOpenIfReady();
+      deps.installVscodeRpcChangePublisher();
+      return;
+    }
+
+    deps.setApplyingRemote(true);
+    try {
+      const range = model.getFullModelRange ? model.getFullModelRange() : null;
+      if (range && typeof model.applyEdits === 'function') {
+        model.applyEdits([{ range, text: content || '' }]);
+      }
+    } finally {
+      deps.setApplyingRemote(false);
+    }
+    deps.applyLanguageToModel(model, lang, currentPath);
+  } catch (_) {
+    deps.setApplyingRemote(true);
+    try {
+      const range = model && model.getFullModelRange ? model.getFullModelRange() : null;
+      if (range && model && typeof model.applyEdits === 'function') {
+        model.applyEdits([{ range, text: content || '' }]);
+      }
+    } finally {
+      deps.setApplyingRemote(false);
+    }
+    const activeModel = deps.getModel();
+    if (activeModel) deps.applyLanguageToModel(activeModel, lang, currentPath);
+  }
+}
+
+export function registerEditorSocketConnectionHandlers(
+  socket: EditorSocketLike,
+  deps: EditorSocketConnectionDeps,
+): void {
+  socket.on('connect', () => {
+    deps.setEditorSocketId(socket.id || null);
+    deps.emitToHost('editor_ready', {});
+    deps.emitToHost('editor:iframe_ready', {});
+  });
+
+  socket.on('editor:ssot', (snapshot: unknown) => {
+    try {
+      const snapshotRecord = asRecord(snapshot);
+      const snapshotFile = asRecord(snapshotRecord && snapshotRecord.file);
+      try {
+        const t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+          ? (Math.round(performance.now() * 10) / 10)
+          : null;
+        console.log((t != null ? ('t=' + t + 'ms ') : '') + 'now=' + Date.now(), '[editor:ssot] rx', { hasFile: !!snapshotFile, currentPath: snapshotRecord && snapshotRecord.currentPath });
+      } catch (_) {}
+      deps.setCachedPrefs(snapshot);
+      if (snapshotFile) {
+        const file = snapshotFile;
+        deps.setBaseSha256(asString(file.base_sha256) || deps.getBaseSha256());
+        deps.setCurrentPath(asString(file.path) || deps.getCurrentPath());
+        const currentPath = deps.getCurrentPath();
+        const ssotGeneration = deps.wbBumpGeneration(currentPath, 'ssot');
+        try { deps.bcUpdatePath(currentPath, true); } catch (_) {}
+        deps.ensureEditorWithPrefs().then(() => {
+          const activePath = deps.getCurrentPath();
+          if (!activePath) return;
+          const lang = deps.languageFromPath(activePath);
+          applyModelLifecycle(deps, asString(file.content), lang, activePath);
+          deps.ensureTouchSelection('ssot');
+          deps.setLastContentSha256(asString(file.content_sha256) || deps.getLastContentSha256());
+          deps.emitToHost('editor_cache_state', {
+            path: activePath,
+            state: file.state,
+            unsaved: !!file.unsaved,
+            reason: file.reason,
+            content_sha256: file.content_sha256,
+            auto_save: file.auto_save,
+          });
+          try {
+            const ssotTx = deps.getOpenTransactionForPath(activePath);
+            const ssotJumpPayload = deps.resolveOpenJumpPayload(ssotTx, (file && !file.has_draft) ? (typeof file.scroll_line === 'number' ? file.scroll_line : null) : null, false);
+            if (ssotJumpPayload) deps.applyResolvedOpenJump('ssot', ssotJumpPayload, ssotTx);
+          } catch (_) {}
+          if (file.has_draft) {
+            deps.emitToHost('editor_draft_state', { has_draft: true, path: activePath });
+            deps.requestDraftDiff('ssot');
+          } else {
+            deps.clearDraftDiffDecorations();
+          }
+          deps.updateDebug('ws=ssot');
+          deps.requestGitBaselines({ reason: 'ssot' });
+          try {
+            const requestId = file && file.request_id ? String(file.request_id) : ('diag_' + Date.now() + '_ssot');
+            const activeModel = deps.getModel();
+            const text = activeModel && activeModel.getValue ? activeModel.getValue() : '';
+            deps.wbQueueDidChange(activePath, text, activeModel && activeModel.getLanguageId ? activeModel.getLanguageId() : lang, ssotGeneration);
+            deps.wbQueueSymbols(activePath, ssotGeneration);
+            deps.wbOpenFileFlow({
+              path: activePath,
+              languageId: lang,
+              uri: activeModel && activeModel.uri ? String(activeModel.uri.toString()) : '',
+              requestId,
+              forceRefresh: true,
+              generation: ssotGeneration,
+              source: 'ssot',
+              timeoutMs: 8000,
+            }).catch(() => {});
+          } catch (_) {}
+        });
+      } else {
+        deps.updateDebug('ws=ssot-empty');
+      }
+    } catch (error) {
+      console.warn('[Monaco] ssot apply failed', error);
+    }
+  });
+
+  socket.on('editor:open', (payload: unknown) => {
+    try {
+      const payloadRecord = asRecord(payload);
+      if (!payloadRecord || !payloadRecord.path) return;
+      if (deps.shouldDropDuplicateEditorOpen(payload)) {
+        try {
+          console.log('[editor:open] drop duplicate', { path: payloadRecord.path, request_id: payloadRecord.request_id || '' });
+        } catch (_) {}
+        return;
+      }
+
+      const model = deps.getModel();
+      if (payloadRecord.reason === 'external_change' && model && model.uri) {
+        try {
+          const incomingUri = deps.monacoFileUri(asString(payloadRecord.path));
+          if (incomingUri && String(model.uri.toString()) !== String(incomingUri.toString())) {
+            console.log('[editor:open] skip external_change: URI mismatch', payloadRecord.path);
+            return;
+          }
+        } catch (_) {}
+      }
+
+      try {
+        const t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
+          ? (Math.round(performance.now() * 10) / 10)
+          : null;
+        console.log((t != null ? ('t=' + t + 'ms ') : '') + 'now=' + Date.now(), '[editor:open] rx', { path: payloadRecord.path, request_id: payloadRecord.request_id || '' });
+      } catch (_) {}
+      deps.queueOpenTransaction(() => deps.runEditorOpenTransaction(payload)).catch((error) => {
+        console.warn('[Monaco] open apply failed', error);
+      });
+    } catch (error) {
+      console.warn('[Monaco] open apply failed', error);
+    }
+  });
+
+  socket.on('editor:jump_to_line', (payload: unknown) => {
+    deps.handleJumpToLine(payload);
+  });
+
+  socket.on('editor:prefs_changed', (payload: unknown) => {
+    try {
+      const payloadRecord = asRecord(payload);
+      const nextPrefs = payloadRecord && payloadRecord.preferences ? asRecord(payloadRecord.preferences) : null;
+      if (!nextPrefs) return;
+      const prevAutoSave = !!deps.getAutoSave();
+      const nextCachedPrefs = Object.assign({}, asRecord(deps.getCachedPrefs()) || {});
+      nextCachedPrefs.preferences = nextPrefs;
+      deps.setCachedPrefs(nextCachedPrefs);
+      const nextAutoSave = !!deps.getAutoSave();
+
+      const editor = deps.getEditor();
+      const diffEditor = deps.getDiffEditor();
+      const model = deps.getModel();
+      if (!editor) return;
+      const opts = deps.buildMonacoOptionsFromPrefs({ preferences: nextPrefs });
+      const nextPrefsEditor = asRecord(nextPrefs.editor);
+      let theme = null;
+      try { theme = nextPrefsEditor && nextPrefsEditor.theme ? nextPrefsEditor.theme : null; } catch (_) { theme = null; }
+      try { if (opts) delete opts.theme; } catch (_) {}
+
+      try { if (editor.updateOptions) editor.updateOptions(opts || {}); } catch (error) { console.warn('[Monaco] updateOptions failed', error); }
+      deps.applyLineNumberSizing();
+      if (diffEditor && diffEditor.getOriginalEditor) {
+        try {
+          const origOpts = Object.assign({}, opts || {}, { readOnly: true, contextmenu: false, minimap: { enabled: false } });
+          const originalEditor = diffEditor.getOriginalEditor ? diffEditor.getOriginalEditor() : null;
+          if (originalEditor && typeof originalEditor.updateOptions === 'function') {
+            originalEditor.updateOptions(origOpts);
+          }
+          try {
+            const diffOpts = Object.assign({}, opts || {}, { minimap: { enabled: false } });
+            const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
+            if (modifiedEditor && typeof modifiedEditor.updateOptions === 'function') {
+              modifiedEditor.updateOptions(diffOpts);
+            }
+          } catch (_) {}
+          try {
+            const scrollOpts = { scrollbar: { vertical: 'hidden', verticalScrollbarSize: 0, horizontal: 'hidden', horizontalScrollbarSize: 0 } };
+            const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
+            const originalEditor = diffEditor.getOriginalEditor ? diffEditor.getOriginalEditor() : null;
+            if (modifiedEditor && typeof modifiedEditor.updateOptions === 'function') {
+              modifiedEditor.updateOptions(scrollOpts);
+            }
+            if (originalEditor && typeof originalEditor.updateOptions === 'function') {
+              originalEditor.updateOptions(scrollOpts);
+            }
+          } catch (_) {}
+        } catch (_) {}
+      }
+      if (typeof theme === 'string' && theme) deps.applyMonacoTheme(theme);
+      deps.ensureTouchSelection('prefs');
+      try { if (diffEditor && typeof diffEditor.layout === 'function') diffEditor.layout(); } catch (_) {}
+      try { if (editor && typeof editor.layout === 'function') editor.layout(); } catch (_) {}
+      deps.updateDebug('prefs=ok');
+
+      if (prevAutoSave !== nextAutoSave && diffEditor && diffEditor.getModel) {
+        try {
+          const dm = diffEditor.getModel ? diffEditor.getModel() : null;
+          if (dm && dm.original && dm.modified) {
+            let mvs = null;
+            try {
+              const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
+              if (modifiedEditor && modifiedEditor.saveViewState) mvs = modifiedEditor.saveViewState();
+            } catch (_) {}
+            const nextDiffModel: Record<string, unknown> = {
+              original: dm.original,
+              modified: dm.modified,
+              te2AutosaveMode: !!nextAutoSave,
+            };
+            if (!nextAutoSave && dm.original === deps.getGitHeadModel() && dm.modified === model) {
+              const baselineContent = model && model.getValue ? model.getValue() : '';
+              const baselineLang = model && model.getLanguageId ? model.getLanguageId() : 'plaintext';
+              const monacoEditor = deps.getMonaco().editor;
+              if (monacoEditor && typeof monacoEditor.createModel === 'function') {
+                const draftBaseline = monacoEditor.createModel(baselineContent, baselineLang);
+                nextDiffModel.modifiedBaseline = draftBaseline;
+                nextDiffModel.te2FreezeProjection = true;
+              }
+            }
+            if (typeof diffEditor.setModel === 'function') {
+              diffEditor.setModel(nextDiffModel);
+            }
+            try {
+              if (mvs) {
+                const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
+                if (modifiedEditor && modifiedEditor.restoreViewState) modifiedEditor.restoreViewState(mvs);
+              }
+            } catch (_) {}
+          }
+        } catch (error) {
+          console.warn('[Monaco] autosave diff mode switch failed', error);
+        }
+      }
+      if (deps.getShowInlineDiffs()) {
+        deps.requestGitBaselines({ immediate: true, reason: 'prefs' });
+      } else {
+        deps.disposeGitBaselines();
+        if (diffEditor) deps.ensurePlainEditorWithPrefs();
+      }
+      if (deps.getShowDraftDiffs()) deps.requestDraftDiff('prefs');
+      else deps.clearDraftDiffDecorations();
+      deps.vscodeRpcDidOpenIfReady();
+      deps.ensureTouchSelection('prefs');
+    } catch (error) {
+      console.warn('[Monaco] prefs_changed apply failed', error);
+    }
+  });
+
+  socket.on('editor:git_baselines', (payload: unknown) => {
+    try {
+      deps.applyGitBaselines(payload);
+    } catch (error) {
+      console.warn('[Monaco] git baselines apply failed', error);
+    }
+  });
+}

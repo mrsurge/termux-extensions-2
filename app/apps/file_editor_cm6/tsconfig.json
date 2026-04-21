@@ -4,8 +4,8 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
-    "noImplicitAny": false,
-    "strictNullChecks": false,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
     "noEmit": true,
     "allowJs": true,
     "checkJs": false,
@@ -24,18 +24,19 @@
     }
   },
   "include": [
-    "src/**/*.ts",
+    "monaco_editor/**/*.d.ts",
     "monaco_editor/**/*.ts",
-    "static/js/**/*.js",
-    "static/js/**/*.ts",
-    "extensions/sidebar_extension/static/js/**/*.js",
-    "monaco_editor/m_editor_app.js"
+    "monaco_editor/m_editor_app.ts"
   ],
   "exclude": [
     "node_modules",
     "static/dist",
     "static/js/vendor",
     "static/vendor",
-    "vendor"
+    "vendor",
+    "monaco_editor/build_shims",
+    "monaco_editor/vscode_build_src",
+    "src/explorer",
+    "src/host"
   ]
 }

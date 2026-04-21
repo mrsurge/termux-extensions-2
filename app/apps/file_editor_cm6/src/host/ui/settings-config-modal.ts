@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
 

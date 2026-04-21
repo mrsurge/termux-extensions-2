@@ -1,6 +1,10 @@
 import type {
+  EditorLike,
+  EditorModelLike,
+  EditorOpenJumpPayload,
   EditorOpenPayload,
   EditorOpenTransactionStore,
+  EditorUriLike,
 } from './editor_open_contract.ts';
 import {
   beginOpenTransaction,
@@ -10,22 +14,22 @@ import {
 import { awaitOpenCompletion } from './editor_open_transaction_runner.ts';
 
 interface RunEditorOpenTransactionDeps {
-  getWindow(): { monaco?: any };
+  getWindow(): { monaco?: unknown };
   getCurrentPath(): string | null;
   setCurrentPath(path: string): void;
   getBaseSha256(): string | null;
   setBaseSha256(value: string | null): void;
   getLastContentSha256(): string | null;
   setLastContentSha256(value: string | null): void;
-  getEditor(): any;
-  getDiffEditor(): any;
-  getModel(): any;
-  setModel(model: any): void;
-  ensureEditorWithPrefs(): Promise<any>;
+  getEditor(): OpenEditorLike | null;
+  getDiffEditor(): OpenDiffEditorLike | null;
+  getModel(): OpenModelLike | null;
+  setModel(model: OpenModelLike | null): void;
+  ensureEditorWithPrefs(): Promise<unknown>;
   languageFromPath(path: string): string;
-  monacoFileUri(monacoRef: any, path: string): any;
-  applyLanguageToModel(model: any, lang: string, absPath: string): void;
-  createFileModel(content: string, lang: string, absPath: string): any;
+  monacoFileUri(monacoRef: unknown, path: string): EditorUriLike | null;
+  applyLanguageToModel(model: OpenModelLike, lang: string, absPath: string): void;
+  createFileModel(content: string, lang: string, absPath: string): OpenModelLike;
   installMirrorPublisher(): void;
   installScrollPublisher(): void;
   vscodeRpcDidOpenIfReady(): void;
@@ -43,14 +47,41 @@ interface RunEditorOpenTransactionDeps {
   queueSymbols(path: string, generation: number): void;
   openFileFlow(payload: Record<string, unknown>): Promise<unknown>;
   absPathFromVscodeUri(uri: string): string | null;
-  applyJumpToLine(editor: any, model: any, jumpPayload: any): void;
+  applyJumpToLine(editor: EditorLike, model: EditorModelLike, jumpPayload: EditorOpenJumpPayload): void;
   coercePositiveInt(value: unknown): number | null;
-  shouldRecreateOpenModel(monacoRef: any, monacoFileUriFn: (monacoRef: any, path: string) => any, model: any, absPath: string): boolean;
-  applyOpenModelTextSafely(model: any, editor: any, content: string, setApplyingRemote: (value: boolean) => void): void;
+  shouldRecreateOpenModel(monacoRef: unknown, monacoFileUriFn: (monacoRef: unknown, path: string) => EditorUriLike | null, model: OpenModelLike | null, absPath: string): boolean;
+  applyOpenModelTextSafely(model: OpenModelLike, editor: OpenEditorLike, content: string, setApplyingRemote: (value: boolean) => void): void;
   emitOpenCacheState(emitToHostFn: (eventType: string, payload: Record<string, unknown>) => void, absPath: string, hasDraft: boolean, sha256: string | null, autoSave: boolean | null): void;
   queueBackendWorkbenchOpen(payload: Record<string, unknown>): void;
   setApplyingRemote(value: boolean): void;
   openTransactionStore: EditorOpenTransactionStore;
+}
+
+interface OpenEditorLike extends EditorLike {
+  setModel?(model: OpenModelLike | null): void;
+  setValue?(value: string): void;
+  saveViewState?(): unknown;
+  restoreViewState?(state: unknown): void;
+}
+
+interface OpenDiffModelLike extends Record<string, unknown> {
+  original?: unknown;
+  modified?: unknown;
+  modifiedBaseline?: { setValue?(value: string): void } | null;
+  te2FreezeProjection?: boolean;
+}
+
+interface OpenDiffEditorLike {
+  setModel?(model: Record<string, unknown> | null): void;
+  getModel?(): OpenDiffModelLike | null;
+  getModifiedEditor?(): OpenEditorLike | null;
+}
+
+interface OpenModelLike extends EditorModelLike {
+  getValue(): string;
+  getLanguageId?(): string;
+  setValue?(value: string): void;
+  dispose?(): void;
 }
 
 export async function runEditorOpenTransaction(
@@ -60,7 +91,7 @@ export async function runEditorOpenTransaction(
   if (!payload || !payload.path) return;
 
   const incomingPath = String(payload.path || '');
-  let incomingUri: any = null;
+  let incomingUri: EditorUriLike | null = null;
   let sameFileNavigationOnly = false;
   try {
     incomingUri = deps.monacoFileUri(deps.getWindow().monaco, incomingPath);
@@ -87,7 +118,7 @@ export async function runEditorOpenTransaction(
     payload,
     deps.coercePositiveInt,
   );
-  let postOpenJumpPayload: any = null;
+  let postOpenJumpPayload: EditorOpenJumpPayload | null = null;
   try { deps.bcUpdatePath(currentPath, true); } catch (_) {}
 
   try {
@@ -96,6 +127,10 @@ export async function runEditorOpenTransaction(
     let model = deps.getModel();
     const editor = deps.getEditor();
     const diffEditor = deps.getDiffEditor();
+    if (!editor) {
+      settleOpenTransaction(deps.openTransactionStore, tx);
+      return;
+    }
 
     if (sameFileNavigationOnly) {
       try {
@@ -108,7 +143,7 @@ export async function runEditorOpenTransaction(
     } else if (!model) {
       model = deps.createFileModel(payload.content || '', lang, currentPath);
       deps.setModel(model);
-      editor.setModel(model);
+      if (typeof editor.setModel === 'function') editor.setModel(model);
       deps.applyLanguageToModel(model, lang, currentPath);
       deps.installMirrorPublisher();
       deps.installScrollPublisher();
@@ -118,11 +153,11 @@ export async function runEditorOpenTransaction(
       try {
         const want = deps.monacoFileUri(deps.getWindow().monaco, currentPath);
         if (want && model.uri && String(model.uri.toString()) !== String(want.toString())) {
-          if (diffEditor) { try { diffEditor.setModel(null); } catch (_) {} }
-          try { model.dispose(); } catch (_) {}
+          if (diffEditor && typeof diffEditor.setModel === 'function') { try { diffEditor.setModel(null); } catch (_) {} }
+          try { if (typeof model.dispose === 'function') model.dispose(); } catch (_) {}
           model = deps.createFileModel(payload.content || '', lang, currentPath);
           deps.setModel(model);
-          editor.setModel(model);
+          if (typeof editor.setModel === 'function') editor.setModel(model);
           deps.applyLanguageToModel(model, lang, currentPath);
           deps.installMirrorPublisher();
           deps.installScrollPublisher();
@@ -147,17 +182,17 @@ export async function runEditorOpenTransaction(
           const dm = diffEditor.getModel();
           if (dm && dm.te2FreezeProjection && dm.modifiedBaseline && model) {
             const freshContent = model.getValue();
-            let modViewState: any = null;
+            let modViewState: unknown = null;
             try {
-              const modifiedEditor = diffEditor.getModifiedEditor();
-              if (modifiedEditor) modViewState = modifiedEditor.saveViewState();
+              const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
+              if (modifiedEditor && typeof modifiedEditor.saveViewState === 'function') modViewState = modifiedEditor.saveViewState();
             } catch (_) {}
-            dm.modifiedBaseline.setValue(freshContent);
-            diffEditor.setModel(dm);
+            if (typeof dm.modifiedBaseline.setValue === 'function') dm.modifiedBaseline.setValue(freshContent);
+            if (typeof diffEditor.setModel === 'function') diffEditor.setModel(dm);
             try {
               if (modViewState) {
-                const modifiedEditor = diffEditor.getModifiedEditor();
-                if (modifiedEditor) modifiedEditor.restoreViewState(modViewState);
+                const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
+                if (modifiedEditor && typeof modifiedEditor.restoreViewState === 'function') modifiedEditor.restoreViewState(modViewState);
               }
             } catch (_) {}
           }

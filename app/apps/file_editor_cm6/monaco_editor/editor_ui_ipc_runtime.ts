@@ -25,11 +25,10 @@ interface IoLike {
   (namespace: string, opts?: Record<string, unknown>): SocketLike;
 }
 
-interface WindowWithUiIpc extends Window {
+type WindowWithUiIpc = Window & {
   io?: IoLike;
-  monaco?: unknown;
   __te2AdapterReady?: boolean;
-}
+};
 
 interface EditorUiIpcRuntimeDeps {
   getWindow(): WindowWithUiIpc;

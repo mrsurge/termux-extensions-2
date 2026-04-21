@@ -1,4 +1,3 @@
-// @ts-nocheck
 
 export function pickerAvailable() {
   return window.teFilePicker && typeof window.teFilePicker.openFile === 'function';

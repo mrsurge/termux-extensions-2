@@ -1,7 +1,7 @@
 import socketio
 
 from app.apps.file_editor_cm6.explorer_rpc_socketio import ExplorerRpcSocketIONamespace
-from app.apps.file_editor_cm6.explorer_ws import ExplorerSocketIONamespace
+from app.apps.file_editor_cm6.explorer_runtime import ExplorerSocketIONamespace
 
 # Worker-owned Socket.IO server for the Explorer runtime.
 # The main framework process only proxies the websocket connection.

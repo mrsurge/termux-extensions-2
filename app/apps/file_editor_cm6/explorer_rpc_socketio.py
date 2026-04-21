@@ -18,7 +18,7 @@ from .explorer_rpc_contract import (
     rpc_notification_from_legacy_message,
     ExplorerRpcProtocolError,
 )
-from .explorer_ws import ExplorerDispatcher
+from .explorer_runtime import ExplorerDispatcher
 
 logger = logging.getLogger(__name__)
 

@@ -6,6 +6,13 @@ from .save_service import (
     request_editor_save_snapshot,
     resolve_editor_save_snapshot_response,
 )
+from .save_routes_service import (
+    SaveValidationError,
+    handle_android_sync_project,
+    handle_save_current_file,
+    write_editor_buffer_to_disk,
+)
+from .preferences_routes_service import handle_update_preference
 from .android_config_service import (
     get_android_lsp_config,
     handle_android_config_get,
@@ -15,6 +22,33 @@ from .android_config_service import (
     resolve_android_roots,
 )
 from .view_settings_service import handle_set_font_scale, handle_set_view_settings
+from .editor_routes_service import (
+    build_view_state_dict,
+    handle_jump_to_line,
+    handle_search_open,
+    handle_set_active_project,
+    handle_set_minimap_mode,
+    handle_set_read_only,
+    handle_toggle_color_picker,
+    handle_toggle_edit_tracking,
+)
+from .cache_routes_service import (
+    handle_check_cache,
+    handle_debug_editor_state,
+    handle_discard_draft,
+    handle_get_cache_state,
+    handle_refresh_cache_state,
+    handle_refresh_diffs,
+    handle_set_editor_content,
+)
+from .cache_runtime_service import (
+    apply_watcher_replace,
+    broadcast_cache_state,
+    build_cache_state_payload,
+    get_combined_diffs,
+    get_combined_diffs_async,
+    schedule_diff_refresh,
+)
 from .workbench_service import (
     handle_workbench_completions,
     handle_workbench_did_change,
@@ -39,6 +73,10 @@ __all__ = [
     "handle_editor_save_request",
     "request_editor_save_snapshot",
     "resolve_editor_save_snapshot_response",
+    "SaveValidationError",
+    "handle_android_sync_project",
+    "handle_save_current_file",
+    "write_editor_buffer_to_disk",
     "get_android_lsp_config",
     "handle_android_config_get",
     "handle_android_config_save",
@@ -47,6 +85,28 @@ __all__ = [
     "resolve_android_roots",
     "handle_set_font_scale",
     "handle_set_view_settings",
+    "build_view_state_dict",
+    "handle_jump_to_line",
+    "handle_search_open",
+    "handle_set_active_project",
+    "handle_set_minimap_mode",
+    "handle_set_read_only",
+    "handle_toggle_color_picker",
+    "handle_toggle_edit_tracking",
+    "handle_check_cache",
+    "handle_debug_editor_state",
+    "handle_discard_draft",
+    "handle_get_cache_state",
+    "handle_refresh_cache_state",
+    "handle_refresh_diffs",
+    "handle_set_editor_content",
+    "apply_watcher_replace",
+    "broadcast_cache_state",
+    "build_cache_state_payload",
+    "get_combined_diffs",
+    "get_combined_diffs_async",
+    "schedule_diff_refresh",
+    "handle_update_preference",
     "handle_workbench_completions",
     "handle_workbench_did_change",
     "handle_workbench_folding_ranges",

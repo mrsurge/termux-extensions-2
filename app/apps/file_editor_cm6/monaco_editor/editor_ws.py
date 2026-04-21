@@ -217,7 +217,7 @@ async def _emit_host_active_file_changed(
 
 def _notify_draft_state_changed_safe(project: str) -> None:
     try:
-        from ..explorer_ws import notify_draft_state_changed
+        from ..explorer.services.runtime_notifications import notify_draft_state_changed
 
         notify_draft_state_changed(project)
     except Exception:

@@ -207,8 +207,9 @@ export function applyGitBaselines(
     let savedScrollTop: number | null = null;
     let savedPosition: MonacoPositionLike | null = null;
     try {
-      const activeEditor = deps.getDiffEditor() && typeof deps.getDiffEditor()!.getModifiedEditor === 'function'
-        ? deps.getDiffEditor()!.getModifiedEditor()
+      const currentDiffEditor = deps.getDiffEditor();
+      const activeEditor = currentDiffEditor && typeof currentDiffEditor.getModifiedEditor === 'function'
+        ? currentDiffEditor.getModifiedEditor()
         : deps.getEditor();
       if (activeEditor && typeof activeEditor.getScrollTop === 'function') {
         savedScrollTop = activeEditor.getScrollTop();
@@ -338,8 +339,9 @@ export function applyGitBaselines(
     deps.ensureTouchSelection('gitdiff');
     setTimeout(() => { deps.ensureTouchSelection('gitdiff-tick'); }, 0);
 
-    const restoreEditor = deps.getDiffEditor() && typeof deps.getDiffEditor()!.getModifiedEditor === 'function'
-      ? deps.getDiffEditor()!.getModifiedEditor()
+    const currentDiffEditor = deps.getDiffEditor();
+    const restoreEditor = currentDiffEditor && typeof currentDiffEditor.getModifiedEditor === 'function'
+      ? currentDiffEditor.getModifiedEditor()
       : deps.getEditor();
     if (savedScrollTop != null) {
       restoreViewState(restoreEditor, savedScrollTop, savedPosition);

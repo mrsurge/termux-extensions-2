@@ -138,7 +138,7 @@ export async function mountInlineEditorHost(editorFrame, options = {}) {
   window.__te2InlineMonacoApiBase = INLINE_EDITOR_API_BASE;
   editorFrame.innerHTML = INLINE_EDITOR_MARKUP;
   await ensureInlineEditorAssetsLoaded(options.ensureSocketIoLoaded);
-  await import('./m_editor_app.js');
+  await import('./m_editor_app.ts');
 }
 
 export function bootInlineEditorHost(editorFrame, options = {}) {

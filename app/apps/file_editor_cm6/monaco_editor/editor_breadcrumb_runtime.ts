@@ -199,12 +199,12 @@ export function createEditorBreadcrumbRuntime(
     if (!doc) return;
     element = initBreadcrumbElement(doc);
     loadBreadcrumbIcons(
-      (path) => import(path),
-      (nextGetIcon) => {
+      (path: string) => import(path),
+      (nextGetIcon: (...args: unknown[]) => unknown) => {
         getIcon = (...args: unknown[]) => nextGetIcon(...args);
         if (lastPath) render();
       },
-      (error) => { console.warn('[BC] seti-icons load failed:', error); },
+      (error: unknown) => { console.warn('[BC] seti-icons load failed:', error); },
     );
   }
 

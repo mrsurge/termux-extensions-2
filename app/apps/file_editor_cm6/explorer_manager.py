@@ -1,8 +1,8 @@
-"""Extracted ConnectionManager and shared utilities from explorer_ws.
+"""Extracted ConnectionManager and shared utilities from explorer_runtime.
 
 This module exists to break circular import chains. Previously, many modules
 needed the ``manager`` singleton or ``abs_to_rel`` helper and had to import
-from ``explorer_ws``, which transitively pulled in the entire explorer
+from ``explorer_runtime`` (formerly ``explorer_ws``), which transitively pulled in the entire explorer
 dispatcher and its deep dependency tree. Extracting the connection manager
 here lets lightweight consumers (sidebar_ws, editor_backend, etc.) import
 just the manager without triggering the cycle.

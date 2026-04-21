@@ -2,12 +2,11 @@ interface WorkerCtorLike {
   new (url: string | URL, options?: WorkerOptions): Worker;
 }
 
-interface WindowWithMonacoBoot extends Window {
-  monaco?: unknown;
+type WindowWithMonacoBoot = Window & {
   MonacoEnvironment?: Record<string, unknown>;
   _loadedMonacoBundle?: string;
   __te2VscodeBootstrap?: unknown;
-}
+};
 
 interface MonacoTypeScriptDefaultsLike {
   setDiagnosticsOptions?(options: Record<string, unknown>): void;

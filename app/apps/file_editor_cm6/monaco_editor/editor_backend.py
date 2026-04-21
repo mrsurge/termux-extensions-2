@@ -1,6 +1,5 @@
 # app/apps/file_editor_cm6/monaco_editor/editor_backend.py
 
-import json
 import sys
 import os
 import hashlib
@@ -10,7 +9,9 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Body, HTTPException, Query, Response
+from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi.responses import Response
+from starlette.responses import FileResponse
 
 # --- Local Imports ---
 # Import stores as singletons from the new stores module
@@ -18,7 +19,7 @@ from app.apps.file_editor_cm6.stores import _history_store, _preferences_store
 from app.apps.file_editor_cm6.preferences_store import ALLOWED_FONT_SCALES
 # Import helpers
 from app.apps.file_editor_cm6.explorer_helper import get_project_root, _normalize_rel_path, mark_git_cache_dirty
-from app.apps.file_editor_cm6.core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe
+from app.apps.file_editor_cm6.core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from app.apps.file_editor_cm6.core_write import write_full, BaseMismatchError
 from app.apps.file_editor_cm6.diff_helper import invalidate_diff_cache, collect_diff
 from app.apps.file_editor_cm6.draft_diff_helper import compute_draft_diff
@@ -35,6 +36,41 @@ from .editor_backend_services.android_config_service import (
 from .editor_backend_services.view_settings_service import (
     handle_set_font_scale as _handle_set_font_scale,
     handle_set_view_settings as _handle_set_view_settings,
+)
+from .editor_backend_services.editor_routes_service import (
+    build_view_state_dict as _build_view_state_dict_service,
+    handle_jump_to_line as _handle_jump_to_line,
+    handle_search_open as _handle_search_open,
+    handle_set_active_project as _handle_set_active_project,
+    handle_set_minimap_mode as _handle_set_minimap_mode,
+    handle_set_read_only as _handle_set_read_only,
+    handle_toggle_color_picker as _handle_toggle_color_picker,
+    handle_toggle_edit_tracking as _handle_toggle_edit_tracking,
+)
+from .editor_backend_services.cache_routes_service import (
+    handle_check_cache as _handle_check_cache,
+    handle_debug_editor_state as _handle_debug_editor_state,
+    handle_discard_draft as _handle_discard_draft,
+    handle_get_cache_state as _handle_get_cache_state,
+    handle_refresh_cache_state as _handle_refresh_cache_state,
+    handle_refresh_diffs as _handle_refresh_diffs,
+    handle_set_editor_content as _handle_set_editor_content,
+)
+from .editor_backend_services.cache_runtime_service import (
+    apply_watcher_replace as _apply_watcher_replace_service,
+    broadcast_cache_state as _broadcast_cache_state_service,
+    build_cache_state_payload as _build_cache_state_payload_service,
+    get_combined_diffs as _get_combined_diffs_service,
+    get_combined_diffs_async as _get_combined_diffs_async_service,
+    schedule_diff_refresh as _schedule_diff_refresh_service,
+)
+from .editor_backend_services.save_routes_service import (
+    handle_android_sync_project as _handle_android_sync_project,
+    handle_save_current_file as _handle_save_current_file,
+    write_editor_buffer_to_disk as _write_editor_buffer_to_disk_service,
+)
+from .editor_backend_services.preferences_routes_service import (
+    handle_update_preference as _handle_update_preference,
 )
 
 
@@ -287,11 +323,6 @@ def _resolve_font_scale(scale_value: object | None) -> float:
 
     return numeric
 
-
-class SaveValidationError(Exception):
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
 
 # --- State Accessors ---
 def get_active_editor() -> EditorLike | None:
@@ -560,44 +591,16 @@ def _build_cache_state_payload(
     cache_entry: dict[str, object] | None = None,
     reason: str = 'update',
 ) -> dict[str, object]:
-    resolved_path = str(file_path) if file_path else ''
-    project_path = str(project_path) if project_path else None
-    file_label = Path(resolved_path).name if resolved_path else 'Untitled'
-    directory = str(Path(resolved_path).parent) if resolved_path else ''
-    rel_path = None
-    if project_path and resolved_path:
-        try:
-            rel_path = _normalize_rel_path(Path(project_path).expanduser(), resolved_path)
-        except Exception:
-            rel_path = None
-
-    auto_save_enabled = None
-    try:
-        auto_save_enabled = bool(_preferences_store.get_preferences().get("editor", {}).get("autoSave", False))
-    except Exception:
-        auto_save_enabled = None
-
-    payload = {
-        "path": resolved_path or None,
-        "project_path": project_path,
-        "relative_path": rel_path,
-        "file_label": file_label,
-        "directory_label": rel_path or directory or None,
-        "absolute_directory": directory or None,
-        "state": state,
-        "unsaved": bool(unsaved),
-        "auto_save": auto_save_enabled,
-        "reason": reason,
-        "updated_at": (cache_entry or {}).get("updated_at"),
-        "timestamp": time.time(),
-        "content_sha256": (cache_entry or {}).get("content_sha256"),
-        "base_sha256": (cache_entry or {}).get("base_sha256"),
-        "run_id": (cache_entry or {}).get("run_id"),
-        "shell_id": (cache_entry or {}).get("shell_id"),
-        "shell_run_id": (cache_entry or {}).get("shell_run_id"),
-    }
-    # Drop None values to keep the payload compact
-    return {k: v for k, v in payload.items() if v is not None}
+    return _build_cache_state_payload_service(
+        project_path,
+        file_path,
+        state=state,
+        unsaved=unsaved,
+        cache_entry=cache_entry,
+        reason=reason,
+        preferences_store=_preferences_store,
+        normalize_rel_path=_normalize_rel_path,
+    )
 
 
 def _broadcast_cache_state(
@@ -609,22 +612,17 @@ def _broadcast_cache_state(
     cache_entry: dict[str, object] | None = None,
     reason: str = 'update',
 ) -> None:
-    editors = get_active_editors()
-    if not editors or not file_path:
-        return
-    payload = _build_cache_state_payload(
+    _broadcast_cache_state_service(
         project_path,
         file_path,
         state=state,
         unsaved=unsaved,
         cache_entry=cache_entry,
         reason=reason,
+        preferences_store=_preferences_store,
+        normalize_rel_path=_normalize_rel_path,
+        get_active_editors=get_active_editors,
     )
-    for editor in editors:
-        try:
-            editor.run_method('emitCacheState', payload)
-        except Exception as exc:
-            print(f"[SESSION_CACHE] Failed to emit cache state: {exc}", file=sys.stderr)
 
 
 def _apply_watcher_replace(
@@ -640,80 +638,24 @@ def _apply_watcher_replace(
     Returns True if content was actually applied to the editor.
     Returns False if the event was ignored (e.g., disk matches draft base).
     """
-    editors = get_active_editors()
-    if not editors or not path:
-        return False
-
-    cache_entry = None
-    external_change = False
-
-    if project_path:
-        cache_entry = _history_store.get_cached_document(project_path, path)
-
-        # If we have a valid draft, check if the disk event is actually a conflict
-        if cache_entry and cache_entry.get('unsaved'):
-            base_sha = cache_entry.get('base_sha256')
-
-            # 1. Disk matches the draft's base -> Ignore event (safe echo or init)
-            if base_sha and sha256 and base_sha == sha256:
-                print(f"[SESSION_CACHE] Ignoring watcher event for {path}; disk matches draft base", file=sys.stderr)
-                return False
-
-            # 2. Disk does NOT match base -> Genuine external edit
-            if base_sha and sha256 and base_sha != sha256:
-                print(f"[SESSION_CACHE] External edit detected for {path} (base={base_sha} disk={sha256}); clearing cached draft", file=sys.stderr)
-                _history_store.clear_cached_document(project_path, path)
-                cache_entry = None
-                external_change = True
-                # Notify explorer of draft state change
-                try:
-                    from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
-                    notify_draft_state_changed(project_path)
-                except Exception as e:
-                    print(f"[WATCHER] Failed to notify explorer of draft change: {e}", file=sys.stderr)
-
-    # If we reach here, we either had no draft, or we had a conflict and cleared it.
-    # In both cases, the editor should accept the disk content.
-    # Guard: if disk content is identical to the current editor buffer, don't
-    # re-apply. Re-applying via set_value() can reset selection/scroll and looks
-    # like the editor "refreshing" while the user is typing.
-    try:
-        same = False
-        try:
-            current = _get_cached_editor_content(get_active_editor())
-            same = (current == content)
-        except Exception:
-            same = False
-        if same:
-            return False
-    except Exception:
-        pass
-
-    for editor in editors:
-        try:
-            editor.set_value(content)
-            editor._cached_content = content
-        except Exception as exc:
-            print(f"[WATCHER] Failed to apply content to editor: {exc}", file=sys.stderr)
-    set_current_file(path, sha256)
-
-    _broadcast_cache_state(
-        project_path,
-        path,
-        state='clean',
-        unsaved=False,
-        cache_entry=cache_entry,
-        reason='watcher_external' if external_change else reason,
+    from app.apps.file_editor_cm6.explorer.services.runtime_notifications import (
+        notify_draft_state_changed,
     )
 
-    if external_change:
-        for editor in editors:
-            try:
-                editor.set_diff_decorations([])
-            except Exception as err:
-                print(f"[DIFF] Failed to clear decorations after external edit: {err}", file=sys.stderr)
-
-    return True  # Content was applied to editor
+    return _apply_watcher_replace_service(
+        path=path,
+        content=content,
+        sha256=sha256,
+        project_path=project_path,
+        reason=reason,
+        get_active_editors=get_active_editors,
+        get_active_editor=get_active_editor,
+        get_cached_editor_content=_get_cached_editor_content,
+        set_current_file=set_current_file,
+        history_store=_history_store,
+        notify_draft_state_changed=notify_draft_state_changed,
+        broadcast_cache_state_fn=_broadcast_cache_state,
+    )
 
 
 def _get_combined_diffs(project_root: Path, file_path: str, current_content: str) -> list[object]:
@@ -721,34 +663,28 @@ def _get_combined_diffs(project_root: Path, file_path: str, current_content: str
     Calculate combined diff hunks (Git and/or Draft) based on current preferences.
     Returns a unified list of hunks to be sent to the frontend.
     """
-    hunks = []
-    prefs = _preferences_store.get_preferences().get('editor', {})
-    
-    # 1. Git Diffs (Show if enabled)
-    if prefs.get('showInlineDiffs', False):
-        try:
-            rel = _normalize_rel_path(project_root, file_path)
-            diff_data = collect_diff(project_root, rel, base_ref=_current_diff_base(str(project_root)))
-            hunks.extend(diff_data.get('hunks', []))
-        except Exception as e:
-            print(f"[DIFF_HELPER] Failed to collect git diffs: {e}", file=sys.stderr)
-
-    # 2. Draft Diffs (Show if enabled AND Autosave is OFF)
-    if not prefs.get('autoSave', False) and prefs.get('showDraftDiffs', True):
-        try:
-            if Path(file_path).exists():
-                disk_content = Path(file_path).read_text(encoding='utf-8', errors='replace')
-                diff_data = compute_draft_diff(file_path, current_content, disk_content)
-                hunks.extend(diff_data.get('hunks', []))
-        except Exception as e:
-            print(f"[DIFF_HELPER] Failed to compute draft diffs: {e}", file=sys.stderr)
-            
-    return hunks
+    return _get_combined_diffs_service(
+        project_root,
+        file_path,
+        current_content,
+        preferences_store=_preferences_store,
+        normalize_rel_path=_normalize_rel_path,
+        current_diff_base=_current_diff_base,
+        collect_diff=collect_diff,
+        compute_draft_diff=compute_draft_diff,
+    )
 
 
 async def _get_combined_diffs_async(project_root: Path, file_path: str, current_content: str) -> list[object]:
-    return await asyncio.to_thread(
-        lambda: _get_combined_diffs(project_root, file_path, current_content)
+    return await _get_combined_diffs_async_service(
+        project_root,
+        file_path,
+        current_content,
+        preferences_store=_preferences_store,
+        normalize_rel_path=_normalize_rel_path,
+        current_diff_base=_current_diff_base,
+        collect_diff=collect_diff,
+        compute_draft_diff=compute_draft_diff,
     )
 
 
@@ -759,29 +695,17 @@ def _schedule_diff_refresh(
     editor: EditorLike | None,
     reason: str,
 ) -> None:
-    async def _run():
-        try:
-            hunks = await _get_combined_diffs_async(project_root, file_path, current_content)
-            for ed in get_active_editors():
-                try:
-                    ed.set_diff_decorations(hunks)
-                except Exception:
-                    pass
-        except Exception as e:
-            print(f"[DIFF_REFRESH][{reason}] Failed: {e}", file=sys.stderr)
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    if loop and loop.is_running():
-        loop.create_task(_run())
-        return
-    loop = _nicegui_loop
-    if loop and loop.is_running():
-        try:
-            asyncio.run_coroutine_threadsafe(_run(), loop)
-        except Exception as exc:
-            print(f"[DIFF_REFRESH][{reason}] Schedule failed: {exc}", file=sys.stderr)
+    _schedule_diff_refresh_service(
+        project_root,
+        file_path,
+        current_content,
+        editor,
+        reason,
+        get_running_loop=asyncio.get_running_loop,
+        get_nicegui_loop=lambda: _nicegui_loop,
+        get_active_editors=get_active_editors,
+        get_combined_diffs_async_fn=_get_combined_diffs_async,
+    )
 
 
 def _persist_to_cache_debounced():
@@ -870,7 +794,9 @@ def _persist_to_cache_debounced():
 
     # Notify explorer of draft state change (debounced)
     try:
-        from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
+        from app.apps.file_editor_cm6.explorer.services.runtime_notifications import (
+            notify_draft_state_changed,
+        )
         notify_draft_state_changed(project_path)
     except Exception as e:
         print(f"[SESSION_CACHE] Failed to notify explorer of draft change: {e}", file=sys.stderr)
@@ -972,7 +898,9 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
 
     # Keep explorer draft accents in sync for immediate persists (file switch).
     try:
-        from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
+        from app.apps.file_editor_cm6.explorer.services.runtime_notifications import (
+            notify_draft_state_changed,
+        )
         notify_draft_state_changed(project_path)
     except Exception as exc:
         print(f"[SESSION_CACHE][IMMEDIATE] Failed to notify explorer: {exc}", file=sys.stderr)
@@ -997,381 +925,105 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
 
 @editor_router.post('/discard_draft')
 async def discard_draft(data: dict[str, object] = Body(...)):
-    """Discard cached session for current document."""
-    path_obj = data.get('path')
-    path = path_obj if isinstance(path_obj, str) else ""
-    project_path = _history_store.get_active_project()
-    
-    if not path or not project_path:
-        return {"ok": False, "error": "No active document"}
-    
-    cleared = _history_store.clear_cached_document(project_path, path)
+    from app.apps.file_editor_cm6.explorer.services.runtime_notifications import (
+        notify_draft_state_changed,
+    )
 
-    # Notify explorer of draft state change
-    if cleared:
-        try:
-            from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
-            notify_draft_state_changed(project_path)
-        except Exception as e:
-            print(f"[DISCARD] Failed to notify explorer of draft change: {e}", file=sys.stderr)
-
-    if cleared and path == get_current_file():
-        _broadcast_cache_state(
-            project_path,
-            path,
-            state='clean',
-            unsaved=False,
-            reason='discard',
-        )
-    
-    return {"ok": True, "data": {"cleared": cleared}}
+    return await _handle_discard_draft(
+        data,
+        history_store=_history_store,
+        get_current_file=get_current_file,
+        notify_draft_state_changed=notify_draft_state_changed,
+        broadcast_cache_state=_broadcast_cache_state,
+    )
 
 @editor_router.post('/refresh_cache_state')
 async def refresh_cache_state():
-    """Force re-broadcast of the current cache state."""
-    project_path = _history_store.get_active_project()
-    current_file = get_current_file()
-    
-    if not project_path or not current_file:
-        return {"ok": True}
-
-    cached_entry = _history_store.get_cached_document(project_path, current_file)
-    if cached_entry:
-        unsaved = cached_entry.get('unsaved', False)
-        
-        if not unsaved:
-             # If cached but clean, broadcast as clean (no draft indicator)
-             _broadcast_cache_state(
-                project_path,
-                current_file,
-                state='clean',
-                unsaved=False,
-                cache_entry=cached_entry,
-                reason='restore_clean'
-             )
-             return {"ok": True}
-
-        # Handle actual unsaved draft
-        runtime_meta = _get_runtime_metadata()
-        cached_run = cached_entry.get('run_id', 'unknown')
-        current_run = runtime_meta['run_id']
-        
-        state = 'mid_session' if cached_run == current_run else 'crashed'
-        
-        # Broadcast standard telemetry
-        _broadcast_cache_state(
-            project_path,
-            current_file,
-            state=state,
-            unsaved=True,
-            cache_entry=cached_entry,
-            reason='restore'
-        )
-        
-        # Explicitly signal draft state if active
-        if state == 'crashed' or (state == 'mid_session'):
-             for editor in get_active_editors():
-                 try:
-                     editor.notify_parent('draft_state', {
-                        'has_draft': True,
-                        'path': current_file
-                    })
-                 except Exception:
-                     pass
-            
-    return {"ok": True}
+    return await _handle_refresh_cache_state(
+        history_store=_history_store,
+        get_current_file=get_current_file,
+        runtime_meta=_get_runtime_metadata,
+        get_active_editors=get_active_editors,
+        broadcast_cache_state=_broadcast_cache_state,
+    )
 
 @editor_router.post('/check_cache')
 async def check_cache(data: dict[str, object] = Body(...)):
-    """Check if a file has a cached draft."""
-    path_obj = data.get('path')
-    path = path_obj if isinstance(path_obj, str) else ""
-    if not path:
-        return {"ok": False, "error": "No path provided"}
-    
-    project_path = _history_store.get_active_project()
-    if not project_path:
-        return {"ok": True, "has_draft": False}
-        
-    cache_entry = _history_store.get_cached_document(project_path, path)
-    print(f"[CHECK_CACHE] Checking {path} -> Found: {bool(cache_entry)}, Unsaved: {cache_entry.get('unsaved') if cache_entry else 'N/A'}", file=sys.stderr)
-    
-    if cache_entry and cache_entry.get('unsaved'):
-        return {
-            "ok": True,
-            "has_draft": True,
-            "content": cache_entry.get('content', ''),
-            "base_sha256": cache_entry.get('base_sha256')
-        }
-    return {"ok": True, "has_draft": False}
+    return await _handle_check_cache(data, history_store=_history_store)
+
+
+def _set_suppress_on_change_until(value: float) -> None:
+    global _suppress_on_change_until
+    _suppress_on_change_until = value
+
+
+def _get_watcher_token() -> object | None:
+    return _current_watcher_token
+
+
+def _set_watcher_token(token: object | None) -> None:
+    global _current_watcher_token
+    _current_watcher_token = token
+
+
+def _unsubscribe_token(token: object) -> None:
+    unsubscribe(str(token))
 
 @editor_router.post('/set_content')
 async def set_editor_content(data: dict[str, object] = Body(...)):
-    global _current_watcher_token
-    global _suppress_on_change_until
-    editors = get_active_editors()
-    editor = get_active_editor()
-    if not editors or not editor:
-        return {"ok": False, "error": "Editor not ready"}
-    
-    path_obj = data.get('path', '')
-    new_path = path_obj if isinstance(path_obj, str) else ''
-    old_path = get_current_file()
-    project_path = _history_store.get_active_project()
-    has_draft = bool(data.get('has_draft', False))
-    
-    print(f"[SET_CONTENT] path={new_path!r} old={old_path!r}", file=sys.stderr)
-
-    # Cache clearing removed to allow multi-file drafts / persistence
-    if old_path and old_path != new_path:
-        _persist_active_draft_immediately(reason='switch')
-    _cancel_cache_persist_timer()
-    
-    content_obj = data.get('content')
-    content = content_obj if isinstance(content_obj, str) else ''
-    language_obj = data.get('language', 'python')
-    language = language_obj if isinstance(language_obj, str) else 'python'
-    content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
-
-    # Check for actual cached draft (needed both for broadcast + fallback SHA)
-    cache_entry = None
-    if project_path and new_path:
-        cache_entry = _history_store.get_cached_document(project_path, new_path)
-
-    # Backend Safeguard: If frontend sends disk content but we have a draft, force the draft.
-    if cache_entry and cache_entry.get('unsaved'):
-        cached_base = cache_entry.get('base_sha256')
-        if isinstance(cached_base, str) and cached_base and content_sha256 == cached_base:
-            print(f"[SET_CONTENT] SAFEGUARD: Overriding disk content with cached draft for {new_path}", file=sys.stderr)
-            cached_content = cache_entry.get('content', '')
-            content = cached_content if isinstance(cached_content, str) else ''
-            content_sha256 = hashlib.sha256(content.encode('utf-8')).hexdigest()
-            has_draft = True # Ensure we treat this as a restore
-
-    provided_base_sha_obj = data.get('sha256')
-    provided_base_sha = provided_base_sha_obj if isinstance(provided_base_sha_obj, str) else None
-    
-    cached_base = cache_entry.get('base_sha256') if cache_entry else None
-    print(f"[SET_CONTENT] SHAs: provided={provided_base_sha} cached_base={cached_base} content_sha={content_sha256}", file=sys.stderr)
-
-    base_sha256: str | None = (
-        provided_base_sha
-        or (cached_base if isinstance(cached_base, str) else None)
-        or content_sha256
+    return await _handle_set_editor_content(
+        data,
+        history_store=_history_store,
+        preferences_store=_preferences_store,
+        get_active_editor=get_active_editor,
+        get_active_editors=get_active_editors,
+        get_current_file=get_current_file,
+        set_current_file=set_current_file,
+        persist_active_draft_immediately=_persist_active_draft_immediately,
+        cancel_cache_persist_timer=_cancel_cache_persist_timer,
+        get_cached_editor_content=_get_cached_editor_content,
+        set_suppress_on_change_until=_set_suppress_on_change_until,
+        maybe_connect_lsp=_maybe_connect_lsp,
+        broadcast_cache_state=_broadcast_cache_state,
+        schedule_diff_refresh=_schedule_diff_refresh,
+        apply_watcher_replace=_apply_watcher_replace,
+        current_diff_base=_current_diff_base,
+        normalize_rel_path=_normalize_rel_path,
+        collect_diff=collect_diff,
+        get_combined_diffs_async=_get_combined_diffs_async,
+        resolve_font_scale=_resolve_font_scale,
+        get_project_root=get_project_root,
+        init_watcher=init_watcher,
+        subscribe=subscribe,
+        unsubscribe=_unsubscribe_token,
+        get_watcher_token=_get_watcher_token,
+        set_watcher_token=_set_watcher_token,
     )
-    set_current_file(new_path, base_sha256)
-
-    remote_apply = bool(data.get("remote_apply"))
-    if remote_apply:
-        # Prevent this apply from immediately persisting/re-broadcasting via on_change.
-        _suppress_on_change_until = time.time() + 1.0
-
-    # LSP: connect or disconnect based on the newly active file
-    try:
-        if project_path and new_path:
-            project_root_path = Path(project_path).expanduser()
-            _maybe_connect_lsp(editor, Path(new_path), project_root_path)
-        else:
-            _maybe_connect_lsp(editor, None, None)
-    except Exception as exc:
-        print(f"[LSP] Failed to update LSP on set_content for {new_path}: {exc}", file=sys.stderr)
-    
-    for ed in editors:
-        try:
-            # Keep diagnostics/squiggles bound to the currently open file even when LSP
-            # is disconnected for this language (e.g. Markdown).
-            try:
-                ed.run_method('setCurrentFilePath', new_path)
-            except Exception:
-                pass
-            ed.set_value(content)
-            setattr(ed, "_cached_content", content)
-            ed.set_language(language)
-            ed.update()
-            # Lezer nudge: occasionally the language parser can lag behind during fast switches.
-            # This is a cheap re-apply of the currently selected language after open.
-            try:
-                ed.run_method('nudgeLanguageParse', language, 5000)
-            except Exception:
-                pass
-        except Exception as exc:
-            print(f"[SET_CONTENT] Failed to update editor: {exc}", file=sys.stderr)
-
-    _broadcast_cache_state(
-        project_path,
-        new_path,
-        state='mid_session' if (cache_entry and cache_entry.get('unsaved')) else 'clean',
-        unsaved=bool(cache_entry and cache_entry.get('unsaved')),
-        cache_entry=cache_entry,
-        reason='restore' if has_draft else 'set_content',
-    )
-    
-    project_root = get_project_root()
-    init_watcher(project_root)
-    
-    def on_file_change(event):
-        if event.get('type') == 'replace_full':
-            new_content, new_sha256 = event.get('content', ''), event.get('sha256')
-            print(f"[SET_CONTENT][WATCHER] replace_full path={new_path!r} sha={new_sha256}", file=sys.stderr)
-            _apply_watcher_replace(
-                path=new_path,
-                content=new_content,
-                sha256=new_sha256,
-                project_path=project_path,
-            )
-            
-            # Refresh diffs (Combined)
-            try:
-                current_content = editor.value or ''
-                _schedule_diff_refresh(project_root, new_path, current_content, editor, "set_content_watcher")
-            except Exception as e:
-                print(f"[FILE_WATCH] Failed to recalculate diffs: {e}", file=sys.stderr)
-
-    # Cleanup old subscription
-    if _current_watcher_token:
-        try:
-            from app.apps.file_editor_cm6.core_read import unsubscribe
-            unsubscribe(_current_watcher_token)
-        except Exception as e:
-            print(f"[SET_CONTENT] Failed to unsubscribe old token: {e}", file=sys.stderr)
-            
-    _current_watcher_token = subscribe(new_path, 'nicegui_backend_set_content', on_file_change)
-    
-    # Apply ALL preferences from disk to ensure consistency (Single Source of Truth)
-    # These are applied every time content changes to maintain consistent editor state
-    # NOTE: theme and line_wrapping are constructor-only, don't re-apply here
-    editor_prefs = _preferences_store.get_preferences().get('editor', {})
-    font_scale_pref = _resolve_font_scale(editor_prefs.get('fontScale'))
-    
-    editor.set_zebra_stripes(editor_prefs.get('showShading'))
-    editor.set_font_scale(font_scale_pref)
-    editor.set_indent_guides(editor_prefs.get('showIndentGuides'))
-    editor.toggle_color_picker(editor_prefs.get('colorPicker'))
-    editor.set_read_only(editor_prefs.get('readOnly', False))
-    editor.set_sticky_scroll(editor_prefs.get('stickyScroll', False))  # Added: 2025-12-03 by vectorArc - TE2 Team
-    # Single update() call after all preferences applied
-    editor.update()
-    
-    print(f"[SET_CONTENT] Applied all preferences from disk", file=sys.stderr)
-    
-    # Load Diffs (Combined)
-    if new_path:
-        try:
-            # On set_content, editor content == disk content (unless restored elsewhere, but set_content clobbers).
-            # So draft diffs will be empty. Git diffs will show if enabled.
-            # _get_combined_diffs handles the preferences check.
-            project_path = _history_store.get_active_project() or str(get_project_root())
-            hunks = await _get_combined_diffs_async(Path(project_path).expanduser(), new_path, str(content))
-            editor.set_diff_decorations(hunks)
-        except Exception as e: 
-            print(f"[SET_CONTENT] Failed to load diffs: {e}", file=sys.stderr)
-            editor.set_diff_decorations([])
-    else: 
-        editor.set_diff_decorations([])
-    
-    return {"ok": True, "sha256": content_sha256}
 
 @editor_router.post('/refresh_diffs')
 async def refresh_diffs(data: dict[str, object] = Body(...)):
-    path_obj = data.get('path')
-    path = path_obj if isinstance(path_obj, str) else ""
-    if not path: return {"ok": False, "error": "No path provided"}
-    editors = get_active_editors()
-    if not editors:
-        return {"ok": False, "error": "Editor not ready"}
-    
-    try:
-        project_path = _history_store.get_active_project() or str(get_project_root())
-        if not project_path: return {"ok": False, "error": "No project selected"}
-        
-        project_root = Path(project_path).expanduser()
-        rel = _normalize_rel_path(project_root, path)
-        diff_data = await asyncio.to_thread(
-            lambda: collect_diff(project_root, rel, base_ref=_current_diff_base(project_path))
-        )
-        hunks = diff_data.get('hunks', [])
-        for editor in editors:
-            try:
-                editor.set_diff_decorations(hunks)
-            except Exception:
-                pass
-        return {"ok": True, "hunks_count": len(hunks)}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    return await _handle_refresh_diffs(
+        data,
+        history_store=_history_store,
+        get_active_editors=get_active_editors,
+        get_project_root=get_project_root,
+        normalize_rel_path=_normalize_rel_path,
+        collect_diff=collect_diff,
+        current_diff_base=_current_diff_base,
+    )
 
 @editor_router.post('/toggle_edit_tracking')
 async def toggle_edit_tracking(data: dict[str, object] = Body(...)):
-    enabled = bool(data.get('enabled', False))
-    from app.apps.file_editor_cm6 import change_ledger
-    if enabled:
-        change_ledger.clear()  # Fresh start
-        print("[editor_app] trackAgentEdits enabled via API — change_ledger ready", file=sys.stderr)
-    else:
-        change_ledger.clear()
-        print("[editor_app] trackAgentEdits disabled via API — change_ledger cleared", file=sys.stderr)
-    updates = {'trackAgentEdits': enabled}
-    if enabled:
-        updates['trackAgentSidebarEdits'] = False
-    _preferences_store.update_preferences(editor=updates)
-    return {"ok": True, "enabled": enabled}
+    return _handle_toggle_edit_tracking(
+        data,
+        update_editor_preferences=lambda updates: _preferences_store.update_preferences(editor=updates),
+    )
 
 @editor_router.post('/jump_to_line')
 async def jump_to_line(data: dict[str, object] = Body(...)):
-    """Jump to a line in the currently loaded file. Does NOT load new files.
-    
-    Args (in data):
-        line: Target line number (1-based)
-        focus: Whether to focus editor (default: True)
-        scroll_to_top: If True, position line at viewport top (for scroll restore).
-                      If False, uses default scrollIntoView behavior. (default: False)
-        scroll_y: Optional scroll mode. Use 'center' to center the target line in the viewport.
-    """
     editors = get_active_editors()
     primary = get_active_editor()
-    if not editors or not primary:
-        return {"ok": False, "error": "Editor not ready"}
-
-    line_obj = data.get('line', 1)
-    try:
-        target_line = int(line_obj) if isinstance(line_obj, (int, str)) else 1
-    except (TypeError, ValueError):
-        return {"ok": False, "error": "Invalid line number"}
-
-    focus_flag = data.get('focus')
-    should_focus = True if focus_flag is None else bool(focus_flag)
-    
-    # scroll_to_top: position line at viewport top (symmetrical with scroll recording)
-    scroll_to_top = bool(data.get('scroll_to_top') or data.get('scrollToTop'))
-
-    scroll_y = data.get('scroll_y') or data.get('scrollY')
-    if isinstance(scroll_y, str):
-        scroll_y = scroll_y.strip()
-    else:
-        scroll_y = None
-    if scroll_to_top:
-        # scroll_to_top is a special mode; ignore scroll_y to avoid conflicting semantics
-        scroll_y = None
-
-    print(
-        f"[JUMP_TO_LINE] Scrolling to line {target_line}, scroll_to_top={scroll_to_top}, scroll_y={scroll_y}",
-        file=sys.stderr,
-    )
-
-    for editor in editors:
-        try:
-            # Avoid focusing multiple clients (esp. mobile keyboard popups).
-            focus_this = should_focus if editor is primary else False
-            editor.jump_to_line(target_line, focus=focus_this, scroll_to_top=scroll_to_top, scroll_y=scroll_y)
-        except Exception as exc:
-            print(f"[JUMP_TO_LINE] Failed: {exc}", file=sys.stderr)
-
-    return {
-        "ok": True,
-        "line": target_line,
-        "focus": should_focus,
-        "scroll_to_top": scroll_to_top,
-        "scroll_y": scroll_y,
-    }
+    return _handle_jump_to_line(data, editors=editors, primary=primary)
 
 @editor_router.post('/search/open')
 async def editor_search_open(data: dict[str, object] = Body(...)):
@@ -1385,8 +1037,7 @@ async def editor_search_open(data: dict[str, object] = Body(...)):
         )
     
     try:
-        editor.open_search_panel()
-        return {"ok": True}
+        return _handle_search_open(editor)
     except Exception as e:
         raise HTTPException(
             status_code=500, 
@@ -1404,11 +1055,8 @@ async def editor_toggle_color_picker(data: dict[str, object] = Body(...)):
             detail="Editor not initialized. Open a file first."
         )
     
-    enabled = data.get('enabled', False)
-    
     try:
-        editor.toggle_color_picker(enabled)
-        return {"ok": True, "enabled": enabled}
+        return _handle_toggle_color_picker(editor, data)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -1426,11 +1074,8 @@ async def editor_set_read_only(data: dict[str, object] = Body(...)):
             detail="Editor not initialized. Open a file first."
         )
     
-    readonly = data.get('readonly', False)
-    
     try:
-        editor.set_read_only(readonly)
-        return {"ok": True, "readonly": readonly}
+        return _handle_set_read_only(editor, data)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -1440,59 +1085,23 @@ async def editor_set_read_only(data: dict[str, object] = Body(...)):
 @editor_router.post('/minimap/mode')
 async def editor_minimap_mode(data: dict[str, object] = Body(...)):
     """Set the minimap mode for the current editor."""
-    mode_obj = data.get('mode', 'off')
-    mode = mode_obj if isinstance(mode_obj, str) else 'off'
     editor = get_active_editor()
     if not editor:
         raise HTTPException(status_code=404, detail='Editor not initialized')
     try:
-        editor.set_minimap_mode(mode)
-        return {'ok': True, 'mode': mode}
+        return _handle_set_minimap_mode(editor, data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Failed to set minimap mode: {e}')
 
 
 # --- Helper Function for View State ---
 def _get_view_state_dict() -> dict[str, object]:
-    """Helper to get current view state from preferences (single source of truth)."""
-    prefs = _preferences_store.get_preferences()
-    editor_prefs = prefs.get('editor', {})
-    lsp_state = {
-        "enableLsp": False,
-        "enableLspPyright": False,
-        "enableLspTypescript": False,
-        "enableLspClangd": False,
-        "enableLspKotlin": False,
-        "enableLspKotlinAndroid": False,
-        "lspPyrightConfigMode": "root",
-    }
-    try:
-        project_path = _history_store.get_active_project() or str(get_project_root())
-        if project_path:
-            lsp_state = _history_store.get_lsp_state_payload(project_path)
-    except Exception:
-        pass
-    return {
-        "showLineNumbers": editor_prefs.get('showLineNumbers'),
-        "showSyntax": editor_prefs.get('showSyntax'),
-        "showShading": editor_prefs.get('showShading'),
-        "wordWrap": editor_prefs.get('wordWrap'),
-        "autoCloseBrackets": editor_prefs.get('autoCloseBrackets'),
-        "autocompletion": editor_prefs.get('autocompletion'),
-        "theme": editor_prefs.get('theme'),
-        "autoSave": editor_prefs.get('autoSave'),
-        "showInlineDiffs": editor_prefs.get('showInlineDiffs'),
-        "trackAgentEdits": editor_prefs.get('trackAgentEdits'),
-        "trackAgentSidebarEdits": editor_prefs.get('trackAgentSidebarEdits'),
-        "fontScale": editor_prefs.get('fontScale'),
-        "showIndentGuides": editor_prefs.get('showIndentGuides'),
-        "colorPicker": editor_prefs.get('colorPicker'),
-        "readOnly": editor_prefs.get('readOnly'),
-        "showMinimap": editor_prefs.get('showMinimap'),
-        "showDraftDiffs": editor_prefs.get('showDraftDiffs'),
-        "stickyScroll": editor_prefs.get('stickyScroll'),  # Added: 2025-12-03 by vectorArc - TE2 Team
-        **lsp_state,
-    }
+    return _build_view_state_dict_service(
+        preferences_store=_preferences_store,
+        active_project=_history_store.get_active_project,
+        project_root=get_project_root,
+        get_lsp_state_payload=_history_store.get_lsp_state_payload,
+    )
 
 
 @editor_router.get('/view_state')
@@ -1503,711 +1112,158 @@ async def get_view_state():
 
 @editor_router.post('/update_preference')
 async def update_preference(data: dict[str, object] = Body(...)):
-    """
-    Update a single preference and apply it to the editor immediately (if an editor is active).
-    This is the ONLY way frontend should change preferences.
-    Returns full view state to eliminate double round-trip (Jimmy's optimization). (also a new thing here... test)
-    """
-    key_obj = data.get('key')
-    key = key_obj if isinstance(key_obj, str) else ""
-    value = data.get('value')
-    source_client_obj = data.get('nicegui_client_id')
-    source_client = source_client_obj if isinstance(source_client_obj, str) else None
-    
-    if not key:
-        raise HTTPException(status_code=400, detail="key is required")
-    
-    editors = get_active_editors()
-    
-    # Validate key. Most preferences are editor-scoped in PreferencesStore, but
-    # LSP config is project-scoped (sidecar SSOT via HistoryStore facade).
-    LSP_KEYS = {
-        'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
-        'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
-        'lspKotlinAndroidModule', 'lspKotlinAndroidVariant',
-        'lspPyrightConfigMode',
-    }
-    if key not in LSP_KEYS:
-        from app.apps.file_editor_cm6.preferences_store import DEFAULT_EDITOR_PREFS
-        if key not in DEFAULT_EDITOR_PREFS:
-            raise HTTPException(status_code=400, detail=f"Invalid preference key: {key}")
-    
-    # Apply to editor immediately based on key; persist only after success
-    try:
-        print(f"[PREFERENCE] Incoming update key={key} value={value}", file=sys.stderr)
-        if key == 'wordWrap':
-            for ed in editors:
-                ed.set_line_wrapping(bool(value))
-            # If turning word wrap ON and diffs are showing, refresh them
-            # Deletion widgets don't auto-adapt to word wrap changes
-            current_file = get_current_file()
-            if value and current_file:
-                current_prefs = _preferences_store.get_preferences().get('editor', {})
-                if current_prefs.get('showInlineDiffs', False):
-                    project_path = _history_store.get_active_project() or str(get_project_root())
-                    if project_path:
-                        try:
-                            rel = _normalize_rel_path(Path(project_path).expanduser(), current_file)
-                            diff_data = collect_diff(Path(project_path).expanduser(), rel, base_ref=_current_diff_base(project_path))
-                            hunks = diff_data.get('hunks', [])
-                            for ed in editors:
-                                ed.set_diff_decorations(hunks)
-                            print(f"[PREFERENCE] Refreshed diffs after word wrap enabled", file=sys.stderr)
-                        except Exception as e:
-                            print(f"[PREFERENCE] Failed to refresh diffs: {e}", file=sys.stderr)
-        elif key == 'showShading':
-            for ed in editors:
-                ed.set_zebra_stripes(bool(value))
-        elif key == 'showIndentGuides':
-            for ed in editors:
-                ed.set_indent_guides(bool(value))
-        elif key == 'theme':
-            theme_value = str(value)
-            value = theme_value
-            # Theme SSOT is now the Monaco theme id set (monaco-editor-themes). The legacy
-            # NiceGUI/CM6 surface can only apply themes it knows about; for unknown theme
-            # keys we still persist SSOT but skip applying to CM6.
-            mapped_theme = THEME_MAP.get(theme_value)
-            if mapped_theme:
-                for ed in editors:
-                    ed.set_theme(mapped_theme)
-        elif key == 'fontScale':
-            try:
-                scale = _resolve_font_scale(value)
-            except RuntimeError as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
-            value = scale
-            for ed in editors:
-                ed.set_font_scale(scale)
-        elif key == 'colorPicker':
-            for ed in editors:
-                ed.toggle_color_picker(bool(value))
-        elif key == 'readOnly':
-            for ed in editors:
-                ed.set_read_only(bool(value))
-        elif key == 'showMinimap':
-            # Use prop setter to trigger client-side auto-detect logic
-            for ed in editors:
-                ed.show_minimap = bool(value)
-        elif key == 'stickyScroll':
-            # Added: 2025-12-03 by vectorArc - TE2 Team
-            for ed in editors:
-                ed.set_sticky_scroll(bool(value))
-        elif key in (
-            'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
-            'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
-            'lspKotlinAndroidModule', 'lspKotlinAndroidVariant',
-            'lspPyrightConfigMode',
-        ):
-            # LSP preferences are project-scoped (sidecar SSOT via HistoryStore facade).
-            # Persist + apply after success below.
-            pass
-        elif key == 'showInlineDiffs':
-            pass  # handled after preference persistence via _refresh_active_diffs
-        elif key == 'showDraftDiffs':
-            pass
-        elif key == 'autoSave':
-            project_path = _history_store.get_active_project() or str(get_project_root())
-            current_file = get_current_file()
-            # When enabling autosave, drop any cached drafts for the active document
-            if value and project_path and current_file:
-                try:
-                    _history_store.clear_cached_document(project_path, current_file)
-                    # Notify explorer of draft state change
-                    from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
-                    notify_draft_state_changed(project_path)
-                except Exception as exc:
-                    print(f"[PREFERENCE] Failed to clear cache on autosave enable: {exc}", file=sys.stderr)
-                _broadcast_cache_state(
-                    project_path,
-                    current_file,
-                    state='clean',
-                    unsaved=False,
-                    cache_entry=None,
-                    reason='autosave_on',
-                )
-            # Refresh handled below after persistence
+    def _collect_diff(project_root: Path, rel_path: str, base_ref: str) -> dict[str, object]:
+        return collect_diff(project_root, rel_path, base_ref=base_ref)
 
-        elif key == 'trackAgentEdits':
-            value = bool(value)
-            from app.apps.file_editor_cm6 import change_ledger
-            if value:
-                change_ledger.clear()  # Fresh start
-                print("[editor_app] trackAgentEdits enabled — change_ledger ready", file=sys.stderr)
-            else:
-                change_ledger.clear()  # Stop tracking
-                print("[editor_app] trackAgentEdits disabled — change_ledger cleared", file=sys.stderr)
-        elif key == 'trackAgentSidebarEdits':
-            value = bool(value)
-            print(f"[editor_app] trackAgentSidebarEdits set to {value}", file=sys.stderr)
-        elif key in ['showLineNumbers', 'showSyntax', 'autoCloseBrackets', 'autocompletion', 'autoSave']:
-            # These require frontend to rebuild view (legacy behavior)
-            # Persistence happens after this block once runtime updates succeed
-            pass
-        
-        for ed in editors:
-            ed.update()
+    def _emit_preferences_changed(
+        project_path: str,
+        key: str,
+        value: object,
+        view_state: dict[str, object],
+        preferences: dict[str, object],
+        source_client: str | None,
+    ) -> None:
+        from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
 
-        if key in (
-            'enableLsp', 'enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid',
-            'lspRootRelPyright', 'lspRootRelTypescript', 'lspRootRelClangd', 'lspRootRelKotlin', 'lspRootRelKotlinAndroid',
-            'lspKotlinAndroidModule', 'lspKotlinAndroidVariant',
-            'lspPyrightConfigMode',
-        ):
-            project_path = _history_store.get_active_project() or str(get_project_root())
-            if not project_path:
-                raise HTTPException(status_code=400, detail="No active project for LSP preference")
-            if key == 'enableLsp':
-                if not _history_store.set_lsp_enabled(project_path, bool(value)):
-                    raise RuntimeError("Failed to persist LSP enablement")
-            elif key in ('enableLspPyright', 'enableLspTypescript', 'enableLspClangd', 'enableLspKotlin', 'enableLspKotlinAndroid'):
-                server_map = {
-                    'enableLspPyright': 'pyright',
-                    'enableLspTypescript': 'typescript',
-                    'enableLspClangd': 'clangd',
-                    'enableLspKotlin': 'kotlin',
-                    'enableLspKotlinAndroid': 'kotlin-android',
-                }
-                server_id = server_map.get(key)
-                if server_id:
-                    if not _history_store.set_lsp_server_enabled(project_path, server_id, bool(value)):
-                        raise RuntimeError("Failed to persist LSP server enablement")
-            elif key in ('lspRootRelKotlinAndroid', 'lspKotlinAndroidModule', 'lspKotlinAndroidVariant'):
-                # Persist kotlin-android config into .code_cm6/lang/android/android_build_config.json (SSOT).
-                try:
-                    from app.apps.file_editor_cm6.android_lang.android_lsp_config import update_android_lsp_config
-
-                    root_path = Path(project_path)
-                    if key == 'lspRootRelKotlinAndroid':
-                        update_android_lsp_config(root_path, root_rel=str(value))
-                    elif key == 'lspKotlinAndroidModule':
-                        update_android_lsp_config(root_path, module=str(value))
-                    else:
-                        update_android_lsp_config(root_path, variant=str(value))
-                except Exception as exc:
-                    raise HTTPException(status_code=400, detail=f"Failed to persist kotlin-android config: {exc}")
-            elif key == 'lspPyrightConfigMode':
-                mode = str(value or "").strip().lower()
-                if not _history_store.set_lsp_pyright_config_mode(project_path, mode):
-                    raise RuntimeError("Failed to persist Pyright config mode")
-
-                # Restart Pyright LSP on next open/start.
-                from app.apps.file_editor_cm6.lsp_shell_manager import shutdown_lsp_shell
-
-                try:
-                    await shutdown_lsp_shell("python")
-                except Exception:
-                    pass
-
-            else:
-                root_map = {
-                    'lspRootRelPyright': 'pyright',
-                    'lspRootRelTypescript': 'typescript',
-                    'lspRootRelClangd': 'clangd',
-                    'lspRootRelKotlin': 'kotlin',
-                }
-                server_id = root_map.get(key)
-                if not server_id:
-                    raise RuntimeError("Unknown LSP root override key")
-
-                # Root overrides are strings. Empty/"." means "use project root".
-                try:
-                    root_rel = str(value).strip() if value is not None else ""
-                except Exception:
-                    root_rel = ""
-
-                if not _history_store.set_lsp_server_root_rel(project_path, server_id, root_rel):
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Invalid LSP project root: must be a relative directory within the project",
-                    )
-
-                # If the server is running, shut it down. Do NOT auto-restart; it
-                # restarts when a supported file is entered or when manually started.
-                from app.apps.file_editor_cm6.lsp_shell_manager import shutdown_lsp_shell
-
-                server_languages = {
-                    "pyright": ["python"],
-                    "typescript": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
-                    "clangd": ["c", "cpp"],
-                    "kotlin": ["kotlin"],
-                }
-                for lang in server_languages.get(server_id, []):
-                    try:
-                        await shutdown_lsp_shell(lang)
-                    except Exception:
-                        pass
-
-                # If the active document uses this server, disconnect the client now.
-                try:
-                    current_file = get_current_file()
-                    if current_file:
-                        current_lang = LSP_LANGUAGE_MAP.get(Path(current_file).suffix)
-                        if current_lang in server_languages.get(server_id, []):
-                            for ed in editors:
-                                ed.disconnect_lsp()
-                except Exception:
-                    pass
-
-            # Apply LSP connect/disconnect after persistence so the SSOT is consistent.
-            # Root changes intentionally do NOT auto-restart; they take effect on next entry/manual start.
-            try:
-                if key.startswith('lspRootRel'):
-                    pass
-                else:
-                    current_file = get_current_file()
-                    if current_file:
-                        for ed in editors:
-                            _maybe_connect_lsp(ed, Path(current_file), Path(project_path))
-                    else:
-                        if key == 'enableLsp' and not bool(value):
-                            for ed in editors:
-                                ed.disconnect_lsp()
-            except Exception as exc:
-                print(f"[PREFERENCE] LSP reconnect after {key} failed: {exc}", file=sys.stderr)
-        else:
-            editor_updates = {key: value}
-            if key == 'trackAgentEdits' and bool(value):
-                editor_updates['trackAgentSidebarEdits'] = False
-            elif key == 'trackAgentSidebarEdits' and bool(value):
-                editor_updates['trackAgentEdits'] = False
-                try:
-                    from app.apps.file_editor_cm6 import change_ledger
-                    change_ledger.clear()
-                except Exception:
-                    pass
-            _preferences_store.update_preferences(editor=editor_updates)
-        
-        if key in ('showInlineDiffs', 'showDraftDiffs', 'autoSave'):
-            _refresh_active_diffs()
-        
-        print(f"[PREFERENCE] Updated {key}={value}", file=sys.stderr)
-
-        view_state = _get_view_state_dict()
-
-        # Broadcast preference changes so other connected host shells converge immediately.
-        # (This is separate from cm6-cache-state, which is primarily about doc cache telemetry.)
+        payload = {
+            "project_path": project_path,
+            "key": key,
+            "value": value,
+            "view_state": view_state,
+            "preferences": preferences,
+            "source_client": source_client,
+        }
+        asyncio.create_task(
+            _explorer_manager.broadcast(
+                project_path,
+                {
+                    "type": "editor:prefs_changed",
+                    "payload": payload,
+                },
+            )
+        )
         try:
-            project_path = _history_store.get_active_project() or str(get_project_root())
-            proj_norm = str(Path(project_path).expanduser().resolve(strict=False)) if project_path else None
-            if proj_norm:
-                preferences = _preferences_store.get_preferences(proj_norm)
-                from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
-                asyncio.create_task(
-                    _explorer_manager.broadcast(
-                        proj_norm,
-                        {
-                            "type": "editor:prefs_changed",
-                            "payload": {
-                                "project_path": proj_norm,
-                                "key": key,
-                                "value": value,
-                                "view_state": view_state,
-                                "preferences": preferences,
-                                "source_client": source_client,
-                            },
-                        },
-                    )
+            from app.apps.file_editor_cm6.monaco_editor.editor_socketio import EDITOR_SIO
+
+            asyncio.create_task(
+                EDITOR_SIO.emit(
+                    "editor:prefs_changed",
+                    payload,
+                    room="file_editor_cm6",
+                    namespace="/editor",
                 )
-
-                # Also notify the dedicated editor Socket.IO channel (Monaco iframe).
-                # Worker-owned Socket.IO server emits directly; main process is proxy-only.
-                try:
-                    from app.apps.file_editor_cm6.monaco_editor.editor_socketio import EDITOR_SIO
-
-                    asyncio.create_task(
-                        EDITOR_SIO.emit(
-                            "editor:prefs_changed",
-                            {
-                                "project_path": proj_norm,
-                                "key": key,
-                                "value": value,
-                                "view_state": view_state,
-                                "preferences": preferences,
-                                "source_client": source_client,
-                            },
-                            room="file_editor_cm6",
-                            namespace="/editor",
-                        )
-                    )
-                except Exception:
-                    pass
-
+            )
         except Exception:
             pass
-        
-        # Return full state (Jimmy's optimization - single round trip)
-        return {"ok": True, "data": view_state}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"[PREFERENCE] Failed to apply {key}={value}: {e}", file=sys.stderr)
-        raise HTTPException(status_code=500, detail=f"Failed to apply preference: {e}")
+
+    return await _handle_update_preference(
+        data,
+        editors=get_active_editors(),
+        preferences_store=_preferences_store,
+        history_store=_history_store,
+        get_project_root=get_project_root,
+        get_current_file=get_current_file,
+        resolve_font_scale=_resolve_font_scale,
+        normalize_rel_path=_normalize_rel_path,
+        collect_diff=_collect_diff,
+        current_diff_base=_current_diff_base,
+        maybe_connect_lsp=_maybe_connect_lsp,
+        broadcast_cache_state=_broadcast_cache_state,
+        refresh_active_diffs=_refresh_active_diffs,
+        build_view_state_dict=_get_view_state_dict,
+        theme_map=THEME_MAP,
+        lsp_language_map=LSP_LANGUAGE_MAP,
+        emit_preferences_changed=_emit_preferences_changed,
+    )
 
 
 @editor_router.get('/cache_state')
 def get_cache_state(project: str | None = Query(None), path: str | None = Query(None)):
-    project_path = project or _history_store.get_active_project()
-    current_file = path or get_current_file()
-    if not project_path or not current_file:
-        return {"ok": True, "data": None}
-
-    cached = _history_store.get_cached_document(project_path, current_file)
-    if not cached:
-        return {"ok": True, "data": {"state": "clean"}}
-
-    runtime = _get_runtime_metadata()
-    state = "mid_session" if cached.get('run_id') == runtime.get('run_id') else "crashed"
-    return {
-        "ok": True,
-        "data": {
-            "state": state,
-            "unsaved": cached.get('unsaved', False),
-            "content_sha256": cached.get('content_sha256'),
-            "base_sha256": cached.get('base_sha256'),
-            "updated_at": cached.get('updated_at'),
-            "run_id": cached.get('run_id'),
-        }
-    }
+    return _handle_get_cache_state(
+        history_store=_history_store,
+        runtime_meta=_get_runtime_metadata,
+        get_current_file=get_current_file,
+        project=project,
+        path=path,
+    )
 
 @editor_router.get('/debug/state')
 def debug_editor_state():
-    editor = get_active_editor()
-    if not editor: return {"ok": False, "error": "Editor not ready", "current_file": get_current_file(), "editor_exists": False}
-    content = editor.value or ''
-    return {"ok": True, "editor_exists": True, "current_file": get_current_file(), "content_length": len(content), "content_hash": hashlib.sha256(content.encode('utf-8')).hexdigest()}
+    return _handle_debug_editor_state(
+        get_active_editor=get_active_editor,
+        get_current_file=get_current_file,
+    )
 
 
 async def _write_editor_buffer_to_disk(*, client_id: str, op_id: str | None) -> dict[str, object]:
-    editor = get_active_editor()
-    if not editor:
-        raise SaveValidationError("Editor not ready")
-
-    current_file = get_current_file()
-    if not current_file:
-        raise SaveValidationError("No file is currently open")
-
-    content = editor.value or ''
-    base_sha256 = get_current_file_sha256()
-    op_identifier = op_id or f"op_{int(time.time() * 1000)}"
-    project_root = get_project_root()
-    print(f"[SAVE] Attempting path={current_file!r} len={len(content)} base={base_sha256}", file=sys.stderr)
-
-    rel_path = _normalize_rel_path(project_root, current_file)
-
-    target_path = project_root.joinpath(rel_path).resolve()
-    orig_mode = None
-    if target_path.exists() and target_path.is_file():
-        try:
-            orig_mode = target_path.stat().st_mode & 0o777
-            print(f"[SAVE] Preserving mode {oct(orig_mode)} for {current_file!r}", file=sys.stderr)
-        except OSError:
-            pass
-
-    init_watcher(project_root)
-
-    file_meta = await asyncio.to_thread(
-        lambda: write_full(
-            project_root,
-            str(rel_path),
-            content,
-            base_sha256=base_sha256,
-            mode=orig_mode,
-        )
+    from app.apps.file_editor_cm6.explorer.services.runtime_notifications import (
+        notify_draft_state_changed,
     )
 
-    push_save_ack(str(rel_path), op_identifier, client_id, file_meta)
-    emit_diff_changed(str(rel_path), file_meta["sha256"])
-    mark_git_cache_dirty(project_root)
-    invalidate_diff_cache(project_root, str(rel_path))
-    set_current_file(current_file, file_meta["sha256"])
-
-    project_path = _history_store.get_active_project()
-    if project_path and current_file:
-        runtime_meta = _get_runtime_metadata()
-        cache_entry = _history_store.upsert_cached_document(
-            project_path=project_path,
-            file_path=current_file,
-            content=content,
-            base_sha256=file_meta["sha256"],
-            run_id=runtime_meta["run_id"],
-            shell_id=runtime_meta["shell_id"],
-            shell_run_id=runtime_meta["shell_run_id"],
-            launcher_pid=runtime_meta["launcher_pid"],
-            worker_pid=runtime_meta["worker_pid"],
-        )
-        _broadcast_cache_state(
-            project_path,
-            current_file,
-            state='clean',
-            unsaved=bool(cache_entry.get('unsaved', False)),
-            cache_entry=cache_entry,
-            reason='save',
-        )
-        removed_clean = _history_store.prune_clean_drafts(project_path)
-        if removed_clean:
-            try:
-                from app.apps.file_editor_cm6.explorer_ws import notify_draft_state_changed
-                notify_draft_state_changed(project_path)
-            except Exception:
-                pass
-
-    # Refresh Diffs (Combined)
-    try:
-        hunks = await _get_combined_diffs_async(project_root, current_file, content)
-        for ed in get_active_editors():
-            try:
-                ed.set_diff_decorations(hunks)
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"[SAVE] Failed to refresh diffs: {e}", file=sys.stderr)
-
-    print(f"[SAVE] Success path={current_file!r} sha={file_meta['sha256']}", file=sys.stderr)
-    return file_meta
+    return await _write_editor_buffer_to_disk_service(
+        client_id=client_id,
+        op_id=op_id,
+        get_active_editor=get_active_editor,
+        get_active_editors=get_active_editors,
+        get_current_file=get_current_file,
+        get_current_file_sha256=get_current_file_sha256,
+        set_current_file=set_current_file,
+        get_project_root=get_project_root,
+        history_store=_history_store,
+        normalize_rel_path=_normalize_rel_path,
+        write_full=write_full,
+        init_watcher=init_watcher,
+        push_save_ack=push_save_ack,
+        emit_diff_changed=emit_diff_changed,
+        mark_git_cache_dirty=mark_git_cache_dirty,
+        invalidate_diff_cache=invalidate_diff_cache,
+        runtime_meta=_get_runtime_metadata,
+        broadcast_cache_state=_broadcast_cache_state,
+        notify_draft_state_changed=notify_draft_state_changed,
+        get_combined_diffs_async=_get_combined_diffs_async,
+    )
 
 @editor_router.post('/save')
 async def save_current_file(data: dict[str, object] = Body(...)):
-    client_id_obj = data.get('client_id', 'unknown')
-    client_id = client_id_obj if isinstance(client_id_obj, str) and client_id_obj else 'unknown'
-    nicegui_client_id_obj = data.get('nicegui_client_id')
-    nicegui_client_id = nicegui_client_id_obj if isinstance(nicegui_client_id_obj, str) else None
-    op_id_obj = data.get('op_id')
-    op_id = op_id_obj if isinstance(op_id_obj, str) else None
-    current_file = get_current_file()
-    base_snapshot = get_current_file_sha256()
-    try:
-        file_meta = await _write_editor_buffer_to_disk(client_id=client_id, op_id=op_id)
+    def _broadcast_to_explorer(project_norm: str, payload: dict[str, object]) -> None:
+        from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
 
-        try:
-            base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
-            effective_project_root = base_project_root
-            cfg = _get_android_lsp_config(base_project_root)
-            rel_root = str(cfg.get("rootRel") or "").strip()
-            if rel_root:
-                candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
-                if candidate.exists() and candidate.is_dir():
-                    effective_project_root = candidate
+        asyncio.create_task(_explorer_manager.broadcast(project_norm, payload))
 
-            # Persist the TE2-side Android sidecar (dependency model skeleton + fingerprints).
-            try:
-                base_project_path = str(base_project_root)
-                if _history_store.get_lsp_enabled(base_project_path) and _history_store.get_lsp_server_enabled(base_project_path, "kotlin-android"):
-                    from app.apps.file_editor_cm6.android_lang.android_lsp_bridge import update_android_sidecar_for_project
+    async def _write_wrapper(client_id: str, op_id: str | None, _nicegui_client_id: str | None) -> dict[str, object]:
+        return await _write_editor_buffer_to_disk(client_id=client_id, op_id=op_id)
 
-                    async def _update_android_sidecar_bg() -> None:
-                        try:
-                            # 1) Update Sprint A sidecar (disk)
-                            cfg = _get_android_lsp_config(base_project_root)
-
-                            sidecar_path = await asyncio.to_thread(
-                                lambda: update_android_sidecar_for_project(
-                                    project_root=base_project_root,
-                                    effective_project_root=effective_project_root,
-                                    module=str((cfg or {}).get('module') or 'app'),
-                                    variant=str((cfg or {}).get('variant') or 'GeckoDebug'),
-                                )
-                            )
-
-                            if not current_file:
-                                return
-                            if Path(current_file).suffix not in ('.kt', '.kts'):
-                                return
-
-                            def _load_sidecar_json() -> dict[str, object]:
-                                try:
-                                    if sidecar_path and Path(sidecar_path).exists():
-                                        return json.loads(Path(sidecar_path).read_text(encoding='utf-8'))
-                                except Exception:
-                                    return {}
-                                return {}
-
-                            te2_sidecar = await asyncio.to_thread(_load_sidecar_json)
-
-                            try:
-                                from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
-
-                                busy_token = await _lsp_busy_begin(
-                                    project_path=base_project_root,
-                                    language_id="kotlin-android",
-                                    activity="gradle_dependency_index",
-                                    detail="Refreshing dependency index (Gradle)…",
-                                )
-                                ok = True
-                                err = ""
-                                try:
-                                    await asyncio.to_thread(
-                                        lambda: ensure_compiled_dependency_index(
-                                            sidecar_path=Path(sidecar_path),
-                                            te2_sidecar=te2_sidecar or {},
-                                            effective_project_root=effective_project_root,
-                                            allow_gradle_resolve=True,
-                                        )
-                                    )
-                                except Exception as exc:
-                                    ok = False
-                                    err = str(exc)
-                                finally:
-                                    try:
-                                        await _lsp_busy_end(token=busy_token, ok=ok, error=err)
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
-                        except Exception as exc:
-                            print(f"[ANDROID SIDECAR] update failed: {exc}", file=sys.stderr)
-
-                    asyncio.create_task(_update_android_sidecar_bg())
-            except Exception:
-                pass
-        except Exception as e:
-            print(f"[LSP SAVE HOOK] exception: {e}", file=sys.stderr)
-
-        # Live autosave propagation: in autosave mode, broadcast the saved buffer
-        # to other host shells via the explorer bus (SSOT active file only).
-        try:
-            editor_prefs = _preferences_store.get_preferences().get('editor', {})
-            if editor_prefs.get('autoSave', False):
-                project_path = _history_store.get_active_project()
-                if project_path and current_file:
-                    try:
-                        editor = get_active_editor()
-                        content = _get_cached_editor_content(editor) if editor else None
-                    except Exception:
-                        content = None
-                    if content is None:
-                        try:
-                            content = Path(current_file).read_text(encoding='utf-8', errors='replace')
-                        except Exception:
-                            content = ''
-
-                    content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest() if content else ''
-                    proj_norm = str(Path(project_path).expanduser().resolve(strict=False))
-                    payload = {
-                        "path": str(current_file),
-                        "project_path": proj_norm,
-                        "content": content,
-                        "base_sha256": (file_meta or {}).get("sha256") or '',
-                        "content_sha256": content_hash or '',
-                        "source_client": nicegui_client_id,
-                    }
-                    from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
-                    asyncio.create_task(
-                        _explorer_manager.broadcast(
-                            proj_norm,
-                            {"type": "autosave:content", "payload": payload},
-                        )
-                    )
-        except Exception:
-            pass
-
-        return {"ok": True, "data": file_meta}
-    except SaveValidationError as e:
-        return {"ok": False, "error": e.message}
-    except BaseMismatchError as e:
-        print(f"[SAVE] BASE_MISMATCH path={current_file!r} expected={base_snapshot} actual={e.current_meta.get('sha256') if getattr(e, 'current_meta', None) else 'unknown'}", file=sys.stderr)
-        return Response(status_code=409, content=json.dumps({"ok": False, "error": "BASE_MISMATCH", "data": {"current": e.current_meta}}), media_type="application/json")
-    except Exception as e:
-        print(f"[SAVE] ERROR path={current_file!r} error={e}", file=sys.stderr)
-        return {"ok": False, "error": str(e)}
+    return await _handle_save_current_file(
+        data,
+        write_editor_buffer_to_disk_fn=_write_wrapper,
+        history_store=_history_store,
+        get_current_file=get_current_file,
+        get_current_file_sha256=get_current_file_sha256,
+        get_project_root=get_project_root,
+        get_android_lsp_config=_get_android_lsp_config,
+        lsp_busy_begin=_lsp_busy_begin,
+        lsp_busy_end=_lsp_busy_end,
+        base_mismatch_error_type=BaseMismatchError,
+        get_active_editor=get_active_editor,
+        get_cached_editor_content=_get_cached_editor_content,
+        get_preferences=_preferences_store.get_preferences,
+        nicegui_broadcast=_broadcast_to_explorer,
+    )
 
 
 # --- Sprint D: Android Sync Endpoint ---
 
 @editor_router.post('/android/sync')
 async def android_sync_project(data: dict[str, object] = Body(...)):
-    """Sync Project with Gradle Files: rebuild dependency model + notify LSP.
-    
-    This is a fast, synchronous operation that:
-    1. Rebuilds te2_android_sidecar.json with fresh dependency model
-    2. Sends workspace/didChangeConfiguration to kotlin-android LSP
-    
-    Does NOT trigger a Gradle compile (that's a future sprint).
-    """
-    
-    # 1) Get project roots (same logic as save path)
-    base_project_root = Path(_history_store.get_active_project() or str(get_project_root()))
-    effective_project_root = base_project_root
-    cfg = _get_android_lsp_config(base_project_root)
-    rel_root = str(cfg.get("rootRel") or "").strip()
-    if rel_root:
-        candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
-        if candidate.exists() and candidate.is_dir():
-            effective_project_root = candidate
-    
-    # 2) Acquire per-project lock to prevent concurrent sync requests
-    lock_key = str(base_project_root)
-    if lock_key not in _android_sync_locks:
-        _android_sync_locks[lock_key] = asyncio.Lock()
-    
-    async with _android_sync_locks[lock_key]:
-        try:
-            # 3) Rebuild dependency model (fast, <1s)
-            from app.apps.file_editor_cm6.android_lang.android_lsp_bridge import update_android_sidecar_for_project
-            sidecar_path = await asyncio.to_thread(
-                lambda: (
-                    lambda _cfg: update_android_sidecar_for_project(
-                        project_root=base_project_root,
-                        effective_project_root=effective_project_root,
-                        module=str((_cfg or {}).get('module') or 'app'),
-                        variant=str((_cfg or {}).get('variant') or 'GeckoDebug'),
-                    )
-                )(
-                    _get_android_lsp_config(base_project_root)
-                )
-            )
-
-            # Sprint E: build dependency index once on explicit sync (may spawn Gradle).
-            try:
-                from app.apps.file_editor_cm6.android_lang.dependency_index import ensure_compiled_dependency_index
-
-                def _load_sidecar_json() -> dict[str, object]:
-                    try:
-                        return json.loads(Path(sidecar_path).read_text(encoding='utf-8'))
-                    except Exception:
-                        return {}
-
-                te2_sidecar = await asyncio.to_thread(_load_sidecar_json)
-                busy_token = await _lsp_busy_begin(
-                    project_path=base_project_root,
-                    language_id="kotlin-android",
-                    activity="gradle_dependency_index",
-                    detail="Syncing Android dependencies (Gradle)…",
-                )
-                ok = True
-                err = ""
-                try:
-                    await asyncio.to_thread(
-                        lambda: ensure_compiled_dependency_index(
-                            sidecar_path=Path(sidecar_path),
-                            te2_sidecar=te2_sidecar or {},
-                            effective_project_root=effective_project_root,
-                            allow_gradle_resolve=True,
-                        )
-                    )
-                except Exception as exc:
-                    ok = False
-                    err = str(exc)
-                finally:
-                    try:
-                        await _lsp_busy_end(token=busy_token, ok=ok, error=err)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            
-            lsp_notified = False
-
-            print(f"[ANDROID SYNC] OK sidecar={sidecar_path} lsp_notified={lsp_notified}", file=sys.stderr)
-            return {
-                "ok": True,
-                "sidecar_path": str(sidecar_path),
-                "lsp_notified": lsp_notified,
-            }
-        except Exception as e:
-            print(f"[ANDROID SYNC] ERROR: {e}", file=sys.stderr)
-            return {"ok": False, "error": str(e)}
+    _ = data
+    return await _handle_android_sync_project(
+        history_store=_history_store,
+        get_project_root=get_project_root,
+        get_android_lsp_config=_get_android_lsp_config,
+        lsp_busy_begin=_lsp_busy_begin,
+        lsp_busy_end=_lsp_busy_end,
+        android_sync_locks=_android_sync_locks,
+    )
 
 
 # --- Android config endpoints (Gradle/LSP support) ---
@@ -2232,19 +1288,16 @@ async def android_config_get():
 
 @editor_router.post('/set_active_project')
 async def set_active_project(payload: dict[str, object] = Body(...)):
-    project_path = payload.get("projectPath") if isinstance(payload, dict) else None
-    if not project_path:
-        raise HTTPException(status_code=400, detail="projectPath required")
     try:
         from app.apps.file_editor_cm6.explorer_helper import set_project_root
         from app.apps.file_editor_cm6.core_read import init_watcher
 
-        normalized = _history_store.set_active_project(str(project_path))
-        if not normalized:
-            raise ValueError("invalid project path")
-        root = set_project_root(normalized)
-        init_watcher(root)
-        return {"ok": True, "projectRoot": str(root)}
+        return _handle_set_active_project(
+            payload,
+            set_active_project=_history_store.set_active_project,
+            set_project_root=set_project_root,
+            init_watcher=init_watcher,
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -2298,6 +1351,176 @@ async def set_font_scale_endpoint(data: dict[str, object] = Body(...)):
         resolve_font_scale=_resolve_font_scale,
         update_editor_preferences=lambda updates: _preferences_store.update_preferences(editor=updates),
     )
+
+
+def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
+    """Register Monaco static asset routes for the inline host editor runtime."""
+    app_pkg_root = Path(__file__).resolve().parents[3]
+    vendored_monaco = app_pkg_root / "static" / "vendor" / "monaco-editor-core"
+    vscode_monaco_esm_dir = vendored_monaco / "esm"
+    esm_ok = vscode_monaco_esm_dir.exists()
+    vscode_monaco_lang_dir = vendored_monaco / "te2-lang"
+    lang_ok = vscode_monaco_lang_dir.exists()
+
+    async def _serve_static_with_css_shim(base_dir: Path, file_path: str, raw: str | None):
+        base = base_dir.resolve()
+        target = (base / file_path).resolve()
+        if not str(target).startswith(str(base) + "/") and target != base:
+            return Response("not found", status_code=404, media_type="text/plain")
+        if not target.exists() or not target.is_file():
+            return Response("not found", status_code=404, media_type="text/plain")
+        if target.suffix == ".css" and raw == "1":
+            return FileResponse(str(target), media_type="text/css")
+        if target.suffix == ".css":
+            shim = """
+// Auto-generated CSS module shim (TE2 / VSCode Monaco ESM)
+const url = new URL(import.meta.url);
+url.searchParams.set('raw', '1');
+const href = url.toString();
+const id = 'te2-css:' + href;
+if (!document.querySelector(`link[data-te2-css="${id}"]`)) {
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = href;
+  link.dataset.te2Css = id;
+  document.head.appendChild(link);
+}
+export default href;
+""".lstrip()
+            return Response(shim, media_type="application/javascript")
+        return FileResponse(str(target))
+
+    @fastapi_app.api_route(
+        f"{mount_path}/monaco_vscode/esm/{{file_path:path}}",
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
+    async def _serve_monaco_vscode_esm(file_path: str, raw: str | None = None):
+        if not esm_ok:
+            return Response("monaco esm not built; run `worktrees/vscode-te2-diff/build_monaco_te2.sh`", status_code=404)
+        return await _serve_static_with_css_shim(vscode_monaco_esm_dir, file_path, raw)
+
+    @fastapi_app.api_route(
+        f"{mount_path}/monaco_vscode/lang/{{file_path:path}}",
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
+    async def _serve_monaco_vscode_lang(file_path: str, raw: str | None = None):
+        if not lang_ok:
+            return Response("te2-lang not built; run `worktrees/vscode-te2-diff/build_monaco_te2.sh`", status_code=404)
+        return await _serve_static_with_css_shim(vscode_monaco_lang_dir, file_path, raw)
+
+    @fastapi_app.get(mount_path + "/monaco_editor/themes/{file_path:path}", include_in_schema=False)
+    async def _serve_monaco_editor_theme_json(file_path: str):
+        base = Path(__file__).with_name("themes").resolve()
+        target = (base / file_path).resolve()
+        if not str(target).startswith(str(base) + "/") and target != base:
+            return Response("not found", status_code=404, media_type="text/plain")
+        if not target.exists() or not target.is_file():
+            return Response("not found", status_code=404, media_type="text/plain")
+        return FileResponse(str(target), media_type="application/json")
+
+    cs_ext_themes = Path.home() / ".config" / "code-server" / "extensions"
+
+    @fastapi_app.get(mount_path + "/monaco_editor/cs_themes/{ext_id}/{theme_file:path}", include_in_schema=False)
+    async def _serve_cs_extension_theme(ext_id: str, theme_file: str):
+        base = (cs_ext_themes / ext_id / "themes").resolve()
+        target = (base / theme_file).resolve()
+        if not str(target).startswith(str(base) + "/") and target != base:
+            return Response("not found", status_code=404, media_type="text/plain")
+        if not target.exists() or not target.is_file():
+            return Response("not found", status_code=404, media_type="text/plain")
+        return FileResponse(str(target), media_type="application/json")
+
+    vendored_themes_dir = Path(__file__).with_name("themes") / "vendored"
+
+    @fastapi_app.get(mount_path + "/monaco_editor/available_themes", include_in_schema=False)
+    async def _available_themes():
+        import json as _json
+
+        themes: list[dict[str, object]] = []
+        if vendored_themes_dir.is_dir():
+            for vendor_dir in sorted(vendored_themes_dir.iterdir()):
+                idx_file = vendor_dir / "theme_index.json"
+                if not idx_file.is_file():
+                    continue
+                try:
+                    idx = _json.loads(idx_file.read_text("utf-8"))
+                    vendored_list = idx.get("vendored", [])
+                    if not isinstance(vendored_list, list):
+                        continue
+                    for theme_item_obj in vendored_list:
+                        if not isinstance(theme_item_obj, dict):
+                            continue
+                        theme_id = theme_item_obj.get("id")
+                        theme_label = theme_item_obj.get("label")
+                        theme_file = theme_item_obj.get("file")
+                        if not isinstance(theme_id, str) or not isinstance(theme_label, str) or not isinstance(theme_file, str):
+                            continue
+                        themes.append(
+                            {
+                                "id": theme_id,
+                                "label": theme_label,
+                                "uiTheme": theme_item_obj.get("uiTheme", "vs-dark"),
+                                "source": "vendored",
+                                "sourceLabel": idx.get("source", vendor_dir.name),
+                                "serveUrl": f"monaco_editor/themes/vendored/{vendor_dir.name}/{theme_file}",
+                            }
+                        )
+                except Exception:
+                    pass
+
+        try:
+            from ..extension_registry import get_extension_list
+
+            exts = get_extension_list()
+            if isinstance(exts, list):
+                for ext_obj in exts:
+                    if not isinstance(ext_obj, dict):
+                        continue
+                    ext_themes = ext_obj.get("themes", [])
+                    if not isinstance(ext_themes, list) or not ext_themes:
+                        continue
+                    ext_id = ext_obj.get("id", "")
+                    ext_path = ext_obj.get("path", "")
+                    if not isinstance(ext_id, str) or not isinstance(ext_path, str) or not ext_id or not ext_path:
+                        continue
+                    for theme_obj in ext_themes:
+                        if not isinstance(theme_obj, dict):
+                            continue
+                        raw_path = theme_obj.get("path", "")
+                        if not isinstance(raw_path, str):
+                            continue
+                        fname = raw_path.rsplit("/", 1)[-1] if "/" in raw_path else raw_path
+                        label_obj = theme_obj.get("label", fname)
+                        label = label_obj if isinstance(label_obj, str) else fname
+                        tid = label.lower().replace(" ", "-").replace("(", "").replace(")", "")
+                        ext_dir_name = Path(ext_path).name
+                        themes.append(
+                            {
+                                "id": f"ext:{ext_id}:{tid}",
+                                "label": label,
+                                "uiTheme": theme_obj.get("uiTheme", "vs-dark"),
+                                "source": "extension",
+                                "sourceLabel": ext_obj.get("display_name", ext_id),
+                                "serveUrl": f"monaco_editor/cs_themes/{ext_dir_name}/{fname}",
+                            }
+                        )
+        except Exception as exc:
+            print(f"[themes] extension theme scan failed: {exc}", flush=True)
+
+        return {"themes": themes}
+
+    @fastapi_app.get(mount_path + "/monaco_editor/textmate/{file_path:path}", include_in_schema=False)
+    async def _serve_monaco_editor_textmate(file_path: str):
+        base = Path(__file__).with_name("textmate").resolve()
+        target = (base / file_path).resolve()
+        if not str(target).startswith(str(base) + "/") and target != base:
+            return Response("not found", status_code=404, media_type="text/plain")
+        if not target.exists() or not target.is_file():
+            return Response("not found", status_code=404, media_type="text/plain")
+        return FileResponse(str(target))
+
 def _refresh_active_diffs():
     """Recalculate combined diffs for the current file based on latest preferences."""
     editor = get_active_editor()
