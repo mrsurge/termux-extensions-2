@@ -8,19 +8,10 @@ from .save_service import (
 )
 from .save_routes_service import (
     SaveValidationError,
-    handle_android_sync_project,
     handle_save_current_file,
     write_editor_buffer_to_disk,
 )
 from .preferences_routes_service import handle_update_preference
-from .android_config_service import (
-    get_android_lsp_config,
-    handle_android_config_get,
-    handle_android_config_save,
-    handle_android_source_set_create,
-    handle_android_variant_create,
-    resolve_android_roots,
-)
 from .view_settings_service import handle_set_font_scale, handle_set_view_settings
 from .editor_routes_service import (
     build_view_state_dict,
@@ -74,15 +65,8 @@ __all__ = [
     "request_editor_save_snapshot",
     "resolve_editor_save_snapshot_response",
     "SaveValidationError",
-    "handle_android_sync_project",
     "handle_save_current_file",
     "write_editor_buffer_to_disk",
-    "get_android_lsp_config",
-    "handle_android_config_get",
-    "handle_android_config_save",
-    "handle_android_source_set_create",
-    "handle_android_variant_create",
-    "resolve_android_roots",
     "handle_set_font_scale",
     "handle_set_view_settings",
     "build_view_state_dict",

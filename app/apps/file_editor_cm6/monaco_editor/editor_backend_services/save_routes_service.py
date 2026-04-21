@@ -39,8 +39,6 @@ class HistoryStoreLike(Protocol):
         worker_pid: int,
     ) -> dict[str, object]: ...
     def prune_clean_drafts(self, project_path: str) -> int: ...
-    def get_lsp_enabled(self, project_path: str) -> bool: ...
-    def get_lsp_server_enabled(self, project_path: str, server_id: str) -> bool: ...
 
 
 class RuntimeMetaProvider(Protocol):
@@ -78,14 +76,6 @@ class WriteFullFn(Protocol):
         base_sha256: str | None = None,
         mode: int | None = None,
     ) -> dict[str, object]: ...
-
-
-class LspBusyBeginFn(Protocol):
-    def __call__(self, *, project_path: str | Path, language_id: str, activity: str, detail: str = "") -> Awaitable[str]: ...
-
-
-class LspBusyEndFn(Protocol):
-    def __call__(self, *, token: str, ok: bool = True, error: str = "") -> Awaitable[None]: ...
 
 
 class BaseMismatchMetaLike(Protocol):
@@ -224,10 +214,6 @@ async def handle_save_current_file(
     history_store: HistoryStoreLike,
     get_current_file: Callable[[], str | None],
     get_current_file_sha256: Callable[[], str | None],
-    get_project_root: Callable[[], Path],
-    get_android_lsp_config: Callable[[Path], dict[str, object]],
-    lsp_busy_begin: LspBusyBeginFn,
-    lsp_busy_end: LspBusyEndFn,
     base_mismatch_error_type: type[Exception],
     get_active_editor: Callable[[], EditorLike | None],
     get_cached_editor_content: Callable[[EditorLike | None], str],
@@ -245,92 +231,6 @@ async def handle_save_current_file(
     base_snapshot = get_current_file_sha256()
     try:
         file_meta = await write_editor_buffer_to_disk_fn(client_id, op_id, nicegui_client_id)
-
-        try:
-            base_project_root = Path(history_store.get_active_project() or str(get_project_root()))
-            effective_project_root = base_project_root
-            cfg = get_android_lsp_config(base_project_root)
-            rel_root_obj = cfg.get("rootRel")
-            rel_root = str(rel_root_obj or "").strip()
-            if rel_root:
-                candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
-                if candidate.exists() and candidate.is_dir():
-                    effective_project_root = candidate
-
-            try:
-                base_project_path = str(base_project_root)
-                if history_store.get_lsp_enabled(base_project_path) and history_store.get_lsp_server_enabled(
-                    base_project_path, "kotlin-android"
-                ):
-                    from app.apps.file_editor_cm6.android_lang.android_lsp_bridge import update_android_sidecar_for_project
-
-                    async def _update_android_sidecar_bg() -> None:
-                        try:
-                            cfg_local = get_android_lsp_config(base_project_root)
-                            sidecar_path = await asyncio.to_thread(
-                                lambda: update_android_sidecar_for_project(
-                                    project_root=base_project_root,
-                                    effective_project_root=effective_project_root,
-                                    module=str((cfg_local or {}).get("module") or "app"),
-                                    variant=str((cfg_local or {}).get("variant") or "GeckoDebug"),
-                                )
-                            )
-                            if not current_file or Path(current_file).suffix not in (".kt", ".kts"):
-                                return
-
-                            def _load_sidecar_json() -> dict[str, object]:
-                                try:
-                                    if sidecar_path and Path(sidecar_path).exists():
-                                        return cast(dict[str, object], json.loads(Path(sidecar_path).read_text(encoding="utf-8")))
-                                except Exception:
-                                    return {}
-                                return {}
-
-                            te2_sidecar = await asyncio.to_thread(_load_sidecar_json)
-                            try:
-                                import app.apps.file_editor_cm6.android_lang.dependency_index as dependency_index
-
-                                ensure_compiled_dependency_index_fn = cast(
-                                    Callable[..., object],
-                                    getattr(dependency_index, "ensure_compiled_dependency_index"),
-                                )
-
-                                busy_token = await lsp_busy_begin(
-                                    project_path=base_project_root,
-                                    language_id="kotlin-android",
-                                    activity="gradle_dependency_index",
-                                    detail="Refreshing dependency index (Gradle)…",
-                                )
-                                ok = True
-                                err = ""
-                                try:
-                                    def _run_dep_index_refresh() -> None:
-                                        ensure_compiled_dependency_index_fn(
-                                            sidecar_path=Path(sidecar_path),
-                                            te2_sidecar=te2_sidecar or {},
-                                            effective_project_root=effective_project_root,
-                                            allow_gradle_resolve=True,
-                                        )
-
-                                    await asyncio.to_thread(_run_dep_index_refresh)
-                                except Exception as exc:
-                                    ok = False
-                                    err = str(exc)
-                                finally:
-                                    try:
-                                        await lsp_busy_end(token=busy_token, ok=ok, error=err)
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
-                        except Exception as exc:
-                            print(f"[ANDROID SIDECAR] update failed: {exc}", file=sys.stderr)
-
-                    asyncio.create_task(_update_android_sidecar_bg())
-            except Exception:
-                pass
-        except Exception as exc:
-            print(f"[LSP SAVE HOOK] exception: {exc}", file=sys.stderr)
 
         try:
             editor_prefs_obj = get_preferences().get("editor", {})
@@ -388,95 +288,3 @@ async def handle_save_current_file(
     except Exception as exc:
         print(f"[SAVE] ERROR path={current_file!r} error={exc}", file=sys.stderr)
         return {"ok": False, "error": str(exc)}
-
-
-async def handle_android_sync_project(
-    *,
-    history_store: HistoryStoreLike,
-    get_project_root: Callable[[], Path],
-    get_android_lsp_config: Callable[[Path], dict[str, object]],
-    lsp_busy_begin: LspBusyBeginFn,
-    lsp_busy_end: LspBusyEndFn,
-    android_sync_locks: dict[str, asyncio.Lock],
-) -> JsonMap:
-    base_project_root = Path(history_store.get_active_project() or str(get_project_root()))
-    effective_project_root = base_project_root
-    cfg = get_android_lsp_config(base_project_root)
-    rel_root_obj = cfg.get("rootRel")
-    rel_root = str(rel_root_obj or "").strip()
-    if rel_root:
-        candidate = (base_project_root / rel_root).expanduser().resolve(strict=False)
-        if candidate.exists() and candidate.is_dir():
-            effective_project_root = candidate
-
-    lock_key = str(base_project_root)
-    if lock_key not in android_sync_locks:
-        android_sync_locks[lock_key] = asyncio.Lock()
-
-    async with android_sync_locks[lock_key]:
-        try:
-            from app.apps.file_editor_cm6.android_lang.android_lsp_bridge import update_android_sidecar_for_project
-
-            sidecar_path = await asyncio.to_thread(
-                lambda: update_android_sidecar_for_project(
-                    project_root=base_project_root,
-                    effective_project_root=effective_project_root,
-                    module=str((get_android_lsp_config(base_project_root) or {}).get("module") or "app"),
-                    variant=str((get_android_lsp_config(base_project_root) or {}).get("variant") or "GeckoDebug"),
-                )
-            )
-
-            try:
-                import app.apps.file_editor_cm6.android_lang.dependency_index as dependency_index
-
-                ensure_compiled_dependency_index_fn = cast(
-                    Callable[..., object],
-                    getattr(dependency_index, "ensure_compiled_dependency_index"),
-                )
-
-                def _load_sidecar_json() -> dict[str, object]:
-                    try:
-                        return cast(dict[str, object], json.loads(Path(sidecar_path).read_text(encoding="utf-8")))
-                    except Exception:
-                        return {}
-
-                te2_sidecar = await asyncio.to_thread(_load_sidecar_json)
-                busy_token = await lsp_busy_begin(
-                    project_path=base_project_root,
-                    language_id="kotlin-android",
-                    activity="gradle_dependency_index",
-                    detail="Syncing Android dependencies (Gradle)…",
-                )
-                ok = True
-                err = ""
-                try:
-                    def _run_sync_dep_index() -> None:
-                        ensure_compiled_dependency_index_fn(
-                            sidecar_path=Path(sidecar_path),
-                            te2_sidecar=te2_sidecar or {},
-                            effective_project_root=effective_project_root,
-                            allow_gradle_resolve=True,
-                        )
-
-                    await asyncio.to_thread(_run_sync_dep_index)
-                except Exception as exc:
-                    ok = False
-                    err = str(exc)
-                finally:
-                    try:
-                        await lsp_busy_end(token=busy_token, ok=ok, error=err)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            lsp_notified = False
-            print(f"[ANDROID SYNC] OK sidecar={sidecar_path} lsp_notified={lsp_notified}", file=sys.stderr)
-            return {
-                "ok": True,
-                "sidecar_path": str(sidecar_path),
-                "lsp_notified": lsp_notified,
-            }
-        except Exception as exc:
-            print(f"[ANDROID SYNC] ERROR: {exc}", file=sys.stderr)
-            return {"ok": False, "error": str(exc)}

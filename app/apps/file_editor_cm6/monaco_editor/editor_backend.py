@@ -5,9 +5,8 @@ import os
 import hashlib
 import time
 import asyncio
-import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 from fastapi import APIRouter, Body, HTTPException, Query
 from fastapi.responses import Response
@@ -25,14 +24,6 @@ from app.apps.file_editor_cm6.diff_helper import invalidate_diff_cache, collect_
 from app.apps.file_editor_cm6.draft_diff_helper import compute_draft_diff
 from .editor_backend_services.contracts import RuntimeMeta
 from .editor_backend_services.protocols import EditorLike
-from .editor_backend_services.android_config_service import (
-    get_android_lsp_config as _get_android_lsp_config_service,
-    handle_android_config_get as _handle_android_config_get,
-    handle_android_config_save as _handle_android_config_save,
-    handle_android_source_set_create as _handle_android_source_set_create,
-    handle_android_variant_create as _handle_android_variant_create,
-    resolve_android_roots as _resolve_android_roots_service,
-)
 from .editor_backend_services.view_settings_service import (
     handle_set_font_scale as _handle_set_font_scale,
     handle_set_view_settings as _handle_set_view_settings,
@@ -65,7 +56,6 @@ from .editor_backend_services.cache_runtime_service import (
     schedule_diff_refresh as _schedule_diff_refresh_service,
 )
 from .editor_backend_services.save_routes_service import (
-    handle_android_sync_project as _handle_android_sync_project,
     handle_save_current_file as _handle_save_current_file,
     write_editor_buffer_to_disk as _write_editor_buffer_to_disk_service,
 )
@@ -114,26 +104,14 @@ _suppress_on_change_until: float = 0.0
 # (cm_delta → multicast → applyDelta) instead of full-text setEditorValue().
 _incremental_mirror_active: bool = False
 
-# Sprint E: guard expensive dependency index builds (no Gradle spam on every keystroke).
-# key: "<effective_project_root>::<syncFingerprint>" -> started_at_ms
-_android_dep_index_build_inflight: dict[str, int] = {}
-
-# Sprint D: per-project lock for Android sync to prevent concurrent stomping.
-_android_sync_locks: dict[str, asyncio.Lock] = {}
-
 # Workspace diagnostics scans (repo-wide, best-effort).
 _pyright_scan_tasks: dict[str, asyncio.Task[object]] = {}
-
-# Sprint F: broadcast "busy" signals for long-running Android LSP work (e.g., Gradle).
-_lsp_busy_counts: dict[str, int] = {}
-_lsp_busy_tasks: dict[str, dict[str, object]] = {}
 
 # --- Constants ---
 RECONNECT_TIMEOUT_S = 1200.0
 RESPONSE_TIMEOUT_S = 1200.0  # Time allowed for page to render before client is deleted
 
 THEME_MAP = {
-    'cm6-dark': 'basicDark',
     'one-dark': 'oneDark',
     'termux': 'consoleDark',
     'github-dark': 'githubDark',
@@ -154,32 +132,6 @@ THEME_MAP = {
     'basic-light': 'basicLight',
 }
 
-# Map file extensions to LSP language identifiers
-LSP_LANGUAGE_MAP = {
-    '.py': 'python',
-    '.pyw': 'python',
-    '.js': 'javascript',
-    '.mjs': 'javascript',
-    '.cjs': 'javascript',
-    '.jsx': 'javascriptreact',
-    '.ts': 'typescript',
-    '.mts': 'typescript',
-    '.tsx': 'typescriptreact',
-    '.c': 'c',
-    '.h': 'cpp',
-    '.cc': 'cpp',
-    '.cpp': 'cpp',
-    '.cxx': 'cpp',
-    '.hpp': 'cpp',
-    '.hh': 'cpp',
-    '.hxx': 'cpp',
-    '.kt': 'kotlin',
-    '.kts': 'kotlin',
-    '.go': 'go',
-    '.rs': 'rust',
-}
-
-
 def _current_diff_base(project_path: Optional[str]) -> str:
     return _history_store.get_diff_base(project_path) if project_path else 'HEAD'
 
@@ -199,99 +151,6 @@ def _resolve_theme_preference(theme_key: Optional[str]) -> str:
             f"Preference file{location_hint} references unsupported theme '{theme_key}'. "
             "Add it to THEME_MAP or update the preference file."
         ) from exc
-
-
-def _normalize_project_path_for_broadcast(project_path: str | Path) -> str:
-    try:
-        return str(Path(project_path).expanduser().resolve(strict=False))
-    except Exception:
-        return str(project_path)
-
-async def _broadcast_lsp_busy(*, project_path: str, payload: dict[str, object]) -> None:
-    return
-
-
-async def _lsp_busy_begin(*, project_path: str | Path, language_id: str, activity: str, detail: str = "") -> str:
-    project_path_s = _normalize_project_path_for_broadcast(project_path)
-    key = f"{project_path_s}::{language_id}"
-    count = int(_lsp_busy_counts.get(key) or 0) + 1
-    _lsp_busy_counts[key] = count
-
-    task_id = uuid.uuid4().hex
-    started_at_ms = int(time.time() * 1000)
-    started_mono = time.monotonic()
-    _lsp_busy_tasks[task_id] = {
-        "project_path": project_path_s,
-        "languageId": str(language_id),
-        "activity": str(activity or "work"),
-        "detail": str(detail or ""),
-        "startedAtMs": started_at_ms,
-        "startedMono": started_mono,
-        "key": key,
-    }
-
-    await _broadcast_lsp_busy(
-        project_path=project_path_s,
-        payload={
-            "taskId": task_id,
-            "languageId": str(language_id),
-            "busy": True,
-            "activity": str(activity or "work"),
-            "detail": str(detail or ""),
-            "startedAtMs": started_at_ms,
-        },
-    )
-    return task_id
-
-
-async def _lsp_busy_end(*, token: str, ok: bool = True, error: str = "") -> None:
-    try:
-        task_id = str(token or "")
-        if not task_id:
-            return
-
-        meta = _lsp_busy_tasks.pop(task_id, None)
-        if not isinstance(meta, dict):
-            return
-
-        project_path = str(meta.get("project_path") or "")
-        language_id = str(meta.get("languageId") or "")
-        activity = str(meta.get("activity") or "")
-        detail = str(meta.get("detail") or "")
-        started_mono_obj = meta.get("startedMono")
-        if isinstance(started_mono_obj, (int, float)):
-            started_mono = float(started_mono_obj)
-        else:
-            started_mono = time.monotonic()
-        duration_ms = max(0, int((time.monotonic() - started_mono) * 1000))
-
-        # Decrement per-(project,language) busy count (best-effort).
-        try:
-            key = str(meta.get("key") or f"{project_path}::{language_id}")
-            count = int(_lsp_busy_counts.get(key) or 0)
-            if count <= 1:
-                _lsp_busy_counts.pop(key, None)
-            else:
-                _lsp_busy_counts[key] = count - 1
-        except Exception:
-            pass
-
-        await _broadcast_lsp_busy(
-            project_path=project_path,
-            payload={
-                "taskId": task_id,
-                "languageId": language_id,
-                "busy": False,
-                "activity": activity,
-                "detail": detail,
-                "ok": bool(ok),
-                "error": str(error or ""),
-                "durationMs": duration_ms,
-            },
-        )
-        return
-    except Exception:
-        return
 
 
 def _resolve_font_scale(scale_value: object | None) -> float:
@@ -368,203 +227,6 @@ def get_current_file_sha256():
     return _current_file_sha256
 
 
-def _should_use_lsp(project_root: Path | None, language_id: str) -> bool:
-    """Determine whether LSP should be used for the given project and language.
-
-    For now this is driven by a simple editor preference flag. In the future
-    this can consult per-project configuration (see tmp7_PROJECT_LSP_CONFIG.md).
-    """
-    if project_root is None:
-        return False
-
-    project_path = str(project_root)
-    if not _history_store.get_lsp_enabled(project_path):
-        return False
-
-    server_id = None
-    if language_id == "python":
-        server_id = "pyright"
-    elif language_id in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
-        server_id = "typescript"
-    elif language_id in ("c", "cpp"):
-        server_id = "clangd"
-    elif language_id == "kotlin":
-        server_id = "kotlin"
-    elif language_id == "kotlin-android":
-        server_id = "kotlin-android"
-
-    if server_id:
-        return _history_store.get_lsp_server_enabled(project_path, server_id)
-
-    return True
-
-
-def _find_pyright_config_root(file_path: Path, project_root: Path) -> tuple[Path | None, Path | None]:
-    """Find nearest Pyright config root + file path between file_path and project_root."""
-    try:
-        start_dir = file_path if file_path.is_dir() else file_path.parent
-    except Exception:
-        start_dir = file_path.parent
-
-    markers = ("pyrightconfig.json", "pyproject.toml")
-    try:
-        current = start_dir.expanduser().resolve(strict=False)
-        stop_root = project_root.expanduser().resolve(strict=False)
-    except Exception:
-        current = start_dir
-        stop_root = project_root
-
-    visited = set()
-    while True:
-        if current in visited:
-            break
-        visited.add(current)
-        try:
-            for name in markers:
-                candidate = current / name
-                if candidate.exists():
-                    return current, candidate
-        except Exception:
-            pass
-        if current == stop_root:
-            break
-        if current.parent == current:
-            break
-        current = current.parent
-    return None, None
-
-
-def _maybe_connect_lsp(editor: EditorLike | None, file_path: Path | None, project_root: Path | None) -> None:
-    """Connect or disconnect the CM6 LSP client based on file/language.
-
-    - If the file extension is mapped and LSP is enabled, connect the client.
-    - Otherwise, ensure any existing LSP connection is torn down.
-    """
-    if editor is None:
-        return
-    if file_path is None or project_root is None:
-        # No active document or project: best-effort disconnect
-        try:
-            editor.disconnect_lsp()
-        except Exception as exc:
-            print(f"[LSP] Failed to disconnect LSP for null document: {exc}", file=sys.stderr)
-        return
-
-    language_id = LSP_LANGUAGE_MAP.get(file_path.suffix)
-    if not language_id:
-        # Unsupported extension: ensure any previous client is stopped
-        try:
-            if hasattr(editor, 'disconnect_lsp'):
-                editor.disconnect_lsp()
-        except Exception as exc:
-            print(f"[LSP] Failed to disconnect LSP for unsupported type {file_path}: {exc}", file=sys.stderr)
-        return
-
-    # Special case: Kotlin files can use Android LSP instead of regular Kotlin LSP
-    # if enableLspKotlinAndroid is set for this project.
-    if language_id == "kotlin":
-        try:
-            project_path = str(project_root)
-            if _history_store.get_lsp_server_enabled(project_path, "kotlin-android"):
-                language_id = "kotlin-android"
-                print(f"[LSP] Using Android Kotlin LSP for {file_path}", file=sys.stderr)
-        except Exception:
-            pass
-
-    if not _should_use_lsp(project_root, language_id):
-        # Preference gate disabled: disconnect if previously connected
-        print(f"[LSP] Preference gate disabled for {language_id}", file=sys.stderr)
-        try:
-            if hasattr(editor, 'disconnect_lsp'):
-                editor.disconnect_lsp()
-        except Exception as exc:
-            print(f"[LSP] Failed to disconnect LSP when disabled for {file_path}: {exc}", file=sys.stderr)
-        return
-
-    # Allow per-server project-root override (project-scoped via sidecar SSOT).
-    effective_project_root = project_root
-    rel_root = ""
-    try:
-        project_path = str(project_root)
-        server_id = None
-        if language_id == "python":
-            server_id = "pyright"
-        elif language_id in ("typescript", "typescriptreact", "javascript", "javascriptreact"):
-            server_id = "typescript"
-        elif language_id in ("c", "cpp"):
-            server_id = "clangd"
-        elif language_id == "kotlin":
-            server_id = "kotlin"
-        elif language_id == "kotlin-android":
-            server_id = "kotlin-android"
-
-        if server_id:
-            rel_root = _history_store.get_lsp_server_root_rel(project_path, server_id) or ""
-            if rel_root:
-                candidate = (project_root / rel_root).expanduser().resolve(strict=False)
-                if candidate.exists() and candidate.is_dir():
-                    effective_project_root = candidate
-    except Exception:
-        effective_project_root = project_root
-
-    pyright_mode = "root"
-    if language_id == "python":
-        try:
-            pyright_mode = _history_store.get_lsp_pyright_config_mode(str(project_root))
-        except Exception:
-            pyright_mode = "root"
-
-    # Pyright: always find nearest config path for CM6 payloads.
-    cfg_root = None
-    cfg_path = None
-    if language_id == "python":
-        try:
-            cfg_root, cfg_path = _find_pyright_config_root(file_path, project_root)
-        except Exception:
-            cfg_root = None
-            cfg_path = None
-
-    # If a python worker registry exists and mode=workers, pick the most specific worker root.
-    if language_id == "python" and pyright_mode == "workers":
-        try:
-            from app.apps.file_editor_cm6.python_lang.worker_registry import find_python_worker_for_file
-
-            entry = find_python_worker_for_file(project_root, file_path)
-            if entry and entry.root:
-                effective_project_root = entry.root
-        except Exception:
-            pass
-    elif language_id == "python" and pyright_mode == "root":
-        if cfg_root and cfg_root.exists() and cfg_root.is_dir() and not rel_root:
-            # Only change the root when no explicit root override is set.
-            effective_project_root = cfg_root
-
-    try:
-        if language_id == "python":
-            print(
-                f"[LSP] Pyright config lookup: file={file_path} base={effective_project_root} "
-                f"rel_root={rel_root!r} cfg_root={cfg_root} cfg_path={cfg_path}",
-                file=sys.stderr,
-            )
-    except Exception:
-        pass
-
-    # At this point we want LSP active for this document
-    print(f"[LSP] Triggering connect_lsp: {language_id} / {effective_project_root} / {file_path}", file=sys.stderr)
-    try:
-        if hasattr(editor, 'connect_lsp'):
-            editor.connect_lsp({
-                'languageId': language_id,
-                'projectRoot': str(effective_project_root),
-                'filePath': str(file_path),
-                'baseProjectRoot': str(project_root),
-                'pyrightConfigPath': str(cfg_path) if (language_id == "python" and cfg_path) else "",
-            })
-        else:
-            print("[LSP] connect_lsp() not available on editor; bundle may be outdated", file=sys.stderr)
-    except Exception as exc:
-        print(f"[LSP] Failed to connect LSP for {file_path} ({language_id}): {exc}", file=sys.stderr)
-
 # --- Helpers ---
 def _get_runtime_metadata() -> RuntimeMeta:
     return {
@@ -574,6 +236,16 @@ def _get_runtime_metadata() -> RuntimeMeta:
         "launcher_pid": int(os.getenv("TE_LAUNCHER_PID", "0")),
         "worker_pid": os.getpid(),
     }
+
+
+def _get_editor_preferences() -> dict[str, object]:
+    prefs_obj: object = _preferences_store.get_preferences()
+    if not isinstance(prefs_obj, dict):
+        return {}
+    prefs = cast(dict[str, object], prefs_obj)
+    editor_obj = prefs.get("editor", {})
+    return cast(dict[str, object], editor_obj if isinstance(editor_obj, dict) else {})
+
 
 # --- Cache Persistence ---
 def _get_cached_editor_content(editor: EditorLike | None) -> str:
@@ -728,8 +400,8 @@ def _persist_to_cache_debounced():
     if not project_path:
         return
     
-    editor_prefs = _preferences_store.get_preferences().get('editor', {})
-    auto_save_enabled = editor_prefs.get('autoSave', False)
+    editor_prefs = _get_editor_preferences()
+    auto_save_enabled = bool(editor_prefs.get('autoSave', False))
     
     current_content = _get_cached_editor_content(editor)
     current_hash = hashlib.sha256(current_content.encode('utf-8')).hexdigest() if current_content else ''
@@ -814,7 +486,7 @@ def _persist_to_cache_debounced():
     # This is debounced via the draft persist timer, so it should remain stable
     # while still keeping diff decorations up to date.
     try:
-        prefs = _preferences_store.get_preferences().get('editor', {})
+        prefs = _get_editor_preferences()
         if prefs.get('showInlineDiffs', False) or prefs.get('showDraftDiffs', False):
             project_root = get_project_root()
             _schedule_diff_refresh(project_root, current_file, current_content, editor, "persist")
@@ -871,7 +543,7 @@ def _persist_active_draft_immediately(reason: str = 'switch') -> bool:
     if not project_path:
         return False
 
-    editor_prefs = _preferences_store.get_preferences().get('editor', {})
+    editor_prefs = _get_editor_preferences()
     if editor_prefs.get('autoSave', False):
         return False
 
@@ -983,7 +655,6 @@ async def set_editor_content(data: dict[str, object] = Body(...)):
         cancel_cache_persist_timer=_cancel_cache_persist_timer,
         get_cached_editor_content=_get_cached_editor_content,
         set_suppress_on_change_until=_set_suppress_on_change_until,
-        maybe_connect_lsp=_maybe_connect_lsp,
         broadcast_cache_state=_broadcast_cache_state,
         schedule_diff_refresh=_schedule_diff_refresh,
         apply_watcher_replace=_apply_watcher_replace,
@@ -1167,12 +838,10 @@ async def update_preference(data: dict[str, object] = Body(...)):
         normalize_rel_path=_normalize_rel_path,
         collect_diff=_collect_diff,
         current_diff_base=_current_diff_base,
-        maybe_connect_lsp=_maybe_connect_lsp,
         broadcast_cache_state=_broadcast_cache_state,
         refresh_active_diffs=_refresh_active_diffs,
         build_view_state_dict=_get_view_state_dict,
         theme_map=THEME_MAP,
-        lsp_language_map=LSP_LANGUAGE_MAP,
         emit_preferences_changed=_emit_preferences_changed,
     )
 
@@ -1239,50 +908,11 @@ async def save_current_file(data: dict[str, object] = Body(...)):
         history_store=_history_store,
         get_current_file=get_current_file,
         get_current_file_sha256=get_current_file_sha256,
-        get_project_root=get_project_root,
-        get_android_lsp_config=_get_android_lsp_config,
-        lsp_busy_begin=_lsp_busy_begin,
-        lsp_busy_end=_lsp_busy_end,
         base_mismatch_error_type=BaseMismatchError,
         get_active_editor=get_active_editor,
         get_cached_editor_content=_get_cached_editor_content,
         get_preferences=_preferences_store.get_preferences,
         nicegui_broadcast=_broadcast_to_explorer,
-    )
-
-
-# --- Sprint D: Android Sync Endpoint ---
-
-@editor_router.post('/android/sync')
-async def android_sync_project(data: dict[str, object] = Body(...)):
-    _ = data
-    return await _handle_android_sync_project(
-        history_store=_history_store,
-        get_project_root=get_project_root,
-        get_android_lsp_config=_get_android_lsp_config,
-        lsp_busy_begin=_lsp_busy_begin,
-        lsp_busy_end=_lsp_busy_end,
-        android_sync_locks=_android_sync_locks,
-    )
-
-
-# --- Android config endpoints (Gradle/LSP support) ---
-
-def _get_android_lsp_config(base_root: Path) -> dict[str, object]:
-    return _get_android_lsp_config_service(base_root)
-
-def _resolve_android_roots() -> tuple[Path, Path, str]:
-    return _resolve_android_roots_service(
-        active_project=_history_store.get_active_project,
-        project_root=get_project_root,
-    )
-
-
-@editor_router.get('/android/config')
-async def android_config_get():
-    return await _handle_android_config_get(
-        active_project=_history_store.get_active_project,
-        project_root=get_project_root,
     )
 
 
@@ -1300,33 +930,6 @@ async def set_active_project(payload: dict[str, object] = Body(...)):
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
-
-@editor_router.post('/android/config/save')
-async def android_config_save(payload: dict[str, object] = Body(...)):
-    return await _handle_android_config_save(
-        payload,
-        active_project=_history_store.get_active_project,
-        project_root=get_project_root,
-    )
-
-
-@editor_router.post('/android/source_set/create')
-async def android_source_set_create(payload: dict[str, object] = Body(...)):
-    return await _handle_android_source_set_create(
-        payload,
-        active_project=_history_store.get_active_project,
-        project_root=get_project_root,
-    )
-
-
-@editor_router.post('/android/variant/create')
-async def android_variant_create(payload: dict[str, object] = Body(...)):
-    return await _handle_android_variant_create(
-        payload,
-        active_project=_history_store.get_active_project,
-        project_root=get_project_root,
-    )
 
 
 @editor_router.post('/set_view_settings')
@@ -1445,8 +1048,12 @@ export default href;
                 if not idx_file.is_file():
                     continue
                 try:
-                    idx = _json.loads(idx_file.read_text("utf-8"))
-                    vendored_list = idx.get("vendored", [])
+                    idx_obj = cast(object, _json.loads(idx_file.read_text("utf-8")))
+                    if not isinstance(idx_obj, dict):
+                        continue
+                    idx = cast(dict[str, object], idx_obj)
+                    vendored_list_obj = idx.get("vendored", [])
+                    vendored_list = vendored_list_obj if isinstance(vendored_list_obj, list) else []
                     if not isinstance(vendored_list, list):
                         continue
                     for theme_item_obj in vendored_list:
@@ -1457,13 +1064,15 @@ export default href;
                         theme_file = theme_item_obj.get("file")
                         if not isinstance(theme_id, str) or not isinstance(theme_label, str) or not isinstance(theme_file, str):
                             continue
+                        source_label_obj = idx.get("source")
+                        source_label = source_label_obj if isinstance(source_label_obj, str) else vendor_dir.name
                         themes.append(
                             {
                                 "id": theme_id,
                                 "label": theme_label,
                                 "uiTheme": theme_item_obj.get("uiTheme", "vs-dark"),
                                 "source": "vendored",
-                                "sourceLabel": idx.get("source", vendor_dir.name),
+                                "sourceLabel": source_label,
                                 "serveUrl": f"monaco_editor/themes/vendored/{vendor_dir.name}/{theme_file}",
                             }
                         )

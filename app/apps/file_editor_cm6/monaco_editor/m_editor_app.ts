@@ -107,6 +107,7 @@ import { bootMonacoRuntime } from './editor_monaco_boot_runtime.ts';
 import { registerEditorSocketConnectionHandlers } from './editor_socket_connection_runtime.ts';
 import { createEditorVscodeApiRuntime } from './editor_vscode_api_runtime.ts';
 import { createEditorWorkbenchRuntime } from './editor_workbench_runtime.ts';
+import { createEditorRpcTransport } from './editor_rpc_transport.ts';
 import { createEditorDebugRuntime } from './editor_debug_runtime.ts';
 import { createEditorUiEditorRuntime } from './editor_ui_editor_runtime.ts';
 import { installTextmateDebugHooks } from './editor_textmate_debug_runtime.ts';
@@ -247,6 +248,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
   let currentPath: string | null = null;
   let cachedPrefs: CachedPrefsLike | null = null;
   let editorSocket: EditorSocketLike | null = null;
+  let editorRpcSocket: EditorSocketLike | null = null;
   let editorSocketId: string | null = null;
   var openTransactionStore = createEditorOpenTransactionStore();
   let baseSha256: string | null = null;
@@ -364,7 +366,20 @@ interface CachedPrefsLike extends Record<string, unknown> {
   function _fetch(url: string | URL, init?: RequestInit): Promise<Response> {
     return window.fetch(url, init);
   }
+
+  function _setTimeoutBound(callback: () => void, delayMs: number): ReturnType<typeof setTimeout> {
+    return window.setTimeout(callback, delayMs);
+  }
+
+  function _clearTimeoutBound(timer: ReturnType<typeof setTimeout>): void {
+    window.clearTimeout(timer);
+  }
   var apiBase = deriveApiBase(window.location);
+  var editorRpcTransport = createEditorRpcTransport({
+    getSocket: function() { return editorRpcSocket; },
+    setTimeoutFn: _setTimeoutBound,
+    clearTimeoutFn: _clearTimeoutBound,
+  });
 
   var vscodeRpcRuntime = createEditorVscodeRpcRuntime({
     getWindow: function() { return window; },
@@ -453,6 +468,17 @@ interface CachedPrefsLike extends Record<string, unknown> {
     vscodeRpcRuntime.installSemanticTokens(legend as SemanticTokensLegendLike | null | undefined);
   }
 
+  function editorRpcCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
+    return editorRpcTransport.call(method as Parameters<typeof editorRpcTransport.call>[0], params || {}, opts);
+  }
+
+  function editorRpcNotify(method: string, params?: Record<string, unknown>): boolean {
+    return editorRpcTransport.notify(method as Parameters<typeof editorRpcTransport.notify>[0], params || {});
+  }
+
+  function isEditorRpcConnected(): boolean {
+    return editorRpcTransport.isConnected();
+  }
 
 
   function _applyDiagnosticsUpdate(params: unknown): void {
@@ -505,8 +531,11 @@ interface CachedPrefsLike extends Record<string, unknown> {
     setDebugDiag: setDebugDiag,
     requestBreadcrumbSymbols: function(path, opts) { breadcrumbRuntime.requestSymbols(path, opts); },
     languageWorkersEnabled: _languageWorkersEnabled,
-    clearTimeoutFn: clearTimeout,
-    setTimeoutFn: setTimeout,
+    isRpcConnected: isEditorRpcConnected,
+    rpcCall: editorRpcCall,
+    rpcNotify: editorRpcNotify,
+    clearTimeoutFn: _clearTimeoutBound,
+    setTimeoutFn: _setTimeoutBound,
   } as Parameters<typeof createEditorWorkbenchRuntime>[0]);
   var languageBridgeProviders = createEditorLanguageBridgeProviders({
     getMonaco: function() { return window.monaco || null; },
@@ -762,14 +791,14 @@ interface CachedPrefsLike extends Record<string, unknown> {
     getDocument: function() { return document; },
     fetchFn: _fetch,
     startVscodeApiService: function() { return startVscodeApiService(_fetch); },
-    discoverVscodeApiWsPath: function() { return discoverVscodeApiWsPath(_fetch, setTimeout); },
+    discoverVscodeApiWsPath: function() { return discoverVscodeApiWsPath(_fetch, _setTimeoutBound); },
     buildVscodeApiWsUrl: function(wsPath) { return buildVscodeApiWsUrl(location, wsPath); },
     createWebSocket: function(url: string) { return new WebSocket(url) as unknown; },
     handleVscodeApiMessageData: handleVscodeApiMessageData,
     rejectAndClearVscodeApiPending: rejectAndClearVscodeApiPending,
     buildVscodeApiRequestPayload: buildVscodeApiRequestPayload,
     createVscodeApiCallPromise: function(pending, id, method, timeoutMs) {
-      return createVscodeApiCallPromise(pending, id, method, timeoutMs, setTimeout);
+      return createVscodeApiCallPromise(pending, id, method, timeoutMs, _setTimeoutBound);
     },
     vscodeApiNotify: vscodeApiNotify,
     getVscodeLanguagesList: getVscodeLanguagesList,
@@ -1007,13 +1036,22 @@ interface CachedPrefsLike extends Record<string, unknown> {
 
   function connectEditorSocket(): boolean {
     try {
-      if (editorSocket) return true;
+      if (editorSocket) {
+        if (editorRpcSocket) editorRpcTransport.attachSocket(editorRpcSocket);
+        return true;
+      }
       if (!window.io) return false;
       editorSocket = window.io('/editor', {
         path: '/editor_ws/socket.io',
         transports: ['websocket'],
         query: { app_id: 'file_editor_cm6' },
       }) as EditorSocketLike;
+      editorRpcSocket = window.io('/rpc/editor', {
+        path: '/editor_ws/socket.io',
+        transports: ['websocket'],
+        query: { app_id: 'file_editor_cm6' },
+      }) as EditorSocketLike;
+      editorRpcTransport.attachSocket(editorRpcSocket);
       registerEditorSocketConnectionHandlers(editorSocket as Parameters<typeof registerEditorSocketConnectionHandlers>[0], buildSocketConnectionDeps({
         setEditorSocketId: function(value: string | null) { editorSocketId = value; },
         emitToHost: emitToHost,
@@ -1114,7 +1152,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
         absPathFromVscodeUri: _absPathFromVscodeUri,
         applyDiagnosticsUpdate: _applyDiagnosticsUpdate,
         workbenchPending: workbenchRuntime.getPendingRequests(),
-        clearTimeoutFn: clearTimeout,
+        clearTimeoutFn: _clearTimeoutBound,
         languageBridge: languageBridge,
         registerSemanticTokensWithLegend: _registerSemanticTokensWithLegend,
         getMonaco: function() { return monaco; },

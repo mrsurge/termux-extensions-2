@@ -3,6 +3,7 @@ import { wbEmitDidChange } from './editor_workbench_emit_utils.js';
 import { wbFlushDidChangeIfReady, wbFlushPendingAfterOpen, wbFlushSymbolsIfReady, wbPublishDidChange } from './editor_workbench_flush_utils.js';
 import { wbBumpGeneration } from './editor_workbench_generation_utils.js';
 import { wbCurrentGeneration, wbQueueDidChange, wbQueueSymbols, wbSetOpenAck } from './editor_workbench_state_utils.js';
+import { EDITOR_RPC_METHODS, editorWorkbenchMethodToRpcMethod } from './editor_rpc_contract.ts';
 
 interface MonacoUriLike {
   toString(): string;
@@ -96,6 +97,9 @@ interface WorkbenchRuntimeDeps {
   setDebugDiag(value: string): void;
   requestBreadcrumbSymbols(path: string, opts?: { generation?: number; fromQueue?: boolean }): void;
   languageWorkersEnabled(): boolean;
+  isRpcConnected(): boolean;
+  rpcCall(method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
+  rpcNotify(method: string, params: Record<string, unknown>): boolean;
   clearTimeoutFn(timer: ReturnType<typeof setTimeout>): void;
   setTimeoutFn(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
 }
@@ -346,6 +350,14 @@ export function createEditorWorkbenchRuntime(
   }
 
   function emitDidChange(payload: Record<string, unknown>): boolean {
+    if (deps.isRpcConnected()) {
+      return deps.rpcNotify(EDITOR_RPC_METHODS.workbenchDidChange, {
+        path: payload.path,
+        text: String(payload.text || ''),
+        languageId: String(payload.languageId || ''),
+        generation: Number.isFinite(Number(payload.generation)) ? Number(payload.generation) : currentGeneration(),
+      });
+    }
     return wbEmitDidChange(deps.getEditorSocket(), payload, currentGeneration);
   }
 
@@ -437,6 +449,10 @@ export function createEditorWorkbenchRuntime(
   }
 
   function editorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
+    const rpcMethod = editorWorkbenchMethodToRpcMethod(method);
+    if (rpcMethod && deps.isRpcConnected()) {
+      return deps.rpcCall(rpcMethod, params || {}, opts);
+    }
     const timeoutMs = opts && Number.isFinite(Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 12000;
     const requestId = 'wb_' + (wbNextId++) + '_' + Date.now();
     const eventName = 'editor_workbench_' + method;

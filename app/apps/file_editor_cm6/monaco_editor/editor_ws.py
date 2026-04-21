@@ -5,7 +5,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 import socketio
 from urllib.parse import parse_qs
@@ -88,6 +88,33 @@ def _has_open_baseline(abs_path: str, generation: Optional[int]) -> bool:
     if generation is None:
         return True
     return baseline.get("generation") == generation
+
+
+def editor_runtime_active_project() -> Optional[str]:
+    return _active_project()
+
+
+def editor_runtime_is_under_project(project: str, abs_path: str) -> bool:
+    return _is_under_project(project, abs_path)
+
+
+def editor_runtime_workbench_get_lock(abs_path: str) -> asyncio.Lock:
+    return _workbench_get_lock(abs_path)
+
+
+def editor_runtime_coerce_generation(raw: object) -> Optional[int]:
+    return _coerce_generation(raw)
+
+
+def editor_runtime_mark_open_baseline(abs_path: str, generation: Optional[int]) -> None:
+    _mark_open_baseline(abs_path, generation)
+
+
+def editor_runtime_has_open_baseline(abs_path: str, generation: Optional[int]) -> bool:
+    return _has_open_baseline(abs_path, generation)
+
+
+editor_workbench_logger = _wb_log
 
 
 def _runtime_meta() -> RuntimeMeta:
@@ -498,8 +525,10 @@ async def handle_tracked_edit(edit_result: dict[str, object]) -> None:
         return
 
     # Check preference
-    prefs = _preferences_store.get_preferences()
-    if not prefs.get("editor", {}).get("trackAgentEdits", False):
+    prefs_obj: object = _preferences_store.get_preferences()
+    editor_prefs_obj = prefs_obj.get("editor", {}) if isinstance(prefs_obj, dict) else {}
+    editor_prefs = cast(dict[str, object], editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {})
+    if not bool(editor_prefs.get("trackAgentEdits", False)):
         return
 
     abs_path_obj = edit_result.get("path", "")

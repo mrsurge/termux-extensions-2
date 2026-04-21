@@ -217,7 +217,6 @@ async def handle_set_editor_content(
     cancel_cache_persist_timer: Callable[[], None],
     get_cached_editor_content: Callable[[EditorLike | None], str],
     set_suppress_on_change_until: Callable[[float], None],
-    maybe_connect_lsp: Callable[[EditorLike | None, Path | None, Path | None], None],
     broadcast_cache_state: BroadcastCacheStateFn,
     schedule_diff_refresh: ScheduleDiffRefreshFn,
     apply_watcher_replace: ApplyWatcherReplaceFn,
@@ -283,14 +282,6 @@ async def handle_set_editor_content(
 
     if bool(data.get("remote_apply")):
         set_suppress_on_change_until(time.time() + 1.0)
-
-    try:
-        if project_path and new_path:
-            maybe_connect_lsp(editor, Path(new_path), Path(project_path).expanduser())
-        else:
-            maybe_connect_lsp(editor, None, None)
-    except Exception as exc:
-        print(f"[LSP] Failed to update LSP on set_content for {new_path}: {exc}", file=sys.stderr)
 
     for ed in editors:
         try:
