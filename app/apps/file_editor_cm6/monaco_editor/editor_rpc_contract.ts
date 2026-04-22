@@ -60,6 +60,7 @@ export const EDITOR_RPC_NOTIFICATIONS = {
   stateSsot: 'editor.state.ssot',
   fileOpened: 'editor.file.opened',
   fileJumpToLine: 'editor.file.jumpToLine',
+  mirrorUpdated: 'editor.mirror.updated',
   gitBaselines: 'editor.gitBaselines.updated',
   draftDiff: 'editor.draftDiff.updated',
   prefsChanged: 'editor.prefs.changed',

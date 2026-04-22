@@ -1,6 +1,12 @@
+import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
+
 interface EditorSocketLike {
   id?: string | null;
   on(eventName: string, handler: (payload: unknown) => void): void;
+}
+
+interface EditorRpcNotificationSource {
+  onNotification(method: string, handler: (payload: Record<string, unknown>) => void): () => void;
 }
 
 interface MonacoUriLike {
@@ -33,6 +39,7 @@ interface MonacoDiffEditorLike {
 }
 
 interface EditorSocketConnectionDeps {
+  rpcNotifications?: EditorRpcNotificationSource | null;
   setEditorSocketId(value: string | null): void;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   getCachedPrefs(): unknown;
@@ -161,13 +168,7 @@ export function registerEditorSocketConnectionHandlers(
   socket: EditorSocketLike,
   deps: EditorSocketConnectionDeps,
 ): void {
-  socket.on('connect', () => {
-    deps.setEditorSocketId(socket.id || null);
-    deps.emitToHost('editor_ready', {});
-    deps.emitToHost('editor:iframe_ready', {});
-  });
-
-  socket.on('editor:ssot', (snapshot: unknown) => {
+  const handleSsotSnapshot = (snapshot: unknown): void => {
     try {
       const snapshotRecord = asRecord(snapshot);
       const snapshotFile = asRecord(snapshotRecord && snapshotRecord.file);
@@ -237,9 +238,9 @@ export function registerEditorSocketConnectionHandlers(
     } catch (error) {
       console.warn('[Monaco] ssot apply failed', error);
     }
-  });
+  };
 
-  socket.on('editor:open', (payload: unknown) => {
+  const handleOpenPayload = (payload: unknown): void => {
     try {
       const payloadRecord = asRecord(payload);
       if (!payloadRecord || !payloadRecord.path) return;
@@ -273,13 +274,9 @@ export function registerEditorSocketConnectionHandlers(
     } catch (error) {
       console.warn('[Monaco] open apply failed', error);
     }
-  });
+  };
 
-  socket.on('editor:jump_to_line', (payload: unknown) => {
-    deps.handleJumpToLine(payload);
-  });
-
-  socket.on('editor:prefs_changed', (payload: unknown) => {
+  const handlePrefsChangedPayload = (payload: unknown): void => {
     try {
       const payloadRecord = asRecord(payload);
       const nextPrefs = payloadRecord && payloadRecord.preferences ? asRecord(payloadRecord.preferences) : null;
@@ -338,18 +335,18 @@ export function registerEditorSocketConnectionHandlers(
       if (prevAutoSave !== nextAutoSave && diffEditor && diffEditor.getModel) {
         try {
           const dm = diffEditor.getModel ? diffEditor.getModel() : null;
-          if (dm && dm.original && dm.modified) {
+          if (dm && (dm as { original?: unknown }).original && (dm as { modified?: unknown }).modified) {
             let mvs = null;
             try {
               const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
               if (modifiedEditor && modifiedEditor.saveViewState) mvs = modifiedEditor.saveViewState();
             } catch (_) {}
             const nextDiffModel: Record<string, unknown> = {
-              original: dm.original,
-              modified: dm.modified,
+              original: (dm as { original: unknown }).original,
+              modified: (dm as { modified: unknown }).modified,
               te2AutosaveMode: !!nextAutoSave,
             };
-            if (!nextAutoSave && dm.original === deps.getGitHeadModel() && dm.modified === model) {
+            if (!nextAutoSave && (dm as { original?: unknown }).original === deps.getGitHeadModel() && (dm as { modified?: unknown }).modified === model) {
               const baselineContent = model && model.getValue ? model.getValue() : '';
               const baselineLang = model && model.getLanguageId ? model.getLanguageId() : 'plaintext';
               const monacoEditor = deps.getMonaco().editor;
@@ -386,7 +383,27 @@ export function registerEditorSocketConnectionHandlers(
     } catch (error) {
       console.warn('[Monaco] prefs_changed apply failed', error);
     }
+  };
+
+  socket.on('connect', () => {
+    deps.setEditorSocketId(socket.id || null);
+    deps.emitToHost('editor_ready', {});
+    deps.emitToHost('editor:iframe_ready', {});
   });
+
+  if (deps.rpcNotifications) {
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.stateSsot, handleSsotSnapshot);
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileOpened, handleOpenPayload);
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileJumpToLine, (payload) => deps.handleJumpToLine(payload));
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.prefsChanged, handlePrefsChangedPayload);
+  } else {
+    socket.on('editor:ssot', handleSsotSnapshot);
+    socket.on('editor:open', handleOpenPayload);
+    socket.on('editor:jump_to_line', (payload: unknown) => {
+      deps.handleJumpToLine(payload);
+    });
+    socket.on('editor:prefs_changed', handlePrefsChangedPayload);
+  }
 
   socket.on('editor:git_baselines', (payload: unknown) => {
     try {

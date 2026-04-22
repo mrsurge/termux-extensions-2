@@ -80,6 +80,7 @@ import { collectBootLanguageIds } from './editor_boot_language_ids_utils.js';
 import { warnIfPlaintextOnlyLanguages } from './editor_boot_plaintext_warn_utils.js';
 import { applyActiveModelLanguage } from './editor_boot_apply_active_model_language_utils.js';
 import { applyLanguageToModelRuntime } from './editor_model_language_runtime.ts';
+import type { WorkbenchPendingDidChangePayload } from './editor_workbench_state_utils.js';
 import {
   applyDraftDiffDecorations as applyDraftDiffDecorationsRuntime,
   applyDraftZones as applyDraftZonesRuntime,
@@ -272,8 +273,8 @@ interface CachedPrefsLike extends Record<string, unknown> {
     getWindow: function() { return window; },
     getDocument: function() { return document; },
     getMonaco: function() { return monaco || window.monaco || null; },
-    getEditor: function() { return editor; },
-    getDiffEditor: function() { return diffEditor; },
+    getEditor: function() { return editor as never; },
+    getDiffEditor: function() { return diffEditor as never; },
     getModel: function() { return model; },
     getGitHeadModel: function() { return gitHeadModel; },
     getGitDiskModel: function() { return gitDiskModel; },
@@ -312,6 +313,8 @@ interface CachedPrefsLike extends Record<string, unknown> {
     setMirrorActive: function(value) { return debugRuntime.setMirrorActive(value); },
     incrementMirrorBindTotal: function() { return debugRuntime.incrementMirrorBindTotal(); },
     syncTraceDebug: function() { return debugRuntime.syncTraceDebug(); },
+    isRpcConnected: isEditorRpcConnected,
+    rpcCall: editorRpcCall,
   });
 
   var breadcrumbRuntime = createEditorBreadcrumbRuntime({
@@ -591,7 +594,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
     return workbenchRuntime.wbQueueSymbols(path, generation);
   }
 
-  function _wbEmitDidChange(payload: Record<string, unknown>): boolean {
+  function _wbEmitDidChange(payload: WorkbenchPendingDidChangePayload): boolean {
     return workbenchRuntime.wbEmitDidChange(payload);
   }
 
@@ -1022,10 +1025,14 @@ interface CachedPrefsLike extends Record<string, unknown> {
     absPathFromVscodeUri: _absPathFromVscodeUri,
     applyJumpToLine: applyJumpToLineAt,
     coercePositiveInt: coercePositiveInt,
-    shouldRecreateOpenModel: shouldRecreateOpenModel,
-    applyOpenModelTextSafely: applyOpenModelTextSafely,
+    shouldRecreateOpenModel: function(monacoRef, monacoFileUriFn, targetModel, absPath) {
+      return shouldRecreateOpenModel(monacoRef, monacoFileUriFn as never, targetModel as never, absPath);
+    },
+    applyOpenModelTextSafely: function(targetModel, targetEditor, content, setApplyingRemote) {
+      return applyOpenModelTextSafely(targetModel as never, targetEditor as never, content, setApplyingRemote);
+    },
     emitOpenCacheState: emitOpenCacheState,
-    queueBackendWorkbenchOpen: queueBackendWorkbenchOpen,
+    queueBackendWorkbenchOpen: function(payload: Record<string, unknown>) { return queueBackendWorkbenchOpen(payload as never); },
     setApplyingRemote: function(value: boolean) { isApplyingRemote = !!value; },
     openTransactionStore: openTransactionStore,
   }) as Parameters<typeof runEditorOpenTransaction>[0];
@@ -1053,6 +1060,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
       }) as EditorSocketLike;
       editorRpcTransport.attachSocket(editorRpcSocket);
       registerEditorSocketConnectionHandlers(editorSocket as Parameters<typeof registerEditorSocketConnectionHandlers>[0], buildSocketConnectionDeps({
+        rpcNotifications: editorRpcTransport,
         setEditorSocketId: function(value: string | null) { editorSocketId = value; },
         emitToHost: emitToHost,
         getCachedPrefs: function() { return cachedPrefs; },
@@ -1119,6 +1127,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
       }) as Parameters<typeof registerEditorSocketConnectionHandlers>[1]);
 
       registerEditorSaveMirrorSocketHandlers(editorSocket as Parameters<typeof registerEditorSaveMirrorSocketHandlers>[0], buildSaveMirrorSocketDeps({
+        rpcNotifications: editorRpcTransport,
         getCurrentPath: function() { return currentPath; },
         getModel: function() { return model; },
         getDiffEditor: function() { return diffEditor; },

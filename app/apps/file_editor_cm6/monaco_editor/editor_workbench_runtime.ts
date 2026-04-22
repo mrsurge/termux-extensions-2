@@ -3,6 +3,7 @@ import { wbEmitDidChange } from './editor_workbench_emit_utils.js';
 import { wbFlushDidChangeIfReady, wbFlushPendingAfterOpen, wbFlushSymbolsIfReady, wbPublishDidChange } from './editor_workbench_flush_utils.js';
 import { wbBumpGeneration } from './editor_workbench_generation_utils.js';
 import { wbCurrentGeneration, wbQueueDidChange, wbQueueSymbols, wbSetOpenAck } from './editor_workbench_state_utils.js';
+import type { WorkbenchFlowLike, WorkbenchPendingDidChangePayload } from './editor_workbench_state_utils.js';
 import { EDITOR_RPC_METHODS, editorWorkbenchMethodToRpcMethod } from './editor_rpc_contract.ts';
 
 interface MonacoUriLike {
@@ -68,15 +69,6 @@ interface LanguageContextLike {
   version: number;
 }
 
-interface WorkbenchFlowLike {
-  generation: number;
-  activePath: string;
-  openAckGeneration: number;
-  openAckPath: string;
-  pendingDidChange: Record<string, unknown> | null;
-  pendingSymbols: Record<string, unknown> | null;
-}
-
 interface LanguageBridgeLike {
   hoverSeq: number;
   completionsSeq: number;
@@ -127,7 +119,7 @@ export function createEditorWorkbenchRuntime(
   wbSetOpenAck(path: string, generation: number): void;
   wbQueueDidChange(path: string, text: string, languageId: string, generation: number): void;
   wbQueueSymbols(path: string, generation: number): void;
-  wbEmitDidChange(payload: Record<string, unknown>): boolean;
+  wbEmitDidChange(payload: WorkbenchPendingDidChangePayload): boolean;
   wbFlushDidChangeIfReady(): void;
   wbFlushSymbolsIfReady(): void;
   wbFlushPendingAfterOpen(): void;
@@ -349,7 +341,7 @@ export function createEditorWorkbenchRuntime(
     wbQueueSymbols(wbFlow, path, generation, currentGeneration);
   }
 
-  function emitDidChange(payload: Record<string, unknown>): boolean {
+  function emitDidChange(payload: WorkbenchPendingDidChangePayload): boolean {
     if (deps.isRpcConnected()) {
       return deps.rpcNotify(EDITOR_RPC_METHODS.workbenchDidChange, {
         path: payload.path,

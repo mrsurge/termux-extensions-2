@@ -33,6 +33,8 @@ interface EditorMirrorRuntimeDeps {
   setMirrorActive(value: number): void;
   incrementMirrorBindTotal(): void;
   syncTraceDebug(): void;
+  isRpcConnected(): boolean;
+  rpcCall(method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
 }
 
 export function createEditorMirrorRuntime(deps: EditorMirrorRuntimeDeps) {
@@ -73,6 +75,8 @@ export function createEditorMirrorRuntime(deps: EditorMirrorRuntimeDeps) {
       setTraceMirrorActive: deps.setMirrorActive,
       incrementTraceMirrorBindTotal: deps.incrementMirrorBindTotal,
       syncTraceDebug: deps.syncTraceDebug,
+      isRpcConnected: deps.isRpcConnected,
+      rpcCall: deps.rpcCall,
     };
   }
 

@@ -25,6 +25,20 @@ from .editor_save_backend import (
     request_editor_save_snapshot,
     resolve_editor_save_snapshot_response,
 )
+from .editor_rpc_contract import (
+    EDITOR_RPC_NOTIFICATION_CACHE_STATE,
+    EDITOR_RPC_NOTIFICATION_DRAFT_STATE,
+    EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
+    EDITOR_RPC_NOTIFICATION_FILE_OPENED,
+    EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED,
+    EDITOR_RPC_NOTIFICATION_NOTIFY,
+    EDITOR_RPC_NOTIFICATION_OPEN_COMPLETE,
+    EDITOR_RPC_NOTIFICATION_PREFS_CHANGED,
+    EDITOR_RPC_NOTIFICATION_READY,
+    EDITOR_RPC_NOTIFICATION_STATE_SSOT,
+    EditorRpcNotification,
+)
+from .editor_rpc_emit import emit_editor_rpc_notification
 from .editor_workbench_backend import (
     handle_workbench_completions,
     handle_workbench_did_change,
@@ -251,10 +265,119 @@ def _notify_draft_state_changed_safe(project: str) -> None:
         pass
 
 
-async def _emit_editor_open_to_default_room(payload: EditorOpenPayload) -> None:
+def editor_runtime_normalize_abs_path(path: str) -> Optional[str]:
+    return _normalize_abs_path(path)
+
+
+def editor_runtime_read_file_payload(project: str, abs_path: str) -> EditorOpenPayload:
+    return _read_file_payload(project, abs_path)
+
+
+def editor_runtime_update_session_state(payload: dict[str, object]) -> None:
+    _history_store.update_session_state(payload)
+
+
+def editor_runtime_set_last_file(project: str, abs_path: str) -> None:
+    _history_store.set_last_file(project, abs_path)
+
+
+async def editor_runtime_broadcast_active_file_update(project: str, abs_path: str) -> None:
+    await _broadcast_active_file_update(project, abs_path)
+
+
+async def editor_runtime_emit_host_active_file_changed(
+    project: str,
+    abs_path: str,
+    *,
+    source: str | None = None,
+    request_id: str | None = None,
+) -> None:
+    await _emit_host_active_file_changed(project, abs_path, source=source, request_id=request_id)
+
+
+def editor_runtime_meta() -> RuntimeMeta:
+    return _runtime_meta()
+
+
+def editor_runtime_notify_draft_state_changed(project: str) -> None:
+    _notify_draft_state_changed_safe(project)
+
+
+def editor_runtime_record_save_sha(abs_path: str, sha256: str) -> None:
+    _LAST_SAVE_SHA[abs_path] = sha256
+
+
+def editor_runtime_build_connect_snapshot(*, role: str = "") -> dict[str, object]:
+    project = _active_project()
+    session_state = _history_store.get_session_state()
+    prefs = _preferences_store.get_preferences(project) if project else {}
+    current_path = _history_store.get_last_file(project) if project else None
+    if not current_path:
+        current_path = session_state.get("currentPath")
+    if current_path and session_state.get("currentPath") != current_path:
+        _history_store.update_session_state({"currentPath": current_path})
+
+    snapshot: dict[str, object] = {
+        "project": project,
+        "session_state": session_state,
+        "preferences": prefs,
+        "currentPath": current_path,
+    }
+    if role != "host" and project and current_path:
+        abs_path = _normalize_abs_path(str(current_path))
+        if abs_path and _is_under_project(project, abs_path):
+            connect_request_id = f"diag_{int(time.time() * 1000)}_rpc"
+            snapshot["file"] = _read_file_payload(project, abs_path)
+            snapshot["file"]["request_id"] = connect_request_id
+    return snapshot
+
+
+async def _emit_editor_rpc_notification_to_room(
+    method: EditorRpcNotification,
+    payload: dict[str, object],
+    *,
+    room: str,
+) -> None:
     from .editor_socketio import EDITOR_SIO
 
-    await EDITOR_SIO.emit("editor:open", payload, room="file_editor_cm6", namespace="/editor")
+    await emit_editor_rpc_notification(
+        lambda event_name, notification_payload: EDITOR_SIO.emit(
+            event_name,
+            notification_payload,
+            room=room,
+            namespace="/rpc/editor",
+        ),
+        method,
+        payload,
+    )
+
+
+def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification | None:
+    mapping: dict[str, EditorRpcNotification] = {
+        "editor:open": EDITOR_RPC_NOTIFICATION_FILE_OPENED,
+        "editor:jump_to_line": EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
+        "editor:mirror": EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED,
+        "editor:cache_state": EDITOR_RPC_NOTIFICATION_CACHE_STATE,
+        "editor:draft_state": EDITOR_RPC_NOTIFICATION_DRAFT_STATE,
+        "editor:prefs_changed": EDITOR_RPC_NOTIFICATION_PREFS_CHANGED,
+        "editor:notify": EDITOR_RPC_NOTIFICATION_NOTIFY,
+        "editor:open_complete": EDITOR_RPC_NOTIFICATION_OPEN_COMPLETE,
+        "editor:ready": EDITOR_RPC_NOTIFICATION_READY,
+    }
+    return mapping.get(event_name)
+
+
+async def editor_runtime_emit_room_event(event_name: str, payload: dict[str, object]) -> None:
+    from .editor_socketio import EDITOR_SIO
+
+    await EDITOR_SIO.emit(event_name, payload, room="file_editor_cm6", namespace="/editor")
+    rpc_notification = _rpc_notification_for_legacy_event(event_name)
+    if rpc_notification:
+        await _emit_editor_rpc_notification_to_room(rpc_notification, payload, room="file_editor_cm6")
+
+
+async def _emit_editor_open_to_default_room(payload: EditorOpenPayload) -> None:
+    await editor_runtime_emit_room_event("editor:open", payload)
 
 
 async def emit_editor_open_from_backend(
@@ -445,7 +568,7 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
         payload = _read_file_payload(project, active_norm)
         payload["reason"] = "external_change"
         payload["request_id"] = f"ext_{int(time.time() * 1000)}"
-        await EDITOR_SIO.emit("editor:open", payload, room="file_editor_cm6", namespace="/editor")
+        await editor_runtime_emit_room_event("editor:open", payload)
         print(f"[editor_ws] external change: broadcast editor:open for {active_norm}", flush=True)
     except Exception as e:
         print(f"[editor_ws] external change: broadcast failed: {e}", flush=True)
@@ -572,7 +695,7 @@ async def handle_tracked_edit(edit_result: dict[str, object]) -> None:
         payload["line"] = line
         payload["reason"] = "tracked_edit"
         payload["request_id"] = f"track_{int(time.time() * 1000)}"
-        await EDITOR_SIO.emit("editor:open", payload, room="file_editor_cm6", namespace="/editor")
+        await editor_runtime_emit_room_event("editor:open", payload)
 
         # Notify explorer so breadcrumb/toolbar filename updates
         await _broadcast_active_file_update(project, abs_path)
@@ -636,37 +759,10 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
 
     async def on_connect(self, sid, environ, auth):
         await self.enter_room(sid, "file_editor_cm6")
-        project = _active_project()
-        session_state = _history_store.get_session_state()
-        prefs = _preferences_store.get_preferences(project) if project else {}
         role = _role_from_environ(environ)
-        connect_request_id = f"diag_{int(time.time() * 1000)}_{str(sid)[-6:]}"
-
-        # Single source of truth: history_store.get_last_file() is authoritative.
-        # session_state["currentPath"] is a mirror written by on_editor_open_request.
-        current_path = None
-        if project:
-            current_path = _history_store.get_last_file(project)
-        if not current_path:
-            current_path = session_state.get("currentPath")
-        # Sync session_state so both stores agree.
-        if current_path and session_state.get("currentPath") != current_path:
-            _history_store.update_session_state({"currentPath": current_path})
-
-        snapshot: dict[str, object] = {
-            "project": project,
-            "session_state": session_state,
-            "preferences": prefs,
-            "currentPath": current_path,
-        }
-
-        # Avoid sending large file content to the host shell on initial connect.
-        # The host only needs the path to show the filename; the iframe loads content.
-        if role != "host" and project and current_path:
-            abs_path = _normalize_abs_path(str(current_path))
-            if abs_path and _is_under_project(project, abs_path):
-                snapshot["file"] = _read_file_payload(project, abs_path)
-                snapshot["file"]["request_id"] = connect_request_id
+        snapshot = editor_runtime_build_connect_snapshot(role=role)
+        project = snapshot.get("project")
+        current_path = snapshot.get("currentPath")
 
         await self.emit("editor:ssot", snapshot, room=sid)
 
@@ -698,7 +794,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return
         payload = dict(payload)
         payload["source_client"] = sid
-        await self.emit("editor:cache_state", payload, room="file_editor_cm6")
+        await editor_runtime_emit_room_event("editor:cache_state", payload)
 
     async def on_editor_scroll_state(self, sid, data):
         payload = data or {}
@@ -730,7 +826,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return
         payload = dict(payload)
         payload["source_client"] = sid
-        await self.emit("editor:draft_state", payload, room="file_editor_cm6")
+        await editor_runtime_emit_room_event("editor:draft_state", payload)
 
     async def on_editor_notify(self, sid, data):
         payload = data or {}
@@ -738,7 +834,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return
         payload = dict(payload)
         payload["source_client"] = sid
-        await self.emit("editor:notify", payload, room="file_editor_cm6")
+        await editor_runtime_emit_room_event("editor:notify", payload)
 
     async def on_editor_open_complete(self, sid, data):
         payload = data or {}
@@ -746,7 +842,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return
         payload = dict(payload)
         payload["source_client"] = sid
-        await self.emit("editor:open_complete", payload, room="file_editor_cm6")
+        await editor_runtime_emit_room_event("editor:open_complete", payload)
 
     async def on_editor_issues_cmd(self, sid, data):
         payload = data or {}
@@ -770,7 +866,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             payload = {}
         payload = dict(payload)
         payload["source_client"] = sid
-        await self.emit("editor:ready", payload, room="file_editor_cm6")
+        await editor_runtime_emit_room_event("editor:ready", payload)
 
         # Eagerly launch code-server + workbench adapter when the editor iframe connects.
         # State is broadcast to all UI IPC clients via _broadcast_adapter_state().
@@ -889,7 +985,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 read_file_payload=_read_file_payload,
                 update_session_state=_history_store.update_session_state,
                 set_last_file=_history_store.set_last_file,
-                emit_editor_open=lambda payload: self.emit("editor:open", payload, room="file_editor_cm6"),
+                emit_editor_open=lambda payload: editor_runtime_emit_room_event("editor:open", payload),
                 broadcast_active_file_update=_broadcast_active_file_update,
                 emit_host_active_file_changed=_emit_host_active_file_changed,
             )
@@ -931,7 +1027,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             scroll_to_top = None
 
         # Broadcast to all connected clients (single-doc model).
-        await self.emit(
+        await editor_runtime_emit_room_event(
             "editor:jump_to_line",
             {
                 "line": line,
@@ -941,7 +1037,6 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 "scroll_to_top": scroll_to_top,
                 "source_client": sid,
             },
-            room="file_editor_cm6",
         )
 
     async def on_editor_git_baselines_request(self, sid, data):
@@ -1089,7 +1184,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return
         payload = dict(payload)
         payload["source_client"] = payload.get("source_client") or sid
-        await self.emit("editor:prefs_changed", payload, room="file_editor_cm6")
+        await editor_runtime_emit_room_event("editor:prefs_changed", payload)
 
     async def on_editor_mirror(self, sid, data):
         await handle_editor_mirror(
@@ -1099,7 +1194,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             normalize_abs_path=_normalize_abs_path,
             is_under_project=_is_under_project,
             runtime_meta=_runtime_meta,
-            emit_to_room=lambda event_name, payload: self.emit(event_name, payload, room="file_editor_cm6"),
+            emit_to_room=editor_runtime_emit_room_event,
             notify_draft_state_changed=_notify_draft_state_changed_safe,
         )
 
@@ -1111,7 +1206,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             normalize_abs_path=_normalize_abs_path,
             is_under_project=_is_under_project,
             request_snapshot=lambda request_id: _request_editor_save_snapshot(self, request_id),
-            emit_to_room=lambda event_name, payload: self.emit(event_name, payload, room="file_editor_cm6"),
+            emit_to_room=editor_runtime_emit_room_event,
             notify_draft_state_changed=_notify_draft_state_changed_safe,
             record_save_sha=lambda abs_path, sha256: _LAST_SAVE_SHA.__setitem__(abs_path, sha256),
         )

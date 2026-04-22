@@ -56,6 +56,7 @@ EditorRpcMethod = Literal[
 EDITOR_RPC_NOTIFICATION_STATE_SSOT: Final = "editor.state.ssot"
 EDITOR_RPC_NOTIFICATION_FILE_OPENED: Final = "editor.file.opened"
 EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE: Final = "editor.file.jumpToLine"
+EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED: Final = "editor.mirror.updated"
 EDITOR_RPC_NOTIFICATION_GIT_BASELINES: Final = "editor.gitBaselines.updated"
 EDITOR_RPC_NOTIFICATION_DRAFT_DIFF: Final = "editor.draftDiff.updated"
 EDITOR_RPC_NOTIFICATION_PREFS_CHANGED: Final = "editor.prefs.changed"
@@ -76,6 +77,7 @@ EditorRpcNotification = Literal[
     "editor.state.ssot",
     "editor.file.opened",
     "editor.file.jumpToLine",
+    "editor.mirror.updated",
     "editor.gitBaselines.updated",
     "editor.draftDiff.updated",
     "editor.prefs.changed",

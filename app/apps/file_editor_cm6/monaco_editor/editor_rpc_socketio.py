@@ -9,18 +9,30 @@ import socketio
 from .editor_rpc_contract import (
     JSONRPC_INTERNAL_ERROR,
     JSONRPC_INVALID_PARAMS,
+    EDITOR_RPC_NOTIFICATION_STATE_SSOT,
     EditorRpcDispatchError,
     EditorRpcProtocolError,
     coerce_jsonrpc_notification_envelope,
     coerce_jsonrpc_request_envelope,
 )
 from .editor_rpc_dispatch import dispatch_editor_rpc_request
-from .editor_rpc_emit import emit_editor_rpc_error, emit_editor_rpc_result
+from .editor_rpc_emit import emit_editor_rpc_error, emit_editor_rpc_notification, emit_editor_rpc_result
 from .editor_ws import (
     editor_runtime_active_project,
+    editor_runtime_broadcast_active_file_update,
+    editor_runtime_build_connect_snapshot,
     editor_runtime_coerce_generation,
-    editor_runtime_has_open_baseline,
+    editor_runtime_emit_host_active_file_changed,
+    editor_runtime_emit_room_event,
     editor_runtime_is_under_project,
+    editor_runtime_meta,
+    editor_runtime_normalize_abs_path,
+    editor_runtime_notify_draft_state_changed,
+    editor_runtime_read_file_payload,
+    editor_runtime_record_save_sha,
+    editor_runtime_set_last_file,
+    editor_runtime_update_session_state,
+    editor_runtime_has_open_baseline,
     editor_runtime_mark_open_baseline,
     editor_runtime_workbench_get_lock,
     editor_workbench_logger,
@@ -35,6 +47,20 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
     async def on_connect(self, sid: str, environ: dict[str, object], auth: object) -> None:
         enter_room = cast(Callable[..., Awaitable[object]], self.enter_room)
         await enter_room(sid, "file_editor_cm6")
+        snapshot = editor_runtime_build_connect_snapshot()
+        await emit_editor_rpc_notification(
+            lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
+            EDITOR_RPC_NOTIFICATION_STATE_SSOT,
+            snapshot,
+        )
+        current_path = snapshot.get("currentPath")
+        project = snapshot.get("project")
+        if isinstance(project, str) and isinstance(current_path, str) and current_path:
+            try:
+                await editor_runtime_broadcast_active_file_update(project, current_path)
+                await editor_runtime_emit_host_active_file_changed(project, current_path, source="rpc_connect")
+            except Exception:
+                pass
 
     async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
         try:
@@ -53,11 +79,21 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                     notification["method"],
                     notification["params"],
                     active_project=editor_runtime_active_project,
+                    normalize_abs_path=editor_runtime_normalize_abs_path,
                     is_under_project=editor_runtime_is_under_project,
                     get_lock=editor_runtime_workbench_get_lock,
                     coerce_generation=editor_runtime_coerce_generation,
                     mark_open_baseline=editor_runtime_mark_open_baseline,
                     has_open_baseline=editor_runtime_has_open_baseline,
+                    runtime_meta=editor_runtime_meta,
+                    read_file_payload=editor_runtime_read_file_payload,
+                    update_session_state=editor_runtime_update_session_state,
+                    set_last_file=editor_runtime_set_last_file,
+                    emit_to_room=editor_runtime_emit_room_event,
+                    broadcast_active_file_update=editor_runtime_broadcast_active_file_update,
+                    emit_host_active_file_changed=editor_runtime_emit_host_active_file_changed,
+                    notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
+                    record_save_sha=editor_runtime_record_save_sha,
                     logger=editor_workbench_logger,
                 )
                 return
@@ -67,11 +103,21 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 request["method"],
                 request["params"],
                 active_project=editor_runtime_active_project,
+                normalize_abs_path=editor_runtime_normalize_abs_path,
                 is_under_project=editor_runtime_is_under_project,
                 get_lock=editor_runtime_workbench_get_lock,
                 coerce_generation=editor_runtime_coerce_generation,
                 mark_open_baseline=editor_runtime_mark_open_baseline,
                 has_open_baseline=editor_runtime_has_open_baseline,
+                runtime_meta=editor_runtime_meta,
+                read_file_payload=editor_runtime_read_file_payload,
+                update_session_state=editor_runtime_update_session_state,
+                set_last_file=editor_runtime_set_last_file,
+                emit_to_room=editor_runtime_emit_room_event,
+                broadcast_active_file_update=editor_runtime_broadcast_active_file_update,
+                emit_host_active_file_changed=editor_runtime_emit_host_active_file_changed,
+                notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
+                record_save_sha=editor_runtime_record_save_sha,
                 logger=editor_workbench_logger,
             )
             await emit_editor_rpc_result(

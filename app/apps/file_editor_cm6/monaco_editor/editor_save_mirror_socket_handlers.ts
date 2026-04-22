@@ -1,3 +1,4 @@
+import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
 import { isMirrorPayloadValid } from './editor_mirror_payload_valid_utils.js';
 import { shouldDropMirrorForSource } from './editor_mirror_source_drop_utils.js';
 import { shouldDropMirrorForPath } from './editor_mirror_path_drop_utils.js';
@@ -16,13 +17,33 @@ import { handleCleanCacheState } from './editor_cache_state_clean_handler_utils.
 import { handleUnsavedCacheState } from './editor_cache_state_unsaved_handler_utils.js';
 import type {
   EditorCacheStatePayload,
-  EditorMirrorPayload,
   EditorMirrorState,
   EditorSaveSnapshotRequestPayload,
   EditorSocketLike,
 } from './editor_save_mirror_contract.ts';
+import type { DraftDiffPayloadLike } from './editor_socket_draft_diff_handler_utils.ts';
+
+interface EditorRpcNotificationSource {
+  onNotification(method: string, handler: (payload: Record<string, unknown>) => void): () => void;
+}
+
+interface MonacoModelLike {
+  getValue?(): string;
+  getFullModelRange?(): unknown;
+  applyEdits?(edits: Array<{ range: unknown; text: string }>): void;
+}
+
+interface EditorMirrorPayloadLike {
+  path?: unknown;
+  content?: unknown;
+  base_sha256?: unknown;
+  content_sha256?: unknown;
+  unsaved?: unknown;
+  source_client?: unknown;
+}
 
 interface SaveMirrorSocketHandlerDeps {
+  rpcNotifications?: EditorRpcNotificationSource | null;
   getCurrentPath(): string | null;
   getModel(): unknown;
   getDiffEditor(): unknown;
@@ -48,18 +69,37 @@ interface SaveMirrorSocketHandlerDeps {
   syncMirrorDebug(): void;
 }
 
+function asMirrorPayload(value: unknown): EditorMirrorPayloadLike | null {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+    ? value as EditorMirrorPayloadLike
+    : null;
+}
+
+function asCacheStatePayload(value: unknown): EditorCacheStatePayload | null {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+    ? value as EditorCacheStatePayload
+    : null;
+}
+
+function asSaveSnapshotRequestPayload(value: unknown): EditorSaveSnapshotRequestPayload | null {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+    ? value as EditorSaveSnapshotRequestPayload
+    : null;
+}
+
 function handleEditorMirrorEvent(
   deps: SaveMirrorSocketHandlerDeps,
-  payload: EditorMirrorPayload | null | undefined,
+  payload: unknown,
 ): void {
+  const mirrorPayload = asMirrorPayload(payload);
   deps.incrementMirrorState('rx');
-  if (!isMirrorPayloadValid(payload)) return;
-  if (shouldDropMirrorForSource(payload, deps.getEditorSocketId())) {
+  if (!isMirrorPayloadValid(mirrorPayload)) return;
+  if (shouldDropMirrorForSource(mirrorPayload, deps.getEditorSocketId())) {
     deps.incrementMirrorState('drop_self');
     deps.syncMirrorDebug();
     return;
   }
-  if (shouldDropMirrorForPath(payload && payload.path, deps.getCurrentPath())) {
+  if (shouldDropMirrorForPath(mirrorPayload?.path, deps.getCurrentPath())) {
     deps.incrementMirrorState('drop_path');
     deps.syncMirrorDebug();
     return;
@@ -71,7 +111,7 @@ function handleEditorMirrorEvent(
     deps.syncMirrorDebug();
     return;
   }
-  if (shouldDropMirrorForSha(payload && payload.content_sha256, deps.getLastContentSha256(), model, payload && payload.content)) {
+  if (shouldDropMirrorForSha(mirrorPayload?.content_sha256, deps.getLastContentSha256(), model, mirrorPayload?.content)) {
     deps.incrementMirrorState('drop_sha');
     deps.syncMirrorDebug();
     return;
@@ -82,12 +122,12 @@ function handleEditorMirrorEvent(
     return;
   }
 
-  applyMirrorContentToModel(model, payload && payload.content, (value: boolean) => {
+  applyMirrorContentToModel(model as MonacoModelLike, mirrorPayload?.content, (value: boolean) => {
     deps.setApplyingRemote(!!value);
   });
 
-  const contentSha = payload && typeof payload.content_sha256 === 'string'
-    ? payload.content_sha256
+  const contentSha = typeof mirrorPayload?.content_sha256 === 'string'
+    ? mirrorPayload.content_sha256
     : null;
   if (contentSha) deps.setLastContentSha256(contentSha);
 
@@ -95,9 +135,9 @@ function handleEditorMirrorEvent(
   deps.syncMirrorDebug();
   deps.applyLineNumberSizing();
 
-  const mirrorUnsaved = payload != null && payload.unsaved === true;
+  const mirrorUnsaved = mirrorPayload?.unsaved === true;
   deps.setUnsavedTrace('mirror', mirrorUnsaved);
-  emitMirrorCacheState(deps.emitToHost, payload, mirrorUnsaved);
+  emitMirrorCacheState(deps.emitToHost, mirrorPayload as DraftDiffPayloadLike & { content_sha256?: unknown }, mirrorUnsaved);
   if (mirrorUnsaved) {
     deps.requestDraftDiff('mirror');
     return;
@@ -107,14 +147,15 @@ function handleEditorMirrorEvent(
 
 function handleEditorCacheStateEvent(
   deps: SaveMirrorSocketHandlerDeps,
-  payload: EditorCacheStatePayload | null | undefined,
+  payload: unknown,
 ): void {
+  const cacheStatePayload = asCacheStatePayload(payload);
   const currentPath = deps.getCurrentPath();
-  if (!isCacheStatePayloadForCurrentPath(payload, currentPath)) return;
+  if (!isCacheStatePayloadForCurrentPath(cacheStatePayload, currentPath)) return;
 
-  if (isCacheStateClean(payload)) {
+  if (isCacheStateClean(cacheStatePayload)) {
     handleCleanCacheState({
-      payload: payload,
+      payload: cacheStatePayload,
       clearDraftDiffDecorationsFn: deps.clearDraftDiffDecorations,
       getAutoSaveFn: deps.getAutoSave,
       shouldSkipAutosaveFn: deps.shouldSkipAutosave,
@@ -129,17 +170,17 @@ function handleEditorCacheStateEvent(
     return;
   }
 
-  if (isCacheStateUnsaved(payload)) {
-    handleUnsavedCacheState(payload, deps.setUnsavedTrace, deps.requestDraftDiff);
+  if (isCacheStateUnsaved(cacheStatePayload)) {
+    handleUnsavedCacheState(cacheStatePayload, deps.setUnsavedTrace, deps.requestDraftDiff);
   }
 }
 
 function handleEditorSaveSnapshotRequestEvent(
   deps: SaveMirrorSocketHandlerDeps,
-  payload: EditorSaveSnapshotRequestPayload | null | undefined,
+  payload: unknown,
 ): void {
   handleSaveSnapshotRequest(
-    payload,
+    asSaveSnapshotRequestPayload(payload),
     deps.getCurrentPath(),
     deps.getModel(),
     deps.getBaseSha256(),
@@ -151,26 +192,39 @@ export function registerEditorSaveMirrorSocketHandlers(
   socket: EditorSocketLike,
   deps: SaveMirrorSocketHandlerDeps,
 ): void {
-  socket.on('editor:mirror', (payload: unknown) => {
-    try {
-      handleEditorMirrorEvent(deps, payload as EditorMirrorPayload | null | undefined);
-    } catch (error) {
-      console.warn('[Monaco] mirror apply failed', error);
-    }
-  });
+  if (deps.rpcNotifications) {
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.mirrorUpdated, (payload) => {
+      try {
+        handleEditorMirrorEvent(deps, payload);
+      } catch (error) {
+        console.warn('[Monaco] mirror apply failed', error);
+      }
+    });
 
-  socket.on('editor:cache_state', (payload: unknown) => {
-    try {
-      handleEditorCacheStateEvent(deps, payload as EditorCacheStatePayload | null | undefined);
-    } catch (_) {}
-  });
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.cacheState, (payload) => {
+      try {
+        handleEditorCacheStateEvent(deps, payload);
+      } catch (_) {}
+    });
+  } else {
+    socket.on('editor:mirror', (payload: unknown) => {
+      try {
+        handleEditorMirrorEvent(deps, payload);
+      } catch (error) {
+        console.warn('[Monaco] mirror apply failed', error);
+      }
+    });
+
+    socket.on('editor:cache_state', (payload: unknown) => {
+      try {
+        handleEditorCacheStateEvent(deps, payload);
+      } catch (_) {}
+    });
+  }
 
   socket.on('editor:save_snapshot_request', (payload: unknown) => {
     try {
-      handleEditorSaveSnapshotRequestEvent(
-        deps,
-        payload as EditorSaveSnapshotRequestPayload | null | undefined,
-      );
+      handleEditorSaveSnapshotRequestEvent(deps, payload);
     } catch (error) {
       console.warn('[Monaco] save snapshot response failed', error);
     }
