@@ -1,6 +1,8 @@
 {
   "typeCheckingMode": "strict",
   "reportAny": "error",
+  "reportExplicitAny": "error",
+  "reportImplicitAny": "error",
   "pythonPlatform": "Linux",
   "exclude": [
     "apps",

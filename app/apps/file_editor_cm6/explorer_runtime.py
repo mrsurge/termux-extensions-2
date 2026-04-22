@@ -8,61 +8,23 @@ here. Put feature behavior in `explorer/handlers/`, `explorer/services/`, or
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+import hashlib
+import importlib
 import json
 import logging
 import os
-import subprocess
-import time
-import urllib.request
-import hashlib
-import shutil
-from contextlib import suppress
-from typing import Dict, Any, List, Optional, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from fastapi import WebSocket, WebSocketDisconnect
 from pathlib import Path
 
-from queue import Queue, Empty
+# Import git_service to register job handlers in worker process.
+importlib.import_module("app.libs.git_service")
 
-# Import git_service to register job handlers in worker process
-import app.libs.git_service  # noqa: F401 - registers git_push, git_pull, git_clone handlers
-
-from .explorer_helper import (
-    list_dir,
-    create_directory,
-    create_file,
-    rename_entry,
-    delete_entry,
-    batch_delete,
-    copy_entry,
-    move_entry,
-    batch_copy,
-    batch_move,
-    copy_entry_inbound,
-    move_entry_inbound,
-    create_project,
-    get_project_root,
-    set_project_root,
-    mark_git_cache_dirty,
-    get_all_git_statuses,
-)
-from .git_helper import (
-    get_status as git_get_status,
-    stage_paths,
-    unstage_paths,
-    stage_all as git_stage_all,
-    unstage_all as git_unstage_all,
-    commit_changes,
-    push_changes,
-    pull_changes,
-    reset_hard,
-    init_repository,
-    restore_path,
-    get_commit_info,
-    list_branches as git_list_branches,
-    get_commits as git_get_commits,
-    GitError,
-)
-from .stores import _history_store, _preferences_store
+from . import explorer_helper as _explorer_helper
+from .git_helper import get_status as git_get_status
+from .stores import get_preferences_store
 from .project_sidecar import ProjectSidecar
 # NOTE: search and review are imported lazily inside handler methods
 # to break a circular import chain:
@@ -74,9 +36,82 @@ from .preferences_store import DEFAULT_UI_PREFS
 logger = logging.getLogger(__name__)
 
 AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
+PREFERENCES_STORE = get_preferences_store()
+
+JsonObject = dict[str, object]
+ExplorerMessageHandler = Callable[[JsonObject, str | None], Awaitable[None]]
+ListDirFn = Callable[[str], JsonObject]
+GetProjectRootFn = Callable[[], Path]
+MarkGitCacheDirtyFn = Callable[[Path], None]
+GetAllGitStatusesFn = Callable[[], JsonObject]
+
+get_project_root = _explorer_helper.get_project_root
+list_dir = cast(ListDirFn, _explorer_helper.list_dir)
+mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _explorer_helper.mark_git_cache_dirty)
+get_all_git_statuses = cast(GetAllGitStatusesFn, _explorer_helper.get_all_git_statuses)
 
 
-def abs_to_rel(abs_path: str, project_root: str) -> Optional[str]:
+def _load_json_value(raw: str) -> object:
+    return cast(object, json.loads(raw))
+
+
+if TYPE_CHECKING:
+    class _SocketIOAsyncNamespace:
+        def __init__(self, namespace: str = "/explorer") -> None: ...
+
+        async def emit(
+            self,
+            event: str,
+            data: object,
+            *,
+            room: str | None = None,
+            namespace: str | None = None,
+        ) -> None: ...
+else:
+    import socketio
+
+    _SocketIOAsyncNamespace = socketio.AsyncNamespace
+
+
+class SocketIOEmitter(Protocol):
+    async def emit(
+        self,
+        event: str,
+        data: object,
+        *,
+        room: str | None = None,
+        namespace: str | None = None,
+    ) -> None: ...
+
+
+@dataclass(frozen=True)
+class ExplorerInboundMessage:
+    message_type: str | None
+    payload: JsonObject
+    msg_id: str | None
+
+
+def _as_json_object(value: object) -> JsonObject | None:
+    if not isinstance(value, dict):
+        return None
+    return cast(JsonObject, value)
+
+
+def _parse_inbound_message(raw: object) -> ExplorerInboundMessage:
+    message = _as_json_object(raw)
+    if message is None:
+        return ExplorerInboundMessage(message_type=None, payload={}, msg_id=None)
+
+    message_type_obj = message.get("type")
+    msg_id_obj = message.get("id")
+    return ExplorerInboundMessage(
+        message_type=message_type_obj if isinstance(message_type_obj, str) else None,
+        payload=_as_json_object(message.get("payload")) or {},
+        msg_id=msg_id_obj if isinstance(msg_id_obj, str) else None,
+    )
+
+
+def abs_to_rel(abs_path: str, project_root: str) -> str | None:
     """Convert an absolute path into a project-root-relative path (best-effort).
 
     Re-exported from explorer_manager for backward compatibility.
@@ -91,273 +126,100 @@ class SocketIOSocketShim:
     Provides accept() and send_text() to satisfy ConnectionManager.
     """
 
-    def __init__(self, namespace, sid):
+    def __init__(self, namespace: SocketIOEmitter, sid: str) -> None:
         self.namespace = namespace
         self.sid = sid
 
-    async def accept(self):
+    async def accept(self) -> None:
         # Socket.IO is already connected; nothing to do
         return
 
-    async def send_text(self, data: str):
+    async def send_text(self, data: str) -> None:
         await self.namespace.emit('explorer:event', data, room=self.sid)
 
 # --- Connection Manager ---
 # Extracted to explorer_manager.py to break circular import chains.
 # Re-exported here for backward compatibility.
-from .explorer_manager import ConnectionManager, ExplorerConnection, manager
-from .explorer.context import ExplorerSearchReviewHandlerContext
-from .explorer.services.project_session import reset_project_session
+from .explorer_manager import ExplorerConnection, manager
+from .explorer.context import (
+    ExplorerFileTreeHandlerContext,
+    ExplorerGitHandlerContext,
+    ExplorerProjectHandlerContext,
+    ExplorerSearchReviewHandlerContext,
+    ExplorerWatcherHandlerContext,
+    MarkProjectDirty,
+)
+from .explorer.services.job_tracking import (
+    ExplorerJobTrackingRuntime,
+    start_job_tracking,
+    stop_job_tracking,
+)
+from .explorer.services.session_bootstrap import bootstrap_explorer_session
 from .explorer.services.runtime_notifications import set_explorer_event_loop
-
-
-# --- Helpers ---
-
-def _get_parent_rel(rel_path: str) -> str:
-    """Get the parent directory rel path. Returns '.' for root-level items."""
-    if not rel_path or rel_path == '.':
-        return '.'
-    parts = rel_path.replace('\\', '/').split('/')
-    if len(parts) <= 1:
-        return '.'
-    return '/'.join(parts[:-1])
-
-def _get_rel_from_abs(abs_path: str, project_root) -> str:
-    """Convert absolute path to project-relative path, or '.' if outside project."""
-    from pathlib import Path
-    try:
-        abs_p = Path(abs_path).resolve()
-        root_p = Path(project_root).resolve()
-        if str(abs_p).startswith(str(root_p)):
-            rel = abs_p.relative_to(root_p)
-            return str(rel) if str(rel) != '.' else '.'
-    except Exception:
-        pass
-    return '.'
-
-
-def _payload_str(payload: dict, key: str, default: Optional[str] = None) -> Optional[str]:
-    value = payload.get(key, default)
-    if isinstance(value, str):
-        return value
-    return default
-
-
-def _payload_str_list(payload: dict, key: str) -> List[str]:
-    value = payload.get(key)
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str)]
 
 # --- Dispatcher ---
 
 class ExplorerDispatcher:
-    def __init__(self, websocket: ExplorerConnection):
+    def __init__(self, websocket: ExplorerConnection) -> None:
         self.websocket = websocket
         self.project_root = get_project_root()
-        self._job_queue: Optional[Queue] = None
-        self._job_listener = None
-        self._job_pump_task: Optional[asyncio.Task] = None
-        self._tracked_job_ids: set = set()  # Jobs we started from this dispatcher
-        
-    async def initialize(self):
+        self._job_tracking: ExplorerJobTrackingRuntime | None = None
+        self._tracked_job_ids: set[str] = set()
+
+    async def initialize(self) -> None:
         # Feed the current worker loop to watcher/draft notification services.
         set_explorer_event_loop(asyncio.get_event_loop())
 
-        # On full framework restart, explorer_helper defaults to ~ until
-        # we rehydrate from HistoryStore. Do that before sending snapshots.
-        try:
-            active_project = _history_store.get_active_project()
-            if isinstance(active_project, str) and active_project.strip():
-                self.project_root = set_project_root(active_project)
-        except Exception:
-            pass
-        
-        # --- WATCHER LIFECYCLE (future implementation) ---
-        # When first client connects, we could start the file watcher:
-        # if not manager.has_connections(str(self.project_root)):
-        #     from .core_read import init_watcher
-        #     init_watcher(self.project_root)
-        # ------------------------------------------------
-        
-        was_new_sidecar = not ProjectSidecar.sidecar_exists(str(self.project_root))
+        bootstrap = await bootstrap_explorer_session(
+            websocket=self.websocket,
+            project_root=self.project_root,
+            emit_personal=self.emit_personal,
+            broadcast_git_status=self.broadcast_git_status,
+            broadcast_review_state=self.broadcast_review_state,
+        )
+        self.project_root = bootstrap.project_root
 
-        # Register connection with current project
-        await manager.accept_and_register(self.websocket, str(self.project_root))
-        
-        # --- Job Registry Listener ---
-        # Subscribe to job updates and forward relevant ones to this client
-        try:
-            from app.libs.jobs import manager as job_manager
-            # Seed job tracking from the project sidecar (jobs started in previous client sessions).
-            try:
-                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
-                self._tracked_job_ids.update(sidecar.list_tracked_jobs())
-            except Exception:
-                pass
-            self._job_queue = Queue()
-            self._job_listener = job_manager.add_listener(self._job_queue, job_ids=None)
-            self._job_pump_task = asyncio.create_task(self._pump_job_events())
-        except Exception as e:
-            logger.warning(f"Failed to register job listener: {e}")
-        
-        # Send initial state snapshots
-        # 1. Project Info
-        await self.emit_personal("project:setActive", {"path": str(self.project_root), "new_sidecar": was_new_sidecar})
-        # 1.5 UI Preferences (PreferenceStore-backed)
-        try:
-            prefs = _preferences_store.get_preferences()
-            ui_prefs = prefs.get("ui") or {}
-            await self.emit_personal("prefs:setUi", {"ui": ui_prefs})
-        except Exception as e:
-            logger.warning(f"Failed to load UI preferences: {e}")
-        # 2. Git Status
-        await self.broadcast_git_status()
-        # 3. Explorer Tree (Root)
-        await self.emit_personal("explorer:setList", await asyncio.to_thread(list_dir, '.'))
-        # 4. Review List (if any)
-        await self.broadcast_review_state()
-        # 5. Open Directories (for restoring tree state)
-        try:
-            sidecar = ProjectSidecar.load_or_create(str(self.project_root))
-            open_dirs = sidecar.get_open_directories()
-            await self.emit_personal("explorer:setOpenDirs", {"dirs": open_dirs})
-        except Exception as e:
-            logger.warning(f"Failed to load open directories: {e}")
+        self._job_tracking = await start_job_tracking(
+            get_project_root=lambda: self.project_root,
+            tracked_job_ids=self._tracked_job_ids,
+            emit_personal=self.emit_personal,
+            refresh_explorer_state=self._refresh_runtime_state,
+        )
 
-        # 6. Active file — rehydrate from history store so the explorer survives
-        #    reconnects without waiting for a new editor:activeFile broadcast.
-        try:
-            session_state = _history_store.get_session_state()
-            current_path = session_state.get("currentPath") if session_state else None
-            if current_path:
-                rel = abs_to_rel(str(current_path), str(self.project_root))
-                if rel and rel != ".":
-                    await self.emit_personal("explorer:activeFile", {"rel": rel, "abs": str(current_path)})
-        except Exception as e:
-            logger.warning(f"Failed to rehydrate active file: {e}")
-
-        # 7. Watcher config (current mode + watchexec availability)
-        try:
-            from .watchexec_shell_manager import is_watchexec_available, ensure_watchexec_shell
-            sidecar_w = ProjectSidecar.load_or_create(str(self.project_root))
-            watcher_cfg = sidecar_w._data.get("watcher", {})
-            watcher_mode = watcher_cfg.get("mode", "ipc")
-            await self.emit_personal("watcher:config", {
-                "mode": watcher_mode,
-                "storage_type": watcher_cfg.get("storage_type", "ssd"),
-                "poll_interval_ms": watcher_cfg.get("poll_interval_ms", 1500),
-                "watchexec_available": is_watchexec_available(),
-            })
-            # Eagerly start watchexec if sidecar says so
-            if watcher_mode == "watchexec" and is_watchexec_available():
-                poll_ms = watcher_cfg.get("poll_interval_ms", 1500)
-                await ensure_watchexec_shell(str(self.project_root), poll_ms)
-        except Exception as e:
-            logger.warning(f"Failed to send watcher config: {e}")
-    
-    async def _pump_job_events(self):
-        """Background task to forward job updates to this client."""
-        logger.debug("[JOB_PUMP] Started job pump task")
-        while True:
-            try:
-                # Non-blocking check with short timeout
-                queue = self._job_queue
-                if queue is None:
-                    await asyncio.sleep(0.5)
-                    continue
-                payload = await asyncio.to_thread(queue.get, timeout=0.5)
-                if not isinstance(payload, dict):
-                    continue
-                
-                for job_data in payload.get("jobs", []):
-                    job_id = job_data.get("id", "")
-                    job_type = job_data.get("type", "")
-                    job_status = job_data.get("status", "")
-                    
-                    # Only forward jobs we're tracking (ones we started)
-                    if job_id in self._tracked_job_ids:
-                        await self.emit_personal("job:progress", job_data)
-                        
-                        # Clean up tracking when job completes
-                        if job_status in ("succeeded", "failed", "cancelled"):
-                            self._tracked_job_ids.discard(job_id)
-                            try:
-                                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
-                                sidecar.remove_tracked_job(job_id)
-                                sidecar.save()
-                            except Exception:
-                                pass
-                            
-                            # On clone success, refresh to pick up git status
-                            if job_type == "git_clone" and job_status == "succeeded":
-                                logger.info(f"[JOB_PUMP] Clone succeeded, refreshing explorer")
-                                await self.broadcast_git_status()
-                                await self.handle_explorer_refresh({}, None)
-                    else:
-                        # Unrelated job updates are expected because the job registry is global.
-                        # Only log when the job looks like one we should be tracking (sidecar / session mismatch).
-                        if job_id and isinstance(job_id, str):
-                            try:
-                                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
-                                tracked = set(sidecar.list_tracked_jobs())
-                            except Exception:
-                                tracked = set()
-
-                            if job_id in tracked:
-                                # Track it now (e.g. app restarted between job creation and listener init).
-                                self._tracked_job_ids.add(job_id)
-                                await self.emit_personal("job:progress", job_data)
-                            else:
-                                logger.debug(f"[JOB_PUMP] Ignoring untracked job {job_id} ({job_type})")
-                        
-            except Empty:
-                continue
-            except asyncio.CancelledError:
-                logger.debug("[JOB_PUMP] Task cancelled")
-                break
-            except Exception as e:
-                logger.warning(f"[JOB_PUMP] Error: {e}")
-                await asyncio.sleep(0.5)
-
-    async def cleanup(self):
-        # Stop job pump task
-        if self._job_pump_task:
-            self._job_pump_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._job_pump_task
-        
-        # Unregister job listener
-        if self._job_listener:
-            try:
-                from app.libs.jobs import manager as job_manager
-                job_manager.remove_listener(self._job_listener)
-            except Exception:
-                pass
-        
+    async def cleanup(self) -> None:
+        await stop_job_tracking(self._job_tracking)
+        self._job_tracking = None
         manager.disconnect(self.websocket)
 
     # --- Helpers ---
 
-    async def emit_personal(self, type: str, payload: Dict[str, Any], reply_to: Optional[str] = None):
-        msg = {"type": type, "payload": payload}
+    async def _refresh_runtime_state(self) -> None:
+        await self.handle_explorer_refresh({}, None)
+
+    async def emit_personal(
+        self,
+        message_type: str,
+        payload: JsonObject,
+        reply_to: str | None = None,
+    ) -> None:
+        msg: JsonObject = {"type": message_type, "payload": payload}
         if reply_to:
             msg["id"] = reply_to
         await manager.send_personal(self.websocket, msg)
 
-    async def broadcast(self, type: str, payload: Dict[str, Any]):
-        msg = {"type": type, "payload": payload}
+    async def broadcast(self, message_type: str, payload: JsonObject) -> None:
+        msg: JsonObject = {"type": message_type, "payload": payload}
         await manager.broadcast(str(self.project_root), msg)
 
-    async def send_error(self, message: str, reply_to: Optional[str] = None):
-        payload = {"error": message}
+    async def send_error(self, message: str, reply_to: str | None = None) -> None:
+        payload: JsonObject = {"error": message}
         await self.emit_personal("error", payload, reply_to)
 
-    async def broadcast_git_status(self):
+    async def broadcast_git_status(self) -> None:
         try:
             status = await asyncio.to_thread(git_get_status, self.project_root)
             logger.info(f"[GIT_STATUS_DEBUG] broadcast_git_status: staged={status.staged}, unstaged={status.unstaged}, untracked={status.untracked}")
-            data = {
+            data: JsonObject = {
                 "branch": status.branch,
                 "detached": status.detached,
                 "ahead": status.ahead,
@@ -378,7 +240,7 @@ class ExplorerDispatcher:
         except Exception as e:
             logger.warning(f"[broadcast_git_status] git baselines push failed: {e}")
 
-    async def broadcast_git_decorations(self):
+    async def broadcast_git_decorations(self) -> None:
         """Broadcast git status decorations for all files and directories.
         
         This allows the frontend to update gitStatus classes on existing DOM nodes
@@ -390,88 +252,117 @@ class ExplorerDispatcher:
         except Exception:
             pass
 
-    async def broadcast_review_state(self):
+    async def broadcast_review_state(self) -> None:
         """Broadcast updated review entries and decoration updates."""
         # 1. Review List
         from .explorer import review
         reviews = await review.list_reviews(self.project_root, lightweight=True)
         await self.broadcast("review:setEntries", {"entries": reviews})
-        
+
         # 2. Decorations (Drafts)
-        # We need to map the reviews to a decoration map { "rel": { "hasDraft": true } }
-        draft_decorations = { r["rel"]: {"hasDraft": True} for r in reviews if r.get("has_draft") }
+        draft_decorations: JsonObject = {
+            rel: {"hasDraft": True}
+            for review_entry in reviews
+            if review_entry.get("has_draft")
+            for rel in [review_entry.get("rel")]
+            if isinstance(rel, str)
+        }
         await self.broadcast("explorer:updateDecorations", {"drafts": draft_decorations})
 
-    def _build_search_review_context(self):
+    def _build_search_review_context(self) -> ExplorerSearchReviewHandlerContext:
         from .explorer_helper import mark_draft_cache_dirty
 
+        typed_mark_draft_cache_dirty = cast(MarkProjectDirty, mark_draft_cache_dirty)
         return ExplorerSearchReviewHandlerContext(
             project_root=self.project_root,
             emit_personal=self.emit_personal,
             broadcast_git_status=self.broadcast_git_status,
             broadcast_review_state=self.broadcast_review_state,
             notify_editor_draft_cleared=self._notify_editor_draft_cleared,
-            mark_draft_cache_dirty=mark_draft_cache_dirty,
-            mark_git_cache_dirty=mark_git_cache_dirty,
+            mark_draft_cache_dirty=typed_mark_draft_cache_dirty,
+            mark_git_cache_dirty=cast(MarkProjectDirty, mark_git_cache_dirty),
         )
+
+    def _build_watcher_context(self) -> ExplorerWatcherHandlerContext:
+        return ExplorerWatcherHandlerContext(
+            project_root=self.project_root,
+            emit_personal=self.emit_personal,
+            broadcast=self.broadcast,
+        )
+
+    def _build_file_tree_context(self) -> ExplorerFileTreeHandlerContext:
+        return ExplorerFileTreeHandlerContext(
+            project_root=self.project_root,
+            broadcast=self.broadcast,
+            broadcast_git_status=self.broadcast_git_status,
+            broadcast_git_decorations=self.broadcast_git_decorations,
+        )
+
+    def _build_git_context(self) -> ExplorerGitHandlerContext:
+        return ExplorerGitHandlerContext(
+            project_root=self.project_root,
+            tracked_job_ids=self._tracked_job_ids,
+            emit_personal=self.emit_personal,
+            broadcast=self.broadcast,
+            broadcast_git_status=self.broadcast_git_status,
+            broadcast_git_decorations=self.broadcast_git_decorations,
+        )
+
+    def _build_project_context(self) -> ExplorerProjectHandlerContext:
+        return ExplorerProjectHandlerContext(
+            websocket=self.websocket,
+            tracked_job_ids=self._tracked_job_ids,
+            emit_personal=self.emit_personal,
+        )
+
+    def _resolve_handler(self, message_type: str) -> ExplorerMessageHandler | None:
+        handler_name = f"handle_{message_type.replace(':', '_')}"
+        handler = getattr(self, handler_name, None)
+        if handler is None:
+            return None
+        return cast(ExplorerMessageHandler, handler)
 
     # --- Message Loop ---
 
-    async def handle_message(self, raw_msg: str):
+    async def handle_message(self, raw_msg: str) -> None:
         try:
-            data = json.loads(raw_msg)
+            data = _load_json_value(raw_msg)
         except json.JSONDecodeError:
-            return await self.send_error("Invalid JSON")
+            await self.send_error("Invalid JSON")
+            return
 
-        msg_type = data.get("type")
-        payload = data.get("payload", {})
-        msg_id = data.get("id")
+        await self.handle_message_json(data)
 
-        if not msg_type:
-            return await self.send_error("Missing message type", msg_id)
+    async def handle_message_json(self, data: object) -> None:
+        message = _parse_inbound_message(data)
+        if not message.message_type:
+            await self.send_error("Missing message type", message.msg_id)
+            return
 
-        # Normalize handler name: explorer:list -> handle_explorer_list
-        handler_name = f"handle_{msg_type.replace(':', '_')}"
-        handler = getattr(self, handler_name, None)
-
-        if not handler:
-            logger.warning(f"Unknown message type: {msg_type}")
-            return await self.send_error(f"Unknown command: {msg_type}", msg_id)
-
-        try:
-            # Refresh context (in case it changed globally, though we track per-socket)
-            # Actually, per-socket tracking is safer for multi-project support later.
-            # For now, self.project_root is authoritative for THIS socket.
-            await handler(payload, msg_id)
-        except Exception as e:
-            logger.exception(f"Error handling {msg_type}")
-            await self.send_error(str(e), msg_id)
-
-    async def handle_message_json(self, data: dict):
-        msg_type = data.get("type") if isinstance(data, dict) else None
-        payload = data.get("payload", {}) if isinstance(data, dict) else {}
-        msg_id = data.get("id") if isinstance(data, dict) else None
-
-        if not msg_type:
-            return await self.send_error("Missing message type", msg_id)
-
-        handler_name = f"handle_{msg_type.replace(':', '_')}"
-        handler = getattr(self, handler_name, None)
-
-        if not handler:
-            logger.warning(f"Unknown message type: {msg_type}")
-            return await self.send_error(f"Unknown command: {msg_type}", msg_id)
+        handler = self._resolve_handler(message.message_type)
+        if handler is None:
+            logger.warning("Unknown message type: %s", message.message_type)
+            await self.send_error(
+                f"Unknown command: {message.message_type}",
+                message.msg_id,
+            )
+            return
 
         try:
-            await handler(payload, msg_id)
+            await handler(message.payload, message.msg_id)
         except Exception as e:
-            logger.exception(f"Error handling {msg_type}")
-            await self.send_error(str(e), msg_id)
+            logger.exception("Error handling %s", message.message_type)
+            await self.send_error(str(e), message.msg_id)
 
     # --- Handlers ---
 
-    async def handle_explorer_list(self, payload: dict, msg_id: str):
-        rel = payload.get("rel", ".")
+    async def handle_explorer_list(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        rel_obj = payload.get("rel")
+        rel = rel_obj if isinstance(rel_obj, str) and rel_obj else "."
         try:
             data = await asyncio.to_thread(list_dir, rel)
             # This is a personal response (lazy load), not a broadcast
@@ -479,7 +370,12 @@ class ExplorerDispatcher:
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
-    async def handle_explorer_refresh(self, payload: dict, msg_id: Optional[str]):
+    async def handle_explorer_refresh(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        del payload, msg_id
         # Refresh everything
         mark_git_cache_dirty(self.project_root)
         await self.broadcast_git_status()
@@ -489,11 +385,12 @@ class ExplorerDispatcher:
         data = await asyncio.to_thread(list_dir, '.')
         await self.broadcast("explorer:setList", data)
 
-    async def handle_cm6_mirror(self, payload: dict, msg_id: str):
+    async def handle_cm6_mirror(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
         """Relay live CM6 buffer mirroring payloads to connected clients."""
-        if not isinstance(payload, dict):
-            return await self.send_error("Invalid payload", msg_id)
-
         path = payload.get("path")
         content = payload.get("content")
         if not isinstance(path, str) or not path:
@@ -507,7 +404,11 @@ class ExplorerDispatcher:
         if msg_id:
             await self.emit_personal("cm6:mirror:ack", {"ok": True}, msg_id)
 
-    async def handle_mention_agent(self, payload: dict, msg_id: str):
+    async def handle_mention_agent(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
         """Relay a file mention to the agent via /sidebar_ipc."""
         path = payload.get("path")
         if not isinstance(path, str) or not path.strip():
@@ -515,12 +416,14 @@ class ExplorerDispatcher:
         try:
             from .ui_ipc.ui_ipc_socketio import UI_IPC_SIO
 
-            mention_payload = {"path": path.strip(), "source": "explorer"}
+            ui_ipc_sio = cast(SocketIOEmitter, UI_IPC_SIO)
+            mention_payload: JsonObject = {"path": path.strip(), "source": "explorer"}
             for key in ("lineNo", "endLineNo", "col", "endCol", "content"):
-                if payload.get(key) is not None:
-                    mention_payload[key] = payload[key]
+                value = payload.get(key)
+                if value is not None:
+                    mention_payload[key] = value
 
-            await UI_IPC_SIO.emit(
+            await ui_ipc_sio.emit(
                 "sidebar:mention",
                 mention_payload,
                 namespace="/sidebar_ipc",
@@ -531,11 +434,16 @@ class ExplorerDispatcher:
             logger.warning(f"[mention:agent] relay failed: {exc}")
             return await self.send_error(f"Mention relay failed: {exc}", msg_id)
 
-    async def handle_explorer_setOpenDirs(self, payload: dict, msg_id: str):
+    async def handle_explorer_setOpenDirs(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
         """Persist the list of open directories in explorer tree."""
-        dirs = payload.get("dirs", [])
-        if not isinstance(dirs, list):
-            dirs = []
+        del msg_id
+        dirs_obj = payload.get("dirs")
+        dirs_items = cast(list[object], dirs_obj) if isinstance(dirs_obj, list) else []
+        dirs = [entry for entry in dirs_items if isinstance(entry, str)]
         try:
             sidecar = ProjectSidecar.load_or_create(str(self.project_root))
             sidecar.set_open_directories(dirs)
@@ -543,135 +451,86 @@ class ExplorerDispatcher:
         except Exception as e:
             logger.warning(f"Failed to save open directories: {e}")
 
-    async def handle_watcher_raiseLimit(self, payload: dict, msg_id: str):
-        limit = payload.get("limit", 524288)
-        password = payload.get("password", "")
-        try:
-            limit_int = int(limit)
-        except Exception:
-            limit_int = 524288
-
-        cmd = ["sudo", "-S", "sysctl", "-w", f"fs.inotify.max_user_watches={limit_int}"]
-
-        def _run():
-            return subprocess.run(
-                cmd,
-                input=(password + "\n") if isinstance(password, str) else "\n",
-                text=True,
-                capture_output=True,
-                timeout=15,
-            )
+    async def handle_watcher_raiseLimit(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.watcher import (
+            ExplorerWatcherContractError,
+            parse_watcher_raise_limit_params,
+        )
+        from .explorer.handlers.watcher import (
+            handle_watcher_raise_limit as handle_watcher_raise_limit_request,
+        )
 
         try:
-            result = await asyncio.to_thread(_run)
-            ok = result.returncode == 0
-            out_payload = {
-                "ok": ok,
-                "code": result.returncode,
-                "stdout": (result.stdout or "").strip(),
-                "stderr": (result.stderr or "").strip(),
-            }
-        except Exception as e:
-            out_payload = {
-                "ok": False,
-                "code": -1,
-                "stdout": "",
-                "stderr": str(e),
-            }
+            params = parse_watcher_raise_limit_params(payload)
+        except ExplorerWatcherContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-        await self.emit_personal("watcher:raiseResult", out_payload, msg_id)
+        await handle_watcher_raise_limit_request(
+            self._build_watcher_context(),
+            params,
+            msg_id,
+        )
 
-        # On successful raise, resubscribe the IPC watcher and stop watchexec if running
-        if out_payload.get("ok"):
-            try:
-                from .workbench_adapter_shell_manager import adapter_rpc
-                await adapter_rpc("adapter.resubscribeWatcher")
-                logger.info("[watcher] resubscribed IPC watcher after inotify raise")
-            except Exception as e:
-                logger.warning(f"[watcher] resubscribe after raise failed: {e}")
-            try:
-                from .watchexec_shell_manager import stop_watchexec_shell
-                await stop_watchexec_shell()
-            except Exception:
-                pass
+    async def handle_watcher_setMode(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.watcher import (
+            ExplorerWatcherContractError,
+            parse_watcher_set_mode_params,
+        )
+        from .explorer.handlers.watcher import (
+            handle_watcher_set_mode as handle_watcher_set_mode_request,
+        )
 
-    async def handle_watcher_setMode(self, payload: dict, msg_id: str):
-        """Persist watcher mode and start/stop watchexec as needed."""
-        mode = payload.get("mode", "ipc")
-        storage_type = payload.get("storage_type", "ssd")
-        if mode not in ("ipc", "watchexec", "none"):
-            return await self.send_error(f"Invalid watcher mode: {mode}", msg_id)
-        if storage_type not in ("ssd", "hdd"):
-            storage_type = "ssd"
-
-        poll_ms = 1500 if storage_type == "ssd" else 4500
-
-        # Persist to sidecar
         try:
-            sidecar = ProjectSidecar.load_or_create(str(self.project_root))
-            watcher_cfg = sidecar._data.get("watcher", {})
-            watcher_cfg["mode"] = mode
-            watcher_cfg["storage_type"] = storage_type
-            watcher_cfg["poll_interval_ms"] = poll_ms
-            sidecar._data["watcher"] = watcher_cfg
-            sidecar.save()
-        except Exception as e:
-            logger.warning(f"[watcher] failed to persist mode: {e}")
+            params = parse_watcher_set_mode_params(payload)
+        except ExplorerWatcherContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-        # Sync VS Code's built-in watcher exclusion to match
+        await handle_watcher_set_mode_request(
+            self._build_watcher_context(),
+            params,
+            msg_id,
+        )
+
+    async def handle_watcher_getConfig(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.watcher import (
+            ExplorerWatcherContractError,
+            parse_watcher_get_config_params,
+        )
+        from .explorer.handlers.watcher import (
+            handle_watcher_get_config as handle_watcher_get_config_request,
+        )
+
         try:
-            from .code_server_shell_manager import sync_vscode_watcher_settings
-            sync_vscode_watcher_settings(mode)
-        except Exception as e:
-            logger.warning(f"[watcher] failed to sync vscode watcher settings: {e}")
+            params = parse_watcher_get_config_params(payload)
+        except ExplorerWatcherContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-        # Apply the mode
-        from .watchexec_shell_manager import stop_watchexec_shell, ensure_watchexec_shell
+        await handle_watcher_get_config_request(
+            self._build_watcher_context(),
+            params,
+            msg_id,
+        )
 
-        if mode == "watchexec":
-            try:
-                shell = await ensure_watchexec_shell(str(self.project_root), poll_ms)
-                ok = shell is not None
-            except Exception as e:
-                logger.warning(f"[watcher] failed to start watchexec: {e}")
-                ok = False
-            await self.emit_personal("watcher:modeStatus", {
-                "mode": mode, "storage_type": storage_type,
-                "poll_interval_ms": poll_ms, "active": ok,
-            }, msg_id)
-        else:
-            # Stop watchexec for both "ipc" and "none" modes
-            try:
-                await stop_watchexec_shell()
-            except Exception:
-                pass
-            await self.emit_personal("watcher:modeStatus", {
-                "mode": mode, "storage_type": storage_type,
-                "poll_interval_ms": poll_ms, "active": True,
-            }, msg_id)
-
-        # Broadcast mode change to all clients so explorer can show/hide refresh button
-        await self.broadcast("watcher:modeChanged", {"mode": mode})
-
-    async def handle_watcher_getConfig(self, payload: dict, msg_id: str):
-        """Return current watcher config + watchexec availability."""
-        from .watchexec_shell_manager import is_watchexec_available
-        try:
-            sidecar = ProjectSidecar.load_or_create(str(self.project_root))
-            watcher_cfg = sidecar._data.get("watcher", {})
-        except Exception:
-            watcher_cfg = {}
-        await self.emit_personal("watcher:config", {
-            "mode": watcher_cfg.get("mode", "ipc"),
-            "storage_type": watcher_cfg.get("storage_type", "ssd"),
-            "poll_interval_ms": watcher_cfg.get("poll_interval_ms", 1500),
-            "watchexec_available": is_watchexec_available(),
-        }, msg_id)
-
-    async def handle_prefs_updateUi(self, payload: dict, msg_id: str):
+    async def handle_prefs_updateUi(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
         """Update a single UI preference key via PreferenceStore (backend owns defaults)."""
         key = payload.get("key")
-        value = payload.get("value")
+        value: object = payload.get("value")
 
         if not isinstance(key, str) or not key.strip():
             return await self.send_error("prefs:updateUi requires 'key' (string)", msg_id)
@@ -679,7 +538,7 @@ class ExplorerDispatcher:
         if key not in DEFAULT_UI_PREFS:
             return await self.send_error(f"Unknown UI preference key: {key}", msg_id)
 
-        expected = DEFAULT_UI_PREFS[key]
+        expected = cast(object, DEFAULT_UI_PREFS[key])
         if isinstance(expected, bool):
             if not isinstance(value, bool):
                 # Accept a few common serializations to be resilient.
@@ -723,13 +582,15 @@ class ExplorerDispatcher:
                     msg_id,
                 )
             if key == "agentShortcuts":
-                cleaned = []
-                if len(value) > 64:
+                cleaned: list[JsonObject] = []
+                shortcut_values = cast(list[object], value)
+                if len(shortcut_values) > 64:
                     return await self.send_error("agentShortcuts max length is 64", msg_id)
-                for idx, raw in enumerate(value):
+                for idx, raw in enumerate(shortcut_values):
                     if not isinstance(raw, dict):
                         return await self.send_error(f"agentShortcuts[{idx}] must be an object", msg_id)
-                    shortcut_kind = raw.get("kind")
+                    raw_dict = cast(JsonObject, raw)
+                    shortcut_kind = raw_dict.get("kind")
                     if not isinstance(shortcut_kind, str):
                         return await self.send_error(
                             f"agentShortcuts[{idx}].kind must be a string",
@@ -742,7 +603,7 @@ class ExplorerDispatcher:
                             msg_id,
                         )
 
-                    app_id = raw.get("app_id")
+                    app_id = raw_dict.get("app_id")
                     app_id_clean = ""
                     if shortcut_kind == "framework_app":
                         if not isinstance(app_id, str) or not app_id.strip():
@@ -751,18 +612,18 @@ class ExplorerDispatcher:
                                 msg_id,
                             )
                         app_id_clean = app_id.strip()
-                    label = raw.get("label")
-                    url = raw.get("url")
+                    label = raw_dict.get("label")
+                    url = raw_dict.get("url")
                     if not isinstance(label, str) or not label.strip():
                         return await self.send_error(f"agentShortcuts[{idx}].label is required", msg_id)
                     if not isinstance(url, str) or not url.strip():
                         return await self.send_error(f"agentShortcuts[{idx}].url is required", msg_id)
-                    sid = raw.get("id")
+                    sid = raw_dict.get("id")
                     if isinstance(sid, str) and sid.strip():
                         sid = sid.strip()
                     else:
                         sid = f"sc_{idx}"
-                    load = raw.get("load")
+                    load = raw_dict.get("load")
                     if load is None or (isinstance(load, str) and not load.strip()):
                         load = "lazy"
                     elif isinstance(load, str):
@@ -777,19 +638,20 @@ class ExplorerDispatcher:
                             f"agentShortcuts[{idx}].load must be 'lazy' or 'eager'",
                             msg_id,
                         )
-                    icon = raw.get("icon")
-                    icon_clean = None
+                    icon = raw_dict.get("icon")
+                    icon_clean: JsonObject | None = None
                     if icon is not None:
-                        if not isinstance(icon, dict):
+                        icon_dict = _as_json_object(icon)
+                        if icon_dict is None:
                             return await self.send_error(f"agentShortcuts[{idx}].icon must be an object", msg_id)
-                        icon_kind = icon.get("kind")
+                        icon_kind = icon_dict.get("kind")
                         if icon_kind == "emoji":
-                            emoji = icon.get("emoji")
+                            emoji = icon_dict.get("emoji")
                             if not isinstance(emoji, str) or not emoji.strip():
                                 return await self.send_error(f"agentShortcuts[{idx}].icon.emoji is required", msg_id)
                             icon_clean = {"kind": "emoji", "emoji": emoji.strip()}
                         elif icon_kind == "asset":
-                            name = icon.get("name")
+                            name = icon_dict.get("name")
                             if not isinstance(name, str) or not name.strip():
                                 return await self.send_error(f"agentShortcuts[{idx}].icon.name is required", msg_id)
                             icon_clean = {"kind": "asset", "name": name.strip()}
@@ -798,9 +660,9 @@ class ExplorerDispatcher:
                                 f"agentShortcuts[{idx}].icon.kind must be 'emoji' or 'asset'",
                                 msg_id,
                             )
-                    header_flag = raw.get("header")
+                    header_flag = raw_dict.get("header")
                     header_clean = bool(header_flag) if header_flag is not None else False
-                    last_used = raw.get("last_used")
+                    last_used = raw_dict.get("last_used")
                     last_used_clean = 0
                     if isinstance(last_used, (int, float)):
                         if last_used >= 0:
@@ -826,17 +688,22 @@ class ExplorerDispatcher:
             )
 
         try:
-            updated = _preferences_store.update_preferences(ui={key: value})
+            updated = cast(JsonObject, PREFERENCES_STORE.update_preferences(ui={key: value}))
         except Exception as e:
             logger.warning(f"Failed to update UI preference {key}: {e}")
             return await self.send_error(str(e), msg_id)
 
-        ui_prefs = updated.get("ui") or {}
+        ui_prefs = _as_json_object(updated.get("ui")) or {}
         await self.broadcast("prefs:setUi", {"ui": ui_prefs})
 
-    async def handle_prefs_vendorAgentIcon(self, payload: dict, msg_id: str):
+    async def handle_prefs_vendorAgentIcon(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
         """Copy an icon asset into the global agent icon cache directory and return its name."""
-        abs_path = payload.get("abs_path") or payload.get("path")
+        abs_path_obj = payload.get("abs_path") or payload.get("path")
+        abs_path = abs_path_obj if isinstance(abs_path_obj, str) else None
         if not isinstance(abs_path, str) or not abs_path.strip():
             return await self.send_error("prefs:vendorAgentIcon requires abs_path", msg_id)
 
@@ -881,493 +748,340 @@ class ExplorerDispatcher:
 
     # --- File Operations (Broadcasts updates) ---
 
-    async def handle_explorer_createFile(self, payload: dict, msg_id: str):
-        parent_rel = _payload_str(payload, "parent_rel", ".") or "."
-        name = _payload_str(payload, "name")
-        if not name:
-            return await self.send_error("File name required", msg_id)
-        res = create_file(parent_rel, name)
-        await self.broadcast("explorer:created", res)
-        # Implicitly refresh parent dir? Client should request or we push?
-        # Ideally we push the updated list of the parent.
-        parent_list = await asyncio.to_thread(list_dir, parent_rel)
-        await self.broadcast("explorer:setList", parent_list)
-
-    async def handle_explorer_createDir(self, payload: dict, msg_id: str):
-        parent_rel = _payload_str(payload, "parent_rel", ".") or "."
-        name = _payload_str(payload, "name")
-        if not name:
-            return await self.send_error("Directory name required", msg_id)
-        res = create_directory(parent_rel, name)
-        await self.broadcast("explorer:created", res)
-        parent_list = await asyncio.to_thread(list_dir, parent_rel)
-        await self.broadcast("explorer:setList", parent_list)
-
-    async def handle_explorer_rename(self, payload: dict, msg_id: str):
-        rel = _payload_str(payload, "rel")
-        new_name = _payload_str(payload, "new_name")
-        if not rel or not new_name:
-            return await self.send_error("Rename requires rel and new_name", msg_id)
-        parent_rel = _get_parent_rel(rel)
-        res = rename_entry(rel, new_name)
-        await self.broadcast("explorer:renamed", res)
-        # Refresh parent directory
-        await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
-
-    async def handle_explorer_delete(self, payload: dict, msg_id: str):
-        rel = _payload_str(payload, "rel")
-        if not rel:
-            return await self.send_error("Delete requires rel", msg_id)
-        parent_rel = _get_parent_rel(rel)
-        res = delete_entry(rel)
-        await self.broadcast("explorer:deleted", res)
-        # Refresh the parent directory to reflect deletion
-        await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
-        # Update git status
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
-
-    async def handle_explorer_batchDelete(self, payload: dict, msg_id: str):
-        rels = _payload_str_list(payload, "rels")
-        res = batch_delete(rels)
-        await self.broadcast("explorer:batchDeleted", res)
-        # Collect unique parent directories and refresh each
-        parent_rels = set(_get_parent_rel(r) for r in rels)
-        for parent_rel in parent_rels:
-            try:
-                await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
-            except Exception:
-                pass  # Directory may no longer exist
-        # Update git status
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
-
-    async def handle_explorer_batchCopy(self, payload: dict, msg_id: str):
-        rels = _payload_str_list(payload, "rels")
-        dest_path = _payload_str(payload, "dest_path")
-        if not dest_path:
-            return await self.send_error("Batch copy requires dest_path", msg_id)
-        res = batch_copy(rels, dest_path)
-        await self.broadcast("explorer:batchCopied", res)
-        # Refresh destination directory (source unchanged for copy)
-        dest_rel = _get_rel_from_abs(dest_path, self.project_root)
-        try:
-            await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, dest_rel))
-        except Exception:
-            pass
-
-    async def handle_explorer_batchMove(self, payload: dict, msg_id: str):
-        rels = _payload_str_list(payload, "rels")
-        dest_path = _payload_str(payload, "dest_path")
-        if not dest_path:
-            return await self.send_error("Batch move requires dest_path", msg_id)
-        res = batch_move(rels, dest_path)
-        await self.broadcast("explorer:batchMoved", res)
-        # Refresh source parent directories and destination
-        parent_rels = set(_get_parent_rel(r) for r in rels)
-        dest_rel = _get_rel_from_abs(dest_path, self.project_root)
-        parent_rels.add(dest_rel)
-        for parent_rel in parent_rels:
-            try:
-                await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
-            except Exception:
-                pass
-
-    async def handle_explorer_editor_open(self, payload: dict, msg_id: str):
-        raw_path = _payload_str(payload, "path") or _payload_str(payload, "abs") or _payload_str(payload, "file") or _payload_str(payload, "rel")
-        if not raw_path:
-            return await self.send_error("Open requires path", msg_id)
-
-        if raw_path.startswith("/"):
-            abs_path = str(Path(raw_path).expanduser())
-        else:
-            abs_path = str((Path(self.project_root) / raw_path.lstrip("/")).expanduser())
-
-        open_payload: dict[str, Any] = {
-            "path": abs_path,
-            "source": payload.get("source") or "explorer_rpc",
-        }
-        line = payload.get("line")
-        column = payload.get("column")
-        if isinstance(line, str) and line.isdigit():
-            line = int(line)
-        if isinstance(column, str) and column.isdigit():
-            column = int(column)
-        if isinstance(line, int) and line >= 1:
-            open_payload["line"] = line
-        if isinstance(column, int) and column >= 1:
-            open_payload["column"] = column
-        if isinstance(payload.get("focus"), bool):
-            open_payload["focus"] = payload.get("focus")
-        if isinstance(payload.get("scrollY"), str):
-            open_payload["scroll_y"] = payload.get("scrollY")
-        if isinstance(payload.get("scroll_y"), str):
-            open_payload["scroll_y"] = payload.get("scroll_y")
-        if isinstance(payload.get("scrollToTop"), bool):
-            open_payload["scroll_to_top"] = payload.get("scrollToTop")
-        if isinstance(payload.get("scroll_to_top"), bool):
-            open_payload["scroll_to_top"] = payload.get("scroll_to_top")
-
-        from .monaco_editor.editor_ws import emit_editor_open_from_backend
-
-        request_id = msg_id if isinstance(msg_id, str) and msg_id else f"explorer_{int(time.time() * 1000)}"
-        await emit_editor_open_from_backend(
-            open_payload,
-            source_client="explorer_rpc",
-            request_id=request_id,
+    async def handle_explorer_createFile(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_create_file_params,
         )
+        from .explorer.handlers.file_tree import handle_create_file
 
-    async def handle_explorer_move(self, payload: dict, msg_id: str):
-        rel = _payload_str(payload, "rel")
-        dest_path = _payload_str(payload, "dest_path")
-        if not rel or not dest_path:
-            return await self.send_error("Move requires rel and dest_path", msg_id)
-        source_parent = _get_parent_rel(rel)
-        res = move_entry(rel, dest_path)
-        await self.broadcast("explorer:moved", res)
-        # Refresh source parent and destination
-        dest_rel = _get_rel_from_abs(dest_path, self.project_root)
-        for parent_rel in set([source_parent, dest_rel]):
-            try:
-                await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, parent_rel))
-            except Exception:
-                pass
-
-    async def handle_explorer_copy(self, payload: dict, msg_id: str):
-        rel = _payload_str(payload, "rel")
-        dest_path = _payload_str(payload, "dest_path")
-        if not rel or not dest_path:
-            return await self.send_error("Copy requires rel and dest_path", msg_id)
-        res = copy_entry(rel, dest_path)
-        await self.broadcast("explorer:copied", res)
-        # Refresh destination directory only (source unchanged)
-        dest_rel = _get_rel_from_abs(dest_path, self.project_root)
         try:
-            await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, dest_rel))
-        except Exception:
-            pass
+            params = parse_create_file_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-    async def handle_explorer_copyFrom(self, payload: dict, msg_id: str):
-        dest_rel = _payload_str(payload, "dest_rel")
-        source_path = _payload_str(payload, "source_path")
-        if not source_path or not dest_rel:
-            return await self.send_error("Copy-from requires source_path and dest_rel", msg_id)
-        res = copy_entry_inbound(source_path, dest_rel)
-        await self.broadcast("explorer:copied", res)
-        # Refresh destination directory
-        try:
-            await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, dest_rel))
-        except Exception:
-            pass
+        await handle_create_file(self._build_file_tree_context(), params, msg_id)
 
-    async def handle_explorer_moveFrom(self, payload: dict, msg_id: str):
-        dest_rel = _payload_str(payload, "dest_rel")
-        source_path = _payload_str(payload, "source_path")
-        if not source_path or not dest_rel:
-            return await self.send_error("Move-from requires source_path and dest_rel", msg_id)
-        res = move_entry_inbound(source_path, dest_rel)
-        await self.broadcast("explorer:moved", res)
-        # Refresh destination directory
+    async def handle_explorer_createDir(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_create_dir_params,
+        )
+        from .explorer.handlers.file_tree import handle_create_dir
+
         try:
-            await self.broadcast("explorer:setList", await asyncio.to_thread(list_dir, dest_rel))
-        except Exception:
-            pass
+            params = parse_create_dir_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_create_dir(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_rename(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_rename_entry_params,
+        )
+        from .explorer.handlers.file_tree import handle_rename_entry
+
+        try:
+            params = parse_rename_entry_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_rename_entry(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_delete(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_delete_entry_params,
+        )
+        from .explorer.handlers.file_tree import handle_delete_entry
+
+        try:
+            params = parse_delete_entry_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_delete_entry(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_batchDelete(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import parse_batch_delete_params
+        from .explorer.handlers.file_tree import handle_batch_delete
+
+        params = parse_batch_delete_params(payload)
+        await handle_batch_delete(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_batchCopy(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_batch_copy_params,
+        )
+        from .explorer.handlers.file_tree import handle_batch_copy
+
+        try:
+            params = parse_batch_copy_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_batch_copy(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_batchMove(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_batch_move_params,
+        )
+        from .explorer.handlers.file_tree import handle_batch_move
+
+        try:
+            params = parse_batch_move_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_batch_move(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_editor_open(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_editor_open_params,
+        )
+        from .explorer.handlers.file_tree import handle_editor_open
+
+        try:
+            params = parse_editor_open_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_editor_open(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_move(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_entry_move_params,
+        )
+        from .explorer.handlers.file_tree import handle_move_entry
+
+        try:
+            params = parse_entry_move_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_move_entry(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_copy(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_entry_copy_params,
+        )
+        from .explorer.handlers.file_tree import handle_copy_entry
+
+        try:
+            params = parse_entry_copy_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_copy_entry(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_copyFrom(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_entry_copy_from_params,
+        )
+        from .explorer.handlers.file_tree import handle_copy_from
+
+        try:
+            params = parse_entry_copy_from_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_copy_from(self._build_file_tree_context(), params, msg_id)
+
+    async def handle_explorer_moveFrom(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.file_tree import (
+            ExplorerFileTreeContractError,
+            parse_entry_move_from_params,
+        )
+        from .explorer.handlers.file_tree import handle_move_from
+
+        try:
+            params = parse_entry_move_from_params(payload)
+        except ExplorerFileTreeContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_move_from(self._build_file_tree_context(), params, msg_id)
 
     # --- Git Operations (Broadcasts Status) ---
 
-    async def handle_git_status(self, payload: dict, msg_id: str):
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
+    async def handle_git_status(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_status_params
+        from .explorer.handlers.git import handle_git_status
 
-    async def handle_git_stage(self, payload: dict, msg_id: str):
-        stage_paths(self.project_root, payload.get("paths", []))
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
+        params = parse_git_status_params(payload)
+        await handle_git_status(self._build_git_context(), params, msg_id)
 
-    async def handle_git_unstage(self, payload: dict, msg_id: str):
-        unstage_paths(self.project_root, payload.get("paths", []))
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
+    async def handle_git_stage(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_stage_params
+        from .explorer.handlers.git import handle_git_stage
 
-    async def handle_git_stageAll(self, payload: dict, msg_id: str):
-        git_stage_all(self.project_root)
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
+        params = parse_git_stage_params(payload)
+        await handle_git_stage(self._build_git_context(), params, msg_id)
 
-    async def handle_git_unstageAll(self, payload: dict, msg_id: str):
-        git_unstage_all(self.project_root)
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
+    async def handle_git_unstage(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_unstage_params
+        from .explorer.handlers.git import handle_git_unstage
 
-    async def handle_git_restore(self, payload: dict, msg_id: str):
-        path = _payload_str(payload, "path")
-        commit = _payload_str(payload, "commit", "HEAD") or "HEAD"
-        if not path:
-            return await self.send_error("Restore requires path", msg_id)
-        restore_path(self.project_root, path, commit)
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast("git:restored", {"path": path})
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
+        params = parse_git_unstage_params(payload)
+        await handle_git_unstage(self._build_git_context(), params, msg_id)
 
-    async def handle_git_commit(self, payload: dict, msg_id: str):
-        message = _payload_str(payload, "message")
-        if not message:
-            return await self.send_error("Commit message required", msg_id)
-        commit_changes(self.project_root, message, bool(payload.get("amend", False)))
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
-        # After commit, HEAD has moved - notify clients to refresh their diff base display
-        await self.broadcast("git:diffBaseSet", {"ref": "HEAD", "refresh": True})
+    async def handle_git_stageAll(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_stage_all_params
+        from .explorer.handlers.git import handle_git_stage_all
 
-    async def handle_git_push(self, payload: dict, msg_id: str):
-        """Create a git_push job for progress tracking."""
-        logger.info(f"[GIT_PUSH] Starting push job for {self.project_root}")
+        params = parse_git_stage_all_params(payload)
+        await handle_git_stage_all(self._build_git_context(), params, msg_id)
+
+    async def handle_git_unstageAll(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_unstage_all_params
+        from .explorer.handlers.git import handle_git_unstage_all
+
+        params = parse_git_unstage_all_params(payload)
+        await handle_git_unstage_all(self._build_git_context(), params, msg_id)
+
+    async def handle_git_restore(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import (
+            ExplorerGitContractError,
+            parse_git_restore_params,
+        )
+        from .explorer.handlers.git import handle_git_restore
+
         try:
-            from app.libs.jobs import manager as job_manager
-            job = job_manager.create_job("git_push", {
-                "repo_path": str(self.project_root),
-                "remote": payload.get("remote", "origin"),
-                "branch": payload.get("branch"),
-                "force": payload.get("force", False),
-            })
-            logger.info(f"[GIT_PUSH] Created job {job.id}, tracking it")
-            # Track this job so we forward its progress events
-            self._tracked_job_ids.add(job.id)
-            try:
-                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
-                sidecar.add_tracked_job(job.id)
-                sidecar.save()
-            except Exception:
-                pass
-            # Acknowledge job creation - progress will come via job:progress events
-            await self.emit_personal("git:pushStarted", {"job_id": job.id}, msg_id)
-        except Exception as e:
-            logger.exception(f"[GIT_PUSH] Failed to create job: {e}")
-            await self.send_error(f"Failed to start push: {e}", msg_id)
+            params = parse_git_restore_params(payload)
+        except ExplorerGitContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-    async def handle_git_pull(self, payload: dict, msg_id: str):
-        """Create a git_pull job for progress tracking."""
+        await handle_git_restore(self._build_git_context(), params, msg_id)
+
+    async def handle_git_commit(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import (
+            ExplorerGitContractError,
+            parse_git_commit_params,
+        )
+        from .explorer.handlers.git import handle_git_commit
+
         try:
-            from app.libs.jobs import manager as job_manager
-            job = job_manager.create_job("git_pull", {
-                "repo_path": str(self.project_root),
-                "remote": payload.get("remote", "origin"),
-                "branch": payload.get("branch"),
-                "rebase": payload.get("rebase", False),
-            })
-            # Track this job so we forward its progress events
-            self._tracked_job_ids.add(job.id)
-            try:
-                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
-                sidecar.add_tracked_job(job.id)
-                sidecar.save()
-            except Exception:
-                pass
-            # Acknowledge job creation - progress will come via job:progress events
-            await self.emit_personal("git:pullStarted", {"job_id": job.id}, msg_id)
-        except Exception as e:
-            await self.send_error(f"Failed to start pull: {e}", msg_id)
+            params = parse_git_commit_params(payload)
+        except ExplorerGitContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-    async def handle_git_reset(self, payload: dict, msg_id: str):
-        reset_hard(self.project_root, payload.get("commit", "HEAD"))
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_git_decorations()
+        await handle_git_commit(self._build_git_context(), params, msg_id)
 
-    async def handle_git_init(self, payload: dict, msg_id: str):
-        init_repository(self.project_root)
-        await self.broadcast_git_status()
+    async def handle_git_push(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_push_params
+        from .explorer.handlers.git import handle_git_push
 
-    async def handle_git_setDiffBase(self, payload: dict, msg_id: str):
-        ref = payload.get("ref", "HEAD")
-        # Validate and persist via HistoryStore (SSOT)
-        get_commit_info(self.project_root, ref)  # Validate
-        _history_store.set_diff_base(str(self.project_root), ref)
-        # Inform all clients that the diff base ref changed; full payload
-        # (including commit metadata) is fetched on demand via /git/diff_base
-        await self.broadcast("git:diffBaseSet", {"ref": ref})
-        # Changing base affects status calculation often
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
+        params = parse_git_push_params(payload)
+        await handle_git_push(self._build_git_context(), params, msg_id)
 
-    async def handle_git_listBranches(self, payload: dict, msg_id: str):
-        res = git_list_branches(self.project_root)
-        await self.emit_personal("git:branches", {"current": res.current, "branches": res.branches}, msg_id)
+    async def handle_git_pull(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_pull_params
+        from .explorer.handlers.git import handle_git_pull
 
-    async def handle_git_listCommits(self, payload: dict, msg_id: str):
-        limit = payload.get("limit", 50)
-        commits = git_get_commits(self.project_root, limit)
-        data = [{"hash": c.hash, "short_hash": c.short_hash, "summary": c.summary} for c in commits]
-        await self.emit_personal("git:commits", {"commits": data}, msg_id)
+        params = parse_git_pull_params(payload)
+        await handle_git_pull(self._build_git_context(), params, msg_id)
+
+    async def handle_git_reset(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_reset_params
+        from .explorer.handlers.git import handle_git_reset
+
+        params = parse_git_reset_params(payload)
+        await handle_git_reset(self._build_git_context(), params, msg_id)
+
+    async def handle_git_init(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_init_params
+        from .explorer.handlers.git import handle_git_init
+
+        params = parse_git_init_params(payload)
+        await handle_git_init(self._build_git_context(), params, msg_id)
+
+    async def handle_git_setDiffBase(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_set_diff_base_params
+        from .explorer.handlers.git import handle_git_set_diff_base
+
+        params = parse_git_set_diff_base_params(payload)
+        await handle_git_set_diff_base(self._build_git_context(), params, msg_id)
+
+    async def handle_git_listBranches(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_list_branches_params
+        from .explorer.handlers.git import handle_git_list_branches
+
+        params = parse_git_list_branches_params(payload)
+        await handle_git_list_branches(self._build_git_context(), params, msg_id)
+
+    async def handle_git_listCommits(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_list_commits_params
+        from .explorer.handlers.git import handle_git_list_commits
+
+        params = parse_git_list_commits_params(payload)
+        await handle_git_list_commits(self._build_git_context(), params, msg_id)
 
     # --- Project Operations ---
 
-    async def handle_project_open(self, payload: dict, msg_id: str):
-        path = payload.get("path")
-        if not path:
-            return await self.send_error("Path required", msg_id)
-
-        # Preserve the user-supplied (symlink) path for UI/history identity.
-        display_path = os.path.abspath(os.path.expanduser(str(path)))
-        
-        # Switch project for this dispatcher
-        # Note: This logic is tricky with the ConnectionManager if we switch projects.
-        # We need to unregister from old project and register to new one.
-        
-        old_project = str(self.project_root)
-        manager.disconnect(self.websocket)  # Disconnect from old
-
-        # Stop watchexec fallback if running (old project)
-        try:
-            from .watchexec_shell_manager import stop_watchexec_shell
-            await stop_watchexec_shell()
-        except Exception:
-            pass
-
-        new_root = set_project_root(path)
-        # Persist active project + reset per-project session state
-        was_new_sidecar = await reset_project_session(display_path)
-        self.project_root = new_root
-        
-        # Register to new
-        manager.register_existing(self.websocket, str(new_root))
-
-        # Switch adapter workspace (lightweight — keeps ExtHost alive, re-scopes extensions)
-        try:
-            from .workbench_adapter_shell_manager import adapter_rpc
-            await adapter_rpc("adapter.switchWorkspace", {"folder": str(new_root)})
-            logger.info(f"[project_open] adapter workspace switched to {new_root}")
-        except Exception as e:
-            logger.warning(f"[project_open] adapter switchWorkspace failed: {e}")
-
-        # Start watchexec if this project's sidecar says so
-        try:
-            sidecar = ProjectSidecar.load_or_create(str(new_root))
-            watcher_cfg = sidecar._data.get("watcher", {})
-            if watcher_cfg.get("mode") == "watchexec":
-                from .watchexec_shell_manager import ensure_watchexec_shell
-                poll_ms = watcher_cfg.get("poll_interval_ms", 1500)
-                await ensure_watchexec_shell(str(new_root), poll_ms)
-        except Exception as e:
-            logger.warning(f"[project_open] watchexec start failed: {e}")
-        
-        await self.emit_personal(
-            "project:opened",
-            {"path": display_path, "resolved_path": str(new_root), "new_sidecar": was_new_sidecar},
-            msg_id,
+    async def handle_project_open(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.project import (
+            ExplorerProjectContractError,
+            parse_project_open_params,
         )
-        # Trigger full refresh for this client
+        from .explorer.handlers.project import handle_project_open
+
+        try:
+            params = parse_project_open_params(payload)
+        except ExplorerProjectContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        switch_result = await handle_project_open(self._build_project_context(), params, msg_id)
+        self.project_root = switch_result.project_root
         await self.handle_explorer_refresh({}, msg_id)
 
-    async def handle_project_create(self, payload: dict, msg_id: str):
-        parent_path = _payload_str(payload, "parent_path")
-        name = _payload_str(payload, "name")
-        if not parent_path or not name:
-            return await self.send_error("Project create requires parent_path and name", msg_id)
-        res = create_project(parent_path, name)
-        # Auto open
-        await self.handle_project_open({"path": res["path"]}, msg_id)
+    async def handle_project_create(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.project import (
+            ExplorerProjectContractError,
+            parse_project_create_params,
+        )
+        from .explorer.handlers.project import handle_project_create
 
-    async def handle_project_list(self, payload: dict, msg_id: str):
-        projects = _history_store.list_projects()
-        await self.emit_personal("project:list", {"projects": projects}, msg_id)
-
-    async def handle_git_clone(self, payload: dict, msg_id: str):
-        """
-        Clone a repository into a new directory.
-        
-        Flow:
-        1. Create empty target directory
-        2. Switch project root to that directory (watcher starts)
-        3. Start clone job (clones into the now-current directory)
-        4. Files appear live as checkout happens
-        """
-        url = payload.get("url")
-        target_path = payload.get("target_path")
-        
-        if not url:
-            return await self.send_error("URL is required", msg_id)
-        if not target_path:
-            return await self.send_error("target_path is required", msg_id)
-        
         try:
-            from pathlib import Path
-            from app.libs.jobs import manager as job_manager
-            
-            # Expand ~ and resolve to absolute path for actual filesystem operations,
-            # but preserve the user path for UI identity when possible.
-            target_display = os.path.abspath(os.path.expanduser(str(target_path)))
-            target = Path(target_path).expanduser().resolve()
-            logger.info(f"[GIT_CLONE] Target: {target}")
-            
-            # Step 1: Create the empty directory
-            if target.exists():
-                if any(target.iterdir()):
-                    return await self.send_error(f"Directory '{target}' already exists and is not empty", msg_id)
-                # Empty dir exists, that's fine
-            else:
-                target.mkdir(parents=True, exist_ok=True)
-            
-            # Step 2: Switch project root directly (without full project_open which emits)
-            from .explorer_helper import set_project_root
-            from .core_read import init_watcher
-            
-            manager.disconnect(self.websocket)  # Disconnect from old project
-            
-            new_root = set_project_root(str(target))
-            init_watcher(new_root)  # Start watching the new directory
-            # Persist active project + reset per-project session state
-            was_new_sidecar = await reset_project_session(target_display)
-            self.project_root = new_root
-            
-            manager.register_existing(self.websocket, str(new_root))
-            
-            # Emit project opened so frontend knows
-            await self.emit_personal(
-                "project:opened",
-                {"path": target_display, "resolved_path": str(new_root), "new_sidecar": was_new_sidecar},
-                None,
-            )
-            
-            # Step 3: Start the clone job
-            job_params = {
-                "url": url,
-                "target_path": str(target),
-                "branch": payload.get("branch"),
-                "depth": payload.get("depth"),
-            }
-            
-            job = job_manager.create_job("git_clone", job_params)
-            
-            # Track this job so we forward its progress events
-            # NOTE: Race condition possible - job may emit before we track
-            self._tracked_job_ids.add(job.id)
-            try:
-                sidecar = ProjectSidecar.load_or_create(str(self.project_root))
-                sidecar.add_tracked_job(job.id)
-                sidecar.save()
-            except Exception:
-                pass
-            
-            # Acknowledge job creation - progress will come via job:progress events
-            await self.emit_personal("git:cloneStarted", {"job_id": job.id, "target_path": str(target)}, msg_id)
-            
-        except Exception as e:
-            logger.exception(f"[GIT_CLONE] Failed to start clone: {e}")
-            await self.send_error(f"Failed to start clone: {e}", msg_id)
+            params = parse_project_create_params(payload)
+        except ExplorerProjectContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        switch_result = await handle_project_create(self._build_project_context(), params, msg_id)
+        self.project_root = switch_result.project_root
+        await self.handle_explorer_refresh({}, msg_id)
+
+    async def handle_project_list(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.project import parse_project_list_params
+        from .explorer.handlers.project import handle_project_list
+
+        params = parse_project_list_params(payload)
+        await handle_project_list(self._build_project_context(), params, msg_id)
+
+    async def handle_git_clone(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.project import (
+            ExplorerProjectContractError,
+            parse_git_clone_params,
+        )
+        from .explorer.handlers.project import handle_git_clone
+
+        try:
+            params = parse_git_clone_params(payload)
+        except ExplorerProjectContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        switch_result = await handle_git_clone(self._build_project_context(), params, msg_id)
+        self.project_root = switch_result.project_root
 
     # --- Search & Review (State Events) ---
 
-    async def handle_search_run(self, payload: dict, msg_id: str | None):
+    async def handle_search_run(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (
             ExplorerSearchReviewContractError,
             parse_search_run_params,
@@ -1387,7 +1101,7 @@ class ExplorerDispatcher:
             msg_id,
         )
 
-    async def handle_review_list(self, payload: dict, msg_id: str | None):
+    async def handle_review_list(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (
             ExplorerSearchReviewContractError,
             parse_review_list_params,
@@ -1407,7 +1121,7 @@ class ExplorerDispatcher:
             msg_id,
         )
 
-    async def handle_review_save(self, payload: dict, msg_id: str | None):
+    async def handle_review_save(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (
             ExplorerSearchReviewContractError,
             parse_review_save_params,
@@ -1427,7 +1141,7 @@ class ExplorerDispatcher:
             msg_id,
         )
 
-    async def handle_review_discard(self, payload: dict, msg_id: str | None):
+    async def handle_review_discard(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (
             ExplorerSearchReviewContractError,
             parse_review_discard_params,
@@ -1447,13 +1161,14 @@ class ExplorerDispatcher:
             msg_id,
         )
 
-    async def _notify_editor_draft_cleared(self, rel_files: list):
+    async def _notify_editor_draft_cleared(self, rel_files: list[str]) -> None:
         """Emit editor:cache_state via the editor Socket.IO for cleared drafts."""
         try:
             from .monaco_editor.editor_socketio import EDITOR_SIO
+            editor_sio = cast(SocketIOEmitter, EDITOR_SIO)
             for rel in rel_files:
                 abs_path = str(self.project_root / rel)
-                await EDITOR_SIO.emit(
+                await editor_sio.emit(
                     "editor:cache_state",
                     {
                         "path": abs_path,
@@ -1466,65 +1181,117 @@ class ExplorerDispatcher:
         except Exception:
             pass
 
-    async def handle_pulse_alive(self, payload: dict, msg_id: str):
+    async def handle_pulse_alive(self, payload: JsonObject, msg_id: str | None) -> None:
         """Handle client heartbeat response (silently)."""
-        pass
+        del payload, msg_id
 
     # ── Extension registry handlers ───────────────────────────────────
 
-    async def handle_ext_list(self, payload: dict, msg_id: str):
+    async def handle_ext_list(self, payload: JsonObject, msg_id: str | None) -> None:
         """Return installed extensions + language slots."""
-        from .extension_registry import get_extension_list, get_language_slots
-        await self.emit_personal("ext:list", {
-            "extensions": get_extension_list(),
-            "language_slots": get_language_slots(),
-        }, msg_id)
+        del payload
+        from . import extension_registry as extension_registry
 
-    async def handle_ext_install(self, payload: dict, msg_id: str):
+        get_extension_list = cast(
+            Callable[[], list[JsonObject]],
+            extension_registry.get_extension_list,
+        )
+        get_language_slots = cast(
+            Callable[[], JsonObject],
+            extension_registry.get_language_slots,
+        )
+        await self.emit_personal(
+            "ext:list",
+            {
+                "extensions": get_extension_list(),
+                "language_slots": get_language_slots(),
+            },
+            msg_id,
+        )
+
+    async def handle_ext_install(self, payload: JsonObject, msg_id: str | None) -> None:
         """Install a VSIX extension and return the result + config schema."""
-        from .extension_registry import install_extension, get_extension_config_schema
-        vsix_path = payload.get("vsix_path", "")
+        from . import extension_registry as extension_registry
+
+        install_extension = cast(
+            Callable[[str], JsonObject],
+            extension_registry.install_extension,
+        )
+        get_extension_config_schema = cast(
+            Callable[[str], JsonObject],
+            extension_registry.get_extension_config_schema,
+        )
+        vsix_path_obj = payload.get("vsix_path")
+        vsix_path = vsix_path_obj if isinstance(vsix_path_obj, str) else ""
         if not vsix_path:
             return await self.send_error("vsix_path is required", msg_id)
         try:
             result = await asyncio.to_thread(install_extension, vsix_path)
-            ext = result.get("extension") or {}
-            ext_id = ext.get("id", "")
+            ext = _as_json_object(result.get("extension")) or {}
+            ext_id_obj = ext.get("id")
+            ext_id = ext_id_obj if isinstance(ext_id_obj, str) else ""
             config_schema = get_extension_config_schema(ext_id) if ext_id else {}
-            await self.emit_personal("ext:installed", {
-                "ok": True,
-                "extension": ext,
-                "config_schema": config_schema,
-                "registry_summary": result.get("registry_summary", {}),
-            }, msg_id)
+            registry_summary = _as_json_object(result.get("registry_summary")) or {}
+            await self.emit_personal(
+                "ext:installed",
+                {
+                    "ok": True,
+                    "extension": ext,
+                    "config_schema": config_schema,
+                    "registry_summary": registry_summary,
+                },
+                msg_id,
+            )
             # Kill code-server + adapter so ext host picks up the new extension
             await self._restart_code_server_and_adapter("ext_install")
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
-    async def handle_ext_uninstall(self, payload: dict, msg_id: str):
+    async def handle_ext_uninstall(self, payload: JsonObject, msg_id: str | None) -> None:
         """Uninstall a user-installed extension."""
-        from .extension_registry import uninstall_extension
-        ext_id = payload.get("ext_id", "")
+        from . import extension_registry as extension_registry
+
+        uninstall_extension = cast(
+            Callable[[str], JsonObject],
+            extension_registry.uninstall_extension,
+        )
+        ext_id_obj = payload.get("ext_id")
+        ext_id = ext_id_obj if isinstance(ext_id_obj, str) else ""
         if not ext_id:
             return await self.send_error("ext_id is required", msg_id)
         try:
             result = await asyncio.to_thread(uninstall_extension, ext_id)
-            await self.emit_personal("ext:uninstalled", {
-                "ok": True,
-                "uninstalled_id": ext_id,
-                "registry_summary": result.get("registry_summary", {}),
-            }, msg_id)
+            registry_summary = _as_json_object(result.get("registry_summary")) or {}
+            await self.emit_personal(
+                "ext:uninstalled",
+                {
+                    "ok": True,
+                    "uninstalled_id": ext_id,
+                    "registry_summary": registry_summary,
+                },
+                msg_id,
+            )
             # Kill code-server + adapter so ext host drops the removed extension
             await self._restart_code_server_and_adapter("ext_uninstall")
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
-    async def handle_ext_configure(self, payload: dict, msg_id: str):
+    async def handle_ext_configure(self, payload: JsonObject, msg_id: str | None) -> None:
         """Save configuration values for an extension and rebuild gate."""
-        from .extension_registry import set_extension_config
-        ext_id = payload.get("ext_id", "")
-        values = payload.get("values", {})
+        from . import extension_registry as extension_registry
+
+        set_extension_config = cast(
+            Callable[[str, JsonObject], JsonObject],
+            extension_registry.set_extension_config,
+        )
+        ext_id_obj = payload.get("ext_id")
+        ext_id = ext_id_obj if isinstance(ext_id_obj, str) else ""
+        values_obj = payload.get("values")
+        values = _as_json_object(values_obj)
+        if values_obj is not None and values is None:
+            return await self.send_error("values must be a JSON object", msg_id)
+        if values is None:
+            values = {}
         if not ext_id:
             return await self.send_error("ext_id is required", msg_id)
         try:
@@ -1538,20 +1305,38 @@ class ExplorerDispatcher:
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
-    async def handle_ext_custom_settings_get(self, payload: dict, msg_id: str):
+    async def handle_ext_custom_settings_get(self, payload: JsonObject, msg_id: str | None) -> None:
         """Return user-defined custom settings JSON."""
-        from .extension_registry import get_custom_settings
-        await self.emit_personal("ext:custom_settings_get", {
-            "ok": True,
-            "settings": get_custom_settings(),
-        }, msg_id)
+        del payload
+        from . import extension_registry as extension_registry
 
-    async def handle_ext_custom_settings_set(self, payload: dict, msg_id: str):
+        get_custom_settings = cast(
+            Callable[[], JsonObject],
+            extension_registry.get_custom_settings,
+        )
+        await self.emit_personal(
+            "ext:custom_settings_get",
+            {
+                "ok": True,
+                "settings": get_custom_settings(),
+            },
+            msg_id,
+        )
+
+    async def handle_ext_custom_settings_set(self, payload: JsonObject, msg_id: str | None) -> None:
         """Save user-defined custom settings JSON and rebuild gate."""
-        from .extension_registry import set_custom_settings
-        settings = payload.get("settings", {})
-        if not isinstance(settings, dict):
+        from . import extension_registry as extension_registry
+
+        set_custom_settings = cast(
+            Callable[[JsonObject], None],
+            extension_registry.set_custom_settings,
+        )
+        settings_obj = payload.get("settings")
+        settings = _as_json_object(settings_obj)
+        if settings_obj is not None and settings is None:
             return await self.send_error("settings must be a JSON object", msg_id)
+        if settings is None:
+            settings = {}
         try:
             await asyncio.to_thread(set_custom_settings, settings)
             await self.emit_personal("ext:custom_settings_set", {
@@ -1563,21 +1348,21 @@ class ExplorerDispatcher:
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
-    async def handle_ext_workspace_settings_get(self, payload: dict, msg_id: str):
+    async def handle_ext_workspace_settings_get(self, payload: JsonObject, msg_id: str | None) -> None:
         """Return workspace-scoped .vscode/settings.json for the active project."""
+        del payload
         proj = str(self.project_root) if self.project_root else ""
         if not proj:
             return await self.emit_personal("ext:workspace_settings_get", {
                 "ok": True, "settings": {}, "path": "",
             }, msg_id)
         settings_path = os.path.join(proj, ".vscode", "settings.json")
-        settings = {}
+        settings: JsonObject = {}
         try:
             if os.path.isfile(settings_path):
                 with open(settings_path, "r", encoding="utf-8") as f:
-                    raw = json.loads(f.read())
-                if isinstance(raw, dict):
-                    settings = raw
+                    raw = _load_json_value(f.read())
+                settings = _as_json_object(raw) or {}
         except Exception as e:
             logger.warning(f"[workspace_settings] read error: {e}")
         await self.emit_personal("ext:workspace_settings_get", {
@@ -1586,14 +1371,17 @@ class ExplorerDispatcher:
             "path": settings_path,
         }, msg_id)
 
-    async def handle_ext_workspace_settings_set(self, payload: dict, msg_id: str):
+    async def handle_ext_workspace_settings_set(self, payload: JsonObject, msg_id: str | None) -> None:
         """Save workspace-scoped .vscode/settings.json and restart adapter."""
         proj = str(self.project_root) if self.project_root else ""
         if not proj:
             return await self.send_error("No active project", msg_id)
-        settings = payload.get("settings", {})
-        if not isinstance(settings, dict):
+        settings_obj = payload.get("settings")
+        settings = _as_json_object(settings_obj)
+        if settings_obj is not None and settings is None:
             return await self.send_error("settings must be a JSON object", msg_id)
+        if settings is None:
+            settings = {}
         settings_dir = os.path.join(proj, ".vscode")
         settings_path = os.path.join(settings_dir, "settings.json")
         try:
@@ -1610,12 +1398,24 @@ class ExplorerDispatcher:
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
-    async def handle_ext_toggle(self, payload: dict, msg_id: str):
+    async def handle_ext_toggle(self, payload: JsonObject, msg_id: str | None) -> None:
         """Activate/deactivate an extension or language slot."""
-        from .extension_registry import toggle_extension, toggle_language_slot
-        ext_id = payload.get("ext_id")
-        lang_id = payload.get("lang_id")
-        active = payload.get("active", True)
+        from . import extension_registry as extension_registry
+
+        toggle_extension = cast(
+            Callable[[str, bool], JsonObject],
+            extension_registry.toggle_extension,
+        )
+        toggle_language_slot = cast(
+            Callable[[str, bool], JsonObject],
+            extension_registry.toggle_language_slot,
+        )
+        ext_id_obj = payload.get("ext_id")
+        ext_id = ext_id_obj if isinstance(ext_id_obj, str) else None
+        lang_id_obj = payload.get("lang_id")
+        lang_id = lang_id_obj if isinstance(lang_id_obj, str) else None
+        active_obj = payload.get("active")
+        active = active_obj if isinstance(active_obj, bool) else True
         try:
             if ext_id:
                 toggle_extension(ext_id, active)
@@ -1634,10 +1434,16 @@ class ExplorerDispatcher:
         except Exception as e:
             await self.send_error(str(e), msg_id)
 
-    async def handle_ext_configSchema(self, payload: dict, msg_id: str):
+    async def handle_ext_configSchema(self, payload: JsonObject, msg_id: str | None) -> None:
         """Return the configuration schema for an extension."""
-        from .extension_registry import get_extension_config_schema
-        ext_id = payload.get("ext_id", "")
+        from . import extension_registry as extension_registry
+
+        get_extension_config_schema = cast(
+            Callable[[str], JsonObject],
+            extension_registry.get_extension_config_schema,
+        )
+        ext_id_obj = payload.get("ext_id")
+        ext_id = ext_id_obj if isinstance(ext_id_obj, str) else ""
         if not ext_id:
             return await self.send_error("ext_id is required", msg_id)
         schema = get_extension_config_schema(ext_id)
@@ -1646,14 +1452,15 @@ class ExplorerDispatcher:
             "schema": schema,
         }, msg_id)
 
-    async def handle_ext_restart_adapter(self, payload: dict, msg_id: str):
+    async def handle_ext_restart_adapter(self, payload: JsonObject, msg_id: str | None) -> None:
         """Manual restart of the workbench adapter from the UI."""
+        del payload
         await self._restart_adapter_only("manual")
         await self.emit_personal("ext:adapter_restarted", {"ok": True}, msg_id)
 
     # ── Private restart helpers ──────────────────────────────────────────
 
-    async def _restart_adapter_only(self, reason: str):
+    async def _restart_adapter_only(self, reason: str) -> None:
         """Kill adapter shell and notify frontend to reload iframe."""
         try:
             from .workbench_adapter_shell_manager import terminate_adapter_shell
@@ -1668,7 +1475,7 @@ class ExplorerDispatcher:
             pass
         await self.emit_personal("ext:adapter_restarting", {"reason": reason})
 
-    async def _restart_code_server_and_adapter(self, reason: str):
+    async def _restart_code_server_and_adapter(self, reason: str) -> None:
         """Kill both code-server and adapter, notify frontend."""
         try:
             from .workbench_adapter_shell_manager import terminate_adapter_shell
@@ -1691,7 +1498,7 @@ class ExplorerDispatcher:
 
 # --- WebSocket Endpoint ---
 
-async def explorer_websocket(websocket: WebSocket):
+async def explorer_websocket(websocket: WebSocket) -> None:
     # Dispatcher init now handles accept/connect logic partially, but we need to accept first
     # to read cookies/headers if needed, or just let dispatcher do it.
     # The dispatcher needs an accepted socket.
@@ -1722,15 +1529,14 @@ async def explorer_websocket(websocket: WebSocket):
 
 # --- Socket.IO Namespace Adapter ---
 
-import socketio
 
-
-class ExplorerSocketIONamespace(socketio.AsyncNamespace):
-    def __init__(self, namespace='/explorer'):
+class ExplorerSocketIONamespace(_SocketIOAsyncNamespace):
+    def __init__(self, namespace: str = "/explorer") -> None:
         super().__init__(namespace)
-        self.dispatchers: Dict[str, ExplorerDispatcher] = {}
+        self.dispatchers: dict[str, ExplorerDispatcher] = {}
 
-    async def on_connect(self, sid, environ):
+    async def on_connect(self, sid: str, environ: dict[str, object]) -> None:
+        del environ
         # Create dispatcher with Socket.IO shim
         ws = SocketIOSocketShim(self, sid)
         dispatcher = ExplorerDispatcher(ws)
@@ -1738,22 +1544,23 @@ class ExplorerSocketIONamespace(socketio.AsyncNamespace):
         self.dispatchers[sid] = dispatcher
         logger.info(f"[ExplorerSIO] client connected sid={sid}")
 
-    async def on_disconnect(self, sid, reason=None):
+    async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
         disp = self.dispatchers.pop(sid, None)
-        if disp:
+        if disp is not None:
             await disp.cleanup()
         logger.info(f"[ExplorerSIO] client disconnected sid={sid} reason={reason}")
 
-    async def on_explorer_send(self, sid, data):
+    async def on_explorer_send(self, sid: str, data: object) -> None:
         disp = self.dispatchers.get(sid)
-        if not disp:
+        if disp is None:
             return
         logger.info(f"[ExplorerSIO] recv sid={sid} data={data}")
         if isinstance(data, str):
             try:
-                data = json.loads(data)
-            except Exception:
-                data = None
-        if not isinstance(data, dict):
+                data = _load_json_value(data)
+            except json.JSONDecodeError:
+                return
+        message_data = _as_json_object(data)
+        if message_data is None:
             return
-        await disp.handle_message_json(data)
+        await disp.handle_message_json(message_data)

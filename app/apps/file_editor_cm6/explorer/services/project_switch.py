@@ -1,0 +1,137 @@
+# pyright: strict
+from __future__ import annotations
+
+import importlib
+import logging
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Awaitable, Callable, cast
+
+from ...explorer_helper import set_project_root
+from ...explorer_manager import ExplorerConnection, manager
+from ...project_sidecar import ProjectSidecar
+from ..contracts.watcher import build_watcher_config_payload
+from .project_session import reset_project_session
+
+logger = logging.getLogger(__name__)
+
+AdapterRpc = Callable[[str, dict[str, object] | None, float], Awaitable[object]]
+InitWatcher = Callable[[Path], None]
+EnsureWatchexecShell = Callable[[str, int], Awaitable[object | None]]
+
+
+@dataclass(frozen=True)
+class ExplorerProjectSwitchResult:
+    project_root: Path
+    display_path: str
+    was_new_sidecar: bool
+
+
+async def switch_project_connection(
+    websocket: ExplorerConnection,
+    project_path: str,
+    *,
+    display_path: str | None = None,
+    initialize_watcher: bool,
+    switch_adapter_workspace: bool,
+) -> ExplorerProjectSwitchResult:
+    normalized_display_path = display_path or os.path.abspath(
+        os.path.expanduser(str(project_path))
+    )
+
+    manager.disconnect(websocket)
+
+    try:
+        from ...watchexec_shell_manager import stop_watchexec_shell
+
+        await stop_watchexec_shell()
+    except Exception:
+        pass
+
+    new_root = set_project_root(project_path)
+
+    if initialize_watcher:
+        init_watcher = _get_init_watcher()
+        init_watcher(new_root)
+
+    was_new_sidecar = await reset_project_session(normalized_display_path)
+    manager.register_existing(websocket, str(new_root))
+
+    if switch_adapter_workspace:
+        try:
+            adapter_rpc = _get_adapter_rpc()
+            await adapter_rpc(
+                "adapter.switchWorkspace",
+                {"folder": str(new_root)},
+                30,
+            )
+            logger.info("[project_open] adapter workspace switched to %s", new_root)
+        except Exception as exc:
+            logger.warning(
+                "[project_open] adapter switchWorkspace failed: %s",
+                exc,
+            )
+
+    await _start_project_watchexec_if_needed(new_root)
+
+    return ExplorerProjectSwitchResult(
+        project_root=new_root,
+        display_path=normalized_display_path,
+        was_new_sidecar=was_new_sidecar,
+    )
+
+
+async def _start_project_watchexec_if_needed(project_root: Path) -> None:
+    try:
+        from ...watchexec_shell_manager import is_watchexec_available
+
+        sidecar = ProjectSidecar.load_or_create(str(project_root))
+        sidecar_data = _sidecar_data_dict(sidecar)
+        watcher_config = build_watcher_config_payload(
+            sidecar_data.get("watcher") if sidecar_data is not None else {},
+            watchexec_available=is_watchexec_available(),
+        )
+        if watcher_config["mode"] == "watchexec" and watcher_config["watchexec_available"]:
+            ensure_watchexec_shell = _get_ensure_watchexec_shell()
+            await ensure_watchexec_shell(
+                str(project_root),
+                watcher_config["poll_interval_ms"],
+            )
+    except Exception as exc:
+        logger.warning("[project_open] watchexec start failed: %s", exc)
+
+
+def _sidecar_data_dict(sidecar: ProjectSidecar) -> dict[object, object] | None:
+    data = getattr(sidecar, "_data", None)
+    if not isinstance(data, dict):
+        return None
+    return cast(dict[object, object], data)
+
+
+def _get_adapter_rpc() -> AdapterRpc:
+    adapter_module = importlib.import_module(
+        "app.apps.file_editor_cm6.workbench_adapter_shell_manager"
+    )
+    adapter_rpc_obj = getattr(adapter_module, "adapter_rpc", None)
+    if not callable(adapter_rpc_obj):
+        raise RuntimeError("adapter_rpc unavailable")
+    return cast(AdapterRpc, adapter_rpc_obj)
+
+
+def _get_init_watcher() -> InitWatcher:
+    core_read_module = importlib.import_module("app.apps.file_editor_cm6.core_read")
+    init_watcher_obj = getattr(core_read_module, "init_watcher", None)
+    if not callable(init_watcher_obj):
+        raise RuntimeError("init_watcher unavailable")
+    return cast(InitWatcher, init_watcher_obj)
+
+
+def _get_ensure_watchexec_shell() -> EnsureWatchexecShell:
+    watchexec_module = importlib.import_module(
+        "app.apps.file_editor_cm6.watchexec_shell_manager"
+    )
+    ensure_shell_obj = getattr(watchexec_module, "ensure_watchexec_shell", None)
+    if not callable(ensure_shell_obj):
+        raise RuntimeError("ensure_watchexec_shell unavailable")
+    return cast(EnsureWatchexecShell, ensure_shell_obj)

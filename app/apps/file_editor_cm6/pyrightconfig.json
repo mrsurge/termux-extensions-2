@@ -1,6 +1,7 @@
 {
-  "typeCheckingMode": "basic",
+  "typeCheckingMode": "strict",
   "reportAny": "error",
+  "reportExplicitAny": "error",
   "pythonPlatform": "Linux",
   "executionEnvironments": [
     {
