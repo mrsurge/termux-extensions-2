@@ -10,7 +10,7 @@ EXPLORER_RPC_NOTIFICATION_EVENT = "rpc.notify"
 
 JsonObject = dict[str, object]
 
-LEGACY_REQUEST_TYPE_BY_RPC_METHOD: dict[str, str] = {
+DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.cm6.mirror": "cm6:mirror",
     "explorer.dir.create": "explorer:createDir",
     "explorer.entries.copy": "explorer:batchCopy",
@@ -180,6 +180,14 @@ def build_jsonrpc_notification(method: str, params: JsonObject | None = None) ->
     }
 
 
+def build_jsonrpc_result(request_id: str, result: JsonObject) -> JsonRpcSuccessEnvelope:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": result,
+    }
+
+
 def parse_explorer_rpc_request(payload: object) -> ParsedExplorerRpcRequest:
     envelope = _as_object(payload)
     if envelope is None:
@@ -207,7 +215,7 @@ def parse_explorer_rpc_request(payload: object) -> ParsedExplorerRpcRequest:
     request_id = _coerce_request_id(envelope.get("id"))
     params = normalize_payload(envelope.get("params"))
 
-    if method not in LEGACY_REQUEST_TYPE_BY_RPC_METHOD:
+    if method not in DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD:
         raise ExplorerRpcProtocolError(
             request_id,
             code=-32601,
@@ -234,16 +242,8 @@ def _coerce_request_id(value: object) -> str | None:
     )
 
 
-def legacy_message_from_rpc_request(parsed: ParsedExplorerRpcRequest) -> JsonObject:
-    method = parsed["method"]
-    request_id = parsed["request_id"]
-    message: JsonObject = {
-        "type": LEGACY_REQUEST_TYPE_BY_RPC_METHOD[method],
-        "payload": parsed["params"],
-    }
-    if request_id is not None:
-        message["id"] = request_id
-    return message
+def dispatcher_message_type_from_rpc_method(method: str) -> str:
+    return DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD[method]
 
 
 def rpc_notification_from_legacy_message(message: object) -> JsonRpcNotificationEnvelope | None:
@@ -264,11 +264,7 @@ def rpc_notification_from_legacy_message(message: object) -> JsonRpcNotification
 def build_jsonrpc_success(request_id: str, legacy_message: object) -> JsonRpcSuccessEnvelope:
     legacy = _as_object(legacy_message) or {}
     payload = normalize_payload(legacy.get("payload"))
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "result": payload,
-    }
+    return build_jsonrpc_result(request_id, payload)
 
 
 def build_default_jsonrpc_success(request_id: str) -> JsonRpcSuccessEnvelope:

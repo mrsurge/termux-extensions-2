@@ -279,7 +279,7 @@ export function createExplorerStickyScopes({
     while (stickySlots.length < count) {
       const underlay = document.createElement('div');
       underlay.className = 'fe-sticky-scope-underlay';
-      container.appendChild(underlay);
+      container!.appendChild(underlay);
       stickyUnderlays.push(underlay);
 
       const slot = document.createElement('ul');
@@ -287,7 +287,7 @@ export function createExplorerStickyScopes({
       const li = document.createElement('li');
       li.className = 'fe-tree-node fe-sticky-scope';
       slot.appendChild(li);
-      container.appendChild(slot);
+      container!.appendChild(slot);
       stickySlots.push(slot);
       stickyRows.push(li);
     }
@@ -440,7 +440,7 @@ export function createExplorerStickyScopes({
 
   function applyPushTransforms(): void {
     if (!stickySlots.length || !stickySourceLis.length) return;
-    const containerRect = container.getBoundingClientRect();
+    const containerRect = container!.getBoundingClientRect();
     if (!isElementVisibleRect(containerRect)) return;
     const listTop = containerRect.top + PADDING_TOP;
 
@@ -506,15 +506,15 @@ export function createExplorerStickyScopes({
     // Hide when drawer is closed / not measurable.
     const treeRect = treeElement.getBoundingClientRect();
     if (!isElementVisibleRect(treeRect)) {
-      container.style.display = 'none';
+      container!.style.display = 'none';
       return;
     }
 
-    container.style.display = 'block';
+    container!.style.display = 'block';
 
     const step = computeRowStep();
     if (!step) {
-      container.style.height = '0px';
+      container!.style.height = '0px';
       ensureSlotCount(0);
       stickySourceLis = [];
       return;
@@ -558,7 +558,7 @@ export function createExplorerStickyScopes({
 
     if (!key || chain.length === 0) {
       lastKey = '';
-      container.style.height = '0px';
+      container!.style.height = '0px';
       ensureSlotCount(0);
       stickySourceLis = [];
       lastBottomTranslateY = 0;
@@ -567,7 +567,7 @@ export function createExplorerStickyScopes({
 
     // Set fixed geometry first; render can rely on rowStepPx.
     const contentHeight = chain.length * rowStepPx;
-    container.style.height = `${PADDING_TOP + contentHeight + BOTTOM_SHADOW_PAD_PX}px`;
+    container!.style.height = `${PADDING_TOP + contentHeight + BOTTOM_SHADOW_PAD_PX}px`;
 
     const sameIdentityChain =
       key === lastKey &&

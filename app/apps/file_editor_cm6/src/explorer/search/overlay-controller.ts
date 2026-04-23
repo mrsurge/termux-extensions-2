@@ -467,7 +467,7 @@ export function createExplorerSearchOverlayController(
     const typedPayload = getSearchResultsPayload(payload);
     const payloadMode = typedPayload?.mode;
 
-    if (payloadMode === 'changes' && typedPayload.base) {
+    if (typedPayload && payloadMode === 'changes' && typedPayload.base) {
       deps.setGitDiffBase(normalizeDiffBase(typedPayload.base));
       deps.onGitDiffBaseChanged();
     }

@@ -10,12 +10,10 @@ here. Put feature behavior in `explorer/handlers/`, `explorer/services/`, or
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-import hashlib
 import importlib
 import json
 import logging
-import os
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 from fastapi import WebSocket, WebSocketDisconnect
 from pathlib import Path
 
@@ -24,29 +22,20 @@ importlib.import_module("app.libs.git_service")
 
 from . import explorer_helper as _explorer_helper
 from .git_helper import get_status as git_get_status
-from .stores import get_preferences_store
-from .project_sidecar import ProjectSidecar
 # NOTE: search and review are imported lazily inside handler methods
 # to break a circular import chain:
 #   diagnostics_bridge → explorer_socketio → explorer_runtime → explorer/review
 #   → editor_discard → editor_backend → editor_socketio → editor_ws
-from .preferences_store import DEFAULT_UI_PREFS
 
 # Logger setup
 logger = logging.getLogger(__name__)
 
-AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
-PREFERENCES_STORE = get_preferences_store()
-
 JsonObject = dict[str, object]
 ExplorerMessageHandler = Callable[[JsonObject, str | None], Awaitable[None]]
-ListDirFn = Callable[[str], JsonObject]
-GetProjectRootFn = Callable[[], Path]
 MarkGitCacheDirtyFn = Callable[[Path], None]
 GetAllGitStatusesFn = Callable[[], JsonObject]
 
 get_project_root = _explorer_helper.get_project_root
-list_dir = cast(ListDirFn, _explorer_helper.list_dir)
 mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _explorer_helper.mark_git_cache_dirty)
 get_all_git_statuses = cast(GetAllGitStatusesFn, _explorer_helper.get_all_git_statuses)
 
@@ -82,6 +71,18 @@ class SocketIOEmitter(Protocol):
         room: str | None = None,
         namespace: str | None = None,
     ) -> None: ...
+
+
+@runtime_checkable
+class ExplorerRpcReplySocket(Protocol):
+    def complete_rpc_request(self, request_id: str, result: JsonObject) -> bool: ...
+
+    def fail_rpc_request(
+        self,
+        request_id: str,
+        message: str,
+        data: JsonObject | None = None,
+    ) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -142,10 +143,14 @@ class SocketIOSocketShim:
 # Re-exported here for backward compatibility.
 from .explorer_manager import ExplorerConnection, manager
 from .explorer.context import (
+    ExplorerExtensionHandlerContext,
     ExplorerFileTreeHandlerContext,
     ExplorerGitHandlerContext,
+    ExplorerIntegrationHandlerContext,
+    ExplorerPrefsHandlerContext,
     ExplorerProjectHandlerContext,
     ExplorerSearchReviewHandlerContext,
+    ExplorerSessionHandlerContext,
     ExplorerWatcherHandlerContext,
     MarkProjectDirty,
 )
@@ -202,6 +207,18 @@ class ExplorerDispatcher:
         payload: JsonObject,
         reply_to: str | None = None,
     ) -> None:
+        if reply_to and isinstance(self.websocket, ExplorerRpcReplySocket):
+            if message_type == "error":
+                error_obj = payload.get("error")
+                error_message = (
+                    error_obj
+                    if isinstance(error_obj, str) and error_obj
+                    else "Explorer RPC request failed"
+                )
+                if self.websocket.fail_rpc_request(reply_to, error_message, payload):
+                    return
+            elif self.websocket.complete_rpc_request(reply_to, payload):
+                return
         msg: JsonObject = {"type": message_type, "payload": payload}
         if reply_to:
             msg["id"] = reply_to
@@ -290,6 +307,33 @@ class ExplorerDispatcher:
             broadcast=self.broadcast,
         )
 
+    def _build_session_context(self) -> ExplorerSessionHandlerContext:
+        return ExplorerSessionHandlerContext(
+            project_root=self.project_root,
+            emit_personal=self.emit_personal,
+            broadcast=self.broadcast,
+            broadcast_git_status=self.broadcast_git_status,
+            broadcast_review_state=self.broadcast_review_state,
+        )
+
+    def _build_integration_context(self) -> ExplorerIntegrationHandlerContext:
+        return ExplorerIntegrationHandlerContext(
+            emit_personal=self.emit_personal,
+            broadcast=self.broadcast,
+        )
+
+    def _build_prefs_context(self) -> ExplorerPrefsHandlerContext:
+        return ExplorerPrefsHandlerContext(
+            emit_personal=self.emit_personal,
+            broadcast=self.broadcast,
+        )
+
+    def _build_extension_context(self) -> ExplorerExtensionHandlerContext:
+        return ExplorerExtensionHandlerContext(
+            project_root=self.project_root,
+            emit_personal=self.emit_personal,
+        )
+
     def _build_file_tree_context(self) -> ExplorerFileTreeHandlerContext:
         return ExplorerFileTreeHandlerContext(
             project_root=self.project_root,
@@ -339,20 +383,33 @@ class ExplorerDispatcher:
             await self.send_error("Missing message type", message.msg_id)
             return
 
-        handler = self._resolve_handler(message.message_type)
+        await self.dispatch_message(
+            message.message_type,
+            message.payload,
+            message.msg_id,
+        )
+
+    async def dispatch_message(
+        self,
+        message_type: str,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        """Dispatch a parsed Explorer command without rebuilding a wire envelope."""
+        handler = self._resolve_handler(message_type)
         if handler is None:
-            logger.warning("Unknown message type: %s", message.message_type)
+            logger.warning("Unknown message type: %s", message_type)
             await self.send_error(
-                f"Unknown command: {message.message_type}",
-                message.msg_id,
+                f"Unknown command: {message_type}",
+                msg_id,
             )
             return
 
         try:
-            await handler(message.payload, message.msg_id)
+            await handler(payload, msg_id)
         except Exception as e:
-            logger.exception("Error handling %s", message.message_type)
-            await self.send_error(str(e), message.msg_id)
+            logger.exception("Error handling %s", message_type)
+            await self.send_error(str(e), msg_id)
 
     # --- Handlers ---
 
@@ -361,95 +418,90 @@ class ExplorerDispatcher:
         payload: JsonObject,
         msg_id: str | None,
     ) -> None:
-        rel_obj = payload.get("rel")
-        rel = rel_obj if isinstance(rel_obj, str) and rel_obj else "."
+        from .explorer.contracts.session import (
+            ExplorerSessionContractError,
+            parse_list_params,
+        )
+        from .explorer.handlers.session import handle_explorer_list
+
         try:
-            data = await asyncio.to_thread(list_dir, rel)
-            # This is a personal response (lazy load), not a broadcast
-            await self.emit_personal("explorer:setList", data, msg_id)
-        except Exception as e:
-            await self.send_error(str(e), msg_id)
+            params = parse_list_params(payload)
+        except ExplorerSessionContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_explorer_list(self._build_session_context(), params, msg_id)
 
     async def handle_explorer_refresh(
         self,
         payload: JsonObject,
         msg_id: str | None,
     ) -> None:
-        del payload, msg_id
-        # Refresh everything
-        mark_git_cache_dirty(self.project_root)
-        await self.broadcast_git_status()
-        await self.broadcast_review_state()
-        # For tree, we typically just refresh the view from client, or broadcast root?
-        # Let's broadcast root to be safe.
-        data = await asyncio.to_thread(list_dir, '.')
-        await self.broadcast("explorer:setList", data)
+        from .explorer.contracts.session import (
+            ExplorerSessionContractError,
+            parse_refresh_params,
+        )
+        from .explorer.handlers.session import handle_explorer_refresh
+
+        try:
+            params = parse_refresh_params(payload)
+        except ExplorerSessionContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_explorer_refresh(self._build_session_context(), params, msg_id)
 
     async def handle_cm6_mirror(
         self,
         payload: JsonObject,
         msg_id: str | None,
     ) -> None:
-        """Relay live CM6 buffer mirroring payloads to connected clients."""
-        path = payload.get("path")
-        content = payload.get("content")
-        if not isinstance(path, str) or not path:
-            return await self.send_error("Missing path", msg_id)
-        if not isinstance(content, str):
-            return await self.send_error("Missing content", msg_id)
+        from .explorer.contracts.integration import (
+            ExplorerIntegrationContractError,
+            parse_cm6_mirror_params,
+        )
+        from .explorer.handlers.integration import handle_cm6_mirror
 
-        # Broadcast to all clients; receivers self-filter via source_client.
-        await self.broadcast("cm6:mirror", payload)
+        try:
+            params = parse_cm6_mirror_params(payload)
+        except ExplorerIntegrationContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-        if msg_id:
-            await self.emit_personal("cm6:mirror:ack", {"ok": True}, msg_id)
+        await handle_cm6_mirror(self._build_integration_context(), params, msg_id)
 
     async def handle_mention_agent(
         self,
         payload: JsonObject,
         msg_id: str | None,
     ) -> None:
-        """Relay a file mention to the agent via /sidebar_ipc."""
-        path = payload.get("path")
-        if not isinstance(path, str) or not path.strip():
-            return await self.send_error("Missing path for mention", msg_id)
+        from .explorer.contracts.integration import (
+            ExplorerIntegrationContractError,
+            parse_mention_agent_params,
+        )
+        from .explorer.handlers.integration import handle_mention_agent
+
         try:
-            from .ui_ipc.ui_ipc_socketio import UI_IPC_SIO
+            params = parse_mention_agent_params(payload)
+        except ExplorerIntegrationContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-            ui_ipc_sio = cast(SocketIOEmitter, UI_IPC_SIO)
-            mention_payload: JsonObject = {"path": path.strip(), "source": "explorer"}
-            for key in ("lineNo", "endLineNo", "col", "endCol", "content"):
-                value = payload.get(key)
-                if value is not None:
-                    mention_payload[key] = value
-
-            await ui_ipc_sio.emit(
-                "sidebar:mention",
-                mention_payload,
-                namespace="/sidebar_ipc",
-                room="sidebar_ipc",
-            )
-            logger.info(f"[mention:agent] relayed to sidebar_ipc path={path}")
-        except Exception as exc:
-            logger.warning(f"[mention:agent] relay failed: {exc}")
-            return await self.send_error(f"Mention relay failed: {exc}", msg_id)
+        await handle_mention_agent(self._build_integration_context(), params, msg_id)
 
     async def handle_explorer_setOpenDirs(
         self,
         payload: JsonObject,
         msg_id: str | None,
     ) -> None:
-        """Persist the list of open directories in explorer tree."""
-        del msg_id
-        dirs_obj = payload.get("dirs")
-        dirs_items = cast(list[object], dirs_obj) if isinstance(dirs_obj, list) else []
-        dirs = [entry for entry in dirs_items if isinstance(entry, str)]
+        from .explorer.contracts.session import (
+            ExplorerSessionContractError,
+            parse_open_dirs_params,
+        )
+        from .explorer.handlers.session import handle_set_open_dirs
+
         try:
-            sidecar = ProjectSidecar.load_or_create(str(self.project_root))
-            sidecar.set_open_directories(dirs)
-            sidecar.save()
-        except Exception as e:
-            logger.warning(f"Failed to save open directories: {e}")
+            params = parse_open_dirs_params(payload)
+        except ExplorerSessionContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_set_open_dirs(self._build_session_context(), params, msg_id)
 
     async def handle_watcher_raiseLimit(
         self,
@@ -528,223 +580,36 @@ class ExplorerDispatcher:
         payload: JsonObject,
         msg_id: str | None,
     ) -> None:
-        """Update a single UI preference key via PreferenceStore (backend owns defaults)."""
-        key = payload.get("key")
-        value: object = payload.get("value")
-
-        if not isinstance(key, str) or not key.strip():
-            return await self.send_error("prefs:updateUi requires 'key' (string)", msg_id)
-        key = key.strip()
-        if key not in DEFAULT_UI_PREFS:
-            return await self.send_error(f"Unknown UI preference key: {key}", msg_id)
-
-        expected = cast(object, DEFAULT_UI_PREFS[key])
-        if isinstance(expected, bool):
-            if not isinstance(value, bool):
-                # Accept a few common serializations to be resilient.
-                if isinstance(value, (int, float)) and value in (0, 1):
-                    value = bool(value)
-                elif isinstance(value, str):
-                    lowered = value.strip().lower()
-                    if lowered in ("true", "1", "yes", "on"):
-                        value = True
-                    elif lowered in ("false", "0", "no", "off"):
-                        value = False
-                    else:
-                        return await self.send_error(
-                            "prefs:updateUi requires 'value' (boolean)",
-                            msg_id,
-                        )
-                else:
-                    return await self.send_error(
-                        "prefs:updateUi requires 'value' (boolean)",
-                        msg_id,
-                    )
-        elif isinstance(expected, str):
-            if value is None:
-                value = ""
-            elif not isinstance(value, str):
-                return await self.send_error(
-                    "prefs:updateUi requires 'value' (string)",
-                    msg_id,
-                )
-            value = value.strip()
-            if key in ("agentToggleDisplay", "agentHeaderDisplay"):
-                if value not in ("icon", "text", "both"):
-                    return await self.send_error(
-                        f"{key} must be one of: icon, text, both",
-                        msg_id,
-                    )
-        elif isinstance(expected, list):
-            if not isinstance(value, list):
-                return await self.send_error(
-                    "prefs:updateUi requires 'value' (array)",
-                    msg_id,
-                )
-            if key == "agentShortcuts":
-                cleaned: list[JsonObject] = []
-                shortcut_values = cast(list[object], value)
-                if len(shortcut_values) > 64:
-                    return await self.send_error("agentShortcuts max length is 64", msg_id)
-                for idx, raw in enumerate(shortcut_values):
-                    if not isinstance(raw, dict):
-                        return await self.send_error(f"agentShortcuts[{idx}] must be an object", msg_id)
-                    raw_dict = cast(JsonObject, raw)
-                    shortcut_kind = raw_dict.get("kind")
-                    if not isinstance(shortcut_kind, str):
-                        return await self.send_error(
-                            f"agentShortcuts[{idx}].kind must be a string",
-                            msg_id,
-                        )
-                    shortcut_kind = shortcut_kind.strip().lower()
-                    if shortcut_kind not in ("url", "framework_app"):
-                        return await self.send_error(
-                            f"agentShortcuts[{idx}].kind must be 'url' or 'framework_app'",
-                            msg_id,
-                        )
-
-                    app_id = raw_dict.get("app_id")
-                    app_id_clean = ""
-                    if shortcut_kind == "framework_app":
-                        if not isinstance(app_id, str) or not app_id.strip():
-                            return await self.send_error(
-                                f"agentShortcuts[{idx}].app_id is required for kind=framework_app",
-                                msg_id,
-                            )
-                        app_id_clean = app_id.strip()
-                    label = raw_dict.get("label")
-                    url = raw_dict.get("url")
-                    if not isinstance(label, str) or not label.strip():
-                        return await self.send_error(f"agentShortcuts[{idx}].label is required", msg_id)
-                    if not isinstance(url, str) or not url.strip():
-                        return await self.send_error(f"agentShortcuts[{idx}].url is required", msg_id)
-                    sid = raw_dict.get("id")
-                    if isinstance(sid, str) and sid.strip():
-                        sid = sid.strip()
-                    else:
-                        sid = f"sc_{idx}"
-                    load = raw_dict.get("load")
-                    if load is None or (isinstance(load, str) and not load.strip()):
-                        load = "lazy"
-                    elif isinstance(load, str):
-                        load = load.strip().lower()
-                        if load not in ("lazy", "eager"):
-                            return await self.send_error(
-                                f"agentShortcuts[{idx}].load must be 'lazy' or 'eager'",
-                                msg_id,
-                            )
-                    else:
-                        return await self.send_error(
-                            f"agentShortcuts[{idx}].load must be 'lazy' or 'eager'",
-                            msg_id,
-                        )
-                    icon = raw_dict.get("icon")
-                    icon_clean: JsonObject | None = None
-                    if icon is not None:
-                        icon_dict = _as_json_object(icon)
-                        if icon_dict is None:
-                            return await self.send_error(f"agentShortcuts[{idx}].icon must be an object", msg_id)
-                        icon_kind = icon_dict.get("kind")
-                        if icon_kind == "emoji":
-                            emoji = icon_dict.get("emoji")
-                            if not isinstance(emoji, str) or not emoji.strip():
-                                return await self.send_error(f"agentShortcuts[{idx}].icon.emoji is required", msg_id)
-                            icon_clean = {"kind": "emoji", "emoji": emoji.strip()}
-                        elif icon_kind == "asset":
-                            name = icon_dict.get("name")
-                            if not isinstance(name, str) or not name.strip():
-                                return await self.send_error(f"agentShortcuts[{idx}].icon.name is required", msg_id)
-                            icon_clean = {"kind": "asset", "name": name.strip()}
-                        else:
-                            return await self.send_error(
-                                f"agentShortcuts[{idx}].icon.kind must be 'emoji' or 'asset'",
-                                msg_id,
-                            )
-                    header_flag = raw_dict.get("header")
-                    header_clean = bool(header_flag) if header_flag is not None else False
-                    last_used = raw_dict.get("last_used")
-                    last_used_clean = 0
-                    if isinstance(last_used, (int, float)):
-                        if last_used >= 0:
-                            last_used_clean = int(last_used)
-                    cleaned.append(
-                        {
-                            "id": sid,
-                            "kind": shortcut_kind,
-                            "app_id": app_id_clean,
-                            "label": label.strip(),
-                            "url": url.strip(),
-                            "icon": icon_clean,
-                            "load": load,
-                            "header": header_clean,
-                            "last_used": last_used_clean,
-                        }
-                    )
-                value = cleaned
-        else:
-            return await self.send_error(
-                "prefs:updateUi unsupported preference type",
-                msg_id,
-            )
+        from .explorer.contracts.prefs import (
+            ExplorerPrefsContractError,
+            parse_update_ui_params,
+        )
+        from .explorer.handlers.prefs import handle_prefs_update_ui
 
         try:
-            updated = cast(JsonObject, PREFERENCES_STORE.update_preferences(ui={key: value}))
-        except Exception as e:
-            logger.warning(f"Failed to update UI preference {key}: {e}")
-            return await self.send_error(str(e), msg_id)
+            params = parse_update_ui_params(payload)
+        except ExplorerPrefsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-        ui_prefs = _as_json_object(updated.get("ui")) or {}
-        await self.broadcast("prefs:setUi", {"ui": ui_prefs})
+        await handle_prefs_update_ui(self._build_prefs_context(), params, msg_id)
 
     async def handle_prefs_vendorAgentIcon(
         self,
         payload: JsonObject,
         msg_id: str | None,
     ) -> None:
-        """Copy an icon asset into the global agent icon cache directory and return its name."""
-        abs_path_obj = payload.get("abs_path") or payload.get("path")
-        abs_path = abs_path_obj if isinstance(abs_path_obj, str) else None
-        if not isinstance(abs_path, str) or not abs_path.strip():
-            return await self.send_error("prefs:vendorAgentIcon requires abs_path", msg_id)
-
-        src = Path(abs_path).expanduser()
-        try:
-            src = src.resolve(strict=True)
-        except Exception:
-            return await self.send_error(f"Icon file not found: {abs_path}", msg_id)
-
-        if not src.is_file():
-            return await self.send_error("Icon path is not a file", msg_id)
-
-        ext = src.suffix.lower()
-        if ext not in (".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp"):
-            return await self.send_error("Unsupported icon type (svg/png/jpg/gif/webp)", msg_id)
+        from .explorer.contracts.prefs import (
+            ExplorerPrefsContractError,
+            parse_vendor_agent_icon_params,
+        )
+        from .explorer.handlers.prefs import handle_prefs_vendor_agent_icon
 
         try:
-            data = src.read_bytes()
-        except Exception as e:
-            return await self.send_error(f"Failed to read icon: {e}", msg_id)
+            params = parse_vendor_agent_icon_params(payload)
+        except ExplorerPrefsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-        digest = hashlib.sha256(data).hexdigest()[:16]
-        stem = src.stem
-        safe_stem = "".join(ch for ch in stem if ch.isalnum() or ch in ("-", "_"))[:40] or "icon"
-        name = f"{safe_stem}_{digest}{ext}"
-
-        try:
-            AGENT_ICON_DIR.mkdir(parents=True, exist_ok=True)
-            dst = (AGENT_ICON_DIR / name).resolve()
-            # Ensure dst stays within the icon dir.
-            if AGENT_ICON_DIR.resolve() not in dst.parents:
-                return await self.send_error("Invalid destination path", msg_id)
-            if not dst.exists():
-                tmp = dst.with_suffix(dst.suffix + ".tmp")
-                tmp.write_bytes(data)
-                tmp.replace(dst)
-        except Exception as e:
-            return await self.send_error(f"Failed to vendor icon: {e}", msg_id)
-
-        url = f"/api/app/file_editor_cm6/agent_icons/{name}"
-        await self.emit_personal("prefs:vendorAgentIconResult", {"ok": True, "name": name, "url": url}, msg_id)
+        await handle_prefs_vendor_agent_icon(self._build_prefs_context(), params, msg_id)
 
     # --- File Operations (Broadcasts updates) ---
 
@@ -1182,318 +1047,174 @@ class ExplorerDispatcher:
             pass
 
     async def handle_pulse_alive(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Handle client heartbeat response (silently)."""
-        del payload, msg_id
+        from .explorer.contracts.integration import (
+            ExplorerIntegrationContractError,
+            parse_pulse_alive_params,
+        )
+        from .explorer.handlers.integration import handle_pulse_alive
+
+        try:
+            params = parse_pulse_alive_params(payload)
+        except ExplorerIntegrationContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_pulse_alive(self._build_integration_context(), params, msg_id)
 
     # ── Extension registry handlers ───────────────────────────────────
 
     async def handle_ext_list(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Return installed extensions + language slots."""
-        del payload
-        from . import extension_registry as extension_registry
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_list_params,
+        )
+        from .explorer.handlers.extensions import handle_ext_list
 
-        get_extension_list = cast(
-            Callable[[], list[JsonObject]],
-            extension_registry.get_extension_list,
-        )
-        get_language_slots = cast(
-            Callable[[], JsonObject],
-            extension_registry.get_language_slots,
-        )
-        await self.emit_personal(
-            "ext:list",
-            {
-                "extensions": get_extension_list(),
-                "language_slots": get_language_slots(),
-            },
-            msg_id,
-        )
+        try:
+            params = parse_list_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_list(self._build_extension_context(), params, msg_id)
 
     async def handle_ext_install(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Install a VSIX extension and return the result + config schema."""
-        from . import extension_registry as extension_registry
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_install_params,
+        )
+        from .explorer.handlers.extensions import handle_ext_install
 
-        install_extension = cast(
-            Callable[[str], JsonObject],
-            extension_registry.install_extension,
-        )
-        get_extension_config_schema = cast(
-            Callable[[str], JsonObject],
-            extension_registry.get_extension_config_schema,
-        )
-        vsix_path_obj = payload.get("vsix_path")
-        vsix_path = vsix_path_obj if isinstance(vsix_path_obj, str) else ""
-        if not vsix_path:
-            return await self.send_error("vsix_path is required", msg_id)
         try:
-            result = await asyncio.to_thread(install_extension, vsix_path)
-            ext = _as_json_object(result.get("extension")) or {}
-            ext_id_obj = ext.get("id")
-            ext_id = ext_id_obj if isinstance(ext_id_obj, str) else ""
-            config_schema = get_extension_config_schema(ext_id) if ext_id else {}
-            registry_summary = _as_json_object(result.get("registry_summary")) or {}
-            await self.emit_personal(
-                "ext:installed",
-                {
-                    "ok": True,
-                    "extension": ext,
-                    "config_schema": config_schema,
-                    "registry_summary": registry_summary,
-                },
-                msg_id,
-            )
-            # Kill code-server + adapter so ext host picks up the new extension
-            await self._restart_code_server_and_adapter("ext_install")
-        except Exception as e:
-            await self.send_error(str(e), msg_id)
+            params = parse_install_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_install(self._build_extension_context(), params, msg_id)
 
     async def handle_ext_uninstall(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Uninstall a user-installed extension."""
-        from . import extension_registry as extension_registry
-
-        uninstall_extension = cast(
-            Callable[[str], JsonObject],
-            extension_registry.uninstall_extension,
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_uninstall_params,
         )
-        ext_id_obj = payload.get("ext_id")
-        ext_id = ext_id_obj if isinstance(ext_id_obj, str) else ""
-        if not ext_id:
-            return await self.send_error("ext_id is required", msg_id)
+        from .explorer.handlers.extensions import handle_ext_uninstall
+
         try:
-            result = await asyncio.to_thread(uninstall_extension, ext_id)
-            registry_summary = _as_json_object(result.get("registry_summary")) or {}
-            await self.emit_personal(
-                "ext:uninstalled",
-                {
-                    "ok": True,
-                    "uninstalled_id": ext_id,
-                    "registry_summary": registry_summary,
-                },
-                msg_id,
-            )
-            # Kill code-server + adapter so ext host drops the removed extension
-            await self._restart_code_server_and_adapter("ext_uninstall")
-        except Exception as e:
-            await self.send_error(str(e), msg_id)
+            params = parse_uninstall_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_uninstall(self._build_extension_context(), params, msg_id)
 
     async def handle_ext_configure(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Save configuration values for an extension and rebuild gate."""
-        from . import extension_registry as extension_registry
-
-        set_extension_config = cast(
-            Callable[[str, JsonObject], JsonObject],
-            extension_registry.set_extension_config,
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_configure_params,
         )
-        ext_id_obj = payload.get("ext_id")
-        ext_id = ext_id_obj if isinstance(ext_id_obj, str) else ""
-        values_obj = payload.get("values")
-        values = _as_json_object(values_obj)
-        if values_obj is not None and values is None:
-            return await self.send_error("values must be a JSON object", msg_id)
-        if values is None:
-            values = {}
-        if not ext_id:
-            return await self.send_error("ext_id is required", msg_id)
+        from .explorer.handlers.extensions import handle_ext_configure
+
         try:
-            set_extension_config(ext_id, values)
-            await self.emit_personal("ext:configured", {
-                "ok": True,
-                "ext_id": ext_id,
-            }, msg_id)
-            # Kill adapter directly — settings need a reload to take effect
-            await self._restart_adapter_only("ext_configure")
-        except Exception as e:
-            await self.send_error(str(e), msg_id)
+            params = parse_configure_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_configure(self._build_extension_context(), params, msg_id)
 
     async def handle_ext_custom_settings_get(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Return user-defined custom settings JSON."""
-        del payload
-        from . import extension_registry as extension_registry
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_custom_settings_get_params,
+        )
+        from .explorer.handlers.extensions import handle_ext_custom_settings_get
 
-        get_custom_settings = cast(
-            Callable[[], JsonObject],
-            extension_registry.get_custom_settings,
-        )
-        await self.emit_personal(
-            "ext:custom_settings_get",
-            {
-                "ok": True,
-                "settings": get_custom_settings(),
-            },
-            msg_id,
-        )
+        try:
+            params = parse_custom_settings_get_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_custom_settings_get(self._build_extension_context(), params, msg_id)
 
     async def handle_ext_custom_settings_set(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Save user-defined custom settings JSON and rebuild gate."""
-        from . import extension_registry as extension_registry
-
-        set_custom_settings = cast(
-            Callable[[JsonObject], None],
-            extension_registry.set_custom_settings,
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_custom_settings_set_params,
         )
-        settings_obj = payload.get("settings")
-        settings = _as_json_object(settings_obj)
-        if settings_obj is not None and settings is None:
-            return await self.send_error("settings must be a JSON object", msg_id)
-        if settings is None:
-            settings = {}
+        from .explorer.handlers.extensions import handle_ext_custom_settings_set
+
         try:
-            await asyncio.to_thread(set_custom_settings, settings)
-            await self.emit_personal("ext:custom_settings_set", {
-                "ok": True,
-                "count": len(settings),
-            }, msg_id)
-            # Kill adapter directly — custom settings need a reload
-            await self._restart_adapter_only("custom_settings")
-        except Exception as e:
-            await self.send_error(str(e), msg_id)
+            params = parse_custom_settings_set_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_custom_settings_set(self._build_extension_context(), params, msg_id)
 
     async def handle_ext_workspace_settings_get(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Return workspace-scoped .vscode/settings.json for the active project."""
-        del payload
-        proj = str(self.project_root) if self.project_root else ""
-        if not proj:
-            return await self.emit_personal("ext:workspace_settings_get", {
-                "ok": True, "settings": {}, "path": "",
-            }, msg_id)
-        settings_path = os.path.join(proj, ".vscode", "settings.json")
-        settings: JsonObject = {}
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_workspace_settings_get_params,
+        )
+        from .explorer.handlers.extensions import handle_ext_workspace_settings_get
+
         try:
-            if os.path.isfile(settings_path):
-                with open(settings_path, "r", encoding="utf-8") as f:
-                    raw = _load_json_value(f.read())
-                settings = _as_json_object(raw) or {}
-        except Exception as e:
-            logger.warning(f"[workspace_settings] read error: {e}")
-        await self.emit_personal("ext:workspace_settings_get", {
-            "ok": True,
-            "settings": settings,
-            "path": settings_path,
-        }, msg_id)
+            params = parse_workspace_settings_get_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_workspace_settings_get(self._build_extension_context(), params, msg_id)
 
     async def handle_ext_workspace_settings_set(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Save workspace-scoped .vscode/settings.json and restart adapter."""
-        proj = str(self.project_root) if self.project_root else ""
-        if not proj:
-            return await self.send_error("No active project", msg_id)
-        settings_obj = payload.get("settings")
-        settings = _as_json_object(settings_obj)
-        if settings_obj is not None and settings is None:
-            return await self.send_error("settings must be a JSON object", msg_id)
-        if settings is None:
-            settings = {}
-        settings_dir = os.path.join(proj, ".vscode")
-        settings_path = os.path.join(settings_dir, "settings.json")
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_workspace_settings_set_params,
+        )
+        from .explorer.handlers.extensions import handle_ext_workspace_settings_set
+
         try:
-            os.makedirs(settings_dir, exist_ok=True)
-            with open(settings_path, "w", encoding="utf-8") as f:
-                f.write(json.dumps(settings, indent=2) + "\n")
-            await self.emit_personal("ext:workspace_settings_set", {
-                "ok": True,
-                "count": len(settings),
-                "path": settings_path,
-            }, msg_id)
-            # Adapter reload needed for extensions to see new workspace config
-            await self._restart_adapter_only("workspace_settings")
-        except Exception as e:
-            await self.send_error(str(e), msg_id)
+            params = parse_workspace_settings_set_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_workspace_settings_set(self._build_extension_context(), params, msg_id)
 
     async def handle_ext_toggle(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Activate/deactivate an extension or language slot."""
-        from . import extension_registry as extension_registry
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_toggle_params,
+        )
+        from .explorer.handlers.extensions import handle_ext_toggle
 
-        toggle_extension = cast(
-            Callable[[str, bool], JsonObject],
-            extension_registry.toggle_extension,
-        )
-        toggle_language_slot = cast(
-            Callable[[str, bool], JsonObject],
-            extension_registry.toggle_language_slot,
-        )
-        ext_id_obj = payload.get("ext_id")
-        ext_id = ext_id_obj if isinstance(ext_id_obj, str) else None
-        lang_id_obj = payload.get("lang_id")
-        lang_id = lang_id_obj if isinstance(lang_id_obj, str) else None
-        active_obj = payload.get("active")
-        active = active_obj if isinstance(active_obj, bool) else True
         try:
-            if ext_id:
-                toggle_extension(ext_id, active)
-                await self.emit_personal("ext:toggled", {
-                    "ok": True, "ext_id": ext_id, "active": active,
-                }, msg_id)
-                # Kill adapter only — code-server already has the files
-                await self._restart_adapter_only("ext_toggle")
-            elif lang_id:
-                toggle_language_slot(lang_id, active)
-                await self.emit_personal("ext:toggled", {
-                    "ok": True, "lang_id": lang_id, "active": active,
-                }, msg_id)
-            else:
-                await self.send_error("ext_id or lang_id is required", msg_id)
-        except Exception as e:
-            await self.send_error(str(e), msg_id)
+            params = parse_toggle_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_toggle(self._build_extension_context(), params, msg_id)
 
     async def handle_ext_configSchema(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Return the configuration schema for an extension."""
-        from . import extension_registry as extension_registry
-
-        get_extension_config_schema = cast(
-            Callable[[str], JsonObject],
-            extension_registry.get_extension_config_schema,
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_config_schema_params,
         )
-        ext_id_obj = payload.get("ext_id")
-        ext_id = ext_id_obj if isinstance(ext_id_obj, str) else ""
-        if not ext_id:
-            return await self.send_error("ext_id is required", msg_id)
-        schema = get_extension_config_schema(ext_id)
-        await self.emit_personal("ext:configSchema", {
-            "ext_id": ext_id,
-            "schema": schema,
-        }, msg_id)
+        from .explorer.handlers.extensions import handle_ext_config_schema
+
+        try:
+            params = parse_config_schema_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_config_schema(self._build_extension_context(), params, msg_id)
 
     async def handle_ext_restart_adapter(self, payload: JsonObject, msg_id: str | None) -> None:
-        """Manual restart of the workbench adapter from the UI."""
-        del payload
-        await self._restart_adapter_only("manual")
-        await self.emit_personal("ext:adapter_restarted", {"ok": True}, msg_id)
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_restart_adapter_params,
+        )
+        from .explorer.handlers.extensions import handle_ext_restart_adapter
 
-    # ── Private restart helpers ──────────────────────────────────────────
+        try:
+            params = parse_restart_adapter_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
 
-    async def _restart_adapter_only(self, reason: str) -> None:
-        """Kill adapter shell and notify frontend to reload iframe."""
-        try:
-            from .workbench_adapter_shell_manager import terminate_adapter_shell
-            killed = await terminate_adapter_shell()
-            print(f"[ext_restart] adapter terminated (reason={reason}, was_running={killed})", flush=True)
-        except Exception as exc:
-            print(f"[ext_restart] adapter terminate error: {exc}", flush=True)
-        try:
-            from .diagnostics_bridge import stop_bridge
-            stop_bridge()
-        except Exception:
-            pass
-        await self.emit_personal("ext:adapter_restarting", {"reason": reason})
-
-    async def _restart_code_server_and_adapter(self, reason: str) -> None:
-        """Kill both code-server and adapter, notify frontend."""
-        try:
-            from .workbench_adapter_shell_manager import terminate_adapter_shell
-            await terminate_adapter_shell()
-        except Exception as exc:
-            print(f"[ext_restart] adapter terminate error: {exc}", flush=True)
-        try:
-            from .diagnostics_bridge import stop_bridge
-            stop_bridge()
-        except Exception:
-            pass
-        try:
-            from .code_server_shell_manager import terminate_code_server_shell
-            killed = await terminate_code_server_shell()
-            print(f"[ext_restart] code-server terminated (reason={reason}, was_running={killed})", flush=True)
-        except Exception as exc:
-            print(f"[ext_restart] code-server terminate error: {exc}", flush=True)
-        await self.emit_personal("ext:adapter_restarting", {"reason": reason, "full_restart": True})
+        await handle_ext_restart_adapter(self._build_extension_context(), params, msg_id)
 
 
 # --- WebSocket Endpoint ---

@@ -3158,7 +3158,7 @@ const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
 let lastSaveTime = 0;
 const SELF_ECHO_GRACE = 1800; // 1.8s grace period after save (avoid cursor jumps on slow typing)
 const saveSocketController = createSaveSocketController({
-  getEditorSocket: () => editorSocket,
+  requestBackendFileSave: (payload) => uiIpcConnections.requestBackendFileSave(payload),
 });
 const autosaveRuntimeController = createAutosaveRuntimeController({
   idleDelayMs: AUTOSAVE_IDLE_DELAY,

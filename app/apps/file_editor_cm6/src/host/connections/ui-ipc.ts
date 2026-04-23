@@ -180,5 +180,23 @@ export function createUiIpcConnections(deps) {
     });
   }
 
-  return { emitSidebarIpc, connectSidebarIPC, connectUIIPC, requestBackendFileOpen };
+  async function requestBackendFileSave(payload) {
+    const socket = await connectUIIPC();
+    if (!socket || !socket.connected) throw new Error('UI IPC socket not connected');
+    return await new Promise((resolve, reject) => {
+      try {
+        socket.emit('ui_event', { ...(payload || {}), type: 'save_file' }, (reply) => {
+          if (!reply || reply.ok === false) {
+            reject(new Error(reply?.error || 'backend save failed'));
+            return;
+          }
+          resolve(reply);
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  return { emitSidebarIpc, connectSidebarIPC, connectUIIPC, requestBackendFileOpen, requestBackendFileSave };
 }

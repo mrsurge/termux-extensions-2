@@ -587,6 +587,10 @@ export function createExplorerTreeMenuController(
           deps.toast('File picker not available');
           return;
         }
+        if (typeof picker.open !== 'function') {
+          deps.toast('File picker open dialog not available');
+          return;
+        }
         try {
           const source = await picker.open({
             title: `Copy into "${entry.name}"`,
@@ -615,6 +619,10 @@ export function createExplorerTreeMenuController(
         const picker = getFilePicker();
         if (!picker) {
           deps.toast('File picker not available');
+          return;
+        }
+        if (typeof picker.open !== 'function') {
+          deps.toast('File picker open dialog not available');
           return;
         }
         try {

@@ -5,10 +5,8 @@ traffic isolated from editor/console chatter.
 """
 
 import time
-from pathlib import Path
 
-from ..explorer_helper import get_project_root
-from ..stores import get_history_store, get_preferences_store
+from ..stores import get_preferences_store
 
 _registered_hosts: set[str] = set()
 _registered_iframes: set[str] = set()
@@ -245,76 +243,16 @@ async def route_backend_open_request(
     log_prefix: str = "[sidebar_ipc] agent_open",
     request_prefix: str = "sidebar",
 ) -> None:
-    history = get_history_store()
-    project = history.get_active_project() or str(get_project_root())
-    if not project:
-        raise ValueError("no active project")
-    project_path = Path(project).expanduser()
-    raw_path = (
-        str(
-            data.get("path")
-            or data.get("abs")
-            or data.get("file")
-            or data.get("rel")
-            or ""
-        )
-        .strip()
-    )
-    if not raw_path:
-        raise ValueError("missing path")
+    from ..host.file_ops_backend import handle_host_open_request
 
-    if raw_path.startswith("/"):
-        target = Path(raw_path).expanduser()
-    else:
-        target = (project_path / raw_path.lstrip("/")).expanduser()
-
-    # Try relative_to with the logical paths first, then fall back to
-    # resolved (realpath) paths so symlinked project roots still match.
-    rel = None
-    for proj_candidate, tgt_candidate in [
-        (project_path, target),
-        (project_path.resolve(strict=False), target.resolve(strict=False)),
-    ]:
-        try:
-            rel = str(tgt_candidate.relative_to(proj_candidate))
-            target = tgt_candidate
-            break
-        except ValueError:
-            continue
-
-    if rel is None:
-        raise PermissionError("path is outside active project root")
-
-    if not target.exists():
-        raise FileNotFoundError("target does not exist")
-    if target.is_dir():
-        raise IsADirectoryError("target is a directory")
-
-    payload = {
-        "rel": rel,
-        "path": str(target),
-        "column": data.get("column"),
-        "source": data.get("source") or source_name,
-        "conversation_id": data.get("conversation_id"),
-    }
-    try:
-        line = int(data.get("line"))
-    except Exception:
-        line = None
-    if isinstance(line, int) and line >= 1:
-        payload["line"] = line
     print(
-        f"{log_prefix} editor_backend project_key={project} "
-        f"rel={rel} line={line}",
+        f"{log_prefix} routing via host file_ops backend",
         flush=True,
     )
-    from ..monaco_editor.editor_ws import emit_editor_open_from_backend
-
-    request_id = f"{request_prefix}_{int(time.time() * 1000)}"
-    await emit_editor_open_from_backend(
-        payload,
-        source_client=source_name,
-        request_id=request_id,
+    await handle_host_open_request(
+        data,
+        source_name=source_name,
+        request_prefix=request_prefix,
     )
 
 

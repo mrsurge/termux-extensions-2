@@ -145,6 +145,7 @@ export function createExplorerTreeDecorationsController(
             ) || null;
 
       while (current) {
+        const dirNode = current;
         statusesToPropagate.forEach((value) => {
           if (
             value === 'modified' ||
@@ -152,25 +153,25 @@ export function createExplorerTreeDecorationsController(
             value === 'deleted' ||
             value === 'renamed'
           ) {
-            current.classList.add('fe-dir-has-modified');
+            dirNode.classList.add('fe-dir-has-modified');
           }
           if (value === 'untracked') {
-            current.classList.add('fe-dir-has-untracked');
+            dirNode.classList.add('fe-dir-has-untracked');
           }
           if (
             value === 'staged' ||
             value === 'staged_modified' ||
             value === 'added'
           ) {
-            current.classList.add('fe-dir-has-staged');
+            dirNode.classList.add('fe-dir-has-staged');
           }
           if (value === 'conflict') {
-            current.classList.add('fe-dir-has-conflict');
+            dirNode.classList.add('fe-dir-has-conflict');
           }
         });
 
         current =
-          current.parentElement?.closest<HTMLLIElement>(
+          dirNode.parentElement?.closest<HTMLLIElement>(
             'li.fe-tree-node[data-kind="dir"]',
           ) || null;
       }

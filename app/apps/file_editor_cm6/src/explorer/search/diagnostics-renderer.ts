@@ -25,6 +25,10 @@ interface ExplorerDiagnosticsCallbacks {
 
 export type ExplorerDiagnosticsDetail = Record<string, unknown>;
 
+function isExplorerMentionPayload(value: unknown): value is ExplorerMentionPayload {
+  return value !== null && typeof value === 'object' && typeof (value as { path?: unknown }).path === 'string';
+}
+
 export interface ProblemsPanelApi {
   update(detail: ExplorerDiagnosticsDetail): void;
   setActiveFile(absPath: string): void;
@@ -71,10 +75,14 @@ function ensurePanel(
         column: col || 1,
       });
     },
-    onMention: async (payload: ExplorerMentionPayload) => {
+    onMention: async (payload: unknown) => {
       try {
         if (typeof callbacks.mentionAgent !== 'function') {
           callbacks.toast('Explorer bus unavailable');
+          return;
+        }
+        if (!isExplorerMentionPayload(payload)) {
+          callbacks.toast('Failed to mention in conversation');
           return;
         }
         await callbacks.mentionAgent(payload);

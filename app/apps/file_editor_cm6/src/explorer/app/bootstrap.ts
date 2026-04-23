@@ -12,6 +12,7 @@
 
 import { showNewProjectModal } from '../../../static/js/new_project_modal.js';
 import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
+import type { JsonObject } from '../../rpc/transport.ts';
 import { createExplorerStickyScopes } from '../chrome/sticky-scopes.ts';
 import { registerExplorerPublicApi } from './public-api.ts';
 import { createExplorerDirectoryStateHelpers } from '../tree/directory-state-utils.ts';
@@ -24,12 +25,16 @@ import { createExplorerTreeMenuController } from '../tree/menu-controller.ts';
 import { createExplorerTreeClickHandler } from '../tree/click-handler.ts';
 import { createExplorerTreeDecorationsController } from '../tree/decorations.ts';
 import type { ExplorerTreeMenuEntry } from '../tree/types.ts';
-import { createExplorerFileOpenBridge } from '../host/file-open-bridge.ts';
+import {
+  createExplorerFileOpenBridge,
+  type ExplorerJumpOptions,
+} from '../host/file-open-bridge.ts';
 import { createExplorerSearchOverlayController } from '../search/overlay-controller.ts';
 import { getErrorMessage } from '../utils/errors.ts';
 import { createExplorerRefreshController } from './refresh-controller.ts';
 import {
   EXPLORER_RPC_METHODS,
+  type ExplorerRpcMethod,
   isExplorerRpcNotificationMethod,
 } from '../rpc/contract.ts';
 import {
@@ -67,45 +72,67 @@ function isExplorerTreeMenuEntry(value: unknown): value is ExplorerTreeMenuEntry
   );
 }
 
-let treeElement = null;
-let gitSummaryEl = null;
-let gitButtons = null;
+type ExplorerGitButtons = {
+  init: HTMLButtonElement | null;
+  stage: HTMLButtonElement | null;
+  unstage: HTMLButtonElement | null;
+  commit: HTMLButtonElement | null;
+  push: HTMLButtonElement | null;
+  pull: HTMLButtonElement | null;
+  reset: HTMLButtonElement | null;
+};
+
+type ExplorerSearchOverlayControllerApi = ReturnType<
+  typeof createExplorerSearchOverlayController
+>;
+type ExplorerTimer = ReturnType<typeof setTimeout> | null;
+
+let treeElement: HTMLElement | null = null;
+let gitSummaryEl: HTMLElement | null = null;
+let gitButtons: ExplorerGitButtons | null = null;
 const explorerRuntimeState = createExplorerRuntimeState();
 let draftUpdateListenerInstalled = false;
 
 // Currently opened document (relative to project root), if known.
-let activeFileRel = null;
+let activeFileRel: string | null = null;
 
-function hasExplorerRpc() {
+function hasExplorerRpc(): boolean {
   return isExplorerRpcAvailable();
 }
 
-function notifyExplorer(method, payload = {}) {
-  return notifyExplorerRpc(method, payload);
+function notifyExplorer(
+  method: string,
+  payload: Record<string, unknown> = {},
+): boolean {
+  return notifyExplorerRpc(method as ExplorerRpcMethod, payload as JsonObject);
 }
 
-function setActiveFileRel(nextRel) {
+function setActiveFileRel(nextRel: string | null): void {
   explorerActiveFileUtils.setActiveFileRel(nextRel);
 }
 
-function applyActiveFileMarker() {
+function applyActiveFileMarker(): void {
   explorerActiveFileUtils.applyActiveFileMarker();
 }
 
-function relFromAbsPath(absPath) {
+function relFromAbsPath(absPath: string | null | undefined): string | null {
   return explorerActiveFileUtils.relFromAbsPath(absPath);
 }
 
-function applyDraftFlag(rel, hasDraft) {
+function applyDraftFlag(rel: string | null | undefined, hasDraft: boolean): void {
   explorerActiveFileUtils.applyDraftFlag(rel, hasDraft);
 }
 
-async function scrollToActiveFile() {
+async function scrollToActiveFile(): Promise<void> {
   return explorerActiveFileUtils.scrollToActiveFile();
 }
 
 // --- Seti-UI file icons (files only; dirs keep emoji) ---
-function applySetiIconToSpan(span, fileName, kind = 'file') {
+function applySetiIconToSpan(
+  span: HTMLElement,
+  fileName: string,
+  kind = 'file',
+): void {
   if (!span) return;
   if (kind !== 'file') {
     // Ensure directories don't inherit prior SVG.
@@ -131,7 +158,7 @@ function applySetiIconToSpan(span, fileName, kind = 'file') {
 }
 
 // --- Batch Select Mode state ---
-let selectModeDir = null; // rel of directory in select mode, or null
+let selectModeDir: string | null = null; // rel of directory in select mode, or null
 const selectedEntries = new Set<string>(); // rel paths of checked items
 
 function isEntrySelected(rel: string): boolean {
@@ -148,7 +175,7 @@ function setEntrySelected(rel: string, selected: boolean): void {
 
 // --- Open Directories Persistence ---
 const openDirectories = new Set<string>(); // rel paths of currently open directories
-let openDirsSyncTimer = null;
+let openDirsSyncTimer: ExplorerTimer = null;
 const OPEN_DIRS_SYNC_DEBOUNCE = 500; // ms
 let openDirsInitialized = false; // True after we've received initial open dirs from backend
 
@@ -190,7 +217,7 @@ const explorerGitFooterUtils = createExplorerGitFooterUtils({
   toast,
   reloadCurrentFile: () => window.__cm6ReloadCurrentFile?.(),
 });
-let explorerSearchOverlayController;
+let explorerSearchOverlayController: ExplorerSearchOverlayControllerApi;
 const explorerDiffBaseController = createExplorerDiffBaseController({
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),
@@ -257,7 +284,7 @@ explorerSearchOverlayController = createExplorerSearchOverlayController({
         if (!hasExplorerRpc()) {
           throw new Error('Explorer RPC unavailable');
         }
-        notifyExplorer(EXPLORER_RPC_METHODS.mentionAgent, payload);
+        notifyExplorer(EXPLORER_RPC_METHODS.mentionAgent, { ...payload });
       },
       getProjectPath: () => explorerRuntimeState.getProjectPath(),
       activeFileAbs: activeAbs,
@@ -302,7 +329,7 @@ const explorerTreeMenuController = createExplorerTreeMenuController({
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),
   toast,
-  isInSelectMode: (rel) => Boolean(rel) && isInSelectMode(rel),
+   isInSelectMode: (rel) => rel !== null && isInSelectMode(rel),
   enableSelectMode: (rel) => enableSelectMode(rel),
   disableSelectMode: () => disableSelectMode(),
   openFileAndMaybeJump: (rel, lineNumber, jumpOptions) =>
@@ -334,63 +361,63 @@ async function initDiffBaseFromBackend() {
   await explorerDiffBaseController.initFromBackend();
 }
 
-function clearElement(el) {
+function clearElement(el: HTMLElement | null): void {
   explorerUiHelpers.clearElement(el);
 }
 
-function basename(path) {
+function basename(path: string): string {
   return explorerUiHelpers.basename(path);
 }
 
-function toast(message) {
+function toast(message: string): void {
   explorerUiHelpers.toast(message);
 }
 
-function isMobileLayout() {
+function isMobileLayout(): boolean {
   return explorerUiHelpers.isMobileLayout();
 }
 
-function closeDrawerIfMobile() {
+function closeDrawerIfMobile(): void {
   explorerUiHelpers.closeDrawerIfMobile();
 }
 
 // --- Batch Select Mode helpers ---
 
-function isInSelectMode(parentRel) {
+function isInSelectMode(parentRel: string): boolean {
   return explorerDirectoryStateHelpers.isInSelectMode(parentRel);
 }
 
-function enableSelectMode(dirRel) {
+function enableSelectMode(dirRel: string): void {
   explorerDirectoryStateHelpers.enableSelectMode(dirRel);
 }
 
-function disableSelectMode() {
+function disableSelectMode(): void {
   explorerDirectoryStateHelpers.disableSelectMode();
 }
 
-function collapseSubdirsOf(parentRel) {
+function collapseSubdirsOf(parentRel: string): void {
   explorerDirectoryStateHelpers.collapseSubdirsOf(parentRel);
 }
 
-function checkAutoDisableSelectMode(collapsedRel) {
+function checkAutoDisableSelectMode(collapsedRel: string): void {
   explorerDirectoryStateHelpers.checkAutoDisableSelectMode(collapsedRel);
 }
 
 // --- Open Directories Persistence ---
 
-function markDirectoryOpen(rel, isOpen) {
+function markDirectoryOpen(rel: string, isOpen: boolean): void {
   explorerDirectoryStateHelpers.markDirectoryOpen(rel, isOpen);
 }
 
-function scheduleOpenDirsSync() {
+function scheduleOpenDirsSync(): void {
   explorerDirectoryStateHelpers.scheduleOpenDirsSync();
 }
 
-function syncOpenDirsToBackend() {
+function syncOpenDirsToBackend(): void {
   explorerDirectoryStateHelpers.syncOpenDirsToBackend();
 }
 
-async function restoreOpenDirectories(dirs) {
+async function restoreOpenDirectories(dirs: string[]): Promise<void> {
   /**
    * Restore open directories from backend on page load.
    * Expands each directory in order, skipping any that don't exist.
@@ -422,7 +449,7 @@ async function restoreOpenDirectories(dirs) {
   scheduleOpenDirsSync();
 }
 
-async function expandDirectoryIfExists(rel) {
+async function expandDirectoryIfExists(rel: string): Promise<void> {
   /**
    * Expand a single directory if it exists in the tree.
    * Unlike expandToPath, this only expands the target directory itself,
@@ -441,13 +468,13 @@ async function expandDirectoryIfExists(rel) {
     const segment = parts[i];
     const nextRel = currentRel === '.' ? segment : `${currentRel}/${segment}`;
     
-    let targetLi = treeElement.querySelector(
+    let targetLi = treeElement.querySelector<HTMLLIElement>(
       `li.fe-tree-node[data-kind="dir"][data-rel="${nextRel}"]`
     );
     
     if (!targetLi) {
       // Node not in DOM - need to request parent listing first
-      const parentLi = treeElement.querySelector(
+      const parentLi = treeElement.querySelector<HTMLLIElement>(
         `li.fe-tree-node[data-kind="dir"][data-rel="${currentRel}"]`
       );
       
@@ -458,7 +485,7 @@ async function expandDirectoryIfExists(rel) {
       }
       
       // Try again after parent expanded
-      targetLi = treeElement.querySelector(
+      targetLi = treeElement.querySelector<HTMLLIElement>(
         `li.fe-tree-node[data-kind="dir"][data-rel="${nextRel}"]`
       );
       
@@ -491,7 +518,7 @@ const _pendingDirListRequests = new Map<
   }
 >();
 
-function _notifyDirListComplete(rel) {
+function _notifyDirListComplete(rel: string): void {
   /**
    * Called when explorer:setList is received for a directory.
    * Resolves any pending expand request waiting for this directory.
@@ -504,7 +531,10 @@ function _notifyDirListComplete(rel) {
   }
 }
 
-async function _requestDirListAndWait(rel, timeoutMs = 2000) {
+async function _requestDirListAndWait(
+  rel: string,
+  timeoutMs = 2000,
+): Promise<void> {
   /**
    * Requests a directory listing and waits for the response.
    * Returns a promise that resolves when the listing is received.
@@ -529,7 +559,7 @@ async function _requestDirListAndWait(rel, timeoutMs = 2000) {
   });
 }
 
-async function expandToPath(rel) {
+async function expandToPath(rel: string): Promise<void> {
   /**
    * Expands the tree to reveal a file or directory at the given relative path.
    * Walks through each path segment, expanding directories as needed.
@@ -551,13 +581,13 @@ async function expandToPath(rel) {
     const isLastSegment = i === segments.length - 1;
 
     // Find the node at nextRel
-    let targetLi = treeElement.querySelector(
+    let targetLi = treeElement.querySelector<HTMLLIElement>(
       `li.fe-tree-node[data-rel="${nextRel}"]`
     );
 
     if (!targetLi) {
       // Node not in DOM - need to expand parent first
-      const parentLi = treeElement.querySelector(
+      const parentLi = treeElement.querySelector<HTMLLIElement>(
         `li.fe-tree-node[data-kind="dir"][data-rel="${currentRel}"]`
       );
       
@@ -570,7 +600,7 @@ async function expandToPath(rel) {
       }
       
       // Try again after parent expanded
-      targetLi = treeElement.querySelector(
+      targetLi = treeElement.querySelector<HTMLLIElement>(
         `li.fe-tree-node[data-rel="${nextRel}"]`
       );
       
@@ -593,11 +623,11 @@ async function expandToPath(rel) {
   }
 }
 
-function getParentRel(rel) {
+function getParentRel(rel: string): string {
   return getParentRelModule(rel);
 }
 
-async function expandToFile(fileRel) {
+async function expandToFile(fileRel: string): Promise<void> {
   /**
    * Expands the tree to reveal a file, expanding its parent directories.
    */
@@ -610,14 +640,14 @@ function renderGitSummary() {
   explorerGitFooterUtils.renderGitSummary();
 }
 
-function setGitControlsEnabled(enabled, showInit = false) {
+function setGitControlsEnabled(enabled: boolean, showInit = false): void {
   explorerGitFooterUtils.setGitControlsEnabled(enabled, showInit);
 }
 
 // --- Git Progress Bar ---
 // Ephemeral progress bar at top of git footer + progress text in status row
 
-function showGitProgressBar(pct, detail) {
+function showGitProgressBar(pct: number, detail?: string): void {
   explorerGitFooterUtils.showGitProgressBar(pct, detail);
 }
 
@@ -632,7 +662,11 @@ function renderExplorerTree() {
   explorerTreeRenderer.renderExplorerTree();
 }
 
-function renderEntriesInto(containerUl, entries, parentRel = null) {
+function renderEntriesInto(
+  containerUl: HTMLElement | null,
+  entries: unknown,
+  parentRel: string | null = null,
+): void {
   explorerTreeRenderer.renderEntriesInto(containerUl, entries, parentRel);
 }
 
@@ -640,7 +674,7 @@ function applyAggregatedGitStatusFlags() {
   explorerTreeDecorationsController.applyAggregatedGitStatusFlags();
 }
 
-function _setDiagnosticsSummary(next) {
+function _setDiagnosticsSummary(next: unknown): void {
   explorerTreeDecorationsController.setDiagnosticsSummary(next);
 }
 
@@ -648,19 +682,19 @@ function applyAggregatedDiagnosticFlags() {
   explorerTreeDecorationsController.applyAggregatedDiagnosticFlags();
 }
 
-function _normalizeWatcherRel(rel) {
+function _normalizeWatcherRel(rel: string): string {
   return normalizeWatcherRelModule(rel);
 }
 
-function _collectWatcherRels(payload) {
+function _collectWatcherRels(payload: JsonObject): Set<string> {
   return collectWatcherRelsModule(payload);
 }
 
-function _isWatcherRelInOpenDir(rel, openDir) {
+function _isWatcherRelInOpenDir(rel: string, openDir: string): boolean {
   return isWatcherRelInOpenDirModule(rel, openDir);
 }
 
-function dispatchRemoteDraft(payload) {
+function dispatchRemoteDraft(payload: JsonObject): void {
   try {
     if (payload && typeof window.__cm6ApplyRemoteDraft === 'function') {
       window.__cm6ApplyRemoteDraft(payload);
@@ -670,7 +704,7 @@ function dispatchRemoteDraft(payload) {
   }
 }
 
-function dispatchAutosaveContent(payload) {
+function dispatchAutosaveContent(payload: JsonObject): void {
   try {
     if (payload && typeof window.__cm6ApplyAutosaveContent === 'function') {
       window.__cm6ApplyAutosaveContent(payload);
@@ -680,7 +714,7 @@ function dispatchAutosaveContent(payload) {
   }
 }
 
-function dispatchPrefsChanged(payload) {
+function dispatchPrefsChanged(payload: JsonObject): void {
   try {
     if (payload && typeof window.__cm6HandlePrefsChanged === 'function') {
       window.__cm6HandlePrefsChanged(payload);
@@ -692,7 +726,7 @@ function dispatchPrefsChanged(payload) {
   }
 }
 
-function dispatchProjectOpened(path) {
+function dispatchProjectOpened(path: string): void {
   if (typeof window.__cm6HandleProjectOpened !== 'function') {
     return;
   }
@@ -703,7 +737,7 @@ function dispatchProjectOpened(path) {
   }
 }
 
-function dispatchWatcherError(payload) {
+function dispatchWatcherError(payload: JsonObject): void {
   try {
     if (typeof window.__cm6HandleWatcherError === 'function') {
       window.__cm6HandleWatcherError(payload || {});
@@ -715,7 +749,7 @@ function dispatchWatcherError(payload) {
   }
 }
 
-function dispatchWatcherRaiseResult(payload) {
+function dispatchWatcherRaiseResult(payload: JsonObject): void {
   try {
     if (typeof window.__cm6HandleWatcherRaiseResult === 'function') {
       window.__cm6HandleWatcherRaiseResult(payload || {});
@@ -742,6 +776,11 @@ function reloadCurrentFile() {
   } catch (err) {
     console.warn('Failed to reload current file after restore:', err);
   }
+}
+
+function getButtonById(id: string): HTMLButtonElement | null {
+  const element = document.getElementById(id);
+  return element instanceof HTMLButtonElement ? element : null;
 }
 
 const explorerNotificationHandler = createExplorerNotificationHandler({
@@ -835,7 +874,9 @@ export async function initExplorerUI() {
         event instanceof CustomEvent && isRecord(event.detail)
           ? event.detail
           : {};
-      const rel = relFromAbsPath(detail.path);
+      const rel = relFromAbsPath(
+        typeof detail.path === 'string' ? detail.path : null,
+      );
       if (!rel || rel === '.') return;
       applyDraftFlag(rel, !!detail.unsaved);
     });
@@ -843,13 +884,13 @@ export async function initExplorerUI() {
   }
 
   gitButtons = {
-    init: document.getElementById('fe-git-init'),
-    stage: document.getElementById('fe-git-stage'),
-    unstage: document.getElementById('fe-git-unstage'),
-    commit: document.getElementById('fe-git-commit'),
-    push: document.getElementById('fe-git-push'),
-    pull: document.getElementById('fe-git-pull'),
-    reset: document.getElementById('fe-git-reset'),
+    init: getButtonById('fe-git-init'),
+    stage: getButtonById('fe-git-stage'),
+    unstage: getButtonById('fe-git-unstage'),
+    commit: getButtonById('fe-git-commit'),
+    push: getButtonById('fe-git-push'),
+    pull: getButtonById('fe-git-pull'),
+    reset: getButtonById('fe-git-reset'),
   };
 
   explorerChromeController.bindUi({
@@ -943,20 +984,24 @@ export async function initExplorerUI() {
 }
 
 // --- Unified file open + jump helper ---
-async function openFileAndMaybeJump(rel, lineNumber = null, jumpOptions = {}) {
+async function openFileAndMaybeJump(
+  rel: string,
+  lineNumber: number | null | undefined = null,
+  jumpOptions: ExplorerJumpOptions = {},
+): Promise<void> {
   return explorerFileOpenBridge.openFileAndMaybeJump(rel, lineNumber, jumpOptions);
 }
 
 // --- Search / Review overlay wiring ---
 
-function openSearchOverlay() {
+function openSearchOverlay(): void {
   explorerSearchOverlayController.openSearchOverlay();
 }
 
-async function fetchChangesResults(force = false) {
+async function fetchChangesResults(force = false): Promise<void> {
   return explorerSearchOverlayController.fetchChangesResults(force);
 }
 
-function renderSearchOverlay() {
+function renderSearchOverlay(): void {
   explorerSearchOverlayController.renderSearchOverlay();
 }

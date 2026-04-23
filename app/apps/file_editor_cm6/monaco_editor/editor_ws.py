@@ -307,6 +307,23 @@ def editor_runtime_record_save_sha(abs_path: str, sha256: str) -> None:
     _LAST_SAVE_SHA[abs_path] = sha256
 
 
+class _EditorSnapshotRoomEmitter:
+    async def emit(self, event: str, data: dict[str, object], *, room: str) -> object:
+        from .editor_socketio import EDITOR_SIO
+
+        await EDITOR_SIO.emit(event, data, room=room, namespace="/editor")
+        return None
+
+
+async def editor_runtime_request_save_snapshot(request_id: str, *, timeout_s: float = 3.0) -> dict[str, object]:
+    return await request_editor_save_snapshot(
+        _EditorSnapshotRoomEmitter(),
+        request_id,
+        waiting=_SAVE_SNAPSHOT_WAITING,
+        timeout_s=timeout_s,
+    )
+
+
 def editor_runtime_build_connect_snapshot(*, role: str = "") -> dict[str, object]:
     project = _active_project()
     session_state = _history_store.get_session_state()

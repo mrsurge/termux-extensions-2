@@ -78,3 +78,30 @@ class ExplorerProjectHandlerContext:
     websocket: ExplorerConnection
     tracked_job_ids: set[str]
     emit_personal: EmitPersonal
+
+
+@dataclass(frozen=True)
+class ExplorerSessionHandlerContext:
+    project_root: Path
+    emit_personal: EmitPersonal
+    broadcast: Broadcast
+    broadcast_git_status: AsyncNoArg
+    broadcast_review_state: AsyncNoArg
+
+
+@dataclass(frozen=True)
+class ExplorerIntegrationHandlerContext:
+    emit_personal: EmitPersonal
+    broadcast: Broadcast
+
+
+@dataclass(frozen=True)
+class ExplorerPrefsHandlerContext:
+    emit_personal: EmitPersonal
+    broadcast: Broadcast
+
+
+@dataclass(frozen=True)
+class ExplorerExtensionHandlerContext:
+    project_root: Path
+    emit_personal: EmitPersonal

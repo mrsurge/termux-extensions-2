@@ -26,7 +26,10 @@
   "include": [
     "monaco_editor/**/*.d.ts",
     "monaco_editor/**/*.ts",
-    "monaco_editor/m_editor_app.ts"
+    "monaco_editor/m_editor_app.ts",
+    "src/explorer/**/*.d.ts",
+    "src/explorer/**/*.ts",
+    "static/js/explorer.ts"
   ],
   "exclude": [
     "node_modules",
@@ -36,7 +39,6 @@
     "vendor",
     "monaco_editor/build_shims",
     "monaco_editor/vscode_build_src",
-    "src/explorer",
     "src/host"
   ]
 }

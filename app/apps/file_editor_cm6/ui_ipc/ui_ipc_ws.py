@@ -82,16 +82,27 @@ class UIIPCNamespace(socketio.AsyncNamespace):
         print(f"[ui_ipc] {event_type} from={sid} ts={int(time.time()*1000)}", flush=True)
         if event_type == "open_file" and isinstance(data, dict):
             try:
-                await sidebar_ws.route_backend_open_request(
-                    self,
+                from ..host.file_ops_backend import handle_host_open_request
+
+                result = await handle_host_open_request(
                     data,
                     source_name="ui_ipc",
-                    log_prefix="[ui_ipc] open_file",
                     request_prefix="ui_open",
                 )
-                return {"ok": True}
+                return result
             except Exception as exc:
                 print(f"[ui_ipc] open_file route failed: {exc}", flush=True)
+                return {"ok": False, "error": str(exc)}
+        if event_type == "save_file" and isinstance(data, dict):
+            try:
+                from ..host.file_ops_backend import handle_host_save_request
+
+                return await handle_host_save_request(
+                    data,
+                    source_name="ui_ipc",
+                )
+            except Exception as exc:
+                print(f"[ui_ipc] save_file route failed: {exc}", flush=True)
                 return {"ok": False, "error": str(exc)}
         # Broadcast to everyone else in the room (skip sender)
         await self.emit("ui_event", data, room="ui_ipc", skip_sid=sid)
