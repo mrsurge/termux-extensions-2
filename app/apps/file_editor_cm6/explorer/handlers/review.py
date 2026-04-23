@@ -28,7 +28,7 @@ async def handle_review_list(
         ),
     )
     payload: ReviewEntriesPayload = {"entries": entries}
-    await context.emit_personal("review:setEntries", dict(payload), msg_id)
+    await context.emit_personal("explorer.review.entries.updated", dict(payload), msg_id)
 
 
 async def handle_review_save(
@@ -41,7 +41,8 @@ async def handle_review_save(
         ReviewSaveResult,
         await review_service.save_reviews(context.project_root, files),
     )
-    await context.emit_personal("review:saved", dict(result), msg_id)
+    if msg_id:
+        await context.emit_personal("explorer.review.entries.updated", dict(result), msg_id)
     context.mark_git_cache_dirty(context.project_root)
     context.mark_draft_cache_dirty(context.project_root)
     await context.broadcast_git_status()
@@ -59,7 +60,8 @@ async def handle_review_discard(
         ReviewDiscardResult,
         await review_service.discard_reviews(context.project_root, files),
     )
-    await context.emit_personal("review:discarded", dict(result), msg_id)
+    if msg_id:
+        await context.emit_personal("explorer.review.entries.updated", dict(result), msg_id)
     context.mark_draft_cache_dirty(context.project_root)
     await context.broadcast_review_state()
     await context.notify_editor_draft_cleared(files)

@@ -3254,6 +3254,7 @@ const searchPanelController = createSearchPanelController({
 // ---------- Unified Preference Management (Backend as Single Source of Truth) ----------
 const preferencesController = createPreferencesController({
   apiPost: (path, body) => apiPost(path, body),
+  requestBackendEditorPreferenceUpdate: (payload) => uiIpcConnections.requestBackendEditorPreferenceUpdate(payload),
   getClientId: () => cm6NiceguiClientId,
   setEditorViewState: (state) => { editorViewState = state; },
   setMenuChecked,

@@ -12,9 +12,8 @@ from fastapi.responses import JSONResponse, FileResponse, Response
 import asyncio
 from anyio import to_thread
 from .agent_ws import agent_websocket
-from .explorer_runtime import explorer_websocket
 from .history_store import HistoryStore
-from .explorer_helper import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
+from .explorer.services.file_ops import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
 # vscode_api_shell_manager import removed — shell is deprecated (see endpoints below)
 from .code_server_shell_manager import ensure_code_server_shell
 from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
@@ -44,7 +43,7 @@ from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
 from .draft_diff_helper import compute_draft_diff
 from .core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
-from .explorer_manager import manager as explorer_manager
+from .explorer.transport.connection_manager import manager as explorer_manager
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
 from .explorer import search as explorer_search_module
@@ -859,7 +858,6 @@ async def serve_agent_icon(name: str):
 from .terminal_backend import terminal_router
 file_editor_cm6_bp.include_router(terminal_router)
 file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
-file_editor_cm6_bp.add_api_websocket_route("/ws/explorer", explorer_websocket)
 
 # Include the self-contained editor routes
 from .monaco_editor.editor_backend import editor_router
@@ -874,7 +872,7 @@ from app.apps.file_editor_cm6.monaco_editor.editor_socketio import EDITOR_ASGI_A
 
 # --- Explorer Socket.IO (worker-owned) ---
 # The main framework process proxies /explorer_ws/socket.io to this worker endpoint.
-from app.apps.file_editor_cm6.explorer_socketio import EXPLORER_ASGI_APP
+from app.apps.file_editor_cm6.explorer.transport.socketio_app import EXPLORER_ASGI_APP
 
 # --- UI IPC Socket.IO (worker-owned) ---
 # Frontend-to-frontend relay for iframe ↔ main page communication.
@@ -1323,12 +1321,19 @@ import asyncio
 async def _broadcast_watcher_error(project_root: Path | str, message: str) -> None:
     try:
         project_path = str(project_root)
+        from app.apps.file_editor_cm6.explorer.transport.rpc_emit import (
+            emit_project_explorer_rpc_notification,
+        )
         payload = {
             "message": message,
             "limit": 524288,
             "command": "sudo sysctl -w fs.inotify.max_user_watches=524288",
         }
-        await explorer_manager.broadcast(project_path, {"type": "watcher:error", "payload": payload})
+        await emit_project_explorer_rpc_notification(
+            project_path,
+            "explorer.watcher.error",
+            payload,
+        )
     except Exception:
         # Avoid cascading failures from watcher error notifications
         pass
@@ -1458,7 +1463,7 @@ async def project_create(data: JsonDict = Body(...)):
         raise HTTPException(status_code=400, detail="parent_path and name are required")
 
     try:
-        from .explorer_helper import create_project
+        from .explorer.services.file_ops import create_project
         result = create_project(parent_path, name)
         
         # Set the new project as active
@@ -2246,7 +2251,7 @@ async def review_save(data: JsonDict = Body(...)):
 
     # Refresh git status cache and draft cache
     mark_git_cache_dirty(root_path)
-    from .explorer_helper import mark_draft_cache_dirty
+    from .explorer.services.file_ops import mark_draft_cache_dirty
     mark_draft_cache_dirty(root_path)
     
     # Notify explorer of draft state change
@@ -2279,7 +2284,7 @@ async def review_discard(data: JsonDict = Body(...)):
             handle_external_discard(project_root, str(abs_path))
     
     # Invalidate draft cache
-    from .explorer_helper import mark_draft_cache_dirty
+    from .explorer.services.file_ops import mark_draft_cache_dirty
     mark_draft_cache_dirty(root_path)
     
     # Notify explorer of draft state change
@@ -2303,7 +2308,7 @@ async def explorer_mkdir(data: JsonDict = Body(...)):
         raise HTTPException(status_code=400, detail="Invalid name")
     
     try:
-        from .explorer_helper import create_directory
+        from .explorer.services.file_ops import create_directory
         result = create_directory(parent_rel, name)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
@@ -2322,7 +2327,7 @@ async def explorer_touch(data: JsonDict = Body(...)):
         raise HTTPException(status_code=400, detail="Invalid name")
       
     try:
-        from .explorer_helper import create_file
+        from .explorer.services.file_ops import create_file
         result = create_file(parent_rel, name)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
@@ -2342,7 +2347,7 @@ async def explorer_rename(data: JsonDict = Body(...)):
         raise HTTPException(status_code=400, detail="Invalid name")
     
     try:
-        from .explorer_helper import rename_entry
+        from .explorer.services.file_ops import rename_entry
         result = rename_entry(rel, new_name)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
@@ -2355,7 +2360,7 @@ async def explorer_delete(data: JsonDict = Body(...)):
     if not rel:
         raise HTTPException(status_code=400, detail="Path required")
     try:
-        from .explorer_helper import delete_entry
+        from .explorer.services.file_ops import delete_entry
         result = delete_entry(rel)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
@@ -2368,7 +2373,7 @@ async def explorer_batch_delete(data: JsonDict = Body(...)):
     if not rels:
         raise HTTPException(status_code=400, detail="Paths required")
     try:
-        from .explorer_helper import batch_delete
+        from .explorer.services.file_ops import batch_delete
         result = batch_delete(rels)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
@@ -2382,7 +2387,7 @@ async def explorer_copy(data: JsonDict = Body(...)):
     if not rel or not dest_path:
         raise HTTPException(status_code=400, detail="Path required")
     try:
-        from .explorer_helper import copy_entry
+        from .explorer.services.file_ops import copy_entry
         result = copy_entry(rel, dest_path)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
@@ -2396,7 +2401,7 @@ async def explorer_move(data: JsonDict = Body(...)):
     if not rel or not dest_path:
         raise HTTPException(status_code=400, detail="Path required")
     try:
-        from .explorer_helper import move_entry
+        from .explorer.services.file_ops import move_entry
         result = move_entry(rel, dest_path)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
@@ -2410,7 +2415,7 @@ async def explorer_batch_copy(data: JsonDict = Body(...)):
     if not rels or not dest_path:
         raise HTTPException(status_code=400, detail="Paths and destination required")
     try:
-        from .explorer_helper import batch_copy
+        from .explorer.services.file_ops import batch_copy
         result = batch_copy(rels, dest_path)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
@@ -2424,7 +2429,7 @@ async def explorer_batch_move(data: JsonDict = Body(...)):
     if not rels or not dest_path:
         raise HTTPException(status_code=400, detail="Paths and destination required")
     try:
-        from .explorer_helper import batch_move
+        from .explorer.services.file_ops import batch_move
         result = batch_move(rels, dest_path)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
@@ -2439,7 +2444,7 @@ async def explorer_copy_from(data: JsonDict = Body(...)):
     if not source_path or not dest_rel:
         raise HTTPException(status_code=400, detail="Source path and destination relative path required")
     try:
-        from .explorer_helper import copy_entry_inbound
+        from .explorer.services.file_ops import copy_entry_inbound
         result = copy_entry_inbound(source_path, dest_rel)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}
@@ -2454,7 +2459,7 @@ async def explorer_move_from(data: JsonDict = Body(...)):
     if not source_path or not dest_rel:
         raise HTTPException(status_code=400, detail="Source path and destination relative path required")
     try:
-        from .explorer_helper import move_entry_inbound
+        from .explorer.services.file_ops import move_entry_inbound
         result = move_entry_inbound(source_path, dest_rel)
         mark_git_cache_dirty(get_project_root())
         return {"ok": True, "data": result}

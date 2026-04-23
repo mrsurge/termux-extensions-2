@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from anyio import to_thread
-from ..explorer_helper import mark_git_cache_dirty
+from .services.file_ops import mark_git_cache_dirty
 from ..core_read import init_watcher, push_save_ack, emit_diff_changed
 from ..core_write import write_full, _get_file_meta
 from ..diff_helper import invalidate_diff_cache

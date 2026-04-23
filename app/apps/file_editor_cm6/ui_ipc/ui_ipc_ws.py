@@ -16,8 +16,8 @@ import time
 from . import console_ws
 from . import sidebar_ws
 from ..stores import get_history_store
-from ..explorer_helper import get_project_root
-from ..explorer_manager import abs_to_rel
+from ..explorer.services.file_ops import get_project_root
+from ..explorer.transport.connection_manager import abs_to_rel
 
 
 class UIIPCNamespace(socketio.AsyncNamespace):
@@ -103,6 +103,19 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 )
             except Exception as exc:
                 print(f"[ui_ipc] save_file route failed: {exc}", flush=True)
+                return {"ok": False, "error": str(exc)}
+        if event_type == "update_editor_preference" and isinstance(data, dict):
+            try:
+                from ..host.editor_preferences_backend import (
+                    handle_host_editor_preference_request,
+                )
+
+                return await handle_host_editor_preference_request(
+                    data,
+                    source_name="ui_ipc",
+                )
+            except Exception as exc:
+                print(f"[ui_ipc] update_editor_preference route failed: {exc}", flush=True)
                 return {"ok": False, "error": str(exc)}
         # Broadcast to everyone else in the room (skip sender)
         await self.emit("ui_event", data, room="ui_ipc", skip_sid=sid)

@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-from ...explorer_helper import get_project_root
+from .file_ops import get_project_root
 from ...project_sidecar import ProjectSidecar
 from ...stores import _history_store
 from .runtime_notifications import notify_draft_state_changed
@@ -25,7 +25,7 @@ async def reset_project_session(new_project_path: str) -> bool:
     sidecar.save()
     if removed_clean:
         try:
-            from ...explorer_helper import mark_draft_cache_dirty
+            from .file_ops import mark_draft_cache_dirty
 
             mark_draft_cache_dirty(Path(normalized_path))
         except Exception:

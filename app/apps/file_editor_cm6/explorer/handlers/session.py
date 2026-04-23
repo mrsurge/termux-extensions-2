@@ -12,7 +12,7 @@ from ..contracts.session import (
     ExplorerSessionNoParams,
 )
 from ..context import ExplorerSessionHandlerContext
-from ... import explorer_helper as _explorer_helper
+from ..services import file_ops as _file_ops
 from ...project_sidecar import ProjectSidecar
 
 logger = logging.getLogger(__name__)
@@ -21,8 +21,8 @@ JsonObject = dict[str, object]
 ListDirFn = Callable[[str], JsonObject]
 MarkGitCacheDirtyFn = Callable[[Path], None]
 
-list_dir = cast(ListDirFn, _explorer_helper.list_dir)
-mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _explorer_helper.mark_git_cache_dirty)
+list_dir = cast(ListDirFn, _file_ops.list_dir)
+mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _file_ops.mark_git_cache_dirty)
 
 
 async def handle_explorer_list(
@@ -31,7 +31,7 @@ async def handle_explorer_list(
     msg_id: str | None,
 ) -> None:
     data = await asyncio.to_thread(list_dir, params["rel"])
-    await context.emit_personal("explorer:setList", data, msg_id)
+    await context.emit_personal("explorer.list.updated", data, msg_id)
 
 
 async def handle_explorer_refresh(
@@ -45,7 +45,7 @@ async def handle_explorer_refresh(
     await context.broadcast_git_status()
     await context.broadcast_review_state()
     data = await asyncio.to_thread(list_dir, ".")
-    await context.broadcast("explorer:setList", data)
+    await context.broadcast("explorer.list.updated", data)
 
 
 async def handle_set_open_dirs(

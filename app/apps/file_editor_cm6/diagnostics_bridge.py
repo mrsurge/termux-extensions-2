@@ -220,8 +220,8 @@ async def _emit_diagnostics_debounced():
         _diag_emit_dirty = False
         await asyncio.sleep(_DIAG_EMIT_DEBOUNCE_S)
     try:
-        from .explorer_socketio import EXPLORER_SIO
-        from .explorer_helper import get_project_root
+        from .explorer.transport.socketio_app import EXPLORER_SIO
+        from .explorer.services.file_ops import get_project_root
     except Exception as exc:
         print(f"[diag_bridge] import fail for explorer emit: {exc}", flush=True)
         return
@@ -265,9 +265,13 @@ async def _emit_diagnostics_debounced():
 
     try:
         # Problems panel + explorer tree badges (full marker detail)
-        from .explorer_rpc_emit import emit_explorer_rpc_notification
+        from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
 
-        await emit_explorer_rpc_notification("explorer.diagnostics.detail", detail_abs)
+        await emit_project_explorer_rpc_notification(
+            proj,
+            "explorer.diagnostics.detail",
+            detail_abs,
+        )
         total_markers = sum(len(v) for v in detail_abs.values())
         print(f"[diag_bridge] emitted explorer diagnostics: {len(summary_rel)} files, {total_markers} markers", flush=True)
     except Exception as exc:
@@ -325,8 +329,9 @@ async def _adapter_ws_loop(sio):
                             continue
                         # Suppress ENOSPC when user is on polling/watchexec fallback —
                         # they already know inotify is limited, that's why they switched.
+                        proj = ""
                         try:
-                            from .explorer_helper import get_project_root
+                            from .explorer.services.file_ops import get_project_root
                             from .project_sidecar import ProjectSidecar
                             proj = str(get_project_root())
                             sc = ProjectSidecar.load_or_create(proj)
@@ -339,12 +344,16 @@ async def _adapter_ws_loop(sio):
                             pass
                         _enospc_forwarded = True
                         try:
-                            from .explorer_rpc_emit import emit_explorer_rpc_notification
+                            from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
                             payload = {
                                 "message": ev.get("message", "Inotify limit reached (ENOSPC)"),
                                 "limit": 524288,
                             }
-                            await emit_explorer_rpc_notification("explorer.watcher.error", payload)
+                            await emit_project_explorer_rpc_notification(
+                                proj,
+                                "explorer.watcher.error",
+                                payload,
+                            )
                             print(f"[diag_bridge] watcher/enospc forwarded (once)", flush=True)
                         except Exception as exc:
                             print(f"[diag_bridge] watcher/enospc emit FAIL: {exc}", flush=True)
@@ -355,7 +364,7 @@ async def _adapter_ws_loop(sio):
                             changes = ev.get("changes", [])
                             # Get project root for abs→rel conversion
                             try:
-                                from .explorer_helper import get_project_root
+                                from .explorer.services.file_ops import get_project_root
                                 proj = str(get_project_root())
                             except Exception:
                                 proj = ""
@@ -391,8 +400,12 @@ async def _adapter_ws_loop(sio):
                                 )
                                 # Notify explorer with watcher:files type
                                 try:
-                                    from .explorer_rpc_emit import emit_explorer_rpc_notification
-                                    await emit_explorer_rpc_notification("explorer.watcher.files", payload)
+                                    from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
+                                    await emit_project_explorer_rpc_notification(
+                                        proj,
+                                        "explorer.watcher.files",
+                                        payload,
+                                    )
                                 except Exception:
                                     pass
                                 print(f"[diag_bridge] watcher/fileChanges forwarded ({total} paths)", flush=True)

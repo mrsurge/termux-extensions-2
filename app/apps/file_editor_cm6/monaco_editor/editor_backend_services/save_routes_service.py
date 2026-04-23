@@ -218,7 +218,7 @@ async def handle_save_current_file(
     get_active_editor: Callable[[], EditorLike | None],
     get_cached_editor_content: Callable[[EditorLike | None], str],
     get_preferences: Callable[[], dict[str, object]],
-    nicegui_broadcast: Callable[[str, dict[str, object]], None],
+    nicegui_broadcast: Callable[[str, str, dict[str, object]], None],
 ) -> JsonMap | Response:
     client_id_obj = data.get("client_id", "unknown")
     client_id = client_id_obj if isinstance(client_id_obj, str) and client_id_obj else "unknown"
@@ -255,16 +255,14 @@ async def handle_save_current_file(
                     base_sha = sha_obj if isinstance(sha_obj, str) else ""
                     nicegui_broadcast(
                         proj_norm,
+                        "explorer.autosave.content",
                         {
-                            "type": "autosave:content",
-                            "payload": {
-                                "path": str(current_file),
-                                "project_path": proj_norm,
-                                "content": content,
-                                "base_sha256": base_sha,
-                                "content_sha256": content_hash or "",
-                                "source_client": nicegui_client_id,
-                            },
+                            "path": str(current_file),
+                            "project_path": proj_norm,
+                            "content": content,
+                            "base_sha256": base_sha,
+                            "content_sha256": content_hash or "",
+                            "source_client": nicegui_client_id,
                         },
                     )
         except Exception:

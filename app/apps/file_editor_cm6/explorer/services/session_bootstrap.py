@@ -6,8 +6,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...explorer_helper import list_dir, set_project_root
-from ...explorer_manager import ExplorerConnection, abs_to_rel, manager
+from .file_ops import list_dir, set_project_root
+from ..transport.connection_manager import ExplorerConnection, abs_to_rel, manager
 from ...project_sidecar import ProjectSidecar
 from ...stores import _history_store, _preferences_store
 from ..contracts.watcher import build_watcher_config_payload
@@ -44,20 +44,20 @@ async def bootstrap_explorer_session(
     await manager.accept_and_register(websocket, str(resolved_project_root))
 
     await emit_personal(
-        "project:setActive",
+        "explorer.project.active.updated",
         {"path": str(resolved_project_root), "new_sidecar": was_new_sidecar},
     )
 
     try:
         prefs = _preferences_store.get_preferences()
         ui_prefs = prefs.get("ui") or {}
-        await emit_personal("prefs:setUi", {"ui": ui_prefs})
+        await emit_personal("explorer.prefs.ui.updated", {"ui": ui_prefs})
     except Exception as exc:
         logger.warning("Failed to load UI preferences: %s", exc)
 
     await broadcast_git_status()
     await emit_personal(
-        "explorer:setList",
+        "explorer.list.updated",
         await asyncio.to_thread(list_dir, "."),
     )
     await broadcast_review_state()
@@ -65,7 +65,7 @@ async def bootstrap_explorer_session(
     try:
         sidecar = ProjectSidecar.load_or_create(str(resolved_project_root))
         open_dirs = sidecar.get_open_directories()
-        await emit_personal("explorer:setOpenDirs", {"dirs": open_dirs})
+        await emit_personal("explorer.openDirs.updated", {"dirs": open_dirs})
     except Exception as exc:
         logger.warning("Failed to load open directories: %s", exc)
 
@@ -76,7 +76,7 @@ async def bootstrap_explorer_session(
             rel = abs_to_rel(str(current_path), str(resolved_project_root))
             if rel and rel != ".":
                 await emit_personal(
-                    "explorer:activeFile",
+                    "explorer.activeFile.updated",
                     {"rel": rel, "abs": str(current_path)},
                 )
     except Exception as exc:
@@ -94,7 +94,7 @@ async def bootstrap_explorer_session(
             watchexec_available=is_watchexec_available(),
         )
         watcher_mode = watcher_config["mode"]
-        await emit_personal("watcher:config", dict(watcher_config))
+        await emit_personal("explorer.watcher.config.updated", dict(watcher_config))
         if watcher_mode == "watchexec" and watcher_config["watchexec_available"]:
             await ensure_watchexec_shell(
                 str(resolved_project_root),

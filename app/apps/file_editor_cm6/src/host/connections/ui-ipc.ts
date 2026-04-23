@@ -198,5 +198,30 @@ export function createUiIpcConnections(deps) {
     });
   }
 
-  return { emitSidebarIpc, connectSidebarIPC, connectUIIPC, requestBackendFileOpen, requestBackendFileSave };
+  async function requestBackendEditorPreferenceUpdate(payload) {
+    const socket = await connectUIIPC();
+    if (!socket || !socket.connected) throw new Error('UI IPC socket not connected');
+    return await new Promise((resolve, reject) => {
+      try {
+        socket.emit('ui_event', { ...(payload || {}), type: 'update_editor_preference' }, (reply) => {
+          if (!reply || reply.ok === false) {
+            reject(new Error(reply?.error || 'backend preference update failed'));
+            return;
+          }
+          resolve(reply);
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  return {
+    emitSidebarIpc,
+    connectSidebarIPC,
+    connectUIIPC,
+    requestBackendFileOpen,
+    requestBackendFileSave,
+    requestBackendEditorPreferenceUpdate,
+  };
 }

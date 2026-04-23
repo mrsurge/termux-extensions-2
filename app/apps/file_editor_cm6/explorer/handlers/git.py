@@ -18,7 +18,7 @@ from ..contracts.git import (
 )
 from ..context import ExplorerGitHandlerContext
 from ..services.tracked_jobs import get_job_manager, remember_tracked_job
-from ...explorer_helper import mark_git_cache_dirty
+from ..services.file_ops import mark_git_cache_dirty
 from ...git_helper import (
     commit_changes,
     get_commit_info,
@@ -97,7 +97,7 @@ async def handle_git_restore(
     del msg_id
     restore_path(context.project_root, params["path"], params["commit"])
     mark_git_cache_dirty(context.project_root)
-    await context.broadcast("git:restored", {"path": params["path"]})
+    await context.broadcast("explorer.git.restored", {"path": params["path"]})
     await context.broadcast_git_status()
     await context.broadcast_git_decorations()
 
@@ -110,7 +110,7 @@ async def handle_git_commit(
     del msg_id
     commit_changes(context.project_root, params["message"], params["amend"])
     await _mark_dirty_and_refresh(context)
-    await context.broadcast("git:diffBaseSet", {"ref": "HEAD", "refresh": True})
+    await context.broadcast("explorer.git.diffBase.updated", {"ref": "HEAD", "refresh": True})
 
 
 async def handle_git_push(
@@ -131,7 +131,7 @@ async def handle_git_push(
         )
         logger.info("[GIT_PUSH] Created job %s, tracking it", job.id)
         remember_tracked_job(context.project_root, context.tracked_job_ids, job.id)
-        await context.emit_personal("git:pushStarted", {"job_id": job.id}, msg_id)
+        await context.emit_personal("explorer.git.push.started", {"job_id": job.id}, msg_id)
     except Exception as exc:
         logger.exception("[GIT_PUSH] Failed to create job: %s", exc)
         raise RuntimeError(f"Failed to start push: {exc}") from exc
@@ -153,7 +153,7 @@ async def handle_git_pull(
             },
         )
         remember_tracked_job(context.project_root, context.tracked_job_ids, job.id)
-        await context.emit_personal("git:pullStarted", {"job_id": job.id}, msg_id)
+        await context.emit_personal("explorer.git.pull.started", {"job_id": job.id}, msg_id)
     except Exception as exc:
         raise RuntimeError(f"Failed to start pull: {exc}") from exc
 
@@ -187,7 +187,7 @@ async def handle_git_set_diff_base(
     get_commit_info(context.project_root, params["ref"])
     history_store = _get_history_store()
     history_store.set_diff_base(str(context.project_root), params["ref"])
-    await context.broadcast("git:diffBaseSet", {"ref": params["ref"]})
+    await context.broadcast("explorer.git.diffBase.updated", {"ref": params["ref"]})
     mark_git_cache_dirty(context.project_root)
     await context.broadcast_git_status()
 

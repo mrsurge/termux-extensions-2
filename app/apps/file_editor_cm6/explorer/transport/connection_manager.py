@@ -11,9 +11,10 @@ just the manager without triggering the cycle.
 import asyncio
 import json
 import logging
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Mapping, Optional, Protocol, cast
+
+JsonMessage = Mapping[str, object]
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 def abs_to_rel(abs_path: str, project_root: str) -> Optional[str]:
     """Convert an absolute path into a project-root-relative path (best-effort)."""
-    if not isinstance(abs_path, str) or not abs_path.strip():
+    if not abs_path.strip():
         return None
-    if not isinstance(project_root, str) or not project_root.strip():
+    if not project_root.strip():
         return None
     try:
         abs_p = Path(abs_path).expanduser().resolve(strict=False)
@@ -52,10 +53,10 @@ class ExplorerConnection(Protocol):
 class ConnectionManager:
     def __init__(self):
         # Map: project_path -> List[WebSocket]
-        self.active_connections: Dict[str, List[ExplorerConnection]] = {}
+        self.active_connections: dict[str, list[ExplorerConnection]] = {}
         # Map: websocket -> project_path (for cleanup)
-        self.ws_project_map: Dict[ExplorerConnection, str] = {}
-        self.pulse_task: Optional[asyncio.Task] = None
+        self.ws_project_map: dict[ExplorerConnection, str] = {}
+        self.pulse_task: asyncio.Task[None] | None = None
 
     async def accept_and_register(self, websocket: ExplorerConnection, project_path: str):
         # Some shims (Socket.IO) don't need accept; provide no-op if missing
@@ -80,7 +81,7 @@ class ConnectionManager:
             self.start_pulse()
             # Start watcher for the project (using SSOT active project)
             try:
-                from .core_read import init_watcher
+                from ...core_read import init_watcher
                 init_watcher()
             except Exception as e:
                 logger.warning(f"Failed to start watcher on connect: {e}")
@@ -103,7 +104,7 @@ class ConnectionManager:
             self.stop_pulse()
             # Stop watcher to save resources
             try:
-                from .core_read import stop_watcher
+                from ...core_read import stop_watcher
                 stop_watcher()
             except Exception as e:
                 logger.warning(f"Failed to stop watcher on disconnect: {e}")
@@ -132,7 +133,10 @@ class ConnectionManager:
                 
                 # Broadcast pulse to all projects
                 for project_path in list(self.active_connections.keys()):
-                    await self.broadcast(project_path, {"type": "pulse"})
+                    await self.broadcast(
+                        project_path,
+                        {"jsonrpc": "2.0", "method": "explorer.pulse", "params": {}},
+                    )
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -162,23 +166,28 @@ class ConnectionManager:
         """Returns True if there are any active connections for a project."""
         return self.get_connection_count(project_path) > 0
 
-    async def broadcast(self, project_path: str, message: Dict[str, Any]):
+    async def broadcast(self, project_path: str, message: JsonMessage) -> None:
         """Send message to all clients connected to a specific project."""
         try:
-            msg_type = message.get("type") if isinstance(message, dict) else None
+            msg_type = message.get("type")
             if msg_type == "agent:open":
-                payload = message.get("payload") if isinstance(message, dict) else {}
+                payload = message.get("payload")
+                payload_map: Mapping[str, object] = (
+                    cast(Mapping[str, object], payload)
+                    if isinstance(payload, Mapping)
+                    else {}
+                )
                 logger.info(
                     "[explorer_broadcast] type=agent:open project=%s conn=%s payload=%s",
                     project_path,
                     self.get_connection_count(project_path),
                     {
-                        "path": payload.get("path") if isinstance(payload, dict) else None,
-                        "rel": payload.get("rel") if isinstance(payload, dict) else None,
-                        "line": payload.get("line") if isinstance(payload, dict) else None,
-                        "column": payload.get("column") if isinstance(payload, dict) else None,
-                        "source": payload.get("source") if isinstance(payload, dict) else None,
-                        "conversation_id": payload.get("conversation_id") if isinstance(payload, dict) else None,
+                        "path": payload_map.get("path"),
+                        "rel": payload_map.get("rel"),
+                        "line": payload_map.get("line"),
+                        "column": payload_map.get("column"),
+                        "source": payload_map.get("source"),
+                        "conversation_id": payload_map.get("conversation_id"),
                     },
                 )
         except Exception:
@@ -198,7 +207,7 @@ class ConnectionManager:
                 except Exception as e:
                     logger.warning(f"Failed to send broadcast: {e}")
 
-    async def send_personal(self, websocket: ExplorerConnection, message: Dict[str, Any]):
+    async def send_personal(self, websocket: ExplorerConnection, message: JsonMessage) -> None:
         """Send message to a single client."""
         try:
             await websocket.send_text(json.dumps(message))

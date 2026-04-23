@@ -18,7 +18,7 @@ from ..contracts.file_tree import (
     ExplorerRenameEntryParams,
 )
 from ..context import ExplorerFileTreeHandlerContext
-from ...explorer_helper import mark_git_cache_dirty
+from ..services.file_ops import mark_git_cache_dirty
 
 ExplorerHelperCall = Callable[..., object]
 
@@ -45,7 +45,7 @@ async def handle_create_file(
         params["parent_rel"],
         params["name"],
     )
-    await context.broadcast("explorer:created", created)
+    del created
     await _broadcast_rel_list(context, params["parent_rel"])
 
 
@@ -61,7 +61,7 @@ async def handle_create_dir(
         params["parent_rel"],
         params["name"],
     )
-    await context.broadcast("explorer:created", created)
+    del created
     await _broadcast_rel_list(context, params["parent_rel"])
 
 
@@ -77,7 +77,7 @@ async def handle_rename_entry(
         params["rel"],
         params["new_name"],
     )
-    await context.broadcast("explorer:renamed", renamed)
+    del renamed
     await _broadcast_rel_list(context, _get_parent_rel(params["rel"]))
 
 
@@ -89,7 +89,7 @@ async def handle_delete_entry(
     del msg_id
 
     deleted = _call_explorer_helper_dict("delete_entry", params["rel"])
-    await context.broadcast("explorer:deleted", deleted)
+    del deleted
     await _broadcast_rel_list(context, _get_parent_rel(params["rel"]))
     mark_git_cache_dirty(context.project_root)
     await context.broadcast_git_status()
@@ -104,7 +104,7 @@ async def handle_batch_delete(
     del msg_id
 
     deleted = _call_explorer_helper_dict("batch_delete", params["rels"])
-    await context.broadcast("explorer:batchDeleted", deleted)
+    del deleted
 
     for parent_rel in {_get_parent_rel(rel) for rel in params["rels"]}:
         await _broadcast_rel_list_ignoring_errors(context, parent_rel)
@@ -126,7 +126,7 @@ async def handle_batch_copy(
         params["rels"],
         params["dest_path"],
     )
-    await context.broadcast("explorer:batchCopied", copied)
+    del copied
     await _broadcast_rel_list_ignoring_errors(
         context,
         _get_rel_from_abs(params["dest_path"], context.project_root),
@@ -145,7 +145,7 @@ async def handle_batch_move(
         params["rels"],
         params["dest_path"],
     )
-    await context.broadcast("explorer:batchMoved", moved)
+    del moved
 
     dest_rel = _get_rel_from_abs(params["dest_path"], context.project_root)
     parent_rels = {_get_parent_rel(rel) for rel in params["rels"]}
@@ -201,7 +201,7 @@ async def handle_move_entry(
         params["rel"],
         params["dest_path"],
     )
-    await context.broadcast("explorer:moved", moved)
+    del moved
 
     source_parent = _get_parent_rel(params["rel"])
     dest_rel = _get_rel_from_abs(params["dest_path"], context.project_root)
@@ -221,7 +221,7 @@ async def handle_copy_entry(
         params["rel"],
         params["dest_path"],
     )
-    await context.broadcast("explorer:copied", copied)
+    del copied
     await _broadcast_rel_list_ignoring_errors(
         context,
         _get_rel_from_abs(params["dest_path"], context.project_root),
@@ -240,7 +240,7 @@ async def handle_copy_from(
         params["source_path"],
         params["dest_rel"],
     )
-    await context.broadcast("explorer:copied", copied)
+    del copied
     await _broadcast_rel_list_ignoring_errors(context, params["dest_rel"])
 
 
@@ -256,7 +256,7 @@ async def handle_move_from(
         params["source_path"],
         params["dest_rel"],
     )
-    await context.broadcast("explorer:moved", moved)
+    del moved
     await _broadcast_rel_list_ignoring_errors(context, params["dest_rel"])
 
 
@@ -265,7 +265,7 @@ async def _broadcast_rel_list(
     rel: str,
 ) -> None:
     list_payload = await asyncio.to_thread(_list_dir_payload, rel)
-    await context.broadcast("explorer:setList", list_payload)
+    await context.broadcast("explorer.list.updated", list_payload)
 
 
 async def _broadcast_rel_list_ignoring_errors(
@@ -288,10 +288,10 @@ def _call_explorer_helper_dict(name: str, *args: object) -> dict[str, object]:
 
 
 def _get_explorer_helper_callable(name: str) -> ExplorerHelperCall:
-    helper_module = importlib.import_module("app.apps.file_editor_cm6.explorer_helper")
+    helper_module = importlib.import_module("app.apps.file_editor_cm6.explorer.services.file_ops")
     helper = getattr(helper_module, name, None)
     if not callable(helper):
-        raise RuntimeError(f"explorer_helper.{name} unavailable")
+        raise RuntimeError(f"explorer.services.file_ops.{name} unavailable")
     return helper
 
 

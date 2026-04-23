@@ -5,13 +5,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ..explorer_manager import ExplorerConnection
+from .transport.connection_manager import ExplorerConnection
 
 
 class EmitPersonal(Protocol):
     async def __call__(
         self,
-        message_type: str,
+        method: str,
         payload: dict[str, object],
         reply_to: str | None = None,
     ) -> None: ...
@@ -24,7 +24,7 @@ class AsyncNoArg(Protocol):
 class Broadcast(Protocol):
     async def __call__(
         self,
-        message_type: str,
+        method: str,
         payload: dict[str, object],
     ) -> None: ...
 

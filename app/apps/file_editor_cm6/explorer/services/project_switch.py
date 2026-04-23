@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, cast
 
-from ...explorer_helper import set_project_root
-from ...explorer_manager import ExplorerConnection, manager
+from .file_ops import set_project_root
+from ..transport.connection_manager import ExplorerConnection, manager
 from ...project_sidecar import ProjectSidecar
 from ..contracts.watcher import build_watcher_config_payload
 from .project_session import reset_project_session

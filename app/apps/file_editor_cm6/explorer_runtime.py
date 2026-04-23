@@ -9,22 +9,19 @@ here. Put feature behavior in `explorer/handlers/`, `explorer/services/`, or
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 import importlib
-import json
 import logging
-from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
-from fastapi import WebSocket, WebSocketDisconnect
+from typing import Protocol, cast, runtime_checkable
 from pathlib import Path
 
 # Import git_service to register job handlers in worker process.
 importlib.import_module("app.libs.git_service")
 
-from . import explorer_helper as _explorer_helper
+from .explorer.services import file_ops as _file_ops
 from .git_helper import get_status as git_get_status
 # NOTE: search and review are imported lazily inside handler methods
 # to break a circular import chain:
-#   diagnostics_bridge → explorer_socketio → explorer_runtime → explorer/review
+#   diagnostics_bridge → explorer transport socketio app → explorer_runtime → explorer/review
 #   → editor_discard → editor_backend → editor_socketio → editor_ws
 
 # Logger setup
@@ -35,31 +32,9 @@ ExplorerMessageHandler = Callable[[JsonObject, str | None], Awaitable[None]]
 MarkGitCacheDirtyFn = Callable[[Path], None]
 GetAllGitStatusesFn = Callable[[], JsonObject]
 
-get_project_root = _explorer_helper.get_project_root
-mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _explorer_helper.mark_git_cache_dirty)
-get_all_git_statuses = cast(GetAllGitStatusesFn, _explorer_helper.get_all_git_statuses)
-
-
-def _load_json_value(raw: str) -> object:
-    return cast(object, json.loads(raw))
-
-
-if TYPE_CHECKING:
-    class _SocketIOAsyncNamespace:
-        def __init__(self, namespace: str = "/explorer") -> None: ...
-
-        async def emit(
-            self,
-            event: str,
-            data: object,
-            *,
-            room: str | None = None,
-            namespace: str | None = None,
-        ) -> None: ...
-else:
-    import socketio
-
-    _SocketIOAsyncNamespace = socketio.AsyncNamespace
+get_project_root = _file_ops.get_project_root
+mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _file_ops.mark_git_cache_dirty)
+get_all_git_statuses = cast(GetAllGitStatusesFn, _file_ops.get_all_git_statuses)
 
 
 class SocketIOEmitter(Protocol):
@@ -85,63 +60,18 @@ class ExplorerRpcReplySocket(Protocol):
     ) -> bool: ...
 
 
-@dataclass(frozen=True)
-class ExplorerInboundMessage:
-    message_type: str | None
-    payload: JsonObject
-    msg_id: str | None
-
-
-def _as_json_object(value: object) -> JsonObject | None:
-    if not isinstance(value, dict):
-        return None
-    return cast(JsonObject, value)
-
-
-def _parse_inbound_message(raw: object) -> ExplorerInboundMessage:
-    message = _as_json_object(raw)
-    if message is None:
-        return ExplorerInboundMessage(message_type=None, payload={}, msg_id=None)
-
-    message_type_obj = message.get("type")
-    msg_id_obj = message.get("id")
-    return ExplorerInboundMessage(
-        message_type=message_type_obj if isinstance(message_type_obj, str) else None,
-        payload=_as_json_object(message.get("payload")) or {},
-        msg_id=msg_id_obj if isinstance(msg_id_obj, str) else None,
-    )
-
-
 def abs_to_rel(abs_path: str, project_root: str) -> str | None:
     """Convert an absolute path into a project-root-relative path (best-effort).
 
-    Re-exported from explorer_manager for backward compatibility.
+    Re-exported from the explorer transport connection manager for backward compatibility.
     """
-    from .explorer_manager import abs_to_rel as _abs_to_rel
+    from .explorer.transport.connection_manager import abs_to_rel as _abs_to_rel
     return _abs_to_rel(abs_path, project_root)
 
-
-class SocketIOSocketShim:
-    """Lightweight shim to let ExplorerDispatcher use Socket.IO sessions.
-
-    Provides accept() and send_text() to satisfy ConnectionManager.
-    """
-
-    def __init__(self, namespace: SocketIOEmitter, sid: str) -> None:
-        self.namespace = namespace
-        self.sid = sid
-
-    async def accept(self) -> None:
-        # Socket.IO is already connected; nothing to do
-        return
-
-    async def send_text(self, data: str) -> None:
-        await self.namespace.emit('explorer:event', data, room=self.sid)
-
 # --- Connection Manager ---
-# Extracted to explorer_manager.py to break circular import chains.
+# Extracted to explorer transport connection_manager.py to break circular import chains.
 # Re-exported here for backward compatibility.
-from .explorer_manager import ExplorerConnection, manager
+from .explorer.transport.connection_manager import ExplorerConnection, manager
 from .explorer.context import (
     ExplorerExtensionHandlerContext,
     ExplorerFileTreeHandlerContext,
@@ -161,6 +91,7 @@ from .explorer.services.job_tracking import (
 )
 from .explorer.services.session_bootstrap import bootstrap_explorer_session
 from .explorer.services.runtime_notifications import set_explorer_event_loop
+from .explorer.transport.rpc_contract import build_jsonrpc_notification
 
 # --- Dispatcher ---
 
@@ -203,12 +134,12 @@ class ExplorerDispatcher:
 
     async def emit_personal(
         self,
-        message_type: str,
+        method: str,
         payload: JsonObject,
         reply_to: str | None = None,
     ) -> None:
         if reply_to and isinstance(self.websocket, ExplorerRpcReplySocket):
-            if message_type == "error":
+            if method == "explorer.error":
                 error_obj = payload.get("error")
                 error_message = (
                     error_obj
@@ -219,18 +150,20 @@ class ExplorerDispatcher:
                     return
             elif self.websocket.complete_rpc_request(reply_to, payload):
                 return
-        msg: JsonObject = {"type": message_type, "payload": payload}
-        if reply_to:
-            msg["id"] = reply_to
-        await manager.send_personal(self.websocket, msg)
+        await manager.send_personal(
+            self.websocket,
+            build_jsonrpc_notification(method, payload),
+        )
 
-    async def broadcast(self, message_type: str, payload: JsonObject) -> None:
-        msg: JsonObject = {"type": message_type, "payload": payload}
-        await manager.broadcast(str(self.project_root), msg)
+    async def broadcast(self, method: str, payload: JsonObject) -> None:
+        await manager.broadcast(
+            str(self.project_root),
+            build_jsonrpc_notification(method, payload),
+        )
 
     async def send_error(self, message: str, reply_to: str | None = None) -> None:
         payload: JsonObject = {"error": message}
-        await self.emit_personal("error", payload, reply_to)
+        await self.emit_personal("explorer.error", payload, reply_to)
 
     async def broadcast_git_status(self) -> None:
         try:
@@ -245,7 +178,7 @@ class ExplorerDispatcher:
                 "unstaged": status.unstaged,
                 "untracked": status.untracked,
             }
-            await self.broadcast("git:status", data)
+            await self.broadcast("explorer.git.status.updated", data)
         except Exception:
             pass
 
@@ -265,7 +198,7 @@ class ExplorerDispatcher:
         """
         try:
             statuses = await asyncio.to_thread(get_all_git_statuses)
-            await self.broadcast("explorer:updateGitStatus", {"statuses": statuses})
+            await self.broadcast("explorer.git.decorations.updated", {"statuses": statuses})
         except Exception:
             pass
 
@@ -274,7 +207,7 @@ class ExplorerDispatcher:
         # 1. Review List
         from .explorer import review
         reviews = await review.list_reviews(self.project_root, lightweight=True)
-        await self.broadcast("review:setEntries", {"entries": reviews})
+        await self.broadcast("explorer.review.entries.updated", {"entries": reviews})
 
         # 2. Decorations (Drafts)
         draft_decorations: JsonObject = {
@@ -284,10 +217,10 @@ class ExplorerDispatcher:
             for rel in [review_entry.get("rel")]
             if isinstance(rel, str)
         }
-        await self.broadcast("explorer:updateDecorations", {"drafts": draft_decorations})
+        await self.broadcast("explorer.decorations.updated", {"drafts": draft_decorations})
 
     def _build_search_review_context(self) -> ExplorerSearchReviewHandlerContext:
-        from .explorer_helper import mark_draft_cache_dirty
+        from .explorer.services.file_ops import mark_draft_cache_dirty
 
         typed_mark_draft_cache_dirty = cast(MarkProjectDirty, mark_draft_cache_dirty)
         return ExplorerSearchReviewHandlerContext(
@@ -365,29 +298,6 @@ class ExplorerDispatcher:
         if handler is None:
             return None
         return cast(ExplorerMessageHandler, handler)
-
-    # --- Message Loop ---
-
-    async def handle_message(self, raw_msg: str) -> None:
-        try:
-            data = _load_json_value(raw_msg)
-        except json.JSONDecodeError:
-            await self.send_error("Invalid JSON")
-            return
-
-        await self.handle_message_json(data)
-
-    async def handle_message_json(self, data: object) -> None:
-        message = _parse_inbound_message(data)
-        if not message.message_type:
-            await self.send_error("Missing message type", message.msg_id)
-            return
-
-        await self.dispatch_message(
-            message.message_type,
-            message.payload,
-            message.msg_id,
-        )
 
     async def dispatch_message(
         self,
@@ -1215,73 +1125,3 @@ class ExplorerDispatcher:
             return await self.send_error(exc.message, msg_id)
 
         await handle_ext_restart_adapter(self._build_extension_context(), params, msg_id)
-
-
-# --- WebSocket Endpoint ---
-
-async def explorer_websocket(websocket: WebSocket) -> None:
-    # Dispatcher init now handles accept/connect logic partially, but we need to accept first
-    # to read cookies/headers if needed, or just let dispatcher do it.
-    # The dispatcher needs an accepted socket.
-    # The dispatcher.initialize() is async.
-    
-    # Wait, dispatcher.__init__ is sync.
-    # We should accept here.
-    dispatcher = ExplorerDispatcher(websocket)
-    # Connect logic in initialize() calls accept(), so we should NOT accept twice or ensure order.
-    # Actually manager.connect calls accept().
-    # Let's clean this up: standard pattern is endpoint accepts, then registers.
-    
-    # Correction: manager.connect calls accept(). 
-    # But dispatcher is created with websocket.
-    
-    await dispatcher.initialize()
-    
-    try:
-        while True:
-            data = await websocket.receive_text()
-            await dispatcher.handle_message(data)
-    except WebSocketDisconnect:
-        await dispatcher.cleanup()
-    except Exception as e:
-        logger.error(f"Explorer WebSocket error: {e}")
-        await dispatcher.cleanup()
-
-
-# --- Socket.IO Namespace Adapter ---
-
-
-class ExplorerSocketIONamespace(_SocketIOAsyncNamespace):
-    def __init__(self, namespace: str = "/explorer") -> None:
-        super().__init__(namespace)
-        self.dispatchers: dict[str, ExplorerDispatcher] = {}
-
-    async def on_connect(self, sid: str, environ: dict[str, object]) -> None:
-        del environ
-        # Create dispatcher with Socket.IO shim
-        ws = SocketIOSocketShim(self, sid)
-        dispatcher = ExplorerDispatcher(ws)
-        await dispatcher.initialize()
-        self.dispatchers[sid] = dispatcher
-        logger.info(f"[ExplorerSIO] client connected sid={sid}")
-
-    async def on_disconnect(self, sid: str, reason: object | None = None) -> None:
-        disp = self.dispatchers.pop(sid, None)
-        if disp is not None:
-            await disp.cleanup()
-        logger.info(f"[ExplorerSIO] client disconnected sid={sid} reason={reason}")
-
-    async def on_explorer_send(self, sid: str, data: object) -> None:
-        disp = self.dispatchers.get(sid)
-        if disp is None:
-            return
-        logger.info(f"[ExplorerSIO] recv sid={sid} data={data}")
-        if isinstance(data, str):
-            try:
-                data = _load_json_value(data)
-            except json.JSONDecodeError:
-                return
-        message_data = _as_json_object(data)
-        if message_data is None:
-            return
-        await disp.handle_message_json(message_data)

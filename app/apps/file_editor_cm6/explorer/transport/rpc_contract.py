@@ -1,4 +1,5 @@
 # pyright: strict
+# Explorer JSON-RPC contract surface.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -68,49 +69,6 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.watcher.limit.raise": "watcher:raiseLimit",
     "explorer.watcher.mode.set": "watcher:setMode",
 }
-
-RPC_NOTIFICATION_METHOD_BY_LEGACY_TYPE: dict[str, str] = {
-    "agent:open": "explorer.agent.open",
-    "autosave:content": "explorer.autosave.content",
-    "cm6:mirror:ack": "explorer.cm6.mirror.ack",
-    "diagnostics:detail": "explorer.diagnostics.detail",
-    "draft:content": "explorer.draft.content",
-    "editor:prefs_changed": "explorer.editor.prefs.changed",
-    "error": "explorer.error",
-    "explorer:activeFile": "explorer.activeFile.updated",
-    "explorer:created": "explorer.entry.created",
-    "explorer:navigate": "explorer.navigate",
-    "explorer:setList": "explorer.list.updated",
-    "explorer:setOpenDirs": "explorer.openDirs.updated",
-    "explorer:setTree": "explorer.tree.updated",
-    "explorer:updateDecorations": "explorer.decorations.updated",
-    "explorer:updateGitStatus": "explorer.git.decorations.updated",
-    "ext:adapter_restarted": "explorer.extensions.adapter.restarted",
-    "ext:adapter_restarting": "explorer.extensions.adapter.restarting",
-    "ext:configSchema": "explorer.extensions.configSchema.updated",
-    "ext:settings_changed": "explorer.extensions.settings.changed",
-    "git:cloneStarted": "explorer.git.clone.started",
-    "git:diffBaseSet": "explorer.git.diffBase.updated",
-    "git:pullStarted": "explorer.git.pull.started",
-    "git:pushStarted": "explorer.git.push.started",
-    "git:restored": "explorer.git.restored",
-    "git:status": "explorer.git.status.updated",
-    "job:progress": "explorer.job.progress",
-    "prefs:setUi": "explorer.prefs.ui.updated",
-    "prefs:vendorAgentIconResult": "explorer.prefs.agentIcon.vendored",
-    "project:opened": "explorer.project.opened",
-    "project:setActive": "explorer.project.active.updated",
-    "pulse": "explorer.pulse",
-    "review:setEntries": "explorer.review.entries.updated",
-    "search:setResults": "explorer.search.results.updated",
-    "watcher:config": "explorer.watcher.config.updated",
-    "watcher:error": "explorer.watcher.error",
-    "watcher:files": "explorer.watcher.files",
-    "watcher:modeChanged": "explorer.watcher.mode.changed",
-    "watcher:modeStatus": "explorer.watcher.mode.status",
-    "watcher:raiseResult": "explorer.watcher.limit.raiseResult",
-}
-
 
 class JsonRpcErrorObject(TypedDict, total=False):
     code: int
@@ -246,27 +204,6 @@ def dispatcher_message_type_from_rpc_method(method: str) -> str:
     return DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD[method]
 
 
-def rpc_notification_from_legacy_message(message: object) -> JsonRpcNotificationEnvelope | None:
-    legacy_message = _as_object(message)
-    if legacy_message is None:
-        return None
-    legacy_type = legacy_message.get("type")
-    if not isinstance(legacy_type, str) or not legacy_type.strip():
-        return None
-
-    method = RPC_NOTIFICATION_METHOD_BY_LEGACY_TYPE.get(legacy_type)
-    if method is None:
-        return None
-    payload = normalize_payload(legacy_message.get("payload"))
-    return build_jsonrpc_notification(method, payload)
-
-
-def build_jsonrpc_success(request_id: str, legacy_message: object) -> JsonRpcSuccessEnvelope:
-    legacy = _as_object(legacy_message) or {}
-    payload = normalize_payload(legacy.get("payload"))
-    return build_jsonrpc_result(request_id, payload)
-
-
 def build_default_jsonrpc_success(request_id: str) -> JsonRpcSuccessEnvelope:
     return {
         "jsonrpc": "2.0",
@@ -293,16 +230,3 @@ def build_jsonrpc_error(
         "id": request_id,
         "error": error,
     }
-
-
-def build_jsonrpc_error_from_legacy_reply(request_id: str, legacy_message: object) -> JsonRpcErrorEnvelope:
-    legacy = _as_object(legacy_message) or {}
-    payload = normalize_payload(legacy.get("payload"))
-    message = payload.get("error")
-    error_message = message if isinstance(message, str) and message else "Explorer RPC request failed"
-    return build_jsonrpc_error(
-        request_id=request_id,
-        code=-32000,
-        message=error_message,
-        data={"legacy_type": cast(object, legacy.get("type"))} if legacy.get("type") is not None else None,
-    )

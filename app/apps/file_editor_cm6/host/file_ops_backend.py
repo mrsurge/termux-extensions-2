@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import TypedDict, cast
 
-from ..explorer_helper import get_project_root
+from ..explorer.services.file_ops import get_project_root
 from ..stores import get_history_store
 from ..monaco_editor.editor_ws import (
     editor_runtime_active_project,

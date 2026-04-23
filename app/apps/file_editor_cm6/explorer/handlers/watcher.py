@@ -62,7 +62,7 @@ async def handle_watcher_raise_limit(
             "stderr": str(exc),
         }
 
-    await context.emit_personal("watcher:raiseResult", dict(out_payload), msg_id)
+    await context.emit_personal("explorer.watcher.limit.raiseResult", dict(out_payload), msg_id)
 
     if not out_payload["ok"]:
         return
@@ -134,8 +134,8 @@ async def handle_watcher_set_mode(
         "poll_interval_ms": poll_interval_ms,
         "active": active,
     }
-    await context.emit_personal("watcher:modeStatus", dict(status_payload), msg_id)
-    await context.broadcast("watcher:modeChanged", {"mode": mode})
+    await context.emit_personal("explorer.watcher.mode.status", dict(status_payload), msg_id)
+    await context.broadcast("explorer.watcher.mode.changed", {"mode": mode})
 
 
 async def handle_watcher_get_config(
@@ -160,7 +160,7 @@ async def handle_watcher_get_config(
         watcher_config,
         watchexec_available=is_watchexec_available(),
     )
-    await context.emit_personal("watcher:config", dict(payload), msg_id)
+    await context.emit_personal("explorer.watcher.config.updated", dict(payload), msg_id)
 
 
 def _normalize_config_dict(value: object) -> dict[str, object]:

@@ -17,7 +17,7 @@ from starlette.responses import FileResponse
 from app.apps.file_editor_cm6.stores import _history_store, _preferences_store
 from app.apps.file_editor_cm6.preferences_store import ALLOWED_FONT_SCALES
 # Import helpers
-from app.apps.file_editor_cm6.explorer_helper import get_project_root, _normalize_rel_path, mark_git_cache_dirty
+from app.apps.file_editor_cm6.explorer.services.file_ops import get_project_root, _normalize_rel_path, mark_git_cache_dirty
 from app.apps.file_editor_cm6.core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from app.apps.file_editor_cm6.core_write import write_full, BaseMismatchError
 from app.apps.file_editor_cm6.diff_helper import invalidate_diff_cache, collect_diff
@@ -447,7 +447,9 @@ def _persist_to_cache_debounced():
         state = _history_store.get_session_state() or {}
         ssot_current = state.get("currentPath")
         if isinstance(ssot_current, str) and ssot_current.strip() and str(ssot_current) == str(current_file):
-            from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
+            from app.apps.file_editor_cm6.explorer.transport.rpc_emit import (
+                emit_project_explorer_rpc_notification,
+            )
 
             proj_norm = str(Path(project_path).expanduser().resolve(strict=False))
             source_client = source_client_id
@@ -460,7 +462,13 @@ def _persist_to_cache_debounced():
                 "content_sha256": current_hash or '',
                 "source_client": source_client,
             }
-            asyncio.create_task(_explorer_manager.broadcast(proj_norm, {"type": "draft:content", "payload": payload}))
+            asyncio.create_task(
+                emit_project_explorer_rpc_notification(
+                    proj_norm,
+                    "explorer.draft.content",
+                    payload,
+                )
+            )
     except Exception:
         pass
 
@@ -794,7 +802,9 @@ async def update_preference(data: dict[str, object] = Body(...)):
         preferences: dict[str, object],
         source_client: str | None,
     ) -> None:
-        from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
+        from app.apps.file_editor_cm6.explorer.transport.rpc_emit import (
+            emit_project_explorer_rpc_notification,
+        )
 
         payload = {
             "project_path": project_path,
@@ -805,12 +815,10 @@ async def update_preference(data: dict[str, object] = Body(...)):
             "source_client": source_client,
         }
         asyncio.create_task(
-            _explorer_manager.broadcast(
+            emit_project_explorer_rpc_notification(
                 project_path,
-                {
-                    "type": "editor:prefs_changed",
-                    "payload": payload,
-                },
+                "explorer.editor.prefs.changed",
+                payload,
             )
         )
         try:
@@ -894,10 +902,14 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: str | None) -> 
 
 @editor_router.post('/save')
 async def save_current_file(data: dict[str, object] = Body(...)):
-    def _broadcast_to_explorer(project_norm: str, payload: dict[str, object]) -> None:
-        from app.apps.file_editor_cm6.explorer_manager import manager as _explorer_manager
+    def _broadcast_to_explorer(project_norm: str, method: str, params: dict[str, object]) -> None:
+        from app.apps.file_editor_cm6.explorer.transport.rpc_emit import (
+            emit_project_explorer_rpc_notification,
+        )
 
-        asyncio.create_task(_explorer_manager.broadcast(project_norm, payload))
+        asyncio.create_task(
+            emit_project_explorer_rpc_notification(project_norm, method, params)
+        )
 
     async def _write_wrapper(client_id: str, op_id: str | None, _nicegui_client_id: str | None) -> dict[str, object]:
         return await _write_editor_buffer_to_disk(client_id=client_id, op_id=op_id)
@@ -919,7 +931,7 @@ async def save_current_file(data: dict[str, object] = Body(...)):
 @editor_router.post('/set_active_project')
 async def set_active_project(payload: dict[str, object] = Body(...)):
     try:
-        from app.apps.file_editor_cm6.explorer_helper import set_project_root
+        from app.apps.file_editor_cm6.explorer.services.file_ops import set_project_root
         from app.apps.file_editor_cm6.core_read import init_watcher
 
         return _handle_set_active_project(

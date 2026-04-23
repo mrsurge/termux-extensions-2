@@ -23,7 +23,7 @@ async def restart_adapter_only(emit_personal: EmitPersonal, reason: str) -> None
     except Exception:
         pass
 
-    await emit_personal("ext:adapter_restarting", {"reason": reason})
+    await emit_personal("explorer.extensions.adapter.restarting", {"reason": reason})
 
 
 async def restart_code_server_and_adapter(
@@ -56,6 +56,6 @@ async def restart_code_server_and_adapter(
         print(f"[ext_restart] code-server terminate error: {exc}", flush=True)
 
     await emit_personal(
-        "ext:adapter_restarting",
+        "explorer.extensions.adapter.restarting",
         {"reason": reason, "full_restart": True},
     )

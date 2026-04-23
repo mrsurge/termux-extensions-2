@@ -40,7 +40,7 @@ async def handle_project_open(
         switch_adapter_workspace=True,
     )
     await context.emit_personal(
-        "project:opened",
+        "explorer.project.opened",
         {
             "path": switch_result.display_path,
             "resolved_path": str(switch_result.project_root),
@@ -102,7 +102,7 @@ async def handle_git_clone(
     )
 
     await context.emit_personal(
-        "project:opened",
+        "explorer.project.opened",
         {
             "path": switch_result.display_path,
             "resolved_path": str(switch_result.project_root),
@@ -122,7 +122,7 @@ async def handle_git_clone(
     )
     remember_tracked_job(switch_result.project_root, context.tracked_job_ids, job.id)
     await context.emit_personal(
-        "git:cloneStarted",
+        "explorer.git.clone.started",
         {"job_id": job.id, "target_path": str(target)},
         msg_id,
     )
@@ -142,10 +142,10 @@ def _call_explorer_helper_dict(name: str, *args: object) -> dict[str, object]:
 
 
 def _get_explorer_helper_callable(name: str) -> ExplorerHelperCall:
-    helper_module = importlib.import_module("app.apps.file_editor_cm6.explorer_helper")
+    helper_module = importlib.import_module("app.apps.file_editor_cm6.explorer.services.file_ops")
     helper = getattr(helper_module, name, None)
     if not callable(helper):
-        raise RuntimeError(f"explorer_helper.{name} unavailable")
+        raise RuntimeError(f"explorer.services.file_ops.{name} unavailable")
     return helper
 
 

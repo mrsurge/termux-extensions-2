@@ -6,21 +6,18 @@ import json
 import logging
 from typing import TYPE_CHECKING, cast
 
-from .explorer_rpc_contract import (
+from .rpc_contract import (
     ExplorerRpcProtocolError,
     JsonRpcErrorEnvelope,
     JsonRpcSuccessEnvelope,
     build_default_jsonrpc_success,
     build_jsonrpc_error,
-    build_jsonrpc_error_from_legacy_reply,
     build_jsonrpc_result,
-    build_jsonrpc_success,
     dispatcher_message_type_from_rpc_method,
     normalize_payload,
     parse_explorer_rpc_request,
-    rpc_notification_from_legacy_message,
 )
-from .explorer_runtime import ExplorerDispatcher
+from ...explorer_runtime import ExplorerDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -106,17 +103,16 @@ class ExplorerRpcSocketShim:
             if isinstance(key, str)
         }
 
-        request_id = payload.get("id")
-        if isinstance(request_id, str):
-            pending = self._pending_requests.pop(request_id, None)
-            if pending is not None and not pending.done():
-                pending.set_result(payload)
-                return
-
-        notification = rpc_notification_from_legacy_message(payload)
-        if notification is None:
-            return
-        await self.namespace.emit("rpc.notify", notification, room=self.sid)
+        if payload.get("jsonrpc") == "2.0":
+            request_id = payload.get("id")
+            if isinstance(request_id, str):
+                pending = self._pending_requests.pop(request_id, None)
+                if pending is not None and not pending.done():
+                    pending.set_result(payload)
+                    return
+            method = payload.get("method")
+            if isinstance(method, str) and method:
+                await self.namespace.emit("rpc.notify", payload, room=self.sid)
 
 
 class ExplorerRpcSocketIONamespace(_SocketIOAsyncNamespace):
@@ -211,6 +207,4 @@ class ExplorerRpcSocketIONamespace(_SocketIOAsyncNamespace):
             if isinstance(result, dict):
                 return build_jsonrpc_result(request_id, normalize_payload(cast(object, result)))
             return build_default_jsonrpc_success(request_id)
-        if legacy_reply.get("type") == "error":
-            return build_jsonrpc_error_from_legacy_reply(request_id, legacy_reply)
-        return build_jsonrpc_success(request_id, legacy_reply)
+        return build_default_jsonrpc_success(request_id)

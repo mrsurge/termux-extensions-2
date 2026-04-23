@@ -10,11 +10,11 @@ from typing import Protocol, cast
 
 from ... import core_read as _core_read
 from ... import core_write as _core_write
-from ... import explorer_helper as _explorer_helper
+from ...explorer.services import file_ops as _file_ops
 from ...core_read import emit_diff_changed, init_watcher
 from ...core_write import BaseMismatchError
 from ...diff_helper import invalidate_diff_cache
-from ...explorer_helper import mark_draft_cache_dirty, mark_git_cache_dirty
+from ...explorer.services.file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
 from ...stores import get_history_store
 from .contracts import EmitToRoomFn, JsonMap, RuntimeMeta, SnapshotEmitter
 from .payload_utils import as_payload_dict, get_opt_str, get_str
@@ -47,7 +47,7 @@ class NormalizeRelPathFn(Protocol):
 _push_save_ack = cast(PushSaveAckFn, getattr(_core_read, "push_save_ack"))
 _get_file_meta = cast(GetFileMetaFn, getattr(_core_write, "_get_file_meta"))
 _write_full = cast(WriteFullFn, getattr(_core_write, "write_full"))
-_normalize_rel_path = cast(NormalizeRelPathFn, getattr(_explorer_helper, "_normalize_rel_path"))
+_normalize_rel_path = cast(NormalizeRelPathFn, getattr(_file_ops, "_normalize_rel_path"))
 _history_store = get_history_store()
 
 

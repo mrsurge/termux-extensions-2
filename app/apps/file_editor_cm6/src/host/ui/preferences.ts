@@ -2,6 +2,7 @@
 /**
  * @param {{
  *   apiPost: (path: string, body: any) => Promise<any>,
+ *   requestBackendEditorPreferenceUpdate?: (payload: any) => Promise<any>,
  *   getClientId: () => string | null,
  *   setEditorViewState: (state: any) => void,
  *   setMenuChecked: (el: any, checked: boolean) => void,
@@ -48,10 +49,15 @@ export function createPreferencesController(deps) {
       const body = /** @type {any} */ ({ key, value });
       const clientId = deps.getClientId();
       if (clientId) body.nicegui_client_id = clientId;
-      const resp = await deps.apiPost('editor/update_preference', body);
-      if (resp && typeof resp === 'object' && Object.keys(resp).length > 0) {
-        deps.setEditorViewState(resp);
-        applyStateToMenus(resp);
+      const resp = typeof deps.requestBackendEditorPreferenceUpdate === 'function'
+        ? await deps.requestBackendEditorPreferenceUpdate(body)
+        : await deps.apiPost('editor/update_preference', body);
+      const viewState = resp && typeof resp === 'object' && resp.data && typeof resp.data === 'object'
+        ? resp.data
+        : resp;
+      if (viewState && typeof viewState === 'object' && Object.keys(viewState).length > 0) {
+        deps.setEditorViewState(viewState);
+        applyStateToMenus(viewState);
         console.log('[Preference] updatePreference applied', key, value);
         return true;
       }

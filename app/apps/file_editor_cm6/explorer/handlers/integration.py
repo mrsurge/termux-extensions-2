@@ -27,9 +27,9 @@ async def handle_cm6_mirror(
     params: JsonObject,
     msg_id: str | None,
 ) -> None:
-    await context.broadcast("cm6:mirror", params)
+    del params
     if msg_id:
-        await context.emit_personal("cm6:mirror:ack", {"ok": True}, msg_id)
+        await context.emit_personal("explorer.cm6.mirror.ack", {"ok": True}, msg_id)
 
 
 async def handle_mention_agent(

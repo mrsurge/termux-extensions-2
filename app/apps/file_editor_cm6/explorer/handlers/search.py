@@ -39,4 +39,4 @@ async def handle_search_run(
             search_service.search_by_changes(context.project_root),
         )
 
-    await context.emit_personal("search:setResults", dict(result), msg_id)
+    await context.emit_personal("explorer.search.results.updated", dict(result), msg_id)

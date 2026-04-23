@@ -193,34 +193,20 @@ def _role_from_environ(environ: dict[str, object]) -> str:
 
 
 async def _broadcast_active_file_update(project: str, abs_path: str) -> None:
-    """Emit active-file updates on both legacy explorer and RPC notification surfaces."""
+    """Emit active-file updates onto the Explorer RPC notification lane."""
     try:
-        from ..explorer_manager import abs_to_rel
+        from ..explorer.transport.connection_manager import abs_to_rel
+        from ..explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
 
         rel = abs_to_rel(abs_path, project)
         if not rel or rel == ".":
             return
 
-        try:
-            from ..explorer_socketio import EXPLORER_SIO
-
-            await EXPLORER_SIO.emit(
-                "explorer:event",
-                {"type": "explorer:activeFile", "payload": {"rel": rel, "abs": abs_path}},
-                namespace="/explorer",
-            )
-        except Exception:
-            pass
-
-        try:
-            from ..explorer_rpc_emit import emit_explorer_rpc_notification
-
-            await emit_explorer_rpc_notification(
-                "explorer.activeFile.updated",
-                {"rel": rel, "abs": abs_path},
-            )
-        except Exception:
-            pass
+        await emit_project_explorer_rpc_notification(
+            project,
+            "explorer.activeFile.updated",
+            {"rel": rel, "abs": abs_path},
+        )
     except Exception:
         pass
 
@@ -233,7 +219,7 @@ async def _emit_host_active_file_changed(
     request_id: str | None = None,
 ) -> None:
     try:
-        from ..explorer_manager import abs_to_rel
+        from ..explorer.transport.connection_manager import abs_to_rel
         from ..ui_ipc.ui_ipc_socketio import UI_IPC_SIO
 
         rel = abs_to_rel(abs_path, project)
@@ -574,7 +560,7 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
             print(f"[editor_ws] external change: draft clear failed: {e}", flush=True)
 
         try:
-            from ..explorer_helper import mark_draft_cache_dirty
+            from ..explorer.services.file_ops import mark_draft_cache_dirty
             mark_draft_cache_dirty()
         except Exception:
             pass
@@ -593,7 +579,7 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
 
     # Mark git cache dirty for explorer decorations
     try:
-        from ..explorer_helper import mark_git_cache_dirty
+        from ..explorer.services.file_ops import mark_git_cache_dirty
         mark_git_cache_dirty()
     except Exception:
         pass
@@ -1320,11 +1306,12 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
                 rel = "."
             is_external = False
 
-        # Relay to explorer socket (cross-transport, same worker process)
+        # Relay to the Explorer RPC lane (cross-backend, same worker process)
         try:
-            from ..explorer_rpc_emit import emit_explorer_rpc_notification
+            from ..explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
             _wb_log.info("[bc-navigate] rel=%s abs=%s external=%s drawer=%s", rel, abs_path, is_external, open_drawer)
-            await emit_explorer_rpc_notification(
+            await emit_project_explorer_rpc_notification(
+                project,
                 "explorer.navigate",
                 {"rel": rel, "abs_path": abs_path, "is_external": is_external, "open_drawer": open_drawer},
             )

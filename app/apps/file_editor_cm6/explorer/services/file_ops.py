@@ -1,4 +1,4 @@
-# app/apps/file_editor_cm6/explorer_helper.py
+# app/apps/file_editor_cm6/explorer/services/file_ops.py
 
 from __future__ import annotations
 from pathlib import Path

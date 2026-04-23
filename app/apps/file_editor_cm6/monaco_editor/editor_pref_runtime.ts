@@ -1,6 +1,6 @@
-import { getShowInlineDiffsFlag, getShowDraftDiffsFlag, getUseTrueInlineViewFlag, getAutoSaveFlag } from './editor_pref_flags_utils.js';
-import { localMirrorDebounceMs, mirrorHotWindowMs, gitBaselineDebounceMs, gitBaselineApplyIdleMs } from './editor_timing_policy_utils.js';
-import { requestGitBaselinesDebounced } from './editor_git_baseline_request_utils.js';
+import { getShowInlineDiffsFlag, getShowDraftDiffsFlag, getUseTrueInlineViewFlag, getAutoSaveFlag } from './editor_pref_flags_utils.ts';
+import { localMirrorDebounceMs, mirrorHotWindowMs, gitBaselineDebounceMs, gitBaselineApplyIdleMs } from './editor_timing_policy_utils.ts';
+import { requestGitBaselinesDebounced } from './editor_git_baseline_request_utils.ts';
 
 interface EditorPrefRuntimeDeps {
   getCachedPrefs(): unknown;

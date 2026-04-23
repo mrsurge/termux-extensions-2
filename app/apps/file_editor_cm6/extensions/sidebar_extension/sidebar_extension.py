@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 # Hardcoded imports for now; these will be dynamically wired by the extensions
 # loader once app-level extensions are formalized.
 from .sidebar_state import enqueue_open_request, pop_open_request, record_drawer_open, update_ui_hints
-from ...explorer_helper import get_project_root
+from ...explorer.services.file_ops import get_project_root
 from ...stores import get_history_store
 
 bp = APIRouter()

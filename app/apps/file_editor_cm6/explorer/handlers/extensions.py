@@ -303,7 +303,7 @@ async def handle_ext_restart_adapter(
 ) -> None:
     del params
     await restart_adapter_only(context.emit_personal, "manual")
-    await context.emit_personal("ext:adapter_restarted", {"ok": True}, msg_id)
+    await context.emit_personal("explorer.extensions.adapter.restarted", {"ok": True}, msg_id)
 
 
 def _as_object(value: object) -> JsonObject | None:

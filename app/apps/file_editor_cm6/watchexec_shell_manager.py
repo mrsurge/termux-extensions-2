@@ -115,12 +115,16 @@ def _forward_watchexec_event(evt: dict, project_root: str) -> None:
     payload = {"created": created, "changed": changed, "deleted": deleted}
 
     try:
-        from .explorer_rpc_emit import emit_explorer_rpc_notification
+        from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
         # Schedule the emit on the running event loop
         loop = asyncio.get_event_loop()
         if loop.is_running():
             loop.create_task(
-                emit_explorer_rpc_notification("explorer.watcher.files", payload)
+                emit_project_explorer_rpc_notification(
+                    str(project_root),
+                    "explorer.watcher.files",
+                    payload,
+                )
             )
             # External edit detection for active editor file
             if changed or created:

@@ -109,7 +109,7 @@ async def _pump_job_events(
 
                 if job_id in tracked_job_ids:
                     await emit_personal(
-                        "job:progress",
+                        "explorer.job.progress",
                         dict(job_data),
                         None,
                     )
@@ -135,7 +135,7 @@ async def _pump_job_events(
 
                     if job_id in tracked:
                         tracked_job_ids.add(job_id)
-                        await emit_personal("job:progress", dict(job_data), None)
+                        await emit_personal("explorer.job.progress", dict(job_data), None)
                     else:
                         logger.debug(
                             "[JOB_PUMP] Ignoring untracked job %s (%s)",
@@ -150,4 +150,3 @@ async def _pump_job_events(
         except Exception as exc:
             logger.warning("[JOB_PUMP] Error: %s", exc)
             await asyncio.sleep(0.5)
-

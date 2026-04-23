@@ -10,8 +10,9 @@ from pathlib import Path
 from threading import Lock, Timer
 from typing import Optional
 
-from ...explorer_helper import get_all_git_statuses, mark_git_cache_dirty
-from ...explorer_manager import abs_to_rel, manager
+from .file_ops import get_all_git_statuses, mark_draft_cache_dirty, mark_git_cache_dirty
+from ..transport.connection_manager import abs_to_rel, manager
+from ..transport.rpc_emit import emit_project_explorer_rpc_notification
 from ...git_helper import get_status as git_get_status
 
 logger = logging.getLogger(__name__)
@@ -79,15 +80,13 @@ async def _broadcast_watcher_files(project_path: str, payload: dict[str, set[str
         deleted = sorted(payload.get("deleted", set()))
         if not created and not changed and not deleted:
             return
-        await manager.broadcast(
+        await emit_project_explorer_rpc_notification(
             project_path,
+            "explorer.watcher.files",
             {
-                "type": "watcher:files",
-                "payload": {
-                    "created": created,
-                    "changed": changed,
-                    "deleted": deleted,
-                },
+                "created": created,
+                "changed": changed,
+                "deleted": deleted,
             },
         )
     except Exception as exc:
@@ -139,9 +138,10 @@ async def _broadcast_git_status_update(project_path: str) -> None:
         mark_git_cache_dirty(Path(project_path))
 
         statuses = await asyncio.to_thread(get_all_git_statuses)
-        await manager.broadcast(
+        await emit_project_explorer_rpc_notification(
             project_path,
-            {"type": "explorer:updateGitStatus", "payload": {"statuses": statuses}},
+            "explorer.git.decorations.updated",
+            {"statuses": statuses},
         )
 
         status = await asyncio.to_thread(git_get_status, Path(project_path))
@@ -151,19 +151,17 @@ async def _broadcast_git_status_update(project_path: str) -> None:
             status.unstaged,
             status.untracked,
         )
-        await manager.broadcast(
+        await emit_project_explorer_rpc_notification(
             project_path,
+            "explorer.git.status.updated",
             {
-                "type": "git:status",
-                "payload": {
-                    "branch": status.branch,
-                    "detached": status.detached,
-                    "ahead": status.ahead,
-                    "behind": status.behind,
-                    "staged": status.staged,
-                    "unstaged": status.unstaged,
-                    "untracked": status.untracked,
-                },
+                "branch": status.branch,
+                "detached": status.detached,
+                "ahead": status.ahead,
+                "behind": status.behind,
+                "staged": status.staged,
+                "unstaged": status.unstaged,
+                "untracked": status.untracked,
             },
         )
 
@@ -236,18 +234,17 @@ async def _broadcast_draft_decorations(project_path: str) -> None:
 
         draft_files = await asyncio.to_thread(_load_snapshot)
         draft_decorations = {rel: {"hasDraft": True} for rel in draft_files}
-        await manager.broadcast(
+        await emit_project_explorer_rpc_notification(
             normalized_path,
-            {
-                "type": "explorer:updateDecorations",
-                "payload": {"drafts": draft_decorations},
-            },
+            "explorer.decorations.updated",
+            {"drafts": draft_decorations},
         )
 
         reviews = await review.list_reviews(Path(normalized_path), lightweight=False)
-        await manager.broadcast(
+        await emit_project_explorer_rpc_notification(
             normalized_path,
-            {"type": "review:setEntries", "payload": {"entries": reviews}},
+            "explorer.review.entries.updated",
+            {"entries": reviews},
         )
     except Exception as exc:
         logger.warning("Failed to broadcast draft decorations: %s", exc)
@@ -255,7 +252,6 @@ async def _broadcast_draft_decorations(project_path: str) -> None:
 
 def notify_draft_state_changed(project_path: str) -> None:
     """Schedule a broadcast of updated draft decorations to explorer clients."""
-    from ...explorer_helper import mark_draft_cache_dirty
 
     normalized_path = str(Path(project_path).resolve())
 

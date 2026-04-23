@@ -32,7 +32,7 @@ async def handle_prefs_update_ui(
     value = _normalize_ui_pref_value(key, params["value"])
     updated = cast(JsonObject, PREFERENCES_STORE.update_preferences(ui={key: value}))
     ui_prefs = _as_object(updated.get("ui")) or {}
-    await context.broadcast("prefs:setUi", {"ui": ui_prefs})
+    await context.broadcast("explorer.prefs.ui.updated", {"ui": ui_prefs})
     del msg_id
 
 
