@@ -824,14 +824,14 @@ function _applyHostActivePath(filePath, options = {}) {
     )
   );
 
-  if (forceToolbar || toolbarStale || !nameEl) {
+  try {
+    if (typeof updatePathDisplay === 'function') updatePathDisplay();
+    else if (typeof window.updatePathDisplay === 'function') window.updatePathDisplay();
+    else if (forceToolbar || toolbarStale || !nameEl) setToolbarFileName(expectedName);
+  } catch (_) {
     try {
-      if (typeof updatePathDisplay === 'function') updatePathDisplay();
-      else if (typeof window.updatePathDisplay === 'function') window.updatePathDisplay();
-      else setToolbarFileName(expectedName);
-    } catch (_) {
-      try { setToolbarFileName(expectedName); } catch (_) {}
-    }
+      if (forceToolbar || toolbarStale || !nameEl) setToolbarFileName(expectedName);
+    } catch (_) {}
   }
 }
 
@@ -3499,6 +3499,7 @@ const runFileController = createRunFileController({
     if (terminal && typeof terminal.open === 'function') await terminal.open();
   },
   apiPost: (path, body) => apiPost(path, body),
+  requestBackendRunActiveFile: (payload) => uiIpcConnections.requestBackendRunActiveFile(payload),
   basename,
   toast: (msg) => host.toast(msg),
   updateRunButtonState: () => fileStatusController.updateRunButtonState(),

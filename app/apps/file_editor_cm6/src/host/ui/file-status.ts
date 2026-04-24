@@ -18,7 +18,7 @@ export function createFileStatusController(deps) {
   function updateRunButtonState() {
     if (!deps.runActiveBtn) return;
     const currentPath = deps.getCurrentPath();
-    const runnable = Boolean(currentPath && deps.getCurrentPathExists() && deps.isRunnableFile(currentPath));
+    const runnable = Boolean(currentPath && deps.isRunnableFile(currentPath));
     deps.runActiveBtn.disabled = !runnable;
     deps.runActiveBtn.title = runnable
       ? 'Run active file in terminal'

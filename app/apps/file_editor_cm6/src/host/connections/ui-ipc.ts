@@ -1,5 +1,7 @@
 // @ts-check
 
+import { isRunnableFile } from '../utils.ts';
+
 /**
  * @param {{
  *   ensureSocketIoLoaded: () => Promise<any>,
@@ -24,6 +26,14 @@ export function createUiIpcConnections(deps) {
       if (fileNameEl) {
         fileNameEl.textContent = fileName || 'Untitled';
         fileNameEl.title = fileName || 'Untitled';
+      }
+      const runActiveBtn = document.getElementById('run-active-file-btn');
+      if (runActiveBtn instanceof HTMLButtonElement) {
+        const runnable = isRunnableFile(filePath);
+        runActiveBtn.disabled = !runnable;
+        runActiveBtn.title = runnable
+          ? 'Run active file in terminal'
+          : 'Open a Python, shell, or C/C++ source file to enable running';
       }
     } catch (_) {}
   }
@@ -216,6 +226,24 @@ export function createUiIpcConnections(deps) {
     });
   }
 
+  async function requestBackendRunActiveFile(payload) {
+    const socket = await connectUIIPC();
+    if (!socket || !socket.connected) throw new Error('UI IPC socket not connected');
+    return await new Promise((resolve, reject) => {
+      try {
+        socket.emit('ui_event', { ...(payload || {}), type: 'run_active_file' }, (reply) => {
+          if (!reply || reply.ok === false) {
+            reject(new Error(reply?.error || 'backend run failed'));
+            return;
+          }
+          resolve(reply);
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
   return {
     emitSidebarIpc,
     connectSidebarIPC,
@@ -223,5 +251,6 @@ export function createUiIpcConnections(deps) {
     requestBackendFileOpen,
     requestBackendFileSave,
     requestBackendEditorPreferenceUpdate,
+    requestBackendRunActiveFile,
   };
 }

@@ -1,6 +1,16 @@
-export function deriveApiBase(locationObj) {
+declare global {
+  interface Window {
+    __te2InlineMonacoApiBase?: string;
+  }
+}
+
+interface LocationLike {
+  pathname?: string;
+}
+
+export function deriveApiBase(locationObj: LocationLike | null | undefined): string {
   try {
-    var override = '';
+    let override = '';
     try {
       override = String(
         (typeof window !== 'undefined' && window.__te2InlineMonacoApiBase)
@@ -12,8 +22,8 @@ export function deriveApiBase(locationObj) {
     }
     if (override) return override.replace(/\/+$/, '');
 
-    var p = String(locationObj && locationObj.pathname ? locationObj.pathname : '');
-    var idx = p.indexOf('/ui/');
+    const p = String(locationObj && locationObj.pathname ? locationObj.pathname : '');
+    const idx = p.indexOf('/ui/');
     return idx >= 0 ? p.slice(0, idx) : '';
   } catch (_) {
     return '';

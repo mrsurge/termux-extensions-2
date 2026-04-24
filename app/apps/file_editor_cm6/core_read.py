@@ -110,8 +110,9 @@ class PollingWatcher:
     def _notify_explorer(self, path: str, event_type: str):
         """Notify explorer of filesystem changes."""
         try:
-            from .explorer.services.runtime_notifications import notify_explorer_of_change
-            notify_explorer_of_change(path, event_type)
+            from .workspace_events import publish_file_change_threadsafe
+
+            publish_file_change_threadsafe(path, event_type)
         except Exception:
             pass  # Explorer module may not be loaded yet
 
@@ -143,8 +144,9 @@ class WatchdogHandler(FileSystemEventHandler):
         # Notify explorer of filesystem changes (files AND directories)
         # This runs in the watcher thread, so it schedules async work
         try:
-            from .explorer.services.runtime_notifications import notify_explorer_of_change
-            notify_explorer_of_change(path, event.event_type)
+            from .workspace_events import publish_file_change_threadsafe
+
+            publish_file_change_threadsafe(path, event.event_type)
         except Exception:
             pass  # Explorer module may not be loaded yet
         

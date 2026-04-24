@@ -117,6 +117,19 @@ class UIIPCNamespace(socketio.AsyncNamespace):
             except Exception as exc:
                 print(f"[ui_ipc] update_editor_preference route failed: {exc}", flush=True)
                 return {"ok": False, "error": str(exc)}
+        if event_type == "run_active_file" and isinstance(data, dict):
+            try:
+                from ..host.terminal_actions_backend import (
+                    handle_host_run_active_file_request,
+                )
+
+                return await handle_host_run_active_file_request(
+                    data,
+                    source_name="ui_ipc",
+                )
+            except Exception as exc:
+                print(f"[ui_ipc] run_active_file route failed: {exc}", flush=True)
+                return {"ok": False, "error": str(exc)}
         # Broadcast to everyone else in the room (skip sender)
         await self.emit("ui_event", data, room="ui_ipc", skip_sid=sid)
 

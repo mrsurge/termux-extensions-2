@@ -2,8 +2,8 @@ import { buildUiUrl, wsUrlFromPath, fetchJsonWithBase } from './editor_common_ut
 import { normalizeLanguageId, languageIdFromPath, monacoFileUri } from './editor_language_utils.js';
 import { parseJsonc } from './editor_parse_utils.js';
 import { createFileModel as createMonacoFileModel } from './editor_model_utils.js';
-import { runIssuesCommand, runFindCommand } from './editor_command_utils.js';
-import { deriveApiBase } from './editor_api_base_utils.js';
+import { runIssuesCommand, runFindCommand } from './editor_command_utils.ts';
+import { deriveApiBase } from './editor_api_base_utils.ts';
 import { absPathFromVscodeUri } from './editor_vscode_uri_utils.js';
 import {
   monacoRangeFromProtoRange,
@@ -13,7 +13,7 @@ import {
   mapCompletionItemKind,
 } from './editor_bridge_utils.js';
 import { te2DumpTextmateScopesForLine, te2GetActiveEditorAndModel, te2AdvanceRuleStackToLine } from './editor_textmate_debug_utils.js';
-import { applyJumpToLine as applyJumpToLineAt } from './editor_jump_utils.js';
+import { applyJumpToLine as applyJumpToLineAt } from './editor_jump_utils.ts';
 import { resolveMonacoThemeId } from './editor_theme_resolver_utils.js';
 import { emitToHostSocket } from './editor_socket_emit_utils.js';
 import { isAdapterReady } from './editor_workbench_barrier_utils.js';
@@ -51,7 +51,7 @@ import { shouldRecreateOpenModel, applyOpenModelTextSafely } from './editor_open
 import { emitOpenCacheState } from './editor_open_emit_cache_state_utils.js';
 import { queueBackendWorkbenchOpen } from './editor_open_workbench_open_utils.js';
 // editor_socket_readiness_step_handler_utils.js removed — readiness is now push-based via UI IPC adapter_state
-import { handleJumpToLineEvent } from './editor_socket_jump_handler_utils.js';
+import { handleJumpToLineEvent } from './editor_socket_jump_handler_utils.ts';
 import { coercePositiveInt } from './editor_open_contract.ts';
 import {
   createEditorOpenTransactionStore,
@@ -66,7 +66,7 @@ import {
   awaitOpenCompletion,
 } from './editor_open_transaction_runner.ts';
 import { runEditorOpenTransaction } from './editor_open_transaction_runner_main.ts';
-import { handleGitBaselinesSocketEvent } from './editor_git_baselines_socket_handler_utils.js';
+import { handleGitBaselinesSocketEvent } from './editor_git_baselines_socket_handler_utils.ts';
 import { shouldSkipAutosaveBaselineRefresh } from './editor_cache_state_autosave_skip_utils.js';
 import { resnapshotDraftBaseline } from './editor_cache_state_resnapshot_utils.js';
 import { canInstallScrollPublisher } from './editor_scroll_publisher_guard_utils.js';
@@ -74,10 +74,10 @@ import { buildScrollStatePayload } from './editor_scroll_publisher_payload_utils
 import { shouldSendScrollImmediately } from './editor_scroll_publisher_throttle_utils.js';
 import { scheduleScrollSend } from './editor_scroll_publisher_schedule_utils.js';
 import { installScrollPublisherRuntime } from './editor_scroll_publisher_runtime.ts';
-import { shouldApplyMirrorPath } from './editor_apply_mirror_path_utils.js';
-import { applyMirrorContent } from './editor_apply_mirror_content_utils.js';
+import { shouldApplyMirrorPath } from './editor_apply_mirror_path_utils.ts';
+import { applyMirrorContent } from './editor_apply_mirror_content_utils.ts';
 import { collectBootLanguageIds } from './editor_boot_language_ids_utils.js';
-import { warnIfPlaintextOnlyLanguages } from './editor_boot_plaintext_warn_utils.js';
+import { warnIfPlaintextOnlyLanguages } from './editor_boot_plaintext_warn_utils.ts';
 import { applyActiveModelLanguage } from './editor_boot_apply_active_model_language_utils.js';
 import { applyLanguageToModelRuntime } from './editor_model_language_runtime.ts';
 import type { WorkbenchPendingDidChangePayload } from './editor_workbench_state_utils.js';

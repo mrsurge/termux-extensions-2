@@ -8,6 +8,7 @@
  *   saveFile: () => Promise<any>,
  *   openTerminal: () => Promise<void>,
  *   apiPost: (path: string, body: any) => Promise<any>,
+ *   requestBackendRunActiveFile?: (payload: any) => Promise<any>,
  *   basename: (path: string) => string,
  *   toast: (msg: string) => void,
  *   updateRunButtonState: () => void,
@@ -16,7 +17,7 @@
 export function createRunFileController(deps) {
   async function runCurrentFile() {
     const currentPath = deps.getCurrentPath();
-    const runnable = currentPath && deps.getCurrentPathExists() && deps.isRunnableFile(currentPath);
+    const runnable = currentPath && deps.isRunnableFile(currentPath);
     if (!runnable) {
       deps.toast('Open a Python, shell, or C/C++ source file to run it in the terminal');
       return;
@@ -29,7 +30,9 @@ export function createRunFileController(deps) {
         return;
       }
       await deps.openTerminal();
-      const response = await deps.apiPost('terminal/run_active_file', {});
+      const response = typeof deps.requestBackendRunActiveFile === 'function'
+        ? await deps.requestBackendRunActiveFile({ path: currentPath })
+        : await deps.apiPost('terminal/run_active_file', { path: currentPath });
       const isWrapped = response && typeof response === 'object' && Object.prototype.hasOwnProperty.call(response, 'ok');
       if (isWrapped && response.ok === false) {
         deps.toast(response.error || 'Failed to run file');

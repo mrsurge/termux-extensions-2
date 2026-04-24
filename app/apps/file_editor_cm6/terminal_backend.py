@@ -13,7 +13,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query, Depends
 import socketio
 
@@ -832,14 +832,38 @@ async def run_active_file():
 
     Saving is handled separately by the editor save endpoint; this only dispatches.
     """
+    return await handle_run_active_file_request()
+
+
+async def handle_run_active_file_request(
+    data: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    """Dispatch a runnable file into the active terminal shell.
+
+    The caller may provide an explicit `path`; otherwise backend SSOT `last_file`
+    is used as fallback for compatibility.
+    """
     history_store = get_history_store()
 
     project_path = history_store.get_active_project()
-    current_file = history_store.get_last_file(project_path) if project_path else None
+    current_file_obj = data.get("path") if isinstance(data, Mapping) else None
+    if isinstance(current_file_obj, str) and current_file_obj.strip():
+        current_file = current_file_obj
+    else:
+        current_file = history_store.get_last_file(project_path) if project_path else None
     if not current_file:
         raise HTTPException(status_code=400, detail="No file is currently open")
 
     path_obj = Path(current_file).expanduser().resolve(strict=False)
+    if not path_obj.exists():
+        raise HTTPException(status_code=404, detail="Active file does not exist")
+    if path_obj.is_dir():
+        raise HTTPException(status_code=400, detail="Active path is a directory")
+    if project_path:
+        try:
+            path_obj.relative_to(Path(project_path).expanduser().resolve(strict=False))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Active file is outside the project")
     ext = path_obj.suffix.lower()
 
     workdir = str(path_obj.parent)

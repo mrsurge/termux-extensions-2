@@ -265,13 +265,9 @@ async def _emit_diagnostics_debounced():
 
     try:
         # Problems panel + explorer tree badges (full marker detail)
-        from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
+        from .workspace_events import publish_diagnostics_detail
 
-        await emit_project_explorer_rpc_notification(
-            proj,
-            "explorer.diagnostics.detail",
-            detail_abs,
-        )
+        await publish_diagnostics_detail(proj, detail_abs)
         total_markers = sum(len(v) for v in detail_abs.values())
         print(f"[diag_bridge] emitted explorer diagnostics: {len(summary_rel)} files, {total_markers} markers", flush=True)
     except Exception as exc:
@@ -344,14 +340,13 @@ async def _adapter_ws_loop(sio):
                             pass
                         _enospc_forwarded = True
                         try:
-                            from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
+                            from .workspace_events import publish_watcher_error
                             payload = {
                                 "message": ev.get("message", "Inotify limit reached (ENOSPC)"),
                                 "limit": 524288,
                             }
-                            await emit_project_explorer_rpc_notification(
+                            await publish_watcher_error(
                                 proj,
-                                "explorer.watcher.error",
                                 payload,
                             )
                             print(f"[diag_bridge] watcher/enospc forwarded (once)", flush=True)
@@ -369,6 +364,7 @@ async def _adapter_ws_loop(sio):
                             except Exception:
                                 proj = ""
                             created, changed, deleted = [], [], []
+                            created_abs, changed_abs, deleted_abs = [], [], []
                             for c in changes:
                                 p = c.get("path", "") if isinstance(c, dict) else ""
                                 t = c.get("type", 0) if isinstance(c, dict) else 0
@@ -381,55 +377,27 @@ async def _adapter_ws_loop(sio):
                                 # type: 0=UPDATED, 1=ADDED, 2=DELETED (VS Code FileChangeType)
                                 if t == 1:
                                     created.append(rel)
+                                    created_abs.append(p)
                                 elif t == 2:
                                     deleted.append(rel)
+                                    deleted_abs.append(p)
                                 else:
                                     changed.append(rel)
-                            payload = {
-                                "created": created,
-                                "changed": changed,
-                                "deleted": deleted,
-                            }
+                                    changed_abs.append(p)
                             total = len(created) + len(changed) + len(deleted)
                             if total > 0:
-                                await sio.emit(
-                                    "editor:filesChanged",
-                                    payload,
-                                    room="file_editor_cm6",
-                                    namespace="/editor",
-                                )
-                                # Notify explorer with watcher:files type
                                 try:
-                                    from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
-                                    await emit_project_explorer_rpc_notification(
+                                    from .workspace_events import publish_file_change_batch
+
+                                    await publish_file_change_batch(
                                         proj,
-                                        "explorer.watcher.files",
-                                        payload,
+                                        created_abs=created_abs,
+                                        changed_abs=changed_abs,
+                                        deleted_abs=deleted_abs,
                                     )
                                 except Exception:
                                     pass
                                 print(f"[diag_bridge] watcher/fileChanges forwarded ({total} paths)", flush=True)
-
-                                # External edit detection: check if active file was changed
-                                for c in changes:
-                                    abs_p = c.get("path", "") if isinstance(c, dict) else ""
-                                    c_type = c.get("type", 0) if isinstance(c, dict) else 0
-                                    if abs_p and c_type in (0, 1):  # UPDATED or ADDED
-                                        try:
-                                            from .monaco_editor.editor_ws import handle_external_file_change
-                                            await handle_external_file_change(abs_p)
-                                        except Exception as exc:
-                                            print(f"[diag_bridge] external edit check failed: {exc}", flush=True)
-                                    # Change ledger: record for track-edits (all types incl. DELETE)
-                                    if abs_p:
-                                        try:
-                                            from .change_ledger import record_change
-                                            from .monaco_editor.editor_ws import handle_tracked_edit
-                                            result = record_change(abs_p, proj)
-                                            if result:
-                                                await handle_tracked_edit(result)
-                                        except Exception as exc:
-                                            print(f"[diag_bridge] change_ledger failed: {exc}", flush=True)
                         except Exception as exc:
                             print(f"[diag_bridge] watcher/fileChanges emit FAIL: {exc}", flush=True)
                         continue

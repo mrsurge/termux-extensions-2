@@ -75,7 +75,7 @@ async def _stdout_reader_loop(proc: asyncio.subprocess.Process, project_root: st
 
 
 def _forward_watchexec_event(evt: dict, project_root: str) -> None:
-    """Parse a watchexec JSON event and emit watcher:files to explorer SIO."""
+    """Parse a watchexec JSON event and publish it through the workspace event surface."""
     # watchexec --emit-events-to json-stdio format:
     # {"tags": [{"kind": "path", "absolute": "/abs/path", "filetype": "file"},
     #           {"kind": "fs", "simple": "create"|"modify"|"remove"|"rename"|...}], ...}
@@ -112,38 +112,19 @@ def _forward_watchexec_event(evt: dict, project_root: str) -> None:
     if not (created or changed or deleted):
         return
 
-    payload = {"created": created, "changed": changed, "deleted": deleted}
-
     try:
-        from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
-        # Schedule the emit on the running event loop
+        from .workspace_events import publish_file_change_batch
+
         loop = asyncio.get_event_loop()
         if loop.is_running():
             loop.create_task(
-                emit_project_explorer_rpc_notification(
+                publish_file_change_batch(
                     str(project_root),
-                    "explorer.watcher.files",
-                    payload,
+                    created_abs=[path_abs] if created else [],
+                    changed_abs=[path_abs] if changed else [],
+                    deleted_abs=[path_abs] if deleted else [],
                 )
             )
-            # External edit detection for active editor file
-            if changed or created:
-                for abs_p in ([path_abs] if (fs_op != "remove") else []):
-                    try:
-                        from .monaco_editor.editor_ws import handle_external_file_change
-                        loop.create_task(handle_external_file_change(abs_p))
-                    except Exception:
-                        pass
-            # Change ledger: record for track-edits (all ops incl. remove)
-            if path_abs:
-                try:
-                    from .change_ledger import record_change
-                    from .monaco_editor.editor_ws import handle_tracked_edit
-                    result = record_change(path_abs, project_root)
-                    if result:
-                        loop.create_task(handle_tracked_edit(result))
-                except Exception:
-                    pass
     except Exception as exc:
         log.debug("[watchexec] forward error: %s", exc)
 

@@ -30,6 +30,10 @@ def set_explorer_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     _explorer_event_loop = loop
 
 
+def get_explorer_event_loop() -> Optional[asyncio.AbstractEventLoop]:
+    return _explorer_event_loop
+
+
 def _watcher_bucket_for_event(event_type: str) -> str:
     if event_type == "created":
         return "created"
@@ -138,12 +142,6 @@ async def _broadcast_git_status_update(project_path: str) -> None:
         mark_git_cache_dirty(Path(project_path))
 
         statuses = await asyncio.to_thread(get_all_git_statuses)
-        await emit_project_explorer_rpc_notification(
-            project_path,
-            "explorer.git.decorations.updated",
-            {"statuses": statuses},
-        )
-
         status = await asyncio.to_thread(git_get_status, Path(project_path))
         logger.info(
             "[GIT_STATUS_DEBUG] staged=%s, unstaged=%s, untracked=%s",
@@ -151,10 +149,12 @@ async def _broadcast_git_status_update(project_path: str) -> None:
             status.unstaged,
             status.untracked,
         )
-        await emit_project_explorer_rpc_notification(
+        from ...workspace_events import publish_git_status_update
+
+        await publish_git_status_update(
             project_path,
-            "explorer.git.status.updated",
-            {
+            decorations_payload={"statuses": statuses},
+            status_payload={
                 "branch": status.branch,
                 "detached": status.detached,
                 "ahead": status.ahead,
@@ -164,13 +164,6 @@ async def _broadcast_git_status_update(project_path: str) -> None:
                 "untracked": status.untracked,
             },
         )
-
-        try:
-            from ...monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
-
-            await broadcast_git_baselines_for_active_file()
-        except Exception as exc:
-            logger.warning("Failed to push git baselines after status update: %s", exc)
     except Exception as exc:
         logger.warning("Failed to broadcast git status update: %s", exc)
 
