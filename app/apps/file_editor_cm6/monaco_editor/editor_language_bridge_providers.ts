@@ -14,10 +14,18 @@ interface LanguageBridgeState {
   registeredHover: Set<string>;
   registeredSymbols: Set<string>;
   registeredFolding: Set<string>;
-  registeredCompletions: Set<string>;
   registeredSemanticTokens: Set<string>;
+  completionProvidersByLanguage: Record<string, Record<string, CompletionProviderRegistrationLike>>;
+  completionProviderDisposablesByLanguage: Record<string, MonacoDisposableLike | null>;
+  completionProviderSignatureByLanguage: Record<string, string>;
   semanticTokensLegendCache: Record<string, SemanticTokensLegendLike>;
   semanticTokensRangeFlag: Record<string, boolean>;
+}
+
+interface CompletionProviderRegistrationLike {
+  handle: string;
+  triggerCharacters: string[];
+  supportsResolve: boolean;
 }
 
 interface GuardedCallResult {
@@ -59,6 +67,10 @@ interface MonacoCompletionContextLike {
   triggerCharacter?: string;
 }
 
+interface MonacoDisposableLike {
+  dispose(): void;
+}
+
 interface MonacoLanguagesLike {
   SymbolKind?: { Function?: number };
   FoldingRangeKind?: {
@@ -83,7 +95,7 @@ interface MonacoLanguagesLike {
   registerCompletionItemProvider?: (selector: unknown, provider: {
     triggerCharacters?: string[];
     provideCompletionItems(model: MonacoModelLike, pos: MonacoPositionLike, token: MonacoCancellationTokenLike, context: MonacoCompletionContextLike): unknown;
-  }) => unknown;
+  }) => MonacoDisposableLike | unknown;
   registerDocumentRangeSemanticTokensProvider?: (selector: unknown, provider: {
     getLegend(): SemanticTokensLegendLike;
     provideDocumentRangeSemanticTokens(model: MonacoModelLike, range: MonacoRangeLike, token: MonacoCancellationTokenLike): unknown;
@@ -106,7 +118,7 @@ interface CreateEditorLanguageBridgeProvidersDeps {
   getCurrentPath(): string | null;
   getHasModel(): boolean;
   getCurrentLanguageContext(): LanguageContext | null;
-  callVscodeApiGuarded(
+  callWorkbenchProviderGuarded(
     kind: 'hover' | 'symbols' | 'folding_ranges' | 'completions',
     method: string,
     params: Record<string, unknown>,
@@ -124,8 +136,8 @@ interface CreateEditorLanguageBridgeProvidersDeps {
   monacoRangeFromCompletionRange(range: unknown, pos: MonacoPositionLike): unknown;
   mapCompletionItemKind(kind: unknown): number;
   flushMirrorDebounce(): void;
-  ensureVscodeLanguagesInstalled(): Promise<void>;
-  getVscodeLanguageIds(): Iterable<string>;
+  ensureWorkbenchLanguageCatalogInstalled(): Promise<void>;
+  getWorkbenchLanguageIds(): Iterable<string>;
   languageBridge: LanguageBridgeState;
 }
 
@@ -248,9 +260,163 @@ function extractWorkbenchPayload(result: unknown): Record<string, unknown> | nul
 export function createEditorLanguageBridgeProviders(
   deps: CreateEditorLanguageBridgeProvidersDeps,
 ): {
+  cacheCompletionProviderRegistration(langId: string, registration: CompletionProviderRegistrationLike): void;
   registerSemanticTokensWithLegend(langId: string, legend: SemanticTokensLegendLike, isRange?: boolean): void;
-  installVscodeApiLanguageBridgeProviders(): void;
+  installWorkbenchLanguageBridgeProviders(): void;
 } {
+  function getCompletionRegistrations(langId: string): CompletionProviderRegistrationLike[] {
+    const languageCache = deps.languageBridge.completionProvidersByLanguage[langId];
+    if (!languageCache) return [];
+    return Object.values(languageCache);
+  }
+
+  function getCompletionTriggerCharacters(langId: string): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const entry of getCompletionRegistrations(langId)) {
+      const triggerChars = Array.isArray(entry.triggerCharacters) ? entry.triggerCharacters : [];
+      for (const triggerChar of triggerChars) {
+        const ch = String(triggerChar || '');
+        if (!ch || seen.has(ch)) continue;
+        seen.add(ch);
+        out.push(ch);
+      }
+    }
+    return out;
+  }
+
+  function getCompletionRegistrationSignature(langId: string): string {
+    return getCompletionRegistrations(langId)
+      .map((entry) => {
+        const triggerCharacters = Array.isArray(entry.triggerCharacters) ? entry.triggerCharacters.map(String).sort().join(',') : '';
+        return String(entry.handle) + '::' + triggerCharacters + '::' + (entry.supportsResolve ? '1' : '0');
+      })
+      .sort()
+      .join('|');
+  }
+
+  function ensureCompletionProviderRegistered(langId: string): void {
+    const monacoRef = deps.getMonaco();
+    if (!monacoRef || !monacoRef.languages || !monacoRef.languages.registerCompletionItemProvider) return;
+    if (!getCompletionRegistrations(langId).length) return;
+
+    const nextSignature = getCompletionRegistrationSignature(langId);
+    if (
+      nextSignature
+      && deps.languageBridge.completionProviderSignatureByLanguage[langId] === nextSignature
+      && deps.languageBridge.completionProviderDisposablesByLanguage[langId]
+    ) {
+      return;
+    }
+
+    const existingDisposable = deps.languageBridge.completionProviderDisposablesByLanguage[langId];
+    if (existingDisposable && typeof existingDisposable.dispose === 'function') {
+      try { existingDisposable.dispose(); } catch (_) {}
+    }
+
+    const triggerCharacters = getCompletionTriggerCharacters(langId);
+    const registrationDisposable = monacoRef.languages.registerCompletionItemProvider(langId, {
+      triggerCharacters,
+      provideCompletionItems(model, pos, token, context) {
+        try {
+          deps.flushMirrorDebounce();
+          const ctx = deps.getCurrentLanguageContext();
+          if (!ctx || !model || !model.uri || String(model.uri.toString()) !== String(ctx.uri)) {
+            return { suggestions: [] };
+          }
+          let triggerKind = 0;
+          let triggerCharacter: string | undefined;
+          const triggerKinds = monacoRef.languages.CompletionTriggerKind;
+          if (context && triggerKinds && context.triggerKind === triggerKinds.TriggerCharacter) {
+            triggerKind = 1;
+            triggerCharacter = context.triggerCharacter || undefined;
+          } else if (context && triggerKinds && context.triggerKind === triggerKinds.TriggerForIncompleteCompletions) {
+            triggerKind = 2;
+          }
+          return deps.callWorkbenchProviderGuarded(
+            'completions',
+            'vscode.completions',
+            {
+              uri: ctx.uri,
+              path: ctx.path,
+              languageId: ctx.languageId,
+              lineNumber: Number(pos && pos.lineNumber ? pos.lineNumber : 1),
+              column: Number(pos && pos.column ? pos.column : 1),
+              triggerKind,
+              triggerCharacter,
+              text: model && model.getValue ? model.getValue() : undefined,
+              timeoutMs: 8000,
+            },
+            ctx,
+            { timeoutMs: 10000, cancelToken: token },
+          ).then((out) => {
+            if (!out || !out.ok) return { suggestions: [] };
+            const payload = extractGuardedPayload(out);
+            const root = payload && (asRecord(payload.result) || payload);
+            const rawItems = root ? (asArray(root.items) || asArray(root.suggestions) || []) : [];
+            const suggestions: Array<Record<string, unknown>> = [];
+            for (const rawItem of rawItems) {
+              const item = asRecord(rawItem);
+              if (!item) continue;
+              const suggestion: Record<string, unknown> = {
+                label: item.label || '',
+                kind: deps.mapCompletionItemKind(item.kind),
+                detail: item.detail || undefined,
+                documentation: item.documentation || undefined,
+                sortText: item.sortText || undefined,
+                filterText: item.filterText || undefined,
+                preselect: item.preselect || undefined,
+                insertText: item.insertText || (typeof item.label === 'string' ? item.label : ''),
+                insertTextRules: item.insertTextRules || undefined,
+                range: deps.monacoRangeFromCompletionRange(item.range, pos),
+                commitCharacters: item.commitCharacters || undefined,
+                additionalTextEdits: item.additionalTextEdits || undefined,
+                tags: item.tags || undefined,
+              };
+              const command = asRecord(item.command);
+              if (command) {
+                suggestion.command = {
+                  id: command.id || '',
+                  title: command.title || command.id || '',
+                  arguments: command.arguments || undefined,
+                };
+              }
+              suggestions.push(suggestion);
+            }
+            return {
+              suggestions,
+              incomplete: !!(root && root.isIncomplete),
+            };
+          });
+        } catch (_) {
+          return { suggestions: [] };
+        }
+      },
+    });
+    deps.languageBridge.completionProviderDisposablesByLanguage[langId] = (
+      registrationDisposable && typeof (registrationDisposable as MonacoDisposableLike).dispose === 'function'
+        ? registrationDisposable as MonacoDisposableLike
+        : null
+    );
+    deps.languageBridge.completionProviderSignatureByLanguage[langId] = nextSignature;
+    console.log('[completions] registered provider bridge for lang=' + langId + ' triggers=' + triggerCharacters.join(','));
+  }
+
+  function cacheCompletionProviderRegistration(langId: string, registration: CompletionProviderRegistrationLike): void {
+    if (!langId) return;
+    const handleKey = String(registration.handle || '').trim();
+    if (!handleKey) return;
+    if (!deps.languageBridge.completionProvidersByLanguage[langId]) {
+      deps.languageBridge.completionProvidersByLanguage[langId] = Object.create(null);
+    }
+    deps.languageBridge.completionProvidersByLanguage[langId][handleKey] = {
+      handle: handleKey,
+      triggerCharacters: Array.isArray(registration.triggerCharacters) ? registration.triggerCharacters.map(String).filter(Boolean) : [],
+      supportsResolve: !!registration.supportsResolve,
+    };
+    ensureCompletionProviderRegistered(langId);
+  }
+
   function registerSemanticTokensWithLegend(
     langId: string,
     legend: SemanticTokensLegendLike,
@@ -387,7 +553,7 @@ export function createEditorLanguageBridgeProviders(
       });
   }
 
-  function installVscodeApiLanguageBridgeProviders(): void {
+  function installWorkbenchLanguageBridgeProviders(): void {
     try {
       const monacoRef = deps.getMonaco();
       if (!monacoRef || !monacoRef.languages) return;
@@ -407,7 +573,7 @@ export function createEditorLanguageBridgeProviders(
                       console.warn('[hover:bridge] BAIL provideHover: ctx=' + (ctx ? 'ok' : 'NULL') + ' m.uri=' + (model && model.uri ? String(model.uri.toString()).slice(-60) : 'NULL') + ' ctx.uri=' + (ctx ? String(ctx.uri).slice(-60) : 'N/A'));
                       return null;
                     }
-                    return deps.callVscodeApiGuarded(
+                    return deps.callWorkbenchProviderGuarded(
                       'hover',
                       'vscode.hover',
                       {
@@ -444,7 +610,7 @@ export function createEditorLanguageBridgeProviders(
                   try {
                     const ctx = deps.getCurrentLanguageContext();
                     if (!ctx || !model || !model.uri || String(model.uri.toString()) !== String(ctx.uri)) return [];
-                    return deps.callVscodeApiGuarded(
+                    return deps.callWorkbenchProviderGuarded(
                       'symbols',
                       'vscode.documentSymbols',
                       {
@@ -475,7 +641,7 @@ export function createEditorLanguageBridgeProviders(
                   try {
                     const ctx = deps.getCurrentLanguageContext();
                     if (!ctx || !model || !model.uri || String(model.uri.toString()) !== String(ctx.uri)) return null;
-                    return deps.callVscodeApiGuarded(
+                    return deps.callWorkbenchProviderGuarded(
                       'folding_ranges',
                       'vscode.foldingRanges',
                       {
@@ -500,88 +666,7 @@ export function createEditorLanguageBridgeProviders(
               });
               deps.languageBridge.registeredFolding.add(langId);
             }
-
-            if (!deps.languageBridge.registeredCompletions.has(langId) && monacoRef.languages.registerCompletionItemProvider) {
-              monacoRef.languages.registerCompletionItemProvider(langId, {
-                triggerCharacters: ['.', ':', '<', '"', "'", '/', '@', '#'],
-                provideCompletionItems(model, pos, token, context) {
-                  try {
-                    deps.flushMirrorDebounce();
-                    const ctx = deps.getCurrentLanguageContext();
-                    if (!ctx || !model || !model.uri || String(model.uri.toString()) !== String(ctx.uri)) {
-                      return { suggestions: [] };
-                    }
-                    let triggerKind = 0;
-                    let triggerCharacter: string | undefined;
-                    const triggerKinds = monacoRef.languages.CompletionTriggerKind;
-                    if (context && triggerKinds && context.triggerKind === triggerKinds.TriggerCharacter) {
-                      triggerKind = 1;
-                      triggerCharacter = context.triggerCharacter || undefined;
-                    } else if (context && triggerKinds && context.triggerKind === triggerKinds.TriggerForIncompleteCompletions) {
-                      triggerKind = 2;
-                    }
-                    return deps.callVscodeApiGuarded(
-                      'completions',
-                      'vscode.completions',
-                      {
-                        uri: ctx.uri,
-                        path: ctx.path,
-                        languageId: ctx.languageId,
-                        lineNumber: Number(pos && pos.lineNumber ? pos.lineNumber : 1),
-                        column: Number(pos && pos.column ? pos.column : 1),
-                        triggerKind,
-                        triggerCharacter,
-                        text: model && model.getValue ? model.getValue() : undefined,
-                        timeoutMs: 8000,
-                      },
-                      ctx,
-                      { timeoutMs: 10000, cancelToken: token },
-                    ).then((out) => {
-                      if (!out || !out.ok) return { suggestions: [] };
-                      const payload = extractGuardedPayload(out);
-                      const root = payload && (asRecord(payload.result) || payload);
-                      const rawItems = root ? (asArray(root.items) || asArray(root.suggestions) || []) : [];
-                      const suggestions: Array<Record<string, unknown>> = [];
-                      for (const rawItem of rawItems) {
-                        const item = asRecord(rawItem);
-                        if (!item) continue;
-                        const suggestion: Record<string, unknown> = {
-                          label: item.label || '',
-                          kind: deps.mapCompletionItemKind(item.kind),
-                          detail: item.detail || undefined,
-                          documentation: item.documentation || undefined,
-                          sortText: item.sortText || undefined,
-                          filterText: item.filterText || undefined,
-                          preselect: item.preselect || undefined,
-                          insertText: item.insertText || (typeof item.label === 'string' ? item.label : ''),
-                          insertTextRules: item.insertTextRules || undefined,
-                          range: deps.monacoRangeFromCompletionRange(item.range, pos),
-                          commitCharacters: item.commitCharacters || undefined,
-                          additionalTextEdits: item.additionalTextEdits || undefined,
-                          tags: item.tags || undefined,
-                        };
-                        const command = asRecord(item.command);
-                        if (command) {
-                          suggestion.command = {
-                            id: command.id || '',
-                            title: command.title || command.id || '',
-                            arguments: command.arguments || undefined,
-                          };
-                        }
-                        suggestions.push(suggestion);
-                      }
-                      return {
-                        suggestions,
-                        incomplete: !!(root && root.isIncomplete),
-                      };
-                    });
-                  } catch (_) {
-                    return { suggestions: [] };
-                  }
-                },
-              });
-              deps.languageBridge.registeredCompletions.add(langId);
-            }
+            ensureCompletionProviderRegistered(langId);
           });
         } catch (_) {}
       };
@@ -591,13 +676,23 @@ export function createEditorLanguageBridgeProviders(
         const ctx = deps.getCurrentLanguageContext();
         if (ctx && ctx.languageId) immediate.add(String(ctx.languageId));
       } catch (_) {}
-      console.log('[hover:bridge] installVscodeApiLanguageBridgeProviders immediate=' + Array.from(immediate).join(',') + ' model=' + (deps.getHasModel() ? 'yes' : 'no') + ' registeredHover=' + Array.from(deps.languageBridge.registeredHover).join(','));
-      if (immediate.size) doRegister(immediate);
+      console.log('[hover:bridge] installWorkbenchLanguageBridgeProviders immediate=' + Array.from(immediate).join(',') + ' model=' + (deps.getHasModel() ? 'yes' : 'no') + ' registeredHover=' + Array.from(deps.languageBridge.registeredHover).join(','));
+      if (immediate.size) {
+        doRegister(immediate);
+        immediate.forEach((langId) => {
+          try {
+            ensureCompletionProviderRegistered(langId);
+          } catch (_) {}
+          try {
+            registerSemanticTokensForLanguage(langId);
+          } catch (_) {}
+        });
+      }
 
-      deps.ensureVscodeLanguagesInstalled().then(() => {
+      deps.ensureWorkbenchLanguageCatalogInstalled().then(() => {
         try {
           const all = new Set<string>();
-          for (const id of deps.getVscodeLanguageIds()) {
+          for (const id of deps.getWorkbenchLanguageIds()) {
             if (id) all.add(id);
           }
           try {
@@ -605,13 +700,19 @@ export function createEditorLanguageBridgeProviders(
             if (ctx && ctx.languageId) all.add(String(ctx.languageId));
           } catch (_) {}
           doRegister(all);
+          all.forEach((langId) => {
+            try {
+              ensureCompletionProviderRegistered(langId);
+            } catch (_) {}
+          });
         } catch (_) {}
       }).catch(() => {});
     } catch (_) {}
   }
 
   return {
+    cacheCompletionProviderRegistration,
     registerSemanticTokensWithLegend,
-    installVscodeApiLanguageBridgeProviders,
+    installWorkbenchLanguageBridgeProviders,
   };
 }

@@ -1,89 +1,151 @@
-// @ts-check
+import {
+  getBootSnapshotHostState,
+  getBootSnapshotSessionState,
+  getBootSnapshotUiPrefs,
+  requestHostBootSnapshot,
+  type HostBootSnapshot,
+} from './boot-snapshot.ts';
 
-/**
- * @param {{
- *   initResponsiveLayout: () => void,
- *   initToolbarTitleClampObservers: () => void,
- *   loadLayoutPreferences: () => void,
- *   initResizeManager: () => void,
- *   initExplorerUI: () => Promise<any>,
- *   connectExplorerSocket: () => void,
- *   connectEditorSocket: () => void,
- *   connectUIIPC: () => void,
- *   connectSidebarIPC: () => void,
- *   ensureWorkbenchAdapterReady: () => Promise<any>,
- *   initBranchMenu: () => any,
- *   waitForInitialUiPrefs: (ms?: number) => Promise<any>,
- *   applySidebarUiPrefs: (prefs: any) => void,
- *   applyAgentRuntimeConfigFromUi: (prefs: any) => Promise<any>,
- *   connectCodexAppserverSocket: (url?: string) => void,
- *   createAgentController: (cfg: any) => any,
- *   syncEditorState: (force?: boolean) => Promise<any>,
- *   broadcastRecentsUpdate: (state: any) => void,
- *   refreshMenuState: () => Promise<any>,
- *   apiPost: (path: string, body: any) => Promise<any>,
- *   fetchPersistedSessionState: () => Promise<any>,
- *   initSessionStateContext: (serverState: any) => void,
- *   queueSessionStateUpdate: (partial?: any) => void,
- *   resetSavedState: () => void,
- *   markUnsaved: (flag: boolean) => void,
- *   setNoProjectState: (msg: string) => void,
- *   getUrlSearch: () => string,
- *   toAbsolute: (path: string, base?: any, homeDir?: string) => string,
- *   HOME_DIR: string,
- *   applyRestoredPathState: (args: { restoredPath: string, serverState: any, restoredSha: string | null }) => void,
- *   openWebSocket: (path: string) => void,
- *   updatePathDisplayFallbackLater: () => void,
- *   openFile: (path: string) => Promise<any>,
- *   onOpenFileFailure: (err: any) => void,
- *   onNoRestoredPath: (serverState: any) => void,
- *   setBranchMenuHandle: (h: any) => void,
- *   setAgentDrawerHandle: (h: any) => void
- * }} deps
- */
-export async function runBootSequence(deps) {
+interface RestoredPathStateArgs {
+  restoredPath: string;
+  serverState: Record<string, unknown>;
+  restoredSha: string | null;
+}
+
+interface BootSequenceDeps {
+  initResponsiveLayout(): void;
+  initToolbarTitleClampObservers(): void;
+  loadLayoutPreferences(): void;
+  initResizeManager(): void;
+  initExplorerUI(): Promise<unknown>;
+  connectExplorerSocket(): void;
+  connectEditorSocket(): void;
+  connectUIIPC(): void;
+  connectSidebarIPC(): void;
+  ensureWorkbenchAdapterReady(): Promise<unknown>;
+  initBranchMenu(): unknown;
+  waitForInitialUiPrefs(ms?: number): Promise<Record<string, unknown>>;
+  seedUiPrefsSnapshot(prefs: Record<string, unknown>): void;
+  applySidebarUiPrefs(prefs: Record<string, unknown>): void;
+  applyAgentRuntimeConfigFromUi(prefs: Record<string, unknown>): Promise<unknown>;
+  connectCodexAppserverSocket(url?: string): void;
+  createAgentController(cfg: unknown): unknown;
+  syncEditorState(force?: boolean): Promise<Record<string, unknown> | null>;
+  hydrateEditorState(state: Record<string, unknown> | null): Record<string, unknown> | null;
+  broadcastRecentsUpdate(state: Record<string, unknown> | null): void;
+  refreshMenuState(): Promise<unknown>;
+  apiPost(path: string, body: Record<string, unknown>): Promise<unknown>;
+  fetchPersistedSessionState(): Promise<Record<string, unknown> | null>;
+  seedPersistedSessionState(snapshot: Record<string, unknown> | null): Record<string, unknown> | null;
+  initSessionStateContext(serverState: Record<string, unknown> | null): void;
+  queueSessionStateUpdate(partial?: Record<string, unknown>): void;
+  resetSavedState(): void;
+  markUnsaved(flag: boolean): void;
+  setNoProjectState(msg: string): void;
+  getUrlSearch(): string;
+  toAbsolute(path: string, base?: unknown, homeDir?: string): string;
+  HOME_DIR: string;
+  applyRestoredPathState(args: RestoredPathStateArgs): void;
+  openWebSocket(path: string): void;
+  updatePathDisplayFallbackLater(): void;
+  openFile(path: string): Promise<unknown>;
+  onOpenFileFailure(err: Error): void;
+  onNoRestoredPath(serverState: Record<string, unknown>): void;
+  setBranchMenuHandle(handle: unknown): void;
+  setAgentDrawerHandle(handle: unknown): void;
+  requestBackendBootSnapshot(payload?: Record<string, unknown>): Promise<unknown>;
+  mountInlineEditorHost(snapshot: HostBootSnapshot | null): Promise<unknown>;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   deps.initResponsiveLayout();
   deps.initToolbarTitleClampObservers();
   deps.loadLayoutPreferences();
   deps.initResizeManager();
 
-  await deps.initExplorerUI().catch(e => {
-    console.error('Failed to initialize explorer UI:', e);
+  await deps.initExplorerUI().catch((error) => {
+    console.error('Failed to initialize explorer UI:', error);
   });
 
-  try { deps.connectExplorerSocket(); } catch (e) { console.warn('Failed to connect explorer Socket.IO bus:', e); }
-  try { deps.connectEditorSocket(); } catch (e) { console.warn('Failed to connect editor Socket.IO channel:', e); }
-  try { deps.connectUIIPC(); } catch (e) { console.warn('Failed to connect UI IPC channel:', e); }
-  try { deps.connectSidebarIPC(); } catch (e) { console.warn('Failed to connect Sidebar IPC channel:', e); }
-  try { await deps.ensureWorkbenchAdapterReady(); } catch (e) { console.warn('Workbench adapter readiness failed:', e); }
+  let bootSnapshot: HostBootSnapshot | null = null;
+  try {
+    bootSnapshot = await requestHostBootSnapshot({
+      requestBackendBootSnapshot: (payload) => deps.requestBackendBootSnapshot(payload),
+    });
+  } catch (error) {
+    console.warn('Boot snapshot request failed:', error);
+  }
+
+  const snapshotUiPrefs = getBootSnapshotUiPrefs(bootSnapshot);
+  if (Object.keys(snapshotUiPrefs).length) {
+    try { deps.seedUiPrefsSnapshot(snapshotUiPrefs); } catch (error) { console.warn('[Sidebar] Failed to seed snapshot prefs:', error); }
+  }
+
+  const snapshotSessionState = getBootSnapshotSessionState(bootSnapshot);
+  if (snapshotSessionState) {
+    deps.seedPersistedSessionState(snapshotSessionState);
+  }
+
+  const snapshotServerState = getBootSnapshotHostState(bootSnapshot);
+  if (snapshotServerState) {
+    deps.hydrateEditorState(snapshotServerState);
+  }
 
   deps.setBranchMenuHandle(deps.initBranchMenu());
-  const initialUiPrefs = await deps.waitForInitialUiPrefs(2200);
-  try { deps.applySidebarUiPrefs(initialUiPrefs || {}); } catch (e) { console.warn('[Sidebar] Failed to apply initial prefs:', e); }
-  const agentIframeConfig = await deps.applyAgentRuntimeConfigFromUi(initialUiPrefs);
-  try { deps.connectCodexAppserverSocket(agentIframeConfig?.url); } catch (e) { console.warn('Failed to connect Codex appserver socket:', e); }
+
+  try { await deps.ensureWorkbenchAdapterReady(); } catch (error) { console.warn('Workbench adapter readiness failed:', error); }
+  try { await deps.mountInlineEditorHost(bootSnapshot); } catch (error) { console.error('Inline editor boot failed:', error); }
+
+  try { deps.connectExplorerSocket(); } catch (error) { console.warn('Failed to connect explorer Socket.IO bus:', error); }
+  try { deps.connectEditorSocket(); } catch (error) { console.warn('Failed to connect editor Socket.IO channel:', error); }
+  try { deps.connectUIIPC(); } catch (error) { console.warn('Failed to connect UI IPC channel:', error); }
+  try { deps.connectSidebarIPC(); } catch (error) { console.warn('Failed to connect Sidebar IPC channel:', error); }
+
+  const initialUiPrefs = Object.keys(snapshotUiPrefs).length
+    ? snapshotUiPrefs
+    : await deps.waitForInitialUiPrefs(2200);
+  try { deps.applySidebarUiPrefs(initialUiPrefs || {}); } catch (error) { console.warn('[Sidebar] Failed to apply initial prefs:', error); }
+  const agentIframeConfig = await deps.applyAgentRuntimeConfigFromUi(initialUiPrefs || {});
+  try {
+    const runtimeUrl = asRecord(agentIframeConfig)?.url;
+    deps.connectCodexAppserverSocket(typeof runtimeUrl === 'string' && runtimeUrl ? runtimeUrl : undefined);
+  } catch (error) {
+    console.warn('Failed to connect Codex appserver socket:', error);
+  }
   deps.setAgentDrawerHandle(deps.createAgentController(agentIframeConfig));
 
-  const serverState = await deps.syncEditorState(true);
+  const serverState = snapshotServerState || await deps.syncEditorState(true);
   deps.broadcastRecentsUpdate(serverState);
   await deps.refreshMenuState();
-  try { await deps.apiPost('editor/refresh_cache_state', {}); } catch (e) { console.warn('Failed to refresh cache state on boot:', e); }
+  try { await deps.apiPost('editor/refresh_cache_state', {}); } catch (error) { console.warn('Failed to refresh cache state on boot:', error); }
 
-  await deps.fetchPersistedSessionState();
+  if (!snapshotSessionState) {
+    await deps.fetchPersistedSessionState();
+  }
   deps.initSessionStateContext(serverState);
   deps.queueSessionStateUpdate({ activeProject: serverState?.activeProject || null });
   deps.resetSavedState();
   deps.markUnsaved(false);
 
   if (!serverState || !serverState.activeProject || !serverState.activeProjectExists) {
-    deps.setNoProjectState(serverState?.activeProjectMessage || 'Select a project to begin.');
+    deps.setNoProjectState(asString(serverState?.activeProjectMessage) || 'Select a project to begin.');
     return;
   }
 
   const params = new URLSearchParams(deps.getUrlSearch());
   const fileFromUrl = params.get('file');
-  const restoredPath = serverState.currentPath || serverState.lastFile;
-  const restoredSha = serverState.lastFileSha256 || null;
+  const restoredPath = asString(serverState.currentPath) || asString(serverState.lastFile);
+  const restoredSha = asString(serverState.lastFileSha256) || null;
 
   if (restoredPath) {
     deps.applyRestoredPathState({ restoredPath, serverState, restoredSha });
@@ -95,7 +157,7 @@ export async function runBootSequence(deps) {
   if (fileFromUrl) {
     const abs = deps.toAbsolute(fileFromUrl, null, deps.HOME_DIR);
     if (abs !== restoredPath) {
-      await deps.openFile(abs).catch((e) => deps.onOpenFileFailure(e));
+      await deps.openFile(abs).catch((error) => deps.onOpenFileFailure(error instanceof Error ? error : new Error(String(error))));
     }
   } else if (!restoredPath) {
     deps.onNoRestoredPath(serverState);

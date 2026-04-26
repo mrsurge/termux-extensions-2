@@ -223,7 +223,7 @@ async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> Non
 async def _handle_push_event(obj: dict) -> None:
     """Forward adapter push events to the editor frontend via Socket.IO."""
     event_name = obj.get("event", "")
-    if event_name == "semantic_tokens_provider_registered":
+    if event_name in {"semantic_tokens_provider_registered", "completions_provider_registered"}:
         try:
             from .monaco_editor.editor_socketio import EDITOR_SIO
             await EDITOR_SIO.emit(
@@ -347,12 +347,6 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
                     if _adapter_state["status"] != "ready":
                         _set_adapter_state("ready", project=project_root)
                         await _broadcast_adapter_state()
-                    # Resync: replay cached provider registrations so late-joining
-                    # clients receive semantic tokens legends, etc.
-                    try:
-                        await adapter_rpc("te2.resync", timeout=5.0)
-                    except Exception:
-                        pass
                     return cached
                 # Live pipe capabilities lost (process restart or FWS owner change) — re-spawn.
                 log.info("[adapter] cached shell alive but live pipe unavailable, re-spawning")
@@ -370,10 +364,6 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
         if _matches_expected_port(existing):
             if await _ensure_live_adapter_io(existing.id):
                 _active_shell_id = existing.id
-                try:
-                    await adapter_rpc("te2.resync", timeout=5.0)
-                except Exception:
-                    pass
                 return existing
             # Live pipe capabilities lost — kill and re-spawn.
             log.info("[adapter] existing shell alive but live pipe unavailable, re-spawning")
@@ -451,12 +441,6 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
                 timeout=15.0,
             )
             print(f"[adapter_shell_mgr] bootstrap connect resp: {connect_resp}")
-            # Resync: replay cached provider registrations so late-joining
-            # frontends receive semantic tokens legends etc.
-            try:
-                await adapter_rpc("te2.resync", timeout=5.0)
-            except Exception:
-                pass
             _set_adapter_state("ready", project=project_root)
             await _broadcast_adapter_state()
         except Exception as exc:

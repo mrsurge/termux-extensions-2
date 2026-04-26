@@ -32,13 +32,29 @@ const editorConfig = {
   format: 'iife',
 };
 
+/** Workbench Adapter typed helper modules (Node ESM) */
+const workbenchAdapterConfig = {
+  entryPoints: ['workbench_protocol_proxy/node_workbench_adapter/src/protocol/wire-encoding.ts'],
+  outdir: 'workbench_protocol_proxy/node_workbench_adapter/dist',
+  outbase: 'workbench_protocol_proxy/node_workbench_adapter/src',
+  bundle: false,
+  sourcemap: isWatch,
+  minify: !isWatch,
+  logLevel: 'info',
+  platform: 'node',
+  target: 'node20',
+  format: 'esm',
+  outExtension: { '.js': '.mjs' },
+};
+
 if (isWatch) {
-  const [hostCtx, editorCtx] = await Promise.all([
+  const [hostCtx, editorCtx, workbenchAdapterCtx] = await Promise.all([
     context(hostConfig),
     context(editorConfig),
+    context(workbenchAdapterConfig),
   ]);
-  await Promise.all([hostCtx.watch(), editorCtx.watch()]);
+  await Promise.all([hostCtx.watch(), editorCtx.watch(), workbenchAdapterCtx.watch()]);
   console.log('Watching for changes...');
 } else {
-  await Promise.all([build(hostConfig), build(editorConfig)]);
+  await Promise.all([build(hostConfig), build(editorConfig), build(workbenchAdapterConfig)]);
 }

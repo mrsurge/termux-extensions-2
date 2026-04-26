@@ -2,13 +2,13 @@
   "name": "Code TE2",
   "id": "file_editor_cm6",
   "icon_src": "/apps/file_editor_cm6/static/icons/CODE_TE2.png",
-  "version": "0.2.138",
+  "version": "0.2.153",
   "description": "The Monaco based code editor for TE2",
   "author": "mrSurge",
   "entrypoints": {
     "backend_blueprint": "main.py",
     "frontend_template": "template.html",
-    "frontend_script": "static/dist/host.js?v=0.2.138"
+    "frontend_script": "static/dist/host.js?v=0.2.153"
   },
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"
@@ -20,7 +20,6 @@
       "editor_transport",
       "terminal_transport",
       "vscode_rpc_transport",
-      "vscode_api_transport",
       "ui_ipc_transport",
       "sidebar_backchannel_uds"
     ]

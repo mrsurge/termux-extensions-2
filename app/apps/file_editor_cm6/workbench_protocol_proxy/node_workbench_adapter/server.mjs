@@ -475,6 +475,18 @@ const wb = new WorkbenchClient({
       process.stdout.write("<<<PUSH>>> " + JSON.stringify(pushPayload) + "\n");
     }
 
+    if (safeEv?.type === "provider/completions") {
+      const pushPayload = {
+        event: "completions_provider_registered",
+        handle: safeEv.handle,
+        language: safeEv.language,
+        triggerCharacters: Array.isArray(safeEv.triggerCharacters) ? safeEv.triggerCharacters : [],
+        supportsResolve: !!safeEv.supportsResolve,
+      };
+      console.error(`[server] PUSH completions_provider_registered lang=${safeEv.language} handle=${safeEv.handle} triggers=${pushPayload.triggerCharacters.length} resolve=${pushPayload.supportsResolve ? 1 : 0}`);
+      process.stdout.write("<<<PUSH>>> " + JSON.stringify(pushPayload) + "\n");
+    }
+
     if (safeEv?.type === "diagnostics/changeMany" && Array.isArray(safeEv?.args)) {
       const norm = diagnosticsFromChangeMany(safeEv.args);
       console.log(`[server] diagnostics/changeMany -> norm=${norm ? `owner=${norm.owner} items=${norm.items.length} markerCounts=[${norm.items.map(i => (i.markers||[]).length).join(',')}]` : 'null'}`);
@@ -549,6 +561,11 @@ async function handleJsonRpc(reqObj) {
     // The onEvent callback re-emits events which flow through the stdout pipe
     // to the Python side and then to the frontend via Socket.IO.
     const result = wb.resync();
+    return { jsonrpc: "2.0", id, result };
+  }
+
+  if (method === "te2.language_catalog") {
+    const result = await wb.languageCatalog();
     return { jsonrpc: "2.0", id, result };
   }
 

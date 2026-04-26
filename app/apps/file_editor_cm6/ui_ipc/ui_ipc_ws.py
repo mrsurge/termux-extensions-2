@@ -130,6 +130,17 @@ class UIIPCNamespace(socketio.AsyncNamespace):
             except Exception as exc:
                 print(f"[ui_ipc] run_active_file route failed: {exc}", flush=True)
                 return {"ok": False, "error": str(exc)}
+        if event_type == "boot_snapshot" and isinstance(data, dict):
+            try:
+                from ..boot_snapshot_backend import handle_boot_snapshot_request
+
+                return await handle_boot_snapshot_request(
+                    data,
+                    source_name="ui_ipc",
+                )
+            except Exception as exc:
+                print(f"[ui_ipc] boot_snapshot route failed: {exc}", flush=True)
+                return {"ok": False, "error": str(exc)}
         # Broadcast to everyone else in the room (skip sender)
         await self.emit("ui_event", data, room="ui_ipc", skip_sid=sid)
 

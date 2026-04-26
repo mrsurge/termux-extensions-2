@@ -6,7 +6,8 @@ traffic isolated from editor/console chatter.
 
 import time
 
-from ..stores import get_preferences_store
+from ..explorer.services.file_ops import get_project_root
+from ..stores import get_history_store, get_preferences_store
 
 _registered_hosts: set[str] = set()
 _registered_iframes: set[str] = set()

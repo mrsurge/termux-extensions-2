@@ -16,6 +16,17 @@ import { VSBuffer } from "./vscode_oss_runtime/base/common/buffer.mjs";
 import { NodeSocketFactory } from "./vscode_oss_runtime/platform/remote/browser/browserSocketFactory.mjs";
 import { ConnectionType, connectToRemoteAgent, createNoopSignService } from "./vscode_oss_runtime/platform/remote/common/remoteAgentConnection.mjs";
 import { IpcPromiseClient } from "./vscode_oss_runtime/base/parts/ipc/common/ipc.mjs";
+import {
+  decodeExtHostRpc,
+  encodeExtAck,
+  encodeExtReplyError,
+  encodeExtReplyOkEmpty,
+  encodeExtReplyOkJson,
+  encodeExtReplyOkVSBuffer,
+  encodeExtRequestJsonArgs,
+  encodeExtRequestMixedArgs,
+  isTerminalExtReply,
+} from "./dist/protocol/wire-encoding.mjs";
 
 function _hts() { const d = new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}.${String(d.getMilliseconds()).padStart(3,'0')}`; }
 const DEFAULT_CODE_SERVER_HTTP = process.env.TE2_CODE_SERVER_HTTP ?? "http://127.0.0.1:18180";
@@ -363,106 +374,6 @@ function _jsonSizeOrSkip(obj, maxItems) {
   }
 }
 
-function u32be(n) {
-  const b = Buffer.alloc(4);
-  b.writeUInt32BE(n >>> 0, 0);
-  return b;
-}
-
-function writeVqlUnsigned(n) {
-  let v = n >>> 0;
-  const bytes = [];
-  while (true) {
-    let b = v & 0x7f;
-    v = v >>> 7;
-    if (v !== 0) b |= 0x80;
-    bytes.push(b);
-    if (v === 0) break;
-  }
-  return Buffer.from(bytes);
-}
-
-function encodeMgmtValue(v) {
-  // Subset used by VS Code IPC:
-  // 0 undefined
-  // 1 string (vql len + bytes)
-  // 4 array (vql length + values)
-  // 5 object (vql len + json bytes)
-  // 6 int (vql)
-  if (v === undefined || v === null) return Buffer.from([0]);
-  if (typeof v === "string") {
-    const s = Buffer.from(v, "utf8");
-    return Buffer.concat([Buffer.from([1]), writeVqlUnsigned(s.length), s]);
-  }
-  if (typeof v === "number" && Number.isFinite(v)) {
-    return Buffer.concat([Buffer.from([6]), writeVqlUnsigned(v | 0)]);
-  }
-  if (Array.isArray(v)) {
-    const parts = [Buffer.from([4]), writeVqlUnsigned(v.length)];
-    for (const x of v) parts.push(encodeMgmtValue(x));
-    return Buffer.concat(parts);
-  }
-  if (typeof v === "object") {
-    const raw = Buffer.from(JSON.stringify(v), "utf8");
-    return Buffer.concat([Buffer.from([5]), writeVqlUnsigned(raw.length), raw]);
-  }
-  const raw = Buffer.from(JSON.stringify(v), "utf8");
-  return Buffer.concat([Buffer.from([5]), writeVqlUnsigned(raw.length), raw]);
-}
-
-function encodeMgmtMessage(header, body) {
-  return Buffer.concat([encodeMgmtValue(header), encodeMgmtValue(body)]);
-}
-
-function encodeExtRequestJsonArgs({ req, rpcId, method, args, cancellable }) {
-  const t = cancellable ? 2 : 1;
-  const methodB = Buffer.from(method, "utf8");
-  const argsB = Buffer.from(JSON.stringify(args ?? []), "utf8");
-  if (methodB.length > 255) throw new Error("method too long");
-  return Buffer.concat([
-    Buffer.from([t]),
-    u32be(req),
-    Buffer.from([rpcId & 0xff]),
-    Buffer.from([methodB.length]),
-    methodB,
-    u32be(argsB.length),
-    argsB,
-  ]);
-}
-
-function encodeExtRequestMixedArgs({ req, rpcId, method, args, cancellable }) {
-  const t = cancellable ? 4 : 3;
-  const methodB = Buffer.from(method, "utf8");
-  if (methodB.length > 255) throw new Error("method too long");
-  const a = Array.isArray(args) ? args : [];
-  const parts = [
-    Buffer.from([t]),
-    u32be(req),
-    Buffer.from([rpcId & 0xff]),
-    Buffer.from([methodB.length]),
-    methodB,
-    u32be(a.length),
-  ];
-  for (const v of a) {
-    if (v === null || typeof v === "undefined") {
-      parts.push(Buffer.from([4])); // null/undefined
-      continue;
-    }
-    if (typeof v === "string") {
-      const b = Buffer.from(v, "utf8");
-      parts.push(Buffer.from([1]), u32be(b.length), b);
-      continue;
-    }
-    // everything else: JSON
-    const raw = Buffer.from(JSON.stringify(v), "utf8");
-    parts.push(Buffer.from([2]), u32be(raw.length), raw);
-  }
-  return Buffer.concat(parts);
-}
-
-function encodeExtReplyOkEmpty(req) {
-  return Buffer.concat([Buffer.from([7]), u32be(req)]);
-}
 
 const _EXT_TO_LANG = {
   ".py": "python", ".pyi": "python", ".pyw": "python",
@@ -505,238 +416,6 @@ function _languageIdFromPath(filePath) {
   return _EXT_TO_LANG[base.slice(dot).toLowerCase()] || "";
 }
 
-function encodeExtAck(req) {
-  return Buffer.concat([Buffer.from([5]), u32be(req)]);
-}
-
-function encodeExtReplyOkJson(req, result) {
-  const jsonB = Buffer.from(JSON.stringify(result ?? null), "utf8");
-  return Buffer.concat([Buffer.from([9]), u32be(req), u32be(jsonB.length), jsonB]);
-}
-
-function encodeExtReplyOkVSBuffer(req, buf) {
-  return Buffer.concat([Buffer.from([8]), u32be(req), u32be(buf.length), buf]);
-}
-
-function encodeExtReplyError(req, errObj) {
-  const jsonB = Buffer.from(JSON.stringify(errObj ?? null), "utf8");
-  return Buffer.concat([Buffer.from([11]), u32be(req), u32be(jsonB.length), jsonB]);
-}
-
-function decodeExtHostRpc(payload) {
-  if (!payload || payload.length < 5) return { kind: "ext", error: "short" };
-  const msgType = payload[0];
-  const req = payload.readUInt32BE(1);
-  let off = 5;
-
-  const readU8 = () => payload[off++];
-  const readU32 = () => {
-    const v = payload.readUInt32BE(off);
-    off += 4;
-    return v >>> 0;
-  };
-  const readBytes = (n) => {
-    const b = payload.subarray(off, off + n);
-    off += n;
-    return b;
-  };
-  const readShortString = () => {
-    const ln = readU8();
-    return readBytes(ln).toString("utf8");
-  };
-  const readLongString = () => {
-    const ln = readU32();
-    if (ln > 10000000) {
-      console.log(`[ipc_decode] WARNING readLongString len=${ln} off=${off} payloadLen=${payload.length}`);
-    }
-    return readBytes(ln).toString("utf8");
-  };
-  const skipLongString = () => {
-    const ln = readU32();
-    readBytes(ln);
-    return ln >>> 0;
-  };
-  const readMixedArray = () => {
-    const count = readU8(); // VS Code uses readUInt8 for mixed arg count
-    if (count > 250) {
-      console.log(`[ipc_decode] WARNING readMixedArray count=${count} off=${off} payloadLen=${payload.length}`);
-      return [{ __mixed_array_too_large__: true, count }];
-    }
-    const out = [];
-    for (let i = 0; i < count; i++) {
-      const argType = readU8();
-      if (argType === 1) {
-        // ArgType.String — VS Code JSON.parse's these in deserializeRequestMixedArgs
-        const raw = readLongString();
-        try { out.push(JSON.parse(raw)); } catch { out.push(raw); }
-      }
-      else if (argType === 2) {
-        // ArgType.VSBuffer — raw binary, read as buffer (len-prefixed)
-        const bln = readU32();
-        out.push(readBytes(bln));
-      }
-      else if (argType === 3) {
-        // ArgType.SerializedObjectWithBuffers — JSON string + N VSBuffers
-        const bufCount = readU32();
-        const raw = readLongString();
-        const buffers = [];
-        for (let j = 0; j < bufCount; j++) {
-          const bln = readU32();
-          buffers.push(readBytes(bln));
-        }
-        try {
-          out.push(JSON.parse(raw || "null"));
-        } catch {
-          out.push({ __json_with_buffers_parse_error__: true, buffers: bufCount });
-        }
-      } else if (argType === 4) out.push(null);
-      else out.push({ __unknown_arg_type__: argType });
-    }
-    return out;
-  };
-  const skipMixedArray = () => {
-    const count = readU8(); // VS Code uses readUInt8 for mixed arg count
-    if (count > 250) {
-      console.log(`[ipc_decode] WARNING skipMixedArray count=${count} (bailing) off=${off} payloadLen=${payload.length}`);
-      return { count, totalJsonBytes: 0, totalStringBytes: 0, totalBuffers: 0, skipped: true };
-    }
-    let totalJsonBytes = 0;
-    let totalStringBytes = 0;
-    let totalBuffers = 0;
-    for (let i = 0; i < count; i++) {
-      const argType = readU8();
-      if (argType === 1) {
-        const ln = readU32();
-        readBytes(ln);
-        totalStringBytes += ln;
-        continue;
-      }
-      if (argType === 2) {
-        const ln = readU32();
-        readBytes(ln);
-        totalJsonBytes += ln;
-        continue;
-      }
-      if (argType === 3) {
-        const bufCount = readU32();
-        const ln = readU32();
-        readBytes(ln);
-        totalJsonBytes += ln;
-        for (let j = 0; j < bufCount; j++) {
-          const bln = readU32();
-          readBytes(bln);
-          totalBuffers += 1;
-        }
-        continue;
-      }
-      if (argType === 4) continue;
-      // unknown: can't reliably skip, but do nothing (will likely fail later)
-    }
-    return { count, totalJsonBytes, totalStringBytes, totalBuffers };
-  };
-
-  try {
-    if (msgType === 1 || msgType === 2) {
-      const rpcId = readU8();
-      const method = readShortString();
-      if (!_shouldParseArgsForMethod(method)) {
-        const argsRawLen = skipLongString();
-        return {
-          kind: "ext",
-          type: msgType,
-          req,
-          rpcId,
-          method,
-          args: [],
-          argsRawLen,
-          cancellable: msgType === 2,
-          skippedArgsParse: true,
-        };
-      }
-      const argsRawLen = readU32();
-      if (MAX_JSON_BYTES > 0 && argsRawLen > MAX_JSON_BYTES) {
-        readBytes(argsRawLen);
-        return {
-          kind: "ext",
-          type: msgType,
-          req,
-          rpcId,
-          method,
-          args: [],
-          argsRawLen,
-          cancellable: msgType === 2,
-          skippedArgsParse: true,
-          skipReason: "too_large",
-        };
-      }
-      const argsRaw = readBytes(argsRawLen).toString("utf8");
-      const args = argsRaw ? JSON.parse(argsRaw) : [];
-      return { kind: "ext", type: msgType, req, rpcId, method, args, argsRawLen, cancellable: msgType === 2 };
-    }
-    if (msgType === 3 || msgType === 4) {
-      const rpcId = readU8();
-      const method = readShortString();
-      if (!_shouldParseArgsForMethod(method)) {
-        const meta = skipMixedArray();
-        return {
-          kind: "ext",
-          type: msgType,
-          req,
-          rpcId,
-          method,
-          args: [],
-          cancellable: msgType === 4,
-          skippedArgsParse: true,
-          argsMeta: { encoding: "mixed", ...meta },
-        };
-      }
-      const args = readMixedArray();
-      return { kind: "ext", type: msgType, req, rpcId, method, args, cancellable: msgType === 4 };
-    }
-    if (msgType === 8) {
-      // ReplyOKVSBuffer — raw buffer reply (used by semantic tokens, etc.)
-      // Wire: [4 bytes bufLen BE] [bufLen bytes raw data]
-      const bufLen = readU32();
-      const rawBuf = readBytes(bufLen);
-      return { kind: "ext", type: msgType, req, buffer: rawBuf };
-    }
-    if (msgType === 9) {
-      const resLen = readU32();
-      if (MAX_JSON_BYTES > 0 && resLen > MAX_JSON_BYTES) {
-        readBytes(resLen);
-        return { kind: "ext", type: msgType, req, skippedResultParse: true, resultRawLen: resLen, skipReason: "too_large" };
-      }
-      const resRaw = readBytes(resLen).toString("utf8");
-      return { kind: "ext", type: msgType, req, result: resRaw ? JSON.parse(resRaw) : null };
-    }
-    if (msgType === 10) {
-      // Reply OK with mixed args (JSON + embedded buffers).
-      // Used by semantic tokens and other responses containing VSBuffer.
-      const resArgs = readMixedArray();
-      const jsonPart = resArgs.length > 0 ? resArgs[0] : null;
-      const buffers = [];
-      for (let i = 0; i < resArgs.length; i++) {
-        if (resArgs[i] && resArgs[i].__json_with_buffers__) {
-          buffers.push(resArgs[i]);
-        }
-      }
-      return { kind: "ext", type: msgType, req, result: jsonPart, mixedArgs: resArgs, buffers };
-    }
-    if (msgType === 11) {
-      const errLen = readU32();
-      if (MAX_JSON_BYTES > 0 && errLen > MAX_JSON_BYTES) {
-        readBytes(errLen);
-        return { kind: "ext", type: msgType, req, skippedErrorParse: true, errorRawLen: errLen, skipReason: "too_large" };
-      }
-      const errRaw = readBytes(errLen).toString("utf8");
-      return { kind: "ext", type: msgType, req, error: errRaw ? JSON.parse(errRaw) : null };
-    }
-    return { kind: "ext", type: msgType, req };
-  } catch (e) {
-    return { kind: "ext", type: msgType, req, error: `decode_fail:${String(e?.message ?? e)}` };
-  }
-}
-
 export class WorkbenchClient {
   constructor({ onEvent } = {}) {
     this.onEvent = typeof onEvent === "function" ? onEvent : () => {};
@@ -745,7 +424,7 @@ export class WorkbenchClient {
     this._mgmtIpc = null;
     this._fsWatcherSub = null; // IPC event subscription for remoteFilesystem fileChange
     this._connecting = false;
-    this._pendingExt = new Map(); // req -> {resolve,reject}
+    this._pendingExt = new Map(); // req -> {resolve,reject,accept?}
     this._signService = createNoopSignService();
     this._debugExtReqSeen = 0;
     this._debugExtReplySeen = 0;
@@ -783,6 +462,7 @@ export class WorkbenchClient {
       completions: new Map(), // handle -> { handle, selector, supportsResolve }
       semanticTokens: new Map(), // handle -> { handle, selector, legend, eventHandle }
     };
+    this._languageCatalogCache = null;
     this.state = {
       connected: false,
       ready: false,
@@ -857,6 +537,46 @@ export class WorkbenchClient {
       this.onEvent({ type: "ext/send", ts_ms: Date.now(), req, rpcId, method });
     } catch {}
     return req;
+  }
+
+  _isTerminalExtReply(msg) {
+    return isTerminalExtReply(msg) && msg.type !== 12;
+  }
+
+  _sendExtAwaitTerminalReply(rpcId, method, args, cancellable = false, timeoutMs = 3000) {
+    if (!this.ext?.protocol) throw new Error("not connected");
+    const req = this._allocExtReqId();
+    const payload = encodeExtRequestJsonArgs({ req, rpcId, method, args, cancellable });
+    const promise = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this._pendingExt.has(req)) {
+          this._pendingExt.delete(req);
+          reject(new Error(`timed out waiting for ${method} ack`));
+        }
+      }, Math.max(1, Number(timeoutMs) || 3000));
+      this._pendingExt.set(req, {
+        accept: (msg) => this._isTerminalExtReply(msg),
+        resolve: (msg) => {
+          clearTimeout(timer);
+          resolve(msg);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+    });
+    this.ext.protocol.send(VSBuffer.wrap(payload));
+    this._sentExtMeta.set(req, { rpcId, method, ts_ms: Date.now() });
+    this._sentExtMetaOrder.push(req);
+    while (this._sentExtMetaOrder.length > 500) {
+      const oldest = this._sentExtMetaOrder.shift();
+      this._sentExtMeta.delete(oldest);
+    }
+    try {
+      this.onEvent({ type: "ext/send", ts_ms: Date.now(), req, rpcId, method, awaitAck: true });
+    } catch {}
+    return { req, promise };
   }
 
   _sendExtMixed(rpcId, method, args, cancellable = false) {
@@ -2022,7 +1742,11 @@ export class WorkbenchClient {
           const hex = Buffer.from(raw.slice(0, Math.min(32, raw.length))).toString('hex');
           console.log(`[ext_msg_raw] #${this._extMsgCount} len=${raw.length} first32hex=${hex}`);
         }
-        const msg = decodeExtHostRpc(payloadVsBuf.buffer);
+        const msg = decodeExtHostRpc(payloadVsBuf.buffer, {
+          shouldParseArgsForMethod: _shouldParseArgsForMethod,
+          maxJsonBytes: MAX_JSON_BYTES,
+          log: (message) => console.log(message),
+        });
         if (this._extMsgCount <= 500) {
           // Peek at raw message type before full decode log
           const rawType = payloadVsBuf.buffer?.[0];
@@ -2173,14 +1897,22 @@ export class WorkbenchClient {
           if (msg.method === "$registerCompletionsProvider" && Array.isArray(msg.args) && msg.args.length >= 2) {
             const handle = Number(msg.args[0]);
             const selector = msg.args[1];
+            const triggerCharacters = Array.isArray(msg.args[2]) ? msg.args[2].map(String).filter(Boolean) : [];
             const supportsResolve = !!msg.args[3];
             if (Number.isFinite(handle) && Array.isArray(selector)) {
               try {
-                this._providers.completions.set(handle, { handle, selector, supportsResolve });
+                this._providers.completions.set(handle, { handle, selector, triggerCharacters, supportsResolve });
               } catch {}
               for (const s of selector) {
                 if (s && typeof s === "object" && s.language) {
-                  this.onEvent({ type: "provider/completions", ts_ms: Date.now(), handle, language: s.language });
+                  this.onEvent({
+                    type: "provider/completions",
+                    ts_ms: Date.now(),
+                    handle,
+                    language: s.language,
+                    triggerCharacters,
+                    supportsResolve,
+                  });
                   break;
                 }
               }
@@ -2445,7 +2177,7 @@ export class WorkbenchClient {
             });
           }
           const pending = this._pendingExt.get(msg.req);
-          if (pending) {
+          if (pending && (!pending.accept || pending.accept(msg))) {
             this._pendingExt.delete(msg.req);
             pending.resolve(msg);
           }
@@ -2809,7 +2541,7 @@ export class WorkbenchClient {
    * Push a full-text buffer update to the extension host for live diagnostics.
    * Uses $acceptModelChanged on ExtHostDocuments with isFlush:true.
    */
-  didChange(params = {}) {
+  didChange(params = {}, opts = {}) {
     if (!this.ext?.protocol) throw new Error("not connected");
     const path = String(params.path ?? "");
     const text = String(params.text ?? "");
@@ -2862,9 +2594,23 @@ export class WorkbenchClient {
     };
 
     // rpcId ExtHostDocuments, $acceptModelChanged(uri, event, isDirty)
-    this._sendExt(_rpcIds.ExtHostDocuments, "$acceptModelChanged", [uriObj, event, true], false);
+    const waitForAck = opts && opts.waitForAck === true;
+    const ack = waitForAck
+      ? this._sendExtAwaitTerminalReply(_rpcIds.ExtHostDocuments, "$acceptModelChanged", [uriObj, event, true], false, Number(opts.timeoutMs ?? 3000))
+      : null;
+    if (!ack) {
+      this._sendExt(_rpcIds.ExtHostDocuments, "$acceptModelChanged", [uriObj, event, true], false);
+    }
     this._docCharCount.set(path, text.length);
     console.log(`[didChange] ts=${Date.now()} path=${path} ver=${nextVersion} bytes=${text.length} prevLines=${prevLines} prevLastLineLen=${prevLastLineLen} newLines=${newLines.length}`);
+    if (ack) {
+      return ack.promise.then((reply) => ({
+        ok: true,
+        versionId: nextVersion,
+        ackReq: ack.req,
+        ackType: reply && typeof reply === "object" ? reply.type : undefined,
+      }));
+    }
     return { ok: true, versionId: nextVersion };
   }
 
@@ -2908,7 +2654,7 @@ export class WorkbenchClient {
     try {
       this.state.activePath = path;
       this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
-      this.state.activeLanguageId = languageFromPath(path) ?? null;
+      this.state.activeLanguageId = _languageIdFromPath(path) ?? null;
       this.state.lastOpenTs = Date.now();
     } catch {}
 
@@ -2987,7 +2733,7 @@ export class WorkbenchClient {
     try {
       this.state.activePath = path;
       this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
-      this.state.activeLanguageId = languageFromPath(path) ?? null;
+      this.state.activeLanguageId = _languageIdFromPath(path) ?? null;
       this.state.lastOpenTs = Date.now();
     } catch {}
 
@@ -3050,7 +2796,7 @@ export class WorkbenchClient {
     try {
       this.state.activePath = path;
       this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
-      this.state.activeLanguageId = languageFromPath(path) ?? null;
+      this.state.activeLanguageId = _languageIdFromPath(path) ?? null;
       this.state.lastOpenTs = Date.now();
     } catch {}
 
@@ -3085,7 +2831,7 @@ export class WorkbenchClient {
     try {
       this.state.activePath = path;
       this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
-      this.state.activeLanguageId = languageFromPath(path) ?? null;
+      this.state.activeLanguageId = _languageIdFromPath(path) ?? null;
       this.state.lastOpenTs = Date.now();
     } catch {}
 
@@ -3148,7 +2894,7 @@ export class WorkbenchClient {
     try {
       this.state.activePath = path;
       this.state.activeUri = uriObj?.external ?? uriObjToString(uriObj);
-      this.state.activeLanguageId = languageFromPath(path) ?? null;
+      this.state.activeLanguageId = _languageIdFromPath(path) ?? null;
       this.state.lastOpenTs = Date.now();
     } catch {}
 
@@ -3245,9 +2991,14 @@ export class WorkbenchClient {
     // Pre-flight: sync document content so the ext host has the latest text.
     if (params.text != null && path) {
       try {
-        this.didChange({ path, text: String(params.text), languageId, authority });
+        const syncResult = await this.didChange(
+          { path, text: String(params.text), languageId, authority },
+          { waitForAck: true, timeoutMs: Math.min(timeoutMs, 5000) },
+        );
+        console.log(`[completions] pre-flight didChange ack path=${path} ver=${syncResult?.versionId ?? "?"} type=${syncResult?.ackType ?? "?"}`);
       } catch (e) {
         console.warn(`[completions] pre-flight didChange failed`, e.message);
+        return { ok: false, error: `didChange_ack_failed: ${e.message || e}` };
       }
     }
 
@@ -3849,6 +3600,98 @@ export class WorkbenchClient {
     this.state.hoverProviderHandle = null;
     this._extHandshake = { readySeen: false, initSent: false, initialized: false };
     this._connecting = false;
+    this._languageCatalogCache = null;
+  }
+
+  async languageCatalog() {
+    if (this._languageCatalogCache) return this._languageCatalogCache;
+
+    if (!Array.isArray(this._extensions) || this._extensions.length === 0) {
+      try {
+        await waitFor(() => Array.isArray(this._extensions) && this._extensions.length > 0, { timeoutMs: 5000, intervalMs: 50 });
+      } catch {}
+    }
+
+    const readConfigurationRaw = async (ext, relativePath) => {
+      try {
+        if (typeof relativePath !== "string" || !relativePath.trim()) return null;
+        const basePath = ext?.extensionLocation?.path;
+        if (typeof basePath !== "string" || !basePath.trim()) return null;
+        const configPath = path.join(basePath, relativePath);
+        return await fs.readFile(configPath, "utf8");
+      } catch {
+        return null;
+      }
+    };
+
+    const pickPriority = (ext) => (ext?.isBuiltin === false ? 1 : 0);
+    const mergedById = new Map();
+
+    for (const ext of Array.isArray(this._extensions) ? this._extensions : []) {
+      const contributes = ext?.contributes;
+      const languages = Array.isArray(contributes?.languages) ? contributes.languages : [];
+      if (!languages.length) continue;
+      const extId = this._extensionIdentifierFrom(ext) ?? String(ext?.id ?? "");
+      const priority = pickPriority(ext);
+
+      for (const rawLanguage of languages) {
+        const language = rawLanguage && typeof rawLanguage === "object" ? rawLanguage : null;
+        const id = typeof language?.id === "string" ? String(language.id).trim() : "";
+        if (!id) continue;
+
+        const configurationPath = typeof language?.configuration === "string"
+          ? String(language.configuration)
+          : "";
+        const configurationRaw = configurationPath
+          ? await readConfigurationRaw(ext, configurationPath)
+          : null;
+        const normalized = {
+          id,
+          aliases: Array.isArray(language?.aliases) ? language.aliases.map(String) : [],
+          extensions: Array.isArray(language?.extensions) ? language.extensions.map(String) : [],
+          filenames: Array.isArray(language?.filenames) ? language.filenames.map(String) : [],
+          mimetypes: Array.isArray(language?.mimetypes) ? language.mimetypes.map(String) : [],
+          configuration: configurationPath || undefined,
+          configuration_raw: configurationRaw || undefined,
+          extension: extId,
+          source: ext?.isBuiltin === false ? "user" : "builtin",
+          _priority: priority,
+        };
+
+        const existing = mergedById.get(id);
+        if (!existing || priority >= Number(existing._priority || 0)) {
+          mergedById.set(id, normalized);
+          continue;
+        }
+
+        if (!existing.configuration_raw && normalized.configuration_raw) {
+          existing.configuration = normalized.configuration;
+          existing.configuration_raw = normalized.configuration_raw;
+        }
+        if ((!Array.isArray(existing.aliases) || !existing.aliases.length) && normalized.aliases.length) {
+          existing.aliases = normalized.aliases;
+        }
+        if ((!Array.isArray(existing.extensions) || !existing.extensions.length) && normalized.extensions.length) {
+          existing.extensions = normalized.extensions;
+        }
+        if ((!Array.isArray(existing.filenames) || !existing.filenames.length) && normalized.filenames.length) {
+          existing.filenames = normalized.filenames;
+        }
+        if ((!Array.isArray(existing.mimetypes) || !existing.mimetypes.length) && normalized.mimetypes.length) {
+          existing.mimetypes = normalized.mimetypes;
+        }
+      }
+    }
+
+    const languages = Array.from(mergedById.values()).map((entry) => {
+      const { _priority, ...rest } = entry;
+      return rest;
+    });
+    if (!languages.length) {
+      return { ok: false, error: "language catalog unavailable" };
+    }
+    this._languageCatalogCache = { ok: true, languages };
+    return this._languageCatalogCache;
   }
 
   providers() {
@@ -3904,6 +3747,23 @@ export class WorkbenchClient {
    */
   resync() {
     const replayed = { semanticTokens: 0, hover: 0, completions: 0, documentSymbols: 0, foldingRanges: 0 };
+    for (const entry of this._providers.completions.values()) {
+      if (!Array.isArray(entry.selector)) continue;
+      for (const sel of entry.selector) {
+        const language = sel?.language ?? null;
+        if (!language) continue;
+        this.onEvent({
+          type: "provider/completions",
+          ts_ms: Date.now(),
+          handle: entry.handle,
+          language,
+          triggerCharacters: Array.isArray(entry.triggerCharacters) ? entry.triggerCharacters : [],
+          supportsResolve: !!entry.supportsResolve,
+          resync: true,
+        });
+        replayed.completions++;
+      }
+    }
     // Replay semantic token provider registrations
     for (const entry of this._providers.semanticTokens.values()) {
       const language = entry.selector?.[0]?.language ?? null;
@@ -3919,7 +3779,7 @@ export class WorkbenchClient {
       });
       replayed.semanticTokens++;
     }
-    console.error(`[resync] replayed providers: semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges}`);
+    console.error(`[resync] replayed providers: cmp=${replayed.completions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges}`);
     return { ok: true, ts_ms: Date.now(), replayed };
   }
 }

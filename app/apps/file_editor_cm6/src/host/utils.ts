@@ -78,7 +78,13 @@ export function detectLanguageFromFilename(filename) {
   return map[ext] || null;
 }
 
-export const RUNNABLE_EXTENSIONS = new Set(['.py', '.pyw', '.sh', '.bash', '.zsh', '.c', '.cc', '.cpp', '.cxx']);
+export const RUNNABLE_EXTENSIONS = new Set([
+  '.py', '.pyw',
+  '.sh', '.bash', '.zsh',
+  '.js', '.mjs', '.cjs',
+  '.ts', '.mts', '.cts',
+  '.c', '.cc', '.cpp', '.cxx',
+]);
 
 export function isRunnableFile(path) {
   if (!path) return false;

@@ -16,22 +16,23 @@
  * }} deps
  */
 export function createEditorStateController(deps) {
+  function hydrateEditorState(state) {
+    deps.setEditorState(state || null);
+    deps.setCachedProjectRoot(state?.activeProject || null);
+    window.__cm6EditorState = state || null;
+    return state || null;
+  }
+
   async function syncEditorState(forceRefresh = false) {
     if (!forceRefresh && deps.getEditorState()) return deps.getEditorState();
     try {
       const resp = await fetch('/api/app/file_editor_cm6/state', { cache: 'no-store' });
       const json = await resp.json();
       const state = json?.data || {};
-      deps.setEditorState(state);
-      deps.setCachedProjectRoot(state.activeProject || null);
-      window.__cm6EditorState = state;
-      return state;
+      return hydrateEditorState(state);
     } catch (err) {
       console.error('Failed to fetch editor state:', err);
-      deps.setEditorState(null);
-      deps.setCachedProjectRoot(null);
-      window.__cm6EditorState = null;
-      return null;
+      return hydrateEditorState(null);
     }
   }
 
@@ -101,5 +102,5 @@ export function createEditorStateController(deps) {
     });
   }
 
-  return { syncEditorState, ensureProjectContext, installWindowHooks };
+  return { syncEditorState, ensureProjectContext, hydrateEditorState, installWindowHooks };
 }

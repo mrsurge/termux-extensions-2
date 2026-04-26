@@ -26,15 +26,6 @@ import { loadVscodeTextmateThemesRuntime } from './editor_theme_loader_runtime_u
 import { applyMonacoThemeRuntime } from './editor_theme_apply_runtime_utils.js';
 import { clearDraftDiffZonesState } from './editor_draft_zone_clear_utils.js';
 import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear_utils.js';
-import { startVscodeApiService } from './editor_vscode_api_start_utils.js';
-import { discoverVscodeApiWsPath } from './editor_vscode_api_discover_utils.js';
-import { buildVscodeApiWsUrl } from './editor_vscode_api_ws_url_utils.js';
-import { handleVscodeApiMessageData } from './editor_vscode_api_message_utils.js';
-import { rejectAndClearVscodeApiPending } from './editor_vscode_api_close_utils.js';
-import { createVscodeApiCallPromise } from './editor_vscode_api_call_request_utils.js';
-import { vscodeApiNotify } from './editor_vscode_api_notify_utils.js';
-import { buildVscodeApiRequestPayload } from './editor_vscode_api_payload_utils.js';
-import { getVscodeLanguagesList } from './editor_vscode_languages_source_utils.js';
 import { resetVscodeLanguageMatchers } from './editor_vscode_language_matchers_reset_utils.js';
 import { registerVscodeLanguageId } from './editor_vscode_language_register_utils.js';
 import { mapVscodeLanguageExtensions } from './editor_vscode_language_extensions_utils.js';
@@ -76,10 +67,10 @@ import { scheduleScrollSend } from './editor_scroll_publisher_schedule_utils.js'
 import { installScrollPublisherRuntime } from './editor_scroll_publisher_runtime.ts';
 import { shouldApplyMirrorPath } from './editor_apply_mirror_path_utils.ts';
 import { applyMirrorContent } from './editor_apply_mirror_content_utils.ts';
-import { collectBootLanguageIds } from './editor_boot_language_ids_utils.js';
+import { collectBootLanguageIds } from './editor_boot_language_ids_utils.ts';
 import { warnIfPlaintextOnlyLanguages } from './editor_boot_plaintext_warn_utils.ts';
-import { applyActiveModelLanguage } from './editor_boot_apply_active_model_language_utils.js';
-import { applyLanguageToModelRuntime } from './editor_model_language_runtime.ts';
+import { applyActiveModelLanguage } from './editor_boot_apply_active_model_language_utils.ts';
+import { applyBootSnapshotToEditor } from './editor_boot_snapshot_runtime.ts';
 import type { WorkbenchPendingDidChangePayload } from './editor_workbench_state_utils.js';
 import {
   applyDraftDiffDecorations as applyDraftDiffDecorationsRuntime,
@@ -89,6 +80,7 @@ import {
   reapplyDraftZones as reapplyDraftZonesRuntime,
 } from './editor_draft_diff_runtime.ts';
 import { createEditorTextmateRuntime } from './editor_textmate_runtime.ts';
+import { createEditorTextmateThemeOwnerRuntime } from './editor_textmate_theme_owner_runtime.ts';
 import { createEditorVscodeRpcRuntime } from './editor_vscode_rpc_runtime.ts';
 import {
   disposeDiffEditorOnly as disposeDiffEditorRuntime,
@@ -106,7 +98,7 @@ import { createEditorBreadcrumbRuntime } from './editor_breadcrumb_runtime.ts';
 import { createEditorUiIpcRuntime } from './editor_ui_ipc_runtime.ts';
 import { bootMonacoRuntime } from './editor_monaco_boot_runtime.ts';
 import { registerEditorSocketConnectionHandlers } from './editor_socket_connection_runtime.ts';
-import { createEditorVscodeApiRuntime } from './editor_vscode_api_runtime.ts';
+import { createEditorWorkbenchLanguageCatalogRuntime } from './editor_workbench_language_catalog_runtime.ts';
 import { createEditorWorkbenchRuntime } from './editor_workbench_runtime.ts';
 import { createEditorRpcTransport } from './editor_rpc_transport.ts';
 import { createEditorDebugRuntime } from './editor_debug_runtime.ts';
@@ -210,12 +202,22 @@ interface LanguageBridgeStateLike {
   registeredHover: Set<string>;
   registeredSymbols: Set<string>;
   registeredFolding: Set<string>;
-  registeredCompletions: Set<string>;
   registeredSemanticTokens: Set<string>;
+  completionProvidersByLanguage: Record<string, Record<string, { handle: string; triggerCharacters: string[]; supportsResolve: boolean }>>;
+  completionProviderDisposablesByLanguage: Record<string, { dispose(): void } | null>;
+  completionProviderSignatureByLanguage: Record<string, string>;
   semanticTokensLegendCache: Record<string, SemanticTokensLegendLike>;
   semanticTokensRangeFlag: Record<string, boolean>;
   semanticTokensResultId: Record<string, string | undefined>;
   semanticTokensDiagGated: Set<string>;
+}
+
+interface EditorModelReadyPayloadLike {
+  path: string;
+  languageId: string;
+  generation?: number;
+  request_id?: string;
+  source?: string;
 }
 
 interface CachedPrefsLike extends Record<string, unknown> {
@@ -229,7 +231,14 @@ interface CachedPrefsLike extends Record<string, unknown> {
   };
 }
 
+interface MonacoBootWindowLike extends Window {
+  __te2InlineMonacoBootSnapshot?: unknown;
+}
+
 (function() {
+  const bootWindow = window as MonacoBootWindowLike;
+  const initialBootSnapshot = bootWindow.__te2InlineMonacoBootSnapshot || null;
+
   // Debug (draft diff hunks): default ON for now to diagnose incorrect ranges.
   // You can disable at runtime in the iframe console with:
   //   window.__debugDraftDiffs = false
@@ -251,6 +260,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
   let editorSocket: EditorSocketLike | null = null;
   let editorRpcSocket: EditorSocketLike | null = null;
   let editorSocketId: string | null = null;
+  let lastModelReadySyncKey: string | null = null;
   var openTransactionStore = createEditorOpenTransactionStore();
   let baseSha256: string | null = null;
   let lastContentSha256: string | null = null;
@@ -407,6 +417,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
   }
 
   var ensureTextmateTokenization = textmateRuntime.ensureTextmateTokenization;
+  let textmateThemeOwnerRuntime: ReturnType<typeof createEditorTextmateThemeOwnerRuntime> | null = null;
   installTextmateDebugHooks({
     getWindow: function() { return window; },
     getCurrentPath: function() { return currentPath; },
@@ -423,14 +434,17 @@ interface CachedPrefsLike extends Record<string, unknown> {
   } as Parameters<typeof installTextmateDebugHooks>[0]);
 
   function applyLanguageToModel(nextModel: MonacoRuntimeModelLike, languageId: string, filePath: string): void {
-    applyLanguageToModelRuntime({
-      getWindow: function() { return window; },
-      normalizeLanguage: normalizeLanguage,
-      languageFromPath: languageFromPath,
-      ensureVscodeLanguagesInstalled: function() { return ensureVscodeLanguagesInstalled(); },
-      ensureTextmateTokenization: ensureTextmateTokenization,
-      installVscodeApiLanguageBridgeProviders: installVscodeApiLanguageBridgeProviders,
-    } as Parameters<typeof applyLanguageToModelRuntime>[0], nextModel, languageId, filePath);
+    if (textmateThemeOwnerRuntime) {
+      textmateThemeOwnerRuntime.applyLanguageToModel(nextModel, languageId, filePath);
+      return;
+    }
+    try {
+      let lang = normalizeLanguage(languageId);
+      if ((!lang || lang === 'plaintext') && filePath) lang = languageFromPath(filePath);
+      if (nextModel && window.monaco && window.monaco.editor && typeof window.monaco.editor.setModelLanguage === 'function') {
+        window.monaco.editor.setModelLanguage(nextModel, lang || 'plaintext');
+      }
+    } catch (_) {}
   }
 
   function normalizeLanguage(lang: unknown): string {
@@ -438,7 +452,11 @@ interface CachedPrefsLike extends Record<string, unknown> {
   }
 
   function languageFromPath(path: string | null): string {
-    return languageIdFromPath(path, vscodeApiRuntime.getVscodeLanguageByFilename(), vscodeApiRuntime.getVscodeLanguageByExtension());
+    return languageIdFromPath(
+      path,
+      workbenchLanguageCatalogRuntime ? workbenchLanguageCatalogRuntime.getLanguageByFilename() : new Map<string, string>(),
+      workbenchLanguageCatalogRuntime ? workbenchLanguageCatalogRuntime.getLanguageByExtension() : new Map<string, string>(),
+    );
   }
 
   function createFileModel(content: string, lang: string, absPath: string): MonacoRuntimeModelLike {
@@ -448,10 +466,27 @@ interface CachedPrefsLike extends Record<string, unknown> {
       content,
       lang,
       absPath,
-      function () {
-        try { setTimeout(function () { installVscodeApiLanguageBridgeProviders(); }, 0); } catch (_) {}
-      }
+      function () {}
     );
+  }
+
+  function applyBootSnapshot(): void {
+    applyBootSnapshotToEditor({
+      getBootSnapshot: function() { return initialBootSnapshot; },
+      getCachedPrefs: function() { return cachedPrefs; },
+      setCachedPrefs: function(value: CachedPrefsLike | null) { cachedPrefs = value; },
+      getCurrentPath: function() { return currentPath; },
+      setCurrentPath: function(value: string | null) { currentPath = value; },
+      getBaseSha256: function() { return baseSha256; },
+      setBaseSha256: function(value: string | null) { baseSha256 = value; },
+      getLastContentSha256: function() { return lastContentSha256; },
+      setLastContentSha256: function(value: string | null) { lastContentSha256 = value; },
+      getModel: function() { return model; },
+      setModel: function(value: MonacoRuntimeModelLike | null) { model = value; },
+      createFileModel: createFileModel,
+      applyLanguageToModel: applyLanguageToModel,
+      languageFromPath: function(path: string) { return languageFromPath(path); },
+    });
   }
 
   function vscodeRpcCall(method: string, params?: Record<string, unknown>): Promise<unknown> {
@@ -512,8 +547,10 @@ interface CachedPrefsLike extends Record<string, unknown> {
     registeredHover: new Set<string>(),
     registeredSymbols: new Set<string>(),
     registeredFolding: new Set<string>(),
-    registeredCompletions: new Set<string>(),
     registeredSemanticTokens: new Set<string>(),
+    completionProvidersByLanguage: {},
+    completionProviderDisposablesByLanguage: {},
+    completionProviderSignatureByLanguage: {},
     semanticTokensLegendCache: {},
     semanticTokensRangeFlag: {},
     semanticTokensResultId: {},
@@ -540,13 +577,14 @@ interface CachedPrefsLike extends Record<string, unknown> {
     clearTimeoutFn: _clearTimeoutBound,
     setTimeoutFn: _setTimeoutBound,
   } as Parameters<typeof createEditorWorkbenchRuntime>[0]);
+  let workbenchLanguageCatalogRuntime: ReturnType<typeof createEditorWorkbenchLanguageCatalogRuntime> | null = null;
   var languageBridgeProviders = createEditorLanguageBridgeProviders({
     getMonaco: function() { return window.monaco || null; },
     getLanguageWorkersEnabled: _languageWorkersEnabled,
     getCurrentPath: function() { return currentPath; },
     getHasModel: function() { return !!model; },
     getCurrentLanguageContext: _currentLanguageContext,
-    callVscodeApiGuarded: _callVscodeApiGuarded,
+    callWorkbenchProviderGuarded: _callWorkbenchProviderGuarded,
     editorWorkbenchCall: editorWorkbenchCall,
     absPathFromVscodeUri: _absPathFromVscodeUri,
     monacoRangeFromProtoRange: function(range: unknown) { return monacoRangeFromProtoRange(window.monaco, range); },
@@ -554,14 +592,16 @@ interface CachedPrefsLike extends Record<string, unknown> {
     monacoRangeFromCompletionRange: function(range: unknown, pos: unknown) { return monacoRangeFromCompletionRange(window.monaco, range, pos); },
     mapCompletionItemKind: function(kind: unknown) { return mapCompletionItemKind(window.monaco, kind); },
     flushMirrorDebounce: _flushMirrorDebounce,
-    ensureVscodeLanguagesInstalled: function() { return ensureVscodeLanguagesInstalled().then(function() {}); },
-    getVscodeLanguageIds: function() { return vscodeApiRuntime.getVscodeLanguageIds(); },
+    ensureWorkbenchLanguageCatalogInstalled: function() { return ensureWorkbenchLanguageCatalogInstalled().then(function() {}); },
+    getWorkbenchLanguageIds: function() {
+      return workbenchLanguageCatalogRuntime ? workbenchLanguageCatalogRuntime.getLanguageIds() : new Set<string>();
+    },
     languageBridge: languageBridge,
   } as unknown as Parameters<typeof createEditorLanguageBridgeProviders>[0]);
 
   // ── Workbench RPC over editor Socket.IO ──────────────────────────
   // Routes hover/symbols/openFile through editor_ws.py → adapter stdio pipe.
-  // Replaces the old vscode_api_ws raw WebSocket path.
+  // Replaces the old deprecated websocket harness path.
   function _isAdapterReady(): boolean {
     return isAdapterReady(window);
   }
@@ -630,8 +670,8 @@ interface CachedPrefsLike extends Record<string, unknown> {
     return workbenchRuntime.editorWorkbenchCall(method, params || {}, opts);
   }
 
-  function _callVscodeApiGuarded(kind: string, method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>> {
-    return workbenchRuntime.callVscodeApiGuarded(kind, method, params || {}, ctx, opts);
+  function _callWorkbenchProviderGuarded(kind: string, method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>> {
+    return workbenchRuntime.callWorkbenchProviderGuarded(kind, method, params || {}, ctx, opts);
   }
 
   function _languageWorkersEnabled() {
@@ -643,8 +683,8 @@ interface CachedPrefsLike extends Record<string, unknown> {
     languageBridgeProviders.registerSemanticTokensWithLegend(langId, legend as SemanticTokensLegendLike, !!isRange);
   }
 
-  function installVscodeApiLanguageBridgeProviders() {
-    languageBridgeProviders.installVscodeApiLanguageBridgeProviders();
+  function installWorkbenchLanguageBridgeProviders() {
+    languageBridgeProviders.installWorkbenchLanguageBridgeProviders();
   }
 
   function vscodeRpcDidOpenIfReady(): void {
@@ -713,7 +753,10 @@ interface CachedPrefsLike extends Record<string, unknown> {
   }
 
   function buildMonacoOptionsFromPrefs(state: unknown): Record<string, unknown> {
-    return buildMonacoOptionsFromPrefsState(state, vscodeApiRuntime.getThemeJsonCache());
+    return buildMonacoOptionsFromPrefsState(
+      state,
+      textmateThemeOwnerRuntime ? textmateThemeOwnerRuntime.getThemeJsonCache() : {},
+    );
   }
 
   function ensureTe2DiffTheme(): void {
@@ -785,26 +828,15 @@ interface CachedPrefsLike extends Record<string, unknown> {
   }
 
   // ------------------------------------------------------------------
-  // VS Code API (vscode_api) theme loading for installed VSIX themes.
-  // Theme preference key uses SSOT string: "vscode:<extensionId>:<relPath>".
+  // Workbench-owned language catalog install. This replaces the old
+  // deprecated websocket language/bootstrap lane.
   // ------------------------------------------------------------------
 
-  var vscodeApiRuntime = createEditorVscodeApiRuntime({
+  workbenchLanguageCatalogRuntime = createEditorWorkbenchLanguageCatalogRuntime({
     getWindow: function() { return window; },
-    getDocument: function() { return document; },
-    fetchFn: _fetch,
-    startVscodeApiService: function() { return startVscodeApiService(_fetch); },
-    discoverVscodeApiWsPath: function() { return discoverVscodeApiWsPath(_fetch, _setTimeoutBound); },
-    buildVscodeApiWsUrl: function(wsPath) { return buildVscodeApiWsUrl(location, wsPath); },
-    createWebSocket: function(url: string) { return new WebSocket(url) as unknown; },
-    handleVscodeApiMessageData: handleVscodeApiMessageData,
-    rejectAndClearVscodeApiPending: rejectAndClearVscodeApiPending,
-    buildVscodeApiRequestPayload: buildVscodeApiRequestPayload,
-    createVscodeApiCallPromise: function(pending, id, method, timeoutMs) {
-      return createVscodeApiCallPromise(pending, id, method, timeoutMs, _setTimeoutBound);
+    fetchLanguageCatalog: function() {
+      return editorWorkbenchCall('language_catalog', {}, { timeoutMs: 8000 });
     },
-    vscodeApiNotify: vscodeApiNotify,
-    getVscodeLanguagesList: getVscodeLanguagesList,
     normalizeLanguage: normalizeLanguage,
     registerVscodeLanguageId: registerVscodeLanguageId,
     mapVscodeLanguageExtensions: mapVscodeLanguageExtensions,
@@ -812,45 +844,71 @@ interface CachedPrefsLike extends Record<string, unknown> {
     applyVscodeLanguageConfiguration: applyVscodeLanguageConfiguration,
     installVscodeLanguagesLoop: installVscodeLanguagesLoop,
     finalizeVscodeLanguagesInstall: finalizeVscodeLanguagesInstall,
-    installVscodeApiLanguageBridgeProviders: installVscodeApiLanguageBridgeProviders,
+    installWorkbenchLanguageBridgeProviders: installWorkbenchLanguageBridgeProviders,
+    parseJsonc: parseJsonc,
+  });
+
+  textmateThemeOwnerRuntime = createEditorTextmateThemeOwnerRuntime({
+    getWindow: function() { return window; },
+    getDocument: function() { return document; },
+    fetchFn: _fetch,
+    ensureTe2DiffTheme: ensureTe2DiffTheme,
     loadVscodeTextmateThemesRuntime: loadVscodeTextmateThemesRuntime,
     applyMonacoThemeRuntime: applyMonacoThemeRuntime,
     ensureThemeRegistry: _ensureThemeRegistry,
     getVscodeThemeJsonUrl: _getVscodeThemeJsonUrl,
     vscodeThemeToMonacoTheme: _vscodeThemeToMonacoTheme,
-    ensureTe2DiffTheme: ensureTe2DiffTheme,
     resolveMonacoThemeId: resolveMonacoThemeId,
     applyThemeToTextmateRegistry: _applyThemeToTextmateRegistry,
-    forceSemanticHighlighting: _forceSemanticHighlighting,
-    parseJsonc: parseJsonc,
-  } as Parameters<typeof createEditorVscodeApiRuntime>[0]);
+    normalizeLanguage: normalizeLanguage,
+    languageFromPath: languageFromPath,
+    ensureWorkbenchLanguageCatalogInstalled: function() { return ensureWorkbenchLanguageCatalogInstalled(); },
+    ensureTextmateTokenization: function(languageId, filePath) { return ensureTextmateTokenization(languageId, filePath); },
+    installWorkbenchLanguageBridgeProviders: installWorkbenchLanguageBridgeProviders,
+  });
 
-  async function ensureVscodeApiWs(): Promise<unknown> {
-    return vscodeApiRuntime.ensureVscodeApiWs();
-  }
-
-  async function vscodeApiCall(method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
-    return vscodeApiRuntime.vscodeApiCall(method, params, opts);
-  }
-
-  function _vscodeApiNotify(method: string, params: Record<string, unknown>): unknown {
-    return vscodeApiRuntime.vscodeApiNotify(method, params);
-  }
-
-  async function ensureVscodeLanguagesInstalled(): Promise<boolean> {
-    return vscodeApiRuntime.ensureVscodeLanguagesInstalled();
-  }
-
-  async function loadVscodeTextmateThemes(): Promise<unknown> {
-    return vscodeApiRuntime.loadVscodeTextmateThemes();
+  async function ensureWorkbenchLanguageCatalogInstalled(): Promise<boolean> {
+    return workbenchLanguageCatalogRuntime
+      ? workbenchLanguageCatalogRuntime.ensureWorkbenchLanguageCatalogInstalled()
+      : false;
   }
 
   async function applyMonacoTheme(themeKey: string): Promise<void> {
-    return vscodeApiRuntime.applyMonacoTheme(themeKey);
+    if (textmateThemeOwnerRuntime) {
+      return textmateThemeOwnerRuntime.applyTheme(themeKey);
+    }
   }
 
   function emitToHost(eventName: string, payload: Record<string, unknown>): unknown {
     return emitToHostSocket(editorSocket, eventName, payload);
+  }
+
+  function emitModelReady(payload: EditorModelReadyPayloadLike | null | undefined): boolean {
+    const socket = editorSocket;
+    if (!payload || !payload.path || !socket || !socket.connected || typeof socket.emit !== 'function') return false;
+    const generation = typeof payload.generation === 'number' && Number.isFinite(payload.generation)
+      ? String(payload.generation)
+      : '-';
+    const syncKey = String(payload.path) + '::' + generation;
+    if (lastModelReadySyncKey === syncKey) return false;
+    lastModelReadySyncKey = syncKey;
+    try {
+      socket.emit('editor_model_ready', {
+        path: String(payload.path),
+        languageId: String(payload.languageId || ''),
+        generation: payload.generation,
+        request_id: payload.request_id ? String(payload.request_id) : '',
+        source: payload.source ? String(payload.source) : '',
+      });
+      console.log('[model_ready] emit', {
+        path: String(payload.path),
+        generation,
+        source: payload.source ? String(payload.source) : '',
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
 
@@ -1013,6 +1071,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
     applyLineNumberSizing: applyLineNumberSizing,
     ensureTouchSelection: ensureTouchSelection,
     emitToHost: emitToHost,
+    emitModelReady: emitModelReady,
     requestDraftDiff: requestDraftDiff,
     clearDraftDiffDecorations: clearDraftDiffDecorations,
     requestGitBaselines: requestGitBaselines,
@@ -1092,6 +1151,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
         getLastContentSha256: function() { return lastContentSha256; },
         setLastContentSha256: function(value: string | null) { lastContentSha256 = value; },
         updateDebug: updateDebug,
+        emitModelReady: emitModelReady,
         getOpenTransactionForPath: function(path: string) { return getOpenTransactionForPath(openTransactionStore, path); },
         resolveOpenJumpPayload: function(tx: unknown, scrollLine: number | null, preferCursor: boolean) {
           return resolveOpenJumpPayload(openTransactionStore, currentPath, tx as never, scrollLine, preferCursor, coercePositiveInt);
@@ -1122,7 +1182,7 @@ interface CachedPrefsLike extends Record<string, unknown> {
         disposeGitBaselines: disposeGitBaselines,
         ensurePlainEditorWithPrefs: ensurePlainEditorWithPrefs,
         getGitHeadModel: function() { return gitHeadModel; },
-        getMonaco: function() { return monaco || window.monaco; },
+        getMonaco: function() { return monaco || window.monaco || {}; },
         applyGitBaselines: applyGitBaselines,
       }) as Parameters<typeof registerEditorSocketConnectionHandlers>[1]);
 
@@ -1164,6 +1224,8 @@ interface CachedPrefsLike extends Record<string, unknown> {
         clearTimeoutFn: _clearTimeoutBound,
         languageBridge: languageBridge,
         registerSemanticTokensWithLegend: _registerSemanticTokensWithLegend,
+        cacheCompletionProviderRegistration: languageBridgeProviders.cacheCompletionProviderRegistration,
+        emitModelReady: emitModelReady,
         getMonaco: function() { return monaco; },
         emitToHost: emitToHost,
         getEditor: function() { return editor; },
@@ -1224,17 +1286,18 @@ interface CachedPrefsLike extends Record<string, unknown> {
     await bootMonacoRuntime(buildBootMonacoRuntimeDeps({
       getWindow: function() { return window; },
       getApiBase: function() { return apiBase; },
+      getBootSnapshot: function() { return initialBootSnapshot; },
       getCachedPrefs: function() { return cachedPrefs; },
       setCachedPrefs: function(value: CachedPrefsLike | null) { cachedPrefs = value; },
       fetchSSOTState: fetchSSOTState,
       languageWorkersEnabled: _languageWorkersEnabled,
       getWorkerLogOnce: function() { return _workerLogOnce; },
       ensureTe2DiffTheme: ensureTe2DiffTheme,
-      loadVscodeTextmateThemes: function() { return loadVscodeTextmateThemes().then(function() {}); },
       applyMonacoTheme: applyMonacoTheme,
       ensureEditorWithPrefs: ensureEditorWithPrefs,
-      installVscodeApiLanguageBridgeProviders: installVscodeApiLanguageBridgeProviders,
-      vscodeApiCall: vscodeApiCall,
+      applyBootSnapshot: applyBootSnapshot,
+      ensureWorkbenchLanguageCatalogInstalled: ensureWorkbenchLanguageCatalogInstalled,
+      installWorkbenchLanguageBridgeProviders: installWorkbenchLanguageBridgeProviders,
       applyActiveModelLanguage: function() {
         applyActiveModelLanguage(window, model, currentPath, applyLanguageToModel, languageFromPath);
       },

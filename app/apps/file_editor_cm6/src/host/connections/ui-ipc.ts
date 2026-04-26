@@ -244,6 +244,24 @@ export function createUiIpcConnections(deps) {
     });
   }
 
+  async function requestBackendBootSnapshot(payload) {
+    const socket = await connectUIIPC();
+    if (!socket || !socket.connected) throw new Error('UI IPC socket not connected');
+    return await new Promise((resolve, reject) => {
+      try {
+        socket.emit('ui_event', { ...(payload || {}), type: 'boot_snapshot' }, (reply) => {
+          if (!reply || reply.ok === false) {
+            reject(new Error(reply?.error || 'backend boot snapshot failed'));
+            return;
+          }
+          resolve(reply);
+        });
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
   return {
     emitSidebarIpc,
     connectSidebarIPC,
@@ -252,5 +270,6 @@ export function createUiIpcConnections(deps) {
     requestBackendFileSave,
     requestBackendEditorPreferenceUpdate,
     requestBackendRunActiveFile,
+    requestBackendBootSnapshot,
   };
 }

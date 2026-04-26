@@ -14,7 +14,6 @@ from anyio import to_thread
 from .agent_ws import agent_websocket
 from .history_store import HistoryStore
 from .explorer.services.file_ops import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
-# vscode_api_shell_manager import removed — shell is deprecated (see endpoints below)
 from .code_server_shell_manager import ensure_code_server_shell
 from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
 from .git_helper import (
@@ -331,33 +330,6 @@ file_editor_cm6_bp = APIRouter()
 
 # # Register terminal routes and WebSocket handler
 # register_terminal_routes(file_editor_cm6_bp, sock)
-
-@file_editor_cm6_bp.get("/vscode_api/discover")
-async def vscode_api_discover():
-    """Discover the browser-facing WS URL for vscode_api.
-
-    DEPRECATED: vscode_api shell is superseded by the workbench adapter.
-    """
-    print("[vscode_api][discover] DEPRECATED — vscode_api shell superseded by workbench adapter", flush=True)
-    return JSONResponse(
-        {"ok": False, "deprecated": True, "error": "vscode_api shell is deprecated; use workbench adapter"},
-        status_code=410,
-    )
-
-
-@file_editor_cm6_bp.get("/vscode_api/start")
-async def vscode_api_start():
-    """Start/adopt vscode_api and wait for readiness.
-
-    DEPRECATED: vscode_api shell is superseded by the workbench adapter.
-    Grammar/theme fallbacks handle syntax highlighting without it.
-    """
-    print("[vscode_api][start] DEPRECATED — vscode_api shell superseded by workbench adapter", flush=True)
-    return JSONResponse(
-        {"ok": False, "deprecated": True, "error": "vscode_api shell is deprecated; use workbench adapter"},
-        status_code=410,
-    )
-
 
 @file_editor_cm6_bp.get("/workbench_adapter/discover")
 async def workbench_adapter_discover():
@@ -735,21 +707,8 @@ async def workbench_adapter_cmd(request: Request):
     return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type", "application/json"))
 
 
-@file_editor_cm6_bp.get("/vscode_api/resolve")
-async def vscode_api_resolve(path: str = ""):
-    """Resolve the correct vscode_api instance for an absolute file path.
-
-    DEPRECATED: vscode_api shell is superseded by the workbench adapter.
-    """
-    print(f"[vscode_api][resolve] DEPRECATED — vscode_api shell superseded by workbench adapter (path={path})", flush=True)
-    return JSONResponse(
-        {"ok": False, "deprecated": True, "error": "vscode_api shell is deprecated; use workbench adapter"},
-        status_code=410,
-    )
-
-
-@file_editor_cm6_bp.get("/vscode_api/extensions/enabled")
-async def vscode_api_get_enabled_extensions():
+@file_editor_cm6_bp.get("/workbench/extensions/enabled")
+async def workbench_get_enabled_extensions():
     """Return the list of globally-installed VSIX extensions enabled for the active project.
 
     SSOT: ProjectSidecar (project-scoped).
@@ -765,15 +724,15 @@ async def vscode_api_get_enabled_extensions():
 
     enabled = []
     try:
-        enabled = sidecar.get_vscode_api_enabled_extensions()
+        enabled = sidecar.get_workbench_enabled_extensions()
     except Exception:
         enabled = []
 
     return {"ok": True, "data": {"project_root": project_root, "enabled": enabled}}
 
 
-@file_editor_cm6_bp.post("/vscode_api/extensions/enabled")
-async def vscode_api_set_enabled_extensions(payload: JsonDict = Body(...)):
+@file_editor_cm6_bp.post("/workbench/extensions/enabled")
+async def workbench_set_enabled_extensions(payload: JsonDict = Body(...)):
     """Set or toggle enabled extensions for the active project.
 
     Accepts either:
@@ -802,11 +761,11 @@ async def vscode_api_set_enabled_extensions(payload: JsonDict = Body(...)):
                 continue
             enabled.append(text)
         try:
-            sidecar.set_vscode_api_enabled_extensions(enabled)
+            sidecar.set_workbench_enabled_extensions(enabled)
             sidecar.save()
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to save enabled extensions: {exc}")
-        return {"ok": True, "data": {"project_root": project_root, "enabled": sidecar.get_vscode_api_enabled_extensions()}}
+        return {"ok": True, "data": {"project_root": project_root, "enabled": sidecar.get_workbench_enabled_extensions()}}
 
     # Toggle.
     ext_id = payload.get("id")
@@ -815,14 +774,14 @@ async def vscode_api_set_enabled_extensions(payload: JsonDict = Body(...)):
     flag = bool(payload.get("enabled", False))
     try:
         if flag:
-            sidecar.enable_vscode_api_extension(str(ext_id))
+            sidecar.enable_workbench_extension(str(ext_id))
         else:
-            sidecar.disable_vscode_api_extension(str(ext_id))
+            sidecar.disable_workbench_extension(str(ext_id))
         sidecar.save()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save enabled extensions: {exc}")
 
-    return {"ok": True, "data": {"project_root": project_root, "enabled": sidecar.get_vscode_api_enabled_extensions()}}
+    return {"ok": True, "data": {"project_root": project_root, "enabled": sidecar.get_workbench_enabled_extensions()}}
 
 
 # Sidebar extension routes (hardwired until dynamic extension loading lands).

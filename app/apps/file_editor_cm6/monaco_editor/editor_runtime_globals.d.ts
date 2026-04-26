@@ -49,7 +49,7 @@ interface Window {
   io?: MonacoSocketIoLike;
   vscodetextmate?: MonacoTextmateGlobal;
   __debugDraftDiffs?: boolean;
-  __debugVscodeApiDiag?: boolean;
+  __debugWorkbenchDiag?: boolean;
 }
 
 declare const monaco: MonacoRuntimeGlobal | undefined;

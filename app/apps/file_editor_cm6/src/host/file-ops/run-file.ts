@@ -19,7 +19,7 @@ export function createRunFileController(deps) {
     const currentPath = deps.getCurrentPath();
     const runnable = currentPath && deps.isRunnableFile(currentPath);
     if (!runnable) {
-      deps.toast('Open a Python, shell, or C/C++ source file to run it in the terminal');
+      deps.toast('Open a Python, shell, JS/TS, or C/C++ source file to run it in the terminal');
       return;
     }
     deps.setRunButtonDisabled(true);

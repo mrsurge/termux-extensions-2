@@ -5,7 +5,6 @@ interface WorkerCtorLike {
 type WindowWithMonacoBoot = Window & {
   MonacoEnvironment?: Record<string, unknown>;
   _loadedMonacoBundle?: string;
-  __te2VscodeBootstrap?: unknown;
 };
 
 interface MonacoTypeScriptDefaultsLike {
@@ -28,21 +27,22 @@ interface MonacoLike {
 interface EditorMonacoBootRuntimeDeps {
   getWindow(): WindowWithMonacoBoot;
   getApiBase(): string;
+  getBootSnapshot(): unknown;
   getCachedPrefs(): unknown;
   setCachedPrefs(value: unknown): void;
   fetchSSOTState(): Promise<unknown>;
   languageWorkersEnabled(): boolean;
   getWorkerLogOnce(): Record<string, boolean>;
   ensureTe2DiffTheme(): void;
-  loadVscodeTextmateThemes(): Promise<void>;
   applyMonacoTheme(themeKey: string): Promise<void> | void;
   ensureEditorWithPrefs(): Promise<unknown>;
-  installVscodeApiLanguageBridgeProviders(): void;
-  vscodeApiCall(method: string, params: Record<string, unknown>): Promise<unknown>;
+  applyBootSnapshot(): void;
+  ensureWorkbenchLanguageCatalogInstalled(): Promise<boolean>;
+  installWorkbenchLanguageBridgeProviders(): void;
   applyActiveModelLanguage(): void;
   collectBootLanguageIds(monacoRef: unknown): string[];
   warnIfPlaintextOnlyLanguages(languageIds: string[]): void;
-  connectEditorSocket(): void;
+  connectEditorSocket(): Promise<unknown> | boolean | void;
   connectUIIPC(): void;
   ensureVscodeRpcConnected(): void;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
@@ -148,6 +148,9 @@ export async function bootMonacoRuntime(
     configureMonacoEnvironment(deps, base, langBase);
 
     try {
+      if (!deps.getCachedPrefs() && deps.getBootSnapshot()) {
+        deps.applyBootSnapshot();
+      }
       if (!deps.getCachedPrefs()) {
         deps.setCachedPrefs(await deps.fetchSSOTState());
       }
@@ -165,22 +168,20 @@ export async function bootMonacoRuntime(
     deps.ensureTe2DiffTheme();
     disableTypeScriptWorkerDiagnostics(monacoNs);
 
-    try { await deps.loadVscodeTextmateThemes(); } catch (_) {}
     try { await deps.applyMonacoTheme('github-dark-default'); } catch (_) {}
 
+    try { deps.applyBootSnapshot(); } catch (_) {}
     await deps.ensureEditorWithPrefs();
-    try { deps.installVscodeApiLanguageBridgeProviders(); } catch (_) {}
+    await Promise.resolve(deps.connectEditorSocket());
+    try { await deps.ensureWorkbenchLanguageCatalogInstalled(); } catch (_) {}
+    try { deps.installWorkbenchLanguageBridgeProviders(); } catch (_) {}
 
     try {
-      try {
-        win.__te2VscodeBootstrap = await deps.vscodeApiCall('vscode.bootstrap.snapshot', {});
-      } catch (_) {}
       deps.applyActiveModelLanguage();
       const langs = deps.collectBootLanguageIds(monacoNs);
       deps.warnIfPlaintextOnlyLanguages(langs);
     } catch (_) {}
 
-    deps.connectEditorSocket();
     deps.connectUIIPC();
 
     try { deps.ensureVscodeRpcConnected(); } catch (_) {}

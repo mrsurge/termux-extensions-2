@@ -46,6 +46,7 @@ from .editor_workbench_backend import (
     handle_workbench_grammars_list,
     handle_workbench_grammars_load,
     handle_workbench_hover,
+    handle_workbench_language_catalog,
     handle_workbench_open_file,
     handle_workbench_semantic_tokens,
     handle_workbench_semantic_tokens_legend,
@@ -61,6 +62,7 @@ _ISSUES_DUMP_TTL_S = 20.0
 _SAVE_SNAPSHOT_WAITING: dict[str, asyncio.Future[dict[str, object]]] = {}
 _WORKBENCH_PATH_LOCKS: dict[str, asyncio.Lock] = {}
 _WORKBENCH_OPEN_BASELINE: dict[str, dict[str, int | None]] = {}
+_MODEL_READY_LAST_BY_SID: dict[str, str] = {}
 
 # Tracks SHA256 of the most recent editor-initiated save per abs path.
 # Used to suppress watcher reload for our own saves.
@@ -790,6 +792,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             await self.leave_room(sid, "file_editor_cm6")
         except Exception:
             pass
+        _MODEL_READY_LAST_BY_SID.pop(sid, None)
 
     async def on_editor_cache_state(self, sid, data):
         payload = data or {}
@@ -871,24 +874,31 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload["source_client"] = sid
         await editor_runtime_emit_room_event("editor:ready", payload)
 
-        # Eagerly launch code-server + workbench adapter when the editor iframe connects.
-        # State is broadcast to all UI IPC clients via _broadcast_adapter_state().
-        project = _active_project()
-        if project:
-            try:
-                from ..code_server_shell_manager import ensure_code_server_shell
-                cs = await ensure_code_server_shell(project)
-                cs_env = (cs.env_overrides or {})
-                port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
-                try:
-                    cs_port = int(str(port_s))
-                except Exception:
-                    cs_port = 0
-                cs_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
-                from ..workbench_adapter_shell_manager import ensure_workbench_adapter_shell
-                await ensure_workbench_adapter_shell(project, code_server_http=cs_http)
-            except Exception as exc:
-                print(f"[editor_ready] eager adapter launch failed: {exc}")
+    async def on_editor_model_ready(self, sid, data):
+        payload = data if isinstance(data, dict) else {}
+        path = _normalize_abs_path(str(payload.get("path") or "")) or ""
+        if not path:
+            return
+        generation = _coerce_generation(payload.get("generation"))
+        generation_key = str(generation) if generation is not None else "-"
+        sync_key = path + "::" + generation_key
+        if _MODEL_READY_LAST_BY_SID.get(sid) == sync_key:
+            return
+        _MODEL_READY_LAST_BY_SID[sid] = sync_key
+
+        try:
+            from ..workbench_adapter_shell_manager import adapter_rpc
+
+            await adapter_rpc("te2.resync", timeout=5.0)
+            _wb_log.info(
+                "[model_ready] sid=%s path=%s generation=%s source=%s",
+                sid,
+                path,
+                generation_key,
+                str(payload.get("source") or ""),
+            )
+        except Exception as exc:
+            _wb_log.warning("[model_ready] resync failed sid=%s path=%s err=%s", sid, path, exc)
 
     async def on_editor_diagnostics_counts(self, sid, data):
         payload = data if isinstance(data, dict) else {}
@@ -1338,6 +1348,13 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
 
     async def on_editor_workbench_grammars_load(self, sid, data):
         await handle_workbench_grammars_load(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            logger=_wb_log,
+        )
+
+    async def on_editor_workbench_language_catalog(self, sid, data):
+        await handle_workbench_language_catalog(
             data,
             emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
             logger=_wb_log,

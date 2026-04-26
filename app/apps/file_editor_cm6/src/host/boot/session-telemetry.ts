@@ -47,6 +47,11 @@ export function createSessionTelemetryController(deps) {
     sessionStateInitialized = true;
   }
 
+  function seedPersistedSessionState(snapshot = null) {
+    persistedSessionSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
+    return persistedSessionSnapshot;
+  }
+
   function queueSessionStateUpdate(partial = null) {
     if (!sessionStateInitialized) return;
     if (partial && Object.keys(partial).length) Object.assign(sessionState, partial);
@@ -91,6 +96,7 @@ export function createSessionTelemetryController(deps) {
   return {
     sessionState,
     fetchPersistedSessionState,
+    seedPersistedSessionState,
     initSessionStateContext,
     queueSessionStateUpdate,
     flushSessionState,

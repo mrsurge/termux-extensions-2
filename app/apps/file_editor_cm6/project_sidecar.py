@@ -159,8 +159,8 @@ class ProjectSidecar:
                     "repoFingerprint": None,
                 }
             },
-            # VS Code API harness state (project-scoped SSOT).
-            "vscode_api": {
+            # Workbench extension-host state (project-scoped SSOT).
+            "workbench_extensions": {
                 # List[str] of globally-installed extension ids enabled for this project.
                 # Format: "publisher.name"
                 "enabled_extensions": [],
@@ -926,16 +926,20 @@ class ProjectSidecar:
         }
 
     # --------------------------------------------------------------------- #
-    # VS Code API harness config (project-scoped SSOT)
+    # Workbench extension-host config (project-scoped SSOT)
     # --------------------------------------------------------------------- #
 
-    def _ensure_vscode_api_schema(self) -> dict:
-        cfg = self._data.get("vscode_api")
-        if not isinstance(cfg, dict):
+    def _ensure_workbench_extensions_schema(self) -> Dict[str, object]:
+        cfg_obj = self._data.get("workbench_extensions")
+        legacy_cfg_obj = self._data.get("vscode_api")
+        if isinstance(cfg_obj, dict):
+            cfg: Dict[str, object] = {str(key): value for key, value in cfg_obj.items() if isinstance(key, str)}
+        elif isinstance(legacy_cfg_obj, dict):
+            cfg = {str(key): value for key, value in legacy_cfg_obj.items() if isinstance(key, str)}
+        else:
             cfg = {}
-        enabled = cfg.get("enabled_extensions")
-        if not isinstance(enabled, list):
-            enabled = []
+        raw_enabled = cfg.get("enabled_extensions")
+        enabled = raw_enabled if isinstance(raw_enabled, list) else []
         # Normalize + de-dupe.
         normalized: List[str] = []
         seen: set[str] = set()
@@ -949,49 +953,50 @@ class ProjectSidecar:
             seen.add(text)
             normalized.append(text)
         cfg["enabled_extensions"] = normalized
-        self._data["vscode_api"] = cfg
+        self._data["workbench_extensions"] = cfg
+        self._data.pop("vscode_api", None)
         return cfg
 
-    def get_vscode_api_enabled_extensions(self) -> List[str]:
-        cfg = self._ensure_vscode_api_schema()
+    def get_workbench_enabled_extensions(self) -> List[str]:
+        cfg = self._ensure_workbench_extensions_schema()
         enabled = cfg.get("enabled_extensions")
         return list(enabled) if isinstance(enabled, list) else []
 
-    def set_vscode_api_enabled_extensions(self, enabled: List[str]) -> List[str]:
-        cfg = self._ensure_vscode_api_schema()
-        cfg["enabled_extensions"] = []
+    def set_workbench_enabled_extensions(self, enabled: List[str]) -> List[str]:
+        cfg = self._ensure_workbench_extensions_schema()
+        normalized: List[str] = []
         try:
             for item in enabled or []:
                 text = str(item).strip()
                 if not text:
                     continue
-                if text in cfg["enabled_extensions"]:
+                if text in normalized:
                     continue
-                cfg["enabled_extensions"].append(text)
+                normalized.append(text)
         except Exception:
             pass
-        self._data["vscode_api"] = cfg
-        return self.get_vscode_api_enabled_extensions()
+        cfg["enabled_extensions"] = normalized
+        self._data["workbench_extensions"] = cfg
+        self._data.pop("vscode_api", None)
+        return self.get_workbench_enabled_extensions()
 
-    def enable_vscode_api_extension(self, extension_id: str) -> List[str]:
-        cfg = self._ensure_vscode_api_schema()
+    def enable_workbench_extension(self, extension_id: str) -> List[str]:
+        enabled = self.get_workbench_enabled_extensions()
         text = str(extension_id).strip()
-        if text and text not in cfg["enabled_extensions"]:
-            cfg["enabled_extensions"].append(text)
-        self._data["vscode_api"] = cfg
-        return self.get_vscode_api_enabled_extensions()
+        if text and text not in enabled:
+            enabled.append(text)
+        return self.set_workbench_enabled_extensions(enabled)
 
-    def disable_vscode_api_extension(self, extension_id: str) -> List[str]:
-        cfg = self._ensure_vscode_api_schema()
+    def disable_workbench_extension(self, extension_id: str) -> List[str]:
+        enabled = self.get_workbench_enabled_extensions()
         text = str(extension_id).strip()
         if not text:
-            return self.get_vscode_api_enabled_extensions()
+            return enabled
         try:
-            cfg["enabled_extensions"] = [x for x in cfg["enabled_extensions"] if x != text]
+            enabled = [item for item in enabled if item != text]
         except Exception:
             pass
-        self._data["vscode_api"] = cfg
-        return self.get_vscode_api_enabled_extensions()
+        return self.set_workbench_enabled_extensions(enabled)
 
 
 def clear_project_state(project_path: str) -> bool:

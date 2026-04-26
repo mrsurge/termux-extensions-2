@@ -90,6 +90,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   } | null = null;
   let tmGrammarIndex: GrammarIndexLike | null = null;
   let tmInstalled: Record<string, boolean> = Object.create(null);
+  let tmInstallInflight: Record<string, Promise<boolean> | undefined> = Object.create(null);
   let tmGrammarByLang: Record<string, unknown> = Object.create(null);
   let tmActiveThemeJson: Record<string, unknown> | null = null;
   let tmVscodeIndex: VscodeGrammarIndexLike | null = null;
@@ -325,84 +326,97 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
       let lang = deps.normalizeLanguage(languageId);
       console.log('[TextMate:DIAG] ensureTextmateTokenization called: lang=' + lang + ' filePath=' + asString(filePath) + ' alreadyInstalled=' + !!tmInstalled[lang]);
       if (tmInstalled[lang]) return true;
+      const inflight = tmInstallInflight[lang];
+      if (inflight) return await inflight;
 
-      const scopeName = await scopeNameForLanguage(lang, filePath);
-      console.log('[TextMate:DIAG] scopeName for ' + lang + ' = ' + scopeName);
-      if (!scopeName) return false;
+      tmInstallInflight[lang] = (async () => {
+        const scopeName = await scopeNameForLanguage(lang, filePath);
+        console.log('[TextMate:DIAG] scopeName for ' + lang + ' = ' + scopeName);
+        if (!scopeName) return false;
 
-      const registry = await ensureTextmateReady() as { loadGrammar?(scopeName: string): Promise<unknown>; getColorMap?(): string[] };
-      const cmBefore = registry && typeof registry.getColorMap === 'function' ? registry.getColorMap().length : '?';
-      const grammar = registry && typeof registry.loadGrammar === 'function' ? await registry.loadGrammar(scopeName) : null;
-      const cmAfter = registry && typeof registry.getColorMap === 'function' ? registry.getColorMap().length : '?';
-      console.log('[TextMate:DIAG] loadGrammar(' + scopeName + ') colorMap: ' + cmBefore + ' -> ' + cmAfter);
-      if (!grammar) {
-        console.warn('[TextMate] missing grammar for', lang, scopeName);
-        return false;
-      }
-      tmGrammarByLang[lang] = grammar;
-      if (tmActiveThemeJson) applyThemeToRegistry(tmActiveThemeJson);
+        const registry = await ensureTextmateReady() as { loadGrammar?(scopeName: string): Promise<unknown>; getColorMap?(): string[] };
+        const cmBefore = registry && typeof registry.getColorMap === 'function' ? registry.getColorMap().length : '?';
+        const grammar = registry && typeof registry.loadGrammar === 'function' ? await registry.loadGrammar(scopeName) : null;
+        const cmAfter = registry && typeof registry.getColorMap === 'function' ? registry.getColorMap().length : '?';
+        console.log('[TextMate:DIAG] loadGrammar(' + scopeName + ') colorMap: ' + cmBefore + ' -> ' + cmAfter);
+        if (!grammar) {
+          console.warn('[TextMate] missing grammar for', lang, scopeName);
+          return false;
+        }
+
+        tmGrammarByLang[lang] = grammar;
+        if (tmActiveThemeJson) applyThemeToRegistry(tmActiveThemeJson);
+
+        try {
+          const knownLangs = typeof monacoLanguages.getLanguages === 'function' ? monacoLanguages.getLanguages() : [];
+          if (!knownLangs.some((entry) => entry && entry.id === lang) && typeof monacoLanguages.register === 'function') {
+            monacoLanguages.register({ id: lang });
+          }
+        } catch (_) {}
+
+        const setTokensProvider = monacoLanguages.setTokensProvider;
+        if (typeof setTokensProvider !== 'function') return false;
+        setTokensProvider.call(monacoLanguages, lang, {
+          getInitialState() {
+            return {
+              _rs: win.vscodetextmate ? win.vscodetextmate.INITIAL : null,
+              clone() { return { _rs: this._rs, clone: this.clone, equals: this.equals }; },
+              equals(other: unknown) {
+                return !!other && typeof other === 'object' && (other as { _rs?: unknown })._rs === this._rs;
+              },
+            };
+          },
+          tokenizeEncoded(line: unknown, state: { _rs?: unknown }) {
+            const ruleStack = state && state._rs != null ? state._rs : (win.vscodetextmate ? win.vscodetextmate.INITIAL : null);
+            const result = (grammar as { tokenizeLine2?(value: string, stack: unknown): { tokens: Uint32Array; ruleStack: unknown } }).tokenizeLine2
+              ? (grammar as { tokenizeLine2(value: string, stack: unknown): { tokens: Uint32Array; ruleStack: unknown } }).tokenizeLine2(String(line || ''), ruleStack)
+              : { tokens: new Uint32Array(0), ruleStack };
+            return {
+              tokens: result.tokens,
+              endState: {
+                _rs: result.ruleStack,
+                clone() { return { _rs: this._rs, clone: this.clone, equals: this.equals }; },
+                equals(other: unknown) { return !!other && typeof other === 'object' && (other as { _rs?: unknown })._rs === this._rs; },
+              },
+            };
+          },
+          tokenize(line: unknown, state: { _rs?: unknown }) {
+            const ruleStack = state && state._rs != null ? state._rs : (win.vscodetextmate ? win.vscodetextmate.INITIAL : null);
+            const result = (grammar as { tokenizeLine?(value: string, stack: unknown): { tokens: Array<{ startIndex: number; scopes?: string[]; _te2_scopeStack?: string[] }>; ruleStack: unknown } }).tokenizeLine
+              ? (grammar as { tokenizeLine(value: string, stack: unknown): { tokens: Array<{ startIndex: number; scopes?: string[]; _te2_scopeStack?: string[] }>; ruleStack: unknown } }).tokenizeLine(String(line || ''), ruleStack)
+              : { tokens: [], ruleStack };
+            const tokens = [] as Array<{ startIndex: number; scopes: string }>;
+            for (const token of result.tokens) {
+              const scopes = Array.isArray(token.scopes) ? token.scopes : [];
+              const last = scopes.length ? scopes[scopes.length - 1] : '';
+              try {
+                if ((win as WindowTextmateLike & { __debugTextmateScopes?: boolean }).__debugTextmateScopes) {
+                  token._te2_scopeStack = scopes.slice();
+                }
+              } catch (_) {}
+              tokens.push({ startIndex: token.startIndex, scopes: last });
+            }
+            return {
+              tokens,
+              endState: {
+                _rs: result.ruleStack,
+                clone() { return { _rs: this._rs, clone: this.clone, equals: this.equals }; },
+                equals(other: unknown) { return !!other && typeof other === 'object' && (other as { _rs?: unknown })._rs === this._rs; },
+              },
+            };
+          },
+        });
+
+        tmInstalled[lang] = true;
+        console.log('[TextMate] installed', lang, '->', scopeName);
+        return true;
+      })();
 
       try {
-        const knownLangs = typeof monacoLanguages.getLanguages === 'function' ? monacoLanguages.getLanguages() : [];
-        if (!knownLangs.some((entry) => entry && entry.id === lang) && typeof monacoLanguages.register === 'function') {
-          monacoLanguages.register({ id: lang });
-        }
-      } catch (_) {}
-
-      monacoLanguages.setTokensProvider(lang, {
-        getInitialState() {
-          return {
-            _rs: win.vscodetextmate ? win.vscodetextmate.INITIAL : null,
-            clone() { return { _rs: this._rs, clone: this.clone, equals: this.equals }; },
-            equals(other: unknown) {
-              return !!other && typeof other === 'object' && (other as { _rs?: unknown })._rs === this._rs;
-            },
-          };
-        },
-        tokenizeEncoded(line: unknown, state: { _rs?: unknown }) {
-          const ruleStack = state && state._rs != null ? state._rs : (win.vscodetextmate ? win.vscodetextmate.INITIAL : null);
-          const result = (grammar as { tokenizeLine2?(value: string, stack: unknown): { tokens: Uint32Array; ruleStack: unknown } }).tokenizeLine2
-            ? (grammar as { tokenizeLine2(value: string, stack: unknown): { tokens: Uint32Array; ruleStack: unknown } }).tokenizeLine2(String(line || ''), ruleStack)
-            : { tokens: new Uint32Array(0), ruleStack };
-          return {
-            tokens: result.tokens,
-            endState: {
-              _rs: result.ruleStack,
-              clone() { return { _rs: this._rs, clone: this.clone, equals: this.equals }; },
-              equals(other: unknown) { return !!other && typeof other === 'object' && (other as { _rs?: unknown })._rs === this._rs; },
-            },
-          };
-        },
-        tokenize(line: unknown, state: { _rs?: unknown }) {
-          const ruleStack = state && state._rs != null ? state._rs : (win.vscodetextmate ? win.vscodetextmate.INITIAL : null);
-          const result = (grammar as { tokenizeLine?(value: string, stack: unknown): { tokens: Array<{ startIndex: number; scopes?: string[]; _te2_scopeStack?: string[] }>; ruleStack: unknown } }).tokenizeLine
-            ? (grammar as { tokenizeLine(value: string, stack: unknown): { tokens: Array<{ startIndex: number; scopes?: string[]; _te2_scopeStack?: string[] }>; ruleStack: unknown } }).tokenizeLine(String(line || ''), ruleStack)
-            : { tokens: [], ruleStack };
-          const tokens = [] as Array<{ startIndex: number; scopes: string }>;
-          for (const token of result.tokens) {
-            const scopes = Array.isArray(token.scopes) ? token.scopes : [];
-            const last = scopes.length ? scopes[scopes.length - 1] : '';
-            try {
-              if ((win as WindowTextmateLike & { __debugTextmateScopes?: boolean }).__debugTextmateScopes) {
-                token._te2_scopeStack = scopes.slice();
-              }
-            } catch (_) {}
-            tokens.push({ startIndex: token.startIndex, scopes: last });
-          }
-          return {
-            tokens,
-            endState: {
-              _rs: result.ruleStack,
-              clone() { return { _rs: this._rs, clone: this.clone, equals: this.equals }; },
-              equals(other: unknown) { return !!other && typeof other === 'object' && (other as { _rs?: unknown })._rs === this._rs; },
-            },
-          };
-        },
-      });
-
-      tmInstalled[lang] = true;
-      console.log('[TextMate] installed', lang, '->', scopeName);
-      return true;
+        return await tmInstallInflight[lang];
+      } finally {
+        delete tmInstallInflight[lang];
+      }
     } catch (error) {
       console.warn('[TextMate] install failed', languageId, error);
       return false;

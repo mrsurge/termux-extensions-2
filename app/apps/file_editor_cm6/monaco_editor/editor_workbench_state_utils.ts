@@ -15,6 +15,9 @@ export interface WorkbenchFlowLike {
   generation?: number;
   openAckGeneration?: number;
   openAckPath?: string;
+  openAckPromise?: Promise<unknown> | null;
+  openAckPromiseGeneration?: number;
+  openAckPromisePath?: string;
   pendingDidChange?: WorkbenchPendingDidChangePayload | null;
   pendingSymbols?: WorkbenchPendingSymbolsPayload | null;
 }

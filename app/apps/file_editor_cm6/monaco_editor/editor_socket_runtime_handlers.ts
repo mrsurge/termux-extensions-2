@@ -3,6 +3,7 @@ import { logDiagnosticsEvent } from './editor_diagnostics_log_utils.js';
 import { applyDiagnosticsBridgeUpdate } from './editor_diagnostics_apply_update_utils.js';
 import { handleWorkbenchResponseEvent } from './editor_socket_workbench_response_handler_utils.js';
 import { handleSemanticTokensProviderRegistered } from './editor_socket_semantic_registered_handler_utils.js';
+import { handleCompletionProviderRegistered } from './editor_socket_completion_registered_handler_utils.ts';
 import { handleIssuesDumpRequest } from './editor_socket_issues_dump_handler_utils.js';
 import { handleIssuesCommand } from './editor_socket_issues_cmd_handler_utils.js';
 import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
@@ -32,6 +33,7 @@ interface EditorRuntimeSocketHandlerDeps {
     semanticTokensRangeFlag: Record<string, unknown>;
   };
   registerSemanticTokensWithLegend(lang: string, legend: unknown, isRange: boolean): void;
+  cacheCompletionProviderRegistration(lang: string, registration: { handle: string; triggerCharacters: string[]; supportsResolve: boolean }): void;
   getMonaco(): unknown;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   getEditor(): unknown;
@@ -50,6 +52,7 @@ const WORKBENCH_RESPONSE_EVENTS = [
   'folding_ranges',
   'grammars_list',
   'grammars_load',
+  'language_catalog',
 ] as const;
 
 export function registerEditorRuntimeSocketHandlers(
@@ -90,6 +93,15 @@ export function registerEditorRuntimeSocketHandlers(
         payload,
         deps.languageBridge,
         deps.registerSemanticTokensWithLegend,
+      );
+    } catch (_) {}
+  });
+
+  socket.on('editor:completions_provider_registered', (payload: unknown) => {
+    try {
+      handleCompletionProviderRegistered(
+        payload,
+        deps.cacheCompletionProviderRegistration,
       );
     } catch (_) {}
   });

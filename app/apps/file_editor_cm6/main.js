@@ -93,7 +93,6 @@ let agentShortcutLoadLabel = null;
 let agentShortcutLoadDD = null;
 let editorViewState = null; // Loaded from backend at startup via /editor/view_state
 let cachedProjectRoot = null;
-
 // Host file-state must be declared before any early reconciler/helper functions
 // that read or write it, otherwise the built host bundle can split the binding.
 let currentPath = '';
@@ -156,7 +155,6 @@ async function fetchAgentExtensionManifest() {
   }
   return {};
 }
-
 function applyAgentIcon(manifest) {
   const iconEl = document.querySelector('#fe-agent-toggle .fe-agent-icon');
   const headerIconEl = document.getElementById('agent-drawer-icon');
@@ -1239,7 +1237,6 @@ Object.assign(appContext.elements, {
   agentTranscript,
   agentComposer,
 });
-bootInlineEditorHost(editorFrame, { ensureSocketIoLoaded });
 
 // Title/status & chrome
 fileNameEl = requireEl('#fe-file-name');
@@ -1802,10 +1799,6 @@ const extConfigForm = requireEl('#ext-config-form');
 const extConfigCancel = requireEl('#ext-config-cancel');
 const extConfigSave = requireEl('#ext-config-save');
 
-let vscodeApiWs = null;
-let vscodeApiNextId = 1;
-const vscodeApiPending = new Map();
-let vscodeApiConnecting = null;
 let workbenchAdapterConnecting = null;
 let workbenchAdapterReadyOk = false;
 window.__adapterConnected = false;
@@ -1890,9 +1883,11 @@ function _handleAdapterState(detail) {
       window.__adapterReadyResolve = null;
     }
   } else if (status === 'idle') {
-    workbenchAdapterReadyOk = false;
-    window.__adapterConnected = false;
-    _feUpdateLspSpinner();
+    // `idle` is not authoritative enough to mean disconnected. Keep the
+    // previous ready/error state until an explicit `ready` or `error` arrives.
+    if (!workbenchAdapterReadyOk && !window.__adapterReadyResolve) {
+      _feUpdateLspSpinner();
+    }
   }
 }
 
@@ -1932,79 +1927,6 @@ async function ensureWorkbenchAdapterReady() {
   const result = await workbenchAdapterConnecting;
   workbenchAdapterConnecting = null;
   return result;
-}
-
-async function ensureVscodeApiWs() {
-  if (vscodeApiWs && vscodeApiWs.readyState === WebSocket.OPEN) return vscodeApiWs;
-  if (vscodeApiConnecting) return vscodeApiConnecting;
-
-  vscodeApiConnecting = (async () => {
-    const resp = await fetch('/api/app/file_editor_cm6/vscode_api/discover', { cache: 'no-store' });
-    const json = await resp.json();
-    if (!resp.ok || json?.ok === false) {
-      throw new Error(json?.error || json?.detail || `discover failed HTTP ${resp.status}`);
-    }
-    const wsPath = json?.data?.ws_url || json?.ws_url;
-    if (!wsPath) throw new Error('vscode_api discover missing ws_url');
-    const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${wsPath}`;
-
-    const ws = new WebSocket(wsUrl);
-    vscodeApiWs = ws;
-
-    ws.onmessage = (ev) => {
-      let msg = null;
-      try { msg = JSON.parse(String(ev.data || '')); } catch { return; }
-      const handleOne = (m) => {
-        const id = m && m.id;
-        if (id == null) return;
-        const pending = vscodeApiPending.get(id);
-        if (!pending) return;
-        vscodeApiPending.delete(id);
-        if (m.error) pending.reject(new Error(m.error.message || 'jsonrpc error'));
-        else pending.resolve(m.result);
-      };
-      if (Array.isArray(msg)) msg.forEach(handleOne);
-      else handleOne(msg);
-    };
-
-    ws.onclose = () => {
-      vscodeApiWs = null;
-      vscodeApiConnecting = null;
-      // Fail all pending calls quickly.
-      for (const [, pending] of vscodeApiPending) {
-        try { pending.reject(new Error('vscode_api ws closed')); } catch {}
-      }
-      vscodeApiPending.clear();
-    };
-
-    await new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('vscode_api ws connect timeout')), 8000);
-      ws.onopen = () => { clearTimeout(t); resolve(); };
-      ws.onerror = () => { clearTimeout(t); reject(new Error('vscode_api ws error')); };
-    });
-
-    vscodeApiConnecting = null;
-    return ws;
-  })();
-
-  return vscodeApiConnecting;
-}
-
-async function vscodeApiCall(method, params) {
-  const ws = await ensureVscodeApiWs();
-  const id = vscodeApiNextId++;
-  const payload = { jsonrpc: '2.0', id, method, params: params || {} };
-  const p = new Promise((resolve, reject) => {
-    vscodeApiPending.set(id, { resolve, reject });
-    // Hard timeout so modal never "hangs".
-    setTimeout(() => {
-      if (!vscodeApiPending.has(id)) return;
-      vscodeApiPending.delete(id);
-      reject(new Error(`vscode_api timeout: ${method}`));
-    }, 12000);
-  });
-  ws.send(JSON.stringify(payload));
-  return p;
 }
 
 createSettingsBootstrap({
@@ -2070,6 +1992,10 @@ if (shouldUseLocalKeyboardViewportAdjustments()) {
 // ---------- Session telemetry ----------
 async function fetchPersistedSessionState() {
   return sessionTelemetry.fetchPersistedSessionState();
+}
+
+function seedPersistedSessionState(snapshot) {
+  return sessionTelemetry.seedPersistedSessionState(snapshot);
 }
 
 function initSessionStateContext(serverState) {
@@ -3711,15 +3637,18 @@ runBootSequence(createBootSequenceDeps({
     ensureWorkbenchAdapterReady: () => ensureWorkbenchAdapterReady(),
     initBranchMenu: () => initBranchMenu(),
     waitForInitialUiPrefs: (ms) => waitForInitialUiPrefs(ms),
+    seedUiPrefsSnapshot: (prefs) => window.__cm6HandleUiPrefs({ ui: prefs || {} }),
     applySidebarUiPrefs: (prefs) => sidebarShortcuts?.applyUiPrefs?.(prefs || {}),
     applyAgentRuntimeConfigFromUi: (prefs) => _applyAgentRuntimeConfigFromUi(prefs),
     connectCodexAppserverSocket: (url) => connectCodexAppserverSocket(url),
     createAgentController: (cfg) => _createAgentController(cfg),
     syncEditorState: (force) => editorStateController.syncEditorState(force),
+    hydrateEditorState: (state) => editorStateController.hydrateEditorState(state),
     broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
     refreshMenuState: () => preferencesController.refreshMenuState(),
     apiPost: (path, body) => apiPost(path, body),
     fetchPersistedSessionState: () => fetchPersistedSessionState(),
+    seedPersistedSessionState: (snapshot) => seedPersistedSessionState(snapshot),
     initSessionStateContext: (serverState) => initSessionStateContext(serverState),
     queueSessionStateUpdate: (partial) => queueSessionStateUpdate(partial),
     resetSavedState: () => { lastSavedContent = ''; },
@@ -3766,6 +3695,11 @@ runBootSequence(createBootSequenceDeps({
     }),
     setBranchMenuHandle: (h) => { branchMenuHandle = h; },
     setAgentDrawerHandle: (h) => { agentDrawerHandle = h; },
+    requestBackendBootSnapshot: (payload) => uiIpcConnections.requestBackendBootSnapshot(payload),
+    mountInlineEditorHost: (snapshot) => bootInlineEditorHost(editorFrame, {
+      ensureSocketIoLoaded,
+      bootSnapshot: snapshot,
+    }),
   })).then(() => {
   try { sidebarShortcuts?.init?.(); } catch (e) { console.warn('[Sidebar] init failed:', e); }
 

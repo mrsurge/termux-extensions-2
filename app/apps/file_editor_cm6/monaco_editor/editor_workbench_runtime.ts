@@ -128,7 +128,7 @@ export function createEditorWorkbenchRuntime(
   wbOpenFileFlow(opts: Record<string, unknown>): Promise<unknown>;
   replayOpenFileAfterBaton(): void;
   editorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
-  callVscodeApiGuarded(kind: string, method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>>;
+  callWorkbenchProviderGuarded(kind: string, method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>>;
   getPendingRequests(): Map<string, WorkbenchPendingEntry>;
 } {
   let diagState: { rx: number; apply: number; drop_no_path: number; drop_no_model: number; drop_mismatch: number } | null = null;
@@ -144,6 +144,59 @@ export function createEditorWorkbenchRuntime(
     pendingDidChange: null,
     pendingSymbols: null,
   };
+
+  function sameLanguageDocumentContext(ctx: unknown, nowCtx: unknown): boolean {
+    try {
+      if (!ctx || !nowCtx) return false;
+      const before = ctx as Partial<LanguageContextLike>;
+      const after = nowCtx as Partial<LanguageContextLike>;
+      return String(after.uri || '') === String(before.uri || '')
+        && String(after.path || '') === String(before.path || '')
+        && String(after.languageId || '') === String(before.languageId || '');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function waitWithTimeout(promise: Promise<unknown>, timeoutMs: number, label: string): Promise<unknown> {
+    const boundedTimeoutMs = Math.max(1, Number(timeoutMs) || 1);
+    return new Promise((resolve, reject) => {
+      const timer = deps.setTimeoutFn(() => {
+        reject(new Error(label + '_timeout'));
+      }, boundedTimeoutMs);
+      promise.then((value) => {
+        deps.clearTimeoutFn(timer);
+        resolve(value);
+      }, (error) => {
+        deps.clearTimeoutFn(timer);
+        reject(error instanceof Error ? error : new Error(String(error || label + '_failed')));
+      });
+    });
+  }
+
+  async function awaitOpenAckForProvider(kind: string, ctx: unknown, timeoutMs: number): Promise<{ ok: boolean; reason?: string }> {
+    if (kind !== 'completions') return { ok: true };
+    const typedCtx = ctx as Partial<LanguageContextLike> | null;
+    const path = String(typedCtx?.path || '');
+    if (!path) return { ok: false, reason: 'missing_path' };
+    const generation = currentGeneration();
+    if (barrierOpen(path, generation)) return { ok: true };
+
+    const openPromise = wbFlow.openAckPromise;
+    const sameOpen = !!(
+      openPromise
+      && String(wbFlow.openAckPromisePath || '') === path
+      && Number(wbFlow.openAckPromiseGeneration || -1) === generation
+    );
+    if (!sameOpen) return { ok: false, reason: 'open_ack_missing' };
+
+    try {
+      await waitWithTimeout(openPromise, Math.min(Math.max(1000, timeoutMs), 6000), 'open_ack');
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error || 'open_ack_failed') };
+    }
+    return barrierOpen(path, generation) ? { ok: true } : { ok: false, reason: 'open_ack_stale' };
+  }
 
   function emitAggregatedDiagCounts(path?: string | null): void {
     try {
@@ -180,7 +233,7 @@ export function createEditorWorkbenchRuntime(
             try { monacoRef.editor!.setModelMarkers!(model, owner, []); } catch (_) {}
           });
         }
-        monacoRef.editor.setModelMarkers(model, 'vscode_api', []);
+        monacoRef.editor.setModelMarkers(model, 'workbench', []);
       }
       diagKnownOwners = new Set();
       deps.emitToHost('editor_diagnostics_counts', {
@@ -220,8 +273,9 @@ export function createEditorWorkbenchRuntime(
         if (!itemPath) {
           diagState.drop_no_path += 1;
           try {
-            if ((deps.getWindow() as Window & { __debugVscodeApiDiag?: boolean }).__debugVscodeApiDiag) {
-              console.log('[vscode_api] diag drop_no_path item.uri=', (item as { uri?: unknown }).uri);
+            const debugWindow = deps.getWindow() as Window & { __debugWorkbenchDiag?: boolean };
+            if (debugWindow.__debugWorkbenchDiag) {
+              console.log('[workbench] diag drop_no_path item.uri=', (item as { uri?: unknown }).uri);
             }
           } catch (_) {}
           continue;
@@ -257,22 +311,23 @@ export function createEditorWorkbenchRuntime(
           try {
             if (!diagKnownOwners) diagKnownOwners = new Set();
             diagKnownOwners.add(owner);
-            console.log('[vscode_api] setModelMarkers owner=' + owner + ' count=' + outMarkers.length + ' sevs=[' + outMarkers.map((m) => m.severity).join(',') + '] lines=[' + outMarkers.map((m) => m.startLineNumber).join(',') + ']');
-            if (outMarkers.length > 0) console.log('[vscode_api] marker[0]:', JSON.stringify(outMarkers[0]));
+            console.log('[workbench] setModelMarkers owner=' + owner + ' count=' + outMarkers.length + ' sevs=[' + outMarkers.map((m) => m.severity).join(',') + '] lines=[' + outMarkers.map((m) => m.startLineNumber).join(',') + ']');
+            if (outMarkers.length > 0) console.log('[workbench] marker[0]:', JSON.stringify(outMarkers[0]));
             editorNs.setModelMarkers(model, owner, outMarkers);
             const verify = editorNs.getModelMarkers({ resource: model.uri }) || [];
-            console.log('[vscode_api] verify getModelMarkers count=' + verify.length);
+            console.log('[workbench] verify getModelMarkers count=' + verify.length);
             emitAggregatedDiagCounts(itemPath);
           } catch (error) {
-            console.error('[vscode_api] setModelMarkers THREW:', error);
+            console.error('[workbench] setModelMarkers THREW:', error);
           }
           didApply = true;
           diagState.apply += 1;
         } else if (model && model.uri && activePath && itemPath !== activePath) {
           diagState.drop_mismatch += 1;
           try {
-            if ((deps.getWindow() as Window & { __debugVscodeApiDiag?: boolean }).__debugVscodeApiDiag) {
-              console.log('[vscode_api] diag mismatch itemPath=', itemPath, 'activePath=', activePath);
+            const debugWindow = deps.getWindow() as Window & { __debugWorkbenchDiag?: boolean };
+            if (debugWindow.__debugWorkbenchDiag) {
+              console.log('[workbench] diag mismatch itemPath=', itemPath, 'activePath=', activePath);
             }
           } catch (_) {}
         } else if (!model || !model.uri) {
@@ -488,7 +543,7 @@ export function createEditorWorkbenchRuntime(
       return Promise.resolve({ ok: false, deferred: true });
     }
 
-    return editorWorkbenchCall('open_file', {
+    const openPromise = editorWorkbenchCall('open_file', {
       path,
       languageId,
       uri: String(opts.uri || ''),
@@ -507,6 +562,18 @@ export function createEditorWorkbenchRuntime(
       schedulePostReadyStructureRefresh(path, generation, source);
       return result;
     });
+    wbFlow.openAckPromise = openPromise;
+    wbFlow.openAckPromisePath = path;
+    wbFlow.openAckPromiseGeneration = generation;
+    const clearOpenPromise = () => {
+      if (wbFlow.openAckPromise === openPromise) {
+        wbFlow.openAckPromise = null;
+        wbFlow.openAckPromisePath = '';
+        wbFlow.openAckPromiseGeneration = -1;
+      }
+    };
+    openPromise.then(clearOpenPromise, clearOpenPromise);
+    return openPromise;
   }
 
   function replayOpenFileAfterBaton(): void {
@@ -541,17 +608,24 @@ export function createEditorWorkbenchRuntime(
     });
   }
 
-  function callVscodeApiGuarded(kind: string, _method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>> {
+  async function callWorkbenchProviderGuarded(kind: string, _method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>> {
     const timeoutMs = opts && Number(opts.timeoutMs) ? Number(opts.timeoutMs) : 5000;
     const cancelToken = opts && opts.cancelToken ? opts.cancelToken : null;
     const languageBridge = deps.getLanguageBridge();
     let seq = 0;
     if (kind === 'hover') seq = ++languageBridge.hoverSeq;
     else if (kind === 'completions') seq = ++languageBridge.completionsSeq;
+
+    const openAck = await awaitOpenAckForProvider(kind, ctx, timeoutMs);
+    if (!openAck.ok) return { ok: false, notReady: true, error: openAck.reason || 'open_ack_not_ready' };
+
     return editorWorkbenchCall(kind, params, { timeoutMs }).then((result) => {
       const nowCtx = currentLanguageContext();
       if (kind === 'symbols' || kind === 'folding_ranges') {
         if (!ctx || !nowCtx || String((nowCtx as { uri?: unknown }).uri) !== String((ctx as { uri?: unknown }).uri)) return { ok: false, stale: true };
+      } else if (kind === 'completions') {
+        if (cancelToken && cancelToken.isCancellationRequested) return { ok: false, stale: true, canceled: true };
+        if (!sameLanguageDocumentContext(ctx, nowCtx)) return { ok: false, stale: true };
       } else {
         if (cancelToken && cancelToken.isCancellationRequested) return { ok: false, stale: true, canceled: true };
         if (!deps.isLanguageContextCurrent(ctx, nowCtx)) return { ok: false, stale: true };
@@ -585,7 +659,7 @@ export function createEditorWorkbenchRuntime(
     wbOpenFileFlow: openFileFlow,
     replayOpenFileAfterBaton,
     editorWorkbenchCall,
-    callVscodeApiGuarded,
+    callWorkbenchProviderGuarded,
     getPendingRequests: () => workbenchPending,
   };
 }

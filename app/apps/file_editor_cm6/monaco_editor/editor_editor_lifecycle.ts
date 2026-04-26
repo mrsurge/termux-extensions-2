@@ -185,6 +185,12 @@ export async function ensureEditorWithPrefs(deps: EditorLifecycleDeps): Promise<
 
   const created = monacoRef.editor.create(container, deps.buildMonacoOptionsFromPrefs(deps.getCachedPrefs()));
   deps.setEditor(created);
+  const model = deps.getModel();
+  if (model && typeof created.setModel === 'function') {
+    try { created.setModel(model); } catch (_) {}
+    deps.installMirrorPublisher();
+    deps.installScrollPublisher();
+  }
   applySharedPlainEditorSetup(deps, created, {
     themeKey: themeFromPrefs(deps.getCachedPrefs()),
     touchReason: 'boot',

@@ -12,9 +12,9 @@ interface EditorModelLanguageRuntimeDeps {
   getWindow(): MonacoWindowLike;
   normalizeLanguage(languageId: unknown): string;
   languageFromPath(path: string): string;
-  ensureVscodeLanguagesInstalled(): Promise<boolean>;
+  ensureWorkbenchLanguageCatalogInstalled(): Promise<boolean>;
   ensureTextmateTokenization(languageId: string, filePath: string): Promise<boolean>;
-  installVscodeApiLanguageBridgeProviders(): void;
+  installWorkbenchLanguageBridgeProviders(): void;
 }
 
 export function applyLanguageToModelRuntime(
@@ -32,7 +32,7 @@ export function applyLanguageToModelRuntime(
     try { win.monaco.editor.setModelLanguage(nextModel, lang); } catch (_) {}
 
     Promise.resolve()
-      .then(() => deps.ensureVscodeLanguagesInstalled())
+      .then(() => deps.ensureWorkbenchLanguageCatalogInstalled())
       .then(() => {
         try {
           if (filePath) {
@@ -48,7 +48,7 @@ export function applyLanguageToModelRuntime(
       .then((ok) => {
         if (!ok) return;
         try { win.monaco!.editor!.setModelLanguage!(nextModel, lang); } catch (_) {}
-        try { deps.installVscodeApiLanguageBridgeProviders(); } catch (_) {}
+        try { deps.installWorkbenchLanguageBridgeProviders(); } catch (_) {}
       })
       .catch(() => {});
   } catch (_) {}

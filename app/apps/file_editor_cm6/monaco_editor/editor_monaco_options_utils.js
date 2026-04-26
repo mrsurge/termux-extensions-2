@@ -77,7 +77,10 @@ export function buildMonacoOptionsFromPrefsState(state, jsonCache) {
     autoClosingBrackets: autoCloseBrackets ? 'always' : 'never',
     quickSuggestions: autocompletion ? { other: true, comments: true, strings: true } : false,
     suggestOnTriggerCharacters: !!autocompletion,
-    wordBasedSuggestions: autocompletion ? 'currentDocument' : 'off',
+    // Code TE2 routes real language intelligence through the WBA. The built-in
+    // word provider can win the first suggest session during WBA warmup and then
+    // trap the user in word-only completions until the cursor moves.
+    wordBasedSuggestions: 'off',
     parameterHints: { enabled: !!autocompletion },
     tabCompletion: autocompletion ? 'on' : 'off',
     fontSize: fontSize,

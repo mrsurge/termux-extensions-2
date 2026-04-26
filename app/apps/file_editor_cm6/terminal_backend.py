@@ -596,6 +596,12 @@ RUNNABLE_COMMANDS = {
     ".sh": ["bash"],
     ".bash": ["bash"],
     ".zsh": ["zsh"],
+    ".js": ["node"],
+    ".mjs": ["node"],
+    ".cjs": ["node"],
+    ".ts": ["node"],
+    ".mts": ["node"],
+    ".cts": ["node"],
 }
 
 _C_EXTS = {".c"}
@@ -909,7 +915,7 @@ async def handle_run_active_file_request(
     else:
         raise HTTPException(
             status_code=400,
-            detail="Only Python, shell scripts, and C/C++ source files can be executed",
+            detail="Only Python, shell, JS/TS, and C/C++ source files can be executed",
         )
 
     mgr = await get_manager()

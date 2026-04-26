@@ -37,6 +37,7 @@ interface RunEditorOpenTransactionDeps {
   applyLineNumberSizing(): void;
   ensureTouchSelection(reason: string): void;
   emitToHost(eventType: string, payload: Record<string, unknown>): void;
+  emitModelReady(payload: { path: string; languageId: string; generation?: number; request_id?: string; source?: string }): boolean;
   requestDraftDiff(reason: string): void;
   clearDraftDiffDecorations(): void;
   requestGitBaselines(payload: { reason: string }): void;
@@ -211,6 +212,15 @@ export async function runEditorOpenTransaction(
     });
     if (payload.has_draft) deps.requestDraftDiff('open');
     else deps.clearDraftDiffDecorations();
+    try {
+      deps.emitModelReady({
+        path: currentPath,
+        languageId: model && model.getLanguageId ? model.getLanguageId() : lang,
+        generation: openGeneration,
+        request_id: payload && payload.request_id ? String(payload.request_id) : '',
+        source: 'open',
+      });
+    } catch (_) {}
 
     postOpenJumpPayload = resolveOpenJumpPayload(
       deps.openTransactionStore,

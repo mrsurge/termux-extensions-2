@@ -92,6 +92,7 @@ interface EditorSocketConnectionDeps {
   getGitHeadModel(): MonacoModelLike | null;
   getMonaco(): { editor?: { createModel?(value: string, language: string): unknown } };
   applyGitBaselines(payload: unknown): void;
+  emitModelReady(payload: { path: string; languageId: string; generation?: number; request_id?: string; source?: string }): boolean;
 }
 
 function asString(value: unknown): string {
@@ -190,7 +191,17 @@ export function registerEditorSocketConnectionHandlers(
           const activePath = deps.getCurrentPath();
           if (!activePath) return;
           const lang = deps.languageFromPath(activePath);
-          applyModelLifecycle(deps, asString(file.content), lang, activePath);
+          const activeModel = deps.getModel();
+          const snapshotContent = asString(file.content);
+          const shouldReuseBootModel = !!(
+            activeModel
+            && activePath === asString(file.path)
+            && typeof activeModel.getValue === 'function'
+            && activeModel.getValue() === snapshotContent
+          );
+          if (!shouldReuseBootModel) {
+            applyModelLifecycle(deps, snapshotContent, lang, activePath);
+          }
           deps.ensureTouchSelection('ssot');
           deps.setLastContentSha256(asString(file.content_sha256) || deps.getLastContentSha256());
           deps.emitToHost('editor_cache_state', {
@@ -212,18 +223,28 @@ export function registerEditorSocketConnectionHandlers(
           } else {
             deps.clearDraftDiffDecorations();
           }
+          try {
+            const readyModel = deps.getModel();
+            deps.emitModelReady({
+              path: activePath,
+              languageId: readyModel && readyModel.getLanguageId ? readyModel.getLanguageId() : lang,
+              generation: ssotGeneration,
+              request_id: file && file.request_id ? String(file.request_id) : '',
+              source: 'ssot',
+            });
+          } catch (_) {}
           deps.updateDebug('ws=ssot');
           deps.requestGitBaselines({ reason: 'ssot' });
           try {
             const requestId = file && file.request_id ? String(file.request_id) : ('diag_' + Date.now() + '_ssot');
-            const activeModel = deps.getModel();
-            const text = activeModel && activeModel.getValue ? activeModel.getValue() : '';
-            deps.wbQueueDidChange(activePath, text, activeModel && activeModel.getLanguageId ? activeModel.getLanguageId() : lang, ssotGeneration);
+            const nextActiveModel = deps.getModel();
+            const text = nextActiveModel && nextActiveModel.getValue ? nextActiveModel.getValue() : '';
+            deps.wbQueueDidChange(activePath, text, nextActiveModel && nextActiveModel.getLanguageId ? nextActiveModel.getLanguageId() : lang, ssotGeneration);
             deps.wbQueueSymbols(activePath, ssotGeneration);
             deps.wbOpenFileFlow({
               path: activePath,
               languageId: lang,
-              uri: activeModel && activeModel.uri ? String(activeModel.uri.toString()) : '',
+              uri: nextActiveModel && nextActiveModel.uri ? String(nextActiveModel.uri.toString()) : '',
               requestId,
               forceRefresh: true,
               generation: ssotGeneration,

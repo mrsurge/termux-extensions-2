@@ -524,3 +524,25 @@ async def handle_workbench_grammars_load(
     except Exception as exc:
         logger.error("[grammars.load] FAILED id=%s: %s", grammar_id, exc)
         await _emit_error(emit_to_sid, "editor:workbench_grammars_load_response", request_id, str(exc))
+
+
+async def handle_workbench_language_catalog(
+    data: object,
+    *,
+    emit_to_sid: EmitToSidFn,
+    logger: _logging.Logger,
+) -> None:
+    payload = _payload_dict(data)
+    request_id = _request_id(payload, "request_id", "wblc")
+
+    try:
+        response = await _adapter_rpc("te2.language_catalog", {})
+        await _emit_result(
+            emit_to_sid,
+            "editor:workbench_language_catalog_response",
+            request_id,
+            response.get("result", response),
+        )
+    except Exception as exc:
+        logger.error("[language_catalog] FAILED: %s", exc)
+        await _emit_error(emit_to_sid, "editor:workbench_language_catalog_response", request_id, str(exc))

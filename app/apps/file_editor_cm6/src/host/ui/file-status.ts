@@ -22,7 +22,7 @@ export function createFileStatusController(deps) {
     deps.runActiveBtn.disabled = !runnable;
     deps.runActiveBtn.title = runnable
       ? 'Run active file in terminal'
-      : 'Open a Python, shell, or C/C++ source file to enable running';
+      : 'Open a Python, shell, JS/TS, or C/C++ source file to enable running';
   }
 
   function updatePathDisplay() {
