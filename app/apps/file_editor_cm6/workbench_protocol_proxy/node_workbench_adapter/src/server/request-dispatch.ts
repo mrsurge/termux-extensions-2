@@ -351,6 +351,7 @@ export async function dispatchJsonRpcRequest(
       providerHandle: params.providerHandle,
       languageId: params.languageId,
       previousResultId: params.previousResultId,
+      text: params.text,
       timeoutMs: params.timeoutMs,
     });
     return success(id, result);
@@ -372,6 +373,7 @@ export async function dispatchJsonRpcRequest(
       providerHandle: params.providerHandle,
       languageId: params.languageId,
       range: params.range,
+      text: params.text,
       timeoutMs: params.timeoutMs,
     });
     runtime.log(

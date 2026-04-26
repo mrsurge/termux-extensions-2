@@ -683,6 +683,7 @@ export class WorkbenchClient {
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
+      didChange: (params, opts) => this.didChange(params, opts),
       findAllProviderHandles: (kind, languageId) => this._findAllProviderHandles(kind, languageId),
       findSemanticRangeHandles: (languageId) => this._providerRegistry.findSemanticRangeHandles(languageId),
       waitFor: (condition, options) => waitFor(condition, options),

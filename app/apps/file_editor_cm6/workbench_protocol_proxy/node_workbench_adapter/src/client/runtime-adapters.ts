@@ -54,6 +54,10 @@ export interface SemanticTokensRuntimeDeps {
   authority: string;
   defaultRemoteAuthority: string;
   languageIdFromPath: (filePath: string) => string;
+  didChange: (
+    params: Record<string, unknown>,
+    opts: { waitForAck: true; timeoutMs: number },
+  ) => Promise<unknown> | unknown;
   findAllProviderHandles: (kind: "semanticTokens", languageId: string) => number[];
   findSemanticRangeHandles: (languageId: string) => number[];
   waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => Promise<boolean>;
@@ -335,6 +339,7 @@ export function createSemanticTokensRuntime(deps: SemanticTokensRuntimeDeps): Se
     ensureConnected: () => ensureConnected(deps.extProtocol),
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
+    didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
     findAllProviderHandles: (kind: "semanticTokens", languageId: string) => deps.findAllProviderHandles(kind, languageId),
     findSemanticRangeHandles: (languageId: string) => deps.findSemanticRangeHandles(languageId),
     waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => deps.waitFor(condition, options),

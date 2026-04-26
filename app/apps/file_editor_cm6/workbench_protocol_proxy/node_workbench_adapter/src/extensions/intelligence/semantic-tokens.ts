@@ -16,6 +16,10 @@ export interface SemanticRuntime {
   ensureConnected: () => void;
   defaultAuthority: () => string;
   languageIdFromPath: (filePath: string) => string;
+  didChange: (
+    params: Record<string, unknown>,
+    opts: { waitForAck: true; timeoutMs: number },
+  ) => Promise<unknown> | unknown;
   findAllProviderHandles: (kind: "semanticTokens", languageId: string) => number[];
   findSemanticRangeHandles: (languageId: string) => number[];
   waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => Promise<boolean>;
@@ -113,6 +117,31 @@ function numberFrom(value: unknown, fallback = 0): number {
 
 function stringFrom(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
+}
+
+async function syncTextIfProvided(
+  runtime: SemanticRuntime,
+  input: Record<string, unknown>,
+  path: string,
+  languageId: string,
+  authority: string,
+  timeoutMs: number,
+  label: string,
+): Promise<Record<string, unknown> | null> {
+  if (input.text == null || !path) return null;
+  try {
+    const syncResult = await runtime.didChange(
+      { path, text: String(input.text), languageId, authority },
+      { waitForAck: true, timeoutMs: Math.min(timeoutMs, 5000) },
+    );
+    const result = isRecord(syncResult) ? syncResult : {};
+    runtime.log(`[${label}] pre-flight didChange ack path=${path} ver=${result.versionId ?? "?"} type=${result.ackType ?? "?"}`);
+    return null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    runtime.warn(`[${label}] pre-flight didChange failed: ${message}`);
+    return { ok: false, error: `didChange_ack_failed: ${message}` };
+  }
 }
 
 function toNumberArray(value: unknown): number[] {
@@ -244,6 +273,9 @@ export async function provideSemanticTokens(runtime: SemanticRuntime, params: un
 
   runtime.log(`[semanticTokens] path=${path} lang=${languageId} prevResultId=${previousResultId}`);
 
+  const syncError = await syncTextIfProvided(runtime, input, path, languageId, authority, timeoutMs, "semanticTokens");
+  if (syncError) return syncError;
+
   if (typeof input.providerHandle === "number") {
     return provideSemanticTokensSingle(runtime, {
       providerHandle: input.providerHandle,
@@ -340,6 +372,9 @@ export async function provideSemanticTokensRange(runtime: SemanticRuntime, param
   if (!range) return { ok: false, error: "range is required for semanticTokensRange" };
 
   runtime.log(`${runtime.timeLabel()} [semanticTokensRange] path=${path} lang=${languageId} range=${range.startLineNumber}:${range.startColumn}-${range.endLineNumber}:${range.endColumn}`);
+
+  const syncError = await syncTextIfProvided(runtime, input, path, languageId, authority, timeoutMs, "semanticTokensRange");
+  if (syncError) return syncError;
 
   let handles = runtime.findSemanticRangeHandles(languageId);
   if (handles.length === 0) {

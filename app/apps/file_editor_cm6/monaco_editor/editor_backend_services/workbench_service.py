@@ -235,6 +235,7 @@ async def handle_workbench_semantic_tokens(
                 "path": abs_path,
                 "languageId": payload.get("languageId", ""),
                 "previousResultId": payload.get("previousResultId", "0"),
+                "text": payload.get("text"),
             },
         )
         await _emit_result(
@@ -304,6 +305,7 @@ async def handle_workbench_semantic_tokens_range(
                 "path": abs_path,
                 "languageId": payload.get("languageId", ""),
                 "range": range_obj,
+                "text": payload.get("text"),
             },
         )
         await _emit_result(
@@ -547,3 +549,25 @@ async def handle_workbench_language_catalog(
     except Exception as exc:
         logger.error("[language_catalog] FAILED: %s", exc)
         await _emit_error(emit_to_sid, "editor:workbench_language_catalog_response", request_id, str(exc))
+
+
+async def handle_workbench_providers(
+    data: object,
+    *,
+    emit_to_sid: EmitToSidFn,
+    logger: _logging.Logger,
+) -> None:
+    payload = _payload_dict(data)
+    request_id = _request_id(payload, "request_id", "wbp")
+
+    try:
+        response = await _adapter_rpc("adapter.providers", {})
+        await _emit_result(
+            emit_to_sid,
+            "editor:workbench_providers_response",
+            request_id,
+            response.get("result", response),
+        )
+    except Exception as exc:
+        logger.error("[providers] FAILED: %s", exc)
+        await _emit_error(emit_to_sid, "editor:workbench_providers_response", request_id, str(exc))

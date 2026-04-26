@@ -49,6 +49,7 @@ export const EDITOR_RPC_METHODS = {
   workbenchSemanticTokensRange: 'editor.workbench.semanticTokensRange',
   workbenchSymbols: 'editor.workbench.symbols',
   workbenchFoldingRanges: 'editor.workbench.foldingRanges',
+  workbenchProviders: 'editor.workbench.providers',
   workbenchDidChange: 'editor.workbench.didChange',
   workbenchGrammarsList: 'editor.workbench.grammarsList',
   workbenchGrammarsLoad: 'editor.workbench.grammarsLoad',
@@ -272,6 +273,8 @@ export function editorWorkbenchMethodToRpcMethod(method: string): EditorRpcMetho
       return EDITOR_RPC_METHODS.workbenchSymbols;
     case 'folding_ranges':
       return EDITOR_RPC_METHODS.workbenchFoldingRanges;
+    case 'providers':
+      return EDITOR_RPC_METHODS.workbenchProviders;
     case 'did_change':
       return EDITOR_RPC_METHODS.workbenchDidChange;
     case 'grammars_list':

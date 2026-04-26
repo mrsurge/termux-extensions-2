@@ -687,6 +687,24 @@ interface MonacoBootWindowLike extends Window {
     languageBridgeProviders.installWorkbenchLanguageBridgeProviders();
   }
 
+  let providerSnapshotHydratePromise: Promise<void> | null = null;
+
+  function hydrateWorkbenchProviderSnapshot(reason: string): Promise<void> {
+    if (providerSnapshotHydratePromise) return providerSnapshotHydratePromise;
+    providerSnapshotHydratePromise = editorWorkbenchCall('providers', {}, { timeoutMs: 5000 })
+      .then((snapshot) => {
+        const counts = languageBridgeProviders.hydrateProviderSnapshot(snapshot);
+        console.log('[providers] hydrated snapshot reason=' + String(reason || 'unknown') + ' completions=' + counts.completions + ' semTok=' + counts.semanticTokens);
+      })
+      .catch((error) => {
+        console.warn('[providers] snapshot hydrate failed (' + String(reason || 'unknown') + ')', error);
+      })
+      .finally(() => {
+        providerSnapshotHydratePromise = null;
+      });
+    return providerSnapshotHydratePromise;
+  }
+
   function vscodeRpcDidOpenIfReady(): void {
     runVscodeRpcDidOpenIfReady({
       getModel: function() { return model; },
@@ -900,6 +918,7 @@ interface MonacoBootWindowLike extends Window {
         request_id: payload.request_id ? String(payload.request_id) : '',
         source: payload.source ? String(payload.source) : '',
       });
+      void hydrateWorkbenchProviderSnapshot('model_ready');
       console.log('[model_ready] emit', {
         path: String(payload.path),
         generation,
@@ -1232,6 +1251,12 @@ interface MonacoBootWindowLike extends Window {
         runIssuesCommand: runIssuesCommand,
         runFindCommand: runFindCommand,
       }) as Parameters<typeof registerEditorRuntimeSocketHandlers>[1]);
+
+      if (editorSocket && typeof editorSocket.on === 'function') {
+        editorSocket.on('connect', () => {
+          void hydrateWorkbenchProviderSnapshot('editor_socket_connect');
+        });
+      }
 
       return true;
     } catch (e) {

@@ -48,6 +48,7 @@ from .editor_workbench_backend import (
     handle_workbench_hover,
     handle_workbench_language_catalog,
     handle_workbench_open_file,
+    handle_workbench_providers,
     handle_workbench_semantic_tokens,
     handle_workbench_semantic_tokens_legend,
     handle_workbench_semantic_tokens_range,
@@ -1355,6 +1356,13 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
 
     async def on_editor_workbench_language_catalog(self, sid, data):
         await handle_workbench_language_catalog(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            logger=_wb_log,
+        )
+
+    async def on_editor_workbench_providers(self, sid, data):
+        await handle_workbench_providers(
             data,
             emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
             logger=_wb_log,

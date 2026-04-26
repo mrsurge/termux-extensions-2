@@ -50,6 +50,7 @@ const WORKBENCH_RESPONSE_EVENTS = [
   'semantic_tokens_legend',
   'semantic_tokens_range',
   'folding_ranges',
+  'providers',
   'grammars_list',
   'grammars_load',
   'language_catalog',

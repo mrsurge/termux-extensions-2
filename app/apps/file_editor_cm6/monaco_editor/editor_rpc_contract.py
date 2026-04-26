@@ -29,6 +29,7 @@ EDITOR_RPC_METHOD_WORKBENCH_SEMANTIC_TOKENS_LEGEND: Final = "editor.workbench.se
 EDITOR_RPC_METHOD_WORKBENCH_SEMANTIC_TOKENS_RANGE: Final = "editor.workbench.semanticTokensRange"
 EDITOR_RPC_METHOD_WORKBENCH_SYMBOLS: Final = "editor.workbench.symbols"
 EDITOR_RPC_METHOD_WORKBENCH_FOLDING_RANGES: Final = "editor.workbench.foldingRanges"
+EDITOR_RPC_METHOD_WORKBENCH_PROVIDERS: Final = "editor.workbench.providers"
 EDITOR_RPC_METHOD_WORKBENCH_DID_CHANGE: Final = "editor.workbench.didChange"
 EDITOR_RPC_METHOD_WORKBENCH_GRAMMARS_LIST: Final = "editor.workbench.grammarsList"
 EDITOR_RPC_METHOD_WORKBENCH_GRAMMARS_LOAD: Final = "editor.workbench.grammarsLoad"
@@ -48,6 +49,7 @@ EditorRpcMethod = Literal[
     "editor.workbench.semanticTokensRange",
     "editor.workbench.symbols",
     "editor.workbench.foldingRanges",
+    "editor.workbench.providers",
     "editor.workbench.didChange",
     "editor.workbench.grammarsList",
     "editor.workbench.grammarsLoad",

@@ -44,6 +44,7 @@ interface MonacoModelLike {
   uri?: MonacoUriLike;
   getLanguageId?(): string;
   getValue?(): string;
+  getVersionId?(): number;
 }
 
 interface MonacoPositionLike {
@@ -257,13 +258,45 @@ function extractWorkbenchPayload(result: unknown): Record<string, unknown> | nul
   return inner || record;
 }
 
+function getModelText(model: MonacoModelLike | null | undefined): string | undefined {
+  try {
+    return model && typeof model.getValue === 'function' ? String(model.getValue()) : undefined;
+  } catch (_) {
+    return undefined;
+  }
+}
+
+function getModelVersion(model: MonacoModelLike | null | undefined): number | undefined {
+  try {
+    const version = model && typeof model.getVersionId === 'function' ? Number(model.getVersionId()) : NaN;
+    return Number.isFinite(version) ? version : undefined;
+  } catch (_) {
+    return undefined;
+  }
+}
+
 export function createEditorLanguageBridgeProviders(
   deps: CreateEditorLanguageBridgeProvidersDeps,
 ): {
   cacheCompletionProviderRegistration(langId: string, registration: CompletionProviderRegistrationLike): void;
   registerSemanticTokensWithLegend(langId: string, legend: SemanticTokensLegendLike, isRange?: boolean): void;
   installWorkbenchLanguageBridgeProviders(): void;
+  hydrateProviderSnapshot(snapshot: unknown): { completions: number; semanticTokens: number };
 } {
+  function selectorLanguagesFromSnapshot(selectorRaw: unknown): string[] {
+    const selectorList = asArray(selectorRaw) || [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const rawSelector of selectorList) {
+      const selector = asRecord(rawSelector);
+      const langId = selector && typeof selector.language === 'string' ? selector.language : '';
+      if (!langId || seen.has(langId)) continue;
+      seen.add(langId);
+      out.push(langId);
+    }
+    return out;
+  }
+
   function getCompletionRegistrations(langId: string): CompletionProviderRegistrationLike[] {
     const languageCache = deps.languageBridge.completionProvidersByLanguage[langId];
     if (!languageCache) return [];
@@ -344,6 +377,8 @@ export function createEditorLanguageBridgeProviders(
                         column: Number(pos && pos.column ? pos.column : 1),
                         triggerKind,
                         triggerCharacter,
+                        text: getModelText(model),
+                        modelVersionId: getModelVersion(model),
                         timeoutMs: 8000,
                       },
                       ctx,
@@ -416,6 +451,49 @@ export function createEditorLanguageBridgeProviders(
     ensureCompletionProviderRegistered(langId);
   }
 
+  function hydrateProviderSnapshot(snapshot: unknown): { completions: number; semanticTokens: number } {
+    const snapshotRecord = asRecord(snapshot);
+    let completionCount = 0;
+    let semanticTokensCount = 0;
+    const completionEntries = asArray(snapshotRecord ? snapshotRecord.completions : null) || [];
+    const semanticTokenEntries = asArray(snapshotRecord ? snapshotRecord.semanticTokens : null) || [];
+
+    for (const rawEntry of completionEntries) {
+      const entry = asRecord(rawEntry);
+      const handle = entry && entry.handle != null ? String(entry.handle).trim() : '';
+      if (!handle) continue;
+      const triggerCharacters = (asArray(entry ? entry.triggerCharacters : null) || []).map(String).filter(Boolean);
+      const supportsResolve = !!(entry && entry.supportsResolve);
+      for (const langId of selectorLanguagesFromSnapshot(entry && entry.selector)) {
+        cacheCompletionProviderRegistration(langId, {
+          handle,
+          triggerCharacters,
+          supportsResolve,
+        });
+        completionCount += 1;
+      }
+    }
+
+    for (const rawEntry of semanticTokenEntries) {
+      const entry = asRecord(rawEntry);
+      const legend = asRecord(entry && entry.legend);
+      if (!legend) continue;
+      const tokenTypes = (asArray(legend.tokenTypes) || []).map(String).filter(Boolean);
+      const tokenModifiers = (asArray(legend.tokenModifiers) || []).map(String).filter(Boolean);
+      if (!tokenTypes.length && !tokenModifiers.length) continue;
+      for (const langId of selectorLanguagesFromSnapshot(entry && entry.selector)) {
+        registerSemanticTokensWithLegend(
+          langId,
+          { tokenTypes, tokenModifiers },
+          !!(entry && entry.range),
+        );
+        semanticTokensCount += 1;
+      }
+    }
+
+    return { completions: completionCount, semanticTokens: semanticTokensCount };
+  }
+
   function registerSemanticTokensWithLegend(
     langId: string,
     legend: SemanticTokensLegendLike,
@@ -449,6 +527,8 @@ export function createEditorLanguageBridgeProviders(
                   endLineNumber: range.endLineNumber,
                   endColumn: range.endColumn,
                 },
+                text: getModelText(model),
+                modelVersionId: getModelVersion(model),
                 timeoutMs: 10000,
               },
               { timeoutMs: 12000 },
@@ -489,6 +569,8 @@ export function createEditorLanguageBridgeProviders(
               path,
               languageId,
               previousResultId: lastResultId || '0',
+              text: getModelText(model),
+              modelVersionId: getModelVersion(model),
               timeoutMs: 10000,
             },
             { timeoutMs: 12000 },
@@ -713,5 +795,6 @@ export function createEditorLanguageBridgeProviders(
     cacheCompletionProviderRegistration,
     registerSemanticTokensWithLegend,
     installWorkbenchLanguageBridgeProviders,
+    hydrateProviderSnapshot,
   };
 }

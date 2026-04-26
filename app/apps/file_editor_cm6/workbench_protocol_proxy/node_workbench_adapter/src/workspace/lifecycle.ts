@@ -101,6 +101,10 @@ function lineByteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
+function normalizeDocumentText(text: string): string {
+  return text.replace(/\r\n/g, "\n");
+}
+
 function lastLineLength(lines: string[]): number {
   return (lines[lines.length - 1] ?? "").length;
 }
@@ -183,8 +187,9 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
   const prevUriObj = runtime.session.activeUriObj;
   const prevTab = runtime.session.activeTab;
 
-  const text = await runtime.spanTraceAsync("openFile.fs.readFile", () => runtime.readTextFile(path));
-  const lines = runtime.spanTrace("openFile.text.splitLines", () => text.split(/\r?\n/));
+  const rawText = await runtime.spanTraceAsync("openFile.fs.readFile", () => runtime.readTextFile(path));
+  const text = normalizeDocumentText(rawText);
+  const lines = runtime.spanTrace("openFile.text.splitLines", () => text.split("\n"));
   let maxLineLen = 0;
   for (const line of lines) {
     if (line.length > maxLineLen) maxLineLen = line.length;
@@ -413,7 +418,7 @@ export function didChange(
   runtime.ensureConnected();
   const input = isRecord(params) ? params : {};
   const path = String(input.path ?? "");
-  const text = String(input.text ?? "");
+  const text = normalizeDocumentText(String(input.text ?? ""));
   const languageId = String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
   const authority = String(input.authority ?? runtime.authority);
   const generation = coerceOptionalGeneration(input.generation);
@@ -428,7 +433,7 @@ export function didChange(
   const uriObj = runtime.uriForPath(path, authority);
   const prevLines = runtime.session.docLineCount.get(path) ?? 1;
   const prevLastLineLen = runtime.session.docLastLineLength.get(path) ?? 10000;
-  const newLines = text.split(/\r?\n/);
+  const newLines = text.split("\n");
   runtime.session.docLineCount.set(path, newLines.length);
   runtime.session.docLastLineLength.set(path, lastLineLength(newLines));
 
