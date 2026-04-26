@@ -336,18 +336,17 @@ export function createEditorLanguageBridgeProviders(
           return deps.callWorkbenchProviderGuarded(
             'completions',
             'vscode.completions',
-            {
-              uri: ctx.uri,
-              path: ctx.path,
-              languageId: ctx.languageId,
-              lineNumber: Number(pos && pos.lineNumber ? pos.lineNumber : 1),
-              column: Number(pos && pos.column ? pos.column : 1),
-              triggerKind,
-              triggerCharacter,
-              text: model && model.getValue ? model.getValue() : undefined,
-              timeoutMs: 8000,
-            },
-            ctx,
+                      {
+                        uri: ctx.uri,
+                        path: ctx.path,
+                        languageId: ctx.languageId,
+                        lineNumber: Number(pos && pos.lineNumber ? pos.lineNumber : 1),
+                        column: Number(pos && pos.column ? pos.column : 1),
+                        triggerKind,
+                        triggerCharacter,
+                        timeoutMs: 8000,
+                      },
+                      ctx,
             { timeoutMs: 10000, cancelToken: token },
           ).then((out) => {
             if (!out || !out.ok) return { suggestions: [] };

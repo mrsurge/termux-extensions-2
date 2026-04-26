@@ -250,16 +250,8 @@ export async function provideFoldingRanges(runtime: StructureRuntime, params: un
 
   let handles = runtime.findAllProviderHandles("foldingRanges", languageId);
   if (handles.length === 0) {
-    runtime.log(`[folding] no provider yet for '${languageId}', waiting up to ${timeoutMs}ms...`);
-    await runtime.waitFor(
-      () => runtime.findAllProviderHandles("foldingRanges", languageId).length > 0,
-      { timeoutMs, intervalMs: 50 },
-    );
-    handles = runtime.findAllProviderHandles("foldingRanges", languageId);
-  }
-  if (handles.length === 0) {
-    runtime.log(`[folding] STILL no provider for '${languageId}' after timeout`);
-    return { ok: false, error: `no folding range provider for language '${languageId}'` };
+    runtime.log(`[folding] no provider for '${languageId}', fast-fail`);
+    return { ok: true, result: null };
   }
   runtime.log(`[folding] multi-provider handles=[${handles.join(",")}] for '${languageId}'`);
 

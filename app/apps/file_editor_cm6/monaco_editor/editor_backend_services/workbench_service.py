@@ -458,24 +458,25 @@ async def handle_workbench_did_change(
     if not active_project() or not abs_path:
         return
 
-    lock = get_lock(abs_path)
-    async with lock:
-        if not has_open_baseline(abs_path, generation):
-            logger.warning("[workbench] didChange dropped (no open baseline) path=%s gen=%s", abs_path, generation)
-            return
+    # didChange must stay on the hot path. Slow structure calls for the same file
+    # can time out when no provider exists, and sharing their lock causes model
+    # sync and diagnostics to lag far behind typing.
+    if not has_open_baseline(abs_path, generation):
+        logger.warning("[workbench] didChange dropped (no open baseline) path=%s gen=%s", abs_path, generation)
+        return
 
-        try:
-            await _adapter_rpc(
-                "vscode.didChange",
-                {
-                    "path": abs_path,
-                    "text": text,
-                    "languageId": language_id,
-                    "generation": generation,
-                },
-            )
-        except Exception as exc:
-            logger.error("[workbench] didChange failed: %s", exc)
+    try:
+        await _adapter_rpc(
+            "vscode.didChange",
+            {
+                "path": abs_path,
+                "text": text,
+                "languageId": language_id,
+                "generation": generation,
+            },
+        )
+    except Exception as exc:
+        logger.error("[workbench] didChange failed: %s", exc)
 
 
 async def handle_workbench_grammars_list(
