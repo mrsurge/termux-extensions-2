@@ -1,0 +1,396 @@
+export interface DispatchRequest {
+  id: unknown;
+  method: string;
+  params: unknown;
+}
+
+export interface AdapterConfigState {
+  upstreamHttp: string;
+  proxyHttp: string;
+}
+
+export interface AdapterSessionState {
+  connected: boolean;
+  ready: boolean;
+  mgmtConnected: boolean;
+  extConnected: boolean;
+  useRemote: boolean | null;
+  authority: string | null;
+  serverRootPath: string | null;
+  commit: string | null;
+  workspaceFolder: string | null;
+  activePath: string | null;
+  activeUri: string | null;
+  activeLanguageId: string | null;
+  lastOpenTs: number | null;
+  docSymbolsProviderHandle: number | null;
+  hoverProviderHandle: number | null;
+}
+
+export interface AdapterServerState {
+  config: AdapterConfigState;
+  session: AdapterSessionState;
+}
+
+export interface HeapSnapshotResult {
+  file: string;
+  heap_used: number;
+  heap_limit: number;
+}
+
+export interface WorkbenchStatus {
+  activePath?: string | null;
+}
+
+export interface WorkbenchLike {
+  state?: WorkbenchStatus & Record<string, unknown>;
+  resync: () => unknown;
+  languageCatalog: () => Promise<unknown>;
+  connect: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  disconnect?: () => void;
+  resubscribeWatcher: () => Promise<void>;
+  _switchWorkspace: (folder: string) => Promise<void>;
+  providers?: () => Record<string, unknown>;
+  openFile: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  documentSymbols: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  foldingRanges: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  hover: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  completions: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  semanticTokens: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  getSemanticTokensLegend: (languageId: string) => Promise<unknown>;
+  semanticTokensRange: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  didChange: (params: Record<string, unknown>) => Record<string, unknown> | Promise<Record<string, unknown>>;
+}
+
+export interface ServerDispatchRuntime {
+  wb: WorkbenchLike;
+  state: AdapterServerState;
+  eventLog: unknown[];
+  defaultRemoteAuthority: string;
+  defaultCodeServerHttp: string;
+  nowMs: () => number;
+  normalizePathParam: (params: unknown) => string;
+  normalizeAuthorityParam: (params: unknown, fallback?: string) => string;
+  vscodeRemoteUri: (authority: string, fsPath: string) => string;
+  buildStatusResult: () => Record<string, unknown>;
+  logStatus: (reason: string, extra?: Record<string, unknown> | null) => void;
+  emitTe2Event: (event: Record<string, unknown>) => void;
+  requestShutdown: () => void;
+  scheduleOpenFileSnapshot: () => void;
+  takeHeapSnapshot: (label: string, explicitPath?: string | null) => HeapSnapshotResult;
+  log: (...args: unknown[]) => void;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function field(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function success(id: unknown, result: unknown): Record<string, unknown> {
+  return { jsonrpc: "2.0", id, result };
+}
+
+function failure(id: unknown, code: number, message: string): Record<string, unknown> {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+
+function missingPathError(id: unknown): Record<string, unknown> {
+  return failure(id, -32602, "Invalid params: provide path or uri");
+}
+
+function resetDisconnectedSession(session: AdapterSessionState): void {
+  session.connected = false;
+  session.ready = false;
+  session.mgmtConnected = false;
+  session.extConnected = false;
+  session.activePath = null;
+  session.activeUri = null;
+  session.activeLanguageId = null;
+  session.lastOpenTs = null;
+  session.docSymbolsProviderHandle = null;
+  session.hoverProviderHandle = null;
+}
+
+function mergeWorkbenchState(runtime: ServerDispatchRuntime): void {
+  if (!isRecord(runtime.wb.state)) return;
+  runtime.state.session = { ...runtime.state.session, ...runtime.wb.state } as AdapterSessionState;
+}
+
+export async function dispatchJsonRpcRequest(
+  runtime: ServerDispatchRuntime,
+  request: DispatchRequest,
+): Promise<Record<string, unknown> | null> {
+  const { id, method } = request;
+  const params = asRecord(request.params);
+
+  if (method === "te2.ping") {
+    return success(id, { ok: true, ts_ms: runtime.nowMs() });
+  }
+
+  if (method === "te2.resync") {
+    return success(id, runtime.wb.resync());
+  }
+
+  if (method === "te2.language_catalog") {
+    return success(id, await runtime.wb.languageCatalog());
+  }
+
+  if (method === "te2.status" || method === "adapter.status") {
+    return success(id, runtime.buildStatusResult());
+  }
+
+  if (method === "adapter.events") {
+    const limit = Number.isFinite(Number(params.limit))
+      ? Math.max(0, Math.min(5000, Number(params.limit)))
+      : 200;
+    const slice = limit ? runtime.eventLog.slice(-limit) : [...runtime.eventLog];
+    if (params.clear === true) runtime.eventLog.length = 0;
+    return success(id, { ok: true, ts_ms: runtime.nowMs(), count: runtime.eventLog.length, events: slice });
+  }
+
+  if (method === "adapter.shutdown") {
+    runtime.requestShutdown();
+    return success(id, { ok: true, ts_ms: runtime.nowMs() });
+  }
+
+  if (method === "adapter.connect") {
+    const result = await runtime.wb.connect({
+      proxyHttp: params.proxyHttp ?? runtime.state.config.proxyHttp,
+      token: params.token,
+      folder: params.folder,
+      authority: params.authority ?? runtime.defaultRemoteAuthority,
+      serverRootPath: params.serverRootPath,
+      commit: params.commit,
+      proxyUri: params.proxyUri,
+    });
+    runtime.buildStatusResult();
+    runtime.logStatus("adapter_connected");
+    runtime.emitTe2Event({ type: "adapter/ready", ts_ms: runtime.nowMs(), session: runtime.state.session });
+    return success(id, result);
+  }
+
+  if (method === "adapter.disconnect") {
+    try {
+      runtime.wb.disconnect?.();
+    } catch {
+      // Preserve current best-effort disconnect behavior.
+    }
+    resetDisconnectedSession(runtime.state.session);
+    runtime.logStatus("adapter_disconnected");
+    return success(id, { ok: true, ts_ms: runtime.nowMs() });
+  }
+
+  if (method === "adapter.resubscribeWatcher") {
+    try {
+      await runtime.wb.resubscribeWatcher();
+      return success(id, { ok: true, ts_ms: runtime.nowMs() });
+    } catch (error) {
+      return failure(id, -32000, String((error as Error)?.message ?? error));
+    }
+  }
+
+  if (method === "adapter.switchWorkspace") {
+    const folder = stringValue(params.folder) ?? stringValue(params.workspaceFolder);
+    if (!folder) return failure(id, -32602, "Missing required param: folder");
+    try {
+      await runtime.wb._switchWorkspace(folder);
+      mergeWorkbenchState(runtime);
+      runtime.logStatus("workspace_switched");
+      return success(id, { ok: true, ts_ms: runtime.nowMs(), workspaceFolder: folder });
+    } catch (error) {
+      return failure(id, -32000, String((error as Error)?.message ?? error));
+    }
+  }
+
+  if (method === "adapter.reconnect") {
+    try {
+      runtime.wb.disconnect?.();
+      const result = await runtime.wb.connect({
+        folder: params.workspaceFolder ?? null,
+        authority: params.authority ?? runtime.defaultRemoteAuthority,
+        proxyHttp: params.proxyHttp ?? runtime.defaultCodeServerHttp,
+        token: params.token ?? "00000000000000000000",
+      });
+      mergeWorkbenchState(runtime);
+      runtime.logStatus("adapter_reconnected");
+      return success(id, { ok: true, ts_ms: runtime.nowMs(), ...result });
+    } catch (error) {
+      runtime.logStatus("adapter_reconnect_error");
+      return failure(id, -32000, String((error as Error)?.message ?? error));
+    }
+  }
+
+  if (method === "adapter.heapSnapshot") {
+    const label = stringValue(params.label) ?? "manual";
+    const snapshot = runtime.takeHeapSnapshot(label, stringValue(params.path));
+    return success(id, { ok: true, ts_ms: runtime.nowMs(), ...snapshot });
+  }
+
+  if (method === "adapter.providers") {
+    const result = runtime.wb.providers?.() ?? { hover: [], documentSymbols: [] };
+    return success(id, { ok: true, ts_ms: runtime.nowMs(), ...result });
+  }
+
+  if (method === "adapter.configure") {
+    if (typeof params.upstreamHttp === "string") runtime.state.config.upstreamHttp = params.upstreamHttp;
+    if (typeof params.proxyHttp === "string") runtime.state.config.proxyHttp = params.proxyHttp;
+    return success(id, { ok: true, ts_ms: runtime.nowMs(), config: runtime.state.config });
+  }
+
+  if (method === "vscode.openFile") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    const requestId = stringValue(params.requestId);
+    const forceRefreshReq = params.forceRefresh === true;
+    if (!resolvedPath) return missingPathError(id);
+
+    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const alreadyActive = resolvedPath === runtime.wb.state?.activePath;
+    const forceRefreshEff = forceRefreshReq || (alreadyActive && !!requestId);
+    runtime.log(
+      `[server] vscode.openFile ENTER path=${resolvedPath} id=${id} requestId=${requestId || "-"} alreadyActive=${alreadyActive ? 1 : 0} forceRefresh_req=${forceRefreshReq ? 1 : 0} forceRefresh_eff=${forceRefreshEff ? 1 : 0}`,
+    );
+    runtime.scheduleOpenFileSnapshot();
+
+    const result = await runtime.wb.openFile({
+      path: resolvedPath,
+      languageId: params.languageId,
+      authority,
+      forceRefresh: forceRefreshEff,
+      generation: params.generation,
+      workspaceFolder: params.workspaceFolder ?? null,
+    });
+    runtime.log(`[server] wb.openFile returned for ${resolvedPath}`);
+    runtime.logStatus("open_file", { path: resolvedPath });
+    return success(id, { ...result, path: resolvedPath, uri: runtime.vscodeRemoteUri(authority, resolvedPath) });
+  }
+
+  if (method === "vscode.documentSymbols") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const result = await runtime.wb.documentSymbols({
+      path: resolvedPath,
+      authority,
+      providerHandle: params.providerHandle,
+      languageId: params.languageId,
+      timeoutMs: params.timeoutMs,
+      generation: params.generation,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.foldingRanges") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const result = await runtime.wb.foldingRanges({
+      path: resolvedPath,
+      authority,
+      providerHandle: params.providerHandle,
+      languageId: params.languageId,
+      timeoutMs: params.timeoutMs,
+      generation: params.generation,
+      context: params.context,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.hover") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const result = await runtime.wb.hover({
+      path: resolvedPath,
+      authority,
+      providerHandle: params.providerHandle,
+      languageId: params.languageId,
+      lineNumber: params.lineNumber,
+      column: params.column,
+      timeoutMs: params.timeoutMs,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.completions") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const result = await runtime.wb.completions({
+      path: resolvedPath,
+      authority,
+      providerHandle: params.providerHandle,
+      languageId: params.languageId,
+      lineNumber: params.lineNumber,
+      column: params.column,
+      triggerKind: params.triggerKind,
+      triggerCharacter: params.triggerCharacter,
+      text: params.text,
+      timeoutMs: params.timeoutMs,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.semanticTokens") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const result = await runtime.wb.semanticTokens({
+      path: resolvedPath,
+      authority,
+      providerHandle: params.providerHandle,
+      languageId: params.languageId,
+      previousResultId: params.previousResultId,
+      timeoutMs: params.timeoutMs,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.semanticTokensLegend") {
+    const languageId = String(params.languageId || "");
+    const legend = await runtime.wb.getSemanticTokensLegend(languageId);
+    return success(id, { ok: !!legend, legend });
+  }
+
+  if (method === "vscode.semanticTokensRange") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const result = await runtime.wb.semanticTokensRange({
+      path: resolvedPath,
+      authority,
+      providerHandle: params.providerHandle,
+      languageId: params.languageId,
+      range: params.range,
+      timeoutMs: params.timeoutMs,
+    });
+    runtime.log(
+      `[semanticTokensRange_reply] ok=${String((result as { ok?: unknown })?.ok)} hasData=${!!field(field(result, "result"), "data")} dataLen=${Array.isArray(field(field(result, "result"), "data")) ? (field(field(result, "result"), "data") as unknown[]).length : 0}`,
+    );
+    return success(id, result);
+  }
+
+  if (method === "vscode.didChange") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const result = runtime.wb.didChange({
+      path: resolvedPath,
+      text: String(params.text ?? ""),
+      languageId: params.languageId,
+      generation: params.generation,
+    });
+    return success(id, result);
+  }
+
+  return null;
+}

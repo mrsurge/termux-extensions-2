@@ -374,7 +374,7 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
     # IMPORTANT: adapter command path is relative to the TE2 repo, not the user's project.
     repo_root = Path(__file__).resolve().parents[3]
     project_root_abs = Path(project_root).resolve(strict=False)
-    adapter_entry = (repo_root / "app" / "apps" / "file_editor_cm6" / "workbench_protocol_proxy" / "node_workbench_adapter" / "server.mjs").resolve(strict=False)
+    adapter_entry = (repo_root / "app" / "apps" / "file_editor_cm6" / "workbench_protocol_proxy" / "node_workbench_adapter" / "dist" / "server" / "server.mjs").resolve(strict=False)
     u = urlparse(str(code_server_http))
     code_server_port = u.port or (443 if u.scheme == "https" else 80)
     remote_authority = f"localhost:{code_server_port}"

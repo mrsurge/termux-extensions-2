@@ -15,6 +15,7 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
+    "types": [],
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "rootDir": "../..",
     "baseUrl": ".",
