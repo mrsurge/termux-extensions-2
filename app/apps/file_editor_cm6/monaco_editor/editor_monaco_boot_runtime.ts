@@ -8,7 +8,9 @@ type WindowWithMonacoBoot = Window & {
 };
 
 interface MonacoTypeScriptDefaultsLike {
+  modeConfiguration?: Record<string, unknown>;
   setDiagnosticsOptions?(options: Record<string, unknown>): void;
+  setModeConfiguration?(options: Record<string, unknown>): void;
 }
 
 interface MonacoTypeScriptNamespaceLike {
@@ -113,26 +115,57 @@ function configureMonacoEnvironment(
   };
 }
 
-function disableTypeScriptWorkerDiagnostics(monacoNs: unknown): void {
+const DEFAULT_TS_MODE_CONFIGURATION: Record<string, boolean> = {
+  completionItems: true,
+  hovers: true,
+  documentSymbols: true,
+  definitions: true,
+  references: true,
+  documentHighlights: true,
+  rename: true,
+  diagnostics: true,
+  documentRangeFormattingEdits: true,
+  signatureHelp: true,
+  onTypeFormattingEdits: true,
+  codeActions: true,
+  inlayHints: true,
+};
+
+function configureTypeScriptWorkerDefaults(monacoNs: unknown, workersEnabled: boolean): void {
   try {
     const monacoRef = monacoNs as MonacoLike;
     const tsLang = monacoRef.languages && monacoRef.languages.typescript;
     if (!tsLang) return;
-    if (tsLang.typescriptDefaults && typeof tsLang.typescriptDefaults.setDiagnosticsOptions === 'function') {
-      tsLang.typescriptDefaults.setDiagnosticsOptions({
-        noSemanticValidation: true,
-        noSyntaxValidation: true,
-      });
+    if (workersEnabled) {
+      console.log('[Monaco] TS/JS worker defaults left enabled by webWorkersEnabled');
+      return;
     }
-    if (tsLang.javascriptDefaults && typeof tsLang.javascriptDefaults.setDiagnosticsOptions === 'function') {
-      tsLang.javascriptDefaults.setDiagnosticsOptions({
-        noSemanticValidation: true,
-        noSyntaxValidation: true,
-      });
+
+    const configureDefaults = (defaults: MonacoTypeScriptDefaultsLike | undefined): void => {
+      if (!defaults) return;
+      if (typeof defaults.setDiagnosticsOptions === 'function') {
+        defaults.setDiagnosticsOptions({
+          noSemanticValidation: true,
+          noSyntaxValidation: true,
+        });
+      }
+      if (typeof defaults.setModeConfiguration === 'function') {
+        defaults.setModeConfiguration({
+          ...DEFAULT_TS_MODE_CONFIGURATION,
+          ...(asRecord(defaults.modeConfiguration) || {}),
+          completionItems: false,
+        });
+      }
+    };
+
+    configureDefaults(tsLang.typescriptDefaults);
+    configureDefaults(tsLang.javascriptDefaults);
+
+    if (tsLang.typescriptDefaults || tsLang.javascriptDefaults) {
+      console.log('[Monaco] TS/JS worker diagnostics disabled; worker completions disabled');
     }
-    console.log('[Monaco] TS/JS worker diagnostics disabled');
   } catch (error) {
-    console.warn('[Monaco] TS/JS diagnostics config failed', error);
+    console.warn('[Monaco] TS/JS worker defaults config failed', error);
   }
 }
 
@@ -166,7 +199,7 @@ export async function bootMonacoRuntime(
 
     win.monaco = monacoNs || undefined;
     deps.ensureTe2DiffTheme();
-    disableTypeScriptWorkerDiagnostics(monacoNs);
+    configureTypeScriptWorkerDefaults(monacoNs, deps.languageWorkersEnabled());
 
     try { await deps.applyMonacoTheme('github-dark-default'); } catch (_) {}
 

@@ -161,6 +161,15 @@ function previousPath(prevUriObj: unknown): string {
   return optionalString(prevUriObj.fsPath) ?? optionalString(prevUriObj.path) ?? "";
 }
 
+function clearTrackedDocumentState(runtime: LifecycleRuntime, path: string): void {
+  if (!path) return;
+  runtime.session.docVersions.delete(path);
+  runtime.session.docLineCount.delete(path);
+  runtime.session.docCharCount.delete(path);
+  runtime.session.docLastLineLength.delete(path);
+  runtime.session.docOpenGeneration.delete(path);
+}
+
 function isRangeArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
 }
@@ -278,6 +287,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
       );
       runtime.log(`[openFile] ts=${Date.now()} removedDocuments=[${prevAbs || "?"}]`);
     } catch {}
+    clearTrackedDocumentState(runtime, prevAbs);
   }
 
   if (isSameFileReopen) {
@@ -502,6 +512,11 @@ export async function switchWorkspace(runtime: LifecycleRuntime, newFolder: stri
     runtime.session.activeEditorId = null;
     runtime.session.activeTab = null;
   }
+  runtime.session.docVersions.clear();
+  runtime.session.docLineCount.clear();
+  runtime.session.docCharCount.clear();
+  runtime.session.docLastLineLength.clear();
+  runtime.session.docOpenGeneration.clear();
 
   const workspace = {
     isUntitled: false,

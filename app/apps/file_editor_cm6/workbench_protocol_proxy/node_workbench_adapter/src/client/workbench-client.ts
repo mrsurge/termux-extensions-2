@@ -704,14 +704,9 @@ export class WorkbenchClient {
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
       getDocumentVersion: (path) => this._docVersions.get(path) ?? null,
       getOpenGeneration: (path) => this._docOpenGeneration.get(path),
-      updateActiveDocument: (path, uriObj, languageId) => {
-        try {
-          this.state.activePath = path;
-          this.state.activeUri = externalUriString(uriObj) ?? stringifyUriSafe(uriObj);
-          this.state.activeLanguageId = languageId ?? null;
-          this.state.lastOpenTs = Date.now();
-        } catch {}
-      },
+      // Provider calls are consumers of the active-document lifecycle, not owners.
+      // Let openFile()/didChange() remain the only state writers for activePath/Uri.
+      updateActiveDocument: () => {},
       selectorGroupsSummary: (kind) => this._providerRegistry.selectorGroupsSummary(kind),
       findAllProviderHandles: (kind, languageId) => this._findAllProviderHandles(kind, languageId),
       waitFor: (condition, options) => waitFor(condition, options),

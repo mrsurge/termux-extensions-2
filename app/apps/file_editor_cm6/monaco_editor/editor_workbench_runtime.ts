@@ -71,7 +71,6 @@ interface LanguageContextLike {
 
 interface LanguageBridgeLike {
   hoverSeq: number;
-  completionsSeq: number;
 }
 
 interface WorkbenchRuntimeDeps {
@@ -614,24 +613,21 @@ export function createEditorWorkbenchRuntime(
     const languageBridge = deps.getLanguageBridge();
     let seq = 0;
     if (kind === 'hover') seq = ++languageBridge.hoverSeq;
-    else if (kind === 'completions') seq = ++languageBridge.completionsSeq;
 
     const openAck = await awaitOpenAckForProvider(kind, ctx, timeoutMs);
-    if (!openAck.ok) return { ok: false, notReady: true, error: openAck.reason || 'open_ack_not_ready' };
+    if (!openAck.ok) {
+      return { ok: false, notReady: true, error: openAck.reason || 'open_ack_not_ready' };
+    }
 
     return editorWorkbenchCall(kind, params, { timeoutMs }).then((result) => {
       const nowCtx = currentLanguageContext();
       if (kind === 'symbols' || kind === 'folding_ranges') {
         if (!ctx || !nowCtx || String((nowCtx as { uri?: unknown }).uri) !== String((ctx as { uri?: unknown }).uri)) return { ok: false, stale: true };
-      } else if (kind === 'completions') {
-        if (cancelToken && cancelToken.isCancellationRequested) return { ok: false, stale: true, canceled: true };
-        if (!sameLanguageDocumentContext(ctx, nowCtx)) return { ok: false, stale: true };
       } else {
         if (cancelToken && cancelToken.isCancellationRequested) return { ok: false, stale: true, canceled: true };
         if (!deps.isLanguageContextCurrent(ctx, nowCtx)) return { ok: false, stale: true };
       }
       if (kind === 'hover' && seq !== languageBridge.hoverSeq) return { ok: false, stale: true };
-      if (kind === 'completions' && seq !== languageBridge.completionsSeq) return { ok: false, stale: true };
       return { ok: true, result };
     }).catch((error) => {
       return { ok: false, error: String(error && (error as { message?: unknown }).message ? (error as { message: unknown }).message : error || 'error') };

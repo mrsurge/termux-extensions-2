@@ -25,7 +25,7 @@ export function handleCompletionProviderRegistered(
   const lang = typeof typedData?.language === 'string' ? typedData.language : '';
   const handle = typedData?.handle;
   if (!lang || handle == null) return;
-  const handleKey = String(handle || '').trim();
+  const handleKey = String(handle).trim();
   if (!handleKey) return;
 
   const triggerCharacters = Array.isArray(typedData?.triggerCharacters)

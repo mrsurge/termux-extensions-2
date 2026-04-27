@@ -9,8 +9,6 @@ import {
   monacoRangeFromProtoRange,
   toMonacoHoverContents,
   isLanguageContextCurrent,
-  monacoRangeFromCompletionRange,
-  mapCompletionItemKind,
 } from './editor_bridge_utils.js';
 import { te2DumpTextmateScopesForLine, te2GetActiveEditorAndModel, te2AdvanceRuleStackToLine } from './editor_textmate_debug_utils.js';
 import { applyJumpToLine as applyJumpToLineAt } from './editor_jump_utils.ts';
@@ -197,7 +195,6 @@ interface SemanticTokensLegendLike {
 interface LanguageBridgeStateLike {
   hoverSeq: number;
   symbolsSeq: number;
-  completionsSeq: number;
   semanticTokensSeq: number;
   registeredHover: Set<string>;
   registeredSymbols: Set<string>;
@@ -542,7 +539,6 @@ interface MonacoBootWindowLike extends Window {
   const languageBridge: LanguageBridgeStateLike = {
     hoverSeq: 0,
     symbolsSeq: 0,
-    completionsSeq: 0,
     semanticTokensSeq: 0,
     registeredHover: new Set<string>(),
     registeredSymbols: new Set<string>(),
@@ -589,8 +585,6 @@ interface MonacoBootWindowLike extends Window {
     absPathFromVscodeUri: _absPathFromVscodeUri,
     monacoRangeFromProtoRange: function(range: unknown) { return monacoRangeFromProtoRange(window.monaco, range); },
     toMonacoHoverContents: toMonacoHoverContents,
-    monacoRangeFromCompletionRange: function(range: unknown, pos: unknown) { return monacoRangeFromCompletionRange(window.monaco, range, pos); },
-    mapCompletionItemKind: function(kind: unknown) { return mapCompletionItemKind(window.monaco, kind); },
     flushMirrorDebounce: _flushMirrorDebounce,
     ensureWorkbenchLanguageCatalogInstalled: function() { return ensureWorkbenchLanguageCatalogInstalled().then(function() {}); },
     getWorkbenchLanguageIds: function() {

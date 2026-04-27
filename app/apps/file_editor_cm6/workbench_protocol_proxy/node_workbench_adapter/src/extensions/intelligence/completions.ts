@@ -41,6 +41,14 @@ export interface CompletionSingleParams {
   timeoutMs: number;
 }
 
+interface CompletionSyncCacheEntry {
+  signature: string;
+  promise?: Promise<unknown>;
+  result?: unknown;
+}
+
+const completionSyncByPath = new Map<string, CompletionSyncCacheEntry>();
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -74,6 +82,66 @@ function insertTextForItem(item: Record<string, unknown>): unknown {
   if (item.h != null) return item.h;
   if (typeof item.a === "string") return item.a;
   return field(item.a, "label") ?? "";
+}
+
+function suggestResultDto(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
+function textHash(text: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return hash.toString(16);
+}
+
+function completionSyncSignature(input: Record<string, unknown>, text: string, languageId: string, authority: string): string {
+  const modelVersionId = input.modelVersionId;
+  const versionPart = modelVersionId == null ? "no-version" : String(modelVersionId);
+  return [
+    authority,
+    languageId,
+    versionPart,
+    String(text.length),
+    textHash(text),
+  ].join("|");
+}
+
+async function ensureCompletionTextSynced(
+  runtime: CompletionRuntime,
+  input: Record<string, unknown>,
+  path: string,
+  text: string,
+  languageId: string,
+  authority: string,
+  timeoutMs: number,
+): Promise<unknown> {
+  const signature = completionSyncSignature(input, text, languageId, authority);
+  const cached = completionSyncByPath.get(path);
+  if (cached && cached.signature === signature) {
+    if (cached.promise) return cached.promise;
+    return cached.result;
+  }
+
+  const promise = Promise.resolve(runtime.didChange(
+    { path, text, languageId, authority },
+    { waitForAck: true, timeoutMs: Math.min(timeoutMs, 5000) },
+  ));
+  completionSyncByPath.set(path, { signature, promise });
+  try {
+    const result = await promise;
+    const latest = completionSyncByPath.get(path);
+    if (latest && latest.signature === signature) {
+      completionSyncByPath.set(path, { signature, result });
+    }
+    return result;
+  } catch (error) {
+    const latest = completionSyncByPath.get(path);
+    if (latest && latest.signature === signature) completionSyncByPath.delete(path);
+    throw error;
+  }
 }
 
 export function inflateCompletionItems(dto: unknown, log: (message: string) => void = () => undefined): Record<string, unknown>[] {
@@ -132,9 +200,14 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
 
   if (input.text != null && path) {
     try {
-      const syncResult = await runtime.didChange(
-        { path, text: String(input.text), languageId, authority },
-        { waitForAck: true, timeoutMs: Math.min(timeoutMs, 5000) },
+      const syncResult = await ensureCompletionTextSynced(
+        runtime,
+        input,
+        path,
+        String(input.text),
+        languageId,
+        authority,
+        timeoutMs,
       );
       const result = isRecord(syncResult) ? syncResult : {};
       runtime.log(`[completions] pre-flight didChange ack path=${path} ver=${result.versionId ?? "?"} type=${result.ackType ?? "?"}`);
@@ -145,9 +218,10 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
     }
   }
 
-  if (typeof input.providerHandle === "number") {
+  const providerHandle = Number(input.providerHandle);
+  if (Number.isFinite(providerHandle)) {
     return provideCompletionSingle(runtime, {
-      providerHandle: input.providerHandle,
+      providerHandle,
       path,
       authority,
       lineNumber,
@@ -192,11 +266,14 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
   let mergedItems: Record<string, unknown>[] = [];
   let anyIncomplete = false;
   let firstCacheId: unknown;
+  const suggestResults: Record<string, unknown>[] = [];
   for (const reply of results) {
     if (replyType(reply) !== 9) continue;
     const raw = replyResult(reply);
     if (!raw) continue;
     const rawRecord = isRecord(raw) ? raw : {};
+    const rawDto = suggestResultDto(raw);
+    if (rawDto) suggestResults.push(rawDto);
     const items = inflateCompletionItems(raw, runtime.log);
     if (items.length > 0) mergedItems = mergedItems.concat(items);
     if (rawRecord.c) anyIncomplete = true;
@@ -204,7 +281,7 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
   }
 
   runtime.log(`[completions] merged ${mergedItems.length} items from ${results.filter((reply) => replyType(reply) === 9).length}/${handles.length} providers`);
-  return { ok: true, result: { items: mergedItems, isIncomplete: anyIncomplete, cacheId: firstCacheId } };
+  return { ok: true, result: { suggestResults, items: mergedItems, isIncomplete: anyIncomplete, cacheId: firstCacheId } };
 }
 
 export async function provideCompletionSingle(runtime: CompletionRuntime, params: CompletionSingleParams): Promise<Record<string, unknown>> {
@@ -227,10 +304,20 @@ export async function provideCompletionSingle(runtime: CompletionRuntime, params
 
   if (replyType(reply) === 9) {
     const raw = replyResult(reply);
-    if (!raw) return { ok: true, result: { items: [], isIncomplete: false } };
+    if (!raw) return { ok: true, result: { dto: null, suggestResults: [], items: [], isIncomplete: false } };
     const rawRecord = isRecord(raw) ? raw : {};
     const items = inflateCompletionItems(raw, runtime.log);
-    return { ok: true, result: { items, isIncomplete: !!rawRecord.c, cacheId: rawRecord.x } };
+    const rawDto = suggestResultDto(raw);
+    return {
+      ok: true,
+      result: {
+        dto: rawDto,
+        suggestResults: rawDto ? [rawDto] : [],
+        items,
+        isIncomplete: !!rawRecord.c,
+        cacheId: rawRecord.x,
+      },
+    };
   }
   if (replyType(reply) === 11) return { ok: false, error: replyError(reply) };
   return { ok: false, error: reply };

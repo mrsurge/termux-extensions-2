@@ -1,3 +1,5 @@
+import { provideWorkbenchCompletionItemsFromVscodeSuggest } from './vscode_completion_vendor/suggest.js';
+
 interface LanguageContext {
   uri: string;
   path: string;
@@ -31,6 +33,7 @@ interface CompletionProviderRegistrationLike {
 interface GuardedCallResult {
   ok?: boolean;
   stale?: boolean;
+  notReady?: boolean;
   canceled?: boolean;
   error?: string;
   result?: unknown;
@@ -84,6 +87,9 @@ interface MonacoLanguagesLike {
     TriggerCharacter?: number;
     TriggerForIncompleteCompletions?: number;
   };
+  CompletionItemKind?: {
+    Property?: number;
+  };
   registerHoverProvider?: (selector: unknown, provider: {
     provideHover(model: MonacoModelLike, pos: MonacoPositionLike, token: MonacoCancellationTokenLike): unknown;
   }) => unknown;
@@ -94,8 +100,9 @@ interface MonacoLanguagesLike {
     provideFoldingRanges(model: MonacoModelLike, context: unknown, token: MonacoCancellationTokenLike): unknown;
   }) => unknown;
   registerCompletionItemProvider?: (selector: unknown, provider: {
+    __te2WorkbenchProvider?: true;
     triggerCharacters?: string[];
-    provideCompletionItems(model: MonacoModelLike, pos: MonacoPositionLike, token: MonacoCancellationTokenLike, context: MonacoCompletionContextLike): unknown;
+    provideCompletionItems(model: MonacoModelLike, pos: MonacoPositionLike, context: MonacoCompletionContextLike, token: MonacoCancellationTokenLike): unknown;
   }) => MonacoDisposableLike | unknown;
   registerDocumentRangeSemanticTokensProvider?: (selector: unknown, provider: {
     getLegend(): SemanticTokensLegendLike;
@@ -110,8 +117,18 @@ interface MonacoLanguagesLike {
 
 interface MonacoLike {
   Range: new (startLineNumber: number, startColumn: number, endLineNumber: number, endColumn: number) => unknown;
+  editor?: {
+    getEditors?: () => unknown[];
+  };
   languages: MonacoLanguagesLike;
 }
+
+interface MonacoCompletionRegistryLike extends Record<string, unknown> {
+  _entries?: unknown[];
+  _lastCandidate?: unknown;
+}
+
+const prunedNativeCompletionLanguages = new Set<string>();
 
 interface CreateEditorLanguageBridgeProvidersDeps {
   getMonaco(): MonacoLike | null;
@@ -120,7 +137,7 @@ interface CreateEditorLanguageBridgeProvidersDeps {
   getHasModel(): boolean;
   getCurrentLanguageContext(): LanguageContext | null;
   callWorkbenchProviderGuarded(
-    kind: 'hover' | 'symbols' | 'folding_ranges' | 'completions',
+    kind: 'hover' | 'symbols' | 'folding_ranges',
     method: string,
     params: Record<string, unknown>,
     ctx: LanguageContext | null,
@@ -134,8 +151,6 @@ interface CreateEditorLanguageBridgeProvidersDeps {
   absPathFromVscodeUri(raw: string): string | null;
   monacoRangeFromProtoRange(range: unknown): unknown;
   toMonacoHoverContents(raw: unknown): unknown[];
-  monacoRangeFromCompletionRange(range: unknown, pos: MonacoPositionLike): unknown;
-  mapCompletionItemKind(kind: unknown): number;
   flushMirrorDebounce(): void;
   ensureWorkbenchLanguageCatalogInstalled(): Promise<void>;
   getWorkbenchLanguageIds(): Iterable<string>;
@@ -275,6 +290,102 @@ function getModelVersion(model: MonacoModelLike | null | undefined): number | un
   }
 }
 
+function completionProviderKey(langId: string, handle: string): string {
+  return langId + '::' + handle;
+}
+
+function completionProviderHandleNumber(handle: string): number | null {
+  const value = Number(handle);
+  return Number.isFinite(value) ? value : null;
+}
+
+function completionPropertyKind(deps: CreateEditorLanguageBridgeProvidersDeps): number {
+  const monacoRef = deps.getMonaco();
+  return monacoRef && monacoRef.languages && monacoRef.languages.CompletionItemKind
+    && typeof monacoRef.languages.CompletionItemKind.Property === 'number'
+    ? monacoRef.languages.CompletionItemKind.Property
+    : 9;
+}
+
+function iterablePairs(value: unknown): Iterable<[unknown, unknown]> | null {
+  const candidate = value as { [Symbol.iterator]?: unknown } | null | undefined;
+  return candidate && typeof candidate[Symbol.iterator] === 'function'
+    ? candidate as Iterable<[unknown, unknown]>
+    : null;
+}
+
+function completionRegistryFromActiveEditor(
+  deps: CreateEditorLanguageBridgeProvidersDeps,
+): MonacoCompletionRegistryLike | null {
+  const monacoRef = deps.getMonaco();
+  const editors = monacoRef && monacoRef.editor && typeof monacoRef.editor.getEditors === 'function'
+    ? monacoRef.editor.getEditors()
+    : [];
+  for (const editor of editors) {
+    const editorRecord = asRecord(editor);
+    let service = asRecord(editorRecord && editorRecord._instantiationService);
+    while (service) {
+      const parent = asRecord(service._parent);
+      if (!parent) break;
+      service = parent;
+    }
+
+    const services = asRecord(service && service._services);
+    const serviceEntries = iterablePairs(services && services._entries);
+    if (!serviceEntries) continue;
+    for (const [key, value] of serviceEntries) {
+      if (String(key) !== 'ILanguageFeaturesService') continue;
+      const languageFeatures = asRecord(value);
+      const completionProvider = asRecord(languageFeatures && languageFeatures.completionProvider) as MonacoCompletionRegistryLike | null;
+      if (completionProvider && Array.isArray(completionProvider._entries)) return completionProvider;
+    }
+  }
+  return null;
+}
+
+function selectorMatchesLanguage(selector: unknown, langId: string): boolean {
+  if (Array.isArray(selector)) {
+    return selector.some((item) => selectorMatchesLanguage(item, langId));
+  }
+  if (typeof selector === 'string') return selector === langId;
+  const selectorRecord = asRecord(selector);
+  return !!selectorRecord && selectorRecord.language === langId;
+}
+
+function pruneNativeWorkerCompletionProviders(
+  deps: CreateEditorLanguageBridgeProvidersDeps,
+  langId: string,
+): number {
+  if (deps.getLanguageWorkersEnabled()) return 0;
+  const registry = completionRegistryFromActiveEditor(deps);
+  if (!registry || !Array.isArray(registry._entries)) return 0;
+  const entries = registry._entries;
+
+  let removed = 0;
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = asRecord(entries[i]);
+    const provider = asRecord(entry && entry.provider);
+    if (
+      entry
+      && provider
+      && Object.prototype.hasOwnProperty.call(provider, '_worker')
+      && selectorMatchesLanguage(entry.selector, langId)
+    ) {
+      entries.splice(i, 1);
+      removed += 1;
+    }
+  }
+
+  if (removed > 0) {
+    registry._lastCandidate = undefined;
+    if (!prunedNativeCompletionLanguages.has(langId)) {
+      prunedNativeCompletionLanguages.add(langId);
+      console.log('[completions] pruned native Monaco worker completion provider for lang=' + langId + ' count=' + removed);
+    }
+  }
+  return removed;
+}
+
 export function createEditorLanguageBridgeProviders(
   deps: CreateEditorLanguageBridgeProvidersDeps,
 ): {
@@ -303,142 +414,83 @@ export function createEditorLanguageBridgeProviders(
     return Object.values(languageCache);
   }
 
-  function getCompletionTriggerCharacters(langId: string): string[] {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const entry of getCompletionRegistrations(langId)) {
-      const triggerChars = Array.isArray(entry.triggerCharacters) ? entry.triggerCharacters : [];
-      for (const triggerChar of triggerChars) {
-        const ch = String(triggerChar || '');
-        if (!ch || seen.has(ch)) continue;
-        seen.add(ch);
-        out.push(ch);
-      }
-    }
-    return out;
+  function getCompletionRegistrationSignature(entry: CompletionProviderRegistrationLike): string {
+    const triggerCharacters = Array.isArray(entry.triggerCharacters) ? entry.triggerCharacters.map(String).sort().join(',') : '';
+    return String(entry.handle) + '::' + triggerCharacters + '::' + (entry.supportsResolve ? '1' : '0');
   }
 
-  function getCompletionRegistrationSignature(langId: string): string {
-    return getCompletionRegistrations(langId)
-      .map((entry) => {
-        const triggerCharacters = Array.isArray(entry.triggerCharacters) ? entry.triggerCharacters.map(String).sort().join(',') : '';
-        return String(entry.handle) + '::' + triggerCharacters + '::' + (entry.supportsResolve ? '1' : '0');
-      })
-      .sort()
-      .join('|');
-  }
-
-  function ensureCompletionProviderRegistered(langId: string): void {
+  function ensureCompletionProviderRegistered(langId: string, entry: CompletionProviderRegistrationLike): void {
     const monacoRef = deps.getMonaco();
     if (!monacoRef || !monacoRef.languages || !monacoRef.languages.registerCompletionItemProvider) return;
-    if (!getCompletionRegistrations(langId).length) return;
+    if (deps.getLanguageWorkersEnabled()) return;
+    const handleKey = entry.handle != null ? String(entry.handle).trim() : '';
+    const providerHandle = completionProviderHandleNumber(handleKey);
+    if (!handleKey || providerHandle === null) return;
 
-    const nextSignature = getCompletionRegistrationSignature(langId);
+    const providerKey = completionProviderKey(langId, handleKey);
+    const nextSignature = getCompletionRegistrationSignature(entry);
     if (
       nextSignature
-      && deps.languageBridge.completionProviderSignatureByLanguage[langId] === nextSignature
-      && deps.languageBridge.completionProviderDisposablesByLanguage[langId]
+      && deps.languageBridge.completionProviderSignatureByLanguage[providerKey] === nextSignature
+      && deps.languageBridge.completionProviderDisposablesByLanguage[providerKey]
     ) {
       return;
     }
 
-    const existingDisposable = deps.languageBridge.completionProviderDisposablesByLanguage[langId];
+    const existingDisposable = deps.languageBridge.completionProviderDisposablesByLanguage[providerKey];
     if (existingDisposable && typeof existingDisposable.dispose === 'function') {
       try { existingDisposable.dispose(); } catch (_) {}
     }
 
-    const triggerCharacters = getCompletionTriggerCharacters(langId);
+    const triggerCharacters = Array.isArray(entry.triggerCharacters) ? entry.triggerCharacters.map(String).filter(Boolean) : [];
     const registrationDisposable = monacoRef.languages.registerCompletionItemProvider(langId, {
+      __te2WorkbenchProvider: true,
       triggerCharacters,
-      provideCompletionItems(model, pos, token, context) {
+      provideCompletionItems(model, pos, context, token) {
         try {
           deps.flushMirrorDebounce();
-          const ctx = deps.getCurrentLanguageContext();
-          if (!ctx || !model || !model.uri || String(model.uri.toString()) !== String(ctx.uri)) {
-            return { suggestions: [] };
-          }
-          let triggerKind = 0;
-          let triggerCharacter: string | undefined;
-          const triggerKinds = monacoRef.languages.CompletionTriggerKind;
-          if (context && triggerKinds && context.triggerKind === triggerKinds.TriggerCharacter) {
-            triggerKind = 1;
-            triggerCharacter = context.triggerCharacter || undefined;
-          } else if (context && triggerKinds && context.triggerKind === triggerKinds.TriggerForIncompleteCompletions) {
-            triggerKind = 2;
-          }
-          return deps.callWorkbenchProviderGuarded(
-            'completions',
-            'vscode.completions',
-                      {
-                        uri: ctx.uri,
-                        path: ctx.path,
-                        languageId: ctx.languageId,
-                        lineNumber: Number(pos && pos.lineNumber ? pos.lineNumber : 1),
-                        column: Number(pos && pos.column ? pos.column : 1),
-                        triggerKind,
-                        triggerCharacter,
-                        text: getModelText(model),
-                        modelVersionId: getModelVersion(model),
-                        timeoutMs: 8000,
-                      },
-                      ctx,
-            { timeoutMs: 10000, cancelToken: token },
-          ).then((out) => {
-            if (!out || !out.ok) return { suggestions: [] };
-            const payload = extractGuardedPayload(out);
-            const root = payload && (asRecord(payload.result) || payload);
-            const rawItems = root ? (asArray(root.items) || asArray(root.suggestions) || []) : [];
-            const suggestions: Array<Record<string, unknown>> = [];
-            for (const rawItem of rawItems) {
-              const item = asRecord(rawItem);
-              if (!item) continue;
-              const suggestion: Record<string, unknown> = {
-                label: item.label || '',
-                kind: deps.mapCompletionItemKind(item.kind),
-                detail: item.detail || undefined,
-                documentation: item.documentation || undefined,
-                sortText: item.sortText || undefined,
-                filterText: item.filterText || undefined,
-                preselect: item.preselect || undefined,
-                insertText: item.insertText || (typeof item.label === 'string' ? item.label : ''),
-                insertTextRules: item.insertTextRules || undefined,
-                range: deps.monacoRangeFromCompletionRange(item.range, pos),
-                commitCharacters: item.commitCharacters || undefined,
-                additionalTextEdits: item.additionalTextEdits || undefined,
-                tags: item.tags || undefined,
-              };
-              const command = asRecord(item.command);
-              if (command) {
-                suggestion.command = {
-                  id: command.id || '',
-                  title: command.title || command.id || '',
-                  arguments: command.arguments || undefined,
-                };
-              }
-              suggestions.push(suggestion);
-            }
-            return {
-              suggestions,
-              incomplete: !!(root && root.isIncomplete),
-            };
+          void token;
+          return provideWorkbenchCompletionItemsFromVscodeSuggest({
+            providerHandle,
+            languageId: langId,
+            model,
+            position: pos,
+            context,
+            monacoTriggerKinds: monacoRef.languages.CompletionTriggerKind || null,
+            propertyKind: completionPropertyKind(deps),
+            adapterTimeoutMs: 8000,
+            callTimeoutMs: 10000,
+            getCurrentPath: deps.getCurrentPath,
+            absPathFromVscodeUri: deps.absPathFromVscodeUri,
+            callWorkbenchCompletions(params, opts) {
+              return deps.editorWorkbenchCall('completions', params, opts);
+            },
           });
         } catch (_) {
           return { suggestions: [] };
         }
       },
     });
-    deps.languageBridge.completionProviderDisposablesByLanguage[langId] = (
+    deps.languageBridge.completionProviderDisposablesByLanguage[providerKey] = (
       registrationDisposable && typeof (registrationDisposable as MonacoDisposableLike).dispose === 'function'
         ? registrationDisposable as MonacoDisposableLike
         : null
     );
-    deps.languageBridge.completionProviderSignatureByLanguage[langId] = nextSignature;
-    console.log('[completions] registered provider bridge for lang=' + langId + ' triggers=' + triggerCharacters.join(','));
+    deps.languageBridge.completionProviderSignatureByLanguage[providerKey] = nextSignature;
+    pruneNativeWorkerCompletionProviders(deps, langId);
+    console.log('[completions] registered provider bridge for lang=' + langId + ' handle=' + handleKey + ' triggers=' + triggerCharacters.join(','));
+  }
+
+  function ensureCompletionProvidersRegistered(langId: string): void {
+    for (const entry of getCompletionRegistrations(langId)) {
+      ensureCompletionProviderRegistered(langId, entry);
+    }
+    pruneNativeWorkerCompletionProviders(deps, langId);
   }
 
   function cacheCompletionProviderRegistration(langId: string, registration: CompletionProviderRegistrationLike): void {
     if (!langId) return;
-    const handleKey = String(registration.handle || '').trim();
+    const handleKey = registration.handle != null ? String(registration.handle).trim() : '';
     if (!handleKey) return;
     if (!deps.languageBridge.completionProvidersByLanguage[langId]) {
       deps.languageBridge.completionProvidersByLanguage[langId] = Object.create(null);
@@ -448,7 +500,7 @@ export function createEditorLanguageBridgeProviders(
       triggerCharacters: Array.isArray(registration.triggerCharacters) ? registration.triggerCharacters.map(String).filter(Boolean) : [],
       supportsResolve: !!registration.supportsResolve,
     };
-    ensureCompletionProviderRegistered(langId);
+    ensureCompletionProvidersRegistered(langId);
   }
 
   function hydrateProviderSnapshot(snapshot: unknown): { completions: number; semanticTokens: number } {
@@ -747,7 +799,7 @@ export function createEditorLanguageBridgeProviders(
               });
               deps.languageBridge.registeredFolding.add(langId);
             }
-            ensureCompletionProviderRegistered(langId);
+            ensureCompletionProvidersRegistered(langId);
           });
         } catch (_) {}
       };
@@ -762,7 +814,7 @@ export function createEditorLanguageBridgeProviders(
         doRegister(immediate);
         immediate.forEach((langId) => {
           try {
-            ensureCompletionProviderRegistered(langId);
+            ensureCompletionProvidersRegistered(langId);
           } catch (_) {}
           try {
             registerSemanticTokensForLanguage(langId);
@@ -783,7 +835,7 @@ export function createEditorLanguageBridgeProviders(
           doRegister(all);
           all.forEach((langId) => {
             try {
-              ensureCompletionProviderRegistered(langId);
+              ensureCompletionProvidersRegistered(langId);
             } catch (_) {}
           });
         } catch (_) {}

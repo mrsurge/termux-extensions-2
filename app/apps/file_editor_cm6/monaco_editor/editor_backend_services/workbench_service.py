@@ -187,9 +187,11 @@ async def handle_workbench_completions(
                 "lineNumber": payload.get("lineNumber", payload.get("line", 1)),
                 "column": payload.get("column", payload.get("character", 1)),
                 "languageId": payload.get("languageId", ""),
+                "providerHandle": payload.get("providerHandle"),
                 "triggerKind": payload.get("triggerKind", 0),
                 "triggerCharacter": payload.get("triggerCharacter"),
                 "text": payload.get("text"),
+                "timeoutMs": payload.get("timeoutMs"),
             },
         )
         await _emit_result(
