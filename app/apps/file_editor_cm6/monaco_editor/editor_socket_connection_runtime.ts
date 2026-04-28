@@ -210,6 +210,7 @@ export function registerEditorSocketConnectionHandlers(
             unsaved: !!file.unsaved,
             reason: file.reason,
             content_sha256: file.content_sha256,
+            base_sha256: file.base_sha256 || (file.unsaved ? null : file.content_sha256),
             auto_save: file.auto_save,
           });
           try {

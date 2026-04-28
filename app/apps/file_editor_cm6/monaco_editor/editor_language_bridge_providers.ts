@@ -1,4 +1,8 @@
 import { provideWorkbenchCompletionItemsFromVscodeSuggest } from './vscode_completion_vendor/suggest.js';
+import {
+  provideWorkbenchDocumentRangeSemanticTokensFromVscodeMainThread,
+  provideWorkbenchDocumentSemanticTokensFromVscodeMainThread,
+} from './vscode_document_intelligence_vendor/semanticTokens.js';
 
 interface LanguageContext {
   uri: string;
@@ -271,23 +275,6 @@ function extractWorkbenchPayload(result: unknown): Record<string, unknown> | nul
   if (!record) return null;
   const inner = asRecord(record.result);
   return inner || record;
-}
-
-function getModelText(model: MonacoModelLike | null | undefined): string | undefined {
-  try {
-    return model && typeof model.getValue === 'function' ? String(model.getValue()) : undefined;
-  } catch (_) {
-    return undefined;
-  }
-}
-
-function getModelVersion(model: MonacoModelLike | null | undefined): number | undefined {
-  try {
-    const version = model && typeof model.getVersionId === 'function' ? Number(model.getVersionId()) : NaN;
-    return Number.isFinite(version) ? version : undefined;
-  } catch (_) {
-    return undefined;
-  }
 }
 
 function completionProviderKey(langId: string, handle: string): string {
@@ -563,35 +550,17 @@ export function createEditorLanguageBridgeProviders(
         },
         provideDocumentRangeSemanticTokens(model, range) {
           try {
-            if (!model || !model.uri || !range) return null;
-            const uri = String(model.uri.toString());
-            const path = deps.getCurrentPath() ? String(deps.getCurrentPath()) : deps.absPathFromVscodeUri(uri);
-            const languageId = String(model.getLanguageId ? model.getLanguageId() : langId);
-            return deps.editorWorkbenchCall(
-              'semantic_tokens_range',
-              {
-                uri,
-                path,
-                languageId,
-                range: {
-                  startLineNumber: range.startLineNumber,
-                  startColumn: range.startColumn,
-                  endLineNumber: range.endLineNumber,
-                  endColumn: range.endColumn,
-                },
-                text: getModelText(model),
-                modelVersionId: getModelVersion(model),
-                timeoutMs: 10000,
+            return provideWorkbenchDocumentRangeSemanticTokensFromVscodeMainThread({
+              model,
+              languageId: langId,
+              range,
+              adapterTimeoutMs: 10000,
+              callTimeoutMs: 12000,
+              getCurrentPath: deps.getCurrentPath,
+              absPathFromVscodeUri: deps.absPathFromVscodeUri,
+              callWorkbenchSemanticTokensRange(params, opts) {
+                return deps.editorWorkbenchCall('semantic_tokens_range', params, opts);
               },
-              { timeoutMs: 12000 },
-            ).then((out) => {
-              const payload = extractWorkbenchPayload(out);
-              const data = payload && asArray(payload.data);
-              if (!payload || !data || !data.length) return null;
-              return {
-                resultId: typeof payload.resultId === 'string' ? payload.resultId : '',
-                data: new Uint32Array(data as number[]),
-              };
             }).catch(() => null);
           } catch (_) {
             return null;
@@ -609,47 +578,19 @@ export function createEditorLanguageBridgeProviders(
       },
       provideDocumentSemanticTokens(model, lastResultId) {
         try {
-          if (!model || !model.uri) return null;
-          const uri = String(model.uri.toString());
-          const path = deps.getCurrentPath() ? String(deps.getCurrentPath()) : deps.absPathFromVscodeUri(uri);
-          const languageId = String(model.getLanguageId ? model.getLanguageId() : langId);
-          console.log('[semanticTokens] FULL REQUEST ' + languageId + ' path=' + path + ' prevResultId=' + (lastResultId || '0'));
-          return deps.editorWorkbenchCall(
-            'semantic_tokens',
-            {
-              uri,
-              path,
-              languageId,
-              previousResultId: lastResultId || '0',
-              text: getModelText(model),
-              modelVersionId: getModelVersion(model),
-              timeoutMs: 10000,
+          const languageId = String(model && model.getLanguageId ? model.getLanguageId() : langId);
+          console.log('[semanticTokens] FULL REQUEST ' + languageId + ' prevResultId=' + (lastResultId || '0'));
+          return provideWorkbenchDocumentSemanticTokensFromVscodeMainThread({
+            model,
+            languageId: langId,
+            lastResultId,
+            adapterTimeoutMs: 10000,
+            callTimeoutMs: 12000,
+            getCurrentPath: deps.getCurrentPath,
+            absPathFromVscodeUri: deps.absPathFromVscodeUri,
+            callWorkbenchSemanticTokens(params, opts) {
+              return deps.editorWorkbenchCall('semantic_tokens', params, opts);
             },
-            { timeoutMs: 12000 },
-          ).then((out) => {
-            const payload = extractWorkbenchPayload(out);
-            if (!payload) return null;
-            const edits = asArray(payload.edits);
-            if (payload.type === 'delta' && edits) {
-              return {
-                resultId: typeof payload.resultId === 'string' ? payload.resultId : '',
-                edits: edits.map((edit) => {
-                  const e = asRecord(edit);
-                  const editData = asArray(e && e.data);
-                  return {
-                    start: Number(e && e.start ? e.start : 0),
-                    deleteCount: Number(e && e.deleteCount ? e.deleteCount : 0),
-                    data: editData ? new Uint32Array(editData as number[]) : undefined,
-                  };
-                }),
-              };
-            }
-            const data = asArray(payload.data);
-            if (!data || !data.length) return null;
-            return {
-              resultId: typeof payload.resultId === 'string' ? payload.resultId : '',
-              data: new Uint32Array(data as number[]),
-            };
           }).catch((error) => {
             console.warn('[semanticTokens] request failed', error);
             return null;

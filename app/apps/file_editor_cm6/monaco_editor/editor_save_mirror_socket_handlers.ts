@@ -49,6 +49,7 @@ interface SaveMirrorSocketHandlerDeps {
   getDiffEditor(): unknown;
   getGitHeadModel(): unknown;
   getBaseSha256(): string | null;
+  setBaseSha256(value: string | null): void;
   getLastContentSha256(): string | null;
   setLastContentSha256(value: string | null): void;
   getLastLocalEditAt(): number;
@@ -152,6 +153,18 @@ function handleEditorCacheStateEvent(
   const cacheStatePayload = asCacheStatePayload(payload);
   const currentPath = deps.getCurrentPath();
   if (!isCacheStatePayloadForCurrentPath(cacheStatePayload, currentPath)) return;
+  const baseSha = typeof cacheStatePayload?.base_sha256 === 'string' && cacheStatePayload.base_sha256.length === 64
+    ? cacheStatePayload.base_sha256
+    : null;
+  const contentSha = typeof cacheStatePayload?.content_sha256 === 'string' && cacheStatePayload.content_sha256.length === 64
+    ? cacheStatePayload.content_sha256
+    : null;
+  if (baseSha) {
+    deps.setBaseSha256(baseSha);
+  } else if (cacheStatePayload?.unsaved === false && contentSha) {
+    deps.setBaseSha256(contentSha);
+  }
+  if (contentSha) deps.setLastContentSha256(contentSha);
 
   if (isCacheStateClean(cacheStatePayload)) {
     handleCleanCacheState({

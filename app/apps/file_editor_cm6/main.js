@@ -846,8 +846,17 @@ function _applyEditorCacheState(data) {
 
   const normalizedPath = (typeof data.path === 'string' && data.path) ? data.path : null;
 
-  if (typeof data.content_sha256 === 'string' && data.content_sha256.length === 64) {
-    lastSha256 = data.content_sha256;
+  const contentSha = (typeof data.content_sha256 === 'string' && data.content_sha256.length === 64)
+    ? data.content_sha256
+    : null;
+  const baseSha = (typeof data.base_sha256 === 'string' && data.base_sha256.length === 64)
+    ? data.base_sha256
+    : null;
+  const isCleanState = data.state === 'clean' || data.unsaved === false;
+  if (baseSha) {
+    lastSha256 = baseSha;
+  } else if (isCleanState && contentSha) {
+    lastSha256 = contentSha;
   }
   let restoredActive = (typeof restoredSessionActive !== 'undefined') ? restoredSessionActive : false;
   if (data.reason === 'restore') {

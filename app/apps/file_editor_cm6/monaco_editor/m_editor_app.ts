@@ -1206,6 +1206,7 @@ interface MonacoBootWindowLike extends Window {
         getDiffEditor: function() { return diffEditor; },
         getGitHeadModel: function() { return gitHeadModel; },
         getBaseSha256: function() { return baseSha256; },
+        setBaseSha256: function(value: string | null) { baseSha256 = value; },
         getLastContentSha256: function() { return lastContentSha256; },
         setLastContentSha256: function(value: string | null) { lastContentSha256 = value; },
         getLastLocalEditAt: function() { return lastLocalEditAt; },

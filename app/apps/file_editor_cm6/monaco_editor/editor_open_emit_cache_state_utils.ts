@@ -3,6 +3,7 @@ export function emitOpenCacheState(
   absPath: string,
   hasDraft: boolean,
   sha256: string | null,
+  baseSha256: string | null,
   autoSave: boolean | null,
 ): void {
   emitToHostFn('editor_cache_state', {
@@ -11,6 +12,7 @@ export function emitOpenCacheState(
     unsaved: hasDraft,
     reason: hasDraft ? 'restore' : 'set_content',
     content_sha256: sha256,
+    base_sha256: baseSha256 || (hasDraft ? null : sha256),
     auto_save: autoSave,
   });
   if (hasDraft) emitToHostFn('editor_draft_state', { has_draft: true, path: absPath });

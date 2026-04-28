@@ -149,11 +149,19 @@ async def handle_editor_mirror(
         return
     content = content_obj
 
+    content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
     base_sha256_obj = payload.get("base_sha256")
     if isinstance(base_sha256_obj, str) and len(base_sha256_obj) == 64:
         base_sha256 = base_sha256_obj
     else:
-        base_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        base_sha256 = content_sha256
+    try:
+        current_meta = _typed_get_file_meta(Path(path))
+        current_sha = current_meta.get("sha256")
+        if isinstance(current_sha, str) and current_sha == content_sha256:
+            base_sha256 = current_sha
+    except Exception:
+        pass
 
     meta = runtime_meta()
     entry = _history_store.upsert_cached_document(
@@ -188,6 +196,7 @@ async def handle_editor_mirror(
             "unsaved": is_unsaved,
             "reason": "mirror",
             "content_sha256": entry.get("content_sha256"),
+            "base_sha256": entry.get("base_sha256"),
             "source_client": sid,
         },
     )
@@ -257,9 +266,11 @@ async def handle_editor_save_request(
         return {"ok": False, "error": "invalid_content"}
     content = content_obj
 
-    base_sha256 = get_opt_str(payload, "base_sha256")
+    # The editor-owned snapshot is authoritative for save conflict checks.
+    # Host state can lag or reflect draft content hashes, so it is only fallback.
+    base_sha256 = get_opt_str(snapshot, "base_sha256")
     if not (isinstance(base_sha256, str) and len(base_sha256) == 64):
-        base_sha256 = get_opt_str(snapshot, "base_sha256")
+        base_sha256 = get_opt_str(payload, "base_sha256")
     if not (isinstance(base_sha256, str) and len(base_sha256) == 64):
         base_sha256 = None
     if payload.get("force") is True:
@@ -323,6 +334,7 @@ async def handle_editor_save_request(
             "unsaved": False,
             "reason": "save",
             "content_sha256": file_meta.get("sha256"),
+            "base_sha256": file_meta.get("sha256"),
             "source_client": sid,
         },
     )

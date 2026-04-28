@@ -57,6 +57,7 @@ export interface SemanticParsedFull {
   type: "full";
   resultId: string;
   data: number[];
+  dto: SemanticTokensFullDto;
   legend?: unknown;
 }
 
@@ -70,10 +71,31 @@ export interface SemanticParsedDelta {
   type: "delta";
   resultId: string;
   edits: SemanticParsedDeltaEdit[];
+  dto: SemanticTokensDeltaDto;
   legend?: unknown;
 }
 
 export type SemanticParsedResult = SemanticParsedFull | SemanticParsedDelta;
+
+export interface SemanticTokensFullDto {
+  id: number;
+  type: "full";
+  data: number[];
+}
+
+export interface SemanticTokensDeltaDto {
+  id: number;
+  type: "delta";
+  deltas: SemanticParsedDeltaEdit[];
+}
+
+interface SemanticSyncCacheEntry {
+  signature: string;
+  promise?: Promise<unknown>;
+  result?: unknown;
+}
+
+const semanticSyncByPath = new Map<string, SemanticSyncCacheEntry>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -115,8 +137,25 @@ function numberFrom(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function stringFrom(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
+function textHash(text: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return hash.toString(16);
+}
+
+function semanticSyncSignature(input: Record<string, unknown>, text: string, languageId: string, authority: string): string {
+  const modelVersionId = input.modelVersionId;
+  const versionPart = modelVersionId == null ? "no-version" : String(modelVersionId);
+  return [
+    authority,
+    languageId,
+    versionPart,
+    String(text.length),
+    textHash(text),
+  ].join("|");
 }
 
 async function syncTextIfProvided(
@@ -129,15 +168,40 @@ async function syncTextIfProvided(
   label: string,
 ): Promise<Record<string, unknown> | null> {
   if (input.text == null || !path) return null;
+  const text = String(input.text);
+  const signature = semanticSyncSignature(input, text, languageId, authority);
+  const cached = semanticSyncByPath.get(path);
+  if (cached && cached.signature === signature) {
+    try {
+      if (cached.promise) {
+        await cached.promise;
+      }
+      runtime.log(`[${label}] pre-flight didChange coalesced path=${path}`);
+      return null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      runtime.warn(`[${label}] pre-flight didChange failed: ${message}`);
+      return { ok: false, error: `didChange_ack_failed: ${message}` };
+    }
+  }
+
   try {
-    const syncResult = await runtime.didChange(
-      { path, text: String(input.text), languageId, authority },
+    const promise = Promise.resolve(runtime.didChange(
+      { path, text, languageId, authority },
       { waitForAck: true, timeoutMs: Math.min(timeoutMs, 5000) },
-    );
+    ));
+    semanticSyncByPath.set(path, { signature, promise });
+    const syncResult = await promise;
+    const latest = semanticSyncByPath.get(path);
+    if (latest && latest.signature === signature) {
+      semanticSyncByPath.set(path, { signature, result: syncResult });
+    }
     const result = isRecord(syncResult) ? syncResult : {};
     runtime.log(`[${label}] pre-flight didChange ack path=${path} ver=${result.versionId ?? "?"} type=${result.ackType ?? "?"}`);
     return null;
   } catch (error) {
+    const latest = semanticSyncByPath.get(path);
+    if (latest && latest.signature === signature) semanticSyncByPath.delete(path);
     const message = error instanceof Error ? error.message : String(error);
     runtime.warn(`[${label}] pre-flight didChange failed: ${message}`);
     return { ok: false, error: `didChange_ack_failed: ${message}` };
@@ -156,7 +220,8 @@ function toNumberArray(value: unknown): number[] {
 }
 
 function emptySemanticTokensResult(legend: unknown = null): SemanticParsedFull {
-  return { type: "full", resultId: "", data: [], legend };
+  const dto: SemanticTokensFullDto = { id: 0, type: "full", data: [] };
+  return { type: "full", resultId: "", data: [], dto, legend };
 }
 
 function semanticScore(result: SemanticParsedResult | null): number {
@@ -165,7 +230,9 @@ function semanticScore(result: SemanticParsedResult | null): number {
 }
 
 export function parseSemanticTokensDto(dto: unknown): SemanticParsedResult {
-  const resultId = stringFrom(field(dto, "id") ?? field(dto, "resultId"), "");
+  const id = numberFrom(field(dto, "id") ?? field(dto, "resultId"));
+  const resultIdRaw = field(dto, "id") ?? field(dto, "resultId");
+  const resultId = resultIdRaw == null ? "" : String(resultIdRaw);
 
   if (field(dto, "type") === 2 || field(dto, "edits") || field(dto, "deltas")) {
     const rawEdits = field(dto, "deltas") ?? field(dto, "edits");
@@ -182,17 +249,30 @@ export function parseSemanticTokensDto(dto: unknown): SemanticParsedResult {
         edits.push(normalized);
       }
     }
+    const rawDto: SemanticTokensDeltaDto = {
+      id,
+      type: "delta",
+      deltas: edits,
+    };
     return {
       type: "delta",
       resultId,
       edits,
+      dto: rawDto,
     };
   }
 
+  const data = toNumberArray(field(dto, "data"));
+  const rawDto: SemanticTokensFullDto = {
+    id,
+    type: "full",
+    data,
+  };
   return {
     type: "full",
     resultId,
-    data: toNumberArray(field(dto, "data")),
+    data,
+    dto: rawDto,
   };
 }
 
@@ -222,7 +302,7 @@ export function parseSemanticTokensReply(
       if (dataLen >= 5) {
         log(`★★★ [SEMANTIC_TOKENS_DATA] first tokens: [${data.slice(0, 20).join(", ")}]`);
       }
-      return { type: "full", resultId: String(dtoId), data, legend };
+      return { type: "full", resultId: String(dtoId), data, dto: { id: dtoId, type: "full", data }, legend };
     }
 
     if (dtoType === 2) {
@@ -242,7 +322,7 @@ export function parseSemanticTokensReply(
         edits.push(edit);
       }
       log(`★★★ [SEMANTIC_TOKENS_DTO] delta id=${dtoId} edits=${edits.length}`);
-      return { type: "delta", resultId: String(dtoId), edits, legend };
+      return { type: "delta", resultId: String(dtoId), edits, dto: { id: dtoId, type: "delta", deltas: edits }, legend };
     }
 
     warn(`★★★ [SEMANTIC_TOKENS_DTO] unknown dtoType=${dtoType} id=${dtoId}`);

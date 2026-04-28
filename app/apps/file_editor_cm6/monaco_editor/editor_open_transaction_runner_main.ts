@@ -52,7 +52,7 @@ interface RunEditorOpenTransactionDeps {
   coercePositiveInt(value: unknown): number | null;
   shouldRecreateOpenModel(monacoRef: unknown, monacoFileUriFn: (monacoRef: unknown, path: string) => EditorUriLike | null, model: OpenModelLike | null, absPath: string): boolean;
   applyOpenModelTextSafely(model: OpenModelLike, editor: OpenEditorLike, content: string, setApplyingRemote: (value: boolean) => void): void;
-  emitOpenCacheState(emitToHostFn: (eventType: string, payload: Record<string, unknown>) => void, absPath: string, hasDraft: boolean, sha256: string | null, autoSave: boolean | null): void;
+  emitOpenCacheState(emitToHostFn: (eventType: string, payload: Record<string, unknown>) => void, absPath: string, hasDraft: boolean, sha256: string | null, baseSha256: string | null, autoSave: boolean | null): void;
   queueBackendWorkbenchOpen(payload: Record<string, unknown>): void;
   setApplyingRemote(value: boolean): void;
   openTransactionStore: EditorOpenTransactionStore;
@@ -208,6 +208,7 @@ export async function runEditorOpenTransaction(
       unsaved: !!payload.unsaved,
       reason: payload.reason || 'open',
       content_sha256: payload.content_sha256,
+      base_sha256: payload.base_sha256 || (payload.unsaved ? null : payload.content_sha256),
       auto_save: payload.auto_save,
     });
     if (payload.has_draft) deps.requestDraftDiff('open');

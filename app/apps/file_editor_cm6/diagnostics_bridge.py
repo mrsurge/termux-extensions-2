@@ -1,7 +1,9 @@
 """Diagnostics bridge: adapter WS → editor Socket.IO.
 
-Subscribes to the workbench adapter event stream (WS on port 18181) and
-forwards diagnostics/update events through the editor Socket.IO channel.
+Subscribes to the workbench adapter event stream (WS on port 18181). Explorer
+and problems UI still consume the normalized diagnostics/update fanout; the
+editor iframe consumes the raw VS Code-shaped diagnostics/changeMany lane so
+the editor path mirrors the WBA/VS Code marker contract.
 
 Important: we only forward diagnostics/update once the Monaco iframe tells us
 it is ready to consume markers for the active open request. This eliminates a
@@ -76,6 +78,103 @@ def _abs_path_from_vscode_uri(raw: Any) -> str:
     except Exception:
         pass
     return ""
+
+
+def _vscode_uri_to_string(raw: Any) -> str:
+    """Best-effort URIComponents/string conversion matching the WBA event bridge."""
+    if not raw:
+        return ""
+    if isinstance(raw, str):
+        return raw
+    if not isinstance(raw, dict):
+        return ""
+    external = raw.get("external")
+    if isinstance(external, str) and external:
+        return external
+    fs_path = raw.get("fsPath")
+    if isinstance(fs_path, str) and fs_path:
+        return f"file://{fs_path}"
+    scheme = raw.get("scheme")
+    path = raw.get("path")
+    authority = raw.get("authority", "")
+    if isinstance(scheme, str) and isinstance(path, str) and scheme and path:
+        return f"{scheme}://{authority if isinstance(authority, str) else ''}{path}"
+    return ""
+
+
+def _diagnostic_markers(raw: Any) -> list:
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        buffered = raw.get("__json_with_buffers__")
+        if isinstance(buffered, list):
+            return buffered
+        markers = raw.get("markers")
+        if isinstance(markers, list):
+            return markers
+    return []
+
+
+def _raw_diagnostics_for_editor(ev: dict) -> list[dict]:
+    """Return active-file candidate payloads in raw VS Code $changeMany shape."""
+    args = ev.get("args")
+    if not isinstance(args, list) or len(args) < 2:
+        return []
+    owner = args[0] if isinstance(args[0], str) else "unknown"
+    pairs = args[1] if isinstance(args[1], list) else []
+    out: list[dict] = []
+    for pair in pairs:
+        if not isinstance(pair, list) or len(pair) < 2:
+            continue
+        uri_raw = pair[0]
+        uri = _vscode_uri_to_string(uri_raw)
+        path = _abs_path_from_vscode_uri(uri)
+        if not path:
+            continue
+        markers = _diagnostic_markers(pair[1])
+        out.append(
+            {
+                "type": "diagnostics/changeMany",
+                "ts_ms": ev.get("ts_ms", int(time.time() * 1000)),
+                "owner": owner,
+                "path": path,
+                "uri": uri,
+                "args": [owner, [[uri_raw, markers]]],
+            }
+        )
+    return out
+
+
+async def _emit_or_buffer_editor_diagnostics(sio, payload: dict) -> None:
+    """Gate editor diagnostics until the iframe reports readiness for this file."""
+    global _pending_entries
+    path = str(payload.get("path", ""))
+    if not _consumer_expected_path or path != str(_consumer_expected_path):
+        return
+    if _consumer_ready:
+        await sio.emit(
+            "editor:diagnostics",
+            payload,
+            room="file_editor_cm6",
+            namespace="/editor",
+        )
+        print(
+            f"[diag_bridge] raw editor emit OK owner={payload.get('owner','?')} path={path}",
+            flush=True,
+        )
+        return
+
+    owner = payload.get("owner")
+    payload_type = payload.get("type")
+    _pending_entries = [
+        e for e in _pending_entries
+        if not (e.get("owner") == owner and e.get("type") == payload_type)
+    ]
+    _pending_entries.append(payload)
+    print(
+        f"[diag_bridge] raw editor buffer owner={owner or '?'} path={path} buffered={len(_pending_entries)}",
+        flush=True,
+    )
 
 
 async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bool:
@@ -402,6 +501,15 @@ async def _adapter_ws_loop(sio):
                             print(f"[diag_bridge] watcher/fileChanges emit FAIL: {exc}", flush=True)
                         continue
 
+                    if ev_type == "diagnostics/changeMany":
+                        try:
+                            payloads = _raw_diagnostics_for_editor(ev)
+                            for payload in payloads:
+                                await _emit_or_buffer_editor_diagnostics(sio, payload)
+                        except Exception as exc:
+                            print(f"[diag_bridge] raw editor diagnostics FAIL: {exc}", flush=True)
+                        continue
+
                     if ev_type != "diagnostics/update":
                         continue
 
@@ -414,37 +522,10 @@ async def _adapter_ws_loop(sio):
                     except Exception as exc:
                         print(f"[diag_bridge] explorer/problems emit FAIL: {exc}", flush=True)
 
-                    for entry in entries:
-                        try:
-                            path = str(entry.get("path", ""))
-                            # Gate forwarding until the editor consumer is ready for the active open.
-                            if _consumer_expected_path and path == str(_consumer_expected_path):
-                                if _consumer_ready:
-                                    await sio.emit(
-                                        "editor:diagnostics",
-                                        entry,
-                                        room="file_editor_cm6",
-                                        namespace="/editor",
-                                    )
-                                    print(
-                                        f"[diag_bridge] emit OK path={path} markers={len(entry.get('markers',[]) or [])}",
-                                        flush=True,
-                                    )
-                                else:
-                                    # Buffer per-owner entries for the expected file.
-                                    global _pending_entries
-                                    # Replace any existing entry for the same owner.
-                                    _pending_entries = [e for e in _pending_entries if e.get("owner") != entry.get("owner")]
-                                    _pending_entries.append(entry)
-                                    print(
-                                        f"[diag_bridge] buffer owner={entry.get('owner','?')} path={path} markers={len(entry.get('markers',[]) or [])} buffered={len(_pending_entries)}",
-                                        flush=True,
-                                    )
-                            else:
-                                # Not the active doc (single-doc model): do not forward to the editor.
-                                pass
-                        except Exception as exc:
-                            print(f"[diag_bridge] emit/buffer FAIL: {exc}", flush=True)
+                    # Editor diagnostics consume the raw diagnostics/changeMany lane
+                    # above. Keep normalized diagnostics/update for Explorer/problems
+                    # only so the editor path can mirror the WBA/VS Code marker shape.
+                    continue
 
         except asyncio.CancelledError:
             break

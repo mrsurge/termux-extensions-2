@@ -1,6 +1,7 @@
 interface EditorMirrorPayloadLike {
   path?: unknown;
   content_sha256?: unknown;
+  base_sha256?: unknown;
 }
 
 export function emitMirrorCacheState(
@@ -14,6 +15,7 @@ export function emitMirrorCacheState(
     unsaved: mirrorUnsaved,
     reason: 'mirror',
     content_sha256: payload?.content_sha256,
+    base_sha256: payload?.base_sha256,
   });
   if (mirrorUnsaved) emitToHostFn('editor_draft_state', { has_draft: true, path: payload?.path });
 }

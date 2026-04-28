@@ -27,6 +27,7 @@ export interface EditorCacheStatePayload {
   unsaved?: unknown;
   reason?: unknown;
   content_sha256?: unknown;
+  base_sha256?: unknown;
   source_client?: unknown;
 }
 

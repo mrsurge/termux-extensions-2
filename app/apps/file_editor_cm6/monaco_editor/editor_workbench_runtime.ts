@@ -5,6 +5,7 @@ import { wbBumpGeneration } from './editor_workbench_generation_utils.js';
 import { wbCurrentGeneration, wbQueueDidChange, wbQueueSymbols, wbSetOpenAck } from './editor_workbench_state_utils.js';
 import type { WorkbenchFlowLike, WorkbenchPendingDidChangePayload } from './editor_workbench_state_utils.js';
 import { EDITOR_RPC_METHODS, editorWorkbenchMethodToRpcMethod } from './editor_rpc_contract.ts';
+import { applyVscodeDiagnosticsChangeManyToActiveModel } from './vscode_document_intelligence_vendor/mainThreadDiagnostics.js';
 
 interface MonacoUriLike {
   toString(): string;
@@ -97,11 +98,6 @@ interface WorkbenchRuntimeDeps {
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
-}
-
-function asNumber(value: unknown, fallback: number): number {
-  const next = Number(value);
-  return Number.isFinite(next) ? next : fallback;
 }
 
 export function createEditorWorkbenchRuntime(
@@ -248,94 +244,38 @@ export function createEditorWorkbenchRuntime(
   function applyDiagnosticsUpdate(params: unknown): void {
     try {
       const monacoRef = deps.getMonaco();
-      const markerSeverity = monacoRef && monacoRef.MarkerSeverity;
       const editorNs = monacoRef && monacoRef.editor;
-      if (!markerSeverity || !editorNs || !editorNs.setModelMarkers || !editorNs.getModelMarkers) return;
+      if (!editorNs || !editorNs.setModelMarkers || !editorNs.getModelMarkers) return;
       if (!diagState) diagState = { rx: 0, apply: 0, drop_no_path: 0, drop_no_model: 0, drop_mismatch: 0 };
       diagState.rx += 1;
 
       const model = deps.getModel();
       const currentPath = deps.getCurrentPath();
-      const owner = params && typeof params === 'object' && (params as { owner?: unknown }).owner != null
-        ? String((params as { owner?: unknown }).owner)
-        : 'workbench';
       const activeUri = model && model.uri ? String(model.uri.toString()) : '';
-      const activePath = currentPath ? String(currentPath) : (activeUri ? deps.absPathFromVscodeUri(activeUri) : '');
-      const items = params && typeof params === 'object' && Array.isArray((params as { items?: unknown[] }).items)
-        ? (params as { items: unknown[] }).items
-        : [];
-      let didApply = false;
+      const stats = applyVscodeDiagnosticsChangeManyToActiveModel({
+        model,
+        editorNs,
+        payload: params,
+        currentPath: currentPath ? String(currentPath) : '',
+        activeUri,
+        absPathFromVscodeUri: deps.absPathFromVscodeUri,
+        markKnownOwner(owner) {
+          if (!diagKnownOwners) diagKnownOwners = new Set();
+          diagKnownOwners.add(owner);
+        },
+        emitCounts: emitAggregatedDiagCounts,
+        log(message, ...args) {
+          console.log(message, ...args);
+        },
+      });
 
-      for (const item of items) {
-        if (!item || typeof item !== 'object') continue;
-        const itemPath = deps.absPathFromVscodeUri(String((item as { uri?: unknown; resource?: unknown }).uri || (item as { resource?: unknown }).resource || ''));
-        if (!itemPath) {
-          diagState.drop_no_path += 1;
-          try {
-            const debugWindow = deps.getWindow() as Window & { __debugWorkbenchDiag?: boolean };
-            if (debugWindow.__debugWorkbenchDiag) {
-              console.log('[workbench] diag drop_no_path item.uri=', (item as { uri?: unknown }).uri);
-            }
-          } catch (_) {}
-          continue;
-        }
-
-        const markers = Array.isArray((item as { markers?: unknown[] }).markers) ? (item as { markers: unknown[] }).markers : [];
-        const outMarkers = markers.map((marker) => {
-          const m = (marker && typeof marker === 'object' ? marker : {}) as Record<string, unknown>;
-          const sev = Number(m.severity || 3);
-          let severity = markerSeverity.Info;
-          if (sev === 8) severity = markerSeverity.Error;
-          else if (sev === 4) severity = markerSeverity.Warning;
-          else if (sev === 2) severity = markerSeverity.Info;
-          else if (sev === 1 && markerSeverity.Hint != null) severity = markerSeverity.Hint;
-          let code: string | undefined;
-          try {
-            if (typeof m.code === 'string' || typeof m.code === 'number') code = String(m.code);
-            else if (m.code && typeof m.code === 'object' && (m.code as { value?: unknown }).value != null) code = String((m.code as { value?: unknown }).value);
-          } catch (_) {}
-          return {
-            severity,
-            message: m.message != null ? String(m.message) : '',
-            startLineNumber: Math.max(1, asNumber(m.startLineNumber, 1)),
-            startColumn: Math.max(1, asNumber(m.startColumn, 1)),
-            endLineNumber: Math.max(1, asNumber(m.endLineNumber != null ? m.endLineNumber : m.startLineNumber, 1)),
-            endColumn: Math.max(1, asNumber(m.endColumn != null ? m.endColumn : m.startColumn, 1)),
-            source: m.source != null ? String(m.source) : 'vscode',
-            code,
-          };
-        });
-
-        if (model && model.uri && activePath && itemPath === activePath) {
-          try {
-            if (!diagKnownOwners) diagKnownOwners = new Set();
-            diagKnownOwners.add(owner);
-            console.log('[workbench] setModelMarkers owner=' + owner + ' count=' + outMarkers.length + ' sevs=[' + outMarkers.map((m) => m.severity).join(',') + '] lines=[' + outMarkers.map((m) => m.startLineNumber).join(',') + ']');
-            if (outMarkers.length > 0) console.log('[workbench] marker[0]:', JSON.stringify(outMarkers[0]));
-            editorNs.setModelMarkers(model, owner, outMarkers);
-            const verify = editorNs.getModelMarkers({ resource: model.uri }) || [];
-            console.log('[workbench] verify getModelMarkers count=' + verify.length);
-            emitAggregatedDiagCounts(itemPath);
-          } catch (error) {
-            console.error('[workbench] setModelMarkers THREW:', error);
-          }
-          didApply = true;
-          diagState.apply += 1;
-        } else if (model && model.uri && activePath && itemPath !== activePath) {
-          diagState.drop_mismatch += 1;
-          try {
-            const debugWindow = deps.getWindow() as Window & { __debugWorkbenchDiag?: boolean };
-            if (debugWindow.__debugWorkbenchDiag) {
-              console.log('[workbench] diag mismatch itemPath=', itemPath, 'activePath=', activePath);
-            }
-          } catch (_) {}
-        } else if (!model || !model.uri) {
-          diagState.drop_no_model += 1;
-        }
-      }
+      diagState.apply += stats.applied;
+      diagState.drop_no_path += stats.dropNoPath;
+      diagState.drop_no_model += stats.dropNoModel;
+      diagState.drop_mismatch += stats.dropMismatch;
 
       deps.setDebugDiag('diag=rx' + diagState.rx + '/ap' + diagState.apply + '/np' + diagState.drop_no_path + '/nm' + diagState.drop_no_model + '/mm' + diagState.drop_mismatch);
-      if (!didApply) {
+      if (!stats.applied) {
         // no-op: stale/mismatched diagnostics are intentionally dropped
       }
     } catch (_) {}
