@@ -277,15 +277,6 @@ function extractWorkbenchPayload(result: unknown): Record<string, unknown> | nul
   return inner || record;
 }
 
-function completionProviderKey(langId: string, handle: string): string {
-  return langId + '::' + handle;
-}
-
-function completionProviderHandleNumber(handle: string): number | null {
-  const value = Number(handle);
-  return Number.isFinite(value) ? value : null;
-}
-
 function completionPropertyKind(deps: CreateEditorLanguageBridgeProvidersDeps): number {
   const monacoRef = deps.getMonaco();
   return monacoRef && monacoRef.languages && monacoRef.languages.CompletionItemKind
@@ -406,30 +397,58 @@ export function createEditorLanguageBridgeProviders(
     return String(entry.handle) + '::' + triggerCharacters + '::' + (entry.supportsResolve ? '1' : '0');
   }
 
-  function ensureCompletionProviderRegistered(langId: string, entry: CompletionProviderRegistrationLike): void {
+  function getCompletionProviderSignature(entries: CompletionProviderRegistrationLike[]): string {
+    return entries
+      .map(getCompletionRegistrationSignature)
+      .sort()
+      .join('|');
+  }
+
+  function getCompletionProviderTriggerCharacters(entries: CompletionProviderRegistrationLike[]): string[] {
+    const seen = new Set<string>();
+    const triggers: string[] = [];
+    for (const entry of entries) {
+      const triggerCharacters = Array.isArray(entry.triggerCharacters) ? entry.triggerCharacters : [];
+      for (const trigger of triggerCharacters) {
+        const normalized = String(trigger);
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        triggers.push(normalized);
+      }
+    }
+    return triggers;
+  }
+
+  function getCompletionProviderHandles(entries: CompletionProviderRegistrationLike[]): string[] {
+    return entries
+      .map((entry) => String(entry.handle || '').trim())
+      .filter(Boolean)
+      .sort((left, right) => Number(left) - Number(right));
+  }
+
+  function ensureCompletionProviderRegistered(langId: string): void {
     const monacoRef = deps.getMonaco();
     if (!monacoRef || !monacoRef.languages || !monacoRef.languages.registerCompletionItemProvider) return;
     if (deps.getLanguageWorkersEnabled()) return;
-    const handleKey = entry.handle != null ? String(entry.handle).trim() : '';
-    const providerHandle = completionProviderHandleNumber(handleKey);
-    if (!handleKey || providerHandle === null) return;
-
-    const providerKey = completionProviderKey(langId, handleKey);
-    const nextSignature = getCompletionRegistrationSignature(entry);
+    const entries = getCompletionRegistrations(langId);
+    if (!entries.length) return;
+    const handles = getCompletionProviderHandles(entries);
+    if (!handles.length) return;
+    const nextSignature = getCompletionProviderSignature(entries);
     if (
       nextSignature
-      && deps.languageBridge.completionProviderSignatureByLanguage[providerKey] === nextSignature
-      && deps.languageBridge.completionProviderDisposablesByLanguage[providerKey]
+      && deps.languageBridge.completionProviderSignatureByLanguage[langId] === nextSignature
+      && deps.languageBridge.completionProviderDisposablesByLanguage[langId]
     ) {
       return;
     }
 
-    const existingDisposable = deps.languageBridge.completionProviderDisposablesByLanguage[providerKey];
+    const existingDisposable = deps.languageBridge.completionProviderDisposablesByLanguage[langId];
     if (existingDisposable && typeof existingDisposable.dispose === 'function') {
       try { existingDisposable.dispose(); } catch (_) {}
     }
 
-    const triggerCharacters = Array.isArray(entry.triggerCharacters) ? entry.triggerCharacters.map(String).filter(Boolean) : [];
+    const triggerCharacters = getCompletionProviderTriggerCharacters(entries);
     const registrationDisposable = monacoRef.languages.registerCompletionItemProvider(langId, {
       __te2WorkbenchProvider: true,
       triggerCharacters,
@@ -438,7 +457,6 @@ export function createEditorLanguageBridgeProviders(
           deps.flushMirrorDebounce();
           void token;
           return provideWorkbenchCompletionItemsFromVscodeSuggest({
-            providerHandle,
             languageId: langId,
             model,
             position: pos,
@@ -458,20 +476,18 @@ export function createEditorLanguageBridgeProviders(
         }
       },
     });
-    deps.languageBridge.completionProviderDisposablesByLanguage[providerKey] = (
+    deps.languageBridge.completionProviderDisposablesByLanguage[langId] = (
       registrationDisposable && typeof (registrationDisposable as MonacoDisposableLike).dispose === 'function'
         ? registrationDisposable as MonacoDisposableLike
         : null
     );
-    deps.languageBridge.completionProviderSignatureByLanguage[providerKey] = nextSignature;
+    deps.languageBridge.completionProviderSignatureByLanguage[langId] = nextSignature;
     pruneNativeWorkerCompletionProviders(deps, langId);
-    console.log('[completions] registered provider bridge for lang=' + langId + ' handle=' + handleKey + ' triggers=' + triggerCharacters.join(','));
+    console.log('[completions] registered aggregated provider bridge for lang=' + langId + ' handles=' + handles.join(',') + ' triggers=' + triggerCharacters.join(','));
   }
 
   function ensureCompletionProvidersRegistered(langId: string): void {
-    for (const entry of getCompletionRegistrations(langId)) {
-      ensureCompletionProviderRegistered(langId, entry);
-    }
+    ensureCompletionProviderRegistered(langId);
     pruneNativeWorkerCompletionProviders(deps, langId);
   }
 

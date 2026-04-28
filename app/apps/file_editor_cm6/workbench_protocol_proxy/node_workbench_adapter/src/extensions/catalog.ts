@@ -164,6 +164,7 @@ export function buildExtensionsSnapshot(scannedExtensions: unknown[], options: E
     if (ident.endsWith("-language-features")) return true;
     if (ident.startsWith("vscode.theme-")) return true;
     if (ident === "vscode.configuration-editing") return true;
+    if (ident === "vscode.emmet") return true;
 
     const manifest = recordField(ext, "packageJSON") ?? (isRecord(ext) ? ext : {});
     const contributes = recordField(manifest, "contributes");

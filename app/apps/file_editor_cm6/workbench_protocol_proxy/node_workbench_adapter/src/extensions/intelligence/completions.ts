@@ -88,6 +88,13 @@ function suggestResultDto(value: unknown): Record<string, unknown> | null {
   return isRecord(value) ? value : null;
 }
 
+function optionalProviderHandle(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const handle = Number(value);
+  return Number.isFinite(handle) ? handle : null;
+}
+
 function textHash(text: string): string {
   let hash = 2166136261;
   for (let i = 0; i < text.length; i += 1) {
@@ -218,8 +225,8 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
     }
   }
 
-  const providerHandle = Number(input.providerHandle);
-  if (Number.isFinite(providerHandle)) {
+  const providerHandle = optionalProviderHandle(input.providerHandle);
+  if (providerHandle !== null) {
     return provideCompletionSingle(runtime, {
       providerHandle,
       path,

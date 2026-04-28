@@ -32,7 +32,7 @@ export interface VscodeWorkbenchCompletionRequest {
   uri: string;
   path: string;
   languageId: string;
-  providerHandle: number;
+  providerHandle?: number;
   lineNumber: number;
   column: number;
   triggerKind: number;
@@ -45,7 +45,7 @@ export interface VscodeWorkbenchCompletionRequest {
 export type VscodeWorkbenchCompletionList = VscodeCompletionListLike;
 
 export interface VscodeSuggestWorkbenchProviderDeps {
-  providerHandle: number;
+  providerHandle?: number | null;
   languageId: string;
   model: VscodeSuggestBridgeModel | null | undefined;
   position: VscodeSuggestBridgePosition | null | undefined;
@@ -144,7 +144,7 @@ export async function provideWorkbenchCompletionItemsFromVscodeSuggest(
 ): Promise<VscodeWorkbenchCompletionList> {
   const uri = modelUriString(deps.model);
   const path = uri ? (deps.absPathFromVscodeUri(uri) || String(deps.getCurrentPath() || '')) : String(deps.getCurrentPath() || '');
-  if (!uri || !path || !Number.isFinite(deps.providerHandle)) {
+  if (!uri || !path) {
     return normalizeVscodeCompletionListFromCompletionModel({ suggestions: [] });
   }
 
@@ -154,12 +154,14 @@ export async function provideWorkbenchCompletionItemsFromVscodeSuggest(
     uri,
     path,
     languageId,
-    providerHandle: deps.providerHandle,
     lineNumber: Number(deps.position && deps.position.lineNumber ? deps.position.lineNumber : 1),
     column: Number(deps.position && deps.position.column ? deps.position.column : 1),
     triggerKind: trigger.triggerKind,
     timeoutMs: Number.isFinite(Number(deps.adapterTimeoutMs)) ? Number(deps.adapterTimeoutMs) : 8000,
   };
+  if (Number.isFinite(Number(deps.providerHandle))) {
+    params.providerHandle = Number(deps.providerHandle);
+  }
   if (trigger.triggerCharacter) params.triggerCharacter = trigger.triggerCharacter;
   const text = modelText(deps.model);
   if (text !== undefined) params.text = text;
