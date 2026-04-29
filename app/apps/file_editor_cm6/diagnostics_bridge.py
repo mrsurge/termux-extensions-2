@@ -1,8 +1,5 @@
 """Diagnostics bridge orchestration for adapter diagnostics intake.
 
-The editor diagnostics lane is handled by a dedicated raw sideband helper in
-`monaco_editor.editor_backend_services.diagnostics_sideband`.
-
 This module owns:
 
 - adapter WS intake
@@ -342,17 +339,9 @@ async def _adapter_ws_loop(sio):
                         continue
 
                     if ev_type == "diagnostics/changeMany":
-                        try:
-                            from .monaco_editor.editor_backend_services.diagnostics_sideband import (
-                                emit_or_buffer_editor_diagnostics_sideband,
-                                raw_diagnostics_sideband_payloads,
-                            )
-
-                            payloads = raw_diagnostics_sideband_payloads(ev)
-                            for payload in payloads:
-                                await emit_or_buffer_editor_diagnostics_sideband(sio, payload)
-                        except Exception as exc:
-                            print(f"[diag_bridge] raw editor diagnostics FAIL: {exc}", flush=True)
+                        # Editor-owned raw diagnostics now ride the direct WBA
+                        # Socket.IO lane. Python keeps only normalized
+                        # explorer/problems diagnostics fanout here.
                         continue
 
                     if ev_type != "diagnostics/update":
@@ -411,11 +400,3 @@ def stop_bridge():
     # Purge the diagnostics cache so stale markers are never replayed
     # after the adapter shuts down or a project switch occurs.
     _diag_cache.clear()
-    try:
-        from .monaco_editor.editor_backend_services.diagnostics_sideband import (
-            clear_editor_diagnostics_sideband_state,
-        )
-
-        clear_editor_diagnostics_sideband_state()
-    except Exception:
-        pass

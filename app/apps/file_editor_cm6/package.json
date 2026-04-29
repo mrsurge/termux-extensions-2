@@ -11,5 +11,8 @@
     "@types/node": "^20.19.39",
     "esbuild": "^0.25.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.3"
   }
 }

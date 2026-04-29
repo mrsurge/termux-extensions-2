@@ -8,12 +8,14 @@ import process from "node:process";
 import { Buffer } from "node:buffer";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
+import type { EditorWbaSocketServer } from "./editor-socket.mjs";
 import type { EventBridgeRuntime } from "./event-bridge";
 import type { AdapterServerState as DispatchServerState, HeapSnapshotResult, WorkbenchLike } from "./request-dispatch";
 
 const { WorkbenchClient } = await import("../client/workbench-client.mjs");
 const bridgeMod = await import("./event-bridge.mjs");
 const dispatchMod = await import("./request-dispatch.mjs");
+const editorSocketMod = await import("./editor-socket.mjs");
 const stdioMod = await import("./stdio-protocol.mjs");
 const textmateMod = await import("./textmate-grammars.mjs");
 
@@ -24,6 +26,7 @@ const {
   logStatus: logBridgeStatus,
 } = bridgeMod;
 const { dispatchJsonRpcRequest } = dispatchMod;
+const { attachEditorWbaSocket } = editorSocketMod;
 const {
   buildJsonRpcErrorReply,
   encodePushLine,
@@ -403,8 +406,12 @@ const HEAP_SNAPSHOT_INTERVAL_MS = Number(process.env.TE2_HEAP_SNAPSHOT_INTERVAL_
 const HEAP_SNAPSHOT_PATH = process.env.TE2_HEAP_SNAPSHOT_PATH || "";
 const HEAP_SNAPSHOT_DIR = process.env.TE2_HEAP_SNAPSHOT_DIR || "";
 let _heapSnapTimer: NodeJS.Timeout | null = null;
+let editorWbaSocketServer: EditorWbaSocketServer | null = null;
 
 function wsBroadcastNotification(method: string, params: unknown): void {
+  try {
+    editorWbaSocketServer?.broadcastNotification(method, params);
+  } catch {}
   if (wsClients.size === 0) return;
   const msg = JSON.stringify({ jsonrpc: "2.0", method, params });
   for (const sock of wsClients) {
@@ -628,7 +635,8 @@ const server = http.createServer(async (req, res) => {
           "  GET  /health",
           "",
           "Reserved:",
-          "  /ws   (WebSocket JSON-RPC in final product)",
+          "  /ws                      (plain WebSocket JSON-RPC/event stream)",
+          "  /wba_ws/socket.io /wba   (editor-facing WBA Socket.IO RPC/event stream)",
           "",
           "Try:",
           `  curl -s -X POST -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"te2.ping\"}' http://${HOST}:${PORT}/cmd`,
@@ -661,9 +669,18 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+editorWbaSocketServer = attachEditorWbaSocket(server, {
+  handleJsonRpc,
+  nowMs,
+  log: (...args: unknown[]) => console.log(...args),
+});
+
 server.on("upgrade", (req, socket) => {
   try {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    if (url.pathname.startsWith("/wba_ws/socket.io")) {
+      return;
+    }
     if (url.pathname !== "/ws") {
       socket.end("HTTP/1.1 404 Not Found\r\n\r\n");
       return;

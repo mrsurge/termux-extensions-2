@@ -21,24 +21,6 @@ EDITOR_RPC_METHOD_GIT_BASELINES_GET: Final = "editor.gitBaselines.get"
 EDITOR_RPC_METHOD_DRAFT_DIFF_GET: Final = "editor.draftDiff.get"
 EDITOR_RPC_METHOD_MIRROR_PUBLISH: Final = "editor.mirror.publish"
 EDITOR_RPC_METHOD_SAVE: Final = "editor.save"
-EDITOR_RPC_METHOD_WORKBENCH_OPEN_FILE: Final = "editor.workbench.openFile"
-EDITOR_RPC_METHOD_WORKBENCH_HOVER: Final = "editor.workbench.hover"
-EDITOR_RPC_METHOD_WORKBENCH_COMPLETIONS: Final = "editor.workbench.completions"
-EDITOR_RPC_METHOD_WORKBENCH_INLAY_HINTS: Final = "editor.workbench.inlayHints"
-EDITOR_RPC_METHOD_WORKBENCH_INLAY_HINTS_RESOLVE: Final = "editor.workbench.inlayHints.resolve"
-EDITOR_RPC_METHOD_WORKBENCH_INLAY_HINTS_RELEASE: Final = "editor.workbench.inlayHints.release"
-EDITOR_RPC_METHOD_WORKBENCH_INLINE_COMPLETIONS: Final = "editor.workbench.inlineCompletions"
-EDITOR_RPC_METHOD_WORKBENCH_INLINE_COMPLETIONS_FREE: Final = "editor.workbench.inlineCompletions.free"
-EDITOR_RPC_METHOD_WORKBENCH_INLINE_COMPLETIONS_DID_SHOW: Final = "editor.workbench.inlineCompletions.didShow"
-EDITOR_RPC_METHOD_WORKBENCH_SEMANTIC_TOKENS: Final = "editor.workbench.semanticTokens"
-EDITOR_RPC_METHOD_WORKBENCH_SEMANTIC_TOKENS_LEGEND: Final = "editor.workbench.semanticTokensLegend"
-EDITOR_RPC_METHOD_WORKBENCH_SEMANTIC_TOKENS_RANGE: Final = "editor.workbench.semanticTokensRange"
-EDITOR_RPC_METHOD_WORKBENCH_SYMBOLS: Final = "editor.workbench.symbols"
-EDITOR_RPC_METHOD_WORKBENCH_FOLDING_RANGES: Final = "editor.workbench.foldingRanges"
-EDITOR_RPC_METHOD_WORKBENCH_PROVIDERS: Final = "editor.workbench.providers"
-EDITOR_RPC_METHOD_WORKBENCH_DID_CHANGE: Final = "editor.workbench.didChange"
-EDITOR_RPC_METHOD_WORKBENCH_GRAMMARS_LIST: Final = "editor.workbench.grammarsList"
-EDITOR_RPC_METHOD_WORKBENCH_GRAMMARS_LOAD: Final = "editor.workbench.grammarsLoad"
 
 EditorRpcMethod = Literal[
     "editor.open",
@@ -47,24 +29,6 @@ EditorRpcMethod = Literal[
     "editor.draftDiff.get",
     "editor.mirror.publish",
     "editor.save",
-    "editor.workbench.openFile",
-    "editor.workbench.hover",
-    "editor.workbench.completions",
-    "editor.workbench.inlayHints",
-    "editor.workbench.inlayHints.resolve",
-    "editor.workbench.inlayHints.release",
-    "editor.workbench.inlineCompletions",
-    "editor.workbench.inlineCompletions.free",
-    "editor.workbench.inlineCompletions.didShow",
-    "editor.workbench.semanticTokens",
-    "editor.workbench.semanticTokensLegend",
-    "editor.workbench.semanticTokensRange",
-    "editor.workbench.symbols",
-    "editor.workbench.foldingRanges",
-    "editor.workbench.providers",
-    "editor.workbench.didChange",
-    "editor.workbench.grammarsList",
-    "editor.workbench.grammarsLoad",
 ]
 
 EDITOR_RPC_NOTIFICATION_STATE_SSOT: Final = "editor.state.ssot"

@@ -21,7 +21,6 @@ from .editor_ws import (
     editor_runtime_active_project,
     editor_runtime_broadcast_active_file_update,
     editor_runtime_build_connect_snapshot,
-    editor_runtime_coerce_generation,
     editor_runtime_emit_host_active_file_changed,
     editor_runtime_emit_room_event,
     editor_runtime_is_under_project,
@@ -32,10 +31,6 @@ from .editor_ws import (
     editor_runtime_record_save_sha,
     editor_runtime_set_last_file,
     editor_runtime_update_session_state,
-    editor_runtime_has_open_baseline,
-    editor_runtime_mark_open_baseline,
-    editor_runtime_workbench_get_lock,
-    editor_workbench_logger,
 )
 
 
@@ -81,10 +76,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                     active_project=editor_runtime_active_project,
                     normalize_abs_path=editor_runtime_normalize_abs_path,
                     is_under_project=editor_runtime_is_under_project,
-                    get_lock=editor_runtime_workbench_get_lock,
-                    coerce_generation=editor_runtime_coerce_generation,
-                    mark_open_baseline=editor_runtime_mark_open_baseline,
-                    has_open_baseline=editor_runtime_has_open_baseline,
                     runtime_meta=editor_runtime_meta,
                     read_file_payload=editor_runtime_read_file_payload,
                     update_session_state=editor_runtime_update_session_state,
@@ -94,7 +85,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                     emit_host_active_file_changed=editor_runtime_emit_host_active_file_changed,
                     notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
                     record_save_sha=editor_runtime_record_save_sha,
-                    logger=editor_workbench_logger,
                 )
                 return
 
@@ -105,10 +95,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 active_project=editor_runtime_active_project,
                 normalize_abs_path=editor_runtime_normalize_abs_path,
                 is_under_project=editor_runtime_is_under_project,
-                get_lock=editor_runtime_workbench_get_lock,
-                coerce_generation=editor_runtime_coerce_generation,
-                mark_open_baseline=editor_runtime_mark_open_baseline,
-                has_open_baseline=editor_runtime_has_open_baseline,
                 runtime_meta=editor_runtime_meta,
                 read_file_payload=editor_runtime_read_file_payload,
                 update_session_state=editor_runtime_update_session_state,
@@ -118,7 +104,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 emit_host_active_file_changed=editor_runtime_emit_host_active_file_changed,
                 notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
                 record_save_sha=editor_runtime_record_save_sha,
-                logger=editor_workbench_logger,
             )
             await emit_editor_rpc_result(
                 lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),

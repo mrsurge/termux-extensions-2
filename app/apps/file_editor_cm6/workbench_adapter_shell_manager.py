@@ -221,19 +221,9 @@ async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> Non
 
 
 async def _handle_push_event(obj: dict) -> None:
-    """Forward adapter push events to the editor frontend via Socket.IO."""
-    event_name = obj.get("event", "")
-    if event_name in {"semantic_tokens_provider_registered", "completions_provider_registered", "inlay_hints_provider_registered", "inline_completions_provider_registered"}:
-        try:
-            from .monaco_editor.editor_socketio import EDITOR_SIO
-            await EDITOR_SIO.emit(
-                f"editor:{event_name}",
-                obj,
-                namespace="/editor",
-            )
-            log.info("[push] forwarded %s lang=%s", event_name, obj.get("language"))
-        except Exception as exc:
-            log.warning("[push] failed to emit %s: %s", event_name, exc)
+    """Consume legacy adapter push frames without relaying editor WBA data."""
+    if obj and log.isEnabledFor(logging.DEBUG):
+        log.debug("[push] ignored legacy adapter push frame; direct WBA socket owns editor notifications")
 
 
 async def adapter_rpc(method: str, params: Optional[dict] = None, timeout: float = 30.0) -> dict:

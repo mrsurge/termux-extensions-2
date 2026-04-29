@@ -69,7 +69,6 @@ import { collectBootLanguageIds } from './editor_boot_language_ids_utils.ts';
 import { warnIfPlaintextOnlyLanguages } from './editor_boot_plaintext_warn_utils.ts';
 import { applyActiveModelLanguage } from './editor_boot_apply_active_model_language_utils.ts';
 import { applyBootSnapshotToEditor } from './editor_boot_snapshot_runtime.ts';
-import type { WorkbenchPendingDidChangePayload } from './editor_workbench_state_utils.js';
 import {
   applyDraftDiffDecorations as applyDraftDiffDecorationsRuntime,
   applyDraftZones as applyDraftZonesRuntime,
@@ -99,6 +98,8 @@ import { registerEditorSocketConnectionHandlers } from './editor_socket_connecti
 import { createEditorWorkbenchLanguageCatalogRuntime } from './editor_workbench_language_catalog_runtime.ts';
 import { createEditorWorkbenchRuntime } from './editor_workbench_runtime.ts';
 import { createEditorRpcTransport } from './editor_rpc_transport.ts';
+import { createEditorWbaRpcTransport } from './editor_wba_rpc_transport.ts';
+import { registerEditorWbaRuntimeHandlers } from './editor_wba_runtime_handlers.ts';
 import { createEditorDebugRuntime } from './editor_debug_runtime.ts';
 import { createEditorUiEditorRuntime } from './editor_ui_editor_runtime.ts';
 import { installTextmateDebugHooks } from './editor_textmate_debug_runtime.ts';
@@ -278,6 +279,7 @@ interface MonacoBootWindowLike extends Window {
   let cachedPrefs: CachedPrefsLike | null = null;
   let editorSocket: EditorSocketLike | null = null;
   let editorRpcSocket: EditorSocketLike | null = null;
+  let wbaRpcSocket: EditorSocketLike | null = null;
   let editorSocketId: string | null = null;
   let lastModelReadySyncKey: string | null = null;
   var openTransactionStore = createEditorOpenTransactionStore();
@@ -412,6 +414,11 @@ interface MonacoBootWindowLike extends Window {
     setTimeoutFn: _setTimeoutBound,
     clearTimeoutFn: _clearTimeoutBound,
   });
+  var editorWbaRpcTransport = createEditorWbaRpcTransport({
+    getSocket: function() { return wbaRpcSocket; },
+    setTimeoutFn: _setTimeoutBound,
+    clearTimeoutFn: _clearTimeoutBound,
+  });
 
   var vscodeRpcRuntime = createEditorVscodeRpcRuntime({
     getWindow: function() { return window; },
@@ -537,6 +544,18 @@ interface MonacoBootWindowLike extends Window {
     return editorRpcTransport.isConnected();
   }
 
+  function editorWbaRpcCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
+    return editorWbaRpcTransport.call(method, params || {}, opts);
+  }
+
+  function editorWbaRpcNotify(method: string, params?: Record<string, unknown>): boolean {
+    return editorWbaRpcTransport.notify(method, params || {});
+  }
+
+  function isEditorWbaRpcConnected(): boolean {
+    return editorWbaRpcTransport.isConnected();
+  }
+
 
   function _applyDiagnosticsUpdate(params: unknown): void {
     workbenchRuntime.applyDiagnosticsUpdate(params);
@@ -587,7 +606,6 @@ interface MonacoBootWindowLike extends Window {
   var workbenchRuntime = createEditorWorkbenchRuntime({
     getWindow: function() { return window; },
     getMonaco: function() { return monaco || window.monaco || null; },
-    getEditorSocket: function() { return editorSocket; },
     getEditor: function() { return editor; },
     getModel: function() { return model; },
     getCurrentPath: function() { return currentPath; },
@@ -599,9 +617,9 @@ interface MonacoBootWindowLike extends Window {
     setDebugDiag: setDebugDiag,
     requestBreadcrumbSymbols: function(path, opts) { breadcrumbRuntime.requestSymbols(path, opts); },
     languageWorkersEnabled: _languageWorkersEnabled,
-    isRpcConnected: isEditorRpcConnected,
-    rpcCall: editorRpcCall,
-    rpcNotify: editorRpcNotify,
+    isWbaRpcConnected: isEditorWbaRpcConnected,
+    wbaRpcCall: editorWbaRpcCall,
+    wbaRpcNotify: editorWbaRpcNotify,
     clearTimeoutFn: _clearTimeoutBound,
     setTimeoutFn: _setTimeoutBound,
   } as Parameters<typeof createEditorWorkbenchRuntime>[0]);
@@ -658,10 +676,6 @@ interface MonacoBootWindowLike extends Window {
 
   function _wbQueueSymbols(path: string, generation: number): void {
     return workbenchRuntime.wbQueueSymbols(path, generation);
-  }
-
-  function _wbEmitDidChange(payload: WorkbenchPendingDidChangePayload): boolean {
-    return workbenchRuntime.wbEmitDidChange(payload);
   }
 
   function _wbFlushDidChangeIfReady() {
@@ -1150,6 +1164,7 @@ interface MonacoBootWindowLike extends Window {
     try {
       if (editorSocket) {
         if (editorRpcSocket) editorRpcTransport.attachSocket(editorRpcSocket);
+        if (wbaRpcSocket) editorWbaRpcTransport.attachSocket(wbaRpcSocket);
         return true;
       }
       if (!window.io) return false;
@@ -1163,7 +1178,13 @@ interface MonacoBootWindowLike extends Window {
         transports: ['websocket'],
         query: { app_id: 'file_editor_cm6' },
       }) as EditorSocketLike;
+      wbaRpcSocket = window.io('/wba', {
+        path: '/wba_ws/socket.io',
+        transports: ['websocket'],
+        query: { app_id: 'file_editor_cm6' },
+      }) as EditorSocketLike;
       editorRpcTransport.attachSocket(editorRpcSocket);
+      editorWbaRpcTransport.attachSocket(wbaRpcSocket);
       registerEditorSocketConnectionHandlers(editorSocket as Parameters<typeof registerEditorSocketConnectionHandlers>[0], buildSocketConnectionDeps({
         rpcNotifications: editorRpcTransport,
         setEditorSocketId: function(value: string | null) { editorSocketId = value; },
@@ -1264,27 +1285,38 @@ interface MonacoBootWindowLike extends Window {
         getCurrentPath: function() { return currentPath; },
         getDraftDiffRequestId: function() { return draftDiffRequestRuntime.getDraftDiffRequestId(); },
         applyDraftDiffDecorations: applyDraftDiffDecorations,
-        getModel: function() { return model; },
-        absPathFromVscodeUri: _absPathFromVscodeUri,
-        applyDiagnosticsUpdate: _applyDiagnosticsUpdate,
-        workbenchPending: workbenchRuntime.getPendingRequests(),
-        clearTimeoutFn: _clearTimeoutBound,
-        languageBridge: languageBridge,
-        registerSemanticTokensWithLegend: _registerSemanticTokensWithLegend,
-        cacheCompletionProviderRegistration: languageBridgeProviders.cacheCompletionProviderRegistration,
-        cacheInlayHintsProviderRegistration: languageBridgeProviders.cacheInlayHintsProviderRegistration,
-        cacheInlineCompletionProviderRegistration: languageBridgeProviders.cacheInlineCompletionProviderRegistration,
-        emitModelReady: emitModelReady,
         getMonaco: function() { return monaco; },
+        getModel: function() { return model; },
         emitToHost: emitToHost,
         getEditor: function() { return editor; },
         runIssuesCommand: runIssuesCommand,
         runFindCommand: runFindCommand,
       }) as Parameters<typeof registerEditorRuntimeSocketHandlers>[1]);
 
+      registerEditorWbaRuntimeHandlers(editorWbaRpcTransport, {
+        getCurrentPath: function() { return currentPath; },
+        getModel: function() { return model; },
+        absPathFromVscodeUri: _absPathFromVscodeUri,
+        applyDiagnosticsUpdate: _applyDiagnosticsUpdate,
+        languageBridge: languageBridge,
+        registerSemanticTokensWithLegend: _registerSemanticTokensWithLegend,
+        cacheCompletionProviderRegistration: languageBridgeProviders.cacheCompletionProviderRegistration,
+        cacheInlayHintsProviderRegistration: languageBridgeProviders.cacheInlayHintsProviderRegistration,
+        cacheInlineCompletionProviderRegistration: languageBridgeProviders.cacheInlineCompletionProviderRegistration,
+      });
+
       if (editorSocket && typeof editorSocket.on === 'function') {
         editorSocket.on('connect', () => {
           void hydrateWorkbenchProviderSnapshot('editor_socket_connect');
+        });
+      }
+      if (wbaRpcSocket && typeof wbaRpcSocket.on === 'function') {
+        wbaRpcSocket.on('connect', () => {
+          console.log('[wba] socket connected');
+          void hydrateWorkbenchProviderSnapshot('wba_socket_connect');
+        });
+        wbaRpcSocket.on('disconnect', () => {
+          console.warn('[wba] socket disconnected');
         });
       }
 

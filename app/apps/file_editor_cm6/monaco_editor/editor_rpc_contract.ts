@@ -41,24 +41,6 @@ export const EDITOR_RPC_METHODS = {
   draftDiffGet: 'editor.draftDiff.get',
   mirrorPublish: 'editor.mirror.publish',
   save: 'editor.save',
-  workbenchOpenFile: 'editor.workbench.openFile',
-  workbenchHover: 'editor.workbench.hover',
-  workbenchCompletions: 'editor.workbench.completions',
-  workbenchInlayHints: 'editor.workbench.inlayHints',
-  workbenchInlayHintsResolve: 'editor.workbench.inlayHints.resolve',
-  workbenchInlayHintsRelease: 'editor.workbench.inlayHints.release',
-  workbenchInlineCompletions: 'editor.workbench.inlineCompletions',
-  workbenchInlineCompletionsFree: 'editor.workbench.inlineCompletions.free',
-  workbenchInlineCompletionsDidShow: 'editor.workbench.inlineCompletions.didShow',
-  workbenchSemanticTokens: 'editor.workbench.semanticTokens',
-  workbenchSemanticTokensLegend: 'editor.workbench.semanticTokensLegend',
-  workbenchSemanticTokensRange: 'editor.workbench.semanticTokensRange',
-  workbenchSymbols: 'editor.workbench.symbols',
-  workbenchFoldingRanges: 'editor.workbench.foldingRanges',
-  workbenchProviders: 'editor.workbench.providers',
-  workbenchDidChange: 'editor.workbench.didChange',
-  workbenchGrammarsList: 'editor.workbench.grammarsList',
-  workbenchGrammarsLoad: 'editor.workbench.grammarsLoad',
 } as const;
 
 export type EditorRpcMethodName = (typeof EDITOR_RPC_METHODS)[keyof typeof EDITOR_RPC_METHODS];
@@ -128,112 +110,6 @@ export interface EditorRpcSaveParams {
   requestId?: string;
 }
 
-export interface EditorRpcWorkbenchOpenFileParams {
-  path: string;
-  languageId?: string;
-  uri?: string;
-  requestId?: string;
-  forceRefresh?: boolean;
-  generation?: number;
-}
-
-export interface EditorRpcWorkbenchHoverParams {
-  path: string;
-  languageId?: string;
-  lineNumber?: number;
-  line?: number;
-  column?: number;
-  character?: number;
-}
-
-export interface EditorRpcWorkbenchCompletionsParams extends EditorRpcWorkbenchHoverParams {
-  triggerKind?: number;
-  triggerCharacter?: string;
-  text?: string;
-}
-
-export interface EditorRpcWorkbenchInlayHintsParams {
-  path: string;
-  languageId?: string;
-  providerHandle?: number | string | null;
-  range?: Record<string, unknown>;
-  text?: string;
-  modelVersionId?: number;
-  timeoutMs?: number;
-}
-
-export interface EditorRpcWorkbenchInlayHintsResolveParams {
-  providerHandle?: number | string | null;
-  cacheId?: unknown;
-}
-
-export interface EditorRpcWorkbenchInlayHintsReleaseParams {
-  providerHandle?: number | string | null;
-  cacheId?: number;
-}
-
-export interface EditorRpcWorkbenchInlineCompletionsParams extends EditorRpcWorkbenchHoverParams {
-  providerHandle?: number | string | null;
-  context?: Record<string, unknown>;
-  text?: string;
-  modelVersionId?: number;
-  timeoutMs?: number;
-}
-
-export interface EditorRpcWorkbenchInlineCompletionsFreeParams {
-  providerHandle?: number | string | null;
-  pid?: number;
-  reason?: Record<string, unknown>;
-}
-
-export interface EditorRpcWorkbenchInlineCompletionsDidShowParams {
-  providerHandle?: number | string | null;
-  pid?: number;
-  idx?: number;
-  updatedInsertText?: string;
-}
-
-export interface EditorRpcWorkbenchSemanticTokensParams {
-  path: string;
-  languageId?: string;
-  previousResultId?: string;
-}
-
-export interface EditorRpcWorkbenchSemanticTokensLegendParams {
-  languageId: string;
-}
-
-export interface EditorRpcWorkbenchSemanticTokensRangeParams {
-  path: string;
-  languageId?: string;
-  range: Record<string, unknown>;
-}
-
-export interface EditorRpcWorkbenchSymbolsParams {
-  path: string;
-  languageId?: string;
-  generation?: number;
-}
-
-export interface EditorRpcWorkbenchFoldingRangesParams {
-  path: string;
-  languageId?: string;
-  generation?: number;
-  context?: Record<string, unknown>;
-  timeoutMs?: number;
-}
-
-export interface EditorRpcWorkbenchDidChangeParams {
-  path: string;
-  text: string;
-  languageId?: string;
-  generation?: number;
-}
-
-export interface EditorRpcWorkbenchGrammarsLoadParams {
-  id: string;
-}
-
 export interface EditorRpcStateSsotNotificationParams {
   project?: string | null;
   session_state?: Record<string, unknown>;
@@ -300,47 +176,4 @@ export function isJsonRpcNotificationEnvelope(value: unknown): value is JsonRpcN
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return record.jsonrpc === JSONRPC_VERSION && typeof record.method === 'string' && !('id' in record);
-}
-
-export function editorWorkbenchMethodToRpcMethod(method: string): EditorRpcMethodName | null {
-  switch (String(method || '')) {
-    case 'open_file':
-      return EDITOR_RPC_METHODS.workbenchOpenFile;
-    case 'hover':
-      return EDITOR_RPC_METHODS.workbenchHover;
-    case 'completions':
-      return EDITOR_RPC_METHODS.workbenchCompletions;
-    case 'inlay_hints':
-      return EDITOR_RPC_METHODS.workbenchInlayHints;
-    case 'inlay_hints_resolve':
-      return EDITOR_RPC_METHODS.workbenchInlayHintsResolve;
-    case 'inlay_hints_release':
-      return EDITOR_RPC_METHODS.workbenchInlayHintsRelease;
-    case 'inline_completions':
-      return EDITOR_RPC_METHODS.workbenchInlineCompletions;
-    case 'inline_completions_free':
-      return EDITOR_RPC_METHODS.workbenchInlineCompletionsFree;
-    case 'inline_completions_did_show':
-      return EDITOR_RPC_METHODS.workbenchInlineCompletionsDidShow;
-    case 'semantic_tokens':
-      return EDITOR_RPC_METHODS.workbenchSemanticTokens;
-    case 'semantic_tokens_legend':
-      return EDITOR_RPC_METHODS.workbenchSemanticTokensLegend;
-    case 'semantic_tokens_range':
-      return EDITOR_RPC_METHODS.workbenchSemanticTokensRange;
-    case 'symbols':
-      return EDITOR_RPC_METHODS.workbenchSymbols;
-    case 'folding_ranges':
-      return EDITOR_RPC_METHODS.workbenchFoldingRanges;
-    case 'providers':
-      return EDITOR_RPC_METHODS.workbenchProviders;
-    case 'did_change':
-      return EDITOR_RPC_METHODS.workbenchDidChange;
-    case 'grammars_list':
-      return EDITOR_RPC_METHODS.workbenchGrammarsList;
-    case 'grammars_load':
-      return EDITOR_RPC_METHODS.workbenchGrammarsLoad;
-    default:
-      return null;
-  }
 }

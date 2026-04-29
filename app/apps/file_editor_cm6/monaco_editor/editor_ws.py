@@ -39,49 +39,17 @@ from .editor_rpc_contract import (
     EditorRpcNotification,
 )
 from .editor_rpc_emit import emit_editor_rpc_notification
-from .editor_workbench_backend import (
-    handle_workbench_completions,
-    handle_workbench_did_change,
-    handle_workbench_folding_ranges,
-    handle_workbench_grammars_list,
-    handle_workbench_grammars_load,
-    handle_workbench_hover,
-    handle_workbench_inlay_hints,
-    handle_workbench_inlay_hints_release,
-    handle_workbench_inlay_hints_resolve,
-    handle_workbench_inline_completions,
-    handle_workbench_inline_completions_did_show,
-    handle_workbench_inline_completions_free,
-    handle_workbench_language_catalog,
-    handle_workbench_open_file,
-    handle_workbench_providers,
-    handle_workbench_semantic_tokens,
-    handle_workbench_semantic_tokens_legend,
-    handle_workbench_semantic_tokens_range,
-    handle_workbench_symbols,
-)
-
 import logging as _logging
 _wb_log = _logging.getLogger("editor_ws.workbench")
 
 _ISSUES_DUMP_WAITING: dict[str, str] = {}
 _ISSUES_DUMP_TTL_S = 20.0
 _SAVE_SNAPSHOT_WAITING: dict[str, asyncio.Future[dict[str, object]]] = {}
-_WORKBENCH_PATH_LOCKS: dict[str, asyncio.Lock] = {}
-_WORKBENCH_OPEN_BASELINE: dict[str, dict[str, int | None]] = {}
 _MODEL_READY_LAST_BY_SID: dict[str, str] = {}
 
 # Tracks SHA256 of the most recent editor-initiated save per abs path.
 # Used to suppress watcher reload for our own saves.
 _LAST_SAVE_SHA: dict[str, str] = {}
-
-
-def _workbench_get_lock(abs_path: str) -> asyncio.Lock:
-    lock = _WORKBENCH_PATH_LOCKS.get(abs_path)
-    if lock is None:
-        lock = asyncio.Lock()
-        _WORKBENCH_PATH_LOCKS[abs_path] = lock
-    return lock
 
 
 def _coerce_generation(raw: object) -> Optional[int]:
@@ -97,22 +65,6 @@ def _coerce_generation(raw: object) -> Optional[int]:
         return None
 
 
-def _mark_open_baseline(abs_path: str, generation: Optional[int]) -> None:
-    _WORKBENCH_OPEN_BASELINE[abs_path] = {
-        "generation": generation,
-        "ts_ms": int(time.time() * 1000),
-    }
-
-
-def _has_open_baseline(abs_path: str, generation: Optional[int]) -> bool:
-    baseline = _WORKBENCH_OPEN_BASELINE.get(abs_path)
-    if not baseline:
-        return False
-    if generation is None:
-        return True
-    return baseline.get("generation") == generation
-
-
 def editor_runtime_active_project() -> Optional[str]:
     return _active_project()
 
@@ -121,23 +73,8 @@ def editor_runtime_is_under_project(project: str, abs_path: str) -> bool:
     return _is_under_project(project, abs_path)
 
 
-def editor_runtime_workbench_get_lock(abs_path: str) -> asyncio.Lock:
-    return _workbench_get_lock(abs_path)
-
-
 def editor_runtime_coerce_generation(raw: object) -> Optional[int]:
     return _coerce_generation(raw)
-
-
-def editor_runtime_mark_open_baseline(abs_path: str, generation: Optional[int]) -> None:
-    _mark_open_baseline(abs_path, generation)
-
-
-def editor_runtime_has_open_baseline(abs_path: str, generation: Optional[int]) -> bool:
-    return _has_open_baseline(abs_path, generation)
-
-
-editor_workbench_logger = _wb_log
 
 
 def _runtime_meta() -> RuntimeMeta:
@@ -913,39 +850,6 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload["source_client"] = sid
         await self.emit("editor:diagnostics_counts", payload, room="file_editor_cm6")
 
-    async def on_editor_diagnostics_consumer_pending(self, sid, data):
-        """Client (Monaco iframe) announces it is about to open/switch a file but is not ready yet.
-
-        This is used to gate workbench diagnostics forwarding to avoid a race where diagnostics
-        arrive before the Monaco model/marker plumbing is ready.
-        """
-        payload = data if isinstance(data, dict) else {}
-        path = _normalize_abs_path(str(payload.get("path") or "")) or ""
-        request_id = str(payload.get("request_id") or payload.get("requestId") or "")
-        if not path:
-            return
-        try:
-            from .editor_backend_services.diagnostics_sideband import set_consumer_pending
-
-            set_consumer_pending(path, request_id)
-        except Exception:
-            pass
-
-    async def on_editor_diagnostics_consumer_ready(self, sid, data):
-        """Client (Monaco iframe) announces it is ready to consume diagnostics for a file."""
-        payload = data if isinstance(data, dict) else {}
-        path = _normalize_abs_path(str(payload.get("path") or "")) or ""
-        request_id = str(payload.get("request_id") or payload.get("requestId") or "")
-        if not path:
-            return
-        try:
-            from .editor_backend_services.diagnostics_sideband import set_consumer_ready
-            from .editor_socketio import EDITOR_SIO
-
-            await set_consumer_ready(EDITOR_SIO, path, request_id)
-        except Exception:
-            pass
-
     async def on_editor_issues_dump_request(self, sid, data):
         payload = data or {}
         if not isinstance(payload, dict):
@@ -1231,123 +1135,6 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             record_save_sha=lambda abs_path, sha256: _LAST_SAVE_SHA.__setitem__(abs_path, sha256),
         )
 
-    async def on_editor_workbench_open_file(self, sid, data):
-        await handle_workbench_open_file(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            active_project=_active_project,
-            is_under_project=_is_under_project,
-            get_lock=_workbench_get_lock,
-            coerce_generation=_coerce_generation,
-            mark_open_baseline=_mark_open_baseline,
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_hover(self, sid, data):
-        await handle_workbench_hover(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            active_project=_active_project,
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_completions(self, sid, data):
-        await handle_workbench_completions(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            active_project=_active_project,
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_inlay_hints(self, sid, data):
-        await handle_workbench_inlay_hints(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            active_project=_active_project,
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_inlay_hints_resolve(self, sid, data):
-        await handle_workbench_inlay_hints_resolve(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_inlay_hints_release(self, sid, data):
-        await handle_workbench_inlay_hints_release(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_inline_completions(self, sid, data):
-        await handle_workbench_inline_completions(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            active_project=_active_project,
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_inline_completions_free(self, sid, data):
-        await handle_workbench_inline_completions_free(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_inline_completions_did_show(self, sid, data):
-        await handle_workbench_inline_completions_did_show(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_semantic_tokens(self, sid, data):
-        await handle_workbench_semantic_tokens(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            active_project=_active_project,
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_semantic_tokens_legend(self, sid, data):
-        await handle_workbench_semantic_tokens_legend(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_semantic_tokens_range(self, sid, data):
-        await handle_workbench_semantic_tokens_range(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            active_project=_active_project,
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_symbols(self, sid, data):
-        await handle_workbench_symbols(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            active_project=_active_project,
-            get_lock=_workbench_get_lock,
-            coerce_generation=_coerce_generation,
-            has_open_baseline=_has_open_baseline,
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_folding_ranges(self, sid, data):
-        await handle_workbench_folding_ranges(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            active_project=_active_project,
-            get_lock=_workbench_get_lock,
-            coerce_generation=_coerce_generation,
-            has_open_baseline=_has_open_baseline,
-            logger=_wb_log,
-        )
-
     async def on_editor_breadcrumb_navigate(self, sid, data):
         """Breadcrumb directory click → relay to explorer socket + open drawer."""
         payload = data if isinstance(data, dict) else {}
@@ -1379,44 +1166,6 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             _wb_log.info("[bc-navigate] emit OK")
         except Exception as exc:
             _wb_log.error("[bc-navigate] emit FAILED: %s", exc)
-
-    async def on_editor_workbench_did_change(self, sid, data):
-        await handle_workbench_did_change(
-            data,
-            active_project=_active_project,
-            get_lock=_workbench_get_lock,
-            coerce_generation=_coerce_generation,
-            has_open_baseline=_has_open_baseline,
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_grammars_list(self, sid, data):
-        await handle_workbench_grammars_list(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_grammars_load(self, sid, data):
-        await handle_workbench_grammars_load(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_language_catalog(self, sid, data):
-        await handle_workbench_language_catalog(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            logger=_wb_log,
-        )
-
-    async def on_editor_workbench_providers(self, sid, data):
-        await handle_workbench_providers(
-            data,
-            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
-            logger=_wb_log,
-        )
 
     # NOTE: on_editor_readiness_check removed — adapter state is now pushed
     # via UI IPC from workbench_adapter_shell_manager._broadcast_adapter_state().

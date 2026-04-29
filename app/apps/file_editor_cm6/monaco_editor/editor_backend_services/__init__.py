@@ -40,20 +40,6 @@ from .cache_runtime_service import (
     get_combined_diffs_async,
     schedule_diff_refresh,
 )
-from .workbench_service import (
-    handle_workbench_completions,
-    handle_workbench_did_change,
-    handle_workbench_folding_ranges,
-    handle_workbench_grammars_list,
-    handle_workbench_grammars_load,
-    handle_workbench_hover,
-    handle_workbench_open_file,
-    handle_workbench_semantic_tokens,
-    handle_workbench_semantic_tokens_legend,
-    handle_workbench_semantic_tokens_range,
-    handle_workbench_symbols,
-)
-
 __all__ = [
     "EditorOpenFields",
     "EditorOpenPayload",
@@ -91,15 +77,4 @@ __all__ = [
     "get_combined_diffs_async",
     "schedule_diff_refresh",
     "handle_update_preference",
-    "handle_workbench_completions",
-    "handle_workbench_did_change",
-    "handle_workbench_folding_ranges",
-    "handle_workbench_grammars_list",
-    "handle_workbench_grammars_load",
-    "handle_workbench_hover",
-    "handle_workbench_open_file",
-    "handle_workbench_semantic_tokens",
-    "handle_workbench_semantic_tokens_legend",
-    "handle_workbench_semantic_tokens_range",
-    "handle_workbench_symbols",
 ]

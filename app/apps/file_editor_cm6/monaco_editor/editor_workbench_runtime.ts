@@ -1,10 +1,9 @@
 import { isAdapterReady, wbIsFrameworkReady, wbIsBarrierOpen } from './editor_workbench_barrier_utils.js';
-import { wbEmitDidChange } from './editor_workbench_emit_utils.js';
 import { wbFlushDidChangeIfReady, wbFlushPendingAfterOpen, wbFlushSymbolsIfReady, wbPublishDidChange } from './editor_workbench_flush_utils.js';
 import { wbBumpGeneration } from './editor_workbench_generation_utils.js';
 import { wbCurrentGeneration, wbQueueDidChange, wbQueueSymbols, wbSetOpenAck } from './editor_workbench_state_utils.js';
 import type { WorkbenchFlowLike, WorkbenchPendingDidChangePayload } from './editor_workbench_state_utils.js';
-import { EDITOR_RPC_METHODS, editorWorkbenchMethodToRpcMethod } from './editor_rpc_contract.ts';
+import { editorWorkbenchMethodToWbaMethod } from './editor_wba_rpc_transport.ts';
 import { VendorMarkerService } from './vscode_document_intelligence_vendor/markerService.ts';
 import {
   VendorMainThreadDiagnostics,
@@ -57,17 +56,6 @@ interface EditorLike {
   getContribution?(id: string): EditorContributionLike | null;
 }
 
-interface EditorSocketLike {
-  connected?: boolean;
-  emit?(eventName: string, payload: Record<string, unknown>): void;
-}
-
-interface WorkbenchPendingEntry {
-  timer: ReturnType<typeof setTimeout>;
-  resolve(value: unknown): void;
-  reject(error: Error): void;
-}
-
 interface LanguageContextLike {
   uri: string;
   path: string;
@@ -82,7 +70,6 @@ interface LanguageBridgeLike {
 interface WorkbenchRuntimeDeps {
   getWindow(): Window & typeof globalThis;
   getMonaco(): MonacoLike | null;
-  getEditorSocket(): EditorSocketLike | null;
   getEditor(): EditorLike | null;
   getModel(): MonacoModelLike | null;
   getCurrentPath(): string | null;
@@ -94,9 +81,9 @@ interface WorkbenchRuntimeDeps {
   setDebugDiag(value: string): void;
   requestBreadcrumbSymbols(path: string, opts?: { generation?: number; fromQueue?: boolean }): void;
   languageWorkersEnabled(): boolean;
-  isRpcConnected(): boolean;
-  rpcCall(method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
-  rpcNotify(method: string, params: Record<string, unknown>): boolean;
+  isWbaRpcConnected(): boolean;
+  wbaRpcCall(method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
+  wbaRpcNotify(method: string, params: Record<string, unknown>): boolean;
   clearTimeoutFn(timer: ReturnType<typeof setTimeout>): void;
   setTimeoutFn(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
 }
@@ -120,7 +107,6 @@ export function createEditorWorkbenchRuntime(
   wbSetOpenAck(path: string, generation: number): void;
   wbQueueDidChange(path: string, text: string, languageId: string, generation: number): void;
   wbQueueSymbols(path: string, generation: number): void;
-  wbEmitDidChange(payload: WorkbenchPendingDidChangePayload): boolean;
   wbFlushDidChangeIfReady(): void;
   wbFlushSymbolsIfReady(): void;
   wbFlushPendingAfterOpen(): void;
@@ -130,7 +116,6 @@ export function createEditorWorkbenchRuntime(
   replayOpenFileAfterBaton(): void;
   editorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
   callWorkbenchProviderGuarded(kind: string, method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>>;
-  getPendingRequests(): Map<string, WorkbenchPendingEntry>;
 } {
   let diagState: { rx: number; appliedBatches: number; appliedResources: number; synced: number; droppedNoUri: number; dropNoModel: number } | null = null;
   let diagProjectedOwners = new Set<string>();
@@ -143,8 +128,6 @@ export function createEditorWorkbenchRuntime(
       console.log(message, ...args);
     },
   });
-  const workbenchPending = new Map<string, WorkbenchPendingEntry>();
-  let wbNextId = 1;
   let wbPostReadyRefreshSeq = 0;
   const wbFlow: WorkbenchFlowLike = {
     generation: 0,
@@ -409,15 +392,18 @@ export function createEditorWorkbenchRuntime(
   }
 
   function emitDidChange(payload: WorkbenchPendingDidChangePayload): boolean {
-    if (deps.isRpcConnected()) {
-      return deps.rpcNotify(EDITOR_RPC_METHODS.workbenchDidChange, {
-        path: payload.path,
-        text: String(payload.text || ''),
-        languageId: String(payload.languageId || ''),
-        generation: Number.isFinite(Number(payload.generation)) ? Number(payload.generation) : currentGeneration(),
-      });
+    const wbaMethod = editorWorkbenchMethodToWbaMethod('did_change');
+    if (!wbaMethod) return false;
+    if (!deps.isWbaRpcConnected()) {
+      console.warn('[wba] didChange dropped: direct WBA socket is not connected');
+      return false;
     }
-    return wbEmitDidChange(deps.getEditorSocket(), payload, currentGeneration);
+    return deps.wbaRpcNotify(wbaMethod, {
+      path: payload.path,
+      text: String(payload.text || ''),
+      languageId: String(payload.languageId || ''),
+      generation: Number.isFinite(Number(payload.generation)) ? Number(payload.generation) : currentGeneration(),
+    });
   }
 
   function flushDidChangeIfReady(): void {
@@ -508,33 +494,14 @@ export function createEditorWorkbenchRuntime(
   }
 
   function editorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
-    const rpcMethod = editorWorkbenchMethodToRpcMethod(method);
-    if (rpcMethod && deps.isRpcConnected()) {
-      return deps.rpcCall(rpcMethod, params || {}, opts);
+    const wbaMethod = editorWorkbenchMethodToWbaMethod(method);
+    if (!wbaMethod) {
+      return Promise.reject(new Error('unsupported direct WBA workbench method: ' + method));
     }
-    const timeoutMs = opts && Number.isFinite(Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 12000;
-    const requestId = 'wb_' + (wbNextId++) + '_' + Date.now();
-    const eventName = 'editor_workbench_' + method;
-    return new Promise((resolve, reject) => {
-      const timer = deps.setTimeoutFn(() => {
-        if (!workbenchPending.has(requestId)) return;
-        workbenchPending.delete(requestId);
-        reject(new Error('workbench timeout: ' + method));
-      }, timeoutMs);
-
-      workbenchPending.set(requestId, { resolve, reject, timer });
-      const socket = deps.getEditorSocket();
-      if (!socket || !socket.connected || typeof socket.emit !== 'function') {
-        deps.clearTimeoutFn(timer);
-        workbenchPending.delete(requestId);
-        reject(new Error('editor socket not connected'));
-        return;
-      }
-
-      const payload = Object.assign({}, params || {}, { request_id: requestId });
-      console.log('[editorWorkbenchCall] EMIT ' + eventName + ' reqId=' + requestId + ' connected=' + socket.connected);
-      socket.emit(eventName, payload);
-    });
+    if (!deps.isWbaRpcConnected()) {
+      return Promise.reject(new Error('direct WBA socket not connected: ' + method));
+    }
+    return deps.wbaRpcCall(wbaMethod, params || {}, opts);
   }
 
   function openFileFlow(opts: Record<string, unknown>): Promise<unknown> {
@@ -543,12 +510,7 @@ export function createEditorWorkbenchRuntime(
     const languageId = String(opts.languageId || '');
     const requestId = String(opts.requestId || ('diag_' + Date.now() + '_open'));
     const source = String(opts.source || 'open');
-    const socket = deps.getEditorSocket();
-    if (!path || !socket || !socket.connected || typeof socket.emit !== 'function') return Promise.resolve({ ok: false, deferred: true });
-
-    try {
-      socket.emit('editor_diagnostics_consumer_pending', { path, request_id: requestId });
-    } catch (_) {}
+    if (!path) return Promise.resolve({ ok: false, deferred: true });
 
     if (!isAdapterReady(deps.getWindow())) {
       console.log('[readiness] open_file deferred (' + source + ') - waiting for baton');
@@ -567,9 +529,6 @@ export function createEditorWorkbenchRuntime(
         return { ok: false, stale: true };
       }
       setOpenAck(path, generation);
-      try {
-        socket.emit!('editor_diagnostics_consumer_ready', { path, request_id: requestId });
-      } catch (_) {}
       flushPendingAfterOpen();
       schedulePostReadyStructureRefresh(path, generation, source);
       return result;
@@ -660,7 +619,6 @@ export function createEditorWorkbenchRuntime(
     wbSetOpenAck: setOpenAck,
     wbQueueDidChange: queueDidChange,
     wbQueueSymbols: queueSymbols,
-    wbEmitDidChange: emitDidChange,
     wbFlushDidChangeIfReady: flushDidChangeIfReady,
     wbFlushSymbolsIfReady: flushSymbolsIfReady,
     wbFlushPendingAfterOpen: flushPendingAfterOpen,
@@ -670,6 +628,5 @@ export function createEditorWorkbenchRuntime(
     replayOpenFileAfterBaton,
     editorWorkbenchCall,
     callWorkbenchProviderGuarded,
-    getPendingRequests: () => workbenchPending,
   };
 }

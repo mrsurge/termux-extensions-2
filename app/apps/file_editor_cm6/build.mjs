@@ -55,6 +55,7 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/semantic-tokens.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/structure.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/event-bridge.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/server/editor-socket.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/request-dispatch.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/server.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/server/stdio-protocol.ts',
