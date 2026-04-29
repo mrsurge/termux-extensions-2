@@ -99,7 +99,7 @@ export function registerEditorRuntimeSocketHandlers(
     }
   });
 
-  socket.on('editor:diagnostics', (payload: unknown) => {
+  socket.on('editor:diagnostics_sideband', (payload: unknown) => {
     try {
       logDiagnosticsEvent(payload, deps.getModel(), deps.getCurrentPath(), deps.absPathFromVscodeUri);
       applyDiagnosticsBridgeUpdate(payload, deps.applyDiagnosticsUpdate);

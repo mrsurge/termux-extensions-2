@@ -1,14 +1,13 @@
-"""Diagnostics bridge: adapter WS → editor Socket.IO.
+"""Diagnostics bridge orchestration for adapter diagnostics intake.
 
-Subscribes to the workbench adapter event stream (WS on port 18181). Explorer
-and problems UI still consume the normalized diagnostics/update fanout; the
-editor iframe consumes the raw VS Code-shaped diagnostics/changeMany lane so
-the editor path mirrors the WBA/VS Code marker contract.
+The editor diagnostics lane is handled by a dedicated raw sideband helper in
+`monaco_editor.editor_backend_services.diagnostics_sideband`.
 
-Important: we only forward diagnostics/update once the Monaco iframe tells us
-it is ready to consume markers for the active open request. This eliminates a
-real race where workbench diagnostics can arrive before the editor model/marker
-plumbing is initialized (especially on refresh / worker restart).
+This module owns:
+
+- adapter WS intake
+- normalized explorer/problems diagnostics fanout
+- watcher-related relay behavior
 """
 
 import asyncio
@@ -25,16 +24,6 @@ DIAG_CACHE_MAX = 500
 
 # Server-side diagnostics cache: (abs_path, owner) -> {ts_ms, owner, path, markers, type}
 _diag_cache: Dict[tuple, Dict[str, Any]] = {}
-
-# Diagnostics gating state (single-doc model).
-# The editor (Monaco iframe) emits consumer_pending/consumer_ready over Socket.IO.
-_consumer_expected_path: Optional[str] = None
-_consumer_expected_request_id: str = ""
-_consumer_ready: bool = False
-_pending_entries: list = []  # Buffered entries per-owner while consumer not ready
-
-# Keep an sio ref so consumer_ready can flush without waiting for a new adapter frame.
-_SIO_REF = None
 
 # Background task handle
 _bridge_task: Optional[asyncio.Task] = None
@@ -78,103 +67,6 @@ def _abs_path_from_vscode_uri(raw: Any) -> str:
     except Exception:
         pass
     return ""
-
-
-def _vscode_uri_to_string(raw: Any) -> str:
-    """Best-effort URIComponents/string conversion matching the WBA event bridge."""
-    if not raw:
-        return ""
-    if isinstance(raw, str):
-        return raw
-    if not isinstance(raw, dict):
-        return ""
-    external = raw.get("external")
-    if isinstance(external, str) and external:
-        return external
-    fs_path = raw.get("fsPath")
-    if isinstance(fs_path, str) and fs_path:
-        return f"file://{fs_path}"
-    scheme = raw.get("scheme")
-    path = raw.get("path")
-    authority = raw.get("authority", "")
-    if isinstance(scheme, str) and isinstance(path, str) and scheme and path:
-        return f"{scheme}://{authority if isinstance(authority, str) else ''}{path}"
-    return ""
-
-
-def _diagnostic_markers(raw: Any) -> list:
-    if isinstance(raw, list):
-        return raw
-    if isinstance(raw, dict):
-        buffered = raw.get("__json_with_buffers__")
-        if isinstance(buffered, list):
-            return buffered
-        markers = raw.get("markers")
-        if isinstance(markers, list):
-            return markers
-    return []
-
-
-def _raw_diagnostics_for_editor(ev: dict) -> list[dict]:
-    """Return active-file candidate payloads in raw VS Code $changeMany shape."""
-    args = ev.get("args")
-    if not isinstance(args, list) or len(args) < 2:
-        return []
-    owner = args[0] if isinstance(args[0], str) else "unknown"
-    pairs = args[1] if isinstance(args[1], list) else []
-    out: list[dict] = []
-    for pair in pairs:
-        if not isinstance(pair, list) or len(pair) < 2:
-            continue
-        uri_raw = pair[0]
-        uri = _vscode_uri_to_string(uri_raw)
-        path = _abs_path_from_vscode_uri(uri)
-        if not path:
-            continue
-        markers = _diagnostic_markers(pair[1])
-        out.append(
-            {
-                "type": "diagnostics/changeMany",
-                "ts_ms": ev.get("ts_ms", int(time.time() * 1000)),
-                "owner": owner,
-                "path": path,
-                "uri": uri,
-                "args": [owner, [[uri_raw, markers]]],
-            }
-        )
-    return out
-
-
-async def _emit_or_buffer_editor_diagnostics(sio, payload: dict) -> None:
-    """Gate editor diagnostics until the iframe reports readiness for this file."""
-    global _pending_entries
-    path = str(payload.get("path", ""))
-    if not _consumer_expected_path or path != str(_consumer_expected_path):
-        return
-    if _consumer_ready:
-        await sio.emit(
-            "editor:diagnostics",
-            payload,
-            room="file_editor_cm6",
-            namespace="/editor",
-        )
-        print(
-            f"[diag_bridge] raw editor emit OK owner={payload.get('owner','?')} path={path}",
-            flush=True,
-        )
-        return
-
-    owner = payload.get("owner")
-    payload_type = payload.get("type")
-    _pending_entries = [
-        e for e in _pending_entries
-        if not (e.get("owner") == owner and e.get("type") == payload_type)
-    ]
-    _pending_entries.append(payload)
-    print(
-        f"[diag_bridge] raw editor buffer owner={owner or '?'} path={path} buffered={len(_pending_entries)}",
-        flush=True,
-    )
 
 
 async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bool:
@@ -237,58 +129,6 @@ def _process_diagnostics_update(params: dict):
         del _diag_cache[oldest_key]
 
     return result
-
-
-def set_consumer_pending(abs_path: str, request_id: str = ""):
-    """Set the expected active document and mark consumer not-ready yet."""
-    global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entries
-    _consumer_expected_path = abs_path or None
-    _consumer_expected_request_id = str(request_id or "")
-    _consumer_ready = False
-    _pending_entries = []
-    try:
-        print(
-            f"[diag_bridge] consumer_pending path={_consumer_expected_path or '?'} request_id={_consumer_expected_request_id or '-'}",
-            flush=True,
-        )
-    except Exception:
-        pass
-
-
-async def set_consumer_ready(sio, abs_path: str, request_id: str = ""):
-    """Mark the consumer as ready; flush any buffered diagnostics for the expected file."""
-    global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entries
-    _consumer_expected_path = abs_path or None
-    _consumer_expected_request_id = str(request_id or "")
-    _consumer_ready = True
-    try:
-        print(
-            f"[diag_bridge] consumer_ready path={_consumer_expected_path or '?'} request_id={_consumer_expected_request_id or '-'} pending={len(_pending_entries)}",
-            flush=True,
-        )
-    except Exception:
-        pass
-
-    if not _pending_entries or not _consumer_expected_path:
-        return
-
-    for pending in _pending_entries:
-        if str(pending.get("path", "")) != str(_consumer_expected_path):
-            continue
-        try:
-            await sio.emit(
-                "editor:diagnostics",
-                pending,
-                room="file_editor_cm6",
-                namespace="/editor",
-            )
-            print(
-                f"[diag_bridge] flush OK owner={pending.get('owner','?')} path={pending.get('path','?')} markers={len(pending.get('markers',[]) or [])}",
-                flush=True,
-            )
-        except Exception as exc:
-            print(f"[diag_bridge] flush FAIL: {exc}", flush=True)
-    _pending_entries = []
 
 
 # ── Debounce state for explorer/problems emission ───────────────────
@@ -503,9 +343,14 @@ async def _adapter_ws_loop(sio):
 
                     if ev_type == "diagnostics/changeMany":
                         try:
-                            payloads = _raw_diagnostics_for_editor(ev)
+                            from .monaco_editor.editor_backend_services.diagnostics_sideband import (
+                                emit_or_buffer_editor_diagnostics_sideband,
+                                raw_diagnostics_sideband_payloads,
+                            )
+
+                            payloads = raw_diagnostics_sideband_payloads(ev)
                             for payload in payloads:
-                                await _emit_or_buffer_editor_diagnostics(sio, payload)
+                                await emit_or_buffer_editor_diagnostics_sideband(sio, payload)
                         except Exception as exc:
                             print(f"[diag_bridge] raw editor diagnostics FAIL: {exc}", flush=True)
                         continue
@@ -541,9 +386,6 @@ async def _adapter_ws_loop(sio):
 def start_bridge(sio):
     """Start the background diagnostics bridge task. Safe to call multiple times."""
     global _bridge_task, _bridge_running
-    global _SIO_REF
-
-    _SIO_REF = sio
 
     if _bridge_task and not _bridge_task.done():
         return  # already running
@@ -555,7 +397,6 @@ def start_bridge(sio):
 def stop_bridge():
     """Stop the background bridge task and clear stale diagnostics state."""
     global _bridge_running, _bridge_task, _enospc_forwarded, _diag_cache
-    global _consumer_expected_path, _consumer_expected_request_id, _consumer_ready, _pending_entries
     global _diag_emit_dirty, _diag_emit_task
 
     _bridge_running = False
@@ -570,7 +411,11 @@ def stop_bridge():
     # Purge the diagnostics cache so stale markers are never replayed
     # after the adapter shuts down or a project switch occurs.
     _diag_cache.clear()
-    _consumer_expected_path = None
-    _consumer_expected_request_id = ""
-    _consumer_ready = False
-    _pending_entries = []
+    try:
+        from .monaco_editor.editor_backend_services.diagnostics_sideband import (
+            clear_editor_diagnostics_sideband_state,
+        )
+
+        clear_editor_diagnostics_sideband_state()
+    except Exception:
+        pass

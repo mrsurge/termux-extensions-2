@@ -36,6 +36,7 @@ interface RunEditorOpenTransactionDeps {
   installVscodeRpcChangePublisher(): void;
   applyLineNumberSizing(): void;
   ensureTouchSelection(reason: string): void;
+  syncDiagnosticsForCurrentModel(reason: string): void;
   emitToHost(eventType: string, payload: Record<string, unknown>): void;
   emitModelReady(payload: { path: string; languageId: string; generation?: number; request_id?: string; source?: string }): boolean;
   requestDraftDiff(reason: string): void;
@@ -176,6 +177,7 @@ export async function runEditorOpenTransaction(
 
     deps.applyLineNumberSizing();
     deps.ensureTouchSelection('open');
+    deps.syncDiagnosticsForCurrentModel('open_model_ready');
 
     if (!sameFileNavigationOnly && payload.reason !== 'external_change') {
       try {

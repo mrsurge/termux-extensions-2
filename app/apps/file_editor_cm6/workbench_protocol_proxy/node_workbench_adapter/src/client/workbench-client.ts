@@ -712,7 +712,6 @@ export class WorkbenchClient {
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
-      didChange: (params, opts) => this.didChange(params, opts),
       uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
       sendExtPending: (rpcId, method, args, cancellable, pendingOptions) => this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
       sendExtAwaitTerminalReply: (rpcId, method, args, cancellable, timeoutMs) => this._sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),

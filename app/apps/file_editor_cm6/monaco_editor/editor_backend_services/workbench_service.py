@@ -233,8 +233,6 @@ async def handle_workbench_inlay_hints(
                 "languageId": payload.get("languageId", ""),
                 "providerHandle": payload.get("providerHandle"),
                 "range": payload.get("range"),
-                "text": payload.get("text"),
-                "modelVersionId": payload.get("modelVersionId"),
                 "timeoutMs": payload.get("timeoutMs"),
             },
         )

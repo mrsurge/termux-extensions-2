@@ -84,10 +84,6 @@ export interface InlayHintsRuntimeDeps {
   authority: string;
   defaultRemoteAuthority: string;
   languageIdFromPath: (filePath: string) => string;
-  didChange: (
-    params: Record<string, unknown>,
-    opts: { waitForAck: true; timeoutMs: number },
-  ) => Promise<unknown> | unknown;
   uriForPath: (filePath: string, authority: string) => unknown;
   sendExtPending: (
     rpcId: number,
@@ -413,7 +409,6 @@ export function createInlayHintsRuntime(deps: InlayHintsRuntimeDeps): InlayHints
     ensureConnected: () => ensureConnected(deps.extProtocol),
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
-    didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
     uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
     sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>
       deps.sendExtPending(rpcId, method, args, cancellable, pendingOptions),

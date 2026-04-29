@@ -550,6 +550,10 @@ interface MonacoBootWindowLike extends Window {
     workbenchRuntime.clearDiagnosticsForSwitch();
   }
 
+  function _syncDiagnosticsForCurrentModel(reason?: string): void {
+    workbenchRuntime.syncDiagnosticsForCurrentModel(reason);
+  }
+
   function _absPathFromVscodeUri(raw: string): string | null {
     return absPathFromVscodeUri(raw);
   }
@@ -1111,6 +1115,7 @@ interface MonacoBootWindowLike extends Window {
     installVscodeRpcChangePublisher: installVscodeRpcChangePublisher,
     applyLineNumberSizing: applyLineNumberSizing,
     ensureTouchSelection: ensureTouchSelection,
+    syncDiagnosticsForCurrentModel: function(reason: string) { _syncDiagnosticsForCurrentModel(reason); },
     emitToHost: emitToHost,
     emitModelReady: emitModelReady,
     requestDraftDiff: requestDraftDiff,

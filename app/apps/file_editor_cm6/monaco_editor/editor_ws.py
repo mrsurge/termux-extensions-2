@@ -925,7 +925,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         if not path:
             return
         try:
-            from ..diagnostics_bridge import set_consumer_pending
+            from .editor_backend_services.diagnostics_sideband import set_consumer_pending
 
             set_consumer_pending(path, request_id)
         except Exception:
@@ -939,7 +939,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         if not path:
             return
         try:
-            from ..diagnostics_bridge import set_consumer_ready
+            from .editor_backend_services.diagnostics_sideband import set_consumer_ready
             from .editor_socketio import EDITOR_SIO
 
             await set_consumer_ready(EDITOR_SIO, path, request_id)

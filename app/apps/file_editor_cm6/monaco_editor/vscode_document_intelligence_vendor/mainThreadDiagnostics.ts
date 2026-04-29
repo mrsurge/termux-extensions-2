@@ -1,171 +1,183 @@
 /*
- * TE2 diagnostics vendor shim for the editor-only lane. This mirrors the VS Code
- * MainThreadDiagnostics.$changeMany(owner, entries) marker shape while keeping
- * Explorer/problem-list fanout on TE2's normalized diagnostics/update path.
- * Source: worktrees/vscode-te2-diff/src/vs/workbench/api/browser/mainThreadDiagnostics.ts
+ * Adapted from:
+ * - worktrees/vscode-te2-diff/src/vs/workbench/api/browser/mainThreadDiagnostics.ts
+ *
+ * TE2 vendors the editor diagnostics ingestion seam locally. The stored
+ * owner/resource semantics mirror VS Code, while Monaco standalone remains the
+ * renderer sink for the active model's markers/decorations.
  */
 
-interface MonacoUriLike {
-  toString(): string;
+import { VendorMarkerService } from './markerService.ts';
+import type {
+  MarkerCodeLike,
+  MarkerDataLike,
+  RelatedInformationLike,
+  UriComponentsLike,
+} from './markers.ts';
+
+export interface DiagnosticsChangeManyPayloadLike {
+  type?: string;
+  args?: unknown[];
 }
 
-interface MonacoModelLike {
-  uri?: MonacoUriLike;
+export interface VendorMainThreadDiagnosticsApplyStats {
+  owner: string;
+  changedResources: number;
+  droppedNoUri: number;
+  resources: string[];
 }
 
-interface MonacoEditorNamespaceLike {
-  getModelMarkers?(opts: { resource: MonacoUriLike }): unknown[];
-  setModelMarkers?(model: MonacoModelLike, owner: string, markers: Array<Record<string, unknown>>): void;
-}
-
-interface VscodeDiagnosticsApplyDeps {
-  model: MonacoModelLike | null | undefined;
-  editorNs: MonacoEditorNamespaceLike | null | undefined;
-  payload: unknown;
-  currentPath: string;
-  activeUri: string;
-  absPathFromVscodeUri(raw: string): string | null;
+interface VendorMainThreadDiagnosticsDeps {
+  markerService: VendorMarkerService;
+  extHostId?: string;
   uriToString?(raw: unknown): string;
-  markKnownOwner(owner: string): void;
-  emitCounts(path: string): void;
   log?(message: string, ...args: unknown[]): void;
-}
-
-export interface VscodeDiagnosticsApplyStats {
-  applied: number;
-  dropNoPath: number;
-  dropNoModel: number;
-  dropMismatch: number;
-}
-
-interface DiagnosticsEntryLike {
-  uri: string;
-  path: string;
-  markers: Array<Record<string, unknown>>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function uriObjToString(raw: unknown): string {
+export function uriObjToString(raw: unknown): string {
   if (!raw) return '';
   if (typeof raw === 'string') return raw;
   if (!isRecord(raw)) return '';
-  if (typeof raw.external === 'string' && raw.external) return raw.external;
-  if (typeof raw.fsPath === 'string' && raw.fsPath) return 'file://' + raw.fsPath;
-  const scheme = typeof raw.scheme === 'string' ? raw.scheme : '';
-  const authority = typeof raw.authority === 'string' ? raw.authority : '';
-  const path = typeof raw.path === 'string' ? raw.path : '';
+  const typedRaw = raw as UriComponentsLike;
+  if (typeof typedRaw.external === 'string' && typedRaw.external) return typedRaw.external;
+  if (typeof typedRaw.fsPath === 'string' && typedRaw.fsPath) return 'file://' + typedRaw.fsPath;
+  const scheme = typeof typedRaw.scheme === 'string' ? typedRaw.scheme : '';
+  const authority = typeof typedRaw.authority === 'string' ? typedRaw.authority : '';
+  const path = typeof typedRaw.path === 'string' ? typedRaw.path : '';
   if (!scheme || !path) return '';
   return scheme + '://' + authority + path;
 }
 
-function markerArray(raw: unknown): unknown[] {
-  if (Array.isArray(raw)) return raw;
-  if (isRecord(raw)) {
-    if (Array.isArray(raw.__json_with_buffers__)) return raw.__json_with_buffers__;
-    if (Array.isArray(raw.markers)) return raw.markers;
+function asDiagnosticsChangeManyPayloadLike(value: unknown): DiagnosticsChangeManyPayloadLike | null {
+  return isRecord(value) ? value as DiagnosticsChangeManyPayloadLike : null;
+}
+
+function reviveRelatedInformation(
+  raw: unknown,
+  uriToStringFn: (raw: unknown) => string,
+): RelatedInformationLike[] | undefined {
+  if (!Array.isArray(raw) || !raw.length) return undefined;
+  const revived: RelatedInformationLike[] = [];
+  for (const item of raw) {
+    if (!isRecord(item)) continue;
+    const resource = uriToStringFn(item.resource);
+    if (!resource) continue;
+    revived.push({
+      resource,
+      message: typeof item.message === 'string' ? item.message : '',
+      startLineNumber: Number.isFinite(Number(item.startLineNumber)) ? Number(item.startLineNumber) : 1,
+      startColumn: Number.isFinite(Number(item.startColumn)) ? Number(item.startColumn) : 1,
+      endLineNumber: Number.isFinite(Number(item.endLineNumber)) ? Number(item.endLineNumber) : 1,
+      endColumn: Number.isFinite(Number(item.endColumn)) ? Number(item.endColumn) : 1,
+    });
   }
-  return [];
+  return revived.length ? revived : undefined;
 }
 
-function coerceMarker(raw: unknown, extHostId: string): Record<string, unknown> {
-  const marker = isRecord(raw) ? { ...raw } : {};
-  if (marker.origin === undefined) marker.origin = extHostId;
-  return marker;
+function reviveCode(
+  raw: unknown,
+  uriToStringFn: (raw: unknown) => string,
+): MarkerCodeLike | undefined {
+  if (typeof raw === 'string') return raw;
+  if (!isRecord(raw)) return undefined;
+  const value = typeof raw.value === 'string' ? raw.value : '';
+  const target = uriToStringFn(raw.target);
+  if (!value || !target) return undefined;
+  return { value, target };
 }
 
-function entriesFromChangeManyPayload(
-  payload: unknown,
-  absPathFromVscodeUri: (raw: string) => string | null,
-  uriToString: (raw: unknown) => string,
+function reviveMarkerData(
+  raw: unknown,
   extHostId: string,
-): { owner: string; entries: DiagnosticsEntryLike[] } | null {
-  const record = isRecord(payload) ? payload : null;
-  const args = Array.isArray(record?.args) ? record.args : null;
-  if (!args || args.length < 2) return null;
-  const owner = typeof args[0] === 'string' ? args[0] : 'unknown';
-  const pairs = Array.isArray(args[1]) ? args[1] : [];
-  const entries: DiagnosticsEntryLike[] = [];
+  uriToStringFn: (raw: unknown) => string,
+): MarkerDataLike | null {
+  if (!isRecord(raw)) return null;
+  return {
+    code: reviveCode(raw.code, uriToStringFn),
+    severity: Number.isFinite(Number(raw.severity)) ? Number(raw.severity) : undefined,
+    message: typeof raw.message === 'string' ? raw.message : '',
+    source: typeof raw.source === 'string' ? raw.source : undefined,
+    startLineNumber: Number.isFinite(Number(raw.startLineNumber)) ? Number(raw.startLineNumber) : 1,
+    startColumn: Number.isFinite(Number(raw.startColumn)) ? Number(raw.startColumn) : 1,
+    endLineNumber: Number.isFinite(Number(raw.endLineNumber)) ? Number(raw.endLineNumber) : 1,
+    endColumn: Number.isFinite(Number(raw.endColumn)) ? Number(raw.endColumn) : 1,
+    modelVersionId: Number.isFinite(Number(raw.modelVersionId)) ? Number(raw.modelVersionId) : undefined,
+    relatedInformation: reviveRelatedInformation(raw.relatedInformation, uriToStringFn),
+    tags: Array.isArray(raw.tags) ? raw.tags.filter((tag): tag is number => Number.isFinite(Number(tag))).map((tag) => Number(tag)) : undefined,
+    origin: typeof raw.origin === 'string' && raw.origin ? raw.origin : extHostId,
+  };
+}
+
+function parseChangeManyPayload(
+  payload: unknown,
+  extHostId: string,
+  uriToStringFn: (raw: unknown) => string,
+): { owner: string; entries: Array<{ resource: string; markers: MarkerDataLike[] }> } | null {
+  const typedPayload = asDiagnosticsChangeManyPayloadLike(payload);
+  if (!typedPayload || typedPayload.type !== 'diagnostics/changeMany' || !Array.isArray(typedPayload.args) || typedPayload.args.length < 2) {
+    return null;
+  }
+
+  const owner = typeof typedPayload.args[0] === 'string' && typedPayload.args[0]
+    ? typedPayload.args[0]
+    : 'unknown';
+  const pairs = Array.isArray(typedPayload.args[1]) ? typedPayload.args[1] : [];
+  const entries: Array<{ resource: string; markers: MarkerDataLike[] }> = [];
   for (const pair of pairs) {
     if (!Array.isArray(pair) || pair.length < 2) continue;
-    const uri = uriToString(pair[0]);
-    const path = uri ? absPathFromVscodeUri(uri) || '' : '';
-    if (!uri || !path) continue;
-    entries.push({
-      uri,
-      path,
-      markers: markerArray(pair[1]).map((marker) => coerceMarker(marker, extHostId)),
-    });
+    const resource = uriToStringFn(pair[0]);
+    if (!resource) continue;
+    const rawMarkers = Array.isArray(pair[1]) ? pair[1] : [];
+    const markers = rawMarkers
+      .map((marker) => reviveMarkerData(marker, extHostId, uriToStringFn))
+      .filter((marker): marker is MarkerDataLike => !!marker);
+    entries.push({ resource, markers });
   }
   return { owner, entries };
 }
 
-function entriesFromNormalizedPayload(
-  payload: unknown,
-  absPathFromVscodeUri: (raw: string) => string | null,
-  extHostId: string,
-): { owner: string; entries: DiagnosticsEntryLike[] } | null {
-  const record = isRecord(payload) ? payload : null;
-  if (!record) return null;
-  const owner = record.owner != null ? String(record.owner) : 'workbench';
-  const rawItems = Array.isArray(record.items) ? record.items : [];
-  const entries: DiagnosticsEntryLike[] = [];
-  for (const rawItem of rawItems) {
-    const item = isRecord(rawItem) ? rawItem : null;
-    if (!item) continue;
-    const uri = String(item.uri || item.resource || '');
-    const path = uri ? absPathFromVscodeUri(uri) || '' : '';
-    if (!uri || !path) continue;
-    entries.push({
-      uri,
-      path,
-      markers: markerArray(item.markers).map((marker) => coerceMarker(marker, extHostId)),
-    });
-  }
-  return { owner, entries };
-}
+export class VendorMainThreadDiagnostics {
+  private readonly markerService: VendorMarkerService;
+  private readonly extHostId: string;
+  private readonly uriToStringFn: (raw: unknown) => string;
+  private readonly logFn?: (message: string, ...args: unknown[]) => void;
 
-export function applyVscodeDiagnosticsChangeManyToActiveModel(deps: VscodeDiagnosticsApplyDeps): VscodeDiagnosticsApplyStats {
-  const stats: VscodeDiagnosticsApplyStats = { applied: 0, dropNoPath: 0, dropNoModel: 0, dropMismatch: 0 };
-  const model = deps.model;
-  const editorNs = deps.editorNs;
-  if (!model || !model.uri || !editorNs || typeof editorNs.setModelMarkers !== 'function') {
-    stats.dropNoModel += 1;
-    return stats;
+  constructor(deps: VendorMainThreadDiagnosticsDeps) {
+    this.markerService = deps.markerService;
+    this.extHostId = typeof deps.extHostId === 'string' && deps.extHostId ? deps.extHostId : 'te2ExtHost1';
+    this.uriToStringFn = deps.uriToString || uriObjToString;
+    this.logFn = deps.log;
   }
 
-  const uriToString = deps.uriToString || uriObjToString;
-  const record = isRecord(deps.payload) ? deps.payload : null;
-  const group = record?.type === 'diagnostics/changeMany'
-    ? entriesFromChangeManyPayload(deps.payload, deps.absPathFromVscodeUri, uriToString, 'te2ExtHost')
-    : entriesFromNormalizedPayload(deps.payload, deps.absPathFromVscodeUri, 'te2ExtHost');
-  if (!group) return stats;
+  applyChangeMany(payload: unknown): VendorMainThreadDiagnosticsApplyStats | null {
+    const parsed = parseChangeManyPayload(payload, this.extHostId, this.uriToStringFn);
+    if (!parsed) return null;
 
-  const activePath = deps.currentPath || (deps.activeUri ? deps.absPathFromVscodeUri(deps.activeUri) || '' : '');
-  for (const entry of group.entries) {
-    if (!entry.path) {
-      stats.dropNoPath += 1;
-      continue;
+    let droppedNoUri = 0;
+    const resources: string[] = [];
+    for (const entry of parsed.entries) {
+      if (!entry.resource) {
+        droppedNoUri += 1;
+        continue;
+      }
+      this.markerService.changeOne(parsed.owner, entry.resource, entry.markers);
+      resources.push(entry.resource);
+      if (this.logFn) {
+        this.logFn(
+          '[workbench] diagnostics changeOne owner=' + parsed.owner + ' resource=' + entry.resource + ' count=' + entry.markers.length,
+        );
+      }
     }
-    if (activePath && entry.path !== activePath) {
-      stats.dropMismatch += 1;
-      continue;
-    }
-    deps.markKnownOwner(group.owner);
-    editorNs.setModelMarkers(model, group.owner, entry.markers);
-    stats.applied += 1;
-    deps.emitCounts(entry.path);
-    if (deps.log) deps.log('[workbench] setModelMarkers raw owner=' + group.owner + ' count=' + entry.markers.length + ' path=' + entry.path);
-  }
-  return stats;
-}
 
-/*
- * Upstream VS Code reference excerpt:
- * MainThreadDiagnostics.$changeMany(owner, entries) revives marker resources,
- * ensures marker.origin, then calls markerService.changeOne(owner, uri, markers)
- * for each resource. TE2's editor lane keeps that owner/resource/marker shape
- * and only filters to the active model before calling setModelMarkers.
- */
+    return {
+      owner: parsed.owner,
+      changedResources: resources.length,
+      droppedNoUri,
+      resources,
+    };
+  }
+}

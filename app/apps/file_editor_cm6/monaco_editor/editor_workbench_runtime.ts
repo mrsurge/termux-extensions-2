@@ -5,7 +5,12 @@ import { wbBumpGeneration } from './editor_workbench_generation_utils.js';
 import { wbCurrentGeneration, wbQueueDidChange, wbQueueSymbols, wbSetOpenAck } from './editor_workbench_state_utils.js';
 import type { WorkbenchFlowLike, WorkbenchPendingDidChangePayload } from './editor_workbench_state_utils.js';
 import { EDITOR_RPC_METHODS, editorWorkbenchMethodToRpcMethod } from './editor_rpc_contract.ts';
-import { applyVscodeDiagnosticsChangeManyToActiveModel } from './vscode_document_intelligence_vendor/mainThreadDiagnostics.js';
+import { VendorMarkerService } from './vscode_document_intelligence_vendor/markerService.ts';
+import {
+  VendorMainThreadDiagnostics,
+  uriObjToString,
+} from './vscode_document_intelligence_vendor/mainThreadDiagnostics.ts';
+import type { MarkerLike } from './vscode_document_intelligence_vendor/markers.ts';
 
 interface MonacoUriLike {
   toString(): string;
@@ -106,6 +111,7 @@ export function createEditorWorkbenchRuntime(
   applyDiagnosticsUpdate(params: unknown): void;
   emitAggregatedDiagCounts(path?: string | null): void;
   clearDiagnosticsForSwitch(): void;
+  syncDiagnosticsForCurrentModel(reason?: string): void;
   currentLanguageContext(): LanguageContextLike | null;
   wbCurrentGeneration(): number;
   wbBumpGeneration(path: string | null, reason: string): number;
@@ -126,8 +132,17 @@ export function createEditorWorkbenchRuntime(
   callWorkbenchProviderGuarded(kind: string, method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>>;
   getPendingRequests(): Map<string, WorkbenchPendingEntry>;
 } {
-  let diagState: { rx: number; apply: number; drop_no_path: number; drop_no_model: number; drop_mismatch: number } | null = null;
-  let diagKnownOwners: Set<string> | null = null;
+  let diagState: { rx: number; appliedBatches: number; appliedResources: number; synced: number; droppedNoUri: number; dropNoModel: number } | null = null;
+  let diagProjectedOwners = new Set<string>();
+  let diagProjectedUri = '';
+  const diagMarkerStore = new VendorMarkerService();
+  const mainThreadDiagnostics = new VendorMainThreadDiagnostics({
+    markerService: diagMarkerStore,
+    uriToString: uriObjToString,
+    log(message, ...args) {
+      console.log(message, ...args);
+    },
+  });
   const workbenchPending = new Map<string, WorkbenchPendingEntry>();
   let wbNextId = 1;
   let wbPostReadyRefreshSeq = 0;
@@ -219,64 +234,122 @@ export function createEditorWorkbenchRuntime(
   }
 
   function clearDiagnosticsForSwitch(): void {
+    diagProjectedOwners = new Set<string>();
+    diagProjectedUri = '';
+    syncDiagnosticsForCurrentModel('switch');
+  }
+
+  function readActiveResourceDiagnostics(activeUri: string, activePath: string): MarkerLike[] {
+    const direct = diagMarkerStore.read({ resource: activeUri });
+    if (direct.length || !activePath) return direct;
+    return diagMarkerStore.read().filter((marker) => {
+      return typeof marker.resource === 'string' && deps.absPathFromVscodeUri(marker.resource) === activePath;
+    });
+  }
+
+  function syncDiagnosticsForCurrentModel(reason: string = 'sync'): void {
     try {
-      const model = deps.getModel();
       const monacoRef = deps.getMonaco();
-      if (model && monacoRef && monacoRef.editor && monacoRef.editor.setModelMarkers) {
-        if (diagKnownOwners && diagKnownOwners.size) {
-          diagKnownOwners.forEach((owner) => {
-            try { monacoRef.editor!.setModelMarkers!(model, owner, []); } catch (_) {}
-          });
-        }
-        monacoRef.editor.setModelMarkers(model, 'workbench', []);
+      const editorNs = monacoRef && monacoRef.editor;
+      const model = deps.getModel();
+      const currentPath = String(deps.getCurrentPath() || '');
+      if (!model || !model.uri || !editorNs || typeof editorNs.setModelMarkers !== 'function') {
+        if (!diagState) diagState = { rx: 0, appliedBatches: 0, appliedResources: 0, synced: 0, droppedNoUri: 0, dropNoModel: 0 };
+        diagState.dropNoModel += 1;
+        return;
       }
-      diagKnownOwners = new Set();
-      deps.emitToHost('editor_diagnostics_counts', {
-        errors: 0,
-        warnings: 0,
-        hints: 0,
-        total: 0,
-        path: deps.getCurrentPath() || '',
-      });
+
+      const activeUri = String(model.uri.toString());
+      const markers = readActiveResourceDiagnostics(activeUri, currentPath);
+      const byOwner = new Map<string, Record<string, unknown>[]>();
+      for (const marker of markers) {
+        const owner = asString(marker.owner) || 'unknown';
+        const bucket = byOwner.get(owner) || [];
+        bucket.push({
+          code: marker.code,
+          severity: marker.severity,
+          message: marker.message,
+          source: marker.source,
+          startLineNumber: marker.startLineNumber,
+          startColumn: marker.startColumn,
+          endLineNumber: marker.endLineNumber,
+          endColumn: marker.endColumn,
+          modelVersionId: marker.modelVersionId,
+          relatedInformation: marker.relatedInformation,
+          tags: marker.tags,
+          origin: marker.origin,
+        });
+        byOwner.set(owner, bucket);
+      }
+
+      if (diagProjectedUri === activeUri) {
+        for (const owner of diagProjectedOwners) {
+          if (!byOwner.has(owner)) {
+            try { editorNs.setModelMarkers(model, owner, []); } catch (_) {}
+          }
+        }
+      } else {
+        diagProjectedOwners = new Set<string>();
+      }
+
+      for (const [owner, ownerMarkers] of byOwner.entries()) {
+        try { editorNs.setModelMarkers(model, owner, ownerMarkers); } catch (_) {}
+      }
+
+      diagProjectedOwners = new Set(byOwner.keys());
+      diagProjectedUri = activeUri;
+      emitAggregatedDiagCounts(currentPath);
+
+      if (!diagState) diagState = { rx: 0, appliedBatches: 0, appliedResources: 0, synced: 0, droppedNoUri: 0, dropNoModel: 0 };
+      diagState.synced += 1;
+      deps.setDebugDiag(
+        'diag=rx' + diagState.rx
+        + '/bat' + diagState.appliedBatches
+        + '/res' + diagState.appliedResources
+        + '/sync' + diagState.synced
+        + '/nu' + diagState.droppedNoUri
+        + '/nm' + diagState.dropNoModel,
+      );
+      console.log(
+        '[workbench] diagnostics sync reason=' + reason
+        + ' resource=' + activeUri
+        + ' owners=' + diagProjectedOwners.size
+        + ' markers=' + markers.length
+        + ' path=' + currentPath,
+      );
     } catch (_) {}
   }
 
   function applyDiagnosticsUpdate(params: unknown): void {
     try {
-      const monacoRef = deps.getMonaco();
-      const editorNs = monacoRef && monacoRef.editor;
-      if (!editorNs || !editorNs.setModelMarkers || !editorNs.getModelMarkers) return;
-      if (!diagState) diagState = { rx: 0, apply: 0, drop_no_path: 0, drop_no_model: 0, drop_mismatch: 0 };
+      if (!diagState) diagState = { rx: 0, appliedBatches: 0, appliedResources: 0, synced: 0, droppedNoUri: 0, dropNoModel: 0 };
       diagState.rx += 1;
+      const stats = mainThreadDiagnostics.applyChangeMany(params);
+      if (!stats) return;
+
+      diagState.appliedBatches += 1;
+      diagState.appliedResources += stats.changedResources;
+      diagState.droppedNoUri += stats.droppedNoUri;
 
       const model = deps.getModel();
-      const currentPath = deps.getCurrentPath();
       const activeUri = model && model.uri ? String(model.uri.toString()) : '';
-      const stats = applyVscodeDiagnosticsChangeManyToActiveModel({
-        model,
-        editorNs,
-        payload: params,
-        currentPath: currentPath ? String(currentPath) : '',
-        activeUri,
-        absPathFromVscodeUri: deps.absPathFromVscodeUri,
-        markKnownOwner(owner) {
-          if (!diagKnownOwners) diagKnownOwners = new Set();
-          diagKnownOwners.add(owner);
-        },
-        emitCounts: emitAggregatedDiagCounts,
-        log(message, ...args) {
-          console.log(message, ...args);
-        },
+      const currentPath = String(deps.getCurrentPath() || '');
+      const activeTouched = stats.resources.some((resource) => {
+        return resource === activeUri
+          || (!!currentPath && deps.absPathFromVscodeUri(resource) === currentPath);
       });
 
-      diagState.apply += stats.applied;
-      diagState.drop_no_path += stats.dropNoPath;
-      diagState.drop_no_model += stats.dropNoModel;
-      diagState.drop_mismatch += stats.dropMismatch;
-
-      deps.setDebugDiag('diag=rx' + diagState.rx + '/ap' + diagState.apply + '/np' + diagState.drop_no_path + '/nm' + diagState.drop_no_model + '/mm' + diagState.drop_mismatch);
-      if (!stats.applied) {
-        // no-op: stale/mismatched diagnostics are intentionally dropped
+      if (activeTouched || (!activeUri && currentPath)) {
+        syncDiagnosticsForCurrentModel('changeMany');
+      } else {
+        deps.setDebugDiag(
+          'diag=rx' + diagState.rx
+          + '/bat' + diagState.appliedBatches
+          + '/res' + diagState.appliedResources
+          + '/sync' + diagState.synced
+          + '/nu' + diagState.droppedNoUri
+          + '/nm' + diagState.dropNoModel,
+        );
       }
     } catch (_) {}
   }
@@ -578,6 +651,7 @@ export function createEditorWorkbenchRuntime(
     applyDiagnosticsUpdate,
     emitAggregatedDiagCounts,
     clearDiagnosticsForSwitch,
+    syncDiagnosticsForCurrentModel,
     currentLanguageContext,
     wbCurrentGeneration: currentGeneration,
     wbBumpGeneration: bumpGeneration,

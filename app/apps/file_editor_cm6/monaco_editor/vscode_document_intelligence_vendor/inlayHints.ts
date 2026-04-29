@@ -7,8 +7,6 @@
 interface VscodeInlayModelLike {
   uri?: { toString(): string };
   getLanguageId?(): string;
-  getValue?(): string;
-  getVersionId?(): number;
 }
 
 interface VscodeInlayRangeLike {
@@ -66,23 +64,6 @@ function modelUriString(model: VscodeInlayModelLike | null | undefined): string 
       : '';
   } catch (_) {
     return '';
-  }
-}
-
-function modelText(model: VscodeInlayModelLike | null | undefined): string | undefined {
-  try {
-    return model && typeof model.getValue === 'function' ? String(model.getValue()) : undefined;
-  } catch (_) {
-    return undefined;
-  }
-}
-
-function modelVersion(model: VscodeInlayModelLike | null | undefined): number | undefined {
-  try {
-    const version = model && typeof model.getVersionId === 'function' ? Number(model.getVersionId()) : NaN;
-    return Number.isFinite(version) ? version : undefined;
-  } catch (_) {
-    return undefined;
   }
 }
 
@@ -157,10 +138,6 @@ export async function provideWorkbenchInlayHintsFromVscodeMainThread(
     range,
     timeoutMs: Number.isFinite(Number(deps.adapterTimeoutMs)) ? Number(deps.adapterTimeoutMs) : 10000,
   };
-  const text = modelText(deps.model);
-  if (text !== undefined) params.text = text;
-  const version = modelVersion(deps.model);
-  if (version !== undefined) params.modelVersionId = version;
 
   const response = await deps.callWorkbenchInlayHints(params, {
     timeoutMs: Number.isFinite(Number(deps.callTimeoutMs)) ? Number(deps.callTimeoutMs) : 12000,

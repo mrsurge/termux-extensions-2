@@ -12,10 +12,6 @@ export interface InlayHintsRuntime {
   ensureConnected: () => void;
   defaultAuthority: () => string;
   languageIdFromPath: (filePath: string) => string;
-  didChange: (
-    params: Record<string, unknown>,
-    opts: { waitForAck: true; timeoutMs: number },
-  ) => Promise<unknown> | unknown;
   uriForPath: (filePath: string, authority: string) => unknown;
   sendExtPending: (
     rpcId: number,
@@ -34,14 +30,6 @@ export interface InlayHintsRuntime {
   log: (message: string) => void;
   warn: (message: string, detail?: unknown) => void;
 }
-
-interface InlayHintsSyncCacheEntry {
-  signature: string;
-  promise?: Promise<unknown>;
-  result?: unknown;
-}
-
-const inlayHintsSyncByPath = new Map<string, InlayHintsSyncCacheEntry>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -64,82 +52,6 @@ function replyError(reply: unknown): unknown {
   return field(reply, "error");
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function textHash(text: string): string {
-  let hash = 2166136261;
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 16777619) >>> 0;
-  }
-  return hash.toString(16);
-}
-
-function inlayHintsSyncSignature(
-  input: Record<string, unknown>,
-  text: string,
-  languageId: string,
-  authority: string,
-): string {
-  const modelVersionId = input.modelVersionId;
-  const versionPart = modelVersionId == null ? "no-version" : String(modelVersionId);
-  return [
-    authority,
-    languageId,
-    versionPart,
-    String(text.length),
-    textHash(text),
-  ].join("|");
-}
-
-async function syncTextIfProvided(
-  runtime: InlayHintsRuntime,
-  input: Record<string, unknown>,
-  path: string,
-  languageId: string,
-  authority: string,
-  timeoutMs: number,
-): Promise<Record<string, unknown> | null> {
-  if (input.text == null || !path) return null;
-  const text = String(input.text);
-  const signature = inlayHintsSyncSignature(input, text, languageId, authority);
-  const cached = inlayHintsSyncByPath.get(path);
-  if (cached && cached.signature === signature) {
-    try {
-      if (cached.promise) await cached.promise;
-      runtime.log(`[inlayHints] pre-flight didChange coalesced path=${path}`);
-      return null;
-    } catch (error) {
-      const message = errorMessage(error);
-      runtime.warn("[inlayHints] pre-flight didChange failed", message);
-      return { ok: false, error: `didChange_ack_failed: ${message}` };
-    }
-  }
-
-  try {
-    const promise = Promise.resolve(runtime.didChange(
-      { path, text, languageId, authority },
-      { waitForAck: true, timeoutMs: Math.min(timeoutMs, 5000) },
-    ));
-    inlayHintsSyncByPath.set(path, { signature, promise });
-    const syncResult = await promise;
-    const latest = inlayHintsSyncByPath.get(path);
-    if (latest && latest.signature === signature) {
-      inlayHintsSyncByPath.set(path, { signature, result: syncResult });
-    }
-    const result = isRecord(syncResult) ? syncResult : {};
-    runtime.log(`[inlayHints] pre-flight didChange ack path=${path} ver=${result.versionId ?? "?"} type=${result.ackType ?? "?"}`);
-    return null;
-  } catch (error) {
-    const latest = inlayHintsSyncByPath.get(path);
-    if (latest && latest.signature === signature) inlayHintsSyncByPath.delete(path);
-    const message = errorMessage(error);
-    runtime.warn("[inlayHints] pre-flight didChange failed", message);
-    return { ok: false, error: `didChange_ack_failed: ${message}` };
-  }
-}
 
 function numberFrom(value: unknown, fallback = NaN): number {
   return typeof value === "number" && Number.isFinite(value) ? value : Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -185,9 +97,6 @@ export async function provideInlayHints(
   if (!range) {
     return { ok: false, error: "missing inlay hints range" };
   }
-
-  const syncError = await syncTextIfProvided(runtime, input, path, languageId, authority, timeoutMs);
-  if (syncError) return syncError;
 
   const uriObj = runtime.uriForPath(path, authority);
   const { promise } = runtime.sendExtPending(
