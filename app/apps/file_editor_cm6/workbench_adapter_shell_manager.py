@@ -223,7 +223,7 @@ async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> Non
 async def _handle_push_event(obj: dict) -> None:
     """Forward adapter push events to the editor frontend via Socket.IO."""
     event_name = obj.get("event", "")
-    if event_name in {"semantic_tokens_provider_registered", "completions_provider_registered"}:
+    if event_name in {"semantic_tokens_provider_registered", "completions_provider_registered", "inlay_hints_provider_registered", "inline_completions_provider_registered"}:
         try:
             from .monaco_editor.editor_socketio import EDITOR_SIO
             await EDITOR_SIO.emit(

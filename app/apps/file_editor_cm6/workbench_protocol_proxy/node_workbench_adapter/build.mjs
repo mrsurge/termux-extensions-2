@@ -19,6 +19,8 @@ const config = {
     "src/extensions/provider-registry.ts",
     "src/extensions/intelligence/completions.ts",
     "src/extensions/intelligence/hover.ts",
+    "src/extensions/intelligence/inlay-hints.ts",
+    "src/extensions/intelligence/inline-completions.ts",
     "src/extensions/intelligence/semantic-tokens.ts",
     "src/extensions/intelligence/structure.ts",
     "src/server/event-bridge.ts",

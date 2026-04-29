@@ -44,6 +44,12 @@ export const EDITOR_RPC_METHODS = {
   workbenchOpenFile: 'editor.workbench.openFile',
   workbenchHover: 'editor.workbench.hover',
   workbenchCompletions: 'editor.workbench.completions',
+  workbenchInlayHints: 'editor.workbench.inlayHints',
+  workbenchInlayHintsResolve: 'editor.workbench.inlayHints.resolve',
+  workbenchInlayHintsRelease: 'editor.workbench.inlayHints.release',
+  workbenchInlineCompletions: 'editor.workbench.inlineCompletions',
+  workbenchInlineCompletionsFree: 'editor.workbench.inlineCompletions.free',
+  workbenchInlineCompletionsDidShow: 'editor.workbench.inlineCompletions.didShow',
   workbenchSemanticTokens: 'editor.workbench.semanticTokens',
   workbenchSemanticTokensLegend: 'editor.workbench.semanticTokensLegend',
   workbenchSemanticTokensRange: 'editor.workbench.semanticTokensRange',
@@ -144,6 +150,47 @@ export interface EditorRpcWorkbenchCompletionsParams extends EditorRpcWorkbenchH
   triggerKind?: number;
   triggerCharacter?: string;
   text?: string;
+}
+
+export interface EditorRpcWorkbenchInlayHintsParams {
+  path: string;
+  languageId?: string;
+  providerHandle?: number | string | null;
+  range?: Record<string, unknown>;
+  text?: string;
+  modelVersionId?: number;
+  timeoutMs?: number;
+}
+
+export interface EditorRpcWorkbenchInlayHintsResolveParams {
+  providerHandle?: number | string | null;
+  cacheId?: unknown;
+}
+
+export interface EditorRpcWorkbenchInlayHintsReleaseParams {
+  providerHandle?: number | string | null;
+  cacheId?: number;
+}
+
+export interface EditorRpcWorkbenchInlineCompletionsParams extends EditorRpcWorkbenchHoverParams {
+  providerHandle?: number | string | null;
+  context?: Record<string, unknown>;
+  text?: string;
+  modelVersionId?: number;
+  timeoutMs?: number;
+}
+
+export interface EditorRpcWorkbenchInlineCompletionsFreeParams {
+  providerHandle?: number | string | null;
+  pid?: number;
+  reason?: Record<string, unknown>;
+}
+
+export interface EditorRpcWorkbenchInlineCompletionsDidShowParams {
+  providerHandle?: number | string | null;
+  pid?: number;
+  idx?: number;
+  updatedInsertText?: string;
 }
 
 export interface EditorRpcWorkbenchSemanticTokensParams {
@@ -263,6 +310,18 @@ export function editorWorkbenchMethodToRpcMethod(method: string): EditorRpcMetho
       return EDITOR_RPC_METHODS.workbenchHover;
     case 'completions':
       return EDITOR_RPC_METHODS.workbenchCompletions;
+    case 'inlay_hints':
+      return EDITOR_RPC_METHODS.workbenchInlayHints;
+    case 'inlay_hints_resolve':
+      return EDITOR_RPC_METHODS.workbenchInlayHintsResolve;
+    case 'inlay_hints_release':
+      return EDITOR_RPC_METHODS.workbenchInlayHintsRelease;
+    case 'inline_completions':
+      return EDITOR_RPC_METHODS.workbenchInlineCompletions;
+    case 'inline_completions_free':
+      return EDITOR_RPC_METHODS.workbenchInlineCompletionsFree;
+    case 'inline_completions_did_show':
+      return EDITOR_RPC_METHODS.workbenchInlineCompletionsDidShow;
     case 'semantic_tokens':
       return EDITOR_RPC_METHODS.workbenchSemanticTokens;
     case 'semantic_tokens_legend':

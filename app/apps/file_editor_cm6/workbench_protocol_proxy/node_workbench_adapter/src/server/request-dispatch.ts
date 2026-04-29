@@ -56,6 +56,12 @@ export interface WorkbenchLike {
   foldingRanges: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   hover: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   completions: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  inlayHints: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  resolveInlayHint: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  releaseInlayHints: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  inlineCompletions: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  freeInlineCompletions: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  handleInlineCompletionDidShow: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   semanticTokens: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   getSemanticTokensLegend: (languageId: string) => Promise<unknown>;
   semanticTokensRange: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -337,6 +343,77 @@ export async function dispatchJsonRpcRequest(
       triggerCharacter: params.triggerCharacter,
       text: params.text,
       timeoutMs: params.timeoutMs,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.inlayHints") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const result = await runtime.wb.inlayHints({
+      path: resolvedPath,
+      authority,
+      providerHandle: params.providerHandle,
+      languageId: params.languageId,
+      range: params.range,
+      text: params.text,
+      modelVersionId: params.modelVersionId,
+      timeoutMs: params.timeoutMs,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.inlayHints.resolve") {
+    const result = await runtime.wb.resolveInlayHint({
+      providerHandle: params.providerHandle,
+      cacheId: params.cacheId,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.inlayHints.release") {
+    const result = await runtime.wb.releaseInlayHints({
+      providerHandle: params.providerHandle,
+      cacheId: params.cacheId,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.inlineCompletions") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const result = await runtime.wb.inlineCompletions({
+      path: resolvedPath,
+      authority,
+      providerHandle: params.providerHandle,
+      languageId: params.languageId,
+      lineNumber: params.lineNumber,
+      column: params.column,
+      context: params.context,
+      text: params.text,
+      modelVersionId: params.modelVersionId,
+      timeoutMs: params.timeoutMs,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.inlineCompletions.free") {
+    const result = await runtime.wb.freeInlineCompletions({
+      providerHandle: params.providerHandle,
+      pid: params.pid,
+      reason: params.reason,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.inlineCompletions.didShow") {
+    const result = await runtime.wb.handleInlineCompletionDidShow({
+      providerHandle: params.providerHandle,
+      pid: params.pid,
+      idx: params.idx,
+      updatedInsertText: params.updatedInsertText,
     });
     return success(id, result);
   }

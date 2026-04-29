@@ -4,6 +4,8 @@ import { applyDiagnosticsBridgeUpdate } from './editor_diagnostics_apply_update_
 import { handleWorkbenchResponseEvent } from './editor_socket_workbench_response_handler_utils.js';
 import { handleSemanticTokensProviderRegistered } from './editor_socket_semantic_registered_handler_utils.js';
 import { handleCompletionProviderRegistered } from './editor_socket_completion_registered_handler_utils.ts';
+import { handleInlayHintsProviderRegistered } from './editor_socket_inlay_hints_registered_handler_utils.ts';
+import { handleInlineCompletionProviderRegistered } from './editor_socket_inline_completions_registered_handler_utils.ts';
 import { handleIssuesDumpRequest } from './editor_socket_issues_dump_handler_utils.js';
 import { handleIssuesCommand } from './editor_socket_issues_cmd_handler_utils.js';
 import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
@@ -34,6 +36,24 @@ interface EditorRuntimeSocketHandlerDeps {
   };
   registerSemanticTokensWithLegend(lang: string, legend: unknown, isRange: boolean): void;
   cacheCompletionProviderRegistration(lang: string, registration: { handle: string; triggerCharacters: string[]; supportsResolve: boolean }): void;
+  cacheInlayHintsProviderRegistration(lang: string, registration: {
+    handle: string;
+    supportsResolve: boolean;
+    displayName?: string | null;
+    eventHandle?: number | null;
+  }): void;
+  cacheInlineCompletionProviderRegistration(lang: string, registration: {
+    handle: string;
+    supportsHandleEvents: boolean;
+    extensionId?: string | null;
+    extensionVersion?: string | null;
+    groupId?: string | null;
+    yieldsToGroupIds: string[];
+    excludesGroupIds: string[];
+    displayName?: string | null;
+    debounceDelayMs?: number | null;
+    eventHandle?: number | null;
+  }): void;
   getMonaco(): unknown;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   getEditor(): unknown;
@@ -46,6 +66,12 @@ const WORKBENCH_RESPONSE_EVENTS = [
   'hover',
   'symbols',
   'completions',
+  'inlay_hints',
+  'inlay_hints_resolve',
+  'inlay_hints_release',
+  'inline_completions',
+  'inline_completions_free',
+  'inline_completions_did_show',
   'semantic_tokens',
   'semantic_tokens_legend',
   'semantic_tokens_range',
@@ -103,6 +129,24 @@ export function registerEditorRuntimeSocketHandlers(
       handleCompletionProviderRegistered(
         payload,
         deps.cacheCompletionProviderRegistration,
+      );
+    } catch (_) {}
+  });
+
+  socket.on('editor:inlay_hints_provider_registered', (payload: unknown) => {
+    try {
+      handleInlayHintsProviderRegistered(
+        payload,
+        deps.cacheInlayHintsProviderRegistration,
+      );
+    } catch (_) {}
+  });
+
+  socket.on('editor:inline_completions_provider_registered', (payload: unknown) => {
+    try {
+      handleInlineCompletionProviderRegistered(
+        payload,
+        deps.cacheInlineCompletionProviderRegistration,
       );
     } catch (_) {}
   });

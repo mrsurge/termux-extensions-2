@@ -17,6 +17,12 @@ from .editor_rpc_contract import (
     EDITOR_RPC_METHOD_WORKBENCH_GRAMMARS_LIST,
     EDITOR_RPC_METHOD_WORKBENCH_GRAMMARS_LOAD,
     EDITOR_RPC_METHOD_WORKBENCH_HOVER,
+    EDITOR_RPC_METHOD_WORKBENCH_INLAY_HINTS,
+    EDITOR_RPC_METHOD_WORKBENCH_INLAY_HINTS_RELEASE,
+    EDITOR_RPC_METHOD_WORKBENCH_INLAY_HINTS_RESOLVE,
+    EDITOR_RPC_METHOD_WORKBENCH_INLINE_COMPLETIONS,
+    EDITOR_RPC_METHOD_WORKBENCH_INLINE_COMPLETIONS_DID_SHOW,
+    EDITOR_RPC_METHOD_WORKBENCH_INLINE_COMPLETIONS_FREE,
     EDITOR_RPC_METHOD_WORKBENCH_OPEN_FILE,
     EDITOR_RPC_METHOD_WORKBENCH_PROVIDERS,
     EDITOR_RPC_METHOD_WORKBENCH_SEMANTIC_TOKENS,
@@ -37,6 +43,12 @@ from .editor_workbench_backend import (
     handle_workbench_grammars_list,
     handle_workbench_grammars_load,
     handle_workbench_hover,
+    handle_workbench_inlay_hints,
+    handle_workbench_inlay_hints_release,
+    handle_workbench_inlay_hints_resolve,
+    handle_workbench_inline_completions,
+    handle_workbench_inline_completions_did_show,
+    handle_workbench_inline_completions_free,
     handle_workbench_open_file,
     handle_workbench_providers,
     handle_workbench_semantic_tokens,
@@ -213,6 +225,62 @@ async def dispatch_editor_rpc_request(
             params,
             emit_to_sid=capture,
             active_project=active_project,
+            logger=logger,
+        )
+        return _unwrap_captured_result(capture, method=method)
+
+    if method == EDITOR_RPC_METHOD_WORKBENCH_INLAY_HINTS:
+        capture = _CapturedEmit()
+        await handle_workbench_inlay_hints(
+            params,
+            emit_to_sid=capture,
+            active_project=active_project,
+            logger=logger,
+        )
+        return _unwrap_captured_result(capture, method=method)
+
+    if method == EDITOR_RPC_METHOD_WORKBENCH_INLAY_HINTS_RESOLVE:
+        capture = _CapturedEmit()
+        await handle_workbench_inlay_hints_resolve(
+            params,
+            emit_to_sid=capture,
+            logger=logger,
+        )
+        return _unwrap_captured_result(capture, method=method)
+
+    if method == EDITOR_RPC_METHOD_WORKBENCH_INLAY_HINTS_RELEASE:
+        capture = _CapturedEmit()
+        await handle_workbench_inlay_hints_release(
+            params,
+            emit_to_sid=capture,
+            logger=logger,
+        )
+        return _unwrap_captured_result(capture, method=method)
+
+    if method == EDITOR_RPC_METHOD_WORKBENCH_INLINE_COMPLETIONS:
+        capture = _CapturedEmit()
+        await handle_workbench_inline_completions(
+            params,
+            emit_to_sid=capture,
+            active_project=active_project,
+            logger=logger,
+        )
+        return _unwrap_captured_result(capture, method=method)
+
+    if method == EDITOR_RPC_METHOD_WORKBENCH_INLINE_COMPLETIONS_FREE:
+        capture = _CapturedEmit()
+        await handle_workbench_inline_completions_free(
+            params,
+            emit_to_sid=capture,
+            logger=logger,
+        )
+        return _unwrap_captured_result(capture, method=method)
+
+    if method == EDITOR_RPC_METHOD_WORKBENCH_INLINE_COMPLETIONS_DID_SHOW:
+        capture = _CapturedEmit()
+        await handle_workbench_inline_completions_did_show(
+            params,
+            emit_to_sid=capture,
             logger=logger,
         )
         return _unwrap_captured_result(capture, method=method)

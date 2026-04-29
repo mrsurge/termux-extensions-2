@@ -64,6 +64,8 @@ import {
   createExtensionCatalogRuntime,
   createExtensionHostRuntime,
   createExtHostDispatchRuntime,
+  createInlayHintsRuntime,
+  createInlineCompletionRuntime,
   createManagementRuntime,
   createSemanticTokensRuntime,
   createTransportRuntime,
@@ -103,6 +105,16 @@ import {
   provideCompletions,
   provideCompletionSingle,
 } from "../extensions/intelligence/completions.mjs";
+import {
+  provideInlayHints,
+  releaseInlayHints,
+  resolveInlayHint,
+} from "../extensions/intelligence/inlay-hints.mjs";
+import {
+  freeInlineCompletions,
+  handleInlineCompletionDidShow,
+  provideInlineCompletions,
+} from "../extensions/intelligence/inline-completions.mjs";
 import {
   provideHover,
   provideHoverSingle,
@@ -168,6 +180,8 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$registerHoverProvider",
   "$registerDocumentSymbolProvider",
   "$registerCompletionsProvider",
+  "$registerInlayHintsProvider",
+  "$registerInlineCompletionsSupport",
   "$registerDocumentSemanticTokensProvider",
   "$registerDocumentRangeSemanticTokensProvider",
   "$registerDocumentLinkProvider",
@@ -672,6 +686,36 @@ export class WorkbenchClient {
       waitFor: (condition, options) => waitFor(condition, options),
       uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
       sendExtPending: (rpcId, method, args, cancellable, pendingOptions) => this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+      log: (message) => console.log(message),
+      warn: (message, detail) => console.warn(message, detail),
+    });
+  }
+
+  _inlineCompletionRuntime() {
+    return createInlineCompletionRuntime({
+      extProtocol: this.ext?.protocol ?? null,
+      authority: this._authority,
+      defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
+      languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
+      didChange: (params, opts) => this.didChange(params, opts),
+      uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
+      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) => this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+      sendExtAwaitTerminalReply: (rpcId, method, args, cancellable, timeoutMs) => this._sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
+      log: (message) => console.log(message),
+      warn: (message, detail) => console.warn(message, detail),
+    });
+  }
+
+  _inlayHintsRuntime() {
+    return createInlayHintsRuntime({
+      extProtocol: this.ext?.protocol ?? null,
+      authority: this._authority,
+      defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
+      languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
+      didChange: (params, opts) => this.didChange(params, opts),
+      uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
+      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) => this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+      sendExtAwaitTerminalReply: (rpcId, method, args, cancellable, timeoutMs) => this._sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
       log: (message) => console.log(message),
       warn: (message, detail) => console.warn(message, detail),
     });
@@ -1192,6 +1236,30 @@ export class WorkbenchClient {
     return provideCompletions(this._completionRuntime(), params);
   }
 
+  async inlayHints(params: unknown = {}): Promise<Record<string, unknown>> {
+    return provideInlayHints(this._inlayHintsRuntime(), params);
+  }
+
+  async resolveInlayHint(params: unknown = {}): Promise<Record<string, unknown>> {
+    return resolveInlayHint(this._inlayHintsRuntime(), params);
+  }
+
+  async releaseInlayHints(params: unknown = {}): Promise<Record<string, unknown>> {
+    return releaseInlayHints(this._inlayHintsRuntime(), params);
+  }
+
+  async inlineCompletions(params: unknown = {}): Promise<Record<string, unknown>> {
+    return provideInlineCompletions(this._inlineCompletionRuntime(), params);
+  }
+
+  async freeInlineCompletions(params: unknown = {}): Promise<Record<string, unknown>> {
+    return freeInlineCompletions(this._inlineCompletionRuntime(), params);
+  }
+
+  async handleInlineCompletionDidShow(params: unknown = {}): Promise<Record<string, unknown>> {
+    return handleInlineCompletionDidShow(this._inlineCompletionRuntime(), params);
+  }
+
   /** Single-provider completions path (for pinned handle callers). */
   async _completionsSingle(
     providerHandle: number,
@@ -1329,7 +1397,7 @@ export class WorkbenchClient {
     for (const event of events) {
       this.onEvent({ ...event, ts_ms: Date.now() });
     }
-    console.error(`[resync] replayed providers: cmp=${replayed.completions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges}`);
+    console.error(`[resync] replayed providers: cmp=${replayed.completions} inlay=${replayed.inlayHints} inline=${replayed.inlineCompletions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges}`);
     return { ok: true, ts_ms: Date.now(), replayed };
   }
 }

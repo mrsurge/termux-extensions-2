@@ -1,5 +1,14 @@
 import { provideWorkbenchCompletionItemsFromVscodeSuggest } from './vscode_completion_vendor/suggest.js';
 import {
+  provideWorkbenchInlayHintsFromVscodeMainThread,
+  resolveWorkbenchInlayHintFromVscodeMainThread,
+} from './vscode_document_intelligence_vendor/inlayHints.ts';
+import {
+  freeWorkbenchInlineCompletionsFromVscodeMainThread,
+  notifyWorkbenchInlineCompletionDidShowFromVscodeMainThread,
+  provideWorkbenchInlineCompletionsFromVscodeMainThread,
+} from './vscode_document_intelligence_vendor/inlineCompletions.ts';
+import {
   provideWorkbenchDocumentRangeSemanticTokensFromVscodeMainThread,
   provideWorkbenchDocumentSemanticTokensFromVscodeMainThread,
 } from './vscode_document_intelligence_vendor/semanticTokens.js';
@@ -24,6 +33,12 @@ interface LanguageBridgeState {
   completionProvidersByLanguage: Record<string, Record<string, CompletionProviderRegistrationLike>>;
   completionProviderDisposablesByLanguage: Record<string, MonacoDisposableLike | null>;
   completionProviderSignatureByLanguage: Record<string, string>;
+  inlayHintsProvidersByLanguage: Record<string, Record<string, InlayHintsProviderRegistrationLike>>;
+  inlayHintsProviderDisposablesByKey: Record<string, MonacoDisposableLike | null>;
+  inlayHintsProviderSignatureByKey: Record<string, string>;
+  inlineCompletionProvidersByLanguage: Record<string, Record<string, InlineCompletionProviderRegistrationLike>>;
+  inlineCompletionProviderDisposablesByKey: Record<string, MonacoDisposableLike | null>;
+  inlineCompletionProviderSignatureByKey: Record<string, string>;
   semanticTokensLegendCache: Record<string, SemanticTokensLegendLike>;
   semanticTokensRangeFlag: Record<string, boolean>;
 }
@@ -32,6 +47,26 @@ interface CompletionProviderRegistrationLike {
   handle: string;
   triggerCharacters: string[];
   supportsResolve: boolean;
+}
+
+interface InlayHintsProviderRegistrationLike {
+  handle: string;
+  supportsResolve: boolean;
+  displayName?: string | null;
+  eventHandle?: number | null;
+}
+
+interface InlineCompletionProviderRegistrationLike {
+  handle: string;
+  supportsHandleEvents: boolean;
+  extensionId?: string | null;
+  extensionVersion?: string | null;
+  groupId?: string | null;
+  yieldsToGroupIds: string[];
+  excludesGroupIds: string[];
+  displayName?: string | null;
+  debounceDelayMs?: number | null;
+  eventHandle?: number | null;
 }
 
 interface GuardedCallResult {
@@ -75,6 +110,10 @@ interface MonacoCompletionContextLike {
   triggerCharacter?: string;
 }
 
+interface MonacoInlineCompletionContextLike extends Record<string, unknown> {
+  triggerKind?: number;
+}
+
 interface MonacoDisposableLike {
   dispose(): void;
 }
@@ -107,6 +146,23 @@ interface MonacoLanguagesLike {
     __te2WorkbenchProvider?: true;
     triggerCharacters?: string[];
     provideCompletionItems(model: MonacoModelLike, pos: MonacoPositionLike, context: MonacoCompletionContextLike, token: MonacoCancellationTokenLike): unknown;
+  }) => MonacoDisposableLike | unknown;
+  registerInlayHintsProvider?: (selector: unknown, provider: {
+    displayName?: string;
+    provideInlayHints(model: MonacoModelLike, range: MonacoRangeLike, token: MonacoCancellationTokenLike): unknown;
+    resolveInlayHint?(hint: Record<string, unknown>, token: MonacoCancellationTokenLike): unknown;
+    onDidChangeInlayHints?: unknown;
+  }) => MonacoDisposableLike | unknown;
+  registerInlineCompletionsProvider?: (selector: unknown, provider: {
+    provideInlineCompletions(model: MonacoModelLike, position: MonacoPositionLike, context: MonacoInlineCompletionContextLike, token: MonacoCancellationTokenLike): unknown;
+    handleItemDidShow?(completions: Record<string, unknown>, item: Record<string, unknown>, updatedInsertText: string, editDeltaInfo: unknown): unknown;
+    disposeInlineCompletions(completions: Record<string, unknown>, reason: Record<string, unknown>): void;
+    groupId?: string;
+    yieldsToGroupIds?: string[];
+    excludesGroupIds?: string[];
+    displayName?: string;
+    debounceDelayMs?: number;
+    toString?(): string;
   }) => MonacoDisposableLike | unknown;
   registerDocumentRangeSemanticTokensProvider?: (selector: unknown, provider: {
     getLegend(): SemanticTokensLegendLike;
@@ -368,9 +424,11 @@ export function createEditorLanguageBridgeProviders(
   deps: CreateEditorLanguageBridgeProvidersDeps,
 ): {
   cacheCompletionProviderRegistration(langId: string, registration: CompletionProviderRegistrationLike): void;
+  cacheInlayHintsProviderRegistration(langId: string, registration: InlayHintsProviderRegistrationLike): void;
+  cacheInlineCompletionProviderRegistration(langId: string, registration: InlineCompletionProviderRegistrationLike): void;
   registerSemanticTokensWithLegend(langId: string, legend: SemanticTokensLegendLike, isRange?: boolean): void;
   installWorkbenchLanguageBridgeProviders(): void;
-  hydrateProviderSnapshot(snapshot: unknown): { completions: number; semanticTokens: number };
+  hydrateProviderSnapshot(snapshot: unknown): { completions: number; inlayHints: number; inlineCompletions: number; semanticTokens: number };
 } {
   function selectorLanguagesFromSnapshot(selectorRaw: unknown): string[] {
     const selectorList = asArray(selectorRaw) || [];
@@ -506,11 +564,277 @@ export function createEditorLanguageBridgeProviders(
     ensureCompletionProvidersRegistered(langId);
   }
 
-  function hydrateProviderSnapshot(snapshot: unknown): { completions: number; semanticTokens: number } {
+  function getInlayHintsRegistrations(langId: string): InlayHintsProviderRegistrationLike[] {
+    const languageCache = deps.languageBridge.inlayHintsProvidersByLanguage[langId];
+    if (!languageCache) return [];
+    return Object.values(languageCache);
+  }
+
+  function inlayHintsRegistrationKey(langId: string, handle: string): string {
+    return langId + '::' + handle;
+  }
+
+  function getInlayHintsRegistrationSignature(entry: InlayHintsProviderRegistrationLike): string {
+    return [
+      String(entry.handle || '').trim(),
+      entry.supportsResolve ? '1' : '0',
+      String(entry.displayName || ''),
+      entry.eventHandle == null ? '' : String(entry.eventHandle),
+    ].join('::');
+  }
+
+  function ensureInlayHintsProviderRegistered(langId: string, handleKey: string): void {
+    const monacoRef = deps.getMonaco();
+    if (!monacoRef || !monacoRef.languages || !monacoRef.languages.registerInlayHintsProvider) return;
+    const languageCache = deps.languageBridge.inlayHintsProvidersByLanguage[langId];
+    const registration = languageCache ? languageCache[handleKey] : null;
+    if (!registration) return;
+
+    const registrationKey = inlayHintsRegistrationKey(langId, handleKey);
+    const nextSignature = getInlayHintsRegistrationSignature(registration);
+    if (
+      nextSignature
+      && deps.languageBridge.inlayHintsProviderSignatureByKey[registrationKey] === nextSignature
+      && deps.languageBridge.inlayHintsProviderDisposablesByKey[registrationKey]
+    ) {
+      return;
+    }
+
+    const existingDisposable = deps.languageBridge.inlayHintsProviderDisposablesByKey[registrationKey];
+    if (existingDisposable && typeof existingDisposable.dispose === 'function') {
+      try { existingDisposable.dispose(); } catch (_) {}
+    }
+
+    const registrationDisposable = monacoRef.languages.registerInlayHintsProvider(langId, {
+      displayName: registration.displayName || undefined,
+      provideInlayHints(model, range) {
+        try {
+          deps.flushMirrorDebounce();
+          return provideWorkbenchInlayHintsFromVscodeMainThread({
+            model,
+            range,
+            languageId: langId,
+            providerHandle: handleKey,
+            adapterTimeoutMs: 10000,
+            callTimeoutMs: 12000,
+            getCurrentPath: deps.getCurrentPath,
+            absPathFromVscodeUri: deps.absPathFromVscodeUri,
+            callWorkbenchInlayHints(params, opts) {
+              return deps.editorWorkbenchCall('inlay_hints', params, opts);
+            },
+            callWorkbenchInlayHintsRelease(params, opts) {
+              return deps.editorWorkbenchCall('inlay_hints_release', params, opts);
+            },
+          }).catch(() => undefined);
+        } catch (_) {
+          return undefined;
+        }
+      },
+      resolveInlayHint(hint) {
+        if (!registration.supportsResolve) return hint;
+        try {
+          return resolveWorkbenchInlayHintFromVscodeMainThread({
+            providerHandle: handleKey,
+            hint,
+            callWorkbenchInlayHintsResolve(params, opts) {
+              return deps.editorWorkbenchCall('inlay_hints_resolve', params, opts);
+            },
+          }).catch(() => hint);
+        } catch (_) {
+          return hint;
+        }
+      },
+    });
+    deps.languageBridge.inlayHintsProviderDisposablesByKey[registrationKey] = (
+      registrationDisposable && typeof (registrationDisposable as MonacoDisposableLike).dispose === 'function'
+        ? registrationDisposable as MonacoDisposableLike
+        : null
+    );
+    deps.languageBridge.inlayHintsProviderSignatureByKey[registrationKey] = nextSignature;
+  }
+
+  function ensureInlayHintsProvidersRegistered(langId: string): void {
+    const registrations = getInlayHintsRegistrations(langId);
+    for (const registration of registrations) {
+      const handleKey = String(registration.handle || '').trim();
+      if (!handleKey) continue;
+      ensureInlayHintsProviderRegistered(langId, handleKey);
+    }
+  }
+
+  function cacheInlayHintsProviderRegistration(langId: string, registration: InlayHintsProviderRegistrationLike): void {
+    if (!langId) return;
+    const handleKey = registration.handle != null ? String(registration.handle).trim() : '';
+    if (!handleKey) return;
+    if (!deps.languageBridge.inlayHintsProvidersByLanguage[langId]) {
+      deps.languageBridge.inlayHintsProvidersByLanguage[langId] = Object.create(null);
+    }
+    deps.languageBridge.inlayHintsProvidersByLanguage[langId][handleKey] = {
+      handle: handleKey,
+      supportsResolve: !!registration.supportsResolve,
+      displayName: registration.displayName || null,
+      eventHandle: registration.eventHandle == null ? null : Number(registration.eventHandle),
+    };
+    ensureInlayHintsProvidersRegistered(langId);
+  }
+
+  function getInlineCompletionRegistrations(langId: string): InlineCompletionProviderRegistrationLike[] {
+    const languageCache = deps.languageBridge.inlineCompletionProvidersByLanguage[langId];
+    if (!languageCache) return [];
+    return Object.values(languageCache);
+  }
+
+  function inlineCompletionRegistrationKey(langId: string, handle: string): string {
+    return langId + '::' + handle;
+  }
+
+  function getInlineCompletionRegistrationSignature(entry: InlineCompletionProviderRegistrationLike): string {
+    return [
+      String(entry.handle || '').trim(),
+      entry.supportsHandleEvents ? '1' : '0',
+      String(entry.extensionId || ''),
+      String(entry.extensionVersion || ''),
+      String(entry.groupId || ''),
+      entry.yieldsToGroupIds.join(','),
+      entry.excludesGroupIds.join(','),
+      String(entry.displayName || ''),
+      entry.debounceDelayMs == null ? '' : String(entry.debounceDelayMs),
+      entry.eventHandle == null ? '' : String(entry.eventHandle),
+    ].join('::');
+  }
+
+  function ensureInlineCompletionProviderRegistered(langId: string, handleKey: string): void {
+    const monacoRef = deps.getMonaco();
+    if (!monacoRef || !monacoRef.languages || !monacoRef.languages.registerInlineCompletionsProvider) return;
+    const languageCache = deps.languageBridge.inlineCompletionProvidersByLanguage[langId];
+    const registration = languageCache ? languageCache[handleKey] : null;
+    if (!registration) return;
+
+    const registrationKey = inlineCompletionRegistrationKey(langId, handleKey);
+    const nextSignature = getInlineCompletionRegistrationSignature(registration);
+    if (
+      nextSignature
+      && deps.languageBridge.inlineCompletionProviderSignatureByKey[registrationKey] === nextSignature
+      && deps.languageBridge.inlineCompletionProviderDisposablesByKey[registrationKey]
+    ) {
+      return;
+    }
+
+    const existingDisposable = deps.languageBridge.inlineCompletionProviderDisposablesByKey[registrationKey];
+    if (existingDisposable && typeof existingDisposable.dispose === 'function') {
+      try { existingDisposable.dispose(); } catch (_) {}
+    }
+
+    const registrationDisposable = monacoRef.languages.registerInlineCompletionsProvider(langId, {
+      provideInlineCompletions(model, position, context) {
+        try {
+          deps.flushMirrorDebounce();
+          return provideWorkbenchInlineCompletionsFromVscodeMainThread({
+            model,
+            position,
+            languageId: langId,
+            providerHandle: handleKey,
+            context,
+            adapterTimeoutMs: 10000,
+            callTimeoutMs: 12000,
+            getCurrentPath: deps.getCurrentPath,
+            absPathFromVscodeUri: deps.absPathFromVscodeUri,
+            callWorkbenchInlineCompletions(params, opts) {
+              return deps.editorWorkbenchCall('inline_completions', params, opts);
+            },
+          }).catch(() => undefined);
+        } catch (_) {
+          return undefined;
+        }
+      },
+      handleItemDidShow(completions, item, updatedInsertText) {
+        if (!registration.supportsHandleEvents) return;
+        try {
+          const pid = Number(asRecord(completions)?.pid);
+          const idx = Number(asRecord(item)?.idx);
+          if (!Number.isFinite(pid) || !Number.isFinite(idx)) return;
+          void notifyWorkbenchInlineCompletionDidShowFromVscodeMainThread({
+            providerHandle: handleKey,
+            pid,
+            idx,
+            updatedInsertText: String(updatedInsertText || ''),
+            callWorkbenchInlineCompletionsDidShow(params, opts) {
+              return deps.editorWorkbenchCall('inline_completions_did_show', params, opts);
+            },
+          });
+        } catch (_) {}
+      },
+      disposeInlineCompletions(completions, reason) {
+        try {
+          const pid = Number(asRecord(completions)?.pid);
+          if (!Number.isFinite(pid)) return;
+          void freeWorkbenchInlineCompletionsFromVscodeMainThread({
+            providerHandle: handleKey,
+            pid,
+            reason: asRecord(reason) || { kind: 'other' },
+            callWorkbenchInlineCompletionsFree(params, opts) {
+              return deps.editorWorkbenchCall('inline_completions_free', params, opts);
+            },
+          });
+        } catch (_) {}
+      },
+      groupId: registration.groupId || registration.extensionId || undefined,
+      yieldsToGroupIds: Array.isArray(registration.yieldsToGroupIds) ? registration.yieldsToGroupIds : [],
+      excludesGroupIds: Array.isArray(registration.excludesGroupIds) ? registration.excludesGroupIds : [],
+      displayName: registration.displayName || undefined,
+      debounceDelayMs: registration.debounceDelayMs == null ? undefined : Number(registration.debounceDelayMs),
+      toString() {
+        return 'InlineCompletionsProvider(' + (registration.extensionId || handleKey) + ')';
+      },
+    });
+    deps.languageBridge.inlineCompletionProviderDisposablesByKey[registrationKey] = (
+      registrationDisposable && typeof (registrationDisposable as MonacoDisposableLike).dispose === 'function'
+        ? registrationDisposable as MonacoDisposableLike
+        : null
+    );
+    deps.languageBridge.inlineCompletionProviderSignatureByKey[registrationKey] = nextSignature;
+  }
+
+  function ensureInlineCompletionProvidersRegistered(langId: string): void {
+    const registrations = getInlineCompletionRegistrations(langId);
+    for (const registration of registrations) {
+      const handleKey = String(registration.handle || '').trim();
+      if (!handleKey) continue;
+      ensureInlineCompletionProviderRegistered(langId, handleKey);
+    }
+  }
+
+  function cacheInlineCompletionProviderRegistration(langId: string, registration: InlineCompletionProviderRegistrationLike): void {
+    if (!langId) return;
+    const handleKey = registration.handle != null ? String(registration.handle).trim() : '';
+    if (!handleKey) return;
+    if (!deps.languageBridge.inlineCompletionProvidersByLanguage[langId]) {
+      deps.languageBridge.inlineCompletionProvidersByLanguage[langId] = Object.create(null);
+    }
+    deps.languageBridge.inlineCompletionProvidersByLanguage[langId][handleKey] = {
+      handle: handleKey,
+      supportsHandleEvents: !!registration.supportsHandleEvents,
+      extensionId: registration.extensionId || null,
+      extensionVersion: registration.extensionVersion || null,
+      groupId: registration.groupId || null,
+      yieldsToGroupIds: Array.isArray(registration.yieldsToGroupIds) ? registration.yieldsToGroupIds.map(String).filter(Boolean) : [],
+      excludesGroupIds: Array.isArray(registration.excludesGroupIds) ? registration.excludesGroupIds.map(String).filter(Boolean) : [],
+      displayName: registration.displayName || null,
+      debounceDelayMs: registration.debounceDelayMs == null ? null : Number(registration.debounceDelayMs),
+      eventHandle: registration.eventHandle == null ? null : Number(registration.eventHandle),
+    };
+    ensureInlineCompletionProvidersRegistered(langId);
+  }
+
+  function hydrateProviderSnapshot(snapshot: unknown): { completions: number; inlayHints: number; inlineCompletions: number; semanticTokens: number } {
     const snapshotRecord = asRecord(snapshot);
     let completionCount = 0;
+    let inlayHintsCount = 0;
+    let inlineCompletionCount = 0;
     let semanticTokensCount = 0;
     const completionEntries = asArray(snapshotRecord ? snapshotRecord.completions : null) || [];
+    const inlayHintsEntries = asArray(snapshotRecord ? snapshotRecord.inlayHints : null) || [];
+    const inlineCompletionEntries = asArray(snapshotRecord ? snapshotRecord.inlineCompletions : null) || [];
     const semanticTokenEntries = asArray(snapshotRecord ? snapshotRecord.semanticTokens : null) || [];
 
     for (const rawEntry of completionEntries) {
@@ -526,6 +850,42 @@ export function createEditorLanguageBridgeProviders(
           supportsResolve,
         });
         completionCount += 1;
+      }
+    }
+
+    for (const rawEntry of inlayHintsEntries) {
+      const entry = asRecord(rawEntry);
+      const handle = entry && entry.handle != null ? String(entry.handle).trim() : '';
+      if (!handle) continue;
+      for (const langId of selectorLanguagesFromSnapshot(entry && entry.selector)) {
+        cacheInlayHintsProviderRegistration(langId, {
+          handle,
+          supportsResolve: entry?.supportsResolve === true,
+          displayName: typeof entry?.displayName === 'string' ? entry.displayName : null,
+          eventHandle: typeof entry?.eventHandle === 'number' && Number.isFinite(entry.eventHandle) ? entry.eventHandle : null,
+        });
+        inlayHintsCount += 1;
+      }
+    }
+
+    for (const rawEntry of inlineCompletionEntries) {
+      const entry = asRecord(rawEntry);
+      const handle = entry && entry.handle != null ? String(entry.handle).trim() : '';
+      if (!handle) continue;
+      for (const langId of selectorLanguagesFromSnapshot(entry && entry.selector)) {
+        cacheInlineCompletionProviderRegistration(langId, {
+          handle,
+          supportsHandleEvents: entry?.supportsHandleEvents === true,
+          extensionId: typeof entry?.extensionId === 'string' ? entry.extensionId : null,
+          extensionVersion: typeof entry?.extensionVersion === 'string' ? entry.extensionVersion : null,
+          groupId: typeof entry?.groupId === 'string' ? entry.groupId : null,
+          yieldsToGroupIds: (asArray(entry ? entry.yieldsToGroupIds : null) || []).map(String).filter(Boolean),
+          excludesGroupIds: (asArray(entry ? entry.excludesGroupIds : null) || []).map(String).filter(Boolean),
+          displayName: typeof entry?.displayName === 'string' ? entry.displayName : null,
+          debounceDelayMs: typeof entry?.debounceDelayMs === 'number' && Number.isFinite(entry.debounceDelayMs) ? entry.debounceDelayMs : null,
+          eventHandle: typeof entry?.eventHandle === 'number' && Number.isFinite(entry.eventHandle) ? entry.eventHandle : null,
+        });
+        inlineCompletionCount += 1;
       }
     }
 
@@ -546,7 +906,7 @@ export function createEditorLanguageBridgeProviders(
       }
     }
 
-    return { completions: completionCount, semanticTokens: semanticTokensCount };
+    return { completions: completionCount, inlayHints: inlayHintsCount, inlineCompletions: inlineCompletionCount, semanticTokens: semanticTokensCount };
   }
 
   function registerSemanticTokensWithLegend(
@@ -774,6 +1134,9 @@ export function createEditorLanguageBridgeProviders(
             ensureCompletionProvidersRegistered(langId);
           } catch (_) {}
           try {
+            ensureInlayHintsProvidersRegistered(langId);
+          } catch (_) {}
+          try {
             registerSemanticTokensForLanguage(langId);
           } catch (_) {}
         });
@@ -794,6 +1157,12 @@ export function createEditorLanguageBridgeProviders(
             try {
               ensureCompletionProvidersRegistered(langId);
             } catch (_) {}
+            try {
+              ensureInlayHintsProvidersRegistered(langId);
+            } catch (_) {}
+            try {
+              ensureInlineCompletionProvidersRegistered(langId);
+            } catch (_) {}
           });
         } catch (_) {}
       }).catch(() => {});
@@ -802,6 +1171,8 @@ export function createEditorLanguageBridgeProviders(
 
   return {
     cacheCompletionProviderRegistration,
+    cacheInlayHintsProviderRegistration,
+    cacheInlineCompletionProviderRegistration,
     registerSemanticTokensWithLegend,
     installWorkbenchLanguageBridgeProviders,
     hydrateProviderSnapshot,

@@ -203,6 +203,28 @@ interface LanguageBridgeStateLike {
   completionProvidersByLanguage: Record<string, Record<string, { handle: string; triggerCharacters: string[]; supportsResolve: boolean }>>;
   completionProviderDisposablesByLanguage: Record<string, { dispose(): void } | null>;
   completionProviderSignatureByLanguage: Record<string, string>;
+  inlayHintsProvidersByLanguage: Record<string, Record<string, {
+    handle: string;
+    supportsResolve: boolean;
+    displayName?: string | null;
+    eventHandle?: number | null;
+  }>>;
+  inlayHintsProviderDisposablesByKey: Record<string, { dispose(): void } | null>;
+  inlayHintsProviderSignatureByKey: Record<string, string>;
+  inlineCompletionProvidersByLanguage: Record<string, Record<string, {
+    handle: string;
+    supportsHandleEvents: boolean;
+    extensionId?: string | null;
+    extensionVersion?: string | null;
+    groupId?: string | null;
+    yieldsToGroupIds: string[];
+    excludesGroupIds: string[];
+    displayName?: string | null;
+    debounceDelayMs?: number | null;
+    eventHandle?: number | null;
+  }>>;
+  inlineCompletionProviderDisposablesByKey: Record<string, { dispose(): void } | null>;
+  inlineCompletionProviderSignatureByKey: Record<string, string>;
   semanticTokensLegendCache: Record<string, SemanticTokensLegendLike>;
   semanticTokensRangeFlag: Record<string, boolean>;
   semanticTokensResultId: Record<string, string | undefined>;
@@ -547,6 +569,12 @@ interface MonacoBootWindowLike extends Window {
     completionProvidersByLanguage: {},
     completionProviderDisposablesByLanguage: {},
     completionProviderSignatureByLanguage: {},
+    inlayHintsProvidersByLanguage: {},
+    inlayHintsProviderDisposablesByKey: {},
+    inlayHintsProviderSignatureByKey: {},
+    inlineCompletionProvidersByLanguage: {},
+    inlineCompletionProviderDisposablesByKey: {},
+    inlineCompletionProviderSignatureByKey: {},
     semanticTokensLegendCache: {},
     semanticTokensRangeFlag: {},
     semanticTokensResultId: {},
@@ -688,7 +716,7 @@ interface MonacoBootWindowLike extends Window {
     providerSnapshotHydratePromise = editorWorkbenchCall('providers', {}, { timeoutMs: 5000 })
       .then((snapshot) => {
         const counts = languageBridgeProviders.hydrateProviderSnapshot(snapshot);
-        console.log('[providers] hydrated snapshot reason=' + String(reason || 'unknown') + ' completions=' + counts.completions + ' semTok=' + counts.semanticTokens);
+        console.log('[providers] hydrated snapshot reason=' + String(reason || 'unknown') + ' completions=' + counts.completions + ' inlay=' + counts.inlayHints + ' inline=' + counts.inlineCompletions + ' semTok=' + counts.semanticTokens);
       })
       .catch((error) => {
         console.warn('[providers] snapshot hydrate failed (' + String(reason || 'unknown') + ')', error);
@@ -1239,6 +1267,8 @@ interface MonacoBootWindowLike extends Window {
         languageBridge: languageBridge,
         registerSemanticTokensWithLegend: _registerSemanticTokensWithLegend,
         cacheCompletionProviderRegistration: languageBridgeProviders.cacheCompletionProviderRegistration,
+        cacheInlayHintsProviderRegistration: languageBridgeProviders.cacheInlayHintsProviderRegistration,
+        cacheInlineCompletionProviderRegistration: languageBridgeProviders.cacheInlineCompletionProviderRegistration,
         emitModelReady: emitModelReady,
         getMonaco: function() { return monaco; },
         emitToHost: emitToHost,

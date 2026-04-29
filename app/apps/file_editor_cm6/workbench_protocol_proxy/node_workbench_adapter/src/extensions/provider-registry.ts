@@ -3,6 +3,8 @@ export const PROVIDER_KINDS = [
   "documentSymbols",
   "foldingRanges",
   "completions",
+  "inlayHints",
+  "inlineCompletions",
   "semanticTokens",
 ] as const;
 
@@ -15,6 +17,14 @@ export interface ProviderEntry {
   eventHandle?: unknown;
   triggerCharacters?: string[];
   supportsResolve?: boolean;
+  supportsHandleEvents?: boolean;
+  extensionId?: string | null;
+  extensionVersion?: string | null;
+  groupId?: string | null;
+  yieldsToGroupIds?: string[];
+  excludesGroupIds?: string[];
+  displayName?: string | null;
+  debounceDelayMs?: number | null;
   legend?: unknown;
   range?: boolean;
 }
@@ -31,6 +41,8 @@ export interface ProviderResyncOutcome {
     semanticTokens: number;
     hover: number;
     completions: number;
+    inlayHints: number;
+    inlineCompletions: number;
     documentSymbols: number;
     foldingRanges: number;
   };
@@ -107,6 +119,8 @@ export class ProviderRegistry {
     documentSymbols: new Map<number, ProviderEntry>(),
     foldingRanges: new Map<number, ProviderEntry>(),
     completions: new Map<number, ProviderEntry>(),
+    inlayHints: new Map<number, ProviderEntry>(),
+    inlineCompletions: new Map<number, ProviderEntry>(),
     semanticTokens: new Map<number, ProviderEntry>(),
   };
 
@@ -128,6 +142,12 @@ export class ProviderRegistry {
     }
     if (methodMatches(method, "$registerCompletionsProvider")) {
       return this.registerCompletionsProvider(args);
+    }
+    if (methodMatches(method, "$registerInlayHintsProvider")) {
+      return this.registerInlayHintsProvider(args);
+    }
+    if (methodMatches(method, "$registerInlineCompletionsSupport")) {
+      return this.registerInlineCompletionsProvider(args);
     }
     if (methodMatches(method, "$registerDocumentSemanticTokensProvider")) {
       return this.registerDocumentSemanticTokensProvider(args);
@@ -156,6 +176,8 @@ export class ProviderRegistry {
       documentSymbols: this.list("documentSymbols"),
       foldingRanges: this.list("foldingRanges"),
       completions: this.list("completions"),
+      inlayHints: this.list("inlayHints"),
+      inlineCompletions: this.list("inlineCompletions"),
       semanticTokens: this.list("semanticTokens"),
     };
   }
@@ -204,7 +226,7 @@ export class ProviderRegistry {
   }
 
   buildResyncEvents(): ProviderResyncOutcome {
-    const replayed = { semanticTokens: 0, hover: 0, completions: 0, documentSymbols: 0, foldingRanges: 0 };
+    const replayed = { semanticTokens: 0, hover: 0, completions: 0, inlayHints: 0, inlineCompletions: 0, documentSymbols: 0, foldingRanges: 0 };
     const events: Record<string, unknown>[] = [];
 
     for (const entry of this.providers.completions.values()) {
@@ -218,6 +240,42 @@ export class ProviderRegistry {
           resync: true,
         });
         replayed.completions += 1;
+      }
+    }
+
+    for (const entry of this.providers.inlineCompletions.values()) {
+      for (const language of selectorLanguages(entry.selector)) {
+        events.push({
+          type: "provider/inlineCompletions",
+          handle: entry.handle,
+          language,
+          supportsHandleEvents: !!entry.supportsHandleEvents,
+          extensionId: entry.extensionId ?? null,
+          extensionVersion: entry.extensionVersion ?? null,
+          groupId: entry.groupId ?? null,
+          yieldsToGroupIds: Array.isArray(entry.yieldsToGroupIds) ? entry.yieldsToGroupIds : [],
+          excludesGroupIds: Array.isArray(entry.excludesGroupIds) ? entry.excludesGroupIds : [],
+          displayName: entry.displayName ?? null,
+          debounceDelayMs: entry.debounceDelayMs ?? null,
+          eventHandle: entry.eventHandle ?? null,
+          resync: true,
+        });
+        replayed.inlineCompletions += 1;
+      }
+    }
+
+    for (const entry of this.providers.inlayHints.values()) {
+      for (const language of selectorLanguages(entry.selector)) {
+        events.push({
+          type: "provider/inlayHints",
+          handle: entry.handle,
+          language,
+          supportsResolve: !!entry.supportsResolve,
+          displayName: entry.displayName ?? null,
+          eventHandle: entry.eventHandle ?? null,
+          resync: true,
+        });
+        replayed.inlayHints += 1;
       }
     }
 
@@ -331,6 +389,86 @@ export class ProviderRegistry {
       });
     }
     outcome.logs.push(`[providers] completions map size=${this.providers.completions.size} languages=[${this.languageSummary("completions")}]`);
+    return outcome;
+  }
+
+  private registerInlayHintsProvider(args: unknown[]): ProviderRegistrationOutcome {
+    const outcome = emptyOutcome(true);
+    if (args.length < 2) return outcome;
+    const handle = finiteHandle(args[0]);
+    const selector = normalizeSelector(args[1]);
+    const supportsResolve = !!args[2];
+    const eventHandle = finiteHandle(args[3]);
+    const displayName = typeof args[4] === "string" ? args[4] : null;
+    if (handle === null || !selector) return outcome;
+
+    this.providers.inlayHints.set(handle, {
+      handle,
+      selector,
+      supportsResolve,
+      eventHandle,
+      displayName,
+    });
+    for (const language of selectorLanguages(selector)) {
+      outcome.events.push({
+        type: "provider/inlayHints",
+        handle,
+        language,
+        supportsResolve,
+        displayName,
+        eventHandle,
+      });
+    }
+    outcome.logs.push(`[providers] inlayHints map size=${this.providers.inlayHints.size} languages=[${this.languageSummary("inlayHints")}] resolve=${supportsResolve ? 1 : 0}`);
+    return outcome;
+  }
+
+  private registerInlineCompletionsProvider(args: unknown[]): ProviderRegistrationOutcome {
+    const outcome = emptyOutcome(true);
+    if (args.length < 4) return outcome;
+    const handle = finiteHandle(args[0]);
+    const selector = normalizeSelector(args[1]);
+    const supportsHandleEvents = args[2] === true;
+    const extensionId = typeof args[3] === "string" ? args[3] : null;
+    const extensionVersion = typeof args[4] === "string" ? args[4] : null;
+    const groupId = typeof args[5] === "string" ? args[5] : null;
+    const yieldsToGroupIds = Array.isArray(args[6]) ? args[6].map(String).filter(Boolean) : [];
+    const displayName = typeof args[7] === "string" ? args[7] : null;
+    const debounceDelayMs = typeof args[8] === "number" && Number.isFinite(args[8]) ? args[8] : null;
+    const excludesGroupIds = Array.isArray(args[9]) ? args[9].map(String).filter(Boolean) : [];
+    const eventHandle = finiteHandle(args[10]);
+    if (handle === null || !selector) return outcome;
+
+    this.providers.inlineCompletions.set(handle, {
+      handle,
+      selector,
+      supportsHandleEvents,
+      extensionId,
+      extensionVersion,
+      groupId,
+      yieldsToGroupIds,
+      excludesGroupIds,
+      displayName,
+      debounceDelayMs,
+      eventHandle,
+    });
+    for (const language of selectorLanguages(selector)) {
+      outcome.events.push({
+        type: "provider/inlineCompletions",
+        handle,
+        language,
+        supportsHandleEvents,
+        extensionId,
+        extensionVersion,
+        groupId,
+        yieldsToGroupIds,
+        excludesGroupIds,
+        displayName,
+        debounceDelayMs,
+        eventHandle,
+      });
+    }
+    outcome.logs.push(`[providers] inlineCompletions map size=${this.providers.inlineCompletions.size} languages=[${this.languageSummary("inlineCompletions")}] handleEvents=${supportsHandleEvents ? 1 : 0}`);
     return outcome;
   }
 

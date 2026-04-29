@@ -46,6 +46,12 @@ from .editor_workbench_backend import (
     handle_workbench_grammars_list,
     handle_workbench_grammars_load,
     handle_workbench_hover,
+    handle_workbench_inlay_hints,
+    handle_workbench_inlay_hints_release,
+    handle_workbench_inlay_hints_resolve,
+    handle_workbench_inline_completions,
+    handle_workbench_inline_completions_did_show,
+    handle_workbench_inline_completions_free,
     handle_workbench_language_catalog,
     handle_workbench_open_file,
     handle_workbench_providers,
@@ -1250,6 +1256,50 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             data,
             emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
             active_project=_active_project,
+            logger=_wb_log,
+        )
+
+    async def on_editor_workbench_inlay_hints(self, sid, data):
+        await handle_workbench_inlay_hints(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            active_project=_active_project,
+            logger=_wb_log,
+        )
+
+    async def on_editor_workbench_inlay_hints_resolve(self, sid, data):
+        await handle_workbench_inlay_hints_resolve(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            logger=_wb_log,
+        )
+
+    async def on_editor_workbench_inlay_hints_release(self, sid, data):
+        await handle_workbench_inlay_hints_release(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            logger=_wb_log,
+        )
+
+    async def on_editor_workbench_inline_completions(self, sid, data):
+        await handle_workbench_inline_completions(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            active_project=_active_project,
+            logger=_wb_log,
+        )
+
+    async def on_editor_workbench_inline_completions_free(self, sid, data):
+        await handle_workbench_inline_completions_free(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
+            logger=_wb_log,
+        )
+
+    async def on_editor_workbench_inline_completions_did_show(self, sid, data):
+        await handle_workbench_inline_completions_did_show(
+            data,
+            emit_to_sid=lambda event_name, payload: self.emit(event_name, payload, room=sid),
             logger=_wb_log,
         )
 

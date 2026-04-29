@@ -215,6 +215,42 @@ export function createWorkbenchEventHandler(runtime: EventBridgeRuntime): (ev: u
       runtime.writePushLine(pushPayload);
     }
 
+    if (isRecord(safeEv) && safeEv.type === "provider/inlayHints") {
+      const pushPayload = {
+        event: "inlay_hints_provider_registered",
+        handle: safeEv.handle,
+        language: safeEv.language,
+        supportsResolve: !!safeEv.supportsResolve,
+        displayName: typeof safeEv.displayName === "string" ? safeEv.displayName : null,
+        eventHandle: safeEv.eventHandle ?? null,
+      };
+      runtime.log(
+        `[server] PUSH inlay_hints_provider_registered lang=${String(safeEv.language ?? "")} handle=${String(safeEv.handle ?? "")} resolve=${pushPayload.supportsResolve ? 1 : 0}`,
+      );
+      runtime.writePushLine(pushPayload);
+    }
+
+    if (isRecord(safeEv) && safeEv.type === "provider/inlineCompletions") {
+      const pushPayload = {
+        event: "inline_completions_provider_registered",
+        handle: safeEv.handle,
+        language: safeEv.language,
+        supportsHandleEvents: !!safeEv.supportsHandleEvents,
+        extensionId: typeof safeEv.extensionId === "string" ? safeEv.extensionId : null,
+        extensionVersion: typeof safeEv.extensionVersion === "string" ? safeEv.extensionVersion : null,
+        groupId: typeof safeEv.groupId === "string" ? safeEv.groupId : null,
+        yieldsToGroupIds: Array.isArray(safeEv.yieldsToGroupIds) ? safeEv.yieldsToGroupIds : [],
+        excludesGroupIds: Array.isArray(safeEv.excludesGroupIds) ? safeEv.excludesGroupIds : [],
+        displayName: typeof safeEv.displayName === "string" ? safeEv.displayName : null,
+        debounceDelayMs: typeof safeEv.debounceDelayMs === "number" ? safeEv.debounceDelayMs : null,
+        eventHandle: safeEv.eventHandle ?? null,
+      };
+      runtime.log(
+        `[server] PUSH inline_completions_provider_registered lang=${String(safeEv.language ?? "")} handle=${String(safeEv.handle ?? "")} handleEvents=${pushPayload.supportsHandleEvents ? 1 : 0}`,
+      );
+      runtime.writePushLine(pushPayload);
+    }
+
     if (isRecord(safeEv) && safeEv.type === "diagnostics/changeMany" && Array.isArray(safeEv.args)) {
       const normalized = diagnosticsFromChangeMany(safeEv.args);
       runtime.log(

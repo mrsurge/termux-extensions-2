@@ -205,6 +205,211 @@ async def handle_workbench_completions(
         await _emit_error(emit_to_sid, "editor:workbench_completions_response", request_id, str(exc))
 
 
+async def handle_workbench_inlay_hints(
+    data: object,
+    *,
+    emit_to_sid: EmitToSidFn,
+    active_project: ActiveProjectFn,
+    logger: _logging.Logger,
+) -> None:
+    payload = _payload_dict(data)
+    request_id = _request_id(payload, "request_id", "ih")
+    abs_path = _payload_str(payload, "path")
+    print(
+        f"[editor_ws] inlayHints request_id={request_id} path={abs_path} "
+        f"lang={payload.get('languageId')} handle={payload.get('providerHandle')} range={payload.get('range')}",
+        flush=True,
+    )
+
+    if not active_project() or not abs_path:
+        await _emit_error(emit_to_sid, "editor:workbench_inlay_hints_response", request_id, "missing_path_or_project")
+        return
+
+    try:
+        response = await _adapter_rpc(
+            "vscode.inlayHints",
+            {
+                "path": abs_path,
+                "languageId": payload.get("languageId", ""),
+                "providerHandle": payload.get("providerHandle"),
+                "range": payload.get("range"),
+                "text": payload.get("text"),
+                "modelVersionId": payload.get("modelVersionId"),
+                "timeoutMs": payload.get("timeoutMs"),
+            },
+        )
+        await _emit_result(
+            emit_to_sid,
+            "editor:workbench_inlay_hints_response",
+            request_id,
+            response.get("result", response),
+        )
+    except Exception as exc:
+        logger.error("[workbench] inlayHints failed: %s", exc)
+        await _emit_error(emit_to_sid, "editor:workbench_inlay_hints_response", request_id, str(exc))
+
+
+async def handle_workbench_inlay_hints_resolve(
+    data: object,
+    *,
+    emit_to_sid: EmitToSidFn,
+    logger: _logging.Logger,
+) -> None:
+    payload = _payload_dict(data)
+    request_id = _request_id(payload, "request_id", "ihr")
+
+    try:
+        response = await _adapter_rpc(
+            "vscode.inlayHints.resolve",
+            {
+                "providerHandle": payload.get("providerHandle"),
+                "cacheId": payload.get("cacheId"),
+            },
+        )
+        await _emit_result(
+            emit_to_sid,
+            "editor:workbench_inlay_hints_resolve_response",
+            request_id,
+            response.get("result", response),
+        )
+    except Exception as exc:
+        logger.error("[workbench] inlayHints.resolve failed: %s", exc)
+        await _emit_error(emit_to_sid, "editor:workbench_inlay_hints_resolve_response", request_id, str(exc))
+
+
+async def handle_workbench_inlay_hints_release(
+    data: object,
+    *,
+    emit_to_sid: EmitToSidFn,
+    logger: _logging.Logger,
+) -> None:
+    payload = _payload_dict(data)
+    request_id = _request_id(payload, "request_id", "ihl")
+
+    try:
+        response = await _adapter_rpc(
+            "vscode.inlayHints.release",
+            {
+                "providerHandle": payload.get("providerHandle"),
+                "cacheId": payload.get("cacheId"),
+            },
+        )
+        await _emit_result(
+            emit_to_sid,
+            "editor:workbench_inlay_hints_release_response",
+            request_id,
+            response.get("result", response),
+        )
+    except Exception as exc:
+        logger.error("[workbench] inlayHints.release failed: %s", exc)
+        await _emit_error(emit_to_sid, "editor:workbench_inlay_hints_release_response", request_id, str(exc))
+
+
+async def handle_workbench_inline_completions(
+    data: object,
+    *,
+    emit_to_sid: EmitToSidFn,
+    active_project: ActiveProjectFn,
+    logger: _logging.Logger,
+) -> None:
+    payload = _payload_dict(data)
+    request_id = _request_id(payload, "request_id", "icmp")
+    abs_path = _payload_str(payload, "path")
+    print(
+        f"[editor_ws] inlineCompletions request_id={request_id} path={abs_path} line={payload.get('lineNumber')} "
+        f"col={payload.get('column')} lang={payload.get('languageId')} handle={payload.get('providerHandle')}",
+        flush=True,
+    )
+
+    if not active_project() or not abs_path:
+        await _emit_error(emit_to_sid, "editor:workbench_inline_completions_response", request_id, "missing_path_or_project")
+        return
+
+    try:
+        response = await _adapter_rpc(
+            "vscode.inlineCompletions",
+            {
+                "path": abs_path,
+                "lineNumber": payload.get("lineNumber", payload.get("line", 1)),
+                "column": payload.get("column", payload.get("character", 1)),
+                "languageId": payload.get("languageId", ""),
+                "providerHandle": payload.get("providerHandle"),
+                "context": payload.get("context"),
+                "text": payload.get("text"),
+                "modelVersionId": payload.get("modelVersionId"),
+                "timeoutMs": payload.get("timeoutMs"),
+            },
+        )
+        await _emit_result(
+            emit_to_sid,
+            "editor:workbench_inline_completions_response",
+            request_id,
+            response.get("result", response),
+        )
+    except Exception as exc:
+        logger.error("[workbench] inlineCompletions failed: %s", exc)
+        await _emit_error(emit_to_sid, "editor:workbench_inline_completions_response", request_id, str(exc))
+
+
+async def handle_workbench_inline_completions_free(
+    data: object,
+    *,
+    emit_to_sid: EmitToSidFn,
+    logger: _logging.Logger,
+) -> None:
+    payload = _payload_dict(data)
+    request_id = _request_id(payload, "request_id", "icf")
+
+    try:
+        response = await _adapter_rpc(
+            "vscode.inlineCompletions.free",
+            {
+                "providerHandle": payload.get("providerHandle"),
+                "pid": payload.get("pid"),
+                "reason": payload.get("reason"),
+            },
+        )
+        await _emit_result(
+            emit_to_sid,
+            "editor:workbench_inline_completions_free_response",
+            request_id,
+            response.get("result", response),
+        )
+    except Exception as exc:
+        logger.error("[workbench] inlineCompletions.free failed: %s", exc)
+        await _emit_error(emit_to_sid, "editor:workbench_inline_completions_free_response", request_id, str(exc))
+
+
+async def handle_workbench_inline_completions_did_show(
+    data: object,
+    *,
+    emit_to_sid: EmitToSidFn,
+    logger: _logging.Logger,
+) -> None:
+    payload = _payload_dict(data)
+    request_id = _request_id(payload, "request_id", "icds")
+
+    try:
+        response = await _adapter_rpc(
+            "vscode.inlineCompletions.didShow",
+            {
+                "providerHandle": payload.get("providerHandle"),
+                "pid": payload.get("pid"),
+                "idx": payload.get("idx"),
+                "updatedInsertText": payload.get("updatedInsertText", ""),
+            },
+        )
+        await _emit_result(
+            emit_to_sid,
+            "editor:workbench_inline_completions_did_show_response",
+            request_id,
+            response.get("result", response),
+        )
+    except Exception as exc:
+        logger.error("[workbench] inlineCompletions.didShow failed: %s", exc)
+        await _emit_error(emit_to_sid, "editor:workbench_inline_completions_did_show_response", request_id, str(exc))
+
+
 async def handle_workbench_semantic_tokens(
     data: object,
     *,

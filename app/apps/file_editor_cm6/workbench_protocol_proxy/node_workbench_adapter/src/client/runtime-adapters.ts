@@ -7,6 +7,8 @@ import type { ExtHostDispatchRuntime } from "../protocol/ext-host-dispatch";
 import type { ExtensionCatalogRuntime } from "../extensions/catalog";
 import type { CompletionRuntime } from "../extensions/intelligence/completions";
 import type { HoverRuntime } from "../extensions/intelligence/hover";
+import type { InlayHintsRuntime } from "../extensions/intelligence/inlay-hints";
+import type { InlineCompletionRuntime } from "../extensions/intelligence/inline-completions";
 import type { SemanticRuntime } from "../extensions/intelligence/semantic-tokens";
 import type { StructureRuntime } from "../extensions/intelligence/structure";
 import type { LifecycleRuntime } from "../workspace/lifecycle";
@@ -44,6 +46,62 @@ export interface CompletionRuntimeDeps {
     args: unknown[],
     cancellable: boolean,
     pendingOptions: TransportPendingOptions,
+  ) => { req: number; promise: Promise<unknown> };
+  log: (message: string) => void;
+  warn: (message: string, detail?: unknown) => void;
+}
+
+export interface InlineCompletionRuntimeDeps {
+  extProtocol: unknown;
+  authority: string;
+  defaultRemoteAuthority: string;
+  languageIdFromPath: (filePath: string) => string;
+  didChange: (
+    params: Record<string, unknown>,
+    opts: { waitForAck: true; timeoutMs: number },
+  ) => Promise<unknown> | unknown;
+  uriForPath: (filePath: string, authority: string) => unknown;
+  sendExtPending: (
+    rpcId: number,
+    method: string,
+    args: unknown[],
+    cancellable: boolean,
+    pendingOptions: TransportPendingOptions,
+  ) => { req: number; promise: Promise<unknown> };
+  sendExtAwaitTerminalReply: (
+    rpcId: number,
+    method: string,
+    args: unknown[],
+    cancellable: boolean,
+    timeoutMs: number,
+  ) => { req: number; promise: Promise<unknown> };
+  log: (message: string) => void;
+  warn: (message: string, detail?: unknown) => void;
+}
+
+export interface InlayHintsRuntimeDeps {
+  extProtocol: unknown;
+  authority: string;
+  defaultRemoteAuthority: string;
+  languageIdFromPath: (filePath: string) => string;
+  didChange: (
+    params: Record<string, unknown>,
+    opts: { waitForAck: true; timeoutMs: number },
+  ) => Promise<unknown> | unknown;
+  uriForPath: (filePath: string, authority: string) => unknown;
+  sendExtPending: (
+    rpcId: number,
+    method: string,
+    args: unknown[],
+    cancellable: boolean,
+    pendingOptions: TransportPendingOptions,
+  ) => { req: number; promise: Promise<unknown> };
+  sendExtAwaitTerminalReply: (
+    rpcId: number,
+    method: string,
+    args: unknown[],
+    cancellable: boolean,
+    timeoutMs: number,
   ) => { req: number; promise: Promise<unknown> };
   log: (message: string) => void;
   warn: (message: string, detail?: unknown) => void;
@@ -329,6 +387,38 @@ export function createCompletionRuntime(deps: CompletionRuntimeDeps): Completion
     uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
     sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>
       deps.sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+    log: (message: string) => deps.log(message),
+    warn: (message: string, detail?: unknown) => deps.warn(message, detail),
+  };
+}
+
+export function createInlineCompletionRuntime(deps: InlineCompletionRuntimeDeps): InlineCompletionRuntime {
+  return {
+    ensureConnected: () => ensureConnected(deps.extProtocol),
+    defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
+    languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
+    didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
+    uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
+    sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>
+      deps.sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+    sendExtAwaitTerminalReply: (rpcId: number, method: string, args: unknown[], cancellable: boolean, timeoutMs: number) =>
+      deps.sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
+    log: (message: string) => deps.log(message),
+    warn: (message: string, detail?: unknown) => deps.warn(message, detail),
+  };
+}
+
+export function createInlayHintsRuntime(deps: InlayHintsRuntimeDeps): InlayHintsRuntime {
+  return {
+    ensureConnected: () => ensureConnected(deps.extProtocol),
+    defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
+    languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
+    didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
+    uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
+    sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>
+      deps.sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+    sendExtAwaitTerminalReply: (rpcId: number, method: string, args: unknown[], cancellable: boolean, timeoutMs: number) =>
+      deps.sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
     log: (message: string) => deps.log(message),
     warn: (message: string, detail?: unknown) => deps.warn(message, detail),
   };
