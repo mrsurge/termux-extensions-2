@@ -9,12 +9,12 @@ const WS_TRACE = String(process?.env?.TE2_WS_TRACE || "") === "1";
 const WS_TRACE_EVERY = Number(process?.env?.TE2_WS_TRACE_EVERY ?? "200");
 
 class NodeWebSocket {
-  constructor(url) {
+  constructor(url, options = {}) {
     if (typeof WebSocket === "undefined") {
       throw new Error("Global WebSocket is not available in this Node runtime");
     }
     // permessage-deflate can cause large memory spikes/leaks on some Node/Android builds; disable for stability.
-    this._ws = new WebSocket(url, { perMessageDeflate: false });
+    this._ws = new WebSocket(url, { perMessageDeflate: false, ...options });
     this._onData = new Emitter();
     this.onData = this._onData.event;
     this._onOpen = new Emitter();
@@ -208,9 +208,10 @@ class NodeSocket {
 }
 
 export class NodeSocketFactory {
-  constructor({ wsSchema = "ws", basePathname = "/" } = {}) {
+  constructor({ wsSchema = "ws", basePathname = "/", socketPath = null } = {}) {
     this._wsSchema = wsSchema || "ws";
     this._basePathname = basePathname || "/";
+    this._socketPath = socketPath || null;
   }
 
   connect({ host, port }, path, query, debugLabel) {
@@ -219,9 +220,15 @@ export class NodeSocketFactory {
       const p = String(path ?? "").replace(/^\/+/g, "");
       // match browser behavior: prefix with basePathname and collapse // -> /
       const fullPath = `${base}/${p}`.replace(/\/+/g, "/");
-      const hostPart = /:/.test(host) && !/\[/.test(host) ? `[${host}]` : host;
-      const url = `${this._wsSchema}://${hostPart}:${port}${fullPath}?${query}&skipWebSocketFrames=false`;
-      const ws = new NodeWebSocket(url);
+      const queryPrefix = query ? `${query}&` : "";
+      const wsOptions = this._socketPath ? { headers: { host: "localhost" } } : {};
+      const url = this._socketPath
+        ? `ws+unix:${this._socketPath}:${fullPath}?${queryPrefix}skipWebSocketFrames=false`
+        : (() => {
+            const hostPart = /:/.test(host) && !/\[/.test(host) ? `[${host}]` : host;
+            return `${this._wsSchema}://${hostPart}:${port}${fullPath}?${queryPrefix}skipWebSocketFrames=false`;
+          })();
+      const ws = new NodeWebSocket(url, wsOptions);
       const d = ws.onError(reject);
       ws.onOpen(() => {
         d.dispose?.();

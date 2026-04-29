@@ -42,6 +42,7 @@ const {
 type AdapterRuntimeConfig = Record<string, unknown> & {
   upstreamHttp: string;
   proxyHttp: string;
+  codeServerSocketPath: string | null;
 };
 type AdapterRuntimeState = Omit<DispatchServerState, "config"> & {
   startedAtMs: number;
@@ -72,8 +73,9 @@ type WebSocketSocket = Duplex;
 
 const HOST = process.env.TE2_ADAPTER_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.TE2_ADAPTER_PORT ?? "8001");
-const DEFAULT_CODE_SERVER_HTTP = process.env.TE2_CODE_SERVER_HTTP ?? "http://127.0.0.1:18180";
-const DEFAULT_REMOTE_AUTHORITY = process.env.TE2_REMOTE_AUTHORITY ?? "localhost:18180";
+const DEFAULT_CODE_SERVER_SOCKET_PATH = String(process.env.TE2_CODE_SERVER_SOCKET ?? "").trim() || null;
+const DEFAULT_CODE_SERVER_HTTP = process.env.TE2_CODE_SERVER_HTTP ?? "http://localhost";
+const DEFAULT_REMOTE_AUTHORITY = process.env.TE2_REMOTE_AUTHORITY ?? "localhost";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -373,6 +375,7 @@ const state: AdapterRuntimeState = {
   config: {
     upstreamHttp: process.env.TE2_UPSTREAM_HTTP ?? DEFAULT_CODE_SERVER_HTTP,
     proxyHttp: process.env.TE2_PROXY_HTTP ?? DEFAULT_CODE_SERVER_HTTP,
+    codeServerSocketPath: DEFAULT_CODE_SERVER_SOCKET_PATH,
   },
   session: {
     connected: false,

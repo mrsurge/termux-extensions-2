@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 _boot_prepare_tasks: dict[str, asyncio.Task[None]] = {}
 EnsureCodeServerShellFn = Callable[[str], Awaitable[object]]
 EnsureWorkbenchAdapterShellFn = Callable[..., Awaitable[object]]
+CodeServerConnectionTargetFn = Callable[[object], tuple[str, str | None]]
 
 
 class ExplorerActiveFilePayload(TypedDict):
@@ -52,25 +53,18 @@ async def _prime_backend_runtime(project_root: str) -> None:
             EnsureWorkbenchAdapterShellFn,
             workbench_adapter_shell_manager.ensure_workbench_adapter_shell,
         )
+        code_server_connection_target = cast(
+            CodeServerConnectionTargetFn,
+            code_server_shell_manager.code_server_connection_target,
+        )
 
         code_server_shell = await ensure_code_server_shell(project_root)
-        code_server_env_raw = getattr(code_server_shell, "env_overrides", None)
-        code_server_env = cast(
-            dict[object, object],
-            code_server_env_raw if isinstance(code_server_env_raw, dict) else {},
+        code_server_http, code_server_socket_path = code_server_connection_target(code_server_shell)
+        await ensure_workbench_adapter_shell(
+            project_root,
+            code_server_http=code_server_http,
+            code_server_socket_path=code_server_socket_path,
         )
-        port_s_obj = code_server_env.get("TE_CODE_SERVER_PORT")
-        port_s = str(port_s_obj) if port_s_obj is not None else ""
-        try:
-            code_server_port = int(str(port_s))
-        except Exception:
-            code_server_port = 0
-        code_server_http = (
-            f"http://127.0.0.1:{code_server_port}"
-            if code_server_port
-            else "http://127.0.0.1:18180"
-        )
-        await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
     except Exception as exc:
         log.warning("[boot_snapshot] backend runtime prime failed: %s", exc)
     finally:

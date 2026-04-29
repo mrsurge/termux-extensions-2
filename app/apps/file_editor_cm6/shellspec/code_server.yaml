@@ -9,7 +9,8 @@ shells:
       - -lc
       - >-
         code-server
-        --bind-addr 127.0.0.1:${ctx:CODE_SERVER_PORT}
+        --socket "${ctx:CODE_SERVER_SOCKET}"
+        --socket-mode 0600
         --auth none
         --config /dev/null
         --disable-telemetry
@@ -21,7 +22,7 @@ shells:
         2>&1
     env:
       TE_APP_ID: ${ctx:APP_ID}
-      TE_CODE_SERVER_PORT: ${ctx:CODE_SERVER_PORT}
+      TE_CODE_SERVER_SOCKET: ${ctx:CODE_SERVER_SOCKET}
       PROJECT_ROOT: ${ctx:PROJECT_ROOT}
       TE_INSTANCE_ID: ${ctx:INSTANCE_ID}
       TE2_EXT_ROOT: ${env:TE2_EXT_ROOT}
@@ -40,9 +41,8 @@ shells:
           bg: rgba(0, 0, 0, 0.88)
           border: rgba(29, 70, 126, 0.88)
     readiness:
-      type: tcp_port
-      host: 127.0.0.1
-      port: ${ctx:CODE_SERVER_PORT}
+      type: output_match
+      pattern: "HTTP server listening"
       timeout: 60
       # NOTE: readiness is handled in code_server_shell_manager.py via
       # subscribed live stdout chunks from the pipe backend.

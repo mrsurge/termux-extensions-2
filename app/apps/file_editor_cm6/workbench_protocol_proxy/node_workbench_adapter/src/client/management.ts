@@ -1,3 +1,5 @@
+import * as http from "node:http";
+
 export interface ManagementState {
   mgmtConnected: boolean;
 }
@@ -21,6 +23,7 @@ export interface ManagementRuntime {
   env: Record<string, string | undefined>;
   defaults: {
     codeServerHttp: string;
+    codeServerSocketPath: string | null;
     remoteAuthority: string;
   };
   refs: ManagementMutableRefs;
@@ -29,7 +32,7 @@ export interface ManagementRuntime {
   connectionTypes: {
     Management: unknown;
   };
-  createSocketFactory: (options: { wsSchema: string; basePathname: string }) => unknown;
+  createSocketFactory: (options: { wsSchema: string; basePathname: string; socketPath?: string | null }) => unknown;
   connectRemoteAgent: (options: Record<string, unknown>) => Promise<{ protocol: unknown }>;
   createMgmtIpc: (protocol: unknown, authority: string) => {
     whenInitialized: (timeoutMs: number) => Promise<void>;
@@ -39,7 +42,7 @@ export interface ManagementRuntime {
   };
   randomUuid: () => string;
   spanTraceAsync: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
-  discoverServerRootPath: (httpBase: string, folder: string | null) => Promise<string>;
+  discoverServerRootPath: (httpBase: string, folder: string | null, socketPath: string | null) => Promise<string>;
   commitFromServerRootPath: (serverRootPath: string) => string | null;
   scanExtensionsFromDisk: (authority: string | null) => Promise<unknown[]>;
   extractExtensionConfigDefaults: (scannedExtensions: unknown[]) => unknown;
@@ -69,6 +72,7 @@ export interface ManagementConnectResult {
   commit: string | null;
   workspaceTrusted: boolean;
   workspaceRoot: string | null;
+  codeServerSocketPath: string | null;
   socketFactory: unknown;
   connectTo: { host: string; port: number };
   extArgs: { language: string; break: boolean; port: null; env: { VSCODE_PROXY_URI: string } };
@@ -103,15 +107,9 @@ function coerceWorkspaceRoot(params: Record<string, unknown>, folder: string | n
   return workspaceFolder ?? folder;
 }
 
-function coerceConnectTo(proxyHttp: string): { proxyUrl: URL; connectTo: { host: string; port: number } } {
+function coerceConnectTo(proxyHttp: string, socketPath: string): { proxyUrl: URL; connectTo: { host: string; port: number } } {
   const proxyUrl = new URL(proxyHttp);
-  return {
-    proxyUrl,
-    connectTo: {
-      host: proxyUrl.hostname,
-      port: Number(proxyUrl.port || (proxyUrl.protocol === "https:" ? 443 : 80)),
-    },
-  };
+  return { proxyUrl, connectTo: { host: "localhost", port: 0 } };
 }
 
 async function getEnvironmentData(runtime: ManagementRuntime, authority: string): Promise<unknown> {
@@ -205,11 +203,36 @@ export async function loadProductVersionFromAppRoot(
   return null;
 }
 
-export async function discoverServerRootPath(httpBase: string, folder: string | null): Promise<string> {
+function requestTextOverUnixSocket(url: URL, socketPath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        socketPath,
+        method: "GET",
+        path: `${url.pathname}${url.search}`,
+        headers: {
+          accept: "text/html",
+          "accept-encoding": "identity",
+          host: url.host || "localhost",
+        },
+      },
+      (resp) => {
+        const chunks: Buffer[] = [];
+        resp.on("data", (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        resp.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      },
+    );
+    req.setTimeout(15000, () => req.destroy(new Error("code-server UDS root discovery timeout")));
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+export async function discoverServerRootPath(httpBase: string, folder: string | null, socketPath: string | null = null): Promise<string> {
+  if (!socketPath) throw new Error("code-server UDS socket path is required");
   const url = new URL("/", httpBase);
   if (folder) url.searchParams.set("folder", folder);
-  const resp = await fetch(url, { headers: { accept: "text/html", "accept-encoding": "identity" } });
-  const text = await resp.text();
+  const text = await requestTextOverUnixSocket(url, socketPath);
   const match = text.match(/(stable-[0-9a-f]{40})/);
   if (!match) return "/";
   return `/${match[1]}`;
@@ -225,22 +248,26 @@ export async function connectManagementSession(
   params: Record<string, unknown> = {},
 ): Promise<ManagementConnectResult> {
   const proxyHttp = typeof params.proxyHttp === "string" ? params.proxyHttp : runtime.defaults.codeServerHttp;
+  const codeServerSocketPath = typeof params.codeServerSocketPath === "string" && params.codeServerSocketPath.trim()
+    ? params.codeServerSocketPath.trim()
+    : runtime.defaults.codeServerSocketPath;
+  if (!codeServerSocketPath) throw new Error("code-server UDS socket path is required");
   const token = typeof params.token === "string" ? params.token : "00000000000000000000";
   const folder = typeof params.folder === "string" ? params.folder : null;
   const authority = typeof params.authority === "string" ? params.authority : runtime.defaults.remoteAuthority;
   const useRemote = params.useRemote ?? (String(runtime.env.TE2_USE_REMOTE || "1") === "1");
   const serverRootPath = typeof params.serverRootPath === "string"
     ? params.serverRootPath
-    : await runtime.spanTraceAsync("connect.discoverServerRootPath", () => runtime.discoverServerRootPath(proxyHttp, folder));
+    : await runtime.spanTraceAsync("connect.discoverServerRootPath", () => runtime.discoverServerRootPath(proxyHttp, folder, codeServerSocketPath));
   const commit = typeof params.commit === "string" ? params.commit : runtime.commitFromServerRootPath(serverRootPath);
   const workspaceTrusted = params.workspaceTrusted ?? true;
 
   runtime.refs.useRemote = !!useRemote;
   runtime.refs.authority = authority;
 
-  const { proxyUrl, connectTo } = coerceConnectTo(proxyHttp);
-  const wsSchema = proxyUrl.protocol === "https:" ? "wss" : "ws";
-  const socketFactory = runtime.createSocketFactory({ wsSchema, basePathname: proxyUrl.pathname });
+  const { proxyUrl, connectTo } = coerceConnectTo(proxyHttp, codeServerSocketPath);
+  const wsSchema = "ws+unix";
+  const socketFactory = runtime.createSocketFactory({ wsSchema, basePathname: proxyUrl.pathname, socketPath: codeServerSocketPath });
 
   const mgmt = await runtime.spanTraceAsync("connect.remoteAgent.mgmt", () => runtime.connectRemoteAgent({
     socketFactory,
@@ -328,6 +355,7 @@ export async function connectManagementSession(
     commit,
     workspaceTrusted: workspaceTrusted === true,
     workspaceRoot,
+    codeServerSocketPath,
     socketFactory,
     connectTo,
     extArgs,

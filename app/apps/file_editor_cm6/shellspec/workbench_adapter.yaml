@@ -16,6 +16,7 @@ shells:
       TE2_ADAPTER_HOST: 127.0.0.1
       TE2_ADAPTER_PORT: ${ctx:WORKBENCH_ADAPTER_PORT}
       TE2_CODE_SERVER_HTTP: ${ctx:CODE_SERVER_HTTP}
+      TE2_CODE_SERVER_SOCKET: ${ctx:CODE_SERVER_SOCKET}
       TE2_REMOTE_AUTHORITY: ${ctx:REMOTE_AUTHORITY}
 
       # Active workspace (not the same as repo root).

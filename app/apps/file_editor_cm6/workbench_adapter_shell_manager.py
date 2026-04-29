@@ -1,7 +1,6 @@
 import hashlib
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlparse
 import asyncio
 import json
 import logging
@@ -69,9 +68,13 @@ def _expected_port() -> str:
     return str(WORKBENCH_ADAPTER_FIXED_PORT)
 
 
-def _matches_expected_port(record: ShellRecord) -> bool:
+def _matches_expected_target(record: ShellRecord, code_server_socket_path: Optional[str]) -> bool:
     env = record.env_overrides or {}
-    return str(env.get("TE2_ADAPTER_PORT") or "").strip() == _expected_port()
+    if str(env.get("TE2_ADAPTER_PORT") or "").strip() != _expected_port():
+        return False
+    env_socket = str(env.get("TE2_CODE_SERVER_SOCKET") or "").strip()
+    expected_socket = str(code_server_socket_path or "").strip()
+    return env_socket == expected_socket
 
 
 async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
@@ -307,7 +310,11 @@ async def terminate_adapter_shell() -> bool:
     return True
 
 
-async def ensure_workbench_adapter_shell(project_root: str, code_server_http: str) -> ShellRecord:
+async def ensure_workbench_adapter_shell(
+    project_root: str,
+    code_server_http: str,
+    code_server_socket_path: Optional[str] = None,
+) -> ShellRecord:
     """Ensure the Node workbench adapter framework shell is running.
 
     This is the browser-facing control plane for read-only language intelligence:
@@ -332,7 +339,7 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
     if _active_shell_id:
         cached = await _get_alive(_active_shell_id)
         if cached and cached.label == label:
-            if _matches_expected_port(cached):
+            if _matches_expected_target(cached, code_server_socket_path):
                 if await _ensure_live_adapter_io(cached.id):
                     if _adapter_state["status"] != "ready":
                         _set_adapter_state("ready", project=project_root)
@@ -351,7 +358,7 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
 
     existing = await mgr.find_shell_by_label(label, status="running")
     if existing:
-        if _matches_expected_port(existing):
+        if _matches_expected_target(existing, code_server_socket_path):
             if await _ensure_live_adapter_io(existing.id):
                 _active_shell_id = existing.id
                 return existing
@@ -365,9 +372,9 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
     repo_root = Path(__file__).resolve().parents[3]
     project_root_abs = Path(project_root).resolve(strict=False)
     adapter_entry = (repo_root / "app" / "apps" / "file_editor_cm6" / "workbench_protocol_proxy" / "node_workbench_adapter" / "dist" / "server" / "server.mjs").resolve(strict=False)
-    u = urlparse(str(code_server_http))
-    code_server_port = u.port or (443 if u.scheme == "https" else 80)
-    remote_authority = f"localhost:{code_server_port}"
+    if not code_server_socket_path:
+        raise RuntimeError("code-server UDS socket path is required")
+    remote_authority = "localhost"
 
     _set_adapter_state("starting", project=project_root)
     await _broadcast_adapter_state()
@@ -385,6 +392,7 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
                 "WORKBENCH_ADAPTER_PORT": str(WORKBENCH_ADAPTER_FIXED_PORT),
                 "WORKBENCH_ADAPTER_ENTRY": str(adapter_entry),
                 "CODE_SERVER_HTTP": str(code_server_http),
+                "CODE_SERVER_SOCKET": str(code_server_socket_path or ""),
                 "REMOTE_AUTHORITY": remote_authority,
             },
             label=label,
@@ -420,14 +428,22 @@ async def ensure_workbench_adapter_shell(project_root: str, code_server_http: st
 
         # Bootstrap: connect adapter to code-server
         try:
-            print(f"[adapter_shell_mgr] calling adapter.connect proxyHttp={code_server_http} authority={remote_authority}")
+            print(
+                "[adapter_shell_mgr] calling adapter.connect "
+                f"proxyHttp={code_server_http} "
+                f"socket={'set' if code_server_socket_path else 'unset'} "
+                f"authority={remote_authority}"
+            )
+            connect_params = {
+                "proxyHttp": code_server_http,
+                "authority": remote_authority,
+                "folder": str(project_root_abs),
+            }
+            if code_server_socket_path:
+                connect_params["codeServerSocketPath"] = code_server_socket_path
             connect_resp = await adapter_rpc(
                 "adapter.connect",
-                {
-                    "proxyHttp": code_server_http,
-                    "authority": remote_authority,
-                    "folder": str(project_root_abs),
-                },
+                connect_params,
                 timeout=15.0,
             )
             print(f"[adapter_shell_mgr] bootstrap connect resp: {connect_resp}")

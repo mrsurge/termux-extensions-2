@@ -150,8 +150,9 @@ type ExtHandshakeState = ExtensionHostRuntime["refs"]["extHandshake"];
 type ExtTraceState = ExtensionHostRuntime["refs"]["extMsgTrace"];
 
 function _hts() { const d = new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}.${String(d.getMilliseconds()).padStart(3,'0')}`; }
-const DEFAULT_CODE_SERVER_HTTP = process.env.TE2_CODE_SERVER_HTTP ?? "http://127.0.0.1:18180";
-const DEFAULT_REMOTE_AUTHORITY = process.env.TE2_REMOTE_AUTHORITY ?? "localhost:18180";
+const DEFAULT_CODE_SERVER_SOCKET_PATH = String(process.env.TE2_CODE_SERVER_SOCKET ?? "").trim() || null;
+const DEFAULT_CODE_SERVER_HTTP = process.env.TE2_CODE_SERVER_HTTP ?? "http://localhost";
+const DEFAULT_REMOTE_AUTHORITY = process.env.TE2_REMOTE_AUTHORITY ?? "localhost";
 const DEBUG_METRICS = String(process.env.TE2_DEBUG_METRICS || "") === "1";
 const INIT_SIZE_PROFILE = String(process.env.TE2_INIT_SIZE_PROFILE || "") === "1";
 const INIT_SIZE_MAX_ITEMS = Number(process.env.TE2_INIT_SIZE_MAX_ITEMS ?? "500");
@@ -921,6 +922,7 @@ export class WorkbenchClient {
       state: this.state,
       defaults: {
         codeServerHttp: DEFAULT_CODE_SERVER_HTTP,
+        codeServerSocketPath: DEFAULT_CODE_SERVER_SOCKET_PATH,
         remoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       },
       signService: this._signService,
@@ -932,7 +934,7 @@ export class WorkbenchClient {
       createMgmtIpc: (protocol, authority) => new IpcPromiseClient(protocol, { remoteAuthority: authority, clientId: "renderer" }),
       randomUuid: () => crypto.randomUUID(),
       spanTraceAsync: (name, fn) => spanTraceAsync(name, fn),
-      discoverServerRootPath: (httpBase, folder) => this._discoverServerRootPath(httpBase, folder),
+      discoverServerRootPath: (httpBase, folder, socketPath) => this._discoverServerRootPath(httpBase, folder, socketPath),
       commitFromServerRootPath: (serverRootPath) => this._commitFromServerRootPath(serverRootPath),
       scanExtensionsFromDisk: (authority) => this._scanExtensionsFromDisk(authority),
       extractExtensionConfigDefaults: (scannedExtensions) => this._extractExtensionConfigDefaults(scannedExtensions),
@@ -1056,8 +1058,8 @@ export class WorkbenchClient {
     return provideLocalTextDocumentContent(this._documentContentRuntime(), handle, uri);
   }
 
-  async _discoverServerRootPath(httpBase: string, folder: string | null): Promise<string> {
-    return discoverWorkbenchServerRootPath(httpBase, folder);
+  async _discoverServerRootPath(httpBase: string, folder: string | null, socketPath: string | null): Promise<string> {
+    return discoverWorkbenchServerRootPath(httpBase, folder, socketPath);
   }
 
   _commitFromServerRootPath(serverRootPath: string): string | null {

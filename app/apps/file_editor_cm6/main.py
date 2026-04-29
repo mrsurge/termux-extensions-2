@@ -14,7 +14,7 @@ from anyio import to_thread
 from .agent_ws import agent_websocket
 from .history_store import HistoryStore
 from .explorer.services.file_ops import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
-from .code_server_shell_manager import ensure_code_server_shell
+from .code_server_shell_manager import code_server_connection_target, ensure_code_server_shell
 from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
 from .git_helper import (
     GitError,
@@ -69,6 +69,13 @@ _workbench_adapter_boot: JsonDict = {
 
 def _now_ms() -> float:
     return time.time() * 1000.0
+
+
+def _adapter_code_server_target(cs: Any, project_root: str) -> tuple[str, str, str | None]:
+    cs_env = getattr(cs, "env_overrides", None) or {}
+    resolved_project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
+    code_server_http, code_server_socket_path = code_server_connection_target(cs)
+    return resolved_project_root, code_server_http, code_server_socket_path
 
 CHANGE_RESULT_LIMIT = 40
 STATUS_TEXT_MAP = {
@@ -355,17 +362,10 @@ async def workbench_adapter_discover():
             status_code=503,
         )
 
-    cs_env = (cs.env_overrides or {})
-    project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
-    port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
-    try:
-        cs_port = int(str(port_s))
-    except Exception:
-        cs_port = 0
-    code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+    project_root, code_server_http, code_server_socket_path = _adapter_code_server_target(cs, project_root)
 
     try:
-        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http, code_server_socket_path=code_server_socket_path)
     except Exception as exc:
         print(f"[workbench_adapter][discover] failed: {type(exc).__name__}: {exc}", flush=True)
         return JSONResponse(
@@ -407,14 +407,7 @@ async def workbench_adapter_start():
             status_code=503,
         )
 
-    cs_env = (cs.env_overrides or {})
-    project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
-    port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
-    try:
-        cs_port = int(str(port_s))
-    except Exception:
-        cs_port = 0
-    code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+    project_root, code_server_http, code_server_socket_path = _adapter_code_server_target(cs, project_root)
 
     # If the adapter was already started at worker boot and is still alive, reuse it.
     # This keeps page refresh / new clients from accidentally perturbing the live session.
@@ -429,13 +422,17 @@ async def workbench_adapter_start():
             mgr = await get_manager()
             maybe = await mgr.get_shell(boot_shell_id)
             if maybe and getattr(maybe, "pid", None) and getattr(maybe, "status", None) == "running":
-                record = maybe
+                maybe_env = getattr(maybe, "env_overrides", None) or {}
+                maybe_socket = str(maybe_env.get("TE2_CODE_SERVER_SOCKET") or "").strip()
+                expected_socket = str(code_server_socket_path or "").strip()
+                if maybe_socket == expected_socket:
+                    record = maybe
     except Exception:
         record = None
 
     if record is None:
         try:
-            record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+            record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http, code_server_socket_path=code_server_socket_path)
             try:
                 _workbench_adapter_boot.update(
                     {
@@ -495,18 +492,11 @@ async def workbench_adapter_attach():
             status_code=503,
         )
 
-    cs_env = (cs.env_overrides or {})
-    project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
-    port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
-    try:
-        cs_port = int(str(port_s))
-    except Exception:
-        cs_port = 0
-    code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+    project_root, code_server_http, code_server_socket_path = _adapter_code_server_target(cs, project_root)
 
     # Ensure shell exists (this is idempotent; uses cached running shell if present).
     try:
-        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http, code_server_socket_path=code_server_socket_path)
     except Exception as exc:
         print(f"[workbench_adapter][attach] failed: {type(exc).__name__}: {exc}", flush=True)
         return JSONResponse(
@@ -613,17 +603,10 @@ async def workbench_adapter_status():
     except Exception as exc:
         return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=503)
 
-    cs_env = (cs.env_overrides or {})
-    project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
-    port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
-    try:
-        cs_port = int(str(port_s))
-    except Exception:
-        cs_port = 0
-    code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
+    project_root, code_server_http, code_server_socket_path = _adapter_code_server_target(cs, project_root)
 
     try:
-        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http, code_server_socket_path=code_server_socket_path)
     except Exception as exc:
         return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=503)
 
@@ -665,17 +648,10 @@ async def workbench_adapter_cmd(request: Request):
     # Ensure adapter is running (and code-server behind it). Use code-server env
     # as the canonical workspace root for the adapter.
     cs = await ensure_code_server_shell(project_root)
-    cs_env = (cs.env_overrides or {})
-    project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
+    project_root, code_server_http, code_server_socket_path = _adapter_code_server_target(cs, project_root)
 
     token = request.headers.get("x-te2-baton") or request.query_params.get("token") or ""
-    cs_port_s = cs_env.get("TE_CODE_SERVER_PORT") or ""
-    try:
-        cs_port = int(str(cs_port_s))
-    except Exception:
-        cs_port = 0
-    code_server_http = f"http://127.0.0.1:{cs_port}" if cs_port else "http://127.0.0.1:18180"
-    rec = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http)
+    rec = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http, code_server_socket_path=code_server_socket_path)
 
     port_s = (rec.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
     try:

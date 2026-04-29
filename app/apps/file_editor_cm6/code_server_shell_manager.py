@@ -13,7 +13,6 @@ from framework_shells.record import ShellRecord
 APP_ID = "file_editor_cm6"
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
 SHELLSPEC_REF = "code_server.yaml#code-server"
-CODE_SERVER_FIXED_PORT = 18180
 
 _active_shell_id: Optional[str] = None
 _ready_event: Optional[asyncio.Event] = None
@@ -29,15 +28,12 @@ def _label() -> str:
     return f"code_server:{APP_ID}:global"
 
 
-def _expected_port() -> str:
-    return str(CODE_SERVER_FIXED_PORT)
-
-
 # ── Bridge extension install ──────────────────────────────────────────
 
 _BRIDGE_EXT_ID = "te2-extension-api-bridge"
 _BRIDGE_EXT_SRC = Path(__file__).parent / "vendor" / _BRIDGE_EXT_ID
 _CODE_SERVER_DATA_DIR = Path.home() / ".config" / "code-server"
+_CODE_SERVER_SOCKET_PATH = _CODE_SERVER_DATA_DIR / "code-server.sock"
 _EXTENSIONS_DIR = _CODE_SERVER_DATA_DIR / "extensions"
 _USER_SETTINGS_PATH = _CODE_SERVER_DATA_DIR / "User" / "settings.json"
 
@@ -152,9 +148,29 @@ def ensure_bridge_extension_installed() -> bool:
     return needs_copy
 
 
-def _matches_expected_port(record: ShellRecord) -> bool:
+def _expected_socket_path() -> str:
+    return str(_CODE_SERVER_SOCKET_PATH)
+
+
+def code_server_connection_target(record: ShellRecord) -> tuple[str, Optional[str]]:
+    """Return the code-server HTTP base and optional UDS path for the WBA."""
     env = record.env_overrides or {}
-    return str(env.get("TE_CODE_SERVER_PORT") or "").strip() == _expected_port()
+    socket_path = str(env.get("TE_CODE_SERVER_SOCKET") or "").strip()
+    command = getattr(record, "command", None) or []
+    command_text = " ".join(str(part) for part in command) if isinstance(command, (list, tuple)) else str(command)
+    if not socket_path and "--socket" in command_text:
+        socket_path = _expected_socket_path()
+    if socket_path:
+        return "http://localhost", socket_path
+
+    # The active code-server shellspec is UDS-only. Missing socket metadata is
+    # a framework-shell handoff bug, not permission to fall back to TCP.
+    return "http://localhost", _expected_socket_path()
+
+
+def _matches_expected_target(record: ShellRecord) -> bool:
+    _, socket_path = code_server_connection_target(record)
+    return socket_path == _expected_socket_path()
 
 
 async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
@@ -246,7 +262,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
     # Fast path: if a previous spawn already completed, check cached shell
     if _ready_event is not None and _ready_event.is_set() and _active_shell_id:
         cached = await _get_alive(_active_shell_id)
-        if cached and _matches_expected_port(cached):
+        if cached and _matches_expected_target(cached):
             if await _has_live_pipe(cached):
                 return cached
 
@@ -256,7 +272,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         await _ready_event.wait()
         if _active_shell_id:
             cached = await _get_alive(_active_shell_id)
-            if cached and _matches_expected_port(cached):
+            if cached and _matches_expected_target(cached):
                 if await _has_live_pipe(cached):
                     return cached
 
@@ -271,7 +287,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         if _active_shell_id:
             cached = await _get_alive(_active_shell_id)
             if cached and cached.label == label:
-                if _matches_expected_port(cached):
+                if _matches_expected_target(cached):
                     if await _has_live_pipe(cached):
                         return cached
                     print(f"[code_server] cached shell {cached.id} has no live pipe, re-spawning", flush=True)
@@ -281,7 +297,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
 
         existing = await mgr.find_shell_by_label(label, status="running")
         if existing:
-            if _matches_expected_port(existing):
+            if _matches_expected_target(existing):
                 if await _has_live_pipe(existing):
                     _active_shell_id = existing.id
                     return existing
@@ -291,6 +307,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
 
         repo_root = Path(project_root).resolve(strict=False)
         data_dir = _CODE_SERVER_DATA_DIR
+        data_dir.mkdir(parents=True, exist_ok=True)
 
         # Ensure bridge extension is installed before code-server starts
         try:
@@ -327,7 +344,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
                 "PROJECT_HASH": _project_hash(str(repo_root)),
                 "INSTANCE_ID": "primary",
                 "CODE_SERVER_DATA_DIR": str(data_dir),
-                "CODE_SERVER_PORT": str(CODE_SERVER_FIXED_PORT),
+                "CODE_SERVER_SOCKET": _expected_socket_path(),
             },
             label=label,
             record_spec_id=f"service:{APP_ID}:code_server",

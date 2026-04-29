@@ -234,16 +234,17 @@ export interface ManagementRuntimeDeps {
   state: { mgmtConnected: boolean };
   defaults: {
     codeServerHttp: string;
+    codeServerSocketPath: string | null;
     remoteAuthority: string;
   };
   signService: unknown;
   connectionTypes: { Management: unknown };
-  createSocketFactory: (options: { wsSchema: string; basePathname: string }) => unknown;
+  createSocketFactory: (options: { wsSchema: string; basePathname: string; socketPath?: string | null }) => unknown;
   connectRemoteAgent: (options: Record<string, unknown>) => Promise<{ protocol: unknown }>;
   createMgmtIpc: (protocol: unknown, authority: string) => NonNullable<ManagementRuntime["refs"]["mgmtIpc"]>;
   randomUuid: () => string;
   spanTraceAsync: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
-  discoverServerRootPath: (httpBase: string, folder: string | null) => Promise<string>;
+  discoverServerRootPath: (httpBase: string, folder: string | null, socketPath: string | null) => Promise<string>;
   commitFromServerRootPath: (serverRootPath: string) => string | null;
   scanExtensionsFromDisk: (authority: string | null) => Promise<unknown[]>;
   extractExtensionConfigDefaults: (scannedExtensions: unknown[]) => unknown;
@@ -566,12 +567,12 @@ export function createManagementRuntime(deps: ManagementRuntimeDeps): Management
     state: deps.state,
     signService: deps.signService,
     connectionTypes: deps.connectionTypes,
-    createSocketFactory: (options: { wsSchema: string; basePathname: string }) => deps.createSocketFactory(options),
+    createSocketFactory: (options: { wsSchema: string; basePathname: string; socketPath?: string | null }) => deps.createSocketFactory(options),
     connectRemoteAgent: (options: Record<string, unknown>) => deps.connectRemoteAgent(options),
     createMgmtIpc: (protocol: unknown, authority: string) => deps.createMgmtIpc(protocol, authority),
     randomUuid: () => deps.randomUuid(),
     spanTraceAsync: <T>(name: string, fn: () => Promise<T>) => deps.spanTraceAsync(name, fn),
-    discoverServerRootPath: (httpBase: string, folder: string | null) => deps.discoverServerRootPath(httpBase, folder),
+    discoverServerRootPath: (httpBase: string, folder: string | null, socketPath: string | null) => deps.discoverServerRootPath(httpBase, folder, socketPath),
     commitFromServerRootPath: (serverRootPath: string) => deps.commitFromServerRootPath(serverRootPath),
     scanExtensionsFromDisk: (authority: string | null) => deps.scanExtensionsFromDisk(authority),
     extractExtensionConfigDefaults: (scannedExtensions: unknown[]) => deps.extractExtensionConfigDefaults(scannedExtensions),

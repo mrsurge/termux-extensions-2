@@ -7,6 +7,7 @@ export interface DispatchRequest {
 export interface AdapterConfigState {
   upstreamHttp: string;
   proxyHttp: string;
+  codeServerSocketPath: string | null;
 }
 
 export interface AdapterSessionState {
@@ -173,6 +174,7 @@ export async function dispatchJsonRpcRequest(
   if (method === "adapter.connect") {
     const result = await runtime.wb.connect({
       proxyHttp: params.proxyHttp ?? runtime.state.config.proxyHttp,
+      codeServerSocketPath: params.codeServerSocketPath ?? runtime.state.config.codeServerSocketPath,
       token: params.token,
       folder: params.folder,
       authority: params.authority ?? runtime.defaultRemoteAuthority,
@@ -226,6 +228,7 @@ export async function dispatchJsonRpcRequest(
         folder: params.workspaceFolder ?? null,
         authority: params.authority ?? runtime.defaultRemoteAuthority,
         proxyHttp: params.proxyHttp ?? runtime.defaultCodeServerHttp,
+        codeServerSocketPath: params.codeServerSocketPath ?? runtime.state.config.codeServerSocketPath,
         token: params.token ?? "00000000000000000000",
       });
       mergeWorkbenchState(runtime);
@@ -251,6 +254,7 @@ export async function dispatchJsonRpcRequest(
   if (method === "adapter.configure") {
     if (typeof params.upstreamHttp === "string") runtime.state.config.upstreamHttp = params.upstreamHttp;
     if (typeof params.proxyHttp === "string") runtime.state.config.proxyHttp = params.proxyHttp;
+    if (typeof params.codeServerSocketPath === "string") runtime.state.config.codeServerSocketPath = params.codeServerSocketPath.trim() || null;
     return success(id, { ok: true, ts_ms: runtime.nowMs(), config: runtime.state.config });
   }
 
