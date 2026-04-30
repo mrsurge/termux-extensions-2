@@ -1,15 +1,15 @@
-import { buildUiUrl, wsUrlFromPath, fetchJsonWithBase } from './editor_common_utils.js';
-import { normalizeLanguageId, languageIdFromPath, monacoFileUri } from './editor_language_utils.js';
-import { parseJsonc } from './editor_parse_utils.js';
-import { createFileModel as createMonacoFileModel } from './editor_model_utils.js';
+import { buildUiUrl, wsUrlFromPath, fetchJsonWithBase } from './editor_common_utils.ts';
+import { normalizeLanguageId, languageIdFromPath, monacoFileUri } from './editor_language_utils.ts';
+import { parseJsonc } from './editor_parse_utils.ts';
+import { createFileModel as createMonacoFileModel } from './editor_model_utils.ts';
 import { runIssuesCommand, runFindCommand } from './editor_command_utils.ts';
 import { deriveApiBase } from './editor_api_base_utils.ts';
-import { absPathFromVscodeUri } from './editor_vscode_uri_utils.js';
+import { absPathFromVscodeUri } from './editor_vscode_uri_utils.ts';
 import {
   monacoRangeFromProtoRange,
   toMonacoHoverContents,
   isLanguageContextCurrent,
-} from './editor_bridge_utils.js';
+} from './editor_bridge_utils.ts';
 import { te2DumpTextmateScopesForLine, te2GetActiveEditorAndModel, te2AdvanceRuleStackToLine } from './editor_textmate_debug_utils.js';
 import { applyJumpToLine as applyJumpToLineAt } from './editor_jump_utils.ts';
 import { resolveMonacoThemeId } from './editor_theme_resolver_utils.js';
@@ -127,8 +127,8 @@ interface MonacoRuntimeUriLike {
 }
 
 interface MonacoRuntimePositionLike {
-  lineNumber?: number;
-  column?: number;
+  lineNumber: number;
+  column: number;
   [key: string]: unknown;
 }
 
@@ -488,12 +488,12 @@ interface MonacoBootWindowLike extends Window {
   function createFileModel(content: string, lang: string, absPath: string): MonacoRuntimeModelLike {
     return createMonacoFileModel(
       monaco,
-      function (p: string) { return monacoFileUri(window.monaco, p); },
+      function (p: string | null | undefined) { return monacoFileUri(window.monaco, p) as MonacoRuntimeUriLike | null; },
       content,
       lang,
       absPath,
       function () {}
-    );
+    ) as MonacoRuntimeModelLike;
   }
 
   function applyBootSnapshot(): void {
@@ -1120,7 +1120,7 @@ interface MonacoBootWindowLike extends Window {
     setModel: function(nextModel: MonacoRuntimeModelLike | null) { model = nextModel; },
     ensureEditorWithPrefs: ensureEditorWithPrefs,
     languageFromPath: languageFromPath,
-    monacoFileUri: monacoFileUri,
+    monacoFileUri: function(monacoRef: unknown, path: string) { return monacoFileUri(monacoRef as MonacoRuntimeGlobal | null | undefined, path) as MonacoRuntimeUriLike | null; },
     applyLanguageToModel: applyLanguageToModel,
     createFileModel: createFileModel,
     installMirrorPublisher: installMirrorPublisher,
@@ -1212,7 +1212,7 @@ interface MonacoBootWindowLike extends Window {
         vscodeRpcDidOpenIfReady: vscodeRpcDidOpenIfReady,
         installVscodeRpcChangePublisher: installVscodeRpcChangePublisher,
         languageFromPath: languageFromPath,
-        monacoFileUri: function(path: string) { return monacoFileUri(window.monaco, path); },
+        monacoFileUri: function(path: string) { return monacoFileUri(window.monaco, path) as MonacoRuntimeUriLike | null; },
         setApplyingRemote: function(value: boolean) { isApplyingRemote = !!value; },
         ensureTouchSelection: ensureTouchSelection,
         getLastContentSha256: function() { return lastContentSha256; },

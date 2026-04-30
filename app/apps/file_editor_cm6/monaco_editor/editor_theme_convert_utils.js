@@ -1,4 +1,4 @@
-import { expandShortHex } from './editor_parse_utils.js';
+import { expandShortHex } from './editor_parse_utils.ts';
 import { vscodeTokenColorsToMonacoRules } from './editor_theme_rules_utils.js';
 import { buildSemanticTokenRules } from './editor_semantic_token_rules_utils.js';
 

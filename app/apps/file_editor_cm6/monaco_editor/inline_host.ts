@@ -13,7 +13,7 @@ const INLINE_EDITOR_STYLE_ASSETS = [
     id: 'fe-inline-monaco-breadcrumbs-css',
     href: '/apps/file_editor_cm6/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css',
   },
-];
+] as const;
 const INLINE_EDITOR_SCRIPT_ASSETS = [
   {
     id: 'fe-inline-monaco-touch-selection-js',
@@ -27,7 +27,7 @@ const INLINE_EDITOR_SCRIPT_ASSETS = [
     id: 'fe-inline-monaco-textmate-js',
     src: '/apps/file_editor_cm6/monaco_editor/textmate/vscode-textmate.umd.js',
   },
-];
+] as const;
 const INLINE_EDITOR_MARKUP = `
   <div class="fh-root">
     <div id="te2-breadcrumbs"></div>
@@ -59,7 +59,25 @@ const INLINE_EDITOR_HOST_STYLE = `
 }
 `;
 
-function ensureInlineStylesheetAsset(id, href) {
+interface InlineEditorBootOptions {
+  ensureSocketIoLoaded?: (() => Promise<unknown>) | null;
+  bootSnapshot?: unknown;
+}
+
+declare global {
+  interface Window {
+    __te2InlineMonacoHost?: boolean;
+    __te2InlineMonacoApiBase?: string;
+    __te2InlineMonacoBootSnapshot?: unknown;
+    __te2InlineMonacoBoot?: Promise<void>;
+  }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function ensureInlineStylesheetAsset(id: string, href: string): void {
   if (document.getElementById(id)) return;
   const link = document.createElement('link');
   link.id = id;
@@ -68,7 +86,7 @@ function ensureInlineStylesheetAsset(id, href) {
   document.head.appendChild(link);
 }
 
-function ensureInlineStyleAsset(id, cssText) {
+function ensureInlineStyleAsset(id: string, cssText: string): void {
   const existing = document.getElementById(id);
   if (existing instanceof HTMLStyleElement) {
     if (existing.textContent !== cssText) existing.textContent = cssText;
@@ -80,10 +98,12 @@ function ensureInlineStyleAsset(id, cssText) {
   document.head.appendChild(style);
 }
 
-function ensureInlineScriptAsset(id, src) {
+function ensureInlineScriptAsset(id: string, src: string): Promise<HTMLScriptElement> {
   const existing = document.getElementById(id);
-  if (existing && existing.dataset.loaded === 'true') return Promise.resolve(existing);
-  if (existing && existing.dataset.loading === 'true') {
+  if (existing instanceof HTMLScriptElement && existing.dataset.loaded === 'true') {
+    return Promise.resolve(existing);
+  }
+  if (existing instanceof HTMLScriptElement && existing.dataset.loading === 'true') {
     return new Promise((resolve, reject) => {
       existing.addEventListener('load', () => resolve(existing), { once: true });
       existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)), { once: true });
@@ -91,7 +111,7 @@ function ensureInlineScriptAsset(id, src) {
   }
 
   return new Promise((resolve, reject) => {
-    const script = existing || document.createElement('script');
+    const script = existing instanceof HTMLScriptElement ? existing : document.createElement('script');
     script.id = id;
     script.async = true;
     script.dataset.loading = 'true';
@@ -105,11 +125,13 @@ function ensureInlineScriptAsset(id, src) {
       script.dataset.loading = 'false';
       reject(new Error(`Failed to load ${src}`));
     };
-    if (!existing) document.head.appendChild(script);
+    if (!(existing instanceof HTMLScriptElement)) document.head.appendChild(script);
   });
 }
 
-async function ensureInlineEditorAssetsLoaded(ensureSocketIoLoaded) {
+async function ensureInlineEditorAssetsLoaded(
+  ensureSocketIoLoaded?: (() => Promise<unknown>) | null,
+): Promise<void> {
   ensureInlineStyleAsset(INLINE_EDITOR_HOST_STYLE_ID, INLINE_EDITOR_HOST_STYLE);
   INLINE_EDITOR_STYLE_ASSETS.forEach((asset) => ensureInlineStylesheetAsset(asset.id, asset.href));
   if (typeof ensureSocketIoLoaded === 'function') {
@@ -120,17 +142,20 @@ async function ensureInlineEditorAssetsLoaded(ensureSocketIoLoaded) {
   }
 }
 
-function renderInlineEditorError(editorFrame, err) {
+function renderInlineEditorError(editorFrame: HTMLElement, error: unknown): void {
   const pre = document.createElement('pre');
   pre.style.margin = '0';
   pre.style.padding = '16px';
   pre.style.color = '#fca5a5';
   pre.style.whiteSpace = 'pre-wrap';
-  pre.textContent = `Inline Monaco boot failed: ${String(err?.message || err)}`;
+  pre.textContent = `Inline Monaco boot failed: ${getErrorMessage(error)}`;
   editorFrame.replaceChildren(pre);
 }
 
-export async function mountInlineEditorHost(editorFrame, options = {}) {
+export async function mountInlineEditorHost(
+  editorFrame: HTMLElement,
+  options: InlineEditorBootOptions = {},
+): Promise<void> {
   if (!(editorFrame instanceof HTMLElement)) {
     throw new Error('Inline Monaco host requires an HTMLElement mount point.');
   }
@@ -142,11 +167,14 @@ export async function mountInlineEditorHost(editorFrame, options = {}) {
   await import('./m_editor_app.ts');
 }
 
-export function bootInlineEditorHost(editorFrame, options = {}) {
-  const bootPromise = mountInlineEditorHost(editorFrame, options).catch((err) => {
-    console.error('[inline_monaco] boot failed', err);
-    renderInlineEditorError(editorFrame, err);
-    throw err;
+export function bootInlineEditorHost(
+  editorFrame: HTMLElement,
+  options: InlineEditorBootOptions = {},
+): Promise<void> {
+  const bootPromise = mountInlineEditorHost(editorFrame, options).catch((error) => {
+    console.error('[inline_monaco] boot failed', error);
+    renderInlineEditorError(editorFrame, error);
+    throw error;
   });
   window.__te2InlineMonacoBoot = bootPromise;
   return bootPromise;

@@ -1,8 +1,8 @@
-# CODE_TE2 (Monaco Iframe Editor) — End‑to‑End Reference
+# CODE_TE2 (Monaco Editor) — End‑to‑End Reference
 
 This document describes the **current** Monaco editor surface used by `file_editor_cm6` inside TE2:
 
-- **Monaco runs inside an iframe** served by the **app worker** (FastAPI).
+- **Monaco is mounted inline in the host page** served by the **app worker** (FastAPI).
 - The editor is controlled via a **dedicated Socket.IO channel** proxied by the **main framework**.
 - Document content, drafts, and preferences are governed by SSOT (`_history_store` / project sidecar, `_preferences_store`).
 
@@ -10,35 +10,38 @@ This is intentionally written as a “wiring + protocol” reference: what runs 
 
 ---
 
-## Roadmap (Monaco + Workbench Sidecar)
+## Current Architecture
 
-This is the current direction:
+This is the live operating model today:
 - TE2 remains the **only** authority for edit/save/draft/autosave/versioning (SSOT).
-- VS Code compatible language intelligence is provided by a **sidecar** that talks to a real `code-server` extension host.
-- Monaco stays thin and consumes normalized requests/events over a dedicated transport.
+- `code-server` owns extension execution and the remote VS Code extension host.
+- The Node **workbench adapter** owns the VS Code protocol boundary.
+- The **inline editor runtime** is the only frontend that talks directly to the WBA for language intelligence.
+- The **host page** and **Explorer** remain backend-owned surfaces; they do not need editor-grade latency.
 
 Cross references:
-- `docs/apps/code_cm6/MONACO_WORKBENCH_SPRINT_PLAN.md`
-- `docs/apps/code_cm6/VSCODE_API_CONTRACT.md`
-- `docs/apps/code_cm6/VSCODE_API_STATE_OWNERSHIP.md`
-- `docs/apps/code_cm6/VSCODE_API_DEPRECATIONS.md`
+- `docs/planning/FILE_EDITOR_CM6_DIAGNOSTICS_PROJECTION_DEBOUNCE_IDEA.md`
+- `docs/planning/FILE_EDITOR_CM6_WBA_ACK_AND_DECOMPOSITION_AUDIT.md`
+- `docs/planning/FILE_EDITOR_CM6_EDITOR_DIAGNOSTICS_SIDEBAND_AND_WBA_WS_PLAN.md`
 
-### Current milestone (read-only language intelligence + live diagnostics)
-Status: implemented and working for **all built-in languages** (Python, TypeScript, JavaScript, CSS, HTML, JSON, etc.):
-- `code-server` runs as a **pipe-backend** framework shell on fixed port `127.0.0.1:18180` with `--disable-workspace-trust`. Stdout is read by the Python shell manager for readiness detection ("HTTP server listening" regex). The pipe backend ensures code-server terminates automatically with the app worker.
-- Node **workbench adapter** runs as a **pipe-backend** framework shell. All RPC (hover, symbols, openFile, didChange, diagnostics nudge) flows over **stdio JSON-RPC** (stdin/stdout pipe), not HTTP. The adapter's HTTP server on port `18181` is vestigial and will be removed.
-- **No HTTP in the editor data flow.** The old `vscode_api` WS JSON-RPC bridge is bypassed. All language-feature requests go: browser → Socket.IO → `editor_ws.py` → stdin pipe → adapter → extension host → stdout pipe → browser.
-- Diagnostics flow through a **server-side bridge** (`diagnostics_bridge.py`) over the editor Socket.IO channel. The diagnostics nudge (`vscode.openFile`) also uses the stdio pipe.
-- **Live typing diagnostics** via `vscode.didChange`: Monaco’s 120ms debounced `onDidChangeModelContent` pushes the full buffer to the extension host via `$acceptModelChanged` (rpcId 85, `isFlush: true`). The ext host updates its mirror model, Pyright/TS re-analyzes, and fresh diagnostics flow back through the existing bridge. No file I/O, no save required.
-- **Diagnostics counter** (toolbar badge) resets to zero on file switch, then updates when new diagnostics arrive for the new file.
-- The workbench adapter and code-server are started eagerly at worker boot. Code-server readiness (pipe stdout regex) **gates** adapter startup, eliminating race conditions.
-- Working end-to-end (over stdio pipe): `vscode.openFile`, `vscode.documentSymbols`, `vscode.hover`, `vscode.didChange`.
-- **File watcher pipeline** (working): TE2 subscribes to code-server's native `remoteFilesystem` IPC channel to receive file change events — zero overhead, no extension needed. Triple fallback: VS Code IPC (default) → raise inotify limit (recovery) → watchexec poll (last resort) → none/lazy (manual). Watcher mode is persisted per-project in ProjectSidecar. Explorer git decorations propagate to parent directories on every change.
-- **Builtin extensions** are loaded by default (95 scanned from code-server, filtered to ~30 language-related).
-- **LanguageId detection**: the adapter infers language from file extension when not provided (supports 40+ extensions including `.mjs`, `.cjs`, `.mts`, `.cts`, `.jsx`, `.tsx`).
+### Current milestone (direct WBA editor intelligence + live diagnostics)
+Status: implemented and working for the active built-in language lane.
 
-Known limitation (expected right now):
-- Files without an LSP extension (e.g. Markdown) won’t get live diagnostics — the toolbar badge clears to zero on switch.
+Current facts:
+- `code-server` runs as a **pipe-backend** framework shell on a **Unix domain socket**, currently `~/.config/code-server/code-server.sock`, using `--socket` and `--socket-mode 0600`. Stdout is still used by Python for readiness detection (`HTTP server listening`).
+- The Node **workbench adapter** runs as a **pipe-backend** framework shell. Its backend-owned control plane still uses **stdio JSON-RPC** (`adapter_rpc(...)`) for lifecycle and control operations.
+- The inline editor runtime language-intelligence hot path is now **direct `/wba` Socket.IO JSON-RPC**, not `editor_workbench_*` through `editor_ws.py`.
+- The host page remains **WBA-blind**. It gets boot snapshot and adapter readiness from backend-owned `/ui_ipc` flows.
+- Explorer/backend still uses the WBA stdio control plane for a few **control-plane** operations such as `adapter.switchWorkspace`, `adapter.resubscribeWatcher`, and editor-backend `te2.resync`. Those are residual control hooks, not the editor hot path.
+- Raw editor diagnostics and provider-registration notifications arrive through the WBA editor-facing event stream. `diagnostics_bridge.py` remains relevant for normalized explorer/problems diagnostics and watcher fanout, not as the primary editor diagnostics transport.
+- The workbench adapter and code-server are still started eagerly at worker boot. Code-server readiness gates adapter startup.
+- File watching still relies on code-server's native filesystem/IPC path, with the same triple-fallback watcher policy.
+- Builtin language extensions are still loaded through the WBA bootstrap/runtime path.
+
+Known limitations / residue:
+- Some backend control paths still use the stdio WBA control plane.
+- Some source modules are still loose JS and should continue to move to TS incrementally.
+- Files without a supporting language provider still will not produce meaningful diagnostics.
 
 ### Extension validation matrix (next milestone)
 We will validate at least 2 deterministic features (hover + symbols + diagnostics) per language:
@@ -55,10 +58,14 @@ We will validate at least 2 deterministic features (hover + symbols + diagnostic
 Browser host shell (file_editor_cm6/template.html + main.js)
   ├─ Explorer drawer (Socket.IO transport; worker-side server, main-process proxy)
   ├─ Terminal drawer (PTY plumbing; separate)
-  └─ Editor iframe <iframe src="/api/app/file_editor_cm6/ui/nc?...">
-        ├─ FastHTML harness: m_editor_app.py
-        ├─ Monaco runtime:  m_editor_app.js
+  └─ Inline editor host mount
+        ├─ Host container: `#editor-frame` in `template.html`
+        ├─ Host bootstrap: `main.js` → `bootInlineEditorHost(...)`
+        ├─ Inline host loader: `monaco_editor/inline_host.ts`
+        ├─ Monaco runtime source: `monaco_editor/m_editor_app.ts`
         ├─ Monaco assets:   /api/app/file_editor_cm6/ui/monaco_vscode/esm/...
+        ├─ Editor SSOT/control socket: /editor_ws/socket.io namespace /editor
+        ├─ Editor WBA RPC socket:      /wba_ws/socket.io    namespace /wba
         └─ Touch selection: /api/app/file_editor_cm6/static/vendor/monaco-touch-selection/...
 
 Main framework process (app/main.py)
@@ -66,50 +73,62 @@ Main framework process (app/main.py)
   ├─ Loads app services declared in manifest.json
   ├─ Explorer transport service (WS proxy): /explorer_ws/socket.io → worker
   ├─ Editor transport service (WS proxy)  : /editor_ws/socket.io  → worker
+  ├─ WBA transport service (WS proxy)     : /wba_ws/socket.io     → workbench adapter
   └─ UI IPC transport service (WS proxy)  : /ui_ipc_ws/socket.io  → worker
 
 App worker process (app/apps/file_editor_cm6/main.py)
   ├─ HTTP routes: /api/app/file_editor_cm6/*
-  ├─ NiceGUI still mounted for legacy editor API endpoints (/editor/*)
-  ├─ Monaco iframe routes under /ui/*
+  ├─ Monaco/VS Code asset routes under /ui/*
   ├─ Worker Socket.IO: /editor_ws/socket.io (EDITOR_ASGI_APP)
   ├─ Worker Socket.IO: /explorer_ws/socket.io (EXPLORER_ASGI_APP)
   ├─ Worker Socket.IO: /ui_ipc_ws/socket.io (UI_IPC_ASGI_APP)
+  ├─ Backend boot/runtime priming for code-server + WBA
   └─ SSOT stores: _history_store (project sidecar), _preferences_store
 
 Framework shells (service processes owned by the framework_shells orchestrator)
   ├─ code-server (pipe backend): real VS Code-compatible backend + remote extension host
-  │     stdout piped to Python for readiness detection; stderr fanned to UI via shell wrapper
-  ├─ workbench adapter (pipe backend, Node): initiates remote-agent WS connection; decodes/encodes workbench protocol
-  │     stdin/stdout = JSON-RPC transport (<<<RPC>>> prefix on responses)
-  │     stderr = adapter logs (console.log redirected to console.error)
-  └─ vscode_api (Node): browser-facing JSON-RPC bridge for VSIX/themes/grammars (NOT used for hover/symbols/openFile)
+  │     listens on the UDS path, stdout piped to Python for readiness detection
+  └─ workbench adapter (pipe backend, Node)
+        ├─ backend control plane: stdin/stdout JSON-RPC (<<<RPC>>> / <<<PUSH>>>)
+        ├─ editor-facing RPC/event plane: Socket.IO namespace /wba on /wba_ws/socket.io
+        └─ remote agent/client side: connects to code-server over UDS
 
-Diagnostics pipeline (server-side bridge, not browser WS):
-  adapter WS (18181) → diagnostics_bridge.py → editor Socket.IO → browser
+Editor language feature pipeline (current hot path):
+  browser inline editor runtime
+    → /wba Socket.IO JSON-RPC
+    → workbench adapter
+    → code-server remote agent / extension host
+    → /wba notifications / replies
+    → browser inline editor runtime
 
-Language feature pipeline (stdio pipe, no HTTP):
-  browser → Socket.IO (editor_workbench_*) → editor_ws.py → adapter stdin pipe → extension host
-  extension host → adapter stdout pipe (<<<RPC>>>) → editor_ws.py → Socket.IO → browser
+Editor SSOT pipeline (still worker-owned):
+  browser inline editor runtime
+    → /editor Socket.IO
+    → app worker SSOT / save / draft / open / cache_state flows
 
-Live diagnostics pipeline (didChange, stdio pipe):
-  Monaco onDidChangeModelContent (120ms debounce) → editor_workbench_did_change
-    → editor_ws.py → adapter stdin → $acceptModelChanged (rpcId 85, isFlush:true)
-    → ext host mirror model update → Pyright/TS re-analysis
-    → $changeMany → diagnostics_bridge.py → editor Socket.IO → browser markers
+Host boot / readiness pipeline:
+  host page
+    → /ui_ipc boot_snapshot
+    → worker boot_snapshot_backend primes code-server/WBA
+    → /ui_ipc adapter_state events back to host
+
+Explorer/backend WBA control-plane residue:
+  explorer/backend
+    → adapter_rpc(...) over stdio
+    → adapter.switchWorkspace / adapter.resubscribeWatcher / te2.resync
 
 File watcher pipeline (IPC — triple fallback):
   code-server parcel watcher detects disk change
     → remoteFilesystem IPC channel fires EventFire (ResponseType 204)
     → workbench_client.mjs onEvent({type: "watcher/fileChanges", changes: [...]})
-    → diagnostics_bridge.py WS → abs→rel path conversion
+    → backend fanout / abs→rel path conversion
     → explorer:event {type: "watcher:files", payload: {created, changed, deleted}}
     → main.js dispatch → explorer.js handleExplorerEvent
     → git:status refresh + directory re-listing + parent dir decoration propagation
   Fallbacks: raise inotify limit → watchexec --poll -- cat → none (manual refresh)
 
 UI IPC pipeline (frontend-to-frontend relay via Python):
-  iframe m_editor_app.js ─┬─ Ctrl+S → ui_event {type:"save"}
+  inline editor m_editor_app.ts ─┬─ Ctrl+S → ui_event {type:"save"}
                           └─ editor focus → ui_event {type:"focus"}
     → Socket.IO /ui_ipc namespace (path: /ui_ipc_ws/socket.io)
     → ui_ipc_ws.py UIIPCNamespace (logs + rebroadcasts, skip sender)
@@ -128,37 +147,32 @@ Terminology used in TE2:
 - **Execution level** is “who runs logic/state” (worker SSOT, extension host, adapter decode/encode).
 
 For `file_editor_cm6`, we intentionally separate responsibilities:
-- **Editor SSOT transport (existing)**: `/editor_ws/socket.io` (main process proxies to worker).
-- **Language feature transport (stdio pipe)**: `editor_ws.py` handlers → `adapter_rpc()` over stdin/stdout pipe to workbench adapter. No HTTP hop.
-- **VSIX/grammar/theme transport (WS)**: `/vscode_api_ws` (main process proxies to `vscode_api` shell). Only used for extension management, NOT for hover/symbols/openFile.
+- **Editor SSOT transport**: `/editor_ws/socket.io` (main process proxy → worker).
+- **Editor WBA transport**: `/wba_ws/socket.io` (main process proxy → WBA shell).
+- **UI IPC transport**: `/ui_ipc_ws/socket.io` (main process proxy → worker).
 - **Execution**:
-  - Worker owns drafts/saves/versioning (`HistoryStore`/sidecar).
-  - `code-server` owns extension execution (remote extension host).
-  - Node workbench adapter owns the remote-agent WS session and workbench protocol encoding/decoding.
+  - Worker owns drafts/saves/versioning and host/explorer state.
+  - `code-server` owns extension execution and remote-agent services.
+  - Node workbench adapter owns protocol translation, provider state, editor-facing WBA RPC/events, and backend stdio control hooks.
 
-Deterministic ports (current):
-- `code-server`: `127.0.0.1:18180` (pipe-backend framework shell)
-  - `--user-data-dir ~/.config/code-server`
-  - `--extensions-dir ~/.config/code-server/extensions`
-  - `--disable-workspace-trust`
-  - stdout piped to Python; stderr visible in framework shells UI via `2>&1 | while read` wrapper
-- workbench adapter: `127.0.0.1:18181` (pipe-backend framework shell, HTTP port is vestigial)
-  - stdin/stdout = JSON-RPC pipe transport
-  - console.log redirected to console.error for UI visibility
+Current deterministic runtime endpoints:
+- `code-server`
+  - UDS path: `~/.config/code-server/code-server.sock`
+  - launched with `--socket` and `--socket-mode 0600`
+  - stdout piped to Python for readiness detection
+- workbench adapter
+  - backend-owned HTTP/Socket.IO listen: `127.0.0.1:18181`
+  - stdio JSON-RPC remains the backend control plane
+  - `/wba_ws/socket.io` is the browser-facing editor RPC/event path
 
-Discovery endpoints (worker, proxied via main process):
+Discovery / control endpoints (worker, proxied via main process):
 - `GET /api/app/file_editor_cm6/code_server/discover`
 - `GET /api/app/file_editor_cm6/workbench_adapter/discover`
-- `GET /api/app/file_editor_cm6/vscode_api/discover`
-
-Workbench adapter baton (deterministic startup):
 - `GET /api/app/file_editor_cm6/workbench_adapter/start`
-  - Starts/adopts code-server + adapter and returns a **baton token**.
-- `GET /api/app/file_editor_cm6/workbench_adapter/status?token=...`
-  - Poll until `state` is `connected` or `ready`.
+- `GET /api/app/file_editor_cm6/workbench_adapter/status`
 - `POST /api/app/file_editor_cm6/workbench_adapter/cmd`
-  - **Requires** header `x-te2-baton: <token>` (or `?token=` query).
-  - Prevents early 502/500 races by ensuring the adapter is up before commands.
+
+The `workbench_adapter/*` HTTP routes are still backend-owned control/discovery surfaces. They are not the editor hot path once the inline editor runtime is connected to `/wba`.
 
 Spinner / Status indicator (host UI):
 - The host UI uses a **3-state status indicator** (`#fe-lsp-spinner`) that is always visible:
@@ -174,27 +188,33 @@ Spinner / Status indicator (host UI):
 
 ## 1) Key files (where to look)
 
-### Monaco iframe (worker)
-- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.py`
-  - FastHTML entrypoint route: `/ui/nc` (worker‑relative; proxied under `/api/app/file_editor_cm6/ui/nc`)
-  - Serves pinned Monaco assets under `/ui/monaco_vscode/*`
-  - Provides a **CSS‑import shim** for Monaco ESM (`import './foo.css'`)
-- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
-  - Monaco editor bootstrap
+### Monaco editor runtime (worker)
+- `app/apps/file_editor_cm6/monaco_editor/inline_host.ts`
+  - Mounts the inline editor into `#editor-frame`
+  - Injects the inline host markup (`#te2-breadcrumbs`, `#fh-monaco`)
+  - Loads required CSS/vendor assets and then imports `m_editor_app.ts`
+- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts`
+  - Monaco editor bootstrap source of truth
   - Model management (plain editor vs diff editor)
   - Draft overlay decorations (blue inserts / yellow deletes)
   - Editor Socket.IO client wiring (namespace `/editor`, path `/editor_ws/socket.io`)
+  - Direct WBA Socket.IO client wiring (namespace `/wba`, path `/wba_ws/socket.io`)
+- `app/apps/file_editor_cm6/monaco_editor/editor_wba_rpc_transport.ts`
+  - Editor-facing JSON-RPC transport over `/wba`
+- `app/apps/file_editor_cm6/monaco_editor/editor_workbench_runtime.ts`
+  - Maps editor workbench calls to direct WBA RPC methods
 
 ### Editor Socket.IO (worker)
 - `app/apps/file_editor_cm6/monaco_editor/editor_socketio.py`
   - `EDITOR_SIO` (worker server) and `EDITOR_ASGI_APP` (mounted at `/editor_ws/socket.io`)
+  - `/editor` is the SSOT/editor-control lane; `/rpc/editor` remains the typed editor backend lane
 - `app/apps/file_editor_cm6/monaco_editor/editor_ws.py`
   - Namespace logic (`EditorSocketIONamespace("/editor")`)
   - SSOT snapshot on connect
   - Open, mirror, git baselines, draft diff, save
   - `on_editor_mirror`: persists draft, emits `editor:cache_state`, triggers `notify_draft_state_changed`
-  - `on_editor_workbench_did_change`: fire-and-forget `vscode.didChange` to adapter via stdio
   - `on_editor_save_request`: writes to disk, clears draft, emits clean `editor:cache_state`
+  - Residual backend control hook: `te2.resync` on model-ready still goes through stdio `adapter_rpc(...)`
 
 ### Explorer Socket.IO (worker)
 - `app/apps/file_editor_cm6/explorer_socketio.py`
@@ -214,22 +234,25 @@ Spinner / Status indicator (host UI):
 - `app/apps/file_editor_cm6/services/explorer_transport.py`
   - Proxies `/explorer_ws/socket.io` websocket frames to worker port
   - Previously ran explorer business logic in-process (architectural violation, fixed)
-- `app/apps/file_editor_cm6/services/vscode_rpc_transport.py`
-  - Proxies `/vscode_rpc_ws` websocket frames to vscode_rpc framework shell
+- `app/apps/file_editor_cm6/services/wba_transport.py`
+  - Proxies `/wba_ws/socket.io` websocket frames to the workbench adapter shell
 - `app/apps/file_editor_cm6/services/ui_ipc_transport.py`
   - Proxies `/ui_ipc_ws/socket.io` websocket frames to worker port
-  - Frontend-to-frontend relay (iframe ↔ main page communication)
+  - Frontend-to-frontend relay (editor-runtime ↔ main page communication)
+- `app/apps/file_editor_cm6/services/vscode_rpc_transport.py`
+  - Legacy/secondary service still present in `manifest.json`; not the current editor intelligence path
 - All transports: bidirectional WS frame forwarding, no SSOT access, no payload parsing
 
 ### Host shell (browser, worker-served)
 - `app/apps/file_editor_cm6/template.html`
-  - Layout + iframe placement
+  - Layout + inline editor placement
 - `app/apps/file_editor_cm6/main.js`
   - Toolbar/menu logic, explorer integration, session state UI
-  - Calls backend editor API endpoints (preferences, check_cache, etc.)
+  - Calls backend editor API endpoints and `/ui_ipc` boot/readiness paths
   - Emits `editor_open_request` and `editor_save_request` over editor Socket.IO
   - `_applyEditorCacheState()`: receives `editor:cache_state`, updates draft badge + path display
   - `_applyCacheIndicatorImpl()`: sets `#fe-file-draft-badge` color/text (orange=draft, red=crash, grey=clean)
+  - Observes backend `adapter_state`; does not call WBA directly for language intelligence
 - `app/apps/file_editor_cm6/static/js/explorer.js`
   - File tree rendering, search, review panel
   - `fetchReviewResults()`: sends `review:list` via explorer bus
@@ -296,9 +319,9 @@ Remaining high-value decomposition targets:
 
 ---
 
-## 1.5) Frontend build process (host + iframe bundles)
+## 1.5) Frontend build process (host + inline editor bundles)
 
-TE2 host/iframe frontend bundling for `file_editor_cm6` uses `esbuild` (with TypeScript type-check support via `tsc --noEmit`):
+TE2 host/inline-editor frontend bundling for `file_editor_cm6` uses `esbuild` (with TypeScript type-check support via `tsc --noEmit`):
 
 - Config: `app/apps/file_editor_cm6/build.mjs`
 - Scripts: `app/apps/file_editor_cm6/package.json`
@@ -308,11 +331,11 @@ TE2 host/iframe frontend bundling for `file_editor_cm6` uses `esbuild` (with Typ
 
 Current build outputs:
 - Host bundle: `static/dist/host.js` (entry: `main.js`, format: ESM)
-- Iframe bundle: `static/dist/editor.js` (entry: `monaco_editor/m_editor_app.js`, format: IIFE)
+- Editor bundle: `static/dist/editor.js` (entry: `monaco_editor/m_editor_app.ts`, format: IIFE)
 
 Notes:
 - Vendor assets remain external (`/static/vendor/*`) and are still loaded separately.
-- This host/iframe bundle process is separate from the Monaco pinned-VSCode asset build described later in this document.
+- This host/inline-editor bundle process is separate from the Monaco pinned-VSCode asset build described later in this document.
 
 ### Current host TS migration state (important)
 - `src/host/**/*.js` has been migrated to `src/host/**/*.ts` and `main.js` imports those `.ts` modules directly at runtime.
@@ -328,11 +351,15 @@ Notes:
 - App HTML: `/app/file_editor_cm6`
 - App API prefix: `/api/app/file_editor_cm6/...`
 
-### Monaco iframe routes (served by the worker, under the app API prefix)
-- Iframe page: `/api/app/file_editor_cm6/ui/nc`
+### Monaco editor runtime routes (served by the worker, under the app API prefix)
 - Monaco ESM: `/api/app/file_editor_cm6/ui/monaco_vscode/esm/vs/...`
 - Monaco “lang bundles”: `/api/app/file_editor_cm6/ui/monaco_vscode/lang/...`
-- Iframe runtime JS: `/api/app/file_editor_cm6/ui/monaco_editor/m_editor_app.js`
+- Inline asset CSS/JS loaded by `inline_host.ts`:
+  - `/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.css`
+  - `/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js`
+  - `/apps/file_editor_cm6/monaco_editor/textmate/vscode-oniguruma.umd.js`
+  - `/apps/file_editor_cm6/monaco_editor/textmate/vscode-textmate.umd.js`
+- Editor-facing WBA RPC/event socket: `/wba_ws/socket.io` namespace `/wba`
 
 ### Editor Socket.IO transport
 - Client path: `/editor_ws/socket.io`
@@ -347,12 +374,20 @@ Important:
 
 ## 3) Main‑process service loader (why services exist)
 
-Services declared in `app/apps/file_editor_cm6/manifest.json`:
+Services declared in `app/apps/file_editor_cm6/manifest.json` currently include the live transport set plus a few legacy/secondary services:
 
 ```json
 "services": {
   "path": "services",
-  "modules": ["explorer_transport", "editor_transport"]
+  "modules": [
+    "explorer_transport",
+    "editor_transport",
+    "terminal_transport",
+    "vscode_rpc_transport",
+    "wba_transport",
+    "ui_ipc_transport",
+    "sidebar_backchannel_uds"
+  ]
 }
 ```
 
@@ -367,6 +402,10 @@ Services run in the **main process** and should provide only:
 - Infrastructure that must outlive worker restarts
 
 They must **not** mutate app worker SSOT (HistoryStore / ProjectSidecar).
+
+Important current note:
+- `wba_transport` is part of the active editor architecture.
+- `vscode_rpc_transport` is still registered, but it is not the current editor intelligence hot path.
 
 ---
 
@@ -391,7 +430,7 @@ Drafts are stored in project sidecar "session_cache" entries:
   - `unsaved` (True/False, computed as `content_sha256 != base_sha256`)
   - runtime identifiers (run_id, etc.)
 
-The editor Socket.IO server (`editor_ws.py`) is the worker-side entry point for persisting drafts from the iframe.
+The editor Socket.IO server (`editor_ws.py`) is the worker-side entry point for persisting drafts from the inline editor runtime.
 
 Draft mutations trigger the following pipeline:
 1. `on_editor_mirror` persists to `ProjectSidecar.session_cache` via `upsert_cached_document`
@@ -413,17 +452,17 @@ Draft mutations trigger the following pipeline:
 
 
 ### Preferences (PreferencesStore)
-Editor preferences are stored per active project and used to initialize the iframe editor options.
+Editor preferences are stored per active project and used to initialize the inline editor options.
 
-Preferences changes are performed via legacy `/editor/*` endpoints (NiceGUI router), but are broadcast to the Monaco iframe via `EDITOR_SIO` (worker Socket.IO server).
+Preferences changes are performed via legacy `/editor/*` endpoints (NiceGUI router), but are broadcast to the Monaco editor runtime via `EDITOR_SIO` (worker Socket.IO server).
 
 ---
 
-## 5) HTTP endpoints the Monaco iframe uses (worker API)
+## 5) HTTP endpoints the Monaco editor runtime uses (worker API)
 
-The iframe computes `apiBase` from its own URL:
-- served at `/api/app/file_editor_cm6/ui/nc`
-- `apiBase` becomes `/api/app/file_editor_cm6`
+The inline editor runtime gets `apiBase` from the inline-host bootstrap override:
+- `inline_host.ts` sets `window.__te2InlineMonacoApiBase = '/api/app/file_editor_cm6'`
+- `editor_api_base_utils.ts` uses that override first and only falls back to URL-prefix math if needed
 
 It then fetches:
 
@@ -442,25 +481,30 @@ It then fetches:
   - implemented in `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` (APIRouter prefix `/editor`)
 
 Notes:
-- The Monaco iframe uses `/editor/check_cache` as a “draft wins” read path when opening/restoring a file.
+- The Monaco editor runtime uses `/editor/check_cache` as a “draft wins” read path when opening/restoring a file.
 - The authoritative “open payload” for socket‑based opens comes from the editor Socket.IO server (see below).
 
 ---
 
-## 6) Editor Socket.IO transport (events + payloads)
+## 6) Editor SSOT Socket.IO transport (events + payloads)
 
 ### Transport
 - path: `/editor_ws/socket.io`
 - namespace: `/editor`
 - room used by server: `"file_editor_cm6"`
 
+Important:
+- This section describes the **worker-owned editor SSOT/control lane**.
+- It is no longer the primary transport for WBA-owned language intelligence.
+- The inline editor runtime now uses `/wba_ws/socket.io` namespace `/wba` for workbench/language RPC.
+
 Clients:
 - Host shell connects with query: `{app_id:'file_editor_cm6', role:'host'}`
 
 ### Connection
 - see `connectEditorSocket()` in `app/apps/file_editor_cm6/main.js`
-- Monaco iframe connects with query: `{app_id:'file_editor_cm6'}`
-  - see `connectEditorSocket()` in `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
+- Monaco editor runtime connects with query: `{app_id:'file_editor_cm6'}`
+  - see `connectEditorSocket()` in `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts`
 
 ### Naming convention
 - Client → server emits underscore events: `editor_open_request`, `editor_mirror`, `editor_save_request`, etc.
@@ -501,10 +545,10 @@ editor:open {
 }
 ```
 
-The Monaco iframe treats `editor:open` as authoritative content and updates its model directly.
+The Monaco editor runtime treats `editor:open` as authoritative content and updates its model directly.
 
 ### Draft mirror flow (live buffer)
-Iframe emits full‑text mirror updates (debounced):
+Inline editor runtime emits full‑text mirror updates (debounced):
 ```js
 emit('editor_mirror', {
   path: "<abs>",
@@ -525,10 +569,10 @@ editor:mirror {
 }
 ```
 
-Other iframes apply the remote buffer; the source client ignores self‑echo by SID.
+Other editor clients apply the remote buffer; the source client ignores self‑echo by SID.
 
 ### Git baseline flow (pinned diff)
-Iframe requests:
+Inline editor runtime requests:
 ```js
 emit('editor_git_baselines_request', { path: "<abs>" })
 ```
@@ -552,7 +596,7 @@ Client uses this to build the “native” Git diff view. In pinned mode:
 - Draft edits do not retarget the Git diff baselines
 
 ### Draft diff overlay flow (custom decorations)
-Iframe requests:
+Inline editor runtime requests:
 ```js
 emit('editor_draft_diff_request', { path: "<abs>", requestId, reason })
 ```
@@ -581,7 +625,7 @@ Preferences are changed via HTTP:
 The backend:
 - persists SSOT preference store
 - broadcasts to host shells via explorer bus (for menus)
-- broadcasts to Monaco iframes via editor Socket.IO:
+- broadcasts to Monaco editor runtimes via editor Socket.IO:
 
 ```js
 editor:prefs_changed {
@@ -635,40 +679,31 @@ editor:cache_state {
 
 Consumers:
 - **Host shell** (`main.js`): `_applyEditorCacheState()` updates `#fe-file-draft-badge` (asterisk indicator)
-- **Monaco iframe** (`m_editor_app.js`): clears draft decorations on `unsaved:false`, requests fresh draft diff on `unsaved:true`
+- **Monaco editor runtime** (`m_editor_app.ts`): clears draft decorations on `unsaved:false`, requests fresh draft diff on `unsaved:true`
 
 Cross-transport note: when drafts are cleared via the explorer review panel (save/discard), `_notify_editor_draft_cleared()` in `explorer_ws.py` emits `editor:cache_state` via `EDITOR_SIO` (the editor Socket.IO server), not the explorer bus.
 
-### Diagnostics flow (server-side bridge)
-Emitted by the diagnostics bridge when the adapter reports `$changeMany`:
-```js
-editor:diagnostics {
-  type: "diagnostics/update",
-  path: "<abs>",
-  owner: "<marker owner>",
-  markers: [...],
-  ts_ms: <timestamp>
-}
+### Diagnostics note
+Primary editor diagnostics no longer arrive on `/editor`.
+
+Current split:
+- raw editor diagnostics and provider-registration notifications arrive through the direct `/wba` event stream
+- normalized explorer/problems diagnostics remain backend-owned
+- `/editor` still carries SSOT/editor-state events such as `editor:open`, `editor:cache_state`, draft diff, and save-related broadcasts
+
+### didChange note
+Primary editor `didChange` no longer emits `editor_workbench_did_change` over `/editor`.
+
+Current hot path:
+```text
+Monaco change
+  -> editor_workbench_runtime.ts
+  -> /wba RPC: vscode.didChange
+  -> WBA
+  -> code-server extension host
 ```
 
-The Monaco iframe converts markers to `monaco.editor.setModelMarkers()` calls.
-On file switch, `_clearDiagnosticsForSwitch()` resets all markers and counts to zero.
-
-### didChange flow (live typing diagnostics)
-Iframe emits (debounced 120ms):
-```js
-emit('editor_workbench_did_change', {
-  path: "<abs>",
-  text: "<full buffer>",
-  languageId: "<language>",
-  generation: <int>
-})
-```
-
-Server forwards to adapter via stdio pipe. The adapter calls `$acceptModelChanged` (rpcId 85, `isFlush: true`) on the extension host. Diagnostics flow back through the bridge.
-Safety invariant: `didChange` and symbols are accepted only after `openFile` baseline exists for the same `(path, generation)`.
-
-**Range correctness (critical for clangd):** The `$acceptModelChanged` change event contains a `range` that must span the entire previous document. The `endColumn` must be the **actual length of the last line + 1** (1-based columns). Using sentinel values like `2147483647` (INT32_MAX) or `1000000` causes the VS Code mirror model to clamp silently, but clangd's LSP server rejects the invalid UTF-16 offset: `"Failed to update ... utf-16 offset 2147483646 is invalid for line N"`. After rejection, clangd loses track of the document (`"trying to get AST for non-added document"`). The adapter tracks `_docLastLineLength` per path and uses it for correct range construction.
+The old `editor_workbench_*` stdio relay path should be treated as historical bring-up context or backend residue, not the current editor transport contract.
 
 ### Relay events (UI commands)
 ```js
@@ -775,7 +810,7 @@ Used by `_notify_editor_draft_cleared()` to update the toolbar draft badge when 
 
 ## 7) Monaco asset pipeline (pinned VS Code build)
 
-The Monaco iframe uses the pinned VS Code `monaco-editor-core` ESM output:
+The Monaco editor runtime uses the pinned VS Code `monaco-editor-core` ESM output:
 - mounted at `/api/app/file_editor_cm6/ui/monaco_vscode/esm/...`
 
 The harness also serves a TE2 language bundle directory:
@@ -786,7 +821,7 @@ Because the VS Code Monaco ESM imports CSS files, the harness serves `.css` as:
 - raw CSS is available when `?raw=1` is present
 
 ### Build procedure (correct)
-There are **two** build outputs that must exist, otherwise `/api/app/file_editor_cm6/ui/nc` will not serve the Monaco iframe correctly:
+There are **two** build outputs that must exist, otherwise the inline Monaco boot path will not serve the editor runtime correctly:
 
 1) **Pinned Monaco ESM** (VS Code fork)
 - Output dir: `worktrees/vscode-te2-diff/out-monaco-editor-core/esm/`
@@ -800,22 +835,22 @@ Recommended build command (does both):
 ```
 cd worktrees/vscode-te2-diff && ./build_monaco_te2.sh
 ```
-### Common failure mode: `/ui/nc` 404 but worker is “running”
+### Common failure mode: inline editor boot is blank but worker is “running”
 Symptom:
-- Browser requests `GET /api/app/file_editor_cm6/ui/nc?...` and gets 404 or falls back to a NiceGUI HTML page.
+- The host page loads, but `#editor-frame` stays blank or the inline Monaco boot falls back to an error panel.
 
 Cause:
-- `register_monaco_editor_routes(...)` did not mount the FastHTML routes because required build artifacts were missing (most commonly `te2-lang/`).
+- Required Monaco build artifacts or the built inline editor bundle were missing, so the host could not complete inline editor boot.
 
 Fix:
-- Run the build above, restart the `file_editor_cm6` worker, hard refresh.
+- Run the build above, rebuild `app/apps/file_editor_cm6` (`node build.mjs`), restart the `file_editor_cm6` worker, hard refresh.
 
 ---
 
 ## 8) UI “knobs” (what you can safely tune)
 
 ### Preferences → Monaco options mapping
-The iframe builds Monaco options from SSOT preferences (`buildMonacoOptionsFromPrefs()`):
+The inline editor runtime builds Monaco options from SSOT preferences (`buildMonacoOptionsFromPrefs()`):
 - line numbers
 - word wrap
 - minimap on/off (but forced off in Git diff mode)
@@ -856,6 +891,7 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 ### 1) Transport is correct (no reconnect loops)
 - Confirm editor proxy: `app/apps/file_editor_cm6/services/editor_transport.py`
 - Confirm explorer proxy: `app/apps/file_editor_cm6/services/explorer_transport.py`
+- Confirm WBA proxy: `app/apps/file_editor_cm6/services/wba_transport.py`
 - Confirm worker SUBAPPS mount:
   ```python
   SUBAPPS = [
@@ -865,13 +901,15 @@ theme registration is skipped (by design) to avoid caching a no-op run.
   ```
 - Editor Socket.IO: namespace `/editor`, path `/editor_ws/socket.io`
 - Explorer Socket.IO: namespace `/explorer`, path `/explorer_ws/socket.io`
+- Editor WBA Socket.IO: namespace `/wba`, path `/wba_ws/socket.io`
 
-### 2) Iframe loads (no `/ui/nc` 404)
-- The Monaco iframe entrypoint is `/api/app/file_editor_cm6/ui/nc?app_id=file_editor_cm6`.
-- If you see a `404` on that URL, it means the worker failed to register the Monaco FastHTML routes.
-  - Check the worker stderr logs for `[MonacoEditor] Failed to register routes`.
-  - The worker now returns a `503` HTML error (instead of silent 404) when registration fails.
-- A common cause is a Python exception inside `app/apps/file_editor_cm6/monaco_editor/m_editor_app.py` during route registration (e.g. bad route string formatting).
+### 2) Inline editor boot completes
+- The host boot path is `template.html` → `main.js` → `bootInlineEditorHost(...)` → `inline_host.ts` → `m_editor_app.ts`.
+- If the editor surface stays blank, inspect:
+  - `static/dist/host.js` load/boot
+  - `static/dist/editor.js` build freshness
+  - worker stderr for boot-snapshot / adapter bootstrap failures
+  - browser console for `[inline_monaco] boot failed`
 
 ### 2) SSOT is present
 - `GET /api/app/file_editor_cm6/state` returns:
@@ -883,7 +921,7 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 ### 4) Draft persistence and live indicators
 - `editor_mirror` should produce a cached draft entry (project sidecar).
 - `editor_save_request` should clear the draft and write disk.
-- On save, the server broadcasts `editor:cache_state` with `unsaved:false`; the iframe must then refresh git baselines so the inline git diff view updates.
+- On save, the server broadcasts `editor:cache_state` with `unsaved:false`; the inline editor runtime must then refresh git baselines so the inline git diff view updates.
 - On edit, `on_editor_mirror` emits `editor:cache_state` with `unsaved:true` (updates toolbar badge live).
 - On edit, `notify_draft_state_changed()` broadcasts `explorer:updateDecorations` + `review:setEntries` (updates explorer hasDraft icons and review list live).
 - On review save/discard, `_notify_editor_draft_cleared()` emits `editor:cache_state` via editor SIO (clears toolbar badge).
@@ -899,7 +937,7 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 
 As of now:
 - The Monaco editor surface is **not** NiceGUI.
-- However, several `/editor/*` HTTP endpoints still live in `nicegui_editor/editor_app.py` and are still used by the host/iframe (e.g. `editor/check_cache`, `editor/update_preference`).
+- However, several `/editor/*` HTTP endpoints still live in `nicegui_editor/editor_app.py` and are still used by the host/editor-runtime pair (e.g. `editor/check_cache`, `editor/update_preference`).
 
 The long‑term direction is to migrate needed editor endpoints into a dedicated non‑NiceGUI API module, but the current system is intentionally functional during the transition.
 
@@ -928,13 +966,13 @@ Language bundles were bundling a **second** Monaco instance, so contributions at
    - Add: `external: ['monaco-editor-core']` for the **contrib build**
    - Do **not** resolve `monaco-editor-core` to `editor.api.js` in the contrib build plugin.
 
-2) **Import map must point to the worker-served Monaco API**
-   - `app/apps/file_editor_cm6/monaco_editor/m_editor_app.py`
+2) **Inline host must point to the worker-served Monaco API**
+   - `app/apps/file_editor_cm6/monaco_editor/inline_host.ts`
    - Use an absolute path:
      - `"monaco-editor-core": "/api/app/file_editor_cm6/ui/monaco_vscode/esm/vs/editor/editor.api.js"`
 
 3) **Force-load language bundles and re-apply model language**
-   - `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
+   - `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts`
    - Import language bundles from `/ui/monaco_vscode/lang/...`
    - On failure, retry with cache-bust query
    - After `ensureEditorWithPrefs()`, call:
@@ -982,7 +1020,7 @@ We re-append the draft zones after Git diff updates by:
 - re-applying the last computed draft zones after Git diff inserts/removes its own view zones
 
 Primary implementation lives in:
-- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
+- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts`
   - `_installDraftZoneOrderingHook()`
   - `applyDraftZones(...)`
   - `reapplyDraftZones()`
@@ -1041,7 +1079,7 @@ if (origTrailing !== modTrailing) {
 }
 ```
 
-### Fix: Mode switch baseline snapshot (`m_editor_app.js`)
+### Fix: Mode switch baseline snapshot (`m_editor_app.ts`)
 
 When toggling autosave OFF → draft mode, the baseline is now a **snapshot of the current editor
 content** (not `gitDiskModel`, which after autosave equals the editor = empty diff):
@@ -1063,7 +1101,9 @@ If your browser keeps pausing on this, DevTools likely has "Pause on exceptions"
 
 ---
 
-## 14) Planned removal: `vscode_rpc` and `vscode_api` standalone harnesses
+## 14) Historical: pre-direct-WBA removal planning for `vscode_rpc` and `vscode_api`
+
+This section is archival context from the period before the direct `/wba` editor transport and UDS code-server cutover. Do not treat it as the authoritative description of the current hot path.
 
 ### Background
 Early in development, two standalone Node.js JSON-RPC harnesses were created as separate framework shells:
@@ -1108,8 +1148,8 @@ These are all **static asset queries** (reading installed extension files) — t
 | `shellspec/vscode_api.yaml` | Framework shell definition |
 | `main.py` (references) | Discovery/resolve endpoints |
 | `main.js` (references) | Frontend bootstrap/snapshot calls |
-| `m_editor_app.js` (references) | Grammar/theme loading calls |
-| `m_editor_app.py` (references) | Bootstrap snapshot route |
+| `m_editor_app.ts` (references) | Grammar/theme loading calls |
+| `inline_host.ts` (references) | Inline editor bootstrap / mount path |
 
 ### Migration strategy (workbench adapter first)
 The workbench adapter already scans all extensions at startup (`_buildExtensionsSnapshot()`), so it has the full `contributes.grammars`, `contributes.themes`, and `contributes.languages` metadata in memory. The preferred migration path is to add new JSON-RPC methods to the adapter rather than building separate Python utilities.
@@ -1129,7 +1169,7 @@ Add these methods to `server.mjs` `handleJsonRpc()`:
 These reuse the existing stdio pipe transport (browser → Socket.IO → `editor_ws.py` → adapter stdin → response). No new transport or framework shell needed.
 
 Python-side: add corresponding `editor_ws.py` handlers (same pattern as `on_editor_workbench_hover`).
-Frontend: update `m_editor_app.js` to call these via editor Socket.IO instead of the `vscode_api` WS harness.
+Frontend: update `m_editor_app.ts` to call these via editor Socket.IO instead of the `vscode_api` WS harness.
 
 **Phase 2: VSIX management via Python**
 VSIX install/registry is pure file management (download, extract, update `extensions.json`). This doesn't need the adapter or an extension host. A Python utility reading `~/.local/share/termux-extensions-2/code-te2-extensions/` directly is sufficient.
@@ -1143,7 +1183,9 @@ Replace the `vscode.bootstrap.snapshot` call (currently via `vscode_api` harness
 
 ---
 
-## 15) Legacy: `vscode_api` harness (extension host + VSIX pipeline, pending removal)
+## 15) Historical: `vscode_api` harness snapshot
+
+This section is retained as background for legacy/secondary surfaces and migration history. It is not the current editor language-intelligence architecture.
 
 `vscode_api` is the next step after `vscode_rpc`.
 
@@ -1190,10 +1232,10 @@ Themes (global SSOT):
 - Built-in themes use simple ids like `te2-dark`, `te2-light`, `github-dark-default`, etc.
 - VSIX-provided themes use: `vscode:<extensionId>:<relPath>`
   - Example: `vscode:GitHub.github-vscode-theme:extension/themes/dark-default.json`
-- The Monaco iframe converts VS Code theme `tokenColors` into Monaco theme rules and applies it after loading via `vscode_api` (`vscode.themes.load`).
+- The Monaco editor runtime converts VS Code theme `tokenColors` into Monaco theme rules and applies it after loading via `vscode_api` (`vscode.themes.load`).
 
 TextMate apply (grammars from VSIX):
-- Monaco iframe uses `vscode-oniguruma` + `vscode-textmate` (UMD globals) to tokenize lines using TextMate grammars.
+- Monaco editor runtime uses `vscode-oniguruma` + `vscode-textmate` (UMD globals) to tokenize lines using TextMate grammars.
 - Grammar resolution prefers `vscode_api` (`vscode.textmate.grammars.list` + `vscode.textmate.grammars.load`) and falls back to legacy static assets under `monaco_editor/textmate/` when present.
 - Boot-time prefetch:
   - `vscode.bootstrap.snapshot` (cached on `window.__te2VscodeBootstrap`)
@@ -1206,7 +1248,7 @@ TextMate apply (grammars from VSIX):
 
 VSIX language configuration (per-project):
 - `vscode.languages.list` returns `contributes.languages` (only for enabled extensions) plus `configuration_raw` (jsonc).
-- Monaco iframe calls `monaco.languages.setLanguageConfiguration(languageId, cfg)` so bracket auto-closing, comments, etc. follow VSIX language configs.
+- Monaco editor runtime calls `monaco.languages.setLanguageConfiguration(languageId, cfg)` so bracket auto-closing, comments, etc. follow VSIX language configs.
 
 Next step:
 - Replace the placeholder server implementation with a real extension-host-backed JSON-RPC surface and keep *all* future VSIX-related integration behind this API.
@@ -1219,28 +1261,28 @@ Language providers (working):
   - On client connect (`on_connect`): sends cached diagnostics + nudges adapter for fresh ones
   - On file switch (`on_editor_open_request`): sends cached diagnostics for the new file + nudges adapter
   - Nudge mechanism: POST `vscode.openFile` to adapter `/cmd` to force extension host re-emit
-  - Monaco iframe handler converts bridge payload to `_applyDiagnosticsUpdate()` format
+  - Monaco editor runtime handler converts bridge payload to `_applyDiagnosticsUpdate()` format
 - **All built-in language extensions** are loaded (filtered to language-only subset, ~30 of 95 scanned).
 - Diagnostics work for Python, TypeScript, JavaScript, CSS, HTML, JSON, and all other languages with built-in VS Code support.
 - RPC features (hover, symbols, openFile, didChange) flow through editor Socket.IO → `editor_ws.py` → adapter stdio pipe
 
 Socket.IO relay handlers (`editor_ws.py`):
-- `on_editor_issues_cmd` → `editor:issues_cmd` — relays marker navigation commands (next/prev) to iframe
-- `on_editor_find_cmd` → `editor:find_cmd` — relays find/replace commands to iframe
+- `on_editor_issues_cmd` → `editor:issues_cmd` — relays marker navigation commands (next/prev) to the inline editor runtime
+- `on_editor_find_cmd` → `editor:find_cmd` — relays find/replace commands to the inline editor runtime
 
 Diagnostics debug overlay + logs (current):
 - Debug overlay text (lower-left): `ext=yes/no og=yes/no diag=rx/ap/np/nm/mm` plus optional `touch=reinit:*`.
   - `ext`: `monaco-touch-selection` helper detected.
   - `og`: `.overflow-guard` element present in current editor DOM.
   - `diag=rx/ap/np/nm/mm` counters:
-    - `rx`: diagnostics events received by Monaco iframe.
+    - `rx`: diagnostics events received by Monaco editor runtime.
     - `ap`: `setModelMarkers` calls performed (includes cache reapply and empty arrays).
     - `np`: dropped because path could not be derived from URI.
     - `nm`: dropped because no model available.
     - `mm`: dropped because item path != active model path.
-  - Counters are cumulative for the iframe lifetime (not per file).
+  - Counters are cumulative for the editor-runtime lifetime (not per file).
   - `touch=reinit:*` appears when touch-selection UI re-installs after editor DOM rebuild.
-- Frontend console logs (Monaco iframe):
+- Frontend console logs (Monaco editor runtime):
   - `[editor:diagnostics] rx diagnostics/update path=... markers=N currentPath=...`
   - `[vscode_api] setModelMarkers count=... sevs=[...] lines=[...]`
   - `[vscode_api] verify getModelMarkers count=...`
@@ -1362,7 +1404,7 @@ TE2 should apply the same principle anywhere we persist client-side state:
 - **Main framework**: proxy-only (services provide WS shims, no SSOT writes).
 - **App worker**: SSOT owner (preferences/history/project sidecar).
 - **vscode_api shell**: heavy work (VSIX, TextMate, LSP / language features, indexing).
-- **Browser iframe**: thin renderer (Monaco UI + provider shims that call backend).
+- **browser editor runtime**: thin renderer (Monaco UI + provider shims that call backend).
 
 ### Immediate follow-ups (ties to your priorities)
 1) **TextMate/grammars/tokens/styling**
@@ -1375,7 +1417,9 @@ TE2 should apply the same principle anywhere we persist client-side state:
 
 ---
 
-## 17) Workbench protocol proxy plan (code-server “black box”)
+## 17) Historical: workbench adapter bring-up and protocol notes
+
+Most of this section is bring-up history. The authoritative current transport split is described earlier in this document; use the notes here for protocol/implementation background, not for deciding today's hot path.
 
 Goal: **avoid rebuilding** VS Code / code-server workbench JS while still extracting language “gold” (diagnostics, hover, completion, symbols) into TE2.
 
@@ -1635,19 +1679,29 @@ See:
 - `CTAG-ANNOTATIONS.md` (tagging prettified functions for later lookup)
 
 ### TE2 integration surface (current)
-Diagnostics use a **server-side bridge** over the existing editor Socket.IO channel:
-- `editor:diagnostics` event: `{ type: "diagnostics/update", path, owner, markers[], ts_ms }`
-- Server-side cache in `diagnostics_bridge.py` (per-path, max 100 entries)
-- Nudge-on-connect: `adapter_rpc("vscode.openFile", ...)` over stdio pipe to force fresh diagnostics
+Editor language intelligence now uses the direct editor-facing WBA socket:
+- inline editor runtime connects to `/wba_ws/socket.io` namespace `/wba`
+- `editorWorkbenchCall(...)` maps workbench methods to WBA JSON-RPC methods
+- WBA replies and notifications return directly to the inline editor runtime without the old Python workbench relay in the hot path
 
-RPC features use **editor Socket.IO → stdio pipe** (no separate WS):
-- `editor_workbench_open_file` → `adapter_rpc("vscode.openFile", { path, languageId, generation })` → `{ ok }`
-- `editor_workbench_hover` → `adapter_rpc("vscode.hover", { path, lineNumber, column, languageId })` → `{ hover }`
-- `editor_workbench_symbols` → `adapter_rpc("vscode.documentSymbols", { path, languageId, generation })` → `{ symbols[] }`
-- `editor_workbench_did_change` → `adapter_rpc("vscode.didChange", { path, text, languageId, generation })` → fire-and-forget (diagnostics arrive via bridge)
+Current hot-path examples:
+- `open_file` → `/wba` RPC `vscode.openFile`
+- `hover` → `/wba` RPC `vscode.hover`
+- `symbols` → `/wba` RPC `vscode.documentSymbols`
+- `did_change` → `/wba` RPC `vscode.didChange`
+- provider registration / editor diagnostics notifications → `/wba` JSON-RPC notifications (`te2.event` fanout)
 
-Live diagnostics data flow:
-- User types in Monaco → 120ms debounce → `editor_workbench_did_change` → `editor_ws.py` → adapter stdin → `$acceptModelChanged` (rpcId 85, full text replace via `isFlush: true`) → extension host re-analyzes → `$changeMany` → diagnostics bridge → browser
+Current backend/control-plane residue:
+- Explorer/backend project-switch and watcher-resubscribe flows still call `adapter_rpc(...)` over stdio
+- editor-backend model-ready resync still calls `adapter_rpc("te2.resync")`
+
+Current diagnostics split:
+- raw editor diagnostics are WBA/editor-owned and flow to the inline editor runtime through `/wba`
+- normalized explorer/problems diagnostics remain backend-owned
+- `diagnostics_bridge.py` is no longer the primary editor diagnostics hot path
+
+Live editor diagnostics data flow:
+- User types in Monaco → direct `/wba` `vscode.didChange` → WBA → `$acceptModelChanged` → extension host re-analyzes → WBA notification fanout → browser editor diagnostics store
 - The adapter tracks per-document `versionId` (monotonically increasing, reset to 1 on `openFile`), previous line count, char count, and **last line length** for correct range replacement
 - **endColumn tracking**: `_docLastLineLength` map stores the character length of each document's last line. Initialized on `openFile()` from `lines[lines.length - 1].length`, updated on every `didChange()` after splitting the new text. Used as `endColumn: prevLastLineLen + 1` in the change range. Fallback is `10000` for documents opened before tracking was added (safe for clangd, clamped by the mirror model).
 - File watchers (Section 19) handle post-save diagnostics automatically — code-server's parcel watcher detects disk changes and feeds `$onFileEvent` to the extension host; TE2 subscribes to the same IPC channel for explorer updates
@@ -1655,13 +1709,12 @@ Live diagnostics data flow:
 Document-symbol ordering hardening (validated):
 - Monaco now gates workbench flow by `(path, generation)` and requires `open_file` ack before queued `didChange` and symbols flush.
 - `editor:ssot`, `editor:open`, baton replay, and `openPathFromBackend` all use the same ordered open flow.
-- `editor_ws.py` serializes `open_file`/`didChange`/symbols per path and tracks open baselines.
 - Adapter invariants return `document_not_open` / `stale_generation` for out-of-order requests.
-- Adapter stdio writes are serialized in `workbench_adapter_shell_manager.py` to avoid request interleaving.
+- Backend stdio writes are still serialized in `workbench_adapter_shell_manager.py` for the remaining control-plane calls.
 
-The old `vscode_api_ws` WS path is **bypassed** for all language feature RPC. It remains only for VSIX/grammar/theme management.
+The old `vscode_api_ws` / `vscode_rpc_ws` paths are not the active editor intelligence transport. Treat them as legacy or secondary surfaces unless a specific feature still depends on them.
 
-The UI (Monaco iframe) remains a thin renderer:
+The UI (Monaco editor runtime) remains a thin renderer:
 - It subscribes to TE2 events, updates Monaco markers/hover providers, and never runs an extension host itself.
 - Hover and symbol providers are registered immediately for the current file's language (no async dependency on VSIX language list).
 ---
@@ -1669,7 +1722,7 @@ The UI (Monaco iframe) remains a thin renderer:
 ## 18) Planned: Breadcrumb navigation widget (extracted from VS Code)
 
 ### Goal
-Add a VS Code-style breadcrumb bar above the Monaco iframe showing:
+Add a VS Code-style breadcrumb bar above the Monaco editor runtime showing:
 - File path segments (project root → current file)
 - Document symbols (outline: classes → methods → current scope based on cursor position)
 
@@ -1721,7 +1774,7 @@ It renders with plain DOM manipulation (no React, no VS Code UI framework). The 
 - **Cursor → symbol mapping**: when cursor position changes, walk the symbol tree to find the deepest symbol whose range contains the cursor. This is ~20 lines of JS.
 
 **Step 4: Mount in the editor UI**
-- Place between `fe-toolbar` and the Monaco iframe
+- Place between `fe-toolbar` and the Monaco editor runtime
 - Update on: file open (`editor:open`), cursor move (Monaco `onDidChangeCursorPosition`), symbol response
 - Click handler: path segments emit `editor_open_request` (for folder nav) or scroll to symbol range
 
@@ -1799,7 +1852,7 @@ Total transitive: ~54 unique .ts files from vs/base/ (all MIT licensed)
 - Implement `SymbolItem extends BreadcrumbsItem`:
   - `render()`: codicon + symbol name (class/function/variable)
   - Click → scroll Monaco to symbol range
-- Mount widget in a container div between `fe-toolbar` and the iframe
+- Mount widget in a container div between `fe-toolbar` and the inline editor container
 
 **Step 3: Wire data sources**
 - **File path**: listen to `editor:open` → split `currentPath` relative to `project_root` → update crumbs
@@ -1916,7 +1969,7 @@ When a watcher event (IPC or watchexec) reports a change to the **currently acti
 - `editor_ws.py`: `handle_external_file_change()`, `_LAST_SAVE_SHA` save-suppress dict
 - `diagnostics_bridge.py`: IPC watcher path hook (calls `handle_external_file_change` for changed/created), ENOSPC suppression
 - `watchexec_shell_manager.py`: watchexec path hook (schedules `handle_external_file_change` via `loop.create_task`)
-- `m_editor_app.js`: `model.applyEdits()` for external changes, scroll save/restore in `ensureDiffEditorWithPrefs`/`ensurePlainEditorWithPrefs`/`applyGitBaselines`
+- `m_editor_app.ts`: `model.applyEdits()` for external changes, scroll save/restore in `ensureDiffEditorWithPrefs`/`ensurePlainEditorWithPrefs`/`applyGitBaselines`
 
 ### VS Code watcher settings sync (dual-watcher suppression)
 
@@ -1936,7 +1989,7 @@ This section documents the stabilization work that removed full-page thrash and 
 
 ### Root causes observed
 
-1. **Diff mode flag drift in iframe context**  
+1. **Diff mode flag drift in inline editor context**
    In `applyGitBaselines()`, `diffEditor.setModel(...)` was skipped when model refs matched, even if `te2AutosaveMode` / `te2FreezeProjection` / `modifiedBaseline` flags were stale.
 
 2. **Mirror echo/jitter under autosave**  
@@ -1945,7 +1998,7 @@ This section documents the stabilization work that removed full-page thrash and 
 3. **Git baseline recompute racing typing**  
    In autosave + inline diff mode, baseline updates could apply while the user was still entering text.
 
-### Runtime fixes (iframe-only)
+### Runtime fixes (inline-editor-only)
 
 #### A) Diff flag parity enforcement
 
@@ -2003,7 +2056,7 @@ Verification checks:
 
 ### Key files
 
-- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
+- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts`
   - flag parity check in `applyGitBaselines()`
   - mirror debounce/guards and mirror debug counters
   - debounced/idle git baseline scheduling
@@ -2018,14 +2071,14 @@ Verification checks:
 
 ### Problem
 
-The editor runs in an iframe with its own document context. UI actions in the iframe (Ctrl+S, editor focus) need to trigger behavior on the main page (save file, close menus). Direct function calls are impossible across iframe boundaries, and `postMessage` lacks observability.
+The editor is mounted inline now, but TE2 still keeps host-page chrome behavior and editor-runtime behavior on separate transport seams. UI actions from the inline editor runtime (Ctrl+S, editor focus) still need to trigger host-owned behavior (save file, close menus), and the repo keeps that relay on `/ui_ipc` for observability and clear ownership.
 
 ### Architecture
 
 A dedicated Socket.IO namespace (`/ui_ipc`) acts as a thin relay. Python logs all traffic for observability but contains no business logic — it just rebroadcasts events to all other clients in the room (skip sender).
 
 ```
-Editor iframe (m_editor_app.js)           Main page (main.js)
+Inline editor runtime (m_editor_app.ts)           Main page (main.js)
   │                                          │
   ├─ Ctrl+S keybinding ──┐                   │
   ├─ editor focus ────────┤                   │
@@ -2049,7 +2102,7 @@ Editor iframe (m_editor_app.js)           Main page (main.js)
 
 | `type`   | Source         | Effect on main page                     |
 |----------|----------------|-----------------------------------------|
-| `save`   | Ctrl+S in iframe | Dispatches synthetic `Ctrl+S` keydown → existing `saveFile()` handler |
+| `save`   | Ctrl+S in inline editor runtime | Dispatches synthetic `Ctrl+S` keydown → existing `saveFile()` handler |
 | `focus`  | Editor widget focus | Dispatches synthetic click on `document.body` → existing `closeAllMenus()` handler |
 
 ### Why synthetic DOM events?
@@ -2065,7 +2118,7 @@ The `ui_event` handler runs in the `connectUIIPC()` closure, which is defined ea
 - `app/apps/file_editor_cm6/manifest.json` — `ui_ipc_transport` in services modules list
 - `app/apps/file_editor_cm6/main.py` — `UI_IPC_ASGI_APP` mounted in SUBAPPS
 - `app/apps/file_editor_cm6/main.js` — `connectUIIPC()`, `ui_event` listener with synthetic event dispatch
-- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js` — `connectUIIPC()`, `bindUIIPCEditorHooks()`, `_bindEditorSaveKey()`, `_bindEditorFocusRelay()`
+- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts` — `connectUIIPC()`, `bindUIIPCEditorHooks()`, `_bindEditorSaveKey()`, `_bindEditorFocusRelay()`
 
 ### Extending
 
@@ -2340,9 +2393,8 @@ Encoded mode resolves the full scope stack against the theme internally and retu
 ext host ($provideDocumentRangeSemanticTokens)
   → workbench_client.mjs (decode Uint32Array, attach legend)
   → server.mjs (vscode.semanticTokensRange route)
-  → Socket.IO (editor_workbench_semantic_tokens_range)
-  → editor_ws.py (adapter_rpc bridge)
-  → m_editor_app.js (DocumentRangeSemanticTokensProvider)
+  → /wba reply
+  → m_editor_app.ts / editor_workbench_runtime.ts
   → Monaco getTokenStyleMetadata() → _patchSemanticTokenColorIndices translation → rendered colors
 ```
 
@@ -2366,7 +2418,8 @@ rm -rf "$VENDOR_DIR/esm" && mkdir -p "$VENDOR_DIR/esm"
 cd out-monaco-editor-core/esm
 find . \( -name "*.js" -o -name "*.css" -o -name "*.ttf" \) \
   -exec sh -c 'mkdir -p "'"$VENDOR_DIR"'/esm/$(dirname "$1")" && cp "$1" "'"$VENDOR_DIR"'/esm/$1"' _ {} \;
-# Rebuild bootstrap bundle
+# Rebuild the editor bootstrap bundle
+# Historical note: the helper script name still says "iframe" even though the editor now mounts inline.
 cd ../.. && node ../../scripts/build_monaco_iframe_bootstrap_bundle.mjs
 ```
 
@@ -2376,8 +2429,10 @@ cd ../.. && node ../../scripts/build_monaco_iframe_bootstrap_bundle.mjs
 |---|---|
 | `workbench_client.mjs` | CancellationToken fix, Uint32Array alignment fix, legend extraction, semantic token RPC, `resync()` |
 | `server.mjs` | `vscode.semanticTokensRange` route, `te2.resync` RPC |
-| `editor_ws.py` | Socket.IO ↔ adapter bridge for semantic tokens, resync trigger in readiness check |
-| `m_editor_app.js` + `editor_*_utils.js` | Theme/runtime orchestration (`_forceSemanticHighlighting()`, `_patchSemanticTokenColorIndices()`, encoded TextMate provider `tokenizeEncoded`, `_applyThemeToTextmateRegistry()`), with semantic/theme rule builders extracted to utility modules |
+| `editor_wba_rpc_transport.ts` | direct `/wba` transport for semantic-token RPC and notifications |
+| `editor_workbench_runtime.ts` | direct semantic-token request path and readiness gating |
+| `editor_ws.py` | residual backend `te2.resync` trigger in readiness/model-ready paths |
+| `m_editor_app.ts` + `editor_*_utils.js` | Theme/runtime orchestration (`_forceSemanticHighlighting()`, `_patchSemanticTokenColorIndices()`, encoded TextMate provider `tokenizeEncoded`, `_applyThemeToTextmateRegistry()`), with semantic/theme rule builders extracted to utility modules |
 | `standaloneThemeService.ts` | Source fix: `semanticHighlighting = true` |
 | `tokenClassificationRegistry.ts` | VS Code's semantic-to-TextMate mapping (reference) |
 
@@ -2385,14 +2440,14 @@ cd ../.. && node ../../scripts/build_monaco_iframe_bootstrap_bundle.mjs
 
 Provider registrations are one-time events from ext host boot. A fresh frontend (page reload) or second client never sees them. The `te2.resync` RPC solves this:
 
-1. Python's `on_editor_readiness_check()` finds adapter already running
-2. Calls `te2.resync` → adapter replays cached provider events via `onEvent`
-3. Events flow through stdout pipe → Python → Socket.IO → frontend
-4. Frontend registers providers with legends — semantic tokens work immediately
+1. A backend control-plane caller sees the adapter is already running
+2. It calls `te2.resync` over stdio `adapter_rpc(...)`
+3. The adapter replays cached provider/diagnostics-side events through its editor-facing `/wba` socket server
+4. The connected inline editor runtime re-registers providers with legends without restarting the adapter
 
 Properties:
 - No adapter restart — ext host stays hot, baton sequence untouched
-- Multi-client safe — each client gets its own resync
+- Multi-client safe — each client can receive the replay through `/wba`
 - Idempotent — `registeredSemanticTokens` set guards against duplicates
 - First step toward Option 3 architecture (adapter as stateful backend)
 
@@ -2406,20 +2461,20 @@ Properties:
 
 ### Overview
 
-Completions flow from the frontend through the same 4-layer RPC pipeline as other language features. The user types → Monaco fires `provideCompletionItems` → frontend serializes the request → Python bridge relays it → adapter calls `$provideCompletionItems` on the ext host → results come back as a minified `ISuggestResultDto` → adapter inflates the DTO → results propagate back to Monaco.
+Completions flow from the frontend through the same WBA RPC pipeline as other editor language features. The user types → Monaco fires `provideCompletionItems` → the inline editor runtime serializes the request onto `/wba` → the adapter calls `$provideCompletionItems` on the ext host → results come back as a minified `ISuggestResultDto` → the adapter inflates the DTO → results propagate back to Monaco.
 
 ### Data flow
 
 ```
 Monaco CompletionItemProvider.provideCompletionItems()
-  → m_editor_app.js: serialize (path, language, line, col, trigger)
-  → editor_ws.py: relay via adapter_rpc("vscode.completions", ...)
+  → m_editor_app.ts / editor_workbench_runtime.ts
+  → editor_wba_rpc_transport.ts: /wba RPC "vscode.completions"
   → server.mjs: route to wb.completions()
   → workbench_client.mjs: $provideCompletionItems(handle, resource, position, context, token)
   → ext host: language server computes completions
   ← ISuggestResultDto (minified wire format)
   ← workbench_client.mjs: _inflateCompletionItems() → Monaco suggestions
-  ← server.mjs → editor_ws.py → m_editor_app.js → Monaco widget
+  ← server.mjs → /wba reply → Monaco widget
 ```
 
 ### The debounce race condition
@@ -2436,7 +2491,7 @@ The ext host computes completions against its internal document model. `didChang
 
 Two-part fix ensures the ext host always has the latest document content:
 
-**Part 1 — Frontend (`m_editor_app.js`)**:
+**Part 1 — Frontend (`m_editor_app.ts`)**:
 - `_flushMirrorDebounce()` force-fires the pending debounce timer before each completion request
 - `text: m.getValue()` is included in every completion RPC as the authoritative full document content
 
@@ -2468,8 +2523,9 @@ The ext host returns a minified DTO with single-letter field names for wire effi
 
 | File | Role |
 |---|---|
-| `m_editor_app.js` | `provideCompletionItems`, `_flushMirrorDebounce()`, sends `text` param |
-| `editor_ws.py` | `on_editor_workbench_completions()` — passes text to adapter RPC |
+| `m_editor_app.ts` | `provideCompletionItems`, `_flushMirrorDebounce()`, sends `text` param |
+| `editor_wba_rpc_transport.ts` | direct `/wba` RPC transport |
+| `editor_workbench_runtime.ts` | maps completion requests to WBA RPC |
 | `server.mjs` | `vscode.completions` route — passes text to `wb.completions()` |
 | `workbench_client.mjs` | `completions()` — pre-flight didChange, `$provideCompletionItems`, `_inflateCompletionItems()` |
 
@@ -2488,7 +2544,7 @@ The ext host returns a minified DTO with single-letter field names for wire effi
 
 ## 25) Console Observability System (vConsole + Socket.IO)
 
-A browser-side console log viewer built on [Tencent vConsole](https://github.com/Tencent/vConsole), integrated into the terminal drawer as a second tab.  Multiple frontends (main page, editor iframe, future apps) ship serialized `console.*` output through the existing `ui_ipc` Socket.IO namespace to a single vConsole drawer UI.
+A browser-side console log viewer built on [Tencent vConsole](https://github.com/Tencent/vConsole), integrated into the terminal drawer as a second tab.  Multiple frontends (main page, inline editor runtime, future apps) ship serialized `console.*` output through the existing `ui_ipc` Socket.IO namespace to a single vConsole drawer UI.
 
 ### Architecture overview
 
@@ -2497,8 +2553,8 @@ A browser-side console log viewer built on [Tencent vConsole](https://github.com
 │  main page  │───────────────▸│              │───────────────▸│  Console tab   │
 │  (bridge)   │                │  Python      │                │  (vConsole UI) │
 ├─────────────┤  console:log   │  relay       │  replay on     │  in drawer     │
-│  editor     │───────────────▸│  + disk      │  connect       │                │
-│  iframe     │                │  append      │───────────────▸│  origin filter │
+│  inline     │───────────────▸│  + disk      │  connect       │                │
+│  editor     │                │  append      │───────────────▸│  origin filter │
 │  (bridge)   │                └──────────────┘                └────────────────┘
 └─────────────┘                  ▼
                           ~/.cache/cm6_editor/
@@ -2520,7 +2576,7 @@ A browser-side console log viewer built on [Tencent vConsole](https://github.com
 | `ui_ipc/ui_ipc_ws.py` | Delegates `console:*` events to `console_ws.py`. |
 | `template.html` | Drawer tab bar (Terminal \| Console), console header (origin dropdown + clear), `#console-container`, vConsole CSS overrides. |
 | `main.js` | Imports bridge + console modules, wires tab switching, View menu toggle. |
-| `monaco_editor/m_editor_app.js` | Inline bridge for the editor iframe — reuses `uiIpcSocket`, registers as `editor_iframe` worker. |
+| `monaco_editor/m_editor_app.ts` | Inline bridge for the inline editor runtime — reuses `uiIpcSocket`, registers as `editor_iframe` worker. |
 
 ### Event protocol (all on `/ui_ipc` namespace)
 
@@ -2669,7 +2725,7 @@ if (fg < this._colorIndexTranslation.length) {
 
 ### Wiring
 
-`_patchSemanticTokenColorIndices()` in `m_editor_app.js` builds the translation table by matching colors from tokenTheme's small palette to their indices in the TextMate color map, then sets it directly on the tokenTheme object:
+`_patchSemanticTokenColorIndices()` in `m_editor_app.ts` builds the translation table by matching colors from tokenTheme's small palette to their indices in the TextMate color map, then sets it directly on the tokenTheme object:
 
 ```js
 theme.tokenTheme._colorIndexTranslation = indexTranslation;
@@ -2686,7 +2742,7 @@ The cache must be cleared because previously cached metadata has stale foregroun
 |------|------|
 | `tokenization.ts` (patched source) | `_colorIndexTranslation` field + translation logic in `match()` |
 | `standaloneThemeService.ts` (patched source) | `setColorMapOverride()` builds translation + forwards |
-| `m_editor_app.js` `_patchSemanticTokenColorIndices()` | App-layer: sets field directly on tokenTheme |
+| `m_editor_app.ts` `_patchSemanticTokenColorIndices()` | App-layer: sets field directly on tokenTheme |
 | `monaco.bootstrap.bundle.js` | Built bundle containing the fix (~line 164490) |
 
 ## 27) Dynamic Theme System
@@ -2729,7 +2785,7 @@ Each entry yields `{id, label, uiTheme, path}`. These appear in the `available_t
 
 ### Frontend registry
 
-`m_editor_app.js`:
+`m_editor_app.ts`:
 - `_ensureThemeRegistry()` — fetches `available_themes` once, builds a `Map<id, entry>`
 - `_getVscodeThemeJsonUrl(themeId)` — looks up serve URL from registry; fallback to vendored path map
 - `loadVscodeTextmateThemes()` — loads ALL themes from registry into `_jsonCache`, calls `defineTheme()` for each
@@ -2751,8 +2807,8 @@ Sections: **Bundled** (vendored), **From Extensions** (installed).
 
 | File | Role |
 |------|------|
-| `m_editor_app.js` + `editor_theme_*_utils.js` | Theme registry, loading, conversion, and application |
-| `m_editor_app.py` | `GET /available_themes` endpoint, vendored theme serving |
+| `m_editor_app.ts` + `editor_theme_*_utils.js` | Theme registry, loading, conversion, and application |
+| `editor_backend.py` | `GET /available_themes` endpoint, vendored theme serving |
 | `extension_registry.py` | `contributes.themes[]` parsing |
 | `main.js` | Theme submodal open/close/refresh logic |
 | `template.html` | `#editor-themes-modal` markup |
@@ -2930,7 +2986,7 @@ When extensions are installed, uninstalled, toggled, or reconfigured, the workbe
 
 ### Solution: auto-restart pipeline
 
-Extension operations trigger automatic shell termination and iframe reload:
+Extension operations trigger automatic shell termination and inline editor remount:
 
 | Operation | Shells killed | Handler |
 |-----------|--------------|---------|
@@ -2943,12 +2999,12 @@ Extension operations trigger automatic shell termination and iframe reload:
 1. **Backend**: extension handler (e.g. `handle_ext_configure`) calls `_restart_adapter_only()`
 2. **Backend**: `terminate_adapter_shell()` kills the Node process, clears pipe/reader/RPC state, cancels pending futures
 3. **Backend**: emits `ext:adapter_restarting` to frontend via explorer WS
-4. **Frontend**: save handler calls `_reloadEditorIframe()` which:
+4. **Frontend**: save handler calls `_reloadEditorIframe()` (legacy name) which now remounts the inline editor runtime:
    - Resets `window.__adapterConnected = false`
    - Sets spinner to busy state
-   - Reloads the iframe after 1.5 s delay (let shell terminate)
-   - Re-invokes `ensureWorkbenchAdapterReady()` after 2 s (let iframe connect)
-5. **Iframe**: loads → emits `editor_readiness_check` → backend launches new adapter → baton completes → spinner goes green
+   - Reboots the inline editor host after 1.5 s delay (let shell terminate)
+   - Re-invokes `ensureWorkbenchAdapterReady()` after 2 s (let the editor runtime reconnect)
+5. **Inline editor runtime**: boots → emits `editor_readiness_check` → backend launches new adapter → baton completes → spinner goes green
 
 The `ext:adapter_restarting` event handler in `connectExplorerSocket()` is a safety-net backup. The primary reload is triggered directly by the save/install handlers. The event handler uses `typeof` guards because those functions are defined later in main.js (not hoisted).
 
@@ -3084,7 +3140,7 @@ Tools appear in the context menu in the order listed below.
 
 ### Initialization
 
-The extension is loaded in `m_editor_app.js` as a UMD global:
+The extension is loaded in `m_editor_app.ts` as a UMD global:
 
 ```js
 // Called after editor DOM is ready (and on re-init after language switches)
@@ -3103,7 +3159,7 @@ need to add custom tools, but TE2 does not use it.
 | `worktrees/monaco-touch-selection/dist/index.umd.cjs` | Build output (UMD) |
 | `app/.../vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js` | Deployed vendored UMD (copy of build output) |
 | `app/.../vendor/monaco-touch-selection/monaco-touch-selection.css` | Manually patched CSS (do NOT overwrite) |
-| `app/.../monaco_editor/m_editor_app.js` | Initialization call (`editorTouchSelectionHelp(editor)`) |
+| `app/.../monaco_editor/m_editor_app.ts` | Initialization call (`editorTouchSelectionHelp(editor)`) |
 
 ## 33) Diagnostics Owner-Keyed Markers (Multi-Source Fix)
 
@@ -3130,7 +3186,7 @@ Each diagnostic source now uses its **original owner string** (`eslint0`,
 `typescript`, etc.) as the Monaco marker owner. Markers from different owners
 coexist independently.
 
-#### Frontend (`m_editor_app.js`)
+#### Frontend (`m_editor_app.ts`)
 
 | Component | Before | After |
 |-----------|--------|-------|
@@ -3156,7 +3212,7 @@ Extension Host ($changeMany owner=eslint0, markers=332)
   → workbench_client.mjs (preserves owner in event)
   → server.mjs emitTe2Event({ type: "diagnostics/update", owner: "eslint0", items: [...] })
   → diagnostics_bridge.py caches at key ("path", "eslint0"), forwards entry
-  → m_editor_app.js _applyDiagnosticsUpdate({ owner: "eslint0", items: [...] })
+  → m_editor_app.ts _applyDiagnosticsUpdate({ owner: "eslint0", items: [...] })
   → monaco.editor.setModelMarkers(model, "eslint0", [332 markers])
 
 Extension Host ($changeMany owner=typescript, markers=16)
@@ -3179,7 +3235,7 @@ When the user switches files (`openPathFromBackend`):
 
 | File | Role |
 |------|------|
-| `m_editor_app.js` | `_applyDiagnosticsUpdate()`, `_emitAggregatedDiagCounts()`, `_clearDiagnosticsForSwitch()`, `_applyCachedDiagnosticsForActive()` |
+| `m_editor_app.ts` | `_applyDiagnosticsUpdate()`, `_emitAggregatedDiagCounts()`, `_clearDiagnosticsForSwitch()`, `_applyCachedDiagnosticsForActive()` |
 | `diagnostics_bridge.py` | `_process_diagnostics_update()`, `set_consumer_ready()`, `send_cached_diagnostics_to_sid()`, `_pending_entries` buffer |
 | `server.mjs` | `diagnosticsFromChangeMany()` — extracts owner from `$changeMany` args, passes through in `diagnostics/update` event |
 
@@ -3255,7 +3311,7 @@ Helper functions added:
 
 After removing Monaco's rich language workers, `json` was no longer a known language ID. `createModel(content, 'json', uri)` silently fell back to `plaintext`.
 
-Fix: Added guard in `ensureTextmateTokenization()` (~line 396 of `m_editor_app.js`) that calls `monaco.languages.register({ id: lang })` if the language isn't already known. TextMate can then attach its tokenizer.
+Fix: Added guard in `ensureTextmateTokenization()` (~line 396 of `m_editor_app.ts`) that calls `monaco.languages.register({ id: lang })` if the language isn't already known. TextMate can then attach its tokenizer.
 
 ### Reply type reference
 
@@ -3272,7 +3328,7 @@ Fix: Added guard in `ensureTextmateTokenization()` (~line 396 of `m_editor_app.j
 ### Cold boot sequence (hover perspective)
 
 ```
-t+0ms    editor iframe connected
+t+0ms    inline editor runtime connected
 t+5ms    [editor:ssot] rx → currentPath = pyrightconfig.json
 t+5ms    [workbench-flow] generation=1
 t+50ms   open_file DEFERRED — waiting for baton
@@ -3298,7 +3354,7 @@ t+20s    user hovers → provideHover fires → editorWorkbenchCall('hover')
 | File | Role |
 |------|------|
 | `workbench_client.mjs` | `hover()`, `completions()`, `symbols()`, `semanticTokens()`, `semanticTokensRange()`, `getSemanticTokensLegend()` — all multi-provider via `_findAllProviderHandles()`. Single-provider helpers: `_hoverSingle()`, `_completionsSingle()`, `_symbolsSingle()`, `_semanticTokensSingle()`. Shared: `_parseSemanticTokensReply()`, `encodeExtReplyError()`, `encodeExtReplyOkVSBuffer()`, `$readFile`/`$stat` handlers, `_sanitizeExtensionForInit()` contributes default |
-| `m_editor_app.js` | `installVscodeApiLanguageBridgeProviders()` (bridge registration), `applyLanguageToModel()` (re-runs bridge after async language set), `ensureTextmateTokenization()` (language registration guard), `provideHover` callback (URI guard + API call) |
+| `m_editor_app.ts` | `installVscodeApiLanguageBridgeProviders()` (bridge registration), `applyLanguageToModel()` (re-runs bridge after async language set), `ensureTextmateTokenization()` (language registration guard), `provideHover` callback (URI guard + API call) |
 | `server.mjs` | HTTP/WS route: `editor_workbench_hover` → `client.hover()` |
 | `editor_ws.py` | `on_editor_workbench_hover` → `adapter_rpc("vscode.hover", ...)` |
 
@@ -3359,7 +3415,7 @@ The GeckoView app fetches all static editor assets over HTTP from the Python ser
 - Monaco bootstrap bundle (JS+CSS) — 8.6MB
 - Monaco chunks, basic-languages, language contributions — 1.2MB
 - Monaco ESM modules — 16MB
-- TE2 editor libs (m_editor_app.js, editor_*_utils.js, textmate UMDs)
+- TE2 editor libs (m_editor_app.ts, editor_*_utils.js, textmate UMDs)
 - file_editor_cm6/static/ (dist, icons, js, vendor)
 - app/static/ non-vendor (fonts, js, icon.png)
 - Vendor: codicons, seti-icons, socket.io, es-module-shims, xterm, ws

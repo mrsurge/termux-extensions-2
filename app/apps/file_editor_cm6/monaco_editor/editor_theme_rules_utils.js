@@ -1,4 +1,4 @@
-import { toMonacoColorHex } from './editor_parse_utils.js';
+import { toMonacoColorHex } from './editor_parse_utils.ts';
 
 export function vscodeTokenColorsToMonacoRules(tokenColors) {
   var rules = [];

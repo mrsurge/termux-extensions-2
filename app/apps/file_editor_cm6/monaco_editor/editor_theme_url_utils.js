@@ -1,4 +1,4 @@
-import { buildUiUrl } from './editor_common_utils.js';
+import { buildUiUrl } from './editor_common_utils.ts';
 
 export function getVscodeThemeJsonUrl(themeId, themeRegistry, apiBase) {
   var id = String(themeId || '');

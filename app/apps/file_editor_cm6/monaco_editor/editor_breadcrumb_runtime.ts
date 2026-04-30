@@ -1,24 +1,24 @@
-import { initBreadcrumbElement } from './editor_breadcrumb_init_utils.js';
-import { loadBreadcrumbIcons } from './editor_breadcrumb_icons_loader_utils.js';
-import { shouldUpdateBreadcrumbPath } from './editor_breadcrumb_update_path_utils.js';
-import { resolveBreadcrumbSymbolsLangId } from './editor_breadcrumb_symbols_lang_utils.js';
-import { getBreadcrumbSymbolsTimeoutMs } from './editor_breadcrumb_symbols_timeout_utils.js';
-import { unwrapBreadcrumbSymbols } from './editor_breadcrumb_symbols_unwrap_utils.js';
-import { symbolRangeToLineBounds } from './editor_breadcrumb_symbol_range_utils.js';
-import { breadcrumbSymbolIcon } from './editor_breadcrumb_symbol_icon_utils.js';
-import { findBreadcrumbSymbolChain } from './editor_breadcrumb_find_symbol_chain_utils.js';
-import { splitBreadcrumbPathParts } from './editor_breadcrumb_split_parts_utils.js';
-import { appendBreadcrumbSeparator } from './editor_breadcrumb_append_sep_utils.js';
-import { isBreadcrumbFileSegment } from './editor_breadcrumb_is_file_segment_utils.js';
-import { createBreadcrumbPathItem } from './editor_breadcrumb_create_path_item_utils.js';
-import { getBreadcrumbIconTheme } from './editor_breadcrumb_icon_theme_utils.js';
-import { applyBreadcrumbFileIcon } from './editor_breadcrumb_apply_icon_utils.js';
-import { shouldRenderBreadcrumbSymbolChain } from './editor_breadcrumb_should_render_symbols_utils.js';
-import { getBreadcrumbSymbolPosition } from './editor_breadcrumb_symbol_position_utils.js';
-import { createBreadcrumbSymbolItem } from './editor_breadcrumb_create_symbol_item_utils.js';
-import { finalizeBreadcrumbScroll } from './editor_breadcrumb_finalize_scroll_utils.js';
-import { getBreadcrumbPathClickTarget } from './editor_breadcrumb_path_click_utils.js';
-import { getBreadcrumbSymbolClickPosition } from './editor_breadcrumb_symbol_click_utils.js';
+import { initBreadcrumbElement } from './editor_breadcrumb_init_utils.ts';
+import { loadBreadcrumbIcons } from './editor_breadcrumb_icons_loader_utils.ts';
+import { shouldUpdateBreadcrumbPath } from './editor_breadcrumb_update_path_utils.ts';
+import { resolveBreadcrumbSymbolsLangId } from './editor_breadcrumb_symbols_lang_utils.ts';
+import { getBreadcrumbSymbolsTimeoutMs } from './editor_breadcrumb_symbols_timeout_utils.ts';
+import { unwrapBreadcrumbSymbols } from './editor_breadcrumb_symbols_unwrap_utils.ts';
+import { symbolRangeToLineBounds } from './editor_breadcrumb_symbol_range_utils.ts';
+import { breadcrumbSymbolIcon } from './editor_breadcrumb_symbol_icon_utils.ts';
+import { findBreadcrumbSymbolChain } from './editor_breadcrumb_find_symbol_chain_utils.ts';
+import { splitBreadcrumbPathParts } from './editor_breadcrumb_split_parts_utils.ts';
+import { appendBreadcrumbSeparator } from './editor_breadcrumb_append_sep_utils.ts';
+import { isBreadcrumbFileSegment } from './editor_breadcrumb_is_file_segment_utils.ts';
+import { createBreadcrumbPathItem } from './editor_breadcrumb_create_path_item_utils.ts';
+import { getBreadcrumbIconTheme } from './editor_breadcrumb_icon_theme_utils.ts';
+import { applyBreadcrumbFileIcon } from './editor_breadcrumb_apply_icon_utils.ts';
+import { shouldRenderBreadcrumbSymbolChain } from './editor_breadcrumb_should_render_symbols_utils.ts';
+import { getBreadcrumbSymbolPosition } from './editor_breadcrumb_symbol_position_utils.ts';
+import { createBreadcrumbSymbolItem } from './editor_breadcrumb_create_symbol_item_utils.ts';
+import { finalizeBreadcrumbScroll } from './editor_breadcrumb_finalize_scroll_utils.ts';
+import { getBreadcrumbPathClickTarget } from './editor_breadcrumb_path_click_utils.ts';
+import { getBreadcrumbSymbolClickPosition } from './editor_breadcrumb_symbol_click_utils.ts';
 
 interface EditorSocketLike {
   connected?: boolean;
@@ -48,8 +48,11 @@ interface BreadcrumbSymbolRangeLike {
 
 interface BreadcrumbSymbolLike {
   kind?: unknown;
+  name?: unknown;
   selectionRange?: BreadcrumbSymbolRangeLike | null;
   range?: BreadcrumbSymbolRangeLike | null;
+  children?: BreadcrumbSymbolLike[] | null;
+  location?: { range?: BreadcrumbSymbolRangeLike | null } | null;
   [key: string]: unknown;
 }
 
@@ -116,7 +119,9 @@ export function createEditorBreadcrumbRuntime(
   let symbols: BreadcrumbSymbolLike[] = [];
   let lastPath: string | null = null;
   let symbolsSeq = 0;
-  let getIcon: ((...args: unknown[]) => unknown) | null = null;
+  let getIcon:
+    | ((name: string, theme: Record<string, string>) => Promise<unknown> | unknown)
+    | null = null;
 
   function renderSymbolIcon(kind: unknown): string {
     return breadcrumbSymbolIcon(kind, SYMBOL_ICON_MAP);
@@ -201,7 +206,7 @@ export function createEditorBreadcrumbRuntime(
     loadBreadcrumbIcons(
       (path: string) => import(path),
       (nextGetIcon: (...args: unknown[]) => unknown) => {
-        getIcon = (...args: unknown[]) => nextGetIcon(...args);
+        getIcon = (name: string, theme: Record<string, string>) => nextGetIcon(name, theme);
         if (lastPath) render();
       },
       (error: unknown) => { console.warn('[BC] seti-icons load failed:', error); },

@@ -1,6 +1,6 @@
 // /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/main.js
 // app/apps/file_editor_cm6/main.js
-// Iframe-based NiceGUI Editor Integration
+// Inline Monaco editor integration
 
 // @ts-check
 import { initExplorerUI } from './static/js/explorer.ts';
@@ -66,7 +66,7 @@ import { createSaveFlowController } from './src/host/file-ops/save-flow.ts';
 import { createOpenFlowController } from './src/host/file-ops/open-flow.ts';
 import { createRunFileController } from './src/host/file-ops/run-file.ts';
 import { createApiClient } from './src/host/api/client.ts';
-import { bootInlineEditorHost } from './monaco_editor/inline_host.js';
+import { bootInlineEditorHost } from './monaco_editor/inline_host.ts';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 

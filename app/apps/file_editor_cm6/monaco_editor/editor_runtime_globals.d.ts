@@ -21,11 +21,15 @@ interface MonacoRuntimeEditorNamespace {
 interface MonacoRuntimeGlobal {
   editor?: MonacoRuntimeEditorNamespace;
   languages?: {
+    CompletionItemKind?: unknown;
     setColorMap?(colorMap: string[]): void;
     getLanguages?(): Array<{ id?: string }>;
     register?(desc: Record<string, unknown>): void;
     setTokensProvider?(languageId: string, provider: Record<string, unknown>): void;
     typescript?: unknown;
+  };
+  Uri?: {
+    file?(path: string): unknown;
   };
   Range?: new (...args: number[]) => unknown;
   MarkerSeverity?: {

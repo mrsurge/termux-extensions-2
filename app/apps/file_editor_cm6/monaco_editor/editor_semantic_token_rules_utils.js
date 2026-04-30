@@ -1,4 +1,4 @@
-import { toMonacoColorHex } from './editor_parse_utils.js';
+import { toMonacoColorHex } from './editor_parse_utils.ts';
 
 var SEMANTIC_TO_TM_SCOPES = {
   'comment': ['comment'],
