@@ -1,5 +1,15 @@
 import type { Server as HttpServer } from "node:http";
-import { Server as SocketIoServer } from "socket.io";
+import { createRequire } from "node:module";
+import type { Server as SocketIoServerCtor } from "socket.io";
+
+type SocketIoModule = {
+  Server: typeof SocketIoServerCtor;
+};
+
+const require = createRequire(import.meta.url);
+const { Server: SocketIoServer } = require(
+  "../../../../vendor/node_socketio/node_modules/socket.io/dist/index.js",
+) as SocketIoModule;
 
 export const WBA_SOCKET_PATH = "/wba_ws/socket.io";
 export const WBA_SOCKET_NAMESPACE = "/wba";
