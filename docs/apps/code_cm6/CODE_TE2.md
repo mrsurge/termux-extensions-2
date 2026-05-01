@@ -1,12 +1,18 @@
 # CODE_TE2 (Monaco Editor) — End‑to‑End Reference
 
-This document describes the **current** Monaco editor surface used by `file_editor_cm6` inside TE2:
+This document describes the **current** Code TE2 editor surface used by `file_editor_cm6` inside TE2:
 
-- **Monaco is mounted inline in the host page** served by the **app worker** (FastAPI).
-- The editor is controlled via a **dedicated Socket.IO channel** proxied by the **main framework**.
+- **Monaco is mounted inline in the host page** served by the **app worker**.
+- The live editor path now spans **multiple logical Socket.IO namespaces** with different owners: worker-owned SSOT lanes, backend-owned relay lanes, and the direct WBA editor lane.
 - Document content, drafts, and preferences are governed by SSOT (`_history_store` / project sidecar, `_preferences_store`).
 
-This is intentionally written as a “wiring + protocol” reference: what runs where, what calls what, and what payloads exist.
+This is intentionally written as a wiring and ownership reference: what runs where, what talks over which lane, and which sections are authoritative for the current live stack.
+
+## How To Read This Doc
+
+- The sections from **Current Architecture** through **4) SSOT (HistoryStore / PreferencesStore) model** are the authoritative current-state summary for the live direct-WBA editor path.
+- The deeper sections after that remain useful operational reference, but some were written across earlier migration stages. If a lower section conflicts with the current-state summary, trust the code and `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
+- This document is the **current wiring reference**. The remaining refactor direction lives in `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
 
 ---
 
@@ -20,6 +26,7 @@ This is the live operating model today:
 - The **host page** and **Explorer** remain backend-owned surfaces; they do not need editor-grade latency.
 
 Cross references:
+- `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`
 - `docs/planning/FILE_EDITOR_CM6_DIAGNOSTICS_PROJECTION_DEBOUNCE_IDEA.md`
 - `docs/planning/FILE_EDITOR_CM6_WBA_ACK_AND_DECOMPOSITION_AUDIT.md`
 - `docs/planning/FILE_EDITOR_CM6_EDITOR_DIAGNOSTICS_SIDEBAND_AND_WBA_WS_PLAN.md`
@@ -38,10 +45,31 @@ Current facts:
 - File watching still relies on code-server's native filesystem/IPC path, with the same triple-fallback watcher policy.
 - Builtin language extensions are still loaded through the WBA bootstrap/runtime path.
 
+### Current milestone (workbench TextMate runtime on the direct-WBA path)
+Status: implemented and user-verified.
+
+Current facts:
+- TextMate tokenization now uses vendored `vscode-textmate` and `vscode-oniguruma` from `monaco_editor/editor_textmate_runtime.ts`, not the old frontend UMD bootstrap lane.
+- The active grammar factory/runtime helpers now live under `monaco_editor/vscode_workbench_textmate_vendor/` and consume WBA-provided grammar metadata from `grammars_list` / `grammars_load`.
+- `inline_host.ts` no longer loads the old TextMate/oniguruma UMD scripts into the active path.
+- `m_editor_app.ts` now replays active-model language application after WBA connect so boot-time grammar/catalog races recover on `main_page`.
+- User-verified after reload: bracket matching, TextMate scopes/colors, semantic tokens, hovers with syntax highlighting, and folding all remained operational.
+
 Known limitations / residue:
 - Some backend control paths still use the stdio WBA control plane.
 - Some source modules are still loose JS and should continue to move to TS incrementally.
 - Files without a supporting language provider still will not produce meaningful diagnostics.
+
+### Current refactor direction
+
+The active docs-first refactor track is:
+- finish strict typing outside the already-clean editor, explorer, and WBA lanes
+- make every remaining Socket.IO surface intentionally JSON-RPC compliant instead of event-name RPC
+- collapse the app-specific Socket.IO server sprawl behind one server/path while preserving the current logical namespaces
+- keep transport consolidation proxy-only; do not move SSOT or WBA ownership just to get one physical socket server
+- defer HTML live preview until this refactor track lands
+
+That target architecture and migration order live in `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
 
 ### Extension validation matrix (next milestone)
 We will validate at least 2 deterministic features (hover + symbols + diagnostics) per language:
@@ -56,7 +84,7 @@ We will validate at least 2 deterministic features (hover + symbols + diagnostic
 
 ```
 Browser host shell (file_editor_cm6/template.html + main.js)
-  ├─ Explorer drawer (Socket.IO transport; worker-side server, main-process proxy)
+  ├─ Explorer drawer (/explorer_ws/socket.io → namespace /rpc/explorer; worker-side server, main-process proxy)
   ├─ Terminal drawer (PTY plumbing; separate)
   └─ Inline editor host mount
         ├─ Host container: `#editor-frame` in `template.html`
@@ -80,7 +108,7 @@ App worker process (app/apps/file_editor_cm6/main.py)
   ├─ HTTP routes: /api/app/file_editor_cm6/*
   ├─ Monaco/VS Code asset routes under /ui/*
   ├─ Worker Socket.IO: /editor_ws/socket.io (EDITOR_ASGI_APP)
-  ├─ Worker Socket.IO: /explorer_ws/socket.io (EXPLORER_ASGI_APP)
+  ├─ Worker Socket.IO: /explorer_ws/socket.io (EXPLORER_ASGI_APP, namespace /rpc/explorer)
   ├─ Worker Socket.IO: /ui_ipc_ws/socket.io (UI_IPC_ASGI_APP)
   ├─ Backend boot/runtime priming for code-server + WBA
   └─ SSOT stores: _history_store (project sidecar), _preferences_store
@@ -217,23 +245,24 @@ Spinner / Status indicator (host UI):
   - Residual backend control hook: `te2.resync` on model-ready still goes through stdio `adapter_rpc(...)`
 
 ### Explorer Socket.IO (worker)
-- `app/apps/file_editor_cm6/explorer_socketio.py`
+- `app/apps/file_editor_cm6/explorer/transport/socketio_app.py`
   - `EXPLORER_SIO` (worker server) and `EXPLORER_ASGI_APP` (mounted at `/explorer_ws/socket.io`)
-- `app/apps/file_editor_cm6/explorer_ws.py`
-  - `ExplorerSocketIONamespace("/explorer")`: routes events to `ExplorerDispatcher` per client
-  - `ExplorerDispatcher`: file tree, git status, review panel, search, draft decorations
-  - `notify_draft_state_changed()`: debounced broadcast of `explorer:updateDecorations` + `review:setEntries`
-  - `_broadcast_draft_decorations()`: reads `DraftIndexSidecar`, broadcasts decorations and review list
-  - `broadcast_review_state()`: broadcasts review entries + draft decorations to all clients
-  - `_notify_editor_draft_cleared()`: cross-transport emit to editor SIO (`editor:cache_state`) for toolbar badge
-  - `handle_review_save` / `handle_review_discard`: save/discard drafts, notify editor + explorer
+  - Registers namespace `/rpc/explorer`
+- `app/apps/file_editor_cm6/explorer/transport/rpc_socketio.py`
+  - `ExplorerRpcSocketIONamespace("/rpc/explorer")`
+  - Parses JSON-RPC explorer requests and adapts them onto the backend dispatcher
+- `app/apps/file_editor_cm6/explorer_runtime.py`
+  - Runtime/composition shell for `ExplorerDispatcher`
+  - Owns explorer session lifecycle, transport-edge delegation, and handler assembly
+- `app/apps/file_editor_cm6/explorer/handlers/*` and `app/apps/file_editor_cm6/explorer/services/*`
+  - Own the extracted file-tree, git, project, watcher, review, prefs, and integration behavior
 
 ### Transport proxies (main process, all proxy-only)
 - `app/apps/file_editor_cm6/services/editor_transport.py`
   - Proxies `/editor_ws/socket.io` websocket frames to worker port
 - `app/apps/file_editor_cm6/services/explorer_transport.py`
-  - Proxies `/explorer_ws/socket.io` websocket frames to worker port
-  - Previously ran explorer business logic in-process (architectural violation, fixed)
+  - Framework-loaded shim only
+  - Delegates the real websocket proxy implementation to `explorer/transport/main_process_proxy.py`
 - `app/apps/file_editor_cm6/services/wba_transport.py`
   - Proxies `/wba_ws/socket.io` websocket frames to the workbench adapter shell
 - `app/apps/file_editor_cm6/services/ui_ipc_transport.py`
@@ -253,8 +282,9 @@ Spinner / Status indicator (host UI):
   - `_applyEditorCacheState()`: receives `editor:cache_state`, updates draft badge + path display
   - `_applyCacheIndicatorImpl()`: sets `#fe-file-draft-badge` color/text (orange=draft, red=crash, grey=clean)
   - Observes backend `adapter_state`; does not call WBA directly for language intelligence
-- `app/apps/file_editor_cm6/static/js/explorer.js`
-  - File tree rendering, search, review panel
+- `app/apps/file_editor_cm6/static/js/explorer.ts`
+  - Served explorer entrypoint
+  - Boots the typed explorer source tree under `src/explorer/`
   - `fetchReviewResults()`: sends `review:list` via explorer bus
   - `review:setEntries` handler: stores entries, re-renders if review overlay visible
   - `renderReviewResults()`: review toolbar, Select All, Save/Discard buttons
@@ -295,6 +325,7 @@ Current extracted modules:
 Remaining high-value decomposition targets:
 - Remaining file-ops/open-save flow partitioning
 - Final wiring reduction so `main.js` becomes mostly boot + module assembly
+- Strict TS conversion of the remaining host lane and the template-owned host contract
 
 ### SSOT and persistence
 - `app/apps/file_editor_cm6/stores.py`
@@ -338,10 +369,10 @@ Notes:
 - This host/inline-editor bundle process is separate from the Monaco pinned-VSCode asset build described later in this document.
 
 ### Current host TS migration state (important)
-- `src/host/**/*.js` has been migrated to `src/host/**/*.ts` and `main.js` imports those `.ts` modules directly at runtime.
-- Runtime serves source modules through `/apps/{app_dir}/{filename:path}` (see `app/extensions/apps/main.py`), so `.ts` files are treated as browser modules (`application/javascript`).
-- Because these `.ts` files are loaded directly by the browser (not transpiled first), they must stay **JS-runtime compatible** (JSDoc typing style, no TS-only syntax like `catch (e: any)` or `as Type` in served modules).
-- Current `tsconfig.json` is intentionally staged for incremental migration (`noImplicitAny: false`, `strictNullChecks: false`) and a subset of host modules is marked `// @ts-nocheck` until full typing is completed.
+- The live host runtime served to the browser is `static/dist/host.js`, bundled from `main.js` by `build.mjs`.
+- `main.js` remains the host bundle entrypoint/orchestration shell and imports the focused modules under `src/host/`.
+- `src/host/` is still excluded from the current app strict-TS lane in `tsconfig.json`; that is planned follow-on work, not completed work.
+- The remaining host-focused target is to shrink/convert raw `main.js` and reduce how much durable UI contract still lives only in `template.html`.
 
 ---
 
@@ -357,8 +388,8 @@ Notes:
 - Inline asset CSS/JS loaded by `inline_host.ts`:
   - `/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.css`
   - `/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js`
-  - `/apps/file_editor_cm6/monaco_editor/textmate/vscode-oniguruma.umd.js`
-  - `/apps/file_editor_cm6/monaco_editor/textmate/vscode-textmate.umd.js`
+- TextMate runtime is bundled into `static/dist/editor.js`
+- Oniguruma WASM is served from `/api/app/file_editor_cm6/ui/monaco_editor/textmate/onig.wasm`
 - Editor-facing WBA RPC/event socket: `/wba_ws/socket.io` namespace `/wba`
 
 ### Editor Socket.IO transport
@@ -455,6 +486,18 @@ Draft mutations trigger the following pipeline:
 Editor preferences are stored per active project and used to initialize the inline editor options.
 
 Preferences changes are performed via legacy `/editor/*` endpoints (NiceGUI router), but are broadcast to the Monaco editor runtime via `EDITOR_SIO` (worker Socket.IO server).
+
+---
+
+## Transitional Note About The Rest Of This File
+
+The sections below remain useful as operational reference, but they were accumulated across multiple architecture stages. Expect some lower subsections to still mention transitional or historical surfaces such as:
+
+- pre-direct-WBA editor workbench relay wording
+- older explorer naming before the `explorer/transport/` and `explorer_runtime.py` split
+- legacy `vscode_api` / `vscode_rpc` context that is no longer the current hot path
+
+If a lower section conflicts with the current-state summary above, trust the code and `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
 
 ---
 
