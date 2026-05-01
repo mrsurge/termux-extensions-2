@@ -1,6 +1,6 @@
-import { setUnsavedTrace, noteGitBaselineRequest } from './editor_trace_utils.js';
-import { setDebugPart, syncTraceDebug as syncTraceDebugState, syncMirrorDebug as syncMirrorDebugState } from './editor_debug_utils.js';
-import { buildDebugMessage } from './editor_debug_message_utils.js';
+import { setUnsavedTrace, noteGitBaselineRequest } from './editor_trace_utils.ts';
+import { setDebugPart, syncTraceDebug as syncTraceDebugState, syncMirrorDebug as syncMirrorDebugState } from './editor_debug_utils.ts';
+import { buildDebugMessage } from './editor_debug_message_utils.ts';
 
 interface EditorDebugRuntimeDeps {
   getDocument(): Document;
@@ -10,7 +10,7 @@ interface EditorDebugRuntimeDeps {
 export function createEditorDebugRuntime(deps: EditorDebugRuntimeDeps) {
   let debugElement: HTMLElement | null = null;
   const debugParts = { git: null, draft: null, diag: null, flags: null, mirror: null, trace: null, extra: null };
-  const mirrorState: Record<string, number> = {
+  const mirrorState = {
     rx: 0,
     ap: 0,
     drop_self: 0,
@@ -79,7 +79,8 @@ export function createEditorDebugRuntime(deps: EditorDebugRuntimeDeps) {
 
   function incrementMirrorState(metric: string) {
     if (!Object.prototype.hasOwnProperty.call(mirrorState, metric)) return;
-    mirrorState[metric] += 1;
+    const key = metric as keyof typeof mirrorState;
+    mirrorState[key] += 1;
   }
 
   function setMirrorActive(value: number) {

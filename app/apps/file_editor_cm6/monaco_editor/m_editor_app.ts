@@ -10,27 +10,27 @@ import {
   toMonacoHoverContents,
   isLanguageContextCurrent,
 } from './editor_bridge_utils.ts';
-import { te2DumpTextmateScopesForLine, te2GetActiveEditorAndModel, te2AdvanceRuleStackToLine } from './editor_textmate_debug_utils.js';
+import { te2DumpTextmateScopesForLine, te2GetActiveEditorAndModel, te2AdvanceRuleStackToLine } from './editor_textmate_debug_utils.ts';
 import { applyJumpToLine as applyJumpToLineAt } from './editor_jump_utils.ts';
-import { resolveMonacoThemeId } from './editor_theme_resolver_utils.js';
+import { resolveMonacoThemeId } from './editor_theme_resolver_utils.ts';
 import { emitToHostSocket } from './editor_socket_emit_utils.js';
 import { isAdapterReady } from './editor_workbench_barrier_utils.js';
-import { buildMonacoOptionsFromPrefsState } from './editor_monaco_options_utils.js';
-import { ensureTe2DiffThemeApplied } from './editor_diff_theme_utils.js';
-import { getVscodeThemeJsonUrl } from './editor_theme_url_utils.js';
-import { vscodeThemeToMonacoTheme } from './editor_theme_convert_utils.js';
-import { ensureThemeRegistryState } from './editor_theme_registry_state_utils.js';
-import { loadVscodeTextmateThemesRuntime } from './editor_theme_loader_runtime_utils.js';
-import { applyMonacoThemeRuntime } from './editor_theme_apply_runtime_utils.js';
-import { clearDraftDiffZonesState } from './editor_draft_zone_clear_utils.js';
-import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear_utils.js';
-import { resetVscodeLanguageMatchers } from './editor_vscode_language_matchers_reset_utils.js';
-import { registerVscodeLanguageId } from './editor_vscode_language_register_utils.js';
-import { mapVscodeLanguageExtensions } from './editor_vscode_language_extensions_utils.js';
-import { mapVscodeLanguageFilenames } from './editor_vscode_language_filenames_utils.js';
-import { applyVscodeLanguageConfiguration } from './editor_vscode_language_config_utils.js';
-import { installVscodeLanguagesLoop } from './editor_vscode_languages_install_loop_utils.js';
-import { finalizeVscodeLanguagesInstall } from './editor_vscode_languages_finalize_utils.js';
+import { buildMonacoOptionsFromPrefsState } from './editor_monaco_options_utils.ts';
+import { ensureTe2DiffThemeApplied } from './editor_diff_theme_utils.ts';
+import { getVscodeThemeJsonUrl } from './editor_theme_url_utils.ts';
+import { vscodeThemeToMonacoTheme } from './editor_theme_convert_utils.ts';
+import { ensureThemeRegistryState } from './editor_theme_registry_state_utils.ts';
+import { loadVscodeTextmateThemesRuntime } from './editor_theme_loader_runtime_utils.ts';
+import { applyMonacoThemeRuntime } from './editor_theme_apply_runtime_utils.ts';
+import { clearDraftDiffZonesState } from './editor_draft_zone_clear_utils.ts';
+import { clearDraftDiffDecorationsState } from './editor_draft_decorations_clear_utils.ts';
+import { resetVscodeLanguageMatchers } from './editor_vscode_language_matchers_reset_utils.ts';
+import { registerVscodeLanguageId } from './editor_vscode_language_register_utils.ts';
+import { mapVscodeLanguageExtensions } from './editor_vscode_language_extensions_utils.ts';
+import { mapVscodeLanguageFilenames } from './editor_vscode_language_filenames_utils.ts';
+import { applyVscodeLanguageConfiguration } from './editor_vscode_language_config_utils.ts';
+import { installVscodeLanguagesLoop } from './editor_vscode_languages_install_loop_utils.ts';
+import { finalizeVscodeLanguagesInstall } from './editor_vscode_languages_finalize_utils.ts';
 import { resolveAutoSaveFromPrefs } from './editor_open_autosave_pref_utils.js';
 import { fetchOpenCache } from './editor_open_cache_fetch_utils.js';
 import { resolveOpenContent } from './editor_open_content_resolve_utils.js';
@@ -58,10 +58,10 @@ import { runEditorOpenTransaction } from './editor_open_transaction_runner_main.
 import { handleGitBaselinesSocketEvent } from './editor_git_baselines_socket_handler_utils.ts';
 import { shouldSkipAutosaveBaselineRefresh } from './editor_cache_state_autosave_skip_utils.js';
 import { resnapshotDraftBaseline } from './editor_cache_state_resnapshot_utils.js';
-import { canInstallScrollPublisher } from './editor_scroll_publisher_guard_utils.js';
-import { buildScrollStatePayload } from './editor_scroll_publisher_payload_utils.js';
-import { shouldSendScrollImmediately } from './editor_scroll_publisher_throttle_utils.js';
-import { scheduleScrollSend } from './editor_scroll_publisher_schedule_utils.js';
+import { canInstallScrollPublisher } from './editor_scroll_publisher_guard_utils.ts';
+import { buildScrollStatePayload } from './editor_scroll_publisher_payload_utils.ts';
+import { shouldSendScrollImmediately } from './editor_scroll_publisher_throttle_utils.ts';
+import { scheduleScrollSend } from './editor_scroll_publisher_schedule_utils.ts';
 import { installScrollPublisherRuntime } from './editor_scroll_publisher_runtime.ts';
 import { shouldApplyMirrorPath } from './editor_apply_mirror_path_utils.ts';
 import { applyMirrorContent } from './editor_apply_mirror_content_utils.ts';
@@ -452,10 +452,22 @@ interface MonacoBootWindowLike extends Window {
     languageFromPath: languageFromPath,
     getGrammarForLanguage: function(languageId) { return textmateRuntime.getGrammarForLanguage(languageId); },
     advanceRuleStackToLine: function(grammar, activeModel, targetLine) {
-      return te2AdvanceRuleStackToLine(window.vscodetextmate, grammar, activeModel, targetLine);
+      if (!activeModel) return (window.vscodetextmate || {}).INITIAL;
+      return te2AdvanceRuleStackToLine(
+        window.vscodetextmate || {},
+        grammar as MonacoTextmateGrammarLike,
+        activeModel as MonacoRuntimeModelLike,
+        targetLine,
+      );
     },
     dumpTextmateScopesForLine: function(lang, text, ruleStack) {
-      return te2DumpTextmateScopesForLine(textmateRuntime.getGrammarByLang(), window.vscodetextmate, lang, text, ruleStack);
+      return te2DumpTextmateScopesForLine(
+        textmateRuntime.getGrammarByLang() as Record<string, MonacoTextmateGrammarLike | undefined>,
+        window.vscodetextmate || {},
+        lang,
+        text,
+        ruleStack,
+      );
     },
   } as Parameters<typeof installTextmateDebugHooks>[0]);
 
@@ -1069,10 +1081,10 @@ interface MonacoBootWindowLike extends Window {
   function clearDraftDiffDecorations(): void {
     var next = clearDraftDiffDecorationsState({
       clearZonesFn: clearDraftDiffZones,
-      draftDecoCollection: draftDecoCollection,
+      draftDecoCollection: draftDecoCollection as { clear?(): void } | null,
       editor: editor,
       draftDecoIds: draftDecoIds,
-      setDebugDraftFn: setDebugDraft,
+      setDebugDraftFn: function(value: string | null) { setDebugDraft(value || ''); },
     });
     draftDecoIds = next.draftDecoIds;
     lastDraftZones = next.lastDraftZones;

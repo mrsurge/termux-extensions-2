@@ -1,7 +1,7 @@
-import { connectUiIpcSocket } from './editor_ui_ipc_connect_utils.js';
-import { bindSaveKeyCommand } from './editor_ui_ipc_save_key_utils.js';
-import { bindFocusRelay } from './editor_ui_ipc_focus_relay_utils.js';
-import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.js';
+import { connectUiIpcSocket } from './editor_ui_ipc_connect_utils.ts';
+import { bindSaveKeyCommand } from './editor_ui_ipc_save_key_utils.ts';
+import { bindFocusRelay } from './editor_ui_ipc_focus_relay_utils.ts';
+import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.ts';
 
 interface DisposableLike {
   dispose?(): void;

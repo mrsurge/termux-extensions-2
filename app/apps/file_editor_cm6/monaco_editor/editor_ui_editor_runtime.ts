@@ -1,8 +1,8 @@
-import { installMarkerNavBindings, jumpToMarker } from './editor_marker_nav_utils.js';
-import { applyLineNumberSizingForEditors } from './editor_line_number_utils.js';
-import { ensureTouchSelection as ensureTouchSelectionUtil } from './editor_touch_menu_utils.js';
-import { syncReadOnlyInputMode } from './editor_readonly_input_mode_utils.js';
-import { onEditorConfigChanged } from './editor_config_change_utils.js';
+import { installMarkerNavBindings, jumpToMarker } from './editor_marker_nav_utils.ts';
+import { applyLineNumberSizingForEditors } from './editor_line_number_utils.ts';
+import { ensureTouchSelection as ensureTouchSelectionUtil } from './editor_touch_menu_utils.ts';
+import { syncReadOnlyInputMode } from './editor_readonly_input_mode_utils.ts';
+import { onEditorConfigChanged } from './editor_config_change_utils.ts';
 
 interface EditorUiEditorRuntimeDeps {
   getWindow(): Window;
@@ -105,24 +105,24 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
 
   function installMarkerNavBindingsRuntime(targetEditor: unknown): void {
     try {
-      installMarkerNavBindings(deps.getMonaco(), targetEditor, (dir: DirectionLike) => {
-        jumpToMarker(deps.getMonaco(), targetEditor, deps.getModel(), dir);
+      installMarkerNavBindings(deps.getMonaco() as MonacoRuntimeGlobal | null, targetEditor, (dir: DirectionLike) => {
+        jumpToMarker(deps.getMonaco() as MonacoRuntimeGlobal | null, targetEditor, deps.getModel(), dir as number);
       });
     } catch (_) {}
   }
 
   function ensureTouchSelection(reason: string): void {
     ensureTouchSelectionUtil(reason, {
-      getEditor: deps.getEditor,
-      getDiffEditor: deps.getDiffEditor,
+      getEditor: () => deps.getEditor() as MonacoRuntimeEditorLike | null,
+      getDiffEditor: () => deps.getDiffEditor() as MonacoRuntimeDiffEditorLike | null,
       getCurrentPath: deps.getCurrentPath,
-      getUiIpcSocket: deps.getUiIpcSocket,
+      getUiIpcSocket: () => deps.getUiIpcSocket() as MonacoRuntimeSocketLike | null,
       updateDebug: deps.updateDebug,
     });
   }
 
   function syncReadOnlyInputModeRuntime(editor: unknown): void {
-    syncReadOnlyInputMode(editor, deps.getMonaco(), deps.getDocument());
+    syncReadOnlyInputMode(editor, deps.getMonaco() as MonacoRuntimeGlobal | null, deps.getDocument());
   }
 
   function onEditorConfigChangedRuntime(editor: unknown): void {
@@ -130,7 +130,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
       syncReadOnlyInputModeFn: syncReadOnlyInputModeRuntime,
       lastKnownReadOnly,
       setLastKnownReadOnlyFn(readOnly: boolean | null) { lastKnownReadOnly = readOnly; },
-      monacoRef: deps.getMonaco(),
+      monacoRef: deps.getMonaco() as MonacoRuntimeGlobal | null,
       fetchFn(url: string, init?: RequestInit) {
         return deps.getWindow().fetch(url, init);
       },

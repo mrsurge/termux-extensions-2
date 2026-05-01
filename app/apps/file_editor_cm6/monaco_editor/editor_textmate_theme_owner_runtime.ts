@@ -19,8 +19,8 @@ interface EditorTextmateThemeOwnerDeps {
   getDocument(): Document;
   fetchFn(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   ensureTe2DiffTheme(): void;
-  loadVscodeTextmateThemesRuntime(args: Record<string, unknown>): Promise<unknown>;
-  applyMonacoThemeRuntime(args: Record<string, unknown>): Promise<unknown>;
+  loadVscodeTextmateThemesRuntime(args: unknown): Promise<unknown>;
+  applyMonacoThemeRuntime(args: unknown): Promise<unknown>;
   ensureThemeRegistry(): Promise<unknown>;
   getVscodeThemeJsonUrl(themeId: string): string;
   vscodeThemeToMonacoTheme(themeId: string, vscodeJson: unknown): unknown;
