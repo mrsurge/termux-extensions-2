@@ -1,547 +1,141 @@
-<!-- 2026-03-01T00:56:24Z -->
 # Termux Extensions 2
 
-## What TE2 Gives You
-<img width="225" height="500" alt="Screenshot_20251213-234841 Termux Extensions" src="https://github.com/user-attachments/assets/b5331afd-2ac2-40ba-9f00-86f3f6b0a15b" />
-<img width="225" height="500" alt="Screenshot_20251124-212029 Termux Extensions" src="https://github.com/user-attachments/assets/70bf817d-ddba-4956-af68-2603d247abce" />
-<img width="225" height="500" alt="Screenshot_20251123-233724 Termux Extensions" src="https://github.com/user-attachments/assets/a6315058-aac9-4301-aff8-88ad4de5463a" />
-<img width="225" height="500" alt="Screenshot_20251124-091516 Termux Extensions" src="https://github.com/user-attachments/assets/7aa5f90c-4c9b-451a-b6c0-8172bde87fe9" />
+TE2 is a fully loaded development and app environment built for programming on mobile and desktop from the same unified workspace.
 
-An integrated developement environment & complete with
-/home/mrsurge/Documents/te-2-cm6-iframe-main/docs/apps/code_cm6/README.md
-## IDE (Code-CM6)
-(see [/docs/apps/code_cm6/README.md](/docs/apps/code_cm6/README.md))
-(im sorry this is AI generated... i dont have the time to create a full feature spec for the ide... maybe you can? anyway... you can read what I have below and if you want to find out more about it you can read the readme in the link)
+It is geared toward web development, compiled-language development, and local tool-driven workflows, while staying practical on a phone or tablet through a mobile-first UI and a real host runtime underneath.
 
-1. Convergbvvnt UI
-   -
-   - Works with desktop and mobile displays... I have spent many hours making sure it works VERY well on mobile. Im going to include the `GeckoView` based app in the releases soon... so look out for that.
-   - The same UI that is in the desktop browser is in the mobile.  Carefully positioned breakpoints make sure of this.  You can host this from your desktop and use it on your mobile/tablet to review and make changes to your desktop repos, and vice versa.
-  <img width="1913" height="1014" alt="Screenshot From 2025-11-24 22-22-14" src="https://github.com/user-attachments/assets/80fed2e0-2f2e-462f-969d-bc90b7150316" />
+Today, the deepest integration is **Code TE2**, but the framework is bigger than the editor. The long-term goal is a **fully unified project environment** where the editor, terminal, explorer, settings, wrappers, and hosted tools all operate as parts of the same system.
 
+## Screenshots
 
-2. Fully `git` integrated
-   -
-   - You can run on your desktop and mobile seperately and use all the intergrated git featrures to push changes in tandem.
-3. Fully Featured
-   -
-   - Python and TS/js LSP's built in... more to come soon
-   - Sticky scroll scopes
-   - Fully integrated project exporer/ agent chat / terminal
-   - Terminal included can be used interchangably in desktop or mobile from either. No SSH.  (Keep it on your personal LAN if you run it in this way.)
-   - Run and debug code... right inside your own native Termux environment.
-   - VS Code - Code-OSS Code-Server Feature parity
-   - CM6 Backend with all the bells and whistles
-   - Feels native on mobile... no selection jank
-   - Code completions
-   - Syntax Highlighting
-   - **Inline Diff Engine**
-   - Draft diff overlays (blue/yellow) that track unsaved changes alongside Git diffs
-   - Fast autosave loop (≈450 ms debounce) with crash-safe session cache fallback
+> Screenshot 1: TE2 app launcher on mobile
 
-<img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/user-attachments/assets/5e6aef7c-2c11-4ce3-9783-5db505ad66c4" />
-<img width="225" height="500" alt="Screenshot_20251124-223352 Termux Extensions" src="https://github.com/user-attachments/assets/8f3ce5fb-7923-46df-9732-73a06d1c7971" />
-<img width="225" height="500" alt="Screenshot_20251123-221530 Termux Extensions" src="https://github.com/user-attachments/assets/14752214-3ffd-4a66-a290-7bf36ccc3774" />
-<img width="225" height="500" alt="Screenshot_20251213-235218 Termux Extensions" src="https://github.com/user-attachments/assets/4b348858-1938-4ae5-9157-61369a74e2f2" />
+> Screenshot 2: Code TE2 editor on desktop
 
+> Screenshot 3: Code TE2 editor on mobile
 
-4. Drafting system
-   -
-<img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/mrsurge/termux-extensions-2/blob/main/docs/pngs/Screenshot_20251203-003428.Termux%20Extensions.png?raw=true" /> <img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/mrsurge/termux-extensions-2/blob/main/docs/pngs/Screenshot_20251203-004535.Termux%20Extensions.png?raw=true" /> <img width="225" height="500" alt="Screenshot_20251123-222022 Termux Extensions" src="https://github.com/mrsurge/termux-extensions-2/blob/main/docs/pngs/Screenshot_20251203-004043.Termux%20Extensions.png?raw=true" />
+> Screenshot 4: Integrated sidebar app or harness app
 
+> Screenshot 5: Multi-app project workspace
 
+## What TE2 Is
 
-5. Room to grow
-   -
-   - help me please i have no idea what im doing
+TE2 is a framework that combines:
+- a shared launcher and app shell
+- isolated app workers
+- framework-owned process and shell management
+- app proxying and app hosting
+- mobile-friendly UI patterns that also work cleanly on desktop
+- a path for both native TE2 apps and shimmed external apps
 
-## Integrated File Explorer
+This is not just a web editor. It is an environment for running a project workspace with tools around it.
 
-1. Works remotely
-2. Has deep linking with the IDE
-3. can open files and archives, extract archives
-4. Easier to use than termux
-5. Works in termuxes security context or with su...
-6. can change file attributes and modes
-7. fully featured
+## What You Get
 
-## Terminal Emulater....
+- **One environment across devices**
+  The same project environment can be used from desktop and mobile, with UI that is intentionally designed for both.
 
-1. kinda redundant, but allows unlimited shells in mobile enviroment
-2. in ADDITITON to the shell that is included with the ide
+- **A real coding stack**
+  Code TE2 is the flagship app today: editor, explorer, terminal, diagnostics, language tooling, drafts, diff overlays, and project-aware behavior.
 
-## AI GENERATED READ ME!!
+- **Tooling for real development**
+  TE2 is meant for web work, scripting, and compiled-language workflows, not just note-taking or toy demos.
 
-**`termux-extensions-2`** is an application platform for Termux that provides mobile-optimized apps with shared infrastructure, process isolation, and multi-device convergence. It runs as a local FastAPI/IPC hybrid server presenting a unified launcher and app container.
+- **App-based architecture**
+  Features are not hardcoded into one monolith. They live as apps and framework services that can evolve together.
 
-The platform delivers functionality through isolated "apps" that leverage framework services (process management, terminal shells, state persistence) to provide rich, touch-friendly experiences on Android devices.
+- **A practical mobile story**
+  The project is built around the idea that a mobile environment should still be able to host serious development work.
 
----
+## Current Integrated Apps
+
+Current app roots in this repo already include:
+- `file_editor_cm6` — **Code TE2**, the current primary editor app
+- `terminal` — standalone terminal app
+- `file_explorer` — file browsing / project navigation surface
+- `archive_manager` — archive workflows
+- `settings` — framework/app settings surface
+- `codex_agent` — a shimmed/harnessed app for the `agent_log_server` stack, running through the shared proxy model
+
+Integration depth is not equal across all apps yet. Code TE2 is currently the deepest and most complete app lane, while the larger goal is to bring the full project environment into one coherent system.
+
+## App Model
+
+TE2 has **two app roots**:
+- built-in apps in `app/apps/`
+- user-local apps in `~/.local/share/te2/apps`
+
+That means TE2 can ship first-party apps from the repo while also supporting locally added apps outside the repo tree.
+
+Apps can enter the environment in two ways:
+- **native TE2 apps** that live directly in an app root
+- **shimmed / harnessed apps** that are brought in through the shared wrapper/proxy path
+
+The concrete example in this tree is `codex_agent`, which is integrated as a proxy-shell app rather than a bespoke parallel server.
+Its current shim target is the `agent_log_server` repo, which is installed as part of the preferred TE2 package install path.
+
+## Framework Harness / Wrapper Path
+
+Not every useful tool needs to be rewritten as a native TE2 app.
+
+TE2 also supports bringing external apps into the environment through the shared harness/wrapper model:
+- the framework can scaffold wrapper apps
+- shared proxy infrastructure can host external UIs inside the TE2 shell
+- those apps can still participate in the broader environment instead of living completely outside it
+
+This is the path that lets TE2 absorb useful tools instead of forcing everything to start as a first-party app.
+
 ## Quick Start
 
-- Ok im back
-
-**Bootstrap (Fresh install will not work if you are using a shell other than bash, a simple `bash` command can fix this)**
-
-### Ubuntu:
+### Desktop / Linux
 
 ```bash
-sudo apt update ; sudo apt upgrade -y ; sudo apt install git -y
-git clone https://github.com/mrsurge/termux-extensions-2.git
-cd termux-extensions-2
-sudo apt install python3-venv
-python3 -m venv te-venv
-source te-venv/bin/activate
-pip install -r requirements.txt
-pip install "framework-shells @ git+https://github.com/mrsurge/framework-shells@main" # framework shells module is now part of a different repo.
-npm install -g typescript-language-server typescript
-sudo apt install dtach -y
-./scripts/run_framework.sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install "te2 @ git+https://github.com/mrsurge/termux-extensions-2.git"
+te2
 ```
-**Subsequent runs:**
+
+### Termux
+
 ```bash
-source te-venv/bin/activate
-./scripts/run_framework.sh
-```
-### Termux: <--- this is why were all here folks
-```bash
-pkg upgrade -y ; apt install git -y
-git clone https://github.com/mrsurge/termux-extensions-2.git
-cd termux-extensions-2
-pip install -r requirements.txt
-pip install "framework-shells @ git+https://github.com/mrsurge/framework-shells@main" # framework shells module is now part of a different repo.
-npm install -g typescript-language-server typescript # will be vendored soon
-pkg install dtach -y
-./scripts/run_framework.sh
-```
-**Subsequent runs:**
-```bash
-./scripts/run_framework.sh
-```
-**For all platforms**
--
-## Network Security & IP Filtering
-
-By default, the framework is **locked down to localhost only**. To allow external connections, use the `--broadcast` flag with specific filters.
-
-### Usage Examples
-
-**1. Allow specific devices (Recommended)**
-Restrict access to specific IP addresses.
-```bash
-./scripts/run_framework.sh --broadcast 192.168.1.50 192.168.1.51
+python -m pip install "te2 @ git+https://github.com/mrsurge/termux-extensions-2.git"
+te2
 ```
 
-**2. Allow entire Wi-Fi network**
-Automatically calculates the subnet for `wlan0` (e.g., `192.168.1.0/24`) and allows all devices on it.
-```bash
-./scripts/run_framework.sh --broadcast wlan0
-```
-*Note: Interfaces with `/32` masks (like Tailscale) are ignored for subnet calculation to prevent accidental exposure. You must add their specific IPs manually.*
+Then open:
+- `http://127.0.0.1:8089`
 
-**3. Allow specific subnets**
-Manually whitelist a CIDR range.
-```bash
-./scripts/run_framework.sh --broadcast 10.0.0.0/24
-```
+By default TE2 stays on localhost. If you want LAN access, run `te2` with the appropriate `--broadcast` arguments.
 
-**4. Allow ALL connections (Insecure)**
-Disable all IP filtering. Not recommended.
-```bash
-./scripts/run_framework.sh --broadcast all
-```
+The preferred install path is the package install path above. It installs:
+- this repo as the `te2` package/CLI
+- `framework-shells`
+- `agent-log-server`
 
-**5. Localhost Only (Default)**
-Running without arguments denies all external connections.
-```bash
-./scripts/run_framework.sh
-```
+## Why The Framework Matters
 
-Browse to `http://localhost:8089` (or `http://<device-ip>:8089` from another device on LAN).
+The important idea is not just "there is an editor app."
 
->Note: --port flag can be used to set custom framework url port
+The important idea is:
+- editor, terminal, explorer, settings, wrappers, and future tools can live in one environment
+- the environment works on mobile without giving up desktop usability
+- apps can be added natively or brought in through a harness
+- the project is moving toward a 100% unified workspace instead of a pile of unrelated tools
 
-## Back to AI Generated Read-Me 
+## Current Direction
 
-## Architecture Overview
+Right now TE2 is strongest in the Code TE2 lane.
 
-### Three-Layer System
+The current direction is to keep tightening the framework as a whole:
+- unify the project environment more completely
+- deepen cross-app integration
+- keep mobile support first-class instead of treating it as an afterthought
+- make external tools easier to absorb through wrappers and harness apps
 
-```dsnt_rndr_rt_on_github_4_sum_reason
-┌─────────────────────────────────────────┐
-│  Supervisor (bash)                      │
-│  - Signal handling (SIGTERM/SIGINT)     │
-│  - Spawns framework + IPC               │
-│  - Orchestrates shutdown                │
-└─────┬────────────────────┬──────────────┘
-      │                    │
-┌─────▼──────────┐   ┌─────▼─────────────┐
-│ IPC Server     │   │ Framework (Main)  │
-│ (Flask/sync)   │◄──┤ (FastAPI/async)   │
-│ :9123          │   │ :8089             │
-│                │   │                   │
-│ - Process reg  │   │ - App launcher    │
-│ - Shutdown seq │   │ - WebSocket proxy │
-│ - Shell mgmt   │   │ - Static serving  │
-└────────────────┘   └────┬──────────────┘
-                          │
-         ┌────────────────┼────────────────┐
-         │                │                │
-    ┌────▼─────┐    ┌─────▼────┐    ┌──────▼───┐
-    │ Worker 1 │    │ Worker 2 │    │ Worker 3 │
-    │ Code CM6 │    │ File Exp │    │ Terminal │
-    │ :5001    │    │ :5002    │    │ :5003    │
-    └──────────┘    └──────────┘    └──────────┘
+## Deeper Docs
 
-```
-### Key Components
-
-**Supervisor** (`scripts/run_framework.sh` → `app/supervisor.py`)
-- Generates unique `TE_RUN_ID` for each boot
-- Spawns IPC server and framework main process
-- Handles SIGTERM/SIGINT for graceful shutdown
-- Cleans up logs from force-killed shells (>7 days removed)
-
-**IPC Server** (`app/ipc/server.py`)
-- Flask-based synchronous operation server
-- Process registry for all framework/worker/shell PIDs
-- Handles blocking operations (shutdown, sequential tasks)
-- Apps can extend via `ipc_stack` modules in manifests
-
-**Framework Main** (`app/main.py`)
-- FastAPI-based async web server
-- Serves app launcher dashboard (`app_shell.html`)
-- Proxies requests to app workers by port
-- WebSocket multiplexing for real-time updates
-
-**App Workers** (`app/libs/app_worker.py`)
-- Isolated subprocesses per app (own Python interpreter)
-- Dynamic port assignment (5001+)
-- Registered with IPC for lifecycle tracking
-- Spawn on-demand when user clicks app card
-
-**Framework Shells** (`framework-shells` package; `app/libs/framework_shells.py` is a compatibility shim)
-- Unified process management for long-lived services (PTY, pipes, dtach-backed persistence)
-- Disk-backed metadata/logs with runtime isolation under `~/.cache/framework_shells/runtimes/...`
-- Adoption of orphaned shells on restart (within the same runtime namespace)
-- Resource monitoring (CPU, memory, threads; `psutil` optional)
-
----
-
-## Shutdown Lifecycle
-
-When user presses Ctrl+C or sends SIGTERM to supervisor:
-
-1. **Supervisor receives signal** → Sets `shutting_down = True`
-2. **IPC orchestrated shutdown** → `POST http://127.0.0.1:9123/actions/shutdown`
-3. **Process registry termination** → `ProcessRegistry.shutdown_all()`:
-   - **Phase 1**: Terminate workers (type="worker") and shells (type="shell")
-     - Send SIGTERM to process group
-     - Poll for 2 seconds (check `/proc/{pid}/stat`)
-     - If still alive: Send SIGKILL (force kill)
-     - Track force-killed shells → logs preserved
-   - **Phase 2**: Terminate framework (type="framework")
-4. **Supervisor cleanup**:
-   - Kill IPC server (SIGTERM to `TE_IPC_PID`)
-   - Delete `~/.cache/te_framework/run_id`
-   - Exit with framework's exit code
-
-**Log Management:**
-- Clean exits: Logs left in `~/.cache/te_framework/logs/`
-- Force-killed: Logs archived to `~/.cache/te_framework/preserved_logs/logs_{timestamp}/`
-- On next boot: Previous logs archived, old archives (>7 days) deleted
-
----
-
-## Multi-Device Convergence
-
-The platform implements the **code-server pattern** - disk-backed state with stateless UI clients:
-
-**Single Backend, Multiple Clients:**
-- Desktop browser at `http://192.168.1.100:8089`
-- Mobile browser at `http://localhost:8089`
-- Both see same state (files, preferences, terminals)
-
-**How It Works:**
-1. All state lives in JSON files on disk
-2. Clients read from backend on every request (no frontend cache)
-3. File watcher broadcasts changes via WebSocket
-4. Edits from any client appear instantly on all others
-
-**Example Flow:**
-```
-Desktop: Types in Code CM6 editor
-  ↓
-Backend: Saves to disk (atomic write with SHA validation)
-  ↓
-File Watcher: Detects change
-  ↓
-WebSocket: Broadcasts to all subscribers
-  ↓
-Mobile: Updates editor content in real-time
-```
-
-No CRDT, no OT, no sync protocol. Just **last write wins** with SHA-based conflict detection.
-
----
-
-## Key Features
-
-### Platform Infrastructure
-- **On-Demand App Workers:** Apps spawn in isolated processes, exit when idle
-- **IPC Server:** Synchronous operation layer for blocking tasks, sequential operations
-- **Framework Shells:** Unified management for background services (terminals, MCP servers, aria2, etc.)
-- **Process Adoption:** Orphaned processes reclaimed on restart
-- **Coordinated Shutdown:** Sequential termination prevents orphans
-- **Log Persistence:** All shell output captured with automatic archival and cleanup
-
-### User-Facing Features
-- **Web-Based UI:** Clean, touch-optimized interface in browser
-- **App Launcher:** Dashboard with app cards, metadata, and quick launch
-- **Multi-Device Access:** Same backend serves desktop and mobile simultaneously
-- **PWA Install:** Add to home screen for full-screen app experience
-- **Real-Time Updates:** WebSocket-based live updates across all clients
-- **State Persistence:** Settings, preferences, and session state survive restarts
-- **Deep Linking:** Centralized mechanism for apps to launch other apps with context (see [docs/core/DEEPLINKING.md](docs/core/DEEPLINKING.md))
-
-### Bundled Apps
-- **Code CM6:** Full CodeMirror 6 editor with Git integration, terminal drawer, AI agent support
-- **Terminal:** Multi-session PTY terminal with xterm.js (planned)
-- **File Explorer:** Native file browser with git status badges (exists, needs linking)
-- **Settings:** Runtime diagnostics, framework shell management, shutdown controls
-
----
-
-**4. Test graceful shutdown:**
-- Press `Ctrl+C` in supervisor window
-- Watch sequential termination log
-- Verify no orphaned processes: `ps aux | grep python`
-
-**5. Test log archival:**
-- Force-kill a framework shell: `kill -9 <pid>`
-- Restart supervisor
-- Check `~/.cache/te_framework/preserved_logs/` for archived logs
-
----
-
-## Mobile Access
-
-### Browser Access (PWA)
-
-On mobile browsers (Chrome, Edge, Firefox):
-
-1. Open `http://localhost:8089` or `http://<device-ip>:8089`
-2. Browser menu → "Install app" or "Add to Home screen"
-3. Launch from home screen icon for full-screen experience
-
-**Notes:**
-- Service worker and manifest included
-- Localhost treated as secure context (no HTTPS needed)
-- Remove old version before reinstalling after updates
-
-### Native GeckoView App (Recommended)
-
-A native Android APK wrapper using GeckoView (Firefox's rendering engine) provides superior mobile experience:
-
-- **Better text selection:** Firefox selection behavior works properly across line breaks (Chrome mobile has known selection issues)
-- **Native feel:** Full-screen app without browser chrome
-- **Proper touch handling:** Optimized for code editing on mobile devices
-- **Custom context menus:** Non-intrusive menus that don't block content during selection
-
-The APK is a thin wrapper that connects to the framework backend running in Termux - all app logic remains in Python/JavaScript.
-
-**Status:** Under development, will be merged to main branch soon.
-
----
-
-## Code CM6 Editor
-
-One of the flagship bundled apps is **Code CM6**, a full-featured mobile code editor built on CodeMirror 6:
-
-**Key Features:**
-- Real-time file change notifications via WebSocket
-- Live inline Git diffs with automatic refresh
-- Embedded terminal drawer with PTY streaming
-- Project-based file management with explorer drawer
-- Disk-backed preferences (themes, word wrap, font scale)
-- Multi-device convergence (edit on desktop, see on mobile instantly)
-- Session cache for crash recovery
-
-The editor demonstrates the platform's convergence capabilities - multiple browsers editing the same files simultaneously with sub-second sync latency.
-
----
-
-## Framework Shells in Detail
-
-Framework shells provide lifecycle management for any long-lived process:
-
-**Shell Types:**
-- **PTY shells** (`uses_pty=True`): Interactive terminals with ANSI support
-- **Pipe shells** (`uses_pipes=True`): stdin/stdout processes (LSP servers, daemons)
-- **Dtach shells** (`uses_dtach=True`): PTY shells wrapped in `dtach` for persistence/reattach
-
-**Use Cases:**
-- Terminal sessions in app drawers
-- MCP servers for AI agent communication
-- Aria2 RPC daemon for download management
-- Archive extraction/compression services
-- Language servers (LSP)
-- Custom chatbots or agents
-
-**Management:**
-- Label-based discovery (multiple apps can share one shell)
-- Automatic log capture (stdout/stderr persisted to disk)
-- Health monitoring (CPU, memory, threads via psutil)
-- Graceful termination with force-kill fallback
-- Orphan adoption on framework restart (within the same runtime namespace)
-
-**Resize reliability:**
-- `FRAMEWORK_SHELLS_SIGWINCH_ON_RESIZE=1` (enabled by default in this repo) sends best-effort `SIGWINCH` after PTY resize so readline/TUIs keep column counts in sync (prevents wrap/overwrite glitches).
-
-**API (framework_shells package):**
-- `GET /api/framework_shells` - List shells with stats
-- `GET /api/framework_shells/<id>` - Shell details
-- `POST /api/framework_shells` - Spawn a shell
-- `POST /api/framework_shells/<id>/terminate` - Terminate (force optional)
-- `POST /api/framework_shells/<id>/action` - Action helper (terminate/kill/etc.)
-- `DELETE /api/framework_shells/<id>` - Purge metadata/logs
-- `POST /api/framework_shells/purge_exited` - Purge exited shells
-- `GET /api/framework_shells/<id>/replay` - Replay stdout log tail
-- `WS /ws/events` - Shell lifecycle event stream
-- `GET /fws/` - Self-hosted dashboard (live shell list + logs)
-
----
-
-## State Persistence
-
-Frontend state that survives browser reloads uses the shared state store:
-
-**Storage:**
-- Location: `~/.cache/termux_extensions/state_store.json`
-- Thread-safe atomic writes
-- Accessible via `window.teState` helper
-
-**JavaScript API:**
-```javascript
-// Read state
-const theme = window.teState.get('theme', 'dark');
-
-// Write state
-await window.teState.set('theme', 'monokai');
-
-// Delete key
-await window.teState.delete('theme');
-```
-
-**Python API:**
-```python
-from app.libs.state_store import get_state, set_state, delete_state
-
-theme = get_state('theme', default='dark')
-set_state('theme', 'monokai')
-delete_state('theme')
-```
-
----
-
-## Development Notes
-
-**Repository Structure:**
-```
-termux-extensions-2/
-├── scripts/                  # Startup scripts, bootstrap helpers
-├── app/
-│   ├── main.py              # FastAPI framework entrypoint
-│   ├── supervisor.py        # Process supervisor
-│   ├── ipc/                 # IPC server (Flask/sync)
-│   ├── libs/                # Shared libraries
-│   │   ├── app_worker.py    # App worker spawner
-│   │   ├── framework_shells.py  # Compatibility shim (external package is `framework-shells`)
-│   │   └── state_store.py   # Persistent state
-│   ├── templates/           # HTML templates
-│   │   └── app_shell.html   # App container UI
-│   ├── apps/                # Bundled applications
-│   │   ├── file_editor_cm6/ # Code CM6 editor
-│   │   └── ...
-│   └── static/              # Static assets, vendored libs
-├── docs/                    # Documentation
-├── requirements.txt         # Python dependencies
-└── README.md                # This file
-```
-
-**Adding New Apps:**
-
-1. Create app directory: `app/apps/my_app/`
-2. Add `manifest.json`:
-   ```json
-   {
-     "id": "my_app",
-     "name": "My App",
-     "backend_module": "app.apps.my_app.main",
-     "icon": "📦"
-   }
-   ```
-3. Create `main.py` with FastAPI router:
-   ```python
-   from fastapi import APIRouter
-   my_app_bp = APIRouter()
-   
-   @my_app_bp.get('/hello')
-   def hello():
-       return {"message": "Hello from My App"}
-   ```
-4. Restart framework - app appears in launcher
-
----
-
-## Platform Architecture Details
-
-**Why IPC Server Exists:**
-
-FastAPI/ASGI excels at async web requests but struggles with sequential blocking operations. The IPC server provides:
-- Synchronous operation runtime (Flask)
-- Sequential task execution (shutdown, agent conversations)
-- Blocking I/O allowed (subprocess, file locks)
-- Isolated from async event loop
-
-Apps can extend IPC via `ipc_stack` modules declared in manifest, enabling custom orchestration without async complexity.
-
-**Why Framework Shells Exist:**
-
-Without unified process management:
-- Apps spawn own terminals → orphans on crash
-- Each app runs own MCP server → resource waste
-- No log capture → debugging blind
-- No adoption → restart loses state
-
-With framework shells:
-- One PTY manager for all terminals
-- Shared MCP servers (labeled, discoverable)
-- Unified logging with archival
-- Orphan adoption on restart
-- Coordinated shutdown prevents leaks
-
----
-
-## License
-
-GPL-3.0 (see gpl-3.0.md in repository root)
-
-## Contributing
-
-email me?
-xrsurge@gmail.com
-
-## Credits
-
-Built with: FastAPI, Flask, CodeMirror 6, xterm.js, NiceGUI (vendored), and many other open source projects.
-
----
-
-**Last Updated:** December 3, 2025
-
-**2025-12-03:** Multi-project session management with per-project sidecar storage, draft retention across project switches, per-file scroll position persistence. — *Atlas, TE2 Team*
-
-More screens:
-<img width="1913" height="1014" alt="Screenshot From 2025-11-25 17-20-52" src="https://github.com/user-attachments/assets/d3f40310-6a13-4bd5-8032-a21c240675fc" />
-<img width="1913" height="1014" alt="Screenshot From 2025-11-25 17-17-25" src="https://github.com/user-attachments/assets/acbcea7e-4663-48d2-b7a9-b84173b26ae1" />
+If you want the deeper app-specific details:
+- Code TE2 app docs in the repo docs tree
+- Code TE2 architecture reference in the repo architecture docs
+- Codex harness app notes: `app/apps/codex_agent/README.md`
