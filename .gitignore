@@ -36,3 +36,4 @@ worktrees/monaco-editor-mobile-playground
 worktrees/vscode-te2-diff
 worktrees/monaco-vscode-api
 worktrees/
+.repo_memory.md

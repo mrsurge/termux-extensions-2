@@ -10,7 +10,7 @@ anyio
 fastmcp
 flask
 flask-socketio
-framework-shells @ git+https://github.com/mrsurge/framework-shells.git
+framework-shells @ git+https://github.com/mrsurge/framework-shells
 agent-log-server @ git+https://github.com/mrsurge/agent_log_server.git
 libarchive-c>=5.1
 requests
