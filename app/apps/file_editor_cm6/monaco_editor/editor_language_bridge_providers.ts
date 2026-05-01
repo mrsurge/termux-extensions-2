@@ -193,6 +193,7 @@ const prunedNativeCompletionLanguages = new Set<string>();
 interface CreateEditorLanguageBridgeProvidersDeps {
   getMonaco(): MonacoLike | null;
   getLanguageWorkersEnabled(): boolean;
+  getDisableSemanticTokens(): boolean;
   getCurrentPath(): string | null;
   getHasModel(): boolean;
   getCurrentLanguageContext(): LanguageContext | null;
@@ -430,6 +431,14 @@ export function createEditorLanguageBridgeProviders(
   installWorkbenchLanguageBridgeProviders(): void;
   hydrateProviderSnapshot(snapshot: unknown): { completions: number; inlayHints: number; inlineCompletions: number; semanticTokens: number };
 } {
+  let semanticTokensDisableLogged = false;
+
+  function logSemanticTokensDisabledOnce(): void {
+    if (semanticTokensDisableLogged) return;
+    semanticTokensDisableLogged = true;
+    try { console.log('[semanticTokens] disabled by __debugDisableSemanticTokens'); } catch (_) {}
+  }
+
   function selectorLanguagesFromSnapshot(selectorRaw: unknown): string[] {
     const selectorList = asArray(selectorRaw) || [];
     const seen = new Set<string>();
@@ -828,6 +837,7 @@ export function createEditorLanguageBridgeProviders(
 
   function hydrateProviderSnapshot(snapshot: unknown): { completions: number; inlayHints: number; inlineCompletions: number; semanticTokens: number } {
     const snapshotRecord = asRecord(snapshot);
+    const disableSemanticTokens = deps.getDisableSemanticTokens();
     let completionCount = 0;
     let inlayHintsCount = 0;
     let inlineCompletionCount = 0;
@@ -889,21 +899,25 @@ export function createEditorLanguageBridgeProviders(
       }
     }
 
-    for (const rawEntry of semanticTokenEntries) {
-      const entry = asRecord(rawEntry);
-      const legend = asRecord(entry && entry.legend);
-      if (!legend) continue;
-      const tokenTypes = (asArray(legend.tokenTypes) || []).map(String).filter(Boolean);
-      const tokenModifiers = (asArray(legend.tokenModifiers) || []).map(String).filter(Boolean);
-      if (!tokenTypes.length && !tokenModifiers.length) continue;
-      for (const langId of selectorLanguagesFromSnapshot(entry && entry.selector)) {
-        registerSemanticTokensWithLegend(
-          langId,
-          { tokenTypes, tokenModifiers },
-          !!(entry && entry.range),
-        );
-        semanticTokensCount += 1;
+    if (!disableSemanticTokens) {
+      for (const rawEntry of semanticTokenEntries) {
+        const entry = asRecord(rawEntry);
+        const legend = asRecord(entry && entry.legend);
+        if (!legend) continue;
+        const tokenTypes = (asArray(legend.tokenTypes) || []).map(String).filter(Boolean);
+        const tokenModifiers = (asArray(legend.tokenModifiers) || []).map(String).filter(Boolean);
+        if (!tokenTypes.length && !tokenModifiers.length) continue;
+        for (const langId of selectorLanguagesFromSnapshot(entry && entry.selector)) {
+          registerSemanticTokensWithLegend(
+            langId,
+            { tokenTypes, tokenModifiers },
+            !!(entry && entry.range),
+          );
+          semanticTokensCount += 1;
+        }
       }
+    } else if (semanticTokenEntries.length) {
+      logSemanticTokensDisabledOnce();
     }
 
     return { completions: completionCount, inlayHints: inlayHintsCount, inlineCompletions: inlineCompletionCount, semanticTokens: semanticTokensCount };
@@ -914,6 +928,10 @@ export function createEditorLanguageBridgeProviders(
     legend: SemanticTokensLegendLike,
     isRange?: boolean,
   ): void {
+    if (deps.getDisableSemanticTokens()) {
+      logSemanticTokensDisabledOnce();
+      return;
+    }
     const monacoRef = deps.getMonaco();
     if (!monacoRef || !monacoRef.languages) return;
     if (deps.languageBridge.registeredSemanticTokens.has(langId)) return;
@@ -980,6 +998,10 @@ export function createEditorLanguageBridgeProviders(
   }
 
   function registerSemanticTokensForLanguage(langId: string): void {
+    if (deps.getDisableSemanticTokens()) {
+      logSemanticTokensDisabledOnce();
+      return;
+    }
     if (deps.languageBridge.registeredSemanticTokens.has(langId)) return;
     deps.editorWorkbenchCall('semantic_tokens_legend', { languageId: langId }, { timeoutMs: 8000 })
       .then((result) => {

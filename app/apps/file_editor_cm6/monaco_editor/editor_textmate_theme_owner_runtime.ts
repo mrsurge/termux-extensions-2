@@ -37,6 +37,14 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function isTextmateDisabled(win: Window | null | undefined): boolean {
+  try {
+    return !!(win && (win as Window & { __debugDisableTextmate?: boolean }).__debugDisableTextmate);
+  } catch (_) {
+    return false;
+  }
+}
+
 export function createEditorTextmateThemeOwnerRuntime(
   deps: EditorTextmateThemeOwnerDeps,
 ): {
@@ -49,6 +57,7 @@ export function createEditorTextmateThemeOwnerRuntime(
   const languageApplyInflight: Record<string, Promise<void> | undefined> = Object.create(null);
   let themeApplyInflight: Promise<void> | null = null;
   let themeApplyKey = '';
+  let textmateDisableLogged = false;
 
   function setModelLanguage(model: unknown, languageId: string): void {
     try {
@@ -94,7 +103,9 @@ export function createEditorTextmateThemeOwnerRuntime(
         setJsonCacheFn(cache: Record<string, unknown>) {
           themeLoadState.jsonCache = cache || {};
         },
-        applyThemeToTextmateRegistryFn: deps.applyThemeToTextmateRegistry,
+        applyThemeToTextmateRegistryFn: isTextmateDisabled(deps.getWindow())
+          ? undefined
+          : deps.applyThemeToTextmateRegistry,
       });
     })();
     try {
@@ -121,15 +132,23 @@ export function createEditorTextmateThemeOwnerRuntime(
 
     languageApplyInflight[applyKey] = (async () => {
       try {
+        const textmateDisabled = isTextmateDisabled(deps.getWindow());
         await deps.ensureWorkbenchLanguageCatalogInstalled();
         if (filePath) {
           const resolved = deps.normalizeLanguage(deps.languageFromPath(filePath));
           if (resolved) lang = resolved;
         }
         setModelLanguage(model, lang);
-        const ok = await deps.ensureTextmateTokenization(lang, filePath);
-        if (!ok) return;
-        setModelLanguage(model, lang);
+        if (textmateDisabled) {
+          if (!textmateDisableLogged) {
+            textmateDisableLogged = true;
+            try { console.log('[TextMate] disabled by __debugDisableTextmate'); } catch (_) {}
+          }
+        } else {
+          const ok = await deps.ensureTextmateTokenization(lang, filePath);
+          if (!ok) return;
+          setModelLanguage(model, lang);
+        }
         try { deps.installWorkbenchLanguageBridgeProviders(); } catch (_) {}
       } finally {
         delete languageApplyInflight[applyKey];
