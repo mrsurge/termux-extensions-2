@@ -3,6 +3,11 @@ export interface GrammarListItem {
   scopeName: string;
   language: string | null;
   extensionId: string;
+  embeddedLanguages: Record<string, string>;
+  tokenTypes: Record<string, string>;
+  injectTo: string[];
+  balancedBracketScopes: string[];
+  unbalancedBracketScopes: string[];
   _extPath: string | null;
   _grammarRelPath: string | null;
 }
@@ -20,6 +25,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
+}
+
+function stringMap(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string" && entry.length > 0) {
+      result[key] = entry;
+    }
+  }
+  return result;
 }
 
 function extensionId(ext: unknown): string {
@@ -62,6 +83,11 @@ export function listTextmateGrammars(runtime: GrammarServerRuntime): GrammarList
         scopeName,
         language: stringOrNull(grammar.language),
         extensionId: extId,
+        embeddedLanguages: stringMap(grammar.embeddedLanguages),
+        tokenTypes: stringMap(grammar.tokenTypes),
+        injectTo: stringArray(grammar.injectTo),
+        balancedBracketScopes: stringArray(grammar.balancedBracketScopes),
+        unbalancedBracketScopes: stringArray(grammar.unbalancedBracketScopes),
         _extPath: extLocPath,
         _grammarRelPath: grammarRelPath,
       });

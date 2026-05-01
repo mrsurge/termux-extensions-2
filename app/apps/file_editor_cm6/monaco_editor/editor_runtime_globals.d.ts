@@ -85,6 +85,7 @@ interface MonacoRuntimeGlobal {
     CompletionItemKind?: unknown;
     setColorMap?(colorMap: string[]): void;
     getLanguages?(): Array<{ id?: string }>;
+    getEncodedLanguageId?(languageId: string): number;
     register?(desc: Record<string, unknown>): void;
     setTokensProvider?(languageId: string, provider: Record<string, unknown>): void;
     setLanguageConfiguration?(languageId: string, configuration: Record<string, unknown>): void;
@@ -155,6 +156,8 @@ interface Window {
   vscodetextmate?: MonacoTextmateGlobal;
   __debugDraftDiffs?: boolean;
   __debugWorkbenchDiag?: boolean;
+  __debugDisableTextmate?: boolean;
+  __debugDisableSemanticTokens?: boolean;
   ['monaco-touch-selection']?: MonacoTouchSelectionGlobal;
   term?: MonacoRuntimeTermShim;
   ctrl?: boolean;

@@ -1,4 +1,22 @@
-type WindowTextmateLike = Window & {
+/*
+ * Workbench-based TextMate runtime for TE2.
+ * Source lineage:
+ * - VS Code workbench TextMate grammar factory and tokenization support
+ * - TE2 WBA grammar transport
+ */
+
+import { URI } from '../../../static/vendor/monaco-editor-core/esm/vs/base/common/uri.js';
+import * as vscodeTextmate from '../vendor/vscode-textmate/release/main.js';
+import * as vscodeOniguruma from '../vendor/vscode-oniguruma/release/main.js';
+import { TMGrammarFactory, missingTMGrammarErrorMessage } from './vscode_workbench_textmate_vendor/TMGrammarFactory.js';
+import {
+  IValidEmbeddedLanguagesMap,
+  IValidGrammarDefinition,
+  IValidTokenTypeMap,
+  standardTokenTypeFromString,
+} from './vscode_workbench_textmate_vendor/TMScopeRegistry.js';
+
+interface WindowTextmateLike extends Window {
   onig?: {
     loadWASM?(buffer: ArrayBuffer): Promise<void>;
     OnigScanner?: new (sources: string[]) => unknown;
@@ -6,14 +24,8 @@ type WindowTextmateLike = Window & {
   };
   vscodetextmate?: {
     INITIAL?: unknown;
-    Registry?: new (options: Record<string, unknown>) => {
-      setTheme?(theme: Record<string, unknown>): void;
-      getColorMap?(): string[];
-      loadGrammar?(scopeName: string): Promise<unknown>;
-    };
-    parseRawGrammar?(content: string, url: string): unknown;
   };
-  monaco?: Window['monaco'] & {
+  monaco?: {
     editor?: {
       getModels?(): Array<{ resetTokenization?(): void }>;
     };
@@ -22,18 +34,25 @@ type WindowTextmateLike = Window & {
       getLanguages?(): Array<{ id?: string }>;
       register?(desc: Record<string, unknown>): void;
       setTokensProvider?(languageId: string, provider: Record<string, unknown>): void;
+      getEncodedLanguageId?(languageId: string): number;
     };
   };
-};
-
-interface GrammarIndexLike {
-  scopes?: Record<string, string>;
 }
 
-interface VscodeGrammarByScopeEntry {
+interface VscodeGrammarListItem {
   id: string;
   scopeName: string;
-  language: string;
+  language: string | null;
+  extensionId?: string;
+  embeddedLanguages?: Record<string, string>;
+  tokenTypes?: Record<string, string>;
+  injectTo?: string[];
+  balancedBracketScopes?: string[];
+  unbalancedBracketScopes?: string[];
+}
+
+interface VscodeGrammarByScopeEntry extends VscodeGrammarListItem {
+  location: URI;
 }
 
 interface VscodeGrammarByLanguageEntry {
@@ -44,6 +63,7 @@ interface VscodeGrammarByLanguageEntry {
 interface VscodeGrammarIndexLike {
   byScope: Record<string, VscodeGrammarByScopeEntry>;
   byLanguage: Record<string, VscodeGrammarByLanguageEntry>;
+  byLocation: Record<string, string>;
 }
 
 interface TextmateRuntimeDeps {
@@ -60,18 +80,86 @@ interface TextmateRuntimeDeps {
   ): Promise<unknown>;
 }
 
+interface TextmateGrammarLike {
+  tokenizeLine(lineText: string, prevState: unknown, timeLimit?: number): {
+    tokens: Array<{ startIndex: number; endIndex: number; scopes?: string[]; _te2_scopeStack?: string[] }>;
+    ruleStack: unknown;
+    stoppedEarly?: boolean;
+  };
+  tokenizeLine2(lineText: string, prevState: unknown, timeLimit?: number): {
+    tokens: Uint32Array;
+    ruleStack: unknown;
+    stoppedEarly?: boolean;
+  };
+}
+
+interface TextmateRegistryLike {
+  setTheme(theme: Record<string, unknown>, colorMap?: string[]): void;
+  getColorMap(): string[];
+  loadGrammarWithConfiguration(
+    scopeName: string,
+    encodedLanguageId: number,
+    configuration: Record<string, unknown>,
+  ): Promise<TextmateGrammarLike | null>;
+}
+
+interface TextmateModuleLike {
+  INITIAL: unknown;
+  Registry: new (options: {
+    onigLib: Promise<{
+      createOnigScanner(sources: string[]): unknown;
+      createOnigString(str: string): unknown;
+    }>;
+    loadGrammar(scopeName: string): Promise<unknown>;
+    getInjections?(scopeName: string): string[];
+  }) => TextmateRegistryLike;
+  parseRawGrammar(content: string, filePath: string): unknown;
+}
+
+interface TextmateStateLike {
+  _rs: unknown;
+  clone(): TextmateStateLike;
+  equals(other: unknown): boolean;
+}
+
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
 function asArray<T>(value: unknown): T[] {
-  return Array.isArray(value) ? value as T[] : [];
+  return Array.isArray(value) ? (value as T[]) : [];
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value != null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
+}
+
+function makeState(ruleStack: unknown): TextmateStateLike {
+  return {
+    _rs: ruleStack,
+    clone() {
+      return makeState(this._rs);
+    },
+    equals(other: unknown): boolean {
+      return !!other && typeof other === 'object' && (other as { _rs?: unknown })._rs === this._rs;
+    },
+  };
+}
+
+function grammarLocationUri(grammarId: string): URI {
+  return URI.parse(`te2-textmate://grammar/${encodeURIComponent(grammarId)}`) as unknown as URI;
+}
+
+function grammarIdFromLocation(resource: URI): string {
+  const rawPath = typeof resource.path === 'string' ? resource.path.replace(/^\/+/, '') : '';
+  const encoded = rawPath || '';
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return encoded;
+  }
 }
 
 export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
@@ -83,12 +171,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   getGrammarByLang(): Record<string, unknown>;
   getGrammarForLanguage(languageId: unknown): unknown;
 } {
-  let tmRegistry: {
-    setTheme?(theme: Record<string, unknown>): void;
-    getColorMap?(): string[];
-    loadGrammar?(scopeName: string): Promise<unknown>;
-  } | null = null;
-  let tmGrammarIndex: GrammarIndexLike | null = null;
+  let tmGrammarFactory: TMGrammarFactory | null = null;
   let tmInstalled: Record<string, boolean> = Object.create(null);
   let tmInstallInflight: Record<string, Promise<boolean> | undefined> = Object.create(null);
   let tmGrammarByLang: Record<string, unknown> = Object.create(null);
@@ -98,9 +181,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   function resetTokenizationForAllModels(): void {
     try {
       const win = deps.getWindow();
-      const models = win.monaco && win.monaco.editor && typeof win.monaco.editor.getModels === 'function'
-        ? win.monaco.editor.getModels()
-        : [];
+      const models = win.monaco?.editor?.getModels ? win.monaco.editor.getModels() : [];
       for (const model of models || []) {
         if (model && typeof model.resetTokenization === 'function') {
           model.resetTokenization();
@@ -109,28 +190,45 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     } catch (_) {}
   }
 
+  function installDebugGlobals(): void {
+    const win = deps.getWindow();
+    try {
+      win.vscodetextmate = vscodeTextmate as unknown as WindowTextmateLike['vscodetextmate'];
+    } catch (_) {}
+    try {
+      win.onig = vscodeOniguruma as unknown as WindowTextmateLike['onig'];
+    } catch (_) {}
+  }
+
+  function buildThemeSettings(themeJson: Record<string, unknown>): { name: string; settings: Array<Record<string, unknown>> } {
+    const colors = asRecord(themeJson.colors) || {};
+    const editorFg = asString(colors['editor.foreground']) || asString(colors.foreground) || '#e6edf3';
+    const editorBg = asString(colors['editor.background']) || asString(colors['editorPane.background']) || '#0d1117';
+    const settings: Array<Record<string, unknown>> = [{ settings: { foreground: editorFg, background: editorBg } }];
+    const tokenColors = asArray<Record<string, unknown>>(themeJson.tokenColors);
+    for (const tokenColor of tokenColors) {
+      settings.push(tokenColor);
+    }
+    return {
+      name: asString(themeJson.name) || 'te2-theme',
+      settings,
+    };
+  }
+
   function applyThemeToRegistry(vscodeThemeJson: unknown): void {
     const theme = asRecord(vscodeThemeJson);
-    if (theme) tmActiveThemeJson = theme;
+    if (!theme) return;
+    tmActiveThemeJson = theme;
     try {
-      if (!tmRegistry || !theme) return;
-      const settings: Array<Record<string, unknown>> = [];
-      const colors = asRecord(theme.colors) || {};
-      const editorFg = asString(colors['editor.foreground']) || asString(colors.foreground) || '#e6edf3';
-      const editorBg = asString(colors['editor.background']) || asString(colors['editorPane.background']) || '#0d1117';
-      settings.push({ settings: { foreground: editorFg, background: editorBg } });
-      const tokenColors = asArray<Record<string, unknown>>(theme.tokenColors);
-      for (const tokenColor of tokenColors) settings.push(tokenColor);
-      tmRegistry.setTheme && tmRegistry.setTheme({ name: asString(theme.name) || 'te2-theme', settings });
+      if (!tmGrammarFactory) return;
+      const tmTheme = buildThemeSettings(theme);
+      tmGrammarFactory.setTheme(tmTheme);
+      const colorMap = tmGrammarFactory.getColorMap();
       const win = deps.getWindow();
-      if (win.monaco && win.monaco.languages && typeof win.monaco.languages.setColorMap === 'function') {
-        const colorMap = tmRegistry.getColorMap ? tmRegistry.getColorMap() : [];
-        if (colorMap && colorMap.length > 0) {
-          win.monaco.languages.setColorMap(colorMap);
-          const installedLangs = Object.keys(tmInstalled).filter((key) => tmInstalled[key]);
-          console.log('[TextMate:DIAG] setColorMap called, colors=' + colorMap.length + ', already installed langs: [' + installedLangs.join(', ') + ']');
-        }
+      if (colorMap.length > 0 && win.monaco?.languages?.setColorMap) {
+        win.monaco.languages.setColorMap(colorMap);
       }
+      resetTokenizationForAllModels();
     } catch (error) {
       console.warn('[TextMate] applyThemeToRegistry failed', error);
     }
@@ -140,22 +238,47 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     const idx: VscodeGrammarIndexLike = {
       byScope: Object.create(null),
       byLanguage: Object.create(null),
+      byLocation: Object.create(null),
     };
+    let loaded = false;
+
     try {
       const res = await deps.editorWorkbenchCall('grammars_list', {}, { timeoutMs: 8000 });
-      const result = asRecord(res) && asRecord(asRecord(res)!.result) ? asRecord(res)!.result : res;
-      const grammars = asArray<Record<string, unknown>>(asRecord(result) ? asRecord(result)!.grammars : []);
+      const result = asRecord(res)?.result && asRecord(asRecord(res)?.result)
+        ? asRecord(asRecord(res)?.result)!
+        : asRecord(res);
+      const grammars = asArray<Record<string, unknown>>(result?.grammars);
+      loaded = true;
       const byLangScopes: Record<string, Set<string>> = Object.create(null);
-      for (const grammar of grammars) {
-        const scope = asString(grammar.scopeName).trim();
-        const id = asString(grammar.id).trim();
-        if (!scope || !id) continue;
-        const grammarLanguage = asString(grammar.language).trim();
-        idx.byScope[scope] = { id, scopeName: scope, language: grammarLanguage };
-        const lang = deps.normalizeLanguage(grammarLanguage);
+
+      for (const rawGrammar of grammars) {
+        const scopeName = asString(rawGrammar.scopeName).trim();
+        const id = asString(rawGrammar.id).trim();
+        if (!scopeName || !id) continue;
+        const location = grammarLocationUri(id);
+        const entry: VscodeGrammarByScopeEntry = {
+          id,
+          scopeName,
+          language: asString(rawGrammar.language).trim() || null,
+          extensionId: asString(rawGrammar.extensionId).trim() || undefined,
+          embeddedLanguages: asRecord(rawGrammar.embeddedLanguages)
+            ? Object.fromEntries(Object.entries(asRecord(rawGrammar.embeddedLanguages)!).filter(([, value]) => typeof value === 'string')) as Record<string, string>
+            : undefined,
+          tokenTypes: asRecord(rawGrammar.tokenTypes)
+            ? Object.fromEntries(Object.entries(asRecord(rawGrammar.tokenTypes)!).filter(([, value]) => typeof value === 'string')) as Record<string, string>
+            : undefined,
+          injectTo: asArray<string>(rawGrammar.injectTo).filter((value) => typeof value === 'string'),
+          balancedBracketScopes: asArray<string>(rawGrammar.balancedBracketScopes).filter((value) => typeof value === 'string'),
+          unbalancedBracketScopes: asArray<string>(rawGrammar.unbalancedBracketScopes).filter((value) => typeof value === 'string'),
+          location,
+        };
+        idx.byScope[scopeName] = entry;
+        idx.byLocation[location.toString()] = id;
+
+        const lang = deps.normalizeLanguage(entry.language);
         if (!lang) continue;
-        if (!byLangScopes[lang]) byLangScopes[lang] = new Set();
-        byLangScopes[lang].add(scope);
+        const scopes = byLangScopes[lang] || (byLangScopes[lang] = new Set());
+        scopes.add(scopeName);
       }
 
       const pickPreferred = (lang: string, scopes: string[]): string | null => {
@@ -172,220 +295,244 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         else if (lang === 'cpp') prefer = ['source.cpp'];
         else if (lang === 'java') prefer = ['source.java'];
         else if (lang === 'rust') prefer = ['source.rust'];
+        else if (lang === 'kotlin') prefer = ['source.kotlin'];
+        else if (lang === 'yaml') prefer = ['source.yaml', 'source.yaml.1.2'];
+        else if (lang === 'toml') prefer = ['source.toml'];
         for (const candidate of prefer) {
-          if (scopes.indexOf(candidate) >= 0) return candidate;
+          if (scopes.includes(candidate)) return candidate;
         }
-        const fallback = 'source.' + lang;
-        if (scopes.indexOf(fallback) >= 0) return fallback;
+        const fallback = `source.${lang}`;
+        if (scopes.includes(fallback)) return fallback;
         return scopes.length ? scopes[0] : null;
       };
 
       for (const lang of Object.keys(byLangScopes)) {
-        const scopes = Array.from(byLangScopes[lang]);
-        scopes.sort();
+        const scopes = Array.from(byLangScopes[lang]).sort();
         idx.byLanguage[lang] = {
           preferred: pickPreferred(lang, scopes),
           scopes,
         };
       }
-    } catch (_) {
-      // keep empty fallback index
+    } catch (error) {
+      console.warn('[TextMate] refreshVscodeGrammarIndex failed', error);
     }
-    tmVscodeIndex = idx;
-    return idx;
+
+    if (loaded) {
+      tmVscodeIndex = idx;
+      return idx;
+    }
+    return tmVscodeIndex || idx;
   }
 
   async function scopeNameForLanguage(languageId: unknown, filePath: unknown): Promise<string> {
     const lang = deps.normalizeLanguage(languageId);
+    const path = asString(filePath);
+
     try {
       if (!tmVscodeIndex) {
-        try { tmVscodeIndex = await refreshVscodeGrammarIndex(); } catch (_) {}
+        await refreshVscodeGrammarIndex();
       }
-      if (tmVscodeIndex && tmVscodeIndex.byLanguage[lang]) {
-        const entry = tmVscodeIndex.byLanguage[lang];
-        const path = asString(filePath);
-        if (entry && entry.scopes && path) {
+      const index = tmVscodeIndex;
+      if (!index) return '';
+      const entry = index.byLanguage[lang];
+      if (entry) {
+        if (path) {
           if (lang === 'javascript' && /\.jsx$/i.test(path)) {
-            if (entry.scopes.indexOf('source.js.jsx') >= 0) return 'source.js.jsx';
-            if (entry.scopes.indexOf('source.jsx') >= 0) return 'source.jsx';
+            if (entry.scopes.includes('source.js.jsx')) return 'source.js.jsx';
+            if (entry.scopes.includes('source.jsx')) return 'source.jsx';
           }
-          if (lang === 'typescript' && /\.tsx$/i.test(path)) {
-            if (entry.scopes.indexOf('source.tsx') >= 0) return 'source.tsx';
-          }
-          if (lang === 'markdown' && entry.scopes.indexOf('text.html.markdown') >= 0) {
-            return 'text.html.markdown';
+          if (lang === 'typescript' && /\.tsx$/i.test(path) && entry.scopes.includes('source.tsx')) {
+            return 'source.tsx';
           }
         }
-        if (entry && entry.preferred) return entry.preferred;
+        if (entry.preferred) return entry.preferred;
       }
     } catch (_) {}
 
-    const path = asString(filePath);
-    if (lang === 'javascript') return /\.jsx$/i.test(path) ? 'source.js.jsx' : 'source.js';
-    if (lang === 'typescript') return /\.tsx$/i.test(path) ? 'source.tsx' : 'source.ts';
-    if (lang === 'python') return 'source.python';
-    if (lang === 'json') return 'source.json';
-    if (lang === 'jsonc') return 'source.json.comments';
-    if (lang === 'html') return 'text.html.basic';
-    if (lang === 'css') return 'source.css';
-    if (lang === 'markdown') return 'text.html.markdown';
-    if (lang === 'shell') return 'source.shell';
-    if (lang === 'c') return 'source.c';
-    if (lang === 'cpp') return 'source.cpp';
-    if (lang === 'java') return 'source.java';
-    if (lang === 'rust') return 'source.rust';
-    return 'source.' + lang;
+    return '';
+  }
+
+  function buildGrammarDefinitions(index: VscodeGrammarIndexLike): IValidGrammarDefinition[] {
+    const win = deps.getWindow();
+    const getEncodedLanguageId = win.monaco?.languages?.getEncodedLanguageId;
+    const definitions: IValidGrammarDefinition[] = [];
+
+    for (const scopeName of Object.keys(index.byScope)) {
+      const entry = index.byScope[scopeName];
+      const embeddedLanguages: IValidEmbeddedLanguagesMap = Object.create(null);
+      const rawEmbedded = entry.embeddedLanguages || {};
+      if (typeof getEncodedLanguageId === 'function') {
+        for (const embeddedScope of Object.keys(rawEmbedded)) {
+          const embeddedLanguage = deps.normalizeLanguage(rawEmbedded[embeddedScope]);
+          if (!embeddedLanguage) continue;
+          const encoded = Number(getEncodedLanguageId.call(win.monaco?.languages, embeddedLanguage));
+          if (Number.isFinite(encoded) && encoded > 0) {
+            embeddedLanguages[embeddedScope] = encoded;
+          }
+        }
+      }
+
+      const tokenTypes: IValidTokenTypeMap = Object.create(null);
+      const rawTokenTypes = entry.tokenTypes || {};
+      for (const tokenScope of Object.keys(rawTokenTypes)) {
+        const mapped = standardTokenTypeFromString(rawTokenTypes[tokenScope]);
+        if (mapped != null) tokenTypes[tokenScope] = mapped;
+      }
+
+      definitions.push({
+        location: entry.location,
+        language: deps.normalizeLanguage(entry.language) || undefined,
+        scopeName: entry.scopeName,
+        embeddedLanguages,
+        tokenTypes,
+        injectTo: entry.injectTo && entry.injectTo.length ? entry.injectTo.slice() : undefined,
+        balancedBracketSelectors: entry.balancedBracketScopes && entry.balancedBracketScopes.length ? entry.balancedBracketScopes.slice() : ['*'],
+        unbalancedBracketSelectors: entry.unbalancedBracketScopes && entry.unbalancedBracketScopes.length ? entry.unbalancedBracketScopes.slice() : [],
+        sourceExtensionId: entry.extensionId,
+      });
+    }
+
+    return definitions;
   }
 
   async function ensureTextmateReady(): Promise<unknown> {
-    if (tmRegistry) return tmRegistry;
-    const win = deps.getWindow();
-    if (!win.vscodetextmate || !win.onig) {
-      throw new Error('TextMate deps missing (vscodetextmate/onig)');
-    }
+    if (tmGrammarFactory) return tmGrammarFactory;
 
+    installDebugGlobals();
     if (!tmVscodeIndex) {
-      try { tmVscodeIndex = await refreshVscodeGrammarIndex(); } catch (_) { tmVscodeIndex = null; }
+      await refreshVscodeGrammarIndex();
     }
-    if (!tmGrammarIndex) {
-      try {
-        tmGrammarIndex = asRecord(await deps.fetchJsonWithBase('/ui/monaco_editor/textmate/grammar_index.json', { cache: 'no-store' })) as GrammarIndexLike;
-      } catch (_) {
-        tmGrammarIndex = null;
-      }
+    if (!tmVscodeIndex) {
+      throw new Error('TextMate grammar index unavailable');
     }
 
-    try {
-      const wasmResp = await deps.fetchFn(deps.buildUiUrl('monaco_editor/textmate/onig.wasm'), { cache: 'force-cache' });
-      if (!wasmResp.ok) throw new Error('onig.wasm HTTP ' + wasmResp.status);
-      const wasmBuf = await wasmResp.arrayBuffer();
-      await (win.onig.loadWASM && win.onig.loadWASM(wasmBuf));
-    } catch (error) {
-      console.warn('[TextMate] loadWASM failed', error);
-      throw error;
+    const wasmResp = await deps.fetchFn(deps.buildUiUrl('monaco_editor/textmate/onig.wasm'), { cache: 'force-cache' });
+    if (!wasmResp.ok) {
+      throw new Error(`onig.wasm HTTP ${wasmResp.status}`);
     }
+    const wasmBuf = await wasmResp.arrayBuffer();
+    await vscodeOniguruma.loadWASM(wasmBuf);
 
-    const RegistryCtor = win.vscodetextmate.Registry;
-    tmRegistry = RegistryCtor
-      ? new RegistryCtor({
-          onigLib: Promise.resolve({
-            createOnigScanner(sources: string[]) {
-              return win.onig && win.onig.OnigScanner ? new win.onig.OnigScanner(sources) : null;
-            },
-            createOnigString(str: string) {
-              return win.onig && win.onig.OnigString ? new win.onig.OnigString(str) : null;
-            },
-          }),
-          loadGrammar: async (scopeName: string) => {
-            try {
-              const sn = asString(scopeName);
-              try {
-                if (!tmVscodeIndex) tmVscodeIndex = await refreshVscodeGrammarIndex();
-                const entry = tmVscodeIndex && tmVscodeIndex.byScope ? tmVscodeIndex.byScope[sn] : null;
-                if (entry && entry.id) {
-                  const loadRes = await deps.editorWorkbenchCall('grammars_load', { id: entry.id }, { timeoutMs: 8000 });
-                  const loadResult = asRecord(loadRes) && asRecord(asRecord(loadRes)!.result) ? asRecord(loadRes)!.result : loadRes;
-                  const raw = asRecord(loadResult) ? asString(asRecord(loadResult)!.raw) : '';
-                  const ok = asRecord(loadResult) ? asRecord(loadResult)!.ok === true : false;
-                  if (ok && raw && win.vscodetextmate && typeof win.vscodetextmate.parseRawGrammar === 'function') {
-                    const url = 'adapter://textmate/' + encodeURIComponent(entry.id);
-                    console.log('[TextMate] loaded extension grammar', sn, '->', entry.id);
-                    return win.vscodetextmate.parseRawGrammar(raw, url);
-                  }
-                }
-              } catch (_) {}
+    const onigLib = Promise.resolve({
+      createOnigScanner(sources: string[]) {
+        return vscodeOniguruma.createOnigScanner(sources);
+      },
+      createOnigString(str: string) {
+        return vscodeOniguruma.createOnigString(str);
+      },
+    });
 
-              const fileName = tmGrammarIndex && tmGrammarIndex.scopes ? tmGrammarIndex.scopes[sn] : '';
-              if (!fileName) return null;
-              const url = deps.buildUiUrl('monaco_editor/textmate/grammars/' + fileName);
-              const resp = await deps.fetchFn(url, { cache: 'force-cache' });
-              if (!resp.ok || !win.vscodetextmate || typeof win.vscodetextmate.parseRawGrammar !== 'function') return null;
-              const content = await resp.text();
-              return win.vscodetextmate.parseRawGrammar(content, url);
-            } catch (error) {
-              console.warn('[TextMate] loadGrammar failed', scopeName, error);
-              return null;
-            }
-          },
-        })
-      : null;
+    const grammarDefinitions = buildGrammarDefinitions(tmVscodeIndex);
+    tmGrammarFactory = new TMGrammarFactory(
+      {
+        logTrace(msg: string) {
+          console.log('[TextMate]', msg);
+        },
+        logError(msg: string, err: unknown) {
+          console.warn('[TextMate]', msg, err);
+        },
+        async readFile(resource: URI): Promise<string> {
+          const grammarId = grammarIdFromLocation(resource) || tmVscodeIndex?.byLocation[resource.toString()] || '';
+          if (!grammarId) {
+            throw new Error(`Unknown grammar resource: ${resource.toString()}`);
+          }
+          const loadRes = await deps.editorWorkbenchCall('grammars_load', { id: grammarId }, { timeoutMs: 8000 });
+          const payload = asRecord(loadRes)?.result && asRecord(asRecord(loadRes)?.result)
+            ? asRecord(asRecord(loadRes)?.result)!
+            : asRecord(loadRes);
+          const ok = payload?.ok === true;
+          const raw = asString(payload?.raw);
+          if (!ok || !raw) {
+            throw new Error(asString(payload?.error) || `Failed to load grammar ${grammarId}`);
+          }
+          return raw;
+        },
+      },
+      grammarDefinitions,
+      vscodeTextmate as unknown as TextmateModuleLike,
+      onigLib,
+    );
 
     if (tmActiveThemeJson) {
       applyThemeToRegistry(tmActiveThemeJson);
-      resetTokenizationForAllModels();
     }
-    console.log('[TextMate] ready');
-    return tmRegistry;
+
+    console.log('[TextMate] workbench runtime ready');
+    return tmGrammarFactory;
   }
 
   async function ensureTextmateTokenization(languageId: unknown, filePath: unknown): Promise<boolean> {
     try {
       const win = deps.getWindow();
-      const monacoLanguages = win.monaco && win.monaco.languages;
+      const monacoLanguages = win.monaco?.languages;
       if (!monacoLanguages || typeof monacoLanguages.setTokensProvider !== 'function') return false;
-      let lang = deps.normalizeLanguage(languageId);
-      console.log('[TextMate:DIAG] ensureTextmateTokenization called: lang=' + lang + ' filePath=' + asString(filePath) + ' alreadyInstalled=' + !!tmInstalled[lang]);
+
+      const lang = deps.normalizeLanguage(languageId);
+      if (!lang) return false;
       if (tmInstalled[lang]) return true;
       const inflight = tmInstallInflight[lang];
       if (inflight) return await inflight;
 
       tmInstallInflight[lang] = (async () => {
         const scopeName = await scopeNameForLanguage(lang, filePath);
-        console.log('[TextMate:DIAG] scopeName for ' + lang + ' = ' + scopeName);
-        if (!scopeName) return false;
+        if (!scopeName) {
+          console.warn('[TextMate] missing scope for', lang, filePath);
+          return false;
+        }
 
-        const registry = await ensureTextmateReady() as { loadGrammar?(scopeName: string): Promise<unknown>; getColorMap?(): string[] };
-        const cmBefore = registry && typeof registry.getColorMap === 'function' ? registry.getColorMap().length : '?';
-        const grammar = registry && typeof registry.loadGrammar === 'function' ? await registry.loadGrammar(scopeName) : null;
-        const cmAfter = registry && typeof registry.getColorMap === 'function' ? registry.getColorMap().length : '?';
-        console.log('[TextMate:DIAG] loadGrammar(' + scopeName + ') colorMap: ' + cmBefore + ' -> ' + cmAfter);
+        const knownLangs = typeof monacoLanguages.getLanguages === 'function' ? monacoLanguages.getLanguages() : [];
+        if (!knownLangs.some((entry) => entry && entry.id === lang) && typeof monacoLanguages.register === 'function') {
+          monacoLanguages.register({ id: lang });
+        }
+
+        const grammarFactory = await ensureTextmateReady() as TMGrammarFactory;
+        const encodedLanguageId = typeof monacoLanguages.getEncodedLanguageId === 'function'
+          ? Number(monacoLanguages.getEncodedLanguageId(lang))
+          : 0;
+        if (!Number.isFinite(encodedLanguageId) || encodedLanguageId <= 0) {
+          console.warn('[TextMate] invalid encoded language id for', lang);
+          return false;
+        }
+
+        const created = await grammarFactory.createGrammar(lang, encodedLanguageId);
+        const grammar = created.grammar as TextmateGrammarLike | null;
         if (!grammar) {
           console.warn('[TextMate] missing grammar for', lang, scopeName);
           return false;
         }
 
         tmGrammarByLang[lang] = grammar;
-        if (tmActiveThemeJson) applyThemeToRegistry(tmActiveThemeJson);
-
-        try {
-          const knownLangs = typeof monacoLanguages.getLanguages === 'function' ? monacoLanguages.getLanguages() : [];
-          if (!knownLangs.some((entry) => entry && entry.id === lang) && typeof monacoLanguages.register === 'function') {
-            monacoLanguages.register({ id: lang });
-          }
-        } catch (_) {}
+        if (tmActiveThemeJson) {
+          applyThemeToRegistry(tmActiveThemeJson);
+        }
 
         const setTokensProvider = monacoLanguages.setTokensProvider;
         if (typeof setTokensProvider !== 'function') return false;
+
         setTokensProvider.call(monacoLanguages, lang, {
           getInitialState() {
-            return {
-              _rs: win.vscodetextmate ? win.vscodetextmate.INITIAL : null,
-              clone() { return { _rs: this._rs, clone: this.clone, equals: this.equals }; },
-              equals(other: unknown) {
-                return !!other && typeof other === 'object' && (other as { _rs?: unknown })._rs === this._rs;
-              },
-            };
+            return makeState(created.initialState);
           },
-          tokenizeEncoded(line: unknown, state: { _rs?: unknown }) {
-            const ruleStack = state && state._rs != null ? state._rs : (win.vscodetextmate ? win.vscodetextmate.INITIAL : null);
-            const result = (grammar as { tokenizeLine2?(value: string, stack: unknown): { tokens: Uint32Array; ruleStack: unknown } }).tokenizeLine2
-              ? (grammar as { tokenizeLine2(value: string, stack: unknown): { tokens: Uint32Array; ruleStack: unknown } }).tokenizeLine2(String(line || ''), ruleStack)
-              : { tokens: new Uint32Array(0), ruleStack };
+          tokenizeEncoded(line: unknown, state: TextmateStateLike) {
+            const currentState = state && Object.prototype.hasOwnProperty.call(state, '_rs') ? state._rs : created.initialState;
+            const result = grammar.tokenizeLine2(String(line || ''), currentState, 500);
+            const nextState = currentState === result.ruleStack ? currentState : result.ruleStack;
+            if (result.stoppedEarly) {
+              return {
+                tokens: result.tokens,
+                endState: makeState(currentState),
+              };
+            }
             return {
               tokens: result.tokens,
-              endState: {
-                _rs: result.ruleStack,
-                clone() { return { _rs: this._rs, clone: this.clone, equals: this.equals }; },
-                equals(other: unknown) { return !!other && typeof other === 'object' && (other as { _rs?: unknown })._rs === this._rs; },
-              },
+              endState: makeState(nextState),
             };
           },
-          tokenize(line: unknown, state: { _rs?: unknown }) {
-            const ruleStack = state && state._rs != null ? state._rs : (win.vscodetextmate ? win.vscodetextmate.INITIAL : null);
-            const result = (grammar as { tokenizeLine?(value: string, stack: unknown): { tokens: Array<{ startIndex: number; scopes?: string[]; _te2_scopeStack?: string[] }>; ruleStack: unknown } }).tokenizeLine
-              ? (grammar as { tokenizeLine(value: string, stack: unknown): { tokens: Array<{ startIndex: number; scopes?: string[]; _te2_scopeStack?: string[] }>; ruleStack: unknown } }).tokenizeLine(String(line || ''), ruleStack)
-              : { tokens: [], ruleStack };
-            const tokens = [] as Array<{ startIndex: number; scopes: string }>;
+          tokenize(line: unknown, state: TextmateStateLike) {
+            const currentState = state && Object.prototype.hasOwnProperty.call(state, '_rs') ? state._rs : created.initialState;
+            const result = grammar.tokenizeLine(String(line || ''), currentState, 500);
+            const nextState = currentState === result.ruleStack ? currentState : result.ruleStack;
+            const tokens: Array<{ startIndex: number; scopes: string }> = [];
             for (const token of result.tokens) {
               const scopes = Array.isArray(token.scopes) ? token.scopes : [];
               const last = scopes.length ? scopes[scopes.length - 1] : '';
@@ -398,17 +545,13 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
             }
             return {
               tokens,
-              endState: {
-                _rs: result.ruleStack,
-                clone() { return { _rs: this._rs, clone: this.clone, equals: this.equals }; },
-                equals(other: unknown) { return !!other && typeof other === 'object' && (other as { _rs?: unknown })._rs === this._rs; },
-              },
+              endState: result.stoppedEarly ? makeState(currentState) : makeState(nextState),
             };
           },
         });
 
         tmInstalled[lang] = true;
-        console.log('[TextMate] installed', lang, '->', scopeName);
+        console.log('[TextMate] installed workbench tokenizer', lang, '->', scopeName);
         return true;
       })();
 
@@ -418,6 +561,10 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
         delete tmInstallInflight[lang];
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === missingTMGrammarErrorMessage) {
+        return false;
+      }
       console.warn('[TextMate] install failed', languageId, error);
       return false;
     }

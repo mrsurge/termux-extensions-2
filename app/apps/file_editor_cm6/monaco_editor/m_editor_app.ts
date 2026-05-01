@@ -266,6 +266,14 @@ interface MonacoBootWindowLike extends Window {
     if (typeof window.__debugDraftDiffs === 'undefined') {
       window.__debugDraftDiffs = true;
     }
+    if (typeof window.__debugDisableTextmate === 'undefined') {
+      window.__debugDisableTextmate = false;
+    }
+    window.__debugDisableSemanticTokens = false;
+  } catch (_) {}
+  try {
+    if (window.__debugDisableTextmate) console.log('[TextMate] disabled by __debugDisableTextmate');
+    if (window.__debugDisableSemanticTokens) console.log('[semanticTokens] disabled by __debugDisableSemanticTokens');
   } catch (_) {}
 
   let editor: MonacoRuntimeEditorLike | null = null;
@@ -639,6 +647,7 @@ interface MonacoBootWindowLike extends Window {
   var languageBridgeProviders = createEditorLanguageBridgeProviders({
     getMonaco: function() { return window.monaco || null; },
     getLanguageWorkersEnabled: _languageWorkersEnabled,
+    getDisableSemanticTokens: function() { return !!window.__debugDisableSemanticTokens; },
     getCurrentPath: function() { return currentPath; },
     getHasModel: function() { return !!model; },
     getCurrentLanguageContext: _currentLanguageContext,
@@ -755,6 +764,15 @@ interface MonacoBootWindowLike extends Window {
         providerSnapshotHydratePromise = null;
       });
     return providerSnapshotHydratePromise;
+  }
+
+  function replayActiveModelLanguageAfterWbaConnect(reason: string): void {
+    try {
+      console.log('[wba] replay active model language reason=' + String(reason || 'unknown') + ' path=' + String(currentPath || ''));
+      applyActiveModelLanguage(window, model, currentPath, applyLanguageToModel, languageFromPath);
+    } catch (error) {
+      console.warn('[wba] replay active model language failed', error);
+    }
   }
 
   function vscodeRpcDidOpenIfReady(): void {
@@ -1325,7 +1343,10 @@ interface MonacoBootWindowLike extends Window {
       if (wbaRpcSocket && typeof wbaRpcSocket.on === 'function') {
         wbaRpcSocket.on('connect', () => {
           console.log('[wba] socket connected');
-          void hydrateWorkbenchProviderSnapshot('wba_socket_connect');
+          void hydrateWorkbenchProviderSnapshot('wba_socket_connect')
+            .finally(() => {
+              replayActiveModelLanguageAfterWbaConnect('wba_socket_connect');
+            });
         });
         wbaRpcSocket.on('disconnect', () => {
           console.warn('[wba] socket disconnected');

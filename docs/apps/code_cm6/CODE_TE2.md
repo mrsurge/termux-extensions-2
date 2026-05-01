@@ -2576,7 +2576,7 @@ A browser-side console log viewer built on [Tencent vConsole](https://github.com
 | `ui_ipc/ui_ipc_ws.py` | Delegates `console:*` events to `console_ws.py`. |
 | `template.html` | Drawer tab bar (Terminal \| Console), console header (origin dropdown + clear), `#console-container`, vConsole CSS overrides. |
 | `main.js` | Imports bridge + console modules, wires tab switching, View menu toggle. |
-| `monaco_editor/m_editor_app.ts` | Inline bridge for the inline editor runtime — reuses `uiIpcSocket`, registers as `editor_iframe` worker. |
+| `monaco_editor/m_editor_app.ts` | Inline bridge for the inline editor runtime on `main_page` — reuses `uiIpcSocket`; legacy source labels in older code paths are not the authoritative runtime description for the current path. |
 
 ### Event protocol (all on `/ui_ipc` namespace)
 

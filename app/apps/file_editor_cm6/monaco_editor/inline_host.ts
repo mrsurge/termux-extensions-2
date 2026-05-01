@@ -19,14 +19,6 @@ const INLINE_EDITOR_SCRIPT_ASSETS = [
     id: 'fe-inline-monaco-touch-selection-js',
     src: '/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js',
   },
-  {
-    id: 'fe-inline-monaco-onig-js',
-    src: '/apps/file_editor_cm6/monaco_editor/textmate/vscode-oniguruma.umd.js',
-  },
-  {
-    id: 'fe-inline-monaco-textmate-js',
-    src: '/apps/file_editor_cm6/monaco_editor/textmate/vscode-textmate.umd.js',
-  },
 ] as const;
 const INLINE_EDITOR_MARKUP = `
   <div class="fh-root">

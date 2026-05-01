@@ -23,6 +23,14 @@ Parent/orchestrator rule: The workflow/orchestration steps below are intended fo
 
 If I am working on the workbench adapter, the Monaco frontend, Code TE2, or anything related to an IDE, and I do not know what is going on, I lost context, or I need to figure out what is going on, I will immediately consult `docs/apps/code_cm6/CODE_TE2.md` and/or ask the user before I make anything up, make any stupid changes, or waste more time.
 
+## User Direct Statements
+
+If the user makes a direct statement about this repo's code, architecture, or runtime behavior, I will treat that statement as authoritative unless I have an actual code reference that proves otherwise.
+
+I will not question the user from documentation, stale repo memory, or assumptions.
+
+If I think the user is wrong, I will only push back when I can cite the exact code path that proves it.
+
 ## Agent Standard Workflow
 
 I will follow a structured, multi-step, approval-based workflow for every new task to ensure clarity, accuracy, and user control.
@@ -51,9 +59,13 @@ When requesting prompt approval or final plan approval for work on this repo, I 
 2. MCP user-input or approval tool, when no built-in tool is available
 3. plain assistant message only when no approval tool is available
 
+Before I ask the user anything, I will check which built-in and MCP user-input / approval tools are actually available in the current tool inventory.
+
 If a higher-priority approval tool is available, I will actually use it. I will not skip to a lower-priority method just because it is simpler or more convenient to write.
 
 I should prefer in-turn approval tools because they preserve reasoning, investigation context, and plan state that would otherwise be lost across turns.
+
+I will be especially careful to check for an ask-user / approval MCP tool before falling back to a plain assistant question.
 
 When using an approval or user-input tool such as `ask_user`, I will include at least one explicit button/choice option. Freeform input may be allowed in addition to that, but freeform alone does not satisfy the approval prompt requirement when a choice-capable tool is available.
 
@@ -86,6 +98,8 @@ For Step 1 prompt approval and Step 2 final plan approval, I will use the approv
 1. built-in harness user-input or approval tool
 2. MCP user-input or approval tool
 3. plain assistant end-of-turn message only if no approval tool is available
+
+Before using a fallback, I will check the current tool inventory to confirm the higher-priority user-input / approval tools are actually unavailable.
 
 If I use a choice-capable approval tool in Step 1 or Step 2, the prompt must include at least one explicit button/choice option. Optional freeform input may supplement the prompt, but it will not replace the button choice.
 
@@ -140,33 +154,11 @@ If I use a choice-capable approval tool in Step 1 or Step 2, the prompt must inc
 
 The agent log is to be used to check whether other agents are working and to communicate with other agents. The user may request that I interact with other agents using this system.
 
-If I have the agent log MCP available, I will use that instead of the CLI examples below.
+If I have the agent log MCP available, I will use that instead of any local HTTP fallback.
 
-The server is running on `http://127.0.0.1:12356`. I can interact with it using `curl`.
+If the agent-log MCP surface is available, I will not hit guessed local agent-log HTTP endpoints directly.
 
-### Agent Log CLI Usage
-
-#### Post A Message
-
-To send a message, use a `POST` request with a JSON body containing `who` (your pseudonym) and `message`.
-
-```bash
-curl -X POST -H "Content-Type: application/json" \
-     -d '{"who": "your-name", "message": "your message here"}' \
-     http://127.0.0.1:12356/api/messages
-```
-
-#### Read Messages
-
-To fetch the log of messages:
-
-```bash
-# Get all messages
-curl http://127.0.0.1:12359/api/messages
-
-# Get only the last n messages
-curl "http://127.0.0.1:12359/api/messages?limit=n"
-```
+Legacy local HTTP access exists only as a last-resort fallback when the MCP surface is actually unavailable, and I have verified the real endpoint first. In normal repo workflow, do not use guessed local HTTP agent-log endpoints.
 
 I will make the user aware that I have read this agent-log usage message upon my initial interaction with him, best effort.
 
@@ -377,22 +369,23 @@ The entries are designed to be concise, each covering a single point and not bei
 
 There are two WebSockets:
 
-- The editor WebSocket, which covers the editor iframe.
-- The explorer WebSocket, which covers the main page.
+- The editor WebSocket, which covers the inline editor runtime on `main_page`.
+- The explorer WebSocket, which covers the explorer/main-page runtime.
 
 The Python framework is the connection between the two frontends. This is how communication is handled. We only use POST/HTTP when absolutely necessary, or when it does not make sense to use a WebSocket.
 
 ## TE2 MCP Eval / FWS Quick Workflow
 
 1. Start with `te2_fws_running` to identify live shell IDs for `file_editor_cm6`. Treat this as the source of truth for which app worker / code-server / WBA shells are actually running.
-2. Use `te2_console_workers_live` to get the **current** exact worker ID. Do not reuse an old `editor_iframe:<id>` after reloads.
+2. Use `te2_console_workers_live` to get the **current** exact worker ID. For the current `file_editor_cm6` editor path, the live editor runtime inspection target is `main_page`.
+   Do not describe that runtime as a separate iframe-owned editor surface. Legacy source labels, query fields, or comments are not authoritative runtime descriptions for the current path.
 3. Use `te2_console_tail` or `te2_console_search` on the exact worker before eval. Narrow first, then probe.
-4. Use `te2_console_eval` on `editor_iframe:<id>` for frontend runtime state. Keep probes small, targeted, and hypothesis-driven. Prefer one question per eval. Use `timeout_seconds` explicitly for anything async.
+4. Use `te2_console_eval` on `main_page` for editor/frontend runtime state unless an actual code reference proves a different live worker owns that runtime. Keep probes small, targeted, and hypothesis-driven. Prefer one question per eval. Use `timeout_seconds` explicitly for anything async.
 5. Use `te2_fws_log_search` / `te2_fws_log_tail` on the WBA shell to prove backend facts such as merged symbols, stale-generation errors, registration, and adapter-side request flow.
 6. Use `te2_fws_log_search` / `te2_fws_log_tail` on the app-worker shell to prove Python bridge behavior (`editor_ws.py`, Socket.IO routing, SSOT updates, etc.).
 7. Successful workflow:
   - prove the backend/provider result first in FWS logs
-  - prove the frontend provider/model state second in `editor_iframe` eval
+  - prove the frontend provider/model state second in `main_page` eval
   - only then inspect controller/widget/render state
 8. For frontend file switching from eval or automation, use the real editor Socket.IO open path:
   - namespace `/editor`
