@@ -9,7 +9,7 @@
  *   getCurrentPath: () => string,
  *   setCurrentPath: (path: string) => void,
  *   reconcileCurrentPath?: (path: string) => void,
- *   getEditorSocket: () => any,
+ *   requestBackendEditorGitBaselines: (payload: Record<string, unknown>) => Promise<any>,
  *   getEditorViewState: () => any,
  *   updatePreference: (key: string, value: any) => Promise<boolean>,
  *   openFile: (path: string, opts?: any) => Promise<any>
@@ -52,11 +52,9 @@ export function createEditorStateController(deps) {
 
     window.__cm6RequestGitBaselines = function() {
       try {
-        const editorSocket = deps.getEditorSocket();
         const currentPath = deps.getCurrentPath();
-        if (!editorSocket || !editorSocket.connected) return false;
         if (!currentPath) return false;
-        editorSocket.emit('editor_git_baselines_request', { path: currentPath });
+        void deps.requestBackendEditorGitBaselines({ path: currentPath });
         return true;
       } catch (_) {
         return false;

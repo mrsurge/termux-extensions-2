@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "te2"
-version = "0.2.187"
+version = "0.2.188"
 description = "TE2 framework runtime and tooling"
 readme = "README.md"
 requires-python = ">=3.12"

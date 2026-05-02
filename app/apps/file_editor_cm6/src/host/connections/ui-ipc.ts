@@ -178,6 +178,31 @@ export function createUiIpcConnections(deps) {
     return await connection.request(UI_IPC_RPC_METHODS.hostBootSnapshotGet, payload || {}, 8000);
   }
 
+  async function requestBackendEditorJumpToLine(payload) {
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostEditorJumpToLine, payload || {}, 8000);
+  }
+
+  async function requestBackendEditorGitBaselines(payload) {
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostEditorGitBaselinesGet, payload || {}, 8000);
+  }
+
+  async function requestBackendEditorFind(payload) {
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostEditorFind, payload || {}, 8000);
+  }
+
+  async function requestBackendEditorIssuesCommand(payload) {
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostEditorIssuesCommand, payload || {}, 8000);
+  }
+
+  async function requestBackendEditorIssuesDump(payload) {
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostEditorIssuesDump, payload || {}, 12000);
+  }
+
   return {
     emitSidebarIpc,
     connectSidebarIPC,
@@ -187,5 +212,10 @@ export function createUiIpcConnections(deps) {
     requestBackendEditorPreferenceUpdate,
     requestBackendRunActiveFile,
     requestBackendBootSnapshot,
+    requestBackendEditorJumpToLine,
+    requestBackendEditorGitBaselines,
+    requestBackendEditorFind,
+    requestBackendEditorIssuesCommand,
+    requestBackendEditorIssuesDump,
   };
 }

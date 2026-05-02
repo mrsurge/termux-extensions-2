@@ -13,6 +13,11 @@ UI_IPC_RPC_METHOD_HOST_FILE_SAVE: Final = "ui.host.file.save"
 UI_IPC_RPC_METHOD_HOST_EDITOR_PREFERENCE_UPDATE: Final = "ui.host.editorPreference.update"
 UI_IPC_RPC_METHOD_HOST_FILE_RUN: Final = "ui.host.file.run"
 UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET: Final = "ui.host.bootSnapshot.get"
+UI_IPC_RPC_METHOD_HOST_EDITOR_JUMP_TO_LINE: Final = "ui.host.editor.jumpToLine"
+UI_IPC_RPC_METHOD_HOST_EDITOR_GIT_BASELINES_GET: Final = "ui.host.editor.gitBaselines.get"
+UI_IPC_RPC_METHOD_HOST_EDITOR_FIND: Final = "ui.host.editor.find"
+UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_COMMAND: Final = "ui.host.editor.issues.command"
+UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_DUMP: Final = "ui.host.editor.issues.dump"
 
 UiIpcRpcMethod = Literal[
     "ui.host.file.open",
@@ -20,6 +25,11 @@ UiIpcRpcMethod = Literal[
     "ui.host.editorPreference.update",
     "ui.host.file.run",
     "ui.host.bootSnapshot.get",
+    "ui.host.editor.jumpToLine",
+    "ui.host.editor.gitBaselines.get",
+    "ui.host.editor.find",
+    "ui.host.editor.issues.command",
+    "ui.host.editor.issues.dump",
 ]
 
 UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE: Final = "ui.editor.save"
@@ -44,6 +54,11 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_EDITOR_PREFERENCE_UPDATE,
     UI_IPC_RPC_METHOD_HOST_FILE_RUN,
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
+    UI_IPC_RPC_METHOD_HOST_EDITOR_JUMP_TO_LINE,
+    UI_IPC_RPC_METHOD_HOST_EDITOR_GIT_BASELINES_GET,
+    UI_IPC_RPC_METHOD_HOST_EDITOR_FIND,
+    UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_COMMAND,
+    UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_DUMP,
 }
 
 ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {

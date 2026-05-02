@@ -1312,6 +1312,7 @@ interface MonacoBootWindowLike extends Window {
       }) as Parameters<typeof registerEditorSaveMirrorSocketHandlers>[1]);
 
       registerEditorRuntimeSocketHandlers(editorSocket as Parameters<typeof registerEditorRuntimeSocketHandlers>[0], buildRuntimeSocketDeps({
+        rpcNotifications: editorRpcTransport,
         getCurrentPath: function() { return currentPath; },
         getDraftDiffRequestId: function() { return draftDiffRequestRuntime.getDraftDiffRequestId(); },
         applyDraftDiffDecorations: applyDraftDiffDecorations,

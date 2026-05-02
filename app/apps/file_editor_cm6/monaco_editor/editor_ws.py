@@ -30,6 +30,10 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_DRAFT_STATE,
     EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
     EDITOR_RPC_NOTIFICATION_FILE_OPENED,
+    EDITOR_RPC_NOTIFICATION_FIND_COMMAND,
+    EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
+    EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND,
+    EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_REQUEST,
     EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED,
     EDITOR_RPC_NOTIFICATION_NOTIFY,
     EDITOR_RPC_NOTIFICATION_OPEN_COMPLETE,
@@ -42,7 +46,7 @@ from .editor_rpc_emit import emit_editor_rpc_notification
 import logging as _logging
 _wb_log = _logging.getLogger("editor_ws.workbench")
 
-_ISSUES_DUMP_WAITING: dict[str, str] = {}
+_ISSUES_DUMP_WAITING: dict[str, str | asyncio.Future[dict[str, object]]] = {}
 _ISSUES_DUMP_TTL_S = 20.0
 _SAVE_SNAPSHOT_WAITING: dict[str, asyncio.Future[dict[str, object]]] = {}
 _MODEL_READY_LAST_BY_SID: dict[str, str] = {}
@@ -236,6 +240,18 @@ def editor_runtime_record_save_sha(abs_path: str, sha256: str) -> None:
     _LAST_SAVE_SHA[abs_path] = sha256
 
 
+def editor_runtime_read_disk_text(path: str) -> str:
+    return _read_disk_text(path)
+
+
+def editor_runtime_git_head_text(project: str, abs_path: str) -> str | None:
+    return _git_head_text(project, abs_path)
+
+
+def editor_runtime_record_file_activity(project: str, abs_path: str, *, scroll_line: float | None = None) -> None:
+    _history_store.record_file_activity(project, abs_path, scroll_line=scroll_line)
+
+
 class _EditorSnapshotRoomEmitter:
     async def emit(self, event: str, data: dict[str, object], *, room: str) -> object:
         from .editor_socketio import EDITOR_SIO
@@ -251,6 +267,21 @@ async def editor_runtime_request_save_snapshot(request_id: str, *, timeout_s: fl
         waiting=_SAVE_SNAPSHOT_WAITING,
         timeout_s=timeout_s,
     )
+
+
+async def editor_runtime_request_issues_dump(request_id: str, *, timeout_s: float = 10.0) -> dict[str, object]:
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future[dict[str, object]] = loop.create_future()
+    _ISSUES_DUMP_WAITING[request_id] = fut
+    try:
+        await editor_runtime_emit_room_event(
+            "editor:issues_dump_request",
+            {"requestId": request_id, "requestedAtMs": int(time.time() * 1000)},
+        )
+        return await asyncio.wait_for(fut, timeout=timeout_s)
+    finally:
+        if _ISSUES_DUMP_WAITING.get(request_id) is fut:
+            _ISSUES_DUMP_WAITING.pop(request_id, None)
 
 
 def editor_runtime_build_connect_snapshot(*, role: str = "") -> dict[str, object]:
@@ -302,6 +333,7 @@ def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification
     mapping: dict[str, EditorRpcNotification] = {
         "editor:open": EDITOR_RPC_NOTIFICATION_FILE_OPENED,
         "editor:jump_to_line": EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
+        "editor:git_baselines": EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
         "editor:mirror": EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED,
         "editor:cache_state": EDITOR_RPC_NOTIFICATION_CACHE_STATE,
         "editor:draft_state": EDITOR_RPC_NOTIFICATION_DRAFT_STATE,
@@ -309,6 +341,9 @@ def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification
         "editor:notify": EDITOR_RPC_NOTIFICATION_NOTIFY,
         "editor:open_complete": EDITOR_RPC_NOTIFICATION_OPEN_COMPLETE,
         "editor:ready": EDITOR_RPC_NOTIFICATION_READY,
+        "editor:issues_dump_request": EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_REQUEST,
+        "editor:issues_cmd": EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND,
+        "editor:find_cmd": EDITOR_RPC_NOTIFICATION_FIND_COMMAND,
     }
     return mapping.get(event_name)
 
@@ -573,8 +608,7 @@ async def broadcast_git_baselines_for_active_file() -> bool:
             "head_content": head,
             "head_sha256": head_sha,
         }
-        from .editor_socketio import EDITOR_SIO
-        await EDITOR_SIO.emit("editor:git_baselines", payload, room="file_editor_cm6", namespace="/editor")
+        await editor_runtime_emit_room_event("editor:git_baselines", payload)
         print(f"[git_baselines_push] emitted editor:git_baselines for {active_norm}", flush=True)
         return True
     except Exception as e:
@@ -797,7 +831,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return
         payload = dict(payload)
         payload["source_client"] = sid
-        await self.emit("editor:issues_cmd", payload, room="file_editor_cm6")
+        await editor_runtime_emit_room_event("editor:issues_cmd", payload)
 
     async def on_editor_find_cmd(self, sid, data):
         payload = data or {}
@@ -805,7 +839,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return
         payload = dict(payload)
         payload["source_client"] = sid
-        await self.emit("editor:find_cmd", payload, room="file_editor_cm6")
+        await editor_runtime_emit_room_event("editor:find_cmd", payload)
 
     async def on_editor_ready(self, sid, data):
         payload = data or {}
@@ -856,10 +890,9 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             return
         _ISSUES_DUMP_WAITING[request_id] = sid
         # Attach a timestamp so stale requests can be ignored client-side if desired.
-        await self.emit(
+        await editor_runtime_emit_room_event(
             "editor:issues_dump_request",
             {"requestId": request_id, "requestedAtMs": int(time.time() * 1000)},
-            room="file_editor_cm6",
         )
 
     async def on_editor_issues_dump_response(self, sid, data):
@@ -870,15 +903,21 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         if not isinstance(request_id, str) or not request_id:
             return
 
-        host_sid = _ISSUES_DUMP_WAITING.pop(request_id, None)
-        if not host_sid:
+        waiting = _ISSUES_DUMP_WAITING.pop(request_id, None)
+        if not waiting:
+            return
+
+        response_payload = {"requestId": request_id, "dump": payload.get("dump")}
+        if isinstance(waiting, asyncio.Future):
+            if not waiting.done():
+                waiting.set_result(response_payload)
             return
 
         try:
             await self.emit(
                 "editor:issues_dump_response",
-                {"requestId": request_id, "dump": payload.get("dump")},
-                room=host_sid,
+                response_payload,
+                room=waiting,
             )
         except Exception:
             return
@@ -947,6 +986,14 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         if scroll_to_top is not None and not isinstance(scroll_to_top, bool):
             scroll_to_top = None
 
+        try:
+            project = _active_project()
+            path = _normalize_abs_path(str(payload_in.get("path") or ""))
+            if project and path and _is_under_project(project, path):
+                _history_store.record_file_activity(project, path, scroll_line=float(line))
+        except Exception:
+            pass
+
         # Broadcast to all connected clients (single-doc model).
         await editor_runtime_emit_room_event(
             "editor:jump_to_line",
@@ -1000,7 +1047,7 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             "head_sha256": head_sha,
             "source_client": sid,
         }
-        await self.emit("editor:git_baselines", payload, room=sid)
+        await editor_runtime_emit_room_event("editor:git_baselines", payload)
 
     async def on_editor_draft_diff_request(self, sid, data):
         """Return draft diff hunks for the currently cached draft (disk ↔ draft buffer).

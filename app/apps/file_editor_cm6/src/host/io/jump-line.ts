@@ -2,8 +2,7 @@
 /**
  * @param {{
  *   getCurrentPath: () => string,
- *   getEditorSocket: () => any,
- *   queueEditorMessage: (msg: any) => void,
+ *   requestBackendEditorJumpToLine: (payload: Record<string, unknown>) => Promise<any>,
  *   toast: (msg: string) => void,
  * }} deps
  */
@@ -26,12 +25,7 @@ export function createJumpLineController(deps) {
       if (options && Object.prototype.hasOwnProperty.call(options, 'scrollToTop')) payload.scroll_to_top = Boolean(optionsAny.scrollToTop);
       if (options && Object.prototype.hasOwnProperty.call(options, 'scrollY') && typeof optionsAny.scrollY === 'string') payload.scroll_y = optionsAny.scrollY;
 
-      const editorSocket = deps.getEditorSocket();
-      if (editorSocket && editorSocket.connected) {
-        editorSocket.emit('editor_jump_to_line_request', payload);
-        return;
-      }
-      deps.queueEditorMessage({ type: 'editor_jump_to_line_request', payload });
+      await deps.requestBackendEditorJumpToLine(payload);
     } catch (e) {
       const eAny = /** @type {any} */ (e);
       deps.toast('Failed to jump: ' + (eAny?.message || 'unknown error'));

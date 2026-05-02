@@ -427,11 +427,17 @@ export function registerEditorSocketConnectionHandlers(
     socket.on('editor:prefs_changed', handlePrefsChangedPayload);
   }
 
-  socket.on('editor:git_baselines', (payload: unknown) => {
+  const handleGitBaselinesPayload = (payload: unknown): void => {
     try {
       deps.applyGitBaselines(payload);
     } catch (error) {
       console.warn('[Monaco] git baselines apply failed', error);
     }
-  });
+  };
+
+  if (deps.rpcNotifications) {
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.gitBaselines, handleGitBaselinesPayload);
+  } else {
+    socket.on('editor:git_baselines', handleGitBaselinesPayload);
+  }
 }

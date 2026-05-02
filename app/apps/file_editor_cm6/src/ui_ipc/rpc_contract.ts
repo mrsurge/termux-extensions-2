@@ -9,6 +9,11 @@ export const UI_IPC_RPC_METHODS = {
   hostEditorPreferenceUpdate: 'ui.host.editorPreference.update',
   hostFileRun: 'ui.host.file.run',
   hostBootSnapshotGet: 'ui.host.bootSnapshot.get',
+  hostEditorJumpToLine: 'ui.host.editor.jumpToLine',
+  hostEditorGitBaselinesGet: 'ui.host.editor.gitBaselines.get',
+  hostEditorFind: 'ui.host.editor.find',
+  hostEditorIssuesCommand: 'ui.host.editor.issues.command',
+  hostEditorIssuesDump: 'ui.host.editor.issues.dump',
 } as const;
 
 export const UI_IPC_RPC_NOTIFICATIONS = {
@@ -52,13 +57,14 @@ export function isUiIpcRpcNotificationMethod(
 }
 
 export function parseUiIpcRpcNotification(
-  notification: JsonRpcNotificationEnvelope,
+  notification: JsonRpcNotificationEnvelope | JsonObject,
 ): UiIpcRpcNotification | null {
-  if (!isUiIpcRpcNotificationMethod(notification.method)) {
+  const method = typeof notification.method === 'string' ? notification.method : '';
+  if (!isUiIpcRpcNotificationMethod(method)) {
     return null;
   }
   return {
-    method: notification.method,
+    method,
     params: normalizeUiIpcRpcParams(notification.params),
   };
 }
@@ -66,7 +72,7 @@ export function parseUiIpcRpcNotification(
 export function buildUiIpcRpcNotificationEnvelope(
   method: UiIpcRpcNotificationMethod,
   params: JsonObject = {},
-): JsonRpcNotificationEnvelope {
+): JsonObject {
   return {
     jsonrpc: '2.0',
     method,

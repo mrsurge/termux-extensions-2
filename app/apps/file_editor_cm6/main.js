@@ -528,7 +528,6 @@ let explorerNeedsResync = false;
 let editorSocket = null;
 let editorSocketConnectPromise = null;
 let editorSocketId = null;
-const editorPending = [];
 let editorIframeReady = false;
 let editorIframeReadyResolver = null;
 let editorIframeReadyPromise = null;
@@ -551,7 +550,6 @@ function markEditorIframeReady() {
     try { resolve(true); } catch (_) {}
   }
 }
-const _editorIssuesDumpWaiters = new Map(); // requestId -> {resolve,reject,timer}
 const _editorOpenWaiters = new Map(); // requestId -> {resolve,reject,timer,path}
 let codexAppserverSocket = null;
 const _agentSidebarTrackedEditDedup = new Map();
@@ -947,37 +945,9 @@ function _handleEditorScrollState(payload) {
   }, (typeof window.__feCursorStateDebounceMs === 'number' ? window.__feCursorStateDebounceMs : 1000));
 }
 
-function _resolveIssuesDumpWaiter(requestId, dump) {
-  const waiter = _editorIssuesDumpWaiters.get(requestId);
-  if (!waiter) return;
-  _editorIssuesDumpWaiters.delete(requestId);
-  try { clearTimeout(waiter.timer); } catch (_) {}
-  try { waiter.resolve(dump || null); } catch (_) {}
-}
-
-function _rejectIssuesDumpWaiter(requestId, err) {
-  const waiter = _editorIssuesDumpWaiters.get(requestId);
-  if (!waiter) return;
-  _editorIssuesDumpWaiters.delete(requestId);
-  try { clearTimeout(waiter.timer); } catch (_) {}
-  try { waiter.reject(err); } catch (_) {}
-}
-
 function _issuesDumpRequestOnce() {
-  const requestId = `issues_dump_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  return new Promise((resolve, reject) => {
-    const timeoutMs = 10000;
-    const timer = setTimeout(() => {
-      _editorIssuesDumpWaiters.delete(requestId);
-      reject(new Error('Issues dump timed out'));
-    }, timeoutMs);
-    _editorIssuesDumpWaiters.set(requestId, { resolve, reject, timer });
-
-    if (editorSocket && editorSocket.connected) {
-      editorSocket.emit('editor_issues_dump_request', { requestId });
-      return;
-    }
-    reject(new Error('Editor socket not connected'));
+  return uiIpcConnections.requestBackendEditorIssuesDump({
+    request_id: `issues_dump_${Date.now()}_${Math.random().toString(16).slice(2)}`,
   });
 }
 
@@ -1031,10 +1001,6 @@ function connectEditorSocket() {
 
       editorSocket.on('connect', () => {
         editorSocketId = editorSocket.id || null;
-        while (editorPending.length) {
-          const msg = editorPending.shift();
-          editorSocket.emit(msg.type, msg.payload || {});
-        }
       });
 
       editorSocket.on('disconnect', (reason) => {
@@ -1092,14 +1058,6 @@ function connectEditorSocket() {
         const p = payload && typeof payload === 'object' ? payload : {};
         const message = typeof p.message === 'string' ? p.message : null;
         if (message) host.toast(message, p.timeout || 3000);
-      });
-
-      editorSocket.on('editor:issues_dump_response', (payload) => {
-        try {
-          const requestId = payload && (payload.requestId || payload.request_id) ? String(payload.requestId || payload.request_id) : '';
-          if (!requestId) return;
-          _resolveIssuesDumpWaiter(requestId, payload.dump);
-        } catch (_) {}
       });
 
       function _feTs() {
@@ -1475,13 +1433,11 @@ function setIssuesButtonsEnabled(enabled) {
   }
 }
 
-function sendIssuesCmd(action) {
+async function sendIssuesCmd(action) {
   try {
-    if (!editorSocket || !editorSocket.connected) return;
-    // Monaco issues navigation runs inside the editor iframe via editor Socket.IO.
-    editorSocket.emit('editor_issues_cmd', { action: String(action || '') });
+    await uiIpcConnections.requestBackendEditorIssuesCommand({ action: String(action || '') });
   } catch (err) {
-    console.warn('[Issues] Failed to send via editor socket:', err);
+    console.warn('[Issues] Failed to send via backend:', err);
   }
 }
 
@@ -1531,8 +1487,8 @@ function buildDefaultDiagnosticsFilename(absPath, projectRoot, ext = '.json') {
   return `${dotted || 'untitled'}${ext}`;
 }
 
-// NOTE: _issuesDumpRequestOnce is now implemented via the editor Socket.IO channel
-// (see connectEditorSocket block) to avoid host↔iframe postMessage bridges.
+// Issues dump requests are brokered through /ui_ipc RPC so the backend owns
+// host-to-editor command routing.
 
 async function _ensureDiagnosticsDir(projectRootAbs) {
   const projectRoot = String(projectRootAbs || '').replace(/\/+$/, '');
@@ -3179,10 +3135,9 @@ async function apiPost(path, body) {
 
 // Live draft/autosave propagation is handled by the dedicated editor Socket.IO channel.
 const searchPanelController = createSearchPanelController({
-  getEditorSocket: () => editorSocket,
   getCurrentPath: () => currentPath || null,
   getProjectRoot: () => cachedProjectRoot || null,
-  apiPost: (path, body) => apiPost(path, body),
+  requestBackendEditorFind: (payload) => uiIpcConnections.requestBackendEditorFind(payload),
   toast: (msg) => host.toast(msg),
 });
 
@@ -3259,7 +3214,7 @@ const editorStateController = createEditorStateController({
   getCurrentPath: () => currentPath,
   setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
   reconcileCurrentPath: (path) => { _applyHostActivePath(path, { forceToolbar: true }); },
-  getEditorSocket: () => editorSocket,
+  requestBackendEditorGitBaselines: (payload) => uiIpcConnections.requestBackendEditorGitBaselines(payload),
   getEditorViewState: () => editorViewState,
   updatePreference: (key, value) => preferencesController.updatePreference(key, value),
   openFile: (path, opts) => openFile(path, opts),
@@ -3482,8 +3437,7 @@ async function pickFile(startPath) {
 
 const jumpLineController = createJumpLineController({
   getCurrentPath: () => currentPath,
-  getEditorSocket: () => editorSocket,
-  queueEditorMessage: (msg) => editorPending.push(msg),
+  requestBackendEditorJumpToLine: (payload) => uiIpcConnections.requestBackendEditorJumpToLine(payload),
   toast: (msg) => host.toast(msg),
 });
 
