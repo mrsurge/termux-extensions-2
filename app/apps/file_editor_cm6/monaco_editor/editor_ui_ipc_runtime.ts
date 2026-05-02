@@ -2,6 +2,10 @@ import { connectUiIpcSocket } from './editor_ui_ipc_connect_utils.ts';
 import { bindSaveKeyCommand } from './editor_ui_ipc_save_key_utils.ts';
 import { bindFocusRelay } from './editor_ui_ipc_focus_relay_utils.ts';
 import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.ts';
+import {
+  UI_IPC_RPC_NOTIFICATIONS,
+  parseUiIpcRpcNotification,
+} from '../src/ui_ipc/rpc_contract.ts';
 
 interface DisposableLike {
   dispose?(): void;
@@ -74,17 +78,18 @@ export function createEditorUiIpcRuntime(
       uiIpcSocket.on('connect', () => {
         console.log('[UI_IPC] editor iframe connected');
       });
-      uiIpcSocket.on('ui_event', (payload) => {
+      uiIpcSocket.on('rpc.notify', (payload) => {
         const data = asRecord(payload);
         if (!data) return;
-        if (data.type !== 'adapter_state') return;
-        const status = typeof data.status === 'string' ? data.status : '';
+        const parsed = parseUiIpcRpcNotification(data as Parameters<typeof parseUiIpcRpcNotification>[0]);
+        if (!parsed || parsed.method !== UI_IPC_RPC_NOTIFICATIONS.adapterState) return;
+        const status = typeof parsed.params.status === 'string' ? parsed.params.status : '';
         console.log('[adapter_state] iframe received:', status);
         if (status === 'ready') {
           win.__te2AdapterReady = true;
           deps.replayOpenFileAfterBaton();
         } else if (status === 'error') {
-          console.warn('[adapter_state] error:', data.error);
+          console.warn('[adapter_state] error:', parsed.params.error);
         }
       });
     } catch (error) {

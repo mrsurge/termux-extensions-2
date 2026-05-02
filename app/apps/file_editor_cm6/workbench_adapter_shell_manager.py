@@ -37,12 +37,10 @@ def get_adapter_state() -> dict:
 async def _broadcast_adapter_state() -> None:
     """Push current adapter state to all UI IPC clients."""
     try:
-        from .ui_ipc.ui_ipc_socketio import UI_IPC_SIO
-        await UI_IPC_SIO.emit(
-            "ui_event",
-            {"type": "adapter_state", **_adapter_state},
-            namespace="/ui_ipc",
-            room="ui_ipc",
+        from .ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
+        await emit_ui_ipc_rpc_notification(
+            "ui.adapter.state",
+            dict(_adapter_state),
         )
     except Exception as exc:
         log.warning("[adapter_state] broadcast failed: %s", exc)

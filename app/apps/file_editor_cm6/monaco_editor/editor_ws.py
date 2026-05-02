@@ -166,11 +166,10 @@ async def _emit_host_active_file_changed(
 ) -> None:
     try:
         from ..explorer.transport.connection_manager import abs_to_rel
-        from ..ui_ipc.ui_ipc_socketio import UI_IPC_SIO
+        from ..ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
 
         rel = abs_to_rel(abs_path, project)
         payload: dict[str, object] = {
-            "type": "active_file_changed",
             "path": abs_path,
             "rel": rel,
         }
@@ -178,11 +177,9 @@ async def _emit_host_active_file_changed(
             payload["source"] = source
         if isinstance(request_id, str) and request_id:
             payload["request_id"] = request_id
-        await UI_IPC_SIO.emit(
-            "ui_event",
+        await emit_ui_ipc_rpc_notification(
+            "ui.host.activeFile.changed",
             payload,
-            namespace="/ui_ipc",
-            room="ui_ipc",
         )
     except Exception:
         pass

@@ -1,6 +1,8 @@
 // @ts-check
 
 import { isRunnableFile } from '../utils.ts';
+import { createUiIpcRpcConnection } from './ui-ipc-rpc.ts';
+import { UI_IPC_RPC_METHODS, UI_IPC_RPC_NOTIFICATIONS } from '../../ui_ipc/rpc_contract.ts';
 
 /**
  * @param {{
@@ -11,7 +13,7 @@ import { isRunnableFile } from '../utils.ts';
  */
 export function createUiIpcConnections(deps) {
   let sidebarIpcSocket = null;
-  let uiIpcSocket = null;
+  let uiIpcRpcConnection = null;
   let uiIpcConnectPromise = null;
 
   function applyActiveFileChangedUiState(data) {
@@ -95,47 +97,44 @@ export function createUiIpcConnections(deps) {
   }
 
   function connectUIIPC() {
-    if (uiIpcSocket && uiIpcSocket.connected) return Promise.resolve(uiIpcSocket);
+    if (uiIpcRpcConnection && uiIpcRpcConnection.isConnected()) return Promise.resolve(uiIpcRpcConnection);
     if (uiIpcConnectPromise) return uiIpcConnectPromise;
-    uiIpcConnectPromise = deps.ensureSocketIoLoaded().then((io) => {
-      if (!io) return;
-      if (uiIpcSocket) {
-        if (!uiIpcSocket.connected) uiIpcSocket.connect();
-        return uiIpcSocket;
-      }
-      uiIpcSocket = io('/ui_ipc', {
-        path: '/ui_ipc_ws/socket.io',
-        transports: ['websocket'],
-        query: { app_id: 'file_editor_cm6', source: 'main_page' },
-      });
-      uiIpcSocket.on('connect', () => {
-        console.log('[UI_IPC] main page connected');
-      });
-      uiIpcSocket.on('ui_event', (data) => {
-        if (!data || typeof data !== 'object') return;
-        console.log('[focus_relay] main got ui_event', data.type);
-        if (data.type === 'save') {
-          document.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 's', code: 'KeyS', ctrlKey: true, bubbles: true,
-          }));
-        } else if (data.type === 'focus') {
-          console.log('[focus_relay] dispatching synthetic click');
-          document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        } else if (data.type === 'mention_request') {
-          console.log('[mention] UI IPC received mention_request');
-          window.dispatchEvent(new CustomEvent('cm6:mention-request', {
-            detail: data,
-          }));
-        } else if (data.type === 'active_file_changed') {
-          applyActiveFileChangedUiState(data);
-          window.dispatchEvent(new CustomEvent('cm6:active-file-changed', {
-            detail: data,
-          }));
-        } else if (data.type === 'adapter_state') {
-          window.dispatchEvent(new CustomEvent('cm6:adapter-state', {
-            detail: data,
-          }));
-        }
+    if (!uiIpcRpcConnection) {
+      uiIpcRpcConnection = createUiIpcRpcConnection({
+        ensureSocketIoLoaded: deps.ensureSocketIoLoaded,
+        onConnect: () => {
+          console.log('[UI_IPC_RPC] main page connected');
+        },
+        onDisconnect: (reason) => {
+          console.log('[UI_IPC_RPC] main page disconnected', reason);
+        },
+        onConnectError: (err) => {
+          console.warn('[UI_IPC_RPC] connect failed', err);
+        },
+        onNotification: (method, params) => {
+          if (method === UI_IPC_RPC_NOTIFICATIONS.editorSave) {
+            document.dispatchEvent(new KeyboardEvent('keydown', {
+              key: 's', code: 'KeyS', ctrlKey: true, bubbles: true,
+            }));
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorFocus) {
+            console.log('[focus_relay] dispatching synthetic click');
+            document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorMentionRequest) {
+            console.log('[mention] UI IPC RPC received mention request');
+            window.dispatchEvent(new CustomEvent('cm6:mention-request', {
+              detail: params,
+            }));
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.hostActiveFileChanged) {
+            applyActiveFileChangedUiState(params);
+            window.dispatchEvent(new CustomEvent('cm6:active-file-changed', {
+              detail: params,
+            }));
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.adapterState) {
+            window.dispatchEvent(new CustomEvent('cm6:adapter-state', {
+              detail: params,
+            }));
+          }
+        },
       });
 
       deps.initConsoleBridge({
@@ -143,27 +142,9 @@ export function createUiIpcConnections(deps) {
         socketPath: '/te2_console_ws/socket.io',
         namespace: '/te2_console',
       });
-      return new Promise((resolve, reject) => {
-        if (uiIpcSocket.connected) {
-          resolve(uiIpcSocket);
-          return;
-        }
-        const onConnect = () => {
-          cleanup();
-          resolve(uiIpcSocket);
-        };
-        const onError = (err) => {
-          cleanup();
-          reject(err);
-        };
-        const cleanup = () => {
-          try { uiIpcSocket.off('connect', onConnect); } catch (_) {}
-          try { uiIpcSocket.off('connect_error', onError); } catch (_) {}
-        };
-        uiIpcSocket.on('connect', onConnect);
-        uiIpcSocket.on('connect_error', onError);
-      });
-    }).catch((err) => {
+    }
+
+    uiIpcConnectPromise = uiIpcRpcConnection.connect().then(() => uiIpcRpcConnection).catch((err) => {
       console.warn('[UI_IPC] connect failed', err);
       throw err;
     }).finally(() => {
@@ -173,93 +154,28 @@ export function createUiIpcConnections(deps) {
   }
 
   async function requestBackendFileOpen(payload) {
-    const socket = await connectUIIPC();
-    if (!socket || !socket.connected) throw new Error('UI IPC socket not connected');
-    return await new Promise((resolve, reject) => {
-      try {
-        socket.emit('ui_event', { ...(payload || {}), type: 'open_file' }, (reply) => {
-          if (!reply || reply.ok === false) {
-            reject(new Error(reply?.error || 'backend open failed'));
-            return;
-          }
-          resolve(reply);
-        });
-      } catch (err) {
-        reject(err);
-      }
-    });
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostFileOpen, payload || {}, 8000);
   }
 
   async function requestBackendFileSave(payload) {
-    const socket = await connectUIIPC();
-    if (!socket || !socket.connected) throw new Error('UI IPC socket not connected');
-    return await new Promise((resolve, reject) => {
-      try {
-        socket.emit('ui_event', { ...(payload || {}), type: 'save_file' }, (reply) => {
-          if (!reply || reply.ok === false) {
-            reject(new Error(reply?.error || 'backend save failed'));
-            return;
-          }
-          resolve(reply);
-        });
-      } catch (err) {
-        reject(err);
-      }
-    });
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostFileSave, payload || {}, 8000);
   }
 
   async function requestBackendEditorPreferenceUpdate(payload) {
-    const socket = await connectUIIPC();
-    if (!socket || !socket.connected) throw new Error('UI IPC socket not connected');
-    return await new Promise((resolve, reject) => {
-      try {
-        socket.emit('ui_event', { ...(payload || {}), type: 'update_editor_preference' }, (reply) => {
-          if (!reply || reply.ok === false) {
-            reject(new Error(reply?.error || 'backend preference update failed'));
-            return;
-          }
-          resolve(reply);
-        });
-      } catch (err) {
-        reject(err);
-      }
-    });
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostEditorPreferenceUpdate, payload || {}, 8000);
   }
 
   async function requestBackendRunActiveFile(payload) {
-    const socket = await connectUIIPC();
-    if (!socket || !socket.connected) throw new Error('UI IPC socket not connected');
-    return await new Promise((resolve, reject) => {
-      try {
-        socket.emit('ui_event', { ...(payload || {}), type: 'run_active_file' }, (reply) => {
-          if (!reply || reply.ok === false) {
-            reject(new Error(reply?.error || 'backend run failed'));
-            return;
-          }
-          resolve(reply);
-        });
-      } catch (err) {
-        reject(err);
-      }
-    });
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostFileRun, payload || {}, 8000);
   }
 
   async function requestBackendBootSnapshot(payload) {
-    const socket = await connectUIIPC();
-    if (!socket || !socket.connected) throw new Error('UI IPC socket not connected');
-    return await new Promise((resolve, reject) => {
-      try {
-        socket.emit('ui_event', { ...(payload || {}), type: 'boot_snapshot' }, (reply) => {
-          if (!reply || reply.ok === false) {
-            reject(new Error(reply?.error || 'backend boot snapshot failed'));
-            return;
-          }
-          resolve(reply);
-        });
-      } catch (err) {
-        reject(err);
-      }
-    });
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostBootSnapshotGet, payload || {}, 8000);
   }
 
   return {

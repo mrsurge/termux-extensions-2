@@ -1,0 +1,75 @@
+import { RPC_NAMESPACES } from '../rpc/namespaces.ts';
+import type { JsonObject, JsonRpcNotificationEnvelope } from '../rpc/transport.ts';
+
+export const UI_IPC_RPC_NAMESPACE = RPC_NAMESPACES.uiIpc;
+
+export const UI_IPC_RPC_METHODS = {
+  hostFileOpen: 'ui.host.file.open',
+  hostFileSave: 'ui.host.file.save',
+  hostEditorPreferenceUpdate: 'ui.host.editorPreference.update',
+  hostFileRun: 'ui.host.file.run',
+  hostBootSnapshotGet: 'ui.host.bootSnapshot.get',
+} as const;
+
+export const UI_IPC_RPC_NOTIFICATIONS = {
+  editorSave: 'ui.editor.save',
+  editorFocus: 'ui.editor.focus',
+  editorBlur: 'ui.editor.blur',
+  editorMentionRequest: 'ui.editor.mention.request',
+  adapterState: 'ui.adapter.state',
+  hostActiveFileChanged: 'ui.host.activeFile.changed',
+} as const;
+
+type ValueOf<T> = T[keyof T];
+
+export type UiIpcRpcMethod = ValueOf<typeof UI_IPC_RPC_METHODS>;
+export type UiIpcRpcNotificationMethod = ValueOf<typeof UI_IPC_RPC_NOTIFICATIONS>;
+
+export interface UiIpcRpcNotification {
+  method: UiIpcRpcNotificationMethod;
+  params: JsonObject;
+}
+
+const UI_IPC_RPC_NOTIFICATION_METHOD_SET = new Set<string>(
+  Object.values(UI_IPC_RPC_NOTIFICATIONS),
+);
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function normalizeUiIpcRpcParams(payload: unknown): JsonObject {
+  if (isJsonObject(payload)) {
+    return payload;
+  }
+  return {};
+}
+
+export function isUiIpcRpcNotificationMethod(
+  method: string,
+): method is UiIpcRpcNotificationMethod {
+  return UI_IPC_RPC_NOTIFICATION_METHOD_SET.has(method);
+}
+
+export function parseUiIpcRpcNotification(
+  notification: JsonRpcNotificationEnvelope,
+): UiIpcRpcNotification | null {
+  if (!isUiIpcRpcNotificationMethod(notification.method)) {
+    return null;
+  }
+  return {
+    method: notification.method,
+    params: normalizeUiIpcRpcParams(notification.params),
+  };
+}
+
+export function buildUiIpcRpcNotificationEnvelope(
+  method: UiIpcRpcNotificationMethod,
+  params: JsonObject = {},
+): JsonRpcNotificationEnvelope {
+  return {
+    jsonrpc: '2.0',
+    method,
+    params,
+  };
+}

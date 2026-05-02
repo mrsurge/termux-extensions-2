@@ -1,3 +1,8 @@
+import {
+  UI_IPC_RPC_NOTIFICATIONS,
+  buildUiIpcRpcNotificationEnvelope,
+} from '../src/ui_ipc/rpc_contract.ts';
+
 interface MentionPayload {
   path: string;
   lineNo?: number;
@@ -55,15 +60,17 @@ export function sendMentionRequest(deps: MentionRequestDeps): void {
   if (!payload) return;
   const sock = deps.getUiIpcSocket ? deps.getUiIpcSocket() : null;
   if (sock && sock.connected && typeof sock.emit === 'function') {
-    sock.emit('ui_event', {
-      type: 'mention_request',
-      path: payload.path,
-      lineNo: payload.lineNo,
-      col: payload.col,
-      endLineNo: payload.endLineNo,
-      endCol: payload.endCol,
-      content: payload.content,
-    });
+    sock.emit('rpc', buildUiIpcRpcNotificationEnvelope(
+      UI_IPC_RPC_NOTIFICATIONS.editorMentionRequest,
+      {
+        path: payload.path,
+        lineNo: payload.lineNo,
+        col: payload.col,
+        endLineNo: payload.endLineNo,
+        endCol: payload.endCol,
+        content: payload.content,
+      },
+    ));
   } else {
     console.warn('[mention] UI IPC socket not connected');
   }
