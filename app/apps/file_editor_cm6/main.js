@@ -67,6 +67,7 @@ import { createOpenFlowController } from './src/host/file-ops/open-flow.ts';
 import { createRunFileController } from './src/host/file-ops/run-file.ts';
 import { createApiClient } from './src/host/api/client.ts';
 import { bootInlineEditorHost } from './monaco_editor/inline_host.ts';
+import { createHostChromeRuntime } from './main_page/frontend/host-chrome-runtime.ts';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 
@@ -1230,460 +1231,43 @@ const menuViewDD  = requireEl('#menu-view-dd');
 const recentFilesBtn = requireEl('#recent-files-btn');
 const recentFilesDD  = requireEl('#recent-files-dd');
 const runActiveBtn   = requireEl('#run-active-file-btn');
-const MAX_FILENAME_DISPLAY = 34;
-let toolbarTitleBootBaselinePx = null;
-let toolbarClampRaf1 = 0;
-let toolbarClampRaf2 = 0;
-let toolbarClampObserversReady = false;
-let toolbarClampRO = null;
-let toolbarClampMO = null;
-let toolbarLastLayoutSig = '';
-
-function formatFileNameDisplay(name) {
-  if (!name) return '';
-  if (name.length <= MAX_FILENAME_DISPLAY) return name;
-  const keepStart = Math.max(6, Math.floor((MAX_FILENAME_DISPLAY - 1) * 0.6));
-  const keepEnd = Math.max(4, MAX_FILENAME_DISPLAY - keepStart - 1);
-  return `${name.slice(0, keepStart)}…${name.slice(-keepEnd)}`;
-}
-
-function scheduleToolbarTitleClamp({ doubleRaf = false, resetBaseline = false } = {}) {
-  if (resetBaseline) {
-    toolbarTitleBootBaselinePx = null;
-  }
-  if (toolbarClampRaf1) {
-    try { cancelAnimationFrame(toolbarClampRaf1); } catch (_) {}
-    toolbarClampRaf1 = 0;
-  }
-  if (toolbarClampRaf2) {
-    try { cancelAnimationFrame(toolbarClampRaf2); } catch (_) {}
-    toolbarClampRaf2 = 0;
-  }
-  toolbarClampRaf1 = requestAnimationFrame(() => {
-    toolbarClampRaf1 = 0;
-    syncToolbarTitleBlockWidth();
-    if (doubleRaf) {
-      toolbarClampRaf2 = requestAnimationFrame(() => {
-        toolbarClampRaf2 = 0;
-        syncToolbarTitleBlockWidth();
-      });
-    }
-  });
-}
-
-function syncToolbarTitleBlockWidth() {
-  if (!_isMobileLayout()) {
-    try { titleBlockEl.style.removeProperty('max-width'); } catch (_) {}
-    toolbarTitleBootBaselinePx = null;
-    return;
-  }
-  try {
-    const leftRect = leftToolbarControlEl.getBoundingClientRect();
-    const rightRect = rightToolbarControlEl.getBoundingClientRect();
-    const toolbarRect = toolbarEl.getBoundingClientRect();
-    const leftEdge = Math.max(toolbarRect.left, leftRect.right);
-    const rightEdge = Math.min(toolbarRect.right, rightRect.left);
-    const available = Math.floor(rightEdge - leftEdge - 12);
-    const currentPx = Number.isFinite(available) ? Math.max(0, available) : 0;
-    if (toolbarTitleBootBaselinePx == null && currentPx > 0) {
-      toolbarTitleBootBaselinePx = currentPx;
-    }
-    const baseline = (toolbarTitleBootBaselinePx == null) ? currentPx : toolbarTitleBootBaselinePx;
-    const clampedPx = Math.max(0, Math.min(currentPx, baseline));
-    titleBlockEl.style.maxWidth = `${clampedPx}px`;
-  } catch (_) {}
-}
-
-function setToolbarFileName(rawName) {
-  const safe = rawName || '';
-  fileNameEl.textContent = safe;
-  fileNameEl.title = safe;
-  if (_isMobileLayout()) {
-    fileNameScrollEl.scrollLeft = 0;
-  }
-  scheduleToolbarTitleClamp({ doubleRaf: true });
-}
-
-function initToolbarTitleClampObservers() {
-  if (toolbarClampObserversReady) return;
-  toolbarClampObserversReady = true;
-
-  const schedule = (opts = undefined) => scheduleToolbarTitleClamp(opts || { doubleRaf: true });
-  schedule({ doubleRaf: true, resetBaseline: true });
-  toolbarLastLayoutSig = root.classList.contains('layout-desktop')
-    ? 'desktop'
-    : (root.classList.contains('layout-mobile') ? 'mobile' : 'unknown');
-
-  window.addEventListener('resize', () => schedule({ doubleRaf: true }));
-  window.addEventListener('orientationchange', () => schedule({ doubleRaf: true, resetBaseline: true }));
-
-  if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
-    window.visualViewport.addEventListener('resize', () => schedule({ doubleRaf: true }));
-  }
-
-  if (typeof ResizeObserver === 'function') {
-    toolbarClampRO = new ResizeObserver(() => {
-      schedule({ doubleRaf: true });
-    });
-    [
-      toolbarEl,
-      leftToolbarControlEl,
-      rightToolbarControlEl,
-      titleBlockEl,
-      fileNameScrollEl,
-      agentDrawerEl,
-    ].forEach((el) => {
-      if (!el) return;
-      try { toolbarClampRO.observe(el); } catch (_) {}
-    });
-  }
-
-  if (typeof MutationObserver === 'function') {
-    toolbarClampMO = new MutationObserver((mutations) => {
-      let resetBaseline = false;
-      for (const m of (mutations || [])) {
-        if (m?.type !== 'attributes') continue;
-        const target = m.target;
-        if (target === root && m.attributeName === 'class') {
-          const nextSig = root.classList.contains('layout-desktop')
-            ? 'desktop'
-            : (root.classList.contains('layout-mobile') ? 'mobile' : 'unknown');
-          if (nextSig !== toolbarLastLayoutSig) {
-            toolbarLastLayoutSig = nextSig;
-            resetBaseline = true;
-            break;
-          }
-        }
-      }
-      schedule({ doubleRaf: true, resetBaseline });
-    });
-    try {
-      toolbarClampMO.observe(root, { attributes: true, attributeFilter: ['class', 'style'] });
-      toolbarClampMO.observe(agentDrawerEl, { attributes: true, attributeFilter: ['class', 'style'] });
-    } catch (_) {}
-  }
-
-  try {
-    agentDrawerEl.addEventListener('transitionend', () => schedule({ doubleRaf: true }));
-  } catch (_) {}
-}
-
-function initToolbarFileNameDrag(el) {
-  if (!el) return;
-  let pointerId = null;
-  let dragging = false;
-  let moved = false;
-  let startX = 0;
-  let startScrollLeft = 0;
-
-  const canDrag = () => _isMobileLayout() && (el.scrollWidth > el.clientWidth + 1);
-
-  const endDrag = () => {
-    if (!dragging) return;
-    dragging = false;
-    pointerId = null;
-    el.classList.remove('is-dragging');
-  };
-
-  el.addEventListener('pointerdown', (ev) => {
-    if (ev.pointerType === 'mouse') return;
-    if (!canDrag()) return;
-    dragging = true;
-    moved = false;
-    pointerId = ev.pointerId;
-    startX = ev.clientX;
-    startScrollLeft = el.scrollLeft;
-    el.classList.add('is-dragging');
-    try { el.setPointerCapture(ev.pointerId); } catch (_) {}
-  });
-
-  el.addEventListener('pointermove', (ev) => {
-    if (!dragging || ev.pointerId !== pointerId) return;
-    const dx = ev.clientX - startX;
-    if (Math.abs(dx) > 2) moved = true;
-    el.scrollLeft = startScrollLeft - dx;
-    ev.preventDefault();
-  }, { passive: false });
-
-  el.addEventListener('pointerup', (ev) => {
-    if (ev.pointerId !== pointerId) return;
-    endDrag();
-  });
-  el.addEventListener('pointercancel', endDrag);
-  el.addEventListener('lostpointercapture', endDrag);
-  el.addEventListener('pointerleave', (ev) => {
-    if (ev.pointerId !== pointerId) return;
-    endDrag();
-  });
-
-  el.addEventListener('click', (ev) => {
-    if (!moved) return;
-    moved = false;
-    ev.preventDefault();
-    ev.stopPropagation();
-  }, true);
-}
-
-function setIssuesButtonsEnabled(enabled) {
-  issuesToggleBtn.disabled = !enabled;
-  if (!enabled) {
-    issuesPrevBtn.disabled = true;
-    issuesNextBtn.disabled = true;
-    issuesBadgesEl.textContent = '';
-  }
-}
-
-async function sendIssuesCmd(action) {
-  try {
-    await uiIpcConnections.requestBackendEditorIssuesCommand({ action: String(action || '') });
-  } catch (err) {
-    console.warn('[Issues] Failed to send via backend:', err);
-  }
-}
-
-issuesToggleBtn.addEventListener('click', () => sendIssuesCmd('next'));
-issuesPrevBtn.addEventListener('click', () => sendIssuesCmd('prev'));
-issuesNextBtn.addEventListener('click', () => sendIssuesCmd('next'));
-initToolbarFileNameDrag(fileNameScrollEl);
-
-function _basenameNoExt(p) {
-  const b = basename(p || '');
-  if (!b) return 'untitled';
-  const idx = b.lastIndexOf('.');
-  if (idx <= 0) return b;
-  return b.slice(0, idx);
-}
-
-function _extNoDot(p) {
-  const b = basename(p || '');
-  const idx = b.lastIndexOf('.');
-  if (idx === -1 || idx === b.length - 1) return '';
-  return b.slice(idx + 1);
-}
-
-function _safeFilePart(s) {
-  const text = String(s || '').trim();
-  if (!text) return '';
-  return text.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
-}
-
-function buildDefaultDiagnosticsFilename(absPath, projectRoot, ext = '.json') {
-  const file = String(absPath || '').trim();
-  const pr = String(projectRoot || '').trim().replace(/\/+$/, '');
-
-  // Prefer project-relative path (stable, readable, and avoids HOME_DIR confusion).
-  let rel = '';
-  if (pr && file && file.startsWith(pr + '/')) {
-    rel = file.slice(pr.length + 1);
-  }
-
-  const dotted = (rel || basename(file) || 'untitled')
-    .split('/')
-    .filter(Boolean)
-    .map(_safeFilePart)
-    .filter(Boolean)
-    .join('.');
-
-  return `${dotted || 'untitled'}${ext}`;
-}
-
-// Issues dump requests are brokered through /ui_ipc RPC so the backend owns
-// host-to-editor command routing.
-
-async function _ensureDiagnosticsDir(projectRootAbs) {
-  const projectRoot = String(projectRootAbs || '').replace(/\/+$/, '');
-  if (!projectRoot) return { ok: false, dir: '' };
-  const codeRoot = `${projectRoot}/.code_cm6`;
-  const target = `${codeRoot}/diagnostics`;
-
-  const exists = async () => {
-    try {
-      const params = new URLSearchParams({ path: target, hidden: '1', root: 'system' });
-      const resp = await fetch(`/api/browse?${params.toString()}`, { cache: 'no-store' });
-      if (!resp.ok) return false;
-      const json = await resp.json().catch(() => ({}));
-      return Boolean(json && json.ok);
-    } catch {
-      return false;
-    }
-  };
-
-  if (await exists()) return { ok: true, dir: target };
-
-  const yes = window.confirm('This will create a new directory called .code_cm6/diagnostics in your project root. Is this ok?');
-  if (!yes) return { ok: false, dir: projectRoot };
-
-  try {
-    const rootResp = await apiPost('explorer/mkdir', { parent_rel: '.', name: '.code_cm6' });
-    if (rootResp?.ok === false) throw new Error(rootResp?.error || 'mkdir failed');
-    const resp = await apiPost('explorer/mkdir', { parent_rel: '.code_cm6', name: 'diagnostics' });
-    if (resp?.ok === false) throw new Error(resp?.error || 'mkdir failed');
-  } catch (err) {
-    host.toast(err?.message || 'Failed to create .code_cm6/diagnostics');
-    return { ok: false, dir: projectRoot };
-  }
-
-  return { ok: true, dir: target };
-}
-
-async function writeTextFileInProject(absPath, content) {
-  const opId = `op_diag_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  const payload = {
-    path: absPath,
-    content: String(content ?? ''),
-    client_id: clientId,
-    op_id: opId,
-  };
-  const res = await apiPost('write', payload);
-  if (res?.ok === false) {
-    throw new Error(res?.error || 'Write failed');
-  }
-  return res;
-}
-
-function _showExportDiagModal() {
-  return new Promise((resolve) => {
-    const modal = document.getElementById('export-diag-modal');
-    if (!modal) { resolve(null); return; }
-    const closeBtn = document.getElementById('export-diag-modal-close');
-    const humanBtn = document.getElementById('export-diag-human');
-    const jsonBtn = document.getElementById('export-diag-json');
-
-    function cleanup(result) {
-      modal.classList.remove('show');
-      modal.setAttribute('aria-hidden', 'true');
-      closeBtn?.removeEventListener('click', onClose);
-      humanBtn?.removeEventListener('click', onHuman);
-      jsonBtn?.removeEventListener('click', onJson);
-      modal.removeEventListener('click', onBackdrop);
-      resolve(result);
-    }
-    function onClose() { cleanup(null); }
-    function onHuman() { cleanup('human'); }
-    function onJson() { cleanup('json'); }
-    function onBackdrop(e) { if (e.target === modal) cleanup(null); }
-
-    closeBtn?.addEventListener('click', onClose);
-    humanBtn?.addEventListener('click', onHuman);
-    jsonBtn?.addEventListener('click', onJson);
-    modal.addEventListener('click', onBackdrop);
-
-    modal.setAttribute('aria-hidden', 'false');
-    modal.classList.add('show');
-  });
-}
-
-function _formatDiagnosticsMarkdown(absPath, markers, projectRoot) {
-  const pr = String(projectRoot || '').replace(/\/+$/, '');
-  const rel = (pr && absPath.startsWith(pr + '/')) ? absPath.slice(pr.length + 1) : absPath;
-  const errors = markers.filter(m => m.severity === 8).length;
-  const warnings = markers.filter(m => m.severity === 4).length;
-  const infos = markers.filter(m => m.severity === 2 || m.severity === 1).length;
-
-  const lines = [];
-  lines.push(`# Diagnostics: ${rel}`);
-  lines.push('');
-  lines.push(`**Exported:** ${new Date().toISOString()}`);
-  const counts = [];
-  if (errors) counts.push(`${errors} error${errors > 1 ? 's' : ''}`);
-  if (warnings) counts.push(`${warnings} warning${warnings > 1 ? 's' : ''}`);
-  if (infos) counts.push(`${infos} info`);
-  lines.push(`**Summary:** ${counts.length ? counts.join(', ') : 'No problems'}`);
-  lines.push('');
-
-  if (markers.length === 0) {
-    lines.push('No problems detected.');
-  } else {
-    // Sort: errors first, then warnings, then by line
-    const sorted = [...markers].sort((a, b) => {
-      const sevOrder = (s) => s === 8 ? 0 : s === 4 ? 1 : 2;
-      const so = sevOrder(a.severity) - sevOrder(b.severity);
-      if (so !== 0) return so;
-      return (a.startLineNumber || 0) - (b.startLineNumber || 0);
-    });
-    for (const m of sorted) {
-      const sev = m.severity === 8 ? '🔴 Error' : m.severity === 4 ? '🟡 Warning' : 'ℹ️ Info';
-      const loc = `${m.startLineNumber || 1}:${m.startColumn || 1}`;
-      const code = m.code && typeof m.code === 'object' ? m.code.value : m.code;
-      const codeText = code == null || code === '' ? '' : String(code);
-      const src = m.source ? ` [${m.source}${codeText ? `(${codeText})` : ''}]` : '';
-      lines.push(`- **${sev}** at line ${loc} — ${m.message || '(no message)'}${src}`);
-    }
-  }
-  lines.push('');
-  return lines.join('\n');
-}
-
-async function exportDiagnosticsToFile() {
-  if (!currentPath) {
-    host.toast('Open a file first');
-    return;
-  }
-  if (!cachedProjectRoot) {
-    host.toast('No active project root');
-    return;
-  }
-
-  // Get markers for current file from the problems panel cache.
-  const detail = problemsPanel.getDetail ? problemsPanel.getDetail() : {};
-  const markers = detail[currentPath] || [];
-
-  // Show format choice modal.
-  const format = await _showExportDiagModal();
-  if (!format) return;
-
-  const projectRoot = String(cachedProjectRoot || '').replace(/\/+$/, '');
-  const isHuman = format === 'human';
-  const fileExt = isHuman ? '.md' : '.json';
-  const defaultDirRes = await _ensureDiagnosticsDir(projectRoot);
-  const startDir = defaultDirRes.dir || projectRoot;
-  const defaultName = buildDefaultDiagnosticsFilename(currentPath, projectRoot, fileExt);
-
-  if (!pickerController.pickerAvailable()) { host.toast('File picker unavailable'); return; }
-
-  let choice = null;
-  try {
-    choice = await window.teFilePicker.saveFile({
-      title: 'Export Diagnostics',
-      startPath: startDir,
-      filename: defaultName,
-      selectLabel: 'Save',
-    });
-  } catch (e) {
-    if (e && e.message === 'cancelled') return;
-    host.toast(e?.message || 'Export cancelled');
-    return;
-  }
-  if (!choice || !choice.path) return;
-
-  const targetAbs = toAbsolute(choice.path, null, HOME_DIR);
-  if (!(targetAbs === projectRoot || targetAbs.startsWith(projectRoot + '/'))) {
-    host.toast('Export path must be inside the project root');
-    return;
-  }
-  if (choice.existed && !window.confirm('File exists. Overwrite?')) return;
-
-  let text;
-  if (isHuman) {
-    text = _formatDiagnosticsMarkdown(currentPath, markers, projectRoot);
-  } else {
-    text = JSON.stringify({
-      exported_at: new Date().toISOString(),
-      project_root: projectRoot,
-      file_path: currentPath,
-      markers: markers,
-    }, null, 2) + '\n';
-  }
-
-  try {
-    await writeTextFileInProject(targetAbs, text);
-    host.toast(`Diagnostics exported: ${basename(targetAbs)}`);
-  } catch (err) {
-    console.error('[Diagnostics Export] Write failed:', err);
-    host.toast(err?.message || 'Failed to write diagnostics file');
-  }
-}
-
+const hostChromeRuntime = createHostChromeRuntime({
+  root,
+  toolbarEl,
+  titleBlockEl,
+  leftToolbarControlEl,
+  rightToolbarControlEl,
+  agentDrawerEl,
+  fileNameEl,
+  fileNameScrollEl,
+  issuesToggleBtn,
+  issuesPrevBtn,
+  issuesNextBtn,
+  issuesBadgesEl,
+  isMobileLayout: () => _isMobileLayout(),
+  basename,
+  toAbsolute,
+  homeDir: HOME_DIR,
+  getCurrentPath: () => currentPath,
+  getCachedProjectRoot: () => cachedProjectRoot,
+  getProblemsDetail: () => problemsPanel.getDetail ? problemsPanel.getDetail() : {},
+  pickerAvailable: () => pickerController.pickerAvailable(),
+  saveFileWithPicker: (options) => window.teFilePicker.saveFile(options),
+  apiPost: (path, body) => apiPost(path, body),
+  getClientId: () => clientId,
+  requestBackendEditorIssuesCommand: (payload) => uiIpcConnections.requestBackendEditorIssuesCommand(payload),
+  toast: (message, kind) => host.toast(message, kind),
+  confirm: (message) => window.confirm(message),
+});
+const {
+  formatFileNameDisplay,
+  scheduleToolbarTitleClamp,
+  setToolbarFileName,
+  initToolbarTitleClampObservers,
+  setIssuesButtonsEnabled,
+  exportDiagnosticsToFile,
+} = hostChromeRuntime;
+hostChromeRuntime.install();
 const miNew       = requireEl('#mi-new');
 const miOpen      = requireEl('#mi-open');
 const miSave      = requireEl('#mi-save');

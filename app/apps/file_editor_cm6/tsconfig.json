@@ -28,6 +28,7 @@
     "monaco_editor/**/*.d.ts",
     "monaco_editor/**/*.ts",
     "monaco_editor/m_editor_app.ts",
+    "main_page/frontend/**/*.ts",
     "src/explorer/**/*.d.ts",
     "src/explorer/**/*.ts",
     "static/js/explorer.ts"
