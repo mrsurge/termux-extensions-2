@@ -49,6 +49,14 @@ export function createUiIpcConnections(deps) {
     } catch (_) {}
   }
 
+  function dispatchWindowCustomEvent(eventName, data) {
+    try {
+      window.dispatchEvent(new CustomEvent(eventName, {
+        detail: data && typeof data === 'object' ? data : {},
+      }));
+    } catch (_) {}
+  }
+
   function emitSidebarIpc(eventName, payload) {
     try {
       if (eventName === 'sidebar:event' && payload && typeof payload === 'object') {
@@ -121,18 +129,26 @@ export function createUiIpcConnections(deps) {
             document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorMentionRequest) {
             console.log('[mention] UI IPC RPC received mention request');
-            window.dispatchEvent(new CustomEvent('cm6:mention-request', {
-              detail: params,
-            }));
+            dispatchWindowCustomEvent('cm6:mention-request', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorReady) {
+            dispatchWindowCustomEvent('cm6:editor-ready', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorOpenComplete) {
+            dispatchWindowCustomEvent('cm6:editor-open-complete', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorCacheState) {
+            dispatchWindowCustomEvent('cm6:editor-cache-state', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorDraftState) {
+            dispatchWindowCustomEvent('cm6:editor-draft-state', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorScrollState) {
+            dispatchWindowCustomEvent('cm6:editor-scroll-state', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorNotify) {
+            dispatchWindowCustomEvent('cm6:editor-notify', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorDiagnosticsCounts) {
+            dispatchWindowCustomEvent('cm6:editor-diagnostics-counts', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.hostActiveFileChanged) {
             applyActiveFileChangedUiState(params);
-            window.dispatchEvent(new CustomEvent('cm6:active-file-changed', {
-              detail: params,
-            }));
+            dispatchWindowCustomEvent('cm6:active-file-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.adapterState) {
-            window.dispatchEvent(new CustomEvent('cm6:adapter-state', {
-              detail: params,
-            }));
+            dispatchWindowCustomEvent('cm6:adapter-state', params);
           }
         },
       });

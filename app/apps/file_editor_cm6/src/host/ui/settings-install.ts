@@ -9,7 +9,7 @@ import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
  *   getStartPath: () => string,
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
  *   refreshExtManager: () => Promise<any> | void,
- *   reloadEditorIframe: () => void,
+ *   reloadEditorFrame: () => void,
  *   openExtConfigModal: (extId: string, displayName: string, schema: any, currentValues: any) => void,
  *   toast: (msg: string, ms?: number) => void
  * }} deps
@@ -37,7 +37,7 @@ export function createSettingsInstallController(deps) {
           const schema = res.config_schema || {};
           deps.toast(`Installed: ${ext.display_name || ext.id || 'ok'} — reloading…`);
           void deps.refreshExtManager();
-          deps.reloadEditorIframe();
+          deps.reloadEditorFrame();
           if (schema && Object.keys(schema.properties || schema || {}).length) {
             deps.openExtConfigModal(ext.id, ext.display_name, schema, {});
           }

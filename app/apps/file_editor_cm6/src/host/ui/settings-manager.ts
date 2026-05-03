@@ -5,7 +5,7 @@ import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
  * @param {{
  *   extManagerListEl: HTMLElement,
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
- *   reloadEditorIframe: () => void,
+ *   reloadEditorFrame: () => void,
  *   openExtConfigModal: (extId: string, displayName: string, schema: any, currentValues: any) => void,
  *   getActiveScope: () => string,
  *   toast: (msg: string, ms?: number) => void
@@ -131,7 +131,7 @@ export function createSettingsManagerController(deps) {
               ext_id: extId,
               active: !isActive,
             }, 10000);
-            deps.reloadEditorIframe();
+            deps.reloadEditorFrame();
             void refreshEditorExtManagerModal();
           } catch (e) {
             deps.toast(/** @type {any} */ (e)?.message || 'Toggle failed');
@@ -200,7 +200,7 @@ export function createSettingsManagerController(deps) {
               }, 30000);
               if (res?.ok) {
                 deps.toast(`Uninstalled: ${label} — reloading…`);
-                deps.reloadEditorIframe();
+                deps.reloadEditorFrame();
                 void refreshEditorExtManagerModal();
               } else {
                 deps.toast(res?.error || 'Uninstall failed');

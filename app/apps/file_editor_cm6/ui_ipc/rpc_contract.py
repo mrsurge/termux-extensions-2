@@ -36,6 +36,13 @@ UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE: Final = "ui.editor.save"
 UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS: Final = "ui.editor.focus"
 UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR: Final = "ui.editor.blur"
 UI_IPC_RPC_NOTIFICATION_EDITOR_MENTION_REQUEST: Final = "ui.editor.mention.request"
+UI_IPC_RPC_NOTIFICATION_EDITOR_READY: Final = "ui.editor.ready"
+UI_IPC_RPC_NOTIFICATION_EDITOR_OPEN_COMPLETE: Final = "ui.editor.open.complete"
+UI_IPC_RPC_NOTIFICATION_EDITOR_CACHE_STATE: Final = "ui.editor.cache.state"
+UI_IPC_RPC_NOTIFICATION_EDITOR_DRAFT_STATE: Final = "ui.editor.draft.state"
+UI_IPC_RPC_NOTIFICATION_EDITOR_SCROLL_STATE: Final = "ui.editor.scroll.state"
+UI_IPC_RPC_NOTIFICATION_EDITOR_NOTIFY: Final = "ui.editor.notify"
+UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS: Final = "ui.editor.diagnostics.counts"
 UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE: Final = "ui.adapter.state"
 UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED: Final = "ui.host.activeFile.changed"
 
@@ -44,6 +51,13 @@ UiIpcRpcNotification = Literal[
     "ui.editor.focus",
     "ui.editor.blur",
     "ui.editor.mention.request",
+    "ui.editor.ready",
+    "ui.editor.open.complete",
+    "ui.editor.cache.state",
+    "ui.editor.draft.state",
+    "ui.editor.scroll.state",
+    "ui.editor.notify",
+    "ui.editor.diagnostics.counts",
     "ui.adapter.state",
     "ui.host.activeFile.changed",
 ]
@@ -66,6 +80,13 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS,
     UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR,
     UI_IPC_RPC_NOTIFICATION_EDITOR_MENTION_REQUEST,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_READY,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_OPEN_COMPLETE,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_CACHE_STATE,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_DRAFT_STATE,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_SCROLL_STATE,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_NOTIFY,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS,
     UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
 }

@@ -19,8 +19,7 @@ interface BootSequenceDeps {
   initResizeManager(): void;
   initExplorerUI(): Promise<unknown>;
   connectExplorerSocket(): void;
-  connectEditorSocket(): void;
-  connectUIIPC(): void;
+  connectUIIPC(): void | Promise<unknown>;
   connectSidebarIPC(): void;
   ensureWorkbenchAdapterReady(): Promise<unknown>;
   initBranchMenu(): unknown;
@@ -104,11 +103,10 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   deps.setBranchMenuHandle(deps.initBranchMenu());
 
   try { await deps.ensureWorkbenchAdapterReady(); } catch (error) { console.warn('Workbench adapter readiness failed:', error); }
+  try { await deps.connectUIIPC(); } catch (error) { console.warn('Failed to connect UI IPC channel:', error); }
   try { await deps.mountInlineEditorHost(bootSnapshot); } catch (error) { console.error('Inline editor boot failed:', error); }
 
   try { deps.connectExplorerSocket(); } catch (error) { console.warn('Failed to connect explorer Socket.IO bus:', error); }
-  try { deps.connectEditorSocket(); } catch (error) { console.warn('Failed to connect editor Socket.IO channel:', error); }
-  try { deps.connectUIIPC(); } catch (error) { console.warn('Failed to connect UI IPC channel:', error); }
   try { deps.connectSidebarIPC(); } catch (error) { console.warn('Failed to connect Sidebar IPC channel:', error); }
 
   const initialUiPrefs = Object.keys(snapshotUiPrefs).length

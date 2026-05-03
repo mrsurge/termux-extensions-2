@@ -11,7 +11,7 @@ import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
  *   saveBtn: HTMLButtonElement,
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
  *   refreshExtManager: () => Promise<any> | void,
- *   reloadEditorIframe: () => void,
+ *   reloadEditorFrame: () => void,
  *   toast: (msg: string, ms?: number) => void
  * }} deps
  */
@@ -362,7 +362,7 @@ export function createSettingsConfigModalController(deps) {
             deps.toast('Workspace configuration saved — reloading adapter…');
             closeExtConfigModal();
             void deps.refreshExtManager();
-            deps.reloadEditorIframe();
+            deps.reloadEditorFrame();
           } else {
             deps.toast(res?.error || 'Save failed');
           }
@@ -376,7 +376,7 @@ export function createSettingsConfigModalController(deps) {
             deps.toast('Configuration saved — reloading adapter…');
             closeExtConfigModal();
             void deps.refreshExtManager();
-            deps.reloadEditorIframe();
+            deps.reloadEditorFrame();
           } else {
             deps.toast(res?.error || 'Save failed');
           }

@@ -13,6 +13,15 @@ from urllib.parse import parse_qs
 from ..draft_diff_helper import compute_draft_diff
 from ..git_helper import _run_git_optional, is_git_repository
 from ..stores import _history_store, _preferences_store
+from ..ui_ipc.rpc_contract import (
+    UI_IPC_RPC_NOTIFICATION_EDITOR_CACHE_STATE,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_DRAFT_STATE,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_NOTIFY,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_OPEN_COMPLETE,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_READY,
+    UI_IPC_RPC_NOTIFICATION_EDITOR_SCROLL_STATE,
+)
 from .editor_open_backend import (
     EditorOpenPayload,
     coerce_editor_open_request_fields,
@@ -348,6 +357,26 @@ def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification
     return mapping.get(event_name)
 
 
+def _ui_ipc_notification_for_legacy_event(event_name: str) -> str | None:
+    mapping: dict[str, str] = {
+        "editor:cache_state": UI_IPC_RPC_NOTIFICATION_EDITOR_CACHE_STATE,
+        "editor:draft_state": UI_IPC_RPC_NOTIFICATION_EDITOR_DRAFT_STATE,
+        "editor:notify": UI_IPC_RPC_NOTIFICATION_EDITOR_NOTIFY,
+        "editor:open_complete": UI_IPC_RPC_NOTIFICATION_EDITOR_OPEN_COMPLETE,
+        "editor:ready": UI_IPC_RPC_NOTIFICATION_EDITOR_READY,
+    }
+    return mapping.get(event_name)
+
+
+async def _emit_ui_ipc_editor_notification(method: str, payload: dict[str, object]) -> None:
+    try:
+        from ..ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
+
+        await emit_ui_ipc_rpc_notification(method, payload)
+    except Exception as exc:
+        _wb_log.warning("[ui_ipc_bridge] failed method=%s err=%s", method, exc)
+
+
 async def editor_runtime_emit_room_event(event_name: str, payload: dict[str, object]) -> None:
     from .editor_socketio import EDITOR_SIO
 
@@ -355,6 +384,9 @@ async def editor_runtime_emit_room_event(event_name: str, payload: dict[str, obj
     rpc_notification = _rpc_notification_for_legacy_event(event_name)
     if rpc_notification:
         await _emit_editor_rpc_notification_to_room(rpc_notification, payload, room="file_editor_cm6")
+    ui_ipc_notification = _ui_ipc_notification_for_legacy_event(event_name)
+    if ui_ipc_notification:
+        await _emit_ui_ipc_editor_notification(ui_ipc_notification, payload)
 
 
 async def _emit_editor_open_to_default_room(payload: EditorOpenPayload) -> None:
@@ -800,6 +832,10 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload = dict(payload)
         payload["source_client"] = sid
         await self.emit("editor:scroll_state", payload, room="file_editor_cm6")
+        await _emit_ui_ipc_editor_notification(
+            UI_IPC_RPC_NOTIFICATION_EDITOR_SCROLL_STATE,
+            payload,
+        )
 
     async def on_editor_draft_state(self, sid, data):
         payload = data or {}
@@ -880,6 +916,10 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
         payload = dict(payload)
         payload["source_client"] = sid
         await self.emit("editor:diagnostics_counts", payload, room="file_editor_cm6")
+        await _emit_ui_ipc_editor_notification(
+            UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS,
+            payload,
+        )
 
     async def on_editor_issues_dump_request(self, sid, data):
         payload = data or {}

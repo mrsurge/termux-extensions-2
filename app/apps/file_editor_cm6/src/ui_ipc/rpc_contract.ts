@@ -21,6 +21,13 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   editorFocus: 'ui.editor.focus',
   editorBlur: 'ui.editor.blur',
   editorMentionRequest: 'ui.editor.mention.request',
+  editorReady: 'ui.editor.ready',
+  editorOpenComplete: 'ui.editor.open.complete',
+  editorCacheState: 'ui.editor.cache.state',
+  editorDraftState: 'ui.editor.draft.state',
+  editorScrollState: 'ui.editor.scroll.state',
+  editorNotify: 'ui.editor.notify',
+  editorDiagnosticsCounts: 'ui.editor.diagnostics.counts',
   adapterState: 'ui.adapter.state',
   hostActiveFileChanged: 'ui.host.activeFile.changed',
 } as const;

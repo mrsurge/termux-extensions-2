@@ -10,7 +10,6 @@ import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
  *   initDrawerAndShortcuts: (opts: any) => any,
  *   bindMenuToggle: (el: HTMLElement, action: () => any) => void,
  *   requireEl: (selector: string) => any,
- *   getEditorSocket: () => any,
  *   hostToast: (msg: string) => void,
  *   setFontScale: (preset: any) => Promise<any>,
  *   triggerEditorSearchPanel: (reason: string, opts?: any) => Promise<any>,

@@ -69,6 +69,7 @@ import { createApiClient } from './src/host/api/client.ts';
 import { bootInlineEditorHost } from './monaco_editor/inline_host.ts';
 import { createHostChromeRuntime } from './main_page/frontend/host-chrome-runtime.ts';
 import { createHostStateRuntime } from './main_page/frontend/host-state-runtime.ts';
+import { createHostEditorEventsRuntime } from './main_page/frontend/host-editor-events-runtime.ts';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 
@@ -525,34 +526,6 @@ async function resolveAgentIframeSettings(uiPrefs) {
 
 let explorerRpcConnection = null;
 let explorerNeedsResync = false;
-
-// Dedicated Editor Socket.IO transport (separate from explorer and NiceGUI).
-let editorSocket = null;
-let editorSocketConnectPromise = null;
-let editorSocketId = null;
-let editorIframeReady = false;
-let editorIframeReadyResolver = null;
-let editorIframeReadyPromise = null;
-
-function ensureEditorIframeReady() {
-  if (editorIframeReady) return Promise.resolve(true);
-  if (editorIframeReadyPromise) return editorIframeReadyPromise;
-  editorIframeReadyPromise = new Promise((resolve) => {
-    editorIframeReadyResolver = resolve;
-  });
-  return editorIframeReadyPromise;
-}
-
-function markEditorIframeReady() {
-  if (editorIframeReady) return;
-  editorIframeReady = true;
-  const resolve = editorIframeReadyResolver;
-  editorIframeReadyResolver = null;
-  if (resolve) {
-    try { resolve(true); } catch (_) {}
-  }
-}
-const _editorOpenWaiters = new Map(); // requestId -> {resolve,reject,timer,path}
 let codexAppserverSocket = null;
 const _agentSidebarTrackedEditDedup = new Map();
 const _recentAgentOpenKeys = new Map();
@@ -698,7 +671,7 @@ function handleExplorerRpcNotification(method, params) {
   }
   if (method === EXPLORER_RPC_NOTIFICATIONS.extensionsAdapterRestarting) {
     console.log('[adapter_restart] received', payload);
-    if (typeof _reloadEditorIframe === 'function') setTimeout(() => _reloadEditorIframe(), 0);
+    if (typeof _reloadEditorFrame === 'function') setTimeout(() => _reloadEditorFrame(), 0);
   }
   if (method === EXPLORER_RPC_NOTIFICATIONS.extensionsSettingsChanged) {
     console.log('[adapter_restart] settings changed', payload);
@@ -841,306 +814,13 @@ function _setHostCurrentPathOnly(path) {
   try { currentPath = ''; } catch (_) {}
 }
 
-function _applyEditorCacheState(data) {
-  if (!data || typeof data !== 'object') return;
-
-  const normalizedPath = (typeof data.path === 'string' && data.path) ? data.path : null;
-
-  const contentSha = (typeof data.content_sha256 === 'string' && data.content_sha256.length === 64)
-    ? data.content_sha256
-    : null;
-  const baseSha = (typeof data.base_sha256 === 'string' && data.base_sha256.length === 64)
-    ? data.base_sha256
-    : null;
-  const isCleanState = data.state === 'clean' || data.unsaved === false;
-  if (baseSha) {
-    lastSha256 = baseSha;
-  } else if (isCleanState && contentSha) {
-    lastSha256 = contentSha;
-  }
-  let restoredActive = (typeof restoredSessionActive !== 'undefined') ? restoredSessionActive : false;
-  if (data.reason === 'restore') {
-    restoredActive = true;
-    try { restoredSessionActive = true; } catch (_) {}
-  } else if (data.state === 'clean') {
-    restoredActive = false;
-    try { restoredSessionActive = false; } catch (_) {}
-  }
-  if (data.reason === 'watcher_external' && normalizedPath) {
-    triggerExternalRefresh(normalizedPath);
-  }
-  applyCacheIndicator({
-    state: data.state,
-    unsaved: data.unsaved,
-    reason: data.reason,
-    restoredActive: restoredActive,
-  });
-
-  // Synchronize autosave mode across host shells (other clients).
-  try {
-    const autosaveValue =
-      typeof data.auto_save === 'boolean' ? data.auto_save :
-      (typeof data.autoSave === 'boolean' ? data.autoSave : null);
-    if (typeof autosaveValue === 'boolean') {
-      if (!editorViewState || typeof editorViewState !== 'object') editorViewState = {};
-      editorViewState.autoSave = autosaveValue;
-      preferencesController.applyStateToMenus(editorViewState);
-    }
-  } catch (_) {}
-
-  if (data.path) {
-    window.dispatchEvent(new CustomEvent('cm6:draft-updated', {
-      detail: {
-        path: data.path,
-        unsaved: !!data.unsaved
-      }
-    }));
-  }
-  window.__cm6CacheState = data;
-}
-
-function _handleEditorScrollState(payload) {
-  const data = payload && typeof payload === 'object' ? payload : {};
-  if (typeof data.line !== 'number' || data.line < 1) return;
-
-  // Avoid TDZ/caching issues by keeping scroll restore state on window.
-  // This can be emitted early by Socket.IO before other module-scope vars are initialized.
-  window.__feLastScrollState = {
-    path: currentPath || null,
-    line: data.line,
-    column: (typeof data.column === 'number' && data.column >= 0) ? data.column : null,
-    top: (typeof data.top === 'number' && data.top >= 0) ? data.top : null,
-  };
-
-  if (window.__feScrollStateTimer) clearTimeout(window.__feScrollStateTimer);
-  window.__feScrollStateTimer = setTimeout(async () => {
-    window.__feScrollStateTimer = null;
-    const lastScrollState = window.__feLastScrollState || null;
-    if (!lastScrollState || !lastScrollState.path) return;
-    try {
-      try {
-        const q = (typeof queueSessionStateUpdate === 'function')
-          ? queueSessionStateUpdate
-          : (typeof window.queueSessionStateUpdate === 'function' ? window.queueSessionStateUpdate : null);
-        if (q) {
-          q({
-            scrollLine: lastScrollState.line,
-            scrollTop: lastScrollState.top != null ? lastScrollState.top : null,
-          });
-        }
-      } catch (_) {}
-
-      if (lastScrollState.line && lastScrollState.line > 0) {
-        const post = (typeof apiPost === 'function')
-          ? apiPost
-          : (typeof window.apiPost === 'function' ? window.apiPost : null);
-        if (post) {
-          await post('state/file_scroll', {
-            path: lastScrollState.path,
-            scroll_line: lastScrollState.line,
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('Failed to persist scroll state:', err);
-    }
-  }, (typeof window.__feCursorStateDebounceMs === 'number' ? window.__feCursorStateDebounceMs : 1000));
-}
-
 function _issuesDumpRequestOnce() {
   return uiIpcConnections.requestBackendEditorIssuesDump({
     request_id: `issues_dump_${Date.now()}_${Math.random().toString(16).slice(2)}`,
   });
 }
 
-function _resolveEditorOpenWaiter(payload) {
-  try {
-    const requestId = payload && (payload.requestId || payload.request_id) ? String(payload.requestId || payload.request_id) : '';
-    if (!requestId) return;
-    const waiter = _editorOpenWaiters.get(requestId);
-    if (!waiter) return;
-    _editorOpenWaiters.delete(requestId);
-    try { clearTimeout(waiter.timer); } catch (_) {}
-    try { waiter.resolve(payload || {}); } catch (_) {}
-  } catch (_) {}
-}
-
-function _rejectAllEditorOpenWaiters(err) {
-  try {
-    for (const [requestId, waiter] of _editorOpenWaiters.entries()) {
-      try { clearTimeout(waiter.timer); } catch (_) {}
-      try { waiter.reject(err); } catch (_) {}
-      _editorOpenWaiters.delete(requestId);
-    }
-  } catch (_) {}
-}
-
-function _awaitEditorOpen(requestId, path, timeoutMs = 10000) {
-  return new Promise((resolve, reject) => {
-    if (!requestId) {
-      reject(new Error('Missing open request id'));
-      return;
-    }
-    const timer = setTimeout(() => {
-      _editorOpenWaiters.delete(requestId);
-      reject(new Error(`Editor open timed out for ${path || requestId}`));
-    }, Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) : 10000);
-    _editorOpenWaiters.set(requestId, { resolve, reject, timer, path: path || '' });
-  });
-}
-
-function connectEditorSocket() {
-  if (editorSocket) return Promise.resolve(editorSocket);
-  if (editorSocketConnectPromise) return editorSocketConnectPromise;
-  editorSocketConnectPromise = ensureSocketIoLoaded()
-    .then((io) => {
-      if (!io) throw new Error('Socket.IO client unavailable');
-      editorSocket = io('/editor', {
-        path: '/editor_ws/socket.io',
-        transports: ['websocket'],
-        query: { app_id: 'file_editor_cm6', role: 'host' },
-      });
-
-      editorSocket.on('connect', () => {
-        editorSocketId = editorSocket.id || null;
-      });
-
-      editorSocket.on('disconnect', (reason) => {
-        console.log('[EditorSIO] Disconnected', reason);
-        _rejectAllEditorOpenWaiters(new Error(`Editor socket disconnected: ${reason || 'unknown'}`));
-      });
-
-      editorSocket.on('connect_error', (err) => {
-        console.warn('[EditorSIO] Connect error', err);
-        _rejectAllEditorOpenWaiters(err instanceof Error ? err : new Error(String(err || 'editor connect error')));
-      });
-
-      editorSocket.on('editor:ready', () => {
-        markEditorIframeReady();
-      });
-
-      editorSocket.on('editor:ssot', (snapshot) => {
-        try {
-          const p = snapshot && typeof snapshot === 'object' ? snapshot : {};
-          const filePath = (p.file && p.file.path) || p.currentPath || null;
-          if (filePath && typeof filePath === 'string') {
-            _applyEditorCacheState({
-              path: filePath,
-              state: (p.file && p.file.state) || 'clean',
-              unsaved: !!(p.file && p.file.unsaved),
-              reason: (p.file && p.file.reason) || 'ssot',
-              content_sha256: (p.file && p.file.content_sha256) || null,
-              auto_save: (p.file && p.file.auto_save) != null ? p.file.auto_save : null,
-            });
-          }
-        } catch (_) {}
-      });
-
-      editorSocket.on('editor:cache_state', (payload) => {
-        _applyEditorCacheState(payload);
-      });
-
-      editorSocket.on('editor:open_complete', (payload) => {
-        _resolveEditorOpenWaiter(payload);
-      });
-
-      editorSocket.on('editor:draft_state', (payload) => {
-        const p = payload && typeof payload === 'object' ? payload : {};
-        if (p.has_draft && p.path) {
-          try { restoredSessionActive = true; } catch (_) {}
-          try { restoredSessionPath = p.path; } catch (_) {}
-        }
-      });
-
-      editorSocket.on('editor:scroll_state', (payload) => {
-        _handleEditorScrollState(payload);
-      });
-
-      editorSocket.on('editor:notify', (payload) => {
-        const p = payload && typeof payload === 'object' ? payload : {};
-        const message = typeof p.message === 'string' ? p.message : null;
-        if (message) host.toast(message, p.timeout || 3000);
-      });
-
-      function _feTs() {
-        try {
-          const t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
-            ? Math.round(performance.now() * 10) / 10
-            : null;
-          return (t != null ? ('t=' + t + 'ms ') : '') + 'now=' + Date.now();
-        } catch (_) {
-          return 'now=' + Date.now();
-        }
-      }
-
-      // Diagnostics counts from iframe → update toolbar badges.
-      editorSocket.on('editor:diagnostics_counts', (payload) => {
-        try {
-          const p = payload && typeof payload === 'object' ? payload : {};
-          const errors = Number(p.errors || 0);
-          const warnings = Number(p.warnings || 0);
-          const hints = Number(p.hints || 0);
-          const total = errors + warnings + hints;
-          const el = document.getElementById('fe-issues-badges');
-          if (!el) return;
-          el.innerHTML = '';
-          if (errors > 0) {
-            const d = document.createElement('span');
-            d.className = 'fe-issues-dot error';
-            d.textContent = String(errors);
-            d.title = errors + ' error' + (errors !== 1 ? 's' : '');
-            el.appendChild(d);
-          }
-          if (warnings > 0) {
-            const d = document.createElement('span');
-            d.className = 'fe-issues-dot warning';
-            d.textContent = String(warnings);
-            d.title = warnings + ' warning' + (warnings !== 1 ? 's' : '');
-            el.appendChild(d);
-          }
-          // Enable/disable issues nav buttons.
-          const toggleBtn = document.getElementById('fe-issues-toggle');
-          const prevBtn = document.getElementById('fe-issues-prev');
-          const nextBtn = document.getElementById('fe-issues-next');
-          if (toggleBtn) toggleBtn.disabled = (total === 0);
-          if (prevBtn) prevBtn.disabled = (total === 0);
-          if (nextBtn) nextBtn.disabled = (total === 0);
-        } catch (_) {}
-      });
-
-      // Code mention requests from iframe → relay via explorer bus → sidebar_ipc.
-      editorSocket.on('editor:mention_request', async (payload) => {
-        try {
-          const p = payload && typeof payload === 'object' ? payload : {};
-          if (!window.__explorerRpc) {
-            console.warn('[mention] Explorer bus unavailable');
-            return;
-          }
-          const body = { path: p.path || '' };
-          if (p.lineNo != null) body.lineNo = p.lineNo;
-          if (p.endLineNo != null) body.endLineNo = p.endLineNo;
-          if (p.col != null) body.col = p.col;
-          if (p.endCol != null) body.endCol = p.endCol;
-          if (p.content) body.content = p.content;
-          window.__explorerRpc.notify(EXPLORER_RPC_METHODS.mentionAgent, body);
-          console.log('[mention] Mentioned in conversation:', body.path);
-        } catch (err) {
-          console.warn('[mention] Request failed:', err);
-        }
-      });
-      return editorSocket;
-    })
-    .catch((err) => {
-      editorSocketConnectPromise = null;
-      console.warn('[EditorSIO] Failed to open editor Socket.IO:', err);
-    });
-  editorSocketConnectPromise.finally(() => {
-    if (editorSocket) editorSocketConnectPromise = null;
-  });
-  return editorSocketConnectPromise;
-}
-
-// ─── UI IPC (frontend ↔ editor iframe relay) ──────────────────────
+// ─── UI IPC (frontend ↔ inline editor relay) ──────────────────────
 const uiIpcConnections = createUiIpcConnections({
   ensureSocketIoLoaded,
   initConsoleBridge,
@@ -1151,7 +831,7 @@ function connectSidebarIPC() {
 }
 
 function connectUIIPC() {
-  uiIpcConnections.connectUIIPC();
+  return uiIpcConnections.connectUIIPC();
 }
 // ─── End UI IPC ───────────────────────────────────────────────────
 
@@ -1188,7 +868,7 @@ var fileNameEl = null;
 window.api  = appContext.api;
 
 const container = requireEl('#editor-container');
-const editorFrame = requireEl('#editor-frame');
+const editorFrameEl = requireEl('#editor-frame');
 const root = requireEl('.fe-root');
 const toolbarEl = requireEl('.fe-toolbar');
 const titleBlockEl = requireEl('.fe-title-block');
@@ -1200,7 +880,7 @@ const agentComposer = requireEl('#agent-input');
 Object.assign(appContext.elements, {
   cacheStateBadge,
   container,
-  editorFrame,
+  editorFrame: editorFrameEl,
   root,
   agentDrawerEl,
   agentTranscript,
@@ -1280,6 +960,34 @@ const hostStateRuntime = createHostStateRuntime({
   log: (...args) => console.log(...args),
 });
 hostStateRuntime.install();
+const hostEditorEventsRuntime = createHostEditorEventsRuntime({
+  applyCacheIndicator: (info) => applyCacheIndicator(info),
+  triggerExternalRefresh: (path) => triggerExternalRefresh(path),
+  applyAutosavePreference: (autoSave) => {
+    if (!editorViewState || typeof editorViewState !== 'object') editorViewState = {};
+    editorViewState.autoSave = autoSave;
+    preferencesController.applyStateToMenus(editorViewState);
+  },
+  setLastSha256: (sha) => { lastSha256 = sha; },
+  getRestoredSessionActive: () => !!restoredSessionActive,
+  setRestoredSessionActive: (flag) => { restoredSessionActive = !!flag; },
+  setRestoredSessionPath: (path) => { restoredSessionPath = path; },
+  getCurrentPath: () => currentPath || '',
+  queueSessionStateUpdate: (partial) => queueSessionStateUpdate(partial),
+  apiPost: (path, body) => apiPost(path, body),
+  issuesBadgesEl,
+  setIssuesButtonsEnabled: (enabled) => setIssuesButtonsEnabled(enabled),
+  toast: (message, timeoutMs) => host.toast(message, timeoutMs),
+  log: (...args) => console.log(...args),
+  warn: (...args) => console.warn(...args),
+});
+hostEditorEventsRuntime.install();
+function ensureEditorFrameReady() {
+  return hostEditorEventsRuntime.ensureEditorFrameReady();
+}
+function _awaitEditorOpen(requestId, path, timeoutMs) {
+  return hostEditorEventsRuntime.awaitEditorOpen(requestId, path, timeoutMs);
+}
 const miNew       = requireEl('#mi-new');
 const miOpen      = requireEl('#mi-open');
 const miSave      = requireEl('#mi-save');
@@ -1397,7 +1105,7 @@ createSettingsBootstrap({
   getStartPath: () => lastPickerPath || HOME_DIR,
   busRequest: (method, payload, timeoutMs) => window.__explorerRpc.request(method, payload, timeoutMs),
   busNotify: (method, payload) => window.__explorerRpc.notify(method, payload),
-  reloadEditorIframe: _reloadEditorIframe,
+  reloadEditorFrame: _reloadEditorFrame,
   toast: (msg, ms) => host.toast(msg, ms),
 });
 
@@ -1415,7 +1123,7 @@ if (shouldUseLocalKeyboardViewportAdjustments()) {
     agentDrawer: agentDrawerEl,
     composer: agentComposer,
     transcript: agentTranscript,
-    editorSurface: editorFrame,
+    editorSurface: editorFrameEl,
   });
 }
 
@@ -2557,8 +2265,8 @@ async function _requestAdapterRestart() {
   return adapterUi.requestAdapterRestart();
 }
 
-function _reloadEditorIframe() {
-  adapterUi.reloadEditorIframe();
+function _reloadEditorFrame() {
+  adapterUi.reloadEditorFrame();
 }
 
 window.__cm6HandleLspStatusUpdate = adapterUi.handleLspStatusUpdate;
@@ -2648,7 +2356,7 @@ const recentsController = createRecentsController({
 });
 recentsController.installWindowHook();
 
-// Synchronize host + iframe when a project is opened in the explorer.
+// Synchronize host + inline editor when a project is opened in the explorer.
 // Called from explorer.ts via window.__cm6HandleProjectOpened(path).
 const projectSwitchController = createProjectSwitchController({
   getTerminal: () => terminal,
@@ -3026,7 +2734,6 @@ const { terminal, consoleDrawer, problemsPanel: drawerProblemsPanel } = initPane
   initDrawerAndShortcuts,
   bindMenuToggle,
   requireEl,
-  getEditorSocket: () => editorSocket,
   hostToast: (msg) => host.toast(msg),
   setFontScale: (preset) => fontScaleController.setFontScale(preset),
   triggerEditorSearchPanel: (reason, opts) => searchPanelController.triggerEditorSearchPanel(reason, opts),
@@ -3059,7 +2766,6 @@ runBootSequence(createBootSequenceDeps({
     initResizeManager: () => initResizeManager(),
     initExplorerUI: () => initExplorerUI(),
     connectExplorerSocket: () => connectExplorerSocket(),
-    connectEditorSocket: () => connectEditorSocket(),
     connectUIIPC: () => connectUIIPC(),
     connectSidebarIPC: () => connectSidebarIPC(),
     ensureWorkbenchAdapterReady: () => hostStateRuntime.ensureWorkbenchAdapterReady(),
@@ -3124,7 +2830,7 @@ runBootSequence(createBootSequenceDeps({
     setBranchMenuHandle: (h) => { branchMenuHandle = h; },
     setAgentDrawerHandle: (h) => { agentDrawerHandle = h; },
     requestBackendBootSnapshot: (payload) => uiIpcConnections.requestBackendBootSnapshot(payload),
-    mountInlineEditorHost: (snapshot) => bootInlineEditorHost(editorFrame, {
+    mountInlineEditorHost: (snapshot) => bootInlineEditorHost(editorFrameEl, {
       ensureSocketIoLoaded,
       bootSnapshot: snapshot,
     }),
@@ -3136,7 +2842,7 @@ runBootSequence(createBootSequenceDeps({
     : (fn) => setTimeout(fn, 0);
   deferHydrate(() => {
     try {
-      void ensureEditorIframeReady()
+      void ensureEditorFrameReady()
         .then(() => Promise.resolve(sidebarShortcuts?.hydrate?.()))
         .catch((e) => {
           console.warn('[Sidebar] deferred hydrate failed:', e);

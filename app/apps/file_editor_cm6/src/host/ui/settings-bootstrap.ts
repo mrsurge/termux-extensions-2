@@ -42,7 +42,7 @@ import { createSettingsModalsController } from './settings-modals.ts';
  *   getStartPath: () => string,
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
  *   busNotify: (event: string, payload?: any) => void,
- *   reloadEditorIframe: () => void,
+ *   reloadEditorFrame: () => void,
  *   toast: (msg: string, ms?: number) => void,
  * }} deps
  */
@@ -59,7 +59,7 @@ export function createSettingsBootstrap(deps) {
     busRequest: deps.busRequest,
     busNotify: deps.busNotify,
     toast: deps.toast,
-    reloadEditorIframe: deps.reloadEditorIframe,
+    reloadEditorFrame: deps.reloadEditorFrame,
   });
 
   function openExtConfigModal(extId, displayName, schema, currentValues) {
@@ -115,7 +115,7 @@ export function createSettingsBootstrap(deps) {
     saveBtn: deps.els.extConfigSave,
     busRequest: deps.busRequest,
     refreshExtManager: () => refreshEditorExtManagerModal(),
-    reloadEditorIframe: deps.reloadEditorIframe,
+    reloadEditorFrame: deps.reloadEditorFrame,
     toast: deps.toast,
   });
   settingsConfigModalController.install();
@@ -123,7 +123,7 @@ export function createSettingsBootstrap(deps) {
   settingsManagerController = createSettingsManagerController({
     extManagerListEl: deps.els.extManagerList,
     busRequest: deps.busRequest,
-    reloadEditorIframe: deps.reloadEditorIframe,
+    reloadEditorFrame: deps.reloadEditorFrame,
     openExtConfigModal,
     getActiveScope: () => settingsRefreshController.getActiveScope(),
     toast: deps.toast,
@@ -140,7 +140,7 @@ export function createSettingsBootstrap(deps) {
     getStartPath: deps.getStartPath,
     busRequest: deps.busRequest,
     refreshExtManager: () => refreshEditorExtManagerModal(),
-    reloadEditorIframe: deps.reloadEditorIframe,
+    reloadEditorFrame: deps.reloadEditorFrame,
     openExtConfigModal,
     toast: deps.toast,
   });

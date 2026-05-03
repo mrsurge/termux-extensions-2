@@ -36,13 +36,13 @@ export function createAdapterUiController(deps) {
       if (!window.__explorerRpc) return;
       deps.spinnerSetStep('Restarting adapter…');
       await window.__explorerRpc.request(EXPLORER_RPC_METHODS.extensionsAdapterRestart, {}, 15000);
-      reloadEditorIframe();
+      reloadEditorFrame();
     } catch (e) {
       console.warn('[adapter_restart] request failed:', e);
     }
   }
 
-  function reloadEditorIframe() {
+  function reloadEditorFrame() {
     window.__adapterConnected = false;
     deps.setWorkbenchAdapterState({ readyOk: false, connecting: null });
     deps.spinnerSetStep('Reloading editor…');
@@ -192,7 +192,7 @@ export function createAdapterUiController(deps) {
     closeAdapterDropdown,
     openAdapterDropdown,
     requestAdapterRestart,
-    reloadEditorIframe,
+    reloadEditorFrame,
     updateLspSpinner,
     handleLspStatusUpdate,
     installLspStatusHandler,

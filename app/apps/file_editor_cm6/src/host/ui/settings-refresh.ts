@@ -11,7 +11,7 @@ import { EXPLORER_RPC_METHODS } from '../../explorer/rpc/contract.ts';
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
  *   busNotify: (event: string, payload?: any) => void,
  *   toast: (msg: string, ms?: number) => void,
- *   reloadEditorIframe: () => void
+ *   reloadEditorFrame: () => void
  * }} deps
  */
 export function createSettingsRefreshController(deps) {
@@ -108,7 +108,7 @@ export function createSettingsRefreshController(deps) {
         const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsSet, { settings: parsed }, 15000);
         if (res?.ok) {
           deps.toast(`Workspace settings saved (${res.count} keys) — reloading adapter…`);
-          deps.reloadEditorIframe();
+          deps.reloadEditorFrame();
         } else {
           deps.toast(res?.error || 'Save failed');
         }
@@ -180,7 +180,7 @@ export function createSettingsRefreshController(deps) {
         const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsCustomSettingsSet, { settings: parsed }, 15000);
         if (res?.ok) {
           deps.toast(`Custom settings saved (${res.count} keys) — reloading adapter…`);
-          deps.reloadEditorIframe();
+          deps.reloadEditorFrame();
         } else {
           deps.toast(res?.error || 'Save failed');
         }

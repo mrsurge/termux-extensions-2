@@ -1,8 +1,8 @@
-"""UI IPC Socket.IO namespace — thin relay for frontend-to-frontend communication.
+"""UI IPC Socket.IO namespace — thin relay for host/runtime UI communication.
 
-Both the main page (main.js) and the editor iframe (m_editor_app.js) connect
-to the ``/ui_ipc`` namespace.  Events are rebroadcast to all other clients in
-the room so the two pages can communicate without Python business logic.
+The main page and inline editor runtime can both consume the ``/ui_ipc``
+namespace. Events are rebroadcast to all other clients in the room so UI
+surfaces can communicate without using the editor-owned namespace as a host bus.
 
 Python only logs traffic for observability.
 
