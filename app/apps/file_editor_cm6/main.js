@@ -68,6 +68,7 @@ import { createRunFileController } from './src/host/file-ops/run-file.ts';
 import { createApiClient } from './src/host/api/client.ts';
 import { bootInlineEditorHost } from './monaco_editor/inline_host.ts';
 import { createHostChromeRuntime } from './main_page/frontend/host-chrome-runtime.ts';
+import { createHostStateRuntime } from './main_page/frontend/host-state-runtime.ts';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 
@@ -1268,6 +1269,17 @@ const {
   exportDiagnosticsToFile,
 } = hostChromeRuntime;
 hostChromeRuntime.install();
+const hostStateRuntime = createHostStateRuntime({
+  updateLspSpinner: () => {
+    const ui = window.__feAdapterUi;
+    if (ui && typeof ui.updateLspSpinner === 'function') {
+      ui.updateLspSpinner();
+    }
+  },
+  applyActiveFilePath: (filePath) => _applyHostActivePath(filePath, { forceToolbar: true }),
+  log: (...args) => console.log(...args),
+});
+hostStateRuntime.install();
 const miNew       = requireEl('#mi-new');
 const miOpen      = requireEl('#mi-open');
 const miSave      = requireEl('#mi-save');
@@ -1347,136 +1359,6 @@ const extConfigClose = requireEl('#ext-config-close');
 const extConfigForm = requireEl('#ext-config-form');
 const extConfigCancel = requireEl('#ext-config-cancel');
 const extConfigSave = requireEl('#ext-config-save');
-
-let workbenchAdapterConnecting = null;
-let workbenchAdapterReadyOk = false;
-window.__adapterConnected = false;
-const _sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function _feHostTs() {
-  try {
-    const t = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function')
-      ? Math.round(performance.now() * 10) / 10
-      : null;
-    return (t != null ? ('t=' + t + 'ms ') : '') + 'now=' + Date.now();
-  } catch (_) {
-    return 'now=' + Date.now();
-  }
-}
-
-function _feUpdateLspSpinner() {
-  try {
-    const ui = window.__feAdapterUi;
-    if (ui && typeof ui.updateLspSpinner === 'function') {
-      ui.updateLspSpinner();
-    }
-  } catch (_) {}
-}
-
-function _spinnerSetStep(title, failed) {
-  try {
-    if (!window.__feLspSpinnerUi) {
-      window.__feLspSpinnerUi = {
-        lspShow: false, lspTitle: '', busyShow: false,
-        busyTitle: '', busyLanguageId: '', busyActivity: '',
-      };
-    }
-    const ui = window.__feLspSpinnerUi;
-    ui.busyShow = true;
-    ui.busyActivity = 'readiness';
-    ui.busyTitle = (failed ? '\u2718 ' : '') + title;
-    _feUpdateLspSpinner();
-  } catch (_) {}
-}
-
-function _spinnerHide(ok) {
-  try {
-    if (!window.__feLspSpinnerUi) return;
-    const ui = window.__feLspSpinnerUi;
-    if (ui.busyActivity === 'readiness' || ui.busyActivity === 'workbench_adapter' || ui.busyActivity === '') {
-      ui.busyShow = false;
-      ui.busyTitle = '';
-      ui.busyActivity = '';
-      window.__adapterConnected = Boolean(ok);
-      try { console.log(_feHostTs(), '[spinner] STOP request_id=- path=- reason=readiness_' + (ok ? 'ok' : 'fail')); } catch (_) {}
-      try {
-        if (window.__feLspSpinnerState && window.__feLspSpinnerState.hideTimer) {
-          clearTimeout(window.__feLspSpinnerState.hideTimer);
-          window.__feLspSpinnerState.hideTimer = null;
-        }
-      } catch (_) {}
-      _feUpdateLspSpinner();
-    }
-  } catch (_) {}
-}
-
-// Adapter state listener — driven by server-pushed events via UI IPC.
-function _handleAdapterState(detail) {
-  const status = detail && detail.status;
-  console.log(_feHostTs(), '[adapter_state]', status, detail && detail.error || '');
-  if (status === 'starting') {
-    _spinnerSetStep('Starting adapter\u2026');
-  } else if (status === 'ready') {
-    workbenchAdapterReadyOk = true;
-    _spinnerHide(true);
-    // Resolve any pending readiness promise.
-    if (window.__adapterReadyResolve) {
-      window.__adapterReadyResolve(true);
-      window.__adapterReadyResolve = null;
-    }
-  } else if (status === 'error') {
-    workbenchAdapterReadyOk = false;
-    _spinnerHide(false);
-    if (window.__adapterReadyResolve) {
-      window.__adapterReadyResolve(false);
-      window.__adapterReadyResolve = null;
-    }
-  } else if (status === 'idle') {
-    // `idle` is not authoritative enough to mean disconnected. Keep the
-    // previous ready/error state until an explicit `ready` or `error` arrives.
-    if (!workbenchAdapterReadyOk && !window.__adapterReadyResolve) {
-      _feUpdateLspSpinner();
-    }
-  }
-}
-
-// Install once — listens for adapter_state events from UI IPC.
-window.addEventListener('cm6:adapter-state', (evt) => {
-  try { _handleAdapterState(evt.detail); } catch (_) {}
-});
-
-window.addEventListener('cm6:active-file-changed', (evt) => {
-  try {
-    const detail = evt && evt.detail && typeof evt.detail === 'object' ? evt.detail : {};
-    const filePath = typeof detail.path === 'string' ? detail.path : '';
-    if (!filePath) return;
-    _applyHostActivePath(filePath, { forceToolbar: true });
-  } catch (_) {}
-});
-
-async function ensureWorkbenchAdapterReady() {
-  if (workbenchAdapterReadyOk) return true;
-  if (workbenchAdapterConnecting) return await workbenchAdapterConnecting;
-
-  _spinnerSetStep('Waiting for adapter\u2026');
-  try { console.log(_feHostTs(), '[spinner] START request_id=- path=- reason=readiness_chain'); } catch (_) {}
-
-  workbenchAdapterConnecting = new Promise((resolve) => {
-    window.__adapterReadyResolve = resolve;
-    // Timeout — if no state arrives within 60s, give up.
-    setTimeout(() => {
-      if (!workbenchAdapterReadyOk && window.__adapterReadyResolve) {
-        _spinnerSetStep('Readiness timeout', true);
-        window.__adapterReadyResolve = null;
-        resolve(false);
-      }
-    }, 60000);
-  });
-
-  const result = await workbenchAdapterConnecting;
-  workbenchAdapterConnecting = null;
-  return result;
-}
 
 createSettingsBootstrap({
   els: {
@@ -2655,10 +2537,9 @@ const CURSOR_STATE_DEBOUNCE = 1000; // ms
 // ── Adapter dropdown (context menu on status indicator) ──────────────
 const adapterUi = createAdapterUiController({
   closeAllMenus: () => menuCoreController.closeAllMenus(),
-  spinnerSetStep: (msg) => _spinnerSetStep(msg),
+  spinnerSetStep: (msg) => hostStateRuntime.spinnerSetStep(msg),
   setWorkbenchAdapterState: ({ readyOk, connecting }) => {
-    workbenchAdapterReadyOk = readyOk;
-    workbenchAdapterConnecting = connecting;
+    hostStateRuntime.setWorkbenchAdapterState({ readyOk, connecting });
   },
   toast: (msg, ms) => host.toast(msg, ms),
 });
@@ -3181,7 +3062,7 @@ runBootSequence(createBootSequenceDeps({
     connectEditorSocket: () => connectEditorSocket(),
     connectUIIPC: () => connectUIIPC(),
     connectSidebarIPC: () => connectSidebarIPC(),
-    ensureWorkbenchAdapterReady: () => ensureWorkbenchAdapterReady(),
+    ensureWorkbenchAdapterReady: () => hostStateRuntime.ensureWorkbenchAdapterReady(),
     initBranchMenu: () => initBranchMenu(),
     waitForInitialUiPrefs: (ms) => waitForInitialUiPrefs(ms),
     seedUiPrefsSnapshot: (prefs) => window.__cm6HandleUiPrefs({ ui: prefs || {} }),
