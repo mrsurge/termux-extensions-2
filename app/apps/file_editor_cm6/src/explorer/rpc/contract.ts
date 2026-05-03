@@ -63,7 +63,6 @@ export const EXPLORER_RPC_METHODS = {
 } as const;
 
 export const EXPLORER_RPC_NOTIFICATIONS = {
-  agentOpen: 'explorer.agent.open',
   autosaveContent: 'explorer.autosave.content',
   cm6MirrorAck: 'explorer.cm6.mirror.ack',
   diagnosticsDetail: 'explorer.diagnostics.detail',

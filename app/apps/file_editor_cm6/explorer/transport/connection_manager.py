@@ -12,7 +12,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Mapping, Optional, Protocol, cast
+from typing import Mapping, Optional, Protocol
 
 JsonMessage = Mapping[str, object]
 
@@ -168,30 +168,6 @@ class ConnectionManager:
 
     async def broadcast(self, project_path: str, message: JsonMessage) -> None:
         """Send message to all clients connected to a specific project."""
-        try:
-            msg_type = message.get("type")
-            if msg_type == "agent:open":
-                payload = message.get("payload")
-                payload_map: Mapping[str, object] = (
-                    cast(Mapping[str, object], payload)
-                    if isinstance(payload, Mapping)
-                    else {}
-                )
-                logger.info(
-                    "[explorer_broadcast] type=agent:open project=%s conn=%s payload=%s",
-                    project_path,
-                    self.get_connection_count(project_path),
-                    {
-                        "path": payload_map.get("path"),
-                        "rel": payload_map.get("rel"),
-                        "line": payload_map.get("line"),
-                        "column": payload_map.get("column"),
-                        "source": payload_map.get("source"),
-                        "conversation_id": payload_map.get("conversation_id"),
-                    },
-                )
-        except Exception:
-            pass
         resolved_key = self._resolve_project_key(project_path)
         if not resolved_key:
             logger.debug(

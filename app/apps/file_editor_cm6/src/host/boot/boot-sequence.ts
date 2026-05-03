@@ -26,9 +26,6 @@ interface BootSequenceDeps {
   waitForInitialUiPrefs(ms?: number): Promise<Record<string, unknown>>;
   seedUiPrefsSnapshot(prefs: Record<string, unknown>): void;
   applySidebarUiPrefs(prefs: Record<string, unknown>): void;
-  applyAgentRuntimeConfigFromUi(prefs: Record<string, unknown>): Promise<unknown>;
-  connectCodexAppserverSocket(url?: string): void;
-  createAgentController(cfg: unknown): unknown;
   syncEditorState(force?: boolean): Promise<Record<string, unknown> | null>;
   hydrateEditorState(state: Record<string, unknown> | null): Record<string, unknown> | null;
   broadcastRecentsUpdate(state: Record<string, unknown> | null): void;
@@ -51,15 +48,8 @@ interface BootSequenceDeps {
   onOpenFileFailure(err: Error): void;
   onNoRestoredPath(serverState: Record<string, unknown>): void;
   setBranchMenuHandle(handle: unknown): void;
-  setAgentDrawerHandle(handle: unknown): void;
   requestBackendBootSnapshot(payload?: Record<string, unknown>): Promise<unknown>;
   mountInlineEditorHost(snapshot: HostBootSnapshot | null): Promise<unknown>;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value != null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
 }
 
 function asString(value: unknown): string {
@@ -113,14 +103,6 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
     ? snapshotUiPrefs
     : await deps.waitForInitialUiPrefs(2200);
   try { deps.applySidebarUiPrefs(initialUiPrefs || {}); } catch (error) { console.warn('[Sidebar] Failed to apply initial prefs:', error); }
-  const agentIframeConfig = await deps.applyAgentRuntimeConfigFromUi(initialUiPrefs || {});
-  try {
-    const runtimeUrl = asRecord(agentIframeConfig)?.url;
-    deps.connectCodexAppserverSocket(typeof runtimeUrl === 'string' && runtimeUrl ? runtimeUrl : undefined);
-  } catch (error) {
-    console.warn('Failed to connect Codex appserver socket:', error);
-  }
-  deps.setAgentDrawerHandle(deps.createAgentController(agentIframeConfig));
 
   const serverState = snapshotServerState || await deps.syncEditorState(true);
   deps.broadcastRecentsUpdate(serverState);

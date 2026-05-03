@@ -11,7 +11,6 @@ from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
 from fastapi.responses import JSONResponse, FileResponse, Response
 import asyncio
 from anyio import to_thread
-from .agent_ws import agent_websocket
 from .history_store import HistoryStore
 from .explorer.services.file_ops import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
 from .code_server_shell_manager import code_server_connection_target, ensure_code_server_shell
@@ -760,15 +759,6 @@ async def workbench_set_enabled_extensions(payload: JsonDict = Body(...)):
     return {"ok": True, "data": {"project_root": project_root, "enabled": sidecar.get_workbench_enabled_extensions()}}
 
 
-# Sidebar extension routes (hardwired until dynamic extension loading lands).
-# Register before agent routes to avoid /agent/{session_id} shadowing static paths.
-from .extensions.sidebar_extension.sidebar_extension import bp as sidebar_extension_bp
-file_editor_cm6_bp.include_router(sidebar_extension_bp)
-
-# # Register agent routes and WebSocket handler
-from .agent_routes import bp as agent_routes_bp
-file_editor_cm6_bp.include_router(agent_routes_bp)
-
 # Serve static files (JS, CSS, etc.)
 @file_editor_cm6_bp.get("/static/{file_path:path}")
 async def serve_static(file_path: str):
@@ -792,7 +782,6 @@ async def serve_agent_icon(name: str):
 # Register terminal routes, (and give me a new reason to make a commit)
 from .terminal_backend import terminal_router
 file_editor_cm6_bp.include_router(terminal_router)
-file_editor_cm6_bp.add_api_websocket_route("/ws/agent", agent_websocket)
 
 # Include the self-contained editor routes
 from .monaco_editor.editor_backend import editor_router

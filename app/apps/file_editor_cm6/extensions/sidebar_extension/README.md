@@ -1,53 +1,35 @@
 # Sidebar Extension (Code TE2 / file_editor_cm6)
 
-This folder is the hub for the **iframe sidebar** integration used by the Code TE2 app.
+This folder now contains the main-page sidebar shortcut frontend only.
 
-It is intentionally **platform-agnostic**: the front-end talks to the host via HTTP endpoints
-(``/api/host/drawer/open`` and ``/api/host/drawer/close``) and to the app backend via FastAPI routes
-mounted under ``/api/app/file_editor_cm6``.
+The old in-app agent harness, transcript/session UI, direct Codex appserver socket,
+and `/agent/*` FastAPI routes were removed. The Codex agent runtime is a separate
+TE2 app (`app/apps/codex_agent`) and is loaded through sidebar shortcuts.
 
-## What Lives Here
+## Live Surfaces
 
-- ``manifest.json``
-  - Metadata + icon used by the front-end to render the sidebar toggle/header icon.
+- `static/js/sidebar_shortcuts.js`
+  - Owns sidebar shortcut preferences, the shortcut modal, header shortcut icons,
+    iframe stack activation, and framework-app shortcut startup.
+- `/sidebar_ipc` on path `/ui_ipc_ws/socket.io`
+  - Owns host/shortcut-frame coordination, cwd sync, active shortcut state,
+    refresh requests, mentions, and sidebar-originated editor-open requests.
+- `app/apps/file_editor_cm6/ui_ipc/sidebar_ws.py`
+  - Backend handler set for the live sidebar IPC namespace.
+- `app/apps/file_editor_cm6/main_page/frontend/host-sidebar-runtime.ts`
+  - Main-page drawer controller for local toolbar clicks plus sidebar RPC/IPCs
+    such as drawer open/close/toggle events.
 
-- ``sidebar_extension.py``
-  - FastAPI router mounted by ``app/apps/file_editor_cm6/main.py``.
-  - Provides lightweight endpoints used by the iframe sidebar:
-    - ``POST /api/app/file_editor_cm6/agent/drawer/open``
-    - ``POST /api/app/file_editor_cm6/agent/drawer/ui_hints``
-    - ``GET  /api/app/file_editor_cm6/agent/cwd`` (CORS-gated for localhost:12359)
-    - ``POST /api/app/file_editor_cm6/agent/open`` (broadcast via Explorer WS to host page)
-    - ``POST /api/app/file_editor_cm6/agent/open_request`` and ``GET /agent/open_request/next``
+## Preserved Contracts
 
-- ``sidebar_state.py``
-  - In-memory state and a small queue shared by the router:
-    - open-count + last-open metadata
-    - ``ui_hints`` map
-    - open-request queue (host page can poll the next request)
+The DOM ids and UI preference keys still use the historical `agent*` names because
+existing sidebar shortcut preferences and CSS depend on them:
 
-- ``static/js/sidebar_iframe.js``
-  - Iframe sidebar controller (open/close, setUrl) used by ``app/apps/file_editor_cm6/main.js``.
-  - Talks to the host drawer endpoints:
-    - ``/api/host/drawer/open``
-    - ``/api/host/drawer/close``
+- `agentActiveShortcutId`
+- `agentToggleDisplay`
+- `agentHeaderDisplay`
+- `agentShortcuts`
+- `#agent-drawer`, `#fe-agent-toggle`, and shortcut-modal ids
 
-- ``static/js/sidebar_drawer.js``
-  - Legacy drawer implementation (kept for reference/compatibility).
-
-## Other Sidebar Touchpoints (Outside This Folder)
-
-- DOM + layout:
-  - ``app/apps/file_editor_cm6/template.html`` (sidebar DOM, header elements, iframe stack)
-
-- Front-end state + preferences + shortcut logic:
-  - ``app/apps/file_editor_cm6/main.js`` (shortcuts, active selection, header icon list, eager/lazy, prefs wiring)
-  - UI preference keys:
-    - ``agentActiveShortcutId``
-    - ``agentToggleDisplay``
-    - ``agentHeaderDisplay``
-    - ``agentShortcuts``
-
-If you want the sidebar logic fully centralized, the next step is extracting the sidebar-related code
-from ``app/apps/file_editor_cm6/main.js`` into a dedicated module under this extension (or under
-``app/apps/file_editor_cm6/static/js/sidebar/``), keeping ``main.js`` as the app bootstrap only.
+Those names are compatibility surface for sidebar shortcuts, not proof that the
+old in-app agent harness still exists.
