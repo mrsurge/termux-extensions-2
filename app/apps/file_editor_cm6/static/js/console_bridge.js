@@ -1,12 +1,16 @@
 // console_bridge.js — Agnostic console monkey-patcher + Socket.IO bridge
 //
-// Patches console.log/info/warn/error/debug to emit events on the framework-
-// owned TE2 console Socket.IO namespace with a "console:" prefix.  Also
-// captures uncaught errors and unhandled rejections.
+// Patches console.log/info/warn/error/debug to emit events on the TE2 console
+// Socket.IO namespace with a "console:" prefix.  Also captures uncaught
+// errors and unhandled rejections.
 //
 // Usage (standalone — creates its own socket):
 //   import { initConsoleBridge } from './console_bridge.js';
 //   initConsoleBridge({ workerLabel: 'my_app', uniquePerWindow: true });
+//
+// Usage (shared socket — reuse an existing TE2 console connection):
+//   import { initConsoleBridge } from './console_bridge.js';
+//   initConsoleBridge({ socket: existingTe2ConsoleSocket, workerLabel: 'my_app', uniquePerWindow: true });
 //
 // For multi-client/frontends that may be open in multiple windows, tabs, or iframes:
 // - use workerLabel as the human-readable grouping label
@@ -131,6 +135,7 @@ function _hookEval() {
  * Initialize the console bridge.
  *
  * @param {object} [opts]
+ * @param {object} [opts.socket]   Existing TE2 console Socket.IO instance to reuse.
  * @param {string} [opts.workerId] Exact identifier for this frontend. Prefer this only when you intentionally want a fixed ID.
  * @param {string} [opts.workerLabel] Human-readable label/grouping for this frontend.
  * @param {boolean} [opts.uniquePerWindow] Generate a stable unique ID per browser window/tab from workerLabel. Recommended for multi-client hosted frontends.
@@ -152,21 +157,25 @@ export function initConsoleBridge(opts = {}) {
     _workerId = `w_${Math.random().toString(36).slice(2, 10)}`;
   }
 
-  const io = window.io;
-  if (!io) {
-    console.warn('[console_bridge] window.io not available — bridge not started');
-    return null;
+  if (opts.socket) {
+    _bridgeSocket = opts.socket;
+  } else {
+    const io = window.io;
+    if (!io) {
+      console.warn('[console_bridge] window.io not available — bridge not started');
+      return null;
+    }
+    _bridgeSocket = io(opts.namespace || '/te2_console', {
+      path: opts.socketPath || '/te2_console_ws/socket.io',
+      transports: ['websocket'],
+      query: {
+        app_id: 'file_editor_cm6',
+        source: 'console_bridge',
+        workerId: _workerId,
+        workerLabel: _workerLabel,
+      },
+    });
   }
-  _bridgeSocket = io(opts.namespace || '/te2_console', {
-    path: opts.socketPath || '/te2_console_ws/socket.io',
-    transports: ['websocket'],
-    query: {
-      app_id: 'file_editor_cm6',
-      source: 'console_bridge',
-      workerId: _workerId,
-      workerLabel: _workerLabel,
-    },
-  });
 
   // Tell the server this is a console-producing worker
   _bridgeSocket.on('connect', () => {
@@ -193,12 +202,7 @@ export function destroyConsoleBridge() {
   for (const level of LEVELS) {
     if (_originals[level]) console[level] = _originals[level];
   }
-  if (_bridgeSocket) {
-    try { _bridgeSocket.disconnect(); } catch (_) {}
-    _bridgeSocket = null;
-  }
   _originals = {};
   _bridgeActive = false;
-  _workerId = null;
   _workerLabel = null;
 }

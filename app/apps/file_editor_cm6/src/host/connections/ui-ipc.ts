@@ -7,7 +7,7 @@ import { UI_IPC_RPC_METHODS, UI_IPC_RPC_NOTIFICATIONS } from '../../ui_ipc/rpc_c
 /**
  * @param {{
  *   ensureSocketIoLoaded: () => Promise<any>,
- *   initConsoleBridge: (args: { workerId: string, socketPath?: string, namespace?: string }) => void,
+ *   initConsoleBridge: (args: { workerId?: string, workerLabel?: string, uniquePerWindow?: boolean, socketPath?: string, namespace?: string }) => unknown,
  *   getClientId: () => string
  * }} deps
  */
@@ -15,6 +15,29 @@ export function createUiIpcConnections(deps) {
   let sidebarIpcSocket = null;
   let uiIpcRpcConnection = null;
   let uiIpcConnectPromise = null;
+  let consoleBridgePromise = null;
+  let consoleBridgeStarted = false;
+
+  function startMainPageConsoleBridge() {
+    if (consoleBridgeStarted) return Promise.resolve();
+    if (consoleBridgePromise) return consoleBridgePromise;
+    consoleBridgePromise = deps.ensureSocketIoLoaded().then((io) => {
+      if (!io) throw new Error('Socket.IO client is not available');
+      const bridge = deps.initConsoleBridge({
+        workerLabel: 'main_page',
+        uniquePerWindow: true,
+        socketPath: '/te2_console_ws/socket.io',
+        namespace: '/te2_console',
+      });
+      if (!bridge) throw new Error('console bridge did not start');
+      consoleBridgeStarted = true;
+    }).catch((err) => {
+      consoleBridgeStarted = false;
+      consoleBridgePromise = null;
+      console.warn('[console_bridge] main page start failed', err);
+    });
+    return consoleBridgePromise;
+  }
 
   function applyActiveFileChangedUiState(data) {
     try {
@@ -153,14 +176,11 @@ export function createUiIpcConnections(deps) {
         },
       });
 
-      deps.initConsoleBridge({
-        workerId: 'main_page',
-        socketPath: '/te2_console_ws/socket.io',
-        namespace: '/te2_console',
-      });
     }
 
-    uiIpcConnectPromise = uiIpcRpcConnection.connect().then(() => uiIpcRpcConnection).catch((err) => {
+    uiIpcConnectPromise = startMainPageConsoleBridge().then(() => {
+      return uiIpcRpcConnection.connect();
+    }).then(() => uiIpcRpcConnection).catch((err) => {
       console.warn('[UI_IPC] connect failed', err);
       throw err;
     }).finally(() => {

@@ -752,6 +752,7 @@
     bottom: 0;
     left: 0;
     right: 0;
+    max-width: 100vw;
     height: 340px;
     background: var(--card, #0b0f1a);
     border-top: 2px solid var(--border, #333);
@@ -760,6 +761,17 @@
     z-index: 100;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    contain: layout paint;
+  }
+
+  /* Monaco's body-level char-width probe is 50000px wide. Keep it off the
+     positive scroll axis so GeckoView does not permanently poison root width. */
+  body > div[style*="top: -50000px"][style*="width: 50000px"],
+  body > div[style*="top:-50000px"][style*="width:50000px"] {
+    left: -50000px !important;
+    contain: layout style paint !important;
+    overflow: hidden !important;
   }
 
   /* Drawer tab bar (Terminal | Console) */
@@ -1231,13 +1243,31 @@
   #terminal-container {
     flex: 1;
     min-height: 0;
+    max-width: 100%;
+    box-sizing: border-box;
     overflow: hidden;
     padding: 8px;
     position: relative;
     overscroll-behavior: contain;
     touch-action: none;
+    contain: layout paint;
   }
-  #terminal-container .xterm { touch-action: none; }
+  #terminal-container .xterm {
+    max-width: 100%;
+    overflow: hidden;
+    touch-action: none;
+    contain: layout paint;
+  }
+  #terminal-container .xterm-screen,
+  #terminal-container .xterm-viewport,
+  #terminal-container .xterm-rows {
+    max-width: 100%;
+  }
+  #terminal-container .xterm-screen,
+  #terminal-container .xterm-helpers {
+    overflow: hidden;
+    contain: layout paint;
+  }
   /* Custom scrollbar for xterm - solid and wide */
   #terminal-container .xterm-viewport::-webkit-scrollbar {
     width: 10px;

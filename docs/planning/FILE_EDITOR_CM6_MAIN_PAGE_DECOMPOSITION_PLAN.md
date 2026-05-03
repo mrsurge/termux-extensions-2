@@ -25,6 +25,8 @@ Use the broader `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for target architecture
 - Host editor-event boundary extraction: `main_page/frontend/host-editor-events-runtime.ts` owns host-side editor readiness/open waiters, cache-state handling, scroll-state persistence, diagnostics badge projection, and editor notify toasts from `/ui_ipc`-bridged editor notifications.
 - Sidebar/drawer prune and extraction: `main_page/frontend/host-sidebar-runtime.ts` owns local drawer open/close/toggle behavior and consumes sidebar IPC/RPC events bridged as `cm6:sidebar-event`.
 - Dead in-app agent harness removal: the old `/agent/*` FastAPI router, `/ws/agent` WebSocket mount, transcript/session backend, direct Codex appserver socket, open-request poller, transcript/composer/session markup, and legacy sidebar iframe/drawer controllers were removed from the live path.
+- Main-page console bridge refresh: `static/js/console_bridge.js` now matches the cached current bridge, and `src/host/connections/ui-ipc.ts` starts the bridge only after Socket.IO is available with `workerLabel: "main_page"` plus `uniquePerWindow: true`.
+- Terminal-drawer mobile root-width hardening: `template.html` now keeps Monaco's body-level offscreen char-width probe on the negative scroll axis and constrains the terminal drawer/xterm stack so opening the drawer cannot poison GeckoView root scroll metrics.
 
 ### Current Sidebar Boundary
 
@@ -38,9 +40,10 @@ Historical `agent*` DOM ids and UI preference keys remain compatibility names fo
 
 ### Immediate Next Candidates
 
-- Re-review `template.html` after the sidebar prune and remove remaining avoidable behavior policy from markup/CSS while preserving shortcut DOM compatibility.
+- Continue re-reviewing `template.html` after the sidebar prune and remove remaining avoidable behavior policy from markup/CSS while preserving shortcut DOM compatibility.
 - Continue shrinking `main.js` by extracting Explorer RPC setup/notification fanout into a grouped strict `main_page/frontend/` runtime.
 - Start the backend decomposition only after choosing a small route/helper family that does not move framework-owned `services/` shims or worker subapp mounts.
+- When debugging live frontend behavior through TE2 console, target the exact generated worker id under the `main_page` label rather than assuming a fixed worker id.
 
 ## Current code review
 
