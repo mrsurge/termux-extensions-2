@@ -376,6 +376,8 @@ The Python framework is the connection between the two frontends. This is how co
 
 ## TE2 MCP Eval / FWS Quick Workflow
 
+TE2 MCP introspection is primarily designed for third-party apps hosted by TE2. It can also inspect TE2 / `file_editor_cm6` itself, but `main_page` is the host page that embeds other apps inside sidebar iframes, so it is a harder target than a normal hosted app. When debugging `main_page` host behavior, especially reload-sensitive layout or drawer issues, do not assume eval/reload alone reproduces the user's state. Ask the user to reload, open drawers, or reproduce the state when needed, then inspect the exact live worker after that user-assisted setup.
+
 1. Start with `te2_fws_running` to identify live shell IDs for `file_editor_cm6`. Treat this as the source of truth for which app worker / code-server / WBA shells are actually running.
 2. Use `te2_console_workers_live` to get the **current** exact worker ID. For the current `file_editor_cm6` editor path, the live editor runtime inspection target is `main_page`.
    Do not describe that runtime as a separate iframe-owned editor surface. Legacy source labels, query fields, or comments are not authoritative runtime descriptions for the current path.
