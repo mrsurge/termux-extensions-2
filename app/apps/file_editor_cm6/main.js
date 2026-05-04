@@ -47,7 +47,6 @@ import { createAutosaveRuntimeController } from './src/host/ui/autosave-runtime.
 import { showProjectsDebugModal } from './src/host/ui/projects-debug-modal.ts';
 import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './src/host/ui/watcher-settings.ts';
 import { createUiIpcConnections } from './src/host/connections/ui-ipc.ts';
-import { createExplorerRpcConnection } from './src/host/connections/explorer-rpc.ts';
 import { EXPLORER_RPC_METHODS, EXPLORER_RPC_NOTIFICATIONS } from './src/explorer/rpc/contract.ts';
 import { createFileWebSocketManager } from './src/host/connections/file-websocket.ts';
 import { createFileSyncHandler } from './src/host/connections/file-sync-handler.ts';
@@ -70,6 +69,7 @@ import { createHostChromeRuntime } from './main_page/frontend/host-chrome-runtim
 import { createHostStateRuntime } from './main_page/frontend/host-state-runtime.ts';
 import { createHostEditorEventsRuntime } from './main_page/frontend/host-editor-events-runtime.ts';
 import { createHostSidebarRuntime } from './main_page/frontend/host-sidebar-runtime.ts';
+import { createExplorerRpcRuntime } from './main_page/frontend/explorer-rpc-runtime.ts';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 
@@ -134,121 +134,13 @@ function _emitSidebarIpc(eventName, payload) {
   uiIpcConnections.emitSidebarIpc(eventName, payload);
 }
 
-let explorerRpcConnection = null;
-let explorerNeedsResync = false;
-function handleExplorerRpcNotification(method, params) {
-  const payload = params && typeof params === 'object' ? params : {};
-  if (typeof method !== 'string' || !method) return;
-
-  if (window.__debugExplorer) {
-    console.log('[ExplorerRPC:event]', { method, payload });
-  }
-
-  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherConfigUpdated && window.__cm6HandleWatcherConfig) {
-    window.__cm6HandleWatcherConfig(payload);
-  }
-  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherModeStatus && window.__cm6HandleWatcherModeStatus) {
-    window.__cm6HandleWatcherModeStatus(payload);
-  }
-  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherError && window.__cm6HandleWatcherError) {
-    window.__cm6HandleWatcherError(payload);
-  }
-  if (method === EXPLORER_RPC_NOTIFICATIONS.watcherLimitRaiseResult && window.__cm6HandleWatcherRaiseResult) {
-    window.__cm6HandleWatcherRaiseResult(payload);
-  }
-  if (method === EXPLORER_RPC_NOTIFICATIONS.prefsUiUpdated && window.__cm6HandleUiPrefs) {
-    window.__cm6HandleUiPrefs(payload);
-  } else if (method === EXPLORER_RPC_NOTIFICATIONS.prefsUiUpdated) {
-    try { window.__cm6PendingUiPrefs = payload; } catch (_) {}
-  }
-  if (method === EXPLORER_RPC_NOTIFICATIONS.extensionsAdapterRestarting) {
-    console.log('[adapter_restart] received', payload);
-    if (typeof _reloadEditorFrame === 'function') setTimeout(() => _reloadEditorFrame(), 0);
-  }
-  if (method === EXPLORER_RPC_NOTIFICATIONS.extensionsSettingsChanged) {
-    console.log('[adapter_restart] settings changed', payload);
-    if (typeof _requestAdapterRestart === 'function') setTimeout(() => _requestAdapterRestart(), 0);
-  }
-  if (method === EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated && (payload.rel || payload.abs)) {
-    try {
-      let abs = payload.abs || null;
-      if (!abs && payload.rel) {
-        let projRoot = null;
-        try { projRoot = sessionTelemetry.activeProjectPath(); } catch (_) {}
-        if (!projRoot) try { projRoot = sessionState?.activeProject; } catch (_) {}
-        abs = projRoot ? toAbsolute(payload.rel, projRoot, HOME_DIR) : null;
-      }
-      if (abs) {
-        _applyHostActivePath(abs, { forceToolbar: true });
-      }
-    } catch (_) {}
-  }
-  if (method === EXPLORER_RPC_NOTIFICATIONS.diagnosticsDetail) {
-    try {
-      const keys = payload ? Object.keys(payload) : [];
-      const sampleMarkers = keys.length > 0 ? (payload[keys[0]] || []).slice(0, 1) : [];
-      console.log('[Problems] diagnostics:detail rx', keys.length, 'files, sample:', JSON.stringify(sampleMarkers).slice(0, 300));
-      problemsPanel.update(payload);
-    } catch (e) { console.error('[Problems] update error:', e); }
-  }
-  if (typeof window.__explorerHandleNotification === 'function') {
-    window.__explorerHandleNotification(method, payload);
-  }
-}
-
+let explorerRpcRuntime = null;
 function connectExplorerSocket() {
-  if (explorerRpcConnection) {
-    explorerRpcConnection.reconnect();
-    return Promise.resolve(explorerRpcConnection);
+  if (!explorerRpcRuntime) {
+    console.warn('[ExplorerRPC] Runtime not initialized');
+    return Promise.resolve(null);
   }
-
-  explorerRpcConnection = createExplorerRpcConnection({
-    ensureSocketIoLoaded,
-    onConnect: () => {
-      console.log('[ExplorerRPC] Connected');
-      if (explorerNeedsResync) {
-        explorerNeedsResync = false;
-      }
-      try {
-        if (typeof window.__cm6ExplorerOnReconnect === 'function') {
-          window.__cm6ExplorerOnReconnect();
-        }
-      } catch (e) {
-        console.warn('[ExplorerRPC] Connect resync failed:', e);
-      }
-    },
-    onDisconnect: (reason) => {
-      console.log('[ExplorerRPC] Disconnected', reason);
-      explorerNeedsResync = true;
-    },
-    onConnectError: (err) => {
-      console.warn('[ExplorerRPC] Connect error', err);
-    },
-    onNotification: (method, params) => {
-      handleExplorerRpcNotification(method, params);
-    },
-  });
-
-  window.__explorerRpc = {
-    connect: () => explorerRpcConnection.connect(),
-    reconnect: () => explorerRpcConnection.reconnect(),
-    isConnected: () => explorerRpcConnection.isConnected(),
-    notify: (method, params = {}) => explorerRpcConnection.notify(method, params || {}),
-    request: (method, params = {}, timeoutMs) => explorerRpcConnection.request(method, params || {}, timeoutMs),
-  };
-
-  void explorerRpcConnection.connect().catch((err) => {
-    console.warn('[ExplorerRPC] Failed to open explorer Socket.IO:', err);
-  });
-
-  document.addEventListener('visibilitychange', () => {
-    try {
-      if (document.visibilityState !== 'visible') return;
-      explorerRpcConnection?.reconnect?.();
-    } catch (_) {}
-  });
-
-  return Promise.resolve(explorerRpcConnection);
+  return explorerRpcRuntime.connect();
 }
 
 // Ensure lastSha256 exists before any cache-state events fire.
@@ -668,6 +560,17 @@ const sessionTelemetry = createSessionTelemetryController({
   getUnsaved: () => !!unsaved,
 });
 sessionState = sessionTelemetry.sessionState;
+explorerRpcRuntime = createExplorerRpcRuntime({
+  ensureSocketIoLoaded,
+  homeDir: HOME_DIR,
+  toAbsolute,
+  getActiveProjectPath: () => sessionTelemetry.activeProjectPath() || null,
+  getSessionActiveProject: () => sessionState.activeProject || null,
+  applyHostActivePath: (path, options) => _applyHostActivePath(path, options),
+  updateProblemsPanel: (payload) => problemsPanel.update(payload),
+  reloadEditorFrame: () => _reloadEditorFrame(),
+  requestAdapterRestart: () => _requestAdapterRestart(),
+});
 let externalRefreshInProgress = false;
 
 function resetActiveFileState({ resetPicker = false } = {}) {

@@ -27,6 +27,7 @@ Use the broader `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for target architecture
 - Dead in-app agent harness removal: the old `/agent/*` FastAPI router, `/ws/agent` WebSocket mount, transcript/session backend, direct Codex appserver socket, open-request poller, transcript/composer/session markup, and legacy sidebar iframe/drawer controllers were removed from the live path.
 - Main-page console bridge refresh: `static/js/console_bridge.js` now matches the cached current bridge, and `src/host/connections/ui-ipc.ts` starts the bridge only after Socket.IO is available with `workerLabel: "main_page"` plus `uniquePerWindow: true`.
 - Terminal-drawer mobile root-width hardening: `template.html` now keeps Monaco's body-level offscreen char-width probe on the negative scroll axis and constrains the terminal drawer/xterm stack so opening the drawer cannot poison GeckoView root scroll metrics.
+- Explorer RPC runtime extraction and topology freeze: `main_page/frontend/explorer-rpc-runtime.ts` now owns Explorer RPC connection lifecycle, notification fanout, reconnect handling, and `window.__explorerRpc` bridge installation. `src/rpc/socketio-topology.ts` records the current frontend Socket.IO namespace/path vocabulary as a precursor to physical gateway consolidation.
 
 ### Current Sidebar Boundary
 
@@ -41,7 +42,8 @@ Historical `agent*` DOM ids and UI preference keys remain compatibility names fo
 ### Immediate Next Candidates
 
 - Continue re-reviewing `template.html` after the sidebar prune and remove remaining avoidable behavior policy from markup/CSS while preserving shortcut DOM compatibility.
-- Continue shrinking `main.js` by extracting Explorer RPC setup/notification fanout into a grouped strict `main_page/frontend/` runtime.
+- Continue shrinking `main.js` by choosing the next grouped host runtime that does not pull all of `src/host/` into strict checking at once.
+- Use the frozen Socket.IO topology constants when touching frontend socket clients, but do not begin physical gateway consolidation until a dedicated backend gateway slice is approved.
 - Start the backend decomposition only after choosing a small route/helper family that does not move framework-owned `services/` shims or worker subapp mounts.
 - When debugging live frontend behavior through TE2 console, target the exact generated worker id under the `main_page` label rather than assuming a fixed worker id.
 

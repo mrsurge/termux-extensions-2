@@ -3,6 +3,11 @@
 import { isRunnableFile } from '../utils.ts';
 import { createUiIpcRpcConnection } from './ui-ipc-rpc.ts';
 import { UI_IPC_RPC_METHODS, UI_IPC_RPC_NOTIFICATIONS } from '../../ui_ipc/rpc_contract.ts';
+import {
+  SOCKET_IO_NAMESPACES,
+  SOCKET_IO_PATHS,
+  fileEditorSocketQuery,
+} from '../../rpc/socketio-topology.ts';
 
 /**
  * @param {{
@@ -26,7 +31,7 @@ export function createUiIpcConnections(deps) {
       const bridge = deps.initConsoleBridge({
         workerLabel: 'main_page',
         uniquePerWindow: true,
-        socketPath: '/te2_console_ws/socket.io',
+        socketPath: SOCKET_IO_PATHS.te2Console,
         namespace: '/te2_console',
       });
       if (!bridge) throw new Error('console bridge did not start');
@@ -97,10 +102,10 @@ export function createUiIpcConnections(deps) {
         if (!sidebarIpcSocket.connected) sidebarIpcSocket.connect();
         return;
       }
-      sidebarIpcSocket = io('/sidebar_ipc', {
-        path: '/ui_ipc_ws/socket.io',
+      sidebarIpcSocket = io(SOCKET_IO_NAMESPACES.sidebarIpc, {
+        path: SOCKET_IO_PATHS.uiIpc,
         transports: ['websocket'],
-        query: { app_id: 'file_editor_cm6', source: 'main_page' },
+        query: fileEditorSocketQuery({ source: 'main_page' }),
       });
       sidebarIpcSocket.on('connect', () => {
         try {
