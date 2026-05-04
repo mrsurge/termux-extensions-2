@@ -18,6 +18,7 @@ UI_IPC_RPC_METHOD_HOST_EDITOR_GIT_BASELINES_GET: Final = "ui.host.editor.gitBase
 UI_IPC_RPC_METHOD_HOST_EDITOR_FIND: Final = "ui.host.editor.find"
 UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_COMMAND: Final = "ui.host.editor.issues.command"
 UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_DUMP: Final = "ui.host.editor.issues.dump"
+UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_MENTION: Final = "ui.host.diagnostics.mention"
 
 UiIpcRpcMethod = Literal[
     "ui.host.file.open",
@@ -30,12 +31,12 @@ UiIpcRpcMethod = Literal[
     "ui.host.editor.find",
     "ui.host.editor.issues.command",
     "ui.host.editor.issues.dump",
+    "ui.host.diagnostics.mention",
 ]
 
 UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE: Final = "ui.editor.save"
 UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS: Final = "ui.editor.focus"
 UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR: Final = "ui.editor.blur"
-UI_IPC_RPC_NOTIFICATION_EDITOR_MENTION_REQUEST: Final = "ui.editor.mention.request"
 UI_IPC_RPC_NOTIFICATION_EDITOR_READY: Final = "ui.editor.ready"
 UI_IPC_RPC_NOTIFICATION_EDITOR_OPEN_COMPLETE: Final = "ui.editor.open.complete"
 UI_IPC_RPC_NOTIFICATION_EDITOR_CACHE_STATE: Final = "ui.editor.cache.state"
@@ -50,7 +51,6 @@ UiIpcRpcNotification = Literal[
     "ui.editor.save",
     "ui.editor.focus",
     "ui.editor.blur",
-    "ui.editor.mention.request",
     "ui.editor.ready",
     "ui.editor.open.complete",
     "ui.editor.cache.state",
@@ -73,13 +73,13 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_EDITOR_FIND,
     UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_COMMAND,
     UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_DUMP,
+    UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_MENTION,
 }
 
 ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE,
     UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS,
     UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR,
-    UI_IPC_RPC_NOTIFICATION_EDITOR_MENTION_REQUEST,
     UI_IPC_RPC_NOTIFICATION_EDITOR_READY,
     UI_IPC_RPC_NOTIFICATION_EDITOR_OPEN_COMPLETE,
     UI_IPC_RPC_NOTIFICATION_EDITOR_CACHE_STATE,

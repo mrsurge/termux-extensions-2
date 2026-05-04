@@ -1,8 +1,8 @@
 """UI IPC Socket.IO namespace — thin relay for host/runtime UI communication.
 
-The main page and inline editor runtime can both consume the ``/ui_ipc``
-namespace. Events are rebroadcast to all other clients in the room so UI
-surfaces can communicate without using the editor-owned namespace as a host bus.
+The main page and native/sidebar UI clients consume the ``/ui_ipc`` namespace.
+Editor-originated commands must enter through the editor-owned RPC namespace
+and may be relayed here by backend hooks when the host page is the consumer.
 
 Python only logs traffic for observability.
 
@@ -21,7 +21,6 @@ from .rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE,
     UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR,
     UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS,
-    UI_IPC_RPC_NOTIFICATION_EDITOR_MENTION_REQUEST,
     UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE,
     UI_IPC_RPC_NOTIFICATION_EVENT,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
@@ -50,8 +49,6 @@ def _legacy_ui_event_payload_for_notification(
         return {"type": "focus"}
     if method == UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR:
         return {"type": "blur"}
-    if method == UI_IPC_RPC_NOTIFICATION_EDITOR_MENTION_REQUEST:
-        return {"type": "mention_request", **params}
     if method == UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE:
         return {"type": "adapter_state", **params}
     if method == UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED:

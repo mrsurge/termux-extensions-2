@@ -29,9 +29,9 @@
     "monaco_editor/**/*.ts",
     "monaco_editor/m_editor_app.ts",
     "main_page/frontend/**/*.ts",
+    "src/diagnostics/**/*.ts",
     "src/explorer/**/*.d.ts",
-    "src/explorer/**/*.ts",
-    "static/js/explorer.ts"
+    "src/explorer/**/*.ts"
   ],
   "exclude": [
     "node_modules",
@@ -40,7 +40,6 @@
     "static/vendor",
     "vendor",
     "monaco_editor/build_shims",
-    "monaco_editor/vscode_build_src",
-    "src/host"
+    "monaco_editor/vscode_build_src"
   ]
 }

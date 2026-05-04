@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import time
 from pathlib import Path
+from typing import Protocol, cast
 
 from ..explorer.services.file_ops import get_project_root
 from ..monaco_editor.editor_backend_services.contracts import JsonMap
@@ -18,6 +19,17 @@ from ..monaco_editor.editor_ws import (
     editor_runtime_request_issues_dump,
 )
 from ..stores import get_history_store
+
+
+class SocketIOEmitter(Protocol):
+    async def emit(
+        self,
+        event: str,
+        data: object,
+        *,
+        room: str | None = None,
+        namespace: str | None = None,
+    ) -> None: ...
 
 
 def _coerce_positive_int(value: object, *, default: int | None = None) -> int | None:
@@ -168,3 +180,31 @@ async def handle_host_editor_issues_dump_request(
         "dump": response.get("dump"),
         "source_client": source_name,
     }
+
+
+async def handle_host_diagnostics_mention_request(
+    data: dict[str, object],
+    *,
+    source_name: str,
+) -> JsonMap:
+    del source_name
+    from ..ui_ipc.ui_ipc_socketio import UI_IPC_SIO
+
+    path = data.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("missing path for diagnostics mention")
+
+    payload: JsonMap = {"path": path.strip(), "source": "diagnostics"}
+    for key in ("lineNo", "endLineNo", "col", "endCol", "content"):
+        value = data.get(key)
+        if value is not None:
+            payload[key] = value
+
+    ui_ipc_sio = cast(SocketIOEmitter, UI_IPC_SIO)
+    await ui_ipc_sio.emit(
+        "sidebar:mention",
+        payload,
+        namespace="/sidebar_ipc",
+        room="sidebar_ipc",
+    )
+    return {"ok": True}

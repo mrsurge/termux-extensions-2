@@ -1,8 +1,14 @@
 // build.mjs — esbuild config for TE2 file editor
 // Two entry points: host page + Monaco editor iframe
 import { context, build } from 'esbuild';
+import { copyFile, mkdir } from 'node:fs/promises';
 
 const isWatch = process.argv.includes('--watch');
+
+async function copyHostCss() {
+  await mkdir('static/dist', { recursive: true });
+  await copyFile('main_page/frontend/explorer.css', 'static/dist/explorer.css');
+}
 
 /** Shared config for both bundles */
 const shared = {
@@ -80,8 +86,10 @@ if (isWatch) {
     context(editorConfig),
     context(workbenchAdapterConfig),
   ]);
+  await copyHostCss();
   await Promise.all([hostCtx.watch(), editorCtx.watch(), workbenchAdapterCtx.watch()]);
   console.log('Watching for changes...');
 } else {
   await Promise.all([build(hostConfig), build(editorConfig), build(workbenchAdapterConfig)]);
+  await copyHostCss();
 }

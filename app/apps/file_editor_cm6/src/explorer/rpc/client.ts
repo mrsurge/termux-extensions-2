@@ -1,7 +1,7 @@
 import type { ExplorerRpcMethod } from './contract.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
 
-interface ExplorerRpcWindowClient {
+export interface ExplorerRpcClient {
   connect(): Promise<void>;
   reconnect(): void;
   isConnected(): boolean;
@@ -13,16 +13,17 @@ interface ExplorerRpcWindowClient {
   ): Promise<TResult>;
 }
 
-function getExplorerRpcClient(): ExplorerRpcWindowClient | null {
-  const rpc = window.__explorerRpc as ExplorerRpcWindowClient | undefined;
-  if (!rpc) return null;
-  if (typeof rpc.notify !== 'function') return null;
-  if (typeof rpc.request !== 'function') return null;
-  if (typeof rpc.reconnect !== 'function') return null;
-  return rpc;
+let explorerRpcClient: ExplorerRpcClient | null = null;
+
+export function installExplorerRpcClient(client: ExplorerRpcClient): void {
+  explorerRpcClient = client;
 }
 
-function primeExplorerRpcConnection(rpc: ExplorerRpcWindowClient): void {
+function getExplorerRpcClient(): ExplorerRpcClient | null {
+  return explorerRpcClient;
+}
+
+function primeExplorerRpcConnection(rpc: ExplorerRpcClient): void {
   if (typeof rpc.isConnected === 'function' && !rpc.isConnected()) {
     rpc.reconnect();
   }

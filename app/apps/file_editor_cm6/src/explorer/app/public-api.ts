@@ -11,21 +11,31 @@ function normalizePayload(payload: unknown): Record<string, unknown> {
     : {};
 }
 
+let explorerPublicApiDeps: ExplorerPublicApiDeps | null = null;
+
 export function registerExplorerPublicApi(
   deps: ExplorerPublicApiDeps,
 ): void {
-  window.__explorerScrollToActiveFile = () => deps.scrollToActiveFile();
-  window.__explorerHandleNotification = (method: string, payload: unknown) => {
-    try {
-      deps.handleNotification(method, normalizePayload(payload));
-    } catch (error) {
-      console.warn('[Explorer] dispatch error', method, error);
-    }
-  };
-  window.__cm6ExplorerOnReconnect = () => {
-    deps.handleReconnect();
-  };
-  window.__cm6RefreshExplorer = async () => {
-    await deps.refreshExplorer();
-  };
+  explorerPublicApiDeps = deps;
+}
+
+export async function scrollExplorerToActiveFile(): Promise<void> {
+  await explorerPublicApiDeps?.scrollToActiveFile();
+}
+
+export function dispatchExplorerNotification(method: string, payload: unknown): void {
+  if (!explorerPublicApiDeps) return;
+  try {
+    explorerPublicApiDeps.handleNotification(method, normalizePayload(payload));
+  } catch (error) {
+    console.warn('[Explorer] dispatch error', method, error);
+  }
+}
+
+export function handleExplorerReconnect(): void {
+  explorerPublicApiDeps?.handleReconnect();
+}
+
+export async function refreshExplorer(): Promise<void> {
+  await explorerPublicApiDeps?.refreshExplorer();
 }

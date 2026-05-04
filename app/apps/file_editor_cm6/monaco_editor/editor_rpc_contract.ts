@@ -41,6 +41,10 @@ export const EDITOR_RPC_METHODS = {
   draftDiffGet: 'editor.draftDiff.get',
   mirrorPublish: 'editor.mirror.publish',
   save: 'editor.save',
+  mentionRequest: 'editor.mention.request',
+  hostSave: 'editor.host.save',
+  focus: 'editor.focus',
+  blur: 'editor.blur',
 } as const;
 
 export type EditorRpcMethodName = (typeof EDITOR_RPC_METHODS)[keyof typeof EDITOR_RPC_METHODS];
@@ -60,6 +64,7 @@ export const EDITOR_RPC_NOTIFICATIONS = {
   openComplete: 'editor.open.complete',
   diagnostics: 'editor.diagnostics.updated',
   diagnosticsCounts: 'editor.diagnostics.counts',
+  adapterState: 'editor.adapter.state',
   semanticTokensProviderRegistered: 'editor.semanticTokens.providerRegistered',
   issuesDumpRequest: 'editor.issues.dump.request',
   issuesDumpResponse: 'editor.issues.dump.response',
@@ -108,6 +113,15 @@ export interface EditorRpcSaveParams {
   base_sha256?: string;
   request_id?: string;
   requestId?: string;
+}
+
+export interface EditorRpcMentionRequestParams {
+  path: string;
+  lineNo?: number;
+  col?: number;
+  endLineNo?: number;
+  endCol?: number;
+  content?: string;
 }
 
 export interface EditorRpcStateSsotNotificationParams {

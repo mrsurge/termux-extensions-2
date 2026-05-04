@@ -1,0 +1,73 @@
+// @ts-check
+
+/**
+ * @param {{
+ *   apiPost: (path: string, body: any) => Promise<any>,
+ *   getEditorViewState: () => any,
+ *   getCurrentPath: () => string,
+ *   openFile: (path: string, options?: any) => Promise<any>,
+ *   jumpToCurrentFileLine: (line: number) => void,
+ *   statusEl: HTMLElement | null
+ * }} deps
+ */
+export function createEditTrackerController(deps: any) {
+  function connectEditTracker() {
+    deps.apiPost('editor/toggle_edit_tracking', { enabled: true })
+      .then(() => console.log('[EditTracker] Enabled'))
+      .catch((err: unknown) => console.error('[EditTracker] Failed to enable:', err));
+  }
+
+  function disconnectEditTracker() {
+    deps.apiPost('editor/toggle_edit_tracking', { enabled: false })
+      .then(() => console.log('[EditTracker] Disabled'))
+      .catch((err: unknown) => console.error('[EditTracker] Failed to disable:', err));
+  }
+
+  function updateEditTrackerStatus(status: any) {
+    if (!deps.statusEl) return;
+    if (status.active && status.shells && status.shells.length > 0) {
+      const shellTypes = status.shells.map((s: any) => s.type).join(', ');
+      deps.statusEl.textContent = `🤖 Tracking (${status.shells.length} ${shellTypes})`;
+      deps.statusEl.style.display = '';
+    } else {
+      deps.statusEl.textContent = '';
+      deps.statusEl.style.display = 'none';
+    }
+  }
+
+  async function autoJumpToEdit(path: string, line: number) {
+    try {
+      if (deps.getCurrentPath() !== path) {
+        await deps.openFile(path, {
+          forceRefresh: true,
+          line,
+          focus: true,
+          scrollY: 'center',
+        });
+        return;
+      }
+      if (line > 0) deps.jumpToCurrentFileLine(line);
+    } catch (e) {
+      console.error('[EditTracker] Auto-jump failed:', e);
+    }
+  }
+
+  function handleEditTrackerEvent(data: any) {
+    if (data.event === 'tracking_status') {
+      updateEditTrackerStatus(data);
+    } else if (data.event === 'edit_tracked') {
+      const viewState = deps.getEditorViewState();
+      if (viewState?.trackAgentEdits || viewState?.trackAgentSidebarEdits) {
+        void autoJumpToEdit(data.path, data.line);
+      }
+    }
+  }
+
+  return {
+    connectEditTracker,
+    disconnectEditTracker,
+    handleEditTrackerEvent,
+    updateEditTrackerStatus,
+    autoJumpToEdit,
+  };
+}

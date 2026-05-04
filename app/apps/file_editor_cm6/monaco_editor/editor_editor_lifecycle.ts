@@ -61,7 +61,7 @@ interface EditorLifecycleDeps {
   onEditorConfigChanged(editor: MonacoEditorLike): void;
   updateDebug(extra: string): void;
   ensureLayoutObserver(): void;
-  bindUIIPCEditorHooks(): void;
+  bindEditorHostActionHooks(): void;
   installMirrorPublisher(): void;
   installScrollPublisher(): void;
   requestBreadcrumbSymbols(absPath: string): void;
@@ -196,7 +196,7 @@ export async function ensureEditorWithPrefs(deps: EditorLifecycleDeps): Promise<
     touchReason: 'boot',
   });
   deps.updateDebug('ssot=ok');
-  deps.bindUIIPCEditorHooks();
+  deps.bindEditorHostActionHooks();
   return created;
 }
 
@@ -242,7 +242,7 @@ export function ensurePlainEditorWithPrefs(deps: EditorLifecycleDeps): MonacoEdi
 
   deps.layoutEditors();
   restoreEditorViewState(created, savedScrollTop, savedPosition);
-  deps.bindUIIPCEditorHooks();
+  deps.bindEditorHostActionHooks();
   return created;
 }
 
@@ -325,6 +325,6 @@ export function ensureDiffEditorWithPrefs(deps: EditorLifecycleDeps): MonacoDiff
   deps.ensureLayoutObserver();
   deps.layoutEditors();
   restoreEditorViewState(modifiedEditor, savedScrollTop, savedPosition);
-  deps.bindUIIPCEditorHooks();
+  deps.bindEditorHostActionHooks();
   return diffEditor;
 }

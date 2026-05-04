@@ -39,7 +39,7 @@ import { initOpenModel } from './editor_open_model_init_utils.js';
 import { shouldRecreateOpenModel, applyOpenModelTextSafely } from './editor_open_model_update_utils.js';
 import { emitOpenCacheState } from './editor_open_emit_cache_state_utils.js';
 import { queueBackendWorkbenchOpen } from './editor_open_workbench_open_utils.js';
-// editor_socket_readiness_step_handler_utils.js removed — readiness is now push-based via UI IPC adapter_state
+// editor_socket_readiness_step_handler_utils.js removed — readiness is now push-based via editor RPC adapter_state
 import { handleJumpToLineEvent } from './editor_socket_jump_handler_utils.ts';
 import { coercePositiveInt } from './editor_open_contract.ts';
 import {
@@ -92,12 +92,13 @@ import { createEditorLanguageBridgeProviders } from './editor_language_bridge_pr
 import { registerEditorSaveMirrorSocketHandlers } from './editor_save_mirror_socket_handlers.ts';
 import { registerEditorRuntimeSocketHandlers } from './editor_socket_runtime_handlers.ts';
 import { createEditorBreadcrumbRuntime } from './editor_breadcrumb_runtime.ts';
-import { createEditorUiIpcRuntime } from './editor_ui_ipc_runtime.ts';
+import { createEditorRpcHostActionRuntime } from './editor_rpc_host_action_runtime.ts';
 import { bootMonacoRuntime } from './editor_monaco_boot_runtime.ts';
 import { registerEditorSocketConnectionHandlers } from './editor_socket_connection_runtime.ts';
 import { createEditorWorkbenchLanguageCatalogRuntime } from './editor_workbench_language_catalog_runtime.ts';
 import { createEditorWorkbenchRuntime } from './editor_workbench_runtime.ts';
 import { createEditorRpcTransport } from './editor_rpc_transport.ts';
+import { EDITOR_RPC_METHODS } from './editor_rpc_contract.ts';
 import { createEditorWbaRpcTransport } from './editor_wba_rpc_transport.ts';
 import { registerEditorWbaRuntimeHandlers } from './editor_wba_runtime_handlers.ts';
 import { createEditorDebugRuntime } from './editor_debug_runtime.ts';
@@ -318,7 +319,9 @@ interface MonacoBootWindowLike extends Window {
     getGitHeadModel: function() { return gitHeadModel; },
     getGitDiskModel: function() { return gitDiskModel; },
     getCurrentPath: function() { return currentPath; },
-    getUiIpcSocket: function() { return uiIpcRuntime.getSocket(); },
+    sendEditorMentionRequest: function(payload) {
+      return editorRpcNotify(EDITOR_RPC_METHODS.mentionRequest, payload);
+    },
     updateDebug: function(extra) { return debugRuntime.updateDebug(extra); },
   });
   var prefRuntime = createEditorPrefRuntime({
@@ -371,12 +374,16 @@ interface MonacoBootWindowLike extends Window {
     },
   } as Parameters<typeof createEditorBreadcrumbRuntime>[0]);
 
-  var uiIpcRuntime = createEditorUiIpcRuntime({
+  var editorHostActionRuntime = createEditorRpcHostActionRuntime({
     getWindow: function() { return window; },
     getEditor: function() { return editor; },
     getDiffEditor: function() { return diffEditor; },
     replayOpenFileAfterBaton: _replayOpenFileAfterBaton,
-  } as Parameters<typeof createEditorUiIpcRuntime>[0]);
+    notifyEditorRpc: function(method, params) { return editorRpcNotify(method, params); },
+    onEditorRpcNotification: function(method, handler) {
+      return editorRpcTransport.onNotification(method, handler);
+    },
+  } as Parameters<typeof createEditorRpcHostActionRuntime>[0]);
 
   var updateDebug = debugRuntime.updateDebug;
   var setDebugGit = debugRuntime.setDebugGit;
@@ -876,7 +883,7 @@ interface MonacoBootWindowLike extends Window {
     onEditorConfigChanged: _onEditorConfigChanged,
     updateDebug: updateDebug,
     ensureLayoutObserver: ensureLayoutObserver,
-    bindUIIPCEditorHooks: bindUIIPCEditorHooks,
+    bindEditorHostActionHooks: bindEditorHostActionHooks,
     installMirrorPublisher: installMirrorPublisher,
     installScrollPublisher: installScrollPublisher,
     requestBreadcrumbSymbols: _bcRequestSymbols,
@@ -1394,13 +1401,13 @@ interface MonacoBootWindowLike extends Window {
     breadcrumbRuntime.updateCursor(line);
   }
 
-  function connectUIIPC() {
-    uiIpcRuntime.connect();
+  function connectEditorHostActions() {
+    editorHostActionRuntime.connect();
   }
 
   /** Call after editor/diffEditor is created to bind Ctrl+S and focus relay. */
-  function bindUIIPCEditorHooks() {
-    uiIpcRuntime.bindEditorHooks();
+  function bindEditorHostActionHooks() {
+    editorHostActionRuntime.bindEditorHooks();
   }
 
   async function bootMonaco() {
@@ -1425,7 +1432,7 @@ interface MonacoBootWindowLike extends Window {
       collectBootLanguageIds: function(monacoRef) { return collectBootLanguageIds(monacoRef); },
       warnIfPlaintextOnlyLanguages: warnIfPlaintextOnlyLanguages,
       connectEditorSocket: connectEditorSocket,
-      connectUIIPC: connectUIIPC,
+      connectEditorHostActions: connectEditorHostActions,
       ensureVscodeRpcConnected: ensureVscodeRpcConnected,
       emitToHost: emitToHost,
       updateDebug: updateDebug,

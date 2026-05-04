@@ -14,7 +14,7 @@ interface EditorUiEditorRuntimeDeps {
   getGitHeadModel(): unknown;
   getGitDiskModel(): unknown;
   getCurrentPath(): string | null;
-  getUiIpcSocket(): unknown;
+  sendEditorMentionRequest(payload: Record<string, unknown>): boolean;
   updateDebug(extra?: string): void;
 }
 
@@ -116,7 +116,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
       getEditor: () => deps.getEditor() as MonacoRuntimeEditorLike | null,
       getDiffEditor: () => deps.getDiffEditor() as MonacoRuntimeDiffEditorLike | null,
       getCurrentPath: deps.getCurrentPath,
-      getUiIpcSocket: () => deps.getUiIpcSocket() as MonacoRuntimeSocketLike | null,
+      sendEditorMentionRequest: deps.sendEditorMentionRequest,
       updateDebug: deps.updateDebug,
     });
   }

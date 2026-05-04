@@ -1,4 +1,4 @@
-import { createProblemsPanel } from '../../../static/js/problems.js';
+import { createProblemsPanel } from '../../diagnostics/problems-panel.ts';
 
 const CONTAINER_ID = 'explorer-diagnostics-container';
 

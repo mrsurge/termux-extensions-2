@@ -3,77 +3,79 @@
 // Inline Monaco editor integration
 
 // @ts-check
-import { initExplorerUI } from './static/js/explorer.ts';
-import { createTerminalDrawer } from './static/js/terminal.js';
-import { initBranchMenu } from './static/js/git_menu.js';
+import { initExplorerUI } from './src/explorer/app/bootstrap.ts';
+import { dispatchExplorerNotification, refreshExplorer } from './src/explorer/app/public-api.ts';
+import { createTerminalDrawer } from './main_page/frontend/host-terminal-drawer.ts';
+import { initBranchMenu } from './main_page/frontend/host-git-branch-menu.ts';
 // Hardcoded extension imports for now; will be dynamically loaded later.
 import { initSidebarShortcuts } from './extensions/sidebar_extension/static/js/sidebar_shortcuts.js';
-import ReconnectingWebSocket from './static/js/reconnecting_websocket.js'; // used by other WS helpers (not explorer)
-import { createConsoleDrawer } from './static/js/console.js';
-import { createProblemsPanel } from './static/js/problems.js';
-import { initConsoleBridge } from './static/js/console_bridge.js';
+import ReconnectingWebSocket from './main_page/frontend/connections/reconnecting-websocket.ts';
+import { createConsoleDrawer } from './main_page/frontend/host-console-drawer.ts';
+import { createProblemsPanel } from './src/diagnostics/problems-panel.ts';
+import { initConsoleBridge } from './main_page/frontend/console_bridge.js';
 import {
   HOME_DIR, HOME_PREFIX, simplifyAbsolute, toAbsolute, parentDir, basename,
   formatDisplayPath, formatDisplayDirectory, detectLanguageFromFilename,
   RUNNABLE_EXTENSIONS, isRunnableFile, setMenuChecked, FONT_SCALE_PRESETS,
   requireEl,
-} from './src/host/utils.ts';
-import { createAppContext } from './src/host/app-context.ts';
-import { initVirtualKeyboardAdjustments } from './src/host/ui/virtual-keyboard.ts';
-import { pickerAvailable as pickerUiAvailable, pickFileWithPicker, pickDirectoryWithPicker, pickSaveTargetWithPicker } from './src/host/io/picker-helpers.ts';
-import { createPickerController } from './src/host/io/picker-controller.ts';
-import { createJumpLineController } from './src/host/io/jump-line.ts';
-import { createAdapterUiController } from './src/host/ui/adapter-ui.ts';
-import { createEditTrackerController } from './src/host/ui/edit-tracker.ts';
-import { createFontScaleController } from './src/host/ui/font-scale.ts';
-import { createSearchPanelController } from './src/host/ui/search-panel.ts';
-import { createMenuCoreController } from './src/host/ui/menu-core.ts';
-import { installBasicMenuActions } from './src/host/ui/menu-actions-basic.ts';
-import { installSimplePreferenceMenuActions } from './src/host/ui/menu-actions-preferences.ts';
-import { installAdvancedMenuActions } from './src/host/ui/menu-actions-advanced.ts';
-import { installPrefsSync } from './src/host/ui/prefs-sync.ts';
-import { createRecentsController } from './src/host/ui/recents.ts';
-import { createPreferencesController } from './src/host/ui/preferences.ts';
-import { createProjectSwitchController } from './src/host/ui/project-switch.ts';
-import { createCacheIndicatorController } from './src/host/ui/cache-indicator.ts';
-import { initDrawerAndShortcuts } from './src/host/ui/drawer-shortcuts.ts';
-import { initPanelsAndDrawer } from './src/host/ui/panels-drawer.ts';
-import { initSidebarShortcutsSafe } from './src/host/ui/sidebar-shortcuts-bootstrap.ts';
-import { initResponsiveLayout } from './src/host/ui/layout-manager.ts';
-import { createFileStatusController } from './src/host/ui/file-status.ts';
-import { createSettingsBootstrap } from './src/host/ui/settings-bootstrap.ts';
-import { createAutosaveModalController } from './src/host/ui/autosave-modal.ts';
-import { createAutosaveRuntimeController } from './src/host/ui/autosave-runtime.ts';
-import { showProjectsDebugModal } from './src/host/ui/projects-debug-modal.ts';
-import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './src/host/ui/watcher-settings.ts';
-import { createUiIpcConnections } from './src/host/connections/ui-ipc.ts';
-import { EXPLORER_RPC_METHODS, EXPLORER_RPC_NOTIFICATIONS } from './src/explorer/rpc/contract.ts';
-import { createFileWebSocketManager } from './src/host/connections/file-websocket.ts';
-import { createFileSyncHandler } from './src/host/connections/file-sync-handler.ts';
-import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './src/host/connections/vendor-loaders.ts';
-import { createSessionTelemetryController } from './src/host/boot/session-telemetry.ts';
-import { createEditorStateController } from './src/host/boot/editor-state.ts';
-import { runBootSequence } from './src/host/boot/boot-sequence.ts';
-import { installBeforeExitGuard } from './src/host/boot/public-hooks.ts';
-import { createStateInitController } from './src/host/boot/state-init.ts';
-import { createBootSequenceDeps } from './src/host/boot/sequence-deps.ts';
-import { applyNoProjectState, applyRestoredPathState, schedulePathDisplayFallback, applyNoRestoredPathState } from './src/host/boot/path-state.ts';
-import { installHostExitGuard } from './src/host/boot/exit-guard.ts';
-import { createSaveSocketController } from './src/host/file-ops/save-socket.ts';
-import { createSaveFlowController } from './src/host/file-ops/save-flow.ts';
-import { createOpenFlowController } from './src/host/file-ops/open-flow.ts';
-import { createRunFileController } from './src/host/file-ops/run-file.ts';
-import { createApiClient } from './src/host/api/client.ts';
+} from './main_page/frontend/core/utils.ts';
+import { createAppContext } from './main_page/frontend/core/app-context.ts';
+import { initVirtualKeyboardAdjustments } from './main_page/frontend/ui/virtual-keyboard.ts';
+import { pickerAvailable as pickerUiAvailable, pickFileWithPicker, pickDirectoryWithPicker, pickSaveTargetWithPicker } from './main_page/frontend/io/picker-helpers.ts';
+import { createPickerController } from './main_page/frontend/io/picker-controller.ts';
+import { createJumpLineController } from './main_page/frontend/io/jump-line.ts';
+import { createAdapterUiController } from './main_page/frontend/ui/adapter-ui.ts';
+import { createEditTrackerController } from './main_page/frontend/ui/edit-tracker.ts';
+import { createFontScaleController } from './main_page/frontend/ui/font-scale.ts';
+import { createSearchPanelController } from './main_page/frontend/ui/search-panel.ts';
+import { createMenuCoreController } from './main_page/frontend/ui/menu-core.ts';
+import { installBasicMenuActions } from './main_page/frontend/ui/menu-actions-basic.ts';
+import { installSimplePreferenceMenuActions } from './main_page/frontend/ui/menu-actions-preferences.ts';
+import { installAdvancedMenuActions } from './main_page/frontend/ui/menu-actions-advanced.ts';
+import { installPrefsSync } from './main_page/frontend/ui/prefs-sync.ts';
+import { createRecentsController } from './main_page/frontend/ui/recents.ts';
+import { createPreferencesController } from './main_page/frontend/ui/preferences.ts';
+import { createProjectSwitchController } from './main_page/frontend/ui/project-switch.ts';
+import { createCacheIndicatorController } from './main_page/frontend/ui/cache-indicator.ts';
+import { initDrawerAndShortcuts } from './main_page/frontend/ui/drawer-shortcuts.ts';
+import { initPanelsAndDrawer } from './main_page/frontend/ui/panels-drawer.ts';
+import { initSidebarShortcutsSafe } from './main_page/frontend/ui/sidebar-shortcuts-bootstrap.ts';
+import { initResponsiveLayout } from './main_page/frontend/ui/layout-manager.ts';
+import { createFileStatusController } from './main_page/frontend/ui/file-status.ts';
+import { createSettingsBootstrap } from './main_page/frontend/ui/settings-bootstrap.ts';
+import { createAutosaveModalController } from './main_page/frontend/ui/autosave-modal.ts';
+import { createAutosaveRuntimeController } from './main_page/frontend/ui/autosave-runtime.ts';
+import { showProjectsDebugModal } from './main_page/frontend/ui/projects-debug-modal.ts';
+import { initWatcherUI, drainPendingWatcherEvents, showWatcherLimitModal } from './main_page/frontend/ui/watcher-settings.ts';
+import { createUiIpcConnections } from './main_page/frontend/connections/ui-ipc.ts';
+import { EXPLORER_RPC_NOTIFICATIONS } from './src/explorer/rpc/contract.ts';
+import { notifyExplorerRpc, requestExplorerRpc } from './src/explorer/rpc/client.ts';
+import { createFileWebSocketManager } from './main_page/frontend/connections/file-websocket.ts';
+import { createFileSyncHandler } from './main_page/frontend/connections/file-sync-handler.ts';
+import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './main_page/frontend/connections/vendor-loaders.ts';
+import { createSessionTelemetryController } from './main_page/frontend/boot/session-telemetry.ts';
+import { createEditorStateController } from './main_page/frontend/boot/editor-state.ts';
+import { runBootSequence } from './main_page/frontend/boot/boot-sequence.ts';
+import { installBeforeExitGuard } from './main_page/frontend/boot/public-hooks.ts';
+import { createStateInitController } from './main_page/frontend/boot/state-init.ts';
+import { createBootSequenceDeps } from './main_page/frontend/boot/sequence-deps.ts';
+import { applyNoProjectState, applyRestoredPathState, schedulePathDisplayFallback, applyNoRestoredPathState } from './main_page/frontend/boot/path-state.ts';
+import { installHostExitGuard } from './main_page/frontend/boot/exit-guard.ts';
+import { createSaveSocketController } from './main_page/frontend/file-ops/save-socket.ts';
+import { createSaveFlowController } from './main_page/frontend/file-ops/save-flow.ts';
+import { createOpenFlowController } from './main_page/frontend/file-ops/open-flow.ts';
+import { createRunFileController } from './main_page/frontend/file-ops/run-file.ts';
+import { createApiClient } from './main_page/frontend/core/api-client.ts';
 import { bootInlineEditorHost } from './monaco_editor/inline_host.ts';
 import { createHostChromeRuntime } from './main_page/frontend/host-chrome-runtime.ts';
 import { createHostStateRuntime } from './main_page/frontend/host-state-runtime.ts';
 import { createHostEditorEventsRuntime } from './main_page/frontend/host-editor-events-runtime.ts';
 import { createHostSidebarRuntime } from './main_page/frontend/host-sidebar-runtime.ts';
-import { createExplorerRpcRuntime } from './main_page/frontend/explorer-rpc-runtime.ts';
+import { captureHostElements } from './main_page/frontend/host-elements.ts';
 
 let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
 
-import { initResizeManager, loadLayoutPreferences } from './static/js/resize_manager.js';
+import { initResizeManager, loadLayoutPreferences } from './main_page/frontend/host-resize-manager.ts';
 
 let _latestUiPrefs = {};
 let _hasUiPrefsSnapshot = false;
@@ -132,15 +134,6 @@ function _isMobileLayout() {
 
 function _emitSidebarIpc(eventName, payload) {
   uiIpcConnections.emitSidebarIpc(eventName, payload);
-}
-
-let explorerRpcRuntime = null;
-function connectExplorerSocket() {
-  if (!explorerRpcRuntime) {
-    console.warn('[ExplorerRPC] Runtime not initialized');
-    return Promise.resolve(null);
-  }
-  return explorerRpcRuntime.connect();
 }
 
 // Ensure lastSha256 exists before any cache-state events fire.
@@ -219,46 +212,99 @@ function connectUIIPC() {
 }
 // ─── End UI IPC ───────────────────────────────────────────────────
 
-// ─── Mention requests via UI IPC CustomEvent ─────────────────────
-window.addEventListener('cm6:mention-request', async (evt) => {
-  try {
-    const data = evt.detail || {};
-    if (!window.__explorerRpc) {
-      console.warn('[mention] Explorer bus unavailable');
-      return;
-    }
-    const body = { path: data.path || '' };
-    if (data.lineNo != null) body.lineNo = data.lineNo;
-    if (data.endLineNo != null) body.endLineNo = data.endLineNo;
-    if (data.col != null) body.col = data.col;
-    if (data.endCol != null) body.endCol = data.endCol;
-    if (data.content) body.content = data.content;
-    window.__explorerRpc.notify(EXPLORER_RPC_METHODS.mentionAgent, body);
-    console.log('[mention] Mentioned in conversation:', body.path);
-  } catch (err) {
-    console.warn('[mention] Request failed:', err);
-  }
-});
-// ─── End Mention ─────────────────────────────────────────────────
-
 // ---- host/api contract (injected by framework) ----
 /* global host, api */
 export default async function initFileEditor(rootEl, api, host) {
 const appContext = createAppContext({ rootEl, api, host });
 window.__feAppContext = appContext;
 window.host = appContext.host;
-const cacheStateBadge = requireEl('#fe-file-draft-badge');
-var fileNameEl = null;
 window.api  = appContext.api;
 
-const container = requireEl('#editor-container');
-const editorFrameEl = requireEl('#editor-frame');
-const root = requireEl('.fe-root');
-const toolbarEl = requireEl('.fe-toolbar');
-const titleBlockEl = requireEl('.fe-title-block');
-const leftToolbarControlEl = requireEl('#fe-drawer-open');
-const rightToolbarControlEl = requireEl('.fe-toolbar > .fe-menu');
-const agentDrawerEl = requireEl('#agent-drawer');
+const hostElements = captureHostElements(requireEl);
+const {
+  cacheStateBadge,
+  container,
+  editorFrameEl,
+  root,
+  toolbarEl,
+  titleBlockEl,
+  leftToolbarControlEl,
+  rightToolbarControlEl,
+  agentDrawerEl,
+  fileNameEl,
+  fileNameScrollEl,
+  issuesToggleBtn,
+  issuesPrevBtn,
+  issuesNextBtn,
+  issuesBadgesEl,
+  statusEl,
+  editTrackerStatusEl,
+  menuFileBtn,
+  menuFileDD,
+  menuEditBtn,
+  menuEditDD,
+  menuEditorBtn,
+  menuEditorDD,
+  menuViewBtn,
+  menuViewDD,
+  recentFilesBtn,
+  recentFilesDD,
+  runActiveBtn,
+  miNew,
+  miOpen,
+  miSave,
+  miSaveAs,
+  miClose,
+  miQuit,
+  miDebugProjects,
+  miUndo,
+  miRedo,
+  miCut,
+  miCopy,
+  miPaste,
+  miSelectAll,
+  miToggleLines,
+  miToggleSyntax,
+  miToggleCloseBrackets,
+  miToggleAutocomplete,
+  miToggleShading,
+  miToggleIndentGuides,
+  miToggleWrap,
+  miToggleAutosave,
+  miToggleDiffs,
+  miToggleDraftDiffs,
+  miToggleColorPicker,
+  miToggleReadonly,
+  miToggleStickyScroll,
+  miTrackEdits,
+  miTrackAgentSidebarEdits,
+  miFind,
+  miGoto,
+  miExportDiagnostics,
+  miEditorSettings,
+  miToggleMinimap,
+  editorSettingsModal,
+  editorSettingsClose,
+  editorSettingsExtStrip,
+  editorSettingsExtSummary,
+  editorSettingsThemeStrip,
+  editorSettingsThemeSummary,
+  editorThemesModal,
+  editorThemesClose,
+  editorThemesList,
+  editorExtManagerModal,
+  editorExtManagerClose,
+  editorExtManagerInstallBtn,
+  editorExtManagerList,
+  extCustomSettingsInput,
+  extCustomSettingsSave,
+  extConfigModal,
+  extConfigTitle,
+  extConfigClose,
+  extConfigForm,
+  extConfigCancel,
+  extConfigSave,
+} = hostElements;
 Object.assign(appContext.elements, {
   cacheStateBadge,
   container,
@@ -268,30 +314,7 @@ Object.assign(appContext.elements, {
 });
 
 // Title/status & chrome
-fileNameEl = requireEl('#fe-file-name');
-const fileNameScrollEl = requireEl('#fe-file-name-scroll');
 window.fileNameEl = fileNameEl;
-const issuesToggleBtn = requireEl('#fe-issues-toggle');
-const issuesPrevBtn = requireEl('#fe-issues-prev');
-const issuesNextBtn = requireEl('#fe-issues-next');
-const issuesBadgesEl = requireEl('#fe-issues-badges');
-const statusEl = requireEl('#fe-status');
-const editTrackerStatusEl = requireEl('#edit-tracker-status');
-
-// Menus (ids must match template.html)
-const menuFileBtn = requireEl('#menu-file-btn');
-const menuFileDD  = requireEl('#menu-file-dd');
-const menuEditBtn = requireEl('#menu-edit-btn');
-const menuEditDD  = requireEl('#menu-edit-dd');
-const menuEditorBtn = requireEl('#menu-editor-btn');
-const menuEditorDD  = requireEl('#menu-editor-dd');
-const menuViewBtn = requireEl('#menu-view-btn');
-const menuViewDD  = requireEl('#menu-view-dd');
-
-
-const recentFilesBtn = requireEl('#recent-files-btn');
-const recentFilesDD  = requireEl('#recent-files-dd');
-const runActiveBtn   = requireEl('#run-active-file-btn');
 const hostChromeRuntime = createHostChromeRuntime({
   root,
   toolbarEl,
@@ -368,65 +391,6 @@ function ensureEditorFrameReady() {
 function _awaitEditorOpen(requestId, path, timeoutMs) {
   return hostEditorEventsRuntime.awaitEditorOpen(requestId, path, timeoutMs);
 }
-const miNew       = requireEl('#mi-new');
-const miOpen      = requireEl('#mi-open');
-const miSave      = requireEl('#mi-save');
-const miSaveAs    = requireEl('#mi-saveas');
-const miClose     = requireEl('#mi-close');
-const miQuit      = requireEl('#mi-quit');
-const miDebugProjects = requireEl('#mi-debug-projects');
-
-const miUndo      = requireEl('#mi-undo');
-const miRedo      = requireEl('#mi-redo');
-const miCut       = requireEl('#mi-cut');
-const miCopy      = requireEl('#mi-copy');
-const miPaste     = requireEl('#mi-paste');
-const miSelectAll = requireEl('#mi-selectall');
-
-const miToggleLines   = requireEl('#mi-toggle-lines');
-const miToggleSyntax  = requireEl('#mi-toggle-syntax');
-const miToggleCloseBrackets = requireEl('#mi-toggle-closebrackets');
-const miToggleAutocomplete = requireEl('#mi-toggle-autocomplete');
-const miToggleShading = requireEl('#mi-toggle-shading');
-const miToggleIndentGuides = requireEl('#mi-toggle-indent-guides');
-const miToggleWrap    = requireEl('#mi-toggle-wrap');
-const miToggleAutosave = requireEl('#mi-toggle-autosave');
-const miToggleDiffs  = requireEl('#mi-toggle-diffs');
-const miToggleDraftDiffs = requireEl('#mi-toggle-draft-diffs');
-const miToggleColorPicker = requireEl('#mi-toggle-color-picker');
-const miToggleReadonly = requireEl('#mi-toggle-readonly');
-const miToggleStickyScroll = requireEl('#mi-toggle-sticky-scroll');  // Added: 2025-12-03 by vectorArc - TE2 Team
-const miTrackEdits   = requireEl('#mi-track-edits');
-const miTrackAgentSidebarEdits = requireEl('#mi-track-agent-sidebar-edits');
-const miFind          = requireEl('#mi-find');
-const miGoto          = requireEl('#mi-goto');
-const miExportDiagnostics = requireEl('#mi-export-diagnostics');
-const miEditorSettings = requireEl('#mi-editor-settings');
-
-// ---------- Editor Settings modal ----------
-const editorSettingsModal = requireEl('#editor-settings-modal');
-const editorSettingsClose = requireEl('#editor-settings-close');
-const editorSettingsExtStrip = requireEl('#editor-settings-ext-strip');
-const editorSettingsExtSummary = requireEl('#editor-settings-ext-summary');
-const editorSettingsThemeStrip = requireEl('#editor-settings-theme-strip');
-const editorSettingsThemeSummary = requireEl('#editor-settings-theme-summary');
-const editorThemesModal = requireEl('#editor-themes-modal');
-const editorThemesClose = requireEl('#editor-themes-close');
-const editorThemesList = requireEl('#editor-themes-list');
-
-const editorExtManagerModal = requireEl('#editor-ext-manager-modal');
-const editorExtManagerClose = requireEl('#editor-ext-manager-close');
-const editorExtManagerInstallBtn = requireEl('#editor-ext-manager-install');
-const editorExtManagerList = requireEl('#editor-ext-manager-list');
-const extCustomSettingsInput = requireEl('#editor-ext-custom-settings-input');
-const extCustomSettingsSave = requireEl('#editor-ext-custom-settings-save');
-
-const extConfigModal = requireEl('#ext-config-modal');
-const extConfigTitle = requireEl('#ext-config-title');
-const extConfigClose = requireEl('#ext-config-close');
-const extConfigForm = requireEl('#ext-config-form');
-const extConfigCancel = requireEl('#ext-config-cancel');
-const extConfigSave = requireEl('#ext-config-save');
 
 createSettingsBootstrap({
   els: {
@@ -463,8 +427,8 @@ createSettingsBootstrap({
   pickerAvailable: () => pickerController.pickerAvailable(),
   pickFile: (startPath) => pickFile(startPath),
   getStartPath: () => lastPickerPath || HOME_DIR,
-  busRequest: (method, payload, timeoutMs) => window.__explorerRpc.request(method, payload, timeoutMs),
-  busNotify: (method, payload) => window.__explorerRpc.notify(method, payload),
+  busRequest: (method, payload, timeoutMs) => requestExplorerRpc(method, payload, timeoutMs),
+  busNotify: (method, payload) => notifyExplorerRpc(method, payload),
   reloadEditorFrame: _reloadEditorFrame,
   toast: (msg, ms) => host.toast(msg, ms),
 });
@@ -560,17 +524,6 @@ const sessionTelemetry = createSessionTelemetryController({
   getUnsaved: () => !!unsaved,
 });
 sessionState = sessionTelemetry.sessionState;
-explorerRpcRuntime = createExplorerRpcRuntime({
-  ensureSocketIoLoaded,
-  homeDir: HOME_DIR,
-  toAbsolute,
-  getActiveProjectPath: () => sessionTelemetry.activeProjectPath() || null,
-  getSessionActiveProject: () => sessionState.activeProject || null,
-  applyHostActivePath: (path, options) => _applyHostActivePath(path, options),
-  updateProblemsPanel: (payload) => problemsPanel.update(payload),
-  reloadEditorFrame: () => _reloadEditorFrame(),
-  requestAdapterRestart: () => _requestAdapterRestart(),
-});
 let externalRefreshInProgress = false;
 
 function resetActiveFileState({ resetPicker = false } = {}) {
@@ -761,7 +714,7 @@ const recentsController = createRecentsController({
 recentsController.installWindowHook();
 
 // Synchronize host + inline editor when a project is opened in the explorer.
-// Called from explorer.ts via window.__cm6HandleProjectOpened(path).
+// Called from Explorer runtime via window.__cm6HandleProjectOpened(path).
 const projectSwitchController = createProjectSwitchController({
   getTerminal: () => terminal,
   closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
@@ -780,7 +733,7 @@ const projectSwitchController = createProjectSwitchController({
   reloadEditorSurface: () => window.location.reload(),
 });
 
-// Expose for explorer.ts (project:opened handler)
+// Expose for Explorer runtime (project:opened handler)
 projectSwitchController.installWindowHook();
 
 const editorStateController = createEditorStateController({
@@ -816,6 +769,7 @@ const fileSyncHandler = createFileSyncHandler({
   setStatus: (text) => { statusEl.textContent = text; },
   getUnsaved: () => !!unsaved,
   clearInflightOpId: () => { inflightOpId = null; },
+  refreshExplorer: () => refreshExplorer(),
 });
 const fileWebSocketManager = createFileWebSocketManager({
   ReconnectingWebSocket,
@@ -890,11 +844,7 @@ const openFlowController = createOpenFlowController({
   syncSessionPath: () => syncSessionPath(),
   getCachedProjectRoot: () => cachedProjectRoot,
   dispatchExplorerActiveFile: (rel) => {
-    try {
-      if (typeof window.__explorerHandleNotification === 'function') {
-        window.__explorerHandleNotification(EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated, { rel });
-      }
-    } catch (_) {}
+    dispatchExplorerNotification(EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated, { rel });
   },
   openWebSocket: (path) => fileWebSocketManager.openWebSocket(path),
   getEditorState: () => editorState,
@@ -975,7 +925,7 @@ const runFileController = createRunFileController({
 // Autosave confirmation modal (constructed lazily)
 const autosaveModalController = createAutosaveModalController();
 
-// Watcher UI (extracted to src/host/ui/watcher-settings.js)
+// Watcher UI (extracted to main_page/frontend/ui/watcher-settings.js)
 initWatcherUI(appContext);
 
 sidebarShortcuts = initSidebarShortcutsSafe({
@@ -991,7 +941,7 @@ sidebarShortcuts = initSidebarShortcutsSafe({
 
 drainPendingWatcherEvents();
 
-// Projects debug modal extracted to src/host/ui/projects-debug-modal.js
+// Projects debug modal extracted to main_page/frontend/ui/projects-debug-modal.js
 
 // ---------- Picker helpers (shared modal provided by framework) ----------
 const pickerController = createPickerController({
@@ -1087,7 +1037,6 @@ installBasicMenuActions({
   toast: (msg) => host.toast(msg),
 });
 
-const miToggleMinimap = requireEl('#mi-toggle-minimap');
 installSimplePreferenceMenuActions({
   bindMenuToggle,
   els: {
@@ -1143,6 +1092,7 @@ const { terminal, consoleDrawer, problemsPanel: drawerProblemsPanel } = initPane
   triggerEditorSearchPanel: (reason, opts) => searchPanelController.triggerEditorSearchPanel(reason, opts),
   openFile: (path, opts) => openFile(path, opts),
   jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
+  requestDiagnosticsMention: (payload) => uiIpcConnections.requestBackendDiagnosticsMention(payload),
   saveFile: () => saveFile(),
   resetToNewFile: () => resetActiveFileState({ resetPicker: true }),
   openPickedFile: () => {
@@ -1168,8 +1118,17 @@ runBootSequence(createBootSequenceDeps({
     initToolbarTitleClampObservers: () => initToolbarTitleClampObservers(),
     loadLayoutPreferences: () => loadLayoutPreferences(),
     initResizeManager: () => initResizeManager(),
-    initExplorerUI: () => initExplorerUI(),
-    connectExplorerSocket: () => connectExplorerSocket(),
+    initExplorerUI: () => initExplorerUI({
+      ensureSocketIoLoaded,
+      homeDir: HOME_DIR,
+      toAbsolute,
+      getActiveProjectPath: () => sessionTelemetry.activeProjectPath() || null,
+      getSessionActiveProject: () => sessionState.activeProject || null,
+      applyHostActivePath: (path, options) => _applyHostActivePath(path, options),
+      updateProblemsPanel: (payload) => problemsPanel.update(payload),
+      reloadEditorFrame: () => _reloadEditorFrame(),
+      requestAdapterRestart: () => _requestAdapterRestart(),
+    }),
     connectUIIPC: () => connectUIIPC(),
     connectSidebarIPC: () => connectSidebarIPC(),
     ensureWorkbenchAdapterReady: () => hostStateRuntime.ensureWorkbenchAdapterReady(),

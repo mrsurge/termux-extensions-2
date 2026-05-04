@@ -14,13 +14,13 @@ export const UI_IPC_RPC_METHODS = {
   hostEditorFind: 'ui.host.editor.find',
   hostEditorIssuesCommand: 'ui.host.editor.issues.command',
   hostEditorIssuesDump: 'ui.host.editor.issues.dump',
+  hostDiagnosticsMention: 'ui.host.diagnostics.mention',
 } as const;
 
 export const UI_IPC_RPC_NOTIFICATIONS = {
   editorSave: 'ui.editor.save',
   editorFocus: 'ui.editor.focus',
   editorBlur: 'ui.editor.blur',
-  editorMentionRequest: 'ui.editor.mention.request',
   editorReady: 'ui.editor.ready',
   editorOpenComplete: 'ui.editor.open.complete',
   editorCacheState: 'ui.editor.cache.state',

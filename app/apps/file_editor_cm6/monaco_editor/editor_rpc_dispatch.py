@@ -5,13 +5,19 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import cast
 
+from .editor_host_actions_backend import handle_editor_host_action
 from .editor_rpc_contract import (
+    EDITOR_RPC_METHOD_BLUR,
+    EDITOR_RPC_METHOD_FOCUS,
+    EDITOR_RPC_METHOD_HOST_SAVE,
+    EDITOR_RPC_METHOD_MENTION_REQUEST,
     EDITOR_RPC_METHOD_MIRROR_PUBLISH,
     EDITOR_RPC_METHOD_OPEN,
     EDITOR_RPC_METHOD_SAVE,
     JSONRPC_METHOD_NOT_FOUND,
     EditorRpcDispatchError,
 )
+from .editor_mention_backend import handle_editor_mention_request
 from .editor_open_backend import EditorOpenPayload, emit_editor_open_from_backend
 from .editor_save_backend import handle_editor_mirror, handle_editor_save_request
 from .editor_backend_services.contracts import RuntimeMeta
@@ -47,6 +53,9 @@ async def dispatch_editor_rpc_request(
     notify_draft_state_changed: NotifyDraftStateChangedFn,
     record_save_sha: RecordSaveShaFn,
 ) -> object:
+    if method in (EDITOR_RPC_METHOD_HOST_SAVE, EDITOR_RPC_METHOD_FOCUS, EDITOR_RPC_METHOD_BLUR):
+        return await handle_editor_host_action(method, params)
+
     if method == EDITOR_RPC_METHOD_OPEN:
         request_id = str(params.get("request_id") or f"rpc_open_{int(time.time() * 1000)}")
         payload = await emit_editor_open_from_backend(
@@ -118,6 +127,9 @@ async def dispatch_editor_rpc_request(
             notify_draft_state_changed=notify_draft_state_changed,
             record_save_sha=record_save_sha,
         )
+
+    if method == EDITOR_RPC_METHOD_MENTION_REQUEST:
+        return await handle_editor_mention_request(params)
 
     raise EditorRpcDispatchError(
         JSONRPC_METHOD_NOT_FOUND,

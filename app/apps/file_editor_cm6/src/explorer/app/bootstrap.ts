@@ -5,12 +5,12 @@
 // - Render the explorer tree/cards from backend snapshots (`explorer:setTree`).
 // - Reflect git status and draft flags on entries.
 // - Wire basic chrome (drawer open/close, project label, git summary, header actions).
-// - Expose `initExplorerUI` and `window.__cm6RefreshExplorer` for host integration.
+// - Expose `initExplorerUI` plus typed Explorer runtime hooks for host integration.
 //
 // All state that matters lives on the backend; this module treats incoming
 // messages as the source of truth and only keeps enough transient state to draw.
 
-import { showNewProjectModal } from '../../../static/js/new_project_modal.js';
+import { showNewProjectModal } from '../chrome/new-project-modal.ts';
 import { getIcon as getSetiIcon } from '/static/vendor/seti-icons/seti-icons.js';
 import type { JsonObject } from '../../rpc/transport.ts';
 import { createExplorerStickyScopes } from '../chrome/sticky-scopes.ts';
@@ -41,6 +41,11 @@ import {
   isExplorerRpcAvailable,
   notifyExplorerRpc,
 } from '../rpc/client.ts';
+import {
+  createExplorerRpcRuntime,
+  type ExplorerRpcRuntime,
+  type ExplorerRpcRuntimeDeps,
+} from '../rpc/runtime.ts';
 import { createExplorerNotificationHandler } from '../rpc/notifications.ts';
 import {
   getParentRel as getParentRelModule,
@@ -90,6 +95,7 @@ type ExplorerTimer = ReturnType<typeof setTimeout> | null;
 let treeElement: HTMLElement | null = null;
 let gitSummaryEl: HTMLElement | null = null;
 let gitButtons: ExplorerGitButtons | null = null;
+let explorerRpcRuntime: ExplorerRpcRuntime | null = null;
 const explorerRuntimeState = createExplorerRuntimeState();
 let draftUpdateListenerInstalled = false;
 
@@ -106,6 +112,8 @@ function notifyExplorer(
 ): boolean {
   return notifyExplorerRpc(method as ExplorerRpcMethod, payload as JsonObject);
 }
+
+export type ExplorerUiInitOptions = ExplorerRpcRuntimeDeps;
 
 function setActiveFileRel(nextRel: string | null): void {
   explorerActiveFileUtils.setActiveFileRel(nextRel);
@@ -845,7 +853,7 @@ const explorerRefreshController = createExplorerRefreshController({
   },
 });
 
-export async function initExplorerUI() {
+export async function initExplorerUI(options: ExplorerUiInitOptions) {
   const drawer = document.getElementById('fe-drawer');
   const drawerBody = drawer?.querySelector<HTMLElement>('.fe-drawer-body') || null;
   const drawerClose = document.getElementById('fe-drawer-close');
@@ -916,9 +924,6 @@ export async function initExplorerUI() {
   explorerDiffBaseController.hydrateFromEditorState();
   updateDiffBaseButtons();
   void initDiffBaseFromBackend();
-  if (hasExplorerRpc()) {
-    notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
-  }
 
   explorerGitFooterUtils.bindGitFooterActions();
   document.addEventListener(
@@ -981,6 +986,10 @@ export async function initExplorerUI() {
     empty.textContent = 'Waiting for project snapshot…';
     treeElement.appendChild(empty);
   }
+
+  explorerRpcRuntime = createExplorerRpcRuntime(options);
+  await explorerRpcRuntime.connect();
+  notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
 }
 
 // --- Unified file open + jump helper ---

@@ -72,14 +72,9 @@ declare global {
     __cm6PendingPrefsChanged?: unknown;
     __cm6PendingWatcherError?: Record<string, unknown>;
     __cm6PendingWatcherRaiseResult?: Record<string, unknown>;
-    __cm6ExplorerOnReconnect?: () => void;
-    __cm6RefreshExplorer?: () => Promise<void>;
     __cm6ReloadCurrentFile?: () => void;
     __cm6RequestGitBaselines?: () => void;
-    __explorerHandleNotification?: (method: string, payload: unknown) => void;
-    __explorerScrollToActiveFile?: () => Promise<void>;
     __explorerStickyScopes?: ExplorerStickyScopesApi | null;
-    __explorerRpc?: unknown;
     teFilePicker?: ExplorerTeFilePicker;
   }
 }

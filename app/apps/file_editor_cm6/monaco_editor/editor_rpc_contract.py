@@ -21,6 +21,10 @@ EDITOR_RPC_METHOD_GIT_BASELINES_GET: Final = "editor.gitBaselines.get"
 EDITOR_RPC_METHOD_DRAFT_DIFF_GET: Final = "editor.draftDiff.get"
 EDITOR_RPC_METHOD_MIRROR_PUBLISH: Final = "editor.mirror.publish"
 EDITOR_RPC_METHOD_SAVE: Final = "editor.save"
+EDITOR_RPC_METHOD_MENTION_REQUEST: Final = "editor.mention.request"
+EDITOR_RPC_METHOD_HOST_SAVE: Final = "editor.host.save"
+EDITOR_RPC_METHOD_FOCUS: Final = "editor.focus"
+EDITOR_RPC_METHOD_BLUR: Final = "editor.blur"
 
 EditorRpcMethod = Literal[
     "editor.open",
@@ -29,6 +33,10 @@ EditorRpcMethod = Literal[
     "editor.draftDiff.get",
     "editor.mirror.publish",
     "editor.save",
+    "editor.mention.request",
+    "editor.host.save",
+    "editor.focus",
+    "editor.blur",
 ]
 
 EDITOR_RPC_NOTIFICATION_STATE_SSOT: Final = "editor.state.ssot"
@@ -45,6 +53,7 @@ EDITOR_RPC_NOTIFICATION_NOTIFY: Final = "editor.notify"
 EDITOR_RPC_NOTIFICATION_OPEN_COMPLETE: Final = "editor.open.complete"
 EDITOR_RPC_NOTIFICATION_DIAGNOSTICS: Final = "editor.diagnostics.updated"
 EDITOR_RPC_NOTIFICATION_DIAGNOSTICS_COUNTS: Final = "editor.diagnostics.counts"
+EDITOR_RPC_NOTIFICATION_ADAPTER_STATE: Final = "editor.adapter.state"
 EDITOR_RPC_NOTIFICATION_SEMANTIC_TOKENS_PROVIDER_REGISTERED: Final = "editor.semanticTokens.providerRegistered"
 EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_REQUEST: Final = "editor.issues.dump.request"
 EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_RESPONSE: Final = "editor.issues.dump.response"
@@ -66,6 +75,7 @@ EditorRpcNotification = Literal[
     "editor.open.complete",
     "editor.diagnostics.updated",
     "editor.diagnostics.counts",
+    "editor.adapter.state",
     "editor.semanticTokens.providerRegistered",
     "editor.issues.dump.request",
     "editor.issues.dump.response",

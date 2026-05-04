@@ -26,16 +26,16 @@ _stdout_subscription_shell_id: Optional[str] = None
 _rpc_write_lock: Optional[asyncio.Lock] = None
 
 # Adapter lifecycle state — broadcast to all UI IPC clients on change.
-_adapter_state: dict = {"status": "idle", "project": None, "error": None}
+_adapter_state: dict[str, object] = {"status": "idle", "project": None, "error": None}
 
 
-def get_adapter_state() -> dict:
+def get_adapter_state() -> dict[str, object]:
     """Return a copy of the current adapter lifecycle state."""
     return dict(_adapter_state)
 
 
 async def _broadcast_adapter_state() -> None:
-    """Push current adapter state to all UI IPC clients."""
+    """Push current adapter state to host UI IPC clients and editor RPC clients."""
     try:
         from .ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
         await emit_ui_ipc_rpc_notification(
@@ -43,7 +43,27 @@ async def _broadcast_adapter_state() -> None:
             dict(_adapter_state),
         )
     except Exception as exc:
-        log.warning("[adapter_state] broadcast failed: %s", exc)
+        log.warning("[adapter_state] UI IPC broadcast failed: %s", exc)
+    try:
+        from .monaco_editor.editor_rpc_contract import (
+            EDITOR_RPC_EVENT,
+            EDITOR_RPC_NOTIFICATION_ADAPTER_STATE,
+            JSONRPC_VERSION,
+        )
+        from .monaco_editor.editor_socketio import EDITOR_SIO
+
+        await EDITOR_SIO.emit(
+            EDITOR_RPC_EVENT,
+            {
+                "jsonrpc": JSONRPC_VERSION,
+                "method": EDITOR_RPC_NOTIFICATION_ADAPTER_STATE,
+                "params": dict(_adapter_state),
+            },
+            namespace="/rpc/editor",
+            room="file_editor_cm6",
+        )
+    except Exception as exc:
+        log.warning("[adapter_state] editor RPC broadcast failed: %s", exc)
 
 
 def _set_adapter_state(status: str, project: str = None, error: str = None) -> None:

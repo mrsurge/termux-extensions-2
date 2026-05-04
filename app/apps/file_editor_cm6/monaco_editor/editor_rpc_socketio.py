@@ -9,6 +9,7 @@ import socketio
 from .editor_rpc_contract import (
     JSONRPC_INTERNAL_ERROR,
     JSONRPC_INVALID_PARAMS,
+    EDITOR_RPC_NOTIFICATION_ADAPTER_STATE,
     EDITOR_RPC_NOTIFICATION_STATE_SSOT,
     EditorRpcDispatchError,
     EditorRpcProtocolError,
@@ -50,6 +51,16 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
         )
         current_path = snapshot.get("currentPath")
         project = snapshot.get("project")
+        try:
+            from ..workbench_adapter_shell_manager import get_adapter_state
+
+            await emit_editor_rpc_notification(
+                lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
+                EDITOR_RPC_NOTIFICATION_ADAPTER_STATE,
+                get_adapter_state(),
+            )
+        except Exception:
+            pass
         if isinstance(project, str) and isinstance(current_path, str) and current_path:
             try:
                 await editor_runtime_broadcast_active_file_update(project, current_path)

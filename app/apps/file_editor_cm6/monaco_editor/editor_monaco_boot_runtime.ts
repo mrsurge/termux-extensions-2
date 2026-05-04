@@ -45,7 +45,7 @@ interface EditorMonacoBootRuntimeDeps {
   collectBootLanguageIds(monacoRef: unknown): string[];
   warnIfPlaintextOnlyLanguages(languageIds: string[]): void;
   connectEditorSocket(): Promise<unknown> | boolean | void;
-  connectUIIPC(): void;
+  connectEditorHostActions(): void;
   ensureVscodeRpcConnected(): void;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   updateDebug(extra: string): void;
@@ -215,7 +215,7 @@ export async function bootMonacoRuntime(
       deps.warnIfPlaintextOnlyLanguages(langs);
     } catch (_) {}
 
-    deps.connectUIIPC();
+    deps.connectEditorHostActions();
 
     try { deps.ensureVscodeRpcConnected(); } catch (_) {}
 

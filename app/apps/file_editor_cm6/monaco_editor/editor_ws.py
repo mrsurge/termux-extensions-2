@@ -1252,4 +1252,4 @@ class EditorSocketIONamespace(socketio.AsyncNamespace):
             _wb_log.error("[bc-navigate] emit FAILED: %s", exc)
 
     # NOTE: on_editor_readiness_check removed — adapter state is now pushed
-    # via UI IPC from workbench_adapter_shell_manager._broadcast_adapter_state().
+            # via editor RPC adapter-state from workbench_adapter_shell_manager._broadcast_adapter_state().

@@ -1,8 +1,3 @@
-import {
-  UI_IPC_RPC_NOTIFICATIONS,
-  buildUiIpcRpcNotificationEnvelope,
-} from '../src/ui_ipc/rpc_contract.ts';
-
 interface MentionPayload {
   path: string;
   lineNo?: number;
@@ -16,7 +11,7 @@ interface MentionRequestDeps {
   getEditor(): MonacoRuntimeEditorLike | null;
   getDiffEditor?(): MonacoRuntimeDiffEditorLike | null;
   getCurrentPath(): string | null;
-  getUiIpcSocket?(): MonacoRuntimeSocketLike | null;
+  sendEditorMentionRequest(payload: Record<string, unknown>): boolean;
   updateDebug(extra?: string): void;
 }
 
@@ -58,21 +53,16 @@ export function sendMentionRequest(deps: MentionRequestDeps): void {
   const path = deps.getCurrentPath();
   const payload = buildMentionPayload(editor, path);
   if (!payload) return;
-  const sock = deps.getUiIpcSocket ? deps.getUiIpcSocket() : null;
-  if (sock && sock.connected && typeof sock.emit === 'function') {
-    sock.emit('rpc', buildUiIpcRpcNotificationEnvelope(
-      UI_IPC_RPC_NOTIFICATIONS.editorMentionRequest,
-      {
-        path: payload.path,
-        lineNo: payload.lineNo,
-        col: payload.col,
-        endLineNo: payload.endLineNo,
-        endCol: payload.endCol,
-        content: payload.content,
-      },
-    ));
-  } else {
-    console.warn('[mention] UI IPC socket not connected');
+  const sent = deps.sendEditorMentionRequest({
+    path: payload.path,
+    lineNo: payload.lineNo,
+    col: payload.col,
+    endLineNo: payload.endLineNo,
+    endCol: payload.endCol,
+    content: payload.content,
+  });
+  if (!sent) {
+    console.warn('[mention] editor RPC socket not connected');
   }
 }
 
