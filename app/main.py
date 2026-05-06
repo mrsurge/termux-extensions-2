@@ -973,31 +973,73 @@ def _build_asset_bundle_zip() -> str:
         _add_tree(zf, te2lang / "language",
                   "static/vendor/monaco-editor-core/te2-lang/language")
 
-        # 4. Monaco ESM
-        _add_tree(zf, app_dir / "static" / "vendor" / "monaco-editor-core" / "esm",
-                  "static/vendor/monaco-editor-core/esm")
+        # 4. Monaco ESM worker entrypoint. The main Monaco UI is in the
+        # te2-lang bootstrap bundle; Android only needs this worker URL.
+        monaco_worker = (
+            app_dir
+            / "static"
+            / "vendor"
+            / "monaco-editor-core"
+            / "esm"
+            / "vs"
+            / "editor"
+            / "common"
+            / "services"
+            / "editorWebWorkerMain.bundle.js"
+        )
+        _add_file(
+            zf,
+            monaco_worker,
+            "static/vendor/monaco-editor-core/esm/vs/editor/common/services/"
+            "editorWebWorkerMain.bundle.js",
+        )
 
         # 5. file_editor_cm6 statics
-        _add_tree(zf, app_dir / "apps" / "file_editor_cm6" / "static",
-                  "apps/file_editor_cm6/static")
+        cm6_static = app_dir / "apps" / "file_editor_cm6" / "static"
+        cm6_static_prefix = "apps/file_editor_cm6/static"
+        _add_file(zf, cm6_static / "dist" / "host.js", f"{cm6_static_prefix}/dist/host.js")
+        _add_file(
+            zf,
+            cm6_static / "dist" / "explorer.css",
+            f"{cm6_static_prefix}/dist/explorer.css",
+        )
+        _add_file(zf, cm6_static / "version.txt", f"{cm6_static_prefix}/version.txt")
+        _add_tree(zf, cm6_static / "icons", f"{cm6_static_prefix}/icons")
+        _add_tree(
+            zf,
+            cm6_static / "vendor" / "monaco-touch-selection",
+            f"{cm6_static_prefix}/vendor/monaco-touch-selection",
+        )
+        _add_file(
+            zf,
+            cm6_static / "vendor" / "vconsole" / "vconsole.min.js",
+            f"{cm6_static_prefix}/vendor/vconsole/vconsole.min.js",
+        )
+        _add_tree(
+            zf,
+            app_dir / "apps" / "file_editor_cm6" / "vendor" / "android-terminalapp-assets-js",
+            "apps/file_editor_cm6/vendor/android-terminalapp-assets-js",
+        )
 
         # 6. TE2 editor libs
         cm6_monaco = app_dir / "apps" / "file_editor_cm6" / "monaco_editor"
         ui_prefix = "api/app/file_editor_cm6/ui/monaco_editor"
-        if cm6_monaco.is_dir():
-            for f in cm6_monaco.glob("*.js"):
-                _add_file(zf, f, f"{ui_prefix}/{f.name}")
-        # Overwrite m_editor_app.js with IIFE bundle
-        iife = app_dir / "apps" / "file_editor_cm6" / "static" / "dist" / "editor.js"
-        if iife.is_file():
-            zf.write(str(iife), f"{ui_prefix}/m_editor_app.js")
+        # The current Android entrypoint is the built host bundle. inline_host.ts
+        # imports the editor runtime into host.js, so there is no separate
+        # m_editor_app.js publication path here.
         _add_tree(zf, cm6_monaco / "textmate", f"{ui_prefix}/textmate")
         _add_tree(zf, cm6_monaco / "themes", f"{ui_prefix}/themes")
-        _add_tree(zf, cm6_monaco / "vscode_build_src", f"{ui_prefix}/vscode_build_src")
+        _add_file(
+            zf,
+            cm6_monaco / "vscode_build_src" / "out" / "breadcrumbsWidget.css",
+            f"{ui_prefix}/vscode_build_src/out/breadcrumbsWidget.css",
+        )
         # top-level files
-        for fname in ("main.js", "template.html"):
-            _add_file(zf, app_dir / "apps" / "file_editor_cm6" / fname,
-                      f"apps/file_editor_cm6/{fname}")
+        _add_file(
+            zf,
+            app_dir / "apps" / "file_editor_cm6" / "template.html",
+            "apps/file_editor_cm6/template.html",
+        )
         # editor_iframe.html → nc.html
         _add_file(zf, cm6_monaco / "editor_iframe.html",
                   "api/app/file_editor_cm6/ui/nc.html")

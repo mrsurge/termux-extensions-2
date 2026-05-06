@@ -109,8 +109,9 @@ MONACO_ESM_SRC="$APP_DIR/static/vendor/monaco-editor-core/esm"
 MONACO_ESM_DST="$DEST/static/vendor/monaco-editor-core/esm"
 
 # The main Monaco UI is already bundled into te2-lang/bootstrap/monaco.bootstrap.bundle.js.
-# Android still needs the editor web worker entrypoint because m_editor_app.js loads it from
-# /ui/monaco_vscode/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js at runtime.
+# Android still needs the editor web worker entrypoint because the host-bundled
+# editor runtime loads it from /ui/monaco_vscode/esm/vs/editor/common/services/
+# editorWebWorkerMain.bundle.js at runtime.
 [ -f "$MONACO_ESM_SRC/vs/editor/common/services/editorWebWorkerMain.bundle.js" ] && \
     copy_file \
         "$MONACO_ESM_SRC/vs/editor/common/services/editorWebWorkerMain.bundle.js" \
@@ -133,8 +134,8 @@ CM6_STATIC_DST="$DEST/apps/file_editor_cm6/static"
     copy_file "$CM6_STATIC_SRC/version.txt" "$CM6_STATIC_DST/version.txt"
 
 # Direct host-page runtime references that are not bundled into host.js.
-[ -f "$CM6_STATIC_SRC/js/explorer.css" ] && \
-    copy_file "$CM6_STATIC_SRC/js/explorer.css" "$CM6_STATIC_DST/js/explorer.css"
+[ -f "$CM6_STATIC_SRC/dist/explorer.css" ] && \
+    copy_file "$CM6_STATIC_SRC/dist/explorer.css" "$CM6_STATIC_DST/dist/explorer.css"
 
 # App icons referenced by manifests/sidebar surfaces.
 [ -d "$CM6_STATIC_SRC/icons" ] && copy_tree "$CM6_STATIC_SRC/icons" "$CM6_STATIC_DST/icons"
@@ -145,6 +146,12 @@ CM6_STATIC_DST="$DEST/apps/file_editor_cm6/static"
 [ -f "$CM6_STATIC_SRC/vendor/vconsole/vconsole.min.js" ] && \
     copy_file "$CM6_STATIC_SRC/vendor/vconsole/vconsole.min.js" "$CM6_STATIC_DST/vendor/vconsole/vconsole.min.js"
 
+# App-local terminal drawer helpers loaded by host-terminal-drawer.ts.
+[ -d "$APP_DIR/apps/file_editor_cm6/vendor/android-terminalapp-assets-js" ] && \
+    copy_tree \
+        "$APP_DIR/apps/file_editor_cm6/vendor/android-terminalapp-assets-js" \
+        "$DEST/apps/file_editor_cm6/vendor/android-terminalapp-assets-js"
+
 # ===================================================================
 # 6. TE2 editor libs (served under /api/app/file_editor_cm6/ui/)
 # ===================================================================
@@ -153,34 +160,27 @@ echo "[6/8] TE2 editor libs..."
 CM6_MONACO="$APP_DIR/apps/file_editor_cm6/monaco_editor"
 UI_DST="$DEST/api/app/file_editor_cm6/ui"
 
-# Android only needs the built editor bundle here, not the raw per-module source tree.
+# Android uses the built host bundle as the entrypoint.  The inline host imports
+# the editor runtime into host.js, so do not publish a parallel m_editor_app.js
+# copy unless the legacy raw editor route is intentionally restored.
 mkdir -p "$UI_DST/monaco_editor"
 
-# The Python server serves the IIFE bundle (static/dist/editor.js) when the
-# browser requests m_editor_app.js.  The raw source is ESM and will crash in a
-# plain <script> tag, so overwrite the raw copy with the built IIFE bundle.
-DIST_EDITOR="$APP_DIR/apps/file_editor_cm6/static/dist/editor.js"
-if [ -f "$DIST_EDITOR" ]; then
-    cp "$DIST_EDITOR" "$UI_DST/monaco_editor/m_editor_app.js"
-    echo "  → Overwrote m_editor_app.js with IIFE bundle ($(wc -c < "$DIST_EDITOR") bytes)"
-else
-    echo "  ⚠ static/dist/editor.js not found — run 'node build.mjs' first"
-fi
-
-# textmate UMDs
+# TextMate runtime/assets. Grammar publication is intentionally retained pending
+# a separate cleanup decision.
 [ -d "$CM6_MONACO/textmate" ] && copy_tree "$CM6_MONACO/textmate" "$UI_DST/monaco_editor/textmate"
 
 # themes dir (contains JSON theme files)
 [ -d "$CM6_MONACO/themes" ] && copy_tree "$CM6_MONACO/themes" "$UI_DST/monaco_editor/themes"
 
-# vscode_build_src/out/ (breadcrumbsWidget etc)
-[ -d "$CM6_MONACO/vscode_build_src" ] && copy_tree "$CM6_MONACO/vscode_build_src" "$UI_DST/monaco_editor/vscode_build_src"
+# Direct breadcrumb stylesheet loaded by inline_host.ts.
+[ -f "$CM6_MONACO/vscode_build_src/out/breadcrumbsWidget.css" ] && \
+    copy_file \
+        "$CM6_MONACO/vscode_build_src/out/breadcrumbsWidget.css" \
+        "$UI_DST/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css"
 
-# file_editor_cm6 top-level JS/HTML served by routes
-for f in main.js template.html; do
-    [ -f "$APP_DIR/apps/file_editor_cm6/$f" ] && \
-        copy_file "$APP_DIR/apps/file_editor_cm6/$f" "$DEST/apps/file_editor_cm6/$f"
-done
+# file_editor_cm6 top-level HTML served by routes.
+[ -f "$APP_DIR/apps/file_editor_cm6/template.html" ] && \
+    copy_file "$APP_DIR/apps/file_editor_cm6/template.html" "$DEST/apps/file_editor_cm6/template.html"
 
 # editor_iframe.html (served at /api/app/file_editor_cm6/ui/nc)
 [ -f "$CM6_MONACO/editor_iframe.html" ] && \
