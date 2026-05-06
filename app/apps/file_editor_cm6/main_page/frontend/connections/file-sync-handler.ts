@@ -33,7 +33,12 @@ interface FileSyncMessage {
 export function createFileSyncHandler(deps: FileSyncHandlerDeps) {
   let explorerRefreshTimer: number | null = null;
 
-  function handleWSMessage(msg: FileSyncMessage): void {
+  function isFileSyncMessage(value: unknown): value is FileSyncMessage {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function handleWSMessage(msg: unknown): void {
+    if (!isFileSyncMessage(msg)) return;
     const type = msg.type;
     if (type === 'replace_full') {
       const isInGracePeriod = deps.getInflightOpId() || (Date.now() - deps.getLastSaveTime()) < deps.selfEchoGraceMs;

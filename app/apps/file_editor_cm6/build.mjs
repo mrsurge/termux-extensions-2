@@ -25,7 +25,7 @@ const shared = {
 /** Host page bundle (ES module) */
 const hostConfig = {
   ...shared,
-  entryPoints: ['main.js'],
+  entryPoints: ['main.ts'],
   outfile: 'static/dist/host.js',
   format: 'esm',
 };

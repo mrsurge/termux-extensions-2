@@ -111,8 +111,9 @@ export const FONT_SCALE_PRESETS = {
   large: 1.0
 };
 
-export function requireEl(selector: string, scope: ParentNode = document): Element {
+export function requireEl(selector: string, scope: ParentNode = document): HTMLElement {
   const el = scope.querySelector(selector);
   if (!el) throw new Error(`Missing element: ${selector}`);
+  if (!(el instanceof HTMLElement)) throw new Error(`Element is not HTMLElement: ${selector}`);
   return el;
 }

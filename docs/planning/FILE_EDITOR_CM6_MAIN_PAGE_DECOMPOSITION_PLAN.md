@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make `app/apps/file_editor_cm6/main.js` and `app/apps/file_editor_cm6/main.py` the next decomposition targets without changing product behavior first.
+Make the host frontend entry (`app/apps/file_editor_cm6/main.ts`) and `app/apps/file_editor_cm6/main.py` the next decomposition targets without changing product behavior first.
 
 The intended direction is:
 
@@ -27,7 +27,7 @@ Use the broader `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for target architecture
 - Dead in-app agent harness removal: the old `/agent/*` FastAPI router, `/ws/agent` WebSocket mount, transcript/session backend, direct Codex appserver socket, open-request poller, transcript/composer/session markup, and legacy sidebar iframe/drawer controllers were removed from the live path.
 - Main-page console bridge refresh/source cleanup: `main_page/frontend/console_bridge.js` now matches the cached current bridge, remains JS intentionally, and `main_page/frontend/connections/ui-ipc.ts` starts the bridge only after Socket.IO is available with `workerLabel: "main_page"` plus `uniquePerWindow: true`.
 - Terminal-drawer mobile root-width hardening: `template.html` now keeps Monaco's body-level offscreen char-width probe on the negative scroll axis and constrains the terminal drawer/xterm stack so opening the drawer cannot poison GeckoView root scroll metrics.
-- Explorer RPC runtime ownership cleanup and topology freeze: `src/explorer/rpc/runtime.ts` owns Explorer RPC connection lifecycle, notification fanout, reconnect handling, and initial git-status refresh. `src/explorer/rpc/connection.ts` owns the Socket.IO transport wrapper, `main.js` imports Explorer bootstrap directly from `src/explorer/app/bootstrap.ts`, and the old `static/js/explorer.ts` plus host-side Explorer connection shim were removed.
+- Explorer RPC runtime ownership cleanup and topology freeze: `src/explorer/rpc/runtime.ts` owns Explorer RPC connection lifecycle, notification fanout, reconnect handling, and initial git-status refresh. `src/explorer/rpc/connection.ts` owns the Socket.IO transport wrapper, the host entry imports Explorer bootstrap directly from `src/explorer/app/bootstrap.ts`, and the old `static/js/explorer.ts` plus host-side Explorer connection shim were removed.
 - Cross-domain bridge cleanup: the `window.__explorerRpc`, `window.__explorerHandleNotification`, `window.__cm6ExplorerOnReconnect`, `window.__cm6RefreshExplorer`, and `window.__explorerScrollToActiveFile` bridge globals were removed from the live source path. Explorer client access is now a module-local registry in `src/explorer/rpc/client.ts`, and Explorer notification/reconnect/refresh helpers are exported from Explorer-owned source.
 - Editor and host mention boundary cleanup: editor touch-selection mention now sends `editor.mention.request` over `/rpc/editor` to editor-owned backend handling; the editor frontend no longer connects to `/ui_ipc` for save/focus/blur/mention or adapter-state consumption; host diagnostics/problems mention now routes through the `/ui_ipc` backend hook `ui.host.diagnostics.mention`.
 - Explorer new-project modal ownership cleanup: the Explorer-only new-project modal moved from legacy `static/js/new_project_modal.js` into strict Explorer source at `src/explorer/chrome/new-project-modal.ts`, and Explorer bootstrap imports it from the owning source tree.
@@ -40,8 +40,14 @@ Use the broader `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for target architecture
 - Host file-ops family cleanup: host-owned open/save/run file operation controllers moved from `src/host/file-ops/` into strict main-page source at `main_page/frontend/file-ops/`, with explicit open options, save response, save target, and run-file response contracts.
 - Host boot family cleanup: host-owned boot/session/path-state controllers moved from `src/host/boot/` into strict main-page source at `main_page/frontend/boot/`, with explicit editor-state, global-open-hook, before-exit, session telemetry, and restored-path contracts.
 - Host core utility cleanup: host-owned API client, app context factory, and path/language/menu utility helpers moved from `src/host/api/client.ts`, `src/host/app-context.ts`, and `src/host/utils.ts` into strict main-page source under `main_page/frontend/core/`.
-- Host UI family cleanup: the remaining host UI controllers moved from `src/host/ui/` into strict main-page source at `main_page/frontend/ui/`, and the host ambient declarations moved from `src/host/global.d.ts` to `main_page/frontend/global.d.ts`. `main.js` now imports toolbar/menubar/settings/recents/drawer/autosave/watcher UI controllers from `main_page/frontend/ui/`.
-- Host element capture cleanup: `main_page/frontend/host-elements.ts` now owns the required DOM element capture contract for the host shell, including toolbar, menu, drawer, settings, and status elements. `main.js` imports `captureHostElements(...)` and keeps only runtime assembly over the returned element bag.
+- Host UI family cleanup: the remaining host UI controllers moved from `src/host/ui/` into strict main-page source at `main_page/frontend/ui/`, and the host ambient declarations moved from `src/host/global.d.ts` to `main_page/frontend/global.d.ts`. The host entry imports toolbar/menubar/settings/recents/drawer/autosave/watcher UI controllers from `main_page/frontend/ui/`.
+- Host element capture cleanup: `main_page/frontend/host-elements.ts` now owns the required DOM element capture contract for the host shell, including toolbar, menu, drawer, settings, and status elements. The host entry imports `captureHostElements(...)` and keeps only runtime assembly over the returned element bag.
+- Host UI preference runtime cleanup: `main_page/frontend/host-ui-prefs-runtime.ts` owns UI preference snapshot normalization, initial preference waiters, boot-snapshot seeding, sidebar shortcut preference application, the `window.__cm6HandleUiPrefs` hook, and pending preference replay.
+- Host boot runtime cleanup: `main_page/frontend/host-boot-runtime.ts` owns host boot dependency assembly, inline editor host mounting, post-boot sidebar init/hydration, no-project/restored-path boot state handling, and host exit-guard installation. The host entry delegates this end-of-file boot block through `createHostBootRuntime(...).start()`.
+- Console drawer log rendering fix: `main_page/frontend/host-console-drawer.ts` renders incoming TE2 console `console:log` events through vConsole's `model.addLog(...)` API with `noOrig: true`. The `noOrig` flag is mandatory because upstream vConsole calls its saved original console after `addLog(...)` unless suppressed, and in TE2 that saved console is the framework console bridge.
+- Main-page entry state localization: remaining mutable host state and the UI IPC connection setup now live inside `initFileEditor(...)` instead of at module scope. This left the root entry with imports, `_isMobileLayout()`, and the exported entry function, making the TypeScript conversion mechanical.
+- Host entry TypeScript conversion: `main.js` was renamed to `main.ts`, `build.mjs` now uses `main.ts` as the host bundle source entry, `tsconfig.json` includes the entry directly, and the served asset remains `static/dist/host.js`.
+- Host entry finish pass: `main.ts` remains a procedural composition root, but the final cleanup removed write-only local state, dead wrapper functions, and stale comments left over from the conversion. Future extraction should be driven by real ownership boundaries instead of line-count reduction alone.
 
 ### Current Sidebar Boundary
 
@@ -96,9 +102,9 @@ This cleanup was ranked ahead of ordinary `main.js` shrinkage, template cleanup,
 ### Immediate Next Candidates
 
 1. Live-validate the cleaned ownership model after rebuild/version sync, using the exact generated `main_page` TE2 console worker and the relevant app-worker/WBA framework-shell logs.
-2. With `src/host` drained of live frontend files, re-review `main.js` as the remaining host assembly surface and pick the next grouped runtime extraction from inline host behavior rather than creating another broad source bucket. The remaining `static/js` file is vendored `static/js/vendor/split.min.js`, not app-owned source.
+2. With `src/host` drained of live frontend files, re-review `main.ts` as the remaining host assembly surface and pick the next grouped runtime extraction from inline host behavior rather than creating another broad source bucket. The remaining `static/js` file is vendored `static/js/vendor/split.min.js`, not app-owned source.
 3. Convert remaining host actions that still import Explorer RPC for project/settings/watcher flows into explicit backend-owned hook surfaces only after classifying whether the producing surface is host or Explorer.
-4. Continue shrinking `main.js` only with grouped host runtimes that preserve source ownership and do not pull all of `src/host/` into strict checking at once.
+4. Continue shrinking `main.ts` only with grouped host runtimes that preserve source ownership and do not pull all of `src/host/` into strict checking at once.
 5. Continue re-reviewing `template.html` after the sidebar prune and remove remaining avoidable behavior policy from markup/CSS while preserving shortcut DOM compatibility.
 6. Use the frozen Socket.IO topology constants when touching frontend socket clients, but do not begin physical gateway consolidation until a dedicated backend gateway slice is approved.
 7. Start the backend decomposition only after choosing a small route/helper family that does not move framework-owned `services/` shims or worker subapp mounts.
@@ -106,29 +112,23 @@ This cleanup was ranked ahead of ordinary `main.js` shrinkage, template cleanup,
 
 ## Current code review
 
-### `main.js`
+### `main.ts`
 
-Baseline at plan creation: roughly 3,700 lines. After the current source-tree cleanup series, `main.js` is roughly 1,224 lines. Re-check the live line count before using size as progress evidence.
+Baseline at plan creation: roughly 3,700 lines as `main.js`. After the current source-tree cleanup, TypeScript conversion, and finish pass, `main.ts` is roughly 1,153 lines. Re-check the live line count before using size as progress evidence.
 
 It is already partially decomposed. The root file imports many focused modules from `src/host/`, `src/explorer/`, `static/js/`, and `monaco_editor/`, but it still owns several large responsibilities inline:
 
 - host-page boot and runtime assembly
-- DOM element capture for the whole app shell
 - host-side UI IPC/sidebar event fanout and remaining host-owned request wiring
-- host-side editor state waiters and event handling from `/ui_ipc`-bridged editor notifications
-- remaining sidebar shortcut orchestration around the persisted shortcut UI and iframe stack
-- toolbar title sizing and mobile filename drag behavior
-- diagnostics export UI and write path
-- adapter readiness spinner/dropdown glue
 - session telemetry wrappers and host active-file state glue
-- file websocket setup and open/save/run controller assembly
+- controller construction and dependency wiring for file websocket, open/save/run, panels, menus, preferences, and sidebar shortcuts
 
 Important typing state:
 
-- `main.js` is `// @ts-check`, but it is still JavaScript.
-- `tsconfig.json` is strict for the active main-page source under `main_page/frontend/**/*.ts`.
+- `main.ts` is now the strict TypeScript source entry for the host bundle.
+- `tsconfig.json` is strict for the active main-page source under `main_page/frontend/**/*.ts` and includes `main.ts` directly.
 - The former `src/host` frontend families have moved into the strict main-page lane, leaving `src/host` without live frontend files.
-- The remaining host typing backlog is now concentrated in the root `main.js` assembly file and any future modules extracted from its inline behavior.
+- The remaining host typing backlog is now future helper/runtime cleanup around currently loose helper modules, not exclusion of the root entry.
 
 ### `main.py`
 
@@ -180,8 +180,8 @@ Recommended compatibility shape:
 
 - keep `main.py` as the app worker entrypoint in `manifest.json`
 - keep the built output `static/dist/host.js` unchanged as the served frontend asset
-- initially keep `main.js` as the esbuild host entrypoint, but make it import and delegate to `main_page/` modules
-- only switch `build.mjs` from `main.js` to a TypeScript entry after the extracted main-page entry is strict-clean and the runtime has been validated
+- use `main.ts` as the esbuild host source entrypoint
+- keep future root-entry shrinkage focused on grouped host runtime extraction, not another broad source bucket
 
 ## Proposed package layout
 
@@ -228,7 +228,7 @@ Notes:
 
 ### Phase 1: create typed seams without changing the bundle entry
 
-1. Keep `build.mjs` host entrypoint as `main.js`.
+1. Historical: `build.mjs` initially kept `main.js` as the host source entrypoint.
 2. Add `main_page/frontend/` modules for one isolated cluster at a time.
 3. Import those modules from `main.js`.
 4. Keep intentional public runtime hooks stable, but do not add new cross-domain `window.__*` bridges:
@@ -274,10 +274,10 @@ Best first extraction targets:
 
 ### Phase 3: convert the root host entry
 
-Only after the extracted main-page entry is strict-clean:
+Completed after the extracted main-page entry was strict-clean:
 
-1. Convert `main.js` to a thin shim or replace it with `main_page/frontend/entry.ts`.
-2. Update `build.mjs` host entrypoint.
+1. Rename `main.js` to `main.ts`.
+2. Update `build.mjs` host entrypoint to `main.ts`.
 3. Keep output as `static/dist/host.js`.
 4. Rebuild and sync the normal `file_editor_cm6` version surfaces for frontend changes.
 
@@ -401,7 +401,7 @@ Next, live-validate the cleaned ownership model first. After that, choose one re
 For that slice:
 
 1. Keep `main_page/frontend/**/*.ts` in the strict TypeScript lane without pulling the entire excluded `src/host` backlog into strict checking.
-2. Keep `main.js` as the host entrypoint.
+2. Keep `main.ts` as the host source entrypoint and `static/dist/host.js` as the served asset.
 3. Do not add compatibility fallback transports or `window.__*` bridge globals.
 4. Rebuild and sync the normal served frontend version surfaces if frontend assets change.
 

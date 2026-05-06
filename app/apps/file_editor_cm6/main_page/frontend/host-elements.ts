@@ -12,9 +12,9 @@ export interface HostElements {
   agentDrawerEl: HTMLElement;
   fileNameEl: HTMLElement;
   fileNameScrollEl: HTMLElement;
-  issuesToggleBtn: HTMLElement;
-  issuesPrevBtn: HTMLElement;
-  issuesNextBtn: HTMLElement;
+  issuesToggleBtn: HTMLButtonElement;
+  issuesPrevBtn: HTMLButtonElement;
+  issuesNextBtn: HTMLButtonElement;
   issuesBadgesEl: HTMLElement;
   statusEl: HTMLElement;
   editTrackerStatusEl: HTMLElement;
@@ -98,9 +98,9 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     agentDrawerEl: requireEl('#agent-drawer'),
     fileNameEl: requireEl('#fe-file-name'),
     fileNameScrollEl: requireEl('#fe-file-name-scroll'),
-    issuesToggleBtn: requireEl('#fe-issues-toggle'),
-    issuesPrevBtn: requireEl('#fe-issues-prev'),
-    issuesNextBtn: requireEl('#fe-issues-next'),
+    issuesToggleBtn: requireEl('#fe-issues-toggle') as HTMLButtonElement,
+    issuesPrevBtn: requireEl('#fe-issues-prev') as HTMLButtonElement,
+    issuesNextBtn: requireEl('#fe-issues-next') as HTMLButtonElement,
     issuesBadgesEl: requireEl('#fe-issues-badges'),
     statusEl: requireEl('#fe-status'),
     editTrackerStatusEl: requireEl('#edit-tracker-status'),

@@ -3,7 +3,6 @@
 // and delegates all Git work to backend endpoints.
 
 interface HostBranchMenuWindow extends Window {
-  host?: { toast?: (message: string) => void };
   __cm6ReloadCurrentFile?: () => void;
   __cm6SyncState?: (force?: boolean) => void;
   __cm6EditorState?: { projectOrigin?: string };

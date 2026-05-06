@@ -26,7 +26,7 @@ interface ExplorerRpcRuntimeGlobals {
 export interface ExplorerRpcRuntimeDeps {
   ensureSocketIoLoaded: () => Promise<IoFactory | null | undefined>;
   homeDir: string;
-  toAbsolute: (path: string, base?: unknown, homeDir?: string) => string;
+  toAbsolute: (path: string, base?: string | null, homeDir?: string) => string;
   getActiveProjectPath: () => string | null;
   getSessionActiveProject: () => string | null;
   applyHostActivePath: (path: string, options?: { forceToolbar?: boolean }) => void;

@@ -1,8 +1,6 @@
-// /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/main.js
-// app/apps/file_editor_cm6/main.js
+// /data/data/com.termux/files/home/mrselect/app/apps/file_editor_cm6/main.ts
+// app/apps/file_editor_cm6/main.ts
 // Inline Monaco editor integration
-
-// @ts-check
 import { initExplorerUI } from './src/explorer/app/bootstrap.ts';
 import { dispatchExplorerNotification, refreshExplorer } from './src/explorer/app/public-api.ts';
 import { createTerminalDrawer } from './main_page/frontend/host-terminal-drawer.ts';
@@ -55,68 +53,74 @@ import { createFileSyncHandler } from './main_page/frontend/connections/file-syn
 import { ensureSocketIoLoaded, ensureVConsoleLoaded } from './main_page/frontend/connections/vendor-loaders.ts';
 import { createSessionTelemetryController } from './main_page/frontend/boot/session-telemetry.ts';
 import { createEditorStateController } from './main_page/frontend/boot/editor-state.ts';
-import { runBootSequence } from './main_page/frontend/boot/boot-sequence.ts';
-import { installBeforeExitGuard } from './main_page/frontend/boot/public-hooks.ts';
 import { createStateInitController } from './main_page/frontend/boot/state-init.ts';
-import { createBootSequenceDeps } from './main_page/frontend/boot/sequence-deps.ts';
-import { applyNoProjectState, applyRestoredPathState, schedulePathDisplayFallback, applyNoRestoredPathState } from './main_page/frontend/boot/path-state.ts';
-import { installHostExitGuard } from './main_page/frontend/boot/exit-guard.ts';
 import { createSaveSocketController } from './main_page/frontend/file-ops/save-socket.ts';
 import { createSaveFlowController } from './main_page/frontend/file-ops/save-flow.ts';
 import { createOpenFlowController } from './main_page/frontend/file-ops/open-flow.ts';
 import { createRunFileController } from './main_page/frontend/file-ops/run-file.ts';
 import { createApiClient } from './main_page/frontend/core/api-client.ts';
-import { bootInlineEditorHost } from './monaco_editor/inline_host.ts';
 import { createHostChromeRuntime } from './main_page/frontend/host-chrome-runtime.ts';
 import { createHostStateRuntime } from './main_page/frontend/host-state-runtime.ts';
 import { createHostEditorEventsRuntime } from './main_page/frontend/host-editor-events-runtime.ts';
 import { createHostSidebarRuntime } from './main_page/frontend/host-sidebar-runtime.ts';
 import { captureHostElements } from './main_page/frontend/host-elements.ts';
-
-let problemsPanel = { show() {}, hide() {}, update() {}, destroy() {}, get isVisible() { return false; } };
-
+import { createHostUiPrefsRuntime } from './main_page/frontend/host-ui-prefs-runtime.ts';
+import { createHostBootRuntime } from './main_page/frontend/host-boot-runtime.ts';
 import { initResizeManager, loadLayoutPreferences } from './main_page/frontend/host-resize-manager.ts';
+import type { ProblemsPanelController } from './src/diagnostics/problems-panel.ts';
+import type { OpenFileOptions } from './main_page/frontend/file-ops/open-flow.ts';
+import type { ScheduleToolbarTitleClampOptions } from './main_page/frontend/host-chrome-runtime.ts';
 
-let _latestUiPrefs = {};
-let _hasUiPrefsSnapshot = false;
-const _uiPrefsWaiters = [];
-let editorViewState = null; // Loaded from backend at startup via /editor/view_state
-let cachedProjectRoot = null;
-// Host file-state must be declared before any early reconciler/helper functions
-// that read or write it, otherwise the built host bundle can split the binding.
-let currentPath = '';
-let currentPathExists = false;
-let lastSavedContent = '';
-let unsaved = false;
-var restoredSessionActive = false;
-var restoredSessionPath = null;
-let currentModeLanguage = null;
-let lastPickerPath = HOME_DIR;
+type UnknownRecord = Record<string, unknown>;
 
-function _resolveUiPrefsWaiters(ui) {
-  if (!_uiPrefsWaiters.length) return;
-  while (_uiPrefsWaiters.length) {
-    const resolve = _uiPrefsWaiters.shift();
-    try {
-      resolve(ui);
-    } catch (_) {}
-  }
+interface HostApi {
+  get: (path: string) => Promise<unknown>;
+  post: (path: string, body: unknown) => Promise<unknown>;
+  delete: (path: string) => Promise<unknown>;
+  [key: string]: unknown;
 }
 
-function waitForInitialUiPrefs(timeoutMs = 2200) {
-  if (_hasUiPrefsSnapshot) {
-    return Promise.resolve(_latestUiPrefs || {});
-  }
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      resolve(_latestUiPrefs || {});
-    }, Math.max(300, timeoutMs || 0));
-    _uiPrefsWaiters.push((ui) => {
-      clearTimeout(timer);
-      resolve(ui || {});
-    });
-  });
+interface HostBridge {
+  toast: (message: string, kind?: unknown) => void;
+  onBeforeExit: (cb: () => UnknownRecord) => void;
 }
+
+interface EditorViewState extends UnknownRecord {
+  autoSave?: boolean;
+  theme?: string;
+}
+
+interface EditorState extends UnknownRecord {
+  activeProject?: string | null;
+}
+
+interface SessionState extends UnknownRecord {
+  activeProject: string | null;
+  currentPath: string | null;
+  unsaved: boolean;
+  lastSha256: string | null;
+  updatedAt: string | null;
+}
+
+interface HostActivePathOptions {
+  forceToolbar?: boolean;
+}
+
+interface SaveFileOptions {
+  isAutosave?: boolean;
+}
+
+interface SidebarShortcutsLike {
+  init?: () => unknown;
+  hydrate?: () => unknown;
+  applyUiPrefs?: (prefs: UnknownRecord) => unknown;
+}
+
+type CacheIndicatorHandler = (info: unknown) => void;
+type ExplorerRpcRequestMethod = Parameters<typeof requestExplorerRpc>[0];
+type ExplorerRpcRequestPayload = Parameters<typeof requestExplorerRpc>[1];
+type ExplorerRpcNotifyMethod = Parameters<typeof notifyExplorerRpc>[0];
+type ExplorerRpcNotifyPayload = Parameters<typeof notifyExplorerRpc>[1];
 
 function _isMobileLayout() {
   try {
@@ -132,77 +136,52 @@ function _isMobileLayout() {
   }
 }
 
-function _emitSidebarIpc(eventName, payload) {
-  uiIpcConnections.emitSidebarIpc(eventName, payload);
+function asUnknownRecord(value: unknown): UnknownRecord {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as UnknownRecord
+    : {};
 }
 
-// Ensure lastSha256 exists before any cache-state events fire.
-var lastSha256 = null;
+// ---- host/api contract (injected by framework) ----
+/* global host, api */
+export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, host: HostBridge) {
+const appContext = createAppContext({ rootEl, api, host });
+window.__feAppContext = appContext;
+window.host = host;
+window.api  = api;
+let problemsPanel: ProblemsPanelController = {
+  show() {},
+  hide() {},
+  update(_detail: unknown) {},
+  setActiveFile(_absPath: string) {},
+  destroy() {},
+  getDetail() { return {}; },
+  getSummary(_projectRoot?: string) { return {}; },
+  get isVisible() { return false; },
+};
+let editorViewState: EditorViewState | null = null; // Loaded from backend at startup via /editor/view_state
+let cachedProjectRoot: string | null = null;
+let currentPath = '';
+let currentPathExists = false;
+let unsaved = false;
+let restoredSessionActive = false;
+let lastPickerPath = HOME_DIR;
+let lastSha256: string | null = null;
 // `explorer:event` may arrive before helper functions are defined; keep a stable symbol.
 // This is NOT a suppression: we queue the latest indicator payload and replay it once
 // the real implementation is installed.
-var applyCacheIndicator = function (info) {
+let applyCacheIndicator: CacheIndicatorHandler = function (info: unknown) {
   try { window.__fePendingCacheIndicator = info; } catch (_) {}
 };
-
-function _applyHostActivePath(filePath, options = {}) {
-  const normalizedPath = (typeof filePath === 'string' && filePath) ? filePath : '';
-  if (!normalizedPath) return;
-
-  try { currentPath = normalizedPath; } catch (_) {}
-  try { currentPathExists = true; } catch (_) {}
-  try {
-    const trimmed = normalizedPath.replace(/\/+$/, '');
-    const idx = trimmed.lastIndexOf('/');
-    lastPickerPath = idx > 0 ? trimmed.slice(0, idx) : '/';
-  } catch (_) {}
-  try { currentModeLanguage = detectLanguageFromFilename(normalizedPath); } catch (_) {}
-  try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(normalizedPath); } catch (_) {}
-
-  const trimmed = normalizedPath.replace(/\/+$/, '');
-  const idx = trimmed.lastIndexOf('/');
-  const expectedName = idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
-  const nameEl = window.fileNameEl || fileNameEl || null;
-  const forceToolbar = !!(options && options.forceToolbar);
-  const toolbarStale = !!(
-    nameEl
-    && (
-      nameEl.textContent !== expectedName
-      || nameEl.title !== expectedName
-    )
-  );
-
-  try {
-    if (typeof updatePathDisplay === 'function') updatePathDisplay();
-    else if (typeof window.updatePathDisplay === 'function') window.updatePathDisplay();
-    else if (forceToolbar || toolbarStale || !nameEl) setToolbarFileName(expectedName);
-  } catch (_) {
-    try {
-      if (forceToolbar || toolbarStale || !nameEl) setToolbarFileName(expectedName);
-    } catch (_) {}
-  }
-}
-
-function _setHostCurrentPathOnly(path) {
-  if (typeof path === 'string' && path) {
-    _applyHostActivePath(path);
-    return;
-  }
-  try { currentPath = ''; } catch (_) {}
-}
-
-function _issuesDumpRequestOnce() {
-  return uiIpcConnections.requestBackendEditorIssuesDump({
-    request_id: `issues_dump_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-  });
-}
-
-// ─── UI IPC (frontend ↔ inline editor relay) ──────────────────────
+let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 const uiIpcConnections = createUiIpcConnections({
   ensureSocketIoLoaded,
   initConsoleBridge,
   getClientId: () => clientId,
 });
+function _emitSidebarIpc(eventName: string, payload?: unknown) {
+  uiIpcConnections.emitSidebarIpc(eventName, asUnknownRecord(payload));
+}
 function connectSidebarIPC() {
   uiIpcConnections.connectSidebarIPC();
 }
@@ -210,15 +189,6 @@ function connectSidebarIPC() {
 function connectUIIPC() {
   return uiIpcConnections.connectUIIPC();
 }
-// ─── End UI IPC ───────────────────────────────────────────────────
-
-// ---- host/api contract (injected by framework) ----
-/* global host, api */
-export default async function initFileEditor(rootEl, api, host) {
-const appContext = createAppContext({ rootEl, api, host });
-window.__feAppContext = appContext;
-window.host = appContext.host;
-window.api  = appContext.api;
 
 const hostElements = captureHostElements(requireEl);
 const {
@@ -334,9 +304,9 @@ const hostChromeRuntime = createHostChromeRuntime({
   homeDir: HOME_DIR,
   getCurrentPath: () => currentPath,
   getCachedProjectRoot: () => cachedProjectRoot,
-  getProblemsDetail: () => problemsPanel.getDetail ? problemsPanel.getDetail() : {},
+  getProblemsDetail: () => problemsPanel.getDetail(),
   pickerAvailable: () => pickerController.pickerAvailable(),
-  saveFileWithPicker: (options) => window.teFilePicker.saveFile(options),
+  saveFileWithPicker: async (options) => window.teFilePicker?.saveFile(options) ?? null,
   apiPost: (path, body) => apiPost(path, body),
   getClientId: () => clientId,
   requestBackendEditorIssuesCommand: (payload) => uiIpcConnections.requestBackendEditorIssuesCommand(payload),
@@ -351,6 +321,48 @@ const {
   setIssuesButtonsEnabled,
   exportDiagnosticsToFile,
 } = hostChromeRuntime;
+function _applyHostActivePath(filePath: unknown, options: HostActivePathOptions = {}) {
+  const normalizedPath = (typeof filePath === 'string' && filePath) ? filePath : '';
+  if (!normalizedPath) return;
+
+  try { currentPath = normalizedPath; } catch (_) {}
+  try { currentPathExists = true; } catch (_) {}
+  try {
+    const trimmed = normalizedPath.replace(/\/+$/, '');
+    const idx = trimmed.lastIndexOf('/');
+    lastPickerPath = idx > 0 ? trimmed.slice(0, idx) : '/';
+  } catch (_) {}
+  try { if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(normalizedPath); } catch (_) {}
+
+  const trimmed = normalizedPath.replace(/\/+$/, '');
+  const idx = trimmed.lastIndexOf('/');
+  const expectedName = idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
+  const nameEl = fileNameEl || null;
+  const forceToolbar = !!(options && options.forceToolbar);
+  const toolbarStale = !!(
+    nameEl
+    && (
+      nameEl.textContent !== expectedName
+      || nameEl.title !== expectedName
+    )
+  );
+
+  try {
+    updatePathDisplay();
+  } catch (_) {
+    try {
+      if (forceToolbar || toolbarStale || !nameEl) setToolbarFileName(expectedName);
+    } catch (_) {}
+  }
+}
+
+function _setHostCurrentPathOnly(path: unknown) {
+  if (typeof path === 'string' && path) {
+    _applyHostActivePath(path);
+    return;
+  }
+  try { currentPath = ''; } catch (_) {}
+}
 hostChromeRuntime.install();
 const hostStateRuntime = createHostStateRuntime({
   updateLspSpinner: () => {
@@ -374,7 +386,7 @@ const hostEditorEventsRuntime = createHostEditorEventsRuntime({
   setLastSha256: (sha) => { lastSha256 = sha; },
   getRestoredSessionActive: () => !!restoredSessionActive,
   setRestoredSessionActive: (flag) => { restoredSessionActive = !!flag; },
-  setRestoredSessionPath: (path) => { restoredSessionPath = path; },
+  setRestoredSessionPath: () => {},
   getCurrentPath: () => currentPath || '',
   queueSessionStateUpdate: (partial) => queueSessionStateUpdate(partial),
   apiPost: (path, body) => apiPost(path, body),
@@ -388,7 +400,7 @@ hostEditorEventsRuntime.install();
 function ensureEditorFrameReady() {
   return hostEditorEventsRuntime.ensureEditorFrameReady();
 }
-function _awaitEditorOpen(requestId, path, timeoutMs) {
+function _awaitEditorOpen(requestId: string, path: string, timeoutMs?: number) {
   return hostEditorEventsRuntime.awaitEditorOpen(requestId, path, timeoutMs);
 }
 
@@ -419,18 +431,18 @@ createSettingsBootstrap({
   },
   closeAllMenus,
   getEditorViewState: () => editorViewState,
-  setEditorTheme: (themeId) => {
+  setEditorTheme: (themeId: string) => {
     editorViewState = editorViewState || {};
     editorViewState.theme = themeId;
   },
-  updatePreference: (key, value) => preferencesController.updatePreference(key, value),
+  updatePreference: (key: string, value: unknown) => preferencesController.updatePreference(key, value),
   pickerAvailable: () => pickerController.pickerAvailable(),
-  pickFile: (startPath) => pickFile(startPath),
+  pickFile: (startPath?: string) => pickFile(startPath),
   getStartPath: () => lastPickerPath || HOME_DIR,
-  busRequest: (method, payload, timeoutMs) => requestExplorerRpc(method, payload, timeoutMs),
-  busNotify: (method, payload) => notifyExplorerRpc(method, payload),
+  busRequest: (method: ExplorerRpcRequestMethod, payload: ExplorerRpcRequestPayload, timeoutMs?: number) => requestExplorerRpc(method, payload, timeoutMs),
+  busNotify: (method: ExplorerRpcNotifyMethod, payload: ExplorerRpcNotifyPayload) => notifyExplorerRpc(method, payload),
   reloadEditorFrame: _reloadEditorFrame,
-  toast: (msg, ms) => host.toast(msg, ms),
+  toast: (msg: string, ms?: number) => host.toast(msg, ms),
 });
 
 function shouldUseLocalKeyboardViewportAdjustments() {
@@ -449,27 +461,27 @@ if (shouldUseLocalKeyboardViewportAdjustments()) {
 
 
 // ---------- Session telemetry ----------
-async function fetchPersistedSessionState() {
+async function fetchPersistedSessionState(): Promise<UnknownRecord | null> {
   return sessionTelemetry.fetchPersistedSessionState();
 }
 
-function seedPersistedSessionState(snapshot) {
+function seedPersistedSessionState(snapshot: UnknownRecord | null): UnknownRecord | null {
   return sessionTelemetry.seedPersistedSessionState(snapshot);
 }
 
-function initSessionStateContext(serverState) {
+function initSessionStateContext(serverState: UnknownRecord | null): void {
   sessionTelemetry.initSessionStateContext(serverState);
 }
 
-function queueSessionStateUpdate(partial = null) {
+function queueSessionStateUpdate(partial: UnknownRecord | null = null): void {
   sessionTelemetry.queueSessionStateUpdate(partial);
 }
 
-async function flushSessionState(force = false) {
+async function flushSessionState(force = false): Promise<unknown> {
   return sessionTelemetry.flushSessionState(force);
 }
 
-function syncSessionPath(extra = {}) {
+function syncSessionPath(extra: UnknownRecord = {}): void {
   sessionTelemetry.syncSessionPath(extra);
 }
 
@@ -478,30 +490,30 @@ const editTrackerController = createEditTrackerController({
   apiPost,
   getEditorViewState: () => editorViewState,
   getCurrentPath: () => currentPath,
-  openFile: (path, opts) => openFile(path, opts),
-  jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
+  openFile: (path: string, opts?: OpenFileOptions) => openFile(path, opts),
+  jumpToCurrentFileLine: (line: number) => jumpToCurrentFileLine(line),
   statusEl: editTrackerStatusEl,
 });
 const fontScaleController = createFontScaleController({
   presets: FONT_SCALE_PRESETS,
-  updatePreference: (key, value) => preferencesController.updatePreference(key, value),
-  scheduleToolbarTitleClamp: (opts) => scheduleToolbarTitleClamp(opts),
-  toast: (msg, kind) => host.toast(msg, kind),
+  updatePreference: (key: string, value: unknown) => preferencesController.updatePreference(key, value),
+  scheduleToolbarTitleClamp: (opts?: ScheduleToolbarTitleClampOptions) => scheduleToolbarTitleClamp(opts),
+  toast: (msg: string, kind?: unknown) => host.toast(msg, kind),
 });
-function applyFontScale(scale) {
+function applyFontScale(scale: number): void {
   fontScaleController.applyFontScale(scale);
-}
-
-function updateFontScaleMenuChecks(currentScale) {
-  fontScaleController.updateFontScaleMenuChecks(currentScale);
 }
 
 // ---------- Editor state ----------
 // Preferences are managed by backend; frontend displays state only (no caching)
 
-let editorState = null;
-let branchMenuHandle = null;
-let sidebarShortcuts = null;
+let editorState: EditorState | null = null;
+let branchMenuHandle: unknown = null;
+let sidebarShortcuts: SidebarShortcutsLike | null = null;
+const hostUiPrefsRuntime = createHostUiPrefsRuntime({
+  getSidebarShortcuts: () => sidebarShortcuts,
+  warn: (...args) => console.warn(...args),
+});
 const hostSidebarRuntime = createHostSidebarRuntime({
   drawerEl: agentDrawerEl,
   toggleButtonEl: document.getElementById('fe-agent-toggle'),
@@ -509,7 +521,7 @@ const hostSidebarRuntime = createHostSidebarRuntime({
   emitSidebarEvent: _emitSidebarIpc,
 });
 hostSidebarRuntime.install();
-let sessionState = {
+let sessionState: SessionState = {
   activeProject: null,
   currentPath: null,
   unsaved: false,
@@ -526,55 +538,26 @@ const sessionTelemetry = createSessionTelemetryController({
 sessionState = sessionTelemetry.sessionState;
 let externalRefreshInProgress = false;
 
-function resetActiveFileState({ resetPicker = false } = {}) {
+function resetActiveFileState({ resetPicker = false }: { resetPicker?: boolean } = {}) {
   fileWebSocketManager.closeWebSocket();
   currentPath = '';
   currentPathExists = false;
   if (resetPicker) lastPickerPath = HOME_DIR;
-  currentModeLanguage = null;
   lastSha256 = null;
-  lastSavedContent = '';
   markUnsaved(false);
   updatePathDisplay();
   syncSessionPath();
 }
 
-window.__cm6HandleUiPrefs = function(payload) {
-  try {
-    const ui =
-      payload && typeof payload.ui === 'object' && payload.ui
-        ? payload.ui
-        : {};
-    _latestUiPrefs = { ...ui };
-    _hasUiPrefsSnapshot = true;
-    _resolveUiPrefsWaiters(_latestUiPrefs);
-    try {
-      sidebarShortcuts?.applyUiPrefs?.(_latestUiPrefs);
-    } catch (e) {
-      console.warn('[Sidebar] Failed to apply sidebar prefs:', e);
-    }
-  } catch (err) {
-    console.warn('[AgentPrefs] Failed to apply prefs:setUi payload:', err);
-  }
-};
-
-try {
-  if (window.__cm6PendingUiPrefs) {
-    window.__cm6HandleUiPrefs(window.__cm6PendingUiPrefs);
-    window.__cm6PendingUiPrefs = null;
-  }
-} catch (_) {}
+hostUiPrefsRuntime.installWindowHook();
+hostUiPrefsRuntime.drainPendingUiPrefs();
 
 // WebSocket and autosave state
-let editTrackerWS = null;
-let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-let cm6NiceguiClientId = null;
-var lastSha256 = null;
-// Keep early bootstrap handlers from hitting TDZ on debounce constants.
+// Host editor-event runtime reads this global when debouncing scroll persistence.
 try {
   if (typeof window.__feCursorStateDebounceMs !== 'number') window.__feCursorStateDebounceMs = 1000;
 } catch (_) {}
-let inflightOpId = null;
+let inflightOpId: string | null = null;
 const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
 const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
 let lastSaveTime = 0;
@@ -586,37 +569,27 @@ const autosaveRuntimeController = createAutosaveRuntimeController({
   idleDelayMs: AUTOSAVE_IDLE_DELAY,
   activeDelayMs: AUTOSAVE_ACTIVE_DELAY,
   getAutoSaveEnabled: () => !!(editorViewState?.autoSave),
-  getNativeSelectionActive: () => !!nativeSelectionActive,
+  getNativeSelectionActive: () => false,
   getUnsaved: () => !!unsaved,
   getCurrentPath: () => currentPath,
   getCurrentPathExists: () => !!currentPathExists,
-  saveFile: (opts) => saveFile(opts),
-  onAutosaveError: (err) => console.error('Autosave failed:', err),
+  saveFile: (opts: SaveFileOptions = {}) => saveFile(opts),
+  onAutosaveError: (err: unknown) => console.error('Autosave failed:', err),
 });
-
-// Use `var` so early Socket.IO events can't hit TDZ before initialization.
-var lastScrollState = null;
-var scrollStateTimer = null;
-const CURSOR_STATE_DEBOUNCE = 1000; // ms
 
 // ── Adapter dropdown (context menu on status indicator) ──────────────
 const adapterUi = createAdapterUiController({
   closeAllMenus: () => menuCoreController.closeAllMenus(),
-  spinnerSetStep: (msg) => hostStateRuntime.spinnerSetStep(msg),
-  setWorkbenchAdapterState: ({ readyOk, connecting }) => {
-    hostStateRuntime.setWorkbenchAdapterState({ readyOk, connecting });
+  spinnerSetStep: (msg: string) => hostStateRuntime.spinnerSetStep(msg),
+  setWorkbenchAdapterState: ({ readyOk, connecting }: { readyOk?: boolean; connecting?: Promise<boolean> | null }) => {
+    hostStateRuntime.setWorkbenchAdapterState({
+      readyOk: !!readyOk,
+      connecting: connecting instanceof Promise ? connecting : null,
+    });
   },
-  toast: (msg, ms) => host.toast(msg, ms),
+  toast: (msg: string, ms?: number) => host.toast(msg, ms),
 });
 window.__feAdapterUi = adapterUi;
-
-function _closeAdapterDropdown() {
-  adapterUi.closeAdapterDropdown();
-}
-
-function _openAdapterDropdown() {
-  adapterUi.openAdapterDropdown();
-}
 
 async function _requestAdapterRestart() {
   return adapterUi.requestAdapterRestart();
@@ -628,7 +601,7 @@ function _reloadEditorFrame() {
 
 window.__cm6HandleLspStatusUpdate = adapterUi.handleLspStatusUpdate;
 
-async function triggerExternalRefresh(path) {
+async function triggerExternalRefresh(path: string) {
   if (externalRefreshInProgress) return;
   externalRefreshInProgress = true;
   try {
@@ -642,7 +615,7 @@ async function triggerExternalRefresh(path) {
 }
 
 
-function markUnsaved(flag) {
+function markUnsaved(flag: boolean) {
   const next = !!flag;
   cacheStateBadge.dataset.state = next ? (cacheStateBadge.dataset.state || '') : '';
   unsaved = next;
@@ -656,10 +629,10 @@ function markUnsaved(flag) {
 
 // ---------- API helpers ----------
 const apiClient = createApiClient(api);
-async function apiGet(path) {
+async function apiGet(path: string): Promise<unknown> {
   return apiClient.apiGet(path);
 }
-async function apiPost(path, body) {
+async function apiPost(path: string, body: UnknownRecord = {}): Promise<unknown> {
   return apiClient.apiPost(path, body);
 }
 
@@ -667,18 +640,18 @@ async function apiPost(path, body) {
 const searchPanelController = createSearchPanelController({
   getCurrentPath: () => currentPath || null,
   getProjectRoot: () => cachedProjectRoot || null,
-  requestBackendEditorFind: (payload) => uiIpcConnections.requestBackendEditorFind(payload),
-  toast: (msg) => host.toast(msg),
+  requestBackendEditorFind: (payload: UnknownRecord) => uiIpcConnections.requestBackendEditorFind(payload),
+  toast: (msg: string) => host.toast(msg),
 });
 
 // ---------- Unified Preference Management (Backend as Single Source of Truth) ----------
 const preferencesController = createPreferencesController({
-  apiPost: (path, body) => apiPost(path, body),
-  requestBackendEditorPreferenceUpdate: (payload) => uiIpcConnections.requestBackendEditorPreferenceUpdate(payload),
-  getClientId: () => cm6NiceguiClientId,
-  setEditorViewState: (state) => { editorViewState = state; },
+  apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
+  requestBackendEditorPreferenceUpdate: (payload: UnknownRecord) => uiIpcConnections.requestBackendEditorPreferenceUpdate(payload),
+  getClientId: () => null,
+  setEditorViewState: (state: EditorViewState | null) => { editorViewState = state; },
   setMenuChecked,
-  applyFontScale: (scale) => applyFontScale(scale),
+  applyFontScale: (scale: number) => applyFontScale(scale),
   getMenuItems: () => ({
     miToggleLines,
     miToggleSyntax,
@@ -700,16 +673,16 @@ const preferencesController = createPreferencesController({
 });
 
 installPrefsSync({
-  getClientId: () => cm6NiceguiClientId,
-  setEditorViewState: (state) => { editorViewState = state; },
-  applyStateToMenus: (state) => preferencesController.applyStateToMenus(state),
+  getClientId: () => null,
+  setEditorViewState: (state: EditorViewState | null) => { editorViewState = state; },
+  applyStateToMenus: (state: EditorViewState | null) => preferencesController.applyStateToMenus(state),
 });
 
 const recentsController = createRecentsController({
   recentFilesDD,
   recentFilesBtn,
-  formatFileNameDisplay: (name) => formatFileNameDisplay(name),
-  openFile: (path) => openFile(path),
+  formatFileNameDisplay: (name: string) => formatFileNameDisplay(name),
+  openFile: (path: string) => openFile(path),
 });
 recentsController.installWindowHook();
 
@@ -722,13 +695,12 @@ const projectSwitchController = createProjectSwitchController({
     currentPath = '';
     currentPathExists = false;
     lastSha256 = null;
-    lastSavedContent = '';
   },
-  markUnsaved: (flag) => markUnsaved(flag),
+  markUnsaved: (flag: boolean) => markUnsaved(flag),
   updatePathDisplay: () => updatePathDisplay(),
   syncSessionPath: () => syncSessionPath(),
-  syncEditorState: (forceRefresh) => editorStateController.syncEditorState(forceRefresh),
-  broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
+  syncEditorState: (forceRefresh?: boolean) => editorStateController.syncEditorState(forceRefresh),
+  broadcastRecentsUpdate: (state: EditorState | null) => recentsController.broadcastRecentsUpdate(state),
   getBranchMenuHandle: () => branchMenuHandle,
   reloadEditorSurface: () => window.location.reload(),
 });
@@ -738,16 +710,16 @@ projectSwitchController.installWindowHook();
 
 const editorStateController = createEditorStateController({
   getEditorState: () => editorState,
-  setEditorState: (state) => { editorState = state; },
+  setEditorState: (state: EditorState | null) => { editorState = state; },
   getCachedProjectRoot: () => cachedProjectRoot,
-  setCachedProjectRoot: (path) => { cachedProjectRoot = path; },
+  setCachedProjectRoot: (path: string | null) => { cachedProjectRoot = path; },
   getCurrentPath: () => currentPath,
-  setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
-  reconcileCurrentPath: (path) => { _applyHostActivePath(path, { forceToolbar: true }); },
-  requestBackendEditorGitBaselines: (payload) => uiIpcConnections.requestBackendEditorGitBaselines(payload),
+  setCurrentPath: (path: string) => { _setHostCurrentPathOnly(path); },
+  reconcileCurrentPath: (path: string) => { _applyHostActivePath(path, { forceToolbar: true }); },
+  requestBackendEditorGitBaselines: (payload: UnknownRecord) => uiIpcConnections.requestBackendEditorGitBaselines(payload),
   getEditorViewState: () => editorViewState,
-  updatePreference: (key, value) => preferencesController.updatePreference(key, value),
-  openFile: (path, opts) => openFile(path, opts),
+  updatePreference: (key: string, value: unknown) => preferencesController.updatePreference(key, value),
+  openFile: (path: string, opts?: OpenFileOptions) => openFile(path, opts),
 });
 
 editorStateController.installWindowHooks();
@@ -760,13 +732,13 @@ const fileSyncHandler = createFileSyncHandler({
   toAbsolute,
   homeDir: HOME_DIR,
   getCurrentPath: () => currentPath,
-  setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
+  setCurrentPath: (path: string) => { _setHostCurrentPathOnly(path); },
   updatePathDisplay: () => updatePathDisplay(),
-  setLastSavedContent: (content) => { lastSavedContent = content; },
+  setLastSavedContent: () => {},
   getLastSha256: () => lastSha256,
-  setLastSha256: (sha) => { lastSha256 = sha; },
-  markUnsaved: (flag) => markUnsaved(flag),
-  setStatus: (text) => { statusEl.textContent = text; },
+  setLastSha256: (sha: string | null) => { lastSha256 = sha; },
+  markUnsaved: (flag: boolean) => markUnsaved(flag),
+  setStatus: (text: string) => { statusEl.textContent = text; },
   getUnsaved: () => !!unsaved,
   clearInflightOpId: () => { inflightOpId = null; },
   refreshExplorer: () => refreshExplorer(),
@@ -774,13 +746,13 @@ const fileSyncHandler = createFileSyncHandler({
 const fileWebSocketManager = createFileWebSocketManager({
   ReconnectingWebSocket,
   clientId,
-  setStatus: (msg) => { statusEl.textContent = msg; },
+  setStatus: (msg: string) => { statusEl.textContent = msg; },
   clearStatus: (expected, delayMs) => {
     setTimeout(() => {
       if (statusEl.textContent === expected) statusEl.textContent = '';
     }, delayMs);
   },
-  onMessage: (msg) => fileSyncHandler.handleWSMessage(msg),
+  onMessage: (msg: unknown) => fileSyncHandler.handleWSMessage(msg),
 });
 
 // ---------- File ops ----------
@@ -792,9 +764,9 @@ const fileStatusController = createFileStatusController({
   toAbsolute,
   HOME_DIR,
   basename,
-  setToolbarFileName: (name) => setToolbarFileName(name),
-  setIndicatorInactive: (badge) => cacheIndicatorController.setIndicatorInactive(badge),
-  setIssuesButtonsEnabled: (enabled) => setIssuesButtonsEnabled(enabled),
+  setToolbarFileName: (name: string) => setToolbarFileName(name),
+  setIndicatorInactive: (badge: HTMLElement) => cacheIndicatorController.setIndicatorInactive(badge),
+  setIssuesButtonsEnabled: (enabled: boolean) => setIssuesButtonsEnabled(enabled),
 });
 function updatePathDisplay() {
   fileStatusController.updatePathDisplay();
@@ -804,14 +776,14 @@ const cacheIndicatorController = createCacheIndicatorController({
   getCurrentPath: () => currentPath,
   getCachedProjectRoot: () => cachedProjectRoot,
   getCurrentProjectRoot: () => stateInitController.getCurrentProjectRoot(),
-  apiDelete: (path) => api.delete(path),
-  openFile: (path, opts) => openFile(path, opts),
-  toast: (msg) => host.toast(msg),
-  markUnsaved: (flag) => markUnsaved(flag),
+  apiDelete: (path: string) => api.delete(path),
+  openFile: (path: string, opts?: OpenFileOptions) => openFile(path, opts),
+  toast: (msg: string) => host.toast(msg),
+  markUnsaved: (flag: boolean) => markUnsaved(flag),
   getRestoredSessionActive: () => restoredSessionActive,
 });
 
-function _applyCacheIndicatorImpl(info) {
+function _applyCacheIndicatorImpl(info: unknown): void {
   cacheIndicatorController.applyCacheIndicator(info);
 }
 
@@ -819,85 +791,84 @@ applyCacheIndicator = _applyCacheIndicatorImpl;
 cacheIndicatorController.installWindowHook();
 
 const openFlowController = createOpenFlowController({
-  setStatus: (text) => { statusEl.textContent = text; },
+  setStatus: (text: string) => { statusEl.textContent = text; },
   ensureProjectContext: () => editorStateController.ensureProjectContext(),
   toAbsolute,
   homeDir: HOME_DIR,
   getRestoredSessionActive: () => !!restoredSessionActive,
   getCurrentPath: () => currentPath,
-  setRestoredSessionActive: (flag) => { restoredSessionActive = flag; },
+  setRestoredSessionActive: (flag: boolean) => { restoredSessionActive = flag; },
   setIndicatorInactive: () => cacheIndicatorController.setIndicatorInactive(cacheStateBadge),
-  apiPost: (path, body) => apiPost(path, body),
-  apiGet: (path) => apiGet(path),
-  setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
-  setCurrentPathExists: (exists) => { currentPathExists = exists; },
-  setLastPickerPath: (path) => { lastPickerPath = path; },
+  apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
+  apiGet: (path: string) => apiGet(path),
+  setCurrentPath: (path: string) => { _setHostCurrentPathOnly(path); },
+  setCurrentPathExists: (exists: boolean) => { currentPathExists = exists; },
+  setLastPickerPath: (path: string) => { lastPickerPath = path; },
   parentDir,
-  setCurrentModeLanguage: (lang) => { currentModeLanguage = lang; },
+  setCurrentModeLanguage: () => {},
   detectLanguageFromFilename,
-  setLastSha256: (sha) => { lastSha256 = sha; },
-  requestBackendOpen: (payload) => uiIpcConnections.requestBackendFileOpen(payload),
-  setLastSavedContent: (content) => { lastSavedContent = content; },
-  awaitEditorOpen: (requestId, path, timeoutMs) => _awaitEditorOpen(requestId, path, timeoutMs),
-  markUnsaved: (flag) => markUnsaved(flag),
+  setLastSha256: (sha: string | null) => { lastSha256 = sha; },
+  requestBackendOpen: (payload: UnknownRecord & { path: string; request_id: string }) => uiIpcConnections.requestBackendFileOpen(payload),
+  setLastSavedContent: () => {},
+  awaitEditorOpen: (requestId: string, path: string, timeoutMs?: number) => _awaitEditorOpen(requestId, path, timeoutMs),
+  markUnsaved: (flag: boolean) => markUnsaved(flag),
   updatePathDisplay: () => updatePathDisplay(),
   syncSessionPath: () => syncSessionPath(),
   getCachedProjectRoot: () => cachedProjectRoot,
-  dispatchExplorerActiveFile: (rel) => {
+  dispatchExplorerActiveFile: (rel: string | null) => {
     dispatchExplorerNotification(EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated, { rel });
   },
-  openWebSocket: (path) => fileWebSocketManager.openWebSocket(path),
+  openWebSocket: (path: string) => fileWebSocketManager.openWebSocket(path),
   getEditorState: () => editorState,
-  setEditorState: (state) => { editorState = state; },
-  setCachedProjectRoot: (path) => { cachedProjectRoot = path; },
-  broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
-  syncEditorState: (force) => editorStateController.syncEditorState(force),
+  setEditorState: (state: unknown) => { editorState = asUnknownRecord(state) as EditorState; },
+  setCachedProjectRoot: (path: string | null) => { cachedProjectRoot = path; },
+  broadcastRecentsUpdate: (state: unknown) => recentsController.broadcastRecentsUpdate(asUnknownRecord(state)),
+  syncEditorState: (force?: boolean) => editorStateController.syncEditorState(force),
   getSessionStateActiveProject: () => sessionState.activeProject || null,
-  setSessionStateActiveProject: (path) => { sessionState.activeProject = path; },
-  jumpToCurrentFileLine: (line, opts) => jumpToCurrentFileLine(line, opts),
-  toast: (msg) => host.toast(msg),
+  setSessionStateActiveProject: (path: string | null) => { sessionState.activeProject = path; },
+  jumpToCurrentFileLine: (line: number, opts?: UnknownRecord) => jumpToCurrentFileLine(line, opts),
+  toast: (msg: string) => host.toast(msg),
 });
 
-async function openFile(path, options = {}) {
+async function openFile(path: string, options: OpenFileOptions = {}): Promise<unknown> {
   return openFlowController.openFile(path, options);
 }
 
 const saveFlowController = createSaveFlowController({
   clientId,
-  setInflightOpId: (id) => { inflightOpId = id; },
-  setLastSaveTime: (ts) => { lastSaveTime = ts; },
+  setInflightOpId: (id: string | null) => { inflightOpId = id; },
+  setLastSaveTime: (ts: number) => { lastSaveTime = ts; },
   getLastSha256: () => lastSha256,
-  setLastSha256: (sha) => { lastSha256 = sha; },
-  setLastSavedContent: (content) => { lastSavedContent = content; },
-  markUnsaved: (flag) => markUnsaved(flag),
+  setLastSha256: (sha: string | null) => { lastSha256 = sha; },
+  setLastSavedContent: () => {},
+  markUnsaved: (flag: boolean) => markUnsaved(flag),
   syncSessionPath: () => syncSessionPath(),
-  apiPost: (path, body) => apiPost(path, body),
-  apiGet: (path) => apiGet(path),
-  saveFileViaEditorSocket: (payload, timeoutMs) => saveSocketController.saveFileViaEditorSocket(payload, timeoutMs),
-  setStatus: (text) => { statusEl.textContent = text; },
+  apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
+  apiGet: (path: string) => apiGet(path),
+  saveFileViaEditorSocket: (payload: UnknownRecord, timeoutMs?: number) => saveSocketController.saveFileViaEditorSocket(payload, timeoutMs),
+  setStatus: (text: string) => { statusEl.textContent = text; },
   getUnsaved: () => !!unsaved,
   toast: (msg) => host.toast(msg),
   pickSaveTarget: () => pickerController.pickSaveTarget(),
   toAbsolute,
   homeDir: HOME_DIR,
-  setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
-  setCurrentPathExists: (exists) => { currentPathExists = exists; },
-  setLastPickerPath: (path) => { lastPickerPath = path; },
-  setCurrentModeLanguage: (lang) => { currentModeLanguage = lang; },
+  setCurrentPath: (path: string) => { _setHostCurrentPathOnly(path); },
+  setCurrentPathExists: (exists: boolean) => { currentPathExists = exists; },
+  setLastPickerPath: (path: string) => { lastPickerPath = path; },
+  setCurrentModeLanguage: () => {},
   parentDir,
   detectLanguageFromFilename,
   updatePathDisplay: () => updatePathDisplay(),
-  openFile: (path, options) => openFile(path, options),
+  openFile: (path: string, options?: OpenFileOptions) => openFile(path, options),
   closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
-  openWebSocket: (path) => fileWebSocketManager.openWebSocket(path),
+  openWebSocket: (path: string) => fileWebSocketManager.openWebSocket(path),
   getCachedProjectRoot: () => cachedProjectRoot,
   getEditorState: () => editorState,
-  setEditorState: (state) => { editorState = state; },
-  setCachedProjectRoot: (path) => { cachedProjectRoot = path; },
+  setEditorState: (state: unknown) => { editorState = state && typeof state === 'object' ? state as EditorState : null; },
+  setCachedProjectRoot: (path: string | null) => { cachedProjectRoot = path; },
 });
 
- // getAgentHostBase
-async function saveFile(opts) {
+async function saveFile(opts: SaveFileOptions = {}): Promise<unknown> {
   return saveFlowController.saveFile({
     currentPath,
     currentPathExists,
@@ -910,22 +881,22 @@ const runFileController = createRunFileController({
   getCurrentPath: () => currentPath,
   getCurrentPathExists: () => currentPathExists,
   isRunnableFile,
-  setRunButtonDisabled: (flag) => { runActiveBtn.disabled = !!flag; },
+  setRunButtonDisabled: (flag: boolean) => { runActiveBtn.disabled = !!flag; },
   saveFile: () => saveFile(),
   openTerminal: async () => {
     if (terminal && typeof terminal.open === 'function') await terminal.open();
   },
-  apiPost: (path, body) => apiPost(path, body),
-  requestBackendRunActiveFile: (payload) => uiIpcConnections.requestBackendRunActiveFile(payload),
+  apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
+  requestBackendRunActiveFile: (payload: UnknownRecord) => uiIpcConnections.requestBackendRunActiveFile(payload),
   basename,
-  toast: (msg) => host.toast(msg),
+  toast: (msg: string) => host.toast(msg),
   updateRunButtonState: () => fileStatusController.updateRunButtonState(),
 });
 
 // Autosave confirmation modal (constructed lazily)
 const autosaveModalController = createAutosaveModalController();
 
-// Watcher UI (extracted to main_page/frontend/ui/watcher-settings.js)
+// Watcher UI
 initWatcherUI(appContext);
 
 sidebarShortcuts = initSidebarShortcutsSafe({
@@ -941,8 +912,6 @@ sidebarShortcuts = initSidebarShortcutsSafe({
 
 drainPendingWatcherEvents();
 
-// Projects debug modal extracted to main_page/frontend/ui/projects-debug-modal.js
-
 // ---------- Picker helpers (shared modal provided by framework) ----------
 const pickerController = createPickerController({
   pickFileWithPicker,
@@ -951,26 +920,26 @@ const pickerController = createPickerController({
   pickerAvailable: () => pickerUiAvailable(),
   getCurrentPath: () => currentPath,
   getLastPickerPath: () => lastPickerPath,
-  setLastPickerPath: (path) => { lastPickerPath = path; },
+  setLastPickerPath: (path: string) => { lastPickerPath = path; },
   homeDir: HOME_DIR,
   toAbsolute,
   parentDir,
   basename,
-  toast: (m) => host.toast(m),
+  toast: (m: string) => host.toast(m),
 });
-async function pickFile(startPath) {
+async function pickFile(startPath?: string): Promise<string | null> {
   return pickerController.pickFile(startPath);
 }
 
 const jumpLineController = createJumpLineController({
   getCurrentPath: () => currentPath,
-  requestBackendEditorJumpToLine: (payload) => uiIpcConnections.requestBackendEditorJumpToLine(payload),
-  toast: (msg) => host.toast(msg),
+  requestBackendEditorJumpToLine: (payload: UnknownRecord) => uiIpcConnections.requestBackendEditorJumpToLine(payload),
+  toast: (msg: string) => host.toast(msg),
 });
 
 // Helper: Jump to line in current file
-async function jumpToCurrentFileLine(line, options = {}) {
-  return jumpLineController.jumpToCurrentFileLine(line, options);
+async function jumpToCurrentFileLine(line: number | string, options: UnknownRecord = {}): Promise<void> {
+  await jumpLineController.jumpToCurrentFileLine(line, options);
 }
 
 // Expose for search overlay
@@ -999,7 +968,7 @@ menuCoreController.installPrimaryMenuButtons();
 function closeAllMenus() {
   return menuCoreController.closeAllMenus();
 }
-function bindMenuToggle(el, action) {
+function bindMenuToggle(el: HTMLElement, action: () => unknown) {
   return menuCoreController.bindMenuToggle(el, action);
 }
 
@@ -1025,16 +994,16 @@ installBasicMenuActions({
   },
   resetToNewFile: () => resetActiveFileState({ resetPicker: true }),
   pickFile: () => pickFile(),
-  openFile: (path) => openFile(path),
+  openFile: (path: string) => openFile(path),
   saveFile: () => saveFile(),
   saveAsDialog: () => saveFlowController.saveAsDialog(),
   closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
   clearOnQuit: () => resetActiveFileState(),
   showProjectsDebugModal,
   exportDiagnosticsToFile: () => exportDiagnosticsToFile(),
-  triggerEditorSearchPanel: (reason, opts) => searchPanelController.triggerEditorSearchPanel(reason, opts),
-  jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
-  toast: (msg) => host.toast(msg),
+  triggerEditorSearchPanel: (reason: string, opts?: UnknownRecord) => searchPanelController.triggerEditorSearchPanel(reason, opts),
+  jumpToCurrentFileLine: (line: number | string) => jumpToCurrentFileLine(line),
+  toast: (msg: string) => host.toast(msg),
 });
 
 installSimplePreferenceMenuActions({
@@ -1052,8 +1021,8 @@ installSimplePreferenceMenuActions({
     miToggleStickyScroll,
   },
   getEditorViewState: () => editorViewState,
-  updatePreference: (key, value) => preferencesController.updatePreference(key, value),
-  toast: (msg) => host.toast(msg),
+  updatePreference: (key: string, value: unknown) => preferencesController.updatePreference(key, value),
+  toast: (msg: string) => host.toast(msg),
 });
 
 installAdvancedMenuActions({
@@ -1067,17 +1036,17 @@ installAdvancedMenuActions({
     miTrackAgentSidebarEdits,
   },
   getEditorViewState: () => editorViewState,
-  updatePreference: (key, value) => preferencesController.updatePreference(key, value),
+  updatePreference: (key: string, value: unknown) => preferencesController.updatePreference(key, value),
   setMenuChecked,
   getCurrentPath: () => currentPath,
   getCurrentPathExists: () => currentPathExists,
-  showAutosaveModal: (fileLabel, hasOtherDrafts) => autosaveModalController.showAutosaveModal(fileLabel, hasOtherDrafts),
+  showAutosaveModal: (fileLabel: string, hasOtherDrafts: boolean) => autosaveModalController.showAutosaveModal(fileLabel, hasOtherDrafts),
   basename,
   getUnsaved: () => !!unsaved,
   saveFile: () => saveFile(),
-  apiPost: (path, body) => apiPost(path, body),
-  markUnsaved: (flag) => markUnsaved(flag),
-  toast: (msg, kind) => host.toast(msg, kind),
+  apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
+  markUnsaved: (flag: boolean) => markUnsaved(flag),
+  toast: (msg: string, kind?: unknown) => host.toast(msg, kind),
 });
 
 const { terminal, consoleDrawer, problemsPanel: drawerProblemsPanel } = initPanelsAndDrawer({
@@ -1087,16 +1056,16 @@ const { terminal, consoleDrawer, problemsPanel: drawerProblemsPanel } = initPane
   initDrawerAndShortcuts,
   bindMenuToggle,
   requireEl,
-  hostToast: (msg) => host.toast(msg),
-  setFontScale: (preset) => fontScaleController.setFontScale(preset),
-  triggerEditorSearchPanel: (reason, opts) => searchPanelController.triggerEditorSearchPanel(reason, opts),
-  openFile: (path, opts) => openFile(path, opts),
-  jumpToCurrentFileLine: (line) => jumpToCurrentFileLine(line),
-  requestDiagnosticsMention: (payload) => uiIpcConnections.requestBackendDiagnosticsMention(payload),
+  hostToast: (msg: string) => host.toast(msg),
+  setFontScale: (preset: string) => fontScaleController.setFontScale(preset),
+  triggerEditorSearchPanel: (reason: string, opts?: UnknownRecord) => searchPanelController.triggerEditorSearchPanel(reason, opts),
+  openFile: (path: string, opts?: OpenFileOptions) => openFile(path, opts),
+  jumpToCurrentFileLine: (line: number | string) => jumpToCurrentFileLine(line),
+  requestDiagnosticsMention: (payload: UnknownRecord) => uiIpcConnections.requestBackendDiagnosticsMention(payload),
   saveFile: () => saveFile(),
   resetToNewFile: () => resetActiveFileState({ resetPicker: true }),
   openPickedFile: () => {
-    pickFile().then((p) => { if (p) openFile(p); });
+    void pickFile().then((p) => { if (p) void openFile(p); });
   },
 });
 problemsPanel = drawerProblemsPanel;
@@ -1104,121 +1073,81 @@ problemsPanel = drawerProblemsPanel;
 // ---------- State load/init ----------
 // host.setTitle('Code CM6');
 const stateInitController = createStateInitController({
-  openFile: (path) => openFile(path),
-  toast: (msg) => host.toast(msg),
+  openFile: (path: string) => openFile(path),
+  toast: (msg: string) => host.toast(msg),
   toAbsolute,
-  getBaseDir: (projectRoot) => projectRoot || cachedProjectRoot || HOME_DIR,
+  getBaseDir: (projectRoot?: string | null) => projectRoot || cachedProjectRoot || HOME_DIR,
   homeDir: HOME_DIR,
-  syncEditorState: (force) => editorStateController.syncEditorState(force),
+  syncEditorState: (force?: boolean) => editorStateController.syncEditorState(force),
 });
 stateInitController.installOpenHooks();
 
-runBootSequence(createBootSequenceDeps({
-    initResponsiveLayout: () => initResponsiveLayout({ scheduleToolbarTitleClamp: (opts) => scheduleToolbarTitleClamp(opts) }),
-    initToolbarTitleClampObservers: () => initToolbarTitleClampObservers(),
-    loadLayoutPreferences: () => loadLayoutPreferences(),
-    initResizeManager: () => initResizeManager(),
-    initExplorerUI: () => initExplorerUI({
-      ensureSocketIoLoaded,
-      homeDir: HOME_DIR,
-      toAbsolute,
-      getActiveProjectPath: () => sessionTelemetry.activeProjectPath() || null,
-      getSessionActiveProject: () => sessionState.activeProject || null,
-      applyHostActivePath: (path, options) => _applyHostActivePath(path, options),
-      updateProblemsPanel: (payload) => problemsPanel.update(payload),
-      reloadEditorFrame: () => _reloadEditorFrame(),
-      requestAdapterRestart: () => _requestAdapterRestart(),
-    }),
-    connectUIIPC: () => connectUIIPC(),
-    connectSidebarIPC: () => connectSidebarIPC(),
-    ensureWorkbenchAdapterReady: () => hostStateRuntime.ensureWorkbenchAdapterReady(),
-    initBranchMenu: () => initBranchMenu(),
-    waitForInitialUiPrefs: (ms) => waitForInitialUiPrefs(ms),
-    seedUiPrefsSnapshot: (prefs) => window.__cm6HandleUiPrefs({ ui: prefs || {} }),
-    applySidebarUiPrefs: (prefs) => sidebarShortcuts?.applyUiPrefs?.(prefs || {}),
-    syncEditorState: (force) => editorStateController.syncEditorState(force),
-    hydrateEditorState: (state) => editorStateController.hydrateEditorState(state),
-    broadcastRecentsUpdate: (state) => recentsController.broadcastRecentsUpdate(state),
-    refreshMenuState: () => preferencesController.refreshMenuState(),
-    apiPost: (path, body) => apiPost(path, body),
-    fetchPersistedSessionState: () => fetchPersistedSessionState(),
-    seedPersistedSessionState: (snapshot) => seedPersistedSessionState(snapshot),
-    initSessionStateContext: (serverState) => initSessionStateContext(serverState),
-    queueSessionStateUpdate: (partial) => queueSessionStateUpdate(partial),
-    resetSavedState: () => { lastSavedContent = ''; },
-    markUnsaved: (flag) => markUnsaved(flag),
-    setNoProjectState: (msg) => applyNoProjectState({
-      statusEl,
-      setToolbarFileName: (name) => setToolbarFileName(name),
-      setIssuesButtonsEnabled: (enabled) => setIssuesButtonsEnabled(enabled),
-      message: msg,
-    }),
-    getUrlSearch: () => window.location.search,
-    toAbsolute,
-    HOME_DIR,
-    applyRestoredPathState: ({ restoredPath, serverState, restoredSha }) => applyRestoredPathState({
-      restoredPath,
-      serverState,
-      restoredSha,
-      parentDir,
-      detectLanguageFromFilename,
-      syncSessionPath: () => syncSessionPath(),
-      setCurrentPath: (path) => { _setHostCurrentPathOnly(path); },
-      setCurrentPathExists: (exists) => { currentPathExists = exists; },
-      setLastPickerPath: (path) => { lastPickerPath = path; },
-      setLastSha256: (sha) => { lastSha256 = sha; },
-      setCurrentModeLanguage: (lang) => { currentModeLanguage = lang; },
-    }),
-    openWebSocket: (path) => fileWebSocketManager.openWebSocket(path),
-    updatePathDisplayFallbackLater: () => schedulePathDisplayFallback({
-      getCurrentPath: () => currentPath,
-      updatePathDisplay: () => updatePathDisplay(),
-      delayMs: 2000,
-    }),
-    openFile: (path) => {
-      lastPickerPath = parentDir(path);
-      return openFile(path);
-    },
-    onOpenFileFailure: (e) => {
-      host.toast(`Failed to open file: ${e.message}`);
-      resetActiveFileState();
-    },
-    onNoRestoredPath: (serverState) => applyNoRestoredPathState({
-      serverState,
-      setStatus: (msg) => { statusEl.textContent = msg; },
-    }),
-    setBranchMenuHandle: (h) => { branchMenuHandle = h; },
-    requestBackendBootSnapshot: (payload) => uiIpcConnections.requestBackendBootSnapshot(payload),
-    mountInlineEditorHost: (snapshot) => bootInlineEditorHost(editorFrameEl, {
-      ensureSocketIoLoaded,
-      bootSnapshot: snapshot,
-    }),
-  })).then(() => {
-  try { sidebarShortcuts?.init?.(); } catch (e) { console.warn('[Sidebar] init failed:', e); }
+function showConfirm(): void {
+  // The before-exit guard already cancels and shows the actionable toast.
+}
 
-  const deferHydrate = typeof requestIdleCallback === 'function'
-    ? (fn) => requestIdleCallback(fn)
-    : (fn) => setTimeout(fn, 0);
-  deferHydrate(() => {
-    try {
-      void ensureEditorFrameReady()
-        .then(() => Promise.resolve(sidebarShortcuts?.hydrate?.()))
-        .catch((e) => {
-          console.warn('[Sidebar] deferred hydrate failed:', e);
-        });
-    } catch (e) {
-      console.warn('[Sidebar] deferred hydrate failed:', e);
-    }
-  });
-});
-
-installHostExitGuard({
-  installBeforeExitGuard,
-  onBeforeExit: (cb) => host.onBeforeExit(cb),
+createHostBootRuntime({
+  initResponsiveLayout,
+  scheduleToolbarTitleClamp: (opts?: unknown) => scheduleToolbarTitleClamp(opts as ScheduleToolbarTitleClampOptions | undefined),
+  initToolbarTitleClampObservers,
+  loadLayoutPreferences,
+  initResizeManager,
+  initExplorerUI,
+  ensureSocketIoLoaded,
+  homeDir: HOME_DIR,
+  toAbsolute,
+  getActiveProjectPath: () => sessionTelemetry.activeProjectPath() || null,
+  getSessionActiveProject: () => sessionState.activeProject || null,
+  applyHostActivePath: (path: string, options?: UnknownRecord) => _applyHostActivePath(path, options),
+  problemsPanel,
+  reloadEditorFrame: () => _reloadEditorFrame(),
+  requestAdapterRestart: () => _requestAdapterRestart(),
+  connectUIIPC: () => connectUIIPC(),
+  connectSidebarIPC: () => connectSidebarIPC(),
+  ensureWorkbenchAdapterReady: () => hostStateRuntime.ensureWorkbenchAdapterReady(),
+  initBranchMenu,
+  setBranchMenuHandle: (handle: unknown) => { branchMenuHandle = handle; },
+  waitForInitialUiPrefs: (ms?: number) => hostUiPrefsRuntime.waitForInitialUiPrefs(ms),
+  seedUiPrefsSnapshot: (prefs: UnknownRecord) => hostUiPrefsRuntime.seedUiPrefsSnapshot(prefs || {}),
+  applySidebarUiPrefs: (prefs: UnknownRecord) => hostUiPrefsRuntime.applySidebarUiPrefs(prefs || {}),
+  syncEditorState: (force?: boolean) => editorStateController.syncEditorState(force),
+  hydrateEditorState: (state: UnknownRecord | null) => editorStateController.hydrateEditorState(state),
+  broadcastRecentsUpdate: (state: UnknownRecord | null) => recentsController.broadcastRecentsUpdate(state),
+  refreshMenuState: () => preferencesController.refreshMenuState(),
+  apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
+  fetchPersistedSessionState: () => fetchPersistedSessionState(),
+  seedPersistedSessionState: (snapshot: UnknownRecord | null) => seedPersistedSessionState(snapshot),
+  initSessionStateContext: (serverState: UnknownRecord | null) => initSessionStateContext(serverState),
+  queueSessionStateUpdate: (partial?: UnknownRecord) => queueSessionStateUpdate(partial ?? null),
+  syncSessionPath: () => syncSessionPath(),
+  resetSavedState: () => {},
+  markUnsaved: (flag: boolean) => markUnsaved(flag),
+  statusEl,
+  setToolbarFileName,
+  setIssuesButtonsEnabled,
+  getUrlSearch: () => window.location.search,
+  parentDir,
+  detectLanguageFromFilename,
+  setCurrentPath: (path: string) => { _setHostCurrentPathOnly(path); },
+  setCurrentPathExists: (exists: boolean) => { currentPathExists = exists; },
+  setLastPickerPath: (path: string) => { lastPickerPath = path; },
+  setLastSha256: (sha: string | null) => { lastSha256 = sha; },
+  setCurrentModeLanguage: () => {},
+  openWebSocket: (path: string) => fileWebSocketManager.openWebSocket(path),
+  getCurrentPath: () => currentPath,
+  updatePathDisplay: () => updatePathDisplay(),
+  openFile: (path: string) => openFile(path),
+  setOpenFilePickerDir: (path: string) => { lastPickerPath = path; },
+  resetActiveFileState: () => resetActiveFileState(),
+  toast: (message: string, kind?: unknown) => host.toast(message, kind),
+  requestBackendBootSnapshot: (payload?: UnknownRecord) => uiIpcConnections.requestBackendBootSnapshot(payload),
+  editorFrameEl,
+  sidebarShortcuts,
+  ensureEditorFrameReady: () => ensureEditorFrameReady(),
+  onBeforeExit: (cb: () => UnknownRecord) => host.onBeforeExit(cb),
   getUnsaved: () => !!unsaved,
   showConfirm: () => showConfirm(),
-  toast: (msg) => host.toast(msg),
-  flushSessionState: (force) => flushSessionState(force),
-});
+  flushSessionState: (force?: boolean) => flushSessionState(force),
+}).start();
 
 }

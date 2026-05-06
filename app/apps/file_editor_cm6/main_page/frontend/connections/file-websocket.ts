@@ -2,10 +2,10 @@
 
 interface ManagedFileWebSocket {
   readyState: number;
-  onopen: (() => void) | null;
+  onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent) => void) | null;
   onerror: ((event: Event) => void) | null;
-  onclose: (() => void) | null;
+  onclose: ((event: CloseEvent) => void) | null;
   onreconnect: ((attempt: number, delayMs: number) => void) | null;
   close: () => void;
   send: (data: string) => void;

@@ -21,7 +21,7 @@ interface SocketLike {
 
 interface VConsoleModel {
   evalCommand(cmd: string): void;
-  addLog(log: { type: string; origData: unknown[] }, options: { cmdType: string }): void;
+  addLog(log: { type: string; origData: unknown[] }, options: { cmdType: string; noOrig?: boolean }): void;
 }
 
 interface VConsoleLogPlugin {
@@ -201,21 +201,7 @@ export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): Console
   }
 
   function _patchEvalCommand(): void {
-    // Try multiple paths to find the log model singleton
-    let model: VConsoleModel | null = null;
-
-    // Path 1: pluginList dict
-    const logPlugin = vConsoleInstance && vConsoleInstance.pluginList &&
-      vConsoleInstance.pluginList['default'];
-    if (logPlugin && logPlugin.model) {
-      model = logPlugin.model;
-    }
-
-    // Path 2: vConsole.log exporter has a .model ref
-    if (!model && vConsoleInstance && vConsoleInstance.log && vConsoleInstance.log.model) {
-      model = vConsoleInstance.log.model;
-    }
-
+    const model = _getLogModel();
     if (!model || typeof model.evalCommand !== 'function') {
       console.warn('[console] could not patch evalCommand — remote eval unavailable');
       return;
@@ -227,7 +213,7 @@ export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): Console
       const target = activeFilter === 'all' ? 'main_page' : activeFilter;
 
       // Show the input in the log panel
-      model.addLog({ type: 'log', origData: [cmd] }, { cmdType: 'input' });
+      model.addLog({ type: 'log', origData: [cmd] }, { cmdType: 'input', noOrig: true });
 
       if (!socket || !socket.connected || typeof socket.emit !== 'function') {
         // Fallback to local eval if no socket
@@ -251,14 +237,14 @@ export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): Console
         activeSocket.off?.('console:evalResult', handler);
         clearTimeout(timeout);
         if (res.ok) {
-          model.addLog({ type: 'log', origData: [res.value] }, { cmdType: 'output' });
+          model.addLog({ type: 'log', origData: [res.value] }, { cmdType: 'output', noOrig: true });
         } else {
-          model.addLog({ type: 'error', origData: [res.error] }, { cmdType: 'output' });
+          model.addLog({ type: 'error', origData: [res.error] }, { cmdType: 'output', noOrig: true });
         }
       };
       const timeout = setTimeout(() => {
         activeSocket.off?.('console:evalResult', handler);
-        model.addLog({ type: 'error', origData: ['eval timeout (10s)'] }, { cmdType: 'output' });
+        model.addLog({ type: 'error', origData: ['eval timeout (10s)'] }, { cmdType: 'output', noOrig: true });
       }, 10000);
       activeSocket.on?.('console:evalResult', handler);
     };
@@ -355,6 +341,22 @@ export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): Console
 
   const LEVEL_METHOD: Record<string, string> = { log: 'log', info: 'info', warn: 'warn', error: 'error', debug: 'debug' };
 
+  function _getLogModel(): VConsoleModel | null {
+    // Path 1: pluginList dict
+    const logPlugin = vConsoleInstance && vConsoleInstance.pluginList &&
+      vConsoleInstance.pluginList['default'];
+    if (logPlugin && logPlugin.model) {
+      return logPlugin.model;
+    }
+
+    // Path 2: vConsole.log exporter has a .model ref
+    if (vConsoleInstance && vConsoleInstance.log && vConsoleInstance.log.model) {
+      return vConsoleInstance.log.model;
+    }
+
+    return null;
+  }
+
   function _handleLog(msg: unknown): void {
     const message = msg && typeof msg === 'object' && !Array.isArray(msg)
       ? msg as ConsoleLogMessage
@@ -371,12 +373,13 @@ export function createConsoleDrawer(options: ConsoleDrawerOptions = {}): Console
     const level = LEVEL_METHOD[message.level || ''] || 'log';
     const prefix = `[${workerId}]`;
 
-    // Use vConsole.log.<level>() to render into the Log panel
-    // without echoing back to browser console (avoids infinite loops)
-    const logPlugin = vConsoleInstance.log;
-    const logMethod = logPlugin ? logPlugin[level] : null;
-    if (typeof logMethod === 'function') {
-      logMethod(prefix, ...message.args);
+    // Render directly through vConsole's model as UI-only rows. Upstream
+    // addLog calls the original console unless noOrig is set; in TE2 the
+    // original console is the framework console bridge, so omitting noOrig
+    // feeds replayed drawer rows back into the transcript stream.
+    const model = _getLogModel();
+    if (model && typeof model.addLog === 'function') {
+      model.addLog({ type: level, origData: [prefix, ...message.args] }, { cmdType: 'output', noOrig: true });
     }
   }
 

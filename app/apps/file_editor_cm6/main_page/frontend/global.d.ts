@@ -3,10 +3,16 @@ import type { ExplorerStickyScopesApi } from '../../src/explorer/chrome/sticky-s
 export {};
 
 interface HostBridge {
-  toast?: (message: string, ms?: number) => void;
+  toast: (message: string, kind?: unknown) => void;
+  onBeforeExit: (cb: () => Record<string, unknown>) => void;
 }
 
-interface ExplorerOpenFileOptions {
+interface RuntimeAdapterUi {
+  updateLspSpinner?: () => void;
+  [key: string]: unknown;
+}
+
+interface ExplorerOpenFileOptions extends Record<string, unknown> {
   line?: number;
   column?: number;
   focus?: boolean;
@@ -84,6 +90,7 @@ type ExplorerJumpToLineFn = (
 declare global {
   interface Window {
     host?: HostBridge;
+    api?: unknown;
     VConsole?: any;
     __adapterConnected?: any;
     __cm6CloseLspMenus?: any;
@@ -95,11 +102,13 @@ declare global {
     __cm6HandleLspStatusUpdate?: any;
     __cm6HandlePrefsChanged?: any;
     __cm6HandleProjectOpened?: any;
+    __cm6HandleUiPrefs?: (payload: unknown) => void;
     __cm6HandleWatcherConfig?: any;
     __cm6HandleWatcherError?: any;
     __cm6HandleWatcherModeStatus?: any;
     __cm6HandleWatcherRaiseResult?: any;
     __cm6LspUi?: any;
+    __cm6PendingUiPrefs?: unknown;
     __cm6PendingPrefsChanged?: any;
     __cm6PendingWatcherError?: any;
     __cm6PendingWatcherRaiseResult?: any;
@@ -108,11 +117,15 @@ declare global {
     __cm6RequestGitBaselines?: any;
     __cm6SyncState?: any;
     __explorerStickyScopes?: ExplorerStickyScopesApi | null;
+    __feAdapterUi?: RuntimeAdapterUi;
+    __feAppContext?: unknown;
+    __feCursorStateDebounceMs?: number;
     __feLspSpinnerState?: any;
     __feLspSpinnerUi?: any;
     __fePendingCacheIndicator?: any;
     appOpenFile?: ExplorerOpenFileAbsFn;
     appOpenFileRel?: ExplorerOpenFileRelFn;
+    fileNameEl?: HTMLElement;
     jumpToCurrentFileLine?: ExplorerJumpToLineFn;
     applyCacheIndicator?: any;
     currentPath?: string | null;
