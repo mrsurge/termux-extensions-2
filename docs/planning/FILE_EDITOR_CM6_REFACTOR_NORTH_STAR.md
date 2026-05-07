@@ -21,6 +21,48 @@ The actual end state is:
 
 This plan exists so the remaining work is driven by one architecture target instead of by isolated cleanup batches.
 
+## Immediate Ordered Queue
+
+The next work should proceed in this order:
+
+1. Deprecate `/editor` as a public ad hoc event bus and complete the editor runtime/backend conversion to `/rpc/editor`.
+   - Inventory every remaining `/editor` event and classify it as request, notification, or obsolete compatibility traffic.
+   - Add typed JSON-RPC request/notification names for the remaining live behaviors before moving callers.
+   - Move editor open, jump, issues, draft-diff, git-baseline, cache/draft/scroll state, notify, ready, save snapshot, and diagnostics-count traffic behind the typed editor RPC contract where still applicable.
+   - Keep backend ownership unchanged: `/rpc/editor` is the editor-runtime/backend lane, not a host shortcut around `/ui_ipc`.
+   - Add temporary instrumentation only when it proves old `/editor` traffic is gone; then remove the old namespace registration and handlers.
+2. Move Android-native editor/UI integration from legacy `ui_event` compatibility onto the UI IPC JSON-RPC notification lane.
+   - Android `UiIpcClient` should consume `rpc.notify` envelopes on `/ui_ipc` for editor focus/blur and other host-facing notifications instead of depending on the legacy `ui_event` bridge.
+   - Keep legacy Android compatibility only until the Android clients have been validated on the RPC lane, then remove `_LEGACY_UI_EVENT_SIDS` and related `ui_event` fanout from the worker.
+   - Make Android console drawer registration/hydration deterministic on first open.
+3. Create a dedicated sidebar IPC/RPC contract surface for external sidebar actions and clean up sidebar boundaries.
+   - Add frontend and backend contract modules for `/sidebar_ipc` instead of treating it as a collection of event-name conventions.
+   - Add a corresponding definition document for external sidebar actions such as mentions, file opens, active shortcut state, refresh requests, and cwd sync.
+   - Keep source ownership explicit: Explorer-originated actions use Explorer RPC or backend relays, editor-originated actions use editor RPC/backend relays, and external/sidebar-frame actions use the sidebar contract.
+4. After items 1-3 are coherent, consolidate the physical app transports behind one app-scoped Socket.IO gateway path while preserving logical namespaces.
+   - Preserve `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, `/terminal`, and `/wba` as logical namespaces unless a concrete contract cleanup removes one.
+   - Do not move SSOT, WBA, terminal, host, or Explorer behavior into the gateway. The gateway is transport routing, not domain ownership.
+5. Fix Android tools/settings console hydration on first open.
+   - Opening the Android tools/settings console overlay should register as a drawer and replay the TE2 console tail immediately without requiring close/reopen.
+6. Fix extension settings rendering so VSIX/object-valued settings do not display as `[object Object]`.
+   - Treat this as a typed normalization/rendering bug in the extension settings surface, likely in `main.py` or a supporting settings/extension module.
+7. Decompose and strictly type `main.py`, and find/deprecate unused top-level modules.
+   - Start with small backend route/helper families and avoid moving framework-owned service shims out of `services/`.
+   - Track deleted top-level modules explicitly so stale imports and app-loader contracts do not silently survive.
+8. Debug why WBA does not work with the same `rust-analyzer` VSIX that works with the same code-server instance powering the WBA.
+   - Treat this as a WBA extension-host/provider bootstrap issue until proven otherwise.
+   - Compare extension discovery, activation, workspace trust/configuration, binary/server executable resolution, and language/provider registration between the visible code-server path and WBA.
+
+### Current `/editor` Deprecation Inventory
+
+The first `/editor` cleanup slice should start from this live inventory:
+
+- connect snapshots: `editor:ssot` should become `/rpc/editor` connect-state only.
+- backend-to-editor notifications already mirrored to RPC and ready for caller cleanup: `editor:open`, `editor:jump_to_line`, `editor:git_baselines`, `editor:mirror`, `editor:cache_state`, `editor:draft_state`, `editor:prefs_changed`, `editor:notify`, `editor:open_complete`, `editor:ready`, `editor:issues_dump_request`, `editor:issues_cmd`, and `editor:find_cmd`.
+- editor-to-backend requests still requiring RPC dispatch coverage or caller migration: `editor_open_request`, `editor_jump_to_line_request`, `editor_git_baselines_request`, `editor_draft_diff_request`, `editor_mirror`, `editor_save_request`, `editor_save_snapshot_response`, `editor_issues_dump_request`, `editor_issues_dump_response`, `editor_model_ready`, `editor_breadcrumb_navigate`, `editor_cache_state`, `editor_scroll_state`, `editor_draft_state`, `editor_notify`, `editor_open_complete`, `editor_ready`, `editor_diagnostics_counts`, `editor_prefs_changed`, `editor_issues_cmd`, and `editor_find_cmd`.
+- known editor frontend legacy emitters include draft-diff request, git-baseline request, breadcrumb navigation, and host emit helpers that still target the `/editor` socket.
+- removal criterion: after `/rpc/editor` callers and server notifications cover those families, `/editor` namespace registration should be removed instead of left as a fallback.
+
 ## What Is Already True
 
 Current facts in the live tree:
@@ -52,6 +94,7 @@ These constraints do not change during the refactor:
 
 Cross references:
 - `docs/apps/code_cm6/CODE_TE2.md`
+- `docs/apps/code_cm6/SIDEBAR_IPC_RPC_CONTRACT.md`
 - `docs/planning/FILE_EDITOR_CM6_OWNERSHIP_BOUNDARY_CONTRACT.md`
 - `docs/planning/FILE_EDITOR_CM6_HTML_PREVIEW_ENGINE_PLAN.md`
 - `docs/planning/FILE_EDITOR_CM6_SOCKETIO_CONSOLIDATION_PLAN.md`
@@ -131,7 +174,7 @@ This refactor does not mean:
 - making WBA the owner of frontend policy or host state
 - changing SSOT semantics just to fit transport cleanup
 - bundling HTML preview implementation into the same execution batch
-- touching Android as part of this planning track
+- touching Android casually outside explicit Android-facing cleanup tasks
 
 ## Recommended Sequence
 

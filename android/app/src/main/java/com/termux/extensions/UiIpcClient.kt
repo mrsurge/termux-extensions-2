@@ -8,13 +8,7 @@ import java.net.URI
 
 /**
  * Socket.IO client that connects to the editor's UI IPC bus and listens for
- * focus/blur events to toggle the EditorInputFilter.
- *
- * The editor iframe emits:
- *   { type: "focus" }  on onDidFocusEditorWidget
- *   { type: "blur" }   on onDidBlurEditorWidget
- *
- * These are rebroadcast by the Python server to all /ui_ipc clients.
+ * typed UI IPC RPC notifications to toggle the EditorInputFilter.
  */
 class UiIpcClient(
     private val filter: EditorInputFilter,
@@ -23,6 +17,9 @@ class UiIpcClient(
     companion object {
         private const val TAG = "UiIpcClient"
         private const val DEFAULT_CONSOLE_TAIL_LINES = 500
+        private const val UI_IPC_RPC_NOTIFICATION_EVENT = "rpc.notify"
+        private const val UI_IPC_EDITOR_FOCUS = "ui.editor.focus"
+        private const val UI_IPC_EDITOR_BLUR = "ui.editor.blur"
     }
 
     private var uiIpcSocket: Socket? = null
@@ -44,7 +41,7 @@ class UiIpcClient(
             val opts = IO.Options().apply {
                 path = "/ui_ipc_ws/socket.io"
                 transports = arrayOf("websocket")
-                query = "app_id=file_editor_cm6&source=gecko_native"
+                query = "app_id=file_editor_cm6&source=android_native"
                 reconnection = true
                 reconnectionDelay = 2000
                 reconnectionDelayMax = 10000
@@ -60,6 +57,14 @@ class UiIpcClient(
                 }
                 on(Socket.EVENT_CONNECT_ERROR) { args ->
                     Log.w(TAG, "Connect error: ${args.firstOrNull()}")
+                }
+                on(UI_IPC_RPC_NOTIFICATION_EVENT) { args ->
+                    try {
+                        val json = parseJsonArg(args.firstOrNull()) ?: return@on
+                        handleUiIpcNotification(json)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error processing UI IPC RPC notification", e)
+                    }
                 }
                 on("ui_event") { args ->
                     try {
@@ -99,11 +104,13 @@ class UiIpcClient(
                 reconnectionDelayMax = 10000
             }
             val uri = URI.create("http://127.0.0.1:$port/te2_console")
-            consoleSocket = IO.socket(uri, opts).apply {
+            val socket = IO.socket(uri, opts)
+            consoleSocket = socket
+            socket.apply {
                 on(Socket.EVENT_CONNECT) {
                     Log.i(TAG, "Connected to TE2 console on port $port")
                     if (consoleDrawerEnabled) {
-                        registerAsDrawer()
+                        registerAsDrawer(socket)
                     }
                 }
                 on(Socket.EVENT_DISCONNECT) {
@@ -153,14 +160,28 @@ class UiIpcClient(
         }
     }
 
+    private fun handleUiIpcNotification(json: JSONObject) {
+        if (json.optString("jsonrpc", "") != "2.0") return
+        when (json.optString("method", "")) {
+            UI_IPC_EDITOR_FOCUS -> {
+                Log.d(TAG, "Editor focused via UI RPC — activating IME filter")
+                setFilterActive(true)
+            }
+            UI_IPC_EDITOR_BLUR -> {
+                Log.d(TAG, "Editor blurred via UI RPC — deactivating IME filter")
+                setFilterActive(false)
+            }
+        }
+    }
+
     /** Register this client as a console drawer to receive log broadcasts. */
-    private fun registerAsDrawer() {
+    private fun registerAsDrawer(socket: Socket? = consoleSocket) {
         try {
             val payload = JSONObject().apply {
                 put("role", "drawer")
                 put("tail_lines", consoleTailLines)
             }
-            consoleSocket?.emit("console:register", payload)
+            socket?.emit("console:register", payload)
             Log.d(TAG, "Registered as console drawer")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to register as drawer", e)

@@ -1,0 +1,251 @@
+# pyright: strict
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Final, Literal, TypedDict, cast
+
+SIDEBAR_IPC_RPC_NAMESPACE: Final = "/sidebar_ipc"
+SIDEBAR_IPC_RPC_REQUEST_EVENT: Final = "rpc"
+SIDEBAR_IPC_RPC_NOTIFICATION_EVENT: Final = "rpc.notify"
+
+SIDEBAR_IPC_RPC_METHOD_REGISTER: Final = "sidebar.register"
+SIDEBAR_IPC_RPC_METHOD_CWD_GET: Final = "sidebar.cwd.get"
+SIDEBAR_IPC_RPC_METHOD_CWD_SYNC: Final = "sidebar.cwd.sync"
+SIDEBAR_IPC_RPC_METHOD_FILE_OPEN: Final = "sidebar.file.open"
+SIDEBAR_IPC_RPC_METHOD_FILE_EDIT: Final = "sidebar.file.edit"
+SIDEBAR_IPC_RPC_METHOD_MENTION: Final = "sidebar.mention"
+SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET: Final = "sidebar.activeShortcut.set"
+SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH: Final = "sidebar.activeShortcut.refresh"
+SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN: Final = "sidebar.drawer.open"
+SIDEBAR_IPC_RPC_METHOD_DRAWER_CLOSE: Final = "sidebar.drawer.close"
+SIDEBAR_IPC_RPC_METHOD_DRAWER_TOGGLE: Final = "sidebar.drawer.toggle"
+
+SidebarIpcRpcMethod = Literal[
+    "sidebar.register",
+    "sidebar.cwd.get",
+    "sidebar.cwd.sync",
+    "sidebar.file.open",
+    "sidebar.file.edit",
+    "sidebar.mention",
+    "sidebar.activeShortcut.set",
+    "sidebar.activeShortcut.refresh",
+    "sidebar.drawer.open",
+    "sidebar.drawer.close",
+    "sidebar.drawer.toggle",
+]
+
+SIDEBAR_IPC_RPC_NOTIFICATION_PRESENCE: Final = "sidebar.presence"
+SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET: Final = "sidebar.cwd.set"
+SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE: Final = "sidebar.clientState"
+SIDEBAR_IPC_RPC_NOTIFICATION_MENTION: Final = "sidebar.mention"
+SIDEBAR_IPC_RPC_NOTIFICATION_FILE_OPEN: Final = "sidebar.file.open"
+SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH: Final = "sidebar.activeShortcut.refresh"
+SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE: Final = "sidebar.drawer.state"
+SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN: Final = "sidebar.drawer.open"
+SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_CLOSE: Final = "sidebar.drawer.close"
+SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_TOGGLE: Final = "sidebar.drawer.toggle"
+
+SidebarIpcRpcNotification = Literal[
+    "sidebar.presence",
+    "sidebar.cwd.set",
+    "sidebar.clientState",
+    "sidebar.mention",
+    "sidebar.file.open",
+    "sidebar.activeShortcut.refresh",
+    "sidebar.drawer.state",
+    "sidebar.drawer.open",
+    "sidebar.drawer.close",
+    "sidebar.drawer.toggle",
+]
+
+ALLOWED_REQUEST_METHODS: Final[set[str]] = {
+    SIDEBAR_IPC_RPC_METHOD_REGISTER,
+    SIDEBAR_IPC_RPC_METHOD_CWD_GET,
+    SIDEBAR_IPC_RPC_METHOD_CWD_SYNC,
+    SIDEBAR_IPC_RPC_METHOD_FILE_OPEN,
+    SIDEBAR_IPC_RPC_METHOD_FILE_EDIT,
+    SIDEBAR_IPC_RPC_METHOD_MENTION,
+    SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET,
+    SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH,
+    SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN,
+    SIDEBAR_IPC_RPC_METHOD_DRAWER_CLOSE,
+    SIDEBAR_IPC_RPC_METHOD_DRAWER_TOGGLE,
+}
+
+ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
+    SIDEBAR_IPC_RPC_NOTIFICATION_PRESENCE,
+    SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET,
+    SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE,
+    SIDEBAR_IPC_RPC_NOTIFICATION_MENTION,
+    SIDEBAR_IPC_RPC_NOTIFICATION_FILE_OPEN,
+    SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH,
+    SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE,
+    SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN,
+    SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_CLOSE,
+    SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_TOGGLE,
+}
+
+JsonObject = dict[str, object]
+JsonRpcId = str
+
+
+class JsonRpcErrorObject(TypedDict, total=False):
+    code: int
+    message: str
+    data: JsonObject
+
+
+class JsonRpcSuccessEnvelope(TypedDict):
+    jsonrpc: str
+    id: JsonRpcId
+    result: object
+
+
+class JsonRpcErrorEnvelope(TypedDict):
+    jsonrpc: str
+    id: JsonRpcId | None
+    error: JsonRpcErrorObject
+
+
+class ParsedSidebarIpcRpcRequest(TypedDict):
+    request_id: JsonRpcId
+    method: SidebarIpcRpcMethod
+    params: JsonObject
+
+
+class ParsedSidebarIpcRpcNotification(TypedDict):
+    method: SidebarIpcRpcNotification
+    params: JsonObject
+
+
+@dataclass(frozen=True)
+class SidebarIpcRpcProtocolError(Exception):
+    request_id: JsonRpcId | None
+    code: int
+    message: str
+    data: JsonObject | None = None
+
+    def to_json(self) -> JsonRpcErrorEnvelope:
+        return build_jsonrpc_error(
+            request_id=self.request_id,
+            code=self.code,
+            message=self.message,
+            data=self.data,
+        )
+
+
+def _as_object(value: object) -> JsonObject | None:
+    if isinstance(value, dict):
+        normalized: JsonObject = {}
+        for key, item in cast(dict[object, object], value).items():
+            if isinstance(key, str):
+                normalized[key] = item
+        return normalized
+    return None
+
+
+def normalize_payload(value: object) -> JsonObject:
+    return _as_object(value) or {}
+
+
+def _coerce_request_id(value: object) -> JsonRpcId:
+    if isinstance(value, str) and value:
+        return value
+    raise SidebarIpcRpcProtocolError(
+        None,
+        code=-32600,
+        message="request id must be a non-empty string",
+    )
+
+
+def parse_sidebar_ipc_rpc_request(payload: object) -> ParsedSidebarIpcRpcRequest | None:
+    envelope = _as_object(payload)
+    if envelope is None:
+        raise SidebarIpcRpcProtocolError(None, code=-32600, message="Invalid request envelope")
+    if envelope.get("jsonrpc") != "2.0":
+        raise SidebarIpcRpcProtocolError(None, code=-32600, message="jsonrpc must be '2.0'")
+    method = envelope.get("method")
+    if not isinstance(method, str) or not method.strip():
+        raise SidebarIpcRpcProtocolError(None, code=-32600, message="method is required")
+    params = normalize_payload(envelope.get("params"))
+    request_id_obj = envelope.get("id")
+    if request_id_obj is None:
+        if method not in ALLOWED_NOTIFICATION_METHODS:
+            raise SidebarIpcRpcProtocolError(
+                None,
+                code=-32601,
+                message=f"Unknown sidebar IPC RPC notification: {method}",
+                data={"method": method},
+            )
+        return None
+    request_id = _coerce_request_id(request_id_obj)
+    if method not in ALLOWED_REQUEST_METHODS:
+        raise SidebarIpcRpcProtocolError(
+            request_id,
+            code=-32601,
+            message=f"Unknown sidebar IPC RPC method: {method}",
+            data={"method": method},
+        )
+    return {
+        "request_id": request_id,
+        "method": cast(SidebarIpcRpcMethod, method),
+        "params": params,
+    }
+
+
+def parse_sidebar_ipc_rpc_notification(payload: object) -> ParsedSidebarIpcRpcNotification:
+    envelope = _as_object(payload)
+    if envelope is None:
+        raise SidebarIpcRpcProtocolError(None, code=-32600, message="Invalid notification envelope")
+    if envelope.get("jsonrpc") != "2.0":
+        raise SidebarIpcRpcProtocolError(None, code=-32600, message="jsonrpc must be '2.0'")
+    method = envelope.get("method")
+    if not isinstance(method, str) or not method.strip():
+        raise SidebarIpcRpcProtocolError(None, code=-32600, message="method is required")
+    if method not in ALLOWED_NOTIFICATION_METHODS:
+        raise SidebarIpcRpcProtocolError(
+            None,
+            code=-32601,
+            message=f"Unknown sidebar IPC RPC notification: {method}",
+            data={"method": method},
+        )
+    return {
+        "method": cast(SidebarIpcRpcNotification, method),
+        "params": normalize_payload(envelope.get("params")),
+    }
+
+
+def build_jsonrpc_notification(method: str, params: JsonObject | None = None) -> JsonObject:
+    return {
+        "jsonrpc": "2.0",
+        "method": method,
+        "params": params or {},
+    }
+
+
+def build_jsonrpc_result(request_id: JsonRpcId, result: object) -> JsonRpcSuccessEnvelope:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": result,
+    }
+
+
+def build_jsonrpc_error(
+    *,
+    request_id: JsonRpcId | None,
+    code: int,
+    message: str,
+    data: JsonObject | None = None,
+) -> JsonRpcErrorEnvelope:
+    error: JsonRpcErrorObject = {
+        "code": code,
+        "message": message,
+    }
+    if data:
+        error["data"] = data
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": error,
+    }

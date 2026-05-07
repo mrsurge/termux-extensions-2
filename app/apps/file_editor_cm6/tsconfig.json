@@ -32,7 +32,8 @@
     "main_page/frontend/**/*.ts",
     "src/diagnostics/**/*.ts",
     "src/explorer/**/*.d.ts",
-    "src/explorer/**/*.ts"
+    "src/explorer/**/*.ts",
+    "src/sidebar_ipc/**/*.ts"
   ],
   "exclude": [
     "node_modules",
