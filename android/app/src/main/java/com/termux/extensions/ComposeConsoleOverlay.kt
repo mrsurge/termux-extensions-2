@@ -186,7 +186,7 @@ class ComposeConsoleState(
         appendEntry(
             ConsoleEntry(
                 level = "debug",
-                workerId = "eval",
+                workerId = targetWorker,
                 leadText = "→ $code",
                 searchText = code,
                 timestampLabel = TimeFormatter.format(Date()),
@@ -197,10 +197,10 @@ class ComposeConsoleState(
 
     private fun defaultEvalTarget(): String {
         if (activeWorkerFilter != "all") return activeWorkerFilter
-        return knownWorkerIds.firstOrNull { it.startsWith("editor_iframe:") }
-            ?: knownWorkerIds.firstOrNull { it == "main_page" }
+        return knownWorkerIds.firstOrNull { it == "main_page" }
+            ?: knownWorkerIds.firstOrNull { it.startsWith("main_page:") }
             ?: knownWorkerIds.firstOrNull()
-            ?: "editor_iframe"
+            ?: "main_page"
     }
 
     fun workerOptions(): List<String> {
@@ -246,12 +246,13 @@ class ComposeConsoleState(
     private fun appendEvalResult(data: JSONObject) {
         val ok = data.optBoolean("ok", false)
         val payload = if (ok) data.opt("value") else data.opt("error")
+        val workerId = data.optString("workerId", "eval")
         val parts = listOf(jsonValueToNode(payload, "eval:${entries.size}"))
         val leadText = if (ok) "←" else "✗"
         appendEntry(
             ConsoleEntry(
                 level = if (ok) "info" else "error",
-                workerId = "eval",
+                workerId = workerId.ifBlank { "eval" },
                 leadText = leadText,
                 parts = parts,
                 searchText = buildSearchText(leadText, parts),

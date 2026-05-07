@@ -2,14 +2,14 @@
 
 ## Goal
 
-Make the host frontend entry (`app/apps/file_editor_cm6/main.ts`) and `app/apps/file_editor_cm6/main.py` the next decomposition targets without changing product behavior first.
+Keep the host frontend entry (`app/apps/file_editor_cm6/main.ts`) as the finished-enough composition root, and make `app/apps/file_editor_cm6/main.py` plus `app/apps/file_editor_cm6/template.html` the next breakup targets without changing product behavior first.
 
 The intended direction is:
 
 - keep a small root entrypoint for framework/app-loader compatibility
-- move main-page-owned frontend code into a new `app/apps/file_editor_cm6/main_page/` area
 - move main-page-owned backend route/service code into the same package family, grouped by domain
-- bring the main-page frontend under strict TypeScript incrementally
+- keep the main-page frontend strict TypeScript lane stable instead of chasing more root-entry line-count reduction
+- split durable UI contract and behavior policy out of `template.html` where practical
 - keep framework-owned service proxy shims under `app/apps/file_editor_cm6/services/`
 
 ## Progress Tracker
@@ -47,8 +47,9 @@ Use the broader `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for target architecture
 - Console drawer log rendering fix: `main_page/frontend/host-console-drawer.ts` renders incoming TE2 console `console:log` events through vConsole's `model.addLog(...)` API with `noOrig: true`. The `noOrig` flag is mandatory because upstream vConsole calls its saved original console after `addLog(...)` unless suppressed, and in TE2 that saved console is the framework console bridge.
 - Main-page entry state localization: remaining mutable host state and the UI IPC connection setup now live inside `initFileEditor(...)` instead of at module scope. This left the root entry with imports, `_isMobileLayout()`, and the exported entry function, making the TypeScript conversion mechanical.
 - Host entry TypeScript conversion: `main.js` was renamed to `main.ts`, `build.mjs` now uses `main.ts` as the host bundle source entry, `tsconfig.json` includes the entry directly, and the served asset remains `static/dist/host.js`.
-- Host entry finish pass: `main.ts` remains a procedural composition root, but the final cleanup removed write-only local state, dead wrapper functions, and stale comments left over from the conversion. Future extraction should be driven by real ownership boundaries instead of line-count reduction alone.
+- Host entry finish pass: `main.ts` remains a procedural composition root, but the final cleanup removed write-only local state, dead wrapper functions, and stale comments left over from the conversion. This host frontend entry is broken up enough for now; do not keep listing it as a next decomposition target unless a concrete ownership bug requires another extraction.
 - Editor RPC namespace cleanup: the legacy `/editor` Socket.IO namespace is retired from the active editor server, and `/rpc/editor` is now the editor runtime/backend lane. Jump-to-line, git-baseline, draft-diff, mirror/save, save-snapshot, cache/draft/scroll state, ready/open-complete/notify, diagnostics-count, model-ready, issues, find, and breadcrumb navigation traffic now uses typed `/rpc/editor` methods/notifications or backend-owned host hooks that fan out through `/rpc/editor`.
+- Android UI IPC RPC cleanup: Android native code now consumes UI IPC `rpc.notify` envelopes for editor focus/blur, no longer listens for the legacy `ui_event` bridge, and the worker no longer maintains Android compatibility `ui_event` subscribers/fanout.
 
 ### Current Sidebar Boundary
 
@@ -62,7 +63,7 @@ Historical `agent*` DOM ids and UI preference keys remain compatibility names fo
 
 ### Completed P0 Boundary Cleanup
 
-This cleanup was ranked ahead of ordinary `main.js` shrinkage, template cleanup, and physical Socket.IO gateway consolidation.
+This cleanup was ranked ahead of older host-entry shrinkage ideas, template cleanup, and physical Socket.IO gateway consolidation.
 
 1. Editor-originated mention now uses editor-owned transport and source ownership.
    - `monaco_editor/editor_touch_menu_utils.ts` no longer emits `ui.editor.mention.request`.
@@ -90,11 +91,11 @@ This cleanup was ranked ahead of ordinary `main.js` shrinkage, template cleanup,
    - If a file installs Explorer RPC globals, Explorer notification handlers, Explorer reconnect behavior, Explorer tree behavior, Explorer diagnostics rendering, or Explorer menu actions, it belongs under `src/explorer/` and must be imported by Explorer-owned source.
    - If a file installs Monaco/editor commands, touch-menu behavior, save/focus/blur handlers, editor diagnostics/projections, editor settings behavior, or editor RPC handlers, it belongs under `monaco_editor/` and must be imported by editor-owned source.
    - If a file installs host chrome, toolbar, menubar, drawer shell, status indicators, boot orchestration, or host/backend request hooks, it belongs under `main_page/frontend/` or an explicitly host-owned `src/host/` package.
-   - Do not put a domain installer under `main_page/frontend/` merely because `main.js` currently calls it. That recreates the dump point with a new path.
+   - Do not put a domain installer under `main_page/frontend/` merely because the host entry assembles boot order. That recreates the dump point with a new path.
 8. No compatibility-shim or fallback escape hatches for this cleanup.
    - Do not add a parallel old path while claiming the new path is fixed.
    - Do not keep a fallback transport for editor-owned actions after moving them to editor RPC.
-   - Do not leave `main.js`, `main_page/frontend/`, or `window.__*` globals as hidden backdoors for cross-domain behavior unless the cleanup explicitly removes that dependency in the same series.
+   - Do not leave the host entry, `main_page/frontend/`, or `window.__*` globals as hidden backdoors for cross-domain behavior unless the cleanup explicitly removes that dependency in the same series.
    - If a removed bridge breaks runtime behavior, debug and repair the real owning source/transport instead of restoring the bridge.
 9. Versioning and validation gate for this cleanup.
    - The cleanup batch should be version-synced only after the source-ownership and transport-ownership work is complete.
@@ -102,15 +103,14 @@ This cleanup was ranked ahead of ordinary `main.js` shrinkage, template cleanup,
 
 ### Immediate Next Candidates
 
-1. Follow the ordered queue in `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`: with `/editor` retired in favor of `/rpc/editor`, move Android native UI integration onto UI IPC RPC, create the dedicated sidebar IPC/RPC contract, then collapse the physical app transports behind one gateway path.
+1. Follow the ordered queue in `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`: with `/editor` retired in favor of `/rpc/editor` and Android native UI integration moved onto UI IPC RPC, create the dedicated sidebar IPC/RPC contract, then collapse the physical app transports behind one gateway path.
 2. Live-validate the cleaned ownership model after rebuild/version sync, using the exact generated `main_page` TE2 console worker and the relevant app-worker/WBA framework-shell logs.
-3. With `src/host` drained of live frontend files, re-review `main.ts` as the remaining host assembly surface and pick the next grouped runtime extraction from inline host behavior rather than creating another broad source bucket.
-4. Convert remaining host actions that still import Explorer RPC for project/settings/watcher flows into explicit backend-owned hook surfaces only after classifying whether the producing surface is host or Explorer.
-5. Continue shrinking `main.ts` only with grouped host runtimes that preserve source ownership and do not pull all of `src/host/` into strict checking at once.
+3. Create the dedicated sidebar IPC/RPC contract before physical gateway work.
+4. Use the frozen Socket.IO topology constants when touching frontend socket clients, but do not begin physical gateway consolidation until the sidebar IPC/RPC contract cleanup item is coherent.
+5. Start `main.py` decomposition only after choosing a small route/helper family that does not move framework-owned `services/` shims or worker subapp mounts.
 6. Continue re-reviewing `template.html` after the sidebar prune and remove remaining avoidable behavior policy from markup/CSS while preserving shortcut DOM compatibility.
-7. Use the frozen Socket.IO topology constants when touching frontend socket clients, but do not begin physical gateway consolidation until the Android UI RPC and sidebar IPC/RPC contract cleanup items are coherent.
-8. Start the backend decomposition only after choosing a small route/helper family that does not move framework-owned `services/` shims or worker subapp mounts.
-9. When debugging live frontend behavior through TE2 console, target the exact generated worker id under the `main_page` label rather than assuming a fixed worker id.
+7. Convert remaining host actions that still import Explorer RPC for project/settings/watcher flows into explicit backend-owned hook surfaces only after classifying whether the producing surface is host or Explorer.
+8. When debugging live frontend behavior through TE2 console, target the exact generated worker id under the `main_page` label rather than assuming a fixed worker id.
 
 ## Current code review
 
@@ -118,12 +118,7 @@ This cleanup was ranked ahead of ordinary `main.js` shrinkage, template cleanup,
 
 Baseline at plan creation: roughly 3,700 lines as `main.js`. After the current source-tree cleanup, TypeScript conversion, and finish pass, `main.ts` is roughly 1,153 lines. Re-check the live line count before using size as progress evidence.
 
-It is already partially decomposed. The root file imports many focused modules from `src/host/`, `src/explorer/`, `static/js/`, and `monaco_editor/`, but it still owns several large responsibilities inline:
-
-- host-page boot and runtime assembly
-- host-side UI IPC/sidebar event fanout and remaining host-owned request wiring
-- session telemetry wrappers and host active-file state glue
-- controller construction and dependency wiring for file websocket, open/save/run, panels, menus, preferences, and sidebar shortcuts
+It is no longer an active breakup target. The root file is the strict host bundle composition entrypoint, and further extraction should be driven only by a concrete ownership or behavior bug, not by line count.
 
 Important typing state:
 
@@ -263,7 +258,7 @@ Best first extraction targets:
    - do not recreate a direct host editor Socket.IO connection for these host-facing state events
 5. Explorer RPC runtime
    - completed under Explorer-owned source at `src/explorer/rpc/runtime.ts` and `src/explorer/rpc/connection.ts`
-   - do not place Explorer installers under `main_page/frontend/` merely because `main.js` currently assembles boot order
+   - do not place Explorer installers under `main_page/frontend/` merely because the host entry assembles boot order
 
 ### Phase 2: strict TypeScript coverage
 

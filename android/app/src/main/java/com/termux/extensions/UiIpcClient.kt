@@ -20,6 +20,7 @@ class UiIpcClient(
         private const val UI_IPC_RPC_NOTIFICATION_EVENT = "rpc.notify"
         private const val UI_IPC_EDITOR_FOCUS = "ui.editor.focus"
         private const val UI_IPC_EDITOR_BLUR = "ui.editor.blur"
+        private const val DEFAULT_CONSOLE_TARGET_WORKER_ID = "main_page"
     }
 
     private var uiIpcSocket: Socket? = null
@@ -45,6 +46,8 @@ class UiIpcClient(
                 reconnection = true
                 reconnectionDelay = 2000
                 reconnectionDelayMax = 10000
+                forceNew = true
+                multiplex = false
             }
             val uri = URI.create("http://127.0.0.1:$port/ui_ipc")
             uiIpcSocket = IO.socket(uri, opts).apply {
@@ -66,24 +69,6 @@ class UiIpcClient(
                         Log.w(TAG, "Error processing UI IPC RPC notification", e)
                     }
                 }
-                on("ui_event") { args ->
-                    try {
-                        val json = parseJsonArg(args.firstOrNull()) ?: return@on
-                        val type = json.optString("type", "")
-                        when (type) {
-                            "focus" -> {
-                                Log.d(TAG, "Editor focused — activating IME filter")
-                                setFilterActive(true)
-                            }
-                            "blur" -> {
-                                Log.d(TAG, "Editor blurred — deactivating IME filter")
-                                setFilterActive(false)
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error processing ui_event", e)
-                    }
-                }
                 connect()
             }
         } catch (e: Exception) {
@@ -91,17 +76,18 @@ class UiIpcClient(
         }
     }
 
-    private fun ensureConsoleSocket() {
-        if (consoleSocket != null) return
-        val port = serverPort ?: return
+    private fun createConsoleSocket(): Socket? {
+        consoleSocket?.let { return it }
+        val port = serverPort ?: return null
         try {
             val opts = IO.Options().apply {
                 path = "/te2_console_ws/socket.io"
-                transports = arrayOf("websocket")
                 query = "app_id=file_editor_cm6&source=android_console"
                 reconnection = true
                 reconnectionDelay = 2000
                 reconnectionDelayMax = 10000
+                forceNew = true
+                multiplex = false
             }
             val uri = URI.create("http://127.0.0.1:$port/te2_console")
             val socket = IO.socket(uri, opts)
@@ -153,11 +139,20 @@ class UiIpcClient(
                     val json = parseJsonArg(args.firstOrNull()) ?: JSONObject()
                     onConsoleEvent?.invoke("console:cleared", json)
                 }
-                connect()
             }
+            return socket
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create TE2 console socket", e)
+            return null
         }
+    }
+
+    private fun ensureConsoleSocketConnected(): Socket? {
+        val socket = createConsoleSocket() ?: return null
+        if (!socket.connected()) {
+            socket.connect()
+        }
+        return socket
     }
 
     private fun handleUiIpcNotification(json: JSONObject) {
@@ -194,9 +189,13 @@ class UiIpcClient(
             consoleTailLines = tailLines
         }
         if (enabled) {
-            ensureConsoleSocket()
-            if (consoleSocket?.connected() == true) {
-                registerAsDrawer()
+            disconnectConsoleSocket()
+            createConsoleSocket()?.let { socket ->
+                if (socket.connected()) {
+                    registerAsDrawer(socket)
+                } else {
+                    socket.connect()
+                }
             }
         } else {
             unregisterAsDrawer()
@@ -227,15 +226,14 @@ class UiIpcClient(
     }
 
     /** Send a console eval request to a specific worker. */
-    fun sendConsoleEval(code: String, targetWorkerId: String = "editor_iframe") {
-        ensureConsoleSocket()
+    fun sendConsoleEval(code: String, targetWorkerId: String = DEFAULT_CONSOLE_TARGET_WORKER_ID) {
         try {
             val payload = JSONObject().apply {
                 put("targetWorkerId", targetWorkerId)
                 put("reqId", java.util.UUID.randomUUID().toString())
                 put("code", code)
             }
-            consoleSocket?.emit("console:eval", payload)
+            ensureConsoleSocketConnected()?.emit("console:eval", payload)
             Log.d(TAG, "Sent console:eval to $targetWorkerId")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to send console:eval", e)
@@ -244,9 +242,8 @@ class UiIpcClient(
 
     /** Request backend transcript truncation for the TE2 console. */
     fun sendConsoleClear() {
-        ensureConsoleSocket()
         try {
-            consoleSocket?.emit("console:clear", JSONObject())
+            ensureConsoleSocketConnected()?.emit("console:clear", JSONObject())
             Log.d(TAG, "Sent console:clear")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to send console:clear", e)

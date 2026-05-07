@@ -17,7 +17,7 @@ The actual end state is:
 - one physical app-scoped Socket.IO gateway/server path with the existing logical namespaces preserved where they are still meaningful
 - worker, host, editor, explorer, and WBA ownership boundaries that stay explicit instead of getting muddied by transport consolidation
 - each page component talking only to its own lane, with backend mediation between domains instead of new direct cross-domain frontend lanes
-- `main.js` and `template.html` reduced from monolith/orchestration blobs into thinner assembly surfaces
+- `main.py` and `template.html` reduced from monolith/orchestration blobs into thinner assembly surfaces
 
 This plan exists so the remaining work is driven by one architecture target instead of by isolated cleanup batches.
 
@@ -30,10 +30,10 @@ The next work should proceed in this order:
    - Editor open, jump, issues, draft-diff, git-baseline, cache/draft/scroll state, notify, ready, save snapshot, diagnostics-count, model-ready, breadcrumb navigation, mirror, and save traffic now flow through typed `/rpc/editor` methods/notifications or backend-owned host hooks that fan out over `/rpc/editor`.
    - Backend ownership stays unchanged: `/rpc/editor` is the editor-runtime/backend lane, not a host shortcut around `/ui_ipc`.
    - The worker mount path `/editor_ws/socket.io` remains as the physical Socket.IO endpoint for the `/rpc/editor` namespace until the later gateway consolidation.
-2. Move Android-native editor/UI integration from legacy `ui_event` compatibility onto the UI IPC JSON-RPC notification lane.
-   - Android `UiIpcClient` should consume `rpc.notify` envelopes on `/ui_ipc` for editor focus/blur and other host-facing notifications instead of depending on the legacy `ui_event` bridge.
-   - Keep legacy Android compatibility only until the Android clients have been validated on the RPC lane, then remove `_LEGACY_UI_EVENT_SIDS` and related `ui_event` fanout from the worker.
-   - Make Android console drawer registration/hydration deterministic on first open.
+2. Completed: move Android-native editor/UI integration from legacy `ui_event` compatibility onto the UI IPC JSON-RPC notification lane.
+   - Android `UiIpcClient` consumes `rpc.notify` envelopes on `/ui_ipc` for editor focus/blur and no longer listens for the legacy `ui_event` bridge.
+   - The worker no longer tracks `_LEGACY_UI_EVENT_SIDS` or emits Android compatibility `ui_event` fanout from UI IPC RPC notifications.
+   - Android console drawer registration/hydration stays on the TE2 console drawer registration path, and console eval defaults to the current `main_page` runtime target instead of the historical editor iframe id.
 3. Create a dedicated sidebar IPC/RPC contract surface for external sidebar actions and clean up sidebar boundaries.
    - Add frontend and backend contract modules for `/sidebar_ipc` instead of treating it as a collection of event-name conventions.
    - Add a corresponding definition document for external sidebar actions such as mentions, file opens, active shortcut state, refresh requests, and cwd sync.
@@ -41,13 +41,14 @@ The next work should proceed in this order:
 4. After items 1-3 are coherent, consolidate the physical app transports behind one app-scoped Socket.IO gateway path while preserving logical namespaces.
    - Preserve `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, `/terminal`, and `/wba` as logical namespaces unless a concrete contract cleanup removes one.
    - Do not move SSOT, WBA, terminal, host, or Explorer behavior into the gateway. The gateway is transport routing, not domain ownership.
-5. Fix Android tools/settings console hydration on first open.
-   - Opening the Android tools/settings console overlay should register as a drawer and replay the TE2 console tail immediately without requiring close/reopen.
-6. Fix extension settings rendering so VSIX/object-valued settings do not display as `[object Object]`.
+5. Fix extension settings rendering so VSIX/object-valued settings do not display as `[object Object]`.
    - Treat this as a typed normalization/rendering bug in the extension settings surface, likely in `main.py` or a supporting settings/extension module.
-7. Decompose and strictly type `main.py`, and find/deprecate unused top-level modules.
+6. Decompose and strictly type `main.py`, and find/deprecate unused top-level modules.
    - Start with small backend route/helper families and avoid moving framework-owned service shims out of `services/`.
    - Track deleted top-level modules explicitly so stale imports and app-loader contracts do not silently survive.
+7. Continue `template.html` decomposition after the backend transport/contract cleanup is coherent.
+   - Move avoidable durable UI contract and behavior policy out of markup/CSS while preserving shortcut DOM compatibility.
+   - Do not treat this as feature work; this is breakup and ownership cleanup.
 8. Debug why WBA does not work with the same `rust-analyzer` VSIX that works with the same code-server instance powering the WBA.
    - Treat this as a WBA extension-host/provider bootstrap issue until proven otherwise.
    - Compare extension discovery, activation, workspace trust/configuration, binary/server executable resolution, and language/provider registration between the visible code-server path and WBA.
@@ -76,7 +77,8 @@ Current facts in the live tree:
 - The WBA typed TypeScript lane is already strict and substantially decomposed.
 - Main-page decomposition has started under `main_page/frontend/`: host chrome, host state, host editor-event handling, and drawer shell behavior now live in grouped strict TypeScript runtimes.
 - The old in-app agent harness is no longer a live contract. The sidebar surface is the shortcut lane plus `/sidebar_ipc`; historical `agent*` DOM ids and preference keys are compatibility names for that UI.
-- The host lane is not done: `main.js` remains the bundle entrypoint/orchestration shell, `src/host/` is still excluded from the app strict-TS lane, and `template.html` still carries too much host/UI contract.
+- The host frontend entry is broken up enough for now: `main.ts` is the strict bundle source entry and should not be treated as the next decomposition target unless a concrete ownership bug requires it.
+- The remaining monolith breakup targets are `main.py` and `template.html`.
 - The app still exposes multiple transport/service surfaces and multiple worker-owned Socket.IO servers, plus the separate adapter-owned `/wba` path.
 - `services/vscode_rpc_transport.py` is still registered even though it is not the current editor intelligence hot path.
 
@@ -87,7 +89,7 @@ These constraints do not change during the refactor:
 - The WBA remains the VS Code protocol boundary and intelligence producer.
 - Transport consolidation must stay proxy-only. Do not move backend state ownership just to achieve one socket server.
 - Host UI is an initiator and renderer, not the owner of project or document intelligence state.
-- Host `main.js` should talk to its host/backend lane (`/ui_ipc`, moving to RPC), not directly to editor domain RPC as a new long-term coupling.
+- Host frontend code should talk to its host/backend lane (`/ui_ipc` RPC), not directly to editor domain RPC as a new long-term coupling.
 - Explorer is project-scoped consumption/rendering, not a second backend.
 - Editor is file-scoped rendering/interaction, not project-state authority.
 - HTML preview is queued behind this refactor track, not mixed into it.
@@ -104,8 +106,8 @@ Cross references:
 The remaining complexity is a combination of four issues, not one:
 - transport sprawl: too many physical socket servers/proxy surfaces
 - contract drift: some internal logical event-name helpers and free-form payloads still exist beside typed JSON-RPC lanes
-- typing asymmetry: editor/explorer/WBA are ahead of host/template and some backend edges
-- monolith residue: `main.js` and `template.html` still carry too much orchestration and UI contract density
+- typing asymmetry: editor/explorer/WBA and the host frontend are ahead of some backend edges
+- monolith residue: `main.py` and `template.html` still carry too much orchestration and UI contract density
 
 If we solve only one of those, the others keep the system hard to reason about.
 
@@ -131,7 +133,7 @@ Recommended namespace set:
 
 Notes:
 - `/editor` should not remain a long-term public ad hoc event bus. Its behavior should converge into typed `/rpc/editor` methods and notifications for the editor-runtime/backend contract.
-- `main.js` should not become a first-class caller of `/rpc/editor` as a substitute for backend mediation. Host-facing actions should stay on the host/backend lane and let Python fan out to editor/backend services.
+- Host frontend code should not become a first-class caller of `/rpc/editor` as a substitute for backend mediation. Host-facing actions should stay on the host/backend lane and let Python fan out to editor/backend services.
 - `/wba` is still logically separate in execution ownership even if the physical gateway is consolidated. Do not collapse WBA behavior into the worker just to satisfy the one-server goal.
 
 ### 2. JSON-RPC 2.0 Everywhere It Matters
@@ -157,13 +159,13 @@ Target ownership split:
 - editor owns file-scoped rendering and interaction only
 - explorer owns project-scoped rendering only
 
-### 4. Host Lane Must Catch Up
+### 4. Backend And Template Lanes Must Catch Up
 
-The refactor is not complete until the host lane catches up to editor/explorer/WBA discipline.
+The refactor is not complete until the remaining backend and template lanes catch up to editor/explorer/WBA/host-frontend discipline.
 
 That means:
-- `main.js` becomes a smaller assembly/orchestration shell
-- host transport and UI modules move toward strict TS with explicit boundary types
+- `main.py` becomes a smaller backend composition surface
+- backend route/helper families move toward typed, focused modules with explicit boundary contracts
 - `template.html` stops being the dumping ground for durable UI contract and wiring policy
 
 ## Non-Goals
@@ -238,11 +240,11 @@ Success criteria:
 - no SSOT logic moved into the transport gateway
 - no WBA logic moved into the worker merely for topology aesthetics
 
-### Phase 4. Finish Host And Template Decomposition
+### Phase 4. Finish Backend And Template Decomposition
 
 Once the transport/contracts are stable:
-- shrink `main.js` further toward assembly-only behavior
-- bring `src/host/` into the strict TS plan deliberately instead of leaving it as a permanent exclusion
+- shrink `main.py` toward backend composition by extracting small route/helper families
+- keep the already-split host frontend entry as a composition root unless a concrete ownership bug justifies more extraction
 - split durable UI contract out of `template.html` where practical
 - keep `template.html` focused on structure, not app behavior policy
 - record detailed completed-slice status in `FILE_EDITOR_CM6_MAIN_PAGE_DECOMPOSITION_PLAN.md`
@@ -264,7 +266,7 @@ Only after the refactor track is coherent again:
 
 When touching a feature during this refactor:
 - if it adds or changes a socket contract, make it typed and JSON-RPC-shaped
-- if it adds host behavior, do not dump more durable policy into `main.js` or `template.html` if a focused module can own it
+- if it adds host behavior, do not dump more durable policy into `main.py` or `template.html` if a focused module can own it
 - if it starts in host chrome, prefer the host/backend lane and backend fanout over new direct host-to-editor RPC coupling
 - if it needs transport consolidation, do it without moving domain ownership
 - if it belongs to preview, defer it unless it directly unblocks this refactor track
@@ -276,7 +278,7 @@ This refactor track is "done enough" when all of the following are true:
 - logical namespaces are stable and intentional
 - public socket contracts are JSON-RPC and typed end-to-end
 - `/editor` no longer survives as a legacy ad hoc public event bus
-- `main.js` is mostly assembly/orchestration rather than feature ownership
+- `main.py` is mostly backend composition rather than feature ownership
 - `template.html` is no longer carrying avoidable app-behavior contract density
 - stale docs and transport residue are removed or explicitly historical
 
