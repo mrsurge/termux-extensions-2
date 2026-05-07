@@ -25,12 +25,11 @@ This plan exists so the remaining work is driven by one architecture target inst
 
 The next work should proceed in this order:
 
-1. Deprecate `/editor` as a public ad hoc event bus and complete the editor runtime/backend conversion to `/rpc/editor`.
-   - Inventory every remaining `/editor` event and classify it as request, notification, or obsolete compatibility traffic.
-   - Add typed JSON-RPC request/notification names for the remaining live behaviors before moving callers.
-   - Move editor open, jump, issues, draft-diff, git-baseline, cache/draft/scroll state, notify, ready, save snapshot, and diagnostics-count traffic behind the typed editor RPC contract where still applicable.
-   - Keep backend ownership unchanged: `/rpc/editor` is the editor-runtime/backend lane, not a host shortcut around `/ui_ipc`.
-   - Add temporary instrumentation only when it proves old `/editor` traffic is gone; then remove the old namespace registration and handlers.
+1. Completed: deprecate `/editor` as a public ad hoc event bus and complete the editor runtime/backend conversion to `/rpc/editor`.
+   - The editor Socket.IO server now registers `/rpc/editor` only; the legacy `/editor` namespace class/registration is gone.
+   - Editor open, jump, issues, draft-diff, git-baseline, cache/draft/scroll state, notify, ready, save snapshot, diagnostics-count, model-ready, breadcrumb navigation, mirror, and save traffic now flow through typed `/rpc/editor` methods/notifications or backend-owned host hooks that fan out over `/rpc/editor`.
+   - Backend ownership stays unchanged: `/rpc/editor` is the editor-runtime/backend lane, not a host shortcut around `/ui_ipc`.
+   - The worker mount path `/editor_ws/socket.io` remains as the physical Socket.IO endpoint for the `/rpc/editor` namespace until the later gateway consolidation.
 2. Move Android-native editor/UI integration from legacy `ui_event` compatibility onto the UI IPC JSON-RPC notification lane.
    - Android `UiIpcClient` should consume `rpc.notify` envelopes on `/ui_ipc` for editor focus/blur and other host-facing notifications instead of depending on the legacy `ui_event` bridge.
    - Keep legacy Android compatibility only until the Android clients have been validated on the RPC lane, then remove `_LEGACY_UI_EVENT_SIDS` and related `ui_event` fanout from the worker.
@@ -53,15 +52,16 @@ The next work should proceed in this order:
    - Treat this as a WBA extension-host/provider bootstrap issue until proven otherwise.
    - Compare extension discovery, activation, workspace trust/configuration, binary/server executable resolution, and language/provider registration between the visible code-server path and WBA.
 
-### Current `/editor` Deprecation Inventory
+### Current `/editor` Deprecation Status
 
-The first `/editor` cleanup slice should start from this live inventory:
+The legacy editor namespace has been removed from the active Socket.IO server:
 
-- connect snapshots: `editor:ssot` should become `/rpc/editor` connect-state only.
-- backend-to-editor notifications already mirrored to RPC and ready for caller cleanup: `editor:open`, `editor:jump_to_line`, `editor:git_baselines`, `editor:mirror`, `editor:cache_state`, `editor:draft_state`, `editor:prefs_changed`, `editor:notify`, `editor:open_complete`, `editor:ready`, `editor:issues_dump_request`, `editor:issues_cmd`, and `editor:find_cmd`.
-- editor-to-backend requests still requiring RPC dispatch coverage or caller migration: `editor_open_request`, `editor_jump_to_line_request`, `editor_git_baselines_request`, `editor_draft_diff_request`, `editor_mirror`, `editor_save_request`, `editor_save_snapshot_response`, `editor_issues_dump_request`, `editor_issues_dump_response`, `editor_model_ready`, `editor_breadcrumb_navigate`, `editor_cache_state`, `editor_scroll_state`, `editor_draft_state`, `editor_notify`, `editor_open_complete`, `editor_ready`, `editor_diagnostics_counts`, `editor_prefs_changed`, `editor_issues_cmd`, and `editor_find_cmd`.
-- known editor frontend legacy emitters include draft-diff request, git-baseline request, breadcrumb navigation, and host emit helpers that still target the `/editor` socket.
-- removal criterion: after `/rpc/editor` callers and server notifications cover those families, `/editor` namespace registration should be removed instead of left as a fallback.
+- `/rpc/editor` is the only editor namespace registered by `monaco_editor/editor_socketio.py`.
+- `m_editor_app.ts` connects only to `/rpc/editor` for editor/backend traffic and `/wba` for workbench-adapter intelligence traffic.
+- The old request families use typed methods: `editor.jumpToLine`, `editor.gitBaselines.get`, and `editor.draftDiff.get`.
+- The remaining former `/editor` event families now use typed methods/notifications such as `editor.cacheState.publish`, `editor.draftState.publish`, `editor.notify.publish`, `editor.openComplete.publish`, `editor.diagnosticsCounts.publish`, `editor.scrollState.publish`, `editor.modelReady`, `editor.save.snapshot.response`, `editor.issues.dump.response`, `editor.breadcrumb.navigate`, and `editor.save.snapshot.request`.
+- `editor_runtime_emit_room_event(...)` is now a logical backend fanout helper that emits `/rpc/editor` notifications and UI IPC mirrors; it no longer emits to a legacy `/editor` namespace.
+- The physical `/editor_ws/socket.io` mount remains for `/rpc/editor` until the later app-scoped Socket.IO gateway consolidation.
 
 ## What Is Already True
 
@@ -70,7 +70,7 @@ Current facts in the live tree:
 - The active TextMate lane now uses the workbench-derived vendored runtime, not the old UMD bootstrap path.
 - The worker still owns SSOT, file open/save/mirror/cache state, host relay behavior, and backend project state.
 - Explorer already has a typed JSON-RPC namespace at `/rpc/explorer` on the worker-owned explorer socket server.
-- Editor has partial typed `/rpc/editor` scaffolding, but the broader editor surface is still split between typed RPC and legacy `/editor` event-name transport.
+- Editor runtime/backend traffic now uses `/rpc/editor`; legacy event-name strings may still exist as internal logical fanout names, but they no longer imply a public `/editor` namespace.
 - Host-side non-editor initiation is already backend-owned through `/ui_ipc` hook surfaces and should continue moving in that direction rather than binding host directly onto editor RPC lanes.
 - `src/explorer` and the Monaco editor lane are already on the strict app TypeScript lane.
 - The WBA typed TypeScript lane is already strict and substantially decomposed.
@@ -103,7 +103,7 @@ Cross references:
 
 The remaining complexity is a combination of four issues, not one:
 - transport sprawl: too many physical socket servers/proxy surfaces
-- contract drift: legacy event-name RPC and free-form payloads still exist beside typed JSON-RPC lanes
+- contract drift: some internal logical event-name helpers and free-form payloads still exist beside typed JSON-RPC lanes
 - typing asymmetry: editor/explorer/WBA are ahead of host/template and some backend edges
 - monolith residue: `main.js` and `template.html` still carry too much orchestration and UI contract density
 
@@ -207,8 +207,8 @@ Expected direction:
 
 #### Editor
 
-- Move the remaining `/editor` behaviors onto typed `/rpc/editor` methods and notifications.
-- Bring open/save/mirror/cache-state/prefs/current-file/state publication under one coherent editor RPC contract.
+- Keep the former `/editor` behaviors on typed `/rpc/editor` methods and notifications.
+- Keep open/save/mirror/cache-state/prefs/current-file/state publication under one coherent editor RPC contract.
 - Keep the worker as the owner of those behaviors.
 - Treat `/rpc/editor` as the editor-runtime/backend lane, not as a replacement host lane.
 

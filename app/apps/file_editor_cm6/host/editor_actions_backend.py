@@ -1,7 +1,6 @@
 # pyright: strict
 from __future__ import annotations
 
-import hashlib
 import time
 from pathlib import Path
 from typing import Protocol, cast
@@ -18,6 +17,10 @@ from ..monaco_editor.editor_ws import (
     editor_runtime_record_file_activity,
     editor_runtime_request_issues_dump,
 )
+from ..monaco_editor.editor_view_state_backend import (
+    build_editor_git_baselines_payload,
+    build_editor_jump_to_line_payload,
+)
 from ..stores import get_history_store
 
 
@@ -30,19 +33,6 @@ class SocketIOEmitter(Protocol):
         room: str | None = None,
         namespace: str | None = None,
     ) -> None: ...
-
-
-def _coerce_positive_int(value: object, *, default: int | None = None) -> int | None:
-    if isinstance(value, int):
-        return value if value > 0 else default
-    if isinstance(value, str) and value.isdigit():
-        parsed = int(value)
-        return parsed if parsed > 0 else default
-    return default
-
-
-def _coerce_optional_bool(value: object) -> bool | None:
-    return value if isinstance(value, bool) else None
 
 
 def _active_project_or_raise() -> str:
@@ -80,29 +70,21 @@ async def handle_host_editor_jump_to_line_request(
 ) -> JsonMap:
     project = _active_project_or_raise()
     path = _resolve_editor_path(data, project)
-    line = _coerce_positive_int(data.get("line"))
-    if line is None:
-        raise ValueError("missing line")
-    column = _coerce_positive_int(data.get("column"), default=1) or 1
-    scroll_y = data.get("scroll_y") or data.get("scrollY")
-    if not isinstance(scroll_y, str):
-        scroll_y = None
-    focus = _coerce_optional_bool(data.get("focus"))
-    scroll_to_top_value = data.get("scroll_to_top") if "scroll_to_top" in data else data.get("scrollToTop")
-    scroll_to_top = _coerce_optional_bool(scroll_to_top_value)
-
-    editor_runtime_record_file_activity(project, path, scroll_line=float(line))
-    payload: JsonMap = {
-        "path": path,
-        "line": line,
-        "column": column,
-        "scroll_y": scroll_y,
-        "focus": focus,
-        "scroll_to_top": scroll_to_top,
-        "source_client": source_name,
-    }
+    payload = build_editor_jump_to_line_payload(
+        {**data, "path": path},
+        source_client=source_name,
+        active_project=editor_runtime_active_project,
+        normalize_abs_path=editor_runtime_normalize_abs_path,
+        is_under_project=editor_runtime_is_under_project,
+        record_file_activity=editor_runtime_record_file_activity,
+    )
     await editor_runtime_emit_room_event("editor:jump_to_line", payload)
-    return {"ok": True, "path": path, "line": line, "column": column}
+    return {
+        "ok": True,
+        "path": path,
+        "line": payload.get("line", 1),
+        "column": payload.get("column", 1),
+    }
 
 
 async def handle_host_editor_git_baselines_request(
@@ -112,24 +94,17 @@ async def handle_host_editor_git_baselines_request(
 ) -> JsonMap:
     project = _active_project_or_raise()
     path = _resolve_editor_path(data, project)
-
-    disk = editor_runtime_read_disk_text(path)
-    disk_sha = hashlib.sha256(disk.encode("utf-8")).hexdigest()
-    head = editor_runtime_git_head_text(project, path)
-    head_sha = hashlib.sha256(head.encode("utf-8")).hexdigest() if isinstance(head, str) else None
-
-    payload: JsonMap = {
-        "path": path,
-        "tracked": bool(head is not None),
-        "base_ref": "HEAD",
-        "disk_content": disk,
-        "disk_sha256": disk_sha,
-        "head_content": head,
-        "head_sha256": head_sha,
-        "source_client": source_name,
-    }
+    payload = build_editor_git_baselines_payload(
+        {**data, "path": path},
+        source_client=source_name,
+        active_project=editor_runtime_active_project,
+        normalize_abs_path=editor_runtime_normalize_abs_path,
+        is_under_project=editor_runtime_is_under_project,
+        read_disk_text=editor_runtime_read_disk_text,
+        git_head_text=editor_runtime_git_head_text,
+    )
     await editor_runtime_emit_room_event("editor:git_baselines", payload)
-    return {"ok": True, "path": path, "tracked": bool(head is not None)}
+    return {"ok": True, "path": path, "tracked": bool(payload.get("tracked"))}
 
 
 async def handle_host_editor_find_request(

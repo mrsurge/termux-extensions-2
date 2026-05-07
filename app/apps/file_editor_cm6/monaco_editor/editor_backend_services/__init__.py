@@ -3,7 +3,6 @@ from .open_service import coerce_editor_open_request_fields, emit_editor_open_fr
 from .save_service import (
     handle_editor_mirror,
     handle_editor_save_request,
-    request_editor_save_snapshot,
     resolve_editor_save_snapshot_response,
 )
 from .save_routes_service import (
@@ -48,7 +47,6 @@ __all__ = [
     "emit_editor_open_from_backend",
     "handle_editor_mirror",
     "handle_editor_save_request",
-    "request_editor_save_snapshot",
     "resolve_editor_save_snapshot_response",
     "SaveValidationError",
     "handle_save_current_file",

@@ -1,5 +1,8 @@
+import { EDITOR_RPC_METHODS } from './editor_rpc_contract.ts';
+
 interface EditorDraftDiffRequestRuntimeDeps {
-  getEditorSocket(): { connected?: boolean; emit?(eventName: string, payload: Record<string, unknown>): void } | null;
+  isRpcConnected(): boolean;
+  rpcCall(method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
   getCurrentPath(): string | null;
   getShowDraftDiffs(): boolean;
 }
@@ -10,9 +13,8 @@ export function createEditorDraftDiffRequestRuntime(deps: EditorDraftDiffRequest
 
   function requestDraftDiff(reason?: string): boolean {
     try {
-      const editorSocket = deps.getEditorSocket();
       const currentPath = deps.getCurrentPath();
-      if (!editorSocket || !editorSocket.connected) return false;
+      if (!deps.isRpcConnected()) return false;
       if (!currentPath) return false;
       if (!deps.getShowDraftDiffs()) return false;
 
@@ -20,13 +22,17 @@ export function createEditorDraftDiffRequestRuntime(deps: EditorDraftDiffRequest
       draftDiffDebounceTimer = setTimeout(() => {
         try {
           draftDiffRequestId = String(Date.now()) + ':' + String(Math.random()).slice(2);
-          if (editorSocket.emit) {
-            editorSocket.emit('editor_draft_diff_request', {
+          void deps.rpcCall(
+            EDITOR_RPC_METHODS.draftDiffGet,
+            {
               path: currentPath,
               requestId: draftDiffRequestId,
               reason: reason || '',
-            });
-          }
+            },
+            { timeoutMs: 12000 },
+          ).catch((error) => {
+            console.warn('[DraftDiff] editor.draftDiff.get failed', error);
+          });
         } catch (_) {}
       }, 180);
       return true;

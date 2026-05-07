@@ -1,10 +1,5 @@
 import { EDITOR_RPC_METHODS } from './editor_rpc_contract.ts';
 
-interface EditorSocketEmitterLike {
-  connected?: boolean;
-  emit(eventName: string, payload: Record<string, unknown>): void;
-}
-
 interface EditorDisposableLike {
   dispose(): void;
 }
@@ -16,7 +11,6 @@ interface EditorModelLike {
 
 interface EditorMirrorPublisherDeps {
   getEditor(): { onDidChangeModelContent(listener: () => void): EditorDisposableLike } | null;
-  getEditorSocket(): EditorSocketEmitterLike | null;
   getCurrentPath(): string | null;
   getModel(): EditorModelLike | null;
   getBaseSha256(): string | null;
@@ -41,21 +35,12 @@ interface EditorMirrorPublisherDeps {
 
 function emitMirrorUpdate(deps: EditorMirrorPublisherDeps, model: EditorModelLike, path: string): void {
   const content = model.getValue();
-  if (deps.isRpcConnected()) {
-    void deps.rpcCall(EDITOR_RPC_METHODS.mirrorPublish, {
-      path,
-      content,
-      base_sha256: deps.getBaseSha256(),
-    }, { timeoutMs: 8000 }).catch(() => {});
-  } else {
-    const socket = deps.getEditorSocket();
-    if (!socket || !socket.connected) return;
-    socket.emit('editor_mirror', {
-      path: path,
-      content: content,
-      base_sha256: deps.getBaseSha256(),
-    });
-  }
+  if (!deps.isRpcConnected()) return;
+  void deps.rpcCall(EDITOR_RPC_METHODS.mirrorPublish, {
+    path,
+    content,
+    base_sha256: deps.getBaseSha256(),
+  }, { timeoutMs: 8000 }).catch(() => {});
   deps.publishDidChange(
     path,
     content,
@@ -94,8 +79,7 @@ export function installMirrorPublisher(deps: EditorMirrorPublisherDeps): void {
       if (deps.getIsApplyingRemote()) return;
       const model = deps.getModel();
       const currentPath = deps.getCurrentPath();
-      const socket = deps.getEditorSocket();
-      if ((!socket || !socket.connected) && !deps.isRpcConnected()) return;
+      if (!deps.isRpcConnected()) return;
       if (!currentPath || !model) return;
 
       deps.setLastLocalEditAt(Date.now());

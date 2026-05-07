@@ -37,17 +37,6 @@ mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _file_ops.mark_git_cache_dirty)
 get_all_git_statuses = cast(GetAllGitStatusesFn, _file_ops.get_all_git_statuses)
 
 
-class SocketIOEmitter(Protocol):
-    async def emit(
-        self,
-        event: str,
-        data: object,
-        *,
-        room: str | None = None,
-        namespace: str | None = None,
-    ) -> None: ...
-
-
 @runtime_checkable
 class ExplorerRpcReplySocket(Protocol):
     def complete_rpc_request(self, request_id: str, result: JsonObject) -> bool: ...
@@ -937,13 +926,13 @@ class ExplorerDispatcher:
         )
 
     async def _notify_editor_draft_cleared(self, rel_files: list[str]) -> None:
-        """Emit editor:cache_state via the editor Socket.IO for cleared drafts."""
+        """Notify the editor RPC lane that draft state was cleared."""
         try:
-            from .monaco_editor.editor_socketio import EDITOR_SIO
-            editor_sio = cast(SocketIOEmitter, EDITOR_SIO)
+            from .monaco_editor.editor_ws import editor_runtime_emit_room_event
+
             for rel in rel_files:
                 abs_path = str(self.project_root / rel)
-                await editor_sio.emit(
+                await editor_runtime_emit_room_event(
                     "editor:cache_state",
                     {
                         "path": abs_path,
@@ -951,7 +940,6 @@ class ExplorerDispatcher:
                         "unsaved": False,
                         "reason": "discard_external",
                     },
-                    namespace="/editor",
                 )
         except Exception:
             pass

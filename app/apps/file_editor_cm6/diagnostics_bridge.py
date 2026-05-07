@@ -210,7 +210,7 @@ async def _emit_diagnostics_debounced():
         print(f"[diag_bridge] explorer/problems emit error: {exc}", flush=True)
 
 
-async def _adapter_ws_loop(sio):
+async def _adapter_ws_loop(_sio: object) -> None:
     """Connect to adapter WS, listen for diagnostics, broadcast via Socket.IO."""
     import websockets
 
@@ -239,18 +239,8 @@ async def _adapter_ws_loop(sio):
                         continue
                     ev_type = ev.get("type")
 
-                    # Forward adapter/ready so browser knows adapter is connected.
+                    # Adapter readiness now flows through the editor RPC adapter-state lane.
                     if ev_type == "adapter/ready":
-                        try:
-                            await sio.emit(
-                                "editor:adapter_ready",
-                                {"ts_ms": ev.get("ts_ms", 0)},
-                                room="file_editor_cm6",
-                                namespace="/editor",
-                            )
-                            print("[diag_bridge] adapter/ready forwarded", flush=True)
-                        except Exception as exc:
-                            print(f"[diag_bridge] adapter/ready emit FAIL: {exc}", flush=True)
                         continue
 
                     # Forward file watcher events to editor and explorer SIO.
@@ -372,7 +362,7 @@ async def _adapter_ws_loop(sio):
         backoff = min(backoff * 2, 30.0)
 
 
-def start_bridge(sio):
+def start_bridge(sio: object) -> None:
     """Start the background diagnostics bridge task. Safe to call multiple times."""
     global _bridge_task, _bridge_running
 

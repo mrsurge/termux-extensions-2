@@ -13,7 +13,6 @@ import {
 import { te2DumpTextmateScopesForLine, te2GetActiveEditorAndModel, te2AdvanceRuleStackToLine } from './editor_textmate_debug_utils.ts';
 import { applyJumpToLine as applyJumpToLineAt } from './editor_jump_utils.ts';
 import { resolveMonacoThemeId } from './editor_theme_resolver_utils.ts';
-import { emitToHostSocket } from './editor_socket_emit_utils.js';
 import { isAdapterReady } from './editor_workbench_barrier_utils.js';
 import { buildMonacoOptionsFromPrefsState } from './editor_monaco_options_utils.ts';
 import { ensureTe2DiffThemeApplied } from './editor_diff_theme_utils.ts';
@@ -286,7 +285,6 @@ interface MonacoBootWindowLike extends Window {
   const _workerLogOnce: Record<string, boolean> = Object.create(null);
   let currentPath: string | null = null;
   let cachedPrefs: CachedPrefsLike | null = null;
-  let editorSocket: EditorSocketLike | null = null;
   let editorRpcSocket: EditorSocketLike | null = null;
   let wbaRpcSocket: EditorSocketLike | null = null;
   let editorSocketId: string | null = null;
@@ -327,7 +325,8 @@ interface MonacoBootWindowLike extends Window {
   var prefRuntime = createEditorPrefRuntime({
     getCachedPrefs: function() { return cachedPrefs; },
     getLastLocalEditAt: function() { return lastLocalEditAt; },
-    getEditorSocket: function() { return editorSocket; },
+    isRpcConnected: isEditorRpcConnected,
+    rpcCall: editorRpcCall,
     getCurrentPath: function() { return currentPath; },
     getDiffEditor: function() { return diffEditor; },
     disposeGitBaselines: function() { return disposeGitBaselines(); },
@@ -336,13 +335,13 @@ interface MonacoBootWindowLike extends Window {
     noteGitBaselineRequest: function(source, immediate) { return debugRuntime.noteGitBaselineRequest(source, immediate); },
   });
   var draftDiffRequestRuntime = createEditorDraftDiffRequestRuntime({
-    getEditorSocket: function() { return editorSocket; },
+    isRpcConnected: isEditorRpcConnected,
+    rpcCall: editorRpcCall,
     getCurrentPath: function() { return currentPath; },
     getShowDraftDiffs: function() { return prefRuntime.getShowDraftDiffs(); },
   });
   var mirrorRuntime = createEditorMirrorRuntime({
     getEditor: function() { return editor; },
-    getEditorSocket: function() { return editorSocket; },
     getCurrentPath: function() { return currentPath; },
     getModel: function() { return model; },
     getBaseSha256: function() { return baseSha256; },
@@ -363,7 +362,7 @@ interface MonacoBootWindowLike extends Window {
     getDocument: function() { return document; },
     getCurrentPath: function() { return currentPath; },
     getModel: function() { return model; },
-    getEditorSocket: function() { return editorSocket; },
+    notifyEditorRpc: function(method, payload) { return editorRpcNotify(method, payload); },
     wbCurrentGeneration: _wbCurrentGeneration,
     wbIsBarrierOpen: _wbIsBarrierOpen,
     wbQueueSymbols: _wbQueueSymbols,
@@ -974,13 +973,25 @@ interface MonacoBootWindowLike extends Window {
     }
   }
 
-  function emitToHost(eventName: string, payload: Record<string, unknown>): unknown {
-    return emitToHostSocket(editorSocket, eventName, payload);
+  function emitToHost(eventName: string, payload: Record<string, unknown>): boolean {
+    const eventMethodMap: Record<string, string> = {
+      editor_cache_state: EDITOR_RPC_METHODS.cacheStatePublish,
+      editor_draft_state: EDITOR_RPC_METHODS.draftStatePublish,
+      editor_notify: EDITOR_RPC_METHODS.notifyPublish,
+      editor_open_complete: EDITOR_RPC_METHODS.openCompletePublish,
+      editor_ready: EDITOR_RPC_METHODS.readyPublish,
+      'editor:iframe_ready': EDITOR_RPC_METHODS.readyPublish,
+      editor_diagnostics_counts: EDITOR_RPC_METHODS.diagnosticsCountsPublish,
+      editor_save_snapshot_response: EDITOR_RPC_METHODS.saveSnapshotResponse,
+      editor_issues_dump_response: EDITOR_RPC_METHODS.issuesDumpResponse,
+    };
+    const method = eventMethodMap[eventName];
+    if (!method) return false;
+    return editorRpcNotify(method, payload);
   }
 
   function emitModelReady(payload: EditorModelReadyPayloadLike | null | undefined): boolean {
-    const socket = editorSocket;
-    if (!payload || !payload.path || !socket || !socket.connected || typeof socket.emit !== 'function') return false;
+    if (!payload || !payload.path || !isEditorRpcConnected()) return false;
     const generation = typeof payload.generation === 'number' && Number.isFinite(payload.generation)
       ? String(payload.generation)
       : '-';
@@ -988,7 +999,7 @@ interface MonacoBootWindowLike extends Window {
     if (lastModelReadySyncKey === syncKey) return false;
     lastModelReadySyncKey = syncKey;
     try {
-      socket.emit('editor_model_ready', {
+      editorRpcNotify(EDITOR_RPC_METHODS.modelReady, {
         path: String(payload.path),
         languageId: String(payload.languageId || ''),
         generation: payload.generation,
@@ -1199,17 +1210,12 @@ interface MonacoBootWindowLike extends Window {
 
   function connectEditorSocket(): boolean {
     try {
-      if (editorSocket) {
+      if (editorRpcSocket) {
         if (editorRpcSocket) editorRpcTransport.attachSocket(editorRpcSocket);
         if (wbaRpcSocket) editorWbaRpcTransport.attachSocket(wbaRpcSocket);
         return true;
       }
       if (!window.io) return false;
-      editorSocket = window.io('/editor', {
-        path: '/editor_ws/socket.io',
-        transports: ['websocket'],
-        query: { app_id: 'file_editor_cm6' },
-      }) as EditorSocketLike;
       editorRpcSocket = window.io('/rpc/editor', {
         path: '/editor_ws/socket.io',
         transports: ['websocket'],
@@ -1222,7 +1228,7 @@ interface MonacoBootWindowLike extends Window {
       }) as EditorSocketLike;
       editorRpcTransport.attachSocket(editorRpcSocket);
       editorWbaRpcTransport.attachSocket(wbaRpcSocket);
-      registerEditorSocketConnectionHandlers(editorSocket as Parameters<typeof registerEditorSocketConnectionHandlers>[0], buildSocketConnectionDeps({
+      registerEditorSocketConnectionHandlers(editorRpcSocket as Parameters<typeof registerEditorSocketConnectionHandlers>[0], buildSocketConnectionDeps({
         rpcNotifications: editorRpcTransport,
         setEditorSocketId: function(value: string | null) { editorSocketId = value; },
         emitToHost: emitToHost,
@@ -1290,7 +1296,7 @@ interface MonacoBootWindowLike extends Window {
         applyGitBaselines: applyGitBaselines,
       }) as Parameters<typeof registerEditorSocketConnectionHandlers>[1]);
 
-      registerEditorSaveMirrorSocketHandlers(editorSocket as Parameters<typeof registerEditorSaveMirrorSocketHandlers>[0], buildSaveMirrorSocketDeps({
+      registerEditorSaveMirrorSocketHandlers(editorRpcSocket as Parameters<typeof registerEditorSaveMirrorSocketHandlers>[0], buildSaveMirrorSocketDeps({
         rpcNotifications: editorRpcTransport,
         getCurrentPath: function() { return currentPath; },
         getModel: function() { return model; },
@@ -1318,7 +1324,7 @@ interface MonacoBootWindowLike extends Window {
         syncMirrorDebug: _syncMirrorDebug,
       }) as Parameters<typeof registerEditorSaveMirrorSocketHandlers>[1]);
 
-      registerEditorRuntimeSocketHandlers(editorSocket as Parameters<typeof registerEditorRuntimeSocketHandlers>[0], buildRuntimeSocketDeps({
+      registerEditorRuntimeSocketHandlers(editorRpcSocket as Parameters<typeof registerEditorRuntimeSocketHandlers>[0], buildRuntimeSocketDeps({
         rpcNotifications: editorRpcTransport,
         getCurrentPath: function() { return currentPath; },
         getDraftDiffRequestId: function() { return draftDiffRequestRuntime.getDraftDiffRequestId(); },
@@ -1343,8 +1349,8 @@ interface MonacoBootWindowLike extends Window {
         cacheInlineCompletionProviderRegistration: languageBridgeProviders.cacheInlineCompletionProviderRegistration,
       });
 
-      if (editorSocket && typeof editorSocket.on === 'function') {
-        editorSocket.on('connect', () => {
+      if (editorRpcSocket && typeof editorRpcSocket.on === 'function') {
+        editorRpcSocket.on('connect', () => {
           void hydrateWorkbenchProviderSnapshot('editor_socket_connect');
         });
       }
@@ -1371,19 +1377,19 @@ interface MonacoBootWindowLike extends Window {
   function installScrollPublisher(): void {
     installScrollPublisherRuntime({
       getEditor: function() { return editor; },
-      getEditorSocket: function() { return editorSocket; },
       getCurrentPath: function() { return currentPath; },
       getModel: function() { return model; },
       canInstall: function() { return canInstallScrollPublisher(editor, scrollPublisherInstalled); },
       setInstalled: function(value: boolean) { scrollPublisherInstalled = !!value; },
       buildScrollStatePayload: function() { return buildScrollStatePayload(editor, currentPath); },
       updateBreadcrumbCursor: bcUpdateCursor,
+      notifyEditorRpc: function(method, payload) { return editorRpcNotify(method, payload); },
       shouldSendImmediately: shouldSendScrollImmediately,
       scheduleSend: function(callback: () => void, delayMs: number) { return scheduleScrollSend(setTimeout, callback, delayMs); },
     } as Parameters<typeof installScrollPublisherRuntime>[0]);
   }
 
-  // No host↔iframe postMessage bridge: all runtime communication uses /editor Socket.IO.
+  // No host↔frame postMessage bridge: editor runtime communication uses /rpc/editor.
 
   function bcInit() {
     breadcrumbRuntime.init();

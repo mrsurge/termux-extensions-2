@@ -418,13 +418,6 @@ export function registerEditorSocketConnectionHandlers(
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileOpened, handleOpenPayload);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileJumpToLine, (payload) => deps.handleJumpToLine(payload));
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.prefsChanged, handlePrefsChangedPayload);
-  } else {
-    socket.on('editor:ssot', handleSsotSnapshot);
-    socket.on('editor:open', handleOpenPayload);
-    socket.on('editor:jump_to_line', (payload: unknown) => {
-      deps.handleJumpToLine(payload);
-    });
-    socket.on('editor:prefs_changed', handlePrefsChangedPayload);
   }
 
   const handleGitBaselinesPayload = (payload: unknown): void => {
@@ -437,7 +430,5 @@ export function registerEditorSocketConnectionHandlers(
 
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.gitBaselines, handleGitBaselinesPayload);
-  } else {
-    socket.on('editor:git_baselines', handleGitBaselinesPayload);
   }
 }

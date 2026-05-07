@@ -45,6 +45,17 @@ export const EDITOR_RPC_METHODS = {
   hostSave: 'editor.host.save',
   focus: 'editor.focus',
   blur: 'editor.blur',
+  readyPublish: 'editor.ready.publish',
+  cacheStatePublish: 'editor.cacheState.publish',
+  draftStatePublish: 'editor.draftState.publish',
+  notifyPublish: 'editor.notify.publish',
+  openCompletePublish: 'editor.openComplete.publish',
+  diagnosticsCountsPublish: 'editor.diagnosticsCounts.publish',
+  scrollStatePublish: 'editor.scrollState.publish',
+  modelReady: 'editor.modelReady',
+  saveSnapshotResponse: 'editor.save.snapshot.response',
+  issuesDumpResponse: 'editor.issues.dump.response',
+  breadcrumbNavigate: 'editor.breadcrumb.navigate',
 } as const;
 
 export type EditorRpcMethodName = (typeof EDITOR_RPC_METHODS)[keyof typeof EDITOR_RPC_METHODS];
@@ -68,6 +79,7 @@ export const EDITOR_RPC_NOTIFICATIONS = {
   semanticTokensProviderRegistered: 'editor.semanticTokens.providerRegistered',
   issuesDumpRequest: 'editor.issues.dump.request',
   issuesDumpResponse: 'editor.issues.dump.response',
+  saveSnapshotRequest: 'editor.save.snapshot.request',
   issuesCommand: 'editor.issues.command',
   findCommand: 'editor.find.command',
 } as const;

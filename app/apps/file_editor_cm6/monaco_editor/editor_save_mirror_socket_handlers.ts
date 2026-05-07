@@ -219,27 +219,15 @@ export function registerEditorSaveMirrorSocketHandlers(
         handleEditorCacheStateEvent(deps, payload);
       } catch (_) {}
     });
-  } else {
-    socket.on('editor:mirror', (payload: unknown) => {
-      try {
-        handleEditorMirrorEvent(deps, payload);
-      } catch (error) {
-        console.warn('[Monaco] mirror apply failed', error);
-      }
-    });
-
-    socket.on('editor:cache_state', (payload: unknown) => {
-      try {
-        handleEditorCacheStateEvent(deps, payload);
-      } catch (_) {}
-    });
   }
 
-  socket.on('editor:save_snapshot_request', (payload: unknown) => {
-    try {
-      handleEditorSaveSnapshotRequestEvent(deps, payload);
-    } catch (error) {
-      console.warn('[Monaco] save snapshot response failed', error);
-    }
-  });
+  if (deps.rpcNotifications) {
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.saveSnapshotRequest, (payload) => {
+      try {
+        handleEditorSaveSnapshotRequestEvent(deps, payload);
+      } catch (error) {
+        console.warn('[Monaco] save snapshot response failed', error);
+      }
+    });
+  }
 }

@@ -1,11 +1,13 @@
 import { getShowInlineDiffsFlag, getShowDraftDiffsFlag, getUseTrueInlineViewFlag, getAutoSaveFlag } from './editor_pref_flags_utils.ts';
 import { localMirrorDebounceMs, mirrorHotWindowMs, gitBaselineDebounceMs, gitBaselineApplyIdleMs } from './editor_timing_policy_utils.ts';
 import { requestGitBaselinesDebounced } from './editor_git_baseline_request_utils.ts';
+import { EDITOR_RPC_METHODS } from './editor_rpc_contract.ts';
 
 interface EditorPrefRuntimeDeps {
   getCachedPrefs(): unknown;
   getLastLocalEditAt(): number;
-  getEditorSocket(): { connected?: boolean; emit?(eventName: string, payload: Record<string, unknown>): void } | null;
+  isRpcConnected(): boolean;
+  rpcCall(method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
   getCurrentPath(): string | null;
   getDiffEditor(): unknown;
   disposeGitBaselines(): void;
@@ -68,9 +70,8 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
   }
 
   function emitGitBaselineRequestNow(): boolean {
-    const editorSocket = deps.getEditorSocket();
     const currentPath = deps.getCurrentPath();
-    if (!editorSocket || !editorSocket.connected) return false;
+    if (!deps.isRpcConnected()) return false;
     if (!currentPath) return false;
 
     if (!getShowInlineDiffs()) {
@@ -79,9 +80,9 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
       return false;
     }
 
-    if (editorSocket.emit) {
-      editorSocket.emit('editor_git_baselines_request', { path: currentPath });
-    }
+    void deps.rpcCall(EDITOR_RPC_METHODS.gitBaselinesGet, { path: currentPath }, { timeoutMs: 12000 }).catch((error) => {
+      console.warn('[Monaco] editor.gitBaselines.get failed', error);
+    });
     return true;
   }
 

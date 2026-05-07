@@ -822,14 +822,12 @@ async def update_preference(data: dict[str, object] = Body(...)):
             )
         )
         try:
-            from app.apps.file_editor_cm6.monaco_editor.editor_socketio import EDITOR_SIO
+            from app.apps.file_editor_cm6.monaco_editor.editor_ws import editor_runtime_emit_room_event
 
             asyncio.create_task(
-                EDITOR_SIO.emit(
+                editor_runtime_emit_room_event(
                     "editor:prefs_changed",
                     payload,
-                    room="file_editor_cm6",
-                    namespace="/editor",
                 )
             )
         except Exception:

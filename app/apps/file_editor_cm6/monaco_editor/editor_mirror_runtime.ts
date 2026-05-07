@@ -8,11 +8,6 @@ interface EditorMirrorEditorLike {
   onDidChangeModelContent(listener: () => void): EditorMirrorDisposableLike;
 }
 
-interface EditorMirrorSocketLike {
-  connected?: boolean;
-  emit(eventName: string, payload: Record<string, unknown>): void;
-}
-
 interface EditorMirrorModelLike {
   getValue(): string;
   getLanguageId?(): string;
@@ -20,7 +15,6 @@ interface EditorMirrorModelLike {
 
 interface EditorMirrorRuntimeDeps {
   getEditor(): EditorMirrorEditorLike | null;
-  getEditorSocket(): EditorMirrorSocketLike | null;
   getCurrentPath(): string | null;
   getModel(): EditorMirrorModelLike | null;
   getBaseSha256(): string | null;
@@ -56,7 +50,6 @@ export function createEditorMirrorRuntime(deps: EditorMirrorRuntimeDeps) {
   function buildMirrorDeps() {
     return {
       getEditor: deps.getEditor,
-      getEditorSocket: deps.getEditorSocket,
       getCurrentPath: deps.getCurrentPath,
       getModel: deps.getModel,
       getBaseSha256: deps.getBaseSha256,

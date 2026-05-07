@@ -1,7 +1,4 @@
-interface EditorSocketLike {
-  connected?: boolean;
-  emit?(eventName: string, payload: Record<string, unknown>): void;
-}
+import { EDITOR_RPC_METHODS } from './editor_rpc_contract.ts';
 
 interface MonacoEditorLike {
   onDidScrollChange?(listener: () => void): void;
@@ -10,13 +7,13 @@ interface MonacoEditorLike {
 
 interface EditorScrollPublisherRuntimeDeps {
   getEditor(): MonacoEditorLike | null;
-  getEditorSocket(): EditorSocketLike | null;
   getCurrentPath(): string | null;
   getModel(): unknown;
   canInstall(): boolean;
   setInstalled(value: boolean): void;
   buildScrollStatePayload(): Record<string, unknown> | null;
   updateBreadcrumbCursor(cursorLine: number | undefined): void;
+  notifyEditorRpc(method: string, payload: Record<string, unknown>): boolean;
   shouldSendImmediately(now: number, lastSentAt: number, thresholdMs: number): boolean;
   scheduleSend(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
 }
@@ -33,12 +30,10 @@ export function installScrollPublisherRuntime(deps: EditorScrollPublisherRuntime
     const send = () => {
       pendingT = null;
       try {
-        const socket = deps.getEditorSocket();
-        if (!socket || !socket.connected || typeof socket.emit !== 'function') return;
         if (!deps.getCurrentPath() || !deps.getModel()) return;
         const payload = deps.buildScrollStatePayload();
         if (!payload) return;
-        socket.emit('editor_scroll_state', payload);
+        if (!deps.notifyEditorRpc(EDITOR_RPC_METHODS.scrollStatePublish, payload)) return;
         lastSentAt = Date.now();
         deps.updateBreadcrumbCursor(typeof payload.cursorLine === 'number' ? payload.cursorLine : undefined);
       } catch (_) {}

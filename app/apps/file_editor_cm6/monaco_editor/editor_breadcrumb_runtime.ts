@@ -19,17 +19,13 @@ import { createBreadcrumbSymbolItem } from './editor_breadcrumb_create_symbol_it
 import { finalizeBreadcrumbScroll } from './editor_breadcrumb_finalize_scroll_utils.ts';
 import { getBreadcrumbPathClickTarget } from './editor_breadcrumb_path_click_utils.ts';
 import { getBreadcrumbSymbolClickPosition } from './editor_breadcrumb_symbol_click_utils.ts';
-
-interface EditorSocketLike {
-  connected?: boolean;
-  emit?(eventName: string, payload: Record<string, unknown>): void;
-}
+import { EDITOR_RPC_METHODS } from './editor_rpc_contract.ts';
 
 interface EditorBreadcrumbRuntimeDeps {
   getDocument(): Document | null;
   getCurrentPath(): string | null;
   getModel(): unknown;
-  getEditorSocket(): EditorSocketLike | null;
+  notifyEditorRpc(method: string, payload: Record<string, unknown>): boolean;
   wbCurrentGeneration(): number;
   wbIsBarrierOpen(path: string, generation: number): boolean;
   wbQueueSymbols(path: string, generation: number): void;
@@ -180,11 +176,8 @@ export function createEditorBreadcrumbRuntime(
     try {
       const target = getBreadcrumbPathClickTarget(event) as BreadcrumbPathClickTarget;
       if (target.isFile) return;
-      const socket = deps.getEditorSocket();
-      console.log('[BC] path click:', target.absDir, 'socket connected:', !!(socket && socket.connected));
-      if (socket && socket.connected && typeof socket.emit === 'function') {
-        socket.emit('editor_breadcrumb_navigate', { path: target.absDir, open_drawer: true });
-      }
+      const sent = deps.notifyEditorRpc(EDITOR_RPC_METHODS.breadcrumbNavigate, { path: target.absDir, open_drawer: true });
+      console.log('[BC] path click:', target.absDir, 'rpc sent:', sent);
     } catch (_) {}
   }
 
@@ -229,8 +222,6 @@ export function createEditorBreadcrumbRuntime(
     const generation = opts && Number.isFinite(Number(opts.generation))
       ? Number(opts.generation)
       : deps.wbCurrentGeneration();
-    const socket = deps.getEditorSocket();
-    if (!socket || !socket.connected) return;
     if (!deps.wbIsBarrierOpen(absPath, generation)) {
       deps.wbQueueSymbols(absPath, generation);
       return;

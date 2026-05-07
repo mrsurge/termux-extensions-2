@@ -7,10 +7,8 @@ import time
 from pathlib import Path
 from typing import Optional, cast
 
-import socketio
 from urllib.parse import parse_qs
 
-from ..draft_diff_helper import compute_draft_diff
 from ..git_helper import _run_git_optional, is_git_repository
 from ..stores import _history_store, _preferences_store
 from ..ui_ipc.rpc_contract import (
@@ -31,11 +29,16 @@ from .editor_backend_services.contracts import RuntimeMeta
 from .editor_save_backend import (
     handle_editor_mirror,
     handle_editor_save_request,
-    request_editor_save_snapshot,
     resolve_editor_save_snapshot_response,
+)
+from .editor_view_state_backend import (
+    build_editor_draft_diff_payload,
+    build_editor_git_baselines_payload,
+    build_editor_jump_to_line_payload,
 )
 from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_CACHE_STATE,
+    EDITOR_RPC_NOTIFICATION_DIAGNOSTICS_COUNTS,
     EDITOR_RPC_NOTIFICATION_DRAFT_STATE,
     EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
     EDITOR_RPC_NOTIFICATION_FILE_OPENED,
@@ -43,11 +46,13 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
     EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND,
     EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_REQUEST,
+    EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_RESPONSE,
     EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED,
     EDITOR_RPC_NOTIFICATION_NOTIFY,
     EDITOR_RPC_NOTIFICATION_OPEN_COMPLETE,
     EDITOR_RPC_NOTIFICATION_PREFS_CHANGED,
     EDITOR_RPC_NOTIFICATION_READY,
+    EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST,
     EDITOR_RPC_NOTIFICATION_STATE_SSOT,
     EditorRpcNotification,
 )
@@ -261,21 +266,28 @@ def editor_runtime_record_file_activity(project: str, abs_path: str, *, scroll_l
     _history_store.record_file_activity(project, abs_path, scroll_line=scroll_line)
 
 
-class _EditorSnapshotRoomEmitter:
-    async def emit(self, event: str, data: dict[str, object], *, room: str) -> object:
-        from .editor_socketio import EDITOR_SIO
-
-        await EDITOR_SIO.emit(event, data, room=room, namespace="/editor")
-        return None
+def editor_runtime_get_cached_document(project: str, abs_path: str) -> dict[str, object] | None:
+    return _history_store.get_cached_document(project, abs_path)
 
 
 async def editor_runtime_request_save_snapshot(request_id: str, *, timeout_s: float = 3.0) -> dict[str, object]:
-    return await request_editor_save_snapshot(
-        _EditorSnapshotRoomEmitter(),
-        request_id,
-        waiting=_SAVE_SNAPSHOT_WAITING,
-        timeout_s=timeout_s,
-    )
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future[dict[str, object]] = loop.create_future()
+    _SAVE_SNAPSHOT_WAITING[request_id] = fut
+    try:
+        await _emit_editor_rpc_notification_to_room(
+            EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST,
+            {"requestId": request_id, "request_id": request_id, "requestedAtMs": int(time.time() * 1000)},
+            room="file_editor_cm6",
+        )
+        return await asyncio.wait_for(fut, timeout=timeout_s)
+    finally:
+        if _SAVE_SNAPSHOT_WAITING.get(request_id) is fut:
+            _SAVE_SNAPSHOT_WAITING.pop(request_id, None)
+
+
+def editor_runtime_resolve_save_snapshot_response(data: dict[str, object]) -> None:
+    resolve_editor_save_snapshot_response(_SAVE_SNAPSHOT_WAITING, data)
 
 
 async def editor_runtime_request_issues_dump(request_id: str, *, timeout_s: float = 10.0) -> dict[str, object]:
@@ -349,6 +361,7 @@ def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification
         "editor:prefs_changed": EDITOR_RPC_NOTIFICATION_PREFS_CHANGED,
         "editor:notify": EDITOR_RPC_NOTIFICATION_NOTIFY,
         "editor:open_complete": EDITOR_RPC_NOTIFICATION_OPEN_COMPLETE,
+        "editor:diagnostics_counts": EDITOR_RPC_NOTIFICATION_DIAGNOSTICS_COUNTS,
         "editor:ready": EDITOR_RPC_NOTIFICATION_READY,
         "editor:issues_dump_request": EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_REQUEST,
         "editor:issues_cmd": EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND,
@@ -363,6 +376,7 @@ def _ui_ipc_notification_for_legacy_event(event_name: str) -> str | None:
         "editor:draft_state": UI_IPC_RPC_NOTIFICATION_EDITOR_DRAFT_STATE,
         "editor:notify": UI_IPC_RPC_NOTIFICATION_EDITOR_NOTIFY,
         "editor:open_complete": UI_IPC_RPC_NOTIFICATION_EDITOR_OPEN_COMPLETE,
+        "editor:diagnostics_counts": UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS,
         "editor:ready": UI_IPC_RPC_NOTIFICATION_EDITOR_READY,
     }
     return mapping.get(event_name)
@@ -378,15 +392,118 @@ async def _emit_ui_ipc_editor_notification(method: str, payload: dict[str, objec
 
 
 async def editor_runtime_emit_room_event(event_name: str, payload: dict[str, object]) -> None:
-    from .editor_socketio import EDITOR_SIO
-
-    await EDITOR_SIO.emit(event_name, payload, room="file_editor_cm6", namespace="/editor")
     rpc_notification = _rpc_notification_for_legacy_event(event_name)
     if rpc_notification:
         await _emit_editor_rpc_notification_to_room(rpc_notification, payload, room="file_editor_cm6")
     ui_ipc_notification = _ui_ipc_notification_for_legacy_event(event_name)
     if ui_ipc_notification:
         await _emit_ui_ipc_editor_notification(ui_ipc_notification, payload)
+
+
+async def editor_runtime_handle_scroll_state(source_client: str, data: dict[str, object]) -> None:
+    payload = dict(data)
+    project = _active_project()
+    if project:
+        try:
+            path = _normalize_abs_path(payload.get("path") or "")
+        except Exception:
+            path = None
+        line = payload.get("line")
+        if isinstance(line, str) and line.isdigit():
+            line = int(line)
+        if path and _is_under_project(project, path) and isinstance(line, (int, float)) and line and line > 0:
+            try:
+                _history_store.update_file_scroll_line(project, path, float(line))
+            except Exception:
+                pass
+
+    payload["source_client"] = payload.get("source_client") or source_client
+    await _emit_ui_ipc_editor_notification(
+        UI_IPC_RPC_NOTIFICATION_EDITOR_SCROLL_STATE,
+        payload,
+    )
+
+
+async def editor_runtime_handle_model_ready(source_client: str, data: dict[str, object]) -> None:
+    path = _normalize_abs_path(str(data.get("path") or "")) or ""
+    if not path:
+        return
+    generation = _coerce_generation(data.get("generation"))
+    generation_key = str(generation) if generation is not None else "-"
+    sync_key = path + "::" + generation_key
+    if _MODEL_READY_LAST_BY_SID.get(source_client) == sync_key:
+        return
+    _MODEL_READY_LAST_BY_SID[source_client] = sync_key
+
+    try:
+        from ..workbench_adapter_shell_manager import adapter_rpc
+
+        await adapter_rpc("te2.resync", timeout=5.0)
+        _wb_log.info(
+            "[model_ready] sid=%s path=%s generation=%s source=%s",
+            source_client,
+            path,
+            generation_key,
+            str(data.get("source") or ""),
+        )
+    except Exception as exc:
+        _wb_log.warning("[model_ready] resync failed sid=%s path=%s err=%s", source_client, path, exc)
+
+
+async def editor_runtime_handle_issues_dump_response(source_client: str, data: dict[str, object]) -> None:
+    del source_client
+    request_id = data.get("requestId") or data.get("request_id")
+    if not isinstance(request_id, str) or not request_id:
+        return
+
+    waiting = _ISSUES_DUMP_WAITING.pop(request_id, None)
+    if not waiting:
+        return
+
+    response_payload: dict[str, object] = {"requestId": request_id, "dump": data.get("dump")}
+    if isinstance(waiting, asyncio.Future):
+        if not waiting.done():
+            waiting.set_result(response_payload)
+        return
+
+    await _emit_editor_rpc_notification_to_room(
+        EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_RESPONSE,
+        response_payload,
+        room=waiting,
+    )
+
+
+async def editor_runtime_handle_breadcrumb_navigate(source_client: str, data: dict[str, object]) -> None:
+    del source_client
+    abs_path_obj = data.get("path", "")
+    abs_path = abs_path_obj if isinstance(abs_path_obj, str) else ""
+    open_drawer = data.get("open_drawer", False)
+    if not abs_path:
+        return
+
+    project = _active_project()
+    rel = abs_path
+    is_external = True
+    if project and abs_path.startswith(project):
+        rel = abs_path[len(project):]
+        if rel.startswith("/"):
+            rel = rel[1:]
+        if not rel:
+            rel = "."
+        is_external = False
+
+    try:
+        from ..explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
+
+        _wb_log.info("[bc-navigate] rel=%s abs=%s external=%s drawer=%s", rel, abs_path, is_external, open_drawer)
+        await emit_project_explorer_rpc_notification(
+            project,
+            "explorer.navigate",
+            {"rel": rel, "abs_path": abs_path, "is_external": is_external, "open_drawer": open_drawer},
+        )
+        _wb_log.info("[bc-navigate] emit OK")
+    except Exception as exc:
+        _wb_log.error("[bc-navigate] emit FAILED: %s", exc)
 
 
 async def _emit_editor_open_to_default_room(payload: EditorOpenPayload) -> None:
@@ -490,20 +607,6 @@ def _read_disk_text(abs_path: str) -> str:
         return content_bytes.decode("utf-8", errors="replace")
     except Exception:
         return ""
-
-
-async def _request_editor_save_snapshot(
-    ns: socketio.AsyncNamespace,
-    request_id: str,
-    *,
-    timeout_s: float = 3.0,
-) -> dict[str, object]:
-    return await request_editor_save_snapshot(
-        ns,
-        request_id,
-        waiting=_SAVE_SNAPSHOT_WAITING,
-        timeout_s=timeout_s,
-    )
 
 
 async def handle_external_file_change(changed_abs_path: str) -> bool:
@@ -687,15 +790,11 @@ async def handle_tracked_edit(edit_result: dict[str, object]) -> None:
     except Exception:
         return
 
-    from .editor_socketio import EDITOR_SIO
-
     if active_norm == changed_norm:
         # Same file — just jump
-        await EDITOR_SIO.emit(
+        await editor_runtime_emit_room_event(
             "editor:jump_to_line",
             {"line": line, "column": 1, "scroll_to_top": False, "source_client": "change_ledger"},
-            room="file_editor_cm6",
-            namespace="/editor",
         )
         print(f"[change_ledger] jump to {rel_path}:{line}", file=sys.stderr)
     else:
@@ -758,498 +857,3 @@ def _git_head_text(project_root: str, abs_path: str) -> Optional[str]:
         return completed.stdout.decode("utf-8", errors="replace")
     except Exception:
         return completed.stdout.decode(errors="replace")
-
-
-class EditorSocketIONamespace(socketio.AsyncNamespace):
-    """Dedicated editor Socket.IO namespace.
-
-    Contract:
-    - SSOT snapshot on connect (`editor:ssot`).
-    - `editor:open_request` -> server validates + broadcasts `editor:open`.
-    - `editor:mirror` -> server persists draft cache + broadcasts to other clients.
-    """
-
-    async def on_connect(self, sid, environ, auth):
-        await self.enter_room(sid, "file_editor_cm6")
-        role = _role_from_environ(environ)
-        snapshot = editor_runtime_build_connect_snapshot(role=role)
-        project = snapshot.get("project")
-        current_path = snapshot.get("currentPath")
-
-        await self.emit("editor:ssot", snapshot, room=sid)
-
-        # Broadcast explorer:activeFile so explorer highlights the open file.
-        if current_path and project:
-            await _broadcast_active_file_update(str(project), str(current_path))
-
-        # Diagnostics bridge: ensure the background adapter→editor bridge is running.
-        try:
-            from ..diagnostics_bridge import (
-                start_bridge,
-            )
-            from .editor_socketio import EDITOR_SIO
-
-            # Ensure the bridge background task is running.
-            start_bridge(EDITOR_SIO)
-        except Exception:
-            pass
-
-    async def on_disconnect(self, sid, reason=None):
-        try:
-            await self.leave_room(sid, "file_editor_cm6")
-        except Exception:
-            pass
-        _MODEL_READY_LAST_BY_SID.pop(sid, None)
-
-    async def on_editor_cache_state(self, sid, data):
-        payload = data or {}
-        if not isinstance(payload, dict):
-            return
-        payload = dict(payload)
-        payload["source_client"] = sid
-        await editor_runtime_emit_room_event("editor:cache_state", payload)
-
-    async def on_editor_scroll_state(self, sid, data):
-        payload = data or {}
-        if not isinstance(payload, dict):
-            return
-
-        project = _active_project()
-        if project:
-            try:
-                path = _normalize_abs_path(payload.get("path") or "")
-            except Exception:
-                path = None
-            line = payload.get("line")
-            if isinstance(line, str) and line.isdigit():
-                line = int(line)
-            if path and _is_under_project(project, path) and isinstance(line, (int, float)) and line and line > 0:
-                try:
-                    _history_store.update_file_scroll_line(project, path, float(line))
-                except Exception:
-                    pass
-
-        payload = dict(payload)
-        payload["source_client"] = sid
-        await self.emit("editor:scroll_state", payload, room="file_editor_cm6")
-        await _emit_ui_ipc_editor_notification(
-            UI_IPC_RPC_NOTIFICATION_EDITOR_SCROLL_STATE,
-            payload,
-        )
-
-    async def on_editor_draft_state(self, sid, data):
-        payload = data or {}
-        if not isinstance(payload, dict):
-            return
-        payload = dict(payload)
-        payload["source_client"] = sid
-        await editor_runtime_emit_room_event("editor:draft_state", payload)
-
-    async def on_editor_notify(self, sid, data):
-        payload = data or {}
-        if not isinstance(payload, dict):
-            return
-        payload = dict(payload)
-        payload["source_client"] = sid
-        await editor_runtime_emit_room_event("editor:notify", payload)
-
-    async def on_editor_open_complete(self, sid, data):
-        payload = data or {}
-        if not isinstance(payload, dict):
-            return
-        payload = dict(payload)
-        payload["source_client"] = sid
-        await editor_runtime_emit_room_event("editor:open_complete", payload)
-
-    async def on_editor_issues_cmd(self, sid, data):
-        payload = data or {}
-        if not isinstance(payload, dict):
-            return
-        payload = dict(payload)
-        payload["source_client"] = sid
-        await editor_runtime_emit_room_event("editor:issues_cmd", payload)
-
-    async def on_editor_find_cmd(self, sid, data):
-        payload = data or {}
-        if not isinstance(payload, dict):
-            return
-        payload = dict(payload)
-        payload["source_client"] = sid
-        await editor_runtime_emit_room_event("editor:find_cmd", payload)
-
-    async def on_editor_ready(self, sid, data):
-        payload = data or {}
-        if not isinstance(payload, dict):
-            payload = {}
-        payload = dict(payload)
-        payload["source_client"] = sid
-        await editor_runtime_emit_room_event("editor:ready", payload)
-
-    async def on_editor_model_ready(self, sid, data):
-        payload = data if isinstance(data, dict) else {}
-        path = _normalize_abs_path(str(payload.get("path") or "")) or ""
-        if not path:
-            return
-        generation = _coerce_generation(payload.get("generation"))
-        generation_key = str(generation) if generation is not None else "-"
-        sync_key = path + "::" + generation_key
-        if _MODEL_READY_LAST_BY_SID.get(sid) == sync_key:
-            return
-        _MODEL_READY_LAST_BY_SID[sid] = sync_key
-
-        try:
-            from ..workbench_adapter_shell_manager import adapter_rpc
-
-            await adapter_rpc("te2.resync", timeout=5.0)
-            _wb_log.info(
-                "[model_ready] sid=%s path=%s generation=%s source=%s",
-                sid,
-                path,
-                generation_key,
-                str(payload.get("source") or ""),
-            )
-        except Exception as exc:
-            _wb_log.warning("[model_ready] resync failed sid=%s path=%s err=%s", sid, path, exc)
-
-    async def on_editor_diagnostics_counts(self, sid, data):
-        payload = data if isinstance(data, dict) else {}
-        payload = dict(payload)
-        payload["source_client"] = sid
-        await self.emit("editor:diagnostics_counts", payload, room="file_editor_cm6")
-        await _emit_ui_ipc_editor_notification(
-            UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS,
-            payload,
-        )
-
-    async def on_editor_issues_dump_request(self, sid, data):
-        payload = data or {}
-        if not isinstance(payload, dict):
-            payload = {}
-        request_id = payload.get("requestId") or payload.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            return
-        _ISSUES_DUMP_WAITING[request_id] = sid
-        # Attach a timestamp so stale requests can be ignored client-side if desired.
-        await editor_runtime_emit_room_event(
-            "editor:issues_dump_request",
-            {"requestId": request_id, "requestedAtMs": int(time.time() * 1000)},
-        )
-
-    async def on_editor_issues_dump_response(self, sid, data):
-        payload = data or {}
-        if not isinstance(payload, dict):
-            return
-        request_id = payload.get("requestId") or payload.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            return
-
-        waiting = _ISSUES_DUMP_WAITING.pop(request_id, None)
-        if not waiting:
-            return
-
-        response_payload = {"requestId": request_id, "dump": payload.get("dump")}
-        if isinstance(waiting, asyncio.Future):
-            if not waiting.done():
-                waiting.set_result(response_payload)
-            return
-
-        try:
-            await self.emit(
-                "editor:issues_dump_response",
-                response_payload,
-                room=waiting,
-            )
-        except Exception:
-            return
-
-    async def on_editor_save_snapshot_response(self, sid, data):
-        resolve_editor_save_snapshot_response(_SAVE_SNAPSHOT_WAITING, data)
-
-    async def on_editor_open_request(self, sid, data):
-        print(f"[editor_ws] on_editor_open_request: sid={sid} data={data}", flush=True)
-        payload_in = data or {}
-        if not isinstance(payload_in, dict):
-            payload_in = {}
-
-        request_id = payload_in.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            request_id = f"diag_{int(time.time() * 1000)}_{str(sid)[-6:]}"
-        try:
-            await emit_editor_open_from_backend(
-                payload_in,
-                source_client=str(sid),
-                request_id=request_id,
-                active_project=_active_project,
-                normalize_abs_path=_normalize_abs_path,
-                is_under_project=_is_under_project,
-                read_file_payload=_read_file_payload,
-                update_session_state=_history_store.update_session_state,
-                set_last_file=_history_store.set_last_file,
-                emit_editor_open=lambda payload: editor_runtime_emit_room_event("editor:open", payload),
-                broadcast_active_file_update=_broadcast_active_file_update,
-                emit_host_active_file_changed=_emit_host_active_file_changed,
-            )
-        except ValueError as exc:
-            await self.emit("editor:error", {"error": str(exc)}, room=sid)
-            return
-
-        # Diagnostics bridge: send cached diagnostics for the new file.
-        # NOTE: do not replay cached diagnostics on open. Diagnostics should be driven
-        # by live workbench adapter events for the active document.
-
-    async def on_editor_jump_to_line_request(self, sid, data):
-        payload_in = data or {}
-        if not isinstance(payload_in, dict):
-            payload_in = {}
-
-        line = payload_in.get("line")
-        column = payload_in.get("column")
-        scroll_y = payload_in.get("scroll_y") or payload_in.get("scrollY")
-        focus = payload_in.get("focus")
-        scroll_to_top = payload_in.get("scroll_to_top") or payload_in.get("scrollToTop")
-
-        if isinstance(line, str) and line.isdigit():
-            line = int(line)
-        if isinstance(column, str) and column.isdigit():
-            column = int(column)
-        if not isinstance(line, int):
-            await self.emit("editor:error", {"error": "missing_line"}, room=sid)
-            return
-        if line < 1:
-            line = 1
-        if not isinstance(column, int) or column < 1:
-            column = 1
-        if scroll_y is not None and not isinstance(scroll_y, str):
-            scroll_y = None
-        if focus is not None and not isinstance(focus, bool):
-            focus = None
-        if scroll_to_top is not None and not isinstance(scroll_to_top, bool):
-            scroll_to_top = None
-
-        try:
-            project = _active_project()
-            path = _normalize_abs_path(str(payload_in.get("path") or ""))
-            if project and path and _is_under_project(project, path):
-                _history_store.record_file_activity(project, path, scroll_line=float(line))
-        except Exception:
-            pass
-
-        # Broadcast to all connected clients (single-doc model).
-        await editor_runtime_emit_room_event(
-            "editor:jump_to_line",
-            {
-                "line": line,
-                "column": column,
-                "scroll_y": scroll_y,
-                "focus": focus,
-                "scroll_to_top": scroll_to_top,
-                "source_client": sid,
-            },
-        )
-
-    async def on_editor_git_baselines_request(self, sid, data):
-        """Return HEAD snapshot + disk snapshot for pinned Git diff baselines.
-
-        This does NOT consider the current draft buffer. The contract is:
-          - HEAD snapshot (original)
-          - Disk snapshot (modified baseline)
-        The client may edit a separate live model while keeping the diff baselines pinned.
-        """
-
-        project = _active_project()
-        if not project:
-            await self.emit("editor:error", {"error": "no_active_project"}, room=sid)
-            return
-
-        path = _normalize_abs_path((data or {}).get("path", ""))
-        if not path:
-            await self.emit("editor:error", {"error": "missing_path"}, room=sid)
-            return
-        if not _is_under_project(project, path):
-            await self.emit("editor:error", {"error": "outside_project"}, room=sid)
-            return
-
-        disk = _read_disk_text(path)
-        disk_sha = hashlib.sha256(disk.encode("utf-8")).hexdigest()
-
-        head = _git_head_text(project, path)
-        head_sha = None
-        if isinstance(head, str):
-            head_sha = hashlib.sha256(head.encode("utf-8")).hexdigest()
-
-        payload: dict[str, object] = {
-            "path": path,
-            "tracked": bool(head is not None),
-            "base_ref": "HEAD",
-            "disk_content": disk,
-            "disk_sha256": disk_sha,
-            "head_content": head,
-            "head_sha256": head_sha,
-            "source_client": sid,
-        }
-        await editor_runtime_emit_room_event("editor:git_baselines", payload)
-
-    async def on_editor_draft_diff_request(self, sid, data):
-        """Return draft diff hunks for the currently cached draft (disk ↔ draft buffer).
-
-        This is separate from Git diffs (HEAD ↔ disk baseline) and is intended to be rendered
-        as custom decorations on the client.
-
-        Contract:
-          - If there is no draft cached for the file, return an empty hunks list.
-          - Never throws; failures return empty hunks + error string.
-        """
-
-        start = time.time()
-        payload_in = data or {}
-        request_id = None
-        if isinstance(payload_in, dict):
-            request_id = payload_in.get("requestId") or payload_in.get("request_id")
-            if not isinstance(request_id, str) or not request_id:
-                request_id = None
-
-        project = _active_project()
-        if not project:
-            await self.emit("editor:error", {"error": "no_active_project"}, room=sid)
-            return
-
-        path = _normalize_abs_path(payload_in.get("path", "") if isinstance(payload_in, dict) else "")
-        if not path:
-            await self.emit("editor:error", {"error": "missing_path"}, room=sid)
-            return
-        if not _is_under_project(project, path):
-            await self.emit("editor:error", {"error": "outside_project"}, room=sid)
-            return
-
-        try:
-            disk_content = _read_disk_text(path)
-            disk_sha256 = hashlib.sha256(disk_content.encode("utf-8")).hexdigest()
-
-            cached = _history_store.get_cached_document(project, path)
-            if not cached or not cached.get("unsaved"):
-                await self.emit(
-                    "editor:draft_diff",
-                    {
-                        "path": path,
-                        "hunks": [],
-                        "summary": {"added": 0, "deleted": 0, "tracked": False},
-                        "disk_sha256": disk_sha256,
-                        "content_sha256": cached.get("content_sha256") if cached else None,
-                        "requestId": request_id,
-                        "ms": int((time.time() - start) * 1000),
-                        "source_client": sid,
-                    },
-                    room=sid,
-                )
-                return
-
-            draft_content_obj = cached.get("content", "")
-            draft_content = draft_content_obj if isinstance(draft_content_obj, str) else ""
-            diff_data = compute_draft_diff(path, draft_content, disk_content)
-            hunks = diff_data.get("hunks", []) if isinstance(diff_data, dict) else []
-            summary = diff_data.get("summary", {"added": 0, "deleted": 0, "tracked": False}) if isinstance(diff_data, dict) else {"added": 0, "deleted": 0, "tracked": False}
-            error = diff_data.get("error") if isinstance(diff_data, dict) else None
-
-            await self.emit(
-                "editor:draft_diff",
-                {
-                    "path": path,
-                    "hunks": hunks,
-                    "summary": summary,
-                    "error": error,
-                    "disk_sha256": disk_sha256,
-                    "content_sha256": cached.get("content_sha256"),
-                    "requestId": request_id,
-                    "ms": int((time.time() - start) * 1000),
-                    "source_client": sid,
-                },
-                room=sid,
-            )
-        except Exception as exc:
-            await self.emit(
-                "editor:draft_diff",
-                {
-                    "path": path,
-                    "hunks": [],
-                    "summary": {"added": 0, "deleted": 0, "tracked": False},
-                    "error": str(exc),
-                    "requestId": request_id,
-                    "ms": int((time.time() - start) * 1000),
-                    "source_client": sid,
-                },
-                room=sid,
-            )
-
-    async def on_editor_prefs_changed(self, sid, data):
-        """Worker-hosted preference updates -> broadcast to editor clients.
-
-        Matches the explorer pattern: clients emit underscore events; server re-broadcasts
-        colon events to all connected editor clients.
-        """
-
-        payload = data or {}
-        if not isinstance(payload, dict):
-            return
-        payload = dict(payload)
-        payload["source_client"] = payload.get("source_client") or sid
-        await editor_runtime_emit_room_event("editor:prefs_changed", payload)
-
-    async def on_editor_mirror(self, sid, data):
-        await handle_editor_mirror(
-            sid,
-            data,
-            active_project=_active_project,
-            normalize_abs_path=_normalize_abs_path,
-            is_under_project=_is_under_project,
-            runtime_meta=_runtime_meta,
-            emit_to_room=editor_runtime_emit_room_event,
-            notify_draft_state_changed=_notify_draft_state_changed_safe,
-        )
-
-    async def on_editor_save_request(self, sid, data):
-        return await handle_editor_save_request(
-            sid,
-            data,
-            active_project=_active_project,
-            normalize_abs_path=_normalize_abs_path,
-            is_under_project=_is_under_project,
-            request_snapshot=lambda request_id: _request_editor_save_snapshot(self, request_id),
-            emit_to_room=editor_runtime_emit_room_event,
-            notify_draft_state_changed=_notify_draft_state_changed_safe,
-            record_save_sha=lambda abs_path, sha256: _LAST_SAVE_SHA.__setitem__(abs_path, sha256),
-        )
-
-    async def on_editor_breadcrumb_navigate(self, sid, data):
-        """Breadcrumb directory click → relay to explorer socket + open drawer."""
-        payload = data if isinstance(data, dict) else {}
-        abs_path = payload.get("path", "")
-        open_drawer = payload.get("open_drawer", False)
-        if not abs_path:
-            return
-
-        project = _active_project()
-        rel = abs_path
-        is_external = True
-        if project and abs_path.startswith(project):
-            rel = abs_path[len(project):]
-            if rel.startswith("/"):
-                rel = rel[1:]
-            if not rel:
-                rel = "."
-            is_external = False
-
-        # Relay to the Explorer RPC lane (cross-backend, same worker process)
-        try:
-            from ..explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
-            _wb_log.info("[bc-navigate] rel=%s abs=%s external=%s drawer=%s", rel, abs_path, is_external, open_drawer)
-            await emit_project_explorer_rpc_notification(
-                project,
-                "explorer.navigate",
-                {"rel": rel, "abs_path": abs_path, "is_external": is_external, "open_drawer": open_drawer},
-            )
-            _wb_log.info("[bc-navigate] emit OK")
-        except Exception as exc:
-            _wb_log.error("[bc-navigate] emit FAILED: %s", exc)
-
-    # NOTE: on_editor_readiness_check removed — adapter state is now pushed
-            # via editor RPC adapter-state from workbench_adapter_shell_manager._broadcast_adapter_state().

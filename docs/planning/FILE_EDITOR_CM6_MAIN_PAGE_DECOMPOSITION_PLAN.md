@@ -48,6 +48,7 @@ Use the broader `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for target architecture
 - Main-page entry state localization: remaining mutable host state and the UI IPC connection setup now live inside `initFileEditor(...)` instead of at module scope. This left the root entry with imports, `_isMobileLayout()`, and the exported entry function, making the TypeScript conversion mechanical.
 - Host entry TypeScript conversion: `main.js` was renamed to `main.ts`, `build.mjs` now uses `main.ts` as the host bundle source entry, `tsconfig.json` includes the entry directly, and the served asset remains `static/dist/host.js`.
 - Host entry finish pass: `main.ts` remains a procedural composition root, but the final cleanup removed write-only local state, dead wrapper functions, and stale comments left over from the conversion. Future extraction should be driven by real ownership boundaries instead of line-count reduction alone.
+- Editor RPC namespace cleanup: the legacy `/editor` Socket.IO namespace is retired from the active editor server, and `/rpc/editor` is now the editor runtime/backend lane. Jump-to-line, git-baseline, draft-diff, mirror/save, save-snapshot, cache/draft/scroll state, ready/open-complete/notify, diagnostics-count, model-ready, issues, find, and breadcrumb navigation traffic now uses typed `/rpc/editor` methods/notifications or backend-owned host hooks that fan out through `/rpc/editor`.
 
 ### Current Sidebar Boundary
 
@@ -101,13 +102,13 @@ This cleanup was ranked ahead of ordinary `main.js` shrinkage, template cleanup,
 
 ### Immediate Next Candidates
 
-1. Follow the ordered queue in `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`: finish `/editor` -> `/rpc/editor`, move Android native UI integration onto UI IPC RPC, create the dedicated sidebar IPC/RPC contract, then collapse the physical app transports behind one gateway path.
+1. Follow the ordered queue in `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`: with `/editor` retired in favor of `/rpc/editor`, move Android native UI integration onto UI IPC RPC, create the dedicated sidebar IPC/RPC contract, then collapse the physical app transports behind one gateway path.
 2. Live-validate the cleaned ownership model after rebuild/version sync, using the exact generated `main_page` TE2 console worker and the relevant app-worker/WBA framework-shell logs.
 3. With `src/host` drained of live frontend files, re-review `main.ts` as the remaining host assembly surface and pick the next grouped runtime extraction from inline host behavior rather than creating another broad source bucket.
 4. Convert remaining host actions that still import Explorer RPC for project/settings/watcher flows into explicit backend-owned hook surfaces only after classifying whether the producing surface is host or Explorer.
 5. Continue shrinking `main.ts` only with grouped host runtimes that preserve source ownership and do not pull all of `src/host/` into strict checking at once.
 6. Continue re-reviewing `template.html` after the sidebar prune and remove remaining avoidable behavior policy from markup/CSS while preserving shortcut DOM compatibility.
-7. Use the frozen Socket.IO topology constants when touching frontend socket clients, but do not begin physical gateway consolidation until the `/editor`, Android UI RPC, and sidebar IPC/RPC contract cleanup items are coherent.
+7. Use the frozen Socket.IO topology constants when touching frontend socket clients, but do not begin physical gateway consolidation until the Android UI RPC and sidebar IPC/RPC contract cleanup items are coherent.
 8. Start the backend decomposition only after choosing a small route/helper family that does not move framework-owned `services/` shims or worker subapp mounts.
 9. When debugging live frontend behavior through TE2 console, target the exact generated worker id under the `main_page` label rather than assuming a fixed worker id.
 

@@ -25,6 +25,17 @@ EDITOR_RPC_METHOD_MENTION_REQUEST: Final = "editor.mention.request"
 EDITOR_RPC_METHOD_HOST_SAVE: Final = "editor.host.save"
 EDITOR_RPC_METHOD_FOCUS: Final = "editor.focus"
 EDITOR_RPC_METHOD_BLUR: Final = "editor.blur"
+EDITOR_RPC_METHOD_READY_PUBLISH: Final = "editor.ready.publish"
+EDITOR_RPC_METHOD_CACHE_STATE_PUBLISH: Final = "editor.cacheState.publish"
+EDITOR_RPC_METHOD_DRAFT_STATE_PUBLISH: Final = "editor.draftState.publish"
+EDITOR_RPC_METHOD_NOTIFY_PUBLISH: Final = "editor.notify.publish"
+EDITOR_RPC_METHOD_OPEN_COMPLETE_PUBLISH: Final = "editor.openComplete.publish"
+EDITOR_RPC_METHOD_DIAGNOSTICS_COUNTS_PUBLISH: Final = "editor.diagnosticsCounts.publish"
+EDITOR_RPC_METHOD_SCROLL_STATE_PUBLISH: Final = "editor.scrollState.publish"
+EDITOR_RPC_METHOD_MODEL_READY: Final = "editor.modelReady"
+EDITOR_RPC_METHOD_SAVE_SNAPSHOT_RESPONSE: Final = "editor.save.snapshot.response"
+EDITOR_RPC_METHOD_ISSUES_DUMP_RESPONSE: Final = "editor.issues.dump.response"
+EDITOR_RPC_METHOD_BREADCRUMB_NAVIGATE: Final = "editor.breadcrumb.navigate"
 
 EditorRpcMethod = Literal[
     "editor.open",
@@ -37,6 +48,17 @@ EditorRpcMethod = Literal[
     "editor.host.save",
     "editor.focus",
     "editor.blur",
+    "editor.ready.publish",
+    "editor.cacheState.publish",
+    "editor.draftState.publish",
+    "editor.notify.publish",
+    "editor.openComplete.publish",
+    "editor.diagnosticsCounts.publish",
+    "editor.scrollState.publish",
+    "editor.modelReady",
+    "editor.save.snapshot.response",
+    "editor.issues.dump.response",
+    "editor.breadcrumb.navigate",
 ]
 
 EDITOR_RPC_NOTIFICATION_STATE_SSOT: Final = "editor.state.ssot"
@@ -57,6 +79,7 @@ EDITOR_RPC_NOTIFICATION_ADAPTER_STATE: Final = "editor.adapter.state"
 EDITOR_RPC_NOTIFICATION_SEMANTIC_TOKENS_PROVIDER_REGISTERED: Final = "editor.semanticTokens.providerRegistered"
 EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_REQUEST: Final = "editor.issues.dump.request"
 EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_RESPONSE: Final = "editor.issues.dump.response"
+EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST: Final = "editor.save.snapshot.request"
 EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND: Final = "editor.issues.command"
 EDITOR_RPC_NOTIFICATION_FIND_COMMAND: Final = "editor.find.command"
 
@@ -79,6 +102,7 @@ EditorRpcNotification = Literal[
     "editor.semanticTokens.providerRegistered",
     "editor.issues.dump.request",
     "editor.issues.dump.response",
+    "editor.save.snapshot.request",
     "editor.issues.command",
     "editor.find.command",
 ]

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Protocol, TypedDict
+from typing import TypedDict
 
 JsonMap = dict[str, object]
 ReadonlyJsonMap = Mapping[str, object]
@@ -56,10 +56,6 @@ class SnapshotResponse(TypedDict, total=False):
     path: str
     content: str
     base_sha256: str
-
-
-class SnapshotEmitter(Protocol):
-    async def emit(self, event: str, data: JsonMap, *, room: str) -> object: ...
 
 
 EmitToRoomFn = Callable[[str, JsonMap], Awaitable[None]]

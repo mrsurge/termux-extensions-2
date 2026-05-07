@@ -29,7 +29,7 @@ export function registerEditorRuntimeSocketHandlers(
   socket: EditorSocketLike,
   deps: EditorRuntimeSocketHandlerDeps,
 ): void {
-  socket.on('editor:draft_diff', (payload: unknown) => {
+  const handleDraftDiffPayload = (payload: unknown): void => {
     try {
       handleDraftDiffEvent(
         payload,
@@ -40,7 +40,11 @@ export function registerEditorRuntimeSocketHandlers(
     } catch (error) {
       console.warn('[DraftDiff] handler failed', error);
     }
-  });
+  };
+
+  if (deps.rpcNotifications) {
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.draftDiff, handleDraftDiffPayload);
+  }
 
   const handleIssuesDumpRequestPayload = (payload: unknown): void => {
     try {
@@ -68,9 +72,5 @@ export function registerEditorRuntimeSocketHandlers(
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.issuesDumpRequest, handleIssuesDumpRequestPayload);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.issuesCommand, handleIssuesCommandPayload);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.findCommand, handleFindCommandPayload);
-  } else {
-    socket.on('editor:issues_dump_request', handleIssuesDumpRequestPayload);
-    socket.on('editor:issues_cmd', handleIssuesCommandPayload);
-    socket.on('editor:find_cmd', handleFindCommandPayload);
   }
 }

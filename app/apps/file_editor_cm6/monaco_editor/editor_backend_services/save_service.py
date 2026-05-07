@@ -16,7 +16,7 @@ from ...core_write import BaseMismatchError
 from ...diff_helper import invalidate_diff_cache
 from ...explorer.services.file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
 from ...stores import get_history_store
-from .contracts import EmitToRoomFn, JsonMap, RuntimeMeta, SnapshotEmitter
+from .contracts import EmitToRoomFn, JsonMap, RuntimeMeta
 from .payload_utils import as_payload_dict, get_opt_str, get_str
 
 
@@ -83,28 +83,6 @@ def _typed_write_full(
         if isinstance(raw_key, str):
             out[raw_key] = raw_value
     return out
-
-
-async def request_editor_save_snapshot(
-    ns: SnapshotEmitter,
-    request_id: str,
-    *,
-    waiting: dict[str, asyncio.Future[JsonMap]],
-    timeout_s: float = 3.0,
-) -> JsonMap:
-    loop = asyncio.get_running_loop()
-    future: asyncio.Future[JsonMap] = loop.create_future()
-    waiting[request_id] = future
-    try:
-        await ns.emit(
-            "editor:save_snapshot_request",
-            {"requestId": request_id, "requestedAtMs": int(time.time() * 1000)},
-            room="file_editor_cm6",
-        )
-        payload = await asyncio.wait_for(future, timeout=timeout_s)
-        return payload
-    finally:
-        waiting.pop(request_id, None)
 
 
 def resolve_editor_save_snapshot_response(
