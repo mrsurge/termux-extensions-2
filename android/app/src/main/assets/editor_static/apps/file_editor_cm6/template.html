@@ -3,7 +3,7 @@
 <!DOCTYPE html>
 <meta charset="utf-8" />
 <title>Code TE2</title>
-<link rel="stylesheet" href="/apps/file_editor_cm6/static/js/explorer.css" />
+<link rel="stylesheet" href="/apps/file_editor_cm6/static/dist/explorer.css" />
 <link rel="stylesheet" href="/static/vendor/codicons/codicon.css" />
 <style>
   :root {
@@ -32,7 +32,15 @@
     --chrome-base-font: calc(14px * var(--chrome-font-scale));
   }
 
-  .fe-root { display: flex; flex-direction: column; height: 100%; background:var(--bg); color:var(--fg); }
+  .fe-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 100%;
+    min-width: 0;
+    background:var(--bg);
+    color:var(--fg);
+  }
 
   body.keyboard-locked {
     overflow: hidden;
@@ -57,6 +65,8 @@
     grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
     grid-template-rows: auto auto 1fr auto;
     height: 100%;
+    min-height: 0;
+    min-width: 0;
     overflow: hidden;
   }
 
@@ -105,7 +115,7 @@
     overflow: hidden;
   }
 
-  /* Agent becomes right sidebar - now spans rows 3-5 */
+  /* Sidebar becomes right rail - now spans rows 3-5 */
   .layout-desktop .agent-drawer {
     position: static !important;
     transform: none !important;
@@ -129,14 +139,14 @@
     left: auto !important;
   }
 
-  /* When agent is "closed" (open class NOT present) */
+  /* When sidebar is "closed" (open class NOT present) */
   .layout-desktop .agent-drawer:not(.open) {
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
   }
 
-  /* Adjust grid when agent is closed */
+  /* Adjust grid when sidebar is closed */
   .layout-desktop:has(.agent-drawer:not(.open)) {
     grid-template-columns: var(--explorer-width, 430px) 1fr 0px;
   }
@@ -147,7 +157,7 @@
     top: 0;
     right: -9999px;
     width: var(--agent-width, 400px);
-    height: 100vh;
+    height: var(--te-app-container-height, 100vh);
   }
 
   /* Terminal is tiled in editor column only in desktop mode */
@@ -165,7 +175,7 @@
   }
 
   /* When terminal is "closed" (open class NOT present) */
-  .layout-desktop .terminal-drawer:not(.open) {
+  .layout-desktop .terminal-drawer:not(.open):not(.terminal-drawer--collapsed) {
     opacity: 0;
     visibility: hidden;
     height: 0;
@@ -174,8 +184,28 @@
   }
 
   /* Adjust grid when terminal is closed in desktop */
-  .layout-desktop:has(.terminal-drawer:not(.open)) {
+  .layout-desktop:has(.terminal-drawer:not(.open):not(.terminal-drawer--collapsed)) {
     grid-template-rows: auto auto 1fr 0px;
+  }
+
+  .layout-desktop .terminal-drawer.terminal-drawer--collapsed {
+    height: 2px;
+    min-height: 2px;
+    max-height: 2px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    pointer-events: auto;
+  }
+
+  .layout-desktop .terminal-drawer.terminal-drawer--collapsed::after {
+    content: '';
+    display: block;
+    flex: 0 0 2px;
+    height: 2px;
+  }
+
+  .layout-desktop:has(.terminal-drawer.terminal-drawer--collapsed) {
+    grid-template-rows: auto auto 1fr 2px;
   }
 
   /* Fix z-index for dropdowns in desktop mode */
@@ -192,6 +222,8 @@
     grid-template-columns: 1fr;
     grid-template-rows: auto auto 1fr auto;
     height: 100%;
+    min-height: 0;
+    min-width: 0;
     overflow: hidden;
   }
 
@@ -212,19 +244,9 @@
     overflow: hidden;
   }
 
-  /* Lower agent drawer z-index in mobile so explorer (100) can overlay it */
+  /* Lower sidebar drawer z-index in mobile so explorer (100) can overlay it */
   .layout-mobile .agent-drawer {
     z-index: 95;
-  }
-
-  /* Hide session card ONLY when keyboard is open in mobile layout */
-  .layout-mobile.keyboard-open .agent-section--current-session {
-    display: none;
-  }
-
-  /* Show files toggle button in mobile agent drawer */
-  .layout-mobile #agent-files-toggle {
-    display: block !important;
   }
 
   /* Terminal becomes tiled in mobile mode */
@@ -243,7 +265,7 @@
   }
 
   /* When terminal is "closed" (open class NOT present) */
-  .layout-mobile .terminal-drawer:not(.open) {
+  .layout-mobile .terminal-drawer:not(.open):not(.terminal-drawer--collapsed) {
     opacity: 0;
     visibility: hidden;
     height: 0;
@@ -252,8 +274,67 @@
   }
 
   /* Adjust grid when terminal is closed */
-  .layout-mobile:has(.terminal-drawer:not(.open)) {
+  .layout-mobile:has(.terminal-drawer:not(.open):not(.terminal-drawer--collapsed)) {
     grid-template-rows: auto auto 1fr 0px;
+  }
+
+  .layout-mobile .terminal-drawer.terminal-drawer--collapsed {
+    height: 2px;
+    min-height: 2px;
+    max-height: 2px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    pointer-events: auto;
+  }
+
+  .layout-mobile .terminal-drawer.terminal-drawer--collapsed::after {
+    content: '';
+    display: block;
+    flex: 0 0 2px;
+    height: 2px;
+  }
+
+  .layout-mobile:has(.terminal-drawer.terminal-drawer--collapsed) {
+    grid-template-rows: auto auto 1fr 2px;
+  }
+
+  .terminal-drawer.terminal-drawer--collapsed .drawer-tab-bar {
+    height: 1px;
+    min-height: 1px;
+    max-height: 1px;
+    padding: 0;
+    border-bottom: 0;
+    overflow: hidden;
+    flex: 0 0 1px;
+  }
+
+  .terminal-drawer.terminal-drawer--collapsed .drawer-tab {
+    min-height: 1px;
+    height: 1px;
+    padding: 0;
+    border: 0;
+    font-size: 0;
+    line-height: 0;
+    overflow: hidden;
+  }
+
+  .terminal-drawer.terminal-drawer--collapsed .terminal-header,
+  .terminal-drawer.terminal-drawer--collapsed .console-header,
+  .terminal-drawer.terminal-drawer--collapsed .problems-header {
+    display: none !important;
+  }
+
+  .terminal-drawer.terminal-drawer--collapsed #terminal-container,
+  .terminal-drawer.terminal-drawer--collapsed #console-container,
+  .terminal-drawer.terminal-drawer--collapsed #problems-container {
+    height: 1px;
+    min-height: 1px;
+    max-height: 1px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    overflow: auto;
+    flex: 0 0 1px;
   }
 
   /* ========================================
@@ -303,7 +384,6 @@
 
   /* Terminal resize handle (horizontal, desktop only - in editor column) */
   .layout-desktop .resize-handle--terminal {
-    display: block;
     height: 5px;
     cursor: row-resize;
     grid-column: 2;
@@ -314,7 +394,6 @@
 
   /* Terminal resize handle (horizontal, mobile only) */
   .layout-mobile .resize-handle--terminal {
-    display: block;
     height: 5px;
     cursor: row-resize;
     grid-column: 1;
@@ -323,10 +402,25 @@
     margin-top: -5px;
   }
 
+  .layout-desktop:has(.terminal-drawer.open) .resize-handle--terminal,
+  .layout-desktop:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal,
+  .layout-mobile:has(.terminal-drawer.open) .resize-handle--terminal {
+    display: block;
+  }
+
+  .layout-mobile:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal {
+    display: block;
+  }
+
+  .layout-desktop:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal:hover,
+  .layout-desktop:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal.dragging,
+  .layout-mobile:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal:hover,
+  .layout-mobile:has(.terminal-drawer.terminal-drawer--collapsed) .resize-handle--terminal.dragging {
+    background: transparent;
+  }
+
   /* Hide resize handles when panels are closed */
-  .layout-desktop .agent-drawer:not(.open) ~ .resize-handle--agent,
-  .layout-desktop .terminal-drawer:not(.open) ~ .resize-handle--terminal,
-  .layout-mobile .terminal-drawer:not(.open) ~ .resize-handle--terminal {
+  .layout-desktop .agent-drawer:not(.open) ~ .resize-handle--agent {
     display: none;
   }
 
@@ -483,6 +577,69 @@
     height: 100% !important;
     display: block;
     border: 0 !important;
+    overflow: hidden;
+    background: #0b0f14;
+  }
+  #editor-frame .fh-root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  #editor-frame #te2-breadcrumbs {
+    display: flex;
+    align-items: center;
+    padding: 2px 8px;
+    background: #0b0f1a;
+    border-bottom: 1px solid #333;
+    font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    min-height: 22px;
+    max-height: 22px;
+    flex-shrink: 0;
+    color: #ccc;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  #editor-frame #te2-breadcrumbs::-webkit-scrollbar { display: none; }
+  #editor-frame #te2-breadcrumbs:empty { display: none; }
+  #editor-frame #te2-breadcrumbs .monaco-breadcrumbs { flex: 1; min-width: 0; }
+  #editor-frame .te2-bc-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 4px;
+    opacity: 0.8;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  #editor-frame .te2-bc-item:hover { opacity: 1; color: #e5e7eb; }
+  #editor-frame .te2-bc-icon {
+    display: inline-flex;
+    align-items: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  #editor-frame .te2-bc-icon svg { width: 16px; height: 16px; fill: currentColor; }
+  #editor-frame .te2-bc-sym-icon {
+    display: inline-flex;
+    align-items: center;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    margin-right: 2px;
+  }
+  #editor-frame .te2-bc-sym-icon svg { width: 14px; height: 14px; }
+  #editor-frame .te2-bc-sep { opacity: 0.4; padding: 0 2px; }
+  #editor-frame #fh-monaco { flex: 1; min-height: 0; min-width: 0; width: 100%; }
+  #editor-frame .fh-root,
+  #editor-frame .monaco-editor {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
   #cm6-host { position:absolute; inset:0; display:flex; }
   .cm-editor { flex:1; height:100%; }
@@ -595,6 +752,7 @@
     bottom: 0;
     left: 0;
     right: 0;
+    max-width: 100vw;
     height: 340px;
     background: var(--card, #0b0f1a);
     border-top: 2px solid var(--border, #333);
@@ -603,6 +761,17 @@
     z-index: 100;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    contain: layout paint;
+  }
+
+  /* Monaco's body-level char-width probe is 50000px wide. Keep it off the
+     positive scroll axis so GeckoView does not permanently poison root width. */
+  body > div[style*="top: -50000px"][style*="width: 50000px"],
+  body > div[style*="top:-50000px"][style*="width:50000px"] {
+    left: -50000px !important;
+    contain: layout style paint !important;
+    overflow: hidden !important;
   }
 
   /* Drawer tab bar (Terminal | Console) */
@@ -954,7 +1123,7 @@
     transform: translateY(0);
   }
   .terminal-drawer.fullscreen {
-    height: calc(100vh - 80px) !important;
+    height: calc(var(--te-app-container-height, 100vh) - 80px) !important;
   }
   .terminal-header {
     display: flex;
@@ -1074,13 +1243,31 @@
   #terminal-container {
     flex: 1;
     min-height: 0;
+    max-width: 100%;
+    box-sizing: border-box;
     overflow: hidden;
     padding: 8px;
     position: relative;
     overscroll-behavior: contain;
     touch-action: none;
+    contain: layout paint;
   }
-  #terminal-container .xterm { touch-action: none; }
+  #terminal-container .xterm {
+    max-width: 100%;
+    overflow: hidden;
+    touch-action: none;
+    contain: layout paint;
+  }
+  #terminal-container .xterm-screen,
+  #terminal-container .xterm-viewport,
+  #terminal-container .xterm-rows {
+    max-width: 100%;
+  }
+  #terminal-container .xterm-screen,
+  #terminal-container .xterm-helpers {
+    overflow: hidden;
+    contain: layout paint;
+  }
   /* Custom scrollbar for xterm - solid and wide */
   #terminal-container .xterm-viewport::-webkit-scrollbar {
     width: 10px;
@@ -1121,7 +1308,7 @@
     padding: 5px 10px;
   }
 
-  /* Agent drawer */
+  /* Sidebar drawer */
   .agent-drawer {
     position: fixed;
     top: 0;
@@ -1139,91 +1326,19 @@
     border-left: 1px solid var(--border);
   }
 
+  html[data-shell-mode="mobile-tab"] .agent-drawer {
+    top: var(--framework-toolbar-height, 0px);
+    bottom: auto;
+    height: var(--te-app-container-height, var(--te-shell-viewport-height, 100dvh));
+    max-height: var(--te-app-container-height, var(--te-shell-viewport-height, 100dvh));
+  }
+
   .agent-drawer.open {
     transform: translateX(0);
   }
 
   .agent-drawer.agent-drawer--fullscreen {
     width: 100vw;
-  }
-
-  .agent-transcript-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    min-height: 0;
-  }
-
-  .agent-drawer.agent-drawer--keyboard {
-    overflow: hidden;
-  }
-
-  .agent-drawer.agent-drawer--keyboard .agent-drawer__body {
-    position: relative;
-    overflow: hidden;
-  }
-
-  .agent-drawer.agent-drawer--keyboard .agent-section {
-    pointer-events: none;
-  }
-
-  .agent-drawer.agent-drawer--keyboard .agent-section--current-session,
-  .agent-drawer.agent-drawer--keyboard .agent-section--stats {
-    opacity: 0;
-  }
-
-  .agent-drawer.agent-drawer--keyboard .agent-section--transcript {
-    pointer-events: auto;
-    position: absolute;
-    inset: 16px 16px calc(var(--keyboard-inset, 0px) + 16px) 16px;
-    margin: 0;
-    padding: 16px;
-    border-radius: 14px;
-    background: rgba(6, 10, 18, 0.95);
-    border: 1px solid rgba(59, 130, 246, 0.35);
-    box-shadow: 0 22px 45px rgba(0, 0, 0, 0.55);
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .agent-drawer.agent-drawer--keyboard .agent-section--transcript h3 {
-    display: none;
-  }
-
-  .agent-drawer.agent-drawer--keyboard .agent-transcript-panel {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    min-height: 0;
-  }
-
-  .agent-drawer.agent-drawer--keyboard .agent-transcript {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px 14px;
-    background: transparent;
-  }
-
-  .agent-drawer.agent-drawer--keyboard .agent-transcript > * {
-    width: 100%;
-  }
-
-  .agent-drawer.agent-drawer--keyboard .agent-composer {
-    position: static;
-    background: rgba(4, 7, 12, 0.92);
-    border: 1px solid rgba(59, 130, 246, 0.25);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-    border-radius: 12px;
-    padding: 12px;
-    margin: 0;
-    gap: 12px;
-    pointer-events: auto;
-  }
-
-  .agent-drawer.agent-drawer--keyboard .agent-composer__textarea {
-    min-height: 74px;
   }
 
   .agent-drawer__header {
@@ -1386,18 +1501,9 @@
     z-index: 450 !important;
   }
 
-  .agent-drawer__body {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    padding: 16px;
-    overflow: hidden;
-  }
-
   .agent-drawer__iframe {
     flex: 1;
-    display: none;
+    display: flex;
     position: relative;
     padding: 0;
     overflow: hidden;
@@ -1465,639 +1571,6 @@
     height: 100%;
     border: 0;
     display: block;
-  }
-
-  .agent-drawer--iframe .agent-drawer__body {
-    display: none;
-  }
-
-  .agent-drawer--iframe .agent-drawer__iframe {
-    display: flex;
-  }
-
-  .agent-drawer--iframe #agent-new-session {
-    display: none;
-  }
-
-  .agent-section {
-    border: 1px solid rgba(37, 50, 75, 0.4);
-    border-radius: 10px;
-    padding: 16px;
-    background: rgba(6, 10, 18, 0.85);
-  }
-
-  .agent-section--sessions {
-    flex: 0 0 auto;
-  }
-
-  .agent-section--transcript {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .agent-section--stats {
-    flex: 0 0 auto;
-    margin-top: auto;
-  }
-
-  .agent-section h3 {
-    margin: 0 0 12px;
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: rgba(229, 231, 235, 0.7);
-  }
-
-  /* Current Session Card */
-  .agent-current-session-card {
-    padding: 12px;
-    border-radius: 8px;
-    background: rgba(37, 50, 75, 0.35);
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-
-  .agent-current-session-card:hover {
-    background: rgba(59, 130, 246, 0.25);
-  }
-
-  .agent-current-session-card__placeholder {
-    text-align: center;
-    opacity: 0.6;
-    font-size: 0.85rem;
-  }
-
-  .agent-current-session-card__name {
-    font-weight: 600;
-    font-size: 0.95rem;
-    margin-bottom: 4px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .agent-current-session-card__status {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #10b981;
-  }
-
-  .agent-current-session-card__meta {
-    font-size: 0.75rem;
-    opacity: 0.7;
-  }
-
-  /* Sessions Modal */
-  .agent-modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .agent-modal__backdrop {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-  }
-
-  .agent-modal__content {
-    position: relative;
-    background: var(--card, #0b0f1a);
-    border-radius: 8px;
-    border: 1px solid var(--border, #333);
-    width: 90%;
-    max-width: 500px;
-    max-height: 80vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
-  }
-
-  .agent-modal__header {
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border, #333);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .agent-modal__header h2 {
-    margin: 0;
-    font-size: 1.1rem;
-    font-weight: 600;
-  }
-
-  .agent-modal__body {
-    padding: 16px 20px;
-    overflow-y: auto;
-    flex: 1;
-  }
-
-  .agent-sessions-modal-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .agent-sessions-modal-list__item {
-    padding: 12px;
-    border-radius: 6px;
-    background: rgba(37, 50, 75, 0.35);
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-    transition: background 0.2s;
-  }
-
-  .agent-sessions-modal-list__item:hover {
-    background: rgba(59, 130, 246, 0.25);
-  }
-
-  .agent-sessions-modal-list__item--active {
-    background: rgba(59, 130, 246, 0.3);
-  }
-
-  .agent-sessions-modal-list__empty {
-    text-align: center;
-    opacity: 0.6;
-    padding: 20px;
-  }
-
-  .agent-sessions-modal-list__info {
-    flex: 1;
-  }
-
-  .agent-sessions-modal-list__name {
-    font-weight: 600;
-    font-size: 0.9rem;
-    margin-bottom: 2px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .agent-sessions-modal-list__meta {
-    font-size: 0.75rem;
-    opacity: 0.7;
-  }
-
-  .agent-sessions-modal-list__delete {
-    background: transparent;
-    border: none;
-    color: #ef4444;
-    cursor: pointer;
-    font-size: 1.2rem;
-    padding: 4px 8px;
-    line-height: 1;
-    opacity: 0.6;
-    transition: opacity 0.2s;
-  }
-
-  .agent-sessions-modal-list__delete:hover {
-    opacity: 1;
-  }
-
-  .agent-session-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 260px;
-    overflow-y: auto;
-  }
-
-  .agent-session-list__item {
-    padding: 8px 10px;
-    border-radius: 6px;
-    background: rgba(37, 50, 75, 0.35);
-    cursor: pointer;
-    font-size: 0.85rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .agent-session-list__item:hover {
-    background: rgba(59, 130, 246, 0.25);
-  }
-
-  .agent-session-list__item--active {
-    background: rgba(59, 130, 246, 0.3);
-    /* Removed border-left to avoid conflict with message bubble styling */
-  }
-
-  .agent-session-list__item--stale {
-    opacity: 0.5;
-    cursor: not-allowed;
-    background: rgba(239, 68, 68, 0.1);
-  }
-
-  .agent-session-stale-badge {
-    color: #f59e0b;
-    font-size: 0.75rem;
-    margin-left: 4px;
-  }
-
-  .agent-session-list__item--empty {
-    text-align: center;
-    opacity: 0.6;
-    pointer-events: none;
-  }
-
-  .agent-session-delete {
-    background: transparent;
-    border: none;
-    color: #ef4444;
-    cursor: pointer;
-    font-size: 1.2rem;
-    padding: 0 4px;
-    line-height: 1;
-    opacity: 0.6;
-  }
-
-  .agent-session-delete:hover {
-    opacity: 1;
-  }
-
-  .agent-transcript {
-    flex: 1;
-    border: 1px solid rgba(59, 130, 246, 0.15);
-    border-radius: 8px;
-    padding: 16px;
-    background: rgba(5, 9, 15, 0.85);
-    overflow-y: auto;
-  }
-
-  .agent-transcript__placeholder {
-    text-align: center;
-    opacity: 0.5;
-    margin-top: 40px;
-  }
-
-  .agent-transcript__planning {
-    margin-bottom: 8px;
-    padding: 6px 10px;
-    background: rgba(0, 0, 0, 0.2);
-    border-left: 2px solid rgba(156, 163, 175, 0.5);
-    font-family: 'Courier New', monospace;
-    font-size: 0.8rem;
-    opacity: 0.7;
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-  }
-
-  .agent-transcript__planning-label {
-    color: #9ca3af;
-    flex-shrink: 0;
-  }
-
-  .agent-transcript__planning-text {
-    color: #d1d5db;
-    white-space: pre-wrap;
-    flex: 1;
-  }
-
-  .agent-transcript__bubble {
-    margin-bottom: 12px;
-    padding: 10px 12px;
-    border-radius: 8px;
-    background: rgba(59, 130, 246, 0.18);
-    font-size: 0.85rem;
-    line-height: 1.5;
-  }
-
-  .agent-transcript__bubble--user {
-    background: rgba(37, 214, 158, 0.2);
-    border-left: 3px solid rgba(16, 185, 129, 0.8);
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
-  }
-
-  .agent-transcript__bubble--assistant {
-    background: rgba(59, 130, 246, 0.1);
-    border-left: 3px solid #3b82f6;
-    white-space: pre-wrap;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
-  }
-
-  .agent-transcript__bubble--system {
-    background: rgba(156, 163, 175, 0.1);
-    border-left: 3px solid #9ca3af;
-    font-size: 0.85em;
-    opacity: 0.8;
-  }
-
-  .agent-transcript__bubble--error {
-    background: rgba(239, 68, 68, 0.1);
-    border-left: 3px solid #ef4444;
-    color: #fca5a5;
-  }
-
-  .agent-transcript__bubble--diff {
-    background: rgba(34, 197, 94, 0.1);
-    border-left: 3px solid #22c55e;
-  }
-
-  .agent-transcript__bubble--diff pre {
-    margin: 8px 0;
-    padding: 8px;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 4px;
-    overflow-x: auto;
-    font-size: 0.8em;
-  }
-
-  .agent-transcript__bubble--diff button {
-    margin-top: 8px;
-  }
-
-  .agent-transcript__bubble--approval {
-    background: rgba(245, 158, 11, 0.1);
-    border-left: 3px solid #f59e0b;
-  }
-
-  .agent-approval-header {
-    font-weight: bold;
-    margin-bottom: 8px;
-    color: #f59e0b;
-  }
-
-  .agent-approval-reason {
-    margin-bottom: 8px;
-    font-size: 0.9em;
-  }
-
-  .agent-approval-command,
-  .agent-approval-cwd {
-    margin-bottom: 8px;
-    font-size: 0.85em;
-  }
-
-  .agent-approval-command code,
-  .agent-approval-cwd code {
-    background: rgba(0, 0, 0, 0.3);
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-family: 'Courier New', monospace;
-    display: block;
-    margin-top: 4px;
-    word-break: break-all;
-  }
-
-  .agent-approval-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 12px;
-  }
-
-  .agent-approval-btn {
-    flex: 1;
-    padding: 8px;
-    font-weight: bold;
-  }
-
-  .agent-approval-btn--approve {
-    background: rgba(34, 197, 94, 0.2);
-    border: 1px solid #22c55e;
-    color: #22c55e;
-  }
-
-  .agent-approval-btn--approve:hover:not(:disabled) {
-    background: rgba(34, 197, 94, 0.3);
-  }
-
-  .agent-approval-btn--deny {
-    background: rgba(239, 68, 68, 0.2);
-    border: 1px solid #ef4444;
-    color: #ef4444;
-  }
-
-  .agent-approval-btn--deny:hover:not(:disabled) {
-    background: rgba(239, 68, 68, 0.3);
-  }
-
-  .agent-approval-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .agent-transcript__bubble--approval-approved {
-    border-left-color: #22c55e;
-  }
-
-  .agent-transcript__bubble--approval-denied {
-    border-left-color: #ef4444;
-  }
-
-  .agent-composer {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin-top: 16px;
-    margin-top: 16px;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
-    font-size: 0.85rem;
-  }
-
-  .agent-composer__textarea {
-    width: 100%;
-    min-height: 90px;
-    resize: vertical;
-    border-radius: 8px;
-    border: 1px solid rgba(59, 130, 246, 0.25);
-    background: rgba(4, 7, 12, 0.95);
-    color: var(--foreground, #e5e7eb);
-    padding: 10px;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', 'Courier New', monospace;
-    font-size: 0.95em;
-    box-sizing: border-box;
-  }
-
-  .agent-composer__toolbar {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .agent-composer__option {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.8rem;
-    color: rgba(229, 231, 235, 0.8);
-  }
-
-  .agent-composer__select {
-    background: rgba(4, 7, 12, 0.9);
-    border: 1px solid rgba(59, 130, 246, 0.3);
-    border-radius: 6px;
-    color: inherit;
-    padding: 4px 8px;
-  }
-
-  .agent-stats {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    font-size: 0.8rem;
-    padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.2);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .agent-stats__status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #ef4444;
-    flex-shrink: 0;
-  }
-
-  .agent-stats__status-dot.connected {
-    background: #22c55e;
-  }
-
-  .agent-stats span {
-    color: rgba(229, 231, 235, 0.7);
-  }
-
-  .agent-approval-settings {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    display: flex;
-    gap: 16px;
-  }
-
-  .agent-approval-checkbox {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.85rem;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .agent-approval-checkbox input[type="checkbox"]:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .agent-approval-checkbox input[type="checkbox"]:disabled ~ span {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  /* Agent Session Config Modal */
-  .agent-session-config {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .agent-config-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .agent-config-field span {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: rgba(229, 231, 235, 0.9);
-  }
-
-  .agent-config-field input[type="text"],
-  .agent-config-field select {
-    padding: 8px 10px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 4px;
-    background: rgba(0, 0, 0, 0.3);
-    color: #e5e7eb;
-    font-size: 0.9rem;
-  }
-
-  .agent-config-divider {
-    height: 1px;
-    background: rgba(255, 255, 255, 0.1);
-    margin: 8px 0;
-  }
-
-  .agent-config-checkbox {
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    cursor: pointer;
-    padding: 10px;
-    border-radius: 6px;
-    transition: background 0.15s;
-  }
-
-  .agent-config-checkbox:hover {
-    background: rgba(59, 130, 246, 0.1);
-  }
-
-  .agent-config-checkbox input[type="checkbox"] {
-    margin-top: 3px;
-    flex-shrink: 0;
-  }
-
-  .agent-config-checkbox div {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .agent-config-checkbox strong {
-    font-size: 0.9rem;
-    color: #e5e7eb;
-  }
-
-  .agent-config-checkbox small {
-    font-size: 0.75rem;
-    color: rgba(229, 231, 235, 0.6);
-    line-height: 1.3;
-  }
-
-  .agent-config-checkbox input[type="checkbox"]:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .agent-config-checkbox:has(input:disabled) {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .agent-config-checkbox:has(input:disabled):hover {
-    background: transparent;
-  }
-
-  /* Session modal needs higher z-index than agent drawer (200) */
-  #agent-session-modal {
-    z-index: 250;
   }
 
   .lsp-rootrel-input {
@@ -2480,14 +1953,7 @@
   </div>
 
 	  <div class="fe-editor-container" id="editor-container">
-	    <iframe 
-	      id="editor-frame" 
-	      src="/api/app/file_editor_cm6/ui/nc?app_id=file_editor_cm6"
-	      frameborder="0"
-	      scrolling="no"
-	      allow="clipboard-read; clipboard-write"
-	      style="width: 100%; height: 100%; border: none; display: block; overflow: hidden;">
-	    </iframe>
+	    <div id="editor-frame" data-editor-mode="inline" aria-label="Code editor"></div>
 	  </div>
 
   <!-- Resize handle for terminal (mobile only) -->
@@ -2533,10 +1999,10 @@
     <div id="problems-container" data-drawer-panel="problems" style="display:none; width:100%; height:100%; overflow:auto;"></div>
   </div>
 
-  <!-- Resize handle for agent (desktop only) -->
+  <!-- Resize handle for sidebar (desktop only) -->
   <div class="resize-handle resize-handle--agent" data-panel="agent"></div>
 
-  <!-- Agent Drawer -->
+  <!-- Sidebar Drawer -->
   <aside id="agent-drawer" class="agent-drawer" aria-hidden="true">
     <header class="agent-drawer__header">
       <div class="agent-drawer__title">
@@ -2548,7 +2014,6 @@
         <div class="fe-dropdown agent-drawer__icon-menu" id="agent-drawer-icon-menu"></div>
       </div>
       <div class="agent-drawer__actions">
-        <button class="fe-btn" id="agent-new-session">New Session</button>
         <button class="fe-btn" id="agent-refresh-active" type="button" title="Refresh active side-bar item" aria-label="Refresh active side-bar item">↻</button>
         <button class="fe-btn" id="agent-close">✕</button>
         <div class="fe-dropdown agent-drawer__refresh-menu" id="agent-refresh-menu"></div>
@@ -2581,108 +2046,7 @@
       </div>
       <div id="sidebar-iframe-stack" class="sidebar-iframe-stack" aria-hidden="true"></div>
     </div>
-    <div class="agent-drawer__body">
-      <section class="agent-section agent-section--current-session" aria-label="Current agent session">
-        <h3>Current Session</h3>
-        <div id="agent-current-session-card" class="agent-current-session-card">
-          <div class="agent-current-session-card__placeholder">No active session</div>
-        </div>
-      </section>
-      <section class="agent-section agent-section--transcript" aria-label="Agent transcript">
-        <h3>Transcript</h3>
-        <div class="agent-transcript-panel">
-          <div class="agent-transcript" id="agent-transcript">
-            <div class="agent-transcript__placeholder">Start a session to see the conversation stream here.</div>
-          </div>
-          <div class="agent-composer">
-            <textarea id="agent-input" class="agent-composer__textarea" placeholder="Message the agent..."></textarea>
-            <div class="agent-composer__toolbar">
-              <label class="agent-composer__option">
-                <span>Target</span>
-                <select id="agent-target" class="agent-composer__select">
-                  <option value="codex">Codex</option>
-                  <option value="gemini">Gemini</option>
-                </select>
-              </label>
-              <button class="fe-btn" id="agent-files-toggle" title="Files" style="display: none; margin-left: auto;">📁</button>
-              <button class="fe-btn" id="agent-send">Send</button>
-            </div>
-          </div>
-        </div>
-      </section>
-      <footer class="agent-stats" id="agent-stats">
-        <div class="agent-stats__status-dot" id="agent-status-dot"></div>
-        <span>Session: <span id="agent-status-text">Disconnected</span></span>
-        <span>Agent: <span id="agent-type-text">—</span></span>
-      </footer>
-    </div>
   </aside>
-
-  <!-- Sessions List Modal -->
-  <div id="agent-sessions-modal" class="agent-modal" style="display: none;">
-    <div class="agent-modal__backdrop"></div>
-    <div class="agent-modal__content">
-      <header class="agent-modal__header">
-        <h2>Sessions</h2>
-        <button class="fe-btn" id="agent-sessions-modal-close">✕</button>
-      </header>
-      <div class="agent-modal__body">
-        <ul id="agent-sessions-modal-list" class="agent-sessions-modal-list">
-          <li class="agent-sessions-modal-list__empty">No sessions yet</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-
-  <!-- Agent Session Config Modal -->
-  <div id="agent-session-modal" class="fe-modal" aria-hidden="true">
-    <div class="fe-modal-card" style="max-width: 420px;">
-      <div class="fe-modal-header">
-        <strong>New Agent Session</strong>
-        <span style="flex:1"></span>
-        <button id="agent-session-modal-close" class="fe-btn" aria-label="Close">✕</button>
-      </div>
-      <div class="fe-modal-body">
-        <div class="agent-session-config">
-          <label class="agent-config-field">
-            <span>Session Name (optional)</span>
-            <input type="text" id="agent-session-name" placeholder="e.g., Bug fix for login" />
-          </label>
-          
-          <label class="agent-config-field">
-            <span>Agent</span>
-            <select id="agent-session-type">
-              <option value="codex">Codex</option>
-              <option value="gemini">Gemini</option>
-            </select>
-          </label>
-          
-          <div class="agent-config-divider"></div>
-          
-          <label class="agent-config-checkbox">
-            <input type="checkbox" id="agent-session-auto" />
-            <div>
-              <strong>Auto-approve safe commands</strong>
-              <small>Auto-approves diffs/patches, asks for shell commands (workspace write only)</small>
-            </div>
-          </label>
-          
-          <label class="agent-config-checkbox" id="agent-session-full-label">
-            <input type="checkbox" id="agent-session-full" disabled />
-            <div>
-              <strong>Full system access</strong>
-              <small>Same approval behavior, but grants full system access when approved</small>
-            </div>
-          </label>
-        </div>
-      </div>
-      <div class="fe-modal-actions">
-        <button id="agent-session-cancel" class="fe-btn">Cancel</button>
-        <button id="agent-session-create" class="fe-btn fe-btn-primary">Create Session</button>
-      </div>
-    </div>
-  </div>
-
 
 </div>
 
@@ -3161,4 +2525,3 @@
 </div>
 
 <script src="/static/vendor/socket.io.min.js"></script>
-<script type="module" src="static/dist/host.js"></script>

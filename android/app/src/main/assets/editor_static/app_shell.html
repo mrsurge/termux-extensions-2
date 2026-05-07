@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta id="app-shell-viewport" name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Termux App</title>
     <link rel="manifest" href="/static/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/static/icon.png">
@@ -19,17 +19,33 @@
             --primary: hsl(217, 91%, 60%);
             --secondary: hsla(220, 18%, 16%, 1.00);
             --muted-foreground: hsl(215, 13%, 65%);
+            --te-shell-viewport-height: 100vh;
+            --te-app-container-height: 100vh;
         }
         html, body {
             margin: 0;
             padding: 0;
-            height: 100%;
-            overflow: hidden;
-            position: fixed;
             width: 100%;
+            min-height: 100%;
+            overflow: hidden;
         }
-        body { background-color: var(--background); color: var(--foreground); font-family: 'Inter', sans-serif; }
-        .app-shell { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
+        body {
+            background-color: var(--background);
+            color: var(--foreground);
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            min-height: 100dvh;
+            min-height: var(--te-shell-viewport-height, 100dvh);
+        }
+        .app-shell {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            height: 100vh;
+            height: 100dvh;
+            height: var(--te-shell-viewport-height, 100dvh);
+            overflow: hidden;
+        }
         .app-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--card); position: sticky; top: 0; z-index: 5; }
         html.gv-native .app-toolbar { display: none; }
         html.te-embed .app-toolbar { display: none; }
@@ -37,7 +53,14 @@
         .spacer { flex: 1; }
         .app-btn { background: var(--secondary); color: var(--foreground); border: 1px solid var(--border); border-radius: 1px; padding: 6px 10px; cursor: pointer; }
         .app-btn:hover { border-color: var(--primary); }
-        #app-container { flex: 1; overflow: auto; }
+        #app-container {
+            flex: 1 1 auto;
+            min-width: 0;
+            min-height: 0;
+            overflow: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+        }
 
         .app-modal {
             position: fixed;
@@ -243,28 +266,93 @@
     <script id="__app_id_json" type="application/json">null</script>
     
     <script>
-    // Framework toolbar height tracking - expose as CSS variable for all apps
-    function updateFrameworkToolbarHeight() {
-        const toolbar = document.querySelector('.app-toolbar');
-        if (
-            toolbar
-            && !document.documentElement.classList.contains('gv-native')
-            && !document.documentElement.classList.contains('te-embed')
-        ) {
-            const height = toolbar.offsetHeight;
-            document.documentElement.style.setProperty('--framework-toolbar-height', `${height}px`);
-        } else {
-            document.documentElement.style.setProperty('--framework-toolbar-height', `0px`);
+    let appShellMetricsRaf = 0;
+    const DEFAULT_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0';
+    const MOBILE_TAB_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+
+    function resolveAppShellMode() {
+        const root = document.documentElement;
+        const isNativeLike = root.classList.contains('gv-native') || root.classList.contains('te-embed');
+        const standaloneMatch = typeof window.matchMedia === 'function'
+            && (window.matchMedia('(display-mode: standalone)').matches
+                || window.matchMedia('(display-mode: minimal-ui)').matches);
+        const isStandalone = !isNativeLike && (standaloneMatch || window.navigator.standalone === true);
+        const coarsePointer = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+        return !isNativeLike && !isStandalone && coarsePointer ? 'mobile-tab' : 'stable';
+    }
+
+    function syncViewportMetaForShellMode(shellMode) {
+        const viewportMeta = document.getElementById('app-shell-viewport');
+        if (!(viewportMeta instanceof HTMLMetaElement)) return;
+        const nextContent = shellMode === 'mobile-tab'
+            ? MOBILE_TAB_VIEWPORT_CONTENT
+            : DEFAULT_VIEWPORT_CONTENT;
+        if (viewportMeta.getAttribute('content') !== nextContent) {
+            viewportMeta.setAttribute('content', nextContent);
         }
     }
-    
+
+    // Framework toolbar and viewport tracking - expose as CSS variables for hosted apps
+    function updateAppShellLayoutMetrics() {
+        const root = document.documentElement;
+        const toolbar = document.querySelector('.app-toolbar');
+        const appContainer = document.getElementById('app-container');
+        const shellMode = resolveAppShellMode();
+        const visualViewport = window.visualViewport || null;
+        const visualViewportHeight = visualViewport && Number.isFinite(visualViewport.height)
+            ? visualViewport.height
+            : null;
+        const visualViewportOffsetTop = visualViewport && Number.isFinite(visualViewport.offsetTop)
+            ? visualViewport.offsetTop
+            : 0;
+        const viewportExtent = visualViewportHeight != null
+            ? visualViewportHeight + visualViewportOffsetTop
+            : null;
+        const viewportHeight = Math.round(viewportExtent || window.innerHeight || document.documentElement.clientHeight || 0);
+
+        root.dataset.shellMode = shellMode;
+        syncViewportMetaForShellMode(shellMode);
+        if (viewportHeight > 0) {
+            root.style.setProperty('--te-shell-viewport-height', `${viewportHeight}px`);
+        }
+        if (
+            toolbar
+            && !root.classList.contains('gv-native')
+            && !root.classList.contains('te-embed')
+        ) {
+            const height = toolbar.offsetHeight;
+            root.style.setProperty('--framework-toolbar-height', `${height}px`);
+        } else {
+            root.style.setProperty('--framework-toolbar-height', `0px`);
+        }
+        if (appContainer) {
+            const appContainerHeight = Math.round(appContainer.clientHeight || 0);
+            if (appContainerHeight > 0) {
+                root.style.setProperty('--te-app-container-height', `${appContainerHeight}px`);
+            }
+        }
+    }
+
+    function scheduleAppShellLayoutMetrics() {
+        if (appShellMetricsRaf) return;
+        appShellMetricsRaf = window.requestAnimationFrame(() => {
+            appShellMetricsRaf = 0;
+            updateAppShellLayoutMetrics();
+        });
+    }
+
+    window.refreshAppShellLayoutMetrics = scheduleAppShellLayoutMetrics;
+
     // Run on load and resize
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', updateFrameworkToolbarHeight);
+        document.addEventListener('DOMContentLoaded', scheduleAppShellLayoutMetrics);
     } else {
-        updateFrameworkToolbarHeight();
+        scheduleAppShellLayoutMetrics();
     }
-    window.addEventListener('resize', updateFrameworkToolbarHeight);
+    window.addEventListener('load', scheduleAppShellLayoutMetrics);
+    window.addEventListener('resize', scheduleAppShellLayoutMetrics);
+    window.visualViewport?.addEventListener('resize', scheduleAppShellLayoutMetrics);
+    window.visualViewport?.addEventListener('scroll', scheduleAppShellLayoutMetrics);
     </script>
     
     <script type="module">
@@ -656,6 +744,7 @@
                     : `/apps/${appDef._dir}/${appDef.entrypoints.frontend_template}`;
                 const template = await fetch(templatePath).then(res => res.text());
                 appContainer.innerHTML = template;
+                window.refreshAppShellLayoutMetrics?.();
 
                 if (appDef.entrypoints.frontend_script) {
                     const scriptPath = assetBaseUrl
@@ -673,6 +762,7 @@
                         await initResult;
                     }
                 }
+                window.refreshAppShellLayoutMetrics?.();
             } catch (error) {
                 const details = debugFullStack && error?.stack ? error.stack : error.message;
                 appContainer.innerHTML = `<pre style=\"color: red; white-space: pre-wrap;\">Error loading app: ${escapeHtml(details)}</pre>`;
