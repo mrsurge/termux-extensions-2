@@ -314,6 +314,7 @@ export interface ExtHostDispatchRuntimeDeps {
   onEvent: (payload: Record<string, unknown>) => void;
   sendPayload: (payload: Uint8Array) => void;
   sendExt: (rpcId: number, method: string, args: unknown[], cancellable?: boolean) => unknown;
+  checkWorkspaceExists: (folders: unknown, includes: unknown) => Promise<boolean>;
   tryOpenDocument: (uri: unknown, options: unknown) => Promise<unknown>;
   provideTextDocumentContent: (handle: number, uri: unknown) => Promise<string | null>;
   readVirtualVscodeUriBuffer: (uri: unknown) => Uint8Array | null;
@@ -674,6 +675,7 @@ export function createExtHostDispatchRuntime(deps: ExtHostDispatchRuntimeDeps): 
     onEvent: (payload: Record<string, unknown>) => deps.onEvent(payload),
     sendPayload: (payload: Uint8Array) => deps.sendPayload(payload),
     sendExt: (rpcId: number, method: string, args: unknown[], cancellable = false) => deps.sendExt(rpcId, method, args, cancellable),
+    checkWorkspaceExists: (folders: unknown, includes: unknown) => deps.checkWorkspaceExists(folders, includes),
     tryOpenDocument: (uri: unknown, options: unknown) => deps.tryOpenDocument(uri, options),
     provideTextDocumentContent: (handle: number, uri: unknown) => deps.provideTextDocumentContent(handle, uri),
     readVirtualVscodeUriBuffer: (uri: unknown) => deps.readVirtualVscodeUriBuffer(uri),

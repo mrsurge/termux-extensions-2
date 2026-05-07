@@ -60,6 +60,7 @@ export interface ExtHostDispatchRuntime {
   onEvent: (payload: Record<string, unknown>) => void;
   sendPayload: (payload: Uint8Array) => void;
   sendExt: (rpcId: number, method: string, args: unknown[], cancellable?: boolean) => void;
+  checkWorkspaceExists: (folders: unknown, includes: unknown) => Promise<boolean>;
   tryOpenDocument: (uri: unknown, options: unknown) => Promise<unknown>;
   provideTextDocumentContent: (handle: number, uri: unknown) => Promise<string | null>;
   readVirtualVscodeUriBuffer: (uri: unknown) => Uint8Array | null;
@@ -311,7 +312,6 @@ function requestReplyPayload(runtime: ExtHostDispatchRuntime, msg: DecodedExtHos
   if (runtime.replyEmptyMethods.has(method)) return encodeExtReplyOkEmpty(req);
   if (runtime.replyNullMethods.has(method)) return encodeExtReplyOkJson(req, null);
   if (method === "$getInitialState") return encodeExtReplyOkJson(req, { isFocused: true, isActive: true });
-  if (method === "$checkExists") return encodeExtReplyOkJson(req, false);
   if (method === "$requestWorkspaceTrust") {
     try {
       runtime.sendExt(runtime.rpcIds.ExtHostWorkspace, "$onDidGrantWorkspaceTrust", [], false);
@@ -350,6 +350,18 @@ function handleTryOpenDocument(runtime: ExtHostDispatchRuntime, msg: DecodedExtH
       msg.method,
       encodeExtReplyError(req, { message: `TE2: cannot open document (${uriStr}): ${error instanceof Error ? error.message : String(error)}`, code: "FileNotFound" }),
     );
+  });
+}
+
+function handleCheckExists(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): void {
+  const req = Number(msg.req ?? 0);
+  const folders = Array.isArray(msg.args) ? msg.args[0] : [];
+  const includes = Array.isArray(msg.args) ? msg.args[1] : [];
+  runtime.checkWorkspaceExists(folders, includes).then((exists) => {
+    sendReplyPayload(runtime, req, msg.method, encodeExtReplyOkJson(req, exists));
+  }).catch((error) => {
+    runtime.log(`[ext_reply] $checkExists error: ${error instanceof Error ? error.message : String(error)}`);
+    sendReplyPayload(runtime, req, msg.method, encodeExtReplyOkJson(req, false));
   });
 }
 
@@ -454,6 +466,10 @@ export function handleExtHostRequest(runtime: ExtHostDispatchRuntime, msg: Decod
   applyProviderRegistration(runtime, msg);
   if (msg.method === "$changeMany") logDiagnosticsChange(runtime, msg);
 
+  if (msg.method === "$checkExists") {
+    handleCheckExists(runtime, msg);
+    return true;
+  }
   if (msg.method === "$tryOpenDocument") {
     handleTryOpenDocument(runtime, msg);
     return true;
