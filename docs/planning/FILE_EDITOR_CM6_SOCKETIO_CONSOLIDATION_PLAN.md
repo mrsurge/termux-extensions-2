@@ -4,7 +4,7 @@
 >
 > Keep this document as historical/background context for the earlier typed JSON-RPC framing. For current sequencing, target architecture, host/template decomposition goals, and the one-server same-namespaces direction, use the North Star doc.
 >
-> Main-page/template progress is tracked in `docs/planning/FILE_EDITOR_CM6_MAIN_PAGE_DECOMPOSITION_PLAN.md`. The old in-app agent harness referenced by some historical notes has been removed; the live sidebar surface is the shortcut lane plus `/sidebar_ipc`.
+> Main-page/template progress is tracked in `docs/planning/FILE_EDITOR_CM6_MAIN_PAGE_DECOMPOSITION_PLAN.md`. Active transport-collapse execution is tracked in `docs/planning/FILE_EDITOR_CM6_TRANSPORT_COLLAPSE_PLAN.md`. The old in-app agent harness referenced by some historical notes has been removed; the live sidebar surface is the shortcut lane plus `/sidebar_ipc`.
 
 ## Intent
 

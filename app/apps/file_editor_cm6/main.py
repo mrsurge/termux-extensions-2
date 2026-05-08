@@ -790,27 +790,16 @@ from .editor_discard import handle_external_discard
 file_editor_cm6_bp.include_router(editor_router)
 register_monaco_editor_routes(file_editor_cm6_bp, mount_path="/ui")
 
-# --- Monaco editor Socket.IO (worker-owned) ---
-# The main framework process proxies /editor_ws/socket.io to this worker endpoint.
-from app.apps.file_editor_cm6.monaco_editor.editor_socketio import EDITOR_ASGI_APP
-
-# --- Explorer Socket.IO (worker-owned) ---
-# The main framework process proxies /explorer_ws/socket.io to this worker endpoint.
-from app.apps.file_editor_cm6.explorer.transport.socketio_app import EXPLORER_ASGI_APP
-
-# --- UI IPC Socket.IO (worker-owned) ---
-# Frontend-to-frontend relay for iframe ↔ main page communication.
-from app.apps.file_editor_cm6.ui_ipc.ui_ipc_socketio import UI_IPC_ASGI_APP
-
-# --- Terminal Socket.IO (worker-owned) ---
-# The main framework process proxies /terminal_ws/socket.io to this worker endpoint.
-from app.apps.file_editor_cm6.terminal_socketio import TERMINAL_ASGI_APP
+# --- Code TE2 Socket.IO (worker-owned) ---
+# The main framework process still proxies the current physical paths to this
+# one worker endpoint. Logical namespaces stay owned by their existing handlers.
+from app.apps.file_editor_cm6.socketio_gateway import FILE_EDITOR_CM6_ASGI_APP
 
 SUBAPPS = [
-    ("/editor_ws/socket.io", EDITOR_ASGI_APP),
-    ("/explorer_ws/socket.io", EXPLORER_ASGI_APP),
-    ("/ui_ipc_ws/socket.io", UI_IPC_ASGI_APP),
-    ("/terminal_ws/socket.io", TERMINAL_ASGI_APP),
+    ("/editor_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
+    ("/explorer_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
+    ("/ui_ipc_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
+    ("/terminal_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
 ]
 
 # Import singleton store instances

@@ -8,6 +8,8 @@ Use this document as the current source of truth for the remaining `file_editor_
 
 Detailed main-page/template progress is tracked in `FILE_EDITOR_CM6_MAIN_PAGE_DECOMPOSITION_PLAN.md`. Keep this North Star document focused on target architecture, sequencing, and cross-plan constraints instead of duplicating per-slice status.
 
+Detailed transport-collapse execution is tracked in `FILE_EDITOR_CM6_TRANSPORT_COLLAPSE_PLAN.md`. The collapse is now intentionally split into an app-local Python Socket.IO layer phase and a later framework-level manifest-declared relay phase.
+
 ## Purpose
 
 The remaining work is not "just" transport cleanup and it is not "just" a TypeScript pass.
@@ -34,22 +36,30 @@ The next work should proceed in this order:
    - Android `UiIpcClient` consumes `rpc.notify` envelopes on `/ui_ipc` for editor focus/blur and no longer listens for the legacy `ui_event` bridge.
    - The worker no longer tracks `_LEGACY_UI_EVENT_SIDS` or emits Android compatibility `ui_event` fanout from UI IPC RPC notifications.
    - Android console drawer registration/hydration stays on the TE2 console drawer registration path, and console eval defaults to the current `main_page` runtime target instead of the historical editor iframe id.
-3. Create a dedicated sidebar IPC/RPC contract surface for external sidebar actions and clean up sidebar boundaries.
-   - Add frontend and backend contract modules for `/sidebar_ipc` instead of treating it as a collection of event-name conventions.
-   - Add a corresponding definition document for external sidebar actions such as mentions, file opens, active shortcut state, refresh requests, and cwd sync.
-   - Keep source ownership explicit: Explorer-originated actions use Explorer RPC or backend relays, editor-originated actions use editor RPC/backend relays, and external/sidebar-frame actions use the sidebar contract.
-4. After items 1-3 are coherent, consolidate the physical app transports behind one app-scoped Socket.IO gateway path while preserving logical namespaces.
-   - Preserve `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, `/terminal`, and `/wba` as logical namespaces unless a concrete contract cleanup removes one.
-   - Do not move SSOT, WBA, terminal, host, or Explorer behavior into the gateway. The gateway is transport routing, not domain ownership.
-5. Fix extension settings rendering so VSIX/object-valued settings do not display as `[object Object]`.
+3. Completed: create a dedicated sidebar IPC/RPC contract surface for external sidebar actions and clean up sidebar boundaries.
+   - Frontend and backend contract modules now define `/sidebar_ipc` instead of treating it as a collection of event-name conventions.
+   - Definition/schema docs now cover external sidebar actions such as mentions, file opens, active shortcut state, refresh requests, and cwd sync.
+   - Source ownership remains explicit: Explorer-originated actions use Explorer RPC or backend relays, editor-originated actions use editor RPC/backend relays, and external/sidebar-frame actions use the sidebar contract.
+4. Completed: phase one transport collapse collapsed the worker-owned Python Socket.IO layer inside `file_editor_cm6` and added `msgspec`-validated JSON-RPC envelope handling.
+   - `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal` remain logical namespaces.
+   - The existing namespace handler classes now register under one worker-side Python `socketio.AsyncServer` in `socketio_gateway.py`.
+   - Existing physical paths remain mounted to the shared worker ASGI app for compatibility.
+   - SSOT, terminal, host, Explorer, and editor behavior did not move into the gateway. The gateway is transport assembly and envelope validation, not domain ownership.
+   - `/wba` remains adapter-owned and separate in this phase.
+5. Phase two transport collapse: add a framework-owned manifest-declared Socket.IO relay using an app-local `sio_service.json`.
+   - The app manifest should point to the relay definition instead of requiring one-off Python transport scripts under `services/`.
+   - The framework relay owns physical mount/routing and target discovery.
+   - Preserve logical namespaces unless a concrete contract cleanup removes one.
+   - Do not move WBA or app-worker domain behavior into the framework relay.
+6. Fix extension settings rendering so VSIX/object-valued settings do not display as `[object Object]`.
    - Treat this as a typed normalization/rendering bug in the extension settings surface, likely in `main.py` or a supporting settings/extension module.
-6. Decompose and strictly type `main.py`, and find/deprecate unused top-level modules.
+7. Decompose and strictly type `main.py`, and find/deprecate unused top-level modules.
    - Start with small backend route/helper families and avoid moving framework-owned service shims out of `services/`.
    - Track deleted top-level modules explicitly so stale imports and app-loader contracts do not silently survive.
-7. Continue `template.html` decomposition after the backend transport/contract cleanup is coherent.
+8. Continue `template.html` decomposition after the backend transport/contract cleanup is coherent.
    - Move avoidable durable UI contract and behavior policy out of markup/CSS while preserving shortcut DOM compatibility.
    - Do not treat this as feature work; this is breakup and ownership cleanup.
-8. Debug why WBA does not work with the same `rust-analyzer` VSIX that works with the same code-server instance powering the WBA.
+9. Debug why WBA does not work with the same `rust-analyzer` VSIX that works with the same code-server instance powering the WBA.
    - Treat this as a WBA extension-host/provider bootstrap issue until proven otherwise.
    - Compare extension discovery, activation, workspace trust/configuration, binary/server executable resolution, and language/provider registration between the visible code-server path and WBA.
 
@@ -79,7 +89,7 @@ Current facts in the live tree:
 - The old in-app agent harness is no longer a live contract. The sidebar surface is the shortcut lane plus `/sidebar_ipc`; historical `agent*` DOM ids and preference keys are compatibility names for that UI.
 - The host frontend entry is broken up enough for now: `main.ts` is the strict bundle source entry and should not be treated as the next decomposition target unless a concrete ownership bug requires it.
 - The remaining monolith breakup targets are `main.py` and `template.html`.
-- The app still exposes multiple transport/service surfaces and multiple worker-owned Socket.IO servers, plus the separate adapter-owned `/wba` path.
+- The app still exposes multiple physical transport/service surfaces for compatibility, but the worker-owned Python Socket.IO layer now uses one shared app-local server for `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`; `/wba` remains separate and adapter-owned.
 - `services/vscode_rpc_transport.py` is still registered even though it is not the current editor intelligence hot path.
 
 ## Core Constraints
@@ -113,15 +123,16 @@ If we solve only one of those, the others keep the system hard to reason about.
 
 ## Target Architecture
 
-### 1. One App-Scoped Socket.IO Gateway
+### 1. Two-Phase Socket.IO Collapse
 
-Target one physical app-scoped Socket.IO gateway/server path for `file_editor_cm6`.
+Target a two-phase collapse instead of one giant transport rewrite.
 
-That gateway should:
-- preserve the logical namespaces that clients use by concern
-- route by namespace to the correct execution owner
-- stay transport-only in the main-process layer
-- stop the current proliferation of separate socket-server/proxy definitions as the primary public shape
+Phase one is app-local and now implemented:
+- collapse the worker-owned Python Socket.IO layer inside `file_editor_cm6`
+- keep current logical namespaces
+- preserve current physical paths for the first code slice unless a later approved substep changes clients
+- add `msgspec`-validated JSON-RPC envelope handling at the Python Socket.IO edge
+- keep `/wba` adapter-owned and separate
 
 Recommended namespace set:
 - `/rpc/editor`
@@ -131,10 +142,16 @@ Recommended namespace set:
 - `/terminal`
 - `/wba`
 
+Phase two is framework-owned:
+- introduce a manifest-declared `sio_service.json`
+- let the framework relay own physical Socket.IO mount/routing and target discovery
+- retire bespoke app `services/*_transport.py` Socket.IO proxy scripts when the relay can express their routes
+- keep compatibility aliases explicit in `sio_service.json`, not hidden in Python fallback code
+
 Notes:
 - `/editor` should not remain a long-term public ad hoc event bus. Its behavior should converge into typed `/rpc/editor` methods and notifications for the editor-runtime/backend contract.
 - Host frontend code should not become a first-class caller of `/rpc/editor` as a substitute for backend mediation. Host-facing actions should stay on the host/backend lane and let Python fan out to editor/backend services.
-- `/wba` is still logically separate in execution ownership even if the physical gateway is consolidated. Do not collapse WBA behavior into the worker just to satisfy the one-server goal.
+- `/wba` is still logically separate in execution ownership even if the phase-two physical relay routes it. Do not collapse WBA behavior into the worker or framework relay just to satisfy the one-server goal.
 
 ### 2. JSON-RPC 2.0 Everywhere It Matters
 
@@ -227,20 +244,37 @@ Expected direction:
 - Treat the WBA stdio control plane as internal backend control, not the public editor contract.
 - Continue reducing residual Python relay/control hooks where they are only historical leftovers.
 
-### Phase 3. Consolidate The Physical Socket Server/Gateway
+### Phase 3. Collapse The App-Local Python Socket.IO Layer
 
-After the namespace contracts are stable:
-- replace the multiple app-specific physical socket-server/proxy surfaces with one app-scoped Socket.IO gateway/server path
-- preserve the logical namespaces above that path
-- route by namespace to worker-owned handlers or WBA-owned handlers as appropriate
+The first transport-collapse code phase stays inside `file_editor_cm6`:
+- create one worker-owned Python Socket.IO server for `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`
+- register the existing namespace handler classes on that server
+- add `msgspec` as the JSON-RPC envelope validation/conversion layer at the Python Socket.IO edge
+- preserve current physical paths for initial callers unless a later approved substep changes frontend/Android paths
+- keep `/wba` adapter-owned and separate
 
 Success criteria:
-- one public app-scoped Socket.IO gateway path
+- one worker-side Python `socketio.AsyncServer` for the app-owned Python namespaces
 - same logical namespace vocabulary
-- no SSOT logic moved into the transport gateway
+- no SSOT logic moved into the app-local gateway
 - no WBA logic moved into the worker merely for topology aesthetics
+- no hidden compatibility fallback beyond explicitly retained current physical paths
 
-### Phase 4. Finish Backend And Template Decomposition
+### Phase 4. Add The Framework `sio_service.json` Relay
+
+The second transport-collapse phase is framework-owned:
+- add a manifest-declared `sio_service.json` relay definition
+- let the main framework load that definition and register physical Socket.IO relay routes
+- route by logical namespace to app-worker or adapter-owned targets
+- retire bespoke app `services/*_transport.py` Socket.IO proxy modules when their routes are represented declaratively
+
+Success criteria:
+- one public app-scoped Socket.IO relay shape is manifest-declared
+- compatibility aliases are explicit in the JSON definition
+- no app behavior, SSOT behavior, terminal behavior, Explorer behavior, or WBA behavior moves into the framework relay
+- the relay is reusable by other TE2 apps rather than hardcoded for `file_editor_cm6`
+
+### Phase 5. Finish Backend And Template Decomposition
 
 Once the transport/contracts are stable:
 - shrink `main.py` toward backend composition by extracting small route/helper families
@@ -249,14 +283,14 @@ Once the transport/contracts are stable:
 - keep `template.html` focused on structure, not app behavior policy
 - record detailed completed-slice status in `FILE_EDITOR_CM6_MAIN_PAGE_DECOMPOSITION_PLAN.md`
 
-### Phase 5. Remove Residue
+### Phase 6. Remove Residue
 
 - remove stale transport wrappers and compatibility shims once callers are gone
 - remove dead docs that were only valid during migration
 - remove legacy event-name RPC assumptions from comments, docs, and helper naming
 - revisit whether `vscode_rpc_transport` still belongs in the manifest once the surrounding residue is gone
 
-### Phase 6. Resume Queued Feature Work
+### Phase 7. Resume Queued Feature Work
 
 Only after the refactor track is coherent again:
 - resume the HTML live preview plan
@@ -268,13 +302,14 @@ When touching a feature during this refactor:
 - if it adds or changes a socket contract, make it typed and JSON-RPC-shaped
 - if it adds host behavior, do not dump more durable policy into `main.py` or `template.html` if a focused module can own it
 - if it starts in host chrome, prefer the host/backend lane and backend fanout over new direct host-to-editor RPC coupling
-- if it needs transport consolidation, do it without moving domain ownership
+- if it needs transport consolidation, follow `FILE_EDITOR_CM6_TRANSPORT_COLLAPSE_PLAN.md` and do it without moving domain ownership
 - if it belongs to preview, defer it unless it directly unblocks this refactor track
 
 ## Completion Criteria
 
 This refactor track is "done enough" when all of the following are true:
-- the app has one physical app-scoped Socket.IO gateway/server path
+- the app-local Python Socket.IO layer is one worker-side server before the framework relay phase begins
+- the app has one physical app-scoped Socket.IO gateway/server path after the framework relay phase
 - logical namespaces are stable and intentional
 - public socket contracts are JSON-RPC and typed end-to-end
 - `/editor` no longer survives as a legacy ad hoc public event bus

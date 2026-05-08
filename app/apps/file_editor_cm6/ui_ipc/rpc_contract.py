@@ -4,6 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, Literal, TypedDict, cast
 
+from ..socketio_jsonrpc import (
+    JsonRpcEnvelopeError,
+    coerce_jsonrpc_envelope,
+    normalize_jsonrpc_params,
+)
+
 UI_IPC_RPC_NAMESPACE: Final = "/ui_ipc"
 UI_IPC_RPC_REQUEST_EVENT: Final = "rpc"
 UI_IPC_RPC_NOTIFICATION_EVENT: Final = "rpc.notify"
@@ -165,87 +171,73 @@ def _coerce_request_id(value: object) -> JsonRpcId:
 
 
 def parse_ui_ipc_rpc_request(payload: object) -> ParsedUiIpcRpcRequest | None:
-    envelope = _as_object(payload)
-    if envelope is None:
+    try:
+        envelope = coerce_jsonrpc_envelope(payload)
+    except JsonRpcEnvelopeError as exc:
         raise UiIpcRpcProtocolError(
             None,
-            code=-32600,
-            message="Invalid request envelope",
-        )
-
-    if envelope.get("jsonrpc") != "2.0":
+            code=exc.code,
+            message=exc.message,
+        ) from exc
+    params_obj: object = envelope.params
+    if params_obj is not None and not isinstance(params_obj, dict):
         raise UiIpcRpcProtocolError(
             None,
-            code=-32600,
-            message="jsonrpc must be '2.0'",
+            code=-32602,
+            message="params must be an object",
         )
-
-    method = envelope.get("method")
-    if not isinstance(method, str) or not method.strip():
-        raise UiIpcRpcProtocolError(
-            None,
-            code=-32600,
-            message="method is required",
-        )
-
-    params = normalize_payload(envelope.get("params"))
-    request_id_obj = envelope.get("id")
-    if request_id_obj is None:
-        if method not in ALLOWED_NOTIFICATION_METHODS:
+    params = normalize_jsonrpc_params(cast(object, params_obj))
+    if not envelope.has_id:
+        if envelope.method not in ALLOWED_NOTIFICATION_METHODS:
             raise UiIpcRpcProtocolError(
                 None,
                 code=-32601,
-                message=f"Unknown UI IPC RPC notification: {method}",
-                data={"method": method},
+                message=f"Unknown UI IPC RPC notification: {envelope.method}",
+                data={"method": envelope.method},
             )
         return None
 
-    request_id = _coerce_request_id(request_id_obj)
-    if method not in ALLOWED_REQUEST_METHODS:
+    request_id = _coerce_request_id(envelope.request_id)
+    if envelope.method not in ALLOWED_REQUEST_METHODS:
         raise UiIpcRpcProtocolError(
             request_id,
             code=-32601,
-            message=f"Unknown UI IPC RPC method: {method}",
-            data={"method": method},
+            message=f"Unknown UI IPC RPC method: {envelope.method}",
+            data={"method": envelope.method},
         )
     return {
         "request_id": request_id,
-        "method": cast(UiIpcRpcMethod, method),
+        "method": cast(UiIpcRpcMethod, envelope.method),
         "params": params,
     }
 
 
 def parse_ui_ipc_rpc_notification(payload: object) -> ParsedUiIpcRpcNotification:
-    envelope = _as_object(payload)
-    if envelope is None:
+    try:
+        envelope = coerce_jsonrpc_envelope(payload)
+    except JsonRpcEnvelopeError as exc:
         raise UiIpcRpcProtocolError(
             None,
-            code=-32600,
-            message="Invalid notification envelope",
-        )
-    if envelope.get("jsonrpc") != "2.0":
+            code=exc.code,
+            message=exc.message,
+        ) from exc
+    params_obj: object = envelope.params
+    if params_obj is not None and not isinstance(params_obj, dict):
         raise UiIpcRpcProtocolError(
             None,
-            code=-32600,
-            message="jsonrpc must be '2.0'",
+            code=-32602,
+            message="params must be an object",
         )
-    method = envelope.get("method")
-    if not isinstance(method, str) or not method.strip():
-        raise UiIpcRpcProtocolError(
-            None,
-            code=-32600,
-            message="method is required",
-        )
-    if method not in ALLOWED_NOTIFICATION_METHODS:
+    if envelope.method not in ALLOWED_NOTIFICATION_METHODS:
         raise UiIpcRpcProtocolError(
             None,
             code=-32601,
-            message=f"Unknown UI IPC RPC notification: {method}",
-            data={"method": method},
+            message=f"Unknown UI IPC RPC notification: {envelope.method}",
+            data={"method": envelope.method},
         )
     return {
-        "method": cast(UiIpcRpcNotification, method),
-        "params": normalize_payload(envelope.get("params")),
+        "method": cast(UiIpcRpcNotification, envelope.method),
+        "params": normalize_jsonrpc_params(cast(object, params_obj)),
     }
 
 

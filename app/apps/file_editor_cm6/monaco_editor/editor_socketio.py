@@ -1,11 +1,10 @@
-import socketio
+# pyright: strict
+from __future__ import annotations
 
-from app.apps.file_editor_cm6.monaco_editor.editor_rpc_socketio import EditorRpcSocketIONamespace
+from app.apps.file_editor_cm6.socketio_gateway import FILE_EDITOR_CM6_ASGI_APP, FILE_EDITOR_CM6_SIO
 
-# Worker-owned Socket.IO server for the Monaco editor runtime.
-# The main framework process only proxies the websocket connection.
-EDITOR_SIO = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
-EDITOR_SIO.register_namespace(EditorRpcSocketIONamespace("/rpc/editor"))
+# Import-compatible aliases for existing editor-owned emitters/import sites.
+EDITOR_SIO = FILE_EDITOR_CM6_SIO
+EDITOR_ASGI_APP = FILE_EDITOR_CM6_ASGI_APP
 
-# Mount this ASGI app at '/editor_ws/socket.io' inside the app worker.
-EDITOR_ASGI_APP = socketio.ASGIApp(EDITOR_SIO, socketio_path="")
+__all__ = ["EDITOR_SIO", "EDITOR_ASGI_APP"]

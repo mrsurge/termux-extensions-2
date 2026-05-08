@@ -3,6 +3,7 @@ starlette
 uvicorn[standard]
 httpx
 websockets
+msgspec>=0.21.1
 sse-starlette
 simple-websocket
 aiohttp

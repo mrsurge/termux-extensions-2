@@ -3,6 +3,13 @@ from __future__ import annotations
 
 from typing import Final, Literal, TypedDict, cast
 
+from ..socketio_jsonrpc import (
+    JsonRpcEnvelopeError,
+    coerce_jsonrpc_envelope,
+    is_jsonrpc_id,
+    normalize_jsonrpc_params,
+)
+
 JSONRPC_VERSION: Final = "2.0"
 EDITOR_RPC_EVENT: Final = "rpc"
 
@@ -156,58 +163,33 @@ class EditorRpcDispatchError(Exception):
 
 
 def coerce_jsonrpc_request_envelope(payload: object) -> JsonRpcRequestEnvelope | None:
-    if not isinstance(payload, dict):
+    try:
+        envelope = coerce_jsonrpc_envelope(payload)
+    except JsonRpcEnvelopeError as exc:
+        raise EditorRpcProtocolError(exc.code, exc.message) from exc
+    if not envelope.has_id or not is_jsonrpc_id(envelope.request_id):
         return None
-    raw_payload = cast(dict[object, object], payload)
-    jsonrpc_obj = raw_payload.get("jsonrpc")
-    method_obj = raw_payload.get("method")
-    params_obj = raw_payload.get("params", {})
-    request_id = raw_payload.get("id")
-    if jsonrpc_obj != JSONRPC_VERSION:
-        raise EditorRpcProtocolError(JSONRPC_INVALID_REQUEST, "invalid_jsonrpc_version")
-    if not isinstance(method_obj, str) or not method_obj:
-        raise EditorRpcProtocolError(JSONRPC_INVALID_REQUEST, "missing_method")
-    if params_obj is None:
-        params_obj = {}
-    if not isinstance(params_obj, dict):
+    params_obj: object = envelope.params
+    if params_obj is not None and not isinstance(params_obj, dict):
         raise EditorRpcProtocolError(JSONRPC_INVALID_PARAMS, "params_must_be_object")
-    if not isinstance(request_id, (str, int)):
-        return None
-    typed_params = cast(dict[object, object], params_obj)
-    params: dict[str, object] = {}
-    for raw_key, raw_value in typed_params.items():
-        if isinstance(raw_key, str):
-            params[raw_key] = raw_value
     return {
         "jsonrpc": JSONRPC_VERSION,
-        "id": request_id,
-        "method": cast(EditorRpcMethod, method_obj),
-        "params": params,
+        "id": cast(JsonRpcId, envelope.request_id),
+        "method": cast(EditorRpcMethod, envelope.method),
+        "params": normalize_jsonrpc_params(cast(object, params_obj)),
     }
 
 
 def coerce_jsonrpc_notification_envelope(payload: object) -> JsonRpcNotificationEnvelope:
-    if not isinstance(payload, dict):
-        raise EditorRpcProtocolError(JSONRPC_INVALID_REQUEST, "payload_must_be_object")
-    raw_payload = cast(dict[object, object], payload)
-    jsonrpc_obj = raw_payload.get("jsonrpc")
-    method_obj = raw_payload.get("method")
-    params_obj = raw_payload.get("params", {})
-    if jsonrpc_obj != JSONRPC_VERSION:
-        raise EditorRpcProtocolError(JSONRPC_INVALID_REQUEST, "invalid_jsonrpc_version")
-    if not isinstance(method_obj, str) or not method_obj:
-        raise EditorRpcProtocolError(JSONRPC_INVALID_REQUEST, "missing_method")
-    if params_obj is None:
-        params_obj = {}
-    if not isinstance(params_obj, dict):
+    try:
+        envelope = coerce_jsonrpc_envelope(payload)
+    except JsonRpcEnvelopeError as exc:
+        raise EditorRpcProtocolError(exc.code, exc.message) from exc
+    params_obj: object = envelope.params
+    if params_obj is not None and not isinstance(params_obj, dict):
         raise EditorRpcProtocolError(JSONRPC_INVALID_PARAMS, "params_must_be_object")
-    typed_params = cast(dict[object, object], params_obj)
-    params: dict[str, object] = {}
-    for raw_key, raw_value in typed_params.items():
-        if isinstance(raw_key, str):
-            params[raw_key] = raw_value
     return {
         "jsonrpc": JSONRPC_VERSION,
-        "method": method_obj,
-        "params": params,
+        "method": envelope.method,
+        "params": normalize_jsonrpc_params(cast(object, params_obj)),
     }

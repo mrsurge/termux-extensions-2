@@ -1,18 +1,15 @@
-import socketio
+# pyright: strict
+from __future__ import annotations
 
-from .ui_ipc_ws import UIIPCNamespace
-
-# Worker-owned Socket.IO server for UI IPC (frontend-to-frontend relay).
-# The main framework process proxies /ui_ipc_ws/socket.io to this worker endpoint.
-UI_IPC_MAX_HTTP_BUFFER_SIZE = 8 * 1024 * 1024
-
-UI_IPC_SIO = socketio.AsyncServer(
-    async_mode="asgi",
-    cors_allowed_origins="*",
-    max_http_buffer_size=UI_IPC_MAX_HTTP_BUFFER_SIZE,
+from app.apps.file_editor_cm6.socketio_gateway import (
+    FILE_EDITOR_CM6_ASGI_APP,
+    FILE_EDITOR_CM6_SIO,
+    FILE_EDITOR_CM6_SOCKETIO_MAX_HTTP_BUFFER_SIZE,
 )
-UI_IPC_SIO.register_namespace(UIIPCNamespace("/ui_ipc"))
-UI_IPC_SIO.register_namespace(UIIPCNamespace("/sidebar_ipc"))
 
-# Mount this ASGI app at '/ui_ipc_ws/socket.io' inside the app worker.
-UI_IPC_ASGI_APP = socketio.ASGIApp(UI_IPC_SIO, socketio_path="")
+# Import-compatible aliases for existing UI IPC/sidebar emitters/import sites.
+UI_IPC_MAX_HTTP_BUFFER_SIZE = FILE_EDITOR_CM6_SOCKETIO_MAX_HTTP_BUFFER_SIZE
+UI_IPC_SIO = FILE_EDITOR_CM6_SIO
+UI_IPC_ASGI_APP = FILE_EDITOR_CM6_ASGI_APP
+
+__all__ = ["UI_IPC_MAX_HTTP_BUFFER_SIZE", "UI_IPC_SIO", "UI_IPC_ASGI_APP"]

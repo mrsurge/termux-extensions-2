@@ -1,11 +1,10 @@
-import socketio
+# pyright: strict
+from __future__ import annotations
 
-from app.apps.file_editor_cm6.explorer.transport.rpc_socketio import ExplorerRpcSocketIONamespace
+from app.apps.file_editor_cm6.socketio_gateway import FILE_EDITOR_CM6_ASGI_APP, FILE_EDITOR_CM6_SIO
 
-# Worker-owned Socket.IO server for the Explorer runtime.
-# The main framework process only proxies the websocket connection.
-EXPLORER_SIO = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
-EXPLORER_SIO.register_namespace(ExplorerRpcSocketIONamespace("/rpc/explorer"))
+# Import-compatible aliases for existing Explorer-owned emitters/import sites.
+EXPLORER_SIO = FILE_EDITOR_CM6_SIO
+EXPLORER_ASGI_APP = FILE_EDITOR_CM6_ASGI_APP
 
-# Mount this ASGI app at '/explorer_ws/socket.io' inside the app worker.
-EXPLORER_ASGI_APP = socketio.ASGIApp(EXPLORER_SIO, socketio_path="")
+__all__ = ["EXPLORER_SIO", "EXPLORER_ASGI_APP"]

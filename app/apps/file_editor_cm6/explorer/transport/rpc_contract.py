@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypedDict, cast
 
+from ...socketio_jsonrpc import (
+    JsonRpcEnvelopeError,
+    coerce_jsonrpc_envelope,
+    normalize_jsonrpc_params,
+)
+
 EXPLORER_RPC_NAMESPACE = "/rpc/explorer"
 EXPLORER_RPC_REQUEST_EVENT = "rpc"
 EXPLORER_RPC_NOTIFICATION_EVENT = "rpc.notify"
@@ -147,43 +153,36 @@ def build_jsonrpc_result(request_id: str, result: JsonObject) -> JsonRpcSuccessE
 
 
 def parse_explorer_rpc_request(payload: object) -> ParsedExplorerRpcRequest:
-    envelope = _as_object(payload)
-    if envelope is None:
+    try:
+        envelope = coerce_jsonrpc_envelope(payload)
+    except JsonRpcEnvelopeError as exc:
         raise ExplorerRpcProtocolError(
-            None,
-            code=-32600,
-            message="Invalid request envelope",
-        )
+            _coerce_request_id(exc.request_id),
+            code=exc.code,
+            message=exc.message,
+        ) from exc
 
-    if envelope.get("jsonrpc") != "2.0":
+    request_id = _coerce_request_id(envelope.request_id) if envelope.has_id else None
+    params_obj: object = envelope.params
+    if params_obj is not None and not isinstance(params_obj, dict):
         raise ExplorerRpcProtocolError(
-            _coerce_request_id(envelope.get("id")),
-            code=-32600,
-            message="jsonrpc must be '2.0'",
+            request_id,
+            code=-32602,
+            message="params must be an object",
         )
+    params = normalize_jsonrpc_params(cast(object, params_obj))
 
-    method = envelope.get("method")
-    if not isinstance(method, str) or not method.strip():
-        raise ExplorerRpcProtocolError(
-            _coerce_request_id(envelope.get("id")),
-            code=-32600,
-            message="method is required",
-        )
-
-    request_id = _coerce_request_id(envelope.get("id"))
-    params = normalize_payload(envelope.get("params"))
-
-    if method not in DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD:
+    if envelope.method not in DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD:
         raise ExplorerRpcProtocolError(
             request_id,
             code=-32601,
-            message=f"Unknown Explorer RPC method: {method}",
-            data={"method": method},
+            message=f"Unknown Explorer RPC method: {envelope.method}",
+            data={"method": envelope.method},
         )
 
     return {
         "request_id": request_id,
-        "method": method,
+        "method": envelope.method,
         "params": params,
     }
 

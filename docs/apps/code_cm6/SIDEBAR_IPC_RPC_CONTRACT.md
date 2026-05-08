@@ -124,10 +124,12 @@ Contract constants/parsers:
 - `app/apps/file_editor_cm6/src/sidebar_ipc/rpc_contract.ts`
 - `app/apps/file_editor_cm6/ui_ipc/sidebar_rpc_contract.py`
 
-Current legacy handler surface:
+Current implementation/source surfaces:
 
 - `app/apps/file_editor_cm6/ui_ipc/sidebar_ws.py`
-- `app/apps/file_editor_cm6/extensions/sidebar_extension/static/js/sidebar_shortcuts.js`
+- `app/apps/file_editor_cm6/main_page/frontend/sidebar-shortcuts/runtime.ts`
+- `app/apps/file_editor_cm6/main_page/frontend/sidebar-shortcuts/`
+- `app/apps/file_editor_cm6/main_page/frontend/ui/sidebar-shortcuts-bootstrap.ts`
 - `app/apps/file_editor_cm6/main_page/frontend/host-sidebar-runtime.ts`
 
 ## Cutover Rule

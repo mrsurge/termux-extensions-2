@@ -18,6 +18,8 @@ This document is the canonical progress tracker for `file_editor_cm6` main-page 
 
 Use the broader `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for target architecture and sequencing. Use this file for concrete slice status, completed extraction notes, and next main-page/template cleanup candidates.
 
+Transport-collapse execution details live in `FILE_EDITOR_CM6_TRANSPORT_COLLAPSE_PLAN.md`. The app-local Python Socket.IO collapse is complete; main-page/template cleanup should still not race ahead of the later framework `sio_service.json` relay phase when physical transport ownership is involved.
+
 ### Completed Slices
 
 - Host chrome extraction: `main_page/frontend/host-chrome-runtime.ts` owns toolbar filename/title clamp, mobile filename drag, issues-button dispatch, and diagnostics export wiring that used to live inline in `main.js`.
@@ -50,12 +52,15 @@ Use the broader `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for target architecture
 - Host entry finish pass: `main.ts` remains a procedural composition root, but the final cleanup removed write-only local state, dead wrapper functions, and stale comments left over from the conversion. This host frontend entry is broken up enough for now; do not keep listing it as a next decomposition target unless a concrete ownership bug requires another extraction.
 - Editor RPC namespace cleanup: the legacy `/editor` Socket.IO namespace is retired from the active editor server, and `/rpc/editor` is now the editor runtime/backend lane. Jump-to-line, git-baseline, draft-diff, mirror/save, save-snapshot, cache/draft/scroll state, ready/open-complete/notify, diagnostics-count, model-ready, issues, find, and breadcrumb navigation traffic now uses typed `/rpc/editor` methods/notifications or backend-owned host hooks that fan out through `/rpc/editor`.
 - Android UI IPC RPC cleanup: Android native code now consumes UI IPC `rpc.notify` envelopes for editor focus/blur, no longer listens for the legacy `ui_event` bridge, and the worker no longer maintains Android compatibility `ui_event` subscribers/fanout.
+- Sidebar shortcut source cleanup: persisted shortcut preferences, header shortcut rendering, modal behavior, iframe-stack activation, and framework-app shortcut startup now live under `main_page/frontend/sidebar-shortcuts/` with `runtime.ts` as the source entry and `main_page/frontend/ui/sidebar-shortcuts-bootstrap.ts` as the host bootstrap seam.
+- App-local Socket.IO collapse: `socketio_gateway.py` now owns one worker-side Python Socket.IO server for `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`, with current physical paths preserved through `main.py` and `msgspec` envelope validation centralized in `socketio_jsonrpc.py`.
 
 ### Current Sidebar Boundary
 
 The live sidebar surface is:
 
-- `extensions/sidebar_extension/static/js/sidebar_shortcuts.js` for persisted shortcut preferences, header shortcut rendering, modal behavior, iframe-stack activation, and framework-app shortcut startup.
+- `main_page/frontend/sidebar-shortcuts/runtime.ts` plus the adjacent `main_page/frontend/sidebar-shortcuts/` modules for persisted shortcut preferences, header shortcut rendering, modal behavior, iframe-stack activation, and framework-app shortcut startup.
+- `main_page/frontend/ui/sidebar-shortcuts-bootstrap.ts` for host bootstrap into the sidebar shortcut runtime.
 - `/sidebar_ipc` on `/ui_ipc_ws/socket.io` for cwd sync, active shortcut state, refresh/mention relay, and sidebar-originated editor-open routing through backend host hooks.
 - `main_page/frontend/host-sidebar-runtime.ts` for main-page drawer shell open/close/toggle state.
 
@@ -103,14 +108,13 @@ This cleanup was ranked ahead of older host-entry shrinkage ideas, template clea
 
 ### Immediate Next Candidates
 
-1. Follow the ordered queue in `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`: with `/editor` retired in favor of `/rpc/editor` and Android native UI integration moved onto UI IPC RPC, create the dedicated sidebar IPC/RPC contract, then collapse the physical app transports behind one gateway path.
-2. Live-validate the cleaned ownership model after rebuild/version sync, using the exact generated `main_page` TE2 console worker and the relevant app-worker/WBA framework-shell logs.
-3. Create the dedicated sidebar IPC/RPC contract before physical gateway work.
-4. Use the frozen Socket.IO topology constants when touching frontend socket clients, but do not begin physical gateway consolidation until the sidebar IPC/RPC contract cleanup item is coherent.
-5. Start `main.py` decomposition only after choosing a small route/helper family that does not move framework-owned `services/` shims or worker subapp mounts.
-6. Continue re-reviewing `template.html` after the sidebar prune and remove remaining avoidable behavior policy from markup/CSS while preserving shortcut DOM compatibility.
-7. Convert remaining host actions that still import Explorer RPC for project/settings/watcher flows into explicit backend-owned hook surfaces only after classifying whether the producing surface is host or Explorer.
-8. When debugging live frontend behavior through TE2 console, target the exact generated worker id under the `main_page` label rather than assuming a fixed worker id.
+1. Defer the framework-level `sio_service.json` relay to transport-collapse phase two; do not recreate hidden fallback transport routing while it is being designed.
+2. Live-validate the cleaned ownership model only after explicit approval, using the exact generated `main_page` TE2 console worker and the relevant app-worker/WBA framework-shell logs.
+3. Use the frozen Socket.IO topology constants when touching frontend socket clients, but avoid frontend/Android physical path changes until the framework relay phase explicitly accounts for clients.
+4. Start `main.py` decomposition only after choosing a small route/helper family that does not move framework-owned service or worker subapp ownership prematurely.
+5. Continue re-reviewing `template.html` after the sidebar prune and remove remaining avoidable behavior policy from markup/CSS while preserving shortcut DOM compatibility.
+6. Convert remaining host actions that still import Explorer RPC for project/settings/watcher flows into explicit backend-owned hook surfaces only after classifying whether the producing surface is host or Explorer.
+7. When debugging live frontend behavior through TE2 console, target the exact generated worker id under the `main_page` label rather than assuming a fixed worker id.
 
 ## Current code review
 
@@ -251,7 +255,7 @@ Best first extraction targets:
    - reason: large self-contained chunk with clear API dependencies
 3. Sidebar runtime
    - completed: `host-sidebar-runtime.ts` owns main-page drawer shell open/close/toggle behavior
-   - remaining candidate: extract persisted shortcut collection, active selection, iframe-stack sync, shortcut modal glue, and framework-app shortcut startup from `sidebar_shortcuts.js` only if that work preserves the `/sidebar_ipc` event model
+   - completed: shortcut collection, active selection, iframe-stack sync, shortcut modal glue, and framework-app shortcut startup now live under `main_page/frontend/sidebar-shortcuts/`
    - removed: Codex appserver socket tracking belonged to the dead in-app agent harness and should not be recreated in the main-page runtime
 4. `host-editor-events-runtime.ts`
    - completed: host-side editor ready/open waiters, cache/scroll event handling, diagnostics count projection, and notify toasts consume `/ui_ipc`-bridged editor notifications

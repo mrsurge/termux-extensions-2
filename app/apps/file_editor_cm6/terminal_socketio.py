@@ -1,11 +1,10 @@
-import socketio
+# pyright: strict
+from __future__ import annotations
 
-from .terminal_backend import TerminalSocketIONamespace, attach_terminal_socketio_server
+from app.apps.file_editor_cm6.socketio_gateway import FILE_EDITOR_CM6_ASGI_APP, FILE_EDITOR_CM6_SIO
 
-# Worker-owned Socket.IO server for the terminal drawer/runtime.
-TERMINAL_SIO = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
-TERMINAL_SIO.register_namespace(TerminalSocketIONamespace("/terminal"))
-attach_terminal_socketio_server(TERMINAL_SIO)
+# Import-compatible aliases for existing terminal emitters/import sites.
+TERMINAL_SIO = FILE_EDITOR_CM6_SIO
+TERMINAL_ASGI_APP = FILE_EDITOR_CM6_ASGI_APP
 
-# Mount this ASGI app at '/terminal_ws/socket.io' inside the app worker.
-TERMINAL_ASGI_APP = socketio.ASGIApp(TERMINAL_SIO, socketio_path="")
+__all__ = ["TERMINAL_SIO", "TERMINAL_ASGI_APP"]
