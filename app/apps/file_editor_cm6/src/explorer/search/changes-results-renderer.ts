@@ -6,6 +6,7 @@ import {
   type ExplorerDiffChangeLike,
   type ExplorerDiffHunkLike,
 } from './utils.ts';
+import { renderHighlightedDiffText } from './render-styling.ts';
 import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
 
 interface ExplorerChangeLine {
@@ -54,6 +55,30 @@ function readCheckboxValue(id: string): boolean {
 function readInputValue(id: string): string {
   const el = document.getElementById(id);
   return el instanceof HTMLInputElement ? el.value : '';
+}
+
+function isAddLineType(type: string | undefined): boolean {
+  return type === 'add' || type === 'add-draft';
+}
+
+function isDeleteLineType(type: string | undefined): boolean {
+  return type === 'del' || type === 'del-draft';
+}
+
+function getComparableLineText(
+  lines: ReadonlyArray<ExplorerChangeLine>,
+  index: number,
+  currentType: string | undefined,
+): string | null {
+  if (isAddLineType(currentType)) {
+    const previous = lines[index - 1];
+    return isDeleteLineType(previous?.type) ? previous?.text || '' : null;
+  }
+  if (isDeleteLineType(currentType)) {
+    const next = lines[index + 1];
+    return isAddLineType(next?.type) ? next?.text || '' : null;
+  }
+  return null;
 }
 
 export function createExplorerChangesResultsRenderer(
@@ -236,7 +261,8 @@ export function createExplorerChangesResultsRenderer(
           let oldLine = typeof hunk.oldStart === 'number' ? hunk.oldStart : 0;
           let newLine = typeof hunk.newStart === 'number' ? hunk.newStart : 0;
 
-          (Array.isArray(hunk.lines) ? hunk.lines : []).forEach((line) => {
+          const lines = Array.isArray(hunk.lines) ? hunk.lines : [];
+          lines.forEach((line, index) => {
             const row = document.createElement('div');
             row.className = 'fe-search-diff-row';
             const rowLine =
@@ -255,7 +281,14 @@ export function createExplorerChangesResultsRenderer(
 
             const text = document.createElement('pre');
             text.className = 'fe-search-diff-text';
-            text.textContent = line.text || '';
+            renderHighlightedDiffText(text, line.text || '', rel, {
+              compareAgainst: getComparableLineText(lines, index, line.type),
+              mode: isAddLineType(line.type)
+                ? 'added'
+                : isDeleteLineType(line.type)
+                  ? 'removed'
+                  : null,
+            });
 
             if (line.type === 'add' || line.type === 'add-draft') {
               row.classList.add(line.type === 'add-draft' ? 'is-add-draft' : 'is-add');

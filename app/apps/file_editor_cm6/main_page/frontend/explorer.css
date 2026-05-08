@@ -2,6 +2,8 @@
 
 /* explorer.css - File Explorer Drawer Styles */
 
+@import './explorer-highlight-github.css';
+
 :root {
   --drawer-width: 100vw; /* Change from 75vw to 100vw for full width */
   --explorer-bg: #0b1220;
@@ -815,6 +817,7 @@
 
 .fe-search-snippet {
   flex: 1;
+  display: block;
   font-size: 12px;
   font-family: monospace;
   overflow: hidden;
@@ -972,6 +975,37 @@
   flex: 1;
   margin: 0;
   white-space: pre-wrap;
+}
+
+.fe-search-code-surface.hljs {
+  display: block;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+}
+
+.fe-search-snippet.fe-search-code-surface.hljs {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-search-diff-text.fe-search-code-surface.hljs {
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.fe-search-diff-token {
+  border-radius: 2px;
+}
+
+.fe-search-diff-token.is-added {
+  background: rgba(34, 197, 94, 0.22);
+}
+
+.fe-search-diff-token.is-removed {
+  background: rgba(248, 113, 113, 0.24);
 }
 
 .fe-search-diff-more {

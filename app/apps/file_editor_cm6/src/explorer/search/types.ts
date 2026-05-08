@@ -25,6 +25,8 @@ export interface ExplorerNameSearchResults {
 
 export interface ExplorerContentSearchMatch {
   line?: number;
+  column?: number;
+  text?: string;
   snippet?: string;
 }
 

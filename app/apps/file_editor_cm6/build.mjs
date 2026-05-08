@@ -7,7 +7,13 @@ const isWatch = process.argv.includes('--watch');
 
 async function copyHostCss() {
   await mkdir('static/dist', { recursive: true });
-  await copyFile('main_page/frontend/explorer.css', 'static/dist/explorer.css');
+  await Promise.all([
+    copyFile('main_page/frontend/explorer.css', 'static/dist/explorer.css'),
+    copyFile(
+      'vendor/highlightjs/styles/github-dark.css',
+      'static/dist/explorer-highlight-github.css',
+    ),
+  ]);
 }
 
 /** Shared config for both bundles */

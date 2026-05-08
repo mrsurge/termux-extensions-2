@@ -5,6 +5,7 @@ import {
   type ExplorerNameSearchItem,
   type ExplorerNameSearchResults,
 } from './types.ts';
+import { renderHighlightedSearchSnippet } from './render-styling.ts';
 import { getErrorMessage } from '../utils/errors.ts';
 import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
 
@@ -154,7 +155,11 @@ export function renderContentResults(
 
       const snippet = document.createElement('span');
       snippet.className = 'fe-search-snippet';
-      snippet.textContent = match.snippet || '';
+      renderHighlightedSearchSnippet(
+        snippet,
+        match.snippet || match.text || '',
+        rel,
+      );
       matchRow.appendChild(snippet);
 
       fileGroup.appendChild(matchRow);
