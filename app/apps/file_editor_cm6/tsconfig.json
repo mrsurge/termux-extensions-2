@@ -40,6 +40,7 @@
     "static/dist",
     "static/vendor",
     "vendor",
+    "src/explorer/search/vscode_widget_vendor/**",
     "monaco_editor/build_shims",
     "monaco_editor/vscode_build_src"
   ]

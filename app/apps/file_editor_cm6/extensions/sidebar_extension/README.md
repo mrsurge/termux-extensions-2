@@ -1,6 +1,6 @@
 # Sidebar Extension (Code TE2 / file_editor_cm6)
 
-This folder now contains the main-page sidebar shortcut frontend only.
+This folder now contains the sidebar extension manifest and compatibility notes.
 
 The old in-app agent harness, transcript/session UI, direct Codex appserver socket,
 and `/agent/*` FastAPI routes were removed. The Codex agent runtime is a separate
@@ -8,9 +8,11 @@ TE2 app (`app/apps/codex_agent`) and is loaded through sidebar shortcuts.
 
 ## Live Surfaces
 
-- `static/js/sidebar_shortcuts.js`
+- `app/apps/file_editor_cm6/main_page/frontend/sidebar-shortcuts/`
   - Owns sidebar shortcut preferences, the shortcut modal, header shortcut icons,
-    iframe stack activation, and framework-app shortcut startup.
+    iframe stack activation, framework-app shortcut startup, and shortcut model
+    normalization. The served bundle is still generated through the main-page
+    `host.js` build.
 - `/sidebar_ipc` on path `/ui_ipc_ws/socket.io`
   - Owns host/shortcut-frame coordination, cwd sync, active shortcut state,
     refresh requests, mentions, and sidebar-originated editor-open requests.

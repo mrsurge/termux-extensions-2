@@ -1,18 +1,22 @@
-// @ts-check
+import type {
+  SidebarShortcutsHost,
+  SidebarShortcutsOptions,
+  SidebarShortcutsRuntime,
+  UnknownRecord,
+} from '../sidebar-shortcuts/types.ts';
 
-/**
- * @param {{
- *   initSidebarShortcuts: (opts: any) => any,
- *   host: any,
- *   homeDir: string,
- *   pickFile: (startPath?: string) => Promise<string | null>,
- *   openDrawer: () => void,
- *   closeAllMenus: () => void,
- *   setMenuChecked: (el: HTMLElement, checked: boolean) => void,
- *   emitSidebarIpc?: (eventName: string, payload?: any) => void,
- * }} deps
- */
-export function initSidebarShortcutsSafe(deps: any) {
+export interface SidebarShortcutsBootstrapDeps {
+  initSidebarShortcuts: (opts: SidebarShortcutsOptions) => SidebarShortcutsRuntime;
+  host: SidebarShortcutsHost | null;
+  homeDir: string;
+  pickFile: (startPath?: string) => Promise<string | null>;
+  openDrawer: () => void;
+  closeAllMenus: () => void;
+  setMenuChecked: (el: HTMLElement | null, checked: boolean) => void;
+  emitSidebarIpc?: (eventName: string, payload?: UnknownRecord) => void;
+}
+
+export function initSidebarShortcutsSafe(deps: SidebarShortcutsBootstrapDeps): SidebarShortcutsRuntime | null {
   try {
     const shortcuts = deps.initSidebarShortcuts({
       host: deps.host,

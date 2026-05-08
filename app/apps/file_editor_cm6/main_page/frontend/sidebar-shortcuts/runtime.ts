@@ -1,4 +1,4 @@
-// app/apps/file_editor_cm6/extensions/sidebar_extension/static/js/sidebar_shortcuts.js
+// app/apps/file_editor_cm6/main_page/frontend/sidebar-shortcuts/runtime.ts
 // Sidebar shortcuts + iframe stack orchestration (kept out of main.js).
 //
 // Owns:
@@ -7,78 +7,106 @@
 // - Shortcuts editor modal (URL + framework_app)
 // - Iframe stack lifecycle (lazy/eager) with framework app start-before-load
 
-import { EXPLORER_RPC_METHODS } from '../../../../src/explorer/rpc/contract.ts';
+import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
 import {
   notifyExplorerRpc,
   requestExplorerRpc,
-} from '../../../../src/explorer/rpc/client.ts';
+} from '../../../src/explorer/rpc/client.ts';
+import { SIDEBAR_IPC_LEGACY_EVENT_TYPES } from '../../../src/sidebar_ipc/rpc_contract.ts';
+import {
+  EXTENSION_MANIFEST_URL,
+  SHORTCUT_KIND_FRAMEWORK_APP,
+  SHORTCUT_KIND_URL,
+  SHORTCUT_LOAD_EAGER,
+  SHORTCUT_LOAD_LAZY,
+  SIDEBAR_SETUP_HINT_DEFAULT,
+  SIDEBAR_SETUP_TITLE_DEFAULT,
+  UI_PREF_KEY_ACTIVE,
+  UI_PREF_KEY_HEADER_DISPLAY,
+  UI_PREF_KEY_SHORTCUTS,
+  UI_PREF_KEY_TOGGLE_DISPLAY,
+} from './constants.ts';
+import {
+  deriveAppIdFromShellEvent as _deriveAppIdFromShellEvent,
+  frameworkEventsUrl as _frameworkEventsUrl,
+  parseShellEvent,
+  runningStateFromShellEvent as _runningStateFromShellEvent,
+  shellPayload,
+} from './framework-events.ts';
+import {
+  agentIconUrlFromName as _agentIconUrlFromName,
+  renderIconNode as _renderIconNode,
+} from './icons.ts';
+import {
+  collectShortcuts as collectShortcutsFromPrefs,
+  ensureActiveSelection as ensureShortcutActiveSelection,
+  pickMruShortcut as pickMruShortcutFromModel,
+  resolveActive as resolveActiveShortcut,
+} from './shortcut-model.ts';
+import type {
+  FrameworkAppManifest,
+  IframeEntry,
+  SidebarShortcut,
+  SidebarShortcutPreference,
+  SidebarShortcutsOptions,
+  SidebarShortcutsRuntime,
+  ShortcutIcon,
+  ShortcutKind,
+  ShortcutLoad,
+  UnknownRecord,
+} from './types.ts';
+import {
+  asRecord,
+  buildFrameworkAppUrl as _buildFrameworkAppUrl,
+  fetchJson as _fetchJson,
+  firstGrapheme as _firstGrapheme,
+  normalizeEditorKind as _normalizeEditorKind,
+  normalizeKind as _normalizeKind,
+  normalizeLoad as _normalizeLoad,
+  normStr as _normStr,
+} from './utils.ts';
 
-const EXTENSION_MANIFEST_URL = '/apps/file_editor_cm6/extensions/sidebar_extension/manifest.json';
-
-const UI_PREF_KEY_ACTIVE = 'agentActiveShortcutId';
-const UI_PREF_KEY_TOGGLE_DISPLAY = 'agentToggleDisplay';
-const UI_PREF_KEY_HEADER_DISPLAY = 'agentHeaderDisplay';
-const UI_PREF_KEY_SHORTCUTS = 'agentShortcuts';
-
-const SHORTCUT_KIND_URL = 'url';
-const SHORTCUT_KIND_FRAMEWORK_APP = 'framework_app';
-
-const SHORTCUT_LOAD_LAZY = 'lazy';
-const SHORTCUT_LOAD_EAGER = 'eager';
-const SIDEBAR_SETUP_TITLE_DEFAULT = 'Side-bar setup';
-const SIDEBAR_SETUP_HINT_DEFAULT = 'Add shortcuts to choose what loads in the side-bar.';
-
-function _normStr(value) {
-  return typeof value === 'string' ? value.trim() : '';
+interface MenuCheckable extends HTMLElement {
+  dataset: DOMStringMap & { value?: string };
 }
 
-function _firstGrapheme(text) {
-  const value = _normStr(text);
-  if (!value) return '';
-  try {
-    if (typeof Intl !== 'undefined' && Intl.Segmenter) {
-      const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-      const it = seg.segment(value)[Symbol.iterator]();
-      const first = it.next();
-      if (first && first.value && first.value.segment) return first.value.segment;
-    }
-  } catch (_) {}
-  return Array.from(value)[0] || '';
+interface HeaderDragState {
+  cell: HTMLElement;
+  btn: HTMLElement;
+  fromIndex: number;
+  dragging: boolean;
+  pointerId?: number | null;
 }
 
-function _normalizeLoad(raw) {
-  const value = _normStr(raw).toLowerCase();
-  return value === SHORTCUT_LOAD_EAGER ? SHORTCUT_LOAD_EAGER : SHORTCUT_LOAD_LAZY;
+interface ShortcutListDragState {
+  row: HTMLElement;
+  handle: HTMLElement;
+  fromIndex: number;
+  dragging: boolean;
+  touchId?: number;
+  mouseMoveHandler: ((ev: MouseEvent) => void) | null;
+  mouseUpHandler: ((ev: MouseEvent) => void) | null;
+  touchMoveHandler: ((ev: TouchEvent) => void) | null;
+  touchEndHandler: ((ev: TouchEvent) => void) | null;
+  touchCancelHandler: ((ev: TouchEvent) => void) | null;
 }
 
-function _normalizeKind(raw) {
-  const value = _normStr(raw).toLowerCase();
-  if (value === SHORTCUT_KIND_URL) return SHORTCUT_KIND_URL;
-  if (value === SHORTCUT_KIND_FRAMEWORK_APP) return SHORTCUT_KIND_FRAMEWORK_APP;
-  return '';
+interface ShortcutIframeLoadOptions extends UnknownRecord {
+  forceReload?: boolean;
+  onBeforeStart?: () => void;
 }
 
-function _normalizeEditorKind(raw) {
-  const kind = _normalizeKind(raw);
-  return kind || SHORTCUT_KIND_URL;
+function errorMessage(error: unknown, fallback: string): string {
+  return error && typeof error === 'object' && 'message' in error
+    ? String((error as { message?: unknown }).message || fallback)
+    : fallback;
 }
 
-function _buildFrameworkAppUrl(appId) {
-  const safe = _normStr(appId);
-  if (!safe) return '';
-  return `/app/${encodeURIComponent(safe)}?embed=1`;
+function eventTargetElement(event: Event): Element | null {
+  return event.target instanceof Element ? event.target : null;
 }
 
-async function _fetchJson(url, opts) {
-  const resp = await fetch(url, opts);
-  let body = null;
-  try {
-    body = await resp.json();
-  } catch (_) {}
-  return { resp, body };
-}
-
-export function initSidebarShortcuts(options = {}) {
+export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): SidebarShortcutsRuntime {
   const host = options.host || null;
   const pickFileFn = typeof options.pickFile === 'function' ? options.pickFile : null;
   const openDrawer = typeof options.openDrawer === 'function' ? options.openDrawer : null;
@@ -87,122 +115,120 @@ export function initSidebarShortcuts(options = {}) {
   const setMenuChecked =
     typeof options.setMenuChecked === 'function'
       ? options.setMenuChecked
-      : (el, checked) => {
+      : (el: HTMLElement | null, checked: boolean) => {
           if (!el) return;
           el.classList.toggle('fe-menu-item-checked', !!checked);
           el.setAttribute('aria-checked', checked ? 'true' : 'false');
         };
 
-  const toast = (msg) => {
+  const toast = (msg: string) => {
     try {
       if (host && typeof host.toast === 'function') host.toast(msg);
       else console.log(msg);
     } catch (_) {}
   };
 
-  function _logAppDiscovery(_step, _data) {}
+  function _logAppDiscovery(_step: string, _data: UnknownRecord = {}) {}
 
-  function _warnAppDiscovery(_step, _data) {}
+  function _warnAppDiscovery(_step: string, _data: UnknownRecord = {}) {}
 
   // --- DOM elements (resolved on init) ---
-  let agentToggleBtn = null;
-  let agentToggleIconEl = null;
+  let agentToggleBtn: HTMLElement | null = null;
+  let agentToggleIconEl: HTMLElement | null = null;
 
-  let shortcutsModal = null;
-  let shortcutsCloseBtn = null;
-  let shortcutsAddBtn = null;
-  let shortcutsListEl = null;
-  let shortcutsEditorEl = null;
+  let shortcutsModal: HTMLElement | null = null;
+  let shortcutsCloseBtn: HTMLElement | null = null;
+  let shortcutsAddBtn: HTMLElement | null = null;
+  let shortcutsListEl: HTMLElement | null = null;
+  let shortcutsEditorEl: HTMLElement | null = null;
 
-  let editorSettingsShortcutsBtn = null;
-  let setupShortcutsBtn = null;
+  let editorSettingsShortcutsBtn: HTMLElement | null = null;
+  let setupShortcutsBtn: HTMLElement | null = null;
 
-  let shortcutLabelInput = null;
-  let shortcutUrlWrap = null;
-  let shortcutUrlInput = null;
-  let shortcutKindBtn = null;
-  let shortcutKindLabel = null;
-  let shortcutKindDD = null;
-  let shortcutAppWrap = null;
-  let shortcutAppBtn = null;
-  let shortcutAppLabel = null;
-  let shortcutAppDD = null;
+  let shortcutLabelInput: HTMLInputElement | null = null;
+  let shortcutUrlWrap: HTMLElement | null = null;
+  let shortcutUrlInput: HTMLInputElement | null = null;
+  let shortcutKindBtn: HTMLElement | null = null;
+  let shortcutKindLabel: HTMLElement | null = null;
+  let shortcutKindDD: HTMLElement | null = null;
+  let shortcutAppWrap: HTMLElement | null = null;
+  let shortcutAppBtn: HTMLElement | null = null;
+  let shortcutAppLabel: HTMLElement | null = null;
+  let shortcutAppDD: HTMLElement | null = null;
 
-  let shortcutLoadBtn = null;
-  let shortcutLoadLabel = null;
-  let shortcutLoadDD = null;
+  let shortcutLoadBtn: HTMLElement | null = null;
+  let shortcutLoadLabel: HTMLElement | null = null;
+  let shortcutLoadDD: HTMLElement | null = null;
 
-  let shortcutEmojiInput = null;
-  let shortcutIconBrowseBtn = null;
-  let shortcutIconClearBtn = null;
-  let shortcutIconPreview = null;
-  let shortcutCancelBtn = null;
-  let shortcutSaveBtn = null;
+  let shortcutEmojiInput: HTMLInputElement | null = null;
+  let shortcutIconBrowseBtn: HTMLElement | null = null;
+  let shortcutIconClearBtn: HTMLElement | null = null;
+  let shortcutIconPreview: HTMLElement | null = null;
+  let shortcutCancelBtn: HTMLElement | null = null;
+  let shortcutSaveBtn: HTMLElement | null = null;
 
-  let sidebarHeaderIconEl = null;
-  let sidebarHeaderTitleEl = null;
-  let sidebarHeaderIconGridEl = null;
-  let sidebarHeaderIconMenuEl = null;
-  let sidebarRefreshBtn = null;
-  let sidebarRefreshMenuEl = null;
-  let sidebarSetupPlaceholder = null;
-  let sidebarSetupTitleEl = null;
-  let sidebarSetupHintEl = null;
-  let sidebarIframeStack = null;
+  let sidebarHeaderIconEl: HTMLElement | null = null;
+  let sidebarHeaderTitleEl: HTMLElement | null = null;
+  let sidebarHeaderIconGridEl: HTMLElement | null = null;
+  let sidebarHeaderIconMenuEl: HTMLElement | null = null;
+  let sidebarRefreshBtn: HTMLElement | null = null;
+  let sidebarRefreshMenuEl: HTMLElement | null = null;
+  let sidebarSetupPlaceholder: HTMLElement | null = null;
+  let sidebarSetupTitleEl: HTMLElement | null = null;
+  let sidebarSetupHintEl: HTMLElement | null = null;
+  let sidebarIframeStack: HTMLElement | null = null;
 
   // --- internal state ---
-  let _latestUiPrefs = {};
+  let _latestUiPrefs: UnknownRecord = {};
   let _settingsUiMutating = false;
-  let _shortcutsCache = [];
+  let _shortcutsCache: SidebarShortcutPreference[] = [];
 
-  let _editingId = null;
-  let _editingAssetName = null;
-  let _editingKind = SHORTCUT_KIND_URL;
+  let _editingId: string | null = null;
+  let _editingAssetName: string | null = null;
+  let _editingKind: ShortcutKind = SHORTCUT_KIND_URL;
   let _editingAppId = '';
   let _lastPickerPath = '';
   let _clientActiveShortcutId = '';
   let _lastShortcutUsageKey = '';
   let _lastShortcutUsageStamp = 0;
 
-  let _iframeMap = new Map(); // key -> {iframe,url,loaded}
+  let _iframeMap = new Map<string, IframeEntry>(); // key -> {iframe,url,loaded}
   let _activateSeq = 0;
 
-  let _extensionManifestIcon = { kind: '', value: '', defaultIcon: '' };
+  let _extensionManifestIcon: ShortcutIcon = { kind: '', value: '', defaultIcon: '' };
 
-  let _appsCache = null; // canonical apps catalog from /api/apps/catalog
-  let _appsCachePromise = null;
-  let _runningCache = null; // Set(app_id)
-  let _runningCachePromise = null;
+  let _appsCache: FrameworkAppManifest[] | null = null; // canonical apps catalog from /api/apps/catalog
+  let _runningCache: Set<string> | null = null; // Set(app_id)
   let _runningCachePrimed = false;
-  let _startingApps = new Map(); // app_id -> Promise<boolean>
-  let _frameworkEventsWs = null;
-  let _frameworkEventsReconnectTimer = null;
+  let _startingApps = new Map<string, Promise<boolean>>(); // app_id -> Promise<boolean>
+  let _frameworkEventsWs: WebSocket | null = null;
+  let _frameworkEventsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let _frameworkEventsBackoffMs = 600;
   let _frameworkEventsEnabled = false;
   let _appsChromeSeq = 0;
   let _headerIconMenuKey = '';
-  let _refreshMenuLongPressTimer = null;
+  let _refreshMenuLongPressTimer: ReturnType<typeof setTimeout> | null = null;
   let _sidebarEventListenerBound = false;
-  let _appsStateReadyPromise = null;
-  let _appsStateReadyResolve = null;
+  let _appsStateReadyPromise: Promise<void> | null = null;
+  let _appsStateReadyResolve: (() => void) | null = null;
   let _lightInitDone = false;
   let _hydrated = false;
-  let _hydratePromise = null;
+  let _hydratePromise: Promise<void> | null = null;
 
-  function _requireEl(selector, scope = document) {
+  function _requireEl<T extends Element = HTMLElement>(selector: string, scope: ParentNode = document): T {
     const el = scope.querySelector(selector);
     if (!el) throw new Error(`Missing element: ${selector}`);
-    return el;
+    return el as T;
   }
 
-  function _sendUiPrefUpdate(key, value) {
+  function _sendUiPrefUpdate(key: string, value: unknown) {
     if (!notifyExplorerRpc(EXPLORER_RPC_METHODS.prefsUiUpdate, { key, value })) {
       toast('Explorer WebSocket is not connected yet.');
       return;
     }
   }
 
-  async function _ensureAppsCache(force = false) {
+  async function _ensureAppsCache(force: boolean = false) {
     _setFrameworkEventsEnabled(true);
     if (!force && Array.isArray(_appsCache)) {
       return _appsCache;
@@ -211,18 +237,13 @@ export function initSidebarShortcuts(options = {}) {
     return Array.isArray(_appsCache) ? _appsCache : [];
   }
 
-  async function _ensureRunningCache(force = false) {
+  async function _ensureRunningCache(force: boolean = false) {
     _setFrameworkEventsEnabled(true);
     if (!force && _runningCachePrimed && _runningCache instanceof Set) {
       return _runningCache;
     }
     await _ensureAppsStateReady();
     return _runningCache instanceof Set ? _runningCache : new Set();
-  }
-
-  function _frameworkEventsUrl() {
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${window.location.host}/ws/apps`;
   }
 
   function _ensureAppsStateReadyPromise() {
@@ -244,40 +265,7 @@ export function initSidebarShortcuts(options = {}) {
     await _appsStateReadyPromise;
   }
 
-  function _deriveAppIdFromShellEvent(evt) {
-    const direct = _normStr(evt?.app_id || evt?.data?.app_id);
-    if (direct) return direct;
-
-    const label = _normStr(evt?.data?.label);
-    if (label.startsWith('app-worker:')) return _normStr(label.slice('app-worker:'.length));
-    if (label.startsWith('asgi-app:')) return _normStr(label.slice('asgi-app:'.length));
-
-    const specId = _normStr(evt?.data?.spec_id);
-    if (specId.startsWith('app:')) {
-      const parts = specId.split(':');
-      if (parts.length >= 2) return _normStr(parts[1]);
-    }
-    return '';
-  }
-
-  function _runningStateFromShellEvent(evt) {
-    const type = _normStr(evt?.type).toLowerCase();
-    const status = _normStr(evt?.data?.status).toLowerCase();
-
-    if (type === 'shell.exited' || type === 'shell.removed') return false;
-    if (type === 'shell.ready' || type === 'shell.spawned') return true;
-    if (type === 'shell.created') {
-      if (!status || status === 'running') return true;
-      return null;
-    }
-    if (type === 'shell.updated') {
-      if (!status) return null;
-      return status === 'running';
-    }
-    return null;
-  }
-
-  function _invalidateFrameworkShortcutIframes(appId) {
+  function _invalidateFrameworkShortcutIframes(appId: unknown) {
     const id = _normStr(appId);
     if (!id) return;
     const shortcuts = _collectShortcuts(_latestUiPrefs || {});
@@ -297,7 +285,7 @@ export function initSidebarShortcuts(options = {}) {
     }
   }
 
-  function _applyRunningDelta(appId, isRunning) {
+  function _applyRunningDelta(appId: unknown, isRunning: unknown) {
     const id = _normStr(appId);
     if (!id || typeof isRunning !== 'boolean') return;
     if (!(_runningCache instanceof Set)) _runningCache = new Set();
@@ -310,7 +298,7 @@ export function initSidebarShortcuts(options = {}) {
     _refreshShortcutChrome();
     if (isRunning) _ensureRunningFrameworkShortcutIframesLoaded();
 
-    // If any shortcut points at a backend that dies, invalidate those iframe entries.
+    // If a shortcut points at a backend that dies, invalidate those iframe entries.
     if (!isRunning) _invalidateFrameworkShortcutIframes(id);
 
     try {
@@ -320,20 +308,15 @@ export function initSidebarShortcuts(options = {}) {
     } catch (_) {}
   }
 
-  function _handleFrameworkShellEvent(raw) {
-    let evt = raw;
-    try {
-      if (typeof evt === 'string') evt = JSON.parse(evt);
-    } catch (_) {
-      return;
-    }
-    if (!evt || typeof evt !== 'object') return;
+  function _handleFrameworkShellEvent(raw: unknown) {
+    const evt = parseShellEvent(raw);
+    if (!evt) return;
 
-    const type = _normStr(evt?.type);
-    const payload = (evt?.payload && typeof evt.payload === 'object') ? evt.payload : {};
+    const type = _normStr(evt.type);
+    const payload = shellPayload(evt);
 
     if (type === 'apps_snapshot' || type === 'catalog_snapshot') {
-      const catalog = Array.isArray(payload?.catalog) ? payload.catalog : [];
+      const catalog = Array.isArray(payload?.catalog) ? payload.catalog as FrameworkAppManifest[] : [];
       const runningIds = Array.isArray(payload?.running_ids)
         ? payload.running_ids.map((id) => _normStr(id)).filter((id) => !!id)
         : [];
@@ -403,7 +386,7 @@ export function initSidebarShortcuts(options = {}) {
     });
   }
 
-  function _setFrameworkEventsEnabled(enabled) {
+  function _setFrameworkEventsEnabled(enabled: boolean) {
     if (!enabled) {
       _frameworkEventsEnabled = false;
       if (_frameworkEventsReconnectTimer) {
@@ -424,7 +407,7 @@ export function initSidebarShortcuts(options = {}) {
     // Registry changes arrive through the apps state websocket snapshot path.
   }
 
-  function _findAppManifest(appId) {
+  function _findAppManifest(appId: unknown) {
     const id = _normStr(appId);
     if (!id || !Array.isArray(_appsCache)) {
       _warnAppDiscovery('manifest:find:skipped', { appId: id, hasAppsCache: Array.isArray(_appsCache) });
@@ -435,7 +418,7 @@ export function initSidebarShortcuts(options = {}) {
     return found;
   }
 
-  function _resolveAppIconSrc(appManifest) {
+  function _resolveAppIconSrc(appManifest: FrameworkAppManifest | null) {
     const raw = _normStr(appManifest?.icon_src);
     if (!raw) {
       _logAppDiscovery('icon-src:none', { appId: _normStr(appManifest?.id) });
@@ -461,7 +444,7 @@ export function initSidebarShortcuts(options = {}) {
     return raw;
   }
 
-  function _manifestIconForApp(appId) {
+  function _manifestIconForApp(appId: unknown) {
     const m = _findAppManifest(appId);
     if (!m) {
       _warnAppDiscovery('manifest-icon:missing-manifest', { appId: _normStr(appId) });
@@ -486,86 +469,11 @@ export function initSidebarShortcuts(options = {}) {
     return null;
   }
 
-  function _agentIconUrlFromName(name) {
-    const safe = _normStr(name);
-    if (!safe) return '';
-    return `/api/app/file_editor_cm6/agent_icons/${encodeURIComponent(safe)}`;
-  }
-
-  function _renderIconNode(icon, sizePx = 16, fallbackText = '') {
-    const wrap = document.createElement('span');
-    wrap.style.display = 'inline-flex';
-    wrap.style.alignItems = 'center';
-    wrap.style.justifyContent = 'center';
-    if (sizePx === null) {
-      wrap.style.width = '100%';
-      wrap.style.height = '100%';
-    } else {
-      wrap.style.width = `${sizePx}px`;
-      wrap.style.height = `${sizePx}px`;
-    }
-
-    const i = icon && typeof icon === 'object' ? icon : null;
-    if (!i) {
-      if (fallbackText) wrap.textContent = fallbackText;
-      return wrap;
-    }
-
-    if (i.kind === 'emoji') {
-      wrap.textContent = _normStr(i.emoji);
-      return wrap;
-    }
-
-    if (i.kind === 'text') {
-      wrap.textContent = _normStr(i.text);
-      return wrap;
-    }
-
-    if (i.kind === 'asset') {
-      const name = _normStr(i.name);
-      if (!name) {
-        if (fallbackText) wrap.textContent = fallbackText;
-        return wrap;
-      }
-      const img = document.createElement('img');
-      img.src = _agentIconUrlFromName(name);
-      img.alt = '';
-      if (sizePx !== null) {
-        img.style.width = `${sizePx}px`;
-        img.style.height = `${sizePx}px`;
-        img.style.objectFit = 'contain';
-      }
-      wrap.appendChild(img);
-      return wrap;
-    }
-
-    if (i.kind === 'image') {
-      const src = _normStr(i.src);
-      if (!src) {
-        if (fallbackText) wrap.textContent = fallbackText;
-        return wrap;
-      }
-      const img = document.createElement('img');
-      img.src = src;
-      img.alt = '';
-      if (sizePx !== null) {
-        img.style.width = `${sizePx}px`;
-        img.style.height = `${sizePx}px`;
-        img.style.objectFit = 'contain';
-      }
-      wrap.appendChild(img);
-      return wrap;
-    }
-
-    if (fallbackText) wrap.textContent = fallbackText;
-    return wrap;
-  }
-
-  function _applyExtensionManifestIcon(manifest) {
+  function _applyExtensionManifestIcon(manifest: UnknownRecord) {
     const iconPath = _normStr(manifest?.icon);
     const iconEmoji = _normStr(manifest?.icon_emoji);
 
-    const targets = [agentToggleIconEl, sidebarHeaderIconEl].filter(Boolean);
+    const targets = [agentToggleIconEl, sidebarHeaderIconEl].filter((el): el is HTMLElement => !!el);
     if (!targets.length) return;
 
     targets.forEach((el) => {
@@ -609,14 +517,14 @@ export function initSidebarShortcuts(options = {}) {
     try {
       const { body } = await _fetchJson(EXTENSION_MANIFEST_URL, { cache: 'no-store' });
       if (body && typeof body === 'object') {
-        _applyExtensionManifestIcon(body);
+        _applyExtensionManifestIcon(asRecord(body));
       }
     } catch (e) {
       console.warn('[Sidebar] Failed to load extension manifest:', e);
     }
   }
 
-  function _restoreManifestIcon(el) {
+  function _restoreManifestIcon(el: HTMLElement | null) {
     if (!el) return;
     const kind = _normStr(el.dataset?.manifestKind);
     const value = _normStr(el.dataset?.manifestValue);
@@ -635,11 +543,11 @@ export function initSidebarShortcuts(options = {}) {
     }
   }
 
-  function _renderIconInto(el, icon, fallbackIcon = null) {
+  function _renderIconInto(el: HTMLElement | null, icon: unknown, fallbackIcon: SidebarShortcut | null = null) {
     if (!el) return;
     el.textContent = '';
 
-    const i = icon && typeof icon === 'object' ? icon : null;
+    const i = icon && typeof icon === 'object' && !Array.isArray(icon) ? icon as ShortcutIcon : null;
     if (i && i.kind === 'emoji') {
       const emoji = _normStr(i.emoji);
       if (emoji) {
@@ -677,88 +585,41 @@ export function initSidebarShortcuts(options = {}) {
     _restoreManifestIcon(el);
   }
 
-  function _collectShortcuts(uiPrefs) {
-    const raw = Array.isArray(uiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? uiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
-    const out = [];
-    raw.forEach((sc) => {
-      if (!sc || typeof sc !== 'object') return;
-      const kind = _normalizeKind(sc.kind);
-      if (!kind) return;
-      const appId = _normStr(sc.app_id);
-      if (kind === SHORTCUT_KIND_FRAMEWORK_APP && !appId) return;
-      const label = _normStr(sc.label);
-      const url = _normStr(sc.url) || (kind === SHORTCUT_KIND_FRAMEWORK_APP ? _buildFrameworkAppUrl(appId) : '');
-      if (!url) return;
-      const id = _normStr(sc.id);
-      const key = id || url;
-      if (!key) return;
-      out.push({
-        key,
-        id,
-        kind,
-        app_id: appId,
-        label,
-        url,
-        icon: sc.icon || null,
-        load: _normalizeLoad(sc.load),
-        header: true,
-        last_used: Number.isFinite(Number(sc.last_used)) ? Number(sc.last_used) : 0,
-      });
-    });
-    return out;
+  function _collectShortcuts(uiPrefs: UnknownRecord) {
+    return collectShortcutsFromPrefs(uiPrefs as UnknownRecord);
   }
 
-  function _resolveActive(uiPrefs, shortcuts) {
-    const activeId = _normStr(_clientActiveShortcutId) || _normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
-    if (!activeId) return null;
-    const list = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
-    return (
-      list.find((sc) => sc && (sc.id === activeId || sc.url === activeId || sc.key === activeId))
-      || null
-    );
+  function _resolveActive(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null = null) {
+    return resolveActiveShortcut(uiPrefs as UnknownRecord, shortcuts, _clientActiveShortcutId);
   }
 
-  function getActiveUrl(uiPrefs) {
+  function getActiveUrl(uiPrefs: UnknownRecord) {
     const active = _resolveActive(uiPrefs || _latestUiPrefs || {});
     return active ? active.url : '';
   }
 
-  function _pickMruShortcut(shortcuts) {
-    const list = Array.isArray(shortcuts) ? shortcuts : [];
-    let best = null;
-    let bestTs = 0;
-    list.forEach((sc) => {
-      if (!sc) return;
-      const ts = Number(sc.last_used) || 0;
-      if (!best || ts > bestTs) {
-        best = sc;
-        bestTs = ts;
-      }
-    });
-    return best;
+  function _pickMruShortcut(shortcuts: SidebarShortcut[] | null) {
+    return pickMruShortcutFromModel(Array.isArray(shortcuts) ? shortcuts : []);
   }
 
-  function _ensureActiveSelection(uiPrefs, shortcuts) {
-    const activeId = _normStr(_clientActiveShortcutId) || _normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
+  function _ensureActiveSelection(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null) {
     const list = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
-    if (!list.length) return { active: null, activeId: '' };
-    const active = _resolveActive(uiPrefs, list);
-    if (active) return { active, activeId: activeId || active.key };
-    const fallback = _pickMruShortcut(list) || list[0];
-    const nextId = fallback?.id || fallback?.url || fallback?.key || '';
-    if (nextId && nextId !== activeId) _clientActiveShortcutId = nextId;
-    return { active: fallback || null, activeId: nextId };
+    const selection = ensureShortcutActiveSelection(uiPrefs as UnknownRecord, list, _clientActiveShortcutId);
+    if (selection.clientActiveShortcutId !== _clientActiveShortcutId) {
+      _clientActiveShortcutId = selection.clientActiveShortcutId;
+    }
+    return { active: selection.active, activeId: selection.activeId };
   }
 
-  function _applyToggleDisplay(uiPrefs) {
+  function _applyToggleDisplay(uiPrefs: UnknownRecord) {
     const display = _normStr(uiPrefs?.[UI_PREF_KEY_TOGGLE_DISPLAY]) || 'icon';
     try {
-      const radios = document.querySelectorAll('input[name="agent-toggle-display"]');
+      const radios = document.querySelectorAll<HTMLInputElement>('input[name="agent-toggle-display"]');
       radios.forEach((r) => { r.checked = (r.value === display); });
     } catch (_) {}
   }
 
-  function _applyHeaderDisplayMode(uiPrefs) {
+  function _applyHeaderDisplayMode(uiPrefs: UnknownRecord) {
     const iconEl = sidebarHeaderIconEl;
     const textEl = sidebarHeaderTitleEl;
     if (!iconEl || !textEl) return;
@@ -775,7 +636,7 @@ export function initSidebarShortcuts(options = {}) {
     }
   }
 
-  function _effectiveShortcutIcon(sc) {
+  function _effectiveShortcutIcon(sc: SidebarShortcut | SidebarShortcutPreference | null) {
     const icon = sc && sc.icon && typeof sc.icon === 'object' ? sc.icon : null;
     if (icon && icon.kind && icon.kind !== 'default') return icon;
     if (sc && sc.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
@@ -800,7 +661,7 @@ export function initSidebarShortcuts(options = {}) {
     } catch (_) {}
   }
 
-  function _applyToggleIcon(uiPrefs, shortcuts, active) {
+  function _applyToggleIcon(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null, active: SidebarShortcut | null) {
     if (!agentToggleIconEl) return;
     const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
     const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
@@ -812,7 +673,7 @@ export function initSidebarShortcuts(options = {}) {
     _restoreManifestIcon(agentToggleIconEl);
   }
 
-  function _applyHeaderLabelAndIcon(uiPrefs, shortcuts, active) {
+  function _applyHeaderLabelAndIcon(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null, active: SidebarShortcut | null) {
     if (!sidebarHeaderIconEl || !sidebarHeaderTitleEl) return;
     const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
     const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
@@ -832,14 +693,14 @@ export function initSidebarShortcuts(options = {}) {
     _restoreManifestIcon(sidebarHeaderIconEl);
   }
 
-  function _collectHeaderItems(resolvedShortcuts) {
+  function _collectHeaderItems(resolvedShortcuts: SidebarShortcut[]) {
     const list = Array.isArray(resolvedShortcuts) ? resolvedShortcuts : [];
     return list
       .filter((sc) => !!sc)
       .map((sc) => ({ ...sc }));
   }
 
-  function _maybeUpdateShortcutLastUsed(shortcutId) {
+  function _maybeUpdateShortcutLastUsed(shortcutId: unknown) {
     const nextId = _normStr(shortcutId);
     if (!nextId) return;
 
@@ -887,7 +748,7 @@ export function initSidebarShortcuts(options = {}) {
     sidebarRefreshMenuEl.innerHTML = '';
   }
 
-  function _emitSidebarControl(type, payload = {}) {
+  function _emitSidebarControl(type: string, payload: UnknownRecord = {}) {
     const message = {
       type: _normStr(type),
       payload: (payload && typeof payload === 'object') ? payload : {},
@@ -902,7 +763,7 @@ export function initSidebarShortcuts(options = {}) {
     }
   }
 
-  function _setClientActiveShortcut(shortcutId, options = {}) {
+  function _setClientActiveShortcut(shortcutId: unknown, options: UnknownRecord = {}) {
     const nextId = _normStr(shortcutId);
     const prevId = _clientActiveShortcutId;
     _clientActiveShortcutId = nextId;
@@ -912,7 +773,7 @@ export function initSidebarShortcuts(options = {}) {
     }
 
     if (options.emit && nextId && nextId !== prevId) {
-      _emitSidebarControl('active_shortcut:set', {
+      _emitSidebarControl(SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutSet, {
         shortcutId: nextId,
         source: options.source || 'sidebar_shortcuts',
       });
@@ -933,7 +794,7 @@ export function initSidebarShortcuts(options = {}) {
     } catch (_) {}
   }
 
-  function _openRefreshMenu(anchorEl) {
+  function _openRefreshMenu(anchorEl: HTMLElement | null) {
     if (!sidebarRefreshMenuEl || !anchorEl) return;
     try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
     _closeAgentDropdown();
@@ -955,7 +816,7 @@ export function initSidebarShortcuts(options = {}) {
     menu.classList.add('show');
   }
 
-  function _findRawShortcutIndex(sc) {
+  function _findRawShortcutIndex(sc: SidebarShortcut | SidebarShortcutPreference | null) {
     const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
     const key = _normStr(sc?.key);
     const id = _normStr(sc?.id);
@@ -971,7 +832,7 @@ export function initSidebarShortcuts(options = {}) {
     });
   }
 
-  function _persistHeaderOrder(orderedKeys) {
+  function _persistHeaderOrder(orderedKeys: unknown) {
     const order = Array.isArray(orderedKeys)
       ? orderedKeys.map((key) => _normStr(key)).filter((key) => !!key)
       : [];
@@ -980,8 +841,8 @@ export function initSidebarShortcuts(options = {}) {
     const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
     if (!raw.length) return;
 
-    const records = [];
-    const byKey = new Map();
+    const records: Array<{ key: string; entry: SidebarShortcutPreference }> = [];
+    const byKey = new Map<string, { key: string; entry: SidebarShortcutPreference }>();
     raw.forEach((entry) => {
       if (!entry || typeof entry !== 'object') return;
       const key = _normStr(entry.id) || _normStr(entry.url);
@@ -992,8 +853,8 @@ export function initSidebarShortcuts(options = {}) {
     });
     if (records.length < 2) return;
 
-    const reordered = [];
-    const seen = new Set();
+    const reordered: Array<{ key: string; entry: SidebarShortcutPreference }> = [];
+    const seen = new Set<string>();
     order.forEach((key) => {
       if (seen.has(key)) return;
       const record = byKey.get(key);
@@ -1021,7 +882,7 @@ export function initSidebarShortcuts(options = {}) {
     _persistShortcuts(next);
   }
 
-  function _removeShortcut(sc) {
+  function _removeShortcut(sc: SidebarShortcut | SidebarShortcutPreference | null) {
     const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
     const idx = _findRawShortcutIndex(sc);
     if (idx < 0) return;
@@ -1030,11 +891,11 @@ export function initSidebarShortcuts(options = {}) {
     _persistShortcuts(next);
   }
 
-  async function _quitFrameworkApp(appId) {
+  async function _quitFrameworkApp(appId: unknown) {
     const id = _normStr(appId);
     if (!id) return false;
     try {
-      const { resp, body } = await _fetchJson(`/api/apps/${encodeURIComponent(id)}/quit`, {
+      const { resp, body } = await _fetchJson<UnknownRecord>(`/api/apps/${encodeURIComponent(id)}/quit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -1043,7 +904,7 @@ export function initSidebarShortcuts(options = {}) {
         if (resp?.status === 404) {
           toast(`${id} is not running`);
         } else {
-          throw new Error(detail);
+          throw new Error(String(detail));
         }
       } else {
         toast(`Stopped ${id}`);
@@ -1055,12 +916,12 @@ export function initSidebarShortcuts(options = {}) {
       _refreshShortcutChrome();
       return true;
     } catch (e) {
-      toast(e?.message || `Failed to stop app ${id}`);
+      toast(errorMessage(e, `Failed to stop app ${id}`));
       return false;
     }
   }
 
-  function _openHeaderIconMenu(anchorEl, sc) {
+  function _openHeaderIconMenu(anchorEl: HTMLElement | null, sc: SidebarShortcut | SidebarShortcutPreference | null) {
     if (!sidebarHeaderIconMenuEl || !anchorEl || !sc) return;
     try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
     _closeAgentDropdown();
@@ -1138,7 +999,7 @@ export function initSidebarShortcuts(options = {}) {
     });
   }
 
-  function _renderHeaderIconGrid(uiPrefs, shortcuts, active) {
+  function _renderHeaderIconGrid(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null, active: SidebarShortcut | null) {
     const gridEl = sidebarHeaderIconGridEl;
     if (!gridEl) return;
 
@@ -1157,11 +1018,11 @@ export function initSidebarShortcuts(options = {}) {
     }
     gridEl.style.display = 'flex';
 
-    let headerDragState = null;
-    let dropBeforeCell = null;
-    let dropAfterCell = null;
+    let headerDragState: HeaderDragState | null = null;
+    let dropBeforeCell: HTMLElement | null = null;
+    let dropAfterCell: HTMLElement | null = null;
     let dropInsertionIndex = -1;
-    const renderedHeaderItems = [];
+    const renderedHeaderItems: SidebarShortcut[] = [];
 
     const clearDropMarkers = () => {
       if (dropBeforeCell) {
@@ -1174,9 +1035,9 @@ export function initSidebarShortcuts(options = {}) {
       }
     };
 
-    const getCells = () => Array.from(gridEl.querySelectorAll('.agent-drawer__icon-cell'));
+    const getCells = () => Array.from(gridEl.querySelectorAll<HTMLElement>('.agent-drawer__icon-cell'));
 
-    const computeInsertion = (clientX, sourceCell) => {
+    const computeInsertion = (clientX: number, sourceCell: HTMLElement) => {
       const cells = getCells().filter((cell) => cell !== sourceCell);
       let insertion = cells.length;
       for (let i = 0; i < cells.length; i += 1) {
@@ -1190,7 +1051,7 @@ export function initSidebarShortcuts(options = {}) {
       return { cells, insertion };
     };
 
-    const updateDragTarget = (clientX) => {
+    const updateDragTarget = (clientX: number) => {
       if (!headerDragState || !headerDragState.dragging || !headerDragState.cell) return;
       clearDropMarkers();
       const { cells, insertion } = computeInsertion(clientX, headerDragState.cell);
@@ -1206,7 +1067,7 @@ export function initSidebarShortcuts(options = {}) {
       }
     };
 
-    const beginDrag = (state) => {
+    const beginDrag = (state: HeaderDragState | null) => {
       if (!state || !state.cell || !state.btn) return;
       state.dragging = true;
       state.cell.classList.add('is-dragging');
@@ -1216,7 +1077,7 @@ export function initSidebarShortcuts(options = {}) {
       dropInsertionIndex = state.fromIndex;
     };
 
-    const finishDrag = (commit) => {
+    const finishDrag = (commit: boolean) => {
       if (!headerDragState) return;
       const state = headerDragState;
       clearDropMarkers();
@@ -1292,9 +1153,9 @@ export function initSidebarShortcuts(options = {}) {
       renderedHeaderItems.push(sc);
       cell.dataset.headerIndex = String(renderedIndex);
 
-      let longPressTimer = null;
+      let longPressTimer: ReturnType<typeof setTimeout> | null = null;
       let suppressUntil = 0;
-      let pointerId = null;
+      let pointerId: number | null = null;
       let startX = 0;
       let startY = 0;
 
@@ -1376,7 +1237,7 @@ export function initSidebarShortcuts(options = {}) {
         updateDragTarget(ev.clientX);
       }, { passive: false });
 
-      const endPointer = (ev, commit) => {
+      const endPointer = (ev: PointerEvent, commit: boolean) => {
         if (ev.pointerId !== pointerId) return;
         clearLp();
         if (headerDragState && headerDragState.btn === btn) {
@@ -1431,7 +1292,7 @@ export function initSidebarShortcuts(options = {}) {
     }
   }
 
-  function _setSetupPlaceholderMode(mode, shortcut) {
+  function _setSetupPlaceholderMode(mode: string, shortcut: SidebarShortcut | SidebarShortcutPreference | null) {
     if (!sidebarSetupPlaceholder) return;
     const titleEl = sidebarSetupTitleEl
       || sidebarSetupPlaceholder.querySelector('.sidebar-setup__title');
@@ -1452,7 +1313,7 @@ export function initSidebarShortcuts(options = {}) {
     sidebarSetupPlaceholder.dataset.mode = 'setup';
   }
 
-  function _updateSetupPlaceholder(uiPrefs, hasActiveOverride, mode = 'setup', shortcut = null) {
+  function _updateSetupPlaceholder(uiPrefs: UnknownRecord, hasActiveOverride: boolean | null, mode: string = 'setup', shortcut: SidebarShortcut | null = null) {
     if (!sidebarSetupPlaceholder || !sidebarIframeStack) return;
     const hasActive = typeof hasActiveOverride === 'boolean'
       ? hasActiveOverride
@@ -1471,7 +1332,7 @@ export function initSidebarShortcuts(options = {}) {
     sidebarIframeStack.setAttribute('aria-hidden', hasActive ? 'false' : 'true');
   }
 
-  async function _ensureFrameworkAppRunning(appId) {
+  async function _ensureFrameworkAppRunning(appId: unknown) {
     const id = _normStr(appId);
     if (!id) return false;
     const existing = _startingApps.get(id);
@@ -1484,18 +1345,18 @@ export function initSidebarShortcuts(options = {}) {
     }
     const startPromise = (async () => {
       try {
-        const { resp, body } = await _fetchJson(`/api/apps/${encodeURIComponent(id)}/start`, {
+        const { resp, body } = await _fetchJson<UnknownRecord>(`/api/apps/${encodeURIComponent(id)}/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
         });
         if (!resp.ok || !body?.ok) {
           const detail = body?.detail || body?.error || `Failed to start app ${id}`;
-          throw new Error(detail);
+          throw new Error(String(detail));
         }
         _applyRunningDelta(id, true);
         return true;
       } catch (e) {
-        toast(e?.message || `Failed to start app ${id}`);
+        toast(errorMessage(e, `Failed to start app ${id}`));
         return false;
       } finally {
         _startingApps.delete(id);
@@ -1505,7 +1366,7 @@ export function initSidebarShortcuts(options = {}) {
     return await startPromise;
   }
 
-  function _configureShortcutIframeElement(iframe, sc) {
+  function _configureShortcutIframeElement(iframe: HTMLIFrameElement, sc: SidebarShortcut) {
     if (!iframe || !sc) return;
     iframe.className = 'sidebar-iframe';
     iframe.setAttribute('data-shortcut-id', sc.key);
@@ -1513,7 +1374,7 @@ export function initSidebarShortcuts(options = {}) {
     iframe.setAttribute('loading', sc.load === SHORTCUT_LOAD_EAGER ? 'eager' : 'lazy');
   }
 
-  function _replaceShortcutIframe(sc, entry) {
+  function _replaceShortcutIframe(sc: SidebarShortcut, entry: IframeEntry) {
     if (!sidebarIframeStack || !sc || !entry || !entry.iframe) return entry;
     const nextIframe = document.createElement('iframe');
     _configureShortcutIframeElement(nextIframe, sc);
@@ -1530,7 +1391,7 @@ export function initSidebarShortcuts(options = {}) {
     return nextEntry;
   }
 
-  async function _ensureIframeLoadedForShortcut(sc, entry, options = {}) {
+  async function _ensureIframeLoadedForShortcut(sc: SidebarShortcut, entry: IframeEntry, options: ShortcutIframeLoadOptions = {}) {
     if (!sc || !entry || !entry.iframe) return false;
     const url = _normStr(sc.url);
     if (!url) return false;
@@ -1578,7 +1439,7 @@ export function initSidebarShortcuts(options = {}) {
     return true;
   }
 
-  function _ensureRunningFrameworkShortcutIframesLoaded(shortcutsOverride) {
+  function _ensureRunningFrameworkShortcutIframesLoaded(shortcutsOverride: SidebarShortcut[] | null = null) {
     const shortcuts = Array.isArray(shortcutsOverride) ? shortcutsOverride : _collectShortcuts(_latestUiPrefs || {});
     const runningSet = _runningCache instanceof Set ? _runningCache : null;
     if (!runningSet || !runningSet.size) return;
@@ -1593,7 +1454,7 @@ export function initSidebarShortcuts(options = {}) {
     });
   }
 
-  async function _refreshActiveShortcut(options = {}) {
+  async function _refreshActiveShortcut(options: UnknownRecord = {}) {
     const flushCache = !!options.flushCache;
     const uiPrefs = _latestUiPrefs || {};
     const shortcuts = _collectShortcuts(uiPrefs);
@@ -1626,7 +1487,7 @@ export function initSidebarShortcuts(options = {}) {
     return !!ok;
   }
 
-  async function _syncIframesAndActivate(uiPrefs, shortcuts, active) {
+  async function _syncIframesAndActivate(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null, active: SidebarShortcut | null) {
     const seq = ++_activateSeq;
     const stack = sidebarIframeStack;
     if (!stack) return;
@@ -1715,7 +1576,7 @@ export function initSidebarShortcuts(options = {}) {
 
   // --- Shortcut editor UI ---
 
-  function _setLoadValue(value) {
+  function _setLoadValue(value: unknown) {
     const normalized = _normalizeLoad(value);
     if (shortcutLoadBtn) shortcutLoadBtn.dataset.value = normalized;
     if (shortcutLoadLabel) shortcutLoadLabel.textContent = normalized === SHORTCUT_LOAD_EAGER ? 'Eager' : 'Lazy';
@@ -1751,7 +1612,7 @@ export function initSidebarShortcuts(options = {}) {
         _setLoadValue(opt.value);
         _closeLoadMenu();
       });
-      shortcutLoadDD.appendChild(item);
+      (shortcutLoadDD as HTMLElement).appendChild(item);
     });
   }
 
@@ -1763,7 +1624,7 @@ export function initSidebarShortcuts(options = {}) {
     if (shortcutLoadBtn) shortcutLoadBtn.setAttribute('aria-expanded', 'true');
   }
 
-  function _setKind(kind) {
+  function _setKind(kind: unknown) {
     _editingKind = _normalizeEditorKind(kind);
     if (shortcutKindBtn) shortcutKindBtn.dataset.value = _editingKind;
     if (shortcutKindLabel) {
@@ -1804,7 +1665,7 @@ export function initSidebarShortcuts(options = {}) {
         _setKind(opt.value);
         _closeKindMenu();
       });
-      shortcutKindDD.appendChild(item);
+      (shortcutKindDD as HTMLElement).appendChild(item);
     });
   }
 
@@ -1822,17 +1683,17 @@ export function initSidebarShortcuts(options = {}) {
     if (shortcutAppBtn) shortcutAppBtn.setAttribute('aria-expanded', 'false');
   }
 
-  function _applyEditingApp(appId, appsList) {
+  function _applyEditingApp(appId: unknown, appsList: FrameworkAppManifest[] | null) {
     const id = _normStr(appId);
     _editingAppId = id;
     if (shortcutAppBtn) shortcutAppBtn.dataset.value = id;
     const found = Array.isArray(appsList) ? appsList.find((a) => a && a.id === id) : null;
-    if (shortcutAppLabel) shortcutAppLabel.textContent = found ? (found.name || found.id) : (id || 'Select app…');
+    if (shortcutAppLabel) shortcutAppLabel.textContent = found ? (_normStr(found.name) || _normStr(found.id)) : (id || 'Select app…');
 
     // If label is blank, adopt the app name.
     const currentLabel = _normStr(shortcutLabelInput?.value);
     if (!currentLabel && found && shortcutLabelInput) {
-      shortcutLabelInput.value = found.name || found.id || '';
+      shortcutLabelInput.value = _normStr(found.name) || _normStr(found.id) || '';
     }
 
     // URL is computed for framework apps (kept in prefs for stability).
@@ -1851,12 +1712,12 @@ export function initSidebarShortcuts(options = {}) {
     _logAppDiscovery('app-menu:render:start');
     shortcutAppDD.innerHTML = '';
 
-    let apps = [];
+    let apps: FrameworkAppManifest[] = [];
     const current = _normStr(shortcutAppBtn?.dataset?.value);
     try {
       apps = await _ensureAppsCache(true);
     } catch (e) {
-      _warnAppDiscovery('app-menu:render:prefetch-error', { message: e?.message || String(e) });
+      _warnAppDiscovery('app-menu:render:prefetch-error', { message: errorMessage(e, String(e)) });
     }
     const running = new Set(
       (Array.isArray(apps) ? apps : [])
@@ -1914,7 +1775,7 @@ export function initSidebarShortcuts(options = {}) {
           const iconNode = _renderIconNode(icon, 16);
           if (iconNode) item.appendChild(iconNode);
         } catch (iconErr) {
-          _warnAppDiscovery('app-menu:render:item:icon-error', { id, message: iconErr?.message || String(iconErr) });
+          _warnAppDiscovery('app-menu:render:item:icon-error', { id, message: errorMessage(iconErr, String(iconErr)) });
         }
 
         const text = document.createElement('span');
@@ -1938,14 +1799,14 @@ export function initSidebarShortcuts(options = {}) {
           _closeAppMenu();
         });
 
-        shortcutAppDD.appendChild(item);
+        (shortcutAppDD as HTMLElement).appendChild(item);
         rendered += 1;
         _logAppDiscovery('app-menu:render:item:done', { index: idx, id });
       } catch (e) {
         _warnAppDiscovery('app-menu:render:item:error', {
           index: idx,
           appId: _normStr(app?.id),
-          message: e?.message || String(e),
+          message: errorMessage(e, String(e)),
         });
       }
     });
@@ -2019,10 +1880,10 @@ export function initSidebarShortcuts(options = {}) {
     _closeAppMenu();
   }
 
-  function _showEditor(entry) {
+  function _showEditor(entry: SidebarShortcut | SidebarShortcutPreference | UnknownRecord = {}) {
     if (!shortcutsEditorEl) return;
     shortcutsEditorEl.style.display = '';
-    const e = entry && typeof entry === 'object' ? entry : {};
+    const e = asRecord(entry);
     _editingId = _normStr(e.id) || null;
     if (shortcutLabelInput) shortcutLabelInput.value = _normStr(e.label);
     if (shortcutUrlInput) shortcutUrlInput.value = _normStr(e.url);
@@ -2036,7 +1897,7 @@ export function initSidebarShortcuts(options = {}) {
     if (shortcutAppLabel) shortcutAppLabel.textContent = _editingAppId ? _editingAppId : 'Select app…';
     if (shortcutEmojiInput) shortcutEmojiInput.value = '';
 
-    const icon = e.icon && typeof e.icon === 'object' ? e.icon : null;
+    const icon = e.icon && typeof e.icon === 'object' && !Array.isArray(e.icon) ? e.icon as ShortcutIcon : null;
     if (icon && icon.kind === 'emoji' && shortcutEmojiInput) {
       shortcutEmojiInput.value = _normStr(icon.emoji);
     } else if (icon && icon.kind === 'asset') {
@@ -2050,7 +1911,7 @@ export function initSidebarShortcuts(options = {}) {
     _renderIconPreview();
   }
 
-  function _persistShortcuts(nextList) {
+  function _persistShortcuts(nextList: SidebarShortcutPreference[]) {
     _sendUiPrefUpdate(UI_PREF_KEY_SHORTCUTS, nextList);
 
     const activeId = _normStr(_clientActiveShortcutId) || _normStr(_latestUiPrefs?.[UI_PREF_KEY_ACTIVE]);
@@ -2077,9 +1938,9 @@ export function initSidebarShortcuts(options = {}) {
       return;
     }
 
-    let dragState = null;
-    let dropBeforeRow = null;
-    let dropAfterRow = null;
+    let dragState: ShortcutListDragState | null = null;
+    let dropBeforeRow: HTMLElement | null = null;
+    let dropAfterRow: HTMLElement | null = null;
     let dropInsertionIndex = -1;
 
     const clearDropMarkers = () => {
@@ -2093,9 +1954,9 @@ export function initSidebarShortcuts(options = {}) {
       }
     };
 
-    const getRows = () => Array.from(shortcutsListEl.querySelectorAll('[data-shortcut-row="1"]'));
+    const getRows = () => Array.from((shortcutsListEl as HTMLElement).querySelectorAll<HTMLElement>('[data-shortcut-row="1"]'));
 
-    const computeInsertion = (clientY, sourceRow) => {
+    const computeInsertion = (clientY: number, sourceRow: HTMLElement) => {
       const rows = getRows().filter((row) => row !== sourceRow);
       let insertion = rows.length;
       for (let i = 0; i < rows.length; i += 1) {
@@ -2109,7 +1970,7 @@ export function initSidebarShortcuts(options = {}) {
       return { rows, insertion };
     };
 
-    const updateDragTarget = (clientY) => {
+    const updateDragTarget = (clientY: number) => {
       if (!dragState || !dragState.dragging || !dragState.row) return;
       clearDropMarkers();
       const { rows, insertion } = computeInsertion(clientY, dragState.row);
@@ -2125,7 +1986,7 @@ export function initSidebarShortcuts(options = {}) {
       }
     };
 
-    const finishDrag = (commit) => {
+    const finishDrag = (commit: boolean) => {
       if (!dragState) return;
       const state = dragState;
       clearDropMarkers();
@@ -2152,7 +2013,7 @@ export function initSidebarShortcuts(options = {}) {
       dropInsertionIndex = -1;
     };
 
-    const beginDrag = (state) => {
+    const beginDrag = (state: ShortcutListDragState | null) => {
       if (!state || !state.row || !state.handle) return;
       state.dragging = true;
       state.row.style.opacity = '0.72';
@@ -2162,16 +2023,16 @@ export function initSidebarShortcuts(options = {}) {
       dropInsertionIndex = state.fromIndex;
     };
 
-    const bindDragHandle = (row, handle, idx) => {
+    const bindDragHandle = (row: HTMLElement, handle: HTMLElement, idx: number) => {
       handle.style.touchAction = 'none';
       handle.style.cursor = 'grab';
 
-      handle.addEventListener('mousedown', (ev) => {
+      handle.addEventListener('mousedown', (ev: MouseEvent) => {
         if (ev.button !== 0) return;
         ev.preventDefault();
         ev.stopPropagation();
         if (dragState) finishDrag(false);
-        dragState = {
+        const state: ShortcutListDragState = {
           row,
           handle,
           fromIndex: idx,
@@ -2182,29 +2043,30 @@ export function initSidebarShortcuts(options = {}) {
           touchEndHandler: null,
           touchCancelHandler: null,
         };
-        beginDrag(dragState);
+        dragState = state;
+        beginDrag(state);
         updateDragTarget(ev.clientY);
-        dragState.mouseMoveHandler = (moveEv) => {
+        state.mouseMoveHandler = (moveEv: MouseEvent) => {
           if (!dragState || dragState.handle !== handle) return;
           moveEv.preventDefault();
           updateDragTarget(moveEv.clientY);
         };
-        dragState.mouseUpHandler = (upEv) => {
+        state.mouseUpHandler = (upEv: MouseEvent) => {
           if (!dragState || dragState.handle !== handle) return;
           upEv.preventDefault();
           finishDrag(true);
         };
-        document.addEventListener('mousemove', dragState.mouseMoveHandler);
-        document.addEventListener('mouseup', dragState.mouseUpHandler);
+        document.addEventListener('mousemove', state.mouseMoveHandler);
+        document.addEventListener('mouseup', state.mouseUpHandler);
       });
 
-      handle.addEventListener('touchstart', (ev) => {
+      handle.addEventListener('touchstart', (ev: TouchEvent) => {
         const touch = ev.changedTouches && ev.changedTouches[0];
         if (!touch) return;
         ev.preventDefault();
         ev.stopPropagation();
         if (dragState) finishDrag(false);
-        dragState = {
+        const state: ShortcutListDragState = {
           row,
           handle,
           fromIndex: idx,
@@ -2216,10 +2078,11 @@ export function initSidebarShortcuts(options = {}) {
           touchEndHandler: null,
           touchCancelHandler: null,
         };
-        beginDrag(dragState);
+        dragState = state;
+        beginDrag(state);
         updateDragTarget(touch.clientY);
 
-        const getTrackedTouch = (touches) => {
+        const getTrackedTouch = (touches: TouchList | null) => {
           if (!touches) return null;
           for (let i = 0; i < touches.length; i += 1) {
             if (touches[i].identifier === dragState?.touchId) return touches[i];
@@ -2227,30 +2090,30 @@ export function initSidebarShortcuts(options = {}) {
           return null;
         };
 
-        dragState.touchMoveHandler = (moveEv) => {
+        state.touchMoveHandler = (moveEv: TouchEvent) => {
           if (!dragState || dragState.handle !== handle) return;
           const t = getTrackedTouch(moveEv.touches) || getTrackedTouch(moveEv.changedTouches);
           if (!t) return;
           moveEv.preventDefault();
           updateDragTarget(t.clientY);
         };
-        dragState.touchEndHandler = (endEv) => {
+        state.touchEndHandler = (endEv: TouchEvent) => {
           if (!dragState || dragState.handle !== handle) return;
           const t = getTrackedTouch(endEv.changedTouches);
           if (!t) return;
           endEv.preventDefault();
           finishDrag(true);
         };
-        dragState.touchCancelHandler = (cancelEv) => {
+        state.touchCancelHandler = (cancelEv: TouchEvent) => {
           if (!dragState || dragState.handle !== handle) return;
           const t = getTrackedTouch(cancelEv.changedTouches);
           if (!t) return;
           cancelEv.preventDefault();
           finishDrag(false);
         };
-        document.addEventListener('touchmove', dragState.touchMoveHandler, { passive: false });
-        document.addEventListener('touchend', dragState.touchEndHandler, { passive: false });
-        document.addEventListener('touchcancel', dragState.touchCancelHandler, { passive: false });
+        document.addEventListener('touchmove', state.touchMoveHandler, { passive: false });
+        document.addEventListener('touchend', state.touchEndHandler, { passive: false });
+        document.addEventListener('touchcancel', state.touchCancelHandler, { passive: false });
       }, { passive: false });
     };
 
@@ -2280,7 +2143,7 @@ export function initSidebarShortcuts(options = {}) {
       meta.appendChild(url);
       row.appendChild(meta);
 
-      const mkBtn = (text) => {
+      const mkBtn = (text: string) => {
         const b = document.createElement('button');
         b.className = 'fe-btn';
         b.textContent = text;
@@ -2306,7 +2169,7 @@ export function initSidebarShortcuts(options = {}) {
       });
       row.appendChild(del);
 
-      shortcutsListEl.appendChild(row);
+      (shortcutsListEl as HTMLElement).appendChild(row);
     });
   }
 
@@ -2412,27 +2275,30 @@ export function initSidebarShortcuts(options = {}) {
     document.addEventListener('click', (ev) => {
       const dd = document.getElementById('fe-agent-dd');
       if (!dd || !dd.classList.contains('show')) return;
-      if (ev.target.closest('#fe-agent-toggle')) return;
-      if (ev.target.closest('#fe-agent-dd')) return;
+      const target = eventTargetElement(ev);
+      if (target?.closest('#fe-agent-toggle')) return;
+      if (target?.closest('#fe-agent-dd')) return;
       _closeAgentDropdown();
     }, false);
 
     document.addEventListener('click', (ev) => {
       if (!sidebarHeaderIconMenuEl || !sidebarHeaderIconMenuEl.classList.contains('show')) return;
-      if (ev.target.closest('#agent-drawer-icon-menu')) return;
-      if (ev.target.closest('.agent-drawer__icon-btn')) return;
+      const target = eventTargetElement(ev);
+      if (target?.closest('#agent-drawer-icon-menu')) return;
+      if (target?.closest('.agent-drawer__icon-btn')) return;
       _closeHeaderIconMenu();
     }, false);
 
     document.addEventListener('click', (ev) => {
       if (!sidebarRefreshMenuEl || !sidebarRefreshMenuEl.classList.contains('show')) return;
-      if (ev.target.closest('#agent-refresh-menu')) return;
-      if (ev.target.closest('#agent-refresh-active')) return;
+      const target = eventTargetElement(ev);
+      if (target?.closest('#agent-refresh-menu')) return;
+      if (target?.closest('#agent-refresh-active')) return;
       _closeRefreshMenu();
     }, false);
   }
 
-  function _stageUiPrefs(uiPrefs) {
+  function _stageUiPrefs(uiPrefs: UnknownRecord) {
     const ui = uiPrefs && typeof uiPrefs === 'object' ? uiPrefs : {};
     _latestUiPrefs = { ...ui };
 
@@ -2467,7 +2333,7 @@ export function initSidebarShortcuts(options = {}) {
       if (shortcutsModal && shortcutsModal.classList.contains('show')) _renderShortcutsList();
     } catch (_) {}
 
-    // If we have any framework-app shortcuts, ensure the app list is loaded so
+    // If we have framework-app shortcuts, ensure the app list is loaded so
     // default (manifest) icons can replace placeholder chrome.
     try {
       const needsApps = normalized.some((sc) => sc && sc.kind === SHORTCUT_KIND_FRAMEWORK_APP);
@@ -2496,7 +2362,7 @@ export function initSidebarShortcuts(options = {}) {
     }
   }
 
-  function applyUiPrefs(uiPrefs) {
+  function applyUiPrefs(uiPrefs: UnknownRecord) {
     _stageUiPrefs(uiPrefs);
     if (!_hydrated) return;
     _applyUiPrefsHydrated();
@@ -2543,9 +2409,9 @@ export function initSidebarShortcuts(options = {}) {
     editorSettingsShortcutsBtn = document.getElementById('editor-settings-agent-shortcuts');
     setupShortcutsBtn = document.getElementById('sidebar-setup-shortcuts');
 
-    shortcutLabelInput = document.getElementById('agent-shortcut-label');
+    shortcutLabelInput = document.getElementById('agent-shortcut-label') as HTMLInputElement | null;
     shortcutUrlWrap = document.getElementById('agent-shortcut-target-url');
-    shortcutUrlInput = document.getElementById('agent-shortcut-url');
+    shortcutUrlInput = document.getElementById('agent-shortcut-url') as HTMLInputElement | null;
     shortcutKindBtn = document.getElementById('agent-shortcut-kind-btn');
     shortcutKindLabel = document.getElementById('agent-shortcut-kind-label');
     shortcutKindDD = document.getElementById('agent-shortcut-kind-dd');
@@ -2557,7 +2423,7 @@ export function initSidebarShortcuts(options = {}) {
     shortcutLoadBtn = document.getElementById('agent-shortcut-load-btn');
     shortcutLoadLabel = document.getElementById('agent-shortcut-load-label');
     shortcutLoadDD = document.getElementById('agent-shortcut-load-dd');
-    shortcutEmojiInput = document.getElementById('agent-shortcut-emoji');
+    shortcutEmojiInput = document.getElementById('agent-shortcut-emoji') as HTMLInputElement | null;
     shortcutIconBrowseBtn = document.getElementById('agent-shortcut-icon-browse');
     shortcutIconClearBtn = document.getElementById('agent-shortcut-icon-clear');
     shortcutIconPreview = document.getElementById('agent-shortcut-icon-preview');
@@ -2569,7 +2435,7 @@ export function initSidebarShortcuts(options = {}) {
 
     // Settings radios: update prefs.
     try {
-      const radios = document.querySelectorAll('input[name="agent-toggle-display"]');
+      const radios = document.querySelectorAll<HTMLInputElement>('input[name="agent-toggle-display"]');
       radios.forEach((r) => {
         r.addEventListener('change', () => {
           if (_settingsUiMutating) return;
@@ -2580,7 +2446,7 @@ export function initSidebarShortcuts(options = {}) {
     } catch (_) {}
 
     try {
-      const headerRadios = document.querySelectorAll('input[name="agent-header-display"]');
+      const headerRadios = document.querySelectorAll<HTMLInputElement>('input[name="agent-header-display"]');
       headerRadios.forEach((r) => {
         r.addEventListener('change', () => {
           if (_settingsUiMutating) return;
@@ -2594,7 +2460,7 @@ export function initSidebarShortcuts(options = {}) {
     if (setupShortcutsBtn) setupShortcutsBtn.addEventListener('click', _openShortcutsModal);
     if (shortcutsCloseBtn) shortcutsCloseBtn.addEventListener('click', _closeShortcutsModal);
     if (sidebarRefreshBtn) {
-      let refreshPointerId = null;
+      let refreshPointerId: number | null = null;
       let refreshStartX = 0;
       let refreshStartY = 0;
       let refreshSuppressUntil = 0;
@@ -2636,7 +2502,7 @@ export function initSidebarShortcuts(options = {}) {
           }, 520);
         }
       });
-      const endRefreshPointer = (ev) => {
+      const endRefreshPointer = (ev: PointerEvent) => {
         if (refreshPointerId !== ev.pointerId) return;
         clearRefreshLongPress();
         refreshPointerId = null;
@@ -2692,7 +2558,7 @@ export function initSidebarShortcuts(options = {}) {
 
     if (shortcutIconBrowseBtn) {
       shortcutIconBrowseBtn.addEventListener('click', async () => {
-        if (typeof window.__explorerBusRequest !== 'function') {
+        if (typeof (window as unknown as { __explorerBusRequest?: unknown }).__explorerBusRequest !== 'function') {
           toast('Explorer connection unavailable');
           return;
         }
@@ -2707,12 +2573,12 @@ export function initSidebarShortcuts(options = {}) {
         try {
           const res = await requestExplorerRpc(EXPLORER_RPC_METHODS.prefsAgentIconVendor, { abs_path: picked }, 12000);
           if (res?.ok && res.name) {
-            _editingAssetName = res.name;
+            _editingAssetName = _normStr(res.name);
             if (shortcutEmojiInput) shortcutEmojiInput.value = '';
             _renderIconPreview();
           }
         } catch (e) {
-          toast(e?.message || 'Failed to vendor icon');
+          toast(errorMessage(e, 'Failed to vendor icon'));
         }
       });
     }
@@ -2762,10 +2628,11 @@ export function initSidebarShortcuts(options = {}) {
         const next = Array.isArray(_shortcutsCache) ? _shortcutsCache.slice() : [];
         const idx = next.findIndex((x) => x && x.id === id);
         const existing = idx >= 0 ? next[idx] : null;
-        const lastUsed = Number.isFinite(Number(existing?.last_used)) ? Number(existing.last_used) : 0;
+        const lastUsed = Number.isFinite(Number(existing?.last_used)) ? Number(existing?.last_used) : 0;
 
         const entry = {
           id,
+          key: id || url,
           kind,
           app_id: kind === SHORTCUT_KIND_FRAMEWORK_APP ? appId : '',
           label,
@@ -2785,23 +2652,23 @@ export function initSidebarShortcuts(options = {}) {
     _bindAgentDropdownInteractions();
 
     if (!_sidebarEventListenerBound) {
-      window.addEventListener('cm6:sidebar-event', (ev) => {
-        const data = ev?.detail;
+      window.addEventListener('cm6:sidebar-event', (ev: Event) => {
+        const data = (ev as CustomEvent<UnknownRecord>).detail;
         if (!data || typeof data !== 'object') return;
         const eventType = _normStr(data.type);
-        if (eventType === 'active_shortcut:set') {
-          const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+        if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutSet) {
+          const payload = asRecord(data.payload);
           const shortcutId = _normStr(payload.shortcutId || payload.activeShortcutId);
           if (shortcutId) _setClientActiveShortcut(shortcutId, { emit: false });
           return;
         }
-        if (eventType === 'client_state') {
-          const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+        if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.clientState) {
+          const payload = asRecord(data.payload);
           _setClientActiveShortcut(_normStr(payload.activeShortcutId), { emit: false });
           return;
         }
-        if (eventType !== 'refresh_active') return;
-        const payload = data.payload && typeof data.payload === 'object' ? data.payload : {};
+        if (eventType !== SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutRefresh) return;
+        const payload = asRecord(data.payload);
         void _refreshActiveShortcut({
           flushCache: !!payload.flushCache,
         });

@@ -27,6 +27,7 @@ from .rpc_contract import (
     parse_ui_ipc_rpc_request,
 )
 from .rpc_dispatch import dispatch_ui_ipc_rpc_request
+from .sidebar_rpc_contract import SIDEBAR_IPC_RPC_NAMESPACE
 from ..stores import get_history_store
 from ..explorer.services.file_ops import get_project_root
 from ..explorer.transport.connection_manager import abs_to_rel
@@ -132,6 +133,8 @@ class UIIPCNamespace(socketio.AsyncNamespace):
         )
 
     async def on_rpc(self, sid, data):
+        if self.namespace == SIDEBAR_IPC_RPC_NAMESPACE:
+            return await sidebar_ws.on_sidebar_rpc(self, sid, data)
         if self.namespace != UI_IPC_RPC_NAMESPACE:
             return build_jsonrpc_error(
                 request_id=None,

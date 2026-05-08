@@ -6,7 +6,7 @@ import { dispatchExplorerNotification, refreshExplorer } from './src/explorer/ap
 import { createTerminalDrawer } from './main_page/frontend/host-terminal-drawer.ts';
 import { initBranchMenu } from './main_page/frontend/host-git-branch-menu.ts';
 // Hardcoded extension imports for now; will be dynamically loaded later.
-import { initSidebarShortcuts } from './extensions/sidebar_extension/static/js/sidebar_shortcuts.js';
+import { initSidebarShortcuts } from './main_page/frontend/sidebar-shortcuts/runtime.ts';
 import ReconnectingWebSocket from './main_page/frontend/connections/reconnecting-websocket.ts';
 import { createConsoleDrawer } from './main_page/frontend/host-console-drawer.ts';
 import { createProblemsPanel } from './src/diagnostics/problems-panel.ts';

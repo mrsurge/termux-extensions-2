@@ -2,8 +2,17 @@
 
 import { isRunnableFile } from '../core/utils.ts';
 import { createUiIpcRpcConnection } from './ui-ipc-rpc.ts';
+import { RPC_NOTIFICATION_EVENT, RPC_REQUEST_EVENT } from '../../../src/rpc/transport.ts';
 import type { IoFactory, JsonObject, SocketLike } from '../../../src/rpc/transport.ts';
 import { UI_IPC_RPC_METHODS, UI_IPC_RPC_NOTIFICATIONS } from '../../../src/ui_ipc/rpc_contract.ts';
+import {
+  SIDEBAR_IPC_LEGACY_EVENT_TYPES,
+  SIDEBAR_IPC_RPC_METHODS,
+  SIDEBAR_IPC_RPC_NOTIFICATIONS,
+  parseSidebarIpcRpcNotification,
+  type SidebarIpcRpcMethod,
+  type SidebarIpcRpcNotificationMethod,
+} from '../../../src/sidebar_ipc/rpc_contract.ts';
 import {
   SOCKET_IO_NAMESPACES,
   SOCKET_IO_PATHS,
@@ -32,6 +41,7 @@ interface HostRuntimeWindow extends Window {
 
 export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   let sidebarIpcSocket: SocketLike | null = null;
+  let sidebarRpcRequestCounter = 0;
   let uiIpcRpcConnection: UiIpcRpcConnection | null = null;
   let uiIpcConnectPromise: Promise<UiIpcRpcConnection> | null = null;
   let consoleBridgePromise: Promise<void> | null = null;
@@ -91,6 +101,127 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     } catch (_) {}
   }
 
+  function nextSidebarRpcRequestId(): string {
+    sidebarRpcRequestCounter += 1;
+    return `sidebar_ipc_${Date.now()}_${sidebarRpcRequestCounter}`;
+  }
+
+  function emitSidebarRpcRequest(method: SidebarIpcRpcMethod, params: JsonObject = {}): void {
+    if (!sidebarIpcSocket || !sidebarIpcSocket.connected) return;
+    sidebarIpcSocket.emit(
+      RPC_REQUEST_EVENT,
+      {
+        jsonrpc: '2.0',
+        id: nextSidebarRpcRequestId(),
+        method,
+        params,
+      },
+      (response: unknown) => {
+        const data = response && typeof response === 'object' ? response as JsonObject : {};
+        const error = data.error && typeof data.error === 'object' ? data.error as JsonObject : null;
+        if (error) {
+          console.warn('[Sidebar_IPC_RPC] request failed', method, error.message || error);
+        }
+      },
+    );
+  }
+
+  function emitSidebarRpcNotification(method: SidebarIpcRpcNotificationMethod, params: JsonObject = {}): void {
+    if (!sidebarIpcSocket || !sidebarIpcSocket.connected) return;
+    sidebarIpcSocket.emit(RPC_REQUEST_EVENT, {
+      jsonrpc: '2.0',
+      method,
+      params,
+    });
+  }
+
+  function handleSidebarRpcNotification(payload: unknown): void {
+    if (!payload || typeof payload !== 'object') return;
+    const parsed = parseSidebarIpcRpcNotification(payload as JsonObject);
+    if (!parsed) return;
+    const { method, params } = parsed;
+    if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.clientState) {
+      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.clientState, payload: params });
+    } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.activeShortcutRefresh) {
+      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutRefresh, payload: params });
+    } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerState) {
+      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerState, payload: params });
+    } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerOpen) {
+      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerOpen, payload: params });
+    } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerClose) {
+      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerClose, payload: params });
+    } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerToggle) {
+      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerToggle, payload: params });
+    } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.cwdSet) {
+      dispatchWindowCustomEvent('cm6:sidebar-cwd-set', params);
+    } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.presence) {
+      dispatchWindowCustomEvent('cm6:sidebar-presence', params);
+    } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.mention) {
+      dispatchWindowCustomEvent('cm6:sidebar-mention', params);
+    } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.fileOpen) {
+      dispatchWindowCustomEvent('cm6:sidebar-file-open', params);
+    }
+  }
+
+  function emitMappedSidebarRpc(eventName: string, payload: JsonObject = {}): boolean {
+    if (eventName === 'sidebar:event') {
+      const eventType = typeof payload.type === 'string' ? payload.type.trim() : '';
+      const eventPayload = payload.payload && typeof payload.payload === 'object' && !Array.isArray(payload.payload)
+        ? payload.payload as JsonObject
+        : {};
+      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutSet) {
+        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.activeShortcutSet, eventPayload);
+        return true;
+      }
+      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutRefresh) {
+        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.activeShortcutRefresh, eventPayload);
+        return true;
+      }
+      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerState) {
+        emitSidebarRpcNotification(SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerState, eventPayload);
+        return true;
+      }
+      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerOpen) {
+        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.drawerOpen, eventPayload);
+        return true;
+      }
+      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerClose) {
+        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.drawerClose, eventPayload);
+        return true;
+      }
+      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerToggle) {
+        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.drawerToggle, eventPayload);
+        return true;
+      }
+      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.agentOpen) {
+        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.fileOpen, eventPayload);
+        return true;
+      }
+      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.agentEdit) {
+        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.fileEdit, eventPayload);
+        return true;
+      }
+      return false;
+    }
+    if (eventName === 'sidebar:mention') {
+      emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.mention, payload);
+      return true;
+    }
+    if (eventName === 'sidebar:agent_open') {
+      emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.fileOpen, payload);
+      return true;
+    }
+    if (eventName === 'sidebar:agent_edit') {
+      emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.fileEdit, payload);
+      return true;
+    }
+    if (eventName === 'sidebar:cwd_set') {
+      emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.cwdSync, payload);
+      return true;
+    }
+    return false;
+  }
+
   function dispatchWindowCustomEvent(eventName: string, data: unknown): void {
     try {
       window.dispatchEvent(new CustomEvent(eventName, {
@@ -105,6 +236,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         dispatchSidebarEvent(payload);
       }
       if (!sidebarIpcSocket || !sidebarIpcSocket.connected) return;
+      if (emitMappedSidebarRpc(eventName, payload || {})) return;
       sidebarIpcSocket.emit(eventName, payload || {});
     } catch (_) {}
   }
@@ -124,7 +256,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
       sidebarIpcSocket = socket;
       socket.on('connect', () => {
         try {
-          socket.emit('sidebar:register', {
+          emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.register, {
             role: 'host',
             app: 'file_editor_cm6',
             client_id: deps.getClientId(),
@@ -139,6 +271,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         if (!data || typeof data !== 'object') return;
         dispatchSidebarEvent(data as JsonObject);
       });
+      socket.on(RPC_NOTIFICATION_EVENT, handleSidebarRpcNotification);
       socket.on('connect_error', (err: unknown) => {
         console.warn('[Sidebar_IPC] connect failed', err);
       });

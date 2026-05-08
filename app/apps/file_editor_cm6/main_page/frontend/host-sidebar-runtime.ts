@@ -1,3 +1,5 @@
+import { SIDEBAR_IPC_LEGACY_EVENT_TYPES } from '../../src/sidebar_ipc/rpc_contract.ts';
+
 export interface HostSidebarRuntimeDeps {
   drawerEl: HTMLElement;
   toggleButtonEl: HTMLElement | null;
@@ -14,10 +16,10 @@ export interface HostSidebarRuntime {
   getShortcutLoadButton: () => HTMLElement | null;
 }
 
-const DRAWER_STATE_EVENT = 'drawer:state';
-const DRAWER_OPEN_EVENTS = new Set(['drawer:open', 'drawer.open']);
-const DRAWER_CLOSE_EVENTS = new Set(['drawer:close', 'drawer.close']);
-const DRAWER_TOGGLE_EVENTS = new Set(['drawer:toggle', 'drawer.toggle']);
+const DRAWER_STATE_EVENT = SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerState;
+const DRAWER_OPEN_EVENTS = new Set([SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerOpen, 'drawer.open']);
+const DRAWER_CLOSE_EVENTS = new Set([SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerClose, 'drawer.close']);
+const DRAWER_TOGGLE_EVENTS = new Set([SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerToggle, 'drawer.toggle']);
 
 function getElementById(id: string): HTMLElement | null {
   return document.getElementById(id);
