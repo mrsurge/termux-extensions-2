@@ -30,6 +30,7 @@ const config = {
     "src/server/stdio-protocol.ts",
     "src/server/textmate-grammars.ts",
     "src/workspace/lifecycle.ts",
+    "src/workspace/workspace-contains.ts",
   ],
   outdir: "dist",
   outbase: "src",
