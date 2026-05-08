@@ -41,3 +41,12 @@ export interface ExplorerContentSearchResults {
   file_count?: number;
   match_count?: number;
 }
+
+export interface ExplorerContentSearchOptions {
+  isRegex: boolean;
+  isCaseSensitive: boolean;
+  isWholeWords: boolean;
+  includePattern: string;
+  excludePattern: string;
+  useIgnoreFiles: boolean;
+}

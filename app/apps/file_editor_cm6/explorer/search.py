@@ -1,8 +1,9 @@
 
 import asyncio
+import fnmatch
 import json
 import os
-import fnmatch
+import re
 import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -253,15 +254,38 @@ async def search_by_name(root: Path, query: str) -> dict:
         "count": count
     }
 
-async def search_by_content(root: Path, query: str) -> dict:
+def _parse_glob_patterns(raw: str) -> list[str]:
+    patterns: list[str] = []
+    for chunk in raw.replace('\n', ',').split(','):
+        pattern = chunk.strip()
+        if pattern:
+            patterns.append(pattern)
+    return patterns
+
+
+def _build_content_options(params: dict) -> dict:
+    return {
+        "query": str(params.get("query", "")),
+        "is_regex": bool(params.get("isRegex", False)),
+        "is_case_sensitive": bool(params.get("isCaseSensitive", False)),
+        "is_whole_words": bool(params.get("isWholeWords", False)),
+        "include_patterns": _parse_glob_patterns(str(params.get("includePattern", ""))),
+        "exclude_patterns": _parse_glob_patterns(str(params.get("excludePattern", ""))),
+        "use_ignore_files": bool(params.get("useIgnoreFiles", True)),
+    }
+
+
+async def search_by_content(root: Path, params: dict) -> dict:
     """Search file contents using ripgrep or fallback."""
+    options = _build_content_options(params)
     rg_path = shutil.which('rg')
     if rg_path:
-        return await _search_with_ripgrep(root, query, rg_path)
+        return await _search_with_ripgrep(root, options, rg_path)
     else:
-        return await _search_with_python(root, query)
+        return await _search_with_python(root, options)
 
-async def _search_with_ripgrep(root: Path, query: str, rg_path: str) -> dict:
+async def _search_with_ripgrep(root: Path, options: dict, rg_path: str) -> dict:
+    query = options["query"]
     cmd = [
         rg_path,
         '--json',
@@ -269,10 +293,24 @@ async def _search_with_ripgrep(root: Path, query: str, rg_path: str) -> dict:
         '--column',
         '--max-count', '5',
         '--max-filesize', '1M',
-        '--',
-        query,
-        str(root)
     ]
+    if options["is_regex"]:
+        cmd.append('--engine=auto')
+    else:
+        cmd.append('--fixed-strings')
+    if options["is_case_sensitive"]:
+        cmd.append('--case-sensitive')
+    else:
+        cmd.append('--ignore-case')
+    if options["is_whole_words"]:
+        cmd.append('--word-regexp')
+    if not options["use_ignore_files"]:
+        cmd.append('--no-ignore')
+    for pattern in options["include_patterns"]:
+        cmd.extend(['-g', pattern])
+    for pattern in options["exclude_patterns"]:
+        cmd.extend(['-g', f'!{pattern}'])
+    cmd.extend(['--', query, str(root)])
     
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -280,7 +318,10 @@ async def _search_with_ripgrep(root: Path, query: str, rg_path: str) -> dict:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        if proc.returncode not in (0, 1):
+            message = stderr.decode('utf-8', errors='ignore').strip() or 'Ripgrep search failed'
+            raise RuntimeError(message)
         
         results_by_file = {}
         for line in stdout.decode('utf-8').splitlines():
@@ -333,9 +374,55 @@ async def _search_with_ripgrep(root: Path, query: str, rg_path: str) -> dict:
     except asyncio.TimeoutError:
         raise TimeoutError("Ripgrep search timed out")
 
-async def _search_with_python(root: Path, query: str) -> dict:
+def _match_literal(
+    line_text: str,
+    query: str,
+    *,
+    is_case_sensitive: bool,
+    is_whole_words: bool,
+) -> list[tuple[int, str]]:
+    haystack = line_text if is_case_sensitive else line_text.lower()
+    needle = query if is_case_sensitive else query.lower()
+    matches: list[tuple[int, str]] = []
+    start = 0
+    while True:
+        idx = haystack.find(needle, start)
+        if idx < 0:
+            break
+        matched_text = line_text[idx:idx + len(query)]
+        if is_whole_words:
+            before = line_text[idx - 1] if idx > 0 else ''
+            after_index = idx + len(query)
+            after = line_text[after_index] if after_index < len(line_text) else ''
+            if ((before.isalnum() or before == '_') or
+                (after.isalnum() or after == '_')):
+                start = idx + max(len(query), 1)
+                continue
+        matches.append((idx, matched_text))
+        start = idx + max(len(query), 1)
+    return matches
+
+
+def _path_matches_patterns(rel: str, patterns: list[str]) -> bool:
+    normalized = rel.replace('\\', '/')
+    for pattern in patterns:
+        if fnmatch.fnmatch(normalized, pattern):
+            return True
+        if fnmatch.fnmatch(Path(normalized).name, pattern):
+            return True
+    return False
+
+
+async def _search_with_python(root: Path, options: dict) -> dict:
+    query = options["query"]
     results_by_file = {}
-    query_lower = query.lower()
+    regex: re.Pattern[str] | None = None
+    if options["is_regex"]:
+        flags = 0 if options["is_case_sensitive"] else re.IGNORECASE
+        try:
+            regex = re.compile(query, flags)
+        except re.error as exc:
+            raise RuntimeError(f"Invalid regular expression: {exc}") from exc
     file_count = 0
     max_files = 50
     
@@ -347,6 +434,16 @@ async def _search_with_python(root: Path, query: str) -> dict:
             return True
     
     def should_ignore(path: Path) -> bool:
+        if options["include_patterns"]:
+            rel_text = str(path).replace('\\', '/')
+            if not _path_matches_patterns(rel_text, options["include_patterns"]):
+                return True
+        if options["exclude_patterns"]:
+            rel_text = str(path).replace('\\', '/')
+            if _path_matches_patterns(rel_text, options["exclude_patterns"]):
+                return True
+        if not options["use_ignore_files"]:
+            return False
         for part in path.parts:
             if part in IGNORE_PATTERNS or part.startswith('.'):
                 return True
@@ -362,10 +459,22 @@ async def _search_with_python(root: Path, query: str) -> dict:
             matches = []
             
             for line_num, line_text in enumerate(lines, 1):
-                if query_lower in line_text.lower():
-                    col = line_text.lower().find(query_lower)
+                if regex is not None:
+                    found_matches = [
+                        (match.start(), match.group(0) or query)
+                        for match in regex.finditer(line_text)
+                    ]
+                else:
+                    found_matches = _match_literal(
+                        line_text,
+                        query,
+                        is_case_sensitive=options["is_case_sensitive"],
+                        is_whole_words=options["is_whole_words"],
+                    )
+                if found_matches:
+                    col, matched_text = found_matches[0]
                     start = max(0, col - 75)
-                    end = min(len(line_text), col + len(query) + 75)
+                    end = min(len(line_text), col + len(matched_text) + 75)
                     matches.append({
                         "line": line_num,
                         "column": col,

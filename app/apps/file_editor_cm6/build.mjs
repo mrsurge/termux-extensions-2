@@ -13,6 +13,10 @@ async function copyHostCss() {
       'vendor/highlightjs/styles/github-dark.css',
       'static/dist/explorer-highlight-github.css',
     ),
+    copyFile(
+      'src/explorer/search/vscode_widget_vendor/media/searchview.css',
+      'static/dist/explorer-search-widget.css',
+    ),
   ]);
 }
 

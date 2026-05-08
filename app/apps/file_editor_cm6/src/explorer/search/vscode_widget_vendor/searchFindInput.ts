@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { ContextScopedFindInput } from '/static/vendor/monaco-editor-core/esm/vs/platform/history/browser/contextScopedHistoryWidget.js';
-import { Emitter } from '/static/vendor/monaco-editor-core/esm/vs/base/common/event.js';
+import { ContextScopedFindInput } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/platform/history/browser/contextScopedHistoryWidget.js';
+import { Emitter } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/common/event.js';
 import type {
   ExplorerSearchWidgetContextKeyService,
   ExplorerSearchWidgetContextViewProvider,

@@ -20,6 +20,12 @@ class ExplorerSearchReviewContractError(Exception):
 class SearchRunParams(TypedDict):
     mode: SearchMode
     query: str
+    isRegex: bool
+    isCaseSensitive: bool
+    isWholeWords: bool
+    includePattern: str
+    excludePattern: str
+    useIgnoreFiles: bool
 
 
 class ReviewListParams(TypedDict):
@@ -142,6 +148,18 @@ def parse_search_run_params(payload: object) -> SearchRunParams:
     return {
         "mode": mode,
         "query": query,
+        "isRegex": _coerce_bool(envelope.get("isRegex"), default=False),
+        "isCaseSensitive": _coerce_bool(
+            envelope.get("isCaseSensitive"), default=False
+        ),
+        "isWholeWords": _coerce_bool(envelope.get("isWholeWords"), default=False),
+        "includePattern": _coerce_string(
+            envelope.get("includePattern"), "search:run includePattern"
+        ),
+        "excludePattern": _coerce_string(
+            envelope.get("excludePattern"), "search:run excludePattern"
+        ),
+        "useIgnoreFiles": _coerce_bool(envelope.get("useIgnoreFiles"), default=True),
     }
 
 
@@ -210,6 +228,14 @@ def _coerce_bool(value: object, *, default: bool) -> bool:
     raise ExplorerSearchReviewContractError("review:list lightweight must be a boolean")
 
 
+def _coerce_string(value: object, field_name: str) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    raise ExplorerSearchReviewContractError(f"{field_name} must be a string")
+
+
 def _as_object(value: object) -> JsonObject:
     if not isinstance(value, dict):
         return {}
@@ -218,4 +244,3 @@ def _as_object(value: object) -> JsonObject:
         if isinstance(key, str):
             normalized[key] = item
     return normalized
-

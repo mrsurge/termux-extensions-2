@@ -1,10 +1,10 @@
-import { ContextView } from '/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview.js';
-import { Emitter } from '/static/vendor/monaco-editor-core/esm/vs/base/common/event.js';
+import { ContextView } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/browser/ui/contextview/contextview.js';
+import { Emitter } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/common/event.js';
 import {
   Disposable,
   type IDisposable,
-} from '/static/vendor/monaco-editor-core/esm/vs/base/common/lifecycle.js';
-import { ContextKeyService } from '/static/vendor/monaco-editor-core/esm/vs/platform/contextkey/browser/contextKeyService.js';
+} from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/common/lifecycle.js';
+import { ContextKeyService } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/platform/contextkey/browser/contextKeyService.js';
 
 export interface ExplorerSearchWidgetSearchConfiguration {
   globalFindClipboard: boolean;
@@ -25,7 +25,7 @@ export interface ExplorerSearchWidgetContextViewProvider {
 }
 
 export interface ExplorerSearchWidgetContextKeyService {
-  createScoped(target: HTMLElement): Disposable;
+  createScoped(target: HTMLElement): { dispose(): void };
 }
 
 interface SearchWidgetConfigurationChangeEvent {
@@ -33,10 +33,12 @@ interface SearchWidgetConfigurationChangeEvent {
 }
 
 class SearchWidgetConfigurationService {
-  private readonly onDidChangeEmitter =
-    new Emitter<SearchWidgetConfigurationChangeEvent>();
+  private readonly onDidChangeEmitter = new Emitter();
 
-  readonly onDidChangeConfiguration = this.onDidChangeEmitter.event;
+  readonly onDidChangeConfiguration =
+    this.onDidChangeEmitter.event as (
+      listener: (event: SearchWidgetConfigurationChangeEvent) => unknown,
+    ) => { dispose(): void };
 
   constructor(
     private searchConfiguration: ExplorerSearchWidgetSearchConfiguration,
@@ -65,7 +67,7 @@ class SearchWidgetConfigurationService {
       },
     };
     this.onDidChangeEmitter.fire({
-      affectsConfiguration: (section) =>
+      affectsConfiguration: (section: string) =>
         section === 'search' || section.startsWith('search.'),
     });
   }
@@ -117,7 +119,7 @@ class SearchWidgetClipboardService {
 }
 
 class SearchWidgetAccessibilityService extends Disposable {
-  private readonly onDidChangeEmitter = this._register(new Emitter<void>());
+  private readonly onDidChangeEmitter = this._register(new Emitter());
   private screenReaderOptimized = false;
 
   readonly onDidChangeScreenReaderOptimized = this.onDidChangeEmitter.event;

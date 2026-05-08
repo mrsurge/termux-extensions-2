@@ -3,6 +3,7 @@
 /* explorer.css - File Explorer Drawer Styles */
 
 @import './explorer-highlight-github.css';
+@import './explorer-search-widget.css';
 
 :root {
   --drawer-width: 100vw; /* Change from 75vw to 100vw for full width */
@@ -256,6 +257,43 @@
   padding: 12px;
   color: rgba(229, 231, 235, 0.6);
   font-style: italic;
+}
+
+.fe-search-content-widget-host {
+  display: none;
+  padding: 0 12px 8px;
+  background: var(--explorer-bg);
+}
+
+.fe-search-content-widget.search-view {
+  height: auto;
+}
+
+.fe-search-content-widget .search-widgets-container {
+  margin: 0;
+  padding: 0;
+}
+
+.fe-search-content-widget .search-widget .search-container,
+.fe-search-content-widget .search-widget .replace-container,
+.fe-search-content-widget .query-details {
+  margin-left: 0;
+}
+
+.fe-search-content-widget .query-details {
+  margin-top: 8px;
+}
+
+.fe-search-content-widget .query-details h4 {
+  color: rgba(229, 231, 235, 0.8);
+}
+
+.fe-search-content-widget .query-details .file-types {
+  display: block;
+}
+
+.fe-search-content-widget .fe-search-pattern-row {
+  margin-bottom: 8px;
 }
 
 .fe-tree-label {

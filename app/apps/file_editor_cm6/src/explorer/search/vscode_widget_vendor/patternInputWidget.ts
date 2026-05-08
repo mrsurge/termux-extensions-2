@@ -3,19 +3,19 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import * as dom from '/static/vendor/monaco-editor-core/esm/vs/base/browser/dom.js';
-import { Toggle } from '/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/toggle/toggle.js';
-import { HistoryInputBox } from '/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/inputbox/inputBox.js';
-import { Widget } from '/static/vendor/monaco-editor-core/esm/vs/base/browser/ui/widget.js';
-import { Codicon } from '/static/vendor/monaco-editor-core/esm/vs/base/common/codicons.js';
-import { Emitter } from '/static/vendor/monaco-editor-core/esm/vs/base/common/event.js';
-import { HistoryNavigator } from '/static/vendor/monaco-editor-core/esm/vs/base/common/history.js';
-import * as nls from '/static/vendor/monaco-editor-core/esm/vs/nls.js';
+import * as dom from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/browser/dom.js';
+import { Toggle } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/browser/ui/toggle/toggle.js';
+import { HistoryInputBox } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/browser/ui/inputbox/inputBox.js';
+import { Widget } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/browser/ui/widget.js';
+import { Codicon } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/common/codicons.js';
+import { Emitter } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/common/event.js';
+import { HistoryNavigator } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/base/common/history.js';
+import * as nls from '../../../../../../static/vendor/monaco-editor-core/esm/vs/nls.js';
 import {
   registerAndCreateHistoryNavigationContext,
-} from '/static/vendor/monaco-editor-core/esm/vs/platform/history/browser/contextScopedHistoryWidget.js';
-import { showHistoryKeybindingHint } from '/static/vendor/monaco-editor-core/esm/vs/platform/history/browser/historyWidgetKeybindingHint.js';
-import { defaultToggleStyles } from '/static/vendor/monaco-editor-core/esm/vs/platform/theme/browser/defaultStyles.js';
+} from '../../../../../../static/vendor/monaco-editor-core/esm/vs/platform/history/browser/contextScopedHistoryWidget.js';
+import { showHistoryKeybindingHint } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/platform/history/browser/historyWidgetKeybindingHint.js';
+import { defaultToggleStyles } from '../../../../../../static/vendor/monaco-editor-core/esm/vs/platform/theme/browser/defaultStyles.js';
 import type { ExplorerSearchWidgetKeybindingService } from './searchWidgetServices.ts';
 
 const KEY_CODE = {
@@ -114,7 +114,7 @@ export class PatternInputWidget extends Widget {
 	private width: number;
 
 	private domNode!: HTMLElement;
-	protected inputBox!: HistoryInputBox;
+	protected inputBox!: ExplorerContextScopedHistoryInputBox;
 
 	private _onSubmit = this._register(new Emitter());
 	onSubmit = this._onSubmit.event;
@@ -171,6 +171,10 @@ export class PatternInputWidget extends Widget {
 
 	focus(): void {
 		this.inputBox.focus();
+	}
+
+	getInputElement(): HTMLInputElement | HTMLTextAreaElement {
+		return this.inputBox.inputElement;
 	}
 
 	inputHasFocus(): boolean {
@@ -233,7 +237,7 @@ export class PatternInputWidget extends Widget {
 		this._register(this.inputBox.onDidChange(() => this._onSubmit.fire(true)));
 
 		this.inputFocusTracker = dom.trackFocus(this.inputBox.inputElement);
-		this.onkeyup(this.inputBox.inputElement, (keyboardEvent) => this.onInputKeyUp(keyboardEvent));
+		this.onkeyup(this.inputBox.inputElement, (keyboardEvent: unknown) => this.onInputKeyUp(keyboardEvent as PatternKeyboardEvent));
 
 		const controls = document.createElement('div');
 		controls.className = 'controls';
@@ -271,7 +275,7 @@ export class IncludePatternInputWidget extends PatternInputWidget {
 		super(parent, contextViewProvider, options, contextKeyService, keybindingService);
 	}
 
-	private useSearchInEditorsBox!: Toggle;
+	declare private useSearchInEditorsBox: Toggle;
 
 	override dispose(): void {
 		super.dispose();
@@ -298,7 +302,7 @@ export class IncludePatternInputWidget extends PatternInputWidget {
 			isChecked: false,
 			...defaultToggleStyles
 		}));
-		this._register(this.useSearchInEditorsBox.onChange(viaKeyboard => {
+		this._register(this.useSearchInEditorsBox.onChange((viaKeyboard: boolean) => {
 			this._onChangeSearchInEditorsBoxEmitter.fire();
 			if (!viaKeyboard) {
 				this.inputBox.focus();
@@ -322,7 +326,7 @@ export class ExcludePatternInputWidget extends PatternInputWidget {
 		super(parent, contextViewProvider, options, contextKeyService, keybindingService);
 	}
 
-	private useExcludesAndIgnoreFilesBox!: Toggle;
+	declare private useExcludesAndIgnoreFilesBox: Toggle;
 
 	override dispose(): void {
 		super.dispose();
@@ -350,7 +354,7 @@ export class ExcludePatternInputWidget extends PatternInputWidget {
 			isChecked: true,
 			...defaultToggleStyles
 		}));
-		this._register(this.useExcludesAndIgnoreFilesBox.onChange(viaKeyboard => {
+		this._register(this.useExcludesAndIgnoreFilesBox.onChange((viaKeyboard: boolean) => {
 			this._onChangeIgnoreBoxEmitter.fire();
 			if (!viaKeyboard) {
 				this.inputBox.focus();

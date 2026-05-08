@@ -31,7 +31,7 @@ async def handle_search_run(
     elif mode == "content":
         result = cast(
             SearchContentResult,
-            await search_service.search_by_content(context.project_root, query),
+            await search_service.search_by_content(context.project_root, params),
         )
     else:
         result = cast(

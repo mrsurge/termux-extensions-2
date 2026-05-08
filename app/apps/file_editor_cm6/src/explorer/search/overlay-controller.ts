@@ -2,11 +2,16 @@ import type { JsonObject } from '../../rpc/transport.ts';
 import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
 import type { ExplorerRpcMethod } from '../rpc/contract.ts';
 import { createExplorerChangesResultsRenderer } from './changes-results-renderer.ts';
+import {
+  createExplorerContentQueryWidget,
+  type ExplorerContentQueryWidgetState,
+} from './content-query-widget.ts';
 import { createExplorerReviewResultsRenderer } from './review-results-renderer.ts';
 import { createExplorerSearchController } from './controller.ts';
 import { renderSearchOverlayBody } from './overlay-body-renderer.ts';
 import { renderContentResults, renderNameResults } from './results-renderer.ts';
 import type {
+  ExplorerContentSearchOptions,
   ExplorerSearchMode,
   ExplorerSearchOverlayState,
 } from './types.ts';
@@ -127,8 +132,19 @@ export function createExplorerSearchOverlayController(
   let searchDebounceTimer: ExplorerSearchTimer = null;
   let lastKnownProjectPath = '';
   let reviewEntries: unknown[] = [];
+  let contentSearchOptions: ExplorerContentSearchOptions = {
+    isRegex: false,
+    isCaseSensitive: false,
+    isWholeWords: false,
+    includePattern: '',
+    excludePattern: '',
+    useIgnoreFiles: true,
+  };
 
   let searchController: ReturnType<typeof createExplorerSearchController>;
+  let contentQueryWidget:
+    | ReturnType<typeof createExplorerContentQueryWidget>
+    | null = null;
 
   const changesResultsRenderer = createExplorerChangesResultsRenderer({
     getGitDiffBase: () => deps.getGitDiffBase(),
@@ -171,21 +187,44 @@ export function createExplorerSearchOverlayController(
     }
 
     const input = overlay.querySelector<HTMLInputElement>('#fe-search-input');
+    const inputContainer = overlay.querySelector<HTMLElement>(
+      '.fe-search-input-container',
+    );
+    if (inputContainer) {
+      inputContainer.style.display = searchMode === 'name' ? 'flex' : 'none';
+    }
     if (input) {
       input.placeholder =
         searchMode === 'name' ? 'Search files/folders...' : 'Search in files...';
       input.value = searchQuery;
-      input.style.display =
-        searchMode === 'name' || searchMode === 'content' ? 'block' : 'none';
+      input.style.display = searchMode === 'name' ? 'block' : 'none';
+    }
+
+    const contentWidgetHost = overlay.querySelector<HTMLElement>(
+      '#fe-search-content-widget-host',
+    );
+    if (contentWidgetHost && contentQueryWidget) {
+      const nextState: ExplorerContentQueryWidgetState = {
+        query: searchQuery,
+        isRegex: contentSearchOptions.isRegex,
+        isCaseSensitive: contentSearchOptions.isCaseSensitive,
+        isWholeWords: contentSearchOptions.isWholeWords,
+        includePattern: contentSearchOptions.includePattern,
+        excludePattern: contentSearchOptions.excludePattern,
+        useIgnoreFiles: contentSearchOptions.useIgnoreFiles,
+      };
+      contentWidgetHost.style.display = searchMode === 'content' ? 'block' : 'none';
+      contentQueryWidget.setState(nextState);
+      contentQueryWidget.setVisible(searchMode === 'content');
+    } else if (contentWidgetHost) {
+      contentWidgetHost.style.display = searchMode === 'content' ? 'block' : 'none';
     }
 
     const clearBtn =
       overlay.querySelector<HTMLButtonElement>('.fe-search-clear');
     if (clearBtn) {
       clearBtn.style.display =
-        searchQuery && (searchMode === 'name' || searchMode === 'content')
-          ? 'block'
-          : 'none';
+        searchQuery && searchMode === 'name' ? 'block' : 'none';
     }
 
     const filterContainer = overlay.querySelector<HTMLElement>(
@@ -306,6 +345,28 @@ export function createExplorerSearchOverlayController(
     });
     inputContainer.appendChild(clearBtn);
 
+    const contentWidgetHost = document.createElement('div');
+    contentWidgetHost.id = 'fe-search-content-widget-host';
+    contentWidgetHost.className = 'fe-search-content-widget-host';
+
+    contentQueryWidget = createExplorerContentQueryWidget(contentWidgetHost, {
+      onOptionsChanged: (next) => {
+        searchQuery = next.query;
+        contentSearchOptions = {
+          isRegex: next.isRegex,
+          isCaseSensitive: next.isCaseSensitive,
+          isWholeWords: next.isWholeWords,
+          includePattern: next.includePattern,
+          excludePattern: next.excludePattern,
+          useIgnoreFiles: next.useIgnoreFiles,
+        };
+        searchController.scheduleSearch(next.query);
+      },
+      onEscape: () => {
+        closeSearchOverlay();
+      },
+    });
+
     const changesToolbar = document.createElement('div');
     changesToolbar.className = 'fe-search-changes-toolbar';
 
@@ -409,6 +470,7 @@ export function createExplorerSearchOverlayController(
 
     overlay.appendChild(header);
     overlay.appendChild(inputContainer);
+    overlay.appendChild(contentWidgetHost);
     overlay.appendChild(changesToolbar);
     overlay.appendChild(resultsContainer);
     overlay.dataset.ready = 'true';
@@ -418,6 +480,10 @@ export function createExplorerSearchOverlayController(
     toast: (message) => deps.toast(message),
     renderSearchOverlay,
     focusSearchInput: () => {
+      if (searchMode === 'content' && contentQueryWidget) {
+        contentQueryWidget.focus();
+        return;
+      }
       const input = document.getElementById('fe-search-input');
       if (input instanceof HTMLInputElement) {
         input.focus();
@@ -457,6 +523,7 @@ export function createExplorerSearchOverlayController(
     setLastKnownProjectPath: (next) => {
       lastKnownProjectPath = next || '';
     },
+    getContentSearchOptions: () => contentSearchOptions,
   });
 
   function closeSearchOverlay(): void {

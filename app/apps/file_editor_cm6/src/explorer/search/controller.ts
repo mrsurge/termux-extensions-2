@@ -1,6 +1,9 @@
 import { EXPLORER_RPC_METHODS, type ExplorerRpcMethod } from '../rpc/contract.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
-import type { ExplorerSearchMode } from './types.ts';
+import type {
+  ExplorerContentSearchOptions,
+  ExplorerSearchMode,
+} from './types.ts';
 import { getErrorMessage } from '../utils/errors.ts';
 
 type ExplorerSearchTimer = ReturnType<typeof setTimeout> | null;
@@ -27,6 +30,7 @@ interface ExplorerSearchControllerDeps {
   getSearchDebounceTimer(): ExplorerSearchTimer;
   setSearchDebounceTimer(next: ExplorerSearchTimer): void;
   setLastKnownProjectPath(next: string): void;
+  getContentSearchOptions(): ExplorerContentSearchOptions;
 }
 
 export function createExplorerSearchController(
@@ -44,6 +48,27 @@ export function createExplorerSearchController(
       clearTimeout(timer);
       deps.setSearchDebounceTimer(null);
     }
+  }
+
+  function buildSearchPayload(query: string): JsonObject {
+    const mode = deps.getSearchMode();
+    if (mode !== 'content') {
+      return {
+        mode,
+        query,
+      };
+    }
+    const options = deps.getContentSearchOptions();
+    return {
+      mode,
+      query,
+      isRegex: options.isRegex,
+      isCaseSensitive: options.isCaseSensitive,
+      isWholeWords: options.isWholeWords,
+      includePattern: options.includePattern,
+      excludePattern: options.excludePattern,
+      useIgnoreFiles: options.useIgnoreFiles,
+    };
   }
 
   async function performSearch(query: string): Promise<void> {
@@ -69,10 +94,7 @@ export function createExplorerSearchController(
     }
 
     try {
-      deps.sendBus(EXPLORER_RPC_METHODS.searchRun, {
-        mode: deps.getSearchMode(),
-        query,
-      });
+      deps.sendBus(EXPLORER_RPC_METHODS.searchRun, buildSearchPayload(query));
     } catch (error) {
       deps.setSearchLoading(false);
       deps.setSearchError(getErrorMessage(error, 'Search request failed'));
@@ -103,6 +125,13 @@ export function createExplorerSearchController(
         void performSearch(query);
       }, 300),
     );
+  }
+
+  function refreshCurrentSearch(): void {
+    if (deps.getSearchMode() !== 'content') {
+      return;
+    }
+    scheduleSearch(deps.getSearchQuery());
   }
 
   async function fetchChangesResults(force = false): Promise<void> {
@@ -226,6 +255,7 @@ export function createExplorerSearchController(
   return {
     clearSearchResults,
     scheduleSearch,
+    refreshCurrentSearch,
     performSearch,
     fetchChangesResults,
     fetchReviewResults,
