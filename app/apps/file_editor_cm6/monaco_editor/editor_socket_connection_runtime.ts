@@ -62,8 +62,6 @@ interface EditorSocketConnectionDeps {
   applyLanguageToModel(model: MonacoModelLike, languageId: string, filePath: string): void;
   installMirrorPublisher(): void;
   installScrollPublisher(): void;
-  vscodeRpcDidOpenIfReady(): void;
-  installVscodeRpcChangePublisher(): void;
   languageFromPath(path: string): string;
   monacoFileUri(path: string): MonacoUriLike | null;
   setApplyingRemote(value: boolean): void;
@@ -117,8 +115,6 @@ function applyModelLifecycle(deps: EditorSocketConnectionDeps, content: string, 
     deps.applyLanguageToModel(nextModel, lang, currentPath);
     deps.installMirrorPublisher();
     deps.installScrollPublisher();
-    deps.vscodeRpcDidOpenIfReady();
-    deps.installVscodeRpcChangePublisher();
     return;
   }
 
@@ -135,8 +131,6 @@ function applyModelLifecycle(deps: EditorSocketConnectionDeps, content: string, 
       deps.applyLanguageToModel(recreated, lang, currentPath);
       deps.installMirrorPublisher();
       deps.installScrollPublisher();
-      deps.vscodeRpcDidOpenIfReady();
-      deps.installVscodeRpcChangePublisher();
       return;
     }
 
@@ -400,7 +394,6 @@ export function registerEditorSocketConnectionHandlers(
       }
       if (deps.getShowDraftDiffs()) deps.requestDraftDiff('prefs');
       else deps.clearDraftDiffDecorations();
-      deps.vscodeRpcDidOpenIfReady();
       deps.ensureTouchSelection('prefs');
     } catch (error) {
       console.warn('[Monaco] prefs_changed apply failed', error);

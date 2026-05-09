@@ -12,14 +12,14 @@ Related docs:
 
 1. `editor_ws`: active and authoritative for editor/save/draft/session.
 2. `vscode_api_ws`: active target transport for language integration.
-3. `vscode_rpc_ws`: deprecated compatibility transport.
+3. `vscode_rpc_ws`: removed historical compatibility transport.
 
-## Deprecation policy for `vscode_rpc_ws`
+## Removal status for `vscode_rpc_ws`
 
 1. No new methods/features.
-2. Existing callers may continue temporarily.
-3. Any surviving method must be migrated to `vscode_api_ws`.
-4. Remove only after parity checklist is complete.
+2. No runtime callers are expected.
+3. Do not restore this transport as a fallback for WBA/editor intelligence.
+4. Any future language-intelligence work belongs on the WBA/direct editor contract.
 
 ## Migration checklist
 
@@ -33,10 +33,10 @@ Related docs:
 - Equivalent status/debug introspection available on `vscode_api_ws`.
 
 4. Cutover guard
-- Confirm no runtime consumers depend on `vscode_rpc_ws`.
+- Confirm no runtime consumers depend on removed transports before deleting any remaining docs.
 
 5. Removal
-- Delete service transport and references only after all above pass.
+- Done for the `vscode_rpc_ws` service/shell/frontend side-channel.
 
 ## Compatibility notes
 

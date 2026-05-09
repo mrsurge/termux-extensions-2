@@ -166,7 +166,6 @@ Files under `app/apps/file_editor_cm6/services/` are loaded by the framework app
 
 They now include non-Socket.IO integration services such as:
 
-- `services/vscode_rpc_transport.py`
 - `services/sidebar_backchannel_uds.py`
 
 Socket.IO route proxying is framework-owned through `app/apps/file_editor_cm6/sio_service.json` and the apps loader's generic raw route proxy. The old handwritten Socket.IO proxy modules are not the source of truth.

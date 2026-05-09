@@ -32,8 +32,6 @@ interface RunEditorOpenTransactionDeps {
   createFileModel(content: string, lang: string, absPath: string): OpenModelLike;
   installMirrorPublisher(): void;
   installScrollPublisher(): void;
-  vscodeRpcDidOpenIfReady(): void;
-  installVscodeRpcChangePublisher(): void;
   applyLineNumberSizing(): void;
   ensureTouchSelection(reason: string): void;
   syncDiagnosticsForCurrentModel(reason: string): void;
@@ -149,8 +147,6 @@ export async function runEditorOpenTransaction(
       deps.applyLanguageToModel(model, lang, currentPath);
       deps.installMirrorPublisher();
       deps.installScrollPublisher();
-      deps.vscodeRpcDidOpenIfReady();
-      deps.installVscodeRpcChangePublisher();
     } else {
       try {
         const want = deps.monacoFileUri(deps.getWindow().monaco, currentPath);
@@ -163,8 +159,6 @@ export async function runEditorOpenTransaction(
           deps.applyLanguageToModel(model, lang, currentPath);
           deps.installMirrorPublisher();
           deps.installScrollPublisher();
-          deps.vscodeRpcDidOpenIfReady();
-          deps.installVscodeRpcChangePublisher();
         } else {
           deps.applyOpenModelTextSafely(model, editor, payload.content || '', deps.setApplyingRemote);
           deps.applyLanguageToModel(model, lang, currentPath);

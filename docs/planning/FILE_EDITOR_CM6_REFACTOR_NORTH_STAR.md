@@ -90,7 +90,7 @@ Current facts in the live tree:
 - The host frontend entry is broken up enough for now: `main.ts` is the strict bundle source entry and should not be treated as the next decomposition target unless a concrete ownership bug requires it.
 - The remaining monolith breakup targets are `main.py` and `template.html`.
 - The app still exposes legacy physical Socket.IO paths for compatibility, but those paths are now explicit aliases in `sio_service.json` behind one framework-owned raw route proxy. The worker-owned Python Socket.IO layer uses one shared app-local server for `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`; `/wba` remains a separate adapter-owned upstream with its own Engine.IO route semantics.
-- `services/vscode_rpc_transport.py` is still registered even though it is not the current editor intelligence hot path.
+- The dead `vscode_rpc` side-channel has been removed; editor intelligence is WBA-owned.
 
 ## Core Constraints
 
@@ -288,7 +288,6 @@ Once the transport/contracts are stable:
 - remove stale transport wrappers and compatibility shims once callers are gone
 - remove dead docs that were only valid during migration
 - remove legacy event-name RPC assumptions from comments, docs, and helper naming
-- revisit whether `vscode_rpc_transport` still belongs in the manifest once the surrounding residue is gone
 
 ### Phase 7. Resume Queued Feature Work
 

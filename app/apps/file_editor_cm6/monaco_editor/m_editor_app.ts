@@ -1,4 +1,4 @@
-import { buildUiUrl, wsUrlFromPath, fetchJsonWithBase } from './editor_common_utils.ts';
+import { buildUiUrl, fetchJsonWithBase } from './editor_common_utils.ts';
 import { normalizeLanguageId, languageIdFromPath, monacoFileUri } from './editor_language_utils.ts';
 import { parseJsonc } from './editor_parse_utils.ts';
 import { createFileModel as createMonacoFileModel } from './editor_model_utils.ts';
@@ -77,7 +77,6 @@ import {
 } from './editor_draft_diff_runtime.ts';
 import { createEditorTextmateRuntime } from './editor_textmate_runtime.ts';
 import { createEditorTextmateThemeOwnerRuntime } from './editor_textmate_theme_owner_runtime.ts';
-import { createEditorVscodeRpcRuntime } from './editor_vscode_rpc_runtime.ts';
 import {
   disposeDiffEditorOnly as disposeDiffEditorRuntime,
   disposeGitBaselines as disposeGitBaselinesRuntime,
@@ -116,10 +115,6 @@ import {
   buildRuntimeSocketDeps,
   buildBootMonacoRuntimeDeps,
 } from './editor_app_bindings.ts';
-import {
-  installVscodeRpcChangePublisher as installEditorVscodeRpcChangePublisher,
-  vscodeRpcDidOpenIfReady as runVscodeRpcDidOpenIfReady,
-} from './editor_vscode_rpc_document_lifecycle.ts';
 /* eslint-disable no-undef */
 
 interface MonacoRuntimeUriLike {
@@ -434,14 +429,6 @@ interface MonacoBootWindowLike extends Window {
     clearTimeoutFn: _clearTimeoutBound,
   });
 
-  var vscodeRpcRuntime = createEditorVscodeRpcRuntime({
-    getWindow: function() { return window; },
-    getMonaco: function() { return monaco || window.monaco || null; },
-    fetchJsonWithBase: function(path, init) { return fetchJsonWithBase(_fetch, apiBase, path, init); },
-    wsUrlFromPath: function(wsPath) { return wsUrlFromPath(window.location, wsPath); },
-    createWebSocket: function(url) { return new WebSocket(url); },
-  } as Parameters<typeof createEditorVscodeRpcRuntime>[0]);
-
   var textmateRuntime = createEditorTextmateRuntime({
     getWindow: function() { return window; },
     getApiBase: function() { return apiBase; },
@@ -539,23 +526,6 @@ interface MonacoBootWindowLike extends Window {
       applyLanguageToModel: applyLanguageToModel,
       languageFromPath: function(path: string) { return languageFromPath(path); },
     });
-  }
-
-  function vscodeRpcCall(method: string, params?: Record<string, unknown>): Promise<unknown> {
-    return vscodeRpcRuntime.call(method, params || {});
-  }
-
-  // vscode_rpc is a legacy/optional side-channel (stdio LSP + semantic tokens POC).
-  // It is NOT required for the workbench-sidecar (code-server) language features.
-  // Default it off to avoid noisy failures when local LSP binaries are not present.
-  var ENABLE_VSCODE_RPC = false;
-
-  async function ensureVscodeRpcConnected() {
-    return vscodeRpcRuntime.ensureConnected(ENABLE_VSCODE_RPC);
-  }
-
-  function installVscodeSemanticTokens(legend: unknown): void {
-    vscodeRpcRuntime.installSemanticTokens(legend as SemanticTokensLegendLike | null | undefined);
   }
 
   function editorRpcCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
@@ -781,41 +751,6 @@ interface MonacoBootWindowLike extends Window {
     }
   }
 
-  function vscodeRpcDidOpenIfReady(): void {
-    runVscodeRpcDidOpenIfReady({
-      getModel: function() { return model; },
-      getCurrentPath: function() { return currentPath; },
-      languageFromPath: languageFromPath,
-      ensureVscodeRpcConnected: ensureVscodeRpcConnected,
-      getVscodeRpcLegend: function() { return vscodeRpcRuntime.getLegend(); },
-      getVscodeRpcWebSocket: function() { return vscodeRpcRuntime.getWebSocket(); },
-      getVscodeRpcDocUri: function() { return vscodeRpcRuntime.getDocUri(); },
-      setVscodeRpcDocUri: function(uri: string) { vscodeRpcRuntime.setDocUri(uri); },
-      getVscodeRpcDocVersion: function() { return vscodeRpcRuntime.getDocVersion(); },
-      setVscodeRpcDocVersion: function(version: number) { vscodeRpcRuntime.setDocVersion(version); },
-      getVscodeRpcChangeDebounceTimer: function() { return vscodeRpcRuntime.getChangeDebounceTimer(); },
-      setVscodeRpcChangeDebounceTimer: function(timer: ReturnType<typeof setTimeout> | null) { vscodeRpcRuntime.setChangeDebounceTimer(timer); },
-    });
-  }
-
-
-
-  function installVscodeRpcChangePublisher(): void {
-    installEditorVscodeRpcChangePublisher({
-      getModel: function() { return model; },
-      getCurrentPath: function() { return currentPath; },
-      languageFromPath: languageFromPath,
-      ensureVscodeRpcConnected: ensureVscodeRpcConnected,
-      getVscodeRpcLegend: function() { return vscodeRpcRuntime.getLegend(); },
-      getVscodeRpcWebSocket: function() { return vscodeRpcRuntime.getWebSocket(); },
-      getVscodeRpcDocUri: function() { return vscodeRpcRuntime.getDocUri(); },
-      setVscodeRpcDocUri: function(uri: string) { vscodeRpcRuntime.setDocUri(uri); },
-      getVscodeRpcDocVersion: function() { return vscodeRpcRuntime.getDocVersion(); },
-      setVscodeRpcDocVersion: function(version: number) { vscodeRpcRuntime.setDocVersion(version); },
-      getVscodeRpcChangeDebounceTimer: function() { return vscodeRpcRuntime.getChangeDebounceTimer(); },
-      setVscodeRpcChangeDebounceTimer: function(timer: ReturnType<typeof setTimeout> | null) { vscodeRpcRuntime.setChangeDebounceTimer(timer); },
-    });
-  }
   function _clearEditorDecorationStateRuntime() {
     draftDecoCollection = null;
     draftDecoIds = [];
@@ -1173,8 +1108,6 @@ interface MonacoBootWindowLike extends Window {
     createFileModel: createFileModel,
     installMirrorPublisher: installMirrorPublisher,
     installScrollPublisher: installScrollPublisher,
-    vscodeRpcDidOpenIfReady: vscodeRpcDidOpenIfReady,
-    installVscodeRpcChangePublisher: installVscodeRpcChangePublisher,
     applyLineNumberSizing: applyLineNumberSizing,
     ensureTouchSelection: ensureTouchSelection,
     syncDiagnosticsForCurrentModel: function(reason: string) { _syncDiagnosticsForCurrentModel(reason); },
@@ -1252,8 +1185,6 @@ interface MonacoBootWindowLike extends Window {
         applyLanguageToModel: applyLanguageToModel,
         installMirrorPublisher: installMirrorPublisher,
         installScrollPublisher: installScrollPublisher,
-        vscodeRpcDidOpenIfReady: vscodeRpcDidOpenIfReady,
-        installVscodeRpcChangePublisher: installVscodeRpcChangePublisher,
         languageFromPath: languageFromPath,
         monacoFileUri: function(path: string) { return monacoFileUri(window.monaco, path) as MonacoRuntimeUriLike | null; },
         setApplyingRemote: function(value: boolean) { isApplyingRemote = !!value; },
@@ -1439,7 +1370,6 @@ interface MonacoBootWindowLike extends Window {
       warnIfPlaintextOnlyLanguages: warnIfPlaintextOnlyLanguages,
       connectEditorSocket: connectEditorSocket,
       connectEditorHostActions: connectEditorHostActions,
-      ensureVscodeRpcConnected: ensureVscodeRpcConnected,
       emitToHost: emitToHost,
       updateDebug: updateDebug,
     }) as Parameters<typeof bootMonacoRuntime>[0]);

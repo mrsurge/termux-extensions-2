@@ -267,8 +267,6 @@ Spinner / Status indicator (host UI):
   - Keeps legacy aliases explicit: `/editor_ws/socket.io`, `/explorer_ws/socket.io`, `/ui_ipc_ws/socket.io`, `/terminal_ws/socket.io`, and `/wba_ws/socket.io`.
 - The app worker owns `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`.
 - The Node WBA service owns `/wba`.
-- `app/apps/file_editor_cm6/services/vscode_rpc_transport.py`
-  - Legacy/secondary service still present in `manifest.json`; not the current editor intelligence path
 - All Socket.IO route proxies: bidirectional WS frame forwarding, no SSOT access, no namespace dispatch, no payload parsing
 
 ### Host shell (browser, worker-served)
@@ -410,7 +408,6 @@ Services declared in `app/apps/file_editor_cm6/manifest.json` currently include 
 "services": {
   "path": "services",
   "modules": [
-    "vscode_rpc_transport",
     "sidebar_backchannel_uds"
   ]
 },
@@ -431,7 +428,7 @@ They must **not** mutate app worker SSOT (HistoryStore / ProjectSidecar).
 
 Important current note:
 - `sio_service.json` is the active physical Socket.IO route source of truth.
-- `vscode_rpc_transport` is still registered, but it is not the current editor intelligence hot path.
+- The old `vscode_rpc` side-channel has been removed; editor intelligence is WBA-owned.
 
 ---
 
@@ -1170,13 +1167,12 @@ These are all **static asset queries** (reading installed extension files) — t
 1. The workbench adapter (if they benefit from extension host context), or
 2. A simple Python-side utility that reads the VSIX install pool directly (preferred for static assets)
 
-### Files to remove (`vscode_rpc`)
+### Files removed (`vscode_rpc`)
 | File | Purpose |
 |------|---------|
 | `services/vscode_rpc_transport.py` | Main-process WS proxy |
 | `vscode_rpc_shell_manager.py` | Shell lifecycle manager |
 | `shellspec/vscode_rpc.yaml` | Framework shell definition |
-| `main.py` (references) | Discovery/start endpoints |
 | `manifest.json` (references) | Service registration |
 
 ### Files to remove (`vscode_api`, after migration)
@@ -1217,7 +1213,7 @@ VSIX install/registry is pure file management (download, extract, update `extens
 Replace the `vscode.bootstrap.snapshot` call (currently via `vscode_api` harness) with a single adapter call that returns grammars + themes + languages in one response, or combine the Phase 1 calls at the Python layer.
 
 ### Priority
-- `vscode_rpc`: can be removed immediately (nothing depends on it in production).
+- `vscode_rpc`: removed; nothing depends on it in production.
 - `vscode_api`: remove after Phase 1 migrates grammar/theme/language queries to the workbench adapter. The frontend currently calls these on boot for TextMate tokenization and theme loading.
 
 ---
@@ -1751,7 +1747,7 @@ Document-symbol ordering hardening (validated):
 - Adapter invariants return `document_not_open` / `stale_generation` for out-of-order requests.
 - Backend stdio writes are still serialized in `workbench_adapter_shell_manager.py` for the remaining control-plane calls.
 
-The old `vscode_api_ws` / `vscode_rpc_ws` paths are not the active editor intelligence transport. Treat them as legacy or secondary surfaces unless a specific feature still depends on them.
+The old `vscode_rpc_ws` path has been removed. The old `vscode_api_ws` path is not the active editor intelligence transport; treat related text as historical unless a specific current feature still depends on it.
 
 The UI (Monaco editor runtime) remains a thin renderer:
 - It subscribes to TE2 events, updates Monaco markers/hover providers, and never runs an extension host itself.

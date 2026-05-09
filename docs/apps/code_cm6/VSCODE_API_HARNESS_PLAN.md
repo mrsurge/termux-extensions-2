@@ -67,7 +67,7 @@ The server-side harness exposes versioned JSON-RPC capabilities, for example:
 - Monaco consumes:
   - TextMate tokens/scopes (client-side tokenization worker) OR tokens delivered from API harness (later).
   - Semantic tokens + diagnostics from API harness (preferred).
-- Any local fallback (e.g., existing `vscode_rpc` POC) is temporary and must not silently mask errors.
+- Do not add local fallback harnesses that silently mask WBA/editor contract errors.
 
 ---
 

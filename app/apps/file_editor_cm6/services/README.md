@@ -19,7 +19,7 @@ The app manifest declares a `services` entry for non-Socket.IO service modules:
 ```
 "services": {
   "path": "services",
-  "modules": ["vscode_rpc_transport", "sidebar_backchannel_uds"]
+  "modules": ["sidebar_backchannel_uds"]
 }
 ```
 
@@ -42,8 +42,6 @@ A service module can export either or both:
 
 ## Current services
 
-- `vscode_rpc_transport.py` — Proxy-only WebSocket shim mounted at
-  `/vscode_rpc_ws` that forwards frames to the `vscode_rpc` framework shell.
 - `sidebar_backchannel_uds.py` — Main-process Unix domain socket JSON-RPC host
   for sidebar backchannel transport (Phase 0 scaffolding: `session.hello`,
   `health.ping`, structured request logs, safe socket lifecycle).

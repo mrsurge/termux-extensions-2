@@ -22,10 +22,10 @@ Primary transports:
 - Scope: language intelligence sidecar only.
 - Includes: hover, symbols, completion, diagnostics events, adapter/runtime control.
 
-Deprecated transport:
+Removed historical transport:
 1. `vscode_rpc_ws`
-- Compatibility-only during migration.
-- No new features.
+- Removed side-channel from the live app.
+- Do not restore as a fallback for WBA/editor intelligence.
 
 ## Endpoint roles
 
