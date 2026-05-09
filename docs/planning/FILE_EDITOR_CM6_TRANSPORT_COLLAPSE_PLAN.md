@@ -4,12 +4,14 @@
 
 Active execution plan for the transport-collapse slice under `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md`.
 
-Phase one is implemented in the current tree. Phase two remains planned.
+Phase one is implemented in the current tree. Phase two is now implemented as a
+framework-owned raw route proxy.
 
 This plan splits the old single "collapse Socket.IO" idea into two phases:
 
 1. Collapse the worker-owned Python Socket.IO layer inside `file_editor_cm6` and add `msgspec` envelope validation.
-2. Move physical Socket.IO relay/routing into a framework-owned manifest-declared `sio_service.json` system.
+2. Move physical Socket.IO route proxying into a framework-owned
+   manifest-declared `sio_service.json` system.
 
 The split matters because the first phase is app-local and can preserve current public paths, while the second phase is a TE2 framework capability that should replace bespoke app `services/*_transport.py` modules.
 
@@ -33,7 +35,20 @@ Phase one now uses one app-local worker gateway:
 - `/ui_ipc_ws/socket.io`
 - `/terminal_ws/socket.io`
 
-Main-process service modules still proxy those physical paths back to the worker, and `services/wba_transport.py` still separately proxies `/wba_ws/socket.io` to the Node WBA service.
+Phase two now replaces the bespoke Socket.IO proxy modules with the generic
+apps `sio_service` route proxy. `app/apps/file_editor_cm6/sio_service.json`
+declares one app-worker Socket.IO route and one WBA service route:
+
+- `/api/app/file_editor_cm6/socket.io` -> app worker `/socket.io/`
+- `/api/app/file_editor_cm6/services/wba/socket.io` -> Node WBA `/wba_ws/socket.io`
+
+The legacy public paths remain as explicit aliases in that JSON file:
+
+- `/editor_ws/socket.io`
+- `/explorer_ws/socket.io`
+- `/ui_ipc_ws/socket.io`
+- `/terminal_ws/socket.io`
+- `/wba_ws/socket.io`
 
 `msgspec` is now declared in `requirements.txt`, which is also the dynamic dependency source for `pyproject.toml`.
 
@@ -126,13 +141,14 @@ Phase one does not include:
   - `rg` check proving only `socketio_gateway.py` constructs `socketio.AsyncServer(...)`
   - `git diff --check`
 
-## Phase Two: Framework `sio_service.json` Relay
+## Phase Two: Framework `sio_service.json` Raw Route Proxy
 
-Goal: replace bespoke app `services/*_transport.py` Socket.IO websocket proxy scripts with a framework-owned relay declared by the app manifest.
+Goal: replace bespoke app `services/*_transport.py` Socket.IO websocket proxy
+scripts with a framework-owned raw route proxy declared by the app manifest.
 
 ### Target Shape
 
-The app manifest points to a Socket.IO service definition, for example:
+The app manifest points to a Socket.IO service definition:
 
 ```json
 {
@@ -140,33 +156,49 @@ The app manifest points to a Socket.IO service definition, for example:
 }
 ```
 
-The app-local `sio_service.json` defines physical mount and namespace routing, for example:
+The app-local `sio_service.json` defines physical Engine.IO routes and upstream
+targets. It does not define or route Socket.IO namespaces:
 
 ```json
 {
-  "mount": "/apps/file_editor_cm6/socket.io",
-  "app_id": "file_editor_cm6",
-  "namespaces": {
-    "/rpc/editor": { "target": "app_worker" },
-    "/rpc/explorer": { "target": "app_worker" },
-    "/ui_ipc": { "target": "app_worker" },
-    "/sidebar_ipc": { "target": "app_worker" },
-    "/terminal": { "target": "app_worker" },
-    "/wba": { "target": "adapter", "service": "workbench_adapter" }
-  }
+  "version": 1,
+  "routes": [
+    {
+      "id": "app_worker",
+      "target": "app_worker",
+      "public_path": "/api/app/file_editor_cm6/socket.io",
+      "upstream_path": "/socket.io/",
+      "aliases": [
+        "/editor_ws/socket.io",
+        "/explorer_ws/socket.io",
+        "/ui_ipc_ws/socket.io",
+        "/terminal_ws/socket.io"
+      ]
+    },
+    {
+      "id": "wba",
+      "target": "static",
+      "host": "127.0.0.1",
+      "port": 18181,
+      "public_path": "/api/app/file_editor_cm6/services/wba/socket.io",
+      "upstream_path": "/wba_ws/socket.io/",
+      "aliases": ["/wba_ws/socket.io"]
+    }
+  ]
 }
 ```
 
-The framework relay owns:
+The framework raw proxy owns:
 
-- physical Socket.IO mount registration
+- physical Engine.IO websocket route registration
 - route lookup from app manifest metadata
-- websocket frame relay/proxying
+- websocket frame proxying
 - target discovery for app worker and adapter-owned endpoints
 - stable compatibility aliases only when explicitly declared in the JSON file
 
-The framework relay must not own:
+The framework raw proxy must not own:
 
+- Socket.IO namespaces
 - editor SSOT
 - Explorer behavior
 - UI IPC semantics
@@ -177,11 +209,17 @@ The framework relay must not own:
 
 ### Phase Two Success Criteria
 
-- The physical app Socket.IO shape is manifest-declared instead of hardcoded in multiple service modules.
-- `file_editor_cm6` no longer needs bespoke `editor_transport.py`, `explorer_transport.py`, `ui_ipc_transport.py`, `terminal_transport.py`, or `wba_transport.py` just to proxy Socket.IO frames.
+- Done: the physical app Socket.IO shape is manifest-declared in
+  `app/apps/file_editor_cm6/sio_service.json` instead of hardcoded in multiple
+  service modules.
+- Done: `file_editor_cm6` no longer lists bespoke `editor_transport.py`,
+  `explorer_transport.py`, `ui_ipc_transport.py`, `terminal_transport.py`, or
+  `wba_transport.py` to proxy Socket.IO frames.
 - Logical namespaces remain stable unless a contract revision explicitly removes one.
-- Compatibility aliases are visible in `sio_service.json`, not hidden in Python fallback code.
-- The relay is reusable by other TE2 apps and is not a `file_editor_cm6`-specific gateway in disguise.
+- Done: compatibility aliases are visible in `sio_service.json`, not hidden in
+  Python fallback code.
+- Done: the route proxy is reusable by other TE2 apps and is not a
+  `file_editor_cm6`-specific gateway in disguise.
 
 ## Execution Order
 
@@ -189,5 +227,6 @@ The framework relay must not own:
 2. Completed: execute phase one as an app-local backend slice.
 3. Completed: validate phase one with local backend checks. Live TE2 runtime checks remain explicit-approval only.
 4. Completed: record phase-one durable facts in repo memory.
-5. Design and implement the framework `sio_service.json` relay as its own later phase.
-6. Migrate `file_editor_cm6` physical paths to the framework relay only after the relay exists and current clients are accounted for.
+5. Completed: implement the framework `sio_service.json` raw route proxy.
+6. Completed: migrate `file_editor_cm6` physical Socket.IO paths to the
+   framework proxy through explicit compatibility aliases.

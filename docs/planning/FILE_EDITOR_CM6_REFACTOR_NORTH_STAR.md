@@ -8,7 +8,7 @@ Use this document as the current source of truth for the remaining `file_editor_
 
 Detailed main-page/template progress is tracked in `FILE_EDITOR_CM6_MAIN_PAGE_DECOMPOSITION_PLAN.md`. Keep this North Star document focused on target architecture, sequencing, and cross-plan constraints instead of duplicating per-slice status.
 
-Detailed transport-collapse execution is tracked in `FILE_EDITOR_CM6_TRANSPORT_COLLAPSE_PLAN.md`. The collapse is now intentionally split into an app-local Python Socket.IO layer phase and a later framework-level manifest-declared relay phase.
+Detailed transport-collapse execution is tracked in `FILE_EDITOR_CM6_TRANSPORT_COLLAPSE_PLAN.md`. The collapse is split into an app-local Python Socket.IO layer phase and a framework-level manifest-declared raw route proxy phase.
 
 ## Purpose
 
@@ -46,11 +46,11 @@ The next work should proceed in this order:
    - Existing physical paths remain mounted to the shared worker ASGI app for compatibility.
    - SSOT, terminal, host, Explorer, and editor behavior did not move into the gateway. The gateway is transport assembly and envelope validation, not domain ownership.
    - `/wba` remains adapter-owned and separate in this phase.
-5. Phase two transport collapse: add a framework-owned manifest-declared Socket.IO relay using an app-local `sio_service.json`.
-   - The app manifest should point to the relay definition instead of requiring one-off Python transport scripts under `services/`.
-   - The framework relay owns physical mount/routing and target discovery.
-   - Preserve logical namespaces unless a concrete contract cleanup removes one.
-   - Do not move WBA or app-worker domain behavior into the framework relay.
+5. Completed: phase two transport collapse added a framework-owned manifest-declared raw Socket.IO route proxy using an app-local `sio_service.json`.
+   - The app manifest points to the route definition instead of requiring one-off Python transport scripts under `services/`.
+   - The framework proxy owns physical Engine.IO route registration, raw websocket forwarding, and target discovery.
+   - Logical namespaces remain owned by the upstream Socket.IO servers and are not enumerated in the manifest route config.
+   - WBA and app-worker domain behavior did not move into the framework proxy.
 6. Fix extension settings rendering so VSIX/object-valued settings do not display as `[object Object]`.
    - Treat this as a typed normalization/rendering bug in the extension settings surface, likely in `main.py` or a supporting settings/extension module.
 7. Decompose and strictly type `main.py`, and find/deprecate unused top-level modules.
@@ -89,7 +89,7 @@ Current facts in the live tree:
 - The old in-app agent harness is no longer a live contract. The sidebar surface is the shortcut lane plus `/sidebar_ipc`; historical `agent*` DOM ids and preference keys are compatibility names for that UI.
 - The host frontend entry is broken up enough for now: `main.ts` is the strict bundle source entry and should not be treated as the next decomposition target unless a concrete ownership bug requires it.
 - The remaining monolith breakup targets are `main.py` and `template.html`.
-- The app still exposes multiple physical transport/service surfaces for compatibility, but the worker-owned Python Socket.IO layer now uses one shared app-local server for `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`; `/wba` remains separate and adapter-owned.
+- The app still exposes legacy physical Socket.IO paths for compatibility, but those paths are now explicit aliases in `sio_service.json` behind one framework-owned raw route proxy. The worker-owned Python Socket.IO layer uses one shared app-local server for `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`; `/wba` remains a separate adapter-owned upstream with its own Engine.IO route semantics.
 - `services/vscode_rpc_transport.py` is still registered even though it is not the current editor intelligence hot path.
 
 ## Core Constraints
@@ -142,16 +142,16 @@ Recommended namespace set:
 - `/terminal`
 - `/wba`
 
-Phase two is framework-owned:
+Phase two is framework-owned and now implemented:
 - introduce a manifest-declared `sio_service.json`
-- let the framework relay own physical Socket.IO mount/routing and target discovery
-- retire bespoke app `services/*_transport.py` Socket.IO proxy scripts when the relay can express their routes
+- let the framework raw proxy own physical Engine.IO route registration, websocket forwarding, and target discovery
+- retire bespoke app `services/*_transport.py` Socket.IO proxy scripts when the proxy can express their routes
 - keep compatibility aliases explicit in `sio_service.json`, not hidden in Python fallback code
 
 Notes:
 - `/editor` should not remain a long-term public ad hoc event bus. Its behavior should converge into typed `/rpc/editor` methods and notifications for the editor-runtime/backend contract.
 - Host frontend code should not become a first-class caller of `/rpc/editor` as a substitute for backend mediation. Host-facing actions should stay on the host/backend lane and let Python fan out to editor/backend services.
-- `/wba` is still logically separate in execution ownership even if the phase-two physical relay routes it. Do not collapse WBA behavior into the worker or framework relay just to satisfy the one-server goal.
+- `/wba` is still logically separate in execution ownership even when the phase-two physical proxy routes it. Do not collapse WBA behavior into the worker or framework proxy just to satisfy topology aesthetics.
 
 ### 2. JSON-RPC 2.0 Everywhere It Matters
 
@@ -260,19 +260,19 @@ Success criteria:
 - no WBA logic moved into the worker merely for topology aesthetics
 - no hidden compatibility fallback beyond explicitly retained current physical paths
 
-### Phase 4. Add The Framework `sio_service.json` Relay
+### Phase 4. Add The Framework `sio_service.json` Raw Route Proxy
 
 The second transport-collapse phase is framework-owned:
-- add a manifest-declared `sio_service.json` relay definition
-- let the main framework load that definition and register physical Socket.IO relay routes
-- route by logical namespace to app-worker or adapter-owned targets
+- add a manifest-declared `sio_service.json` raw route definition
+- let the main framework load that definition and register physical Engine.IO websocket proxy routes
+- route by physical path to app-worker or adapter-owned targets
 - retire bespoke app `services/*_transport.py` Socket.IO proxy modules when their routes are represented declaratively
 
 Success criteria:
-- one public app-scoped Socket.IO relay shape is manifest-declared
+- one public app-scoped Socket.IO route shape is manifest-declared
 - compatibility aliases are explicit in the JSON definition
-- no app behavior, SSOT behavior, terminal behavior, Explorer behavior, or WBA behavior moves into the framework relay
-- the relay is reusable by other TE2 apps rather than hardcoded for `file_editor_cm6`
+- no app behavior, SSOT behavior, terminal behavior, Explorer behavior, or WBA behavior moves into the framework proxy
+- the raw proxy is reusable by other TE2 apps rather than hardcoded for `file_editor_cm6`
 
 ### Phase 5. Finish Backend And Template Decomposition
 
@@ -308,8 +308,8 @@ When touching a feature during this refactor:
 ## Completion Criteria
 
 This refactor track is "done enough" when all of the following are true:
-- the app-local Python Socket.IO layer is one worker-side server before the framework relay phase begins
-- the app has one physical app-scoped Socket.IO gateway/server path after the framework relay phase
+- the app-local Python Socket.IO layer is one worker-side server before the framework proxy phase begins
+- the app has a manifest-declared raw Socket.IO route proxy after the framework proxy phase, with separate physical Engine.IO routes only where upstream connection semantics differ
 - logical namespaces are stable and intentional
 - public socket contracts are JSON-RPC and typed end-to-end
 - `/editor` no longer survives as a legacy ad hoc public event bus

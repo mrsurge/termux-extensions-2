@@ -10,7 +10,7 @@ The intended direction is:
 - move main-page-owned backend route/service code into the same package family, grouped by domain
 - keep the main-page frontend strict TypeScript lane stable instead of chasing more root-entry line-count reduction
 - split durable UI contract and behavior policy out of `template.html` where practical
-- keep framework-owned service proxy shims under `app/apps/file_editor_cm6/services/`
+- keep framework-owned service integration surfaces either under `app/apps/file_editor_cm6/services/` for non-Socket.IO services or in manifest-declared framework proxy config for Socket.IO routes
 
 ## Progress Tracker
 
@@ -18,7 +18,7 @@ This document is the canonical progress tracker for `file_editor_cm6` main-page 
 
 Use the broader `FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for target architecture and sequencing. Use this file for concrete slice status, completed extraction notes, and next main-page/template cleanup candidates.
 
-Transport-collapse execution details live in `FILE_EDITOR_CM6_TRANSPORT_COLLAPSE_PLAN.md`. The app-local Python Socket.IO collapse is complete; main-page/template cleanup should still not race ahead of the later framework `sio_service.json` relay phase when physical transport ownership is involved.
+Transport-collapse execution details live in `FILE_EDITOR_CM6_TRANSPORT_COLLAPSE_PLAN.md`. The app-local Python Socket.IO collapse and the framework raw `sio_service.json` route-proxy phase are complete; main-page/template cleanup should not recreate hidden transport fallback routing.
 
 ### Completed Slices
 
@@ -108,9 +108,9 @@ This cleanup was ranked ahead of older host-entry shrinkage ideas, template clea
 
 ### Immediate Next Candidates
 
-1. Defer the framework-level `sio_service.json` relay to transport-collapse phase two; do not recreate hidden fallback transport routing while it is being designed.
+1. Treat `sio_service.json` as the physical Socket.IO route source of truth; do not recreate hidden fallback transport routing.
 2. Live-validate the cleaned ownership model only after explicit approval, using the exact generated `main_page` TE2 console worker and the relevant app-worker/WBA framework-shell logs.
-3. Use the frozen Socket.IO topology constants when touching frontend socket clients, but avoid frontend/Android physical path changes until the framework relay phase explicitly accounts for clients.
+3. Use the frozen Socket.IO topology constants when touching frontend socket clients, but avoid frontend/Android physical path changes unless the change explicitly accounts for Android publication.
 4. Start `main.py` decomposition only after choosing a small route/helper family that does not move framework-owned service or worker subapp ownership prematurely.
 5. Continue re-reviewing `template.html` after the sidebar prune and remove remaining avoidable behavior policy from markup/CSS while preserving shortcut DOM compatibility.
 6. Convert remaining host actions that still import Explorer RPC for project/settings/watcher flows into explicit backend-owned hook surfaces only after classifying whether the producing surface is host or Explorer.
@@ -160,18 +160,16 @@ Important backend state:
 
 ## Ownership boundaries
 
-### Do not move framework-owned service shims
+### Do not move framework-owned integration surfaces
 
 Files under `app/apps/file_editor_cm6/services/` are loaded by the framework app-service loader from `manifest.json`.
 
-They include main-process transport proxies such as:
+They now include non-Socket.IO integration services such as:
 
-- `services/editor_transport.py`
-- `services/explorer_transport.py`
-- `services/terminal_transport.py`
-- `services/ui_ipc_transport.py`
+- `services/vscode_rpc_transport.py`
+- `services/sidebar_backchannel_uds.py`
 
-These must stay in `services/` unless the manifest/service loader is intentionally changed in the same approved task.
+Socket.IO route proxying is framework-owned through `app/apps/file_editor_cm6/sio_service.json` and the apps loader's generic raw route proxy. The old handwritten Socket.IO proxy modules are not the source of truth.
 
 The prior Explorer proxy break came from moving one of these shims as if it were ordinary app-worker code. The main-page decomposition must treat these as framework integration surfaces, not domain logic.
 

@@ -257,20 +257,19 @@ Spinner / Status indicator (host UI):
 - `app/apps/file_editor_cm6/explorer/handlers/*` and `app/apps/file_editor_cm6/explorer/services/*`
   - Own the extracted file-tree, git, project, watcher, review, prefs, and integration behavior
 
-### Transport proxies (main process, all proxy-only)
-- `app/apps/file_editor_cm6/services/editor_transport.py`
-  - Proxies `/editor_ws/socket.io` websocket frames to worker port
-- `app/apps/file_editor_cm6/services/explorer_transport.py`
-  - Framework-loaded shim only
-  - Delegates the real websocket proxy implementation to `explorer/transport/main_process_proxy.py`
-- `app/apps/file_editor_cm6/services/wba_transport.py`
-  - Proxies `/wba_ws/socket.io` websocket frames to the workbench adapter shell
-- `app/apps/file_editor_cm6/services/ui_ipc_transport.py`
-  - Proxies `/ui_ipc_ws/socket.io` websocket frames to worker port
-  - Frontend-to-frontend relay (editor-runtime ↔ main page communication)
+### Socket.IO route proxy (main process, proxy-only)
+- `app/extensions/apps/sio_service.py`
+  - Framework-owned raw Engine.IO websocket route proxy loaded from app manifests.
+  - It forwards websocket frames only; it does not parse Socket.IO namespaces or JSON-RPC payloads.
+- `app/apps/file_editor_cm6/sio_service.json`
+  - Declares `/api/app/file_editor_cm6/socket.io` -> app worker `/socket.io/`.
+  - Declares `/api/app/file_editor_cm6/services/wba/socket.io` -> Node WBA `/wba_ws/socket.io`.
+  - Keeps legacy aliases explicit: `/editor_ws/socket.io`, `/explorer_ws/socket.io`, `/ui_ipc_ws/socket.io`, `/terminal_ws/socket.io`, and `/wba_ws/socket.io`.
+- The app worker owns `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`.
+- The Node WBA service owns `/wba`.
 - `app/apps/file_editor_cm6/services/vscode_rpc_transport.py`
   - Legacy/secondary service still present in `manifest.json`; not the current editor intelligence path
-- All transports: bidirectional WS frame forwarding, no SSOT access, no payload parsing
+- All Socket.IO route proxies: bidirectional WS frame forwarding, no SSOT access, no namespace dispatch, no payload parsing
 
 ### Host shell (browser, worker-served)
 - `app/apps/file_editor_cm6/template.html`
@@ -405,21 +404,17 @@ Important:
 
 ## 3) Main‑process service loader (why services exist)
 
-Services declared in `app/apps/file_editor_cm6/manifest.json` currently include the live transport set plus a few legacy/secondary services:
+Services declared in `app/apps/file_editor_cm6/manifest.json` currently include non-Socket.IO service modules:
 
 ```json
 "services": {
   "path": "services",
   "modules": [
-    "explorer_transport",
-    "editor_transport",
-    "terminal_transport",
     "vscode_rpc_transport",
-    "wba_transport",
-    "ui_ipc_transport",
     "sidebar_backchannel_uds"
   ]
-}
+},
+"sio_service": "sio_service.json"
 ```
 
 Loaded by the main framework’s apps extension loader:
@@ -435,7 +430,7 @@ Services run in the **main process** and should provide only:
 They must **not** mutate app worker SSOT (HistoryStore / ProjectSidecar).
 
 Important current note:
-- `wba_transport` is part of the active editor architecture.
+- `sio_service.json` is the active physical Socket.IO route source of truth.
 - `vscode_rpc_transport` is still registered, but it is not the current editor intelligence hot path.
 
 ---
@@ -761,10 +756,11 @@ emit('editor_find_cmd', { action: "find" | "replace" | ... }) → editor:find_cm
 ## 6.5) Explorer Socket.IO transport (events + payloads)
 
 ### Transport
-- path: `/explorer_ws/socket.io`
-- namespace: `/explorer`
-- Worker-side server: `ExplorerSocketIONamespace` in `explorer_ws.py`
-- Main-process proxy: `services/explorer_transport.py` (WS frame forwarding only)
+- legacy path alias: `/explorer_ws/socket.io`
+- app-scoped path: `/api/app/file_editor_cm6/socket.io`
+- namespace: `/rpc/explorer`
+- Worker-side namespace: `ExplorerRpcSocketIONamespace("/rpc/explorer")`
+- Main-process proxy: `app/extensions/apps/sio_service.py` using `app/apps/file_editor_cm6/sio_service.json`
 
 ### Connection
 Client connects with query: `{app_id: 'file_editor_cm6'}`
@@ -932,14 +928,14 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 ## 9) Debugging checklist (what to verify first)
 
 ### 1) Transport is correct (no reconnect loops)
-- Confirm editor proxy: `app/apps/file_editor_cm6/services/editor_transport.py`
-- Confirm explorer proxy: `app/apps/file_editor_cm6/services/explorer_transport.py`
-- Confirm WBA proxy: `app/apps/file_editor_cm6/services/wba_transport.py`
+- Confirm framework Socket.IO route proxy: `app/extensions/apps/sio_service.py`
+- Confirm file_editor route config: `app/apps/file_editor_cm6/sio_service.json`
 - Confirm worker SUBAPPS mount:
   ```python
   SUBAPPS = [
-      ("/editor_ws/socket.io", EDITOR_ASGI_APP),
-      ("/explorer_ws/socket.io", EXPLORER_ASGI_APP),
+      ("/socket.io", FILE_EDITOR_CM6_ASGI_APP),
+      ("/editor_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
+      ("/explorer_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
   ]
   ```
 - Editor Socket.IO: namespace `/editor`, path `/editor_ws/socket.io`
@@ -2156,9 +2152,9 @@ The `ui_event` handler runs in the `connectUIIPC()` closure, which is defined ea
 
 - `app/apps/file_editor_cm6/ui_ipc/__init__.py` — empty package init
 - `app/apps/file_editor_cm6/ui_ipc/ui_ipc_ws.py` — `UIIPCNamespace`: logs event type + sender sid, rebroadcasts to room (skip sender)
-- `app/apps/file_editor_cm6/ui_ipc/ui_ipc_socketio.py` — creates `UI_IPC_SIO` server + `UI_IPC_ASGI_APP`
-- `app/apps/file_editor_cm6/services/ui_ipc_transport.py` — main-process websocket proxy at `/ui_ipc_ws/socket.io`
-- `app/apps/file_editor_cm6/manifest.json` — `ui_ipc_transport` in services modules list
+- `app/apps/file_editor_cm6/ui_ipc/ui_ipc_socketio.py` — compatibility alias for the shared worker Socket.IO server/app
+- `app/apps/file_editor_cm6/sio_service.json` — main-process raw route proxy config for `/ui_ipc_ws/socket.io`
+- `app/apps/file_editor_cm6/manifest.json` — points to `sio_service.json`
 - `app/apps/file_editor_cm6/main.py` — `UI_IPC_ASGI_APP` mounted in SUBAPPS
 - `app/apps/file_editor_cm6/main.js` — `connectUIIPC()`, `ui_event` listener with synthetic event dispatch
 - `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts` — `connectUIIPC()`, `bindUIIPCEditorHooks()`, `_bindEditorSaveKey()`, `_bindEditorFocusRelay()`

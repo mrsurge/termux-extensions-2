@@ -796,6 +796,7 @@ register_monaco_editor_routes(file_editor_cm6_bp, mount_path="/ui")
 from app.apps.file_editor_cm6.socketio_gateway import FILE_EDITOR_CM6_ASGI_APP
 
 SUBAPPS = [
+    ("/socket.io", FILE_EDITOR_CM6_ASGI_APP),
     ("/editor_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
     ("/explorer_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
     ("/ui_ipc_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),

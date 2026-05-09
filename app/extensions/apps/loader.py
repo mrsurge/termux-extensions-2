@@ -139,9 +139,15 @@ def load_apps_and_services(app) -> list[dict]:
     apps = registry.list_apps()
 
     from app.extensions.apps.proxy_shell import register_proxy_shell_engine
+    from app.extensions.apps.sio_service import register_sio_service_proxy
 
     _collect_registry_errors(apps)
     load_app_services(apps, app)
+    for app_def in apps:
+        try:
+            register_sio_service_proxy(app_def, app)
+        except Exception as exc:
+            _set_app_error(app_def.app_id, f"sio_service: {type(exc).__name__}: {exc}")
     register_proxy_shell_engine(app)
     _LOADED_APPS = _serialize_apps(apps)
     return list(_LOADED_APPS)
