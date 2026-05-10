@@ -70,6 +70,10 @@ import { initResizeManager, loadLayoutPreferences } from './main_page/frontend/h
 import type { ProblemsPanelController } from './src/diagnostics/problems-panel.ts';
 import type { OpenFileOptions } from './main_page/frontend/file-ops/open-flow.ts';
 import type { ScheduleToolbarTitleClampOptions } from './main_page/frontend/host-chrome-runtime.ts';
+import type {
+  SidebarIpcRpcMethod,
+  SidebarIpcRpcNotificationMethod,
+} from './src/sidebar_ipc/rpc_contract.ts';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -179,8 +183,11 @@ const uiIpcConnections = createUiIpcConnections({
   initConsoleBridge,
   getClientId: () => clientId,
 });
-function _emitSidebarIpc(eventName: string, payload?: unknown) {
-  uiIpcConnections.emitSidebarIpc(eventName, asUnknownRecord(payload));
+function _emitSidebarRpcRequest(method: SidebarIpcRpcMethod, payload?: unknown) {
+  uiIpcConnections.emitSidebarRpcRequest(method, asUnknownRecord(payload));
+}
+function _emitSidebarRpcNotification(method: SidebarIpcRpcNotificationMethod, payload?: unknown) {
+  uiIpcConnections.emitSidebarRpcNotification(method, asUnknownRecord(payload));
 }
 function connectSidebarIPC() {
   uiIpcConnections.connectSidebarIPC();
@@ -524,7 +531,7 @@ const hostSidebarRuntime = createHostSidebarRuntime({
   drawerEl: agentDrawerEl,
   toggleButtonEl: document.getElementById('fe-agent-toggle'),
   closeButtonEl: document.getElementById('agent-close'),
-  emitSidebarEvent: _emitSidebarIpc,
+  emitSidebarRpcNotification: _emitSidebarRpcNotification,
 });
 hostSidebarRuntime.install();
 let sessionState: SessionState = {
@@ -913,7 +920,7 @@ sidebarShortcuts = initSidebarShortcutsSafe({
   openDrawer: () => hostSidebarRuntime.openDrawer(),
   closeAllMenus,
   setMenuChecked,
-  emitSidebarIpc: _emitSidebarIpc,
+  emitSidebarRpcRequest: _emitSidebarRpcRequest,
 });
 
 drainPendingWatcherEvents();

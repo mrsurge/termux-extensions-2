@@ -7,7 +7,8 @@ and may be relayed here by backend hooks when the host page is the consumer.
 Python only logs traffic for observability.
 
 Console events (``console:*``) are delegated to ``console_ws`` handlers.
-Sidebar events (``sidebar:*``) are delegated to ``sidebar_ws`` handlers.
+Sidebar IPC only accepts typed JSON-RPC envelopes on the ``/sidebar_ipc``
+namespace.
 """
 
 import socketio
@@ -190,26 +191,3 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
     async def on_console_clear(self, sid, data):
         await console_ws.on_console_clear(self, sid, data)
-
-    # ─── Sidebar event delegation ──────────────────────────────
-
-    async def on_sidebar_register(self, sid, data):
-        await sidebar_ws.on_sidebar_register(self, sid, data)
-
-    async def on_sidebar_event(self, sid, data):
-        await sidebar_ws.on_sidebar_event(self, sid, data)
-
-    async def on_sidebar_agent_edit(self, sid, data):
-        await sidebar_ws.on_sidebar_agent_edit(self, sid, data)
-
-    async def on_sidebar_agent_open(self, sid, data):
-        await sidebar_ws.on_sidebar_agent_open(self, sid, data)
-
-    async def on_sidebar_cwd_get(self, sid, data):
-        return await sidebar_ws.on_sidebar_cwd_get(self, sid, data)
-
-    async def on_sidebar_cwd_set(self, sid, data):
-        return await sidebar_ws.on_sidebar_cwd_set(self, sid, data)
-
-    async def on_sidebar_mention(self, sid, data):
-        await sidebar_ws.on_sidebar_mention(self, sid, data)

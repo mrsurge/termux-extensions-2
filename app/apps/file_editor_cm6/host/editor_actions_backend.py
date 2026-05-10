@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Protocol, cast
 
 from ..explorer.services.file_ops import get_project_root
 from ..monaco_editor.editor_backend_services.contracts import JsonMap
@@ -22,17 +21,6 @@ from ..monaco_editor.editor_view_state_backend import (
     build_editor_jump_to_line_payload,
 )
 from ..stores import get_history_store
-
-
-class SocketIOEmitter(Protocol):
-    async def emit(
-        self,
-        event: str,
-        data: object,
-        *,
-        room: str | None = None,
-        namespace: str | None = None,
-    ) -> None: ...
 
 
 def _active_project_or_raise() -> str:
@@ -163,7 +151,7 @@ async def handle_host_diagnostics_mention_request(
     source_name: str,
 ) -> JsonMap:
     del source_name
-    from ..ui_ipc.ui_ipc_socketio import UI_IPC_SIO
+    from ..ui_ipc.sidebar_ws import emit_sidebar_mention_global
 
     path = data.get("path")
     if not isinstance(path, str) or not path.strip():
@@ -175,11 +163,5 @@ async def handle_host_diagnostics_mention_request(
         if value is not None:
             payload[key] = value
 
-    ui_ipc_sio = cast(SocketIOEmitter, UI_IPC_SIO)
-    await ui_ipc_sio.emit(
-        "sidebar:mention",
-        payload,
-        namespace="/sidebar_ipc",
-        room="sidebar_ipc",
-    )
+    await emit_sidebar_mention_global(payload)
     return {"ok": True}

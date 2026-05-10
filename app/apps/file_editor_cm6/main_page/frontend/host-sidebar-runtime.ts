@@ -1,10 +1,16 @@
-import { SIDEBAR_IPC_LEGACY_EVENT_TYPES } from '../../src/sidebar_ipc/rpc_contract.ts';
+import {
+  SIDEBAR_IPC_RPC_NOTIFICATIONS,
+  type SidebarIpcRpcNotificationMethod,
+} from '../../src/sidebar_ipc/rpc_contract.ts';
 
 export interface HostSidebarRuntimeDeps {
   drawerEl: HTMLElement;
   toggleButtonEl: HTMLElement | null;
   closeButtonEl: HTMLElement | null;
-  emitSidebarEvent?: (eventName: string, payload: Record<string, unknown>) => void;
+  emitSidebarRpcNotification?: (
+    method: SidebarIpcRpcNotificationMethod,
+    payload: Record<string, unknown>,
+  ) => void;
 }
 
 export interface HostSidebarRuntime {
@@ -16,10 +22,10 @@ export interface HostSidebarRuntime {
   getShortcutLoadButton: () => HTMLElement | null;
 }
 
-const DRAWER_STATE_EVENT = SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerState;
-const DRAWER_OPEN_EVENTS = new Set([SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerOpen, 'drawer.open']);
-const DRAWER_CLOSE_EVENTS = new Set([SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerClose, 'drawer.close']);
-const DRAWER_TOGGLE_EVENTS = new Set([SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerToggle, 'drawer.toggle']);
+const DRAWER_STATE_EVENT = SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerState;
+const DRAWER_OPEN_EVENTS: ReadonlySet<string> = new Set([SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerOpen]);
+const DRAWER_CLOSE_EVENTS: ReadonlySet<string> = new Set([SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerClose]);
+const DRAWER_TOGGLE_EVENTS: ReadonlySet<string> = new Set([SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerToggle]);
 
 function getElementById(id: string): HTMLElement | null {
   return document.getElementById(id);
@@ -42,13 +48,10 @@ export function createHostSidebarRuntime(deps: HostSidebarRuntimeDeps): HostSide
 
   function publishState(open: boolean): void {
     try {
-      deps.emitSidebarEvent?.('sidebar:event', {
-        type: DRAWER_STATE_EVENT,
-        payload: {
-          open,
-          source: 'main_page',
-          ts: Date.now(),
-        },
+      deps.emitSidebarRpcNotification?.(DRAWER_STATE_EVENT, {
+        open,
+        source: 'main_page',
+        ts: Date.now(),
       });
     } catch {}
   }

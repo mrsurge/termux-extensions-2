@@ -6,7 +6,6 @@ import { RPC_NOTIFICATION_EVENT, RPC_REQUEST_EVENT } from '../../../src/rpc/tran
 import type { IoFactory, JsonObject, SocketLike } from '../../../src/rpc/transport.ts';
 import { UI_IPC_RPC_METHODS, UI_IPC_RPC_NOTIFICATIONS } from '../../../src/ui_ipc/rpc_contract.ts';
 import {
-  SIDEBAR_IPC_LEGACY_EVENT_TYPES,
   SIDEBAR_IPC_RPC_METHODS,
   SIDEBAR_IPC_RPC_NOTIFICATIONS,
   parseSidebarIpcRpcNotification,
@@ -141,17 +140,17 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     if (!parsed) return;
     const { method, params } = parsed;
     if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.clientState) {
-      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.clientState, payload: params });
+      dispatchSidebarEvent({ type: method, payload: params });
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.activeShortcutRefresh) {
-      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutRefresh, payload: params });
+      dispatchSidebarEvent({ type: method, payload: params });
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerState) {
-      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerState, payload: params });
+      dispatchSidebarEvent({ type: method, payload: params });
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerOpen) {
-      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerOpen, payload: params });
+      dispatchSidebarEvent({ type: method, payload: params });
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerClose) {
-      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerClose, payload: params });
+      dispatchSidebarEvent({ type: method, payload: params });
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerToggle) {
-      dispatchSidebarEvent({ type: SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerToggle, payload: params });
+      dispatchSidebarEvent({ type: method, payload: params });
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.cwdSet) {
       dispatchWindowCustomEvent('cm6:sidebar-cwd-set', params);
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.presence) {
@@ -163,81 +162,11 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     }
   }
 
-  function emitMappedSidebarRpc(eventName: string, payload: JsonObject = {}): boolean {
-    if (eventName === 'sidebar:event') {
-      const eventType = typeof payload.type === 'string' ? payload.type.trim() : '';
-      const eventPayload = payload.payload && typeof payload.payload === 'object' && !Array.isArray(payload.payload)
-        ? payload.payload as JsonObject
-        : {};
-      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutSet) {
-        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.activeShortcutSet, eventPayload);
-        return true;
-      }
-      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutRefresh) {
-        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.activeShortcutRefresh, eventPayload);
-        return true;
-      }
-      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerState) {
-        emitSidebarRpcNotification(SIDEBAR_IPC_RPC_NOTIFICATIONS.drawerState, eventPayload);
-        return true;
-      }
-      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerOpen) {
-        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.drawerOpen, eventPayload);
-        return true;
-      }
-      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerClose) {
-        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.drawerClose, eventPayload);
-        return true;
-      }
-      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.drawerToggle) {
-        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.drawerToggle, eventPayload);
-        return true;
-      }
-      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.agentOpen) {
-        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.fileOpen, eventPayload);
-        return true;
-      }
-      if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.agentEdit) {
-        emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.fileEdit, eventPayload);
-        return true;
-      }
-      return false;
-    }
-    if (eventName === 'sidebar:mention') {
-      emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.mention, payload);
-      return true;
-    }
-    if (eventName === 'sidebar:agent_open') {
-      emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.fileOpen, payload);
-      return true;
-    }
-    if (eventName === 'sidebar:agent_edit') {
-      emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.fileEdit, payload);
-      return true;
-    }
-    if (eventName === 'sidebar:cwd_set') {
-      emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.cwdSync, payload);
-      return true;
-    }
-    return false;
-  }
-
   function dispatchWindowCustomEvent(eventName: string, data: unknown): void {
     try {
       window.dispatchEvent(new CustomEvent(eventName, {
         detail: data && typeof data === 'object' ? data : {},
       }));
-    } catch (_) {}
-  }
-
-  function emitSidebarIpc(eventName: string, payload: JsonObject = {}): void {
-    try {
-      if (eventName === 'sidebar:event' && payload && typeof payload === 'object') {
-        dispatchSidebarEvent(payload);
-      }
-      if (!sidebarIpcSocket || !sidebarIpcSocket.connected) return;
-      if (emitMappedSidebarRpc(eventName, payload || {})) return;
-      sidebarIpcSocket.emit(eventName, payload || {});
     } catch (_) {}
   }
 
@@ -263,13 +192,6 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
           });
         } catch (_) {}
         console.log('[Sidebar_IPC] main page connected');
-      });
-      socket.on('sidebar:agent_edit', (data: unknown) => {
-        if (!data || typeof data !== 'object') return;
-      });
-      socket.on('sidebar:event', (data: unknown) => {
-        if (!data || typeof data !== 'object') return;
-        dispatchSidebarEvent(data as JsonObject);
       });
       socket.on(RPC_NOTIFICATION_EVENT, handleSidebarRpcNotification);
       socket.on('connect_error', (err: unknown) => {
@@ -395,7 +317,8 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   }
 
   return {
-    emitSidebarIpc,
+    emitSidebarRpcRequest,
+    emitSidebarRpcNotification,
     connectSidebarIPC,
     connectUIIPC,
     requestBackendFileOpen,

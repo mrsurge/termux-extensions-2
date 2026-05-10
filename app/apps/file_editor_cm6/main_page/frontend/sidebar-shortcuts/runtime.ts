@@ -12,7 +12,11 @@ import {
   notifyExplorerRpc,
   requestExplorerRpc,
 } from '../../../src/explorer/rpc/client.ts';
-import { SIDEBAR_IPC_LEGACY_EVENT_TYPES } from '../../../src/sidebar_ipc/rpc_contract.ts';
+import {
+  SIDEBAR_IPC_RPC_METHODS,
+  SIDEBAR_IPC_RPC_NOTIFICATIONS,
+  type SidebarIpcRpcMethod,
+} from '../../../src/sidebar_ipc/rpc_contract.ts';
 import {
   EXTENSION_MANIFEST_URL,
   SHORTCUT_KIND_FRAMEWORK_APP,
@@ -111,7 +115,8 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
   const pickFileFn = typeof options.pickFile === 'function' ? options.pickFile : null;
   const openDrawer = typeof options.openDrawer === 'function' ? options.openDrawer : null;
   const closeAllMenus = typeof options.closeAllMenus === 'function' ? options.closeAllMenus : null;
-  const emitSidebarIpc = typeof options.emitSidebarIpc === 'function' ? options.emitSidebarIpc : null;
+  const emitSidebarRpcRequest =
+    typeof options.emitSidebarRpcRequest === 'function' ? options.emitSidebarRpcRequest : null;
   const setMenuChecked =
     typeof options.setMenuChecked === 'function'
       ? options.setMenuChecked
@@ -748,14 +753,14 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     sidebarRefreshMenuEl.innerHTML = '';
   }
 
-  function _emitSidebarControl(type: string, payload: UnknownRecord = {}) {
+  function _requestSidebarControl(method: SidebarIpcRpcMethod, payload: UnknownRecord = {}) {
     const message = {
-      type: _normStr(type),
+      type: _normStr(method),
       payload: (payload && typeof payload === 'object') ? payload : {},
     };
     if (!message.type) return;
-    if (emitSidebarIpc) {
-      emitSidebarIpc('sidebar:event', message);
+    if (emitSidebarRpcRequest) {
+      emitSidebarRpcRequest(method, message.payload);
     } else {
       try {
         window.dispatchEvent(new CustomEvent('cm6:sidebar-event', { detail: message }));
@@ -773,7 +778,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     }
 
     if (options.emit && nextId && nextId !== prevId) {
-      _emitSidebarControl(SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutSet, {
+      _requestSidebarControl(SIDEBAR_IPC_RPC_METHODS.activeShortcutSet, {
         shortcutId: nextId,
         source: options.source || 'sidebar_shortcuts',
       });
@@ -809,7 +814,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       ev.preventDefault();
       ev.stopPropagation();
       _closeRefreshMenu();
-      _emitSidebarControl('refresh_active', { flushCache: true, source: 'sidebar_refresh_menu' });
+      _requestSidebarControl(SIDEBAR_IPC_RPC_METHODS.activeShortcutRefresh, { flushCache: true, source: 'sidebar_refresh_menu' });
     });
     menu.appendChild(flush);
 
@@ -2480,7 +2485,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
         ev.preventDefault();
         ev.stopPropagation();
         _closeRefreshMenu();
-        _emitSidebarControl('refresh_active', { flushCache: false, source: 'sidebar_refresh_button' });
+        _requestSidebarControl(SIDEBAR_IPC_RPC_METHODS.activeShortcutRefresh, { flushCache: false, source: 'sidebar_refresh_button' });
       });
       sidebarRefreshBtn.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
@@ -2656,18 +2661,21 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
         const data = (ev as CustomEvent<UnknownRecord>).detail;
         if (!data || typeof data !== 'object') return;
         const eventType = _normStr(data.type);
-        if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutSet) {
+        if (eventType === SIDEBAR_IPC_RPC_METHODS.activeShortcutSet) {
           const payload = asRecord(data.payload);
           const shortcutId = _normStr(payload.shortcutId || payload.activeShortcutId);
           if (shortcutId) _setClientActiveShortcut(shortcutId, { emit: false });
           return;
         }
-        if (eventType === SIDEBAR_IPC_LEGACY_EVENT_TYPES.clientState) {
+        if (eventType === SIDEBAR_IPC_RPC_NOTIFICATIONS.clientState) {
           const payload = asRecord(data.payload);
           _setClientActiveShortcut(_normStr(payload.activeShortcutId), { emit: false });
           return;
         }
-        if (eventType !== SIDEBAR_IPC_LEGACY_EVENT_TYPES.activeShortcutRefresh) return;
+        if (
+          eventType !== SIDEBAR_IPC_RPC_NOTIFICATIONS.activeShortcutRefresh &&
+          eventType !== SIDEBAR_IPC_RPC_METHODS.activeShortcutRefresh
+        ) return;
         const payload = asRecord(data.payload);
         void _refreshActiveShortcut({
           flushCache: !!payload.flushCache,

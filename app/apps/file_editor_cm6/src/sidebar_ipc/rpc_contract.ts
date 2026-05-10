@@ -30,29 +30,6 @@ export const SIDEBAR_IPC_RPC_NOTIFICATIONS = {
   drawerToggle: 'sidebar.drawer.toggle',
 } as const;
 
-export const SIDEBAR_IPC_LEGACY_EVENTS = {
-  register: 'sidebar:register',
-  event: 'sidebar:event',
-  presence: 'sidebar:presence',
-  cwdGet: 'sidebar:cwd_get',
-  cwdSet: 'sidebar:cwd_set',
-  mention: 'sidebar:mention',
-  agentEdit: 'sidebar:agent_edit',
-  agentOpen: 'sidebar:agent_open',
-} as const;
-
-export const SIDEBAR_IPC_LEGACY_EVENT_TYPES = {
-  agentEdit: 'agent_edit',
-  agentOpen: 'agent_open',
-  activeShortcutSet: 'active_shortcut:set',
-  activeShortcutRefresh: 'refresh_active',
-  clientState: 'client_state',
-  drawerState: 'drawer:state',
-  drawerOpen: 'drawer:open',
-  drawerClose: 'drawer:close',
-  drawerToggle: 'drawer:toggle',
-} as const;
-
 type ValueOf<T> = T[keyof T];
 
 export type SidebarIpcRpcMethod = ValueOf<typeof SIDEBAR_IPC_RPC_METHODS>;

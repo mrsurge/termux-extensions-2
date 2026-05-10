@@ -43,6 +43,8 @@ _registered_iframes: set[str] = set()
 _client_ids_by_sid: dict[str, str] = {}
 _client_active_shortcuts: dict[str, str] = {}
 
+JsonObject = dict[str, object]
+
 
 def _is_agent_sidebar_tracking_enabled() -> bool:
     try:
@@ -53,20 +55,6 @@ def _is_agent_sidebar_tracking_enabled() -> bool:
         return bool(editor.get("trackAgentSidebarEdits", False))
     except Exception:
         return False
-
-
-def _payload_preview(payload: dict | None) -> dict:
-    if not isinstance(payload, dict):
-        return {}
-    return {
-        "path": payload.get("path"),
-        "abs": payload.get("abs"),
-        "rel": payload.get("rel"),
-        "line": payload.get("line"),
-        "column": payload.get("column"),
-        "source": payload.get("source"),
-        "conversation_id": payload.get("conversation_id"),
-    }
 
 
 def _norm(value) -> str:
@@ -96,16 +84,10 @@ async def _emit_rpc_notification(ns, method: str, params: dict, *, to_sid: str |
 
 async def _emit_client_state(ns, client_id: str, *, to_sid: str | None = None, skip_sid: str | None = None):
     state_payload = _client_state_payload(client_id)
-    payload = {
-        "type": "client_state",
-        "payload": state_payload,
-    }
     if to_sid:
         await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE, state_payload, to_sid=to_sid)
-        await ns.emit("sidebar:event", payload, to=to_sid)
         return
     await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE, state_payload, room=_client_room(client_id), skip_sid=skip_sid)
-    await ns.emit("sidebar:event", payload, room=_client_room(client_id), skip_sid=skip_sid)
 
 
 async def _resolve_client_id(ns, sid: str, payload: dict | None = None) -> str:
@@ -133,10 +115,8 @@ async def _emit_presence(ns, *, to_sid: str | None = None):
     }
     if to_sid:
         await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_PRESENCE, payload, to_sid=to_sid)
-        await ns.emit("sidebar:presence", payload, to=to_sid)
     else:
         await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_PRESENCE, payload, room="sidebar_ipc")
-        await ns.emit("sidebar:presence", payload, room="sidebar_ipc")
 
 
 def _current_cwd() -> str:
@@ -157,10 +137,8 @@ async def emit_sidebar_cwd_set(ns, *, to_sid: str | None = None, reason: str = "
     payload = _cwd_payload(reason)
     if to_sid:
         await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET, payload, to_sid=to_sid)
-        await ns.emit("sidebar:cwd_set", payload, to=to_sid)
     else:
         await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET, payload, room="sidebar_ipc")
-        await ns.emit("sidebar:cwd_set", payload, room="sidebar_ipc")
     print(
         f"[sidebar_ipc] cwd_set reason={payload.get('reason')} cwd={payload.get('cwd') or ''} to={to_sid or 'room'}",
         flush=True,
@@ -177,10 +155,20 @@ async def emit_sidebar_cwd_set_global(*, reason: str = "sync") -> None:
         namespace="/sidebar_ipc",
         room="sidebar_ipc",
     )
-    await UI_IPC_SIO.emit("sidebar:cwd_set", payload, namespace="/sidebar_ipc", room="sidebar_ipc")
     print(
         f"[sidebar_ipc] cwd_set(global) reason={payload.get('reason')} cwd={payload.get('cwd') or ''}",
         flush=True,
+    )
+
+
+async def emit_sidebar_mention_global(payload: JsonObject) -> None:
+    from .ui_ipc_socketio import UI_IPC_SIO
+
+    await UI_IPC_SIO.emit(
+        SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
+        build_jsonrpc_notification(SIDEBAR_IPC_RPC_NOTIFICATION_MENTION, payload),
+        namespace="/sidebar_ipc",
+        room="sidebar_ipc",
     )
 
 
@@ -226,85 +214,9 @@ async def on_sidebar_disconnect(ns, sid):
         await _emit_presence(ns)
 
 
-async def on_sidebar_event(ns, sid, data):
-    """Generic relay for sidebar-scoped events."""
-    if not isinstance(data, dict):
-        return
-    event_type = str(data.get("type") or "unknown")
-    print(
-        f"[sidebar_ipc] event type={event_type} from={sid} "
-        f"payload={_payload_preview(data.get('payload'))}",
-        flush=True,
-    )
-    if event_type == "agent_edit":
-        if not _is_agent_sidebar_tracking_enabled():
-            print("[sidebar_ipc] agent_edit dropped: trackAgentSidebarEdits disabled", flush=True)
-            return
-        payload = data.get("payload")
-        if isinstance(payload, dict):
-            try:
-                await _broadcast_agent_open(ns, payload)
-            except Exception as exc:
-                print(f"[sidebar_ipc] sidebar:event agent_edit route failed: {exc}", flush=True)
-        return
-    if event_type == "agent_open":
-        payload = data.get("payload")
-        if isinstance(payload, dict):
-            try:
-                await _broadcast_agent_open(ns, payload)
-            except Exception as exc:
-                print(f"[sidebar_ipc] sidebar:event agent_open route failed: {exc}", flush=True)
-        return
-    if event_type == "active_shortcut:set":
-        payload = data.get("payload")
-        client_id = await _resolve_client_id(ns, sid, payload if isinstance(payload, dict) else None)
-        shortcut_id = _norm(payload.get("shortcutId") or payload.get("activeShortcutId")) if isinstance(payload, dict) else ""
-        _client_active_shortcuts[client_id] = shortcut_id
-        await _emit_client_state(ns, client_id, skip_sid=sid)
-        return
-    if event_type == "refresh_active":
-        payload = data.get("payload")
-        client_id = await _resolve_client_id(ns, sid, payload if isinstance(payload, dict) else None)
-        await ns.emit("sidebar:event", data, room=_client_room(client_id), skip_sid=sid)
-        return
-    await ns.emit("sidebar:event", data, room="sidebar_ipc", skip_sid=sid)
-
-
-def _event_payload(event_type: str, payload: dict | None = None) -> dict:
-    return {
-        "type": event_type,
-        "payload": payload if isinstance(payload, dict) else {},
-    }
-
-
-async def _emit_sidebar_event_dual(ns, event_type: str, payload: dict | None = None, *, room: str = "sidebar_ipc", skip_sid: str | None = None):
-    data = _event_payload(event_type, payload)
-    notification_method = {
-        "refresh_active": SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH,
-        "drawer:state": SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE,
-        "drawer:open": SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN,
-        "drawer:close": SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_CLOSE,
-        "drawer:toggle": SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_TOGGLE,
-    }.get(event_type)
-    if notification_method:
-        await _emit_rpc_notification(ns, notification_method, data["payload"], room=room, skip_sid=skip_sid)
-    await ns.emit("sidebar:event", data, room=room, skip_sid=skip_sid)
-
-
-async def on_sidebar_cwd_get(ns, sid, data):
-    payload = _cwd_payload("request")
-    print(
-        f"[sidebar_ipc] cwd_get from={sid} cwd={payload.get('cwd') or ''}",
-        flush=True,
-    )
-    return {"ok": True, "data": payload}
-
-
-async def on_sidebar_cwd_set(ns, sid, data):
-    # Backend is the source of truth; ignore client-supplied cwd and re-emit canonical value.
-    print(f"[sidebar_ipc] cwd_set request ignored from={sid}", flush=True)
-    await emit_sidebar_cwd_set(ns, reason="authoritative")
-    return {"ok": True}
+async def _emit_sidebar_control_notification(ns, notification_method: str, payload: dict | None = None, *, room: str = "sidebar_ipc", skip_sid: str | None = None):
+    params = payload if isinstance(payload, dict) else {}
+    await _emit_rpc_notification(ns, notification_method, params, room=room, skip_sid=skip_sid)
 
 
 async def route_backend_open_request(
@@ -328,49 +240,8 @@ async def route_backend_open_request(
     )
 
 
-async def _broadcast_agent_open(_ns, data: dict) -> None:
-    await route_backend_open_request(_ns, data)
-
-
-async def on_sidebar_agent_edit(ns, sid, data):
-    """Route agent-edit signals through backend explorer broadcast path."""
-    if not isinstance(data, dict):
-        return
-    if not _is_agent_sidebar_tracking_enabled():
-        print("[sidebar_ipc] agent_edit dropped: trackAgentSidebarEdits disabled", flush=True)
-        return
-    print(
-        f"[sidebar_ipc] agent_edit from={sid} payload={_payload_preview(data)}",
-        flush=True,
-    )
-    try:
-        await _broadcast_agent_open(ns, data)
-    except Exception as exc:
-        print(f"[sidebar_ipc] agent_edit route failed: {exc}", flush=True)
-
-
-async def on_sidebar_agent_open(ns, sid, data):
-    """Route explicit user-driven opens through backend explorer broadcast path."""
-    if not isinstance(data, dict):
-        return
-    print(
-        f"[sidebar_ipc] agent_open from={sid} payload={_payload_preview(data)}",
-        flush=True,
-    )
-    try:
-        await _broadcast_agent_open(ns, data)
-    except Exception as exc:
-        print(f"[sidebar_ipc] agent_open route failed: {exc}", flush=True)
-
-
 async def on_sidebar_mention(ns, sid, data):
-    """Relay a file mention from a client to all sidebar_ipc listeners.
-
-    The explorer emits sidebar:mention server-side (via UI_IPC_SIO.emit),
-    which reaches all clients in the room directly.  This handler covers
-    the case where a *client* (e.g. a sidebar iframe) emits sidebar:mention
-    so it gets rebroadcast to the room.
-    """
+    """Relay a typed sidebar.mention request/notification to sidebar listeners."""
     if not isinstance(data, dict):
         return
     path = data.get("path")
@@ -379,7 +250,6 @@ async def on_sidebar_mention(ns, sid, data):
         flush=True,
     )
     await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_MENTION, data, room="sidebar_ipc", skip_sid=sid)
-    await ns.emit("sidebar:mention", data, room="sidebar_ipc", skip_sid=sid)
 
 
 async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict) -> object:
@@ -426,36 +296,36 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
         return {"ok": True, "client_id": client_id, "activeShortcutId": shortcut_id}
     if method == SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH:
         client_id = await _resolve_client_id(ns, sid, params)
-        await _emit_sidebar_event_dual(ns, "refresh_active", params, room=_client_room(client_id), skip_sid=sid)
+        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH, params, room=_client_room(client_id), skip_sid=sid)
         return {"ok": True}
     if method == SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN:
-        await _emit_sidebar_event_dual(ns, "drawer:open", params, skip_sid=sid)
+        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN, params, skip_sid=sid)
         return {"ok": True}
     if method == SIDEBAR_IPC_RPC_METHOD_DRAWER_CLOSE:
-        await _emit_sidebar_event_dual(ns, "drawer:close", params, skip_sid=sid)
+        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_CLOSE, params, skip_sid=sid)
         return {"ok": True}
     if method == SIDEBAR_IPC_RPC_METHOD_DRAWER_TOGGLE:
-        await _emit_sidebar_event_dual(ns, "drawer:toggle", params, skip_sid=sid)
+        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_TOGGLE, params, skip_sid=sid)
         return {"ok": True}
     raise RuntimeError(f"Unhandled sidebar IPC RPC method: {method}")
 
 
 async def _dispatch_sidebar_rpc_notification(ns, sid: str, method: str, params: dict) -> None:
     if method == SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE:
-        await _emit_sidebar_event_dual(ns, "drawer:state", params, skip_sid=sid)
+        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE, params, skip_sid=sid)
         return
     if method == SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN:
-        await _emit_sidebar_event_dual(ns, "drawer:open", params, skip_sid=sid)
+        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN, params, skip_sid=sid)
         return
     if method == SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_CLOSE:
-        await _emit_sidebar_event_dual(ns, "drawer:close", params, skip_sid=sid)
+        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_CLOSE, params, skip_sid=sid)
         return
     if method == SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_TOGGLE:
-        await _emit_sidebar_event_dual(ns, "drawer:toggle", params, skip_sid=sid)
+        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_TOGGLE, params, skip_sid=sid)
         return
     if method == SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH:
         client_id = await _resolve_client_id(ns, sid, params)
-        await _emit_sidebar_event_dual(ns, "refresh_active", params, room=_client_room(client_id), skip_sid=sid)
+        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH, params, room=_client_room(client_id), skip_sid=sid)
         return
     if method == SIDEBAR_IPC_RPC_NOTIFICATION_MENTION:
         await on_sidebar_mention(ns, sid, params)

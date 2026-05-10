@@ -2,22 +2,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Protocol, cast
 
 logger = logging.getLogger(__name__)
 
 JsonObject = dict[str, object]
-
-
-class SocketIOEmitter(Protocol):
-    async def emit(
-        self,
-        event: str,
-        data: object,
-        *,
-        room: str | None = None,
-        namespace: str | None = None,
-    ) -> None: ...
 
 
 def _normalize_mention_payload(params: JsonObject) -> JsonObject:
@@ -34,15 +22,9 @@ def _normalize_mention_payload(params: JsonObject) -> JsonObject:
 
 
 async def handle_editor_mention_request(params: JsonObject) -> JsonObject:
-    from ..ui_ipc.ui_ipc_socketio import UI_IPC_SIO
+    from ..ui_ipc.sidebar_ws import emit_sidebar_mention_global
 
     mention_payload = _normalize_mention_payload(params)
-    ui_ipc_sio = cast(SocketIOEmitter, UI_IPC_SIO)
-    await ui_ipc_sio.emit(
-        "sidebar:mention",
-        mention_payload,
-        namespace="/sidebar_ipc",
-        room="sidebar_ipc",
-    )
+    await emit_sidebar_mention_global(mention_payload)
     logger.info("[editor:mention] relayed to sidebar_ipc path=%s", mention_payload["path"])
     return {"ok": True}

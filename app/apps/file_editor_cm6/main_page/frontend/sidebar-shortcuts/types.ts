@@ -1,3 +1,5 @@
+import type { SidebarIpcRpcMethod } from '../../../src/sidebar_ipc/rpc_contract.ts';
+
 export type UnknownRecord = Record<string, unknown>;
 
 export type ShortcutKind = 'url' | 'framework_app';
@@ -58,7 +60,7 @@ export interface SidebarShortcutsOptions {
   pickFile?: (startPath?: string) => Promise<string | null>;
   openDrawer?: () => void;
   closeAllMenus?: () => void;
-  emitSidebarIpc?: (eventName: string, payload?: UnknownRecord) => void;
+  emitSidebarRpcRequest?: (method: SidebarIpcRpcMethod, payload?: UnknownRecord) => void;
   setMenuChecked?: (el: HTMLElement | null, checked: boolean) => void;
 }
 
