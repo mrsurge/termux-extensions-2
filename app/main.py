@@ -28,6 +28,7 @@ sys.path.insert(0, project_root)
 
 from fastapi import FastAPI, Request, Query, Body, HTTPException, Header, Response
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from starlette.requests import ClientDisconnect
 from app.libs.app_lifecycle import start_background_tasks, stop_background_tasks
 from app.libs.app_manager import get_running_apps, initialize_running_apps
 
@@ -1393,8 +1394,11 @@ async def proxy_app_request(app_id: str, subpath: str, request: Request):
     
     # Forward headers minus 'host'
     headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
-    body = await request.body()
-    
+    try:
+        body = await request.body()
+    except ClientDisconnect:
+        return Response(status_code=499)
+
     client = httpx.AsyncClient(timeout=30.0)
     try:
         upstream_request = client.build_request(

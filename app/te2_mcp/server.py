@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastmcp import FastMCP
 
 from app.extensions.apps import loader as apps_loader
@@ -81,11 +83,27 @@ def build_server() -> FastMCP:
 
     @server.tool(description="Execute JavaScript in a live TE2 console worker through the framework-owned console relay.")
     async def te2_console_eval(target_worker_id: str, code: str, timeout_seconds: float = 20.0) -> dict:
-        return await te2_console.eval_in_worker(
-            target_worker_id=target_worker_id,
-            code=code,
-            timeout_seconds=timeout_seconds,
-        )
+        try:
+            return await te2_console.eval_in_worker(
+                target_worker_id=target_worker_id,
+                code=code,
+                timeout_seconds=timeout_seconds,
+            )
+        except LookupError as exc:
+            return {
+                "ok": False,
+                "error_type": "worker_not_registered",
+                "error": str(exc),
+                "workers": await te2_console.list_workers(),
+            }
+        except asyncio.TimeoutError:
+            return {
+                "ok": False,
+                "error_type": "eval_timeout",
+                "error": f"console eval timed out after {timeout_seconds:g}s",
+                "target_worker_id": target_worker_id,
+                "workers": await te2_console.list_workers(),
+            }
 
     @server.tool(description="List framework-shells records directly from the shared runtime store.")
     async def te2_fws_running() -> dict:
