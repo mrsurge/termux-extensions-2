@@ -4,6 +4,7 @@
  * @param {{
  *   settingsModalEl: HTMLElement,
  *   settingsCloseEl: HTMLElement,
+ *   settingsConsoleWorkerIdEl: HTMLElement,
  *   menuEditorSettingsEl: HTMLElement,
  *   extManagerModalEl: HTMLElement,
  *   extManagerCloseEl: HTMLElement,
@@ -12,12 +13,30 @@
  *   refreshEditorSettingsModal: () => Promise<any> | void,
  *   refreshEditorExtManagerModal: () => Promise<any> | void,
  *   loadCustomSettings: () => Promise<any> | void,
+ *   getConsoleWorkerId: () => string | null,
  * }} deps
  */
 export function createSettingsModalsController(deps: any) {
+  function refreshConsoleWorkerId() {
+    const el = deps.settingsConsoleWorkerIdEl;
+    if (!el) return;
+    const workerId = deps.getConsoleWorkerId?.();
+    if (typeof workerId === 'string' && workerId.trim()) {
+      const value = workerId.trim();
+      el.textContent = `main_page console: ${value}`;
+      el.title = `TE2 console worker id: ${value}`;
+      el.dataset.state = 'ready';
+      return;
+    }
+    el.textContent = 'main_page console: pending';
+    el.title = 'TE2 console worker id has not registered yet';
+    el.dataset.state = 'pending';
+  }
+
   function openEditorSettingsModal() {
     deps.settingsModalEl.classList.add('show');
     deps.settingsModalEl.setAttribute('aria-hidden', 'false');
+    refreshConsoleWorkerId();
     void deps.refreshEditorSettingsModal();
   }
 
@@ -55,6 +74,8 @@ export function createSettingsModalsController(deps: any) {
     deps.settingsExtStripEl.addEventListener('click', () => {
       openEditorExtManagerModal();
     });
+    window.addEventListener('te2:console-bridge-status', refreshConsoleWorkerId);
+    refreshConsoleWorkerId();
   }
 
   return {

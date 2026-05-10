@@ -4,6 +4,74 @@ import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
 type ExtConfigValues = Record<string, any>;
 type ExtConfigSchema = Record<string, any>;
 
+function isPlainObject(value: any): value is Record<string, any> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function schemaTypeIncludes(prop: any, typeName: string): boolean {
+  const rawType = prop?.type;
+  return rawType === typeName || (Array.isArray(rawType) && rawType.includes(typeName));
+}
+
+function schemaAnyOfIncludesType(prop: any, typeName: string): boolean {
+  return Array.isArray(prop?.anyOf) && prop.anyOf.some((branch: any) => {
+    return schemaTypeIncludes(branch, typeName);
+  });
+}
+
+function schemaAllowsObject(prop: any): boolean {
+  return schemaTypeIncludes(prop, 'object') ||
+    schemaAnyOfIncludesType(prop, 'object') ||
+    isPlainObject(prop?.default);
+}
+
+function formatConfigValue(value: any): string {
+  if (value == null) return '';
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value, null, 2); } catch (_) { return String(value); }
+  }
+  return String(value);
+}
+
+function sameConfigValue(left: any, right: any): boolean {
+  if (left === right) return true;
+  try { return JSON.stringify(left) === JSON.stringify(right); } catch (_) { return String(left) === String(right); }
+}
+
+function collectEnumOptions(prop: any): any[] {
+  const options: any[] = [];
+  const seen = new Set<string>();
+  const addOption = (value: any) => {
+    let key = '';
+    try { key = JSON.stringify(value); } catch (_) { key = String(value); }
+    if (seen.has(key)) return;
+    seen.add(key);
+    options.push(value);
+  };
+
+  if (Array.isArray(prop?.enum)) {
+    prop.enum.forEach(addOption);
+  }
+  if (Array.isArray(prop?.anyOf)) {
+    prop.anyOf.forEach((branch: any) => {
+      if (Array.isArray(branch?.enum)) branch.enum.forEach(addOption);
+    });
+  }
+  return options;
+}
+
+function parseJsonEditorValue(input: HTMLTextAreaElement): { ok: boolean; value: any } {
+  const raw = input.value.trim();
+  if (!raw) return { ok: true, value: null };
+  try {
+    input.style.borderColor = '';
+    return { ok: true, value: JSON.parse(raw) };
+  } catch (_) {
+    input.style.borderColor = 'var(--danger, #f87171)';
+    return { ok: false, value: null };
+  }
+}
+
 /**
  * @param {{
  *   modalEl: HTMLElement,
@@ -69,13 +137,73 @@ export function createSettingsConfigModalController(deps: any) {
           fieldRow.appendChild(desc);
         }
 
-        const curVal = extConfigValues[key] !== undefined ? extConfigValues[key] : prop.default;
+        const hasCurrentValue = Object.prototype.hasOwnProperty.call(extConfigValues, key);
+        const curVal = hasCurrentValue ? extConfigValues[key] : prop.default;
         if (prop.type === 'boolean') {
           const cb = document.createElement('input');
           cb.type = 'checkbox';
           cb.checked = !!curVal;
           cb.addEventListener('change', () => { extConfigValues[key] = cb.checked; });
           fieldRow.appendChild(cb);
+        } else if (schemaAllowsObject(prop) && collectEnumOptions(prop).length) {
+          const enumOptions = collectEnumOptions(prop);
+          const customValue = isPlainObject(curVal) ? curVal : (isPlainObject(prop.default) ? prop.default : {});
+          const select = document.createElement('select');
+          select.className = 'lsp-rootrel-input';
+          select.style.width = '100%';
+          select.style.marginBottom = '6px';
+
+          enumOptions.forEach((opt: any) => {
+            const option = document.createElement('option');
+            option.value = formatConfigValue(opt);
+            option.textContent = formatConfigValue(opt);
+            select.appendChild(option);
+          });
+
+          const customOption = document.createElement('option');
+          customOption.value = '__json_object__';
+          customOption.textContent = 'Custom JSON object';
+          select.appendChild(customOption);
+
+          const textarea = document.createElement('textarea');
+          textarea.className = 'lsp-rootrel-input';
+          textarea.rows = 8;
+          textarea.spellcheck = false;
+          textarea.style.width = '100%';
+          textarea.style.fontFamily = '"SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace';
+          textarea.value = formatConfigValue(customValue);
+          textarea.placeholder = 'JSON object…';
+
+          const enumMatch = enumOptions.find((opt: any) => sameConfigValue(curVal, opt));
+          select.value = enumMatch !== undefined ? formatConfigValue(enumMatch) : '__json_object__';
+
+          function syncMixedEditor(markChanged: boolean) {
+            if (select.value !== '__json_object__') {
+              textarea.style.display = 'none';
+              textarea.style.borderColor = '';
+              if (markChanged) {
+                const selected = enumOptions.find((opt: any) => formatConfigValue(opt) === select.value);
+                extConfigValues[key] = selected !== undefined ? selected : select.value;
+              }
+              return;
+            }
+
+            textarea.style.display = '';
+            if (markChanged) {
+              const parsed = parseJsonEditorValue(textarea);
+              if (parsed.ok) extConfigValues[key] = parsed.value;
+            }
+          }
+
+          select.addEventListener('change', () => syncMixedEditor(true));
+          textarea.addEventListener('input', () => {
+            if (select.value !== '__json_object__') return;
+            const parsed = parseJsonEditorValue(textarea);
+            if (parsed.ok) extConfigValues[key] = parsed.value;
+          });
+          syncMixedEditor(false);
+          fieldRow.appendChild(select);
+          fieldRow.appendChild(textarea);
         } else if (prop.enum && Array.isArray(prop.enum)) {
           const wrap = document.createElement('div');
           wrap.style.display = 'flex';
@@ -90,11 +218,11 @@ export function createSettingsConfigModalController(deps: any) {
             const radio = document.createElement('input');
             radio.type = 'radio';
             radio.name = `ext-cfg-${key}`;
-            radio.value = String(opt);
-            radio.checked = String(curVal) === String(opt);
+            radio.value = formatConfigValue(opt);
+            radio.checked = sameConfigValue(curVal, opt);
             radio.addEventListener('change', () => { extConfigValues[key] = opt; });
             optLabel.appendChild(radio);
-            optLabel.appendChild(document.createTextNode(String(opt)));
+            optLabel.appendChild(document.createTextNode(formatConfigValue(opt)));
             wrap.appendChild(optLabel);
           });
           fieldRow.appendChild(wrap);
@@ -110,6 +238,20 @@ export function createSettingsConfigModalController(deps: any) {
             extConfigValues[key] = input.value === '' ? null : Number(input.value);
           });
           fieldRow.appendChild(input);
+        } else if (schemaAllowsObject(prop)) {
+          const textarea = document.createElement('textarea');
+          textarea.className = 'lsp-rootrel-input';
+          textarea.rows = 8;
+          textarea.spellcheck = false;
+          textarea.style.width = '100%';
+          textarea.style.fontFamily = '"SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace';
+          textarea.value = formatConfigValue(curVal);
+          textarea.placeholder = prop.default != null ? formatConfigValue(prop.default) : 'JSON object…';
+          textarea.addEventListener('input', () => {
+            const parsed = parseJsonEditorValue(textarea);
+            if (parsed.ok) extConfigValues[key] = parsed.value;
+          });
+          fieldRow.appendChild(textarea);
         } else if (prop.type === 'array') {
           // ── VS Code-style array editor ──────────────────────────
           const itemSchema = prop.items || {};

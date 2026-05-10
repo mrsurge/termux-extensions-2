@@ -12,6 +12,7 @@ import { createSettingsModalsController } from './settings-modals.ts';
  *   els: {
  *     settingsModal: HTMLElement,
  *     settingsClose: HTMLElement,
+ *     settingsConsoleWorkerId: HTMLElement,
  *     menuEditorSettings: HTMLElement,
  *     extManagerModal: HTMLElement,
  *     extManagerClose: HTMLElement,
@@ -43,6 +44,7 @@ import { createSettingsModalsController } from './settings-modals.ts';
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
  *   busNotify: (event: string, payload?: any) => void,
  *   reloadEditorFrame: () => void,
+ *   getConsoleWorkerId: () => string | null,
  *   toast: (msg: string, ms?: number) => void,
  * }} deps
  */
@@ -82,6 +84,7 @@ export function createSettingsBootstrap(deps: any) {
   const settingsModalsController = createSettingsModalsController({
     settingsModalEl: deps.els.settingsModal,
     settingsCloseEl: deps.els.settingsClose,
+    settingsConsoleWorkerIdEl: deps.els.settingsConsoleWorkerId,
     menuEditorSettingsEl: deps.els.menuEditorSettings,
     extManagerModalEl: deps.els.extManagerModal,
     extManagerCloseEl: deps.els.extManagerClose,
@@ -90,6 +93,7 @@ export function createSettingsBootstrap(deps: any) {
     refreshEditorSettingsModal: () => refreshEditorSettingsModal(),
     refreshEditorExtManagerModal: () => refreshEditorExtManagerModal(),
     loadCustomSettings: () => loadCustomSettings(),
+    getConsoleWorkerId: deps.getConsoleWorkerId,
   });
   settingsModalsController.install();
 

@@ -505,6 +505,21 @@
   .fe-modal-card { width: min(800px, 92vw); max-height: 80vh; background: var(--card, #0b0f1a); color: var(--foreground, #e5e7eb); border: 1px solid var(--border, #333); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
   .fe-modal-header { display: flex; align-items: center; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border, #333); }
   .fe-modal-body { padding: 16px 20px; overflow-y: auto; overflow-x: hidden; }
+  .settings-console-worker-id {
+    max-width: min(42vw, 280px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px 8px;
+    border: 1px solid var(--border, #333);
+    border-radius: 999px;
+    font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    opacity: 0.72;
+  }
+  .settings-console-worker-id[data-state="ready"] { opacity: 0.9; }
+  .settings-console-worker-id[data-state="pending"] { opacity: 0.52; }
   /* Workspace scope: hide toggle, uninstall, and install — settings-only */
   .fe-modal.ext-scope-workspace .ext-toggle-btn,
   .fe-modal.ext-scope-workspace .ext-uninstall-btn,
@@ -2231,6 +2246,7 @@
   <div class="fe-modal-card" style="max-width: 760px;">
     <div class="fe-modal-header">
       <strong>Editor Settings</strong>
+      <span id="editor-settings-console-worker-id" class="settings-console-worker-id" data-state="pending" title="main_page TE2 console worker id">main_page console: pending</span>
       <span style="flex:1"></span>
       <button class="fe-btn" id="editor-settings-close" aria-label="Close">✕</button>
     </div>

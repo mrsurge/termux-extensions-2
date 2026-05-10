@@ -26,6 +26,23 @@ let _workerId = null;
 let _workerLabel = null;
 let _originals = {};
 
+export function getConsoleBridgeStatus() {
+  return {
+    active: _bridgeActive,
+    connected: !!(_bridgeSocket && _bridgeSocket.connected),
+    workerId: _workerId,
+    workerLabel: _workerLabel,
+  };
+}
+
+function _emitBridgeStatus() {
+  try {
+    window.dispatchEvent(new CustomEvent('te2:console-bridge-status', {
+      detail: getConsoleBridgeStatus(),
+    }));
+  } catch (_) {}
+}
+
 function _safeSerialize(x) {
   const seen = new WeakSet();
   return JSON.stringify(x, (_k, v) => {
@@ -180,7 +197,13 @@ export function initConsoleBridge(opts = {}) {
   // Tell the server this is a console-producing worker
   _bridgeSocket.on('connect', () => {
     _bridgeSocket.emit('console:register', { workerId: _workerId, workerLabel: _workerLabel, role: 'worker' });
+    _emitBridgeStatus();
   });
+  if (typeof _bridgeSocket.on === 'function') {
+    _bridgeSocket.on('disconnect', () => {
+      _emitBridgeStatus();
+    });
+  }
   // If already connected, register immediately
   if (_bridgeSocket.connected) {
     _bridgeSocket.emit('console:register', { workerId: _workerId, workerLabel: _workerLabel, role: 'worker' });
@@ -190,6 +213,7 @@ export function initConsoleBridge(opts = {}) {
   _hookErrors();
   _hookEval();
   _bridgeActive = true;
+  _emitBridgeStatus();
 
   return { socket: _bridgeSocket, workerId: _workerId, destroy: destroyConsoleBridge };
 }
@@ -204,5 +228,7 @@ export function destroyConsoleBridge() {
   }
   _originals = {};
   _bridgeActive = false;
+  _workerId = null;
   _workerLabel = null;
+  _emitBridgeStatus();
 }

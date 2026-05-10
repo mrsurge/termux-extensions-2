@@ -10,7 +10,7 @@ import { initSidebarShortcuts } from './main_page/frontend/sidebar-shortcuts/run
 import ReconnectingWebSocket from './main_page/frontend/connections/reconnecting-websocket.ts';
 import { createConsoleDrawer } from './main_page/frontend/host-console-drawer.ts';
 import { createProblemsPanel } from './src/diagnostics/problems-panel.ts';
-import { initConsoleBridge } from './main_page/frontend/console_bridge.js';
+import { getConsoleBridgeStatus, initConsoleBridge } from './main_page/frontend/console_bridge.js';
 import {
   HOME_DIR, HOME_PREFIX, simplifyAbsolute, toAbsolute, parentDir, basename,
   formatDisplayPath, formatDisplayDirectory, detectLanguageFromFilename,
@@ -255,6 +255,7 @@ const {
   miToggleMinimap,
   editorSettingsModal,
   editorSettingsClose,
+  editorSettingsConsoleWorkerId,
   editorSettingsExtStrip,
   editorSettingsExtSummary,
   editorSettingsThemeStrip,
@@ -408,6 +409,7 @@ createSettingsBootstrap({
   els: {
     settingsModal: editorSettingsModal,
     settingsClose: editorSettingsClose,
+    settingsConsoleWorkerId: editorSettingsConsoleWorkerId,
     menuEditorSettings: miEditorSettings,
     extManagerModal: editorExtManagerModal,
     extManagerClose: editorExtManagerClose,
@@ -442,6 +444,10 @@ createSettingsBootstrap({
   busRequest: (method: ExplorerRpcRequestMethod, payload: ExplorerRpcRequestPayload, timeoutMs?: number) => requestExplorerRpc(method, payload, timeoutMs),
   busNotify: (method: ExplorerRpcNotifyMethod, payload: ExplorerRpcNotifyPayload) => notifyExplorerRpc(method, payload),
   reloadEditorFrame: _reloadEditorFrame,
+  getConsoleWorkerId: () => {
+    const status = getConsoleBridgeStatus();
+    return typeof status.workerId === 'string' ? status.workerId : null;
+  },
   toast: (msg: string, ms?: number) => host.toast(msg, ms),
 });
 
