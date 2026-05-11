@@ -7,14 +7,13 @@ import time
 import shutil
 from pathlib import Path
 from typing import Any
-from fastapi import APIRouter, Request, HTTPException, WebSocket, Body, Query
+from fastapi import APIRouter, HTTPException, WebSocket, Body, Query
 from fastapi.responses import JSONResponse, FileResponse, Response
 import asyncio
 from anyio import to_thread
 from .history_store import HistoryStore
 from .explorer.services.file_ops import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
-from .code_server_shell_manager import code_server_connection_target, ensure_code_server_shell
-from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
+from .code_server_shell_manager import ensure_code_server_shell
 from .git_helper import (
     GitError,
     list_branches as git_list_branches,
@@ -45,6 +44,17 @@ from .explorer.transport.connection_manager import manager as explorer_manager
 from .core_write import write_full, BaseMismatchError, _get_file_meta
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
 from .explorer import search as explorer_search_module
+from .main_page.backend.state_payload import (
+    StatePayloadDeps,
+    build_diff_base_payload,
+    build_state_payload,
+    expand_and_validate_path,
+    get_runtime_metadata,
+    resolve_diff_base,
+    status_to_payload,
+)
+from .main_page.backend.workbench_routes import WorkbenchRoutesDeps, create_workbench_router
+from .main_page.backend.project_routes import ProjectRoutesDeps, create_project_router
 
 IGNORE_PATTERNS = [
     '.git', '__pycache__', 'node_modules', '.venv', 'venv',
@@ -54,27 +64,6 @@ IGNORE_PATTERNS = [
 
 AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
 JsonDict = dict[str, Any]
-
-# Workbench adapter boot record (per worker process).
-# Purpose: make `/workbench_adapter/start` idempotent for page refresh / new clients
-# by reusing the adapter shell that was started at worker boot, when still alive.
-_workbench_adapter_boot: JsonDict = {
-    "worker_shell_id": None,
-    "project_root": None,
-    "adapter_shell_id": None,
-    "boot_ts_ms": 0.0,
-}
-
-
-def _now_ms() -> float:
-    return time.time() * 1000.0
-
-
-def _adapter_code_server_target(cs: Any, project_root: str) -> tuple[str, str, str | None]:
-    cs_env = getattr(cs, "env_overrides", None) or {}
-    resolved_project_root = str(cs_env.get("PROJECT_ROOT") or project_root)
-    code_server_http, code_server_socket_path = code_server_connection_target(cs)
-    return resolved_project_root, code_server_http, code_server_socket_path
 
 CHANGE_RESULT_LIMIT = 40
 STATUS_TEXT_MAP = {
@@ -337,428 +326,6 @@ file_editor_cm6_bp = APIRouter()
 # # Register terminal routes and WebSocket handler
 # register_terminal_routes(file_editor_cm6_bp, sock)
 
-@file_editor_cm6_bp.get("/workbench_adapter/discover")
-async def workbench_adapter_discover():
-    """Start/adopt the Node workbench adapter and return a same-origin cmd URL.
-
-    The adapter itself binds to 127.0.0.1 on a deterministic port, but browsers
-    must not depend on localhost direct access (remote clients). We expose a
-    worker-owned proxy endpoint at `/workbench_adapter/cmd`.
-    """
-
-    # Ensure code-server backend exists first (adapter connects to it) and
-    # use code-server's PROJECT_ROOT as the canonical active workspace.
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    try:
-        cs = await ensure_code_server_shell(project_root)
-    except Exception as exc:
-        print(f"[code_server][discover] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    project_root, code_server_http, code_server_socket_path = _adapter_code_server_target(cs, project_root)
-
-    try:
-        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http, code_server_socket_path=code_server_socket_path)
-    except Exception as exc:
-        print(f"[workbench_adapter][discover] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
-    try:
-        port = int(str(port_s))
-    except Exception:
-        port = 0
-
-    return {
-        "ok": True,
-        "data": {
-            "project_root": project_root,
-            "port": port,
-            "shell_id": record.id,
-            "cmd_url": "/api/app/file_editor_cm6/workbench_adapter/cmd",
-        },
-    }
-
-
-@file_editor_cm6_bp.get("/workbench_adapter/start")
-async def workbench_adapter_start():
-    """Start/adopt the workbench adapter and return a baton token."""
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    try:
-        cs = await ensure_code_server_shell(project_root)
-    except Exception as exc:
-        print(f"[code_server][start] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    project_root, code_server_http, code_server_socket_path = _adapter_code_server_target(cs, project_root)
-
-    # If the adapter was already started at worker boot and is still alive, reuse it.
-    # This keeps page refresh / new clients from accidentally perturbing the live session.
-    record = None
-    try:
-        boot_worker_id = str(_workbench_adapter_boot.get("worker_shell_id") or "")
-        boot_project = str(_workbench_adapter_boot.get("project_root") or "")
-        boot_shell_id = str(_workbench_adapter_boot.get("adapter_shell_id") or "")
-        this_worker_id = os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown")
-        if boot_shell_id and boot_worker_id and boot_worker_id == this_worker_id and boot_project == project_root:
-            from framework_shells import get_manager
-            mgr = await get_manager()
-            maybe = await mgr.get_shell(boot_shell_id)
-            if maybe and getattr(maybe, "pid", None) and getattr(maybe, "status", None) == "running":
-                maybe_env = getattr(maybe, "env_overrides", None) or {}
-                maybe_socket = str(maybe_env.get("TE2_CODE_SERVER_SOCKET") or "").strip()
-                expected_socket = str(code_server_socket_path or "").strip()
-                if maybe_socket == expected_socket:
-                    record = maybe
-    except Exception:
-        record = None
-
-    if record is None:
-        try:
-            record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http, code_server_socket_path=code_server_socket_path)
-            try:
-                _workbench_adapter_boot.update(
-                    {
-                        "worker_shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
-                        "project_root": project_root,
-                        "adapter_shell_id": getattr(record, "id", None),
-                        "boot_ts_ms": _now_ms(),
-                    }
-                )
-            except Exception:
-                pass
-        except Exception as exc:
-            print(f"[workbench_adapter][start] failed: {type(exc).__name__}: {exc}", flush=True)
-            return JSONResponse(
-                {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-                status_code=503,
-            )
-
-    port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
-    try:
-        port = int(str(port_s))
-    except Exception:
-        port = 0
-
-    return {
-        "ok": True,
-        "data": {
-            "state": "starting",
-            "project_root": project_root,
-            "port": port,
-            "shell_id": record.id,
-            "cmd_url": "/api/app/file_editor_cm6/workbench_adapter/cmd",
-        },
-    }
-
-
-@file_editor_cm6_bp.get("/workbench_adapter/attach")
-async def workbench_adapter_attach():
-    """Attach to the workbench adapter without perturbing an already-running session.
-
-    Contract:
-    - Always returns a baton token (same as /start)
-    - Returns best-effort readiness state *immediately* so new clients/page refresh
-      don't have to wait for a one-shot adapter/ready event they may have missed.
-    """
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    try:
-        cs = await ensure_code_server_shell(project_root)
-    except Exception as exc:
-        print(f"[code_server][attach] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    project_root, code_server_http, code_server_socket_path = _adapter_code_server_target(cs, project_root)
-
-    # Ensure shell exists (this is idempotent; uses cached running shell if present).
-    try:
-        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http, code_server_socket_path=code_server_socket_path)
-    except Exception as exc:
-        print(f"[workbench_adapter][attach] failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse(
-            {"ok": False, "error": f"{type(exc).__name__}: {exc}"},
-            status_code=503,
-        )
-
-    port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
-    try:
-        port = int(str(port_s))
-    except Exception:
-        port = 0
-
-    # Probe adapter status via JSON-RPC (best-effort).
-    state = "starting"
-    session = {"connected": False, "ready": False}
-    if port:
-        try:
-            import httpx
-
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.post(
-                    f"http://127.0.0.1:{port}/cmd",
-                    json={"jsonrpc": "2.0", "id": 1, "method": "te2.status", "params": {}},
-                )
-            payload = resp.json() if resp.content else {}
-            session = (payload.get("result") or {}).get("session") or session
-            connected = bool(session.get("connected"))
-            ready = bool(session.get("ready"))
-            state = "ready" if ready else ("connected" if connected else "starting")
-        except Exception:
-            pass
-
-    return {
-        "ok": True,
-        "data": {
-            "state": state,
-            "session": session,
-            "project_root": project_root,
-            "port": port,
-            "shell_id": record.id,
-            "cmd_url": "/api/app/file_editor_cm6/workbench_adapter/cmd",
-        },
-    }
-
-
-@file_editor_cm6_bp.get("/workbench_adapter/nudge")
-async def workbench_adapter_nudge(path: str = ""):
-    """Request a workbench adapter "change file" (openFile) for the active path.
-
-    Intended for new/refreshing clients: nudge the adapter to re-emit diagnostics
-    for the current SSOT file without re-running a full init sequence.
-    """
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    abs_path = str(path or "").strip()
-    if not abs_path:
-        try:
-            session_state = _history_store.get_session_state() or {}
-            abs_path = str(session_state.get("currentPath") or "").strip()
-        except Exception:
-            abs_path = ""
-    if not abs_path:
-        return JSONResponse({"ok": False, "error": "missing_path"}, status_code=400)
-
-    try:
-        project_root_path = Path(project_root).expanduser().resolve(strict=False)
-        abs_path_resolved = Path(abs_path).expanduser().resolve(strict=False)
-    except Exception:
-        return JSONResponse({"ok": False, "error": "invalid_path"}, status_code=400)
-
-    if not str(abs_path_resolved).startswith(str(project_root_path)):
-        return JSONResponse({"ok": False, "error": "outside_project"}, status_code=400)
-
-    try:
-        from .diagnostics_bridge import nudge_diagnostics_for_file
-        ok = await nudge_diagnostics_for_file(str(abs_path_resolved))
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500)
-
-    return {
-        "ok": True,
-        "data": {
-            "path": str(abs_path_resolved),
-            "requested": bool(ok),
-        },
-    }
-
-
-@file_editor_cm6_bp.get("/workbench_adapter/status")
-async def workbench_adapter_status():
-    """Return workbench adapter readiness state."""
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    # Ensure adapter shell exists (but don't force reconnect).
-    try:
-        cs = await ensure_code_server_shell(project_root)
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=503)
-
-    project_root, code_server_http, code_server_socket_path = _adapter_code_server_target(cs, project_root)
-
-    try:
-        record = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http, code_server_socket_path=code_server_socket_path)
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=503)
-
-    port_s = (record.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
-    try:
-        port = int(str(port_s))
-    except Exception:
-        port = 0
-    if not port:
-        return {"ok": True, "state": "starting", "session": {"connected": False, "ready": False}}
-
-    # Probe adapter status via JSON-RPC.
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(
-                f"http://127.0.0.1:{port}/cmd",
-                json={"jsonrpc": "2.0", "id": 1, "method": "te2.status", "params": {}},
-            )
-        payload = resp.json() if resp.content else {}
-        session = (payload.get("result") or {}).get("session") or {}
-        connected = bool(session.get("connected"))
-        ready = bool(session.get("ready"))
-        state = "ready" if ready else ("connected" if connected else "starting")
-        return {"ok": True, "state": state, "session": session}
-    except Exception:
-        return {"ok": True, "state": "starting", "session": {"connected": False, "ready": False}}
-
-
-@file_editor_cm6_bp.post("/workbench_adapter/cmd")
-async def workbench_adapter_cmd(request: Request):
-    """Same-origin JSON-RPC proxy to the Node workbench adapter /cmd endpoint."""
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    # Ensure adapter is running (and code-server behind it). Use code-server env
-    # as the canonical workspace root for the adapter.
-    cs = await ensure_code_server_shell(project_root)
-    project_root, code_server_http, code_server_socket_path = _adapter_code_server_target(cs, project_root)
-
-    token = request.headers.get("x-te2-baton") or request.query_params.get("token") or ""
-    rec = await ensure_workbench_adapter_shell(project_root, code_server_http=code_server_http, code_server_socket_path=code_server_socket_path)
-
-    port_s = (rec.env_overrides or {}).get("TE2_ADAPTER_PORT") or ""
-    try:
-        port = int(str(port_s))
-    except Exception:
-        port = 0
-    if not port:
-        raise HTTPException(status_code=503, detail="workbench adapter not ready (missing port)")
-
-    # Proxy request body to adapter.
-    try:
-        body = await request.body()
-    except Exception:
-        body = b""
-
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"http://127.0.0.1:{port}/cmd",
-                content=body,
-                headers={"content-type": request.headers.get("content-type", "application/json")},
-            )
-    except Exception as exc:
-        print(f"[workbench_adapter][cmd] proxy failed: {type(exc).__name__}: {exc}", flush=True)
-        return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=503)
-
-    return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type", "application/json"))
-
-
-@file_editor_cm6_bp.get("/workbench/extensions/enabled")
-async def workbench_get_enabled_extensions():
-    """Return the list of globally-installed VSIX extensions enabled for the active project.
-
-    SSOT: ProjectSidecar (project-scoped).
-    """
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    sidecar = _history_store.get_project_sidecar(project_root)
-    if not sidecar:
-        raise HTTPException(status_code=500, detail="Failed to load project sidecar")
-
-    enabled = []
-    try:
-        enabled = sidecar.get_workbench_enabled_extensions()
-    except Exception:
-        enabled = []
-
-    return {"ok": True, "data": {"project_root": project_root, "enabled": enabled}}
-
-
-@file_editor_cm6_bp.post("/workbench/extensions/enabled")
-async def workbench_set_enabled_extensions(payload: JsonDict = Body(...)):
-    """Set or toggle enabled extensions for the active project.
-
-    Accepts either:
-    - {"enabled": ["publisher.name", ...]}
-    - {"id": "publisher.name", "enabled": true|false}
-    """
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    if not project_root:
-        raise HTTPException(status_code=400, detail="No active project root")
-
-    sidecar = _history_store.get_project_sidecar(project_root)
-    if not sidecar:
-        raise HTTPException(status_code=500, detail="Failed to load project sidecar")
-
-    # Bulk set.
-    if isinstance(payload.get("enabled"), list):
-        items = payload.get("enabled") or []
-        enabled: list[str] = []
-        for item in items:
-            try:
-                text = str(item).strip()
-            except Exception:
-                continue
-            if not text or text in enabled:
-                continue
-            enabled.append(text)
-        try:
-            sidecar.set_workbench_enabled_extensions(enabled)
-            sidecar.save()
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to save enabled extensions: {exc}")
-        return {"ok": True, "data": {"project_root": project_root, "enabled": sidecar.get_workbench_enabled_extensions()}}
-
-    # Toggle.
-    ext_id = payload.get("id")
-    if not ext_id:
-        raise HTTPException(status_code=400, detail="Expected 'enabled' list or ('id' + 'enabled') payload")
-    flag = bool(payload.get("enabled", False))
-    try:
-        if flag:
-            sidecar.enable_workbench_extension(str(ext_id))
-        else:
-            sidecar.disable_workbench_extension(str(ext_id))
-        sidecar.save()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to save enabled extensions: {exc}")
-
-    return {"ok": True, "data": {"project_root": project_root, "enabled": sidecar.get_workbench_enabled_extensions()}}
-
-
 # Serve static files (JS, CSS, etc.)
 @file_editor_cm6_bp.get("/static/{file_path:path}")
 async def serve_static(file_path: str):
@@ -805,6 +372,60 @@ SUBAPPS = [
 
 # Import singleton store instances
 from .stores import _history_store, _preferences_store
+
+_STATE_PAYLOAD_DEPS = StatePayloadDeps(
+    history=_history_store,
+    preferences=_preferences_store,
+    set_project_root=set_project_root,
+    is_git_repository=is_git_repository,
+    get_commit_info=get_commit_info,
+    format_label=HistoryStore.format_label,
+)
+
+
+async def _get_framework_shell_by_id(shell_id: str):
+    from .workbench_adapter_shell_manager import get_shell_record
+
+    return await get_shell_record(shell_id)
+
+
+async def _ensure_workbench_adapter_shell_for_routes(
+    project_root: str,
+    *,
+    code_server_http: str,
+    code_server_socket_path: str | None,
+):
+    from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
+
+    return await ensure_workbench_adapter_shell(
+        project_root,
+        code_server_http=code_server_http,
+        code_server_socket_path=code_server_socket_path,
+    )
+
+
+def _code_server_connection_target_for_routes(record):
+    from .code_server_shell_manager import code_server_connection_target
+
+    return code_server_connection_target(record)
+
+
+async def _nudge_diagnostics_for_file_for_routes(path: str) -> bool:
+    from .diagnostics_bridge import nudge_diagnostics_for_file
+
+    return await nudge_diagnostics_for_file(path)
+
+
+_WORKBENCH_ROUTES_DEPS = WorkbenchRoutesDeps(
+    history=_history_store,
+    get_project_root=get_project_root,
+    ensure_code_server_shell=ensure_code_server_shell,
+    ensure_workbench_adapter_shell=_ensure_workbench_adapter_shell_for_routes,
+    code_server_connection_target=_code_server_connection_target_for_routes,
+    nudge_diagnostics_for_file=_nudge_diagnostics_for_file_for_routes,
+    get_shell_by_id=_get_framework_shell_by_id,
+)
+file_editor_cm6_bp.include_router(create_workbench_router(_WORKBENCH_ROUTES_DEPS))
 
 
 def initialize_project_session() -> ProjectSidecar | None:
@@ -914,128 +535,79 @@ def _get_active_project_root() -> Path:
 
 
 def _resolve_diff_base(project_path: str | None) -> str:
-    base = _history_store.get_diff_base(project_path)
-    return base.strip() if base else 'HEAD'
+    return resolve_diff_base(_STATE_PAYLOAD_DEPS, project_path)
 
 
 def _diff_base_payload(project_path: str | None) -> JsonDict:
-    base_ref = _resolve_diff_base(project_path)
-    mode = 'none'
-    commit_info = None
-    root_path = None
-
-    if project_path:
-        root_path = Path(project_path)
-        if root_path.exists() and is_git_repository(root_path):
-            mode = 'head' if base_ref == 'HEAD' else 'detached'
-            try:
-                commit = get_commit_info(root_path, base_ref)
-            except GitError:
-                commit = None
-            if commit:
-                commit_info = {
-                    "hash": commit.hash,
-                    "short": commit.short_hash,
-                    "subject": commit.summary,
-                    "author": commit.author,
-                    "date": commit.date,
-                }
-        else:
-            mode = 'none'
-
-    return {
-        "ref": base_ref,
-        "mode": mode,
-        "commit": commit_info,
-    }
+    return build_diff_base_payload(_STATE_PAYLOAD_DEPS, project_path)
 
 
 
 def _status_to_payload(status: Any) -> JsonDict:
-    return {
-        "branch": status.branch,
-        "detached": status.detached,
-        "ahead": status.ahead,
-        "behind": status.behind,
-        "staged": status.staged,
-        "unstaged": status.unstaged,
-        "untracked": status.untracked,
-    }
+    return status_to_payload(status)
 
 def _get_runtime_metadata() -> JsonDict:
-    """Collect runtime metadata for crash detection."""
-    import os
-    return {
-        "run_id": os.getenv("TE_RUN_ID", "unknown"),
-        "shell_id": os.getenv("TE_FRAMEWORK_SHELL_ID", "unknown"),
-        "shell_run_id": os.getenv("TE_FRAMEWORK_SHELL_RUN_ID", "unknown"),
-        "launcher_pid": int(os.getenv("TE_LAUNCHER_PID", "0")),
-        "worker_pid": os.getpid(),
-    }
+    return get_runtime_metadata()
 
 def _build_state_payload() -> JsonDict:
-    project_path = _history_store.get_active_project()
-    project_exists = bool(project_path and Path(project_path).is_dir())
-    project_label = HistoryStore.format_label(project_path)
-    project_message = ""
-    if not project_path:
-        project_message = "No project selected."
-    elif not project_exists:
-        project_message = f'Project "{project_label or project_path}" not found.'
-    else:
-        # Make sure runtime root matches
-        try:
-            set_project_root(project_path)
-        except Exception:
-            project_exists = False
-            project_message = f'Project "{project_label or project_path}" not accessible.'
-
-    last_file = _history_store.get_last_file(project_path)
-    last_file_exists = bool(last_file and Path(last_file).is_file())
-    last_file_label = HistoryStore.format_label(last_file)
-    last_file_message = ""
-    if last_file and not last_file_exists:
-        last_file_message = f'File "{last_file_label or last_file}" not found.'
-
-    recents_raw = _history_store.list_files(project_path) if project_path else []
-    recents: list[JsonDict] = []
-    for entry in recents_raw:
-        entry_path = entry.get("path")
-        entry_path_str = entry_path if isinstance(entry_path, str) else None
-        exists = bool(entry_path_str and Path(entry_path_str).is_file())
-        recents.append({
-            "path": entry_path_str,
-            "label": entry.get("label") or HistoryStore.format_label(entry_path_str),
-            "opened_at": entry.get("opened_at"),
-            "exists": exists,
-            "scroll_line": entry.get("scroll_line"),
-        })
-
-    editor_prefs = _preferences_store.get_preferences(project_path)
-    runtime_meta = _get_runtime_metadata()
-    diff_base_info = _diff_base_payload(project_path if project_exists else None)
-
-    return {
-        "activeProject": project_path,
-        "activeProjectLabel": project_label,
-        "activeProjectExists": project_exists,
-        "activeProjectMessage": project_message,
-        "lastFile": last_file,
-        "lastFileLabel": last_file_label,
-        "lastFileExists": last_file_exists,
-        "lastFileMessage": last_file_message,
-        "recents": recents,
-        "preferences": editor_prefs,
-        "gitDiffBase": diff_base_info,
-        "runtime": runtime_meta,
-    }
+    return build_state_payload(_STATE_PAYLOAD_DEPS)
 
 def _expand_and_validate_path(path: str) -> tuple[str | None, str | None]:
-    base_home = os.path.expanduser('~')
-    expanded = os.path.normpath(os.path.expanduser(path))
-    if not os.path.abspath(expanded).startswith(base_home):
-        return None, 'Access denied'
-    return expanded, None
+    return expand_and_validate_path(path)
+
+
+async def _close_active_terminal_sockets_for_project_routes() -> None:
+    from .terminal_backend import close_active_terminal_sockets
+
+    await close_active_terminal_sockets()
+
+
+def _stop_diagnostics_bridge_for_project_routes() -> None:
+    from .diagnostics_bridge import stop_bridge
+
+    stop_bridge()
+
+
+async def _terminate_adapter_shell_for_project_routes() -> bool:
+    from .workbench_adapter_shell_manager import terminate_adapter_shell
+
+    return await terminate_adapter_shell()
+
+
+def _clear_change_ledger_for_project_routes() -> None:
+    from .change_ledger import clear as clear_ledger
+
+    clear_ledger()
+
+
+async def _emit_sidebar_cwd_set_for_project_routes(reason: str) -> None:
+    from .ui_ipc import sidebar_ws
+
+    await sidebar_ws.emit_sidebar_cwd_set_global(reason=reason)
+
+
+def _create_project_for_project_routes(parent_path: str, name: str) -> dict[str, object]:
+    from .explorer.services.file_ops import create_project
+
+    result = create_project(parent_path, name)
+    return {str(key): value for key, value in result.items()}
+
+
+_PROJECT_ROUTES_DEPS = ProjectRoutesDeps(
+    history=_history_store,
+    get_project_root=get_project_root,
+    set_project_root=set_project_root,
+    invalidate_diff_cache=invalidate_diff_cache,
+    set_edit_tracker_project_root=edit_tracker.set_project_root,
+    close_active_terminal_sockets=_close_active_terminal_sockets_for_project_routes,
+    stop_diagnostics_bridge=_stop_diagnostics_bridge_for_project_routes,
+    terminate_adapter_shell=_terminate_adapter_shell_for_project_routes,
+    clear_change_ledger=_clear_change_ledger_for_project_routes,
+    emit_sidebar_cwd_set=_emit_sidebar_cwd_set_for_project_routes,
+    build_state_payload=_build_state_payload,
+    create_project=_create_project_for_project_routes,
+)
+file_editor_cm6_bp.include_router(create_project_router(_PROJECT_ROUTES_DEPS))
 
 @file_editor_cm6_bp.get('/')
 def status_root():
@@ -1238,7 +810,7 @@ async def _broadcast_watcher_error(project_root: Path | str, message: str) -> No
         from app.apps.file_editor_cm6.explorer.transport.rpc_emit import (
             emit_project_explorer_rpc_notification,
         )
-        payload = {
+        payload: dict[str, object] = {
             "message": message,
             "limit": 524288,
             "command": "sudo sysctl -w fs.inotify.max_user_watches=524288",
@@ -1309,102 +881,6 @@ async def ws_read(websocket: WebSocket):
         forward_task.cancel()
         unsubscribe(token)
         print(f"[ws/read] closed path={path} client={client_id}", file=sys.stderr)
-
-@file_editor_cm6_bp.post('/project/open')
-async def project_open(data: JsonDict = Body(...)):
-    """Open a project directory."""
-    path = (data.get('path') or '').strip()
-
-    try:
-        display_path = os.path.abspath(os.path.expanduser(str(path)))
-        abs_path = set_project_root(path)  # validates and sets global project root
-        _history_store.touch_project(display_path)
-        _history_store.set_active_project(display_path)
-        invalidate_diff_cache(abs_path)
-        edit_tracker.set_project_root(abs_path)
-        # Force terminal drawers to reconnect to the new project's shell.
-        try:
-            from .terminal_backend import close_active_terminal_sockets
-            await close_active_terminal_sockets()
-        except Exception:
-            pass
-
-        # Dispose stale ext host state for the old project.
-        try:
-            from .diagnostics_bridge import stop_bridge
-            stop_bridge()
-        except Exception:
-            pass
-        try:
-            import app.apps.file_editor_cm6.workbench_adapter_shell_manager as _wa_mod
-            if _wa_mod._active_shell_id:
-                from framework_shells import get_manager
-                mgr = await get_manager()
-                await mgr.terminate_shell(_wa_mod._active_shell_id, force=True)
-                _wa_mod._active_shell_id = None
-                _wa_mod._pipe_state = None
-                if _wa_mod._stdout_reader_task and not _wa_mod._stdout_reader_task.done():
-                    _wa_mod._stdout_reader_task.cancel()
-                _wa_mod._stdout_reader_task = None
-        except Exception:
-            pass
-        try:
-            from .change_ledger import clear as clear_ledger
-            clear_ledger()
-        except Exception:
-            pass
-
-        # Broadcast authoritative cwd update for sidebar consumers.
-        try:
-            from .ui_ipc import sidebar_ws
-            await sidebar_ws.emit_sidebar_cwd_set_global(reason="project_open")
-        except Exception:
-            pass
-
-        state = _build_state_payload()
-        return {"ok": True, "data": {"path": str(abs_path), "state": state}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@file_editor_cm6_bp.post('/project/create')
-async def project_create(data: JsonDict = Body(...)):
-    """Create a new project directory."""
-    parent_path_value = data.get('parent_path')
-    name_value = data.get('name')
-    parent_path = parent_path_value if isinstance(parent_path_value, str) else None
-    name = name_value if isinstance(name_value, str) else None
-    if not parent_path or not name:
-        raise HTTPException(status_code=400, detail="parent_path and name are required")
-
-    try:
-        from .explorer.services.file_ops import create_project
-        result = create_project(parent_path, name)
-        
-        # Set the new project as active
-        new_project_path = result['path']
-        _history_store.touch_project(new_project_path)
-        _history_store.set_active_project(new_project_path)
-        try:
-            from .ui_ipc import sidebar_ws
-            await sidebar_ws.emit_sidebar_cwd_set_global(reason="project_create")
-        except Exception:
-            pass
-        # Force terminal drawers to reconnect to the new project's shell.
-        try:
-            from .terminal_backend import close_active_terminal_sockets
-            await close_active_terminal_sockets()
-        except Exception:
-            pass
-        
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.get('/project/current')
-def project_current():
-    """Get the current project root."""
-    root = _history_store.get_active_project() or str(get_project_root())
-    return {"ok": True, "data": {"path": str(root)}}
 
 @file_editor_cm6_bp.get('/git/branches')
 def git_branches():

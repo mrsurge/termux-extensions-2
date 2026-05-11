@@ -103,6 +103,12 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
     return None
 
 
+async def get_shell_record(shell_id: str) -> Optional[ShellRecord]:
+    """Return a shell record by id for route-level boot-record reuse."""
+    mgr = await get_manager()
+    return await mgr.get_shell(shell_id)
+
+
 def _fail_pending_rpcs(message: str) -> None:
     for fut in list(_rpc_pending.values()):
         if not fut.done():

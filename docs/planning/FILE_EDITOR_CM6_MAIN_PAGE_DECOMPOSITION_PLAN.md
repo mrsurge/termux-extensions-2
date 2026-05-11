@@ -298,6 +298,7 @@ First backend extraction targets:
    - `_build_state_payload`
    - `_expand_and_validate_path`
    - reason: used by many routes and easy to test in isolation
+   - completed: strict backend helper module now lives at `main_page/backend/state_payload.py`; `main.py` keeps thin compatibility wrappers so route behavior and registration stay unchanged
 2. `workbench_routes.py`
    - `/workbench_adapter/discover`
    - `/workbench_adapter/start`
@@ -307,11 +308,15 @@ First backend extraction targets:
    - `/workbench_adapter/cmd`
    - `/workbench/extensions/enabled`
    - reason: coherent WBA-facing route family
+   - completed: strict route factory now lives at `main_page/backend/workbench_routes.py`; `main.py` only assembles route dependencies and includes the router
+   - route typing note: FastAPI decorators in extracted route factories use `response_model=None` so strict Python return annotations such as `JsonObject | JSONResponse` stay type-checkable without Pydantic treating them as response schemas
+   - cleanup carried with slice: typed the watcher-error payload and replaced main.py's private adapter-global cleanup with the existing adapter lifecycle helper, removing the stale `_pipe_state` reset discovered by diagnostics
 3. `project_routes.py`
    - `/project/open`
    - `/project/create`
    - `/project/current`
    - reason: central state transition family; should eventually share a project-switch service with Explorer
+   - completed: strict project route factory now lives at `main_page/backend/project_routes.py`; `main.py` assembles terminal, diagnostics, adapter, sidebar, ledger, and project-creation dependencies without owning the route bodies
 4. `git_routes.py`
    - branch/status/diff-base/stage/commit/push/pull/reset/remote endpoints
    - reason: large route family with a clear `git_helper` dependency
@@ -353,6 +358,8 @@ These overlap the extracted Explorer JSON-RPC backend. Do not blindly delete the
 - dead compatibility route
 - should redirect to Explorer backend handler/service
 - should move into an explicit legacy compatibility module
+
+The same rule applies to routes with historical names such as `/state`: a stale or deprecated function name is not enough evidence for removal. `/state` is still consumed by the host boot path and Monaco runtime today, so cleanup must start with current consumer classification before pruning.
 
 ### Phase 3: worker boot and subapp composition
 
