@@ -165,6 +165,16 @@ def _normalize_agent_shortcuts(value: object) -> list[JsonObject]:
         if not isinstance(url, str) or not url.strip():
             raise RuntimeError(f"agentShortcuts[{idx}].url is required")
 
+        version = raw_dict.get("version")
+        if version is None:
+            version_clean = ""
+        elif isinstance(version, str):
+            version_clean = version.strip()
+        elif isinstance(version, (int, float)) and version >= 0:
+            version_clean = str(int(version))
+        else:
+            raise RuntimeError(f"agentShortcuts[{idx}].version must be a string or positive number")
+
         sid = raw_dict.get("id")
         sid_clean = sid.strip() if isinstance(sid, str) and sid.strip() else f"sc_{idx}"
 
@@ -193,6 +203,7 @@ def _normalize_agent_shortcuts(value: object) -> list[JsonObject]:
                 "app_id": app_id_clean,
                 "label": label.strip(),
                 "url": url.strip(),
+                "version": version_clean,
                 "icon": icon_clean,
                 "load": load_clean,
                 "header": header_clean,

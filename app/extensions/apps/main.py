@@ -206,6 +206,22 @@ async def start_app(app_id: str):
         print(f"[AppsExtension] start_app failed for {app_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@apps_bp.post('/api/apps/{app_id}/restart')
+async def restart_app(app_id: str):
+    print(f"[AppsExtension] restart_app requested for {app_id}")
+    try:
+        app_info = await get_app_runtime().restart_app(app_id)
+        started = app_info.get("started", {}) if isinstance(app_info, dict) else {}
+        print(
+            f"[AppsExtension] restart_app succeeded for {app_id}: "
+            f"shell={started.get('shell_id') if isinstance(started, dict) else None} "
+            f"port={started.get('port') if isinstance(started, dict) else None}"
+        )
+        return {"ok": True, "data": app_info}
+    except (ValueError, RuntimeError) as e:
+        print(f"[AppsExtension] restart_app failed for {app_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @apps_bp.post('/api/apps/{app_id}/quit')
 async def quit_app(app_id: str, manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """

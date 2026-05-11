@@ -23,6 +23,7 @@ export interface SidebarShortcut extends UnknownRecord {
   app_id: string;
   label: string;
   url: string;
+  version: string;
   icon: ShortcutIcon | null;
   load: ShortcutLoad;
   last_used: number;
@@ -34,6 +35,7 @@ export interface SidebarShortcutPreference extends UnknownRecord {
   app_id?: string;
   label?: string;
   url?: string;
+  version?: string | number;
   icon?: ShortcutIcon | null;
   load?: ShortcutLoad | string;
   last_used?: number;

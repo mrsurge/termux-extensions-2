@@ -296,7 +296,13 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
         return {"ok": True, "client_id": client_id, "activeShortcutId": shortcut_id}
     if method == SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH:
         client_id = await _resolve_client_id(ns, sid, params)
-        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH, params, room=_client_room(client_id), skip_sid=sid)
+        # The host that requested refresh is also the iframe owner, so echo back.
+        await _emit_sidebar_control_notification(
+            ns,
+            SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH,
+            params,
+            room=_client_room(client_id),
+        )
         return {"ok": True}
     if method == SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN:
         await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN, params, skip_sid=sid)
@@ -325,7 +331,13 @@ async def _dispatch_sidebar_rpc_notification(ns, sid: str, method: str, params: 
         return
     if method == SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH:
         client_id = await _resolve_client_id(ns, sid, params)
-        await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH, params, room=_client_room(client_id), skip_sid=sid)
+        # The host that requested refresh is also the iframe owner, so echo back.
+        await _emit_sidebar_control_notification(
+            ns,
+            SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH,
+            params,
+            room=_client_room(client_id),
+        )
         return
     if method == SIDEBAR_IPC_RPC_NOTIFICATION_MENTION:
         await on_sidebar_mention(ns, sid, params)

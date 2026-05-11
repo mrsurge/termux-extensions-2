@@ -1413,9 +1413,17 @@
   .agent-drawer__refresh-menu {
     position: absolute;
     top: calc(100% + 4px);
-    right: 36px;
+    left: auto;
+    right: 0;
     min-width: 190px;
+    max-width: calc(100vw - 16px);
     z-index: 80;
+  }
+
+  .agent-drawer__refresh-menu .fe-dd-item {
+    justify-content: flex-end;
+    text-align: right;
+    white-space: nowrap;
   }
 
   .agent-drawer__chrome {

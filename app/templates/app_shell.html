@@ -727,9 +727,73 @@
             });
         }
 
+        function sidebarShortcutVersion() {
+            try {
+                return new URLSearchParams(window.location.search).get('te2_sidebar_version') || '';
+            } catch (_) {
+                return '';
+            }
+        }
+
+        function withSidebarShortcutVersion(rawUrl, version, baseUrl) {
+            if (!version || !rawUrl || typeof rawUrl !== 'string') return rawUrl;
+            const trimmed = rawUrl.trim();
+            if (!trimmed || trimmed.startsWith('#') || /^(?:data|blob|javascript|mailto|tel):/i.test(trimmed)) {
+                return rawUrl;
+            }
+            try {
+                const parsed = new URL(trimmed, baseUrl || window.location.href);
+                if (parsed.origin !== window.location.origin) return rawUrl;
+                parsed.searchParams.set('te2_sidebar_version', version);
+                return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+            } catch (_) {
+                return rawUrl;
+            }
+        }
+
+        function rewriteSrcsetWithSidebarShortcutVersion(value, version, baseUrl) {
+            if (!version || !value || typeof value !== 'string') return value;
+            return value.split(',').map(candidate => {
+                const trimmed = candidate.trim();
+                if (!trimmed) return candidate;
+                const match = trimmed.match(/^(\S+)(\s+.*)?$/);
+                if (!match) return candidate;
+                const rewritten = withSidebarShortcutVersion(match[1], version, baseUrl);
+                return `${rewritten}${match[2] || ''}`;
+            }).join(', ');
+        }
+
+        function rewriteTemplateVersionedAssets(templateText, templateUrl, version) {
+            if (!version) return templateText;
+            try {
+                const templateElement = document.createElement('template');
+                templateElement.innerHTML = templateText;
+                const baseUrl = new URL(templateUrl, window.location.origin).toString();
+                templateElement.content.querySelectorAll('link[href]').forEach(el => {
+                    const raw = el.getAttribute('href') || '';
+                    const next = withSidebarShortcutVersion(raw, version, baseUrl);
+                    if (next !== raw) el.setAttribute('href', next);
+                });
+                templateElement.content.querySelectorAll('script[src], img[src], source[src]').forEach(el => {
+                    const raw = el.getAttribute('src') || '';
+                    const next = withSidebarShortcutVersion(raw, version, baseUrl);
+                    if (next !== raw) el.setAttribute('src', next);
+                });
+                templateElement.content.querySelectorAll('img[srcset], source[srcset]').forEach(el => {
+                    const raw = el.getAttribute('srcset') || '';
+                    const next = rewriteSrcsetWithSidebarShortcutVersion(raw, version, baseUrl);
+                    if (next !== raw) el.setAttribute('srcset', next);
+                });
+                return templateElement.innerHTML;
+            } catch (_) {
+                return templateText;
+            }
+        }
+
         async function loadApp() {
             try {
                 if (!appId) throw new Error('App ID not available for app shell');
+                const sidebarVersion = sidebarShortcutVersion();
                 const response = await fetch('/api/apps');
                 const result = await response.json();
                 if (!result.ok) throw new Error(result.error);
@@ -742,15 +806,17 @@
                 const templatePath = assetBaseUrl
                     ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_template.replace(/^\/+/, '')}`
                     : `/apps/${appDef._dir}/${appDef.entrypoints.frontend_template}`;
-                const template = await fetch(templatePath).then(res => res.text());
-                appContainer.innerHTML = template;
+                const templateUrl = withSidebarShortcutVersion(templatePath, sidebarVersion, window.location.href);
+                const template = await fetch(templateUrl, sidebarVersion ? { cache: 'reload' } : undefined).then(res => res.text());
+                appContainer.innerHTML = rewriteTemplateVersionedAssets(template, templateUrl, sidebarVersion);
                 window.refreshAppShellLayoutMetrics?.();
 
                 if (appDef.entrypoints.frontend_script) {
                     const scriptPath = assetBaseUrl
                         ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_script.replace(/^\/+/, '')}`
                         : `/apps/${appDef._dir}/${appDef.entrypoints.frontend_script}`;
-                    const module = await import(scriptPath);
+                    const scriptUrl = withSidebarShortcutVersion(scriptPath, sidebarVersion, window.location.href);
+                    const module = await import(scriptUrl);
                     const api = {
                         get: (endpoint) => teFetch(`/api/app/${appId}/${endpoint}`),
                         post: (endpoint, body) => teFetch(`/api/app/${appId}/${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),

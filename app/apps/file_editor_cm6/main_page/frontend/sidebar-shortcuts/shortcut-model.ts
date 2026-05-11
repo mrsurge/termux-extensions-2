@@ -40,6 +40,7 @@ export function collectShortcuts(uiPrefs: UnknownRecord): SidebarShortcut[] {
       app_id: appId,
       label,
       url,
+      version: normStr(sc.version),
       icon: sc.icon && typeof sc.icon === 'object' && !Array.isArray(sc.icon) ? sc.icon as SidebarShortcut['icon'] : null,
       load: normalizeLoad(sc.load),
       header: true,

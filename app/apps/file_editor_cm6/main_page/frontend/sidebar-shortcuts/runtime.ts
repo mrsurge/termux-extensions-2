@@ -23,6 +23,7 @@ import {
   SHORTCUT_KIND_URL,
   SHORTCUT_LOAD_EAGER,
   SHORTCUT_LOAD_LAZY,
+  SIDEBAR_SHORTCUT_VERSION_PARAM,
   SIDEBAR_SETUP_HINT_DEFAULT,
   SIDEBAR_SETUP_TITLE_DEFAULT,
   UI_PREF_KEY_ACTIVE,
@@ -108,6 +109,33 @@ function errorMessage(error: unknown, fallback: string): string {
 
 function eventTargetElement(event: Event): Element | null {
   return event.target instanceof Element ? event.target : null;
+}
+
+function shortcutVersion(value: unknown): string {
+  const version = _normStr(value);
+  return version ? version : '';
+}
+
+function versionedShortcutUrl(url: string, version: unknown): string {
+  const stamp = shortcutVersion(version);
+  if (!stamp) return url;
+  try {
+    const hasExplicitScheme = /^[a-z][a-z0-9+.-]*:/i.test(url);
+    const isProtocolRelative = url.startsWith('//');
+    const origin = window.location.origin || 'http://localhost';
+    const parsed = new URL(url, origin);
+    parsed.searchParams.set(SIDEBAR_SHORTCUT_VERSION_PARAM, stamp);
+    if (!hasExplicitScheme && !isProtocolRelative) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+    return parsed.toString();
+  } catch (_) {
+    const hashIndex = url.indexOf('#');
+    const base = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+    const hash = hashIndex >= 0 ? url.slice(hashIndex) : '';
+    const sep = base.includes('?') ? (base.endsWith('?') || base.endsWith('&') ? '' : '&') : '?';
+    return `${base}${sep}${encodeURIComponent(SIDEBAR_SHORTCUT_VERSION_PARAM)}=${encodeURIComponent(stamp)}${hash}`;
+  }
 }
 
 export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): SidebarShortcutsRuntime {
@@ -737,6 +765,37 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     _sendUiPrefUpdate(UI_PREF_KEY_SHORTCUTS, next);
   }
 
+  function _shortcutMatches(candidate: unknown, shortcut: SidebarShortcut | null): boolean {
+    if (!shortcut || !candidate || typeof candidate !== 'object') return false;
+    const sc = candidate as UnknownRecord;
+    const candidateId = _normStr(sc.id);
+    const candidateUrl = _normStr(sc.url);
+    return (
+      (!!shortcut.id && candidateId === shortcut.id)
+      || (!!shortcut.url && candidateUrl === shortcut.url)
+      || (!!shortcut.key && (candidateId === shortcut.key || candidateUrl === shortcut.key))
+    );
+  }
+
+  function _bumpShortcutVersion(shortcut: SidebarShortcut | null): SidebarShortcut | null {
+    if (!shortcut) return null;
+    const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS]) ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS] : [];
+    const nextVersion = String(Date.now());
+    let changed = false;
+    const next = raw.map((sc) => {
+      if (!_shortcutMatches(sc, shortcut)) return sc;
+      changed = true;
+      return { ...(sc as UnknownRecord), version: nextVersion };
+    });
+    if (!changed) return { ...shortcut, version: nextVersion };
+
+    _latestUiPrefs = { ..._latestUiPrefs, [UI_PREF_KEY_SHORTCUTS]: next };
+    _shortcutsCache = next.filter((sc): sc is SidebarShortcutPreference => !!sc && typeof sc === 'object');
+    _sendUiPrefUpdate(UI_PREF_KEY_SHORTCUTS, next);
+    const refreshed = _resolveActive(_latestUiPrefs, _collectShortcuts(_latestUiPrefs));
+    return refreshed || { ...shortcut, version: nextVersion };
+  }
+
   function _closeHeaderIconMenu() {
     if (!sidebarHeaderIconMenuEl) return;
     sidebarHeaderIconMenuEl.classList.remove('show');
@@ -806,6 +865,8 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     _closeHeaderIconMenu();
     _closeRefreshMenu();
 
+    const uiPrefs = _latestUiPrefs || {};
+    const active = _resolveActive(uiPrefs, _collectShortcuts(uiPrefs));
     const menu = sidebarRefreshMenuEl;
     const flush = document.createElement('div');
     flush.className = 'fe-dd-item';
@@ -817,6 +878,19 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       _requestSidebarControl(SIDEBAR_IPC_RPC_METHODS.activeShortcutRefresh, { flushCache: true, source: 'sidebar_refresh_menu' });
     });
     menu.appendChild(flush);
+
+    if (active && active.kind === SHORTCUT_KIND_FRAMEWORK_APP && _normStr(active.app_id)) {
+      const restart = document.createElement('div');
+      restart.className = 'fe-dd-item';
+      restart.textContent = 'Restart app';
+      restart.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _closeRefreshMenu();
+        void _restartActiveFrameworkShortcut();
+      });
+      menu.appendChild(restart);
+    }
 
     menu.classList.add('show');
   }
@@ -922,6 +996,38 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       return true;
     } catch (e) {
       toast(errorMessage(e, `Failed to stop app ${id}`));
+      return false;
+    }
+  }
+
+  async function _restartFrameworkApp(appId: unknown) {
+    const id = _normStr(appId);
+    if (!id) return false;
+    try {
+      _startingApps.delete(id);
+      const stop = await _fetchJson<UnknownRecord>(`/api/apps/${encodeURIComponent(id)}/quit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!stop.resp.ok || !stop.body?.ok) {
+        const detail = stop.body?.detail || stop.body?.error || `Failed to stop app ${id}`;
+        if (stop.resp.status !== 404) throw new Error(String(detail));
+      }
+      _applyRunningDelta(id, false);
+
+      const start = await _fetchJson<UnknownRecord>(`/api/apps/${encodeURIComponent(id)}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!start.resp.ok || !start.body?.ok) {
+        const detail = start.body?.detail || start.body?.error || `Failed to start app ${id}`;
+        throw new Error(String(detail));
+      }
+      _applyRunningDelta(id, true);
+      toast(`Restarted ${id}`);
+      return true;
+    } catch (e) {
+      toast(errorMessage(e, `Failed to restart app ${id}`));
       return false;
     }
   }
@@ -1391,7 +1497,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     } catch (_) {
       return entry;
     }
-    const nextEntry = { iframe: nextIframe, url: _normStr(sc.url), loaded: false };
+    const nextEntry = { iframe: nextIframe, url: versionedShortcutUrl(_normStr(sc.url), sc.version), loaded: false };
     _iframeMap.set(sc.key, nextEntry);
     return nextEntry;
   }
@@ -1401,13 +1507,14 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     const url = _normStr(sc.url);
     if (!url) return false;
     const forceReload = !!options.forceReload;
+    const loadUrl = versionedShortcutUrl(url, sc.version);
 
     if (sc.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
       const onBeforeStart = typeof options.onBeforeStart === 'function' ? options.onBeforeStart : null;
       const appId = _normStr(sc.app_id);
       if (!appId) return false;
 
-      if (entry.loaded && _runningCachePrimed && _runningCache instanceof Set && _runningCache.has(appId)) {
+      if (!forceReload && entry.loaded && _runningCachePrimed && _runningCache instanceof Set && _runningCache.has(appId)) {
         return true;
       }
 
@@ -1432,14 +1539,16 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       }
 
       if (forceReload || !entry.loaded || startedNow) {
-        entry.iframe.src = url;
+        entry.url = loadUrl;
+        entry.iframe.src = loadUrl;
         entry.loaded = true;
       }
       return true;
     }
 
     if (!forceReload && entry.loaded) return true;
-    entry.iframe.src = url;
+    entry.url = loadUrl;
+    entry.iframe.src = loadUrl;
     entry.loaded = true;
     return true;
   }
@@ -1463,7 +1572,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     const flushCache = !!options.flushCache;
     const uiPrefs = _latestUiPrefs || {};
     const shortcuts = _collectShortcuts(uiPrefs);
-    const active = _resolveActive(uiPrefs, shortcuts);
+    let active = _resolveActive(uiPrefs, shortcuts);
     if (!active || !active.key) {
       _updateSetupPlaceholder(uiPrefs, false, 'setup');
       return false;
@@ -1477,6 +1586,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     if (!entry || !entry.iframe) return false;
 
     if (flushCache) {
+      active = _bumpShortcutVersion(active) || active;
       entry = _replaceShortcutIframe(active, entry);
     }
 
@@ -1486,6 +1596,41 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     const ok = await _ensureIframeLoadedForShortcut(active, entry, {
       forceReload: true,
       forceRunningCheck: active.kind === SHORTCUT_KIND_FRAMEWORK_APP,
+      onBeforeStart: () => _updateSetupPlaceholder(uiPrefs, false, 'loading', active),
+    });
+    _updateSetupPlaceholder(uiPrefs, !!ok, ok ? 'ready' : 'setup', active);
+    return !!ok;
+  }
+
+  async function _restartActiveFrameworkShortcut() {
+    const uiPrefs = _latestUiPrefs || {};
+    const shortcuts = _collectShortcuts(uiPrefs);
+    let active = _resolveActive(uiPrefs, shortcuts);
+    if (!active || active.kind !== SHORTCUT_KIND_FRAMEWORK_APP || !_normStr(active.app_id)) {
+      return false;
+    }
+    _updateSetupPlaceholder(uiPrefs, false, 'loading', active);
+
+    const restarted = await _restartFrameworkApp(active.app_id);
+    if (!restarted) {
+      _updateSetupPlaceholder(uiPrefs, false, 'setup', active);
+      return false;
+    }
+
+    let entry = _iframeMap.get(active.key);
+    if (!entry) {
+      await _syncIframesAndActivate(uiPrefs, shortcuts, active);
+      entry = _iframeMap.get(active.key);
+    }
+    if (!entry || !entry.iframe) {
+      _updateSetupPlaceholder(uiPrefs, false, 'setup', active);
+      return false;
+    }
+    active = _bumpShortcutVersion(active) || active;
+    entry = _replaceShortcutIframe(active, entry);
+    const ok = await _ensureIframeLoadedForShortcut(active, entry, {
+      forceReload: true,
+      forceRunningCheck: true,
       onBeforeStart: () => _updateSetupPlaceholder(uiPrefs, false, 'loading', active),
     });
     _updateSetupPlaceholder(uiPrefs, !!ok, ok ? 'ready' : 'setup', active);
@@ -1517,15 +1662,16 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
         const iframe = document.createElement('iframe');
         _configureShortcutIframeElement(iframe, sc);
         stack.appendChild(iframe);
-        entry = { iframe, url: sc.url, loaded: false };
+        entry = { iframe, url: versionedShortcutUrl(sc.url, sc.version), loaded: false };
         _iframeMap.set(sc.key, entry);
       }
+      const loadUrl = versionedShortcutUrl(sc.url, sc.version);
       const prevUrl = entry.url;
-      entry.url = sc.url;
+      entry.url = loadUrl;
       _configureShortcutIframeElement(entry.iframe, sc);
 
-      if (entry.loaded && prevUrl && prevUrl !== sc.url) {
-        entry.iframe.src = sc.url;
+      if (entry.loaded && prevUrl && prevUrl !== loadUrl) {
+        entry.iframe.src = loadUrl;
       }
     });
 
@@ -2634,6 +2780,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
         const idx = next.findIndex((x) => x && x.id === id);
         const existing = idx >= 0 ? next[idx] : null;
         const lastUsed = Number.isFinite(Number(existing?.last_used)) ? Number(existing?.last_used) : 0;
+        const version = shortcutVersion(existing?.version);
 
         const entry = {
           id,
@@ -2642,6 +2789,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
           app_id: kind === SHORTCUT_KIND_FRAMEWORK_APP ? appId : '',
           label,
           url,
+          version,
           icon,
           load,
           last_used: lastUsed,
