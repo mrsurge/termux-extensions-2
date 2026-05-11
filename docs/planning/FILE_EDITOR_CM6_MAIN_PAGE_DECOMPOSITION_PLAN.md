@@ -320,9 +320,12 @@ First backend extraction targets:
 4. `git_routes.py`
    - branch/status/diff-base/stage/commit/push/pull/reset/remote endpoints
    - reason: large route family with a clear `git_helper` dependency
+   - completed: strict git route factory now lives at `main_page/backend/git_routes.py`; `main.py` assembles git helper/cache/history dependencies and includes the router instead of owning the route bodies
+   - cleanup carried with slice: removed unreachable stale state-payload code after `/git/init` that could not execute and referenced invalid locals
 5. `history_routes.py` and `debug_routes.py`
    - recent files/history/sidecar/debug project endpoints
    - reason: low product risk and removes a lot of tail routes
+   - completed: strict history/debug route factory now lives at `main_page/backend/history_routes.py`; it owns recent-project inspection/deletion, recent-file history, raw history dump, raw project sidecar dump, and combined raw debug state endpoints
 6. `file_routes.py`
    - `/read`
    - `/write`

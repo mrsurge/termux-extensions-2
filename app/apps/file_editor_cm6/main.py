@@ -16,6 +16,9 @@ from .explorer.services.file_ops import get_project_root, set_project_root, mark
 from .code_server_shell_manager import ensure_code_server_shell
 from .git_helper import (
     GitError,
+    is_git_repository,
+    get_worktree_changes,
+    get_commit_info,
     list_branches as git_list_branches,
     checkout_branch as git_checkout_branch,
     create_branch as git_create_branch_helper,
@@ -31,10 +34,9 @@ from .git_helper import (
     restore_path,
     get_commits,
     reset_hard,
-    is_git_repository,
     init_repository,
-    get_worktree_changes,
-    get_commit_info,
+    add_remote as git_add_remote,
+    get_origin_url as git_get_origin_url,
 )
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache, collect_diff
@@ -55,6 +57,8 @@ from .main_page.backend.state_payload import (
 )
 from .main_page.backend.workbench_routes import WorkbenchRoutesDeps, create_workbench_router
 from .main_page.backend.project_routes import ProjectRoutesDeps, create_project_router
+from .main_page.backend.git_routes import GitRoutesDeps, create_git_router
+from .main_page.backend.history_routes import HistoryRoutesDeps, create_history_router
 
 IGNORE_PATTERNS = [
     '.git', '__pycache__', 'node_modules', '.venv', 'venv',
@@ -556,6 +560,38 @@ def _expand_and_validate_path(path: str) -> tuple[str | None, str | None]:
     return expand_and_validate_path(path)
 
 
+_GIT_ROUTES_DEPS = GitRoutesDeps(
+    history=_history_store,
+    get_active_project_root=_get_active_project_root,
+    get_project_root=get_project_root,
+    list_branches=git_list_branches,
+    checkout_branch=git_checkout_branch,
+    create_branch=git_create_branch_helper,
+    get_status=git_get_status,
+    stage_all=git_stage_all,
+    unstage_all=git_unstage_all,
+    commit_changes=git_commit_changes,
+    push_changes=git_push_changes,
+    pull_changes=git_pull_changes,
+    stage_paths=stage_paths,
+    unstage_paths=unstage_paths,
+    get_commits_for_path=get_commits_for_path,
+    restore_path=restore_path,
+    get_commits=get_commits,
+    reset_hard=reset_hard,
+    is_git_repository=is_git_repository,
+    init_repository=init_repository,
+    get_commit_info=get_commit_info,
+    add_remote=git_add_remote,
+    get_origin_url=git_get_origin_url,
+    status_to_payload=_status_to_payload,
+    diff_base_payload=_diff_base_payload,
+    invalidate_diff_cache=invalidate_diff_cache,
+    mark_git_cache_dirty=mark_git_cache_dirty,
+)
+file_editor_cm6_bp.include_router(create_git_router(_GIT_ROUTES_DEPS))
+
+
 async def _close_active_terminal_sockets_for_project_routes() -> None:
     from .terminal_backend import close_active_terminal_sockets
 
@@ -608,6 +644,15 @@ _PROJECT_ROUTES_DEPS = ProjectRoutesDeps(
     create_project=_create_project_for_project_routes,
 )
 file_editor_cm6_bp.include_router(create_project_router(_PROJECT_ROUTES_DEPS))
+
+_HISTORY_ROUTES_DEPS = HistoryRoutesDeps(
+    history=_history_store,
+    get_project_root=get_project_root,
+    format_label=HistoryStore.format_label,
+    get_sidecar_path=ProjectSidecar.get_sidecar_path,
+    load_sidecar=ProjectSidecar.load_or_create,
+)
+file_editor_cm6_bp.include_router(create_history_router(_HISTORY_ROUTES_DEPS))
 
 @file_editor_cm6_bp.get('/')
 def status_root():
@@ -881,434 +926,6 @@ async def ws_read(websocket: WebSocket):
         forward_task.cancel()
         unsubscribe(token)
         print(f"[ws/read] closed path={path} client={client_id}", file=sys.stderr)
-
-@file_editor_cm6_bp.get('/git/branches')
-def git_branches():
-    try:
-        project_root = _get_active_project_root()
-        info = git_list_branches(project_root)
-        return {"ok": True, "data": {"current": info.current, "branches": info.branches}}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@file_editor_cm6_bp.post('/git/checkout')
-async def git_checkout_route(data: JsonDict = Body(...)):
-    name = (data.get('name') or '').strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Branch name required")
-    try:
-        project_root = _get_active_project_root()
-        info = git_checkout_branch(project_root, name)
-        return {"ok": True, "data": {"current": info.current, "branches": info.branches}}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@file_editor_cm6_bp.post('/git/branch')
-async def git_create_branch_route(data: JsonDict = Body(...)):
-    name = (data.get('name') or '').strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Branch name required")
-    try:
-        project_root = _get_active_project_root()
-        info = git_create_branch_helper(project_root, name)
-        return {"ok": True, "data": {"current": info.current, "branches": info.branches}}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-@file_editor_cm6_bp.get('/git/status')
-def git_status_route():
-    try:
-        project_root = _get_active_project_root()
-        status = git_get_status(project_root)
-        return {"ok": True, "data": _status_to_payload(status)}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@file_editor_cm6_bp.get('/git/diff_base')
-def git_diff_base_route():
-    project_path = _history_store.get_active_project()
-    return {"ok": True, "data": _diff_base_payload(project_path)}
-
-
-@file_editor_cm6_bp.post('/git/diff_base')
-def git_set_diff_base_route(payload: JsonDict = Body(...)):
-    project_path = _history_store.get_active_project()
-    if not project_path:
-        raise HTTPException(status_code=400, detail="No project selected")
-
-    ref = (payload.get('ref') or 'HEAD').strip() or 'HEAD'
-    project_root = _get_active_project_root()
-    if not is_git_repository(project_root):
-        raise HTTPException(status_code=400, detail="Not a git repository")
-
-    if ref != 'HEAD':
-        try:
-            commit = get_commit_info(project_root, ref)
-        except GitError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        if not commit:
-            raise HTTPException(status_code=400, detail="Commit not found")
-
-    _history_store.set_diff_base(project_path, ref)
-    invalidate_diff_cache(project_root)
-    mark_git_cache_dirty(project_root)
-    return {"ok": True, "data": _diff_base_payload(project_path)}
-
-
-@file_editor_cm6_bp.post('/git/stage_all')
-def git_stage_all_route():
-    try:
-        project_root = _get_active_project_root()
-        status = git_stage_all(project_root)
-        return {"ok": True, "data": _status_to_payload(status)}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@file_editor_cm6_bp.post('/git/unstage_all')
-def git_unstage_all_route():
-    try:
-        project_root = _get_active_project_root()
-        status = git_unstage_all(project_root)
-        return {"ok": True, "data": _status_to_payload(status)}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@file_editor_cm6_bp.post('/git/commit')
-async def git_commit_route(data: JsonDict = Body(...)):
-    message = (data.get('message') or '').strip()
-    amend = bool(data.get('amend'))
-    if not message:
-        raise HTTPException(status_code=400, detail="Commit message required")
-    try:
-        project_root = _get_active_project_root()
-        status = git_commit_changes(project_root, message, amend=amend)
-        return {"ok": True, "data": _status_to_payload(status)}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@file_editor_cm6_bp.post('/git/push')
-async def git_push_route(data: JsonDict = Body(...)):
-    remote = (data.get('remote') or '').strip() or None
-    branch = (data.get('branch') or '').strip() or None
-    force = bool(data.get('force'))
-    try:
-        project_root = _get_active_project_root()
-        status = git_push_changes(project_root, remote=remote, branch=branch, force=force)
-        return {"ok": True, "data": _status_to_payload(status)}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@file_editor_cm6_bp.post('/git/pull')
-async def git_pull_route(data: JsonDict = Body(...)):
-    remote = (data.get('remote') or '').strip() or None
-    branch = (data.get('branch') or '').strip() or None
-    rebase = bool(data.get('rebase'))
-    try:
-        project_root = _get_active_project_root()
-        status = git_pull_changes(project_root, remote=remote, branch=branch, rebase=rebase)
-        return {"ok": True, "data": _status_to_payload(status)}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-
-@file_editor_cm6_bp.get('/debug/projects')
-def debug_projects():
-    """Return recent projects plus associated sidecar metadata (debugging helper)."""
-    try:
-        projects = _history_store.list_projects()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read recent projects: {exc}")
-
-    active_project = _history_store.get_active_project()
-
-    results: list[JsonDict] = []
-    for entry in projects:
-        project_path = entry.get("path")
-        project_path_str = project_path if isinstance(project_path, str) else None
-        label = entry.get("label") or HistoryStore.format_label(project_path_str)
-        opened_at = entry.get("opened_at")
-
-        sidecar_path = None
-        sidecar_exists = False
-        session_count = None
-        last_boot_at = None
-        draft_count = 0
-
-        if project_path_str:
-            try:
-                sc_path = ProjectSidecar.get_sidecar_path(project_path_str)
-                sidecar_path = str(sc_path)
-                sidecar_exists = sc_path.exists()
-                if sidecar_exists:
-                    sc = ProjectSidecar.load_or_create(project_path_str)
-                    session_count = sc.session_count
-                    last_boot_at = sc.last_boot_at
-                    draft_count = sc.get_draft_count()
-            except Exception:
-                # Sidecar issues should not block listing history.
-                pass
-
-        is_active = bool(
-            project_path_str
-            and active_project
-            and str(project_path_str) == str(active_project)
-        )
-
-        results.append(
-            {
-                "path": project_path_str,
-                "label": label,
-                "opened_at": opened_at,
-                "sidecar_path": sidecar_path,
-                "sidecar_exists": sidecar_exists,
-                "session_count": session_count,
-                "last_boot_at": last_boot_at,
-                "draft_count": draft_count,
-                "is_active": is_active,
-            }
-        )
-
-    return {"ok": True, "data": results}
-
-
-@file_editor_cm6_bp.delete('/debug/projects')
-def debug_delete_project(payload: JsonDict = Body(...)):
-    """Delete or reset a project entry from history and its sidecar (debugging helper).
-
-    Semantics:
-    - If the project is NOT the active project:
-        * Remove it from HistoryStore (projects + recent_projects).
-        * Delete its sidecar file entirely.
-    - If the project IS the active project:
-        * Reset its per-project history (files, last_file, diff_base, origin).
-        * Clear its session_cache and tracked_jobs in the sidecar and reset diff_base.
-        * Keep the sidecar file and the project entry so the app still \"knows\" about it.
-    """
-    project_path = (payload or {}).get("path")
-    if not project_path:
-        raise HTTPException(status_code=400, detail="path is required")
-
-    active_project = _history_store.get_active_project()
-    is_active = bool(
-        project_path
-        and active_project
-        and str(project_path) == str(active_project)
-    )
-
-    removed = False
-    sidecar_deleted = False
-    history_reset = False
-
-    if is_active:
-        # Do not remove the active project; instead reset its history + sidecar
-        try:
-            history_reset = _history_store.reset_project_history(project_path)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to reset project history: {exc}")
-
-        try:
-            sidecar = ProjectSidecar.load_or_create(project_path)
-            sidecar.clear_session_cache()
-            sidecar.clear_tracked_jobs()
-            sidecar.set_diff_base("HEAD")
-            sidecar.save()
-        except Exception:
-            # Sidecar failures are non-fatal for debug tooling.
-            pass
-    else:
-        # Non-active projects are fully removed along with their sidecars.
-        try:
-            removed = _history_store.remove_project(project_path)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Failed to remove project: {exc}")
-
-        try:
-            sc_path = ProjectSidecar.get_sidecar_path(project_path)
-            if sc_path.exists():
-                sc_path.unlink()
-                sidecar_deleted = True
-        except Exception:
-            # Sidecar deletion failures are non-fatal for a debug endpoint.
-            sidecar_deleted = False
-
-    return {
-        "ok": True,
-        "data": {
-            "removed": removed,
-            "sidecar_deleted": sidecar_deleted,
-            "history_reset": history_reset,
-            "is_active": is_active,
-        },
-    }
-
-@file_editor_cm6_bp.post('/git/stage')
-async def git_stage_route(data: JsonDict = Body(...)):
-    paths = data.get('paths', [])
-    if not paths:
-        raise HTTPException(status_code=400, detail="Paths required")
-    try:
-        project_root = _get_active_project_root()
-        status = stage_paths(project_root, paths)
-        mark_git_cache_dirty(project_root)
-        return {"ok": True, "data": _status_to_payload(status)}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-@file_editor_cm6_bp.post('/git/unstage')
-async def git_unstage_route(data: JsonDict = Body(...)):
-    paths = data.get('paths', [])
-    if not paths:
-        raise HTTPException(status_code=400, detail="Paths required")
-    try:
-        project_root = _get_active_project_root()
-        status = unstage_paths(project_root, paths)
-        mark_git_cache_dirty(project_root)
-        return {"ok": True, "data": _status_to_payload(status)}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-@file_editor_cm6_bp.get('/git/commits_for_path')
-async def git_commits_for_path(path: str = Query(...), limit: int = Query(20)):
-    try:
-        project_root = _get_active_project_root()
-        commits = get_commits_for_path(project_root, path, limit)
-        return {"ok": True, "data": [
-            {
-                "hash": c.hash,
-                "short_hash": c.short_hash,
-                "summary": c.summary,
-                "author": c.author,
-                "date": c.date
-            }
-            for c in commits
-        ]}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-@file_editor_cm6_bp.post('/git/restore')
-async def git_restore_route(data: JsonDict = Body(...)):
-    path = data.get('path')
-    commit = data.get('commit', 'HEAD')
-    if not path:
-        raise HTTPException(status_code=400, detail="Path required")
-    try:
-        project_root = _get_active_project_root()
-        restore_path(project_root, path, commit)
-        mark_git_cache_dirty(project_root)
-        invalidate_diff_cache(project_root, path)
-        return {"ok": True, "data": {"path": path, "commit": commit}}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-@file_editor_cm6_bp.get('/git/commits')
-async def git_commits():
-    try:
-        project_root = _get_active_project_root()
-        commits = get_commits(project_root, limit=50)
-        return {"ok": True, "data": [
-            {
-                "hash": c.hash,
-                "short_hash": c.short_hash,
-                "summary": c.summary,
-                "author": c.author,
-                "date": c.date
-            }
-            for c in commits
-        ]}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-@file_editor_cm6_bp.post('/git/reset_hard')
-async def git_reset_hard_route(data: JsonDict = Body(...)):
-    commit = data.get('commit', 'HEAD')
-    try:
-        project_root = _get_active_project_root()
-        status = reset_hard(project_root, commit)
-        mark_git_cache_dirty(project_root)
-        invalidate_diff_cache(project_root)
-        return {"ok": True, "data": _status_to_payload(status)}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-@file_editor_cm6_bp.get('/git/is_repo')
-async def git_is_repo():
-    try:
-        project_root = _get_active_project_root()
-        is_repo = is_git_repository(project_root)
-        return {"ok": True, "data": {"is_repo": is_repo}}
-    except Exception as exc:
-        return {"ok": True, "data": {"is_repo": False}}
-
-@file_editor_cm6_bp.post('/git/init')
-async def git_init_route():
-    try:
-        project_root = _get_active_project_root()
-        status = init_repository(project_root)
-        mark_git_cache_dirty(project_root)
-        return {"ok": True, "data": _status_to_payload(status)}
-    except GitError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
-    state = history.get_session_state()
-    
-    # If we have an active project, check/refresh its origin cache
-    active_project_path = history.get_active_project()
-    project_origin = None
-    if active_project_path and os.path.isdir(active_project_path):
-        try:
-            from . import git_helper
-            if git_helper.is_git_repository(Path(active_project_path)):
-                project_origin = git_helper.get_origin_url(Path(active_project_path))
-                history.set_project_origin(active_project_path, project_origin)
-            else:
-                history.set_project_origin(active_project_path, None)
-        except Exception:
-            pass
-    else:
-        project_origin = history.get_project_origin(active_project_path)
-
-    return {
-        "ok": True,
-        "data": {
-            "activeProject": history.get_active_project(),
-            "activeProjectExists": bool(history.get_active_project() and os.path.isdir(history.get_active_project())),
-            "activeProjectLabel": HistoryStore.format_label(history.get_active_project()),
-            "projectOrigin": project_origin,
-            "currentPath": state.get("currentPath"),
-            "unsaved": state.get("unsaved"),
-            "recents": history.list_files(history.get_active_project()) if history.get_active_project() else [],
-            "gitDiffBase": diff_base_info,
-            "editorState": state,
-        }
-    }
-
-@file_editor_cm6_bp.post('/git/remote/add')
-async def add_git_remote(data: JsonDict = Body(...)):
-    name = data.get('name')
-    url = data.get('url')
-    if not name or not url:
-        raise HTTPException(status_code=400, detail="Name and URL required")
-    
-    root = get_project_root()
-    try:
-        from . import git_helper
-        git_helper.add_remote(root, name, url)
-        
-        # Refresh cache
-        history = _history_store
-        origin = git_helper.get_origin_url(root)
-        history.set_project_origin(str(root), origin)
-        
-        return {"ok": True}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.get('/state')
 async def get_editor_state_deprecated():
@@ -1855,96 +1472,6 @@ async def explorer_move_from(data: JsonDict = Body(...)):
         return {"ok": True, "data": result}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.get('/history/files')
-def get_recent_files():
-    """Get recent files for the current project."""
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    try:
-        files_raw = _history_store.list_files(str(project_root))
-        files: list[JsonDict] = []
-        for entry in files_raw:
-            entry_path = entry.get("path")
-            entry_path_str = entry_path if isinstance(entry_path, str) else None
-            files.append({
-                **entry,
-                "exists": bool(entry_path_str and Path(entry_path_str).is_file()),
-            })
-        return {"ok": True, "data": files}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@file_editor_cm6_bp.get('/history/raw')
-def get_history_raw():
-    """Return raw HistoryStore state (debug)."""
-    try:
-        return {"ok": True, "data": _history_store.dump_raw()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@file_editor_cm6_bp.get('/project/sidecar/raw')
-def get_project_sidecar_raw():
-    """Return raw ProjectSidecar state for the active project (debug)."""
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    try:
-        sidecar = ProjectSidecar.load_or_create(str(project_root))
-        return {"ok": True, "data": sidecar.dump_raw()}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@file_editor_cm6_bp.get('/debug/state/raw')
-def get_debug_state_raw():
-    """Return raw history + raw sidecar for the active project (debug)."""
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    try:
-        sidecar = ProjectSidecar.load_or_create(str(project_root))
-        return {
-            "ok": True,
-            "data": {
-                "history": _history_store.dump_raw(),
-                "sidecar": sidecar.dump_raw(),
-            },
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@file_editor_cm6_bp.post('/history/touch')
-async def touch_file_history(data: JsonDict = Body(...)):
-    """Add a file to the recent files list."""
-    path_value = data.get('path')
-    path = path_value if isinstance(path_value, str) else None
-    if not path:
-        raise HTTPException(status_code=400, detail="Path is required")
-
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    try:
-        entry = _history_store.record_file_activity(str(project_root), path)
-        return {"ok": True, "data": entry}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@file_editor_cm6_bp.delete('/history/file')
-def remove_file_history(path: str = Query(...)):
-    """Remove a file from the recent files list."""
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    try:
-        removed = _history_store.remove_file(str(project_root), path)
-        return {"ok": True, "data": {"removed": removed}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@file_editor_cm6_bp.delete('/history/files/all')
-def clear_all_file_history():
-    """Clear all recent files for the active project."""
-    project_root = _history_store.get_active_project() or str(get_project_root())
-    try:
-        cleared = _history_store.clear_all_files(str(project_root))
-        return {"ok": True, "data": {"cleared": cleared}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.get('/edit_tracker/status')
 def get_edit_tracker_status():
