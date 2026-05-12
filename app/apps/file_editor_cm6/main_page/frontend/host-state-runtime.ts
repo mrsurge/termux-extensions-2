@@ -94,16 +94,20 @@ export function createHostStateRuntime(deps: HostStateRuntimeDeps): HostStateRun
 
   function spinnerHide(ok: boolean): void {
     try {
-      const ui = hostWindow().__feLspSpinnerUi;
-      if (!ui) return;
+      const winRef = hostWindow();
+      winRef.__adapterConnected = Boolean(ok);
+      const ui = winRef.__feLspSpinnerUi;
+      if (!ui) {
+        updateLspSpinner();
+        return;
+      }
       if (ui.busyActivity === 'readiness' || ui.busyActivity === 'workbench_adapter' || ui.busyActivity === '') {
         ui.busyShow = false;
         ui.busyTitle = '';
         ui.busyActivity = '';
-        hostWindow().__adapterConnected = Boolean(ok);
         try { log(hostTs(), `[spinner] STOP request_id=- path=- reason=readiness_${ok ? 'ok' : 'fail'}`); } catch {}
         try {
-          const state = hostWindow().__feLspSpinnerState;
+          const state = winRef.__feLspSpinnerState;
           if (state?.hideTimer) {
             clearTimeout(state.hideTimer);
             state.hideTimer = null;
@@ -125,9 +129,7 @@ export function createHostStateRuntime(deps: HostStateRuntimeDeps): HostStateRun
     const payload = isRecord(detail) ? detail : {};
     const status = typeof payload.status === 'string' ? payload.status : '';
     log(hostTs(), '[adapter_state]', status, payload.error || '');
-    if (status === 'starting') {
-      spinnerSetStep('Starting adapter\u2026');
-    } else if (status === 'ready') {
+    if (status === 'ready') {
       workbenchAdapterReadyOk = true;
       spinnerHide(true);
       resolveAdapterReady(true);
@@ -135,6 +137,8 @@ export function createHostStateRuntime(deps: HostStateRuntimeDeps): HostStateRun
       workbenchAdapterReadyOk = false;
       spinnerHide(false);
       resolveAdapterReady(false);
+    } else if (status === 'starting' || status === 'connected') {
+      spinnerSetStep(status === 'connected' ? 'Connecting adapter\u2026' : 'Starting adapter\u2026');
     } else if (status === 'idle') {
       if (!workbenchAdapterReadyOk && !hostWindow().__adapterReadyResolve) {
         updateLspSpinner();
