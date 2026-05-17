@@ -316,6 +316,16 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     return await connection.request(UI_IPC_RPC_METHODS.hostDiagnosticsMention, payload || {}, 8000);
   }
 
+  async function requestBackendRecordFileActivity(payload: JsonObject = {}): Promise<unknown> {
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostStateFileActivityRecord, payload || {}, 8000);
+  }
+
+  async function requestBackendUpdateFileScroll(payload: JsonObject = {}): Promise<unknown> {
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostStateFileScrollUpdate, payload || {}, 8000);
+  }
+
   return {
     emitSidebarRpcRequest,
     emitSidebarRpcNotification,
@@ -332,5 +342,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     requestBackendEditorIssuesCommand,
     requestBackendEditorIssuesDump,
     requestBackendDiagnosticsMention,
+    requestBackendRecordFileActivity,
+    requestBackendUpdateFileScroll,
   };
 }

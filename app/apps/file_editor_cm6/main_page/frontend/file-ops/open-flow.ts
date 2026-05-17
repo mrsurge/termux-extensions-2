@@ -39,8 +39,7 @@ interface OpenFlowControllerDeps {
   getCurrentPath: () => string | null;
   setRestoredSessionActive: (flag: boolean) => void;
   setIndicatorInactive: () => void;
-  apiPost: (path: string, body: Record<string, unknown>) => Promise<unknown>;
-  apiGet: (path: string) => Promise<unknown>;
+  recordFileActivity: (payload: Record<string, unknown>) => Promise<unknown>;
   setCurrentPath: (path: string) => void;
   setCurrentPathExists: (exists: boolean) => void;
   setLastPickerPath: (path: string) => void;
@@ -139,7 +138,7 @@ export function createOpenFlowController(deps: OpenFlowControllerDeps) {
       deps.openWebSocket(resolvedTarget);
 
       try {
-        const activity = await deps.apiPost('state/file_activity', {
+        const activity = await deps.recordFileActivity({
           path: resolvedTarget,
           project: deps.getCachedProjectRoot() || projectState.activeProject,
         });

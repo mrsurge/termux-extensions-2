@@ -117,6 +117,20 @@ def build_server() -> FastMCP:
     async def te2_fws_log_tail(shell_id: str, stream: str = "both", lines: int = 200) -> dict:
         return await framework_shells.get_log_tail(shell_id=shell_id, stream=stream, lines=lines)
 
+    @server.tool(description="Write text to a live framework-shell stdin surface through the shared framework_shells manager. The eof flag is a low-level explicit close option.")
+    async def te2_fws_shell_write(
+        shell_id: str,
+        data: str = "",
+        append_newline: bool = False,
+        eof: bool = False,
+    ) -> dict:
+        return await framework_shells.write_input(
+            shell_id=shell_id,
+            data=data,
+            append_newline=append_newline,
+            eof=eof,
+        )
+
     @server.tool(description="Search framework shell logs directly via framework_shells manager.")
     async def te2_fws_log_search(
         shell_id: str,
@@ -148,6 +162,10 @@ def build_server() -> FastMCP:
         signature: str = "",
         exclude_query: str = "",
         exclude_signature: str = "",
+        include_io_metadata: bool = False,
+        include_stdin: bool = False,
+        include_timestamps: bool = False,
+        include_output_metadata: bool = False,
     ) -> dict:
         return await framework_shells.inspect_logs(
             shell_id=shell_id,
@@ -161,6 +179,10 @@ def build_server() -> FastMCP:
             signature=signature or None,
             exclude_query=exclude_query or None,
             exclude_signature=exclude_signature or None,
+            include_io_metadata=include_io_metadata,
+            include_stdin=include_stdin,
+            include_timestamps=include_timestamps,
+            include_output_metadata=include_output_metadata,
         )
 
     @server.tool(description="List available local TE2 app templates from the user-local templates directory.")

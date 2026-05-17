@@ -15,6 +15,8 @@ export const UI_IPC_RPC_METHODS = {
   hostEditorIssuesCommand: 'ui.host.editor.issues.command',
   hostEditorIssuesDump: 'ui.host.editor.issues.dump',
   hostDiagnosticsMention: 'ui.host.diagnostics.mention',
+  hostStateFileActivityRecord: 'ui.host.state.fileActivity.record',
+  hostStateFileScrollUpdate: 'ui.host.state.fileScroll.update',
 } as const;
 
 export const UI_IPC_RPC_NOTIFICATIONS = {

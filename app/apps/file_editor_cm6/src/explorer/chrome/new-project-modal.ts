@@ -26,24 +26,24 @@ function ensureStyle() {
             box-shadow: 0 20px 40px rgba(0,0,0,0.6);
             font-family: system-ui, -apple-system, sans-serif;
         }
-        .fe-modal-header { 
+        .fe-modal-header {
             padding: 16px 20px; font-weight: 600; font-size: 1.1rem;
-            border-bottom: 1px solid var(--border, #333); 
+            border-bottom: 1px solid var(--border, #333);
         }
         .fe-modal-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
-        .fe-modal-footer { 
-            padding: 16px 20px; display: flex; justify-content: flex-end; gap: 10px; 
+        .fe-modal-footer {
+            padding: 16px 20px; display: flex; justify-content: flex-end; gap: 10px;
             border-top: 1px solid var(--border, #333); background: rgba(255,255,255,0.02);
         }
         .fe-radio-group { display: flex; flex-direction: column; gap: 12px; }
-        .fe-radio-label { 
-            display: flex; align-items: center; gap: 10px; cursor: pointer; 
+        .fe-radio-label {
+            display: flex; align-items: center; gap: 10px; cursor: pointer;
             padding: 10px; border-radius: 6px; border: 1px solid transparent;
             transition: background 0.2s;
         }
         .fe-radio-label:hover { background: rgba(255,255,255,0.05); }
-        .fe-radio-label.checked { 
-            background: rgba(80, 120, 255, 0.15); 
+        .fe-radio-label.checked {
+            background: rgba(80, 120, 255, 0.15);
             border-color: var(--primary, #5078ff);
         }
         .fe-radio-input { accent-color: var(--primary, #5078ff); transform: scale(1.1); }
@@ -60,8 +60,8 @@ function ensureStyle() {
             transition: all 0.2s;
         }
         .fe-modal-btn:hover { background: var(--hover, #444); }
-        .fe-modal-btn.primary { 
-            background: var(--primary, #5078ff); border-color: var(--primary, #5078ff); color: white; 
+        .fe-modal-btn.primary {
+            background: var(--primary, #5078ff); border-color: var(--primary, #5078ff); color: white;
         }
         .fe-modal-btn.primary:hover { opacity: 0.9; }
         .fe-modal-hint { font-size: 0.85rem; color: var(--muted-foreground, #888); }

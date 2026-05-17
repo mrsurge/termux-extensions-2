@@ -137,7 +137,18 @@ def build_inspect_result(
         total_returned=len(records),
         summary=summary,
         stream_meta=stream_meta,
+        io_metadata=_coerce_io_metadata(payload.get("io_metadata")),
     )
+
+
+def _coerce_io_metadata(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    records: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            records.append(dict(item))
+    return records
 
 
 def _analyze_line(

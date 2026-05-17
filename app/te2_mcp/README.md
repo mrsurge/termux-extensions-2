@@ -19,7 +19,9 @@ Current tools:
 - `te2_fws_running`
 - `te2_fws_shell_get`
 - `te2_fws_log_tail`
+- `te2_fws_shell_write` (writes text to live shell stdin; explicit EOF remains a low-level option)
 - `te2_fws_log_search`
+- `te2_fws_log_inspect` (supports opt-in `include_io_metadata`, `include_stdin`, `include_timestamps`, and `include_output_metadata`)
 - `te2_apps_templates`
 - `te2_scaffold_proxy_wrapper`
 - `te2_validate_proxy_wrapper`

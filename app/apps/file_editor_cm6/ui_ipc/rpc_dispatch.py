@@ -13,6 +13,8 @@ from .rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_FILE_OPEN,
     UI_IPC_RPC_METHOD_HOST_FILE_RUN,
     UI_IPC_RPC_METHOD_HOST_FILE_SAVE,
+    UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD,
+    UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
     UiIpcRpcMethod,
     build_jsonrpc_error,
 )
@@ -27,6 +29,10 @@ from ..host.editor_actions_backend import (
 )
 from ..host.editor_preferences_backend import handle_host_editor_preference_request
 from ..host.file_ops_backend import handle_host_open_request, handle_host_save_request
+from ..host.state_backend import (
+    handle_host_file_activity_record_request,
+    handle_host_file_scroll_update_request,
+)
 from ..host.terminal_actions_backend import handle_host_run_active_file_request
 
 
@@ -99,6 +105,18 @@ async def dispatch_ui_ipc_rpc_request(
 
     if method == UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_MENTION:
         return await handle_host_diagnostics_mention_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD:
+        return await handle_host_file_activity_record_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE:
+        return await handle_host_file_scroll_update_request(
             params,
             source_name=source_name,
         )

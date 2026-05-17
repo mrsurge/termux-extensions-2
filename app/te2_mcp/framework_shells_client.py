@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Any
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from framework_shells import get_manager
+from framework_shells.auth import derive_api_token, get_secret
 
 try:
     from framework_shells.log_inspection import inspect_log_file
@@ -13,6 +19,46 @@ except Exception:  # pragma: no cover - compatibility fallback for older framewo
     inspect_log_file = None
 
 from .fws_log_analysis import build_inspect_result
+
+
+def _framework_api_base_url() -> str:
+    for name in ("FRAMEWORK_SHELLS_API_URL", "FRAMEWORK_SHELLS_FWS_SOCKETIO_URL", "TE_FRAMEWORK_URL"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value.rstrip("/")
+    return "http://127.0.0.1:8089"
+
+
+def _post_shell_input_sync(base_url: str, shell_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    quoted_shell_id = urllib.parse.quote(shell_id, safe="")
+    url = f"{base_url}/api/framework_shells/{quoted_shell_id}/input"
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Framework-Key": derive_api_token(get_secret()),
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        message = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"FWS API write failed ({exc.code}): {message}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"FWS API write failed: {exc}") from exc
+
+    parsed = json.loads(raw or "{}")
+    if not isinstance(parsed, dict):
+        raise RuntimeError("FWS API returned a non-object response")
+    return dict(parsed)
+
+
+async def _post_shell_input(base_url: str, shell_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return await asyncio.to_thread(_post_shell_input_sync, base_url, shell_id, payload)
 
 
 @dataclass(slots=True)
@@ -43,6 +89,71 @@ class FrameworkShellsClient:
         mgr = await get_manager()
         data = await mgr.get_log_tail(str(shell_id or "").strip(), stream=stream, lines=lines)
         return {"ok": True, "data": data, "source": "framework_shells.direct"}
+
+    async def write_input(
+        self,
+        shell_id: str,
+        *,
+        data: str = "",
+        append_newline: bool = False,
+        eof: bool = False,
+    ) -> dict[str, Any]:
+        """Write text to live framework-shell stdin; eof is an explicit low-level close option."""
+        mgr = await get_manager()
+        normalized_shell_id = str(shell_id or "").strip()
+        if not normalized_shell_id:
+            return {"ok": False, "error": "shell_id is required", "source": "framework_shells.direct"}
+        if eof and data:
+            return {
+                "ok": False,
+                "error": "Provide either data or eof=true, not both",
+                "source": "framework_shells.direct",
+            }
+
+        result_source = "framework_shells.direct"
+        try:
+            if eof:
+                result = await mgr.send_shell_eof(normalized_shell_id, source="te2_mcp")
+            else:
+                result = await mgr.write_to_shell(
+                    normalized_shell_id,
+                    str(data or ""),
+                    append_newline=bool(append_newline),
+                    source="te2_mcp",
+                )
+        except KeyError:
+            return {"ok": False, "error": f"Shell not found: {normalized_shell_id}", "source": "framework_shells.direct"}
+        except (RuntimeError, ValueError) as exc:
+            if "Live input unavailable" not in str(exc):
+                return {"ok": False, "error": str(exc), "source": "framework_shells.direct"}
+            try:
+                api_result = await _post_shell_input(
+                    _framework_api_base_url(),
+                    normalized_shell_id,
+                    {
+                        "eof": True,
+                        "source": "te2_mcp",
+                    }
+                    if eof
+                    else {
+                        "data": str(data or ""),
+                        "append_newline": bool(append_newline),
+                        "source": "te2_mcp",
+                    },
+                )
+                if api_result.get("ok") is not True:
+                    return {
+                        "ok": False,
+                        "error": str(api_result.get("error") or api_result),
+                        "source": "framework_shells.api",
+                    }
+                result_obj = api_result.get("data")
+                result = dict(result_obj) if isinstance(result_obj, dict) else api_result
+                result_source = "framework_shells.api"
+            except Exception as api_exc:
+                return {"ok": False, "error": str(api_exc), "source": "framework_shells.api"}
+
+        return {"ok": True, "data": result, "source": result_source}
 
     async def search_logs(
         self,
@@ -79,6 +190,10 @@ class FrameworkShellsClient:
         signature: str | None = None,
         exclude_query: str | None = None,
         exclude_signature: str | None = None,
+        include_io_metadata: bool = False,
+        include_stdin: bool = False,
+        include_timestamps: bool = False,
+        include_output_metadata: bool = False,
     ) -> dict[str, Any]:
         mgr = await get_manager()
         normalized_shell_id = str(shell_id or "").strip()
@@ -107,6 +222,10 @@ class FrameworkShellsClient:
                     signature=signature,
                     exclude_query=exclude_query,
                     exclude_signature=exclude_signature,
+                    include_io_metadata=include_io_metadata,
+                    include_stdin=include_stdin,
+                    include_timestamps=include_timestamps,
+                    include_output_metadata=include_output_metadata,
                 )
             mode = "tail"
         result = build_inspect_result(
@@ -137,7 +256,30 @@ class FrameworkShellsClient:
         signature: str | None,
         exclude_query: str | None,
         exclude_signature: str | None,
+        include_io_metadata: bool,
+        include_stdin: bool,
+        include_timestamps: bool,
+        include_output_metadata: bool,
     ) -> dict[str, Any]:
+        try:
+            return await mgr.inspect_logs(
+                shell_id,
+                stream=stream,
+                lines=lines,
+                query=None,
+                exclude_query=exclude_query,
+                regex=regex,
+                ignore_case=ignore_case,
+                format=format,
+                signature=signature,
+                exclude_signature=exclude_signature,
+                include_io_metadata=include_io_metadata,
+                include_stdin=include_stdin,
+                include_timestamps=include_timestamps,
+                include_output_metadata=include_output_metadata,
+            )
+        except TypeError:
+            pass
         if inspect_log_file is None:
             raise RuntimeError("framework_shells.log_inspection.inspect_log_file is unavailable")
         shell = await mgr.get_shell(shell_id)

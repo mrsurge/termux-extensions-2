@@ -97,6 +97,7 @@ class FwsLogInspectResult(BaseModel):
     total_returned: int = 0
     summary: FwsLogInspectSummary
     stream_meta: list[FwsLogStreamMeta] = Field(default_factory=list)
+    io_metadata: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FrameworkShellsConfig(BaseModel):

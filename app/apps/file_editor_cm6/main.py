@@ -1010,64 +1010,6 @@ async def update_preferences(payload: JsonDict = Body(...)):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-@file_editor_cm6_bp.post('/state/file_activity')
-async def record_file_activity(data: JsonDict = Body(...)):
-    """Persist last-opened file and recents for the active project."""
-    path = data.get('path')
-    if not path:
-        raise HTTPException(status_code=400, detail="Path is required")
-
-    project_path = data.get('project') or _history_store.get_active_project()
-    if not project_path:
-        raise HTTPException(status_code=400, detail="No project selected")
-
-    scroll_line = data.get('scroll_line') or data.get('scrollLine')
-    if scroll_line is not None:
-        try:
-            scroll_line = float(scroll_line)
-        except (TypeError, ValueError):
-            scroll_line = None
-
-    try:
-        project_root_path = Path(project_path).expanduser().resolve()
-        candidate_path = Path(path).expanduser().resolve()
-        if not str(candidate_path).startswith(str(project_root_path)):
-            raise HTTPException(status_code=400, detail="File is outside the project root")
-
-        entry = _history_store.record_file_activity(project_path, str(candidate_path), scroll_line=scroll_line)
-        state = _build_state_payload()
-        return {"ok": True, "data": {"entry": entry, "state": state}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@file_editor_cm6_bp.post('/state/file_scroll')
-async def update_file_scroll(data: JsonDict = Body(...)):
-    """Update just the scroll position for a file (debounced from frontend)."""
-    path = data.get('path')
-    scroll_line = data.get('scroll_line') or data.get('scrollLine')
-    
-    if not path:
-        raise HTTPException(status_code=400, detail="Path is required")
-    if scroll_line is None:
-        raise HTTPException(status_code=400, detail="scroll_line is required")
-
-    try:
-        scroll_line = float(scroll_line)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="scroll_line must be a number")
-
-    project_path = data.get('project') or _history_store.get_active_project()
-    if not project_path:
-        raise HTTPException(status_code=400, detail="No project selected")
-
-    try:
-        updated = _history_store.update_file_scroll_line(project_path, path, scroll_line)
-        return {"ok": True, "data": {"updated": updated}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @file_editor_cm6_bp.get('/diff')
 def get_diff(path: str = Query(...)):
     """Return git diff hunks for the requested file."""

@@ -17,7 +17,7 @@ export interface HostEditorEventsRuntimeDeps {
   setRestoredSessionPath: (path: string) => void;
   getCurrentPath: () => string;
   queueSessionStateUpdate: (partial: { scrollLine: number; scrollTop: number | null }) => void;
-  apiPost: (path: string, body?: JsonObject) => Promise<unknown>;
+  updateFileScroll: (payload: JsonObject) => Promise<unknown>;
   issuesBadgesEl: HTMLElement;
   setIssuesButtonsEnabled: (enabled: boolean) => void;
   toast: (message: string, timeoutMs?: number) => void;
@@ -243,7 +243,7 @@ export function createHostEditorEventsRuntime(deps: HostEditorEventsRuntimeDeps)
         } catch {}
 
         if (lastScrollState.line && lastScrollState.line > 0) {
-          await deps.apiPost('state/file_scroll', {
+          await deps.updateFileScroll({
             path: lastScrollState.path,
             scroll_line: lastScrollState.line,
           });
