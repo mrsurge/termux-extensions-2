@@ -1,0 +1,20 @@
+version: '1'
+shells:
+  app-worker:
+    backend: proc
+    cwd: /data/data/com.termux/files/home/test-projects/als_rs
+    command:
+    - sh
+    - -lc
+    - python -m agent_log_server_rs.bootstrap --port 12459
+    env:
+      TE_APP_ID: als-rs
+      TE_APP_WORKER_PORT: '12459'
+    subgroups:
+    - als-rs
+    - app-worker
+    readiness:
+      type: tcp_port
+      host: 127.0.0.1
+      port: 12459
+      timeout: 20.0

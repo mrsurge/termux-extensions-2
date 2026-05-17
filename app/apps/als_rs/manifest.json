@@ -1,0 +1,45 @@
+{
+  "name": "ALS-RS",
+  "id": "als-rs",
+  "version": "0.1.0",
+  "description": "Rust-backed Agent Log Server migration branch",
+  "shellspec": {
+    "app_worker": "shellspec/app_worker.yaml#app-worker"
+  },
+  "entrypoints": {
+    "backend_blueprint": "main.py",
+    "frontend_template": "template.html",
+    "frontend_script": "main.js"
+  },
+  "proxy_shell": {
+    "enabled": true,
+    "start_path": "/",
+    "health_path": "/api/health",
+    "rewrite": {
+      "enabled": true,
+      "path_prefixes": [
+        "/",
+        "/static/"
+      ],
+      "content_types": [
+        "text/html",
+        "javascript",
+        "application/json",
+        "text/css"
+      ],
+      "absolute_root_paths": [
+        "/api/",
+        "/ws/",
+        "/static/"
+      ],
+      "css_root_paths": [
+        "/static/"
+      ]
+    },
+    "socketio": {
+      "enabled": true,
+      "inject_path": false
+    }
+  },
+  "icon_text": "RS"
+}
