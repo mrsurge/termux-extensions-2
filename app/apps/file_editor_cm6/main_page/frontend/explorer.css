@@ -280,6 +280,18 @@
   margin-left: 0;
 }
 
+.fe-search-content-widget .search-widget .search-container,
+.fe-search-content-widget .search-widget .monaco-findInput,
+.fe-search-content-widget .search-widget .monaco-scrollable-element,
+.fe-search-content-widget .search-widget .monaco-inputbox,
+.fe-search-content-widget .search-widget .monaco-inputbox > .ibwrapper {
+  min-height: 28px !important;
+}
+
+.fe-search-content-widget .search-widget .monaco-inputbox > .ibwrapper > textarea.input {
+  min-height: 22px !important;
+}
+
 .fe-search-content-widget .query-details {
   margin-top: 8px;
 }
