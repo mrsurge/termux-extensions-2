@@ -1,0 +1,40 @@
+# Repo-local ripgrep hygiene.
+# These paths are generated, vendored, archived, or bundled publication output.
+# Use `rg --no-ignore` / `rg -uuu` or target a path directly when auditing one of them intentionally.
+
+# Dependency trees
+node_modules/
+app/apps/file_editor_cm6/node_modules/
+.venv314t/
+
+# Generated frontend bundles and package output
+build/
+**/build/
+te2.egg-info/
+app/apps/*/static/dist/
+app/apps/file_editor_cm6/static/dist/
+app/apps/file_editor_cm6/static/js/vendor/
+app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/dist/
+
+# Android bundled publication output
+android/app/src/main/assets/editor_static/
+android/app/build/
+
+# Broad third-party/vendor payloads
+app/static/vendor/
+app/apps/file_editor_cm6/vendor/highlightjs/
+app/apps/file_editor_cm6/vendor/hterm/
+app/apps/file_editor_cm6/monaco_editor/textmate/
+app/apps/terminal/vendor/
+app/apps/terminal_testing/vendor/
+
+# Historical archives and local backups
+OLD/
+OLD_EXPLORER/
+backups/
+.code_cm6/diagnostics/
+.tmp/
+
+# Local worktrees/scratch clones; search them explicitly when they are the target.
+worktrees/
+.tmp_fws_repo*/
