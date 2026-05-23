@@ -20,6 +20,9 @@ SIDEBAR_IPC_RPC_METHOD_CWD_SYNC: Final = "sidebar.cwd.sync"
 SIDEBAR_IPC_RPC_METHOD_FILE_OPEN: Final = "sidebar.file.open"
 SIDEBAR_IPC_RPC_METHOD_FILE_EDIT: Final = "sidebar.file.edit"
 SIDEBAR_IPC_RPC_METHOD_MENTION: Final = "sidebar.mention"
+SIDEBAR_IPC_RPC_METHOD_PROJECT_LOOKUP: Final = "sidebar.project.lookup"
+SIDEBAR_IPC_RPC_METHOD_PROJECT_OPEN: Final = "sidebar.project.open"
+SIDEBAR_IPC_RPC_METHOD_PROJECT_CREATE: Final = "sidebar.project.create"
 SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET: Final = "sidebar.activeShortcut.set"
 SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH: Final = "sidebar.activeShortcut.refresh"
 SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN: Final = "sidebar.drawer.open"
@@ -33,6 +36,9 @@ SidebarIpcRpcMethod = Literal[
     "sidebar.file.open",
     "sidebar.file.edit",
     "sidebar.mention",
+    "sidebar.project.lookup",
+    "sidebar.project.open",
+    "sidebar.project.create",
     "sidebar.activeShortcut.set",
     "sidebar.activeShortcut.refresh",
     "sidebar.drawer.open",
@@ -45,6 +51,7 @@ SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET: Final = "sidebar.cwd.set"
 SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE: Final = "sidebar.clientState"
 SIDEBAR_IPC_RPC_NOTIFICATION_MENTION: Final = "sidebar.mention"
 SIDEBAR_IPC_RPC_NOTIFICATION_FILE_OPEN: Final = "sidebar.file.open"
+SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED: Final = "sidebar.project.opened"
 SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH: Final = "sidebar.activeShortcut.refresh"
 SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE: Final = "sidebar.drawer.state"
 SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN: Final = "sidebar.drawer.open"
@@ -57,6 +64,7 @@ SidebarIpcRpcNotification = Literal[
     "sidebar.clientState",
     "sidebar.mention",
     "sidebar.file.open",
+    "sidebar.project.opened",
     "sidebar.activeShortcut.refresh",
     "sidebar.drawer.state",
     "sidebar.drawer.open",
@@ -71,6 +79,9 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     SIDEBAR_IPC_RPC_METHOD_FILE_OPEN,
     SIDEBAR_IPC_RPC_METHOD_FILE_EDIT,
     SIDEBAR_IPC_RPC_METHOD_MENTION,
+    SIDEBAR_IPC_RPC_METHOD_PROJECT_LOOKUP,
+    SIDEBAR_IPC_RPC_METHOD_PROJECT_OPEN,
+    SIDEBAR_IPC_RPC_METHOD_PROJECT_CREATE,
     SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET,
     SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH,
     SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN,
@@ -84,6 +95,7 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE,
     SIDEBAR_IPC_RPC_NOTIFICATION_MENTION,
     SIDEBAR_IPC_RPC_NOTIFICATION_FILE_OPEN,
+    SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED,
     SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH,
     SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE,
     SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN,

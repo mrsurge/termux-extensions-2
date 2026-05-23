@@ -19,6 +19,9 @@ from .sidebar_rpc_contract import (
     SIDEBAR_IPC_RPC_METHOD_FILE_EDIT,
     SIDEBAR_IPC_RPC_METHOD_FILE_OPEN,
     SIDEBAR_IPC_RPC_METHOD_MENTION,
+    SIDEBAR_IPC_RPC_METHOD_PROJECT_CREATE,
+    SIDEBAR_IPC_RPC_METHOD_PROJECT_LOOKUP,
+    SIDEBAR_IPC_RPC_METHOD_PROJECT_OPEN,
     SIDEBAR_IPC_RPC_METHOD_REGISTER,
     SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH,
     SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE,
@@ -30,6 +33,7 @@ from .sidebar_rpc_contract import (
     SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
     SIDEBAR_IPC_RPC_NOTIFICATION_MENTION,
     SIDEBAR_IPC_RPC_NOTIFICATION_PRESENCE,
+    SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED,
     SidebarIpcRpcProtocolError,
     build_jsonrpc_error,
     build_jsonrpc_notification,
@@ -219,6 +223,18 @@ async def _emit_sidebar_control_notification(ns, notification_method: str, paylo
     await _emit_rpc_notification(ns, notification_method, params, room=room, skip_sid=skip_sid)
 
 
+async def _emit_project_opened(ns, payload: dict[str, object], *, skip_sid: str | None = None) -> None:
+    params = dict(payload)
+    params.setdefault("ts", int(time.time() * 1000))
+    await _emit_rpc_notification(
+        ns,
+        SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED,
+        params,
+        room="sidebar_ipc",
+        skip_sid=skip_sid,
+    )
+
+
 async def route_backend_open_request(
     _ns,
     data: dict,
@@ -288,6 +304,33 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
     if method == SIDEBAR_IPC_RPC_METHOD_MENTION:
         await on_sidebar_mention(ns, sid, params)
         return {"ok": True}
+    if method == SIDEBAR_IPC_RPC_METHOD_PROJECT_LOOKUP:
+        from ..host.project_backend import handle_sidebar_project_lookup_request
+
+        return await handle_sidebar_project_lookup_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+        )
+    if method == SIDEBAR_IPC_RPC_METHOD_PROJECT_OPEN:
+        from ..host.project_backend import handle_sidebar_project_open_request
+
+        result = await handle_sidebar_project_open_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+        )
+        if isinstance(result, dict) and result.get("ok") is True:
+            await _emit_project_opened(ns, result)
+        return result
+    if method == SIDEBAR_IPC_RPC_METHOD_PROJECT_CREATE:
+        from ..host.project_backend import handle_sidebar_project_create_request
+
+        result = await handle_sidebar_project_create_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+        )
+        if isinstance(result, dict) and result.get("ok") is True and "resolved_path" in result:
+            await _emit_project_opened(ns, result)
+        return result
     if method == SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET:
         client_id = await _resolve_client_id(ns, sid, params)
         shortcut_id = _norm(params.get("shortcutId") or params.get("activeShortcutId"))

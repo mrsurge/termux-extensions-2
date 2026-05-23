@@ -182,6 +182,10 @@ const uiIpcConnections = createUiIpcConnections({
   ensureSocketIoLoaded,
   initConsoleBridge,
   getClientId: () => clientId,
+  onHostStateResync: async () => {
+    const state = await editorStateController.syncEditorState(true);
+    recentsController.broadcastRecentsUpdate(state);
+  },
 });
 function _emitSidebarRpcRequest(method: SidebarIpcRpcMethod, payload?: unknown) {
   uiIpcConnections.emitSidebarRpcRequest(method, asUnknownRecord(payload));
@@ -720,6 +724,14 @@ const projectSwitchController = createProjectSwitchController({
 
 // Expose for Explorer runtime (project:opened handler)
 projectSwitchController.installWindowHook();
+window.addEventListener('cm6:sidebar-project-opened', (event) => {
+  const detail = asUnknownRecord((event as CustomEvent<unknown>).detail);
+  const path = typeof detail.path === 'string' && detail.path.trim()
+    ? detail.path.trim()
+    : '';
+  if (!path) return;
+  void projectSwitchController.handleProjectOpened(path);
+});
 
 const editorStateController = createEditorStateController({
   getEditorState: () => editorState,
@@ -729,6 +741,7 @@ const editorStateController = createEditorStateController({
   getCurrentPath: () => currentPath,
   setCurrentPath: (path: string) => { _setHostCurrentPathOnly(path); },
   reconcileCurrentPath: (path: string) => { _applyHostActivePath(path, { forceToolbar: true }); },
+  requestBackendBootSnapshot: (payload?: UnknownRecord) => uiIpcConnections.requestBackendBootSnapshot(payload),
   requestBackendEditorGitBaselines: (payload: UnknownRecord) => uiIpcConnections.requestBackendEditorGitBaselines(payload),
   getEditorViewState: () => editorViewState,
   updatePreference: (key: string, value: unknown) => preferencesController.updatePreference(key, value),

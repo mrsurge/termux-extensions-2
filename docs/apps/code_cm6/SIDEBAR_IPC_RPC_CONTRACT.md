@@ -2,9 +2,9 @@
 
 ## Status
 
-Initial contract definition for the `/sidebar_ipc` cleanup.
+Typed contract definition for the live `/sidebar_ipc` lane.
 
-The live implementation still contains legacy Socket.IO event names such as `sidebar:event`, `sidebar:mention`, `sidebar:agent_open`, and `sidebar:cwd_get`. This document defines the typed JSON-RPC target that those event-name conventions should migrate toward before the physical Socket.IO transports are collapsed behind one app gateway path.
+The live implementation accepts typed JSON-RPC envelopes on `/sidebar_ipc`. Legacy `sidebar:*` event names are retired from the active source path.
 
 ## Transport
 
@@ -36,6 +36,7 @@ It owns:
 - active shortcut state and refresh requests
 - external/sidebar-originated file opens and edit notifications
 - external/sidebar-originated mentions
+- external/sidebar-originated project lookup/open/create requests, routed through backend project hooks
 - drawer open/close/toggle requests and state notifications
 
 It does not own:
@@ -65,6 +66,17 @@ It does not own:
 - `sidebar.mention`
   - External/sidebar-originated mention relay to sidebar listeners.
   - Params: `{ path? , rel? , line? , column? , source? , conversation_id? , text? }`.
+- `sidebar.project.lookup`
+  - Checks whether a path is an official known project root.
+  - Params: `{ path }`.
+  - Known means the history store contains the logical path and the project sidecar file exists.
+- `sidebar.project.open`
+  - Opens a known project root through backend project hooks.
+  - Params: `{ path }`.
+  - This refuses paths that are not in project history or have no sidecar.
+- `sidebar.project.create`
+  - Creates or optionally adopts a project from a target path through backend project hooks.
+  - Params: `{ path, adoptExisting?, open? }`.
 - `sidebar.activeShortcut.set`
   - Sets active shortcut state for a sidebar client id.
   - Params: `{ client_id? , shortcutId? , activeShortcutId? }`.
@@ -93,6 +105,9 @@ It does not own:
   - Params: same shape as `sidebar.mention` request.
 - `sidebar.file.open`
   - Params: normalized backend open payload for listeners that need visibility.
+- `sidebar.project.opened`
+  - Params: `{ path, resolved_path, state, source, ts }`.
+  - Sent after sidebar IPC successfully opens or creates-and-opens a project. Host clients consume this via their existing sidebar IPC frontend transport and run their own project-open resync.
 - `sidebar.activeShortcut.refresh`
   - Params: `{ client_id? , flushCache? , source? }`.
 - `sidebar.drawer.state`
@@ -100,22 +115,9 @@ It does not own:
 - `sidebar.drawer.open`, `sidebar.drawer.close`, `sidebar.drawer.toggle`
   - Params: `{ source? , ts? }`.
 
-## Compatibility Mapping
+## Project Ownership Rule
 
-Legacy event names should map as follows during migration:
-
-- `sidebar:register` -> `sidebar.register`
-- `sidebar:cwd_get` -> `sidebar.cwd.get`
-- `sidebar:cwd_set` -> `sidebar.cwd.sync` for client request, `sidebar.cwd.set` for server notification
-- `sidebar:agent_open` -> `sidebar.file.open`
-- `sidebar:agent_edit` -> `sidebar.file.edit`
-- `sidebar:mention` -> `sidebar.mention`
-- `sidebar:event { type: "active_shortcut:set" }` -> `sidebar.activeShortcut.set`
-- `sidebar:event { type: "refresh_active" }` -> `sidebar.activeShortcut.refresh`
-- `sidebar:event { type: "drawer:state" }` -> `sidebar.drawer.state`
-- `sidebar:event { type: "drawer:open" }` -> `sidebar.drawer.open`
-- `sidebar:event { type: "drawer:close" }` -> `sidebar.drawer.close`
-- `sidebar:event { type: "drawer:toggle" }` -> `sidebar.drawer.toggle`
+Sidebar IPC is only the transport edge for sidebar clients. Project lookup/open/create behavior is owned by backend project hooks that reuse the same history store, sidecar lookup, project-root switch, terminal cleanup, diagnostics stop, adapter termination, change-ledger clearing, and cwd fanout used by the existing backend project route family. Frontend synchronization after `sidebar.project.opened` happens over the receiving frontend's existing sidebar IPC transport.
 
 ## Implementation Files
 
@@ -127,6 +129,8 @@ Contract constants/parsers:
 Current implementation/source surfaces:
 
 - `app/apps/file_editor_cm6/ui_ipc/sidebar_ws.py`
+- `app/apps/file_editor_cm6/host/project_backend.py`
+- `app/apps/file_editor_cm6/main_page/backend/project_service.py`
 - `app/apps/file_editor_cm6/main_page/frontend/sidebar-shortcuts/runtime.ts`
 - `app/apps/file_editor_cm6/main_page/frontend/sidebar-shortcuts/`
 - `app/apps/file_editor_cm6/main_page/frontend/ui/sidebar-shortcuts-bootstrap.ts`

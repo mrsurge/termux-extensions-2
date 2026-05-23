@@ -642,6 +642,8 @@ _PROJECT_ROUTES_DEPS = ProjectRoutesDeps(
     emit_sidebar_cwd_set=_emit_sidebar_cwd_set_for_project_routes,
     build_state_payload=_build_state_payload,
     create_project=_create_project_for_project_routes,
+    format_label=HistoryStore.format_label,
+    get_sidecar_path=ProjectSidecar.get_sidecar_path,
 )
 file_editor_cm6_bp.include_router(create_project_router(_PROJECT_ROUTES_DEPS))
 

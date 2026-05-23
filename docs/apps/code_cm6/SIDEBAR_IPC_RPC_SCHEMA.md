@@ -4,7 +4,7 @@
 
 This is the schema-level companion to `SIDEBAR_IPC_RPC_CONTRACT.md`.
 
-It defines the JSON-RPC 2.0 envelope and payload shapes for the logical `/sidebar_ipc` namespace. The current live implementation may dual-emit legacy `sidebar:*` events during migration, but new clients should use the typed RPC event names described here.
+It defines the JSON-RPC 2.0 envelope and payload shapes for the logical `/sidebar_ipc` namespace. The current live implementation uses typed JSON-RPC event names; legacy `sidebar:*` events are not part of the active contract.
 
 ## Ownership
 
@@ -15,6 +15,7 @@ It defines the JSON-RPC 2.0 envelope and payload shapes for the logical `/sideba
 - active shortcut state and refresh requests
 - sidebar/external file-open and edit signals routed through backend host hooks
 - sidebar/external mention relay
+- sidebar/external project lookup, open, and create requests routed through backend project hooks
 - drawer open, close, toggle, and state notifications
 
 `/sidebar_ipc` does not own Explorer tree behavior, editor touch-selection behavior, host toolbar save/run/open behavior, WBA provider state, or terminal execution semantics.
@@ -157,6 +158,45 @@ Protocol error codes should follow JSON-RPC 2.0 conventions:
 }
 ```
 
+`ProjectPathPayload`:
+
+```json
+{
+  "path": "/absolute/or/~/project/path"
+}
+```
+
+`ProjectCreatePayload`:
+
+```json
+{
+  "path": "/desired/project/root",
+  "adoptExisting": false,
+  "open": true
+}
+```
+
+`ProjectLookupResult`:
+
+```json
+{
+  "ok": true,
+  "known": true,
+  "reason": null,
+  "project": {
+    "path": "/logical/history/path",
+    "label": "project",
+    "opened_at": "timestamp",
+    "is_active": false,
+    "directory_exists": true,
+    "sidecar": {
+      "exists": true,
+      "path": "/home/.../.cache/cm6_editor/projects/<sha>.json"
+    }
+  }
+}
+```
+
 ## Request Methods
 
 ### `sidebar.register`
@@ -278,6 +318,69 @@ Result:
 }
 ```
 
+### `sidebar.project.lookup`
+
+Checks whether a path is an official known project root. Known means exact history-store logical path match plus existing project sidecar.
+
+Params: `ProjectPathPayload`
+
+Result: `ProjectLookupResult`
+
+Miss result:
+
+```json
+{
+  "ok": true,
+  "known": false,
+  "reason": "not_in_history",
+  "project": {
+    "path": "/logical/path",
+    "sidecar": {
+      "exists": false,
+      "path": "/home/.../.cache/cm6_editor/projects/<sha>.json"
+    }
+  }
+}
+```
+
+Stable miss reasons include `invalid_path`, `not_in_history`, `sidecar_missing`, and `path_missing`.
+
+### `sidebar.project.open`
+
+Opens a known project root through backend project hooks. The sidebar IPC backend refuses paths that are not known with an existing sidecar.
+
+Params: `ProjectPathPayload`
+
+Success result:
+
+```json
+{
+  "ok": true,
+  "path": "/logical/history/path",
+  "resolved_path": "/resolved/project/root",
+  "state": {},
+  "project": {}
+}
+```
+
+Refusal result:
+
+```json
+{
+  "ok": false,
+  "reason": "sidecar_missing",
+  "lookup": {}
+}
+```
+
+### `sidebar.project.create`
+
+Creates or optionally adopts a project from a target path through backend project hooks.
+
+Params: `ProjectCreatePayload`
+
+Success result follows `sidebar.project.open` when `open` is true and includes `created` / `adopted` flags where applicable.
+
 ### `sidebar.activeShortcut.set`
 
 Sets active shortcut state for a sidebar client id.
@@ -397,6 +500,22 @@ Params: `MentionPayload`
 
 Params: normalized backend file-open visibility payload. This notification is for sidebar clients that need visibility into backend-routed opens; it must not become the source of truth for editor open state.
 
+### `sidebar.project.opened`
+
+Params:
+
+```json
+{
+  "path": "/logical/history/path",
+  "resolved_path": "/resolved/project/root",
+  "state": {},
+  "source": "sidebar_ipc_rpc",
+  "ts": 1778220000000
+}
+```
+
+Host clients consume this via the existing `/sidebar_ipc` frontend connection and run their own project-open resync. Sidebar IPC does not call host functions directly.
+
 ### `sidebar.activeShortcut.refresh`
 
 Params: `ActiveShortcutRefreshPayload`
@@ -425,26 +544,9 @@ Params: `DrawerPayload`
 
 Params: `DrawerPayload`
 
-## Legacy Compatibility Mapping
+## Retired Legacy Events
 
-During migration, these legacy event names map to typed RPC methods or notifications:
-
-| Legacy event | Legacy shape | RPC method / notification |
-| --- | --- | --- |
-| `sidebar:register` | `{ role, client_id }` | `sidebar.register` |
-| `sidebar:cwd_get` | `{}` | `sidebar.cwd.get` |
-| `sidebar:cwd_set` client request | `{ reason? }` | `sidebar.cwd.sync` |
-| `sidebar:cwd_set` server event | `{ cwd, reason, ts }` | `sidebar.cwd.set` |
-| `sidebar:agent_open` | `FileLocation` | `sidebar.file.open` |
-| `sidebar:agent_edit` | `FileLocation` | `sidebar.file.edit` |
-| `sidebar:mention` | `MentionPayload` | `sidebar.mention` |
-| `sidebar:event` | `{ type: "active_shortcut:set", payload }` | `sidebar.activeShortcut.set` |
-| `sidebar:event` | `{ type: "refresh_active", payload }` | `sidebar.activeShortcut.refresh` |
-| `sidebar:event` | `{ type: "client_state", payload }` | `sidebar.clientState` |
-| `sidebar:event` | `{ type: "drawer:state", payload }` | `sidebar.drawer.state` |
-| `sidebar:event` | `{ type: "drawer:open", payload }` | `sidebar.drawer.open` |
-| `sidebar:event` | `{ type: "drawer:close", payload }` | `sidebar.drawer.close` |
-| `sidebar:event` | `{ type: "drawer:toggle", payload }` | `sidebar.drawer.toggle` |
+Legacy `sidebar:*` Socket.IO event names are not part of this schema. New behavior must be added as typed JSON-RPC methods or `rpc.notify` notifications on `/sidebar_ipc`.
 
 ## Source Of Truth
 
@@ -458,6 +560,8 @@ Code TE2 implementation edge:
 - `app/apps/file_editor_cm6/ui_ipc/sidebar_ws.py`
 - `app/apps/file_editor_cm6/ui_ipc/ui_ipc_ws.py`
 - `app/apps/file_editor_cm6/main_page/frontend/connections/ui-ipc.ts`
+- `app/apps/file_editor_cm6/host/project_backend.py`
+- `app/apps/file_editor_cm6/main_page/backend/project_service.py`
 - `app/apps/file_editor_cm6/main_page/frontend/sidebar-shortcuts/runtime.ts`
 - `app/apps/file_editor_cm6/main_page/frontend/sidebar-shortcuts/`
 - `app/apps/file_editor_cm6/main_page/frontend/ui/sidebar-shortcuts-bootstrap.ts`

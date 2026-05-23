@@ -1,3 +1,8 @@
+import {
+  getBootSnapshotHostState,
+  requestHostBootSnapshot,
+} from './boot-snapshot.ts';
+
 interface HostEditorState extends Record<string, unknown> {
   activeProject?: string | null;
   activeProjectExists?: boolean;
@@ -16,6 +21,7 @@ interface EditorStateControllerDeps {
   getCurrentPath: () => string | null;
   setCurrentPath: (path: string) => void;
   reconcileCurrentPath?: (path: string) => void;
+  requestBackendBootSnapshot: (payload?: Record<string, unknown>) => Promise<unknown>;
   requestBackendEditorGitBaselines: (payload: Record<string, unknown>) => Promise<unknown>;
   getEditorViewState: () => HostEditorViewState | null;
   updatePreference: (key: string, value: unknown) => Promise<boolean>;
@@ -48,15 +54,20 @@ export function createEditorStateController(deps: EditorStateControllerDeps) {
     return nextState;
   }
 
+  async function requestSnapshotHostState(): Promise<HostEditorState | null> {
+    const snapshot = await requestHostBootSnapshot({
+      requestBackendBootSnapshot: (payload) => deps.requestBackendBootSnapshot(payload),
+    });
+    return getBootSnapshotHostState(snapshot) as HostEditorState | null;
+  }
+
   async function syncEditorState(forceRefresh = false): Promise<HostEditorState | null> {
     if (!forceRefresh && deps.getEditorState()) return deps.getEditorState();
     try {
-      const resp = await fetch('/api/app/file_editor_cm6/state', { cache: 'no-store' });
-      const json = asRecord(await resp.json());
-      const state = asRecord(json?.data) || {};
-      return hydrateEditorState(state as HostEditorState);
+      const state = await requestSnapshotHostState();
+      return hydrateEditorState(state);
     } catch (err) {
-      console.error('Failed to fetch editor state:', err);
+      console.error('Failed to fetch host snapshot state:', err);
       return hydrateEditorState(null);
     }
   }

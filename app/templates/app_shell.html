@@ -412,6 +412,21 @@
             return body.data;
         }
 
+        function appLifecycleEndpoint(targetAppId, action) {
+            return `/api/apps/${encodeURIComponent(String(targetAppId || '').trim())}/${action}`;
+        }
+
+        async function shutdownAppGroup(targetAppId) {
+            if (!String(targetAppId || '').trim()) {
+                throw new Error('Missing app id for quit');
+            }
+            return teFetch(appLifecycleEndpoint(targetAppId, 'quit'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}',
+            });
+        }
+
         async function fetchSettings() {
             try {
                 const data = await teFetch(SETTINGS_ENDPOINT);
@@ -505,7 +520,7 @@
             } catch (e) {
                 console.error('beforeExit handler error:', e);
             }
-            navigateFn();
+            await Promise.resolve(navigateFn());
         }
 
         window.addEventListener('beforeunload', (e) => {
@@ -531,11 +546,15 @@
 
         if (btnQuit) {
             btnQuit.addEventListener('click', () => {
-                fetch(`/api/apps/${appId}/quit`, {
-                    method: "POST",
-                }).catch(err => console.error('Failed to send quit signal:', err));
-                // Navigate home immediately
-                window.location.href = '/';
+                attemptExit(async () => {
+                    try {
+                        await shutdownAppGroup(appId);
+                    } catch (err) {
+                        console.error('Failed to send quit signal:', err);
+                        host.toast(`Failed to quit app: ${err.message || err}`);
+                    }
+                    window.location.href = '/';
+                });
             });
         }
 
@@ -667,8 +686,9 @@
                                 const card = btn.closest('.recents-card');
                                 const appIdToQuit = card.dataset.appId;
                                 if (appIdToQuit && confirm(`Quit ${appIdToQuit}? This will override any lock.`)) {
-                                    fetch(`/api/apps/${appIdToQuit}/quit`, { method: 'POST' })
-                                        .then(() => card.remove());
+                                    shutdownAppGroup(appIdToQuit)
+                                        .then(() => card.remove())
+                                        .catch(err => host.toast(`Error: ${err.message || err}`));
                                 }
                             });
                         });
@@ -700,7 +720,7 @@
                                 const runningApps = await teFetch('/api/apps/running');
                                 const unlockedApps = runningApps.filter(app => !app.locked);
                                 for (const app of unlockedApps) {
-                                    await fetch(`/api/apps/${app.app_id}/quit`, { method: 'POST' });
+                                    await shutdownAppGroup(app.app_id);
                                 }
                                 recentsModal.style.display = 'none';
                             } catch (err) {

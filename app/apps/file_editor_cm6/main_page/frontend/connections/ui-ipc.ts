@@ -30,6 +30,7 @@ interface UiIpcConnectionsDeps {
   ensureSocketIoLoaded: () => Promise<IoFactory | null | undefined>;
   initConsoleBridge: (args: ConsoleBridgeOptions) => unknown;
   getClientId: () => string;
+  onHostStateResync?: () => Promise<void> | void;
 }
 
 type UiIpcRpcConnection = ReturnType<typeof createUiIpcRpcConnection>;
@@ -45,6 +46,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   let uiIpcConnectPromise: Promise<UiIpcRpcConnection> | null = null;
   let consoleBridgePromise: Promise<void> | null = null;
   let consoleBridgeStarted = false;
+  let uiIpcHasConnectedOnce = false;
 
   function startMainPageConsoleBridge(): Promise<void> {
     if (consoleBridgeStarted) return Promise.resolve();
@@ -159,6 +161,9 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
       dispatchWindowCustomEvent('cm6:sidebar-mention', params);
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.fileOpen) {
       dispatchWindowCustomEvent('cm6:sidebar-file-open', params);
+    } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.projectOpened) {
+      dispatchWindowCustomEvent('cm6:sidebar-project-opened', params);
+      dispatchSidebarEvent({ type: method, payload: params });
     }
   }
 
@@ -210,6 +215,17 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         ensureSocketIoLoaded: deps.ensureSocketIoLoaded,
         onConnect: () => {
           console.log('[UI_IPC_RPC] main page connected');
+          if (uiIpcHasConnectedOnce) {
+            try {
+              void Promise.resolve(deps.onHostStateResync?.()).catch((error: unknown) => {
+                console.warn('[UI_IPC_RPC] host state resync failed', error);
+              });
+            } catch (error) {
+              console.warn('[UI_IPC_RPC] host state resync failed', error);
+            }
+            return;
+          }
+          uiIpcHasConnectedOnce = true;
         },
         onDisconnect: (reason) => {
           console.log('[UI_IPC_RPC] main page disconnected', reason);
