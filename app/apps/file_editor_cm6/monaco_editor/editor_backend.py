@@ -3,7 +3,6 @@
 import sys
 import os
 import hashlib
-import time
 import asyncio
 from pathlib import Path
 from typing import Optional, cast
@@ -32,7 +31,6 @@ from .editor_backend_services.editor_routes_service import (
     build_view_state_dict as _build_view_state_dict_service,
     handle_jump_to_line as _handle_jump_to_line,
     handle_search_open as _handle_search_open,
-    handle_set_active_project as _handle_set_active_project,
     handle_set_minimap_mode as _handle_set_minimap_mode,
     handle_set_read_only as _handle_set_read_only,
     handle_toggle_color_picker as _handle_toggle_color_picker,
@@ -924,22 +922,6 @@ async def save_current_file(data: dict[str, object] = Body(...)):
         get_preferences=_preferences_store.get_preferences,
         nicegui_broadcast=_broadcast_to_explorer,
     )
-
-
-@editor_router.post('/set_active_project')
-async def set_active_project(payload: dict[str, object] = Body(...)):
-    try:
-        from app.apps.file_editor_cm6.explorer.services.file_ops import set_project_root
-        from app.apps.file_editor_cm6.core_read import init_watcher
-
-        return _handle_set_active_project(
-            payload,
-            set_active_project=_history_store.set_active_project,
-            set_project_root=set_project_root,
-            init_watcher=init_watcher,
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @editor_router.post('/set_view_settings')

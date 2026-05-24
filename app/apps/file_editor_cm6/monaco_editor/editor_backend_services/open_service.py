@@ -6,13 +6,34 @@ from typing import Protocol
 
 from .contracts import EditorOpenFields, EditorOpenPayload
 from .payload_utils import get_opt_int, get_opt_str, get_str
+from ...open_state_backend import SidecarOpenStatePayload
 
 
 class EmitHostActiveFileChangedFn(Protocol):
     def __call__(
         self,
         project: str,
+        abs_path: str | None,
+        *,
+        source: str | None = None,
+        request_id: str | None = None,
+    ) -> Awaitable[None]: ...
+
+
+class RecordSidecarOpenFileFn(Protocol):
+    def __call__(
+        self,
+        project: str,
         abs_path: str,
+        *,
+        reason: str,
+    ) -> SidecarOpenStatePayload: ...
+
+
+class EmitOpenStateChangedFn(Protocol):
+    def __call__(
+        self,
+        open_state: SidecarOpenStatePayload,
         *,
         source: str | None = None,
         request_id: str | None = None,
@@ -77,7 +98,10 @@ async def emit_editor_open_from_backend(
     emit_editor_open: Callable[[EditorOpenPayload], Awaitable[None]],
     broadcast_active_file_update: Callable[[str, str], Awaitable[None]],
     emit_host_active_file_changed: EmitHostActiveFileChangedFn,
+    record_sidecar_open_file: RecordSidecarOpenFileFn,
+    emit_open_state_changed: EmitOpenStateChangedFn,
 ) -> EditorOpenPayload:
+    del set_last_file, broadcast_active_file_update, emit_host_active_file_changed
     normalized = dict(payload_in) if isinstance(payload_in, Mapping) else {}
     fields = coerce_editor_open_request_fields(
         normalized,
@@ -89,8 +113,8 @@ async def emit_editor_open_from_backend(
     project = fields["project"]
     path = fields["path"]
 
+    open_state = record_sidecar_open_file(project, path, reason="file_open")
     update_session_state({"currentPath": path})
-    set_last_file(project, path)
 
     payload = read_file_payload(project, path)
     payload["source_client"] = source_client
@@ -115,11 +139,6 @@ async def emit_editor_open_from_backend(
         payload["scroll_to_top"] = scroll_to_top
 
     await emit_editor_open(payload)
-    await broadcast_active_file_update(project, path)
-    await emit_host_active_file_changed(
-        project,
-        path,
-        source=get_str(normalized, "source", source_client),
-        request_id=request_id,
-    )
+    source = get_str(normalized, "source", source_client)
+    await emit_open_state_changed(open_state, source=source, request_id=request_id)
     return payload

@@ -32,6 +32,7 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   editorDiagnosticsCounts: 'ui.editor.diagnostics.counts',
   adapterState: 'ui.adapter.state',
   hostActiveFileChanged: 'ui.host.activeFile.changed',
+  openStateChanged: 'ui.openState.changed',
 } as const;
 
 type ValueOf<T> = T[keyof T];

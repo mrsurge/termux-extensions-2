@@ -85,11 +85,13 @@ async def handle_host_file_activity_record_request(
     except ValueError as exc:
         raise PermissionError("file is outside the project root") from exc
 
-    entry = history.record_file_activity(
-        project_path,
-        str(candidate_path),
-        scroll_line=_optional_scroll_line(data),
-    )
+    scroll_line = _optional_scroll_line(data)
+    if scroll_line is not None:
+        history.update_file_scroll_line(project_path, str(candidate_path), scroll_line)
+    entry: JsonMap = {
+        "path": str(candidate_path),
+        "label": HistoryStore.format_label(str(candidate_path)),
+    }
     return {
         "ok": True,
         "data": {

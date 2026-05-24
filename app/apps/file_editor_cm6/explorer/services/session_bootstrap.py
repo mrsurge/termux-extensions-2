@@ -7,8 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .file_ops import list_dir, set_project_root
-from ..transport.connection_manager import ExplorerConnection, abs_to_rel, manager
+from ..transport.connection_manager import ExplorerConnection, manager
 from ...project_sidecar import ProjectSidecar
+from ...open_state_backend import read_sidecar_open_state
 from ...stores import _history_store, _preferences_store
 from ..contracts.watcher import build_watcher_config_payload
 from ..context import AsyncNoArg, EmitPersonal
@@ -70,15 +71,14 @@ async def bootstrap_explorer_session(
         logger.warning("Failed to load open directories: %s", exc)
 
     try:
-        session_state = _history_store.get_session_state()
-        current_path = session_state.get("currentPath") if session_state else None
-        if current_path:
-            rel = abs_to_rel(str(current_path), str(resolved_project_root))
-            if rel and rel != ".":
-                await emit_personal(
-                    "explorer.activeFile.updated",
-                    {"rel": rel, "abs": str(current_path)},
-                )
+        open_state = read_sidecar_open_state(str(resolved_project_root), reason="reconnect")
+        await emit_personal("explorer.openState.changed", dict(open_state))
+        current_path = open_state["openFile"]
+        rel = open_state["openFileRel"]
+        await emit_personal(
+            "explorer.activeFile.updated",
+            {"rel": rel, "abs": current_path, "openState": dict(open_state)},
+        )
     except Exception as exc:
         logger.warning("Failed to rehydrate active file: %s", exc)
 

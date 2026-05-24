@@ -38,6 +38,7 @@ async def handle_project_open(
         params["path"],
         initialize_watcher=False,
         switch_adapter_workspace=True,
+        open_state_reason="explorer_project_open",
     )
     await context.emit_personal(
         "explorer.project.opened",
@@ -99,6 +100,7 @@ async def handle_git_clone(
         display_path=target_display,
         initialize_watcher=True,
         switch_adapter_workspace=False,
+        open_state_reason="explorer_git_clone",
     )
 
     await context.emit_personal(

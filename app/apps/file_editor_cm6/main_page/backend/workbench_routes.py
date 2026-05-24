@@ -36,6 +36,8 @@ class WorkbenchExtensionSidecarLike(Protocol):
 class HistoryStoreLike(Protocol):
     def get_active_project(self) -> str | None: ...
 
+    def get_last_file(self, project_path: str | None) -> str | None: ...
+
     def get_session_state(self) -> JsonObject: ...
 
     def get_project_sidecar(self, project_root: str) -> WorkbenchExtensionSidecarLike | None: ...
@@ -366,8 +368,7 @@ def create_workbench_router(deps: WorkbenchRoutesDeps) -> APIRouter:
         abs_path = str(path or "").strip()
         if not abs_path:
             try:
-                session_state = deps.history.get_session_state()
-                current_path = session_state.get("currentPath")
+                current_path = deps.history.get_last_file(project_root)
                 abs_path = current_path.strip() if isinstance(current_path, str) else ""
             except Exception:
                 abs_path = ""

@@ -586,7 +586,7 @@ Mitigation options (future work):
 
 ### 4.4 LSP Bridge (DocumentSymbols → Sticky Scroll)
 
-**Added:** 2025-12-08 (Kotlin + clangd support: 2025-12-20)
+**Added:** 2025-12-08 (clangd support: 2025-12-20; old Kotlin LSP notes are prune-only)
 
 Code CM6 can connect the CM6 iframe to a backend Language Server Protocol (LSP) process (stdin/stdout JSON-RPC) and use `textDocument/documentSymbol` to drive the Monaco-style **sticky scroll** scope overlay.
 
@@ -599,7 +599,7 @@ Code CM6 can connect the CM6 iframe to a backend Language Server Protocol (LSP) 
 
 **Key behaviors:**
 - **Project-scoped gate (SSOT):** LSP enablement is stored in the **ProjectSidecar** (per project root) under `lsp.enabled` (default false). There is no fallback to PreferencesStore for LSP toggles.
-- **Per-server toggles:** `lsp.servers.{pyright|typescript|clangd|kotlin}` are also stored per-project (default true) so the master toggle behaves like a blanket opt-in but servers can be selectively disabled.
+- **Per-server toggles:** supported LSP server toggles are stored per-project so the master toggle behaves like a blanket opt-in but servers can be selectively disabled. Old Kotlin LSP toggle fields are prune-only/no-op compatibility residue.
 - **UI control surface:** The host modal (`Language Servers…`) reflects the sidecar state and can start/stop servers manually (`POST /api/lsp/start`, `POST /api/lsp/stop`) for pre-warming or cleanup.
 - **Sticky scroll source:** If LSP `documentSymbol` data is present, sticky scroll uses it; otherwise it falls back to Lezer parsing / fold heuristics.
 - **Session model:** The `/lsp` Socket.IO namespace is stateless on the client; the backend keeps a long-lived per-(language, projectRoot) bridge session and can short-circuit repeat `initialize` calls on reconnects.
@@ -608,49 +608,18 @@ Code CM6 can connect the CM6 iframe to a backend Language Server Protocol (LSP) 
 - **Running-state indicator (websocket):** The Language Servers modal receives `lsp:status` snapshots over the explorer websocket bus and uses that to render Start/Stop button state without polling.
 - **New-project prompt:** When a project is first opened/created/cloned and a sidecar is created, the explorer emits `new_sidecar: true` and the host UI shows a top-banner prompt (20s) offering to open the Language Servers modal.
 
-#### Kotlin LSP (JetBrains kotlin-lsp)
+#### Kotlin LSP (prune-only / no-op)
 
-The JetBrains Kotlin LSP distribution is large (~600MB). The recommended approach is to vendor it under the repo at:
-- `app/static/vendor/lsp_servers/kotlin-lsp/kotlin-lsp.sh` (plus its `lib/` directory)
+Kotlin LSP is not a live supported path. Treat JetBrains `kotlin-lsp` and the old Kotlin LSP launch/configuration surface as a no-op that should be pruned, not validated or documented as installable runtime behavior.
 
-You can override discovery via:
-- `editor.kotlinLspPath` (absolute path to `kotlin-lsp.sh`)
-- `TE2_KOTLIN_LSP_SH` / `KOTLIN_LSP_SH` (absolute path)
-- `TE2_KOTLIN_LSP_HOME` / `KOTLIN_LSP_HOME` (directory containing `kotlin-lsp.sh` + `lib/`)
-
-**Termux install (example):**
-```bash
-pkg install unzip glibc-runner
-# Prefer the platform zip on Android (bundled JRE).
-scripts/vendor_kotlin_lsp.sh https://download-cdn.jetbrains.com/kotlin-lsp/261.13587.0/kotlin-lsp-261.13587.0-linux-aarch64.zip
-```
-
-**Ubuntu / desktop Linux install (example):**
-```bash
-sudo apt-get install -y unzip curl
-# Pick the zip that matches your CPU architecture:
-#   x86_64  -> linux-x64
-#   aarch64 -> linux-aarch64
-scripts/vendor_kotlin_lsp.sh https://download-cdn.jetbrains.com/kotlin-lsp/261.13587.0/kotlin-lsp-261.13587.0-linux-x64.zip
-```
-
-Then:
-- Enable LSP for the project via the host **Language Servers** modal (stores to the project sidecar).
-- (optional) set `editor.kotlinLspPath=...` if you installed Kotlin LSP somewhere else
-
-**Termux runtime notes (Android):**
-- The platform zip bundles a glibc-linked JRE; Code CM6 launches it via `grun` (glibc-runner) on Android.
-- Temp/cache directories are redirected under `~/.cache/te2_kotlin_lsp/<project-hash>/` (no `/tmp` assumptions, and avoids cross-workspace cache collisions).
-- Kotlin LSP is run in `--stdio` mode (single-client).
-- Some devices require SELinux permissive for Kotlin LSP file watching; Code CM6 currently attempts `sudo -n setenforce 0` on Android if `sudo` is available before launching Kotlin LSP. (UI gating/ack is planned.)
-- Optional run mode knob: `editor.kotlinLspIsolatedDocuments` (default true on Android) adds `--isolated-documents` to reduce workspace-wide coupling.
+Any remaining Kotlin LSP mentions in code or docs should be classified for removal unless they refer to non-LSP Kotlin language identification, syntax highlighting, Android/Kotlin source parsing, or historical migration notes.
 
 #### C/C++ LSP (clangd)
 
 Code CM6 supports C-family sticky scroll scopes via `clangd`:
 - `clangd` is expected to be available on PATH (Termux provides it; no vendoring required).
 - Extension mapping (examples): `.c` → `c`, `.cpp/.cc/.cxx/.h/.hpp/...` → `cpp`
-- The backend spawns `clangd` as a pipe shell and uses `textDocument/documentSymbol` the same way as Python/TypeScript/Kotlin.
+- The backend spawns `clangd` as a pipe shell and uses `textDocument/documentSymbol` through the supported LSP bridge path.
 
 ---
 

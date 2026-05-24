@@ -36,6 +36,8 @@ class HistoryStoreLike(Protocol):
 
     def get_active_project(self) -> str | None: ...
 
+    def get_last_file(self, project_path: str | None) -> str | None: ...
+
     def reset_project_history(self, project_path: str) -> bool: ...
 
     def remove_project(self, project_path: str) -> bool: ...
@@ -254,28 +256,46 @@ def create_history_router(deps: HistoryRoutesDeps) -> APIRouter:
 
         project_root = _active_project_or_root(deps)
         try:
-            entry = deps.history.record_file_activity(str(project_root), path)
-            return {"ok": True, "data": entry}
+            from ...monaco_editor.editor_ws import editor_runtime_emit_open_state_changed
+            from ...open_state_backend import write_sidecar_open_file
+
+            open_state = write_sidecar_open_file(str(project_root), path, reason="file_open")
+            await editor_runtime_emit_open_state_changed(open_state, source="history_touch")
+            return {"ok": True, "data": {"openState": dict(open_state)}}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @router.delete("/history/file", response_model=None)
-    def remove_file_history(path: str = Query(...)) -> JsonObject:
+    async def remove_file_history(path: str = Query(...)) -> JsonObject:
         """Remove a file from the recent files list."""
         project_root = _active_project_or_root(deps)
         try:
+            from ...monaco_editor.editor_ws import editor_runtime_emit_open_state_changed
+            from ...open_state_backend import clear_sidecar_open_file
+
+            active_before = deps.history.get_last_file(str(project_root))
             removed = deps.history.remove_file(str(project_root), path)
-            return {"ok": True, "data": {"removed": removed}}
+            open_state: dict[str, object] | None = None
+            if active_before and Path(active_before).expanduser().resolve(strict=False) == Path(path).expanduser().resolve(strict=False):
+                next_state = clear_sidecar_open_file(str(project_root), reason="no_file", require_existing_sidecar=False)
+                await editor_runtime_emit_open_state_changed(next_state, source="history_remove")
+                open_state = dict(next_state)
+            return {"ok": True, "data": {"removed": removed, "openState": open_state}}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @router.delete("/history/files/all", response_model=None)
-    def clear_all_file_history() -> JsonObject:
+    async def clear_all_file_history() -> JsonObject:
         """Clear all recent files for the active project."""
         project_root = _active_project_or_root(deps)
         try:
+            from ...monaco_editor.editor_ws import editor_runtime_emit_open_state_changed
+            from ...open_state_backend import clear_sidecar_open_file
+
             cleared = deps.history.clear_all_files(str(project_root))
-            return {"ok": True, "data": {"cleared": cleared}}
+            open_state = clear_sidecar_open_file(str(project_root), reason="no_file", require_existing_sidecar=False)
+            await editor_runtime_emit_open_state_changed(open_state, source="history_clear")
+            return {"ok": True, "data": {"cleared": cleared, "openState": dict(open_state)}}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 

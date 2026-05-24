@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .file_ops import get_project_root
 from ...project_sidecar import ProjectSidecar
-from ...stores import _history_store
+from ...stores import get_history_store
 from .runtime_notifications import notify_draft_state_changed
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,16 @@ logger = logging.getLogger(__name__)
 async def reset_project_session(new_project_path: str) -> bool:
     """Set the active project on explicit project switch."""
     normalized_path = os.path.abspath(os.path.expanduser(str(new_project_path)))
-    _history_store.set_active_project(normalized_path)
+    history_store = get_history_store()
+    history_store.set_active_project(normalized_path)
+    history_store.update_session_state(
+        {
+            "activeProject": normalized_path,
+            "currentPath": None,
+            "lastSha256": None,
+            "unsaved": False,
+        }
+    )
 
     was_new_sidecar = not ProjectSidecar.sidecar_exists(normalized_path)
     sidecar = ProjectSidecar.load_or_create(normalized_path)

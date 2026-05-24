@@ -23,11 +23,18 @@ def create_project_router(deps: ProjectRoutesDeps) -> APIRouter:
         path = payload_string(data, "path") or ""
 
         try:
+            file_target = (
+                payload_string(data, "file")
+                or payload_string(data, "file_path")
+                or payload_string(data, "fileTarget")
+                or payload_string(data, "targetFile")
+            )
             result = await open_project(
                 deps,
                 path,
                 require_known_sidecar=False,
                 reason="project_open",
+                file_target=file_target,
             )
             if result.get("ok") is not True:
                 raise ValueError(str(result.get("reason") or "project open failed"))

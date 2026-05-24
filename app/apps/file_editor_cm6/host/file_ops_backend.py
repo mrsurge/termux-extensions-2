@@ -16,8 +16,10 @@ from ..monaco_editor.editor_ws import (
     editor_runtime_normalize_abs_path,
     editor_runtime_notify_draft_state_changed,
     editor_runtime_read_file_payload,
+    editor_runtime_record_sidecar_open_file,
     editor_runtime_record_save_sha,
     editor_runtime_request_save_snapshot,
+    editor_runtime_emit_open_state_changed,
     editor_runtime_set_last_file,
     editor_runtime_update_session_state,
 )
@@ -102,6 +104,8 @@ async def handle_host_open_request(
         emit_editor_open=lambda open_payload: editor_runtime_emit_room_event("editor:open", cast(dict[str, object], open_payload)),
         broadcast_active_file_update=editor_runtime_broadcast_active_file_update,
         emit_host_active_file_changed=editor_runtime_emit_host_active_file_changed,
+        record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
+        emit_open_state_changed=editor_runtime_emit_open_state_changed,
     )
     return {
         'ok': True,

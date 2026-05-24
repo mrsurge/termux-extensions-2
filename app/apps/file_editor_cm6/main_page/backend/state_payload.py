@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ...git_helper import GitCommit, GitError, GitStatus
+from ...open_state_backend import read_sidecar_open_state
 
 JsonObject = dict[str, object]
 
@@ -109,7 +110,16 @@ def build_state_payload(deps: StatePayloadDeps) -> JsonObject:
             project_exists = False
             project_message = f'Project "{project_label or project_path}" not accessible.'
 
-    last_file = deps.history.get_last_file(project_path)
+    last_file: str | None = None
+    open_state_payload: JsonObject | None = None
+    if project_path:
+        try:
+            open_state = read_sidecar_open_state(project_path, reason="sidecar_replay")
+            open_state_payload = dict(open_state)
+            open_file = open_state.get("openFile")
+            last_file = open_file if isinstance(open_file, str) else None
+        except Exception:
+            last_file = None
     last_file_exists = bool(last_file and Path(last_file).is_file())
     last_file_label = deps.format_label(last_file)
     last_file_message = ""
@@ -140,6 +150,8 @@ def build_state_payload(deps: StatePayloadDeps) -> JsonObject:
         "activeProjectExists": project_exists,
         "activeProjectMessage": project_message,
         "lastFile": last_file,
+        "currentPath": last_file,
+        "openState": open_state_payload,
         "lastFileLabel": last_file_label,
         "lastFileExists": last_file_exists,
         "lastFileMessage": last_file_message,

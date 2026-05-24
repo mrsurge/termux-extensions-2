@@ -19,6 +19,12 @@ from ..ui_ipc.rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_EDITOR_OPEN_COMPLETE,
     UI_IPC_RPC_NOTIFICATION_EDITOR_READY,
     UI_IPC_RPC_NOTIFICATION_EDITOR_SCROLL_STATE,
+    UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
+)
+from ..open_state_backend import (
+    SidecarOpenStatePayload,
+    read_sidecar_open_state,
+    write_sidecar_open_file,
 )
 from .editor_open_backend import (
     EditorOpenPayload,
@@ -50,6 +56,7 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_MIRROR_UPDATED,
     EDITOR_RPC_NOTIFICATION_NOTIFY,
     EDITOR_RPC_NOTIFICATION_OPEN_COMPLETE,
+    EDITOR_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
     EDITOR_RPC_NOTIFICATION_PREFS_CHANGED,
     EDITOR_RPC_NOTIFICATION_READY,
     EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST,
@@ -175,22 +182,48 @@ async def _broadcast_active_file_update(project: str, abs_path: str) -> None:
         pass
 
 
+async def _emit_explorer_open_state_update(open_state: SidecarOpenStatePayload) -> None:
+    try:
+        from ..explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
+
+        project = open_state["projectPath"]
+        await emit_project_explorer_rpc_notification(
+            project,
+            "explorer.openState.changed",
+            dict(open_state),
+        )
+        await emit_project_explorer_rpc_notification(
+            project,
+            "explorer.activeFile.updated",
+            {
+                "rel": open_state["openFileRel"],
+                "abs": open_state["openFile"],
+                "openState": dict(open_state),
+            },
+        )
+    except Exception:
+        pass
+
+
 async def _emit_host_active_file_changed(
     project: str,
-    abs_path: str,
+    abs_path: str | None,
     *,
     source: str | None = None,
     request_id: str | None = None,
+    open_state: SidecarOpenStatePayload | None = None,
 ) -> None:
     try:
         from ..explorer.transport.connection_manager import abs_to_rel
         from ..ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
 
-        rel = abs_to_rel(abs_path, project)
+        rel = abs_to_rel(abs_path, project) if abs_path else None
         payload: dict[str, object] = {
             "path": abs_path,
             "rel": rel,
         }
+        if open_state is not None:
+            payload["openState"] = dict(open_state)
         if isinstance(source, str) and source:
             payload["source"] = source
         if isinstance(request_id, str) and request_id:
@@ -201,6 +234,53 @@ async def _emit_host_active_file_changed(
         )
     except Exception:
         pass
+
+
+async def _emit_open_state_changed(
+    open_state: SidecarOpenStatePayload,
+    *,
+    source: str | None = None,
+    request_id: str | None = None,
+) -> None:
+    payload: dict[str, object] = dict(open_state)
+    if isinstance(source, str) and source:
+        payload["source"] = source
+    if isinstance(request_id, str) and request_id:
+        payload["request_id"] = request_id
+    print(
+        "[open_state] emit "
+        f"source={source or ''} "
+        f"project={open_state.get('projectPath')} "
+        f"openFile={open_state.get('openFile')} "
+        f"revision={open_state.get('revision')}",
+        flush=True,
+    )
+
+    try:
+        await _emit_editor_rpc_notification_to_room(
+            EDITOR_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
+            payload,
+            room="file_editor_cm6",
+        )
+    except Exception:
+        pass
+
+    try:
+        await _emit_ui_ipc_editor_notification(
+            UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
+            payload,
+        )
+    except Exception:
+        pass
+
+    await _emit_explorer_open_state_update(open_state)
+    await _emit_host_active_file_changed(
+        open_state["projectPath"],
+        open_state["openFile"],
+        source=source,
+        request_id=request_id,
+        open_state=open_state,
+    )
 
 
 def _notify_draft_state_changed_safe(project: str) -> None:
@@ -228,13 +308,49 @@ def editor_runtime_set_last_file(project: str, abs_path: str) -> None:
     _history_store.set_last_file(project, abs_path)
 
 
+def editor_runtime_record_sidecar_open_file(
+    project: str,
+    abs_path: str,
+    *,
+    reason: str = "file_open",
+) -> SidecarOpenStatePayload:
+    return write_sidecar_open_file(project, abs_path, reason=reason)
+
+
 async def editor_runtime_broadcast_active_file_update(project: str, abs_path: str) -> None:
     await _broadcast_active_file_update(project, abs_path)
 
 
+async def editor_runtime_emit_open_state_changed(
+    open_state: SidecarOpenStatePayload,
+    *,
+    source: str | None = None,
+    request_id: str | None = None,
+) -> None:
+    await _emit_open_state_changed(open_state, source=source, request_id=request_id)
+
+
+async def editor_runtime_replay_sidecar_open_state(
+    project: str,
+    *,
+    reason: str = "sidecar_replay",
+    source: str | None = None,
+) -> dict[str, object]:
+    open_state = read_sidecar_open_state(project, reason=reason)
+    open_file = open_state["openFile"]
+    _history_store.update_session_state({"currentPath": open_file})
+    if open_file:
+        payload = _read_file_payload(project, open_file)
+        payload["reason"] = reason
+        payload["request_id"] = f"open_state_{int(time.time() * 1000)}"
+        await editor_runtime_emit_room_event("editor:open", payload)
+    await _emit_open_state_changed(open_state, source=source or reason)
+    return dict(open_state)
+
+
 async def editor_runtime_emit_host_active_file_changed(
     project: str,
-    abs_path: str,
+    abs_path: str | None,
     *,
     source: str | None = None,
     request_id: str | None = None,
@@ -263,7 +379,8 @@ def editor_runtime_git_head_text(project: str, abs_path: str) -> str | None:
 
 
 def editor_runtime_record_file_activity(project: str, abs_path: str, *, scroll_line: float | None = None) -> None:
-    _history_store.record_file_activity(project, abs_path, scroll_line=scroll_line)
+    if scroll_line is not None:
+        _history_store.update_file_scroll_line(project, abs_path, scroll_line)
 
 
 def editor_runtime_get_cached_document(project: str, abs_path: str) -> dict[str, object] | None:
@@ -309,11 +426,17 @@ def editor_runtime_build_connect_snapshot(*, role: str = "") -> dict[str, object
     project = _active_project()
     session_state = _history_store.get_session_state()
     prefs = _preferences_store.get_preferences(project) if project else {}
-    current_path = _history_store.get_last_file(project) if project else None
-    if not current_path:
-        current_path = session_state.get("currentPath")
-    if current_path and session_state.get("currentPath") != current_path:
+    open_state: SidecarOpenStatePayload | None = None
+    current_path: object = None
+    if project:
+        try:
+            open_state = read_sidecar_open_state(project, reason="reconnect")
+            current_path = open_state["openFile"]
+        except Exception:
+            current_path = None
+    if session_state.get("currentPath") != current_path:
         _history_store.update_session_state({"currentPath": current_path})
+        session_state = _history_store.get_session_state()
 
     snapshot: dict[str, object] = {
         "project": project,
@@ -321,6 +444,8 @@ def editor_runtime_build_connect_snapshot(*, role: str = "") -> dict[str, object
         "preferences": prefs,
         "currentPath": current_path,
     }
+    if open_state is not None:
+        snapshot["openState"] = dict(open_state)
     if role != "host" and project and current_path:
         abs_path = _normalize_abs_path(str(current_path))
         if abs_path and _is_under_project(project, abs_path):
@@ -538,6 +663,8 @@ async def emit_editor_open_from_backend(
         emit_editor_open=emit_editor_open or _emit_editor_open_to_default_room,
         broadcast_active_file_update=broadcast_active_file_update or _broadcast_active_file_update,
         emit_host_active_file_changed=emit_host_active_file_changed or _emit_host_active_file_changed,
+        record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
+        emit_open_state_changed=editor_runtime_emit_open_state_changed,
     )
 
 
@@ -798,18 +925,16 @@ async def handle_tracked_edit(edit_result: dict[str, object]) -> None:
         )
         print(f"[change_ledger] jump to {rel_path}:{line}", file=sys.stderr)
     else:
-        # Different file — update SSOT, then open with line target
-        _history_store.update_session_state({"currentPath": abs_path})
-        _history_store.set_last_file(project, abs_path)
+        # Different file: sidecar write is the authority, then derived projections follow.
+        open_state = write_sidecar_open_file(project, abs_path, reason="tracked_edit")
+        _history_store.update_session_state({"currentPath": open_state["openFile"]})
 
         payload = _read_file_payload(project, abs_path)
         payload["line"] = line
         payload["reason"] = "tracked_edit"
         payload["request_id"] = f"track_{int(time.time() * 1000)}"
         await editor_runtime_emit_room_event("editor:open", payload)
-
-        # Notify explorer so breadcrumb/toolbar filename updates
-        await _broadcast_active_file_update(project, abs_path)
+        await _emit_open_state_changed(open_state, source="change_ledger")
 
         print(f"[change_ledger] open+jump {rel_path}:{line}", file=sys.stderr)
 

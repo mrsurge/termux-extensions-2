@@ -29,18 +29,21 @@ class ExplorerProjectSwitchResult:
 
 
 async def switch_project_connection(
-    websocket: ExplorerConnection,
+    websocket: ExplorerConnection | None,
     project_path: str,
     *,
     display_path: str | None = None,
     initialize_watcher: bool,
     switch_adapter_workspace: bool,
+    open_state_reason: str = "project_open",
+    open_state_source: str = "explorer_project_open",
 ) -> ExplorerProjectSwitchResult:
     normalized_display_path = display_path or os.path.abspath(
         os.path.expanduser(str(project_path))
     )
 
-    manager.disconnect(websocket)
+    if websocket is not None:
+        manager.disconnect(websocket)
 
     try:
         from ...watchexec_shell_manager import stop_watchexec_shell
@@ -56,7 +59,9 @@ async def switch_project_connection(
         init_watcher(new_root)
 
     was_new_sidecar = await reset_project_session(normalized_display_path)
-    manager.register_existing(websocket, str(new_root))
+    if websocket is not None:
+        manager.register_existing(websocket, str(new_root))
+    manager.reassign_all(str(new_root))
 
     if switch_adapter_workspace:
         try:
@@ -74,6 +79,11 @@ async def switch_project_connection(
             )
 
     await _start_project_watchexec_if_needed(new_root)
+    await _replay_sidecar_open_state(
+        new_root,
+        reason=open_state_reason,
+        source=open_state_source,
+    )
 
     return ExplorerProjectSwitchResult(
         project_root=new_root,
@@ -100,6 +110,20 @@ async def _start_project_watchexec_if_needed(project_root: Path) -> None:
             )
     except Exception as exc:
         logger.warning("[project_open] watchexec start failed: %s", exc)
+
+
+async def _replay_sidecar_open_state(
+    project_root: Path,
+    *,
+    reason: str,
+    source: str,
+) -> None:
+    editor_module = importlib.import_module("app.apps.file_editor_cm6.monaco_editor.editor_ws")
+    replay_obj = getattr(editor_module, "editor_runtime_replay_sidecar_open_state", None)
+    if not callable(replay_obj):
+        raise RuntimeError("editor_runtime_replay_sidecar_open_state unavailable")
+    replay = cast(Callable[..., Awaitable[object | None]], replay_obj)
+    await replay(str(project_root), reason=reason, source=source)
 
 
 def _sidecar_data_dict(sidecar: ProjectSidecar) -> dict[object, object] | None:

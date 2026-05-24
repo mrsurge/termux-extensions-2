@@ -66,6 +66,12 @@ async def _emit_sidebar_cwd_set(reason: str) -> None:
     await sidebar_ws.emit_sidebar_cwd_set_global(reason=reason)
 
 
+async def _emit_explorer_project_opened(payload: JsonMap) -> None:
+    from ..explorer.transport.rpc_emit import emit_explorer_rpc_notification
+
+    await emit_explorer_rpc_notification("explorer.project.opened", payload)
+
+
 def _create_project(parent_path: str, name: str) -> dict[str, object]:
     from ..explorer.services import file_ops
 
@@ -93,6 +99,7 @@ def _project_service_deps() -> ProjectServiceDeps:
         create_project=_create_project,
         format_label=HistoryStore.format_label,
         get_sidecar_path=ProjectSidecar.get_sidecar_path,
+        emit_explorer_project_opened=_emit_explorer_project_opened,
     )
 
 
@@ -130,11 +137,14 @@ async def handle_sidebar_project_open_request(
     *,
     source_name: str,
 ) -> JsonMap:
+    file_target_obj = data.get("file") or data.get("file_path") or data.get("fileTarget") or data.get("targetFile")
+    file_target = file_target_obj.strip() if isinstance(file_target_obj, str) and file_target_obj.strip() else None
     result = await open_project(
         _project_service_deps(),
         _path_param(data),
         require_known_sidecar=True,
         reason="sidebar_project_open",
+        file_target=file_target,
     )
     if result.get("ok") is True:
         result["source"] = source_name

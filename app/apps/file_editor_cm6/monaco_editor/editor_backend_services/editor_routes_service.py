@@ -160,23 +160,3 @@ def build_view_state_dict(
         "stickyScroll": editor_prefs.get("stickyScroll"),
         **lsp_state,
     }
-
-
-def handle_set_active_project(
-    payload: Mapping[str, object],
-    *,
-    set_active_project: Callable[[str], str | None],
-    set_project_root: Callable[[str], Path],
-    init_watcher: Callable[[Path], object],
-) -> JsonMap:
-    project_obj = payload.get("projectPath")
-    project_path = project_obj if isinstance(project_obj, str) else ""
-    if not project_path:
-        raise ValueError("projectPath required")
-
-    normalized = set_active_project(project_path)
-    if not normalized:
-        raise ValueError("invalid project path")
-    root = set_project_root(normalized)
-    init_watcher(root)
-    return {"ok": True, "projectRoot": str(root)}

@@ -178,12 +178,49 @@ let applyCacheIndicator: CacheIndicatorHandler = function (info: unknown) {
   try { window.__fePendingCacheIndicator = info; } catch (_) {}
 };
 let clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+function dispatchHostOpenStateProjection(state: UnknownRecord, source: string): void {
+  const openState = asUnknownRecord(state.openState);
+  const openFile = typeof openState.openFile === 'string' && openState.openFile
+    ? openState.openFile
+    : typeof state.currentPath === 'string' && state.currentPath
+      ? state.currentPath
+      : typeof state.lastFile === 'string' && state.lastFile
+        ? state.lastFile
+        : null;
+  const projectPath = typeof openState.projectPath === 'string' && openState.projectPath
+    ? openState.projectPath
+    : typeof state.activeProject === 'string' && state.activeProject
+      ? state.activeProject
+      : null;
+  const openStatePayload: UnknownRecord = {
+    ...openState,
+    source,
+  };
+  if (projectPath) openStatePayload.projectPath = projectPath;
+  if (openFile) {
+    openStatePayload.openFile = openFile;
+    if (typeof openStatePayload.path !== 'string') openStatePayload.path = openFile;
+  }
+  window.dispatchEvent(new CustomEvent('cm6:open-state-changed', {
+    detail: openStatePayload,
+  }));
+  window.dispatchEvent(new CustomEvent('cm6:active-file-changed', {
+    detail: {
+      ...openStatePayload,
+      path: openFile,
+      openState: openStatePayload,
+    },
+  }));
+}
+
 const uiIpcConnections = createUiIpcConnections({
   ensureSocketIoLoaded,
   initConsoleBridge,
   getClientId: () => clientId,
   onHostStateResync: async () => {
     const state = await editorStateController.syncEditorState(true);
+    if (state) dispatchHostOpenStateProjection(state, 'ui_ipc_host_state_resync');
     recentsController.broadcastRecentsUpdate(state);
   },
 });
@@ -384,6 +421,17 @@ const hostStateRuntime = createHostStateRuntime({
     }
   },
   applyActiveFilePath: (filePath) => _applyHostActivePath(filePath, { forceToolbar: true }),
+  clearActiveFilePath: () => {
+    currentPath = '';
+    currentPathExists = false;
+    lastSha256 = null;
+    setToolbarFileName('No file');
+    setIssuesButtonsEnabled(false);
+    if (runActiveBtn) {
+      runActiveBtn.disabled = true;
+      runActiveBtn.title = 'Open a runnable source file to enable running';
+    }
+  },
   log: (...args) => console.log(...args),
 });
 hostStateRuntime.install();
@@ -719,19 +767,10 @@ const projectSwitchController = createProjectSwitchController({
   syncEditorState: (forceRefresh?: boolean) => editorStateController.syncEditorState(forceRefresh),
   broadcastRecentsUpdate: (state: EditorState | null) => recentsController.broadcastRecentsUpdate(state),
   getBranchMenuHandle: () => branchMenuHandle,
-  reloadEditorSurface: () => window.location.reload(),
 });
 
 // Expose for Explorer runtime (project:opened handler)
 projectSwitchController.installWindowHook();
-window.addEventListener('cm6:sidebar-project-opened', (event) => {
-  const detail = asUnknownRecord((event as CustomEvent<unknown>).detail);
-  const path = typeof detail.path === 'string' && detail.path.trim()
-    ? detail.path.trim()
-    : '';
-  if (!path) return;
-  void projectSwitchController.handleProjectOpened(path);
-});
 
 const editorStateController = createEditorStateController({
   getEditorState: () => editorState,

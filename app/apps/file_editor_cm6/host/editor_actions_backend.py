@@ -36,7 +36,6 @@ def _resolve_editor_path(data: dict[str, object], project: str) -> str:
         data.get("path")
         or data.get("currentPath")
         or history.get_last_file(project)
-        or history.get_session_state().get("currentPath")
         or ""
     ).strip()
     if not raw_path:

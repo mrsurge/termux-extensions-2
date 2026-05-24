@@ -1,6 +1,7 @@
 export interface HostStateRuntimeDeps {
   updateLspSpinner: () => void;
   applyActiveFilePath: (path: string) => void;
+  clearActiveFilePath: () => void;
   log?: (...args: unknown[]) => void;
 }
 
@@ -149,9 +150,29 @@ export function createHostStateRuntime(deps: HostStateRuntimeDeps): HostStateRun
   function handleActiveFileChanged(detail: unknown): void {
     try {
       const payload = isRecord(detail) ? detail : {};
+      const openState = isRecord(payload.openState) ? payload.openState : null;
+      if (openState) {
+        handleOpenStateChanged(openState);
+        return;
+      }
       const filePath = typeof payload.path === 'string' ? payload.path : '';
-      if (!filePath) return;
+      if (!filePath) {
+        deps.clearActiveFilePath();
+        return;
+      }
       deps.applyActiveFilePath(filePath);
+    } catch {}
+  }
+
+  function handleOpenStateChanged(detail: unknown): void {
+    try {
+      const payload = isRecord(detail) ? detail : {};
+      const openFile = typeof payload.openFile === 'string' ? payload.openFile : '';
+      if (!openFile) {
+        deps.clearActiveFilePath();
+        return;
+      }
+      deps.applyActiveFilePath(openFile);
     } catch {}
   }
 
@@ -194,6 +215,11 @@ export function createHostStateRuntime(deps: HostStateRuntimeDeps): HostStateRun
     window.addEventListener('cm6:active-file-changed', (evt) => {
       try {
         handleActiveFileChanged(evt instanceof CustomEvent ? evt.detail : undefined);
+      } catch {}
+    });
+    window.addEventListener('cm6:open-state-changed', (evt) => {
+      try {
+        handleOpenStateChanged(evt instanceof CustomEvent ? evt.detail : undefined);
       } catch {}
     });
   }

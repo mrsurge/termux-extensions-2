@@ -51,15 +51,30 @@ The next work should proceed in this order:
    - The framework proxy owns physical Engine.IO route registration, raw websocket forwarding, and target discovery.
    - Logical namespaces remain owned by the upstream Socket.IO servers and are not enumerated in the manifest route config.
    - WBA and app-worker domain behavior did not move into the framework proxy.
-6. Fix extension settings rendering so VSIX/object-valued settings do not display as `[object Object]`.
+6. Make project/open-file state sidecar-event-driven before continuing reload-removal or project-switch cleanup.
+   - The last opened project is the open project.
+   - The project sidecar `last_file` is the open file.
+   - History store owns open-project identity only; opened-file identity belongs in the project sidecar only.
+   - Frontend `currentPath`, host/editor session state, Explorer active markers, and WBA active document state are projections of the sidecar-backed event, not authorities.
+   - Any backend path that writes sidecar opened-file state must publish the same open-state event to all connected clients, and reconnect must replay that same event from sidecar disk state.
+   - This is a hard authority cutover, not a compatibility shim. Change or remove any path that lets history/session/frontend state repair, override, or preserve open-file identity outside the sidecar event model.
+   - File-backed project state is intentional architecture for portability and future runtime ports. The sidecar data shape plus the sidecar-derived event stream should be the state-machine contract.
+   - Preserve the current validation contract: file opens require an active project sidecar and must reject files outside the open project.
+   - Add the explicit combined transaction for "open project with file target": set the open project and the target project's sidecar `last_file` together, then publish the same sidecar open-state event.
+   - Track concrete execution in `FILE_EDITOR_CM6_SIDECAR_OPEN_STATE_PLAN.md`.
+7. Prune Kotlin LSP no-op surfaces instead of validating them.
+   - Treat JetBrains `kotlin-lsp` support as dead/no-op.
+   - Do not spend validation time proving Kotlin LSP behavior; classify remaining Kotlin LSP settings, docs, launch code, and vendor instructions for removal.
+   - Keep unrelated Kotlin language identification, syntax highlighting, Android/Kotlin source parsing, and historical notes only when they are not claiming live Kotlin LSP support.
+8. Fix extension settings rendering so VSIX/object-valued settings do not display as `[object Object]`.
    - Treat this as a typed normalization/rendering bug in the extension settings surface, likely in `main.py` or a supporting settings/extension module.
-7. Decompose and strictly type `main.py`, and find/deprecate unused top-level modules.
+9. Decompose and strictly type `main.py`, and find/deprecate unused top-level modules.
    - Start with small backend route/helper families and avoid moving framework-owned service shims out of `services/`.
    - Track deleted top-level modules explicitly so stale imports and app-loader contracts do not silently survive.
-8. Continue `template.html` decomposition after the backend transport/contract cleanup is coherent.
+10. Continue `template.html` decomposition after the backend transport/contract cleanup is coherent.
    - Move avoidable durable UI contract and behavior policy out of markup/CSS while preserving shortcut DOM compatibility.
    - Do not treat this as feature work; this is breakup and ownership cleanup.
-9. Debug why WBA does not work with the same `rust-analyzer` VSIX that works with the same code-server instance powering the WBA.
+11. Debug why WBA does not work with the same `rust-analyzer` VSIX that works with the same code-server instance powering the WBA.
    - Treat this as a WBA extension-host/provider bootstrap issue until proven otherwise.
    - Compare extension discovery, activation, workspace trust/configuration, binary/server executable resolution, and language/provider registration between the visible code-server path and WBA.
 
@@ -96,6 +111,10 @@ Current facts in the live tree:
 
 These constraints do not change during the refactor:
 - TE2 remains SSOT owner for draft/save/open/versioning behavior.
+- Open-project identity belongs to backend project/history state; opened-file identity belongs to the active project's `ProjectSidecar.last_file`.
+- Treat sidecar opened-file writes as event-source writes: every successful write publishes one open-state event to every connected client, and reconnect replays the same event from disk.
+- Do not let `currentPath`, host/editor session state, Explorer active markers, WBA active document state, or history MRU data become competing opened-file authorities.
+- No file open command may bypass the active-project sidecar or open a file outside the open project.
 - The WBA remains the VS Code protocol boundary and intelligence producer.
 - Transport consolidation must stay proxy-only. Do not move backend state ownership just to achieve one socket server.
 - Host UI is an initiator and renderer, not the owner of project or document intelligence state.

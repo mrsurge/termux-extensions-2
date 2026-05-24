@@ -56,6 +56,7 @@ UI_IPC_RPC_NOTIFICATION_EDITOR_NOTIFY: Final = "ui.editor.notify"
 UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS: Final = "ui.editor.diagnostics.counts"
 UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE: Final = "ui.adapter.state"
 UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED: Final = "ui.host.activeFile.changed"
+UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED: Final = "ui.openState.changed"
 
 UiIpcRpcNotification = Literal[
     "ui.editor.save",
@@ -70,6 +71,7 @@ UiIpcRpcNotification = Literal[
     "ui.editor.diagnostics.counts",
     "ui.adapter.state",
     "ui.host.activeFile.changed",
+    "ui.openState.changed",
 ]
 
 ALLOWED_REQUEST_METHODS: Final[set[str]] = {
@@ -101,6 +103,7 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS,
     UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
 }
 
 JsonObject = dict[str, object]

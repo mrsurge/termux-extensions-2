@@ -20,6 +20,7 @@ from .rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE,
     UI_IPC_RPC_NOTIFICATION_EVENT,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
     UiIpcRpcProtocolError,
     build_jsonrpc_error,
     build_jsonrpc_notification,
@@ -31,7 +32,7 @@ from .rpc_dispatch import dispatch_ui_ipc_rpc_request
 from .sidebar_rpc_contract import SIDEBAR_IPC_RPC_NAMESPACE
 from ..stores import get_history_store
 from ..explorer.services.file_ops import get_project_root
-from ..explorer.transport.connection_manager import abs_to_rel
+from ..open_state_backend import read_sidecar_open_state
 
 
 async def emit_ui_ipc_rpc_notification(
@@ -92,11 +93,19 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 pass
             try:
                 history = get_history_store()
-                session_state = history.get_session_state() or {}
-                current_path = str(session_state.get("currentPath") or "").strip()
                 project = history.get_active_project() or str(get_project_root())
-                if current_path and project:
-                    rel = abs_to_rel(current_path, project)
+                if project:
+                    open_state = read_sidecar_open_state(project, reason="reconnect")
+                    current_path = open_state["openFile"]
+                    rel = open_state["openFileRel"]
+                    await self.emit(
+                        UI_IPC_RPC_NOTIFICATION_EVENT,
+                        build_jsonrpc_notification(
+                            UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
+                            dict(open_state),
+                        ),
+                        to=sid,
+                    )
                     await self.emit(
                         UI_IPC_RPC_NOTIFICATION_EVENT,
                         build_jsonrpc_notification(
@@ -104,6 +113,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                             {
                                 "path": current_path,
                                 "rel": rel,
+                                "openState": dict(open_state),
                                 "source": "ui_ipc_connect",
                             },
                         ),

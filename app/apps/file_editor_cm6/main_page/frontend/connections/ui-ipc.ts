@@ -1,6 +1,5 @@
 // @ts-check
 
-import { isRunnableFile } from '../core/utils.ts';
 import { createUiIpcRpcConnection } from './ui-ipc-rpc.ts';
 import { RPC_NOTIFICATION_EVENT, RPC_REQUEST_EVENT } from '../../../src/rpc/transport.ts';
 import type { IoFactory, JsonObject, SocketLike } from '../../../src/rpc/transport.ts';
@@ -35,10 +34,6 @@ interface UiIpcConnectionsDeps {
 
 type UiIpcRpcConnection = ReturnType<typeof createUiIpcRpcConnection>;
 
-interface HostRuntimeWindow extends Window {
-  currentPath?: string | null;
-}
-
 export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   let sidebarIpcSocket: SocketLike | null = null;
   let sidebarRpcRequestCounter = 0;
@@ -46,7 +41,6 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   let uiIpcConnectPromise: Promise<UiIpcRpcConnection> | null = null;
   let consoleBridgePromise: Promise<void> | null = null;
   let consoleBridgeStarted = false;
-  let uiIpcHasConnectedOnce = false;
 
   function startMainPageConsoleBridge(): Promise<void> {
     if (consoleBridgeStarted) return Promise.resolve();
@@ -69,28 +63,15 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     return consoleBridgePromise;
   }
 
-  function applyActiveFileChangedUiState(data: JsonObject): void {
-    try {
-      const filePath = typeof data?.path === 'string' ? data.path : '';
-      if (!filePath) return;
-      try { (window as HostRuntimeWindow).currentPath = filePath; } catch (_) {}
-      const trimmed = filePath.replace(/\/+$/, '');
-      const idx = trimmed.lastIndexOf('/');
-      const fileName = idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
-      const fileNameEl = document.getElementById('fe-file-name');
-      if (fileNameEl) {
-        fileNameEl.textContent = fileName || 'Untitled';
-        fileNameEl.title = fileName || 'Untitled';
-      }
-      const runActiveBtn = document.getElementById('run-active-file-btn');
-      if (runActiveBtn instanceof HTMLButtonElement) {
-        const runnable = isRunnableFile(filePath);
-        runActiveBtn.disabled = !runnable;
-        runActiveBtn.title = runnable
-          ? 'Run active file in terminal'
-          : 'Open a Python, shell, or C/C++ source file to enable running';
-      }
-    } catch (_) {}
+  function activeFilePayloadFromOpenState(params: JsonObject): JsonObject {
+    const openFile = typeof params.openFile === 'string' && params.openFile
+      ? params.openFile
+      : null;
+    return {
+      ...params,
+      path: openFile,
+      openState: params,
+    };
   }
 
   function dispatchSidebarEvent(data: JsonObject): void {
@@ -162,7 +143,6 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.fileOpen) {
       dispatchWindowCustomEvent('cm6:sidebar-file-open', params);
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.projectOpened) {
-      dispatchWindowCustomEvent('cm6:sidebar-project-opened', params);
       dispatchSidebarEvent({ type: method, payload: params });
     }
   }
@@ -215,17 +195,13 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         ensureSocketIoLoaded: deps.ensureSocketIoLoaded,
         onConnect: () => {
           console.log('[UI_IPC_RPC] main page connected');
-          if (uiIpcHasConnectedOnce) {
-            try {
-              void Promise.resolve(deps.onHostStateResync?.()).catch((error: unknown) => {
-                console.warn('[UI_IPC_RPC] host state resync failed', error);
-              });
-            } catch (error) {
+          try {
+            void Promise.resolve(deps.onHostStateResync?.()).catch((error: unknown) => {
               console.warn('[UI_IPC_RPC] host state resync failed', error);
-            }
-            return;
+            });
+          } catch (error) {
+            console.warn('[UI_IPC_RPC] host state resync failed', error);
           }
-          uiIpcHasConnectedOnce = true;
         },
         onDisconnect: (reason) => {
           console.log('[UI_IPC_RPC] main page disconnected', reason);
@@ -256,8 +232,10 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorDiagnosticsCounts) {
             dispatchWindowCustomEvent('cm6:editor-diagnostics-counts', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.hostActiveFileChanged) {
-            applyActiveFileChangedUiState(params);
             dispatchWindowCustomEvent('cm6:active-file-changed', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.openStateChanged) {
+            dispatchWindowCustomEvent('cm6:open-state-changed', params);
+            dispatchWindowCustomEvent('cm6:active-file-changed', activeFilePayloadFromOpenState(params));
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.adapterState) {
             dispatchWindowCustomEvent('cm6:adapter-state', params);
           }

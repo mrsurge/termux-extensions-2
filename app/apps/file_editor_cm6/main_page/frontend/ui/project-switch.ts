@@ -10,8 +10,7 @@
  *   syncSessionPath: () => void,
  *   syncEditorState: (forceRefresh?: boolean) => Promise<any>,
  *   broadcastRecentsUpdate: (state: any) => void,
- *   getBranchMenuHandle: () => any,
- *   reloadEditorSurface: () => void
+ *   getBranchMenuHandle: () => any
  * }} deps
  */
 export function createProjectSwitchController(deps: any) {
@@ -29,16 +28,6 @@ export function createProjectSwitchController(deps: any) {
     deps.updatePathDisplay();
     deps.syncSessionPath();
 
-    try {
-      await fetch('/api/app/file_editor_cm6/editor/set_active_project', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectPath: newProjectPath }),
-      });
-    } catch (err) {
-      console.warn('[ProjectSwitch] Failed to sync worker project root:', err);
-    }
-
     const newState = await deps.syncEditorState(true);
 
     deps.broadcastRecentsUpdate(newState);
@@ -47,10 +36,6 @@ export function createProjectSwitchController(deps: any) {
       try { branchMenuHandle.refresh(); } catch (err) {
         console.warn('[ProjectSwitch] Failed to refresh branch menu:', err);
       }
-    }
-
-    try { deps.reloadEditorSurface(); } catch (err) {
-      console.warn('[ProjectSwitch] Failed to reload editor surface:', err);
     }
   }
 

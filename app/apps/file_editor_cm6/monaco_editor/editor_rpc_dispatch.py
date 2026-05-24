@@ -35,6 +35,7 @@ from .editor_mention_backend import handle_editor_mention_request
 from .editor_open_backend import EditorOpenPayload, emit_editor_open_from_backend
 from .editor_save_backend import handle_editor_mirror, handle_editor_save_request
 from .editor_backend_services.contracts import RuntimeMeta
+from ..open_state_backend import SidecarOpenStatePayload
 from .editor_view_state_backend import (
     GetCachedDocumentFn,
     GitHeadTextFn,
@@ -55,6 +56,8 @@ SetLastFileFn = Callable[[str, str], None]
 EmitToRoomFn = Callable[[str, dict[str, object]], Awaitable[None]]
 BroadcastActiveFileUpdateFn = Callable[[str, str], Awaitable[None]]
 EmitHostActiveFileChangedFn = Callable[..., Awaitable[None]]
+RecordSidecarOpenFileFn = Callable[..., SidecarOpenStatePayload]
+EmitOpenStateChangedFn = Callable[..., Awaitable[None]]
 NotifyDraftStateChangedFn = Callable[[str], None]
 RecordSaveShaFn = Callable[[str, str], None]
 HandleEditorPayloadFn = Callable[[str, dict[str, object]], Awaitable[None]]
@@ -82,6 +85,8 @@ async def dispatch_editor_rpc_request(
     get_cached_document: GetCachedDocumentFn,
     update_session_state: UpdateSessionStateFn,
     set_last_file: SetLastFileFn,
+    record_sidecar_open_file: RecordSidecarOpenFileFn,
+    emit_open_state_changed: EmitOpenStateChangedFn,
     emit_to_room: EmitToRoomFn,
     broadcast_active_file_update: BroadcastActiveFileUpdateFn,
     emit_host_active_file_changed: EmitHostActiveFileChangedFn,
@@ -117,6 +122,8 @@ async def dispatch_editor_rpc_request(
                 source=source,
                 request_id=request_id,
             ),
+            record_sidecar_open_file=record_sidecar_open_file,
+            emit_open_state_changed=emit_open_state_changed,
         )
         return payload
 

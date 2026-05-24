@@ -70,6 +70,7 @@ export const EXPLORER_RPC_NOTIFICATIONS = {
   editorPrefsChanged: 'explorer.editor.prefs.changed',
   error: 'explorer.error',
   activeFileUpdated: 'explorer.activeFile.updated',
+  openStateChanged: 'explorer.openState.changed',
   entryCreated: 'explorer.entry.created',
   listUpdated: 'explorer.list.updated',
   navigate: 'explorer.navigate',

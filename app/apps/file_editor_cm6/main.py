@@ -622,6 +622,12 @@ async def _emit_sidebar_cwd_set_for_project_routes(reason: str) -> None:
     await sidebar_ws.emit_sidebar_cwd_set_global(reason=reason)
 
 
+async def _emit_explorer_project_opened_for_project_routes(payload: dict[str, object]) -> None:
+    from .explorer.transport.rpc_emit import emit_explorer_rpc_notification
+
+    await emit_explorer_rpc_notification("explorer.project.opened", payload)
+
+
 def _create_project_for_project_routes(parent_path: str, name: str) -> dict[str, object]:
     from .explorer.services.file_ops import create_project
 
@@ -644,6 +650,7 @@ _PROJECT_ROUTES_DEPS = ProjectRoutesDeps(
     create_project=_create_project_for_project_routes,
     format_label=HistoryStore.format_label,
     get_sidecar_path=ProjectSidecar.get_sidecar_path,
+    emit_explorer_project_opened=_emit_explorer_project_opened_for_project_routes,
 )
 file_editor_cm6_bp.include_router(create_project_router(_PROJECT_ROUTES_DEPS))
 
@@ -956,9 +963,10 @@ async def get_editor_state_deprecated():
         project_origin = history.get_project_origin(active_project)
 
     session_state = history.get_session_state()
+    open_file = payload.get("lastFile")
     payload.update({
         "projectOrigin": project_origin,
-        "currentPath": session_state.get("currentPath"),
+        "currentPath": open_file if isinstance(open_file, str) else None,
         "unsaved": session_state.get("unsaved"),
         "editorState": session_state,
     })

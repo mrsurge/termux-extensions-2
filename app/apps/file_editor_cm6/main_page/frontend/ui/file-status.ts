@@ -29,7 +29,7 @@ export function createFileStatusController(deps: any) {
     const currentPath = deps.getCurrentPath();
     const badge = document.getElementById('fe-file-draft-badge');
     if (!currentPath) {
-      deps.setToolbarFileName('Untitled');
+      deps.setToolbarFileName('No file');
       if (badge) deps.setIndicatorInactive(badge);
       deps.setIssuesButtonsEnabled(false);
       updateRunButtonState();

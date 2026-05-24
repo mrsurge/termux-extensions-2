@@ -10,6 +10,7 @@ from .explorer.contracts.watcher import WatcherConfigPayload, build_watcher_conf
 from .explorer.transport.connection_manager import abs_to_rel
 from .monaco_editor.editor_backend_services.contracts import JsonMap
 from .monaco_editor.editor_ws import editor_runtime_build_connect_snapshot
+from .open_state_backend import read_sidecar_open_state
 from .project_sidecar import ProjectSidecar
 from .history_store import HistoryStore
 from .stores import get_history_store, get_preferences_store
@@ -95,7 +96,15 @@ def _build_host_state_payload() -> JsonMap:
     elif not project_exists:
         project_message = f'Project "{project_label or project_path}" not found.'
 
-    last_file = history.get_last_file(project_path)
+    last_file: str | None = None
+    open_state: JsonMap | None = None
+    if project_path:
+        try:
+            sidecar_state = read_sidecar_open_state(project_path, reason="reconnect")
+            open_state = dict(sidecar_state)
+            last_file = sidecar_state["openFile"]
+        except Exception:
+            last_file = None
     last_file_exists = bool(last_file and Path(last_file).is_file())
     last_file_label = HistoryStore.format_label(last_file)
     last_file_message = ""
@@ -128,7 +137,8 @@ def _build_host_state_payload() -> JsonMap:
         "lastFileMessage": last_file_message,
         "recents": recents,
         "preferences": prefs_store.get_preferences(project_path),
-        "currentPath": session_state.get("currentPath"),
+        "currentPath": last_file,
+        "openState": open_state,
         "unsaved": session_state.get("unsaved"),
         "editorState": session_state,
     }
@@ -139,6 +149,7 @@ def _build_explorer_bootstrap_payload(
     project_root: str | None,
     session_state: JsonMap,
 ) -> ExplorerBootstrapPayload | None:
+    del session_state
     if not project_root:
         return None
 
@@ -149,13 +160,18 @@ def _build_explorer_bootstrap_payload(
         resolved_project_root = str(project_root)
 
     active_file_payload: ExplorerActiveFilePayload | None = None
-    current_path_obj = session_state.get("currentPath")
-    if isinstance(current_path_obj, str) and current_path_obj.strip():
-        rel = abs_to_rel(current_path_obj, resolved_project_root)
+    open_file: str | None = None
+    try:
+        open_state = read_sidecar_open_state(resolved_project_root, reason="reconnect")
+        open_file = open_state["openFile"]
+    except Exception:
+        open_file = None
+    if isinstance(open_file, str) and open_file.strip():
+        rel = abs_to_rel(open_file, resolved_project_root)
         if isinstance(rel, str):
             active_file_payload = {
                 "rel": rel,
-                "abs": current_path_obj,
+                "abs": open_file,
             }
 
     sidecar = ProjectSidecar.load_or_create(resolved_project_root)

@@ -525,43 +525,15 @@ class HistoryStore:
             return {"error": "failed_to_dump", "repr": repr(data)}
 
     def list_files(self, project_path: str) -> List[Dict[str, object]]:
-        """List recent files for a project — sidecar is SSOT with lazy migration."""
+        """List recent files for a project from the sidecar only."""
         normalized_project = self._normalize_project_path(project_path)
-        
-        # Try sidecar first (SSOT)
         try:
             sidecar = ProjectSidecar.load_or_create(normalized_project)
+            sidecar.reload()
             sidecar_files = sidecar.list_recent_files()
-            
-            # Lazy migration: if sidecar has no files but history does, seed it
-            if not sidecar_files:
-                with self._lock:
-                    projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
-                    entry = projects.get(normalized_project)
-                    if entry:
-                        legacy_files = entry.get("files") or []
-                        legacy_last = entry.get("last_file")
-                        if legacy_files:
-                            # Migrate recent_files
-                            for f in reversed(legacy_files):
-                                if f.get("path"):
-                                    sidecar.record_file_activity(f["path"])
-                            # Ensure last_file is set
-                            if legacy_last:
-                                sidecar.set_last_file(legacy_last)
-                            sidecar.save()
-                            return sidecar.list_recent_files()
             return sidecar_files
         except Exception:
-            pass
-        
-        # Fallback to history.json
-        with self._lock:
-            projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
-            entry = projects.get(normalized_project)
-            if not entry:
-                return []
-            return list(entry.get("files") or [])
+            return []
 
     def reset_project_history(self, project_path: str) -> bool:
         """Reset per-project history (files, last_file, diff_base, origin) without
@@ -722,80 +694,32 @@ class HistoryStore:
             return str(val) if val else None
 
     def set_last_file(self, project_path: str, file_path: Optional[str]) -> Optional[str]:
-        """Set last opened file — delegates to sidecar as SSOT."""
+        """Set last opened file in the project sidecar only."""
         normalized_project = self._normalize_project_path(project_path)
         normalized_file = self._normalize_file_path(file_path) if file_path else None
-        
-        # Sidecar is SSOT
-        try:
-            sidecar = ProjectSidecar.load_or_create(normalized_project)
-            result = sidecar.set_last_file(normalized_file)
-            if normalized_file:
-                sidecar.record_file_activity(normalized_file)
-            sidecar.save()
-        except Exception:
-            result = normalized_file
-        
-        # Mirror to history.json for compatibility
+
+        sidecar = ProjectSidecar.load_or_create(normalized_project)
+        result = sidecar.set_last_file(normalized_file)
+        if normalized_file:
+            sidecar.record_file_activity(normalized_file)
+        sidecar.save()
         with self._lock:
-            project_entry = self._touch_project_locked(normalized_project)
-            project_entry["last_file"] = normalized_file
-            if normalized_file:
-                files: List[Dict[str, object]] = project_entry.setdefault("files", [])
-                files = [entry for entry in files if entry.get("path") != normalized_file]
-                timestamp = _utc_timestamp()
-                files.insert(
-                    0,
-                    {
-                        "path": normalized_file,
-                        "label": _project_label(normalized_file),
-                        "opened_at": timestamp,
-                    },
-                )
-                project_entry["files"] = files[:MAX_RECENT_FILES]
+            self._touch_project_locked(normalized_project)
             self._save_locked()
-            return result
+        return result
 
     def get_last_file(self, project_path: Optional[str]) -> Optional[str]:
-        """Get last opened file — sidecar is SSOT with lazy migration from history."""
+        """Get last opened file from the project sidecar only."""
         if not project_path:
             return None
         normalized_project = self._normalize_project_path(project_path)
-        
-        # Try sidecar first (SSOT)
         try:
             sidecar = ProjectSidecar.load_or_create(normalized_project)
+            sidecar.reload()
             sidecar_last = sidecar.get_last_file()
-            
-            # Lazy migration: if sidecar has no last_file but history does, seed it
-            if sidecar_last is None:
-                with self._lock:
-                    projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
-                    entry = projects.get(normalized_project)
-                    if entry:
-                        legacy_last = entry.get("last_file")
-                        legacy_files = entry.get("files") or []
-                        if legacy_last or legacy_files:
-                            # Migrate last_file
-                            if legacy_last:
-                                sidecar.set_last_file(legacy_last)
-                            # Migrate recent_files
-                            for f in reversed(legacy_files):
-                                if f.get("path"):
-                                    sidecar.record_file_activity(f["path"])
-                            sidecar.save()
-                            return sidecar.get_last_file()
-            return sidecar_last
+            return str(sidecar_last) if sidecar_last else None
         except Exception:
-            pass
-        
-        # Fallback to history.json
-        with self._lock:
-            projects: Dict[str, Dict[str, object]] = self._data.get("projects", {})
-            entry = projects.get(normalized_project)
-            if not entry:
-                return None
-            return entry.get("last_file")
+            return None
 
     def set_diff_base(self, project_path: str, ref: Optional[str]) -> str:
         normalized_project = self._normalize_project_path(project_path)
@@ -862,7 +786,7 @@ class HistoryStore:
             return entry.get("origin") if entry else None
 
     def record_file_activity(self, project_path: str, file_path: str, scroll_line: Optional[float] = None) -> Dict[str, object]:
-        """Record file open — delegates to sidecar as SSOT, mirrors to history.json.
+        """Record file activity in the sidecar; history stores project recency only.
         
         Args:
             project_path: The project containing the file.
@@ -872,30 +796,11 @@ class HistoryStore:
         normalized_project = self._normalize_project_path(project_path)
         normalized_file = self._normalize_file_path(file_path)
         
-        # Sidecar is SSOT
-        entry = None
-        try:
-            sidecar = ProjectSidecar.load_or_create(normalized_project)
-            entry = sidecar.record_file_activity(normalized_file, scroll_line=scroll_line)
-            sidecar.save()
-        except Exception:
-            pass
-        
-        # Mirror to history.json for compatibility
+        sidecar = ProjectSidecar.load_or_create(normalized_project)
+        entry = sidecar.record_file_activity(normalized_file, scroll_line=scroll_line)
+        sidecar.save()
         with self._lock:
-            project_entry = self._touch_project_locked(normalized_project)
-            project_entry["last_file"] = normalized_file
-            files: List[Dict[str, object]] = project_entry.setdefault("files", [])
-            files = [e for e in files if e.get("path") != normalized_file]
-            timestamp = _utc_timestamp()
-            if entry is None:
-                entry = {
-                    "path": normalized_file,
-                    "label": _project_label(normalized_file),
-                    "opened_at": timestamp,
-                }
-            files.insert(0, entry)
-            project_entry["files"] = files[:MAX_RECENT_FILES]
+            self._touch_project_locked(normalized_project)
             self._save_locked()
             return entry
 

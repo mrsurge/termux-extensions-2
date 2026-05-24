@@ -126,6 +126,8 @@ class ProjectSidecar:
             "recent_files": [],
             # Last opened file for this project (SSOT).
             "last_file": None,
+            # Monotonic revision for sidecar-backed open-file events.
+            "open_state_revision": 0,
             # Open directories in explorer tree (persisted across reloads).
             "open_directories": [],
             # Legacy single terminal framework shell id (kept for lazy migration).
@@ -564,6 +566,20 @@ class ProjectSidecar:
     def get_last_file(self) -> Optional[str]:
         """Return the last opened file path for this project."""
         return self._data.get("last_file")
+
+    def get_open_state_revision(self) -> int:
+        """Return the monotonic revision for sidecar-backed open-file state."""
+        try:
+            raw = self._data.get("open_state_revision", 0)
+            return int(raw) if raw is not None else 0
+        except Exception:
+            return 0
+
+    def bump_open_state_revision(self) -> int:
+        """Increment and return the open-file state revision."""
+        revision = self.get_open_state_revision() + 1
+        self._data["open_state_revision"] = revision
+        return revision
 
     def set_last_file(self, file_path: Optional[str]) -> Optional[str]:
         """Set the last opened file path for this project."""

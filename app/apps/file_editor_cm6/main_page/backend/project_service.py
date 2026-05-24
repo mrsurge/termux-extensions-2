@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .state_payload import JsonObject
+from ...open_state_backend import write_sidecar_open_file
 
 
 class HistoryStoreLike(Protocol):
@@ -36,6 +37,7 @@ class ProjectServiceDeps:
     create_project: Callable[[str, str], JsonObject]
     format_label: Callable[[str | None], str]
     get_sidecar_path: Callable[[str], Path]
+    emit_explorer_project_opened: Callable[[JsonObject], Awaitable[None]] | None = None
 
 
 async def _ignore_async_errors(fn: Callable[[], Awaitable[object | None]]) -> None:
@@ -66,6 +68,20 @@ def normalize_history_project_path(path: str) -> str:
         return os.path.abspath(expanded)
     except Exception:
         return str(path or "").strip()
+
+
+def _resolve_project_file_target(project_root: Path, file_target: str) -> str:
+    raw = str(file_target or "").strip()
+    if not raw:
+        raise ValueError("invalid_file_target")
+    candidate = Path(raw).expanduser() if os.path.isabs(raw) else project_root / raw
+    try:
+        resolved_root = project_root.expanduser().resolve(strict=False)
+        resolved_file = candidate.expanduser().resolve(strict=False)
+        resolved_file.relative_to(resolved_root)
+    except ValueError as exc:
+        raise PermissionError("outside_project") from exc
+    return str(resolved_file)
 
 
 async def after_project_switch(deps: ProjectServiceDeps, *, reason: str) -> None:
@@ -150,6 +166,7 @@ async def open_project(
     *,
     require_known_sidecar: bool,
     reason: str,
+    file_target: str | None = None,
 ) -> JsonObject:
     display_path = normalize_history_project_path(path)
     if not display_path:
@@ -164,14 +181,45 @@ async def open_project(
                 "lookup": lookup,
             }
 
-    project_root = deps.set_project_root(display_path)
-    deps.history.touch_project(display_path)
-    deps.history.set_active_project(display_path)
-    deps.invalidate_diff_cache(project_root)
-    deps.set_edit_tracker_project_root(project_root)
-    await after_project_switch(deps, reason=reason)
+    replay_reason = "project_open"
+    if file_target:
+        target_path = _resolve_project_file_target(
+            Path(display_path).expanduser().resolve(strict=False),
+            file_target,
+        )
+        write_sidecar_open_file(
+            display_path,
+            target_path,
+            reason="project_open_with_file",
+            require_existing_sidecar=False,
+        )
+        replay_reason = "project_open_with_file"
+
+    from ...explorer.services.project_switch import switch_project_connection
+    from ...explorer.transport.rpc_socketio import sync_active_explorer_dispatchers_project_root
+
+    switch_result = await switch_project_connection(
+        None,
+        display_path,
+        display_path=display_path,
+        initialize_watcher=False,
+        switch_adapter_workspace=True,
+        open_state_reason=replay_reason,
+        open_state_source=reason,
+    )
+    project_root = switch_result.project_root
+    sync_active_explorer_dispatchers_project_root(project_root)
     state = deps.build_state_payload()
     lookup_after = lookup_project(deps, display_path)
+    project_opened_payload: JsonObject = {
+        "path": display_path,
+        "resolved_path": str(project_root),
+        "new_sidecar": switch_result.was_new_sidecar,
+        "source": reason,
+    }
+    emit_explorer_project_opened = deps.emit_explorer_project_opened
+    if emit_explorer_project_opened is not None:
+        await _ignore_async_errors(lambda: emit_explorer_project_opened(project_opened_payload))
 
     return {
         "ok": True,

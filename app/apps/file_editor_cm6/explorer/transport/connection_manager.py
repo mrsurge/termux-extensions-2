@@ -86,6 +86,17 @@ class ConnectionManager:
             except Exception as e:
                 logger.warning(f"Failed to start watcher on connect: {e}")
 
+    def reassign_all(self, project_path: str) -> None:
+        """Move every active Explorer connection to the current project key."""
+        connections: list[ExplorerConnection] = []
+        for existing in self.active_connections.values():
+            connections.extend(existing)
+        # Preserve order while avoiding duplicate entries from prior remaps.
+        deduped = list(dict.fromkeys(connections))
+        self.active_connections = {project_path: deduped} if deduped else {}
+        self.ws_project_map = {connection: project_path for connection in deduped}
+        logger.info("Explorer clients reassigned to project: %s", project_path)
+
     def disconnect(self, websocket: ExplorerConnection):
         project_path = self.ws_project_map.get(websocket)
         if project_path and project_path in self.active_connections:

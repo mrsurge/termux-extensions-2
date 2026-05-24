@@ -400,6 +400,42 @@ export function registerEditorSocketConnectionHandlers(
     }
   };
 
+  const handleOpenStatePayload = (payload: unknown): void => {
+    try {
+      const record = asRecord(payload);
+      if (!record) return;
+      const openFile = asString(record.openFile);
+      if (openFile) return;
+      deps.setCurrentPath(null);
+      deps.setBaseSha256(null);
+      deps.setLastContentSha256(null);
+      deps.bcUpdatePath(null, true);
+      try { deps.clearDraftDiffDecorations(); } catch (_) {}
+      try { deps.disposeGitBaselines(); } catch (_) {}
+      try {
+        const diffEditor = deps.getDiffEditor();
+        if (diffEditor && typeof diffEditor.setModel === 'function') diffEditor.setModel(null);
+      } catch (_) {}
+      try {
+        const editor = deps.getEditor();
+        if (editor && typeof editor.setModel === 'function') editor.setModel(null);
+      } catch (_) {}
+      try {
+        const model = deps.getModel();
+        if (model && typeof model.dispose === 'function') model.dispose();
+      } catch (_) {}
+      deps.setModel(null);
+      deps.emitToHost('editor_cache_state', {
+        path: null,
+        state: 'clean',
+        unsaved: false,
+        reason: record.reason || 'open_state_clear',
+      });
+    } catch (error) {
+      console.warn('[Monaco] open-state clear failed', error);
+    }
+  };
+
   socket.on('connect', () => {
     deps.setEditorSocketId(socket.id || null);
     deps.emitToHost('editor_ready', {});
@@ -409,6 +445,7 @@ export function registerEditorSocketConnectionHandlers(
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.stateSsot, handleSsotSnapshot);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileOpened, handleOpenPayload);
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.openStateChanged, handleOpenStatePayload);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.fileJumpToLine, (payload) => deps.handleJumpToLine(payload));
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.prefsChanged, handlePrefsChangedPayload);
   }

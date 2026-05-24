@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from .rpc_contract import (
@@ -20,6 +21,18 @@ from .rpc_contract import (
 from ...explorer_runtime import ExplorerDispatcher
 
 logger = logging.getLogger(__name__)
+
+_ACTIVE_EXPLORER_NAMESPACES: list["ExplorerRpcSocketIONamespace"] = []
+
+
+def sync_active_explorer_dispatchers_project_root(project_root: Path) -> None:
+    """Keep Explorer dispatcher contexts aligned after non-Explorer project opens."""
+    for namespace in list(_ACTIVE_EXPLORER_NAMESPACES):
+        for dispatcher in list(namespace.dispatchers.values()):
+            try:
+                dispatcher.project_root = project_root
+            except Exception:
+                logger.exception("[ExplorerRPC] failed to sync dispatcher project root")
 
 
 if TYPE_CHECKING:
@@ -120,6 +133,7 @@ class ExplorerRpcSocketIONamespace(_SocketIOAsyncNamespace):
         super().__init__(namespace)
         self.dispatchers: dict[str, ExplorerDispatcher] = {}
         self.rpc_sockets: dict[str, ExplorerRpcSocketShim] = {}
+        _ACTIVE_EXPLORER_NAMESPACES.append(self)
 
     async def on_connect(self, sid: str, environ: dict[str, object]) -> None:
         rpc_socket = ExplorerRpcSocketShim(self, sid)

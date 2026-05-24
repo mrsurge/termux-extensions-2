@@ -89,6 +89,7 @@ EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_RESPONSE: Final = "editor.issues.dump.respon
 EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST: Final = "editor.save.snapshot.request"
 EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND: Final = "editor.issues.command"
 EDITOR_RPC_NOTIFICATION_FIND_COMMAND: Final = "editor.find.command"
+EDITOR_RPC_NOTIFICATION_OPEN_STATE_CHANGED: Final = "editor.openState.changed"
 
 EditorRpcNotification = Literal[
     "editor.state.ssot",
@@ -112,6 +113,7 @@ EditorRpcNotification = Literal[
     "editor.save.snapshot.request",
     "editor.issues.command",
     "editor.find.command",
+    "editor.openState.changed",
 ]
 
 

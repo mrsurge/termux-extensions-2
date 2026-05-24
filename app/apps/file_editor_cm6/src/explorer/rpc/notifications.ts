@@ -244,6 +244,34 @@ export function createExplorerNotificationHandler(
               }
             })
             .catch(() => {});
+        } else {
+          try {
+            deps.applyActiveFileMarker();
+          } catch {
+            // Ignore marker races during clear.
+          }
+        }
+        break;
+      }
+      case EXPLORER_RPC_NOTIFICATIONS.openStateChanged: {
+        const nextRel = getStringValue(payload.openFileRel) || getStringValue(payload.rel);
+        deps.setActiveFileRel(nextRel);
+        if (nextRel) {
+          Promise.resolve(deps.expandToFile(nextRel))
+            .then(() => {
+              try {
+                deps.applyActiveFileMarker();
+              } catch {
+                // Ignore marker races during replay.
+              }
+            })
+            .catch(() => {});
+        } else {
+          try {
+            deps.applyActiveFileMarker();
+          } catch {
+            // Ignore marker races during replay clear.
+          }
         }
         break;
       }
