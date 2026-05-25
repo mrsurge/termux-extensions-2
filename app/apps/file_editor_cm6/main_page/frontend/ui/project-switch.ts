@@ -45,7 +45,11 @@ export function createProjectSwitchController(deps: ProjectSwitchControllerDeps)
       deps.applyStateProjection?.(statePayload, 'project_opened_rpc');
       return nextState;
     }
-    return deps.syncEditorState(true);
+    const nextState = await deps.syncEditorState(true);
+    if (nextState) {
+      deps.applyStateProjection?.(nextState, 'project_opened_rpc_resync');
+    }
+    return nextState;
   }
 
   async function runProjectOpened(statePayload: UnknownRecord | null = null): Promise<void> {
