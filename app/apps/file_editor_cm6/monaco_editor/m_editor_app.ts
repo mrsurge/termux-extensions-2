@@ -2,7 +2,7 @@ import { buildUiUrl, fetchJsonWithBase } from './editor_common_utils.ts';
 import { normalizeLanguageId, languageIdFromPath, monacoFileUri } from './editor_language_utils.ts';
 import { parseJsonc } from './editor_parse_utils.ts';
 import { createFileModel as createMonacoFileModel } from './editor_model_utils.ts';
-import { runIssuesCommand, runFindCommand } from './editor_command_utils.ts';
+import { runIssuesCommand, runFindCommand, runEditCommand } from './editor_command_utils.ts';
 import { deriveApiBase } from './editor_api_base_utils.ts';
 import { absPathFromVscodeUri } from './editor_vscode_uri_utils.ts';
 import {
@@ -196,6 +196,8 @@ interface LanguageBridgeStateLike {
   registeredSymbols: Set<string>;
   registeredFolding: Set<string>;
   registeredSemanticTokens: Set<string>;
+  semanticTokensChangeEmittersByLanguage: Record<string, { event(listener: () => void): { dispose(): void }; fire(): void }>;
+  semanticTokensLanguagesByEventHandle: Record<string, string[]>;
   completionProvidersByLanguage: Record<string, Record<string, { handle: string; triggerCharacters: string[]; supportsResolve: boolean }>>;
   completionProviderDisposablesByLanguage: Record<string, { dispose(): void } | null>;
   completionProviderSignatureByLanguage: Record<string, string>;
@@ -373,6 +375,14 @@ interface MonacoBootWindowLike extends Window {
     getEditor: function() { return editor; },
     getDiffEditor: function() { return diffEditor; },
     replayOpenFileAfterBaton: _replayOpenFileAfterBaton,
+    onProjectSwitching: function(params) {
+      try { editorWbaRpcTransport.rejectPending('project switching'); } catch (_) {}
+      try { workbenchRuntime.wbBeginProjectSwitch(params || {}); } catch (_) {}
+    },
+    onProjectSwitched: function(params) {
+      try { workbenchRuntime.wbEndProjectSwitch(params || {}); } catch (_) {}
+      try { _replayOpenFileAfterBaton(); } catch (_) {}
+    },
     notifyEditorRpc: function(method, params) { return editorRpcNotify(method, params); },
     onEditorRpcNotification: function(method, handler) {
       return editorRpcTransport.onNotification(method, handler);
@@ -585,6 +595,8 @@ interface MonacoBootWindowLike extends Window {
     registeredSymbols: new Set<string>(),
     registeredFolding: new Set<string>(),
     registeredSemanticTokens: new Set<string>(),
+    semanticTokensChangeEmittersByLanguage: {},
+    semanticTokensLanguagesByEventHandle: {},
     completionProvidersByLanguage: {},
     completionProviderDisposablesByLanguage: {},
     completionProviderSignatureByLanguage: {},
@@ -700,7 +712,14 @@ interface MonacoBootWindowLike extends Window {
   }
 
   function _replayOpenFileAfterBaton() {
-    return workbenchRuntime.replayOpenFileAfterBaton();
+    return workbenchRuntime.replayOpenFileAfterBaton()
+      .then(() => {
+        replayActiveModelLanguageAfterWbaConnect('baton');
+        refreshActiveLanguageIntelligenceAfterWbaConnect('baton');
+      })
+      .catch((error) => {
+        console.warn('[readiness] baton active model flush failed', error);
+      });
   }
 
   function editorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
@@ -749,6 +768,49 @@ interface MonacoBootWindowLike extends Window {
     } catch (error) {
       console.warn('[wba] replay active model language failed', error);
     }
+  }
+
+  function refreshActiveLanguageIntelligenceAfterWbaConnect(reason: string): void {
+    const activePath = String(currentPath || '');
+    if (!activePath) return;
+    try {
+      workbenchRuntime.wbFlushDidChangeIfReady();
+    } catch (error) {
+      console.warn('[wba] didChange flush failed after connect', error);
+    }
+    try {
+      workbenchRuntime.wbFlushSymbolsIfReady();
+    } catch (error) {
+      console.warn('[wba] symbols flush failed after connect', error);
+    }
+    try {
+      const languageId = model && typeof model.getLanguageId === 'function' ? String(model.getLanguageId() || '') : '';
+      languageBridgeProviders.fireSemanticTokensChanged(languageId || null);
+    } catch (error) {
+      console.warn('[wba] semantic-token invalidation failed after connect', error);
+    }
+    try {
+      const generation = workbenchRuntime.wbCurrentGeneration();
+      _bcRequestSymbols(activePath, { generation });
+      workbenchRuntime.wbSchedulePostReadyStructureRefresh(activePath, generation, 'wba_ready:' + String(reason || 'unknown'));
+    } catch (error) {
+      console.warn('[wba] active language-intelligence refresh failed after connect', error);
+    }
+  }
+
+  function handleWbaSocketReadyForEditor(reason: string): void {
+    void workbenchRuntime.wbFlushActiveModelOpen('wba_ready:' + String(reason || 'connect'))
+      .catch((error) => {
+        console.warn('[wba] active model open flush failed after connect', error);
+      })
+      .then((result) => {
+        const record = result && typeof result === 'object' ? result as Record<string, unknown> : {};
+        if (record.deferred === true) return null;
+        return hydrateWorkbenchProviderSnapshot(reason).finally(() => {
+          replayActiveModelLanguageAfterWbaConnect(reason);
+          refreshActiveLanguageIntelligenceAfterWbaConnect(reason);
+        });
+      });
   }
 
   function _clearEditorDecorationStateRuntime() {
@@ -941,7 +1003,15 @@ interface MonacoBootWindowLike extends Window {
         request_id: payload.request_id ? String(payload.request_id) : '',
         source: payload.source ? String(payload.source) : '',
       });
-      void hydrateWorkbenchProviderSnapshot('model_ready');
+      void workbenchRuntime.wbFlushActiveModelOpen('model_ready')
+        .catch((error) => {
+          console.warn('[model_ready] WBA open flush failed', error);
+        })
+        .then((result) => {
+          const record = result && typeof result === 'object' ? result as Record<string, unknown> : {};
+          if (record.deferred === true) return;
+          void hydrateWorkbenchProviderSnapshot('model_ready');
+        });
       console.log('[model_ready] emit', {
         path: String(payload.path),
         generation,
@@ -1266,6 +1336,7 @@ interface MonacoBootWindowLike extends Window {
         getEditor: function() { return editor; },
         runIssuesCommand: runIssuesCommand,
         runFindCommand: runFindCommand,
+        runEditCommand: runEditCommand,
       }) as Parameters<typeof registerEditorRuntimeSocketHandlers>[1]);
 
       registerEditorWbaRuntimeHandlers(editorWbaRpcTransport, {
@@ -1275,6 +1346,7 @@ interface MonacoBootWindowLike extends Window {
         applyDiagnosticsUpdate: _applyDiagnosticsUpdate,
         languageBridge: languageBridge,
         registerSemanticTokensWithLegend: _registerSemanticTokensWithLegend,
+        fireSemanticTokensChanged: languageBridgeProviders.fireSemanticTokensChanged,
         cacheCompletionProviderRegistration: languageBridgeProviders.cacheCompletionProviderRegistration,
         cacheInlayHintsProviderRegistration: languageBridgeProviders.cacheInlayHintsProviderRegistration,
         cacheInlineCompletionProviderRegistration: languageBridgeProviders.cacheInlineCompletionProviderRegistration,
@@ -1288,10 +1360,7 @@ interface MonacoBootWindowLike extends Window {
       if (wbaRpcSocket && typeof wbaRpcSocket.on === 'function') {
         wbaRpcSocket.on('connect', () => {
           console.log('[wba] socket connected');
-          void hydrateWorkbenchProviderSnapshot('wba_socket_connect')
-            .finally(() => {
-              replayActiveModelLanguageAfterWbaConnect('wba_socket_connect');
-            });
+          handleWbaSocketReadyForEditor('wba_socket_connect');
         });
         wbaRpcSocket.on('disconnect', () => {
           console.warn('[wba] socket disconnected');

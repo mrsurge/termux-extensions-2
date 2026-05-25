@@ -23,6 +23,7 @@ interface EditorRuntimeSocketHandlerDeps {
   getEditor(): unknown;
   runIssuesCommand(editor: unknown, action: string): void;
   runFindCommand(editor: unknown, action: string, onError: (error: unknown) => void): void;
+  runEditCommand(editor: unknown, command: string): boolean;
 }
 
 export function registerEditorRuntimeSocketHandlers(
@@ -68,9 +69,24 @@ export function registerEditorRuntimeSocketHandlers(
     }
   };
 
+  const handleEditCommandPayload = (payload: unknown): void => {
+    try {
+      const record = payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? payload as Record<string, unknown>
+        : {};
+      const command = typeof record.command === 'string' ? record.command : '';
+      if (!command) return;
+      const ok = deps.runEditCommand(deps.getEditor(), command);
+      if (!ok) console.warn('[Edit] command failed or unsupported', command);
+    } catch (error) {
+      console.warn('[Edit] command handler failed', error);
+    }
+  };
+
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.issuesDumpRequest, handleIssuesDumpRequestPayload);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.issuesCommand, handleIssuesCommandPayload);
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.findCommand, handleFindCommandPayload);
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.editCommand, handleEditCommandPayload);
   }
 }

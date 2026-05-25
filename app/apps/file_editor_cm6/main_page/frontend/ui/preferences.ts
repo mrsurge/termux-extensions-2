@@ -43,6 +43,21 @@ export function createPreferencesController(deps: any) {
     deps.applyFontScale(state.fontScale ?? 0.85);
   }
 
+  function applyPreferencesChangedPayload(payload: any) {
+    const nextState = payload && typeof payload === 'object'
+      ? (payload.view_state && typeof payload.view_state === 'object'
+        ? payload.view_state
+        : (payload.preferences && typeof payload.preferences === 'object'
+          && payload.preferences.editor && typeof payload.preferences.editor === 'object'
+          ? payload.preferences.editor
+          : null))
+      : null;
+    if (!nextState) return false;
+    deps.setEditorViewState(nextState);
+    applyStateToMenus(nextState);
+    return true;
+  }
+
   async function updatePreference(key: string, value: any) {
     try {
       console.log('[Preference] updatePreference request', key, value);
@@ -76,5 +91,11 @@ export function createPreferencesController(deps: any) {
     deps.setEditorViewState(state);
   }
 
-  return { fetchEditorState, updatePreference, refreshMenuState, applyStateToMenus };
+  return {
+    fetchEditorState,
+    updatePreference,
+    refreshMenuState,
+    applyStateToMenus,
+    applyPreferencesChangedPayload,
+  };
 }

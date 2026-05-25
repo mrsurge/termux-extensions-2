@@ -21,6 +21,9 @@ interface DiffEditorLike {
 
 type WindowWithEditorHostActions = Window & {
   __te2AdapterReady?: boolean;
+  __te2AdapterProject?: string | null;
+  __te2ProjectSwitchInProgress?: boolean;
+  __te2ProjectSwitchId?: string | null;
 };
 
 interface EditorRpcHostActionRuntimeDeps {
@@ -28,6 +31,8 @@ interface EditorRpcHostActionRuntimeDeps {
   getEditor(): EditorLike | null;
   getDiffEditor(): DiffEditorLike | null;
   replayOpenFileAfterBaton(): void;
+  onProjectSwitching?(params: Record<string, unknown>): void;
+  onProjectSwitched?(params: Record<string, unknown>): void;
   notifyEditorRpc(method: EditorRpcMethodName, params: Record<string, unknown>): boolean;
   onEditorRpcNotification(
     method: EditorRpcNotificationName,
@@ -44,6 +49,8 @@ export function createEditorRpcHostActionRuntime(
   deps: EditorRpcHostActionRuntimeDeps,
 ): EditorRpcHostActionRuntime {
   let adapterStateUnsubscribe: (() => void) | null = null;
+  let projectSwitchingUnsubscribe: (() => void) | null = null;
+  let projectSwitchedUnsubscribe: (() => void) | null = null;
   let focusDisposable: DisposableLike | null = null;
   let mobileCtrlDisposable: DisposableLike | null = null;
 
@@ -57,16 +64,43 @@ export function createEditorRpcHostActionRuntime(
 
   function connect(): void {
     try {
-      if (adapterStateUnsubscribe) return;
+      if (adapterStateUnsubscribe && projectSwitchingUnsubscribe && projectSwitchedUnsubscribe) return;
       adapterStateUnsubscribe = deps.onEditorRpcNotification(EDITOR_RPC_NOTIFICATIONS.adapterState, (params) => {
         const status = typeof params.status === 'string' ? params.status : '';
+        const project = typeof params.project === 'string' ? params.project : null;
         console.log('[adapter_state] editor rpc received:', status);
         if (status === 'ready') {
-          deps.getWindow().__te2AdapterReady = true;
+          const win = deps.getWindow();
+          win.__te2AdapterReady = true;
+          win.__te2AdapterProject = project;
           deps.replayOpenFileAfterBaton();
-        } else if (status === 'error') {
+        } else {
+          const win = deps.getWindow();
+          win.__te2AdapterReady = false;
+          if (project) win.__te2AdapterProject = project;
+        }
+        if (status === 'error') {
           console.warn('[adapter_state] error:', params.error);
         }
+      });
+      projectSwitchingUnsubscribe = deps.onEditorRpcNotification(EDITOR_RPC_NOTIFICATIONS.projectSwitching, (params) => {
+        const win = deps.getWindow();
+        const project = typeof params.projectPath === 'string' ? params.projectPath : null;
+        const switchId = typeof params.switchId === 'string' ? params.switchId : null;
+        win.__te2AdapterReady = false;
+        win.__te2AdapterProject = project;
+        win.__te2ProjectSwitchInProgress = true;
+        win.__te2ProjectSwitchId = switchId;
+        deps.onProjectSwitching?.(params);
+      });
+      projectSwitchedUnsubscribe = deps.onEditorRpcNotification(EDITOR_RPC_NOTIFICATIONS.projectSwitched, (params) => {
+        const win = deps.getWindow();
+        const project = typeof params.projectPath === 'string' ? params.projectPath : null;
+        const switchId = typeof params.switchId === 'string' ? params.switchId : null;
+        win.__te2ProjectSwitchInProgress = false;
+        win.__te2ProjectSwitchId = switchId;
+        if (project) win.__te2AdapterProject = project;
+        deps.onProjectSwitched?.(params);
       });
     } catch (error) {
       console.warn('[editor_rpc_host_actions] connect failed', error);

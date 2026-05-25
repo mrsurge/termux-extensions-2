@@ -13,7 +13,7 @@ const shared = {
   format: 'esm',
   target: 'es2022',
   alias: {
-    'te2-console-bridge': path.join(appRoot, '..', 'file_editor_cm6', 'static', 'js', 'console_bridge.js'),
+    'te2-console-bridge': path.join(appRoot, '..', 'file_editor_cm6', 'main_page', 'frontend', 'console_bridge.js'),
   },
   external: [
     '/static/vendor/*',

@@ -58,7 +58,7 @@ interface ExplorerNotificationHandlerDeps {
   dispatchRemoteDraft(payload: JsonObject): void;
   dispatchAutosaveContent(payload: JsonObject): void;
   dispatchPrefsChanged(payload: JsonObject): void;
-  dispatchProjectOpened(path: string): void;
+  dispatchProjectOpened(path: string, payload?: JsonObject): void;
   dispatchWatcherError(payload: JsonObject): void;
   dispatchWatcherRaiseResult(payload: JsonObject): void;
   requestGitBaselines(): void;
@@ -108,6 +108,32 @@ function coerceGitStatus(payload: JsonObject): ExplorerGitStatus {
   if (Array.isArray(payload.unstaged)) status.unstaged = payload.unstaged;
   if (Array.isArray(payload.untracked)) status.untracked = payload.untracked;
   return status;
+}
+
+function applyProjectRootProjection(
+  deps: ExplorerNotificationHandlerDeps,
+  nextProjectPath: string | null,
+): boolean {
+  if (!nextProjectPath) return false;
+  const prevProjectPath = deps.runtimeState.getProjectPath() || '';
+  const projectChanged = !!prevProjectPath && prevProjectPath !== nextProjectPath;
+  deps.runtimeState.setProjectPath(nextProjectPath);
+  deps.renderProjectLabel();
+  if (!projectChanged) return false;
+
+  deps.setActiveFileRel(null);
+  deps.getOpenDirectories().clear();
+  deps.setOpenDirsInitialized(false);
+  deps.runtimeState.setGitStatus(null);
+  deps.renderExplorerTree();
+  deps.renderGitSummary();
+  deps.setGitControlsEnabled(false, false);
+  if (deps.hasExplorerRpc()) {
+    deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
+    deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
+  }
+  void deps.initDiffBaseFromBackend();
+  return true;
 }
 
 function getJobProgressPercent(value: unknown): number {
@@ -216,11 +242,11 @@ export function createExplorerNotificationHandler(
           getNonEmptyString(payload.path) ||
           getNonEmptyString(payload.projectPath) ||
           prevProjectPath;
-        deps.runtimeState.setProjectPath(nextProjectPath);
-        deps.renderProjectLabel();
+        const projectChanged = applyProjectRootProjection(deps, nextProjectPath);
         void deps.initDiffBaseFromBackend();
 
         if (
+          !projectChanged &&
           prevProjectPath &&
           nextProjectPath &&
           prevProjectPath !== nextProjectPath
@@ -254,6 +280,8 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.openStateChanged: {
+        const nextProjectPath = getNonEmptyString(payload.projectPath);
+        applyProjectRootProjection(deps, nextProjectPath);
         const nextRel = getStringValue(payload.openFileRel) || getStringValue(payload.rel);
         deps.setActiveFileRel(nextRel);
         if (nextRel) {
@@ -446,14 +474,13 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.projectOpened: {
         const path = getNonEmptyString(payload.path);
         if (path) {
-          deps.runtimeState.setProjectPath(path);
-          deps.renderProjectLabel();
+          applyProjectRootProjection(deps, path);
           if (deps.hasExplorerRpc()) {
             deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
             deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
           }
           void deps.initDiffBaseFromBackend();
-          deps.dispatchProjectOpened(path);
+          deps.dispatchProjectOpened(path, payload);
         }
         break;
       }

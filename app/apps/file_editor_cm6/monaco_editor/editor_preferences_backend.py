@@ -92,6 +92,18 @@ async def handle_editor_preference_update_request(
                 room_payload,
             )
         )
+        try:
+            from ..ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
+            from ..ui_ipc.rpc_contract import UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED
+
+            asyncio.create_task(
+                emit_ui_ipc_rpc_notification(
+                    UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED,
+                    room_payload,
+                )
+            )
+        except Exception:
+            pass
 
     return await handle_update_preference(
         payload,

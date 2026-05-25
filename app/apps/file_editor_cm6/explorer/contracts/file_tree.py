@@ -54,6 +54,7 @@ class ExplorerEditorOpenRequiredParams(TypedDict):
 
 
 class ExplorerEditorOpenParams(ExplorerEditorOpenRequiredParams, total=False):
+    project_root: str
     line: int
     column: int
     focus: bool
@@ -126,6 +127,12 @@ def parse_editor_open_params(payload: object) -> ExplorerEditorOpenParams:
         "raw_path": raw_path,
         "source": _parse_optional_string(envelope.get("source")) or "explorer_rpc",
     }
+
+    project_root = _parse_optional_string(envelope.get("projectRoot")) or _parse_optional_string(
+        envelope.get("project_root")
+    )
+    if project_root is not None:
+        params["project_root"] = project_root
 
     line = _coerce_optional_positive_int(envelope.get("line"))
     if line is not None:

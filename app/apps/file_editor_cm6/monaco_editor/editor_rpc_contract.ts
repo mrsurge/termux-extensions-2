@@ -82,7 +82,10 @@ export const EDITOR_RPC_NOTIFICATIONS = {
   saveSnapshotRequest: 'editor.save.snapshot.request',
   issuesCommand: 'editor.issues.command',
   findCommand: 'editor.find.command',
+  editCommand: 'editor.edit.command',
   openStateChanged: 'editor.openState.changed',
+  projectSwitching: 'editor.project.switching',
+  projectSwitched: 'editor.project.switched',
 } as const;
 
 export type EditorRpcNotificationName = (typeof EDITOR_RPC_NOTIFICATIONS)[keyof typeof EDITOR_RPC_NOTIFICATIONS];

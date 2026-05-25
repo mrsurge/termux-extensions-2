@@ -84,6 +84,8 @@ class MainActivity : AppCompatActivity() {
     private var pendingSurfaceRecover: Boolean = false
     private var notificationPermissionRequestInFlight: Boolean = false
     private var pendingPersistentServiceStart: Boolean = false
+    private var persistentNetworkPermissionDenied: Boolean = false
+    private var persistentNetworkStartFailed: Boolean = false
 
     private fun prefs() = getSharedPreferences("gecko_session_state", Context.MODE_PRIVATE)
 
@@ -462,10 +464,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun updatePersistentNetworkService() {
         if (!persistentNetworkNotificationEnabled || !inAppShell) {
-            pendingPersistentServiceStart = false
-            stopService(Intent(this, PersistentNetworkService::class.java))
+            stopPersistentNetworkServiceLocally()
+            persistentNetworkStartFailed = false
             return
         }
+
+        if (persistentNetworkStartFailed) return
 
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             val granted = ContextCompat.checkSelfPermission(
@@ -473,6 +477,10 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
             if (!granted) {
+                if (persistentNetworkPermissionDenied) {
+                    pendingPersistentServiceStart = false
+                    return
+                }
                 pendingPersistentServiceStart = true
                 if (!notificationPermissionRequestInFlight) {
                     notificationPermissionRequestInFlight = true
@@ -495,51 +503,31 @@ class MainActivity : AppCompatActivity() {
                 startService(intent)
             }
         } catch (_: Exception) {
-            disablePersistentNetworkNotificationSetting()
+            persistentNetworkStartFailed = true
+            stopPersistentNetworkServiceLocally()
         }
     }
 
-    private fun disablePersistentNetworkNotificationSetting() {
-        persistentNetworkNotificationEnabled = false
+    private fun stopPersistentNetworkServiceLocally() {
         pendingPersistentServiceStart = false
         notificationPermissionRequestInFlight = false
         stopService(Intent(this, PersistentNetworkService::class.java))
+    }
 
-        Thread {
-            try {
-                val settingsUrl = frameworkBaseUrl.trimEnd('/') + "/api/settings"
-                val merged = JSONObject()
-
-                // Merge patch instead of clobbering full settings.
-                try {
-                    val getReq = Request.Builder().url(settingsUrl).get().build()
-                    httpClient.newCall(getReq).execute().use { resp ->
-                        val body = resp.body?.string().orEmpty()
-                        if (resp.isSuccessful && body.isNotBlank()) {
-                            val json = JSONObject(body)
-                            val data = json.optJSONObject("data")
-                            if (data != null) {
-                                val keys = data.keys()
-                                while (keys.hasNext()) {
-                                    val key = keys.next() as String
-                                    merged.put(key, data.opt(key) ?: JSONObject.NULL)
-                                }
-                            }
-                        }
-                    }
-                } catch (_: Exception) {
-                }
-
-                merged.put("persistent_network_notification", false)
-
-                val postReq = Request.Builder()
-                    .url(settingsUrl)
-                    .post(merged.toString().toRequestBody("application/json".toMediaType()))
-                    .build()
-                httpClient.newCall(postReq).execute().close()
-            } catch (_: Exception) {
+    private fun fetchPersistentNetworkSetting(frameworkUrl: String): Boolean? {
+        return try {
+            val androidCfgUrl = frameworkUrl.trimEnd('/') + "/api/android/config"
+            val req = Request.Builder().url(androidCfgUrl).get().build()
+            httpClient.newCall(req).execute().use { resp ->
+                val body = resp.body?.string()
+                if (!resp.isSuccessful || body.isNullOrBlank()) return null
+                val json = JSONObject(body)
+                val data = json.optJSONObject("data") ?: return null
+                data.optBoolean("persistent_network_notification", false)
             }
-        }.start()
+        } catch (_: Exception) {
+            null
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -891,6 +879,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        persistentNetworkPermissionDenied = false
+        persistentNetworkStartFailed = false
         try {
             if (::geckoSession.isInitialized) geckoSession.setActive(true)
         } catch (_: Exception) {
@@ -931,11 +921,13 @@ class MainActivity : AppCompatActivity() {
             notificationPermissionRequestInFlight = false
             val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
             if (granted) {
+                persistentNetworkPermissionDenied = false
                 if (pendingPersistentServiceStart) {
                     updatePersistentNetworkService()
                 }
             } else {
-                disablePersistentNetworkNotificationSetting()
+                persistentNetworkPermissionDenied = true
+                stopPersistentNetworkServiceLocally()
             }
         }
     }
@@ -1382,10 +1374,16 @@ class MainActivity : AppCompatActivity() {
             // Connect IME filter IPC after server URL is known
             try {
                 val port = java.net.URI(frameworkUrl).port.let { if (it == -1) 8089 else it }
-                uiIpcClient = UiIpcClient(editorInputFilter) { _ ->
+                uiIpcClient = UiIpcClient(editorInputFilter) { active ->
                     runOnUiThread {
                         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
-                        imm?.restartInput(geckoView)
+                        if (active) {
+                            geckoView.requestFocus()
+                            imm?.restartInput(geckoView)
+                            imm?.showSoftInput(geckoView, 0)
+                        } else {
+                            imm?.restartInput(geckoView)
+                        }
                     }
                 }
                 uiIpcClient?.onConsoleEvent = { eventName, data ->
@@ -1399,19 +1397,8 @@ class MainActivity : AppCompatActivity() {
                 android.util.Log.w("MainActivity", "UiIpcClient setup failed", e)
             }
 
-            try {
-                val androidCfgUrl = frameworkUrl.trimEnd('/') + "/api/android/config"
-                val req = Request.Builder().url(androidCfgUrl).get().build()
-                httpClient.newCall(req).execute().use { resp ->
-                    val body = resp.body?.string()
-                    if (resp.isSuccessful && !body.isNullOrBlank()) {
-                        val json = JSONObject(body)
-                        val data = json.optJSONObject("data")
-                        persistentNetworkNotificationEnabled =
-                            data?.optBoolean("persistent_network_notification", false) ?: false
-                    }
-                }
-            } catch (_: Exception) {
+            fetchPersistentNetworkSetting(frameworkUrl)?.let {
+                persistentNetworkNotificationEnabled = it
             }
             runOnUiThread {
                 if (forceLoadHome) {

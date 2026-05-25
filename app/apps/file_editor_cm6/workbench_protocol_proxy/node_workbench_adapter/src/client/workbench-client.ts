@@ -186,6 +186,8 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$registerInlineCompletionsSupport",
   "$registerDocumentSemanticTokensProvider",
   "$registerDocumentRangeSemanticTokensProvider",
+  "$emitDocumentSemanticTokensEvent",
+  "$emitDocumentRangeSemanticTokensEvent",
   "$registerDocumentLinkProvider",
   "$registerCodeActionSupport",
   "$registerCodeLensesProvider",

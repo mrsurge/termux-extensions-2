@@ -830,6 +830,22 @@ async def update_preference(data: dict[str, object] = Body(...)):
             )
         except Exception:
             pass
+        try:
+            from app.apps.file_editor_cm6.ui_ipc.rpc_contract import (
+                UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED,
+            )
+            from app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws import (
+                emit_ui_ipc_rpc_notification,
+            )
+
+            asyncio.create_task(
+                emit_ui_ipc_rpc_notification(
+                    UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED,
+                    payload,
+                )
+            )
+        except Exception:
+            pass
 
     return await _handle_update_preference(
         data,

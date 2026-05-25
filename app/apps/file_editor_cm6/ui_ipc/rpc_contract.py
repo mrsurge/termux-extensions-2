@@ -24,6 +24,7 @@ UI_IPC_RPC_METHOD_HOST_EDITOR_GIT_BASELINES_GET: Final = "ui.host.editor.gitBase
 UI_IPC_RPC_METHOD_HOST_EDITOR_FIND: Final = "ui.host.editor.find"
 UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_COMMAND: Final = "ui.host.editor.issues.command"
 UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_DUMP: Final = "ui.host.editor.issues.dump"
+UI_IPC_RPC_METHOD_HOST_EDITOR_COMMAND: Final = "ui.host.editor.command"
 UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_MENTION: Final = "ui.host.diagnostics.mention"
 UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD: Final = "ui.host.state.fileActivity.record"
 UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE: Final = "ui.host.state.fileScroll.update"
@@ -39,6 +40,7 @@ UiIpcRpcMethod = Literal[
     "ui.host.editor.find",
     "ui.host.editor.issues.command",
     "ui.host.editor.issues.dump",
+    "ui.host.editor.command",
     "ui.host.diagnostics.mention",
     "ui.host.state.fileActivity.record",
     "ui.host.state.fileScroll.update",
@@ -47,6 +49,8 @@ UiIpcRpcMethod = Literal[
 UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE: Final = "ui.editor.save"
 UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS: Final = "ui.editor.focus"
 UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR: Final = "ui.editor.blur"
+UI_IPC_RPC_NOTIFICATION_IME_FOCUS: Final = "ui.ime.focus"
+UI_IPC_RPC_NOTIFICATION_IME_BLUR: Final = "ui.ime.blur"
 UI_IPC_RPC_NOTIFICATION_EDITOR_READY: Final = "ui.editor.ready"
 UI_IPC_RPC_NOTIFICATION_EDITOR_OPEN_COMPLETE: Final = "ui.editor.open.complete"
 UI_IPC_RPC_NOTIFICATION_EDITOR_CACHE_STATE: Final = "ui.editor.cache.state"
@@ -57,11 +61,16 @@ UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS: Final = "ui.editor.diagnostic
 UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE: Final = "ui.adapter.state"
 UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED: Final = "ui.host.activeFile.changed"
 UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED: Final = "ui.openState.changed"
+UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHING: Final = "ui.project.switching"
+UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHED: Final = "ui.project.switched"
+UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED: Final = "ui.preferences.changed"
 
 UiIpcRpcNotification = Literal[
     "ui.editor.save",
     "ui.editor.focus",
     "ui.editor.blur",
+    "ui.ime.focus",
+    "ui.ime.blur",
     "ui.editor.ready",
     "ui.editor.open.complete",
     "ui.editor.cache.state",
@@ -72,6 +81,9 @@ UiIpcRpcNotification = Literal[
     "ui.adapter.state",
     "ui.host.activeFile.changed",
     "ui.openState.changed",
+    "ui.project.switching",
+    "ui.project.switched",
+    "ui.preferences.changed",
 ]
 
 ALLOWED_REQUEST_METHODS: Final[set[str]] = {
@@ -85,6 +97,7 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_EDITOR_FIND,
     UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_COMMAND,
     UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_DUMP,
+    UI_IPC_RPC_METHOD_HOST_EDITOR_COMMAND,
     UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_MENTION,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
@@ -94,6 +107,8 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE,
     UI_IPC_RPC_NOTIFICATION_EDITOR_FOCUS,
     UI_IPC_RPC_NOTIFICATION_EDITOR_BLUR,
+    UI_IPC_RPC_NOTIFICATION_IME_FOCUS,
+    UI_IPC_RPC_NOTIFICATION_IME_BLUR,
     UI_IPC_RPC_NOTIFICATION_EDITOR_READY,
     UI_IPC_RPC_NOTIFICATION_EDITOR_OPEN_COMPLETE,
     UI_IPC_RPC_NOTIFICATION_EDITOR_CACHE_STATE,
@@ -104,6 +119,9 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
     UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHING,
+    UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHED,
+    UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED,
 }
 
 JsonObject = dict[str, object]

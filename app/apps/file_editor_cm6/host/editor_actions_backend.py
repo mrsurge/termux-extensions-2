@@ -111,6 +111,22 @@ async def handle_host_editor_find_request(
     return {"ok": True, "action": action}
 
 
+async def handle_host_editor_command_request(
+    data: dict[str, object],
+    *,
+    source_name: str,
+) -> JsonMap:
+    command = str(data.get("command") or "").strip()
+    allowed = {"undo", "redo", "cut", "copy", "paste", "selectAll"}
+    if command not in allowed:
+        raise ValueError("unsupported editor command")
+    await editor_runtime_emit_room_event(
+        "editor:edit_cmd",
+        {"command": command, "source_client": source_name},
+    )
+    return {"ok": True, "command": command}
+
+
 async def handle_host_editor_issues_command_request(
     data: dict[str, object],
     *,

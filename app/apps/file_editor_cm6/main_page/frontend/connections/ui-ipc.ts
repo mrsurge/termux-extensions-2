@@ -144,6 +144,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
       dispatchWindowCustomEvent('cm6:sidebar-file-open', params);
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.projectOpened) {
       dispatchSidebarEvent({ type: method, payload: params });
+      dispatchWindowCustomEvent('cm6:sidebar-project-opened', params);
     }
   }
 
@@ -236,8 +237,14 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.openStateChanged) {
             dispatchWindowCustomEvent('cm6:open-state-changed', params);
             dispatchWindowCustomEvent('cm6:active-file-changed', activeFilePayloadFromOpenState(params));
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitching) {
+            dispatchWindowCustomEvent('cm6:project-switching', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitched) {
+            dispatchWindowCustomEvent('cm6:project-switched', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.adapterState) {
             dispatchWindowCustomEvent('cm6:adapter-state', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.preferencesChanged) {
+            dispatchWindowCustomEvent('cm6:preferences-changed', params);
           }
         },
       });
@@ -295,6 +302,11 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     return await connection.request(UI_IPC_RPC_METHODS.hostEditorFind, payload || {}, 8000);
   }
 
+  async function requestBackendEditorCommand(payload: JsonObject = {}): Promise<unknown> {
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostEditorCommand, payload || {}, 8000);
+  }
+
   async function requestBackendEditorIssuesCommand(payload: JsonObject = {}): Promise<unknown> {
     const connection = await connectUIIPC();
     return await connection.request(UI_IPC_RPC_METHODS.hostEditorIssuesCommand, payload || {}, 8000);
@@ -320,9 +332,21 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     return await connection.request(UI_IPC_RPC_METHODS.hostStateFileScrollUpdate, payload || {}, 8000);
   }
 
+  function emitUiIpcNotification(method: keyof typeof UI_IPC_RPC_NOTIFICATIONS | string, params: JsonObject = {}): void {
+    const resolved = Object.prototype.hasOwnProperty.call(UI_IPC_RPC_NOTIFICATIONS, method)
+      ? UI_IPC_RPC_NOTIFICATIONS[method as keyof typeof UI_IPC_RPC_NOTIFICATIONS]
+      : method;
+    void connectUIIPC().then((connection) => {
+      connection.notify(resolved as typeof UI_IPC_RPC_NOTIFICATIONS[keyof typeof UI_IPC_RPC_NOTIFICATIONS], params || {});
+    }).catch((error: unknown) => {
+      console.warn('[UI_IPC_RPC] notification emit failed', resolved, error);
+    });
+  }
+
   return {
     emitSidebarRpcRequest,
     emitSidebarRpcNotification,
+    emitUiIpcNotification,
     connectSidebarIPC,
     connectUIIPC,
     requestBackendFileOpen,
@@ -333,6 +357,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     requestBackendEditorJumpToLine,
     requestBackendEditorGitBaselines,
     requestBackendEditorFind,
+    requestBackendEditorCommand,
     requestBackendEditorIssuesCommand,
     requestBackendEditorIssuesDump,
     requestBackendDiagnosticsMention,

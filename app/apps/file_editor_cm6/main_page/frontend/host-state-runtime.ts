@@ -138,8 +138,13 @@ export function createHostStateRuntime(deps: HostStateRuntimeDeps): HostStateRun
       workbenchAdapterReadyOk = false;
       spinnerHide(false);
       resolveAdapterReady(false);
-    } else if (status === 'starting' || status === 'connected') {
-      spinnerSetStep(status === 'connected' ? 'Connecting adapter\u2026' : 'Starting adapter\u2026');
+    } else if (status === 'starting' || status === 'connected' || status === 'switching') {
+      workbenchAdapterReadyOk = false;
+      if (status === 'switching') {
+        spinnerSetStep('Switching project adapter\u2026');
+      } else {
+        spinnerSetStep(status === 'connected' ? 'Connecting adapter\u2026' : 'Starting adapter\u2026');
+      }
     } else if (status === 'idle') {
       if (!workbenchAdapterReadyOk && !hostWindow().__adapterReadyResolve) {
         updateLspSpinner();
@@ -173,6 +178,28 @@ export function createHostStateRuntime(deps: HostStateRuntimeDeps): HostStateRun
         return;
       }
       deps.applyActiveFilePath(openFile);
+    } catch {}
+  }
+
+  function handleProjectSwitching(detail: unknown): void {
+    try {
+      workbenchAdapterReadyOk = false;
+      const payload = isRecord(detail) ? detail : {};
+      const displayPath = typeof payload.displayPath === 'string' ? payload.displayPath : '';
+      spinnerSetStep(displayPath ? `Switching project: ${displayPath}` : 'Switching project\u2026');
+    } catch {}
+  }
+
+  function handleProjectSwitched(detail: unknown): void {
+    try {
+      const payload = isRecord(detail) ? detail : {};
+      const status = typeof payload.status === 'string' ? payload.status : '';
+      if (status === 'error') {
+        workbenchAdapterReadyOk = false;
+        spinnerHide(false);
+        return;
+      }
+      updateLspSpinner();
     } catch {}
   }
 
@@ -220,6 +247,16 @@ export function createHostStateRuntime(deps: HostStateRuntimeDeps): HostStateRun
     window.addEventListener('cm6:open-state-changed', (evt) => {
       try {
         handleOpenStateChanged(evt instanceof CustomEvent ? evt.detail : undefined);
+      } catch {}
+    });
+    window.addEventListener('cm6:project-switching', (evt) => {
+      try {
+        handleProjectSwitching(evt instanceof CustomEvent ? evt.detail : undefined);
+      } catch {}
+    });
+    window.addEventListener('cm6:project-switched', (evt) => {
+      try {
+        handleProjectSwitched(evt instanceof CustomEvent ? evt.detail : undefined);
       } catch {}
     });
   }

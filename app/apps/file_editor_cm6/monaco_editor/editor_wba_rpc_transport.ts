@@ -37,6 +37,12 @@ interface PendingRequestEntry {
   method: string;
 }
 
+interface ConnectWaiter {
+  timer: ReturnType<typeof setTimeout>;
+  resolve(socket: WbaRpcSocketLike): void;
+  reject(error: Error): void;
+}
+
 interface WbaRpcTransportDeps {
   getSocket(): WbaRpcSocketLike | null;
   setTimeoutFn(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
@@ -119,11 +125,32 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   notify(method: string, params: Record<string, unknown>): boolean;
   onNotification(method: string, handler: (params: Record<string, unknown>) => void): () => void;
   getPendingRequests(): Map<string, PendingRequestEntry>;
+  rejectPending(reason?: string): void;
 } {
   const pending = new Map<string, PendingRequestEntry>();
+  const connectWaiters = new Set<ConnectWaiter>();
   const notificationHandlers = new Map<string, Set<(params: Record<string, unknown>) => void>>();
   let nextId = 1;
   let attached = false;
+
+  function resolveConnectWaiters(): void {
+    const socket = deps.getSocket();
+    if (!socket?.connected) return;
+    for (const waiter of Array.from(connectWaiters)) {
+      deps.clearTimeoutFn(waiter.timer);
+      connectWaiters.delete(waiter);
+      waiter.resolve(socket);
+    }
+  }
+
+  function rejectConnectWaiters(message: string): void {
+    const error = new Error(message);
+    for (const waiter of Array.from(connectWaiters)) {
+      deps.clearTimeoutFn(waiter.timer);
+      connectWaiters.delete(waiter);
+      waiter.reject(error);
+    }
+  }
 
   function rejectAllPending(message: string): void {
     for (const [key, entry] of pending.entries()) {
@@ -179,12 +206,18 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
     if (attached || !socket || typeof socket.on !== 'function') return;
     attached = true;
     socket.on(WBA_RPC_EVENT, handleMessage);
+    socket.on('connect', () => {
+      resolveConnectWaiters();
+    });
     socket.on('disconnect', () => {
+      rejectConnectWaiters('wba rpc socket disconnected');
       rejectAllPending('wba rpc socket disconnected');
     });
     socket.on('connect_error', () => {
+      rejectConnectWaiters('wba rpc socket connect error');
       rejectAllPending('wba rpc socket connect error');
     });
+    resolveConnectWaiters();
   }
 
   function isConnected(): boolean {
@@ -192,16 +225,37 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
     return !!(socket && socket.connected);
   }
 
-  function call(
+  function waitForConnected(method: string, timeoutMs: number): Promise<WbaRpcSocketLike> {
+    const socket = deps.getSocket();
+    if (socket?.connected) return Promise.resolve(socket);
+    return new Promise((resolve, reject) => {
+      const waiter: ConnectWaiter = {
+        resolve,
+        reject,
+        timer: deps.setTimeoutFn(() => {
+          connectWaiters.delete(waiter);
+          reject(new Error(`wba rpc socket not connected: ${method}`));
+        }, timeoutMs),
+      };
+      connectWaiters.add(waiter);
+    });
+  }
+
+  async function call(
     method: string,
     params: Record<string, unknown>,
     opts?: { timeoutMs?: number },
   ): Promise<unknown> {
     const timeoutMs = opts && Number.isFinite(Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 12000;
+    const startedAt = Date.now();
+    const socket = await waitForConnected(method, timeoutMs);
+    const remainingMs = timeoutMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) {
+      return Promise.reject(new Error(`wba rpc timeout: ${method}`));
+    }
     const requestId: WbaRpcId = `wba_rpc_${nextId++}_${Date.now()}`;
-    const socket = deps.getSocket();
     const emit = socket && typeof socket.emit === 'function' ? socket.emit.bind(socket) : null;
-    if (!socket || !socket.connected || !emit) {
+    if (!socket.connected || !emit) {
       return Promise.reject(new Error('wba rpc socket not connected'));
     }
     return new Promise((resolve, reject) => {
@@ -211,7 +265,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
         if (!entry) return;
         pending.delete(key);
         reject(new Error(`wba rpc timeout: ${method}`));
-      }, timeoutMs);
+      }, remainingMs);
       pending.set(idKey(requestId), { timer, resolve, reject, method });
       emit(WBA_RPC_EVENT, {
         jsonrpc: '2.0',
@@ -256,5 +310,6 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
     notify,
     onNotification,
     getPendingRequests: () => pending,
+    rejectPending: (reason?: string) => rejectAllPending(String(reason || 'wba rpc pending requests rejected')),
   };
 }

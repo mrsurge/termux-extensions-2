@@ -18,8 +18,10 @@ interface EditorWbaRuntimeHandlerDeps {
     registeredSemanticTokens: Set<string>;
     semanticTokensLegendCache: Record<string, unknown>;
     semanticTokensRangeFlag: Record<string, unknown>;
+    semanticTokensLanguagesByEventHandle: Record<string, string[]>;
   };
   registerSemanticTokensWithLegend(lang: string, legend: unknown, isRange: boolean): void;
+  fireSemanticTokensChanged(lang?: string | null): void;
   cacheCompletionProviderRegistration(lang: string, registration: { handle: string; triggerCharacters: string[]; supportsResolve: boolean }): void;
   cacheInlayHintsProviderRegistration(lang: string, registration: {
     handle: string;
@@ -64,6 +66,21 @@ export function registerEditorWbaRuntimeHandlers(
           deps.languageBridge,
           deps.registerSemanticTokensWithLegend,
         );
+        return;
+      }
+
+      if (type === 'provider/semanticTokens/didChange') {
+        const eventHandle = Number(event.eventHandle);
+        if (Number.isFinite(eventHandle)) {
+          const languages = deps.languageBridge.semanticTokensLanguagesByEventHandle[String(eventHandle)] || [];
+          if (languages.length) {
+            for (const lang of languages) deps.fireSemanticTokensChanged(lang);
+          } else {
+            deps.fireSemanticTokensChanged(null);
+          }
+        } else {
+          deps.fireSemanticTokensChanged(null);
+        }
         return;
       }
 

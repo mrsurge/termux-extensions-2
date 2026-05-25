@@ -163,7 +163,8 @@ async def handle_editor_open(
     if raw_path.startswith("/"):
         abs_path = str(Path(raw_path).expanduser())
     else:
-        abs_path = str((context.project_root / raw_path.lstrip("/")).expanduser())
+        base_root = Path(params.get("project_root") or context.project_root)
+        abs_path = str((base_root / raw_path.lstrip("/")).expanduser())
 
     open_payload: dict[str, object] = {
         "path": abs_path,

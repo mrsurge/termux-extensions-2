@@ -20,6 +20,8 @@ from ..ui_ipc.rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_EDITOR_READY,
     UI_IPC_RPC_NOTIFICATION_EDITOR_SCROLL_STATE,
     UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHED,
+    UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHING,
 )
 from ..open_state_backend import (
     SidecarOpenStatePayload,
@@ -49,6 +51,7 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_FILE_JUMP_TO_LINE,
     EDITOR_RPC_NOTIFICATION_FILE_OPENED,
     EDITOR_RPC_NOTIFICATION_FIND_COMMAND,
+    EDITOR_RPC_NOTIFICATION_EDIT_COMMAND,
     EDITOR_RPC_NOTIFICATION_GIT_BASELINES,
     EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND,
     EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_REQUEST,
@@ -58,6 +61,8 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_OPEN_COMPLETE,
     EDITOR_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
     EDITOR_RPC_NOTIFICATION_PREFS_CHANGED,
+    EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHED,
+    EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHING,
     EDITOR_RPC_NOTIFICATION_READY,
     EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST,
     EDITOR_RPC_NOTIFICATION_STATE_SSOT,
@@ -71,6 +76,7 @@ _ISSUES_DUMP_WAITING: dict[str, str | asyncio.Future[dict[str, object]]] = {}
 _ISSUES_DUMP_TTL_S = 20.0
 _SAVE_SNAPSHOT_WAITING: dict[str, asyncio.Future[dict[str, object]]] = {}
 _MODEL_READY_LAST_BY_SID: dict[str, str] = {}
+_PROJECT_SWITCH_SEQ = 0
 
 # Tracks SHA256 of the most recent editor-initiated save per abs path.
 # Used to suppress watcher reload for our own saves.
@@ -283,6 +289,117 @@ async def _emit_open_state_changed(
     )
 
 
+def _next_project_switch_id() -> str:
+    global _PROJECT_SWITCH_SEQ
+    _PROJECT_SWITCH_SEQ += 1
+    return f"project_switch_{int(time.time() * 1000)}_{_PROJECT_SWITCH_SEQ}"
+
+
+async def _emit_project_switch_notification(
+    *,
+    phase: str,
+    project: str,
+    display_path: str | None = None,
+    source: str | None = None,
+    reason: str | None = None,
+    switch_id: str | None = None,
+    status: str | None = None,
+    error: str | None = None,
+    open_state: dict[str, object] | None = None,
+    adapter_status: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "phase": phase,
+        "operation": "project_open",
+        "projectPath": project,
+        "displayPath": display_path or project,
+        "switchId": switch_id or _next_project_switch_id(),
+        "ts": int(time.time() * 1000),
+    }
+    if isinstance(source, str) and source:
+        payload["source"] = source
+    if isinstance(reason, str) and reason:
+        payload["reason"] = reason
+    if isinstance(status, str) and status:
+        payload["status"] = status
+    if isinstance(error, str) and error:
+        payload["error"] = error
+    if isinstance(adapter_status, str) and adapter_status:
+        payload["adapterStatus"] = adapter_status
+    if open_state is not None:
+        payload["openState"] = dict(open_state)
+
+    if phase == "begin":
+        editor_method = EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHING
+        ui_method = UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHING
+    else:
+        editor_method = EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHED
+        ui_method = UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHED
+
+    print(
+        "[project_switch] emit "
+        f"phase={phase} project={project} switchId={payload['switchId']} "
+        f"status={status or ''} adapterStatus={adapter_status or ''}",
+        flush=True,
+    )
+
+    try:
+        await _emit_editor_rpc_notification_to_room(
+            editor_method,
+            payload,
+            room="file_editor_cm6",
+        )
+    except Exception:
+        pass
+    try:
+        await _emit_ui_ipc_editor_notification(ui_method, payload)
+    except Exception:
+        pass
+    return payload
+
+
+async def editor_runtime_emit_project_switching(
+    project: str,
+    *,
+    display_path: str | None = None,
+    source: str | None = None,
+    reason: str | None = None,
+) -> dict[str, object]:
+    return await _emit_project_switch_notification(
+        phase="begin",
+        project=project,
+        display_path=display_path,
+        source=source,
+        reason=reason,
+    )
+
+
+async def editor_runtime_emit_project_switched(
+    project: str,
+    *,
+    display_path: str | None = None,
+    source: str | None = None,
+    reason: str | None = None,
+    switch_id: str | None = None,
+    status: str = "ready",
+    error: str | None = None,
+    open_state: dict[str, object] | None = None,
+    adapter_status: str | None = None,
+) -> dict[str, object]:
+    return await _emit_project_switch_notification(
+        phase="end",
+        project=project,
+        display_path=display_path,
+        source=source,
+        reason=reason,
+        switch_id=switch_id,
+        status=status,
+        error=error,
+        open_state=open_state,
+        adapter_status=adapter_status,
+    )
+
+
 def _notify_draft_state_changed_safe(project: str) -> None:
     try:
         from ..explorer.services.runtime_notifications import notify_draft_state_changed
@@ -491,6 +608,7 @@ def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification
         "editor:issues_dump_request": EDITOR_RPC_NOTIFICATION_ISSUES_DUMP_REQUEST,
         "editor:issues_cmd": EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND,
         "editor:find_cmd": EDITOR_RPC_NOTIFICATION_FIND_COMMAND,
+        "editor:edit_cmd": EDITOR_RPC_NOTIFICATION_EDIT_COMMAND,
     }
     return mapping.get(event_name)
 

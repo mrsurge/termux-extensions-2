@@ -1,8 +1,8 @@
 import { isAdapterReady, wbIsFrameworkReady, wbIsBarrierOpen } from './editor_workbench_barrier_utils.js';
 import { wbFlushDidChangeIfReady, wbFlushPendingAfterOpen, wbFlushSymbolsIfReady, wbPublishDidChange } from './editor_workbench_flush_utils.js';
 import { wbBumpGeneration } from './editor_workbench_generation_utils.js';
-import { wbCurrentGeneration, wbQueueDidChange, wbQueueSymbols, wbSetOpenAck } from './editor_workbench_state_utils.js';
-import type { WorkbenchFlowLike, WorkbenchPendingDidChangePayload } from './editor_workbench_state_utils.js';
+import { wbCurrentGeneration, wbQueueDidChange, wbQueueOpenFile, wbQueueSymbols, wbSetOpenAck } from './editor_workbench_state_utils.js';
+import type { WorkbenchFlowLike, WorkbenchPendingDidChangePayload, WorkbenchPendingOpenFilePayload } from './editor_workbench_state_utils.js';
 import { editorWorkbenchMethodToWbaMethod } from './editor_wba_rpc_transport.ts';
 import { VendorMarkerService } from './vscode_document_intelligence_vendor/markerService.ts';
 import {
@@ -113,7 +113,10 @@ export function createEditorWorkbenchRuntime(
   wbSchedulePostReadyStructureRefresh(path: string, generation: number, reason?: string): void;
   wbPublishDidChange(path: string, text: string, languageId: string, generation: number): boolean;
   wbOpenFileFlow(opts: Record<string, unknown>): Promise<unknown>;
-  replayOpenFileAfterBaton(): void;
+  wbFlushActiveModelOpen(reason?: string): Promise<unknown>;
+  wbBeginProjectSwitch(params?: Record<string, unknown>): void;
+  wbEndProjectSwitch(params?: Record<string, unknown>): void;
+  replayOpenFileAfterBaton(): Promise<unknown>;
   editorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
   callWorkbenchProviderGuarded(kind: string, method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>>;
 } {
@@ -135,6 +138,7 @@ export function createEditorWorkbenchRuntime(
     openAckGeneration: -1,
     openAckPath: '',
     pendingDidChange: null,
+    pendingOpenFile: null,
     pendingSymbols: null,
   };
 
@@ -167,13 +171,56 @@ export function createEditorWorkbenchRuntime(
     });
   }
 
-  async function awaitOpenAckForProvider(kind: string, ctx: unknown, timeoutMs: number): Promise<{ ok: boolean; reason?: string }> {
-    if (kind !== 'completions') return { ok: true };
-    const typedCtx = ctx as Partial<LanguageContextLike> | null;
-    const path = String(typedCtx?.path || '');
+  function isDocumentBackedWorkbenchMethod(method: string): boolean {
+    switch (method) {
+      case 'completions':
+      case 'hover':
+      case 'symbols':
+      case 'folding_ranges':
+      case 'semantic_tokens':
+      case 'semantic_tokens_range':
+      case 'inlay_hints':
+      case 'inline_completions':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function isProjectSwitchInProgress(): boolean {
+    const win = deps.getWindow() as Window & typeof globalThis & { __te2ProjectSwitchInProgress?: boolean };
+    return !!win.__te2ProjectSwitchInProgress;
+  }
+
+  function activeAdapterProject(): string {
+    const win = deps.getWindow() as Window & typeof globalThis & { __te2AdapterProject?: string | null };
+    return typeof win.__te2AdapterProject === 'string' ? win.__te2AdapterProject : '';
+  }
+
+  function isPathUnderProject(path: string, project: string): boolean {
+    const normalizedPath = String(path || '');
+    const normalizedProject = String(project || '');
+    if (!normalizedPath || !normalizedProject) return true;
+    return normalizedPath === normalizedProject || normalizedPath.startsWith(normalizedProject.endsWith('/') ? normalizedProject : normalizedProject + '/');
+  }
+
+  function adapterAcceptsPath(path: string): boolean {
+    const project = activeAdapterProject();
+    return !project || isPathUnderProject(path, project);
+  }
+
+  async function awaitOpenAckForPath(path: string, timeoutMs: number, reason: string): Promise<{ ok: boolean; reason?: string }> {
     if (!path) return { ok: false, reason: 'missing_path' };
-    const generation = currentGeneration();
+    if (isProjectSwitchInProgress()) return { ok: false, reason: 'project_switching' };
+    if (!adapterAcceptsPath(path)) return { ok: false, reason: 'stale_project_path' };
+    let generation = currentGeneration();
     if (barrierOpen(path, generation)) return { ok: true };
+
+    if (String(path) === String(deps.getCurrentPath() || '')) {
+      await flushActiveModelOpen(reason);
+      generation = currentGeneration();
+      if (barrierOpen(path, generation)) return { ok: true };
+    }
 
     const openPromise = wbFlow.openAckPromise;
     const sameOpen = !!(
@@ -189,6 +236,12 @@ export function createEditorWorkbenchRuntime(
       return { ok: false, reason: error instanceof Error ? error.message : String(error || 'open_ack_failed') };
     }
     return barrierOpen(path, generation) ? { ok: true } : { ok: false, reason: 'open_ack_stale' };
+  }
+
+  async function awaitOpenAckForProvider(kind: string, ctx: unknown, params: Record<string, unknown>, timeoutMs: number): Promise<{ ok: boolean; reason?: string }> {
+    const typedCtx = ctx as Partial<LanguageContextLike> | null;
+    const path = String(params.path || typedCtx?.path || deps.getCurrentPath() || '');
+    return awaitOpenAckForPath(path, timeoutMs, 'provider_' + kind);
   }
 
   function emitAggregatedDiagCounts(path?: string | null): void {
@@ -395,7 +448,8 @@ export function createEditorWorkbenchRuntime(
     const wbaMethod = editorWorkbenchMethodToWbaMethod('did_change');
     if (!wbaMethod) return false;
     if (!deps.isWbaRpcConnected()) {
-      console.warn('[wba] didChange dropped: direct WBA socket is not connected');
+      console.warn('[wba] didChange queued: direct WBA socket is not connected');
+      queueDidChange(payload.path, payload.text, payload.languageId, payload.generation);
       return false;
     }
     return deps.wbaRpcNotify(wbaMethod, {
@@ -493,49 +547,76 @@ export function createEditorWorkbenchRuntime(
     );
   }
 
-  function editorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
+  function rawEditorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
     const wbaMethod = editorWorkbenchMethodToWbaMethod(method);
     if (!wbaMethod) {
       return Promise.reject(new Error('unsupported direct WBA workbench method: ' + method));
     }
-    if (!deps.isWbaRpcConnected()) {
-      return Promise.reject(new Error('direct WBA socket not connected: ' + method));
-    }
     return deps.wbaRpcCall(wbaMethod, params || {}, opts);
   }
 
-  function openFileFlow(opts: Record<string, unknown>): Promise<unknown> {
+  async function editorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
+    const normalizedParams = params || {};
+    const timeoutMs = opts && Number(opts.timeoutMs) ? Number(opts.timeoutMs) : 5000;
+    if (isDocumentBackedWorkbenchMethod(method)) {
+      const openAck = await awaitOpenAckForPath(String(normalizedParams.path || deps.getCurrentPath() || ''), timeoutMs, 'workbench_' + method);
+      if (!openAck.ok) {
+        throw new Error(openAck.reason || 'open_ack_not_ready');
+      }
+    }
+    return rawEditorWorkbenchCall(method, normalizedParams, opts);
+  }
+
+  function normalizeOpenFilePayload(opts: Record<string, unknown>): WorkbenchPendingOpenFilePayload | null {
     const path = String(opts.path || '');
     const generation = Number.isFinite(Number(opts.generation)) ? Number(opts.generation) : currentGeneration();
     const languageId = String(opts.languageId || '');
     const requestId = String(opts.requestId || ('diag_' + Date.now() + '_open'));
     const source = String(opts.source || 'open');
-    if (!path) return Promise.resolve({ ok: false, deferred: true });
-
-    if (!isAdapterReady(deps.getWindow())) {
-      console.log('[readiness] open_file deferred (' + source + ') - waiting for baton');
-      return Promise.resolve({ ok: false, deferred: true });
-    }
-
-    const openPromise = editorWorkbenchCall('open_file', {
+    if (!path) return null;
+    return {
       path,
       languageId,
       uri: String(opts.uri || ''),
       requestId,
       forceRefresh: !!opts.forceRefresh,
       generation,
-    }, { timeoutMs: Number.isFinite(Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 8000 }).then((result) => {
-      if (generation !== currentGeneration() || String(path) !== String(deps.getCurrentPath() || '')) {
+      source,
+      timeoutMs: Number.isFinite(Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 8000,
+    };
+  }
+
+  function canSendOpenFile(payload?: WorkbenchPendingOpenFilePayload | null): boolean {
+    if (isProjectSwitchInProgress()) return false;
+    const path = String(payload?.path || deps.getCurrentPath() || '');
+    return isAdapterReady(deps.getWindow()) && deps.isWbaRpcConnected() && frameworkReady() && adapterAcceptsPath(path);
+  }
+
+  function sendQueuedOpenFile(payload: WorkbenchPendingOpenFilePayload): Promise<unknown> {
+    const openPromise = rawEditorWorkbenchCall('open_file', {
+      path: payload.path,
+      languageId: payload.languageId,
+      uri: payload.uri,
+      requestId: payload.requestId,
+      forceRefresh: payload.forceRefresh,
+      generation: payload.generation,
+    }, { timeoutMs: payload.timeoutMs }).then((result) => {
+      if (payload.generation !== currentGeneration() || String(payload.path) !== String(deps.getCurrentPath() || '')) {
         return { ok: false, stale: true };
       }
-      setOpenAck(path, generation);
+      setOpenAck(payload.path, payload.generation);
       flushPendingAfterOpen();
-      schedulePostReadyStructureRefresh(path, generation, source);
+      schedulePostReadyStructureRefresh(payload.path, payload.generation, payload.source);
       return result;
+    }).catch((error) => {
+      if (payload.generation === currentGeneration() && String(payload.path) === String(deps.getCurrentPath() || '')) {
+        wbFlow.pendingOpenFile = payload;
+      }
+      throw error instanceof Error ? error : new Error(String(error || 'open_file_failed'));
     });
     wbFlow.openAckPromise = openPromise;
-    wbFlow.openAckPromisePath = path;
-    wbFlow.openAckPromiseGeneration = generation;
+    wbFlow.openAckPromisePath = payload.path;
+    wbFlow.openAckPromiseGeneration = payload.generation;
     const clearOpenPromise = () => {
       if (wbFlow.openAckPromise === openPromise) {
         wbFlow.openAckPromise = null;
@@ -547,36 +628,79 @@ export function createEditorWorkbenchRuntime(
     return openPromise;
   }
 
-  function replayOpenFileAfterBaton(): void {
+  function queueActiveModelOpen(reason: string): WorkbenchPendingOpenFilePayload | null {
     const currentPath = deps.getCurrentPath();
     const editor = deps.getEditor();
-    if (!currentPath || !editor) return;
+    if (isProjectSwitchInProgress()) return null;
+    if (currentPath && !adapterAcceptsPath(currentPath)) return null;
+    if (!currentPath || !editor) return null;
     const model = typeof editor.getModel === 'function' ? editor.getModel() : null;
-    if (!model) return;
+    if (!model) return null;
     let generation = currentGeneration();
     if (!generation || String(wbFlow.activePath || '') !== String(currentPath || '')) {
-      generation = bumpGeneration(currentPath, 'baton_replay');
+      generation = bumpGeneration(currentPath, reason || 'active_model_open');
     }
-    const replayReqId = 'baton_' + Date.now();
     const languageId = (model.getLanguageId ? model.getLanguageId() : '') || '';
-    console.log('[readiness] baton arrived, replaying open_file for', currentPath);
     try {
       const content = model.getValue ? model.getValue() : '';
       queueDidChange(currentPath, content, languageId, generation);
     } catch (_) {}
     queueSymbols(currentPath, generation);
-    openFileFlow({
+    return wbQueueOpenFile(wbFlow, {
       path: currentPath,
       languageId,
       uri: model && model.uri ? String(model.uri.toString()) : '',
-      requestId: replayReqId,
+      requestId: String(reason || 'active') + '_' + Date.now(),
       forceRefresh: true,
       generation,
-      source: 'baton',
+      source: reason || 'active_model',
       timeoutMs: 8000,
-    }).catch((error) => {
+    }, currentGeneration);
+  }
+
+  function flushActiveModelOpen(reason: string = 'flush'): Promise<unknown> {
+    if (!wbFlow.pendingOpenFile) {
+      queueActiveModelOpen(reason);
+    }
+    const pending = wbFlow.pendingOpenFile;
+    if (!pending || !pending.path) return Promise.resolve({ ok: false, deferred: true });
+    if (!canSendOpenFile(pending)) {
+      console.log('[readiness] open_file held (' + String(reason || pending.source || 'open') + ') - waiting for WBA/model readiness');
+      return Promise.resolve({ ok: false, deferred: true });
+    }
+    wbFlow.pendingOpenFile = null;
+    return sendQueuedOpenFile(pending);
+  }
+
+  function openFileFlow(opts: Record<string, unknown>): Promise<unknown> {
+    const payload = normalizeOpenFilePayload(opts);
+    if (!payload) return Promise.resolve({ ok: false, deferred: true });
+    wbQueueOpenFile(wbFlow, payload, currentGeneration);
+    return flushActiveModelOpen(payload.source);
+  }
+
+  function replayOpenFileAfterBaton(): Promise<unknown> {
+    console.log('[readiness] baton arrived, flushing active model open');
+    return flushActiveModelOpen('baton').catch((error) => {
       console.warn('[readiness] baton replay open_file failed', error);
+      throw error instanceof Error ? error : new Error(String(error || 'baton_open_failed'));
     });
+  }
+
+  function beginProjectSwitch(params?: Record<string, unknown>): void {
+    wbFlow.openAckGeneration = -1;
+    wbFlow.openAckPath = '';
+    wbFlow.openAckPromise = null;
+    wbFlow.openAckPromisePath = '';
+    wbFlow.openAckPromiseGeneration = -1;
+    wbFlow.pendingOpenFile = null;
+    wbFlow.pendingDidChange = null;
+    wbFlow.pendingSymbols = null;
+    console.log('[project_switch] workbench suspended', params?.switchId || '');
+  }
+
+  function endProjectSwitch(params?: Record<string, unknown>): void {
+    console.log('[project_switch] workbench resumed', params?.switchId || '');
   }
 
   async function callWorkbenchProviderGuarded(kind: string, _method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>> {
@@ -586,7 +710,7 @@ export function createEditorWorkbenchRuntime(
     let seq = 0;
     if (kind === 'hover') seq = ++languageBridge.hoverSeq;
 
-    const openAck = await awaitOpenAckForProvider(kind, ctx, timeoutMs);
+    const openAck = await awaitOpenAckForProvider(kind, ctx, params, timeoutMs);
     if (!openAck.ok) {
       return { ok: false, notReady: true, error: openAck.reason || 'open_ack_not_ready' };
     }
@@ -625,6 +749,9 @@ export function createEditorWorkbenchRuntime(
     wbSchedulePostReadyStructureRefresh: schedulePostReadyStructureRefresh,
     wbPublishDidChange: publishDidChange,
     wbOpenFileFlow: openFileFlow,
+    wbFlushActiveModelOpen: flushActiveModelOpen,
+    wbBeginProjectSwitch: beginProjectSwitch,
+    wbEndProjectSwitch: endProjectSwitch,
     replayOpenFileAfterBaton,
     editorWorkbenchCall,
     callWorkbenchProviderGuarded,

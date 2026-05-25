@@ -4,6 +4,7 @@ from __future__ import annotations
 from .rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
     UI_IPC_RPC_METHOD_HOST_EDITOR_FIND,
+    UI_IPC_RPC_METHOD_HOST_EDITOR_COMMAND,
     UI_IPC_RPC_METHOD_HOST_EDITOR_GIT_BASELINES_GET,
     UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_COMMAND,
     UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_DUMP,
@@ -22,6 +23,7 @@ from ..boot_snapshot_backend import handle_boot_snapshot_request
 from ..host.editor_actions_backend import (
     handle_host_diagnostics_mention_request,
     handle_host_editor_find_request,
+    handle_host_editor_command_request,
     handle_host_editor_git_baselines_request,
     handle_host_editor_issues_command_request,
     handle_host_editor_issues_dump_request,
@@ -57,6 +59,12 @@ async def dispatch_ui_ipc_rpc_request(
 
     if method == UI_IPC_RPC_METHOD_HOST_EDITOR_PREFERENCE_UPDATE:
         return await handle_host_editor_preference_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_EDITOR_COMMAND:
+        return await handle_host_editor_command_request(
             params,
             source_name=source_name,
         )

@@ -13,6 +13,7 @@
 interface TerminalDrawerOptions {
   onReady?: () => void;
   getCurrentProjectPath?: () => string | null;
+  emitImeIntent?: (active: boolean, params?: Record<string, unknown>) => void;
 }
 
 interface TerminalDrawerController {
@@ -147,6 +148,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   const {
     onReady = () => {},
     getCurrentProjectPath = () => null,
+    emitImeIntent = () => {},
   } = options;
 
   let term: XtermTerminal | null = null;
@@ -191,6 +193,16 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   const FONT_SIZE_STEP = 1;
   const HELPER_BASE_URL = '/apps/file_editor_cm6/vendor/android-terminalapp-assets-js';
   let vendoredCtrlFocusCleanup: (() => void) | null = null;
+
+  function emitTerminalImeIntent(active: boolean, trigger: string): void {
+    try {
+      emitImeIntent(active, {
+        source: 'terminal_drawer',
+        surface: 'file_editor_cm6.terminal_drawer',
+        trigger,
+      });
+    } catch (_) {}
+  }
 
   function formatShellLabel(id: string | null | undefined): string {
     if (!id) return 'Terminal';
@@ -727,13 +739,19 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     const textarea = getTermTextarea(currentTerm);
     if (!textarea || !currentTerm) return;
     const handleFocus = () => {
+      emitTerminalImeIntent(true, 'textarea_focus');
       void bindDrawerVendoredCtrlHandler(currentTerm).catch((err) => {
         console.warn('Failed to rebind vendored ctrl helper:', err);
       });
     };
+    const handleBlur = () => {
+      emitTerminalImeIntent(false, 'textarea_blur');
+    };
     textarea.addEventListener('focus', handleFocus, true);
+    textarea.addEventListener('blur', handleBlur, true);
     vendoredCtrlFocusCleanup = () => {
       textarea.removeEventListener('focus', handleFocus, true);
+      textarea.removeEventListener('blur', handleBlur, true);
     };
   }
 
@@ -1042,6 +1060,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     installDrawerVendoredCtrlFocusBinding(nextTerm);
 
     container.addEventListener('pointerdown', () => {
+      emitTerminalImeIntent(true, 'pointerdown');
       setDrawerHelperFocusActive(true);
       void bindDrawerVendoredCtrlHandler(nextTerm).catch((err) => {
         console.warn('Failed to bind vendored ctrl helper:', err);
@@ -1220,6 +1239,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         lastTapY = t.clientY;
       }
 
+      emitTerminalImeIntent(true, 'touchend');
       try { term.focus(); } catch (_) {}
     }, { passive: false });
 
@@ -1275,6 +1295,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     setDrawerCollapsedState(true);
     setTerminalResizeHandleActive(true);
     isOpen = false;
+    emitTerminalImeIntent(false, 'drawer_close');
     setDrawerHelperFocusActive(false);
     startupSizing = false;
     clearStartupFitTimer();

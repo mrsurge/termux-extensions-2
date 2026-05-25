@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 AdapterRpc = Callable[[str, dict[str, object] | None, float], Awaitable[object]]
 InitWatcher = Callable[[Path], None]
 EnsureWatchexecShell = Callable[[str, int], Awaitable[object | None]]
+EmitProjectSwitchFn = Callable[..., Awaitable[dict[str, object]]]
+MarkAdapterWorkspaceStateFn = Callable[..., Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,14 @@ async def switch_project_connection(
         pass
 
     new_root = set_project_root(project_path)
+    switch_notice = await _broadcast_project_switching(
+        new_root,
+        display_path=normalized_display_path,
+        reason=open_state_reason,
+        source=open_state_source,
+    )
+    switch_id = str(switch_notice.get("switchId") or "")
+    adapter_status = "unchanged"
 
     if initialize_watcher:
         init_watcher = _get_init_watcher()
@@ -65,24 +75,44 @@ async def switch_project_connection(
 
     if switch_adapter_workspace:
         try:
+            await _mark_adapter_workspace_switching(new_root)
+            adapter_status = "switching"
             adapter_rpc = _get_adapter_rpc()
             await adapter_rpc(
                 "adapter.switchWorkspace",
                 {"folder": str(new_root)},
                 30,
             )
+            await _mark_adapter_workspace_ready(new_root)
+            adapter_status = "ready"
             logger.info("[project_open] adapter workspace switched to %s", new_root)
         except Exception as exc:
+            adapter_status = "error"
+            try:
+                await _mark_adapter_workspace_error(new_root, str(exc))
+            except Exception:
+                pass
             logger.warning(
                 "[project_open] adapter switchWorkspace failed: %s",
                 exc,
             )
 
     await _start_project_watchexec_if_needed(new_root)
-    await _replay_sidecar_open_state(
+    open_state = await _replay_sidecar_open_state(
         new_root,
         reason=open_state_reason,
         source=open_state_source,
+    )
+    await _broadcast_project_git_state(new_root)
+    await _broadcast_project_switched(
+        new_root,
+        display_path=normalized_display_path,
+        reason=open_state_reason,
+        source=open_state_source,
+        switch_id=switch_id,
+        open_state=open_state if isinstance(open_state, dict) else None,
+        adapter_status=adapter_status,
+        status="ready" if adapter_status != "error" else "error",
     )
 
     return ExplorerProjectSwitchResult(
@@ -117,13 +147,71 @@ async def _replay_sidecar_open_state(
     *,
     reason: str,
     source: str,
-) -> None:
+) -> dict[str, object] | None:
     editor_module = importlib.import_module("app.apps.file_editor_cm6.monaco_editor.editor_ws")
     replay_obj = getattr(editor_module, "editor_runtime_replay_sidecar_open_state", None)
     if not callable(replay_obj):
         raise RuntimeError("editor_runtime_replay_sidecar_open_state unavailable")
     replay = cast(Callable[..., Awaitable[object | None]], replay_obj)
-    await replay(str(project_root), reason=reason, source=source)
+    result = await replay(str(project_root), reason=reason, source=source)
+    return cast(dict[str, object], result) if isinstance(result, dict) else None
+
+
+async def _broadcast_project_switching(
+    project_root: Path,
+    *,
+    display_path: str,
+    reason: str,
+    source: str,
+) -> dict[str, object]:
+    editor_module = importlib.import_module("app.apps.file_editor_cm6.monaco_editor.editor_ws")
+    emit_obj = getattr(editor_module, "editor_runtime_emit_project_switching", None)
+    if not callable(emit_obj):
+        raise RuntimeError("editor_runtime_emit_project_switching unavailable")
+    emit = cast(EmitProjectSwitchFn, emit_obj)
+    return await emit(
+        str(project_root),
+        display_path=display_path,
+        reason=reason,
+        source=source,
+    )
+
+
+async def _broadcast_project_switched(
+    project_root: Path,
+    *,
+    display_path: str,
+    reason: str,
+    source: str,
+    switch_id: str,
+    open_state: dict[str, object] | None,
+    adapter_status: str,
+    status: str,
+) -> None:
+    editor_module = importlib.import_module("app.apps.file_editor_cm6.monaco_editor.editor_ws")
+    emit_obj = getattr(editor_module, "editor_runtime_emit_project_switched", None)
+    if not callable(emit_obj):
+        raise RuntimeError("editor_runtime_emit_project_switched unavailable")
+    emit = cast(EmitProjectSwitchFn, emit_obj)
+    await emit(
+        str(project_root),
+        display_path=display_path,
+        reason=reason,
+        source=source,
+        switch_id=switch_id,
+        open_state=open_state,
+        adapter_status=adapter_status,
+        status=status,
+    )
+
+
+async def _broadcast_project_git_state(project_root: Path) -> None:
+    try:
+        from .runtime_notifications import broadcast_git_status_update
+
+        await broadcast_git_status_update(project_root)
+    except Exception as exc:
+        logger.warning("[project_open] git state replay failed: %s", exc)
 
 
 def _sidecar_data_dict(sidecar: ProjectSidecar) -> dict[object, object] | None:
@@ -141,6 +229,39 @@ def _get_adapter_rpc() -> AdapterRpc:
     if not callable(adapter_rpc_obj):
         raise RuntimeError("adapter_rpc unavailable")
     return cast(AdapterRpc, adapter_rpc_obj)
+
+
+async def _mark_adapter_workspace_switching(project_root: Path) -> None:
+    adapter_module = importlib.import_module(
+        "app.apps.file_editor_cm6.workbench_adapter_shell_manager"
+    )
+    marker_obj = getattr(adapter_module, "mark_adapter_workspace_switching", None)
+    if not callable(marker_obj):
+        return
+    marker = cast(MarkAdapterWorkspaceStateFn, marker_obj)
+    await marker(str(project_root))
+
+
+async def _mark_adapter_workspace_ready(project_root: Path) -> None:
+    adapter_module = importlib.import_module(
+        "app.apps.file_editor_cm6.workbench_adapter_shell_manager"
+    )
+    marker_obj = getattr(adapter_module, "mark_adapter_workspace_ready", None)
+    if not callable(marker_obj):
+        return
+    marker = cast(MarkAdapterWorkspaceStateFn, marker_obj)
+    await marker(str(project_root))
+
+
+async def _mark_adapter_workspace_error(project_root: Path, error: str) -> None:
+    adapter_module = importlib.import_module(
+        "app.apps.file_editor_cm6.workbench_adapter_shell_manager"
+    )
+    marker_obj = getattr(adapter_module, "mark_adapter_workspace_error", None)
+    if not callable(marker_obj):
+        return
+    marker = cast(MarkAdapterWorkspaceStateFn, marker_obj)
+    await marker(str(project_root), str(error))
 
 
 def _get_init_watcher() -> InitWatcher:

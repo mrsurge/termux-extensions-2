@@ -8,14 +8,28 @@ import os
 import urllib.request
 from pathlib import Path
 from threading import Lock, Timer
-from typing import Optional
+from types import TracebackType
+from typing import Optional, Protocol, cast
 
-from .file_ops import get_all_git_statuses, mark_draft_cache_dirty, mark_git_cache_dirty
+from .file_ops import get_git_statuses_for_root, mark_draft_cache_dirty, mark_git_cache_dirty
 from ..transport.connection_manager import abs_to_rel, manager
 from ..transport.rpc_emit import emit_project_explorer_rpc_notification
 from ...git_helper import get_status as git_get_status
 
 logger = logging.getLogger(__name__)
+
+
+class UrlOpenResponse(Protocol):
+    def __enter__(self) -> "UrlOpenResponse": ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> object: ...
+
+    def read(self) -> bytes: ...
 
 _explorer_event_loop: Optional[asyncio.AbstractEventLoop] = None
 _explorer_refresh_timers: dict[str, Timer] = {}
@@ -52,7 +66,7 @@ def _schedule_watcher_files_broadcast(
     with _explorer_refresh_lock:
         batch = _watcher_file_batches.get(project_path)
         if batch is None:
-            batch = {"created": set(), "changed": set(), "deleted": set()}
+            batch = {"created": set[str](), "changed": set[str](), "deleted": set[str]()}
             _watcher_file_batches[project_path] = batch
         batch[bucket].add(rel_path)
 
@@ -128,7 +142,7 @@ def _schedule_git_status_broadcast(project_path: str) -> None:
             if loop is None:
                 return
             asyncio.run_coroutine_threadsafe(
-                _broadcast_git_status_update(project_path),
+                broadcast_git_status_update(project_path),
                 loop,
             )
 
@@ -137,12 +151,13 @@ def _schedule_git_status_broadcast(project_path: str) -> None:
         timer.start()
 
 
-async def _broadcast_git_status_update(project_path: str) -> None:
+async def broadcast_git_status_update(project_path: str | Path) -> None:
+    project = Path(project_path)
     try:
-        mark_git_cache_dirty(Path(project_path))
+        mark_git_cache_dirty(project)
 
-        statuses = await asyncio.to_thread(get_all_git_statuses)
-        status = await asyncio.to_thread(git_get_status, Path(project_path))
+        statuses = await asyncio.to_thread(get_git_statuses_for_root, project)
+        status = await asyncio.to_thread(git_get_status, project)
         logger.info(
             "[GIT_STATUS_DEBUG] staged=%s, unstaged=%s, untracked=%s",
             status.staged,
@@ -152,7 +167,7 @@ async def _broadcast_git_status_update(project_path: str) -> None:
         from ...workspace_events import publish_git_status_update
 
         await publish_git_status_update(
-            project_path,
+            str(project),
             decorations_payload={"statuses": statuses},
             status_payload={
                 "branch": status.branch,
@@ -186,7 +201,8 @@ def _forward_draft_notification(project_path: str) -> None:
         headers={"Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=2.0) as resp:
+        response = cast(UrlOpenResponse, urllib.request.urlopen(req, timeout=2.0))
+        with response as resp:
             resp.read()
     except Exception as exc:
         logger.debug("Failed to forward draft notify to main: %s", exc)

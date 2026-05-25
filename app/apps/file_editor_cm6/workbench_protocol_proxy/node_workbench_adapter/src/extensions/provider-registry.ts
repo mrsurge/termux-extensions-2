@@ -287,6 +287,7 @@ export class ProviderRegistry {
         handle: entry.handle,
         language,
         legend: entry.legend,
+        eventHandle: entry.eventHandle ?? null,
         range: !!entry.range,
         resync: true,
       });
@@ -478,12 +479,12 @@ export class ProviderRegistry {
     const handle = finiteHandle(args[0]);
     const selector = normalizeSelector(args[1]);
     const legend = args[2];
-    const eventHandle = args[3] ?? null;
+    const eventHandle = finiteHandle(args[3]);
     if (handle === null || !selector || !legend) return outcome;
 
     this.providers.semanticTokens.set(handle, { handle, selector, legend, eventHandle });
     for (const language of selectorLanguages(selector)) {
-      outcome.events.push({ type: "provider/semanticTokens", handle, language, legend });
+      outcome.events.push({ type: "provider/semanticTokens", handle, language, legend, eventHandle });
     }
     outcome.logs.push(`[providers] semanticTokens map size=${this.providers.semanticTokens.size} languages=[${this.languageSummary("semanticTokens")}] legendTypes=${tokenLegendLength(legend, "tokenTypes")} legendMods=${tokenLegendLength(legend, "tokenModifiers")}`);
     return outcome;
@@ -495,6 +496,7 @@ export class ProviderRegistry {
     const handleValue = Number(args[0]);
     const selector = args[1];
     const legend = args[2];
+    const eventHandle = finiteHandle(args[3]);
     const legendKeys = isRecord(legend) ? Object.keys(legend).join(",") : "N/A";
     outcome.logs.push(`[providers] range check: handle=${handleValue} isFinite=${Number.isFinite(handleValue)} isArrSelector=${Array.isArray(selector)} legendTruthy=${!!legend} legendType=${typeof legend} legendKeys=${legendKeys}`);
 
@@ -503,9 +505,9 @@ export class ProviderRegistry {
     if (handle === null || !normalizedSelector || !legend) return outcome;
 
     try {
-      this.providers.semanticTokens.set(handle, { handle, selector: normalizedSelector, legend, eventHandle: null, range: true });
+      this.providers.semanticTokens.set(handle, { handle, selector: normalizedSelector, legend, eventHandle, range: true });
       for (const language of selectorLanguages(normalizedSelector)) {
-        outcome.events.push({ type: "provider/semanticTokens", handle, language, legend, range: true });
+        outcome.events.push({ type: "provider/semanticTokens", handle, language, legend, eventHandle, range: true });
       }
       outcome.logs.push(`[providers] semanticTokensRange map size=${this.providers.semanticTokens.size} languages=[${this.languageSummary("semanticTokens")}] legendTypes=${tokenLegendLength(legend, "tokenTypes")} legendMods=${tokenLegendLength(legend, "tokenModifiers")}`);
     } catch (error) {

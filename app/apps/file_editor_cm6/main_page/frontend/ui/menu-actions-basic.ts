@@ -30,6 +30,7 @@
  *   clearOnQuit: () => void,
  *   showProjectsDebugModal: () => void,
  *   exportDiagnosticsToFile: () => void,
+ *   requestBackendEditorCommand: (payload: any) => Promise<any>,
  *   triggerEditorSearchPanel: (reason: string, opts?: any) => any,
  *   jumpToCurrentFileLine: (line: number) => Promise<any> | any,
  *   toast: (msg: string) => void,
@@ -52,12 +53,21 @@ export function installBasicMenuActions(deps: any) {
   b(e.miDebugProjects, () => deps.showProjectsDebugModal());
   b(e.miExportDiagnostics, () => deps.exportDiagnosticsToFile());
 
-  b(e.miUndo, () => { document.execCommand('undo'); });
-  b(e.miRedo, () => { document.execCommand('redo'); });
-  b(e.miCut, () => document.execCommand('cut'));
-  b(e.miCopy, () => document.execCommand('copy'));
-  b(e.miPaste, () => { document.execCommand('paste'); });
-  b(e.miSelectAll, () => { document.execCommand('selectAll'); });
+  const editorCommand = async (command: string) => {
+    try {
+      await deps.requestBackendEditorCommand({ command });
+    } catch (error) {
+      console.warn('[Edit] command request failed', command, error);
+      deps.toast('Editor command failed');
+    }
+  };
+
+  b(e.miUndo, () => { void editorCommand('undo'); });
+  b(e.miRedo, () => { void editorCommand('redo'); });
+  b(e.miCut, () => { void editorCommand('cut'); });
+  b(e.miCopy, () => { void editorCommand('copy'); });
+  b(e.miPaste, () => { void editorCommand('paste'); });
+  b(e.miSelectAll, () => { void editorCommand('selectAll'); });
 
   b(e.miFind, () => { deps.triggerEditorSearchPanel('menu', { replace: true }); });
   b(e.miGoto, async () => {

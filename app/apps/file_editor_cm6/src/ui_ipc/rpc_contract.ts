@@ -14,6 +14,7 @@ export const UI_IPC_RPC_METHODS = {
   hostEditorFind: 'ui.host.editor.find',
   hostEditorIssuesCommand: 'ui.host.editor.issues.command',
   hostEditorIssuesDump: 'ui.host.editor.issues.dump',
+  hostEditorCommand: 'ui.host.editor.command',
   hostDiagnosticsMention: 'ui.host.diagnostics.mention',
   hostStateFileActivityRecord: 'ui.host.state.fileActivity.record',
   hostStateFileScrollUpdate: 'ui.host.state.fileScroll.update',
@@ -23,6 +24,8 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   editorSave: 'ui.editor.save',
   editorFocus: 'ui.editor.focus',
   editorBlur: 'ui.editor.blur',
+  imeFocus: 'ui.ime.focus',
+  imeBlur: 'ui.ime.blur',
   editorReady: 'ui.editor.ready',
   editorOpenComplete: 'ui.editor.open.complete',
   editorCacheState: 'ui.editor.cache.state',
@@ -33,6 +36,9 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   adapterState: 'ui.adapter.state',
   hostActiveFileChanged: 'ui.host.activeFile.changed',
   openStateChanged: 'ui.openState.changed',
+  projectSwitching: 'ui.project.switching',
+  projectSwitched: 'ui.project.switched',
+  preferencesChanged: 'ui.preferences.changed',
 } as const;
 
 type ValueOf<T> = T[keyof T];

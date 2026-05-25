@@ -20,6 +20,8 @@ class UiIpcClient(
         private const val UI_IPC_RPC_NOTIFICATION_EVENT = "rpc.notify"
         private const val UI_IPC_EDITOR_FOCUS = "ui.editor.focus"
         private const val UI_IPC_EDITOR_BLUR = "ui.editor.blur"
+        private const val UI_IPC_IME_FOCUS = "ui.ime.focus"
+        private const val UI_IPC_IME_BLUR = "ui.ime.blur"
         private const val DEFAULT_CONSOLE_TARGET_WORKER_ID = "main_page"
     }
 
@@ -28,6 +30,7 @@ class UiIpcClient(
     private var serverPort: Int? = null
     private var consoleDrawerEnabled = false
     private var consoleTailLines = DEFAULT_CONSOLE_TAIL_LINES
+    private var activeImeOwner: String? = null
 
     /** Callback for console events — receives (eventName, JSONObject) */
     var onConsoleEvent: ((String, JSONObject) -> Unit)? = null
@@ -159,14 +162,40 @@ class UiIpcClient(
         if (json.optString("jsonrpc", "") != "2.0") return
         when (json.optString("method", "")) {
             UI_IPC_EDITOR_FOCUS -> {
-                Log.d(TAG, "Editor focused via UI RPC — activating IME filter")
-                setFilterActive(true)
+                handleImeFocus("editor")
             }
             UI_IPC_EDITOR_BLUR -> {
-                Log.d(TAG, "Editor blurred via UI RPC — deactivating IME filter")
-                setFilterActive(false)
+                handleImeBlur("editor")
+            }
+            UI_IPC_IME_FOCUS -> {
+                handleImeFocus(notificationSource(json, "ime"))
+            }
+            UI_IPC_IME_BLUR -> {
+                handleImeBlur(notificationSource(json, "ime"))
             }
         }
+    }
+
+    private fun notificationSource(json: JSONObject, fallback: String): String {
+        val params = json.optJSONObject("params")
+        val raw = params?.optString("source", "")?.trim().orEmpty()
+        return raw.ifEmpty { fallback }
+    }
+
+    private fun handleImeFocus(owner: String) {
+        activeImeOwner = owner
+        Log.d(TAG, "IME focus via UI RPC ($owner) — activating filter")
+        setFilterActive(true)
+    }
+
+    private fun handleImeBlur(owner: String) {
+        if (activeImeOwner != null && activeImeOwner != owner) {
+            Log.d(TAG, "Ignoring stale IME blur from $owner; active owner is $activeImeOwner")
+            return
+        }
+        activeImeOwner = null
+        Log.d(TAG, "IME blur via UI RPC ($owner) — deactivating filter")
+        setFilterActive(false)
     }
 
     /** Register this client as a console drawer to receive log broadcasts. */
@@ -269,6 +298,7 @@ class UiIpcClient(
             uiIpcSocket?.off()
             uiIpcSocket = null
             disconnectConsoleSocket()
+            activeImeOwner = null
             filter.isActive = false
         } catch (e: Exception) {
             Log.w(TAG, "Error disconnecting", e)

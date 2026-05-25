@@ -7,12 +7,15 @@ interface SemanticTokensBridgeLike {
   registeredSemanticTokens: Set<string>;
   semanticTokensLegendCache: Record<string, unknown>;
   semanticTokensRangeFlag: Record<string, unknown>;
+  semanticTokensLanguagesByEventHandle: Record<string, string[]>;
 }
 
 export interface SemanticTokensRegisteredPayload {
+  handle?: unknown;
   language?: string;
   legend?: SemanticTokensLegendLike;
   range?: boolean;
+  eventHandle?: unknown;
 }
 
 function asSemanticTokensRegisteredPayload(value: unknown): SemanticTokensRegisteredPayload | null {
@@ -30,7 +33,13 @@ export function handleSemanticTokensProviderRegistered(
   const lang = typedData?.language;
   const legend = typedData?.legend;
   if (!lang || !legend || !legend.tokenTypes || !legend.tokenModifiers) return;
-  if (languageBridge.registeredSemanticTokens.has(lang)) return;
+  const eventHandle = Number(typedData?.eventHandle);
+  if (Number.isFinite(eventHandle)) {
+    const key = String(eventHandle);
+    const languages = languageBridge.semanticTokensLanguagesByEventHandle[key] || [];
+    if (!languages.includes(lang)) languages.push(lang);
+    languageBridge.semanticTokensLanguagesByEventHandle[key] = languages;
+  }
   console.log(
     '[semanticTokens] push cached legend for ' + lang
     + ' types=' + legend.tokenTypes.length

@@ -281,6 +281,25 @@ function logDiagnosticsChange(runtime: ExtHostDispatchRuntime, msg: DecodedExtHo
   runtime.onEvent({ type: "diagnostics/changeMany", ts_ms: runtime.nowMs(), args: msg.args });
 }
 
+function handleSemanticTokensEvent(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): boolean {
+  if (msg.method !== "$emitDocumentSemanticTokensEvent" && msg.method !== "$emitDocumentRangeSemanticTokensEvent") return false;
+  const rawHandle = Array.isArray(msg.args) ? msg.args[0] : undefined;
+  const eventHandle = Number(rawHandle);
+  if (!Number.isFinite(eventHandle)) {
+    runtime.log(`[semanticTokens] ignored ${msg.method} with invalid eventHandle=${String(rawHandle)}`);
+    return true;
+  }
+  const range = msg.method === "$emitDocumentRangeSemanticTokensEvent";
+  runtime.log(`[semanticTokens] ${msg.method} eventHandle=${eventHandle}`);
+  runtime.onEvent({
+    type: "provider/semanticTokens/didChange",
+    ts_ms: runtime.nowMs(),
+    eventHandle,
+    range,
+  });
+  return true;
+}
+
 function sendReplyPayload(
   runtime: ExtHostDispatchRuntime,
   req: number,
@@ -465,6 +484,7 @@ export function handleExtHostRequest(runtime: ExtHostDispatchRuntime, msg: Decod
 
   applyProviderRegistration(runtime, msg);
   if (msg.method === "$changeMany") logDiagnosticsChange(runtime, msg);
+  handleSemanticTokensEvent(runtime, msg);
 
   if (msg.method === "$checkExists") {
     handleCheckExists(runtime, msg);

@@ -734,12 +734,12 @@ function dispatchPrefsChanged(payload: JsonObject): void {
   }
 }
 
-function dispatchProjectOpened(path: string): void {
+function dispatchProjectOpened(path: string, payload?: JsonObject): void {
   if (typeof window.__cm6HandleProjectOpened !== 'function') {
     return;
   }
   try {
-    window.__cm6HandleProjectOpened(path);
+    window.__cm6HandleProjectOpened(path, payload);
   } catch (err) {
     console.warn('[Explorer] Failed to synchronize editor on project:opened:', err);
   }

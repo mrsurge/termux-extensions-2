@@ -30,6 +30,8 @@ interface LanguageBridgeState {
   registeredSymbols: Set<string>;
   registeredFolding: Set<string>;
   registeredSemanticTokens: Set<string>;
+  semanticTokensChangeEmittersByLanguage: Record<string, SemanticTokensChangeEmitterLike>;
+  semanticTokensLanguagesByEventHandle: Record<string, string[]>;
   completionProvidersByLanguage: Record<string, Record<string, CompletionProviderRegistrationLike>>;
   completionProviderDisposablesByLanguage: Record<string, MonacoDisposableLike | null>;
   completionProviderSignatureByLanguage: Record<string, string>;
@@ -118,6 +120,11 @@ interface MonacoDisposableLike {
   dispose(): void;
 }
 
+interface SemanticTokensChangeEmitterLike {
+  event(listener: () => void): MonacoDisposableLike;
+  fire(): void;
+}
+
 interface MonacoLanguagesLike {
   SymbolKind?: { Function?: number };
   FoldingRangeKind?: {
@@ -165,10 +172,12 @@ interface MonacoLanguagesLike {
     toString?(): string;
   }) => MonacoDisposableLike | unknown;
   registerDocumentRangeSemanticTokensProvider?: (selector: unknown, provider: {
+    onDidChange?: (listener: () => void) => MonacoDisposableLike;
     getLegend(): SemanticTokensLegendLike;
     provideDocumentRangeSemanticTokens(model: MonacoModelLike, range: MonacoRangeLike, token: MonacoCancellationTokenLike): unknown;
   }) => unknown;
   registerDocumentSemanticTokensProvider?: (selector: unknown, provider: {
+    onDidChange?: (listener: () => void) => MonacoDisposableLike;
     getLegend(): SemanticTokensLegendLike;
     provideDocumentSemanticTokens(model: MonacoModelLike, lastResultId: string | null | undefined, token: MonacoCancellationTokenLike): unknown;
     releaseDocumentSemanticTokens(resultId: string): void;
@@ -428,6 +437,7 @@ export function createEditorLanguageBridgeProviders(
   cacheInlayHintsProviderRegistration(langId: string, registration: InlayHintsProviderRegistrationLike): void;
   cacheInlineCompletionProviderRegistration(langId: string, registration: InlineCompletionProviderRegistrationLike): void;
   registerSemanticTokensWithLegend(langId: string, legend: SemanticTokensLegendLike, isRange?: boolean): void;
+  fireSemanticTokensChanged(langId?: string | null): void;
   installWorkbenchLanguageBridgeProviders(): void;
   hydrateProviderSnapshot(snapshot: unknown): { completions: number; inlayHints: number; inlineCompletions: number; semanticTokens: number };
 } {
@@ -437,6 +447,54 @@ export function createEditorLanguageBridgeProviders(
     if (semanticTokensDisableLogged) return;
     semanticTokensDisableLogged = true;
     try { console.log('[semanticTokens] disabled by __debugDisableSemanticTokens'); } catch (_) {}
+  }
+
+  function createSemanticTokensChangeEmitter(): SemanticTokensChangeEmitterLike {
+    const listeners = new Set<() => void>();
+    return {
+      event(listener: () => void): MonacoDisposableLike {
+        listeners.add(listener);
+        return {
+          dispose(): void {
+            listeners.delete(listener);
+          },
+        };
+      },
+      fire(): void {
+        for (const listener of Array.from(listeners)) {
+          try {
+            listener();
+          } catch (_) {}
+        }
+      },
+    };
+  }
+
+  function semanticTokensChangeEmitterForLanguage(langId: string): SemanticTokensChangeEmitterLike {
+    const key = String(langId || '');
+    let emitter = deps.languageBridge.semanticTokensChangeEmittersByLanguage[key];
+    if (!emitter) {
+      emitter = createSemanticTokensChangeEmitter();
+      deps.languageBridge.semanticTokensChangeEmittersByLanguage[key] = emitter;
+    }
+    return emitter;
+  }
+
+  function fireSemanticTokensChanged(langId?: string | null): void {
+    if (langId) {
+      const emitter = deps.languageBridge.semanticTokensChangeEmittersByLanguage[String(langId)];
+      if (emitter) {
+        try { console.log('[semanticTokens] invalidating provider for ' + String(langId)); } catch (_) {}
+        emitter.fire();
+      }
+      return;
+    }
+    for (const key of Object.keys(deps.languageBridge.semanticTokensChangeEmittersByLanguage)) {
+      const emitter = deps.languageBridge.semanticTokensChangeEmittersByLanguage[key];
+      if (!emitter) continue;
+      try { console.log('[semanticTokens] invalidating provider for ' + key); } catch (_) {}
+      emitter.fire();
+    }
   }
 
   function selectorLanguagesFromSnapshot(selectorRaw: unknown): string[] {
@@ -934,11 +992,18 @@ export function createEditorLanguageBridgeProviders(
     }
     const monacoRef = deps.getMonaco();
     if (!monacoRef || !monacoRef.languages) return;
-    if (deps.languageBridge.registeredSemanticTokens.has(langId)) return;
+    deps.languageBridge.semanticTokensLegendCache[langId] = legend;
+    deps.languageBridge.semanticTokensRangeFlag[langId] = !!isRange;
+    const changeEmitter = semanticTokensChangeEmitterForLanguage(langId);
+    if (deps.languageBridge.registeredSemanticTokens.has(langId)) {
+      fireSemanticTokensChanged(langId);
+      return;
+    }
     deps.languageBridge.registeredSemanticTokens.add(langId);
 
     if (isRange && monacoRef.languages.registerDocumentRangeSemanticTokensProvider) {
       monacoRef.languages.registerDocumentRangeSemanticTokensProvider(langId, {
+        onDidChange: changeEmitter.event,
         getLegend() {
           return legend;
         },
@@ -967,6 +1032,7 @@ export function createEditorLanguageBridgeProviders(
     console.log('[semanticTokens] registering FULL provider for ' + langId + ' types=' + legend.tokenTypes.length + ' mods=' + legend.tokenModifiers.length);
     if (!monacoRef.languages.registerDocumentSemanticTokensProvider) return;
     monacoRef.languages.registerDocumentSemanticTokensProvider(langId, {
+      onDidChange: changeEmitter.event,
       getLegend() {
         return legend;
       },
@@ -1196,6 +1262,7 @@ export function createEditorLanguageBridgeProviders(
     cacheInlayHintsProviderRegistration,
     cacheInlineCompletionProviderRegistration,
     registerSemanticTokensWithLegend,
+    fireSemanticTokensChanged,
     installWorkbenchLanguageBridgeProviders,
     hydrateProviderSnapshot,
   };

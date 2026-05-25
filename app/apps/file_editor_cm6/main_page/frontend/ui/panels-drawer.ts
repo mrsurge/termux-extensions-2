@@ -14,6 +14,7 @@
  *   openFile: (path: string, options?: any) => Promise<any>,
  *   jumpToCurrentFileLine: (line: number) => Promise<any>,
  *   requestDiagnosticsMention: (payload: any) => Promise<any>,
+ *   emitImeIntent?: (active: boolean, params?: Record<string, unknown>) => void,
  *   saveFile: () => Promise<any>,
  *   resetToNewFile: () => void,
  *   openPickedFile: () => void,
@@ -22,6 +23,7 @@
 export function initPanelsAndDrawer(deps: any) {
   const terminal = deps.createTerminalDrawer({
     onReady: () => console.log('Terminal drawer ready'),
+    emitImeIntent: deps.emitImeIntent,
   });
   const consoleDrawer = deps.createConsoleDrawer();
   const problemsPanel = deps.createProblemsPanel({

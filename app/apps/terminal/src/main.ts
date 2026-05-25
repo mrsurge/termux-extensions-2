@@ -197,6 +197,18 @@ interface XtermTerminalConstructor {
   new (options?: XtermOptions): XtermTerminalLike;
 }
 
+interface SocketIoSocketLike {
+  connected?: boolean;
+  connect?: () => void;
+  emit(event: string, payload?: unknown): void;
+  on(event: string, handler: (...args: unknown[]) => void): void;
+}
+
+type SocketIoFactory = (
+  namespace: string,
+  options?: Record<string, unknown>,
+) => SocketIoSocketLike;
+
 interface AppState {
   shells: ShellRecord[];
   activeId: string | null;
@@ -242,10 +254,20 @@ const INPUT_FLUSH_THRESHOLD = 1024;
 const HELPER_BASE_URL = '/apps/terminal/vendor/android-terminalapp-assets-js';
 const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
 const NEW_TERMINAL_LONG_PRESS_MS = 450;
+const UI_IPC_RPC_EVENT = 'rpc';
+const UI_IPC_IME_FOCUS = 'ui.ime.focus';
+const UI_IPC_IME_BLUR = 'ui.ime.blur';
 let terminalConsoleBridgeInitialized = false;
+let terminalUiIpcSocket: SocketIoSocketLike | null = null;
+let terminalUiIpcConnectWarningShown = false;
 
 function getSocketIoGlobal(): unknown {
   return (window as Window & { io?: unknown }).io;
+}
+
+function getSocketIoFactory(): SocketIoFactory | null {
+  const io = getSocketIoGlobal();
+  return typeof io === 'function' ? io as SocketIoFactory : null;
 }
 
 function getXtermGlobal(): XtermTerminalConstructor | null {
@@ -341,6 +363,61 @@ async function ensureTerminalConsoleBridge(): Promise<void> {
   } catch (error) {
     console.warn('[terminal] failed to init console bridge', error);
   }
+}
+
+async function ensureUiIpcSocket(): Promise<SocketIoSocketLike | null> {
+  if (terminalUiIpcSocket) {
+    if (!terminalUiIpcSocket.connected) {
+      try {
+        terminalUiIpcSocket.connect?.();
+      } catch {
+        // IME hints are best-effort.
+      }
+    }
+    return terminalUiIpcSocket;
+  }
+
+  try {
+    await ensureSocketIoClient();
+    const io = getSocketIoFactory();
+    if (!io) return null;
+    const socket = io('/ui_ipc', {
+      path: '/ui_ipc_ws/socket.io',
+      transports: ['websocket'],
+      query: {
+        app_id: 'file_editor_cm6',
+        source: 'terminal_app',
+      },
+    });
+    socket.on('connect_error', (error: unknown) => {
+      if (terminalUiIpcConnectWarningShown) return;
+      terminalUiIpcConnectWarningShown = true;
+      console.warn('[terminal] UI IPC IME relay unavailable', error);
+    });
+    terminalUiIpcSocket = socket;
+    return socket;
+  } catch (error) {
+    if (!terminalUiIpcConnectWarningShown) {
+      terminalUiIpcConnectWarningShown = true;
+      console.warn('[terminal] UI IPC IME relay unavailable', error);
+    }
+    return null;
+  }
+}
+
+function emitTerminalImeIntent(active: boolean, trigger: string): void {
+  void ensureUiIpcSocket().then((socket) => {
+    if (!socket) return;
+    socket.emit(UI_IPC_RPC_EVENT, {
+      jsonrpc: '2.0',
+      method: active ? UI_IPC_IME_FOCUS : UI_IPC_IME_BLUR,
+      params: {
+        source: 'terminal_app',
+        surface: 'terminal',
+        trigger,
+      },
+    });
+  });
 }
 
 function ensureXtermCSS(): void {
@@ -716,13 +793,19 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     const textarea = getTermTextarea(currentTerm);
     if (!textarea || !currentTerm) return;
     const handleFocus = () => {
+      emitTerminalImeIntent(true, 'textarea_focus');
       void bindVendoredCtrlHandler(currentTerm).catch((error) => {
         console.warn('[terminal] failed to rebind vendored ctrl helper', error);
       });
     };
+    const handleBlur = () => {
+      emitTerminalImeIntent(false, 'textarea_blur');
+    };
     textarea.addEventListener('focus', handleFocus, true);
+    textarea.addEventListener('blur', handleBlur, true);
     state.ctrlFocusCleanup = () => {
       textarea.removeEventListener('focus', handleFocus, true);
+      textarea.removeEventListener('blur', handleBlur, true);
     };
   }
 
@@ -994,6 +1077,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function disposeSession(): void {
+    emitTerminalImeIntent(false, 'dispose_session');
     state.wsDesiredId = null;
     state.sessionId = null;
     state.lastSeqApplied = 0;
@@ -1165,6 +1249,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     });
     term.open(ui.termContainer);
     term.focus();
+    emitTerminalImeIntent(true, 'select_shell');
     state.term = term;
 
     await ensureTouchToMouseHelper();
@@ -1246,6 +1331,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
   installVendoredCtrlStateListener();
   ui.termContainer.addEventListener('pointerdown', () => {
+    emitTerminalImeIntent(true, 'pointerdown');
     bindVendoredCtrlOnPointerDown();
     refocusTerm();
   }, { passive: true });

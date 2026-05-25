@@ -66,7 +66,7 @@ declare global {
     __cm6EnsureDraftDiffs?: (force?: boolean) => Promise<void> | void;
     __cm6EnsureInlineDiffs?: (force?: boolean) => Promise<void> | void;
     __cm6HandlePrefsChanged?: (payload: unknown) => void;
-    __cm6HandleProjectOpened?: (path: string) => void;
+    __cm6HandleProjectOpened?: (path: string, payload?: Record<string, unknown>) => void;
     __cm6HandleWatcherError?: (payload: Record<string, unknown>) => void;
     __cm6HandleWatcherRaiseResult?: (payload: Record<string, unknown>) => void;
     __cm6PendingPrefsChanged?: unknown;

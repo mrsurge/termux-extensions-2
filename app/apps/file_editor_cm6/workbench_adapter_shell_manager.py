@@ -66,11 +66,29 @@ async def _broadcast_adapter_state() -> None:
         log.warning("[adapter_state] editor RPC broadcast failed: %s", exc)
 
 
-def _set_adapter_state(status: str, project: str = None, error: str = None) -> None:
+def _set_adapter_state(status: str, project: Optional[str] = None, error: Optional[str] = None) -> None:
     """Update state dict. Caller must await _broadcast_adapter_state() after."""
     _adapter_state["status"] = status
     _adapter_state["project"] = project
     _adapter_state["error"] = error
+
+
+async def mark_adapter_workspace_switching(project_root: str) -> None:
+    """Broadcast that the shared adapter is changing workspace roots."""
+    _set_adapter_state("switching", project=str(project_root), error=None)
+    await _broadcast_adapter_state()
+
+
+async def mark_adapter_workspace_ready(project_root: str) -> None:
+    """Broadcast that the shared adapter workspace now matches project_root."""
+    _set_adapter_state("ready", project=str(project_root), error=None)
+    await _broadcast_adapter_state()
+
+
+async def mark_adapter_workspace_error(project_root: str, error: str) -> None:
+    """Broadcast that the shared adapter workspace switch failed."""
+    _set_adapter_state("error", project=str(project_root), error=str(error))
+    await _broadcast_adapter_state()
 
 
 def _project_hash(project_root: str) -> str:

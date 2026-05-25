@@ -751,8 +751,8 @@ const recentsController = createRecentsController({
 });
 recentsController.installWindowHook();
 
-// Synchronize host + inline editor when a project is opened in the explorer.
-// Called from Explorer runtime via window.__cm6HandleProjectOpened(path).
+// Synchronize host + inline editor when a project is opened over project RPC.
+// Called from Explorer runtime via window.__cm6HandleProjectOpened(path, payload).
 const projectSwitchController = createProjectSwitchController({
   getTerminal: () => terminal,
   closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
@@ -765,12 +765,18 @@ const projectSwitchController = createProjectSwitchController({
   updatePathDisplay: () => updatePathDisplay(),
   syncSessionPath: () => syncSessionPath(),
   syncEditorState: (forceRefresh?: boolean) => editorStateController.syncEditorState(forceRefresh),
+  hydrateEditorState: (state: UnknownRecord | null) => editorStateController.hydrateEditorState(state),
+  applyStateProjection: (state: UnknownRecord, source: string) => dispatchHostOpenStateProjection(state, source),
   broadcastRecentsUpdate: (state: EditorState | null) => recentsController.broadcastRecentsUpdate(state),
   getBranchMenuHandle: () => branchMenuHandle,
 });
 
 // Expose for Explorer runtime (project:opened handler)
 projectSwitchController.installWindowHook();
+window.addEventListener('cm6:sidebar-project-opened', (event) => {
+  const payload = event instanceof CustomEvent ? asUnknownRecord(event.detail) : {};
+  void projectSwitchController.handleProjectOpenedPayload(payload);
+});
 
 const editorStateController = createEditorStateController({
   getEditorState: () => editorState,
@@ -1065,6 +1071,7 @@ installBasicMenuActions({
   clearOnQuit: () => resetActiveFileState(),
   showProjectsDebugModal,
   exportDiagnosticsToFile: () => exportDiagnosticsToFile(),
+  requestBackendEditorCommand: (payload: UnknownRecord) => uiIpcConnections.requestBackendEditorCommand(payload),
   triggerEditorSearchPanel: (reason: string, opts?: UnknownRecord) => searchPanelController.triggerEditorSearchPanel(reason, opts),
   jumpToCurrentFileLine: (line: number | string) => jumpToCurrentFileLine(line),
   toast: (msg: string) => host.toast(msg),
@@ -1126,11 +1133,21 @@ const { terminal, consoleDrawer, problemsPanel: drawerProblemsPanel } = initPane
   openFile: (path: string, opts?: OpenFileOptions) => openFile(path, opts),
   jumpToCurrentFileLine: (line: number | string) => jumpToCurrentFileLine(line),
   requestDiagnosticsMention: (payload: UnknownRecord) => uiIpcConnections.requestBackendDiagnosticsMention(payload),
+  emitImeIntent: (active: boolean, params: UnknownRecord = {}) => {
+    uiIpcConnections.emitUiIpcNotification(active ? 'imeFocus' : 'imeBlur', params);
+  },
   saveFile: () => saveFile(),
   resetToNewFile: () => resetActiveFileState({ resetPicker: true }),
   openPickedFile: () => {
     void pickFile().then((p) => { if (p) void openFile(p); });
   },
+});
+window.addEventListener('cm6:preferences-changed', (event) => {
+  try {
+    preferencesController.applyPreferencesChangedPayload((event as CustomEvent<unknown>).detail);
+  } catch (error) {
+    console.warn('[Preferences] failed to apply preferences-changed event', error);
+  }
 });
 problemsPanel = drawerProblemsPanel;
 

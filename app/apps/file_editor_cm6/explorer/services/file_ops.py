@@ -392,18 +392,18 @@ def _select_highest_priority(statuses: Iterable[str]) -> str:
     return 'clean'
 
 
-def get_all_git_statuses() -> Dict[str, str]:
+def get_git_statuses_for_root(project_root: Path) -> Dict[str, str]:
     """
     Return a map of rel_path -> gitStatus for all files with non-clean status.
-    
+
     Directory status propagation is handled by the frontend - it walks up from
     dirty files and applies 'modified' outline to ancestor directories.
-    
+
     Used to broadcast git status updates to the frontend without replacing the tree.
     """
-    root = get_project_root()
+    root = project_root
     status_map = _get_git_status_snapshot(root)
-    
+
     if not status_map:
         return {}
     
@@ -413,8 +413,12 @@ def get_all_git_statuses() -> Dict[str, str]:
     for rel_path, status in status_map.items():
         if status and status != 'clean':
             result[rel_path] = status
-    
+
     return result
+
+
+def get_all_git_statuses() -> Dict[str, str]:
+    return get_git_statuses_for_root(get_project_root())
 
 
 def _is_git_repo(root: Path) -> bool:

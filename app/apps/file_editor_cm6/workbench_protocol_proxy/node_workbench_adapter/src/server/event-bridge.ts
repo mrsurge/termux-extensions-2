@@ -193,10 +193,11 @@ export function createWorkbenchEventHandler(runtime: EventBridgeRuntime): (ev: u
         handle: safeEv.handle,
         language: safeEv.language,
         legend: safeEv.legend,
+        eventHandle: safeEv.eventHandle ?? null,
         range: !!safeEv.range,
       };
       runtime.log(
-        `[server] PUSH semantic_tokens_provider_registered lang=${String(safeEv.language ?? "")} handle=${String(safeEv.handle ?? "")} range=${!!safeEv.range} legendTypes=${Array.isArray(field(safeEv.legend, "tokenTypes")) ? (field(safeEv.legend, "tokenTypes") as unknown[]).length : 0}`,
+        `[server] PUSH semantic_tokens_provider_registered lang=${String(safeEv.language ?? "")} handle=${String(safeEv.handle ?? "")} eventHandle=${String(safeEv.eventHandle ?? "none")} range=${!!safeEv.range} legendTypes=${Array.isArray(field(safeEv.legend, "tokenTypes")) ? (field(safeEv.legend, "tokenTypes") as unknown[]).length : 0}`,
       );
       runtime.writePushLine(pushPayload);
     }
