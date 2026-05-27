@@ -117,7 +117,7 @@ It does not own:
 
 ## Project Ownership Rule
 
-Sidebar IPC is only the transport edge for sidebar clients. Project lookup/open/create behavior is owned by backend project hooks that reuse the same history store, sidecar lookup, project-root switch, terminal cleanup, diagnostics stop, adapter termination, change-ledger clearing, and cwd fanout used by the existing backend project route family. Frontend synchronization after `sidebar.project.opened` happens over the receiving frontend's existing sidebar IPC transport.
+Sidebar IPC is only the transport edge for sidebar clients. Project lookup/open/create behavior is owned by backend project hooks that reuse the same history store, sidecar lookup, project-root switch, terminal cleanup, diagnostics stop, adapter termination, retired change-ledger cleanup, and cwd fanout used by the existing backend project route family. Frontend synchronization after `sidebar.project.opened` happens over the receiving frontend's existing sidebar IPC transport.
 
 ## Implementation Files
 

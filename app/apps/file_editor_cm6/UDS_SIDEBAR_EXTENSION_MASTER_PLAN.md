@@ -170,16 +170,16 @@ Goal: let agents perform mention-like navigation actions (document/console/explo
 - notes:
   - intended for agent-triggered open/focus flows across IDE surfaces.
 
-### D. Edit Tracker Source Hook
-Goal: provide an alternate source of truth for last-edit location when complex diff history is ambiguous.
+### D. Retired Edit Tracker Source Hook
+Goal: historical placeholder only. The external edit tracker/change ledger is retired and should not be reintroduced as a diff-based filesystem watcher path.
 
 19. `edit_tracker.last_change.publish`
 - req:
 `{path:string, line:number, column?:number, commit?:string, editor_session_id?:string, reason:string, source:string, ts:number}`
 - res: `{ok:true, accepted:boolean}`
 - notes:
-  - consumed as a secondary signal by edit-tracker logic.
-  - does not replace diff-based tracker; augments it.
+  - retired with the external change ledger.
+  - do not replace this with another diff-based filesystem watcher; use explicit surface-owned edit/open contracts instead.
 
 ## vNext Migration Addendum
 ### Phase 7: mention package and reverse mention

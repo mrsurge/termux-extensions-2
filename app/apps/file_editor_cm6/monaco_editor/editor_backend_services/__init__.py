@@ -19,7 +19,6 @@ from .editor_routes_service import (
     handle_set_minimap_mode,
     handle_set_read_only,
     handle_toggle_color_picker,
-    handle_toggle_edit_tracking,
 )
 from .cache_routes_service import (
     handle_check_cache,
@@ -58,7 +57,6 @@ __all__ = [
     "handle_set_minimap_mode",
     "handle_set_read_only",
     "handle_toggle_color_picker",
-    "handle_toggle_edit_tracking",
     "handle_check_cache",
     "handle_debug_editor_state",
     "handle_discard_draft",

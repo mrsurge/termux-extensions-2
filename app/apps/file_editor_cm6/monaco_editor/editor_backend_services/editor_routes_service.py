@@ -15,28 +15,6 @@ class PreferencesStoreLike(Protocol):
     def get_preferences(self) -> dict[str, object]: ...
 
 
-def handle_toggle_edit_tracking(
-    data: Mapping[str, object],
-    *,
-    update_editor_preferences: Callable[[dict[str, object]], object],
-) -> JsonMap:
-    enabled = bool(data.get("enabled", False))
-    from app.apps.file_editor_cm6 import change_ledger
-
-    if enabled:
-        change_ledger.clear()
-        print("[editor_app] trackAgentEdits enabled via API — change_ledger ready", file=sys.stderr)
-    else:
-        change_ledger.clear()
-        print("[editor_app] trackAgentEdits disabled via API — change_ledger cleared", file=sys.stderr)
-
-    updates: dict[str, object] = {"trackAgentEdits": enabled}
-    if enabled:
-        updates["trackAgentSidebarEdits"] = False
-    update_editor_preferences(updates)
-    return {"ok": True, "enabled": enabled}
-
-
 def handle_jump_to_line(
     data: Mapping[str, object],
     *,
@@ -149,7 +127,6 @@ def build_view_state_dict(
         "theme": editor_prefs.get("theme"),
         "autoSave": editor_prefs.get("autoSave"),
         "showInlineDiffs": editor_prefs.get("showInlineDiffs"),
-        "trackAgentEdits": editor_prefs.get("trackAgentEdits"),
         "trackAgentSidebarEdits": editor_prefs.get("trackAgentSidebarEdits"),
         "fontScale": editor_prefs.get("fontScale"),
         "showIndentGuides": editor_prefs.get("showIndentGuides"),

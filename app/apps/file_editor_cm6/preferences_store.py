@@ -18,7 +18,6 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "autoSave": True,
     "showInlineDiffs": True,
     "showDraftDiffs": True,
-    "trackAgentEdits": False,
     "trackAgentSidebarEdits": False,
     "fontScale": 0.85,  # NEW: Default to Medium preset
     "showIndentGuides": True,
@@ -129,6 +128,9 @@ class PreferencesStore:
 
             modified = False
             editor_store = data.setdefault("editor", {})
+            if "trackAgentEdits" in editor_store:
+                editor_store.pop("trackAgentEdits", None)
+                modified = True
             for key, default_val in DEFAULT_EDITOR_PREFS.items():
                 if key not in editor_store:
                     editor_store[key] = default_val

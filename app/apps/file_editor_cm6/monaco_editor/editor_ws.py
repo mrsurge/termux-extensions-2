@@ -996,67 +996,6 @@ async def broadcast_git_baselines_for_active_file() -> bool:
         return False
 
 
-async def handle_tracked_edit(edit_result: dict[str, object]) -> None:
-    """Dispatch a jump/open when trackAgentEdits is enabled and a new edit is detected.
-
-    If the edited file is already active, emits ``editor:jump_to_line``.
-    If a different file was edited, emits ``editor:open`` with a target line.
-    Toolbar filename update flows through explorer:activeFile, not editor:cache_state.
-    """
-    project = _active_project()
-    if not project:
-        return
-
-    # Check preference
-    prefs_obj: object = _preferences_store.get_preferences()
-    editor_prefs_obj = prefs_obj.get("editor", {}) if isinstance(prefs_obj, dict) else {}
-    editor_prefs = cast(dict[str, object], editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {})
-    if not bool(editor_prefs.get("trackAgentEdits", False)):
-        return
-
-    abs_path_obj = edit_result.get("path", "")
-    if not isinstance(abs_path_obj, str) or not abs_path_obj:
-        return
-    abs_path = abs_path_obj
-    rel_path_obj = edit_result.get("rel_path", "")
-    rel_path = rel_path_obj if isinstance(rel_path_obj, str) else ""
-    line_obj = edit_result.get("line", 1)
-    if isinstance(line_obj, int):
-        line = line_obj if line_obj > 0 else 1
-    elif isinstance(line_obj, str) and line_obj.isdigit():
-        line = max(1, int(line_obj))
-    else:
-        line = 1
-
-    active_path = _history_store.get_last_file(project)
-    try:
-        active_norm = str(Path(active_path).resolve(strict=False)) if active_path else ""
-        changed_norm = str(Path(abs_path).resolve(strict=False))
-    except Exception:
-        return
-
-    if active_norm == changed_norm:
-        # Same file — just jump
-        await editor_runtime_emit_room_event(
-            "editor:jump_to_line",
-            {"line": line, "column": 1, "scroll_to_top": False, "source_client": "change_ledger"},
-        )
-        print(f"[change_ledger] jump to {rel_path}:{line}", file=sys.stderr)
-    else:
-        # Different file: sidecar write is the authority, then derived projections follow.
-        open_state = write_sidecar_open_file(project, abs_path, reason="tracked_edit")
-        _history_store.update_session_state({"currentPath": open_state["openFile"]})
-
-        payload = _read_file_payload(project, abs_path)
-        payload["line"] = line
-        payload["reason"] = "tracked_edit"
-        payload["request_id"] = f"track_{int(time.time() * 1000)}"
-        await editor_runtime_emit_room_event("editor:open", payload)
-        await _emit_open_state_changed(open_state, source="change_ledger")
-
-        print(f"[change_ledger] open+jump {rel_path}:{line}", file=sys.stderr)
-
-
 def _git_head_text(project_root: str, abs_path: str) -> Optional[str]:
     """Return the file content at HEAD (or None if untracked / no commits)."""
 

@@ -316,7 +316,7 @@ First backend extraction targets:
    - `/project/create`
    - `/project/current`
    - reason: central state transition family; should eventually share a project-switch service with Explorer
-   - completed: strict project route factory now lives at `main_page/backend/project_routes.py`; `main.py` assembles terminal, diagnostics, adapter, sidebar, ledger, and project-creation dependencies without owning the route bodies
+   - completed: strict project route factory now lives at `main_page/backend/project_routes.py`; `main.py` assembles terminal, diagnostics, adapter, sidebar, retired change-ledger cleanup, and project-creation dependencies without owning the route bodies
 4. `git_routes.py`
    - branch/status/diff-base/stage/commit/push/pull/reset/remote endpoints
    - reason: large route family with a clear `git_helper` dependency

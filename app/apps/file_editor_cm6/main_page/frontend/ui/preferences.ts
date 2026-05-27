@@ -38,7 +38,6 @@ export function createPreferencesController(deps: any) {
     deps.setMenuChecked(m.miToggleReadonly, state.readOnly);
     deps.setMenuChecked(m.miToggleMinimap, state.showMinimap);
     deps.setMenuChecked(m.miToggleStickyScroll, state.stickyScroll);
-    deps.setMenuChecked(m.miTrackEdits, state.trackAgentEdits);
     deps.setMenuChecked(m.miTrackAgentSidebarEdits, state.trackAgentSidebarEdits);
     deps.applyFontScale(state.fontScale ?? 0.85);
   }

@@ -25,6 +25,8 @@ app/static/vendor/
 app/apps/file_editor_cm6/vendor/highlightjs/
 app/apps/file_editor_cm6/vendor/hterm/
 app/apps/file_editor_cm6/monaco_editor/textmate/
+app/apps/file_editor_cm6/monaco_editor/textmate/**
+**/monaco_editor/textmate/**
 app/apps/terminal/vendor/
 app/apps/terminal_testing/vendor/
 

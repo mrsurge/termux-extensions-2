@@ -34,7 +34,6 @@ from .editor_backend_services.editor_routes_service import (
     handle_set_minimap_mode as _handle_set_minimap_mode,
     handle_set_read_only as _handle_set_read_only,
     handle_toggle_color_picker as _handle_toggle_color_picker,
-    handle_toggle_edit_tracking as _handle_toggle_edit_tracking,
 )
 from .editor_backend_services.cache_routes_service import (
     handle_check_cache as _handle_check_cache,
@@ -687,13 +686,6 @@ async def refresh_diffs(data: dict[str, object] = Body(...)):
         normalize_rel_path=_normalize_rel_path,
         collect_diff=collect_diff,
         current_diff_base=_current_diff_base,
-    )
-
-@editor_router.post('/toggle_edit_tracking')
-async def toggle_edit_tracking(data: dict[str, object] = Body(...)):
-    return _handle_toggle_edit_tracking(
-        data,
-        update_editor_preferences=lambda updates: _preferences_store.update_preferences(editor=updates),
     )
 
 @editor_router.post('/jump_to_line')

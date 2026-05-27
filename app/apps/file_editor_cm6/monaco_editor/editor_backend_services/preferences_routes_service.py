@@ -153,16 +153,6 @@ async def handle_update_preference(
                     cache_entry=None,
                     reason="autosave_on",
                 )
-        elif key == "trackAgentEdits":
-            value = bool(value)
-            from app.apps.file_editor_cm6 import change_ledger
-
-            if value:
-                change_ledger.clear()
-                print("[editor_app] trackAgentEdits enabled — change_ledger ready", file=sys.stderr)
-            else:
-                change_ledger.clear()
-                print("[editor_app] trackAgentEdits disabled — change_ledger cleared", file=sys.stderr)
         elif key == "trackAgentSidebarEdits":
             value = bool(value)
             print(f"[editor_app] trackAgentSidebarEdits set to {value}", file=sys.stderr)
@@ -173,10 +163,7 @@ async def handle_update_preference(
             ed.update()
 
         editor_updates: dict[str, object] = {key: value}
-        if key == "trackAgentEdits" and bool(value):
-            editor_updates["trackAgentSidebarEdits"] = False
-        elif key == "trackAgentSidebarEdits" and bool(value):
-            editor_updates["trackAgentEdits"] = False
+        if key == "trackAgentSidebarEdits" and bool(value):
             try:
                 from app.apps.file_editor_cm6 import change_ledger
 

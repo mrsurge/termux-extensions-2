@@ -17,7 +17,6 @@ export interface HostElements {
   issuesNextBtn: HTMLButtonElement;
   issuesBadgesEl: HTMLElement;
   statusEl: HTMLElement;
-  editTrackerStatusEl: HTMLElement;
   menuFileBtn: HTMLElement;
   menuFileDD: HTMLElement;
   menuEditBtn: HTMLElement;
@@ -55,7 +54,6 @@ export interface HostElements {
   miToggleColorPicker: HTMLElement;
   miToggleReadonly: HTMLElement;
   miToggleStickyScroll: HTMLElement;
-  miTrackEdits: HTMLElement;
   miTrackAgentSidebarEdits: HTMLElement;
   miFind: HTMLElement;
   miGoto: HTMLElement;
@@ -104,7 +102,6 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     issuesNextBtn: requireEl('#fe-issues-next') as HTMLButtonElement,
     issuesBadgesEl: requireEl('#fe-issues-badges'),
     statusEl: requireEl('#fe-status'),
-    editTrackerStatusEl: requireEl('#edit-tracker-status'),
     menuFileBtn: requireEl('#menu-file-btn'),
     menuFileDD: requireEl('#menu-file-dd'),
     menuEditBtn: requireEl('#menu-edit-btn'),
@@ -142,7 +139,6 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     miToggleColorPicker: requireEl('#mi-toggle-color-picker'),
     miToggleReadonly: requireEl('#mi-toggle-readonly'),
     miToggleStickyScroll: requireEl('#mi-toggle-sticky-scroll'),
-    miTrackEdits: requireEl('#mi-track-edits'),
     miTrackAgentSidebarEdits: requireEl('#mi-track-agent-sidebar-edits'),
     miFind: requireEl('#mi-find'),
     miGoto: requireEl('#mi-goto'),

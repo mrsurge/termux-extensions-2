@@ -8,7 +8,6 @@
  *     miToggleDiffs: HTMLElement,
  *     miToggleDraftDiffs: HTMLElement,
  *     miToggleReadonly: HTMLElement,
- *     miTrackEdits: HTMLElement,
  *     miTrackAgentSidebarEdits: HTMLElement,
  *   },
  *   getEditorViewState: () => any,
@@ -28,7 +27,7 @@
 export function installAdvancedMenuActions(deps: any) {
   let preTrackingPrefs: { showInlineDiffs: boolean; readOnly: boolean } | null = null;
   const s = () => deps.getEditorViewState();
-  const anyTracking = () => !!(s()?.trackAgentEdits || s()?.trackAgentSidebarEdits);
+  const anyTracking = () => !!(s()?.trackAgentSidebarEdits);
 
   async function restorePreTrackingPrefsIfIdle() {
     if (anyTracking() || !preTrackingPrefs) return;
@@ -38,13 +37,12 @@ export function installAdvancedMenuActions(deps: any) {
   }
 
   async function disableAllEditTracking(reason?: string) {
-    if (s()?.trackAgentEdits) await deps.updatePreference('trackAgentEdits', false);
     if (s()?.trackAgentSidebarEdits) await deps.updatePreference('trackAgentSidebarEdits', false);
     await restorePreTrackingPrefsIfIdle();
     if (reason) deps.toast(reason, 'warn');
   }
 
-  async function toggleTrackedEditPreference(targetKey: string, otherKey: string) {
+  async function toggleTrackedEditPreference(targetKey: string) {
     const enabling = !(s()?.[targetKey]);
     if (enabling) {
       if (!preTrackingPrefs) {
@@ -55,7 +53,6 @@ export function installAdvancedMenuActions(deps: any) {
       }
       await deps.updatePreference('showInlineDiffs', true);
       await deps.updatePreference('readOnly', true);
-      if (s()?.[otherKey]) await deps.updatePreference(otherKey, false);
       const success = await deps.updatePreference(targetKey, true);
       if (!success) deps.toast('Failed to enable edit tracking');
       return;
@@ -140,10 +137,7 @@ export function installAdvancedMenuActions(deps: any) {
     }
   });
 
-  deps.bindMenuToggle(deps.els.miTrackEdits, async () => {
-    await toggleTrackedEditPreference('trackAgentEdits', 'trackAgentSidebarEdits');
-  });
   deps.bindMenuToggle(deps.els.miTrackAgentSidebarEdits, async () => {
-    await toggleTrackedEditPreference('trackAgentSidebarEdits', 'trackAgentEdits');
+    await toggleTrackedEditPreference('trackAgentSidebarEdits');
   });
 }

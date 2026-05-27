@@ -23,7 +23,6 @@ import { pickerAvailable as pickerUiAvailable, pickFileWithPicker, pickDirectory
 import { createPickerController } from './main_page/frontend/io/picker-controller.ts';
 import { createJumpLineController } from './main_page/frontend/io/jump-line.ts';
 import { createAdapterUiController } from './main_page/frontend/ui/adapter-ui.ts';
-import { createEditTrackerController } from './main_page/frontend/ui/edit-tracker.ts';
 import { createFontScaleController } from './main_page/frontend/ui/font-scale.ts';
 import { createSearchPanelController } from './main_page/frontend/ui/search-panel.ts';
 import { createMenuCoreController } from './main_page/frontend/ui/menu-core.ts';
@@ -256,7 +255,6 @@ const {
   issuesNextBtn,
   issuesBadgesEl,
   statusEl,
-  editTrackerStatusEl,
   menuFileBtn,
   menuFileDD,
   menuEditBtn,
@@ -294,7 +292,6 @@ const {
   miToggleColorPicker,
   miToggleReadonly,
   miToggleStickyScroll,
-  miTrackEdits,
   miTrackAgentSidebarEdits,
   miFind,
   miGoto,
@@ -550,15 +547,6 @@ function syncSessionPath(extra: UnknownRecord = {}): void {
   sessionTelemetry.syncSessionPath(extra);
 }
 
-// ---------- Edit Tracker ----------
-const editTrackerController = createEditTrackerController({
-  apiPost,
-  getEditorViewState: () => editorViewState,
-  getCurrentPath: () => currentPath,
-  openFile: (path: string, opts?: OpenFileOptions) => openFile(path, opts),
-  jumpToCurrentFileLine: (line: number) => jumpToCurrentFileLine(line),
-  statusEl: editTrackerStatusEl,
-});
 const fontScaleController = createFontScaleController({
   presets: FONT_SCALE_PRESETS,
   updatePreference: (key: string, value: unknown) => preferencesController.updatePreference(key, value),
@@ -732,7 +720,6 @@ const preferencesController = createPreferencesController({
     miToggleReadonly,
     miToggleMinimap,
     miToggleStickyScroll,
-    miTrackEdits,
     miTrackAgentSidebarEdits,
   }),
 });
@@ -1103,7 +1090,6 @@ installAdvancedMenuActions({
     miToggleDiffs,
     miToggleDraftDiffs,
     miToggleReadonly,
-    miTrackEdits,
     miTrackAgentSidebarEdits,
   },
   getEditorViewState: () => editorViewState,

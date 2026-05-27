@@ -1,10 +1,9 @@
 # pyright: strict
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
-from typing import Callable, TypedDict, cast
+from typing import TypedDict, cast
 
 logger = logging.getLogger(__name__)
 
@@ -15,10 +14,6 @@ class WatcherFilesPayload(TypedDict):
     created: list[str]
     changed: list[str]
     deleted: list[str]
-
-
-TrackedEditResult = dict[str, object]
-RecordChangeFn = Callable[[str, str], TrackedEditResult | None]
 
 
 _diagnostics_detail_by_project: dict[str, DiagnosticsDetailPayload] = {}
@@ -93,19 +88,6 @@ async def publish_watcher_error(project_path: str, payload: dict[str, object]) -
     )
 
 
-async def _publish_tracked_change(abs_path: str, project_path: str) -> None:
-    try:
-        from . import change_ledger as _change_ledger
-        from .monaco_editor.editor_ws import handle_tracked_edit
-
-        record_change_fn = cast(RecordChangeFn, getattr(_change_ledger, "record_change"))
-        result = await asyncio.to_thread(record_change_fn, abs_path, project_path)
-        if result:
-            await handle_tracked_edit(result)
-    except Exception as exc:
-        logger.debug("[workspace_events] tracked change publish failed: %s", exc)
-
-
 async def publish_file_change_batch(
     project_path: str,
     *,
@@ -138,11 +120,9 @@ async def publish_file_change_batch(
         except Exception as exc:
             logger.debug("[workspace_events] external file change publish failed: %s", exc)
 
-    for abs_path in [*created_abs, *changed_abs, *deleted_abs]:
-        await _publish_tracked_change(abs_path, normalized_project)
-
-
 def publish_file_change_threadsafe(abs_path: str, event_type: str) -> None:
+    import asyncio
+
     from .explorer.services.file_ops import get_project_root
     from .explorer.services.runtime_notifications import get_explorer_event_loop
 
