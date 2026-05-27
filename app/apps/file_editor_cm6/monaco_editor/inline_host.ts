@@ -33,14 +33,6 @@ const INLINE_EDITOR_HOST_STYLE = `
   background: rgba(210, 153, 34, 0.90);
   width: 3px !important;
 }
-#editor-frame .monaco-editor .te2-draft-del-zone {
-  background: rgba(210, 153, 34, 0.12);
-  color: #e6b450;
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
-  white-space: pre;
-}
 #editor-frame .monaco-editor .margin-view-overlays .codicon-folding-expanded,
 #editor-frame .monaco-editor .margin-view-overlays .codicon-folding-collapsed,
 #editor-frame .monaco-editor .margin-view-overlays .codicon-folding-manual-expanded,

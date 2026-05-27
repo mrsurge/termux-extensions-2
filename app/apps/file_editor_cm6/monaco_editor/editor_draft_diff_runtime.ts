@@ -16,14 +16,9 @@ interface MonacoDecorationsCollectionLike {
   set?(decorations: unknown[]): void;
 }
 
-interface MonacoViewZoneAccessorLike {
-  addZone(zone: Record<string, unknown>): unknown;
-}
-
 interface MonacoCodeEditorLike {
   createDecorationsCollection?(): MonacoDecorationsCollectionLike;
   deltaDecorations?(oldDecorations: unknown[], newDecorations: unknown[]): unknown[];
-  changeViewZones?(callback: (accessor: MonacoViewZoneAccessorLike) => void): void;
 }
 
 interface MonacoModifiedEditorLike {
@@ -65,13 +60,11 @@ interface EditorDraftDiffRuntimeDeps {
   getDiffEditor(): MonacoDiffEditorLike | null;
   getModel(): MonacoTextModelLike | null;
   getMonaco(): MonacoLike | null;
-  getDocument(): Document | null;
   getShowDraftDiffs(): boolean;
   getShowInlineDiffs(): boolean;
   clearDraftDiffDecorations(): void;
   clearDraftDiffZones(): void;
   setDebugDraft(value: string): void;
-  applyEditorTypography(node: HTMLElement): void;
   getDraftDecoCollection(): MonacoDecorationsCollectionLike | null;
   setDraftDecoCollection(value: MonacoDecorationsCollectionLike | null): void;
   getDraftDecoIds(): unknown[];
@@ -121,82 +114,22 @@ export function ensureDraftDecoCollection(
 
 export function applyDraftZones(
   deps: EditorDraftDiffRuntimeDeps,
-  zones: DraftZoneLike[] | null | undefined,
+  _zones: DraftZoneLike[] | null | undefined,
 ): void {
-  deps.setLastDraftZones(zones && zones.length ? zones.slice() : null);
+  deps.setLastDraftZones(null);
   deps.clearDraftDiffZones();
-
-  const editor = deps.getEditor();
-  const doc = deps.getDocument();
-  if (!zones || !zones.length || !editor || !doc || typeof editor.changeViewZones !== 'function') return;
-
-  deps.setIsApplyingDraftZones(true);
-  const nextZoneIds: unknown[] = [];
-  try {
-    deps.setIgnoreNextModifiedViewZonesEvent(true);
-    editor.changeViewZones((accessor) => {
-      for (const zone of zones) {
-        const node = doc.createElement('div');
-        node.className = 'te2-draft-del-zone';
-        node.textContent = zone.text || '';
-        node.style.whiteSpace = 'pre';
-        deps.applyEditorTypography(node);
-        try {
-          const id = accessor.addZone({
-            afterLineNumber: zone.after,
-            heightInLines: Math.max(1, zone.lines || 1),
-            domNode: node,
-          });
-          nextZoneIds.push(id);
-        } catch (_) {}
-      }
-    });
-  } catch (_) {
-    nextZoneIds.length = 0;
-  }
   deps.setIsApplyingDraftZones(false);
-  deps.setDraftZoneIds(nextZoneIds);
+  deps.setIgnoreNextModifiedViewZonesEvent(false);
+  deps.setReapplyDraftZonesScheduled(false);
+  deps.setDraftZoneIds([]);
 }
 
 export function reapplyDraftZones(deps: EditorDraftDiffRuntimeDeps): void {
-  try {
-    if (deps.getIsApplyingDraftZones()) return;
-    const zones = deps.getLastDraftZones();
-    if (!zones || !zones.length) return;
-    applyDraftZones(deps, zones);
-  } catch (_) {}
+  applyDraftZones(deps, null);
 }
 
 export function installDraftZoneOrderingHook(deps: EditorDraftDiffRuntimeDeps): void {
-  try {
-    const diffEditor = deps.getDiffEditor();
-    if (!diffEditor || diffEditor.__te2DraftZoneOrderingHook) return;
-    const modifiedEditor = typeof diffEditor.getModifiedEditor === 'function'
-      ? diffEditor.getModifiedEditor()
-      : null;
-    if (!modifiedEditor || typeof modifiedEditor.onDidChangeViewZones !== 'function') return;
-
-    diffEditor.__te2DraftZoneOrderingHook = true;
-    modifiedEditor.onDidChangeViewZones(() => {
-      try {
-        if (deps.getIgnoreNextModifiedViewZonesEvent()) {
-          deps.setIgnoreNextModifiedViewZonesEvent(false);
-          return;
-        }
-        if (deps.getReapplyDraftZonesScheduled()) return;
-        if (!deps.getShowInlineDiffs()) return;
-        if (!deps.getShowDraftDiffs()) return;
-        const zones = deps.getLastDraftZones();
-        if (!zones || !zones.length) return;
-
-        deps.setReapplyDraftZonesScheduled(true);
-        deps.schedule(() => {
-          deps.setReapplyDraftZonesScheduled(false);
-          try { reapplyDraftZones(deps); } catch (_) {}
-        }, 0);
-      } catch (_) {}
-    });
-  } catch (_) {}
+  applyDraftZones(deps, null);
 }
 
 export function applyDraftDiffDecorations(
@@ -363,11 +296,6 @@ export function applyDraftDiffDecorations(
               linesDecorationsClassName: 'te2-draft-del-marker',
             },
           });
-          zones.push({
-            after: anchor - 1,
-            text: delBlock.join('\n'),
-            lines: delBlock.length,
-          });
           continue;
         }
 
@@ -410,7 +338,10 @@ export function applyDraftDiffDecorations(
       deps.setDraftDecoIds(editor.deltaDecorations(deps.getDraftDecoIds(), decorations));
     }
 
-    applyDraftZones(deps, zones);
+    // Monaco's stock combined diff deletion widget owns deleted-text layout.
+    // Keep draft deletion markers non-layout-changing so we don't add a second
+    // modified-side view zone for the same original-side deletion.
+    applyDraftZones(deps, null);
     try {
       if (deps.getShowInlineDiffs()) installDraftZoneOrderingHook(deps);
     } catch (error) {
