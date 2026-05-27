@@ -29,9 +29,23 @@ const INLINE_EDITOR_MARKUP = `
 const INLINE_EDITOR_HOST_STYLE = `
 #editor-frame .monaco-editor .te2-draft-add-line { background: rgba(56, 139, 253, 0.22) !important; }
 #editor-frame .monaco-editor .te2-draft-del-line { background: rgba(210, 153, 34, 0.18) !important; }
-#editor-frame .monaco-editor .margin-view-overlays .te2-draft-del-marker {
-  background: rgba(210, 153, 34, 0.90);
-  width: 3px !important;
+#editor-frame .monaco-editor .te2-draft-del-zone {
+  background: rgba(210, 153, 34, 0.12);
+  color: #e6b450;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre;
+}
+#editor-frame .monaco-editor .te2-draft-stock-del-zone,
+#editor-frame .monaco-editor .te2-draft-stock-del-zone .view-line {
+  background: rgba(210, 153, 34, 0.16) !important;
+}
+#editor-frame .monaco-editor .te2-draft-stock-del-zone .inline-deleted-text {
+  background: rgba(210, 153, 34, 0.30) !important;
+}
+#editor-frame .monaco-editor .te2-draft-stock-del-margin {
+  background: rgba(210, 153, 34, 0.16) !important;
 }
 #editor-frame .monaco-editor .margin-view-overlays .codicon-folding-expanded,
 #editor-frame .monaco-editor .margin-view-overlays .codicon-folding-collapsed,

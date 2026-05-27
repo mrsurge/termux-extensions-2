@@ -27,6 +27,7 @@ Implementation should:
 
 - Draft deletions line up with the stock combined diff deletion layout.
 - No additional blank/deleted line appears after each draft deletion.
+- Normal editor mode still shows the draft deletion widget because there is no stock combined-diff deletion widget to reuse.
 - Normal Git diff deletion widgets should not be restyled as draft deletions unless they are part of the active draft diff presentation.
 - Draft additions keep their existing draft styling.
 - Turning draft diffs or inline diffs off clears draft-only markers and does not leave stale zones.
@@ -50,7 +51,9 @@ This plan intentionally has no fallback path. If the stock deletion widget canno
 
 Implemented in the current cleanup slice:
 
-- Draft deletion handling no longer creates custom `te2-draft-del-zone` view zones.
-- Draft deletion markers remain non-layout-changing.
-- The stale `te2-draft-del-zone` stylesheet rule was removed.
-- Served frontend version surfaces were synced to `0.2.242`.
+- Normal editor mode still creates `te2-draft-del-zone` view zones for draft deletions.
+- Combined diff mode bypasses those custom zones and tags only matching Monaco stock deletion widgets for draft styling.
+- The old `te2-draft-del-marker` margin marker was removed.
+- Served frontend version surfaces were synced to `0.2.243`.
+- Local typecheck/build/syntax/whitespace validation passed after this correction.
+- Live runtime validation is still pending before any follow-up commit.

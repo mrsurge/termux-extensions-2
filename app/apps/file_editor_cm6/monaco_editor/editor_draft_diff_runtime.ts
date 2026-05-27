@@ -16,9 +16,14 @@ interface MonacoDecorationsCollectionLike {
   set?(decorations: unknown[]): void;
 }
 
+interface MonacoViewZoneAccessorLike {
+  addZone(zone: Record<string, unknown>): unknown;
+}
+
 interface MonacoCodeEditorLike {
   createDecorationsCollection?(): MonacoDecorationsCollectionLike;
   deltaDecorations?(oldDecorations: unknown[], newDecorations: unknown[]): unknown[];
+  changeViewZones?(callback: (accessor: MonacoViewZoneAccessorLike) => void): void;
 }
 
 interface MonacoModifiedEditorLike {
@@ -60,11 +65,13 @@ interface EditorDraftDiffRuntimeDeps {
   getDiffEditor(): MonacoDiffEditorLike | null;
   getModel(): MonacoTextModelLike | null;
   getMonaco(): MonacoLike | null;
+  getDocument(): Document | null;
   getShowDraftDiffs(): boolean;
   getShowInlineDiffs(): boolean;
   clearDraftDiffDecorations(): void;
   clearDraftDiffZones(): void;
   setDebugDraft(value: string): void;
+  applyEditorTypography(node: HTMLElement): void;
   getDraftDecoCollection(): MonacoDecorationsCollectionLike | null;
   setDraftDecoCollection(value: MonacoDecorationsCollectionLike | null): void;
   getDraftDecoIds(): unknown[];
@@ -94,6 +101,74 @@ function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : [];
 }
 
+function normalizeDeletedText(value: string): string {
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\u00a0/g, ' ')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .trim();
+}
+
+function rectanglesOverlapVertically(left: DOMRect, right: DOMRect): boolean {
+  return left.bottom > right.top && right.bottom > left.top;
+}
+
+function tagMatchingStockDeletionMargins(doc: Document, contentNode: HTMLElement): void {
+  try {
+    const contentRect = contentNode.getBoundingClientRect();
+    const marginNodes = Array.from(doc.querySelectorAll<HTMLElement>('.inline-deleted-margin-view-zone'));
+    for (const marginNode of marginNodes) {
+      if (marginNode.classList.contains('te2-draft-stock-del-margin')) continue;
+      const marginRect = marginNode.getBoundingClientRect();
+      if (!rectanglesOverlapVertically(contentRect, marginRect)) continue;
+      marginNode.classList.add('te2-draft-stock-del-margin');
+      break;
+    }
+  } catch (_) {}
+}
+
+function tagMatchingStockDeletionWidgets(
+  deps: EditorDraftDiffRuntimeDeps,
+  zones: DraftZoneLike[] | null | undefined,
+): void {
+  const doc = deps.getDocument();
+  if (!doc) return;
+  try {
+    for (const node of Array.from(doc.querySelectorAll<HTMLElement>('.te2-draft-stock-del-zone'))) {
+      node.classList.remove('te2-draft-stock-del-zone');
+    }
+    for (const node of Array.from(doc.querySelectorAll<HTMLElement>('.te2-draft-stock-del-margin'))) {
+      node.classList.remove('te2-draft-stock-del-margin');
+    }
+  } catch (_) {}
+
+  if (!zones || !zones.length) return;
+
+  const unmatchedZones = zones
+    .map((zone) => ({
+      text: normalizeDeletedText(zone.text),
+      lines: Math.max(1, zone.lines || 1),
+    }))
+    .filter((zone) => zone.text.length > 0);
+  if (!unmatchedZones.length) return;
+
+  const stockNodes = Array.from(doc.querySelectorAll<HTMLElement>('.line-delete.line-delete-selectable'));
+  for (const stockNode of stockNodes) {
+    const stockText = normalizeDeletedText(stockNode.textContent || '');
+    if (!stockText) continue;
+
+    const matchIndex = unmatchedZones.findIndex((zone) => stockText === zone.text || stockText.includes(zone.text));
+    if (matchIndex < 0) continue;
+
+    stockNode.classList.add('te2-draft-stock-del-zone');
+    tagMatchingStockDeletionMargins(doc, stockNode);
+    unmatchedZones.splice(matchIndex, 1);
+    if (!unmatchedZones.length) break;
+  }
+}
+
 export function ensureDraftDecoCollection(
   deps: EditorDraftDiffRuntimeDeps,
 ): MonacoDecorationsCollectionLike | null {
@@ -114,22 +189,82 @@ export function ensureDraftDecoCollection(
 
 export function applyDraftZones(
   deps: EditorDraftDiffRuntimeDeps,
-  _zones: DraftZoneLike[] | null | undefined,
+  zones: DraftZoneLike[] | null | undefined,
 ): void {
-  deps.setLastDraftZones(null);
+  deps.setLastDraftZones(zones && zones.length ? zones.slice() : null);
   deps.clearDraftDiffZones();
+
+  const editor = deps.getEditor();
+  const doc = deps.getDocument();
+  if (!zones || !zones.length || !editor || !doc || typeof editor.changeViewZones !== 'function') return;
+
+  deps.setIsApplyingDraftZones(true);
+  const nextZoneIds: unknown[] = [];
+  try {
+    deps.setIgnoreNextModifiedViewZonesEvent(true);
+    editor.changeViewZones((accessor) => {
+      for (const zone of zones) {
+        const node = doc.createElement('div');
+        node.className = 'te2-draft-del-zone';
+        node.textContent = zone.text || '';
+        node.style.whiteSpace = 'pre';
+        deps.applyEditorTypography(node);
+        try {
+          const id = accessor.addZone({
+            afterLineNumber: zone.after,
+            heightInLines: Math.max(1, zone.lines || 1),
+            domNode: node,
+          });
+          nextZoneIds.push(id);
+        } catch (_) {}
+      }
+    });
+  } catch (_) {
+    nextZoneIds.length = 0;
+  }
   deps.setIsApplyingDraftZones(false);
-  deps.setIgnoreNextModifiedViewZonesEvent(false);
-  deps.setReapplyDraftZonesScheduled(false);
-  deps.setDraftZoneIds([]);
+  deps.setDraftZoneIds(nextZoneIds);
 }
 
 export function reapplyDraftZones(deps: EditorDraftDiffRuntimeDeps): void {
-  applyDraftZones(deps, null);
+  try {
+    if (deps.getIsApplyingDraftZones()) return;
+    const zones = deps.getLastDraftZones();
+    if (!zones || !zones.length) return;
+    applyDraftZones(deps, zones);
+  } catch (_) {}
 }
 
 export function installDraftZoneOrderingHook(deps: EditorDraftDiffRuntimeDeps): void {
-  applyDraftZones(deps, null);
+  try {
+    const diffEditor = deps.getDiffEditor();
+    if (!diffEditor || diffEditor.__te2DraftZoneOrderingHook) return;
+    const modifiedEditor = typeof diffEditor.getModifiedEditor === 'function'
+      ? diffEditor.getModifiedEditor()
+      : null;
+    if (!modifiedEditor || typeof modifiedEditor.onDidChangeViewZones !== 'function') return;
+
+    diffEditor.__te2DraftZoneOrderingHook = true;
+    modifiedEditor.onDidChangeViewZones(() => {
+      try {
+        if (deps.getIgnoreNextModifiedViewZonesEvent()) {
+          deps.setIgnoreNextModifiedViewZonesEvent(false);
+          return;
+        }
+        if (deps.getReapplyDraftZonesScheduled()) return;
+        if (!deps.getShowInlineDiffs()) return;
+        if (!deps.getShowDraftDiffs()) return;
+        const zones = deps.getLastDraftZones();
+        if (!zones || !zones.length) return;
+
+        deps.setReapplyDraftZonesScheduled(true);
+        deps.schedule(() => {
+          deps.setReapplyDraftZonesScheduled(false);
+          try { reapplyDraftZones(deps); } catch (_) {}
+        }, 0);
+      } catch (_) {}
+    });
+  } catch (_) {}
 }
 
 export function applyDraftDiffDecorations(
@@ -289,12 +424,10 @@ export function applyDraftDiffDecorations(
             );
           }
 
-          decorations.push({
-            range: new monacoRef.Range(anchor, 1, anchor, 1),
-            options: {
-              isWholeLine: false,
-              linesDecorationsClassName: 'te2-draft-del-marker',
-            },
+          zones.push({
+            after: anchor - 1,
+            text: delBlock.join('\n'),
+            lines: delBlock.length,
           });
           continue;
         }
@@ -338,10 +471,15 @@ export function applyDraftDiffDecorations(
       deps.setDraftDecoIds(editor.deltaDecorations(deps.getDraftDecoIds(), decorations));
     }
 
-    // Monaco's stock combined diff deletion widget owns deleted-text layout.
-    // Keep draft deletion markers non-layout-changing so we don't add a second
-    // modified-side view zone for the same original-side deletion.
-    applyDraftZones(deps, null);
+    // In combined diff mode Monaco owns deletion-widget layout. In normal
+    // editor mode there is no stock deletion widget, so keep the draft zone.
+    applyDraftZones(deps, deps.getShowInlineDiffs() ? null : zones);
+    if (deps.getShowInlineDiffs()) {
+      deps.schedule(() => { tagMatchingStockDeletionWidgets(deps, zones); }, 0);
+      deps.schedule(() => { tagMatchingStockDeletionWidgets(deps, zones); }, 80);
+    } else {
+      tagMatchingStockDeletionWidgets(deps, null);
+    }
     try {
       if (deps.getShowInlineDiffs()) installDraftZoneOrderingHook(deps);
     } catch (error) {
