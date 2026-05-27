@@ -46,8 +46,6 @@ interface SaveMirrorSocketHandlerDeps {
   rpcNotifications?: EditorRpcNotificationSource | null;
   getCurrentPath(): string | null;
   getModel(): unknown;
-  getDiffEditor(): unknown;
-  getGitHeadModel(): unknown;
   getBaseSha256(): string | null;
   setBaseSha256(value: string | null): void;
   getLastContentSha256(): string | null;
@@ -55,7 +53,6 @@ interface SaveMirrorSocketHandlerDeps {
   getLastLocalEditAt(): number;
   getMirrorHotWindowMs(): number;
   getEditorSocketId(): string | null;
-  getMonaco(): unknown;
   setApplyingRemote(value: boolean): void;
   applyLineNumberSizing(): void;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
@@ -63,9 +60,7 @@ interface SaveMirrorSocketHandlerDeps {
   requestDraftDiff(reason: string): void;
   clearDraftDiffDecorations(): void;
   getAutoSave(): boolean;
-  shouldSkipAutosave(diffEditor: unknown, gitHeadModel: unknown, model: unknown): boolean;
   requestGitBaselines(payload: { immediate?: boolean; reason: string }): void;
-  resnapshotDraftBaseline(diffEditor: unknown, monacoRef: unknown, model: unknown): void;
   incrementMirrorState(metric: keyof EditorMirrorState): void;
   syncMirrorDebug(): void;
 }
@@ -171,13 +166,7 @@ function handleEditorCacheStateEvent(
       payload: cacheStatePayload,
       clearDraftDiffDecorationsFn: deps.clearDraftDiffDecorations,
       getAutoSaveFn: deps.getAutoSave,
-      shouldSkipAutosaveFn: deps.shouldSkipAutosave,
-      diffEditor: deps.getDiffEditor(),
-      gitHeadModel: deps.getGitHeadModel(),
-      model: deps.getModel(),
       requestGitBaselinesFn: deps.requestGitBaselines,
-      resnapshotDraftBaselineFn: deps.resnapshotDraftBaseline,
-      monacoRef: deps.getMonaco(),
       setUnsavedTraceFn: deps.setUnsavedTrace,
     });
     return;

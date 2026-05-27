@@ -40,10 +40,10 @@ class MessageWidget {
         this._labelService = _labelService;
         this._lines = 0;
         this._longestLineLength = 0;
+        this._measuredLines = 0;
         this._relatedDiagnostics = new WeakMap();
         this._disposables = new DisposableStore();
         this._editor = editor;
-        this._measuredLines = 0;
         const domNode = document.createElement('div');
         domNode.className = 'descriptioncontainer';
         this._domNode = domNode;
@@ -221,11 +221,11 @@ let MarkerNavigationWidget = class MarkerNavigationWidget extends PeekViewWidget
         this._contextKeyService = _contextKeyService;
         this._labelService = _labelService;
         this._callOnDispose = new DisposableStore();
+        this._relayoutScheduled = false;
         this._onDidSelectRelatedInformation = new Emitter();
         this.onDidSelectRelatedInformation = this._onDidSelectRelatedInformation.event;
         this._severity = MarkerSeverity.Warning;
         this._backgroundColor = Color.white;
-        this._relayoutScheduled = false;
         this._applyTheme(_themeService.getColorTheme());
         this._callOnDispose.add(_themeService.onDidColorThemeChange(this._applyTheme.bind(this)));
         this.create();
@@ -321,7 +321,7 @@ let MarkerNavigationWidget = class MarkerNavigationWidget extends PeekViewWidget
     _doLayoutBody(heightInPixel, widthInPixel) {
         super._doLayoutBody(heightInPixel, widthInPixel);
         this._heightInPixel = heightInPixel;
-        const effectiveWidth = widthInPixel - (this.editor.getLayoutInfo().minimap?.minimapWidth || 0);
+        const effectiveWidth = widthInPixel - this.editor.getLayoutInfo().minimap.minimapWidth;
         this._message.layout(heightInPixel, effectiveWidth);
         this._container.style.height = `${heightInPixel}px`;
         // After layout/measure, check if wrapping requires more height
@@ -339,7 +339,7 @@ let MarkerNavigationWidget = class MarkerNavigationWidget extends PeekViewWidget
         }
     }
     _onWidth(widthInPixel) {
-        const effectiveWidth = widthInPixel - (this.editor.getLayoutInfo().minimap?.minimapWidth || 0);
+        const effectiveWidth = widthInPixel - this.editor.getLayoutInfo().minimap.minimapWidth;
         this._message.layout(this._heightInPixel, effectiveWidth);
     }
     _relayout() {

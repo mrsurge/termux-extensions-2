@@ -266,14 +266,8 @@ export class StandaloneThemeService extends Disposable {
     }
     setColorMapOverride(colorMapOverride) {
         this._colorMapOverride = colorMapOverride;
-        // TE2: reindex the tokenTheme's rule trie so foreground/background
-        // indices match the authoritative (TextMate) palette.  After this,
-        // match() returns indices that correspond directly to the CSS .mtk*
-        // rules — no runtime translation needed.
         if (colorMapOverride && this._theme) {
-            try {
-                this._theme.tokenTheme.reindexToColorMap(colorMapOverride);
-            } catch (_) { /* best-effort */ }
+            this._theme.tokenTheme.reindexToColorMap(colorMapOverride);
         }
         this._updateThemeOrColorMap();
     }

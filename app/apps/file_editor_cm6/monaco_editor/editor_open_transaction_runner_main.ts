@@ -67,8 +67,6 @@ interface OpenEditorLike extends EditorLike {
 interface OpenDiffModelLike extends Record<string, unknown> {
   original?: unknown;
   modified?: unknown;
-  modifiedBaseline?: { setValue?(value: string): void } | null;
-  te2FreezeProjection?: boolean;
 }
 
 interface OpenDiffEditorLike {
@@ -172,30 +170,6 @@ export async function runEditorOpenTransaction(
     deps.applyLineNumberSizing();
     deps.ensureTouchSelection('open');
     deps.syncDiagnosticsForCurrentModel('open_model_ready');
-
-    if (!sameFileNavigationOnly && payload.reason !== 'external_change') {
-      try {
-        if (diffEditor && diffEditor.getModel) {
-          const dm = diffEditor.getModel();
-          if (dm && dm.te2FreezeProjection && dm.modifiedBaseline && model) {
-            const freshContent = model.getValue();
-            let modViewState: unknown = null;
-            try {
-              const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
-              if (modifiedEditor && typeof modifiedEditor.saveViewState === 'function') modViewState = modifiedEditor.saveViewState();
-            } catch (_) {}
-            if (typeof dm.modifiedBaseline.setValue === 'function') dm.modifiedBaseline.setValue(freshContent);
-            if (typeof diffEditor.setModel === 'function') diffEditor.setModel(dm);
-            try {
-              if (modViewState) {
-                const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
-                if (modifiedEditor && typeof modifiedEditor.restoreViewState === 'function') modifiedEditor.restoreViewState(modViewState);
-              }
-            } catch (_) {}
-          }
-        }
-      } catch (_) {}
-    }
 
     deps.setLastContentSha256(payload.content_sha256 || deps.getLastContentSha256());
     deps.emitToHost('editor_cache_state', {

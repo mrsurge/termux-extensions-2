@@ -87,8 +87,6 @@ interface EditorSocketConnectionDeps {
   getShowDraftDiffs(): boolean;
   disposeGitBaselines(): void;
   ensurePlainEditorWithPrefs(): MonacoEditorLike | null;
-  getGitHeadModel(): MonacoModelLike | null;
-  getMonaco(): { editor?: { createModel?(value: string, language: string): unknown } };
   applyGitBaselines(payload: unknown): void;
   emitModelReady(payload: { path: string; languageId: string; generation?: number; request_id?: string; source?: string }): boolean;
 }
@@ -297,11 +295,9 @@ export function registerEditorSocketConnectionHandlers(
       const payloadRecord = asRecord(payload);
       const nextPrefs = payloadRecord && payloadRecord.preferences ? asRecord(payloadRecord.preferences) : null;
       if (!nextPrefs) return;
-      const prevAutoSave = !!deps.getAutoSave();
       const nextCachedPrefs = Object.assign({}, asRecord(deps.getCachedPrefs()) || {});
       nextCachedPrefs.preferences = nextPrefs;
       deps.setCachedPrefs(nextCachedPrefs);
-      const nextAutoSave = !!deps.getAutoSave();
 
       const editor = deps.getEditor();
       const diffEditor = deps.getDiffEditor();
@@ -348,44 +344,6 @@ export function registerEditorSocketConnectionHandlers(
       try { if (editor && typeof editor.layout === 'function') editor.layout(); } catch (_) {}
       deps.updateDebug('prefs=ok');
 
-      if (prevAutoSave !== nextAutoSave && diffEditor && diffEditor.getModel) {
-        try {
-          const dm = diffEditor.getModel ? diffEditor.getModel() : null;
-          if (dm && (dm as { original?: unknown }).original && (dm as { modified?: unknown }).modified) {
-            let mvs = null;
-            try {
-              const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
-              if (modifiedEditor && modifiedEditor.saveViewState) mvs = modifiedEditor.saveViewState();
-            } catch (_) {}
-            const nextDiffModel: Record<string, unknown> = {
-              original: (dm as { original: unknown }).original,
-              modified: (dm as { modified: unknown }).modified,
-              te2AutosaveMode: !!nextAutoSave,
-            };
-            if (!nextAutoSave && (dm as { original?: unknown }).original === deps.getGitHeadModel() && (dm as { modified?: unknown }).modified === model) {
-              const baselineContent = model && model.getValue ? model.getValue() : '';
-              const baselineLang = model && model.getLanguageId ? model.getLanguageId() : 'plaintext';
-              const monacoEditor = deps.getMonaco().editor;
-              if (monacoEditor && typeof monacoEditor.createModel === 'function') {
-                const draftBaseline = monacoEditor.createModel(baselineContent, baselineLang);
-                nextDiffModel.modifiedBaseline = draftBaseline;
-                nextDiffModel.te2FreezeProjection = true;
-              }
-            }
-            if (typeof diffEditor.setModel === 'function') {
-              diffEditor.setModel(nextDiffModel);
-            }
-            try {
-              if (mvs) {
-                const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
-                if (modifiedEditor && modifiedEditor.restoreViewState) modifiedEditor.restoreViewState(mvs);
-              }
-            } catch (_) {}
-          }
-        } catch (error) {
-          console.warn('[Monaco] autosave diff mode switch failed', error);
-        }
-      }
       if (deps.getShowInlineDiffs()) {
         deps.requestGitBaselines({ immediate: true, reason: 'prefs' });
       } else {

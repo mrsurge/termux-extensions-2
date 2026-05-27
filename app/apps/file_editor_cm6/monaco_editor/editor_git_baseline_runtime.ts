@@ -68,7 +68,6 @@ interface EditorGitBaselineRuntimeDeps {
   setLastGitBaselines(payload: GitBaselinePayloadLike | null): void;
   getShowInlineDiffs(): boolean;
   getShowDraftDiffs(): boolean;
-  getAutoSave(): boolean;
   disposeGitBaselines(): void;
   ensurePlainEditorWithPrefs(): MonacoEditorLike | null;
   ensureDiffEditorWithPrefs(): MonacoDiffEditorLike | null;
@@ -154,8 +153,6 @@ function scheduleLineChangeDebug(diffEditor: MonacoDiffEditorLike | null, deps: 
               path: deps.getCurrentPath(),
               diffResult: result,
               modelKeys: diffModel ? Object.keys(diffModel) : null,
-              hasModifiedBaselineKey: diffModel ? Object.prototype.hasOwnProperty.call(diffModel, 'modifiedBaseline') : null,
-              modifiedBaselineType: diffModel && diffModel.modifiedBaseline ? typeof diffModel.modifiedBaseline : null,
             });
           } catch (_) {}
         }
@@ -244,33 +241,20 @@ export function applyGitBaselines(
     deps.setGitDiskModel(nextDiskModel);
 
     let diffEditor = deps.ensureDiffEditorWithPrefs();
-    const desiredAutoSave = !!deps.getAutoSave();
-    const desiredFreeze = !desiredAutoSave;
-    const desiredHasBaseline = !desiredAutoSave;
-
     let needsSetModel = true;
-    let needsFlagRebind = false;
     try {
       if (diffEditor && typeof diffEditor.getModel === 'function') {
         const diffModel = diffEditor.getModel();
         if (diffModel && diffModel.original === nextHeadModel && diffModel.modified === liveModel) {
           needsSetModel = false;
-          const currentAutoSave = !!diffModel.te2AutosaveMode;
-          const currentFreeze = !!diffModel.te2FreezeProjection;
-          const currentHasBaseline = !!diffModel.modifiedBaseline;
-          needsFlagRebind = (
-            currentAutoSave !== desiredAutoSave ||
-            currentFreeze !== desiredFreeze ||
-            currentHasBaseline !== desiredHasBaseline
-          );
-          console.log('[GitBaselines] models match: needsSetModel=false needsFlagRebind=' + needsFlagRebind + ' hasGitDiff=' + hasGitDiff);
+          console.log('[GitBaselines] models match: needsSetModel=false hasGitDiff=' + hasGitDiff);
         } else {
           console.log('[GitBaselines] models differ: needsSetModel=true');
         }
       }
     } catch (_) {}
 
-    if (needsSetModel || needsFlagRebind) {
+    if (needsSetModel) {
       try {
         let modifiedViewState: unknown = null;
         try {
@@ -285,14 +269,7 @@ export function applyGitBaselines(
         const diffModel: Record<string, unknown> = {
           original: nextHeadModel,
           modified: liveModel,
-          te2AutosaveMode: desiredAutoSave,
         };
-        if (!desiredAutoSave && liveModel) {
-          const baselineContent = liveModel.getValue ? liveModel.getValue() : '';
-          const baselineLanguage = liveModel.getLanguageId ? liveModel.getLanguageId() : 'plaintext';
-          diffModel.modifiedBaseline = monacoRef.editor.createModel(baselineContent, baselineLanguage);
-          diffModel.te2FreezeProjection = true;
-        }
         if (diffEditor && typeof diffEditor.setModel === 'function') {
           diffEditor.setModel(diffModel);
         }
@@ -306,11 +283,7 @@ export function applyGitBaselines(
           }
         } catch (_) {}
 
-        deps.setDebugFlags(
-          'flags=set as=' + (desiredAutoSave ? '1' : '0') +
-          ' fr=' + (desiredFreeze ? '1' : '0') +
-          ' mb=' + (desiredHasBaseline ? '1' : '0')
-        );
+        deps.setDebugFlags('flags=stock-diff');
       } catch (error) {
         console.warn('[Monaco] diffEditor.setModel failed', error);
         deps.disposeGitBaselines();

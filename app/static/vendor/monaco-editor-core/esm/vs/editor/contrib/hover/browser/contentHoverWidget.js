@@ -43,6 +43,7 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
         this._configurationService = _configurationService;
         this._accessibilityService = _accessibilityService;
         this._keybindingService = _keybindingService;
+        this._lastTouchInteraction = 0;
         this._hover = this._register(new HoverWidget(true));
         this._onDidResize = this._register(new Emitter());
         this.onDidResize = this._onDidResize.event;
@@ -78,7 +79,6 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
         }));
         this._setRenderedHover(undefined);
         this._editor.addContentWidget(this);
-        this._lastTouchInteraction = 0;
         this._initTouchDrag();
         this._initTouchScroll();
     }
@@ -88,7 +88,7 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
         this._editor.removeContentWidget(this);
     }
     wasTouchInteraction() {
-        return (Date.now() - this._lastTouchInteraction) < 400;
+        return Date.now() - this._lastTouchInteraction < 400;
     }
     _initTouchDrag() {
         const domNode = this._resizableNode.domNode;
@@ -96,7 +96,7 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
         let longPressTimer = null;
         const LONG_PRESS_MS = 400;
         const onTouchStart = (e) => {
-            if (!this.isVisible || this._isResizing) {
+            if (!this.isVisible || this.isResizing) {
                 return;
             }
             if (e.touches.length !== 1) {
@@ -106,7 +106,6 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
             if (target.closest('a, button, input, textarea, select, [contenteditable]')) {
                 return;
             }
-            // Sash edges always start drag immediately
             if (target.closest('.monaco-sash')) {
                 const touch = e.touches[0];
                 const rect = domNode.getBoundingClientRect();
@@ -119,7 +118,6 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
                 };
                 return;
             }
-            // For status-bar: long press to initiate drag
             if (target.closest('.status-bar')) {
                 const touch = e.touches[0];
                 const startX = touch.clientX;
@@ -138,20 +136,10 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
             }
         };
         const onTouchMove = (e) => {
-            // Cancel long press if finger moves before timer fires
             if (longPressTimer && e.touches.length === 1) {
-                const touch = e.touches[0];
-                const target = e.target;
-                const startState = dragState;
-                if (!startState) {
-                    // Long press hasn't fired yet — check distance
-                    // If moved more than 8px, cancel the long press (it's a scroll)
-                    if (longPressTimer) {
-                        clearTimeout(longPressTimer);
-                        longPressTimer = null;
-                    }
-                    return;
-                }
+                clearTimeout(longPressTimer);
+                longPressTimer = null;
+                return;
             }
             if (!dragState || e.touches.length !== 1) {
                 return;
@@ -175,7 +163,6 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
             const widgetH = domNode.offsetHeight;
             let newLeft = dragState.startLeft + dx;
             let newTop = dragState.startTop + dy;
-            // Bound: left edge of editor, right edge minus minimap
             const rightBound = editorRect.right - (layoutInfo.minimap?.minimapWidth || 0);
             newLeft = Math.max(editorRect.left, Math.min(newLeft, rightBound - widgetW));
             newTop = Math.max(editorRect.top, Math.min(newTop, editorRect.bottom - widgetH));
@@ -197,7 +184,6 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
         domNode.addEventListener('touchmove', onTouchMove, { passive: false });
         domNode.addEventListener('touchend', onTouchEnd, { passive: true });
         domNode.addEventListener('touchcancel', onTouchEnd, { passive: true });
-        // Suppress native context menu during long-press drag
         domNode.addEventListener('contextmenu', (e) => {
             if (longPressTimer || dragState) {
                 e.preventDefault();
@@ -214,7 +200,7 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
                 return;
             }
             const target = e.target;
-            // Don't intercept touches on drag surfaces or interactive elements
+            // Do not steal touch gestures from drag surfaces or interactive content.
             if (target.closest('.status-bar, .monaco-sash, a, button, input, textarea, select, [contenteditable]')) {
                 return;
             }
@@ -356,7 +342,7 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
             : this._contentWidth);
         if (overflowing || this._hover.containerDomNode.clientWidth < initialWidth) {
             const layoutInfo = this._editor.getLayoutInfo();
-            const editorWidth = layoutInfo.width - (layoutInfo.minimap?.minimapWidth || 0);
+            const editorWidth = layoutInfo.width - layoutInfo.minimap.minimapWidth;
             const horizontalPadding = 14;
             return editorWidth - horizontalPadding;
         }
@@ -421,27 +407,24 @@ let ContentHoverWidget = class ContentHoverWidget extends ResizableContentWidget
         const editorRect = editorDomNode.getBoundingClientRect();
         const widgetRect = domNode.getBoundingClientRect();
         const rightBound = editorRect.right - (layoutInfo.minimap?.minimapWidth || 0);
-        // Clamp right edge: widget must not extend past minimap
         if (widgetRect.right > rightBound) {
             const overflow = widgetRect.right - rightBound;
             const currentLeft = parseFloat(domNode.style.left) || 0;
-            domNode.style.left = (currentLeft - overflow) + 'px';
+            domNode.style.left = `${currentLeft - overflow}px`;
         }
-        // Clamp left edge: widget must not go past editor left
         const updatedRect = domNode.getBoundingClientRect();
         if (updatedRect.left < editorRect.left) {
             const currentLeft = parseFloat(domNode.style.left) || 0;
-            domNode.style.left = (currentLeft + (editorRect.left - updatedRect.left)) + 'px';
-            // If still too wide, constrain width
+            domNode.style.left = `${currentLeft + editorRect.left - updatedRect.left}px`;
             const finalRect = domNode.getBoundingClientRect();
             if (finalRect.right > rightBound) {
-                domNode.style.width = (rightBound - editorRect.left) + 'px';
+                domNode.style.width = `${rightBound - editorRect.left}px`;
             }
         }
     }
     _updateMaxDimensions() {
         const layoutInfo = this._editor.getLayoutInfo();
-        const availableWidth = layoutInfo.width - (layoutInfo.minimap?.minimapWidth || 0);
+        const availableWidth = layoutInfo.width - layoutInfo.minimap.minimapWidth;
         const height = Math.max(layoutInfo.height / 4, 250, ContentHoverWidget_1._lastDimensions.height);
         const width = Math.max(availableWidth * 0.66, 750, ContentHoverWidget_1._lastDimensions.width);
         this._resizableNode.maxSize = new dom.Dimension(width, height);

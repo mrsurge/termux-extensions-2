@@ -13777,8 +13777,8 @@ var init_contextkey = __esm({
             this._parsingErrors.push({ message: errorUnexpectedEOF, offset: peek.offset, lexeme: "", additionalInfo: hintUnexpectedEOF });
             throw _Parser2._parseError;
           default:
-            throw this._errExpectedButGot(`true | false | KEY 
-	| KEY '=~' REGEX 
+            throw this._errExpectedButGot(`true | false | KEY
+	| KEY '=~' REGEX
 	| KEY ('==' | '!=' | '<' | '<=' | '>' | '>=' | 'in' | 'not' 'in') value`, this._peek());
         }
       }
@@ -60781,12 +60781,6 @@ function lengthLessThanEqual(length1, length2) {
 function lengthGreaterThanEqual(length1, length2) {
   return length1 >= length2;
 }
-function lengthToPosition(length) {
-  const l = length;
-  const lineCount = Math.floor(l / factor);
-  const colCount = l - lineCount * factor;
-  return new Position(lineCount + 1, colCount + 1);
-}
 function positionToLength(position) {
   return toLength(position.lineNumber - 1, position.column - 1);
 }
@@ -60799,13 +60793,6 @@ function lengthsToRange(lengthStart, lengthEnd) {
   const colCount2 = l2 - lineCount2 * factor;
   return new Range(lineCount + 1, colCount + 1, lineCount2 + 1, colCount2 + 1);
 }
-function lengthOfRange(range2) {
-  if (range2.startLineNumber === range2.endLineNumber) {
-    return new TextLength(0, range2.endColumn - range2.startColumn);
-  } else {
-    return new TextLength(range2.endLineNumber - range2.startLineNumber, range2.endColumn - 1);
-  }
-}
 function lengthOfString(str) {
   const lines = splitLines(str);
   return toLength(lines.length - 1, lines[lines.length - 1].length);
@@ -60814,7 +60801,6 @@ var lengthZero, factor;
 var init_length = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/editor/common/model/bracketPairsTextModelPart/bracketPairsTree/length.js"() {
     init_strings();
-    init_position();
     init_range();
     init_textLength();
     lengthZero = 0;
@@ -93709,14 +93695,8 @@ function lineRangeMappingFromRangeMappings(alignments, originalLines, modifiedLi
     if (changes[0].modified.startLineNumber !== changes[0].original.startLineNumber) {
       return void 0;
     }
-    const lastChange = changes[changes.length - 1];
-    const origTrailing = originalLines.length.lineCount - lastChange.original.endLineNumberExclusive;
-    const modTrailing = modifiedLines.length.lineCount - lastChange.modified.endLineNumberExclusive;
-    if (origTrailing !== modTrailing) {
-      const maxTrailing = Math.max(origTrailing, modTrailing);
-      const newOrigEnd = lastChange.original.endLineNumberExclusive + maxTrailing;
-      const newModEnd = lastChange.modified.endLineNumberExclusive + maxTrailing;
-      changes[changes.length - 1] = new DetailedLineRangeMapping(new LineRange(lastChange.original.startLineNumber, newOrigEnd), new LineRange(lastChange.modified.startLineNumber, newModEnd), lastChange.innerChanges);
+    if (modifiedLines.length.lineCount - changes[changes.length - 1].modified.endLineNumberExclusive !== originalLines.length.lineCount - changes[changes.length - 1].original.endLineNumberExclusive) {
+      return void 0;
     }
   }
   if (!checkAdjacentItems(changes, (m1, m2) => m2.original.startLineNumber - m1.original.endLineNumberExclusive === m2.modified.startLineNumber - m1.modified.endLineNumberExclusive && m1.original.endLineNumberExclusive < m2.original.startLineNumber && m1.modified.endLineNumberExclusive < m2.modified.startLineNumber)) {
@@ -94932,13 +94912,10 @@ var init_linesDiffComputer = __esm({
         this.hitTimeout = hitTimeout;
       }
     };
-    MovedText = class _MovedText {
+    MovedText = class {
       constructor(lineRangeMapping, changes) {
         this.lineRangeMapping = lineRangeMapping;
         this.changes = changes;
-      }
-      flip() {
-        return new _MovedText(this.lineRangeMapping.flip(), this.changes.map((c) => c.flip()));
       }
     };
   }
@@ -96395,70 +96372,10 @@ function normalizeRangeMapping(rangeMapping, original, modified) {
   return new RangeMapping(originalRange, modifiedRange);
 }
 function applyOriginalEdits(diff, textEdits, originalTextModel, modifiedTextModel) {
-  if (textEdits.length === 0) {
-    return diff;
-  }
-  const diff2 = flip(diff);
-  const diff3 = applyModifiedEdits(diff2, textEdits, modifiedTextModel, originalTextModel);
-  if (!diff3) {
-    return void 0;
-  }
-  return flip(diff3);
-}
-function flip(diff) {
-  return {
-    changes: diff.changes.map((c) => c.flip()),
-    moves: diff.moves.map((m) => m.flip()),
-    identical: diff.identical,
-    quitEarly: diff.quitEarly
-  };
+  return void 0;
 }
 function applyModifiedEdits(diff, textEdits, originalTextModel, modifiedTextModel) {
-  if (textEdits.length === 0) {
-    return diff;
-  }
-  if (diff.moves.length > 0) {
-    return void 0;
-  }
-  const coarseChanges = diff.changes.map((c) => c.withInnerChangesFromLineRanges());
-  let changes;
-  changes = applyModifiedEditsToLineRangeMappings(coarseChanges, textEdits, originalTextModel, modifiedTextModel);
-  if (!changes || changes === coarseChanges) {
-    return void 0;
-  }
-  return {
-    identical: false,
-    quitEarly: false,
-    changes,
-    moves: []
-  };
-}
-function applyModifiedEditsToLineRangeMappings(changes, textEdits, originalTextModel, modifiedTextModel) {
-  const diffTextEdits = changes.flatMap((c) => (c.innerChanges ?? []).map((c2) => {
-    const len = lengthOfRange(c2.modifiedRange);
-    return new TextEditInfo(positionToLength(c2.originalRange.getStartPosition()), positionToLength(c2.originalRange.getEndPosition()), toLength(len.lineCount, len.columnCount));
-  }));
-  if (diffTextEdits.length === 0) {
-    return changes;
-  }
-  const combined = combineTextEditInfos(diffTextEdits, textEdits);
-  let lastOriginalEndOffset = lengthZero;
-  let lastModifiedEndOffset = lengthZero;
-  const rangeMappings = combined.map((c) => {
-    const modifiedStartOffset = lengthAdd(lastModifiedEndOffset, lengthDiffNonNegative(lastOriginalEndOffset, c.startOffset));
-    lastOriginalEndOffset = c.endOffset;
-    lastModifiedEndOffset = lengthAdd(modifiedStartOffset, c.newLength);
-    return new RangeMapping(Range.fromPositions(lengthToPosition(c.startOffset), lengthToPosition(c.endOffset)), Range.fromPositions(lengthToPosition(modifiedStartOffset), lengthToPosition(lastModifiedEndOffset)));
-  });
-  try {
-    const result = lineRangeMappingFromRangeMappings(rangeMappings, new ArrayText(originalTextModel.getLinesContent()), new ArrayText(modifiedTextModel.getLinesContent()));
-    if (!result) {
-      return void 0;
-    }
-    return result;
-  } catch {
-    return changes;
-  }
+  return void 0;
 }
 var __decorate31, __param27, DiffEditorViewModel, DiffState, DiffMapping, UnchangedRegion;
 var init_diffEditorViewModel = __esm({
@@ -96479,9 +96396,6 @@ var init_diffEditorViewModel = __esm({
     init_types();
     init_arrays();
     init_assert();
-    init_range();
-    init_abstractText();
-    init_length();
     __decorate31 = function(decorators, target, key, desc) {
       var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
       if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
@@ -96612,52 +96526,36 @@ var init_diffEditorViewModel = __esm({
           }, tx);
         };
         this._register(model.modified.onDidChangeContent((e) => {
-          const freezePinnedMode = !model.te2AutosaveMode && !!model.te2FreezeProjection && !!model.modifiedBaseline && model.modifiedBaseline !== model.modified;
-          if (freezePinnedMode) {
-            return;
-          }
           const diff = this._diff.get();
-          if (diff && !model.te2AutosaveMode) {
+          if (diff) {
             const textEdits = TextEditInfo.fromModelContentChanges(e.changes);
-            try {
-              const result = applyModifiedEdits(this._lastDiff, textEdits, model.original, model.modified);
-              if (result) {
-                this._lastDiff = result;
-                transaction((tx) => {
-                  this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
-                  updateUnchangedRegions(result, tx);
-                  const currentSyncedMovedText = this.movedTextToCompare.get();
-                  this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find((m) => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : void 0, tx);
-                });
-              }
-            } catch (_projectionErr) {
+            const result = applyModifiedEdits(this._lastDiff, textEdits, model.original, model.modified);
+            if (result) {
+              this._lastDiff = result;
+              transaction((tx) => {
+                this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
+                updateUnchangedRegions(result, tx);
+                const currentSyncedMovedText = this.movedTextToCompare.get();
+                this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find((m) => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : void 0, tx);
+              });
             }
           }
           this._isDiffUpToDate.set(false, void 0);
           debouncer.schedule();
         }));
         this._register(model.original.onDidChangeContent((e) => {
-          const freezePinnedMode = !model.te2AutosaveMode && !!model.te2FreezeProjection && !!model.modifiedBaseline && model.modifiedBaseline !== model.modified;
-          if (freezePinnedMode) {
-            this._isDiffUpToDate.set(false, void 0);
-            debouncer.schedule();
-            return;
-          }
           const diff = this._diff.get();
-          if (diff && !model.te2AutosaveMode) {
+          if (diff) {
             const textEdits = TextEditInfo.fromModelContentChanges(e.changes);
-            try {
-              const result = applyOriginalEdits(this._lastDiff, textEdits, model.original, model.modified);
-              if (result) {
-                this._lastDiff = result;
-                transaction((tx) => {
-                  this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
-                  updateUnchangedRegions(result, tx);
-                  const currentSyncedMovedText = this.movedTextToCompare.get();
-                  this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find((m) => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : void 0, tx);
-                });
-              }
-            } catch (_projectionErr) {
+            const result = applyOriginalEdits(this._lastDiff, textEdits, model.original, model.modified);
+            if (result) {
+              this._lastDiff = result;
+              transaction((tx) => {
+                this._diff.set(DiffState.fromDiffResult(this._lastDiff), tx);
+                updateUnchangedRegions(result, tx);
+                const currentSyncedMovedText = this.movedTextToCompare.get();
+                this.movedTextToCompare.set(currentSyncedMovedText ? this._lastDiff.moves.find((m) => m.lineRangeMapping.modified.intersect(currentSyncedMovedText.lineRangeMapping.modified)) : void 0, tx);
+              });
             }
           }
           this._isDiffUpToDate.set(false, void 0);
@@ -96679,24 +96577,14 @@ var init_diffEditorViewModel = __esm({
             originalTextEditInfos = combineTextEditInfos(originalTextEditInfos, edits);
           }));
           let modifiedTextEditInfos = [];
-          const freezePinnedMode = !model.te2AutosaveMode && !!model.te2FreezeProjection && !!model.modifiedBaseline && model.modifiedBaseline !== model.modified;
-          if (!freezePinnedMode) {
-            store.add(model.modified.onDidChangeContent((e) => {
-              const edits = TextEditInfo.fromModelContentChanges(e.changes);
-              modifiedTextEditInfos = combineTextEditInfos(modifiedTextEditInfos, edits);
-            }));
-          }
-          const baselineOriginal = model.te2AutosaveMode ? model.original : model.originalBaseline ?? model.original;
-          const baselineModified = model.te2AutosaveMode ? model.modified : model.modifiedBaseline ?? model.modified;
-          const usePinnedBaseline = !model.te2AutosaveMode && baselineOriginal === model.original && baselineModified !== model.modified;
-          const originalForDiff = usePinnedBaseline ? baselineOriginal : model.original;
-          const modifiedForDiff = usePinnedBaseline ? baselineModified : model.modified;
-          let result = await documentDiffProvider.diffProvider.computeDiff(originalForDiff, modifiedForDiff, {
+          store.add(model.modified.onDidChangeContent((e) => {
+            const edits = TextEditInfo.fromModelContentChanges(e.changes);
+            modifiedTextEditInfos = combineTextEditInfos(modifiedTextEditInfos, edits);
+          }));
+          let result = await documentDiffProvider.diffProvider.computeDiff(model.original, model.modified, {
             ignoreTrimWhitespace: this._options.ignoreTrimWhitespace.read(reader),
             maxComputationTimeMs: this._options.maxComputationTimeMs.read(reader),
-            // When projecting a pinned diff through subsequent edits we currently do not
-            // support moved-text tracking. Disable moves to avoid losing incremental updates.
-            computeMoves: usePinnedBaseline ? false : this._options.showMoves.read(reader)
+            computeMoves: this._options.showMoves.read(reader)
           }, this._cancellationTokenSource.token);
           if (this._cancellationTokenSource.token.isCancellationRequested) {
             return;
@@ -96704,25 +96592,9 @@ var init_diffEditorViewModel = __esm({
           if (model.original.isDisposed() || model.modified.isDisposed()) {
             return;
           }
-          result = normalizeDocumentDiff(result, originalForDiff, modifiedForDiff);
-          const freezePinnedBaselineProjection = !model.te2AutosaveMode && usePinnedBaseline && !!model.te2FreezeProjection;
-          if (usePinnedBaseline) {
-            if (!freezePinnedBaselineProjection) {
-              try {
-                result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
-              } catch (_projectionErr) {
-              }
-            }
-          } else if (!model.te2AutosaveMode) {
-            try {
-              result = applyOriginalEdits(result, originalTextEditInfos, model.original, model.modified) ?? result;
-            } catch (_projectionErr) {
-            }
-            try {
-              result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
-            } catch (_projectionErr) {
-            }
-          }
+          result = normalizeDocumentDiff(result, model.original, model.modified);
+          result = applyOriginalEdits(result, originalTextEditInfos, model.original, model.modified) ?? result;
+          result = applyModifiedEdits(result, modifiedTextEditInfos, model.original, model.modified) ?? result;
           transaction((tx) => {
             updateUnchangedRegions(result, tx);
             this._lastDiff = result;
@@ -96806,32 +96678,7 @@ var init_diffEditorViewModel = __esm({
     };
     UnchangedRegion = class _UnchangedRegion {
       static fromDiffs(changes, originalLineCount, modifiedLineCount, minHiddenLineCount, minContext) {
-        const maxOrig = originalLineCount + 1;
-        const maxMod = modifiedLineCount + 1;
-        const safeChanges = changes.filter((c) => {
-          const o = c.original;
-          const m = c.modified;
-          if (!Number.isFinite(o.startLineNumber) || !Number.isFinite(o.endLineNumberExclusive)) {
-            return false;
-          }
-          if (!Number.isFinite(m.startLineNumber) || !Number.isFinite(m.endLineNumberExclusive)) {
-            return false;
-          }
-          if (o.startLineNumber < 1 || o.endLineNumberExclusive < 1) {
-            return false;
-          }
-          if (m.startLineNumber < 1 || m.endLineNumberExclusive < 1) {
-            return false;
-          }
-          if (o.startLineNumber > o.endLineNumberExclusive || m.startLineNumber > m.endLineNumberExclusive) {
-            return false;
-          }
-          if (o.endLineNumberExclusive > maxOrig || m.endLineNumberExclusive > maxMod) {
-            return false;
-          }
-          return true;
-        });
-        const inversedMappings = DetailedLineRangeMapping.inverse(safeChanges, originalLineCount, modifiedLineCount);
+        const inversedMappings = DetailedLineRangeMapping.inverse(changes, originalLineCount, modifiedLineCount);
         const result = [];
         for (const mapping of inversedMappings) {
           let origStart = mapping.original.startLineNumber;
@@ -119137,6 +118984,36 @@ function resolveParsedTokenThemeRules(parsedThemeRules, customTokenColors) {
   }
   return new TokenTheme(colorMap, root);
 }
+function normalizeColorHex(color) {
+  const hex = color.toString().toUpperCase().replace("#", "");
+  return hex.length >= 6 ? hex.substring(0, 6) : hex;
+}
+function findNearestColorIndex(hex, palette) {
+  const r0 = parseInt(hex.substring(0, 2), 16);
+  const g0 = parseInt(hex.substring(2, 4), 16);
+  const b0 = parseInt(hex.substring(4, 6), 16);
+  let bestIdx = 1;
+  let bestDist = Infinity;
+  for (let i2 = 1; i2 < palette.length; i2++) {
+    const color = palette[i2];
+    if (!color) {
+      continue;
+    }
+    const candidate = normalizeColorHex(color);
+    const r = parseInt(candidate.substring(0, 2), 16);
+    const g = parseInt(candidate.substring(2, 4), 16);
+    const b = parseInt(candidate.substring(4, 6), 16);
+    const dist = (r0 - r) ** 2 + (g0 - g) ** 2 + (b0 - b) ** 2;
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = i2;
+    }
+    if (dist === 0) {
+      break;
+    }
+  }
+  return bestIdx;
+}
 function toStandardTokenType(tokenType) {
   const m = tokenType.match(STANDARD_TOKEN_TYPE_REGEXP);
   if (!m) {
@@ -119219,7 +119096,7 @@ var init_tokenization = __esm({
         return this._id2color.slice(0);
       }
     };
-    TokenTheme = class _TokenTheme {
+    TokenTheme = class {
       static createFromRawTokenTheme(source, customTokenColors) {
         return this.createFromParsedTokenTheme(parseTokenTheme(source), customTokenColors);
       }
@@ -119248,12 +119125,9 @@ var init_tokenization = __esm({
         return (result | languageId << 0) >>> 0;
       }
       /**
-       * TE2: Reindex the entire rule trie so that foreground/background color
-       * indices match a new authoritative color map (e.g. the TextMate palette).
-       * After this call, match() returns indices that correspond directly to the
-       * CSS .mtk* rules generated from the same palette — no runtime translation.
-       *
-       * @param newColorMap Color[] — the authoritative palette (index 0 = null).
+       * TE2: Reindex the rule trie so token foreground/background color ids match
+       * an authoritative palette, such as the TextMate palette that generated the
+       * active `.mtk*` CSS rules.
        */
       reindexToColorMap(newColorMap) {
         if (!newColorMap || newColorMap.length < 2) {
@@ -119261,81 +119135,50 @@ var init_tokenization = __esm({
         }
         const newHexToIdx = /* @__PURE__ */ new Map();
         for (let i2 = 1; i2 < newColorMap.length; i2++) {
-          const c = newColorMap[i2];
-          if (!c) continue;
-          const hex = c.toString().toUpperCase().replace("#", "");
-          const norm = hex.length >= 6 ? hex.substring(0, 6) : hex;
-          if (!newHexToIdx.has(norm)) {
-            newHexToIdx.set(norm, i2);
+          const color = newColorMap[i2];
+          if (!color) {
+            continue;
+          }
+          const normalized = normalizeColorHex(color);
+          if (!newHexToIdx.has(normalized)) {
+            newHexToIdx.set(normalized, i2);
           }
         }
         const oldColors = this._colorMap.getColorMap();
         const translation = new Array(oldColors.length);
         translation[0] = 0;
         let changed = 0;
-        for (let j = 1; j < oldColors.length; j++) {
-          if (!oldColors[j]) {
-            translation[j] = j;
+        for (let i2 = 1; i2 < oldColors.length; i2++) {
+          const oldColor = oldColors[i2];
+          if (!oldColor) {
+            translation[i2] = i2;
             continue;
           }
-          const hex = oldColors[j].toString().toUpperCase().replace("#", "");
-          const norm = hex.length >= 6 ? hex.substring(0, 6) : hex;
-          const mapped = newHexToIdx.get(norm);
-          if (mapped !== void 0) {
-            translation[j] = mapped;
-            if (mapped !== j) changed++;
+          const normalized = normalizeColorHex(oldColor);
+          const mapped = newHexToIdx.get(normalized);
+          if (typeof mapped === "number") {
+            translation[i2] = mapped;
+            if (mapped !== i2) {
+              changed++;
+            }
           } else {
-            translation[j] = this._findNearestIndex(norm, newColorMap);
+            translation[i2] = findNearestColorIndex(normalized, newColorMap);
             changed++;
           }
         }
         if (changed === 0) {
           return;
         }
-        _TokenTheme._reindexNode(this._root, translation);
-        const cm = new ColorMap();
-        for (let k = 1; k < newColorMap.length; k++) {
-          if (!newColorMap[k]) continue;
-          const hex = newColorMap[k].toString().toUpperCase().replace("#", "");
-          const norm = hex.length >= 6 ? hex.substring(0, 6) : hex;
-          cm.getId(norm);
-        }
-        this._colorMap = cm;
-        this._cache.clear();
-      }
-      _findNearestIndex(hexNorm, palette) {
-        const r0 = parseInt(hexNorm.substring(0, 2), 16);
-        const g0 = parseInt(hexNorm.substring(2, 4), 16);
-        const b0 = parseInt(hexNorm.substring(4, 6), 16);
-        let bestIdx = 1;
-        let bestDist = Infinity;
-        for (let i2 = 1; i2 < palette.length; i2++) {
-          if (!palette[i2]) continue;
-          const h2 = palette[i2].toString().toUpperCase().replace("#", "");
-          const r = parseInt(h2.substring(0, 2), 16);
-          const g = parseInt(h2.substring(2, 4), 16);
-          const b = parseInt(h2.substring(4, 6), 16);
-          const d = (r0 - r) ** 2 + (g0 - g) ** 2 + (b0 - b) ** 2;
-          if (d < bestDist) {
-            bestDist = d;
-            bestIdx = i2;
+        this._root.reindexColors(translation);
+        const colorMap = new ColorMap();
+        for (let i2 = 1; i2 < newColorMap.length; i2++) {
+          const color = newColorMap[i2];
+          if (color) {
+            colorMap.getId(normalizeColorHex(color));
           }
-          if (d === 0) break;
         }
-        return bestIdx;
-      }
-      static _reindexNode(node, translation) {
-        const rule = node._mainRule;
-        let fg = rule._foreground;
-        let bg = rule._background;
-        if (fg > 0 && fg < translation.length) fg = translation[fg];
-        if (bg > 0 && bg < translation.length) bg = translation[bg];
-        rule._foreground = fg;
-        rule._background = bg;
-        rule.metadata = (rule._fontStyle << 11 | fg << 15 | bg << 24) >>> 0;
-        for (const child of node._children.values()) {
-          _TokenTheme._reindexNode(child, translation);
-        }
+        this._colorMap = colorMap;
+        this._cache.clear();
       }
     };
     STANDARD_TOKEN_TYPE_REGEXP = /\b(comment|string|regex|regexp)\b/;
@@ -119359,6 +119202,15 @@ var init_tokenization = __esm({
         }
         if (background !== 0) {
           this._background = background;
+        }
+        this.metadata = (this._fontStyle << 11 | this._foreground << 15 | this._background << 24) >>> 0;
+      }
+      reindexColors(translation) {
+        if (this._foreground > 0 && this._foreground < translation.length) {
+          this._foreground = translation[this._foreground];
+        }
+        if (this._background > 0 && this._background < translation.length) {
+          this._background = translation[this._background];
         }
         this.metadata = (this._fontStyle << 11 | this._foreground << 15 | this._background << 24) >>> 0;
       }
@@ -119410,6 +119262,12 @@ var init_tokenization = __esm({
           this._children.set(head, child);
         }
         child.insert(tail2, fontStyle, foreground2, background);
+      }
+      reindexColors(translation) {
+        this._mainRule.reindexColors(translation);
+        for (const child of this._children.values()) {
+          child.reindexColors(translation);
+        }
       }
     };
   }
@@ -119990,10 +119848,7 @@ ${this._themeCSS}`;
       setColorMapOverride(colorMapOverride) {
         this._colorMapOverride = colorMapOverride;
         if (colorMapOverride && this._theme) {
-          try {
-            this._theme.tokenTheme.reindexToColorMap(colorMapOverride);
-          } catch (_) {
-          }
+          this._theme.tokenTheme.reindexToColorMap(colorMapOverride);
         }
         this._updateThemeOrColorMap();
       }
@@ -182638,6 +182493,7 @@ var ContentHoverWidget = class ContentHoverWidget2 extends ResizableContentWidge
     this._configurationService = _configurationService;
     this._accessibilityService = _accessibilityService;
     this._keybindingService = _keybindingService;
+    this._lastTouchInteraction = 0;
     this._hover = this._register(new HoverWidget(true));
     this._onDidResize = this._register(new Emitter());
     this.onDidResize = this._onDidResize.event;
@@ -182676,7 +182532,6 @@ var ContentHoverWidget = class ContentHoverWidget2 extends ResizableContentWidge
     }));
     this._setRenderedHover(void 0);
     this._editor.addContentWidget(this);
-    this._lastTouchInteraction = 0;
     this._initTouchDrag();
     this._initTouchScroll();
   }
@@ -182694,7 +182549,7 @@ var ContentHoverWidget = class ContentHoverWidget2 extends ResizableContentWidge
     let longPressTimer = null;
     const LONG_PRESS_MS = 400;
     const onTouchStart = (e) => {
-      if (!this.isVisible || this._isResizing) {
+      if (!this.isVisible || this.isResizing) {
         return;
       }
       if (e.touches.length !== 1) {
@@ -182735,16 +182590,9 @@ var ContentHoverWidget = class ContentHoverWidget2 extends ResizableContentWidge
     };
     const onTouchMove = (e) => {
       if (longPressTimer && e.touches.length === 1) {
-        const touch2 = e.touches[0];
-        const target = e.target;
-        const startState = dragState;
-        if (!startState) {
-          if (longPressTimer) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-          }
-          return;
-        }
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+        return;
       }
       if (!dragState || e.touches.length !== 1) {
         return;
@@ -182941,7 +182789,7 @@ var ContentHoverWidget = class ContentHoverWidget2 extends ResizableContentWidge
     const initialWidth = typeof this._contentWidth === "undefined" ? 0 : this._contentWidth;
     if (overflowing || this._hover.containerDomNode.clientWidth < initialWidth) {
       const layoutInfo = this._editor.getLayoutInfo();
-      const editorWidth = layoutInfo.width - (layoutInfo.minimap?.minimapWidth || 0);
+      const editorWidth = layoutInfo.width - layoutInfo.minimap.minimapWidth;
       const horizontalPadding = 14;
       return editorWidth - horizontalPadding;
     } else {
@@ -183009,21 +182857,21 @@ var ContentHoverWidget = class ContentHoverWidget2 extends ResizableContentWidge
     if (widgetRect.right > rightBound) {
       const overflow = widgetRect.right - rightBound;
       const currentLeft = parseFloat(domNode.style.left) || 0;
-      domNode.style.left = currentLeft - overflow + "px";
+      domNode.style.left = `${currentLeft - overflow}px`;
     }
     const updatedRect = domNode.getBoundingClientRect();
     if (updatedRect.left < editorRect.left) {
       const currentLeft = parseFloat(domNode.style.left) || 0;
-      domNode.style.left = currentLeft + (editorRect.left - updatedRect.left) + "px";
+      domNode.style.left = `${currentLeft + editorRect.left - updatedRect.left}px`;
       const finalRect = domNode.getBoundingClientRect();
       if (finalRect.right > rightBound) {
-        domNode.style.width = rightBound - editorRect.left + "px";
+        domNode.style.width = `${rightBound - editorRect.left}px`;
       }
     }
   }
   _updateMaxDimensions() {
     const layoutInfo = this._editor.getLayoutInfo();
-    const availableWidth = layoutInfo.width - (layoutInfo.minimap?.minimapWidth || 0);
+    const availableWidth = layoutInfo.width - layoutInfo.minimap.minimapWidth;
     const height = Math.max(layoutInfo.height / 4, 250, ContentHoverWidget_1._lastDimensions.height);
     const width2 = Math.max(availableWidth * 0.66, 750, ContentHoverWidget_1._lastDimensions.width);
     this._resizableNode.maxSize = new Dimension(width2, height);
@@ -191670,10 +191518,10 @@ var MessageWidget2 = class {
     this._labelService = _labelService;
     this._lines = 0;
     this._longestLineLength = 0;
+    this._measuredLines = 0;
     this._relatedDiagnostics = /* @__PURE__ */ new WeakMap();
     this._disposables = new DisposableStore();
     this._editor = editor2;
-    this._measuredLines = 0;
     const domNode = document.createElement("div");
     domNode.className = "descriptioncontainer";
     this._domNode = domNode;
@@ -191860,11 +191708,11 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
     this._contextKeyService = _contextKeyService;
     this._labelService = _labelService;
     this._callOnDispose = new DisposableStore();
+    this._relayoutScheduled = false;
     this._onDidSelectRelatedInformation = new Emitter();
     this.onDidSelectRelatedInformation = this._onDidSelectRelatedInformation.event;
     this._severity = MarkerSeverity.Warning;
     this._backgroundColor = Color.white;
-    this._relayoutScheduled = false;
     this._applyTheme(_themeService.getColorTheme());
     this._callOnDispose.add(_themeService.onDidColorThemeChange(this._applyTheme.bind(this)));
     this.create();
@@ -191956,7 +191804,7 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
   _doLayoutBody(heightInPixel, widthInPixel) {
     super._doLayoutBody(heightInPixel, widthInPixel);
     this._heightInPixel = heightInPixel;
-    const effectiveWidth = widthInPixel - (this.editor.getLayoutInfo().minimap?.minimapWidth || 0);
+    const effectiveWidth = widthInPixel - this.editor.getLayoutInfo().minimap.minimapWidth;
     this._message.layout(heightInPixel, effectiveWidth);
     this._container.style.height = `${heightInPixel}px`;
     if (!this._relayoutScheduled) {
@@ -191976,7 +191824,7 @@ var MarkerNavigationWidget = class MarkerNavigationWidget2 extends PeekViewWidge
     }
   }
   _onWidth(widthInPixel) {
-    const effectiveWidth = widthInPixel - (this.editor.getLayoutInfo().minimap?.minimapWidth || 0);
+    const effectiveWidth = widthInPixel - this.editor.getLayoutInfo().minimap.minimapWidth;
     this._message.layout(this._heightInPixel, effectiveWidth);
   }
   _relayout() {

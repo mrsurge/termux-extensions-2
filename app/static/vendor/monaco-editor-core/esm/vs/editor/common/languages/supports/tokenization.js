@@ -162,97 +162,92 @@ export class TokenTheme {
             | (languageId << 0 /* MetadataConsts.LANGUAGEID_OFFSET */)) >>> 0;
     }
     /**
-     * TE2: Reindex the entire rule trie so that foreground/background color
-     * indices match a new authoritative color map (e.g. the TextMate palette).
-     * After this call, match() returns indices that correspond directly to the
-     * CSS .mtk* rules generated from the same palette — no runtime translation.
-     *
-     * @param newColorMap Color[] — the authoritative palette (index 0 = null).
+     * TE2: Reindex the rule trie so token foreground/background color ids match
+     * an authoritative palette, such as the TextMate palette that generated the
+     * active `.mtk*` CSS rules.
      */
     reindexToColorMap(newColorMap) {
         if (!newColorMap || newColorMap.length < 2) {
             return;
         }
-        // Build hex→newIndex reverse lookup from the incoming palette.
         const newHexToIdx = new Map();
         for (let i = 1; i < newColorMap.length; i++) {
-            const c = newColorMap[i];
-            if (!c) continue;
-            const hex = c.toString().toUpperCase().replace('#', '');
-            // Normalise 6-char uppercase hex (strip alpha if present)
-            const norm = hex.length >= 6 ? hex.substring(0, 6) : hex;
-            if (!newHexToIdx.has(norm)) {
-                newHexToIdx.set(norm, i);
+            const color = newColorMap[i];
+            if (!color) {
+                continue;
+            }
+            const normalized = normalizeColorHex(color);
+            if (!newHexToIdx.has(normalized)) {
+                newHexToIdx.set(normalized, i);
             }
         }
-        // Build oldIndex→hex from current colorMap.
-        const oldColors = this._colorMap.getColorMap(); // Color[]
+        const oldColors = this._colorMap.getColorMap();
         const translation = new Array(oldColors.length);
         translation[0] = 0;
         let changed = 0;
-        for (let j = 1; j < oldColors.length; j++) {
-            if (!oldColors[j]) { translation[j] = j; continue; }
-            const hex = oldColors[j].toString().toUpperCase().replace('#', '');
-            const norm = hex.length >= 6 ? hex.substring(0, 6) : hex;
-            const mapped = newHexToIdx.get(norm);
-            if (mapped !== undefined) {
-                translation[j] = mapped;
-                if (mapped !== j) changed++;
-            } else {
-                // Color not in new palette — find nearest by RGB distance.
-                translation[j] = this._findNearestIndex(norm, newColorMap);
+        for (let i = 1; i < oldColors.length; i++) {
+            const oldColor = oldColors[i];
+            if (!oldColor) {
+                translation[i] = i;
+                continue;
+            }
+            const normalized = normalizeColorHex(oldColor);
+            const mapped = newHexToIdx.get(normalized);
+            if (typeof mapped === 'number') {
+                translation[i] = mapped;
+                if (mapped !== i) {
+                    changed++;
+                }
+            }
+            else {
+                translation[i] = findNearestColorIndex(normalized, newColorMap);
                 changed++;
             }
         }
         if (changed === 0) {
-            return; // Palettes already agree.
+            return;
         }
-        // Walk the trie and rewrite every rule's foreground + background.
-        TokenTheme._reindexNode(this._root, translation);
-        // Replace internal ColorMap with one built from the new palette.
-        const cm = new ColorMap();
-        for (let k = 1; k < newColorMap.length; k++) {
-            if (!newColorMap[k]) continue;
-            const hex = newColorMap[k].toString().toUpperCase().replace('#', '');
-            const norm = hex.length >= 6 ? hex.substring(0, 6) : hex;
-            cm.getId(norm);
+        this._root.reindexColors(translation);
+        const colorMap = new ColorMap();
+        for (let i = 1; i < newColorMap.length; i++) {
+            const color = newColorMap[i];
+            if (color) {
+                colorMap.getId(normalizeColorHex(color));
+            }
         }
-        this._colorMap = cm;
+        this._colorMap = colorMap;
         this._cache.clear();
     }
-    _findNearestIndex(hexNorm, palette) {
-        const r0 = parseInt(hexNorm.substring(0, 2), 16);
-        const g0 = parseInt(hexNorm.substring(2, 4), 16);
-        const b0 = parseInt(hexNorm.substring(4, 6), 16);
-        let bestIdx = 1;
-        let bestDist = Infinity;
-        for (let i = 1; i < palette.length; i++) {
-            if (!palette[i]) continue;
-            const h = palette[i].toString().toUpperCase().replace('#', '');
-            const r = parseInt(h.substring(0, 2), 16);
-            const g = parseInt(h.substring(2, 4), 16);
-            const b = parseInt(h.substring(4, 6), 16);
-            const d = (r0 - r) ** 2 + (g0 - g) ** 2 + (b0 - b) ** 2;
-            if (d < bestDist) { bestDist = d; bestIdx = i; }
-            if (d === 0) break;
+}
+function normalizeColorHex(color) {
+    const hex = color.toString().toUpperCase().replace('#', '');
+    return hex.length >= 6 ? hex.substring(0, 6) : hex;
+}
+function findNearestColorIndex(hex, palette) {
+    const r0 = parseInt(hex.substring(0, 2), 16);
+    const g0 = parseInt(hex.substring(2, 4), 16);
+    const b0 = parseInt(hex.substring(4, 6), 16);
+    let bestIdx = 1;
+    let bestDist = Infinity;
+    for (let i = 1; i < palette.length; i++) {
+        const color = palette[i];
+        if (!color) {
+            continue;
         }
-        return bestIdx;
-    }
-    static _reindexNode(node, translation) {
-        const rule = node._mainRule;
-        let fg = rule._foreground;
-        let bg = rule._background;
-        if (fg > 0 && fg < translation.length) fg = translation[fg];
-        if (bg > 0 && bg < translation.length) bg = translation[bg];
-        rule._foreground = fg;
-        rule._background = bg;
-        rule.metadata = ((rule._fontStyle << 11 /* MetadataConsts.FONT_STYLE_OFFSET */)
-            | (fg << 15 /* MetadataConsts.FOREGROUND_OFFSET */)
-            | (bg << 24 /* MetadataConsts.BACKGROUND_OFFSET */)) >>> 0;
-        for (const child of node._children.values()) {
-            TokenTheme._reindexNode(child, translation);
+        const candidate = normalizeColorHex(color);
+        const r = parseInt(candidate.substring(0, 2), 16);
+        const g = parseInt(candidate.substring(2, 4), 16);
+        const b = parseInt(candidate.substring(4, 6), 16);
+        const dist = (r0 - r) ** 2 + (g0 - g) ** 2 + (b0 - b) ** 2;
+        if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = i;
+        }
+        if (dist === 0) {
+            break;
         }
     }
+    return bestIdx;
 }
 const STANDARD_TOKEN_TYPE_REGEXP = /\b(comment|string|regex|regexp)\b/;
 export function toStandardTokenType(tokenType) {
@@ -303,6 +298,17 @@ export class ThemeTrieElementRule {
         }
         if (background !== 0 /* ColorId.None */) {
             this._background = background;
+        }
+        this.metadata = ((this._fontStyle << 11 /* MetadataConsts.FONT_STYLE_OFFSET */)
+            | (this._foreground << 15 /* MetadataConsts.FOREGROUND_OFFSET */)
+            | (this._background << 24 /* MetadataConsts.BACKGROUND_OFFSET */)) >>> 0;
+    }
+    reindexColors(translation) {
+        if (this._foreground > 0 && this._foreground < translation.length) {
+            this._foreground = translation[this._foreground];
+        }
+        if (this._background > 0 && this._background < translation.length) {
+            this._background = translation[this._background];
         }
         this.metadata = ((this._fontStyle << 11 /* MetadataConsts.FONT_STYLE_OFFSET */)
             | (this._foreground << 15 /* MetadataConsts.FOREGROUND_OFFSET */)
@@ -359,6 +365,12 @@ export class ThemeTrieElement {
             this._children.set(head, child);
         }
         child.insert(tail, fontStyle, foreground, background);
+    }
+    reindexColors(translation) {
+        this._mainRule.reindexColors(translation);
+        for (const child of this._children.values()) {
+            child.reindexColors(translation);
+        }
     }
 }
 export function generateTokensCSSForColorMap(colorMap) {

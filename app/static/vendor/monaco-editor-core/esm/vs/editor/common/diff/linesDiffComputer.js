@@ -24,8 +24,5 @@ export class MovedText {
         this.lineRangeMapping = lineRangeMapping;
         this.changes = changes;
     }
-    flip() {
-        return new MovedText(this.lineRangeMapping.flip(), this.changes.map(c => c.flip()));
-    }
 }
 //# sourceMappingURL=linesDiffComputer.js.map

@@ -55,8 +55,6 @@ import {
 } from './editor_open_transaction_runner.ts';
 import { runEditorOpenTransaction } from './editor_open_transaction_runner_main.ts';
 import { handleGitBaselinesSocketEvent } from './editor_git_baselines_socket_handler_utils.ts';
-import { shouldSkipAutosaveBaselineRefresh } from './editor_cache_state_autosave_skip_utils.js';
-import { resnapshotDraftBaseline } from './editor_cache_state_resnapshot_utils.js';
 import { canInstallScrollPublisher } from './editor_scroll_publisher_guard_utils.ts';
 import { buildScrollStatePayload } from './editor_scroll_publisher_payload_utils.ts';
 import { shouldSendScrollImmediately } from './editor_scroll_publisher_throttle_utils.ts';
@@ -1045,7 +1043,6 @@ interface MonacoBootWindowLike extends Window {
     setLastGitBaselines: function(payload: Record<string, unknown> | null) { lastGitBaselines = payload; },
     getShowInlineDiffs: getShowInlineDiffs,
     getShowDraftDiffs: getShowDraftDiffs,
-    getAutoSave: getAutoSave,
     disposeGitBaselines: disposeGitBaselines,
     ensurePlainEditorWithPrefs: ensurePlainEditorWithPrefs,
     ensureDiffEditorWithPrefs: ensureDiffEditorWithPrefs,
@@ -1301,8 +1298,6 @@ interface MonacoBootWindowLike extends Window {
         rpcNotifications: editorRpcTransport,
         getCurrentPath: function() { return currentPath; },
         getModel: function() { return model; },
-        getDiffEditor: function() { return diffEditor; },
-        getGitHeadModel: function() { return gitHeadModel; },
         getBaseSha256: function() { return baseSha256; },
         setBaseSha256: function(value: string | null) { baseSha256 = value; },
         getLastContentSha256: function() { return lastContentSha256; },
@@ -1310,7 +1305,6 @@ interface MonacoBootWindowLike extends Window {
         getLastLocalEditAt: function() { return lastLocalEditAt; },
         getMirrorHotWindowMs: function() { return prefRuntime.getMirrorHotWindowMs(); },
         getEditorSocketId: function() { return editorSocketId; },
-        getMonaco: function() { return monaco; },
         setApplyingRemote: function(value: boolean) { isApplyingRemote = !!value; },
         applyLineNumberSizing: applyLineNumberSizing,
         emitToHost: emitToHost,
@@ -1318,9 +1312,7 @@ interface MonacoBootWindowLike extends Window {
         requestDraftDiff: requestDraftDiff,
         clearDraftDiffDecorations: clearDraftDiffDecorations,
         getAutoSave: getAutoSave,
-        shouldSkipAutosave: shouldSkipAutosaveBaselineRefresh,
         requestGitBaselines: requestGitBaselines,
-        resnapshotDraftBaseline: resnapshotDraftBaseline,
         incrementMirrorState: function(metric: string) { debugRuntime.incrementMirrorState(metric); },
         syncMirrorDebug: _syncMirrorDebug,
       }) as Parameters<typeof registerEditorSaveMirrorSocketHandlers>[1]);
