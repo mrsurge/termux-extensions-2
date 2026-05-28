@@ -68,6 +68,7 @@ interface EditorGitBaselineRuntimeDeps {
   setLastGitBaselines(payload: GitBaselinePayloadLike | null): void;
   getShowInlineDiffs(): boolean;
   getShowDraftDiffs(): boolean;
+  getShowDraftInsertions(): boolean;
   disposeGitBaselines(): void;
   ensurePlainEditorWithPrefs(): MonacoEditorLike | null;
   ensureDiffEditorWithPrefs(): MonacoDiffEditorLike | null;
@@ -76,6 +77,7 @@ interface EditorGitBaselineRuntimeDeps {
   layoutEditors(): void;
   installDraftZoneOrderingHook(): void;
   reapplyDraftZones(): void;
+  requestDraftDiff(reason: string): void;
   ensureTouchSelection(reason: string): void;
   setDebugGit(value: string): void;
   setDebugFlags(value: string): void;
@@ -216,7 +218,9 @@ export function applyGitBaselines(
       }
     } catch (_) {}
 
-    if (!deps.getShowInlineDiffs()) {
+    const showCommitDiff = deps.getShowInlineDiffs();
+    const showDiskDraftDiff = deps.getShowDraftDiffs();
+    if (!showCommitDiff && !showDiskDraftDiff) {
       deps.disposeGitBaselines();
       if (deps.getDiffEditor()) deps.ensurePlainEditorWithPrefs();
       return;
@@ -239,17 +243,19 @@ export function applyGitBaselines(
     deps.setGitHeadModel(nextHeadModel);
     const nextDiskModel = updateOrCreateModel(monacoRef, deps.getGitDiskModel(), disk, language);
     deps.setGitDiskModel(nextDiskModel);
+    const originalModel = showCommitDiff ? nextHeadModel : nextDiskModel;
+    const diffKind = showCommitDiff ? 'commit' : 'disk-draft';
 
     let diffEditor = deps.ensureDiffEditorWithPrefs();
     let needsSetModel = true;
     try {
       if (diffEditor && typeof diffEditor.getModel === 'function') {
         const diffModel = diffEditor.getModel();
-        if (diffModel && diffModel.original === nextHeadModel && diffModel.modified === liveModel) {
+        if (diffModel && diffModel.original === originalModel && diffModel.modified === liveModel) {
           needsSetModel = false;
-          console.log('[GitBaselines] models match: needsSetModel=false hasGitDiff=' + hasGitDiff);
+          console.log('[GitBaselines] models match: needsSetModel=false kind=' + diffKind + ' hasGitDiff=' + hasGitDiff);
         } else {
-          console.log('[GitBaselines] models differ: needsSetModel=true');
+          console.log('[GitBaselines] models differ: needsSetModel=true kind=' + diffKind);
         }
       }
     } catch (_) {}
@@ -267,7 +273,7 @@ export function applyGitBaselines(
         } catch (_) {}
 
         const diffModel: Record<string, unknown> = {
-          original: nextHeadModel,
+          original: originalModel,
           modified: liveModel,
         };
         if (diffEditor && typeof diffEditor.setModel === 'function') {
@@ -283,7 +289,7 @@ export function applyGitBaselines(
           }
         } catch (_) {}
 
-        deps.setDebugFlags('flags=stock-diff');
+        deps.setDebugFlags('flags=stock-diff:' + diffKind);
       } catch (error) {
         console.warn('[Monaco] diffEditor.setModel failed', error);
         deps.disposeGitBaselines();
@@ -306,6 +312,7 @@ export function applyGitBaselines(
       }
     } catch (_) {}
     try { if (deps.getShowDraftDiffs()) setTimeout(() => { deps.reapplyDraftZones(); }, 0); } catch (_) {}
+    try { if (deps.getShowDraftInsertions()) setTimeout(() => { deps.requestDraftDiff('baseline'); }, 0); } catch (_) {}
 
     scheduleLineChangeDebug(deps.getDiffEditor(), deps);
 

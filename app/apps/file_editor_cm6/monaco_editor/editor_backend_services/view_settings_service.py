@@ -76,6 +76,8 @@ def handle_set_view_settings(
     if "show_inline_diffs" in data:
         show_diffs = bool(data["show_inline_diffs"])
         editor_updates["showInlineDiffs"] = show_diffs
+        if show_diffs:
+            editor_updates["showDraftDiffs"] = False
         if show_diffs and editor and "current_path" in data:
             try:
                 project_path = active_project() or str(project_root())

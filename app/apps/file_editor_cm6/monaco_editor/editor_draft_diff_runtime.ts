@@ -67,6 +67,7 @@ interface EditorDraftDiffRuntimeDeps {
   getMonaco(): MonacoLike | null;
   getDocument(): Document | null;
   getShowDraftDiffs(): boolean;
+  getShowDraftInsertions(): boolean;
   getShowInlineDiffs(): boolean;
   clearDraftDiffDecorations(): void;
   clearDraftDiffZones(): void;
@@ -282,7 +283,12 @@ export function applyDraftDiffDecorations(
     const model = deps.getModel();
     if (!editor || !monacoRef || !model) return;
 
-    if (!deps.getShowDraftDiffs()) {
+    const showFullDraftDiffs = deps.getShowDraftDiffs();
+    const showDraftInsertions = deps.getShowDraftInsertions();
+    const usingStockDeletionWidgets = deps.getShowInlineDiffs() || showFullDraftDiffs || !!deps.getDiffEditor();
+    const shouldStyleStockDraftDeletions = showDraftInsertions && usingStockDeletionWidgets;
+
+    if (!showDraftInsertions && !showFullDraftDiffs) {
       deps.clearDraftDiffDecorations();
       return;
     }
@@ -374,10 +380,12 @@ export function applyDraftDiffDecorations(
             );
           }
 
-          decorations.push({
-            range: new monacoRef.Range(lineNumber, 1, lineNumber, 1),
-            options: { isWholeLine: true, className: 'te2-draft-add-line' },
-          });
+          if (showDraftInsertions) {
+            decorations.push({
+              range: new monacoRef.Range(lineNumber, 1, lineNumber, 1),
+              options: { isWholeLine: true, className: 'te2-draft-add-line' },
+            });
+          }
           newLine += 1;
           continue;
         }
@@ -424,11 +432,13 @@ export function applyDraftDiffDecorations(
             );
           }
 
-          zones.push({
-            after: anchor - 1,
-            text: delBlock.join('\n'),
-            lines: delBlock.length,
-          });
+          if (showFullDraftDiffs || shouldStyleStockDraftDeletions) {
+            zones.push({
+              after: anchor - 1,
+              text: delBlock.join('\n'),
+              lines: delBlock.length,
+            });
+          }
           continue;
         }
 
@@ -471,17 +481,17 @@ export function applyDraftDiffDecorations(
       deps.setDraftDecoIds(editor.deltaDecorations(deps.getDraftDecoIds(), decorations));
     }
 
-    // In combined diff mode Monaco owns deletion-widget layout. In normal
+    // In any diff-editor mode Monaco owns deletion-widget layout. In normal
     // editor mode there is no stock deletion widget, so keep the draft zone.
-    applyDraftZones(deps, deps.getShowInlineDiffs() ? null : zones);
-    if (deps.getShowInlineDiffs()) {
+    applyDraftZones(deps, usingStockDeletionWidgets ? null : zones);
+    if (shouldStyleStockDraftDeletions) {
       deps.schedule(() => { tagMatchingStockDeletionWidgets(deps, zones); }, 0);
       deps.schedule(() => { tagMatchingStockDeletionWidgets(deps, zones); }, 80);
     } else {
       tagMatchingStockDeletionWidgets(deps, null);
     }
     try {
-      if (deps.getShowInlineDiffs()) installDraftZoneOrderingHook(deps);
+      if (shouldStyleStockDraftDeletions) installDraftZoneOrderingHook(deps);
     } catch (error) {
       console.warn('[DraftDiff] Failed to install zone ordering hook', error);
     }

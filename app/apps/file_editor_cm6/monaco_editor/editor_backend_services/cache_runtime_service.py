@@ -209,7 +209,10 @@ def get_combined_diffs(
     editor_prefs_obj = preferences_store.get_preferences().get("editor", {})
     prefs = cast(dict[str, object], editor_prefs_obj if isinstance(editor_prefs_obj, dict) else {})
 
-    if bool(prefs.get("showInlineDiffs", False)):
+    show_draft_diffs = not bool(prefs.get("autoSave", False)) and bool(prefs.get("showDraftDiffs", True))
+    show_commit_diffs = bool(prefs.get("showInlineDiffs", False)) and not show_draft_diffs
+
+    if show_commit_diffs:
         try:
             rel = normalize_rel_path(project_root, file_path)
             diff_data = collect_diff(project_root, rel, current_diff_base(str(project_root)))
@@ -219,7 +222,7 @@ def get_combined_diffs(
         except Exception as exc:
             print(f"[DIFF_HELPER] Failed to collect git diffs: {exc}", file=sys.stderr)
 
-    if not bool(prefs.get("autoSave", False)) and bool(prefs.get("showDraftDiffs", True)):
+    if show_draft_diffs:
         try:
             if Path(file_path).exists():
                 disk_content = Path(file_path).read_text(encoding="utf-8", errors="replace")

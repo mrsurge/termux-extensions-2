@@ -11,6 +11,30 @@
  * }} deps
  */
 export function createPreferencesController(deps: any) {
+  function setMenuItemLabel(el: unknown, label: string) {
+    const node = el instanceof HTMLElement ? el : null;
+    const labelNode = node ? node.querySelector('span') : null;
+    if (labelNode) {
+      labelNode.textContent = label;
+    } else if (node) {
+      node.textContent = label;
+    }
+  }
+
+  function syncSaveModeMenu(m: Record<string, any>, state: any) {
+    const autoSave = !!state.autoSave;
+    const item = m.miToggleAutosave;
+    setMenuItemLabel(item, autoSave ? 'Draft Mode' : 'Auto Save');
+    if (item instanceof HTMLElement) {
+      item.classList.remove('fe-menu-item-checked');
+      item.setAttribute('role', 'menuitem');
+      item.removeAttribute('aria-checked');
+      item.title = autoSave
+        ? 'Switch to Draft Mode. Edits stay in the draft cache until saved.'
+        : 'Switch to Auto Save. Current drafts will be saved before autosave is enabled.';
+    }
+  }
+
   async function fetchEditorState() {
     try {
       const resp = await fetch('/api/app/file_editor_cm6/editor/view_state', { cache: 'no-store' });
@@ -31,9 +55,12 @@ export function createPreferencesController(deps: any) {
     deps.setMenuChecked(m.miToggleShading, state.showShading);
     deps.setMenuChecked(m.miToggleIndentGuides, state.showIndentGuides);
     deps.setMenuChecked(m.miToggleWrap, state.wordWrap);
-    deps.setMenuChecked(m.miToggleAutosave, state.autoSave);
-    deps.setMenuChecked(m.miToggleDiffs, state.showInlineDiffs);
-    deps.setMenuChecked(m.miToggleDraftDiffs, state.showDraftDiffs);
+    syncSaveModeMenu(m, state);
+    const autoSave = !!state.autoSave;
+    const showDraftDiffs = !autoSave && !!state.showDraftDiffs;
+    const showCommitDiffs = !showDraftDiffs && !!state.showInlineDiffs;
+    deps.setMenuChecked(m.miToggleDiffs, showCommitDiffs);
+    deps.setMenuChecked(m.miToggleDraftDiffs, showDraftDiffs);
     deps.setMenuChecked(m.miToggleColorPicker, state.colorPicker);
     deps.setMenuChecked(m.miToggleReadonly, state.readOnly);
     deps.setMenuChecked(m.miToggleMinimap, state.showMinimap);

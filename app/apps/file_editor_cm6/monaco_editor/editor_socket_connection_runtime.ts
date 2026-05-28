@@ -85,6 +85,7 @@ interface EditorSocketConnectionDeps {
   getAutoSave(): boolean;
   getShowInlineDiffs(): boolean;
   getShowDraftDiffs(): boolean;
+  getShowDraftInsertions(): boolean;
   disposeGitBaselines(): void;
   ensurePlainEditorWithPrefs(): MonacoEditorLike | null;
   applyGitBaselines(payload: unknown): void;
@@ -344,13 +345,13 @@ export function registerEditorSocketConnectionHandlers(
       try { if (editor && typeof editor.layout === 'function') editor.layout(); } catch (_) {}
       deps.updateDebug('prefs=ok');
 
-      if (deps.getShowInlineDiffs()) {
+      if (deps.getShowInlineDiffs() || deps.getShowDraftDiffs()) {
         deps.requestGitBaselines({ immediate: true, reason: 'prefs' });
       } else {
         deps.disposeGitBaselines();
         if (diffEditor) deps.ensurePlainEditorWithPrefs();
       }
-      if (deps.getShowDraftDiffs()) deps.requestDraftDiff('prefs');
+      if (deps.getShowDraftInsertions()) deps.requestDraftDiff('prefs');
       else deps.clearDraftDiffDecorations();
       deps.ensureTouchSelection('prefs');
     } catch (error) {

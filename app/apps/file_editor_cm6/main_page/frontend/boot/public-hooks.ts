@@ -14,14 +14,6 @@ interface GlobalOpenHookDeps {
   HOME_DIR: string;
 }
 
-interface BeforeExitGuardDeps {
-  onBeforeExit: (cb: () => Record<string, unknown>) => void;
-  getUnsaved: () => boolean;
-  showConfirm: () => void;
-  toast: (msg: string) => void;
-  flushSessionState: (force?: boolean) => Promise<unknown> | void;
-}
-
 interface GlobalOpenRuntimeWindow {
   appOpenFile?: (absPath: string, options?: ExplorerOpenOptions) => Promise<unknown>;
   appOpenFileRel?: (rel: string, projectRoot?: string | null, options?: ExplorerOpenOptions) => Promise<unknown>;
@@ -52,16 +44,4 @@ export function installGlobalOpenHooks(deps: GlobalOpenHookDeps): void {
       throw error;
     });
   };
-}
-
-export function installBeforeExitGuard(deps: BeforeExitGuardDeps): void {
-  deps.onBeforeExit(() => {
-    if (deps.getUnsaved()) {
-      deps.showConfirm();
-      deps.toast('Unsaved changes — Save or Discard before leaving.');
-      return { cancel: true };
-    }
-    deps.flushSessionState(true);
-    return {};
-  });
 }

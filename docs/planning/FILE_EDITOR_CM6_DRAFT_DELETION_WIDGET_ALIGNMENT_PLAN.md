@@ -28,9 +28,9 @@ Implementation should:
 - Draft deletions line up with the stock combined diff deletion layout.
 - No additional blank/deleted line appears after each draft deletion.
 - Normal editor mode still shows the draft deletion widget because there is no stock combined-diff deletion widget to reuse.
-- Normal Git diff deletion widgets should not be restyled as draft deletions unless they are part of the active draft diff presentation.
-- Draft additions keep their existing draft styling.
-- Turning draft diffs or inline diffs off clears draft-only markers and does not leave stale zones.
+- Normal commit-diff deletion widgets should not be restyled as draft deletions unless they are part of the active draft diff presentation.
+- Draft additions keep their blue draft insertion styling whenever autosave is off, even if the full disk-vs-draft diff view is disabled.
+- Turning disk-vs-draft diff off clears draft deletion widgets/stock deletion tags but leaves draft insertion styling active while autosave is off.
 
 ## Validation
 
@@ -54,6 +54,22 @@ Implemented in the current cleanup slice:
 - Normal editor mode still creates `te2-draft-del-zone` view zones for draft deletions.
 - Combined diff mode bypasses those custom zones and tags only matching Monaco stock deletion widgets for draft styling.
 - The old `te2-draft-del-marker` margin marker was removed.
-- Served frontend version surfaces were synced to `0.2.243`.
+- Served frontend version surfaces were synced for this correction.
 - Local typecheck/build/syntax/whitespace validation passed after this correction.
 - Live runtime validation is still pending before any follow-up commit.
+
+Follow-up implementation:
+
+- The former `Show Git Diffs` menu item is now labeled `Show Commit Diff`.
+- The former `Show Draft Diffs` menu item is now labeled `Show Disk vs Draft Diff`.
+- When `Show Disk vs Draft Diff` is enabled without `Show Commit Diff`, the diff editor compares disk content as the original model against the live draft model.
+- Draft insertion styling is now requested whenever autosave is off, independent of the full disk-vs-draft diff toggle.
+- The unsaved-edit page-exit guard was removed from the main-page boot path.
+
+Additional mode-canonization follow-up:
+
+- `Auto Save` moved from the View menu to the Editor menu and now operates as the explicit save-mode toggle: while autosave is on, the menu action is labeled `Draft Mode`; while Draft Mode is active, the menu action is labeled `Auto Save`.
+- Enabling autosave still requires the autosave warning and saves the current draft before switching modes. There is no page-exit draft warning.
+- Commit diff and disk-vs-draft diff are mutually exclusive diff modes. Enabling one disables the other, and disk-vs-draft diff also forces Draft Mode because it is invalid while autosave is on.
+- Draft insertion and draft deletion styling remain autosave-off invariants, including while commit diff is the active diff mode. Commit diff mode uses the same stock Monaco deletion-widget draft styling override as disk-vs-draft mode.
+- Served frontend version surfaces were synced for the completed follow-up.

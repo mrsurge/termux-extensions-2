@@ -129,10 +129,11 @@ async def handle_update_preference(
             for ed in editors:
                 ed.set_sticky_scroll(bool(value))
         elif key == "showInlineDiffs":
-            pass
+            value = bool(value)
         elif key == "showDraftDiffs":
-            pass
+            value = bool(value)
         elif key == "autoSave":
+            value = bool(value)
             project_path = history_store.get_active_project() or str(get_project_root())
             current_file = get_current_file()
             if value and project_path and current_file:
@@ -163,6 +164,13 @@ async def handle_update_preference(
             ed.update()
 
         editor_updates: dict[str, object] = {key: value}
+        if key == "showInlineDiffs" and bool(value):
+            editor_updates["showDraftDiffs"] = False
+        elif key == "showDraftDiffs" and bool(value):
+            editor_updates["showInlineDiffs"] = False
+            editor_updates["autoSave"] = False
+        elif key == "autoSave" and bool(value):
+            editor_updates["showDraftDiffs"] = False
         if key == "trackAgentSidebarEdits" and bool(value):
             try:
                 from app.apps.file_editor_cm6 import change_ledger

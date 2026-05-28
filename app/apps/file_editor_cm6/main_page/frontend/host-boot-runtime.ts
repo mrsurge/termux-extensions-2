@@ -1,13 +1,11 @@
 import { bootInlineEditorHost } from '../../monaco_editor/inline_host.ts';
 import { runBootSequence } from './boot/boot-sequence.ts';
-import { installBeforeExitGuard } from './boot/public-hooks.ts';
 import {
   applyNoProjectState,
   applyNoRestoredPathState,
   applyRestoredPathState,
   schedulePathDisplayFallback,
 } from './boot/path-state.ts';
-import { installHostExitGuard } from './boot/exit-guard.ts';
 import type { ExplorerUiInitOptions } from '../../src/explorer/app/bootstrap.ts';
 import type { IoFactory } from '../../src/rpc/transport.ts';
 
@@ -84,10 +82,6 @@ interface HostBootRuntimeDeps {
   editorFrameEl: HTMLElement;
   sidebarShortcuts: BootSidebarShortcutsLike | null | undefined;
   ensureEditorFrameReady: () => Promise<unknown>;
-  onBeforeExit: (cb: () => UnknownRecord) => void;
-  getUnsaved: () => boolean;
-  showConfirm: () => Promise<boolean> | boolean | void;
-  flushSessionState: (force?: boolean) => Promise<unknown>;
 }
 
 function errorMessage(error: unknown): string {
@@ -213,14 +207,6 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
       runPostBootSidebarHydration(deps);
     });
 
-    installHostExitGuard({
-      installBeforeExitGuard,
-      onBeforeExit: (cb) => deps.onBeforeExit(cb),
-      getUnsaved: () => deps.getUnsaved(),
-      showConfirm: async () => !!(await deps.showConfirm()),
-      toast: (message) => deps.toast(message),
-      flushSessionState: (force) => deps.flushSessionState(force),
-    });
   }
 
   return {

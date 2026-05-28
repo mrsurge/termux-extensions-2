@@ -27,7 +27,12 @@ const INLINE_EDITOR_MARKUP = `
   </div>
 `;
 const INLINE_EDITOR_HOST_STYLE = `
-#editor-frame .monaco-editor .te2-draft-add-line { background: rgba(56, 139, 253, 0.22) !important; }
+#editor-frame .monaco-editor .te2-draft-add-line,
+#editor-frame .monaco-editor .te2-draft-add-line.line-insert,
+#editor-frame .monaco-editor .line-insert.te2-draft-add-line,
+#editor-frame .monaco-editor .te2-draft-add-line .view-line {
+  background: rgba(56, 139, 253, 0.24) !important;
+}
 #editor-frame .monaco-editor .te2-draft-del-line { background: rgba(210, 153, 34, 0.18) !important; }
 #editor-frame .monaco-editor .te2-draft-del-zone {
   background: rgba(210, 153, 34, 0.12);

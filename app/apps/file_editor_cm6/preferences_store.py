@@ -17,7 +17,7 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "theme": "cm6-dark",
     "autoSave": True,
     "showInlineDiffs": True,
-    "showDraftDiffs": True,
+    "showDraftDiffs": False,
     "trackAgentSidebarEdits": False,
     "fontScale": 0.85,  # NEW: Default to Medium preset
     "showIndentGuides": True,

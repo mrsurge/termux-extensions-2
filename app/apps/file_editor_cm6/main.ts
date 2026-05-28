@@ -1149,10 +1149,6 @@ const stateInitController = createStateInitController({
 });
 stateInitController.installOpenHooks();
 
-function showConfirm(): void {
-  // The before-exit guard already cancels and shows the actionable toast.
-}
-
 createHostBootRuntime({
   initResponsiveLayout,
   scheduleToolbarTitleClamp: (opts?: unknown) => scheduleToolbarTitleClamp(opts as ScheduleToolbarTitleClampOptions | undefined),
@@ -1211,10 +1207,6 @@ createHostBootRuntime({
   editorFrameEl,
   sidebarShortcuts,
   ensureEditorFrameReady: () => ensureEditorFrameReady(),
-  onBeforeExit: (cb: () => UnknownRecord) => host.onBeforeExit(cb),
-  getUnsaved: () => !!unsaved,
-  showConfirm: () => showConfirm(),
-  flushSessionState: (force?: boolean) => flushSessionState(force),
 }).start();
 
 }

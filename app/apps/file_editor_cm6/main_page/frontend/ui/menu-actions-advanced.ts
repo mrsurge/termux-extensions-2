@@ -71,26 +71,22 @@ export function installAdvancedMenuActions(deps: any) {
       const success = await deps.updatePreference('autoSave', false);
       if (!success) {
         deps.toast('Failed to update preference');
-        deps.setMenuChecked(deps.els.miToggleAutosave, true);
       }
       return;
     }
     const currentPath = deps.getCurrentPath();
     if (!currentPath || !deps.getCurrentPathExists()) {
       deps.toast('Open a file before enabling autosave');
-      deps.setMenuChecked(deps.els.miToggleAutosave, false);
       return;
     }
     const confirmed = await deps.showAutosaveModal(deps.basename(currentPath), deps.getUnsaved());
     if (!confirmed) {
-      deps.setMenuChecked(deps.els.miToggleAutosave, false);
       return;
     }
     if (deps.getUnsaved() && currentPath && deps.getCurrentPathExists()) {
       const saved = await deps.saveFile();
       if (!saved) {
         deps.toast('Autosave not enabled: saving failed');
-        deps.setMenuChecked(deps.els.miToggleAutosave, false);
         return;
       }
     }
@@ -98,27 +94,37 @@ export function installAdvancedMenuActions(deps: any) {
     const success = await deps.updatePreference('autoSave', true);
     if (!success) {
       deps.toast('Failed to update preference');
-      deps.setMenuChecked(deps.els.miToggleAutosave, false);
       return;
     }
     if (s()) s().autoSave = true;
     deps.markUnsaved(false);
-    if (s()?.showDraftDiffs) await deps.updatePreference('showDraftDiffs', false);
     if (anyTracking() && !s()?.readOnly) await disableAllEditTracking('Auto-track edits disabled (incompatible with autosave)');
   });
 
   deps.bindMenuToggle(deps.els.miToggleDiffs, async () => {
     const turningOff = !!(s()?.showInlineDiffs);
+    if (!turningOff && s()?.showDraftDiffs) {
+      const draftOff = await deps.updatePreference('showDraftDiffs', false);
+      if (!draftOff) { deps.toast('Failed to update preference'); return; }
+    }
     const success = await deps.updatePreference('showInlineDiffs', !turningOff);
     if (!success) { deps.toast('Failed to update preference'); return; }
-    if (turningOff && anyTracking()) await disableAllEditTracking('Auto-track edits disabled (requires git diffs)');
+    if (turningOff && anyTracking()) await disableAllEditTracking('Auto-track edits disabled (requires commit diff)');
   });
 
   deps.bindMenuToggle(deps.els.miToggleDraftDiffs, async () => {
     const turningOn = !(s()?.showDraftDiffs);
-    if (turningOn && s()?.autoSave) {
-      await deps.updatePreference('autoSave', false);
-      deps.toast('Autosave disabled (draft diffs require draft mode)', 'warn');
+    if (turningOn) {
+      const wasAutoSave = !!(s()?.autoSave);
+      if (wasAutoSave) {
+        await deps.updatePreference('autoSave', false);
+      }
+      if (s()?.showInlineDiffs) {
+        await deps.updatePreference('showInlineDiffs', false);
+      }
+      if (wasAutoSave) {
+        deps.toast('Autosave disabled (disk vs draft diff requires Draft Mode)', 'warn');
+      }
     }
     const success = await deps.updatePreference('showDraftDiffs', turningOn);
     if (!success) deps.toast('Failed to update preference');

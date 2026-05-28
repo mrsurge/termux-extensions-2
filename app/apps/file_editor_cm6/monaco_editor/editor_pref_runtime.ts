@@ -23,6 +23,7 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
   let pendingGitBaselinePayload: unknown = null;
 
   function getShowInlineDiffs(): boolean {
+    if (getShowDraftDiffs()) return false;
     return getShowInlineDiffsFlag(deps.getCachedPrefs());
   }
 
@@ -32,6 +33,10 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
 
   function getShowDraftDiffs(): boolean {
     return getShowDraftDiffsFlag(deps.getCachedPrefs(), getAutoSave);
+  }
+
+  function getShowDraftInsertions(): boolean {
+    return !getAutoSave();
   }
 
   function getUseTrueInlineView(): boolean {
@@ -74,7 +79,7 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
     if (!deps.isRpcConnected()) return false;
     if (!currentPath) return false;
 
-    if (!getShowInlineDiffs()) {
+    if (!getShowInlineDiffs() && !getShowDraftDiffs()) {
       deps.disposeGitBaselines();
       if (deps.getDiffEditor()) deps.ensurePlainEditorWithPrefs();
       return false;
@@ -129,6 +134,7 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
   return {
     getShowInlineDiffs,
     getShowDraftDiffs,
+    getShowDraftInsertions,
     getUseTrueInlineView,
     getAutoSave,
     getLocalMirrorDebounceMs,

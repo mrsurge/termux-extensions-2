@@ -4,7 +4,7 @@ interface EditorDraftDiffRequestRuntimeDeps {
   isRpcConnected(): boolean;
   rpcCall(method: string, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
   getCurrentPath(): string | null;
-  getShowDraftDiffs(): boolean;
+  getShowDraftInsertions(): boolean;
 }
 
 export function createEditorDraftDiffRequestRuntime(deps: EditorDraftDiffRequestRuntimeDeps) {
@@ -16,7 +16,7 @@ export function createEditorDraftDiffRequestRuntime(deps: EditorDraftDiffRequest
       const currentPath = deps.getCurrentPath();
       if (!deps.isRpcConnected()) return false;
       if (!currentPath) return false;
-      if (!deps.getShowDraftDiffs()) return false;
+      if (!deps.getShowDraftInsertions()) return false;
 
       if (draftDiffDebounceTimer) clearTimeout(draftDiffDebounceTimer);
       draftDiffDebounceTimer = setTimeout(() => {

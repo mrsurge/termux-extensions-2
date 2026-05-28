@@ -492,7 +492,11 @@ def _persist_to_cache_debounced():
     # while still keeping diff decorations up to date.
     try:
         prefs = _get_editor_preferences()
-        if prefs.get('showInlineDiffs', False) or prefs.get('showDraftDiffs', False):
+        if (
+            not bool(prefs.get('autoSave', False))
+            or bool(prefs.get('showInlineDiffs', False))
+            or bool(prefs.get('showDraftDiffs', False))
+        ):
             project_root = get_project_root()
             _schedule_diff_refresh(project_root, current_file, current_content, editor, "persist")
     except Exception as e:
