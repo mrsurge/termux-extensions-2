@@ -11,6 +11,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 import importlib
 import logging
+import time
 from typing import Protocol, cast, runtime_checkable
 from pathlib import Path
 
@@ -22,7 +23,6 @@ from .git_helper import get_status as git_get_status
 # NOTE: search and review are imported lazily inside handler methods
 # to break a circular import chain:
 #   diagnostics_bridge → explorer transport socketio app → explorer_runtime → explorer/review
-#   → editor_discard → editor_backend → editor_socketio → editor_ws
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -928,7 +928,10 @@ class ExplorerDispatcher:
     async def _notify_editor_draft_cleared(self, rel_files: list[str]) -> None:
         """Notify the editor RPC lane that draft state was cleared."""
         try:
-            from .monaco_editor.editor_ws import editor_runtime_emit_room_event
+            from .monaco_editor.editor_ws import (
+                editor_runtime_emit_room_event,
+                editor_runtime_reload_disk_content_if_active,
+            )
 
             for rel in rel_files:
                 abs_path = str(self.project_root / rel)
@@ -940,6 +943,11 @@ class ExplorerDispatcher:
                         "unsaved": False,
                         "reason": "discard_external",
                     },
+                )
+                await editor_runtime_reload_disk_content_if_active(
+                    abs_path,
+                    source="explorer_review_discard",
+                    request_id=f"explorer_draft_discard_{int(time.time() * 1000)}",
                 )
         except Exception:
             pass

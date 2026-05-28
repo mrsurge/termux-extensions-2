@@ -10,7 +10,6 @@ from ..core_write import write_full, _get_file_meta
 from ..diff_helper import invalidate_diff_cache
 from ..draft_diff_helper import compute_draft_diff
 from ..stores import _history_store
-from ..editor_discard import handle_external_discard
 
 async def list_reviews(project_root: Path, lightweight: bool = False) -> list[dict[str, object]]:
     """Get list of files with unsaved drafts."""
@@ -120,7 +119,5 @@ async def discard_reviews(project_root: Path, files: list[str]) -> dict[str, obj
         abs_path = project_root / rel_path
         if _history_store.clear_cached_document(str(project_root), str(abs_path)):
             discarded_count += 1
-            # Revert the active editor if this file is open
-            handle_external_discard(str(project_root), str(abs_path))
             
     return {"discarded_count": discarded_count}

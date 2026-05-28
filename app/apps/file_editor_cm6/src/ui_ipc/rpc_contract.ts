@@ -6,6 +6,7 @@ export const UI_IPC_RPC_NAMESPACE = RPC_NAMESPACES.uiIpc;
 export const UI_IPC_RPC_METHODS = {
   hostFileOpen: 'ui.host.file.open',
   hostFileSave: 'ui.host.file.save',
+  hostDraftDiscard: 'ui.host.draft.discard',
   hostEditorPreferenceUpdate: 'ui.host.editorPreference.update',
   hostFileRun: 'ui.host.file.run',
   hostBootSnapshotGet: 'ui.host.bootSnapshot.get',

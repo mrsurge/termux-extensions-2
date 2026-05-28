@@ -272,6 +272,11 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     return await connection.request(UI_IPC_RPC_METHODS.hostFileSave, payload || {}, 8000);
   }
 
+  async function requestBackendDraftDiscard(payload: JsonObject = {}): Promise<unknown> {
+    const connection = await connectUIIPC();
+    return await connection.request(UI_IPC_RPC_METHODS.hostDraftDiscard, payload || {}, 8000);
+  }
+
   async function requestBackendEditorPreferenceUpdate(payload: JsonObject = {}): Promise<unknown> {
     const connection = await connectUIIPC();
     return await connection.request(UI_IPC_RPC_METHODS.hostEditorPreferenceUpdate, payload || {}, 8000);
@@ -351,6 +356,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     connectUIIPC,
     requestBackendFileOpen,
     requestBackendFileSave,
+    requestBackendDraftDiscard,
     requestBackendEditorPreferenceUpdate,
     requestBackendRunActiveFile,
     requestBackendBootSnapshot,

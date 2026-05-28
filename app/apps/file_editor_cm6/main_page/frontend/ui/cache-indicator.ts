@@ -1,23 +1,37 @@
 // @ts-check
 
-/**
- * @param {{
- *   getCurrentPath: () => string,
- *   getCachedProjectRoot: () => string | null,
- *   getCurrentProjectRoot: () => Promise<string | null>,
- *   apiDelete: (path: string) => Promise<any>,
- *   openFile: (path: string, opts?: any) => Promise<any>,
- *   toast: (msg: string) => void,
- *   markUnsaved: (flag: boolean) => void,
- *   getRestoredSessionActive: () => boolean
- * }} deps
- */
-export function createCacheIndicatorController(deps: any) {
+interface CacheIndicatorInfo {
+  state?: string;
+  unsaved?: boolean;
+  reason?: string;
+  restoredActive?: boolean;
+}
+
+interface CacheIndicatorControllerDeps {
+  getCurrentPath: () => string | null;
+  getCachedProjectRoot: () => string | null;
+  getCurrentProjectRoot: () => Promise<string | null>;
+  discardDraft: (payload: Record<string, unknown>) => Promise<unknown>;
+  toast: (msg: string) => void;
+  markUnsaved: (flag: boolean) => void;
+  getRestoredSessionActive: () => boolean;
+}
+
+function asCacheIndicatorInfo(value: unknown): CacheIndicatorInfo | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as CacheIndicatorInfo;
+}
+
+export function createCacheIndicatorController(deps: CacheIndicatorControllerDeps) {
   async function handleDiscardClick(e: MouseEvent) {
     e.stopPropagation();
     e.preventDefault();
 
     const currentPath = deps.getCurrentPath();
+    if (!currentPath) {
+      deps.toast('Cannot discard: No active file');
+      return;
+    }
     const project = deps.getCachedProjectRoot() || (await deps.getCurrentProjectRoot());
     if (!project) {
       deps.toast('Cannot discard: Project root unknown');
@@ -25,9 +39,11 @@ export function createCacheIndicatorController(deps: any) {
     }
 
     try {
-      const url = `session_cache?project=${encodeURIComponent(project)}&path=${encodeURIComponent(currentPath)}`;
-      await deps.apiDelete(url);
-      await deps.openFile(currentPath, { forceRefresh: true });
+      await deps.discardDraft({
+        project,
+        path: currentPath,
+        source: 'host_cache_indicator',
+      });
       deps.toast('Draft discarded');
     } catch (err) {
       deps.toast('Failed to discard draft');
@@ -54,10 +70,11 @@ export function createCacheIndicatorController(deps: any) {
     badge.style.display = 'inline-block';
   }
 
-  function applyCacheIndicator(info: any) {
+  function applyCacheIndicator(rawInfo: unknown) {
     const badge = document.getElementById('fe-file-draft-badge');
     if (!badge) return;
 
+    const info = asCacheIndicatorInfo(rawInfo);
     if (!info) {
       setIndicatorInactive(badge);
       return;

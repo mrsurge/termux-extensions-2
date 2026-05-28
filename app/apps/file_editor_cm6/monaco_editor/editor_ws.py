@@ -483,6 +483,30 @@ def editor_runtime_notify_draft_state_changed(project: str) -> None:
     _notify_draft_state_changed_safe(project)
 
 
+async def editor_runtime_reload_disk_content_if_active(
+    abs_path: str,
+    *,
+    source: str,
+    request_id: str | None = None,
+) -> bool:
+    project = _active_project()
+    target = _normalize_abs_path(abs_path)
+    if not project or not target or not _is_under_project(project, target):
+        return False
+
+    active_path = _history_store.get_last_file(project)
+    active_target = _normalize_abs_path(active_path) if active_path else None
+    if active_target != target:
+        return False
+
+    await emit_editor_open_from_backend(
+        {"path": target, "source": source, "reason": "discard_external"},
+        source_client=source,
+        request_id=request_id or f"draft_discard_{int(time.time() * 1000)}",
+    )
+    return True
+
+
 def editor_runtime_record_save_sha(abs_path: str, sha256: str) -> None:
     _LAST_SAVE_SHA[abs_path] = sha256
 

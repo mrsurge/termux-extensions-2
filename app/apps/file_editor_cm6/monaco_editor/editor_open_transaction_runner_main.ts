@@ -94,8 +94,10 @@ export async function runEditorOpenTransaction(
   try {
     incomingUri = deps.monacoFileUri(deps.getWindow().monaco, incomingPath);
     const model = deps.getModel();
+    const reason = String(payload.reason || '');
     sameFileNavigationOnly = !!(
-      payload.reason !== 'external_change'
+      reason !== 'external_change'
+      && reason !== 'discard_external'
       && model
       && model.uri
       && incomingUri

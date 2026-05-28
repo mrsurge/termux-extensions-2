@@ -119,6 +119,9 @@ async def emit_editor_open_from_backend(
     payload = read_file_payload(project, path)
     payload["source_client"] = source_client
     payload["request_id"] = request_id
+    explicit_reason = get_str(normalized, "reason", "")
+    if explicit_reason:
+        payload["reason"] = explicit_reason
 
     line = fields["line"]
     column = fields["column"]

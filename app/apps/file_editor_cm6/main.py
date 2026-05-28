@@ -357,7 +357,6 @@ file_editor_cm6_bp.include_router(terminal_router)
 # Include the self-contained editor routes
 from .monaco_editor.editor_backend import editor_router
 from .monaco_editor import register_monaco_editor_routes
-from .editor_discard import handle_external_discard
 file_editor_cm6_bp.include_router(editor_router)
 register_monaco_editor_routes(file_editor_cm6_bp, mount_path="/ui")
 
@@ -718,7 +717,7 @@ def get_session_cache(
 
 
 @file_editor_cm6_bp.delete('/session_cache')
-def delete_session_cache(
+async def delete_session_cache(
     project: str = Query(...),
     path: str = Query(...),
 ):
@@ -738,6 +737,28 @@ def delete_session_cache(
         try:
             from .explorer.services.runtime_notifications import notify_draft_state_changed
             notify_draft_state_changed(expanded_project)
+        except Exception:
+            pass
+        try:
+            from .monaco_editor.editor_ws import (
+                editor_runtime_emit_room_event,
+                editor_runtime_reload_disk_content_if_active,
+            )
+
+            await editor_runtime_emit_room_event(
+                "editor:cache_state",
+                {
+                    "path": expanded_path,
+                    "state": "clean",
+                    "unsaved": False,
+                    "reason": "discard_external",
+                },
+            )
+            await editor_runtime_reload_disk_content_if_active(
+                expanded_path,
+                source="legacy_session_cache_delete",
+                request_id=f"session_cache_delete_{int(time.time() * 1000)}",
+            )
         except Exception:
             pass
     
@@ -1240,7 +1261,28 @@ async def review_discard(data: JsonDict = Body(...)):
         abs_path = root_path / rel_path
         if _history_store.clear_cached_document(project_root, str(abs_path)):
             discarded_count += 1
-            handle_external_discard(project_root, str(abs_path))
+            try:
+                from .monaco_editor.editor_ws import (
+                    editor_runtime_emit_room_event,
+                    editor_runtime_reload_disk_content_if_active,
+                )
+
+                await editor_runtime_emit_room_event(
+                    "editor:cache_state",
+                    {
+                        "path": str(abs_path),
+                        "state": "clean",
+                        "unsaved": False,
+                        "reason": "discard_external",
+                    },
+                )
+                await editor_runtime_reload_disk_content_if_active(
+                    str(abs_path),
+                    source="legacy_review_discard",
+                    request_id=f"legacy_review_discard_{int(time.time() * 1000)}",
+                )
+            except Exception:
+                pass
     
     # Invalidate draft cache
     from .explorer.services.file_ops import mark_draft_cache_dirty
