@@ -23,6 +23,9 @@ SIDEBAR_IPC_RPC_METHOD_MENTION: Final = "sidebar.mention"
 SIDEBAR_IPC_RPC_METHOD_PROJECT_LOOKUP: Final = "sidebar.project.lookup"
 SIDEBAR_IPC_RPC_METHOD_PROJECT_OPEN: Final = "sidebar.project.open"
 SIDEBAR_IPC_RPC_METHOD_PROJECT_CREATE: Final = "sidebar.project.create"
+SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST: Final = "sidebar.drafts.list"
+SIDEBAR_IPC_RPC_METHOD_DRAFT_STATE_GET: Final = "sidebar.draftState.get"
+SIDEBAR_IPC_RPC_METHOD_DRAFT_CLEAR: Final = "sidebar.draft.clear"
 SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET: Final = "sidebar.activeShortcut.set"
 SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH: Final = "sidebar.activeShortcut.refresh"
 SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN: Final = "sidebar.drawer.open"
@@ -39,6 +42,9 @@ SidebarIpcRpcMethod = Literal[
     "sidebar.project.lookup",
     "sidebar.project.open",
     "sidebar.project.create",
+    "sidebar.drafts.list",
+    "sidebar.draftState.get",
+    "sidebar.draft.clear",
     "sidebar.activeShortcut.set",
     "sidebar.activeShortcut.refresh",
     "sidebar.drawer.open",
@@ -82,6 +88,9 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     SIDEBAR_IPC_RPC_METHOD_PROJECT_LOOKUP,
     SIDEBAR_IPC_RPC_METHOD_PROJECT_OPEN,
     SIDEBAR_IPC_RPC_METHOD_PROJECT_CREATE,
+    SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST,
+    SIDEBAR_IPC_RPC_METHOD_DRAFT_STATE_GET,
+    SIDEBAR_IPC_RPC_METHOD_DRAFT_CLEAR,
     SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET,
     SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH,
     SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN,

@@ -13,6 +13,9 @@ from .sidebar_rpc_contract import (
     SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET,
     SIDEBAR_IPC_RPC_METHOD_CWD_GET,
     SIDEBAR_IPC_RPC_METHOD_CWD_SYNC,
+    SIDEBAR_IPC_RPC_METHOD_DRAFT_CLEAR,
+    SIDEBAR_IPC_RPC_METHOD_DRAFT_STATE_GET,
+    SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST,
     SIDEBAR_IPC_RPC_METHOD_DRAWER_CLOSE,
     SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN,
     SIDEBAR_IPC_RPC_METHOD_DRAWER_TOGGLE,
@@ -331,6 +334,27 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
         if isinstance(result, dict) and result.get("ok") is True and "resolved_path" in result:
             await _emit_project_opened(ns, result)
         return result
+    if method == SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST:
+        from ..host.draft_state_backend import handle_sidebar_drafts_list_request
+
+        return await handle_sidebar_drafts_list_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+        )
+    if method == SIDEBAR_IPC_RPC_METHOD_DRAFT_STATE_GET:
+        from ..host.draft_state_backend import handle_sidebar_draft_state_get_request
+
+        return await handle_sidebar_draft_state_get_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+        )
+    if method == SIDEBAR_IPC_RPC_METHOD_DRAFT_CLEAR:
+        from ..host.draft_state_backend import handle_sidebar_draft_clear_request
+
+        return await handle_sidebar_draft_clear_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+        )
     if method == SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET:
         client_id = await _resolve_client_id(ns, sid, params)
         shortcut_id = _norm(params.get("shortcutId") or params.get("activeShortcutId"))
