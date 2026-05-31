@@ -29,6 +29,7 @@ EDITOR_RPC_METHOD_DRAFT_DIFF_GET: Final = "editor.draftDiff.get"
 EDITOR_RPC_METHOD_MIRROR_PUBLISH: Final = "editor.mirror.publish"
 EDITOR_RPC_METHOD_SAVE: Final = "editor.save"
 EDITOR_RPC_METHOD_MENTION_REQUEST: Final = "editor.mention.request"
+EDITOR_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET: Final = "editor.agentEdits.documentState.get"
 EDITOR_RPC_METHOD_AGENT_EDITS_DECIDE: Final = "editor.agentEdits.decide"
 EDITOR_RPC_METHOD_HOST_SAVE: Final = "editor.host.save"
 EDITOR_RPC_METHOD_FOCUS: Final = "editor.focus"
@@ -53,6 +54,7 @@ EditorRpcMethod = Literal[
     "editor.mirror.publish",
     "editor.save",
     "editor.mention.request",
+    "editor.agentEdits.documentState.get",
     "editor.agentEdits.decide",
     "editor.host.save",
     "editor.focus",

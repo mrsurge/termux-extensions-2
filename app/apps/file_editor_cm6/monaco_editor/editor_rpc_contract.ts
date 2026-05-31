@@ -42,6 +42,7 @@ export const EDITOR_RPC_METHODS = {
   mirrorPublish: 'editor.mirror.publish',
   save: 'editor.save',
   mentionRequest: 'editor.mention.request',
+  agentEditsDocumentStateGet: 'editor.agentEdits.documentState.get',
   agentEditsDecide: 'editor.agentEdits.decide',
   hostSave: 'editor.host.save',
   focus: 'editor.focus',
@@ -140,6 +141,17 @@ export interface EditorRpcMentionRequestParams {
   endLineNo?: number;
   endCol?: number;
   content?: string;
+}
+
+export interface EditorRpcAgentEditsDocumentStateGetParams {
+  path: string;
+  uri?: string;
+  projectPath?: string;
+  request_id?: string;
+  reason?: string;
+  knownLedgerRevision?: number;
+  documentVersion?: number;
+  contentSha256?: string;
 }
 
 export interface EditorRpcStateSsotNotificationParams {

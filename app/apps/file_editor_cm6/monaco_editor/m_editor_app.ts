@@ -1203,6 +1203,9 @@ interface MonacoBootWindowLike extends Window {
     },
     emitOpenCacheState: emitOpenCacheState,
     queueBackendWorkbenchOpen: function(payload: Record<string, unknown>) { return queueBackendWorkbenchOpen(payload as never); },
+    requestAgentEditDocumentState: function(payload: Record<string, unknown>) {
+      return editorRpcCall(EDITOR_RPC_METHODS.agentEditsDocumentStateGet, payload, { timeoutMs: 8000 });
+    },
     setApplyingRemote: function(value: boolean) { isApplyingRemote = !!value; },
     openTransactionStore: openTransactionStore,
   }) as Parameters<typeof runEditorOpenTransaction>[0];

@@ -134,17 +134,14 @@ const LINE_TOKEN_DECODER = {
   },
 };
 
-function trimDtoLines(lines: string[]): string[] {
+function normalizeDtoLines(lines: string[]): string[] {
   const result = lines.map((line) => String(line ?? '').replace(/\r$/, ''));
-  while (result.length > 1 && result[result.length - 1] === '') {
-    result.pop();
-  }
   return result.length ? result : [''];
 }
 
 function createLineSourceFromDto(lines: string[]): unknown {
   return new LineSource(
-    trimDtoLines(lines).map((line) => LineTokens.createEmpty(line, LINE_TOKEN_DECODER)),
+    normalizeDtoLines(lines).map((line) => LineTokens.createEmpty(line, LINE_TOKEN_DECODER)),
     [],
     true,
     true,
@@ -160,7 +157,7 @@ function createOriginalZoneDom(
   domNode.className = 'chat-editing-original-zone view-lines line-delete monaco-mouse-cursor-text';
 
   const lines = change.originalLines.length
-    ? trimDtoLines(change.originalLines)
+    ? normalizeDtoLines(change.originalLines)
     : Array.from({ length: Math.max(1, inclusiveRangeLineCount(change.original)) }, () => '');
 
   // Upstream VS Code reads tokenized original lines from diff.originalModel.

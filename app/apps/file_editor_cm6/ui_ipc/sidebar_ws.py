@@ -107,46 +107,6 @@ async def _emit_rpc_notification(ns, method: str, params: dict, *, to_sid: str |
     await ns.emit(SIDEBAR_IPC_RPC_NOTIFICATION_EVENT, envelope, room=room or "sidebar_ipc", skip_sid=skip_sid)
 
 
-async def _call_sidebar_rpc_peer(ns, sid: str, method: str, params: dict, *, timeout: float = 3.0) -> dict[str, object] | None:
-    request_id = f"sidebar_backend_{int(time.time() * 1000)}_{abs(hash((sid, method))) % 1000000}"
-    envelope = {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "method": method,
-        "params": params,
-    }
-    try:
-        response = await ns.call(
-            "rpc",
-            envelope,
-            to=sid,
-            namespace="/sidebar_ipc",
-            timeout=timeout,
-        )
-    except Exception as exc:
-        print(f"[sidebar_ipc_rpc] peer call failed method={method} sid={sid} err={exc}", flush=True)
-        return None
-    return response if isinstance(response, dict) else None
-
-
-async def _call_first_agent_edit_peer(ns, method: str, params: dict, *, exclude_sid: str | None = None) -> dict[str, object]:
-    for sid in list(_agent_edit_peer_sids):
-        if exclude_sid and sid == exclude_sid:
-            continue
-        response = await _call_sidebar_rpc_peer(ns, sid, method, params)
-        if not response:
-            continue
-        result = response.get("result")
-        if isinstance(result, dict):
-            result_map = {str(key): item for key, item in result.items() if isinstance(key, str)}
-            result_map.setdefault("ok", True)
-            return result_map
-        error = response.get("error")
-        if isinstance(error, dict):
-            return {"ok": False, "error": str(error.get("message") or "agent edit peer error")}
-    return {"ok": False, "available": False, "error": "no agent edit peer available"}
-
-
 async def _emit_client_state(ns, client_id: str, *, to_sid: str | None = None, skip_sid: str | None = None):
     state_payload = _client_state_payload(client_id)
     if to_sid:
@@ -244,12 +204,21 @@ async def request_agent_edit_document_state_from_peers(
 ) -> JsonObject:
     from .ui_ipc_socketio import UI_IPC_SIO
 
-    return await _call_first_agent_edit_peer(
-        UI_IPC_SIO,
-        SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET,
-        payload,
-        exclude_sid=exclude_sid,
-    )
+    peers = 0
+    envelope = build_jsonrpc_notification(SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET, payload)
+    for sid in list(_agent_edit_peer_sids):
+        if exclude_sid and sid == exclude_sid:
+            continue
+        await UI_IPC_SIO.emit(
+            SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
+            envelope,
+            to=sid,
+            namespace="/sidebar_ipc",
+        )
+        peers += 1
+    if peers == 0:
+        return {"ok": False, "available": False, "error": "no agent edit peer available"}
+    return {"ok": True, "queued": True, "peers": peers}
 
 
 async def forward_agent_edit_decision_to_peers(
@@ -259,12 +228,21 @@ async def forward_agent_edit_decision_to_peers(
 ) -> JsonObject:
     from .ui_ipc_socketio import UI_IPC_SIO
 
-    return await _call_first_agent_edit_peer(
-        UI_IPC_SIO,
-        SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DECIDE,
-        payload,
-        exclude_sid=exclude_sid,
-    )
+    peers = 0
+    envelope = build_jsonrpc_notification(SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DECIDE, payload)
+    for sid in list(_agent_edit_peer_sids):
+        if exclude_sid and sid == exclude_sid:
+            continue
+        await UI_IPC_SIO.emit(
+            SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
+            envelope,
+            to=sid,
+            namespace="/sidebar_ipc",
+        )
+        peers += 1
+    if peers == 0:
+        return {"ok": False, "available": False, "error": "no agent edit peer available"}
+    return {"ok": True, "queued": True, "peers": peers}
 
 
 async def on_sidebar_register(ns, sid, data):
@@ -402,7 +380,7 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
                 request_prefix="sidebar_rpc",
             )
             return {"ok": True, "review": review_result, "navigation": "routed"}
-        print("[sidebar_ipc_rpc] file_edit review refreshed; navigation skipped: trackAgentSidebarEdits disabled", flush=True)
+        print("[sidebar_ipc_rpc] file_edit tracking signal; navigation skipped: trackAgentSidebarEdits disabled", flush=True)
         return {"ok": True, "review": review_result, "navigation": "skipped", "reason": "trackAgentSidebarEdits disabled"}
     if method == SIDEBAR_IPC_RPC_METHOD_MENTION:
         await on_sidebar_mention(ns, sid, params)

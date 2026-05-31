@@ -53,6 +53,7 @@ interface RunEditorOpenTransactionDeps {
   applyOpenModelTextSafely(model: OpenModelLike, editor: OpenEditorLike, content: string, setApplyingRemote: (value: boolean) => void): void;
   emitOpenCacheState(emitToHostFn: (eventType: string, payload: Record<string, unknown>) => void, absPath: string, hasDraft: boolean, sha256: string | null, baseSha256: string | null, autoSave: boolean | null): void;
   queueBackendWorkbenchOpen(payload: Record<string, unknown>): void;
+  requestAgentEditDocumentState(payload: Record<string, unknown>): Promise<unknown>;
   setApplyingRemote(value: boolean): void;
   openTransactionStore: EditorOpenTransactionStore;
 }
@@ -255,14 +256,20 @@ export async function runEditorOpenTransaction(
     if (!sameFileNavigationOnly && payload.reason !== 'external_change') {
       deps.requestGitBaselines({ reason: 'open' });
     }
-    deps.emitToHost('editor_open_complete', {
+    const openCompletePayload = {
       path: currentPath,
       request_id: payload && payload.request_id ? String(payload.request_id) : '',
       line: tx && tx.hasExplicitNavigation ? tx.line : null,
       column: tx && tx.hasExplicitNavigation ? tx.column : null,
       reason: payload.reason || 'open',
-    });
+    };
+    deps.emitToHost('editor_open_complete', openCompletePayload);
     settleOpenTransaction(deps.openTransactionStore, tx);
+    try {
+      await deps.requestAgentEditDocumentState(openCompletePayload);
+    } catch (error) {
+      console.warn('[AgentEditReview] document state request failed after open', error);
+    }
   } catch (err) {
     settleOpenTransaction(deps.openTransactionStore, tx);
     throw err;

@@ -322,7 +322,7 @@ export function createAgentEditReviewRuntime(deps: AgentEditReviewRuntimeDeps) {
 
   async function sendDecision(edit: NormalizedAgentEdit, decision: 'accept' | 'reject'): Promise<boolean> {
     try {
-      await deps.rpcCall(EDITOR_RPC_METHODS.agentEditsDecide, {
+      const result = await deps.rpcCall(EDITOR_RPC_METHODS.agentEditsDecide, {
         decision,
         conversationId: edit.conversationId,
         sessionId: edit.sessionId,
@@ -334,6 +334,16 @@ export function createAgentEditReviewRuntime(deps: AgentEditReviewRuntimeDeps) {
         knownRevision: edit.revision,
         ts: Date.now(),
       }, { timeoutMs: 5000 });
+      const response = typeof result === 'object' && result !== null && !Array.isArray(result)
+        ? result as Record<string, unknown>
+        : null;
+      if (response?.queued === true) {
+        return false;
+      }
+      if (response?.ok === false) {
+        console.warn('[AgentEditReview] decision rejected', response);
+        return false;
+      }
       return true;
     } catch (error) {
       console.warn('[AgentEditReview] decision failed', error);
