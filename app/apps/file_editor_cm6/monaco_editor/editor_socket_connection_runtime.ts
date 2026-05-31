@@ -75,6 +75,7 @@ interface EditorSocketConnectionDeps {
   requestDraftDiff(reason: string): void;
   clearDraftDiffDecorations(): void;
   requestGitBaselines(opts: { immediate?: boolean; reason: string }): void;
+  requestAgentEditDocumentState(payload: Record<string, unknown>): Promise<unknown>;
   shouldDropDuplicateEditorOpen(payload: unknown): boolean;
   queueOpenTransaction(task: () => Promise<void>): Promise<void>;
   runEditorOpenTransaction(payload: unknown): Promise<void>;
@@ -180,7 +181,7 @@ export function registerEditorSocketConnectionHandlers(
         const currentPath = deps.getCurrentPath();
         const ssotGeneration = deps.wbBumpGeneration(currentPath, 'ssot');
         try { deps.bcUpdatePath(currentPath, true); } catch (_) {}
-        deps.ensureEditorWithPrefs().then(() => {
+        deps.ensureEditorWithPrefs().then(async () => {
           const activePath = deps.getCurrentPath();
           if (!activePath) return;
           const lang = deps.languageFromPath(activePath);
@@ -229,13 +230,14 @@ export function registerEditorSocketConnectionHandlers(
           } catch (_) {}
           deps.updateDebug('ws=ssot');
           deps.requestGitBaselines({ reason: 'ssot' });
+          let languageOpenPromise: Promise<unknown> | null = null;
           try {
             const requestId = file && file.request_id ? String(file.request_id) : ('diag_' + Date.now() + '_ssot');
             const nextActiveModel = deps.getModel();
             const text = nextActiveModel && nextActiveModel.getValue ? nextActiveModel.getValue() : '';
             deps.wbQueueDidChange(activePath, text, nextActiveModel && nextActiveModel.getLanguageId ? nextActiveModel.getLanguageId() : lang, ssotGeneration);
             deps.wbQueueSymbols(activePath, ssotGeneration);
-            deps.wbOpenFileFlow({
+            languageOpenPromise = deps.wbOpenFileFlow({
               path: activePath,
               languageId: lang,
               uri: nextActiveModel && nextActiveModel.uri ? String(nextActiveModel.uri.toString()) : '',
@@ -246,6 +248,20 @@ export function registerEditorSocketConnectionHandlers(
               timeoutMs: 8000,
             }).catch(() => {});
           } catch (_) {}
+          if (languageOpenPromise) {
+            try {
+              await languageOpenPromise;
+            } catch (_) {}
+          }
+          try {
+            await deps.requestAgentEditDocumentState({
+              path: activePath,
+              request_id: file && file.request_id ? String(file.request_id) : '',
+              reason: 'ssot',
+            });
+          } catch (error) {
+            console.warn('[AgentEditReview] document state request failed after ssot open', error);
+          }
         });
       } else {
         deps.updateDebug('ws=ssot-empty');

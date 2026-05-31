@@ -1283,6 +1283,9 @@ interface MonacoBootWindowLike extends Window {
         requestDraftDiff: requestDraftDiff,
         clearDraftDiffDecorations: clearDraftDiffDecorations,
         requestGitBaselines: requestGitBaselines,
+        requestAgentEditDocumentState: function(payload: Record<string, unknown>) {
+          return editorRpcCall(EDITOR_RPC_METHODS.agentEditsDocumentStateGet, payload, { timeoutMs: 8000 });
+        },
         shouldDropDuplicateEditorOpen: shouldDropDuplicateEditorOpen,
         queueOpenTransaction: function(task: () => Promise<void>) { return queueOpenTransaction(openTransactionStore, task).then(function() {}); },
         runEditorOpenTransaction: function(payload: unknown) { return _runEditorOpenTransaction(payload).then(function() {}); },

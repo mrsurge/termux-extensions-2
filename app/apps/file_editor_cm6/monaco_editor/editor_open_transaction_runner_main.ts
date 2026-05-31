@@ -228,6 +228,7 @@ export async function runEditorOpenTransaction(
       } catch (_) {}
     }
 
+    let languageOpenPromise: Promise<unknown> | null = null;
     if (!sameFileNavigationOnly) {
       try {
         const openReqId = (payload && payload.request_id) ? String(payload.request_id) : (`diag_${Date.now()}_open`);
@@ -240,7 +241,7 @@ export async function runEditorOpenTransaction(
           openGeneration,
         );
         deps.queueSymbols(currentPath, openGeneration);
-        deps.openFileFlow({
+        languageOpenPromise = deps.openFileFlow({
           path: currentPath,
           languageId: lang,
           uri: (model && model.uri) ? String(model.uri.toString()) : '',
@@ -265,6 +266,11 @@ export async function runEditorOpenTransaction(
     };
     deps.emitToHost('editor_open_complete', openCompletePayload);
     settleOpenTransaction(deps.openTransactionStore, tx);
+    if (languageOpenPromise) {
+      try {
+        await languageOpenPromise;
+      } catch (_) {}
+    }
     try {
       await deps.requestAgentEditDocumentState(openCompletePayload);
     } catch (error) {
