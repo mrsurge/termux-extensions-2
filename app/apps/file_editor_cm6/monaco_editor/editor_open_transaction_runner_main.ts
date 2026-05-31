@@ -227,14 +227,6 @@ export async function runEditorOpenTransaction(
       } catch (_) {}
     }
 
-    deps.emitToHost('editor_open_complete', {
-      path: currentPath,
-      request_id: payload && payload.request_id ? String(payload.request_id) : '',
-      line: tx && tx.hasExplicitNavigation ? tx.line : null,
-      column: tx && tx.hasExplicitNavigation ? tx.column : null,
-      reason: payload.reason || 'open',
-    });
-
     if (!sameFileNavigationOnly) {
       try {
         const openReqId = (payload && payload.request_id) ? String(payload.request_id) : (`diag_${Date.now()}_open`);
@@ -263,6 +255,13 @@ export async function runEditorOpenTransaction(
     if (!sameFileNavigationOnly && payload.reason !== 'external_change') {
       deps.requestGitBaselines({ reason: 'open' });
     }
+    deps.emitToHost('editor_open_complete', {
+      path: currentPath,
+      request_id: payload && payload.request_id ? String(payload.request_id) : '',
+      line: tx && tx.hasExplicitNavigation ? tx.line : null,
+      column: tx && tx.hasExplicitNavigation ? tx.column : null,
+      reason: payload.reason || 'open',
+    });
     settleOpenTransaction(deps.openTransactionStore, tx);
   } catch (err) {
     settleOpenTransaction(deps.openTransactionStore, tx);

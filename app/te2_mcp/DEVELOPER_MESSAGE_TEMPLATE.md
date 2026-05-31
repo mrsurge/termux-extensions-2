@@ -189,17 +189,15 @@ After wiring the bridge:
 Treat `main_page` and `editor_iframe` as internal TE2 workers unless you are specifically debugging TE2 itself.
 
 The default TE2 console bridge for hosted frontends lives at:
-- `app/apps/file_editor_cm6/static/js/console_bridge.js`
+- `app/apps/file_editor_cm6/main_page/frontend/console_bridge.js`
 
 The internal TE2 host wires that bridge from:
-- `app/apps/file_editor_cm6/src/host/connections/ui-ipc.ts`
-- `app/apps/file_editor_cm6/main.js`
+- `app/apps/file_editor_cm6/main_page/frontend/connections/ui-ipc.ts`
+- `app/apps/file_editor_cm6/main.ts`
 
-The editor iframe has its own console bridge wiring at:
-- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.js`
-- `app/apps/file_editor_cm6/monaco_editor/editor_ui_ipc_register_utils.js`
-- `app/apps/file_editor_cm6/monaco_editor/editor_console_emit_log_utils.js`
-- `app/apps/file_editor_cm6/monaco_editor/editor_console_eval_handler_utils.js`
+The live console transport is framework-owned at namespace `/te2_console` on
+path `/te2_console_ws/socket.io`, backed by `app/te2_console_runtime.py`.
+Do not route console traffic through file-editor UI IPC.
 
 ## Framework-Shells Guidance
 

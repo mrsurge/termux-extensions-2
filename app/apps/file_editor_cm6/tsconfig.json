@@ -42,6 +42,7 @@
     "vendor",
     "src/explorer/search/vscode_widget_vendor/**",
     "monaco_editor/build_shims",
+    "monaco_editor/vscode_chat_editing_vendor/upstream/**",
     "monaco_editor/vscode_build_src"
   ]
 }

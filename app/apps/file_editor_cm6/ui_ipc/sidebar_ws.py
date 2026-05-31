@@ -9,6 +9,11 @@ import time
 from ..explorer.services.file_ops import get_project_root
 from ..stores import get_history_store, get_preferences_store
 from .sidebar_rpc_contract import (
+    SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_CLEAR,
+    SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DECIDE,
+    SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET,
+    SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_LIST,
+    SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_PUBLISH,
     SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH,
     SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET,
     SIDEBAR_IPC_RPC_METHOD_CWD_GET,
@@ -47,6 +52,7 @@ from .sidebar_rpc_contract import (
 
 _registered_hosts: set[str] = set()
 _registered_iframes: set[str] = set()
+_agent_edit_peer_sids: set[str] = set()
 _client_ids_by_sid: dict[str, str] = {}
 _client_active_shortcuts: dict[str, str] = {}
 
@@ -68,6 +74,18 @@ def _norm(value) -> str:
     return str(value or "").strip()
 
 
+def _has_agent_edit_capability(data: dict) -> bool:
+    if data.get("agentEdits") is True or data.get("agent_edits") is True:
+        return True
+    capabilities = data.get("capabilities")
+    if isinstance(capabilities, list):
+        normalized = {_norm(item) for item in capabilities}
+        if {"agentEdits", "agent_edits", "sidebar.agentEdits"} & normalized:
+            return True
+    app_name = _norm(data.get("app") or data.get("app_id") or data.get("appId")).lower()
+    return app_name in {"als", "als-rs", "als_rs"}
+
+
 def _client_room(client_id: str) -> str:
     return f"sidebar:client:{_norm(client_id) or 'unknown'}"
 
@@ -87,6 +105,46 @@ async def _emit_rpc_notification(ns, method: str, params: dict, *, to_sid: str |
         await ns.emit(SIDEBAR_IPC_RPC_NOTIFICATION_EVENT, envelope, to=to_sid)
         return
     await ns.emit(SIDEBAR_IPC_RPC_NOTIFICATION_EVENT, envelope, room=room or "sidebar_ipc", skip_sid=skip_sid)
+
+
+async def _call_sidebar_rpc_peer(ns, sid: str, method: str, params: dict, *, timeout: float = 3.0) -> dict[str, object] | None:
+    request_id = f"sidebar_backend_{int(time.time() * 1000)}_{abs(hash((sid, method))) % 1000000}"
+    envelope = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": method,
+        "params": params,
+    }
+    try:
+        response = await ns.call(
+            "rpc",
+            envelope,
+            to=sid,
+            namespace="/sidebar_ipc",
+            timeout=timeout,
+        )
+    except Exception as exc:
+        print(f"[sidebar_ipc_rpc] peer call failed method={method} sid={sid} err={exc}", flush=True)
+        return None
+    return response if isinstance(response, dict) else None
+
+
+async def _call_first_agent_edit_peer(ns, method: str, params: dict, *, exclude_sid: str | None = None) -> dict[str, object]:
+    for sid in list(_agent_edit_peer_sids):
+        if exclude_sid and sid == exclude_sid:
+            continue
+        response = await _call_sidebar_rpc_peer(ns, sid, method, params)
+        if not response:
+            continue
+        result = response.get("result")
+        if isinstance(result, dict):
+            result_map = {str(key): item for key, item in result.items() if isinstance(key, str)}
+            result_map.setdefault("ok", True)
+            return result_map
+        error = response.get("error")
+        if isinstance(error, dict):
+            return {"ok": False, "error": str(error.get("message") or "agent edit peer error")}
+    return {"ok": False, "available": False, "error": "no agent edit peer available"}
 
 
 async def _emit_client_state(ns, client_id: str, *, to_sid: str | None = None, skip_sid: str | None = None):
@@ -179,6 +237,36 @@ async def emit_sidebar_mention_global(payload: JsonObject) -> None:
     )
 
 
+async def request_agent_edit_document_state_from_peers(
+    payload: JsonObject,
+    *,
+    exclude_sid: str | None = None,
+) -> JsonObject:
+    from .ui_ipc_socketio import UI_IPC_SIO
+
+    return await _call_first_agent_edit_peer(
+        UI_IPC_SIO,
+        SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET,
+        payload,
+        exclude_sid=exclude_sid,
+    )
+
+
+async def forward_agent_edit_decision_to_peers(
+    payload: JsonObject,
+    *,
+    exclude_sid: str | None = None,
+) -> JsonObject:
+    from .ui_ipc_socketio import UI_IPC_SIO
+
+    return await _call_first_agent_edit_peer(
+        UI_IPC_SIO,
+        SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DECIDE,
+        payload,
+        exclude_sid=exclude_sid,
+    )
+
+
 async def on_sidebar_register(ns, sid, data):
     if not isinstance(data, dict):
         data = {}
@@ -199,6 +287,10 @@ async def on_sidebar_register(ns, sid, data):
         _registered_hosts.add(sid)
         await ns.enter_room(sid, "sidebar:hosts")
 
+    if _has_agent_edit_capability(data):
+        _agent_edit_peer_sids.add(sid)
+        await ns.enter_room(sid, "sidebar:agent_edits")
+
     print(
         f"[sidebar_ipc] register sid={sid} role={role} ts={int(time.time() * 1000)}",
         flush=True,
@@ -216,6 +308,7 @@ async def on_sidebar_disconnect(ns, sid):
     if sid in _registered_iframes:
         _registered_iframes.discard(sid)
         removed = True
+    _agent_edit_peer_sids.discard(sid)
     _client_ids_by_sid.pop(sid, None)
     if removed:
         await _emit_presence(ns)
@@ -293,17 +386,24 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
         )
         return {"ok": True}
     if method == SIDEBAR_IPC_RPC_METHOD_FILE_EDIT:
-        if not _is_agent_sidebar_tracking_enabled():
-            print("[sidebar_ipc_rpc] file_edit dropped: trackAgentSidebarEdits disabled", flush=True)
-            return {"ok": False, "dropped": True, "reason": "trackAgentSidebarEdits disabled"}
-        await route_backend_open_request(
-            ns,
+        from ..host.agent_edit_review_backend import handle_sidebar_file_edit_review_signal
+
+        review_result = await handle_sidebar_file_edit_review_signal(
             params,
             source_name="sidebar_ipc_rpc",
-            log_prefix="[sidebar_ipc_rpc] file_edit",
-            request_prefix="sidebar_rpc",
+            source_sid=sid,
         )
-        return {"ok": True}
+        if _is_agent_sidebar_tracking_enabled():
+            await route_backend_open_request(
+                ns,
+                params,
+                source_name="sidebar_ipc_rpc",
+                log_prefix="[sidebar_ipc_rpc] file_edit",
+                request_prefix="sidebar_rpc",
+            )
+            return {"ok": True, "review": review_result, "navigation": "routed"}
+        print("[sidebar_ipc_rpc] file_edit review refreshed; navigation skipped: trackAgentSidebarEdits disabled", flush=True)
+        return {"ok": True, "review": review_result, "navigation": "skipped", "reason": "trackAgentSidebarEdits disabled"}
     if method == SIDEBAR_IPC_RPC_METHOD_MENTION:
         await on_sidebar_mention(ns, sid, params)
         return {"ok": True}
@@ -354,6 +454,46 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
         return await handle_sidebar_draft_clear_request(
             params,
             source_name="sidebar_ipc_rpc",
+        )
+    if method == SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET:
+        from ..host.agent_edit_review_backend import handle_sidebar_agent_edits_document_state_get_request
+
+        return await handle_sidebar_agent_edits_document_state_get_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+            source_sid=sid,
+        )
+    if method == SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_PUBLISH:
+        _agent_edit_peer_sids.add(sid)
+        from ..host.agent_edit_review_backend import handle_sidebar_agent_edits_publish_request
+
+        return await handle_sidebar_agent_edits_publish_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+        )
+    if method == SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_CLEAR:
+        _agent_edit_peer_sids.add(sid)
+        from ..host.agent_edit_review_backend import handle_sidebar_agent_edits_clear_request
+
+        return await handle_sidebar_agent_edits_clear_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+        )
+    if method == SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_LIST:
+        from ..host.agent_edit_review_backend import handle_sidebar_agent_edits_list_request
+
+        return await handle_sidebar_agent_edits_list_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+        )
+    if method == SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DECIDE:
+        _agent_edit_peer_sids.add(sid)
+        from ..host.agent_edit_review_backend import handle_sidebar_agent_edits_decide_request
+
+        return await handle_sidebar_agent_edits_decide_request(
+            params,
+            source_name="sidebar_ipc_rpc",
+            source_sid=sid,
         )
     if method == SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET:
         client_id = await _resolve_client_id(ns, sid, params)

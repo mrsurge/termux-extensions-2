@@ -7,6 +7,7 @@ from typing import cast
 
 from .editor_host_actions_backend import handle_editor_host_action
 from .editor_rpc_contract import (
+    EDITOR_RPC_METHOD_AGENT_EDITS_DECIDE,
     EDITOR_RPC_METHOD_BLUR,
     EDITOR_RPC_METHOD_BREADCRUMB_NAVIGATE,
     EDITOR_RPC_METHOD_CACHE_STATE_PUBLISH,
@@ -179,6 +180,11 @@ async def dispatch_editor_rpc_request(
     if method == EDITOR_RPC_METHOD_MENTION_REQUEST:
         return await handle_editor_mention_request(params)
 
+    if method == EDITOR_RPC_METHOD_AGENT_EDITS_DECIDE:
+        from ..host.agent_edit_review_backend import handle_editor_agent_edits_decide_request
+
+        return await handle_editor_agent_edits_decide_request(params)
+
     if method == EDITOR_RPC_METHOD_READY_PUBLISH:
         await emit_to_room("editor:ready", _payload_with_source(params, source_client))
         return {"ok": True}
@@ -197,6 +203,12 @@ async def dispatch_editor_rpc_request(
 
     if method == EDITOR_RPC_METHOD_OPEN_COMPLETE_PUBLISH:
         await emit_to_room("editor:open_complete", _payload_with_source(params, source_client))
+        try:
+            from ..host.agent_edit_review_backend import handle_editor_open_complete_for_agent_edits
+
+            await handle_editor_open_complete_for_agent_edits(params)
+        except Exception as exc:
+            print(f"[agent_edit_review] open-complete hydration failed err={exc}", flush=True)
         return {"ok": True}
 
     if method == EDITOR_RPC_METHOD_DIAGNOSTICS_COUNTS_PUBLISH:

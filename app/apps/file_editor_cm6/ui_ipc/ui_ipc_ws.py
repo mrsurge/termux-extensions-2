@@ -6,14 +6,14 @@ and may be relayed here by backend hooks when the host page is the consumer.
 
 Python only logs traffic for observability.
 
-Console events (``console:*``) are delegated to ``console_ws`` handlers.
+Console traffic is framework-owned by ``app.te2_console_runtime`` on
+``/te2_console``; UI IPC does not relay ``console:*`` events.
 Sidebar IPC only accepts typed JSON-RPC envelopes on the ``/sidebar_ipc``
 namespace.
 """
 
 import socketio
 
-from . import console_ws
 from . import sidebar_ws
 from .rpc_contract import (
     UI_IPC_RPC_NAMESPACE,
@@ -64,9 +64,8 @@ async def emit_ui_ipc_rpc_notification(
 
 class UIIPCNamespace(socketio.AsyncNamespace):
 
-    # python-socketio dispatches via 'on_' + event_name, but colons in
-    # event names (e.g. 'console:log') produce 'on_console:log' which
-    # can't be a Python method name.  Translate colons to underscores.
+    # python-socketio dispatches via 'on_' + event_name. Translate colons to
+    # underscores for typed event names such as rpc.notify.
     async def trigger_event(self, event, *args):
         normalized = event.replace(':', '_') if event else event
         handler_name = 'on_' + (normalized or '')
@@ -125,8 +124,6 @@ class UIIPCNamespace(socketio.AsyncNamespace):
     async def on_disconnect(self, sid, reason=None):
         room = "sidebar_ipc" if self.namespace == "/sidebar_ipc" else "ui_ipc"
         print(f"[{room}] disconnect sid={sid} reason={reason}", flush=True)
-        if self.namespace == "/ui_ipc":
-            await console_ws.on_console_disconnect(self, sid)
         await sidebar_ws.on_sidebar_disconnect(self, sid)
 
     async def _emit_ui_ipc_rpc_notification(
@@ -178,26 +175,3 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 code=-32603,
                 message=str(exc),
             )
-
-    # ─── Console event delegation ──────────────────────────────
-
-    async def on_console_register(self, sid, data):
-        await console_ws.on_console_register(self, sid, data)
-
-    async def on_console_unregister(self, sid, data):
-        await console_ws.on_console_unregister(self, sid, data)
-
-    async def on_console_log(self, sid, data):
-        await console_ws.on_console_log(self, sid, data)
-
-    async def on_console_eval(self, sid, data):
-        await console_ws.on_console_eval(self, sid, data)
-
-    async def on_console_evalResult(self, sid, data):
-        await console_ws.on_console_eval_result(self, sid, data)
-
-    async def on_console_replay(self, sid, data):
-        await console_ws.on_console_replay(self, sid, data)
-
-    async def on_console_clear(self, sid, data):
-        await console_ws.on_console_clear(self, sid, data)

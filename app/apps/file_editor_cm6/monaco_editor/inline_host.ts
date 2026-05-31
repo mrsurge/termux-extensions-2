@@ -13,6 +13,14 @@ const INLINE_EDITOR_STYLE_ASSETS = [
     id: 'fe-inline-monaco-breadcrumbs-css',
     href: '/apps/file_editor_cm6/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css',
   },
+  {
+    id: 'fe-chat-editor-controller-css',
+    href: '/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css',
+  },
+  {
+    id: 'fe-chat-editing-editor-overlay-css',
+    href: '/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css',
+  },
 ] as const;
 const INLINE_EDITOR_SCRIPT_ASSETS = [
   {

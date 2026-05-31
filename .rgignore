@@ -22,6 +22,8 @@ android/app/build/
 
 # Broad third-party/vendor payloads
 app/static/vendor/
+app/apps/*/vendor/
+app/apps/*/static/vendor/
 app/apps/file_editor_cm6/vendor/highlightjs/
 app/apps/file_editor_cm6/vendor/hterm/
 app/apps/file_editor_cm6/monaco_editor/textmate/

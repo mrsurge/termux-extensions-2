@@ -2579,143 +2579,49 @@ The ext host returns a minified DTO with single-letter field names for wire effi
 
 ## 25) Console Observability System (vConsole + Socket.IO)
 
-A browser-side console log viewer built on [Tencent vConsole](https://github.com/Tencent/vConsole), integrated into the terminal drawer as a second tab.  Multiple frontends (main page, inline editor runtime, future apps) ship serialized `console.*` output through the existing `ui_ipc` Socket.IO namespace to a single vConsole drawer UI.
+Console observability is framework-owned. Browser producers and drawer clients use namespace `/te2_console` on path `/te2_console_ws/socket.io`, backed by `app/te2_console_runtime.py` and mounted by `app/te2_runtime_mounts.py`.
+
+The old worker-owned `/ui_ipc` console relay has been removed from the live source path. `ui_ipc` does not handle `console:*` events.
 
 ### Architecture overview
 
 ```
-┌─────────────┐  console:log   ┌──────────────┐  console:log   ┌────────────────┐
-│  main page  │───────────────▸│              │───────────────▸│  Console tab   │
-│  (bridge)   │                │  Python      │                │  (vConsole UI) │
-├─────────────┤  console:log   │  relay       │  replay on     │  in drawer     │
-│  inline     │───────────────▸│  + disk      │  connect       │                │
-│  editor     │                │  append      │───────────────▸│  origin filter │
-│  (bridge)   │                └──────────────┘                └────────────────┘
-└─────────────┘                  ▼
-                          ~/.cache/cm6_editor/
-                          console_log.jsonl
+┌─────────────┐  console:log   ┌───────────────────────┐  console:log   ┌────────────────┐
+│ main_page   │───────────────▸│ framework TE2 console │───────────────▸│ Console drawer │
+│ bridge      │                │ /te2_console          │ replay/eval    │ vConsole UI    │
+└─────────────┘                └───────────────────────┘                └────────────────┘
+                                      ▼
+                         ~/.cache/app_server/
+                         te2_console_log.jsonl
 ```
-
-- **No in-memory log buffer** on the Python side — relay is pass-through + disk append.
-- Disk log is **wiped on server boot** (one session per Python process lifetime).
-- New drawer connections get a **full replay** from disk before switching to live.
 
 ### Files
 
 | File | Role |
 |------|------|
-| `static/js/console_bridge.js` | Agnostic console monkey-patcher — patches `console.*`, serializes args, emits `console:log` on ui_ipc. Reusable on any frontend. |
-| `static/js/console.js` | Drawer UI module — loads vConsole dynamically, connects as `role: 'drawer'`, renders incoming `console:log` events via `vConsole.log.<level>()` plugin API. |
-| `static/vendor/vconsole/vconsole.min.js` | Vendored vConsole 3.x dist (MIT). |
-| `ui_ipc/console_ws.py` | Python event handlers — `console:register`, `console:log`, `console:eval`, `console:evalResult`. Disk-backed JSONL append + replay. |
-| `ui_ipc/ui_ipc_ws.py` | Delegates `console:*` events to `console_ws.py`. |
-| `template.html` | Drawer tab bar (Terminal \| Console), console header (origin dropdown + clear), `#console-container`, vConsole CSS overrides. |
-| `main.js` | Imports bridge + console modules, wires tab switching, View menu toggle. |
-| `monaco_editor/m_editor_app.ts` | Inline bridge for the inline editor runtime on `main_page` — reuses `uiIpcSocket`; legacy source labels in older code paths are not the authoritative runtime description for the current path. |
+| `app/te2_console_runtime.py` | Framework-owned Socket.IO console runtime and transcript storage. |
+| `app/te2_runtime_mounts.py` | Mounts `/te2_console_ws/socket.io`. |
+| `app/te2_mcp/te2_console_client.py` | MCP in-process eval/list bridge to the framework console runtime. |
+| `app/apps/file_editor_cm6/main_page/frontend/console_bridge.js` | Browser console monkey-patcher; emits `console:log` and handles `console:eval` over `/te2_console`. |
+| `app/apps/file_editor_cm6/main_page/frontend/host-console-drawer.ts` | vConsole drawer client; registers as `role: "drawer"` on `/te2_console`. |
+| `android/app/src/main/java/com/termux/extensions/UiIpcClient.kt` | Native Android console drawer client; connects to `/te2_console`. |
 
-### Event protocol (all on `/ui_ipc` namespace)
+### Event protocol
 
 | Event | Direction | Payload | Notes |
 |-------|-----------|---------|-------|
-| `console:register` | client → server | `{ role: 'drawer' \| 'worker', workerId? }` | Drawer joins `console:drawers` room + gets replay. Worker joins `console:<workerId>` room. |
-| `console:log` | worker → server → drawers | `{ workerId, level, ts, args[] }` | `args` are JSON-safe (pre-serialized by bridge via `safeSerialize()`). Appended to disk. |
-| `console:eval` | drawer → server → worker | `{ targetWorkerId, reqId, code }` | Routed to `console:<workerId>` room only. |
-| `console:evalResult` | worker → server → drawers | `{ workerId, reqId, ok, value\|error }` | Forwarded to `console:drawers` room. |
-
-### Room layout
-
-- `console:drawers` — all drawer clients (receives fan-out of every `console:log`)
-- `console:<workerId>` — per-worker room (used for targeted `console:eval` routing)
-
-### Console bridge (`console_bridge.js`)
-
-The bridge is **not** a vConsole instance — it's a lightweight monkey-patcher + serializer:
-
-1. Wraps `console.log/info/warn/error/debug` — captures method name (categorization) + args
-2. `safeSerialize()` handles circular refs, BigInt, Error objects, DOM elements → JSON-safe output
-3. Adds `Date.now()` timestamp and `workerId`
-4. Emits over socket as `console:log`
-5. Captures `window.onerror` and `unhandledrejection` as error-level entries
-6. Supports `console:eval` for remote code execution from the drawer — retries
-   bare object literals wrapped in parens on SyntaxError (matches browser DevTools behavior)
-
-vConsole is only needed on the **drawer side** for rendering. The bridge just ships data.
-
-### Origin filter (drawer header)
-
-The console tab header contains a "Source" dropdown (uses `fe-menu` / `fe-dropdown` CSS classes) that filters incoming logs by `workerId`:
-- **All** — shows everything with `[workerId]` prefix tags
-- **\<workerId\>** — shows only that origin's logs
-
-Workers are discovered dynamically from incoming `console:log` events and added to the dropdown. A "Clear" button calls `vConsole.log.clear()`.
-
-### Disk persistence
-
-- **Path**: `~/.cache/cm6_editor/console_log.jsonl`
-- **Format**: Newline-delimited JSON, one `console:log` payload per line
-- **Lifecycle**: Wiped on Python server boot → accumulates for session → wiped next boot
-- **Replay**: On drawer `console:register`, the entire file is streamed line-by-line via `ns.emit("console:log", entry, to=sid)`
-- **No memory buffer**: Python holds zero log data in RAM — reads from disk for replay, appends via open file handle with per-write flush
-
-### Script loading
-
-Template HTML is injected via `innerHTML` (app_shell.html line 547–549), which **does not execute `<script>` tags**. vConsole and Socket.IO are loaded dynamically via `document.createElement('script')`:
-
-```js
-function ensureVConsoleLoaded() {
-  if (window.VConsole) return Promise.resolve(window.VConsole);
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = '/apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js';
-    script.onload = () => resolve(window.VConsole);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
-```
-
-Same pattern as `ensureSocketIoLoaded()` in main.js. Both must resolve before their dependents initialize.
-
-### Duplicate suppression (vConsole capture bypass)
-
-vConsole monkey-patches `console.*` on instantiation, which would double-display main-page logs (once from vConsole's own capture, once from our bridge round-trip). To prevent this, `console.js` saves the current `console.*` methods — which are already our bridge wrappers — **before** calling `new VConsole()`, then restores them immediately after:
-
-```js
-// Before vConsole init:
-const saved = { log: console.log, info: console.info, ... };
-
-// After new VConsole():
-console.log = saved.log;  // restore bridge wrappers
-```
-
-This neuters vConsole's built-in capture layer. All log traffic flows exclusively through the bridge → Python → drawer socket path, where each entry carries a `workerId` label and is persisted to disk. vConsole only renders what we explicitly feed it via `vConsole.log.<level>()`.
-
-### Remote eval via vConsole command bar
-
-The vConsole command bar normally calls `eval.call(window, cmd)` locally. Since our console is a remote viewer, `console.js` monkey-patches `evalCommand` on the log model singleton to route through the socket:
-
-1. User types command in vConsole's input bar
-2. Patched `evalCommand` emits `console:eval` to the worker selected in the origin dropdown
-3. Worker's bridge calls `eval()` locally and emits `console:evalResult`
-4. Result is displayed in vConsole via `model.addLog()` with `cmdType: 'output'`
-
-The log model singleton is accessed via `vConsoleInstance.pluginList['default'].model` (`pluginList` is a dict keyed by plugin id in the minified build).
-
-### Filter-triggered replay
-
-When the user changes the origin dropdown selection, the drawer:
-1. Calls `vConsole.log.clear()` to wipe the current display
-2. Emits `console:replay` to Python, which re-streams the entire disk log
-3. `_handleLog()` applies the new `activeFilter`, showing only matching entries
-
-This ensures users see the complete filtered history, not just logs from the moment of filter change.
+| `console:register` | client -> server | `{ role: "drawer" | "worker", workerId?, workerLabel?, tail_lines? }` | Drawers join `console:drawers`; workers join `console:<workerId>`. |
+| `console:log` | worker -> server -> drawers | `{ workerId, workerLabel?, level, ts, args[] }` | Appended to the framework transcript and fanned out to drawers. |
+| `console:eval` | drawer/MCP -> server -> worker | `{ targetWorkerId, reqId, code }` | Routed only to `console:<workerId>`. |
+| `console:evalResult` | worker -> server -> drawers/MCP waiter | `{ workerId, reqId, ok, value|error }` | Resolves pending evals and fans out to drawers. |
+| `console:replay` | drawer -> server | `{ tail_lines? }` | Replays transcript entries from `~/.cache/app_server/te2_console_log.jsonl`. |
+| `console:clear` | drawer -> server -> drawers | `{}` | Clears transcript and drawer state. |
 
 ### vConsole integration notes
 
-- vConsole keeps **raw JS references** (`origData: any`) in its internal log store — not serializable. The pretty-printing happens in Svelte render components, not in the data model.
-- `vConsole.log.log()` / `.info()` / `.warn()` / `.error()` write to the Log panel **only** (no browser console echo) — this prevents infinite loops when the bridge is also active.
-- `vConsole.hideSwitch()` hides the floating toggle button; `vConsole.show()` opens the panel. We control visibility from the drawer tab, not vConsole's own UI.
-- CSS overrides in template.html force `#__vconsole` into relative positioning to fill `#console-container` instead of using vConsole's default fixed overlay.
+- vConsole is drawer-only. The producer bridge just patches browser `console.*`, serializes args, and ships events.
+- The drawer writes TE2 console rows through vConsole's `model.addLog(..., { noOrig: true })` path so replayed rows do not feed back into the framework console bridge.
+- The main page bridge uses `workerLabel: "main_page"` plus `uniquePerWindow: true`; runtime inspection should target the exact generated worker id.
 
 ## 26) Monarch Palette Corruption Fix (Universal)
 

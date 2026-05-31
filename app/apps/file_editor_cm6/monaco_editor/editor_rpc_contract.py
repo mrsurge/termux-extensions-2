@@ -29,6 +29,7 @@ EDITOR_RPC_METHOD_DRAFT_DIFF_GET: Final = "editor.draftDiff.get"
 EDITOR_RPC_METHOD_MIRROR_PUBLISH: Final = "editor.mirror.publish"
 EDITOR_RPC_METHOD_SAVE: Final = "editor.save"
 EDITOR_RPC_METHOD_MENTION_REQUEST: Final = "editor.mention.request"
+EDITOR_RPC_METHOD_AGENT_EDITS_DECIDE: Final = "editor.agentEdits.decide"
 EDITOR_RPC_METHOD_HOST_SAVE: Final = "editor.host.save"
 EDITOR_RPC_METHOD_FOCUS: Final = "editor.focus"
 EDITOR_RPC_METHOD_BLUR: Final = "editor.blur"
@@ -52,6 +53,7 @@ EditorRpcMethod = Literal[
     "editor.mirror.publish",
     "editor.save",
     "editor.mention.request",
+    "editor.agentEdits.decide",
     "editor.host.save",
     "editor.focus",
     "editor.blur",
@@ -93,6 +95,7 @@ EDITOR_RPC_NOTIFICATION_EDIT_COMMAND: Final = "editor.edit.command"
 EDITOR_RPC_NOTIFICATION_OPEN_STATE_CHANGED: Final = "editor.openState.changed"
 EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHING: Final = "editor.project.switching"
 EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHED: Final = "editor.project.switched"
+EDITOR_RPC_NOTIFICATION_AGENT_EDITS_CHANGED: Final = "editor.agentEdits.changed"
 
 EditorRpcNotification = Literal[
     "editor.state.ssot",
@@ -120,6 +123,7 @@ EditorRpcNotification = Literal[
     "editor.openState.changed",
     "editor.project.switching",
     "editor.project.switched",
+    "editor.agentEdits.changed",
 ]
 
 

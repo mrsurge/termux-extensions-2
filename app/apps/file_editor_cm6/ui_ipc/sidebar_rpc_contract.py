@@ -26,6 +26,11 @@ SIDEBAR_IPC_RPC_METHOD_PROJECT_CREATE: Final = "sidebar.project.create"
 SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST: Final = "sidebar.drafts.list"
 SIDEBAR_IPC_RPC_METHOD_DRAFT_STATE_GET: Final = "sidebar.draftState.get"
 SIDEBAR_IPC_RPC_METHOD_DRAFT_CLEAR: Final = "sidebar.draft.clear"
+SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET: Final = "sidebar.agentEdits.documentState.get"
+SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_PUBLISH: Final = "sidebar.agentEdits.publish"
+SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_CLEAR: Final = "sidebar.agentEdits.clear"
+SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_LIST: Final = "sidebar.agentEdits.list"
+SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DECIDE: Final = "sidebar.agentEdits.decide"
 SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET: Final = "sidebar.activeShortcut.set"
 SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH: Final = "sidebar.activeShortcut.refresh"
 SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN: Final = "sidebar.drawer.open"
@@ -45,6 +50,11 @@ SidebarIpcRpcMethod = Literal[
     "sidebar.drafts.list",
     "sidebar.draftState.get",
     "sidebar.draft.clear",
+    "sidebar.agentEdits.documentState.get",
+    "sidebar.agentEdits.publish",
+    "sidebar.agentEdits.clear",
+    "sidebar.agentEdits.list",
+    "sidebar.agentEdits.decide",
     "sidebar.activeShortcut.set",
     "sidebar.activeShortcut.refresh",
     "sidebar.drawer.open",
@@ -91,6 +101,11 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST,
     SIDEBAR_IPC_RPC_METHOD_DRAFT_STATE_GET,
     SIDEBAR_IPC_RPC_METHOD_DRAFT_CLEAR,
+    SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET,
+    SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_PUBLISH,
+    SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_CLEAR,
+    SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_LIST,
+    SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_DECIDE,
     SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_SET,
     SIDEBAR_IPC_RPC_METHOD_ACTIVE_SHORTCUT_REFRESH,
     SIDEBAR_IPC_RPC_METHOD_DRAWER_OPEN,

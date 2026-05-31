@@ -3,6 +3,13 @@ import { handleDraftDiffEvent } from './editor_socket_draft_diff_handler_utils.j
 import { handleIssuesDumpRequest } from './editor_socket_issues_dump_handler_utils.js';
 import { handleIssuesCommand } from './editor_socket_issues_cmd_handler_utils.js';
 import { handleFindCommand } from './editor_socket_find_cmd_handler_utils.js';
+import { createAgentEditReviewRuntime } from './editor_agent_edit_review_runtime.ts';
+
+interface DisposableRuntime {
+  dispose(): void;
+}
+
+let activeAgentEditReviewRuntime: DisposableRuntime | null = null;
 
 interface EditorSocketLike {
   on(eventName: string, handler: (payload: unknown) => void): void;
@@ -21,6 +28,9 @@ interface EditorRuntimeSocketHandlerDeps {
   getModel(): unknown;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   getEditor(): unknown;
+  getDocument(): Document | null;
+  rpcCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
+  schedule(callback: () => void, delayMs: number): unknown;
   runIssuesCommand(editor: unknown, action: string): void;
   runFindCommand(editor: unknown, action: string, onError: (error: unknown) => void): void;
   runEditCommand(editor: unknown, command: string): boolean;
@@ -45,6 +55,29 @@ export function registerEditorRuntimeSocketHandlers(
 
   if (deps.rpcNotifications) {
     deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.draftDiff, handleDraftDiffPayload);
+  }
+
+  try { activeAgentEditReviewRuntime?.dispose(); } catch (_) {}
+
+  const agentEditReviewRuntime = createAgentEditReviewRuntime({
+    getDocument: deps.getDocument,
+    getEditor: deps.getEditor,
+    getModel: deps.getModel,
+    getMonaco: deps.getMonaco,
+    getCurrentPath: deps.getCurrentPath,
+    rpcCall: deps.rpcCall,
+    schedule: deps.schedule,
+  });
+  activeAgentEditReviewRuntime = agentEditReviewRuntime;
+
+  if (deps.rpcNotifications) {
+    deps.rpcNotifications.onNotification(EDITOR_RPC_NOTIFICATIONS.agentEditsChanged, (payload) => {
+      try {
+        agentEditReviewRuntime.scheduleReapply(payload);
+      } catch (error) {
+        console.warn('[AgentEditReview] handler failed', error);
+      }
+    });
   }
 
   const handleIssuesDumpRequestPayload = (payload: unknown): void => {

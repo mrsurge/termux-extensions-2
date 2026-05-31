@@ -25,13 +25,12 @@
  * }} deps
  */
 export function installAdvancedMenuActions(deps: any) {
-  let preTrackingPrefs: { showInlineDiffs: boolean; readOnly: boolean } | null = null;
+  let preTrackingPrefs: { readOnly: boolean } | null = null;
   const s = () => deps.getEditorViewState();
   const anyTracking = () => !!(s()?.trackAgentSidebarEdits);
 
   async function restorePreTrackingPrefsIfIdle() {
     if (anyTracking() || !preTrackingPrefs) return;
-    await deps.updatePreference('showInlineDiffs', !!preTrackingPrefs.showInlineDiffs);
     await deps.updatePreference('readOnly', !!preTrackingPrefs.readOnly);
     preTrackingPrefs = null;
   }
@@ -47,11 +46,9 @@ export function installAdvancedMenuActions(deps: any) {
     if (enabling) {
       if (!preTrackingPrefs) {
         preTrackingPrefs = {
-          showInlineDiffs: s()?.showInlineDiffs ?? true,
           readOnly: s()?.readOnly ?? false,
         };
       }
-      await deps.updatePreference('showInlineDiffs', true);
       await deps.updatePreference('readOnly', true);
       const success = await deps.updatePreference(targetKey, true);
       if (!success) deps.toast('Failed to enable edit tracking');
@@ -109,7 +106,6 @@ export function installAdvancedMenuActions(deps: any) {
     }
     const success = await deps.updatePreference('showInlineDiffs', !turningOff);
     if (!success) { deps.toast('Failed to update preference'); return; }
-    if (turningOff && anyTracking()) await disableAllEditTracking('Auto-track edits disabled (requires commit diff)');
   });
 
   deps.bindMenuToggle(deps.els.miToggleDraftDiffs, async () => {

@@ -45,6 +45,7 @@ from .editor_view_state_backend import (
     build_editor_jump_to_line_payload,
 )
 from .editor_rpc_contract import (
+    EDITOR_RPC_NOTIFICATION_AGENT_EDITS_CHANGED,
     EDITOR_RPC_NOTIFICATION_CACHE_STATE,
     EDITOR_RPC_NOTIFICATION_DIAGNOSTICS_COUNTS,
     EDITOR_RPC_NOTIFICATION_DRAFT_STATE,
@@ -633,6 +634,7 @@ def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification
         "editor:issues_cmd": EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND,
         "editor:find_cmd": EDITOR_RPC_NOTIFICATION_FIND_COMMAND,
         "editor:edit_cmd": EDITOR_RPC_NOTIFICATION_EDIT_COMMAND,
+        "editor:agent_edits_changed": EDITOR_RPC_NOTIFICATION_AGENT_EDITS_CHANGED,
     }
     return mapping.get(event_name)
 

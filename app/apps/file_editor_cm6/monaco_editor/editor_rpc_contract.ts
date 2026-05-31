@@ -42,6 +42,7 @@ export const EDITOR_RPC_METHODS = {
   mirrorPublish: 'editor.mirror.publish',
   save: 'editor.save',
   mentionRequest: 'editor.mention.request',
+  agentEditsDecide: 'editor.agentEdits.decide',
   hostSave: 'editor.host.save',
   focus: 'editor.focus',
   blur: 'editor.blur',
@@ -86,6 +87,7 @@ export const EDITOR_RPC_NOTIFICATIONS = {
   openStateChanged: 'editor.openState.changed',
   projectSwitching: 'editor.project.switching',
   projectSwitched: 'editor.project.switched',
+  agentEditsChanged: 'editor.agentEdits.changed',
 } as const;
 
 export type EditorRpcNotificationName = (typeof EDITOR_RPC_NOTIFICATIONS)[keyof typeof EDITOR_RPC_NOTIFICATIONS];

@@ -33,6 +33,14 @@ Agent edit review ownership:
 - Project switching should not require durable TE2 state. The render cache can be process-memory scoped and filtered by URI/project/thread/session on display. TE2 can rehydrate opened documents by URI after reconnect; ALS can also republish current state after reconnect or TE2 restart.
 - ALS and TE2 are semantic peers for this feature even though the transport shape is client-like. Neither side should treat the other side's absence as a hard editor/app error.
 
+`Track agent edits` menu behavior:
+
+- This menu option remains the idle behavior control for the existing sidebar-agent edit tracking system. It is only loosely correlated with inline agent edit review.
+- Turning it on keeps the existing read-only behavior and the existing sidebar file-edit tracking behavior.
+- Turning it on must not force or lock the editor into commit/git diff mode. Commit diff and disk-vs-draft diff remain independent view modes.
+- Turning it off keeps the existing tracking-off behavior.
+- Inline agent edit review is hydrated by open URI and ALS projection state regardless of this preference. The two systems should not grow hidden logical dependencies.
+
 ## Peer Availability And Failure Semantics
 
 ALS and TE2 should both tolerate the other side being absent, disconnected, or restarted.
@@ -57,6 +65,8 @@ The preferred failure contract is neutral absence: empty state, disabled afforda
 
 - Backend sidebar RPC contract: `app/apps/file_editor_cm6/ui_ipc/sidebar_rpc_contract.py`
 - Sidebar dispatch edge: `app/apps/file_editor_cm6/ui_ipc/sidebar_ws.py`
+- Agent edit review backend projection cache: `app/apps/file_editor_cm6/host/agent_edit_review_backend.py`
+- Editor inline agent edit affordance runtime: `app/apps/file_editor_cm6/monaco_editor/editor_agent_edit_review_runtime.ts`
 - Sidecar draft store: `app/apps/file_editor_cm6/project_sidecar.py`
 - History draft facade: `app/apps/file_editor_cm6/history_store.py`
 - Existing Explorer review service: `app/apps/file_editor_cm6/explorer/review.py`
@@ -662,6 +672,40 @@ ALS owns:
 10. Forward editor decision intents to ALS, mark local controls pending/disabled, and clear/update widgets only from the next ALS projection.
 11. Add ALS-side decision handling so accept clears ledger state, reject applies ALS-owned reverse patch/restore, and stale/error states republish with messages.
 12. Only revisit draft save/patch RPCs if a concrete harness workflow needs TE2 to mutate more draft state.
+
+## ALS-Side Progress
+
+ALS-RS now has the first backend-only slice for the inline agent edit review contract. TE2 now has the matching first bridge/rendering slice, but ALS still owns the canonical ledger and final reject restore/revert payload.
+
+Implemented on the ALS side:
+
+- A separate Rust `inline_agent_edits` ledger owns URI-scoped inline edit projections, source metadata, monotonic `ledgerRevision`, per-edit/per-hunk `revision`, and states such as `pending`, `accepted`, `rejected`, and `stale`; this is separate from the existing Project modal tracked-diff ledger. Citations: `/data/data/com.termux/files/home/test-projects/als_rs/rust/crates/als-server/src/inline_agent_edits.rs:9-37`; `/data/data/com.termux/files/home/test-projects/als_rs/.repo_memory.md:823-828`.
+- `agentEdits.publish` accepts ALS-owned edit projections and stores or replaces records by source and edit id; `agentEdits.documentState.get` hydrates one document URI and supports `knownLedgerRevision` / `known_ledger_revision` returning `notModified`. Citations: `/data/data/com.termux/files/home/test-projects/als_rs/rust/crates/als-server/src/inline_agent_edits.rs:37-140`; `/data/data/com.termux/files/home/test-projects/als_rs/rust/crates/als-server/src/ui_rpc.rs:76-80`.
+- `agentEdits.clear`, `agentEdits.list`, and `agentEdits.decide` are exposed through ALS-RS `/rpc/ui`; `decide` currently handles accept/reject state transitions and stale `knownRevision` guards, but real reject restore/revert still waits on the final inline-chat restore payload shape. Citations: `/data/data/com.termux/files/home/test-projects/als_rs/rust/crates/als-server/src/inline_agent_edits.rs:142-240`; `/data/data/com.termux/files/home/test-projects/als_rs/rust/crates/als-server/src/ui_rpc.rs:76-80`.
+- The ledger is registered in ALS-RS app state and server modules, so the UI RPC methods share process-local state across calls. Citations: `/data/data/com.termux/files/home/test-projects/als_rs/rust/crates/als-server/src/main.rs:1-14`; `/data/data/com.termux/files/home/test-projects/als_rs/rust/crates/als-server/src/state.rs:24-64`.
+- Unit coverage exercises document-state grouping, `knownLedgerRevision` not-modified responses, accept/hunk state updates, stale decisions, and targeted clear behavior. Full ALS validation also passed with `cargo test --manifest-path rust/Cargo.toml -p als-server` reporting 77 passing tests. Citation: `/data/data/com.termux/files/home/test-projects/als_rs/rust/crates/als-server/src/inline_agent_edits.rs:477-602`.
+
+Remaining ALS-side work:
+
+- define the final restore/revert payload shape for true reject semantics;
+- keep this inline document-state system loosely correlated with, but not logically merged into, the existing Project modal tracked-diff system.
+
+## TE2-Side Progress
+
+Implemented on the TE2 side:
+
+- `/sidebar_ipc` now accepts the inline agent edit review peer methods `sidebar.agentEdits.documentState.get`, `sidebar.agentEdits.publish`, `sidebar.agentEdits.clear`, `sidebar.agentEdits.list`, and `sidebar.agentEdits.decide` through the typed sidebar RPC contract.
+- `host/agent_edit_review_backend.py` keeps a process-memory render cache, tracks opened document URIs, forwards URI hydration/decision requests to registered sidebar peers, and emits editor updates as `editor.agentEdits.changed`.
+- Editor open-complete publication now runs agent edit URI hydration late in the open flow, after the normal editor open-complete fanout.
+- Review publication emits a toast with a relative path when the file is inside the current project and an absolute path otherwise.
+- The Monaco editor now has a first inline affordance runtime that filters edit projections by active URI, renders hunk-level accept/reject controls, disables controls while a decision is pending, and forwards `editor.agentEdits.decide` to the backend.
+- The host `Track agent edits` action no longer forces commit diff mode when enabled and no longer disables tracking merely because commit diff is turned off.
+
+Remaining TE2 work:
+
+- rehydrate all tracked open URIs on sidebar peer reconnect instead of only hydrating the current open-complete URI;
+- refine widget placement and multi-source grouping once ALS finalizes the live DTO shape;
+- decide whether a future UX pass should show grouped session/thread labels when multiple ALS conversations publish edits for the same URI.
 
 ## MCP / Sidebar DTO
 
