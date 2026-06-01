@@ -111,13 +111,20 @@ function hasOriginalDeletion(change: ChatEditingHunkRenderChange): boolean {
   return change.originalLines.length > 0 || inclusiveRangeLineCount(change.original) > 0;
 }
 
-function modifiedDecorationClass(change: ChatEditingHunkRenderChange): string {
-  if (changedLineDelta(change) < 0) return 'line-delete';
-  return 'line-insert';
+function hasModifiedInsertion(change: ChatEditingHunkRenderChange): boolean {
+  return change.modifiedLines.length > 0 || (!hasOriginalDeletion(change) && inclusiveRangeLineCount(change.modified) > 0);
 }
 
 function visualLineRange(change: ChatEditingHunkRenderChange, lineCount: number): { start: number; end: number } {
   const start = clampLine(asFiniteLine(change.modified.startLineNumber, 1), lineCount);
+  const explicitModifiedLines = change.modifiedLines.length;
+  if (explicitModifiedLines > 0) {
+    return { start, end: clampLine(start + explicitModifiedLines - 1, lineCount) };
+  }
+  const modifiedLineCount = inclusiveRangeLineCount(change.modified);
+  if (modifiedLineCount > 0) {
+    return { start, end: clampLine(start + modifiedLineCount - 1, lineCount) };
+  }
   const delta = changedLineDelta(change);
   if (delta < 0) {
     return { start, end: start };
@@ -208,22 +215,22 @@ export class ChatEditingHunkRenderer {
 
       for (const change of changes) {
         const { start: modifiedStart, end: modifiedEnd } = visualLineRange(change, lineCount);
-        const lineClass = modifiedDecorationClass(change);
-        const rendersOriginalZone = lineClass === 'line-delete' && change.originalLines.length > 0;
+        const rendersOriginalZone = hasOriginalDeletion(change);
+        const rendersModifiedInsertion = hasModifiedInsertion(change);
 
-        if (!rendersOriginalZone) {
+        if (rendersModifiedInsertion) {
           decorations.push({
             range: new this._deps.RangeCtor(modifiedStart, 1, Math.max(modifiedStart, modifiedEnd), 1),
             options: {
               description: 'chat-editing-decoration',
               isWholeLine: true,
-              className: lineClass,
-              marginClassName: lineClass === 'line-delete' ? 'gutter-delete' : 'gutter-insert',
+              className: 'line-insert',
+              marginClassName: 'gutter-insert',
             },
           });
         }
 
-        if (lineClass === 'line-insert') {
+        if (rendersModifiedInsertion) {
           decorations.push({
             range: new this._deps.RangeCtor(modifiedStart, 1, Math.max(modifiedStart, modifiedEnd), Number.MAX_SAFE_INTEGER),
             options: {
@@ -262,14 +269,16 @@ export class ChatEditingHunkRenderer {
     if (typeof this._deps.editor.changeViewZones !== 'function') {
       for (const change of changes) {
         const { start: modifiedStart, end: modifiedEnd } = visualLineRange(change, lineCount);
-        decorations.push({
-          range: new this._deps.RangeCtor(modifiedStart, 1, Math.max(modifiedStart, modifiedEnd), 1),
-          options: {
-            description: 'chat-editing-decoration',
-            isWholeLine: true,
-            className: modifiedDecorationClass(change),
-          },
-        });
+        if (hasOriginalDeletion(change) || hasModifiedInsertion(change)) {
+          decorations.push({
+            range: new this._deps.RangeCtor(modifiedStart, 1, Math.max(modifiedStart, modifiedEnd), 1),
+            options: {
+              description: 'chat-editing-decoration',
+              isWholeLine: true,
+              className: hasModifiedInsertion(change) ? 'line-insert' : 'line-delete',
+            },
+          });
+        }
         const widget = new DiffHunkWidget(
           this._deps.editor,
           change.diffInfo,
