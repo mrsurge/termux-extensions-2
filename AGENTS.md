@@ -89,11 +89,12 @@ This repo is the TE2 framework/workspace repo. The main user-facing workspace ap
 Use these references before guessing:
 
 - `.repo_memory.md` for concise current repo memory
+- `AGENTS.md` for the repo workflow gate
 - `docs/apps/code_cm6/CODE_TE2.md` for Code TE2 orientation
-- `docs/planning/FILE_EDITOR_CM6_OWNERSHIP_BOUNDARY_CONTRACT.md` for the current workspace ownership/RPC contract
+- `docs/planning/FILE_EDITOR_CM6_OWNERSHIP_BOUNDARY_CONTRACT.md` for workspace ownership/RPC reference material
 - `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for the broader direction
 
-Source wins over docs if they disagree. The ownership boundary contract is the gold-standard architecture note for `file_editor_cm6`.
+Source wins over docs if they disagree. `.repo_memory.md` and current source are the first check for current repo facts; planning docs can lag implementation.
 
 ## Important Acronyms
 
@@ -124,8 +125,8 @@ Core framework and app entrypoints:
 
 Open-file and project state authority:
 
-- `app/apps/file_editor_cm6/monaco_editor/open_state_backend.py`
-- `app/apps/file_editor_cm6/monaco_editor/project_sidecar.py`
+- `app/apps/file_editor_cm6/open_state_backend.py`
+- `app/apps/file_editor_cm6/project_sidecar.py`
 - `app/apps/file_editor_cm6/monaco_editor/editor_backend_services/open_service.py`
 
 Generated or bundled outputs such as `app/apps/file_editor_cm6/static/dist/` are not the source of truth unless the task explicitly targets built assets.
@@ -155,8 +156,8 @@ Current lanes:
 
 - Editor frontend -> `/rpc/editor` namespace, Socket.IO path `/editor_ws/socket.io`; backend in `monaco_editor/editor_rpc_dispatch.py`, `monaco_editor/editor_ws.py`, and editor backend services.
 - Explorer frontend -> `/rpc/explorer` namespace, Socket.IO path `/explorer_ws/socket.io`; backend in `explorer/transport/rpc_socketio.py`, `explorer_runtime.py`, and Explorer handlers/services.
-- Host/main-page frontend -> `/ui_ipc` namespace, Socket.IO path `/ui_ipc_ws/socket.io`; backend in `ui_ipc/rpc_dispatch.py` and `host/*`.
-- Sidebar shortcuts/windows -> `/sidebar_ipc` namespace on the app Socket.IO service, currently reached through the UI IPC Socket.IO path; backend in `ui_ipc/sidebar_ws.py` and sidebar RPC contract files.
+- Host/main-page frontend -> `/ui_ipc` namespace, Socket.IO path `/ui_ipc_ws/socket.io`; backend in `ui_ipc/rpc_dispatch.py` and `host/*`. UI IPC owns host/sidebar frontend UI updates and URL-apply commands.
+- Sidebar shortcuts/windows -> `/sidebar_ipc` namespace on the app Socket.IO service, currently reached through the UI IPC Socket.IO path; backend in `ui_ipc/sidebar_ws.py` and sidebar RPC contract files. For stateful sidebar app windows, Sidebar IPC is a backend-only app API lane: app frontends send state to their own backend, and app backends send app lane data plus the exact URL to open over Sidebar IPC.
 - Terminal frontend/shell surfaces -> `/terminal` namespace, Socket.IO path `/terminal_ws/socket.io`; backend terminal services and routes.
 - WBA/code-server intelligence -> `/wba` namespace, Socket.IO path `/wba_ws/socket.io`; Node adapter side owns this lane.
 - TE2 console -> `/te2_console` namespace, Socket.IO path `/te2_console_ws/socket.io`; framework-owned console/debug lane.
@@ -166,6 +167,7 @@ Examples of respecting the boundary:
 - Explorer open: Explorer UI sends `explorer.editor.open` on the Explorer RPC lane. The Explorer backend resolves the request, calls the editor backend open hook, and the editor backend records sidecar/open state and emits editor/open-state updates through the editor lane. Explorer UI does not call the editor socket directly.
 - Editor mention: Editor UI sends `editor.mention.request` on the editor RPC lane. The editor backend relays to the sidebar mention system, which fans out through `/sidebar_ipc`. Editor UI does not speak to `/sidebar_ipc` directly.
 - Host diagnostics mention: Host UI sends `ui.host.diagnostics.mention` on `/ui_ipc`. The host backend calls the sidebar mention helper. Host UI does not bypass its lane.
+- Stateful sidebar app URL update: app frontend constructs the state URL, posts it to its own app backend, and the app backend sends `sidebar.window.openUrl` over `/sidebar_ipc`. UI IPC applies the persisted URL to the sidebar frontend iframe stack.
 
 If a new action crosses domains, model it as: surface frontend -> that surface's RPC lane -> that surface's backend -> target backend hook/service -> target surface notification on its own lane.
 
