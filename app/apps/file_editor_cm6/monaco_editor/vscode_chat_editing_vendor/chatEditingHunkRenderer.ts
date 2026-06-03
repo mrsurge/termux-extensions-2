@@ -108,7 +108,7 @@ function changedLineDelta(change: ChatEditingHunkRenderChange): number {
 }
 
 function hasOriginalDeletion(change: ChatEditingHunkRenderChange): boolean {
-  return change.originalLines.length > 0 || inclusiveRangeLineCount(change.original) > 0;
+  return change.originalLines.length > 0;
 }
 
 function hasModifiedInsertion(change: ChatEditingHunkRenderChange): boolean {
