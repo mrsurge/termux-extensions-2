@@ -1,10 +1,10 @@
 // app/apps/file_editor_cm6/main_page/frontend/sidebar-shortcuts/runtime.ts
-// Sidebar shortcuts + iframe stack orchestration (kept out of main.js).
+// Sidebar app-window/plain-entry iframe stack orchestration (kept out of main.js).
 //
 // Owns:
-// - UI prefs wiring (agentToggleDisplay / agentHeaderDisplay / agentShortcuts / agentActiveShortcutId)
+// - UI prefs wiring (agent* preference names remain compatibility storage)
 // - Sidebar header icon list + title/icon rendering
-// - Shortcuts editor modal (URL + framework_app)
+// - Plain URL/fallback entry editor modal
 // - Iframe stack lifecycle (lazy/eager) with framework app start-before-load
 
 import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
@@ -13,16 +13,19 @@ import {
   requestExplorerRpc,
 } from '../../../src/explorer/rpc/client.ts';
 import {
-  SIDEBAR_IPC_RPC_METHODS,
   SIDEBAR_IPC_RPC_NOTIFICATIONS,
-  type SidebarIpcRpcMethod,
 } from '../../../src/sidebar_ipc/rpc_contract.ts';
+import {
+  UI_IPC_RPC_METHODS,
+  type UiIpcRpcMethod,
+} from '../../../src/ui_ipc/rpc_contract.ts';
 import {
   EXTENSION_MANIFEST_URL,
   SHORTCUT_KIND_FRAMEWORK_APP,
   SHORTCUT_KIND_URL,
   SHORTCUT_LOAD_EAGER,
   SHORTCUT_LOAD_LAZY,
+  SIDEBAR_DOCK_DEBUG_NUMBERS_FLAG,
   SIDEBAR_SHORTCUT_VERSION_PARAM,
   SIDEBAR_SETUP_HINT_DEFAULT,
   SIDEBAR_SETUP_TITLE_DEFAULT,
@@ -44,13 +47,12 @@ import {
 } from './icons.ts';
 import {
   collectShortcuts as collectShortcutsFromPrefs,
-  ensureActiveSelection as ensureShortcutActiveSelection,
   pickMruShortcut as pickMruShortcutFromModel,
-  resolveActive as resolveActiveShortcut,
 } from './shortcut-model.ts';
 import type {
   FrameworkAppManifest,
   IframeEntry,
+  SidebarAppDockSlot,
   SidebarShortcut,
   SidebarShortcutPreference,
   SidebarShortcutsOptions,
@@ -101,6 +103,16 @@ interface ShortcutIframeLoadOptions extends UnknownRecord {
   onBeforeStart?: () => void;
 }
 
+interface SidebarRuntimeEventWindow {
+  __cm6SidebarRuntimeReady?: boolean;
+  __cm6PendingSidebarEvents?: UnknownRecord[];
+}
+
+const SIDEBAR_LAUNCHER_ICON_SRC = '/apps/file_editor_cm6/static/icons/sidebar-launcher.svg';
+const SIDEBAR_SELF_APP_ID = 'file_editor_cm6';
+const LEGACY_SIDEBAR_ACTIVE_SHORTCUT_SET = 'sidebar.activeShortcut.set';
+const LEGACY_SIDEBAR_ACTIVE_SHORTCUT_REFRESH = 'sidebar.activeShortcut.refresh';
+
 function errorMessage(error: unknown, fallback: string): string {
   return error && typeof error === 'object' && 'message' in error
     ? String((error as { message?: unknown }).message || fallback)
@@ -143,8 +155,8 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
   const pickFileFn = typeof options.pickFile === 'function' ? options.pickFile : null;
   const openDrawer = typeof options.openDrawer === 'function' ? options.openDrawer : null;
   const closeAllMenus = typeof options.closeAllMenus === 'function' ? options.closeAllMenus : null;
-  const emitSidebarRpcRequest =
-    typeof options.emitSidebarRpcRequest === 'function' ? options.emitSidebarRpcRequest : null;
+  const emitSidebarUiRequest =
+    typeof options.emitSidebarUiRequest === 'function' ? options.emitSidebarUiRequest : null;
   const setMenuChecked =
     typeof options.setMenuChecked === 'function'
       ? options.setMenuChecked
@@ -215,6 +227,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
   let _latestUiPrefs: UnknownRecord = {};
   let _settingsUiMutating = false;
   let _shortcutsCache: SidebarShortcutPreference[] = [];
+  let _appDockSlots: SidebarAppDockSlot[] = [];
 
   let _editingId: string | null = null;
   let _editingAssetName: string | null = null;
@@ -222,6 +235,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
   let _editingAppId = '';
   let _lastPickerPath = '';
   let _clientActiveShortcutId = '';
+  let _clientActiveWindowHostId = '';
   let _lastShortcutUsageKey = '';
   let _lastShortcutUsageStamp = 0;
 
@@ -301,7 +315,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
   function _invalidateFrameworkShortcutIframes(appId: unknown) {
     const id = _normStr(appId);
     if (!id) return;
-    const shortcuts = _collectShortcuts(_latestUiPrefs || {});
+    const shortcuts = _collectVisibleShortcuts(_latestUiPrefs || {});
     const active = _resolveActive(_latestUiPrefs || {}, shortcuts);
     let invalidatedActive = false;
     shortcuts.forEach((sc) => {
@@ -331,7 +345,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     _refreshShortcutChrome();
     if (isRunning) _ensureRunningFrameworkShortcutIframesLoaded();
 
-    // If a shortcut points at a backend that dies, invalidate those iframe entries.
+    // If a framework app entry points at a backend that dies, invalidate those iframes.
     if (!isRunning) _invalidateFrameworkShortcutIframes(id);
 
     try {
@@ -339,6 +353,51 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
         void _renderAppMenu();
       }
     } catch (_) {}
+  }
+
+  function _mergeCatalogReadinessIntoDockSlots(catalog: FrameworkAppManifest[]): boolean {
+    const readinessByHostId = new Map<string, UnknownRecord>();
+    catalog.forEach((app) => {
+      const readiness = asRecord(app?.readiness);
+      const hostId = _normStr(readiness.host_id || readiness.hostId);
+      if (hostId) readinessByHostId.set(hostId, readiness);
+    });
+    if (!readinessByHostId.size) return false;
+
+    let changed = false;
+    const now = Date.now();
+    _appDockSlots = _appDockSlots.map((slot) => {
+      const hostId = _windowHostId(slot);
+      const readiness = readinessByHostId.get(hostId);
+      if (!readiness) return slot;
+      changed = true;
+      const next: SidebarAppDockSlot = {
+        ...slot,
+        readiness: {
+          ...asRecord(slot.readiness),
+          ...readiness,
+        },
+        updated_at: now,
+        updatedAt: now,
+      };
+      const url = _normStr(readiness.url);
+      if (url) {
+        next.restore_url = url;
+        next.restoreUrl = url;
+      }
+      const tokenId = _normStr(readiness.token_id || readiness.tokenId);
+      if (tokenId) {
+        next.token_id = tokenId;
+        next.tokenId = tokenId;
+      }
+      const consoleWorkerId = _normStr(readiness.console_worker_id || readiness.consoleWorkerId);
+      if (consoleWorkerId) {
+        next.console_worker_id = consoleWorkerId;
+        next.consoleWorkerId = consoleWorkerId;
+      }
+      return next;
+    });
+    return changed;
   }
 
   function _handleFrameworkShellEvent(raw: unknown) {
@@ -357,7 +416,9 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       _runningCache = new Set(runningIds);
       _runningCachePrimed = true;
       _resolveAppsStateReady();
-      _refreshShortcutChrome();
+      const dockReadinessChanged = _mergeCatalogReadinessIntoDockSlots(catalog);
+      if (dockReadinessChanged && _hydrated) _applyUiPrefsHydrated();
+      else _refreshShortcutChrome();
       _ensureRunningFrameworkShortcutIframesLoaded();
       try {
         if (shortcutAppDD && shortcutAppDD.classList.contains('show')) {
@@ -451,6 +512,17 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     return found;
   }
 
+  function _appManifestIsStateful(appManifest: FrameworkAppManifest | null): boolean {
+    if (!appManifest || typeof appManifest !== 'object') return false;
+    if (typeof appManifest.stateful === 'boolean') return appManifest.stateful;
+    const sidebarState = appManifest.sidebar_state;
+    return !!(
+      sidebarState
+      && typeof sidebarState === 'object'
+      && (sidebarState as UnknownRecord).enabled !== false
+    );
+  }
+
   function _resolveAppIconSrc(appManifest: FrameworkAppManifest | null) {
     const raw = _normStr(appManifest?.icon_src);
     if (!raw) {
@@ -500,6 +572,23 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     }
     _warnAppDiscovery('manifest-icon:none', { appId: _normStr(appId) });
     return null;
+  }
+
+  function _dockDebugNumbersEnabled(): boolean {
+    const truthy = new Set(['1', 'true', 'yes', 'on']);
+    try {
+      const fromQuery = new URLSearchParams(window.location.search).get(SIDEBAR_DOCK_DEBUG_NUMBERS_FLAG);
+      if (fromQuery !== null) return truthy.has(fromQuery.trim().toLowerCase());
+    } catch (_) {}
+    try {
+      const fromStorage = window.localStorage?.getItem(SIDEBAR_DOCK_DEBUG_NUMBERS_FLAG);
+      if (fromStorage !== null) return truthy.has(String(fromStorage).trim().toLowerCase());
+    } catch (_) {}
+    try {
+      const fromDataset = document.documentElement?.dataset?.sidebarDockNumbers;
+      if (fromDataset !== undefined) return truthy.has(String(fromDataset).trim().toLowerCase());
+    } catch (_) {}
+    return false;
   }
 
   function _applyExtensionManifestIcon(manifest: UnknownRecord) {
@@ -622,8 +711,132 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     return collectShortcutsFromPrefs(uiPrefs as UnknownRecord);
   }
 
+  function _windowHostId(win: SidebarAppDockSlot | UnknownRecord | null): string {
+    return _normStr(win?.host_id || win?.hostId);
+  }
+
+  function _windowKey(win: SidebarAppDockSlot | UnknownRecord | null): string {
+    const hostId = _windowHostId(win);
+    return hostId ? `dock:${hostId}` : '';
+  }
+
+  function _findAppDockSlot(value: unknown): SidebarAppDockSlot | null {
+    const raw = _normStr(value);
+    if (!raw) return null;
+    const hostId = raw.startsWith('dock:')
+      ? raw.slice('dock:'.length)
+      : (raw.startsWith('stateful:') ? raw.slice('stateful:'.length) : raw);
+    return _appDockSlots.find((win) => _windowHostId(win) === hostId) || null;
+  }
+
+  function _appDockSlotIsStateful(win: SidebarAppDockSlot | UnknownRecord | null): boolean {
+    if (!win || typeof win !== 'object') return false;
+    if (typeof win.stateful === 'boolean') return win.stateful;
+    return !!(win.token_id || win.tokenId || win.console_worker_id || win.consoleWorkerId);
+  }
+
+  function _appDockSlotToEntry(win: SidebarAppDockSlot): SidebarShortcut | null {
+    const hostId = _windowHostId(win);
+    const url = _normStr(win.url);
+    const restoreUrl = _normStr(win.restore_url || win.restoreUrl);
+    const appId = _normStr(win.app_id || win.appId);
+    if (!hostId || !url || !appId) return null;
+    const label = _normStr(win.label) || _normStr(win.title) || _normStr(win.path) || appId;
+    const icon = win.icon && typeof win.icon === 'object' ? win.icon : _manifestIconForApp(appId);
+    const stateful = _appDockSlotIsStateful(win);
+    return {
+      id: _windowKey(win),
+      key: _windowKey(win),
+      kind: SHORTCUT_KIND_FRAMEWORK_APP,
+      app_id: appId,
+      label,
+      url,
+      version: '',
+      icon: icon && typeof icon === 'object' ? icon as ShortcutIcon : null,
+      load: _normalizeLoad(win.load || SHORTCUT_LOAD_EAGER),
+      last_used: Number(win.updated_at || win.updatedAt || 0),
+      dock: true,
+      stateful,
+      host_id: hostId,
+      base_url: _normStr(win.base_url || win.baseUrl),
+      restore_url: restoreUrl,
+      restoreUrl,
+      readiness: win.readiness || null,
+    };
+  }
+
+  function _collectAppDockEntries(): SidebarShortcut[] {
+    return _appDockSlots
+      .map((win) => _appDockSlotToEntry(win))
+      .filter((win): win is SidebarShortcut => !!win);
+  }
+
+  function _shortcutMatchesValue(sc: SidebarShortcut | SidebarShortcutPreference | null, value: unknown): boolean {
+    const id = _normStr(value);
+    if (!sc || !id) return false;
+    return (
+      (!!sc.id && sc.id === id)
+      || (!!sc.url && sc.url === id)
+      || (!!sc.key && sc.key === id)
+    );
+  }
+
+  function _collectFallbackEntries(uiPrefs: UnknownRecord): SidebarShortcut[] {
+    return _collectShortcuts(uiPrefs);
+  }
+
+  function _collectVisibleShortcuts(uiPrefs: UnknownRecord): SidebarShortcut[] {
+    const appDockEntries = _collectAppDockEntries();
+    const activeFallbackId = _normStr(_clientActiveShortcutId);
+    if (!activeFallbackId) return appDockEntries;
+    const activeFallback = _collectFallbackEntries(uiPrefs)
+      .filter((sc) => _shortcutMatchesValue(sc, activeFallbackId));
+    return [
+      ...appDockEntries,
+      ...activeFallback,
+    ];
+  }
+
+  function _isStatefulDockEntry(sc: SidebarShortcut | SidebarShortcutPreference | null): boolean {
+    return !!(sc && (sc as SidebarShortcut).dock && (sc as SidebarShortcut).stateful);
+  }
+
+  function _isAppDockEntry(sc: SidebarShortcut | SidebarShortcutPreference | null): boolean {
+    return !!(sc && (sc as SidebarShortcut).dock && _normStr((sc as SidebarShortcut).host_id));
+  }
+
+  function _dockReadinessStatus(sc: SidebarShortcut | SidebarShortcutPreference | null): string {
+    if (!_isStatefulDockEntry(sc)) return 'ready';
+    const hostId = _normStr((sc as SidebarShortcut).host_id);
+    const win = _findAppDockSlot(hostId);
+    const readiness = win?.readiness && typeof win.readiness === 'object' ? win.readiness : null;
+    const shortcutReadiness = asRecord((sc as SidebarShortcut).readiness);
+    return _normStr(readiness?.status || shortcutReadiness.status || 'starting').toLowerCase();
+  }
+
+  function _isDockEntryReady(sc: SidebarShortcut | SidebarShortcutPreference | null): boolean {
+    if (!_isStatefulDockEntry(sc)) return true;
+    return _dockReadinessStatus(sc) === 'ready';
+  }
+
   function _resolveActive(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null = null) {
-    return resolveActiveShortcut(uiPrefs as UnknownRecord, shortcuts, _clientActiveShortcutId);
+    const activeWindow = _findAppDockSlot(_clientActiveWindowHostId);
+    if (activeWindow) {
+      const entry = _appDockSlotToEntry(activeWindow);
+      if (entry) return entry;
+    }
+    const list = Array.isArray(shortcuts) ? shortcuts : _collectVisibleShortcuts(uiPrefs);
+    const explicitFallbackId = _normStr(_clientActiveShortcutId);
+    if (explicitFallbackId) {
+      const explicit = list.find((sc) => _shortcutMatchesValue(sc, explicitFallbackId));
+      if (explicit) return explicit;
+    }
+    const persistedActiveId = _normStr(uiPrefs?.[UI_PREF_KEY_ACTIVE]);
+    if (persistedActiveId) {
+      const dockActive = _collectAppDockEntries().find((sc) => _shortcutMatchesValue(sc, persistedActiveId));
+      if (dockActive) return dockActive;
+    }
+    return null;
   }
 
   function getActiveUrl(uiPrefs: UnknownRecord) {
@@ -636,12 +849,23 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
   }
 
   function _ensureActiveSelection(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null) {
-    const list = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
-    const selection = ensureShortcutActiveSelection(uiPrefs as UnknownRecord, list, _clientActiveShortcutId);
-    if (selection.clientActiveShortcutId !== _clientActiveShortcutId) {
-      _clientActiveShortcutId = selection.clientActiveShortcutId;
+    const activeWindow = _findAppDockSlot(_clientActiveWindowHostId);
+    if (activeWindow) {
+      const entry = _appDockSlotToEntry(activeWindow);
+      if (entry) return { active: entry, activeId: entry.key };
     }
-    return { active: selection.active, activeId: selection.activeId };
+    const list = Array.isArray(shortcuts) ? shortcuts : _collectVisibleShortcuts(uiPrefs);
+    const active = _resolveActive(uiPrefs, list);
+    if (active) {
+      const activeId = active.id || active.url || active.key || '';
+      return { active, activeId };
+    }
+    const appDockFallback = _pickMruShortcut(_collectAppDockEntries());
+    if (appDockFallback) {
+      const activeId = appDockFallback.id || appDockFallback.url || appDockFallback.key || '';
+      return { active: appDockFallback, activeId };
+    }
+    return { active: null, activeId: '' };
   }
 
   function _applyToggleDisplay(uiPrefs: UnknownRecord) {
@@ -680,7 +904,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
   }
 
   function _refreshShortcutChrome() {
-    const normalized = _collectShortcuts(_latestUiPrefs || {});
+    const normalized = _collectVisibleShortcuts(_latestUiPrefs || {});
     const active = _resolveActive(_latestUiPrefs || {}, normalized);
     _applyToggleIcon(_latestUiPrefs || {}, normalized, active);
     _applyHeaderLabelAndIcon(_latestUiPrefs || {}, normalized, active);
@@ -696,7 +920,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
 
   function _applyToggleIcon(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null, active: SidebarShortcut | null) {
     if (!agentToggleIconEl) return;
-    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectVisibleShortcuts(uiPrefs);
     const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
     const icon = _effectiveShortcutIcon(resolvedActive);
     if (icon) {
@@ -708,7 +932,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
 
   function _applyHeaderLabelAndIcon(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null, active: SidebarShortcut | null) {
     if (!sidebarHeaderIconEl || !sidebarHeaderTitleEl) return;
-    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectVisibleShortcuts(uiPrefs);
     const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
     const headerLabel = resolvedActive && _normStr(resolvedActive.label) ? _normStr(resolvedActive.label) : 'Sidebar';
     sidebarHeaderTitleEl.textContent = headerLabel;
@@ -792,7 +1016,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     _latestUiPrefs = { ..._latestUiPrefs, [UI_PREF_KEY_SHORTCUTS]: next };
     _shortcutsCache = next.filter((sc): sc is SidebarShortcutPreference => !!sc && typeof sc === 'object');
     _sendUiPrefUpdate(UI_PREF_KEY_SHORTCUTS, next);
-    const refreshed = _resolveActive(_latestUiPrefs, _collectShortcuts(_latestUiPrefs));
+    const refreshed = _resolveActive(_latestUiPrefs, _collectVisibleShortcuts(_latestUiPrefs));
     return refreshed || { ...shortcut, version: nextVersion };
   }
 
@@ -812,14 +1036,17 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     sidebarRefreshMenuEl.innerHTML = '';
   }
 
-  function _requestSidebarControl(method: SidebarIpcRpcMethod, payload: UnknownRecord = {}) {
+  function _requestSidebarControl(
+    method: UiIpcRpcMethod,
+    payload: UnknownRecord = {},
+  ) {
     const message = {
       type: _normStr(method),
       payload: (payload && typeof payload === 'object') ? payload : {},
     };
     if (!message.type) return;
-    if (emitSidebarRpcRequest) {
-      emitSidebarRpcRequest(method, message.payload);
+    if (emitSidebarUiRequest) {
+      emitSidebarUiRequest(method, message.payload);
     } else {
       try {
         window.dispatchEvent(new CustomEvent('cm6:sidebar-event', { detail: message }));
@@ -829,15 +1056,39 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
 
   function _setClientActiveShortcut(shortcutId: unknown, options: UnknownRecord = {}) {
     const nextId = _normStr(shortcutId);
+    const activeWindow = _findAppDockSlot(nextId);
+    if (activeWindow) {
+      const hostId = _windowHostId(activeWindow);
+      const prevWindowId = _clientActiveWindowHostId;
+      _clientActiveWindowHostId = hostId;
+      _clientActiveShortcutId = '';
+      if (options.emit && hostId && hostId !== prevWindowId) {
+        _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowActivate, {
+          hostId,
+          host_id: hostId,
+          source: options.source || 'sidebar_shortcuts',
+        });
+      }
+      if (!_hydrated) return;
+      const normalized = _collectVisibleShortcuts(_latestUiPrefs || {});
+      const ensured = _ensureActiveSelection(_latestUiPrefs || {}, normalized);
+      _applyToggleIcon(_latestUiPrefs || {}, normalized, ensured.active);
+      _applyHeaderLabelAndIcon(_latestUiPrefs || {}, normalized, ensured.active);
+      _renderHeaderIconGrid(_latestUiPrefs || {}, normalized, ensured.active);
+      void _syncIframesAndActivate(_latestUiPrefs || {}, normalized, ensured.active);
+      return;
+    }
+
     const prevId = _clientActiveShortcutId;
     _clientActiveShortcutId = nextId;
+    if (nextId) _clientActiveWindowHostId = '';
 
     if (options.updateLastUsed && nextId) {
       _maybeUpdateShortcutLastUsed(nextId);
     }
 
     if (options.emit && nextId && nextId !== prevId) {
-      _requestSidebarControl(SIDEBAR_IPC_RPC_METHODS.activeShortcutSet, {
+      _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarActiveShortcutSet, {
         shortcutId: nextId,
         source: options.source || 'sidebar_shortcuts',
       });
@@ -845,7 +1096,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
 
     if (!_hydrated) return;
 
-    const normalized = _collectShortcuts(_latestUiPrefs || {});
+    const normalized = _collectVisibleShortcuts(_latestUiPrefs || {});
     const ensured = _ensureActiveSelection(_latestUiPrefs || {}, normalized);
     _applyToggleIcon(_latestUiPrefs || {}, normalized, ensured.active);
     _applyHeaderLabelAndIcon(_latestUiPrefs || {}, normalized, ensured.active);
@@ -866,7 +1117,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     _closeRefreshMenu();
 
     const uiPrefs = _latestUiPrefs || {};
-    const active = _resolveActive(uiPrefs, _collectShortcuts(uiPrefs));
+    const active = _resolveActive(uiPrefs, _collectVisibleShortcuts(uiPrefs));
     const menu = sidebarRefreshMenuEl;
     const flush = document.createElement('div');
     flush.className = 'fe-dd-item';
@@ -875,7 +1126,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       ev.preventDefault();
       ev.stopPropagation();
       _closeRefreshMenu();
-      _requestSidebarControl(SIDEBAR_IPC_RPC_METHODS.activeShortcutRefresh, { flushCache: true, source: 'sidebar_refresh_menu' });
+      void _refreshActiveShortcut({ flushCache: true });
     });
     menu.appendChild(flush);
 
@@ -1040,7 +1291,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     _closeHeaderIconMenu();
 
     const menu = sidebarHeaderIconMenuEl;
-    const label = _normStr(sc?.label) || _normStr(sc?.app_id) || _normStr(sc?.url) || 'Shortcut';
+    const label = _normStr(sc?.label) || _normStr(sc?.app_id) || _normStr(sc?.url) || 'Sidebar entry';
 
     const title = document.createElement('div');
     title.className = 'fe-dd-item';
@@ -1061,6 +1312,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     };
 
     const appId = _normStr(sc?.kind === SHORTCUT_KIND_FRAMEWORK_APP ? sc?.app_id : '');
+    const dockHostId = _isAppDockEntry(sc) ? _normStr((sc as SidebarShortcut).host_id) : '';
     if (appId) {
       addSeparator();
       const kill = document.createElement('div');
@@ -1075,15 +1327,31 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     }
 
     addSeparator();
-    const remove = document.createElement('div');
-    remove.className = 'fe-dd-item';
-    remove.textContent = 'Remove shortcut';
-    remove.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      _closeHeaderIconMenu();
-      _removeShortcut(sc);
-    });
-    menu.appendChild(remove);
+    if (dockHostId) {
+      const closeWindow = document.createElement('div');
+      closeWindow.className = 'fe-dd-item';
+      closeWindow.textContent = 'Close dock slot';
+      closeWindow.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        _closeHeaderIconMenu();
+        _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowClose, {
+          hostId: dockHostId,
+          host_id: dockHostId,
+          source: 'header_icon_menu',
+        });
+      });
+      menu.appendChild(closeWindow);
+    } else {
+      const remove = document.createElement('div');
+      remove.className = 'fe-dd-item';
+      remove.textContent = 'Remove entry';
+      remove.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        _closeHeaderIconMenu();
+        _removeShortcut(sc);
+      });
+      menu.appendChild(remove);
+    }
 
     const parent = menu.parentElement;
     if (!parent) return;
@@ -1110,23 +1378,139 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     });
   }
 
+  async function _openLauncherMenu(anchorEl: HTMLElement | null) {
+    if (!sidebarHeaderIconMenuEl || !anchorEl) return;
+    try { if (closeAllMenus) closeAllMenus(); } catch (_) {}
+    _closeAgentDropdown();
+    _closeRefreshMenu();
+    _closeHeaderIconMenu();
+
+    const menu = sidebarHeaderIconMenuEl;
+    const title = document.createElement('div');
+    title.className = 'fe-dd-item';
+    title.style.opacity = '0.72';
+    title.style.cursor = 'default';
+    title.textContent = 'App drawer';
+    menu.appendChild(title);
+
+    const loading = document.createElement('div');
+    loading.className = 'fe-dd-item';
+    loading.style.opacity = '0.7';
+    loading.textContent = 'Loading apps…';
+    menu.appendChild(loading);
+
+    const parent = menu.parentElement;
+    if (!parent) return;
+    const parentRect = parent.getBoundingClientRect();
+    const anchorRect = anchorEl.getBoundingClientRect();
+    const baseLeft = Math.max(0, Math.round(anchorRect.left - parentRect.left));
+    const baseTop = Math.max(0, Math.round(anchorRect.bottom - parentRect.top + 4));
+    menu.style.left = `${baseLeft}px`;
+    menu.style.top = `${baseTop}px`;
+    menu.dataset.shortcutKey = '__launcher__';
+    _headerIconMenuKey = '__launcher__';
+    menu.classList.add('show');
+
+    let apps: FrameworkAppManifest[] = [];
+    try {
+      apps = await _ensureAppsCache(true);
+    } catch (e) {
+      loading.textContent = errorMessage(e, 'Failed to load apps');
+      return;
+    }
+    if (!menu.classList.contains('show') || _headerIconMenuKey !== '__launcher__') return;
+    loading.remove();
+
+    const launcherApps = apps
+      .filter((app) => {
+        const id = _normStr(app?.id);
+        return !!id && id !== SIDEBAR_SELF_APP_ID;
+      })
+      .sort((a, b) => {
+        const an = _normStr(a?.name) || _normStr(a?.id);
+        const bn = _normStr(b?.name) || _normStr(b?.id);
+        return an.localeCompare(bn, undefined, { sensitivity: 'base', numeric: true });
+      });
+
+    if (!launcherApps.length) {
+      const empty = document.createElement('div');
+      empty.className = 'fe-dd-item';
+      empty.style.opacity = '0.7';
+      empty.textContent = 'No launcher apps';
+      menu.appendChild(empty);
+    }
+
+    launcherApps.forEach((app) => {
+      const id = _normStr(app.id);
+      if (!id) return;
+      const item = document.createElement('div');
+      item.className = 'fe-dd-item';
+      item.style.display = 'flex';
+      item.style.gap = '8px';
+      item.style.alignItems = 'center';
+      item.style.justifyContent = 'space-between';
+      const icon = _manifestIconForApp(id);
+      const node = _renderIconNode(icon, 16, _firstGrapheme(app.name || id));
+      const labelWrap = document.createElement('span');
+      labelWrap.style.display = 'inline-flex';
+      labelWrap.style.alignItems = 'center';
+      labelWrap.style.gap = '8px';
+      if (node) labelWrap.appendChild(node);
+      const text = document.createElement('span');
+      text.textContent = _normStr(app.name) || id;
+      labelWrap.appendChild(text);
+      item.appendChild(labelWrap);
+      const badge = document.createElement('span');
+      badge.style.fontSize = '0.72rem';
+      badge.style.opacity = '0.62';
+      badge.textContent = _appManifestIsStateful(app) ? 'state' : 'base';
+      item.appendChild(badge);
+      item.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        _closeHeaderIconMenu();
+        _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowCreate, {
+          appId: id,
+          app_id: id,
+          source: 'sidebar_launcher',
+          activate: true,
+        });
+      });
+      menu.appendChild(item);
+    });
+
+    const sep = document.createElement('div');
+    sep.className = 'fe-dd-separator';
+    sep.style.margin = '4px 0';
+    menu.appendChild(sep);
+
+    const addUrl = document.createElement('div');
+    addUrl.className = 'fe-dd-item';
+    addUrl.textContent = 'Add plain URL fallback entry...';
+    addUrl.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      _closeHeaderIconMenu();
+      _openShortcutsModal();
+      _showEditor({ kind: SHORTCUT_KIND_URL, load: SHORTCUT_LOAD_LAZY });
+    });
+    menu.appendChild(addUrl);
+  }
+
   function _renderHeaderIconGrid(uiPrefs: UnknownRecord, shortcuts: SidebarShortcut[] | null, active: SidebarShortcut | null) {
     const gridEl = sidebarHeaderIconGridEl;
     if (!gridEl) return;
 
-    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectVisibleShortcuts(uiPrefs);
     const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
     const activeKey = resolvedActive?.key || '';
-    const headerItems = _collectHeaderItems(resolvedShortcuts);
+    const headerItems = _collectHeaderItems(resolvedShortcuts)
+      .filter((sc) => _isAppDockEntry(sc));
     const runningSet = _runningCache instanceof Set ? _runningCache : new Set();
     const isMobileLayout = !!document.querySelector('.fe-root.layout-mobile');
+    const dockDebugNumbers = _dockDebugNumbersEnabled();
 
     gridEl.innerHTML = '';
-    if (!headerItems.length && !isMobileLayout) {
-      gridEl.style.display = 'none';
-      _closeHeaderIconMenu();
-      return;
-    }
     gridEl.style.display = 'flex';
 
     let headerDragState: HeaderDragState | null = null;
@@ -1243,10 +1627,42 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       gridEl.appendChild(cell);
     }
 
+    const launcherCell = document.createElement('div');
+    launcherCell.className = 'agent-drawer__icon-cell agent-drawer__icon-cell--launcher';
+    const launcherBtn = document.createElement('button');
+    launcherBtn.className = 'agent-drawer__icon-btn';
+    launcherBtn.title = 'Open app drawer';
+    launcherBtn.setAttribute('aria-label', 'Open app drawer');
+    launcherBtn.style.cursor = 'pointer';
+    if (dockDebugNumbers) {
+      launcherBtn.textContent = '0';
+    } else {
+      const launcherImg = document.createElement('img');
+      launcherImg.src = SIDEBAR_LAUNCHER_ICON_SRC;
+      launcherImg.alt = '';
+      launcherImg.setAttribute('aria-hidden', 'true');
+      launcherBtn.appendChild(launcherImg);
+    }
+    launcherBtn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      void _openLauncherMenu(launcherBtn);
+    });
+    launcherCell.appendChild(launcherBtn);
+    const launcherDot = document.createElement('span');
+    launcherDot.className = 'agent-drawer__running-dot is-placeholder';
+    launcherDot.setAttribute('aria-hidden', 'true');
+    launcherCell.appendChild(launcherDot);
+    gridEl.appendChild(launcherCell);
+
     headerItems.forEach((sc) => {
+      const renderedIndex = renderedHeaderItems.length;
       const effectiveIcon = _effectiveShortcutIcon(sc);
       const fallbackText = _firstGrapheme(sc.label);
-      const iconNode = _renderIconNode(effectiveIcon, null, fallbackText);
+      const debugText = String(renderedIndex + 1);
+      const iconNode = dockDebugNumbers
+        ? _renderIconNode({ kind: 'text', text: debugText }, null, debugText)
+        : _renderIconNode(effectiveIcon, null, fallbackText);
       if (!iconNode || (!iconNode.textContent && !iconNode.childNodes.length)) return;
 
       const cell = document.createElement('div');
@@ -1255,12 +1671,11 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       const btn = document.createElement('button');
       btn.className = 'agent-drawer__icon-btn';
       if (sc.key && sc.key === activeKey) btn.classList.add('is-active');
-      btn.title = sc.label || sc.url || 'Shortcut';
+      btn.title = sc.label || sc.url || 'Sidebar entry';
       btn.style.touchAction = 'none';
       btn.style.cursor = 'grab';
       btn.appendChild(iconNode);
 
-      const renderedIndex = renderedHeaderItems.length;
       renderedHeaderItems.push(sc);
       cell.dataset.headerIndex = String(renderedIndex);
 
@@ -1377,7 +1792,17 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       dot.className = 'agent-drawer__running-dot';
       if (sc.key && sc.key === activeKey) dot.classList.add('is-active');
       const appId = _normStr(sc.kind === SHORTCUT_KIND_FRAMEWORK_APP ? sc.app_id : '');
-      if (appId) {
+      if (_isStatefulDockEntry(sc)) {
+        const readinessStatus = _dockReadinessStatus(sc);
+        if (readinessStatus === 'ready') {
+          dot.classList.add('is-up');
+        } else if (readinessStatus === 'error' || readinessStatus === 'stopped') {
+          dot.classList.add('is-down');
+        } else {
+          dot.classList.add('is-starting');
+        }
+        dot.title = `${sc.label || appId || 'App window'}: ${readinessStatus || 'starting'}`;
+      } else if (appId) {
         const isRunning = runningSet.has(appId);
         dot.classList.add(isRunning ? 'is-up' : 'is-down');
         dot.title = `${sc.label || appId}: ${isRunning ? 'Running' : 'Not running'}`;
@@ -1391,14 +1816,14 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       gridEl.appendChild(cell);
     });
 
-    if (!renderedHeaderItems.length) {
+    if (!renderedHeaderItems.length && !launcherCell.isConnected) {
       gridEl.style.display = 'none';
       _closeHeaderIconMenu();
       return;
     }
 
     const openKey = _normStr(_headerIconMenuKey || sidebarHeaderIconMenuEl?.dataset?.shortcutKey);
-    if (openKey && !renderedHeaderItems.some((sc) => _normStr(sc?.key) === openKey)) {
+    if (openKey && openKey !== '__launcher__' && !renderedHeaderItems.some((sc) => _normStr(sc?.key) === openKey)) {
       _closeHeaderIconMenu();
     }
   }
@@ -1413,9 +1838,17 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
 
     if (mode === 'loading') {
       const label = _normStr(shortcut?.label) || _normStr(shortcut?.app_id) || 'app';
-      titleEl.textContent = 'Starting side-bar app…';
-      hintEl.textContent = `Starting ${label}.`;
+      titleEl.textContent = 'Starting sidebar app window...';
+      hintEl.textContent = `Starting ${label} as a sidebar app window.`;
       sidebarSetupPlaceholder.dataset.mode = 'loading';
+      return;
+    }
+
+    if (mode === 'waiting_ready') {
+      const label = _normStr(shortcut?.label) || _normStr(shortcut?.app_id) || 'app';
+      titleEl.textContent = 'Waiting for app readiness...';
+      hintEl.textContent = `${label} is loaded; waiting for its backend readiness POST.`;
+      sidebarSetupPlaceholder.dataset.mode = 'waiting_ready';
       return;
     }
 
@@ -1497,17 +1930,35 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     } catch (_) {
       return entry;
     }
-    const nextEntry = { iframe: nextIframe, url: versionedShortcutUrl(_normStr(sc.url), sc.version), loaded: false };
+    const nextEntry = { iframe: nextIframe, url: _shortcutFrameUrl(sc, null, { forceReload: true }), loaded: false };
     _iframeMap.set(sc.key, nextEntry);
     return nextEntry;
   }
 
+  function _shortcutRestoreUrl(sc: SidebarShortcut | null): string {
+    return _normStr(sc?.restore_url || sc?.restoreUrl);
+  }
+
+  function _shortcutFrameUrl(
+    sc: SidebarShortcut,
+    entry: IframeEntry | null = null,
+    options: ShortcutIframeLoadOptions = {},
+  ): string {
+    const liveUrl = _normStr(sc.url);
+    const restoreUrl = _shortcutRestoreUrl(sc);
+    const forceReload = !!options.forceReload;
+    if (!forceReload && entry?.loaded && _normStr(entry.url)) {
+      return _normStr(entry.url);
+    }
+    return versionedShortcutUrl(restoreUrl || liveUrl, sc.version);
+  }
+
   async function _ensureIframeLoadedForShortcut(sc: SidebarShortcut, entry: IframeEntry, options: ShortcutIframeLoadOptions = {}) {
     if (!sc || !entry || !entry.iframe) return false;
-    const url = _normStr(sc.url);
+    const url = _shortcutFrameUrl(sc, entry, options);
     if (!url) return false;
     const forceReload = !!options.forceReload;
-    const loadUrl = versionedShortcutUrl(url, sc.version);
+    const loadUrl = url;
 
     if (sc.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
       const onBeforeStart = typeof options.onBeforeStart === 'function' ? options.onBeforeStart : null;
@@ -1554,7 +2005,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
   }
 
   function _ensureRunningFrameworkShortcutIframesLoaded(shortcutsOverride: SidebarShortcut[] | null = null) {
-    const shortcuts = Array.isArray(shortcutsOverride) ? shortcutsOverride : _collectShortcuts(_latestUiPrefs || {});
+    const shortcuts = Array.isArray(shortcutsOverride) ? shortcutsOverride : _collectVisibleShortcuts(_latestUiPrefs || {});
     const runningSet = _runningCache instanceof Set ? _runningCache : null;
     if (!runningSet || !runningSet.size) return;
 
@@ -1571,7 +2022,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
   async function _refreshActiveShortcut(options: UnknownRecord = {}) {
     const flushCache = !!options.flushCache;
     const uiPrefs = _latestUiPrefs || {};
-    const shortcuts = _collectShortcuts(uiPrefs);
+    const shortcuts = _collectVisibleShortcuts(uiPrefs);
     let active = _resolveActive(uiPrefs, shortcuts);
     if (!active || !active.key) {
       _updateSetupPlaceholder(uiPrefs, false, 'setup');
@@ -1604,7 +2055,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
 
   async function _restartActiveFrameworkShortcut() {
     const uiPrefs = _latestUiPrefs || {};
-    const shortcuts = _collectShortcuts(uiPrefs);
+    const shortcuts = _collectVisibleShortcuts(uiPrefs);
     let active = _resolveActive(uiPrefs, shortcuts);
     if (!active || active.kind !== SHORTCUT_KIND_FRAMEWORK_APP || !_normStr(active.app_id)) {
       return false;
@@ -1642,7 +2093,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     const stack = sidebarIframeStack;
     if (!stack) return;
 
-    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectShortcuts(uiPrefs);
+    const resolvedShortcuts = Array.isArray(shortcuts) ? shortcuts : _collectVisibleShortcuts(uiPrefs);
     const desiredKeys = new Set(resolvedShortcuts.map((sc) => sc.key));
 
     _iframeMap.forEach((entry, key) => {
@@ -1655,17 +2106,17 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     // Ensure app metadata is available for default icons (best-effort).
     void _ensureAppsCache(false);
 
-    // Create iframes for shortcuts.
+    // Create iframes for app dock slots and plain URL fallback entries.
     resolvedShortcuts.forEach((sc) => {
       let entry = _iframeMap.get(sc.key);
       if (!entry) {
         const iframe = document.createElement('iframe');
         _configureShortcutIframeElement(iframe, sc);
         stack.appendChild(iframe);
-        entry = { iframe, url: versionedShortcutUrl(sc.url, sc.version), loaded: false };
+        entry = { iframe, url: _shortcutFrameUrl(sc, null), loaded: false };
         _iframeMap.set(sc.key, entry);
       }
-      const loadUrl = versionedShortcutUrl(sc.url, sc.version);
+      const loadUrl = _shortcutFrameUrl(sc, entry);
       const prevUrl = entry.url;
       entry.url = loadUrl;
       _configureShortcutIframeElement(entry.iframe, sc);
@@ -1718,11 +2169,25 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
           ),
         });
         if (seq !== _activateSeq) return;
-        activeReady = !!ok && !!entry.loaded;
+        const waitingForStatefulReadiness = _isStatefulDockEntry(resolvedActive) && !_isDockEntryReady(resolvedActive);
+        activeReady = !!ok && !!entry.loaded && !waitingForStatefulReadiness;
+        if (waitingForStatefulReadiness) {
+          _updateSetupPlaceholder(
+            uiPrefs || _latestUiPrefs || {},
+            false,
+            'waiting_ready',
+            resolvedActive,
+          );
+        }
       }
     }
 
-    _updateSetupPlaceholder(uiPrefs || _latestUiPrefs || {}, activeReady);
+    _updateSetupPlaceholder(
+      uiPrefs || _latestUiPrefs || {},
+      activeReady,
+      activeReady ? 'setup' : (_isStatefulDockEntry(resolvedActive) ? 'waiting_ready' : 'setup'),
+      resolvedActive || null,
+    );
   }
 
   // --- Shortcut editor UI ---
@@ -2084,7 +2549,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     if (!shortcuts.length) {
       const empty = document.createElement('div');
       empty.style.opacity = '0.7';
-      empty.textContent = 'No shortcuts yet.';
+      empty.textContent = 'No plain URL entries yet.';
       shortcutsListEl.appendChild(empty);
       return;
     }
@@ -2351,15 +2816,20 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
 
     const display = _normStr(_latestUiPrefs?.[UI_PREF_KEY_TOGGLE_DISPLAY]) || 'icon';
     const shortcuts = Array.isArray(_shortcutsCache) ? _shortcutsCache : [];
+    const appDockEntries = _collectAppDockEntries();
 
-    if (!shortcuts.length) {
+    if (!shortcuts.length && !appDockEntries.length) {
       const empty = document.createElement('div');
       empty.className = 'fe-dd-item';
       empty.style.opacity = '0.7';
-      empty.textContent = 'No shortcuts';
+      empty.textContent = 'No sidebar items';
       dd.appendChild(empty);
     } else {
-      shortcuts.forEach((sc) => {
+      const items: Array<SidebarShortcut | SidebarShortcutPreference> = [
+        ...appDockEntries,
+        ...shortcuts,
+      ];
+      items.forEach((sc) => {
         const label = _normStr(sc?.label);
         const url = _normStr(sc?.url);
         const id = _normStr(sc?.id);
@@ -2400,7 +2870,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
 
     const manage = document.createElement('div');
     manage.className = 'fe-dd-item';
-    manage.textContent = 'Manage shortcuts…';
+    manage.textContent = 'Manage plain URL entries...';
     manage.addEventListener('click', (ev) => {
       ev.stopPropagation();
       _closeAgentDropdown();
@@ -2468,7 +2938,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
   function _applyUiPrefsHydrated() {
     if (!_hydrated) return;
 
-    const normalized = _collectShortcuts(_latestUiPrefs);
+    const normalized = _collectVisibleShortcuts(_latestUiPrefs);
     const ensured = _ensureActiveSelection(_latestUiPrefs, normalized);
     _applyToggleIcon(_latestUiPrefs, normalized, ensured.active);
     _applyHeaderLabelAndIcon(_latestUiPrefs, normalized, ensured.active);
@@ -2484,7 +2954,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
       if (shortcutsModal && shortcutsModal.classList.contains('show')) _renderShortcutsList();
     } catch (_) {}
 
-    // If we have framework-app shortcuts, ensure the app list is loaded so
+    // If fallback framework-app entries exist, load the app list so
     // default (manifest) icons can replace placeholder chrome.
     try {
       const needsApps = normalized.some((sc) => sc && sc.kind === SHORTCUT_KIND_FRAMEWORK_APP);
@@ -2515,6 +2985,42 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
 
   function applyUiPrefs(uiPrefs: UnknownRecord) {
     _stageUiPrefs(uiPrefs);
+    if (!_hydrated) return;
+    _applyUiPrefsHydrated();
+  }
+
+  function _appDockSlotsFromLedgerPayload(payload: UnknownRecord): SidebarAppDockSlot[] {
+    const slots = asRecord(payload.slots);
+    const order = Array.isArray(payload.order)
+      ? payload.order.map((item) => _normStr(item)).filter(Boolean)
+      : [];
+    if (Object.keys(slots).length) {
+      const orderedHostIds = order.filter((item) => item !== 'launcher' && slots[item]);
+      const unorderedHostIds = Object.keys(slots).filter((hostId) => !orderedHostIds.includes(hostId));
+      return [...orderedHostIds, ...unorderedHostIds]
+        .map((hostId) => asRecord(slots[hostId]))
+        .filter((item): item is SidebarAppDockSlot => !!_normStr(item.host_id || item.hostId));
+    }
+
+    // One-turn migration tolerance for older local pref payloads; live RPC shape is slots/order.
+    return Array.isArray(payload.windows)
+      ? payload.windows.filter((item): item is SidebarAppDockSlot => !!item && typeof item === 'object')
+      : [];
+  }
+
+  function _applyAppDockLedgerPayload(payload: UnknownRecord) {
+    const windows = _appDockSlotsFromLedgerPayload(payload);
+    _appDockSlots = windows;
+    const activeHostId = _normStr(payload.activeHostId || payload.active_host_id);
+    if (activeHostId) {
+      _clientActiveWindowHostId = activeHostId;
+      _clientActiveShortcutId = '';
+    } else if (
+      _clientActiveWindowHostId
+      && !_appDockSlots.some((win) => _windowHostId(win) === _clientActiveWindowHostId)
+    ) {
+      _clientActiveWindowHostId = '';
+    }
     if (!_hydrated) return;
     _applyUiPrefsHydrated();
   }
@@ -2608,7 +3114,13 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
     } catch (_) {}
 
     if (editorSettingsShortcutsBtn) editorSettingsShortcutsBtn.addEventListener('click', _openShortcutsModal);
-    if (setupShortcutsBtn) setupShortcutsBtn.addEventListener('click', _openShortcutsModal);
+    if (setupShortcutsBtn) {
+      setupShortcutsBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        void _openLauncherMenu(setupShortcutsBtn);
+      });
+    }
     if (shortcutsCloseBtn) shortcutsCloseBtn.addEventListener('click', _closeShortcutsModal);
     if (sidebarRefreshBtn) {
       let refreshPointerId: number | null = null;
@@ -2631,7 +3143,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
         ev.preventDefault();
         ev.stopPropagation();
         _closeRefreshMenu();
-        _requestSidebarControl(SIDEBAR_IPC_RPC_METHODS.activeShortcutRefresh, { flushCache: false, source: 'sidebar_refresh_button' });
+        void _refreshActiveShortcut({ flushCache: false });
       });
       sidebarRefreshBtn.addEventListener('contextmenu', (ev) => {
         ev.preventDefault();
@@ -2809,7 +3321,7 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
         const data = (ev as CustomEvent<UnknownRecord>).detail;
         if (!data || typeof data !== 'object') return;
         const eventType = _normStr(data.type);
-        if (eventType === SIDEBAR_IPC_RPC_METHODS.activeShortcutSet) {
+        if (eventType === LEGACY_SIDEBAR_ACTIVE_SHORTCUT_SET) {
           const payload = asRecord(data.payload);
           const shortcutId = _normStr(payload.shortcutId || payload.activeShortcutId);
           if (shortcutId) _setClientActiveShortcut(shortcutId, { emit: false });
@@ -2817,12 +3329,41 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
         }
         if (eventType === SIDEBAR_IPC_RPC_NOTIFICATIONS.clientState) {
           const payload = asRecord(data.payload);
+          const activeWindowHostId = _normStr(payload.activeWindowHostId || payload.active_window_host_id);
+          if (activeWindowHostId) {
+            _clientActiveWindowHostId = activeWindowHostId;
+            _clientActiveShortcutId = '';
+            _applyUiPrefsHydrated();
+            return;
+          }
           _setClientActiveShortcut(_normStr(payload.activeShortcutId), { emit: false });
+          return;
+        }
+        if (eventType === SIDEBAR_IPC_RPC_NOTIFICATIONS.windowsChanged) {
+          _applyAppDockLedgerPayload(asRecord(data.payload));
+          return;
+        }
+        if (eventType === SIDEBAR_IPC_RPC_NOTIFICATIONS.windowActivated) {
+          const payload = asRecord(data.payload);
+          const hostId = _normStr(payload.hostId || payload.host_id);
+          if (hostId) {
+            _clientActiveWindowHostId = hostId;
+            _clientActiveShortcutId = '';
+            _applyUiPrefsHydrated();
+          }
+          return;
+        }
+        if (eventType === SIDEBAR_IPC_RPC_NOTIFICATIONS.windowReadinessChanged) {
+          const payload = asRecord(data.payload);
+          const state = asRecord(payload.state);
+          if ((state.slots && typeof state.slots === 'object') || Array.isArray(state.windows)) {
+            _applyAppDockLedgerPayload(state);
+          }
           return;
         }
         if (
           eventType !== SIDEBAR_IPC_RPC_NOTIFICATIONS.activeShortcutRefresh &&
-          eventType !== SIDEBAR_IPC_RPC_METHODS.activeShortcutRefresh
+          eventType !== LEGACY_SIDEBAR_ACTIVE_SHORTCUT_REFRESH
         ) return;
         const payload = asRecord(data.payload);
         void _refreshActiveShortcut({
@@ -2830,6 +3371,17 @@ export function initSidebarShortcuts(options: SidebarShortcutsOptions = {}): Sid
         });
       });
       _sidebarEventListenerBound = true;
+      const runtimeWindow = window as unknown as SidebarRuntimeEventWindow;
+      const pendingEvents = Array.isArray(runtimeWindow.__cm6PendingSidebarEvents)
+        ? runtimeWindow.__cm6PendingSidebarEvents.splice(0)
+        : [];
+      runtimeWindow.__cm6PendingSidebarEvents = [];
+      runtimeWindow.__cm6SidebarRuntimeReady = true;
+      pendingEvents.forEach((detail) => {
+        try {
+          window.dispatchEvent(new CustomEvent('cm6:sidebar-event', { detail }));
+        } catch (_) {}
+      });
     }
 
     _lightInitDone = true;

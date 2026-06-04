@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -9,6 +10,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Body, Query
 
@@ -16,6 +18,7 @@ from framework_shells import FrameworkShellManager
 from framework_shells import get_manager as get_framework_shell_manager
 
 aria_downloader_bp = APIRouter()
+APP_ID = str(os.environ.get('TE_APP_ID') or 'aria_downloader').strip() or 'aria_downloader'
 
 DEFAULT_RPC_URL = 'http://127.0.0.1:6800/jsonrpc'
 MAX_RESULT_ITEMS = 200
@@ -35,6 +38,39 @@ DEFAULT_SHELL_CWD = '~/services/aria2'
 DEFAULT_LOG_TAIL_LINES = 200
 STATE_DIR = Path(os.path.expanduser('~/.cache/aria_downloader'))
 STATE_FILE = STATE_DIR / 'framework_shell.json'
+
+
+def _framework_url() -> str:
+    explicit = str(os.environ.get('TE_FRAMEWORK_URL') or '').strip()
+    if explicit:
+        return explicit.rstrip('/')
+    port = str(os.environ.get('TE_PORT') or '8089').strip() or '8089'
+    return f'http://127.0.0.1:{port}'
+
+
+def _post_serving_readiness() -> None:
+    body = {
+        'app_id': APP_ID,
+        'status': 'ready',
+        'phase': 'serving',
+        'source': 'aria_downloader_backend',
+    }
+    endpoint = f"{_framework_url()}/api/apps/{quote(APP_ID, safe='')}/readiness"
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(body).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        resp.read()
+
+
+async def te2_app_backend_serving() -> None:
+    try:
+        await asyncio.to_thread(_post_serving_readiness)
+    except Exception as exc:
+        print(f"[aria_downloader] readiness post failed: {exc}", flush=True)
 
 
 def _rpc_config() -> Tuple[str, Optional[str]]:

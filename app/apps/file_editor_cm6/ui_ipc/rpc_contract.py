@@ -29,6 +29,10 @@ UI_IPC_RPC_METHOD_HOST_EDITOR_COMMAND: Final = "ui.host.editor.command"
 UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_MENTION: Final = "ui.host.diagnostics.mention"
 UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD: Final = "ui.host.state.fileActivity.record"
 UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE: Final = "ui.host.state.fileScroll.update"
+UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE: Final = "ui.sidebar.window.create"
+UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE: Final = "ui.sidebar.window.activate"
+UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE: Final = "ui.sidebar.window.close"
+UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET: Final = "ui.sidebar.activeShortcut.set"
 
 UiIpcRpcMethod = Literal[
     "ui.host.file.open",
@@ -46,6 +50,10 @@ UiIpcRpcMethod = Literal[
     "ui.host.diagnostics.mention",
     "ui.host.state.fileActivity.record",
     "ui.host.state.fileScroll.update",
+    "ui.sidebar.window.create",
+    "ui.sidebar.window.activate",
+    "ui.sidebar.window.close",
+    "ui.sidebar.activeShortcut.set",
 ]
 
 UI_IPC_RPC_NOTIFICATION_EDITOR_SAVE: Final = "ui.editor.save"
@@ -66,6 +74,9 @@ UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED: Final = "ui.openState.changed"
 UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHING: Final = "ui.project.switching"
 UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHED: Final = "ui.project.switched"
 UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED: Final = "ui.preferences.changed"
+UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED: Final = "ui.sidebar.windows.changed"
+UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED: Final = "ui.sidebar.window.activated"
+UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED: Final = "ui.sidebar.window.readiness.changed"
 
 UiIpcRpcNotification = Literal[
     "ui.editor.save",
@@ -86,6 +97,9 @@ UiIpcRpcNotification = Literal[
     "ui.project.switching",
     "ui.project.switched",
     "ui.preferences.changed",
+    "ui.sidebar.windows.changed",
+    "ui.sidebar.window.activated",
+    "ui.sidebar.window.readiness.changed",
 ]
 
 ALLOWED_REQUEST_METHODS: Final[set[str]] = {
@@ -104,6 +118,10 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_MENTION,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
+    UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE,
+    UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE,
+    UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE,
+    UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET,
 }
 
 ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
@@ -125,6 +143,9 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHING,
     UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHED,
     UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED,
+    UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED,
 }
 
 JsonObject = dict[str, object]

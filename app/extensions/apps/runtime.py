@@ -146,8 +146,12 @@ class AppRuntime:
             ctx["BACKEND_MODULE_PATH"] = str((app.root_dir / app.backend_module).resolve())
 
         env_overrides = dict(shell.env)
+        env_overrides["TE_APP_ID"] = app.app_id
         if os.environ.get("TE_FRAMEWORK_URL"):
             env_overrides["TE_FRAMEWORK_URL"] = os.environ["TE_FRAMEWORK_URL"]
+        else:
+            framework_port = str(os.environ.get("TE_PORT") or "8089").strip() or "8089"
+            env_overrides["TE_FRAMEWORK_URL"] = f"http://127.0.0.1:{framework_port}"
         ui: Optional[dict[str, Any]] = None
         if app.framework_shell_ui or shell.ui:
             ui = {}

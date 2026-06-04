@@ -15,6 +15,10 @@ from .rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_FILE_OPEN,
     UI_IPC_RPC_METHOD_HOST_FILE_RUN,
     UI_IPC_RPC_METHOD_HOST_FILE_SAVE,
+    UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET,
+    UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE,
+    UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE,
+    UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
     UiIpcRpcMethod,
@@ -136,6 +140,26 @@ async def dispatch_ui_ipc_rpc_request(
             params,
             source_name=source_name,
         )
+
+    if method == UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE:
+        from .sidebar_ws import handle_ui_sidebar_window_create_request
+
+        return await handle_ui_sidebar_window_create_request(params)
+
+    if method == UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE:
+        from .sidebar_ws import handle_ui_sidebar_window_activate_request
+
+        return await handle_ui_sidebar_window_activate_request(params)
+
+    if method == UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE:
+        from .sidebar_ws import handle_ui_sidebar_window_close_request
+
+        return await handle_ui_sidebar_window_close_request(params)
+
+    if method == UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET:
+        from .sidebar_ws import handle_ui_sidebar_active_shortcut_set_request
+
+        return await handle_ui_sidebar_active_shortcut_set_request(params)
 
     raise RuntimeError(
         build_jsonrpc_error(

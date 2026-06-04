@@ -1,10 +1,11 @@
 import asyncio
 import contextlib
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 # A simple in-memory store for the state of running apps.
 _running_apps: Dict[str, Dict] = {}
+_app_readiness: Dict[str, Dict[str, Any]] = {}
 _lock: Optional[asyncio.Lock] = None
 _cleanup_task: Optional[asyncio.Task] = None
 
@@ -92,6 +93,11 @@ async def register_app(app_id: str, shell_id: str, port: int):
             "created_at": existing.get("created_at", time.time()),
             "locked": bool(existing.get("locked", False)),
         }
+        _app_readiness[str(app_id or "").strip()] = {
+            "app_id": str(app_id or "").strip(),
+            "status": "starting",
+            "updated_at": time.time(),
+        }
 
 async def unregister_app(shell_id: str):
     """
@@ -99,7 +105,10 @@ async def unregister_app(shell_id: str):
     """
     print(f"[AppLifecycle] Unregistering shell_id={shell_id}")
     async with _get_lock():
-        _running_apps.pop(shell_id, None)
+        app_info = _running_apps.pop(shell_id, None)
+        app_id = str((app_info or {}).get("app_id") or "").strip()
+        if app_id and not any(info.get("app_id") == app_id for info in _running_apps.values()):
+            _app_readiness.pop(app_id, None)
 
 
 async def unregister_app_group(app_id: str):
@@ -109,6 +118,65 @@ async def unregister_app_group(app_id: str):
         to_remove = [shell_id for shell_id, info in _running_apps.items() if info.get("app_id") == app_id]
         for shell_id in to_remove:
             _running_apps.pop(shell_id, None)
+        _app_readiness.pop(str(app_id or "").strip(), None)
+
+
+def _normalize_readiness_payload(app_id: str, payload: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    raw = payload if isinstance(payload, dict) else {}
+    status = str(raw.get("status") or raw.get("phase") or "").strip().lower() or "ready"
+    if status == "loading":
+        status = "starting"
+    if status not in {"starting", "ready", "error", "stopped"}:
+        status = "ready" if status in {"ok", "up", "serving"} else "error"
+    normalized: Dict[str, Any] = {
+        "app_id": str(app_id or "").strip(),
+        "status": status,
+        "updated_at": time.time(),
+    }
+    for key in (
+        "phase",
+        "host_id",
+        "hostId",
+        "token_id",
+        "tokenId",
+        "console_worker_id",
+        "consoleWorkerId",
+        "url",
+        "message",
+        "source",
+    ):
+        value = raw.get(key)
+        if value is None:
+            continue
+        normalized[key] = value
+    details = raw.get("details")
+    if isinstance(details, dict):
+        normalized["details"] = dict(details)
+    return normalized
+
+
+async def set_app_readiness(app_id: str, payload: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    safe_app_id = str(app_id or "").strip()
+    if not safe_app_id:
+        raise ValueError("app_id is required")
+    readiness = _normalize_readiness_payload(safe_app_id, payload)
+    async with _get_lock():
+        _app_readiness[safe_app_id] = readiness
+    return dict(readiness)
+
+
+async def get_app_readiness(app_id: str) -> Dict[str, Any] | None:
+    safe_app_id = str(app_id or "").strip()
+    if not safe_app_id:
+        return None
+    async with _get_lock():
+        value = _app_readiness.get(safe_app_id)
+        return dict(value) if isinstance(value, dict) else None
+
+
+async def get_all_app_readiness() -> Dict[str, Dict[str, Any]]:
+    async with _get_lock():
+        return {app_id: dict(value) for app_id, value in _app_readiness.items() if isinstance(value, dict)}
 
 async def get_running_apps(manager) -> List[Dict]:
     """
@@ -134,6 +202,7 @@ async def get_running_apps(manager) -> List[Dict]:
             "uptime": time.time() - app_info["created_at"],
             "cpu": stats.get("cpu_percent", 0),
             "ram": stats.get("memory_rss", 0),
+            "readiness": dict(_app_readiness.get(str(app_info.get("app_id") or "").strip()) or {}),
         })
 
     if stale_shell_ids:
@@ -150,6 +219,9 @@ async def set_lock_state(shell_id: str, locked: bool) -> Optional[Dict]:
     async with _get_lock():
         if shell_id in _running_apps:
             _running_apps[shell_id]["locked"] = locked
+            app_id = str(_running_apps[shell_id].get("app_id") or "").strip()
+            if app_id:
+                _running_apps[shell_id]["readiness"] = dict(_app_readiness.get(app_id) or {})
             return _running_apps[shell_id]
         return None
 
@@ -188,6 +260,7 @@ async def terminate_app_group(manager, app_id: str) -> Dict:
         to_remove = [shell_id for shell_id, info in _running_apps.items() if info.get("app_id") == app_id]
         for shell_id in to_remove:
             _running_apps.pop(shell_id, None)
+        _app_readiness.pop(str(app_id or "").strip(), None)
     if to_remove:
         print(f"[AppLifecycle] Unregistered {len(to_remove)} tracked shell(s) for app_id={app_id}")
     else:

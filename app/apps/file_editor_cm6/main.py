@@ -7,6 +7,8 @@ import time
 import shutil
 from pathlib import Path
 from typing import Any
+from urllib import request as urllib_request
+from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query
 from fastapi.responses import JSONResponse, FileResponse, Response
 import asyncio
@@ -68,6 +70,40 @@ IGNORE_PATTERNS = [
 
 AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
 JsonDict = dict[str, Any]
+APP_ID = str(os.environ.get("TE_APP_ID") or "file_editor_cm6").strip() or "file_editor_cm6"
+
+
+def _framework_url() -> str:
+    explicit = str(os.environ.get("TE_FRAMEWORK_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    port = str(os.environ.get("TE_PORT") or "8089").strip() or "8089"
+    return f"http://127.0.0.1:{port}"
+
+
+def _post_serving_readiness() -> None:
+    body = {
+        "app_id": APP_ID,
+        "status": "ready",
+        "phase": "serving",
+        "source": "file_editor_cm6_backend",
+    }
+    endpoint = f"{_framework_url()}/api/apps/{quote(APP_ID, safe='')}/readiness"
+    req = urllib_request.Request(
+        endpoint,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib_request.urlopen(req, timeout=5) as resp:
+        resp.read()
+
+
+async def te2_app_backend_serving() -> None:
+    try:
+        await asyncio.to_thread(_post_serving_readiness)
+    except Exception as exc:
+        print(f"[file_editor_cm6] readiness post failed: {exc}", flush=True)
 
 CHANGE_RESULT_LIMIT = 40
 STATUS_TEXT_MAP = {

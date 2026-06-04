@@ -112,6 +112,9 @@ class AppDefinition:
         return f"{self.asset_base_url}/{raw.lstrip('/')}"
 
     def to_payload(self, *, include_compat_dir: bool = True) -> dict[str, Any]:
+        sidebar_state = self.raw_manifest.get("sidebar_state")
+        if not isinstance(sidebar_state, dict):
+            sidebar_state = None
         payload = {
             "id": self.app_id,
             "name": self.name,
@@ -128,6 +131,7 @@ class AppDefinition:
             "manifest_path": str(self.manifest_path),
             "asset_base_url": self.asset_base_url,
             "proxy_shell": self.proxy_shell,
+            "sidebar_state": sidebar_state,
             "enabled": self.enabled,
         }
         if include_compat_dir:
@@ -137,6 +141,9 @@ class AppDefinition:
         return payload
 
     def to_catalog_payload(self, *, running: bool = False) -> dict[str, Any]:
+        sidebar_state = self.raw_manifest.get("sidebar_state")
+        if not isinstance(sidebar_state, dict):
+            sidebar_state = None
         return {
             "id": self.app_id,
             "name": self.name,
@@ -153,6 +160,7 @@ class AppDefinition:
             "embed_url": f"/app/{self.app_id}?embed=1",
             "source_kind": self.source_kind,
             "asset_base_url": self.asset_base_url,
+            "sidebar_state": sidebar_state,
             "enabled": self.enabled,
         }
 

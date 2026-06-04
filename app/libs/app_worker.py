@@ -3,6 +3,7 @@
 import asyncio
 import argparse
 import importlib.util
+import inspect
 import os
 import signal
 import sys
@@ -31,8 +32,10 @@ def main():
     parser.add_argument("--port", required=True, type=int, help="The port to run the app on.")
     parser.add_argument("--backend-module", required=True, help="The path to the backend module.")
     args = parser.parse_args()
+    os.environ["TE_APP_ID"] = args.app_id
 
     mounted_subapps = []
+    backend_serving_hook = None
 
     @asynccontextmanager
     async def lifespan(_app):
@@ -44,7 +47,21 @@ def main():
                     continue
                 print(f"DEBUG: Entering lifespan for mounted sub-app at {path}", file=sys.stderr)
                 await stack.enter_async_context(lifespan_context(subapp))
+            serving_task = None
+            if callable(backend_serving_hook):
+                async def _run_backend_serving_hook():
+                    await asyncio.sleep(0.1)
+                    try:
+                        result = backend_serving_hook()
+                        if inspect.isawaitable(result):
+                            await result
+                    except Exception as exc:
+                        print(f"[app-worker] Backend serving hook failed for {args.app_id}: {exc}", file=sys.stderr)
+
+                serving_task = asyncio.create_task(_run_backend_serving_hook())
             yield
+            if serving_task is not None and not serving_task.done():
+                serving_task.cancel()
 
     app = FastAPI(lifespan=lifespan)
 
@@ -103,6 +120,8 @@ def main():
                 mounted_subapps.append((path, subapp))
                 app.mount(path, subapp)
 
+        backend_serving_hook = getattr(module, 'te2_app_backend_serving', None)
+
     except Exception as e:
         print(f"Error loading app backend: {e}", file=sys.stderr)
         sys.exit(1)
@@ -122,6 +141,7 @@ def main():
         app,
         host="127.0.0.1",
         port=args.port,
+        lifespan="on",
         timeout_graceful_shutdown=2.0,
         log_config=None,
     )

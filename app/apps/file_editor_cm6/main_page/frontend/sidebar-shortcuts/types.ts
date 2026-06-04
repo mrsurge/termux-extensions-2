@@ -1,4 +1,4 @@
-import type { SidebarIpcRpcMethod } from '../../../src/sidebar_ipc/rpc_contract.ts';
+import type { UiIpcRpcMethod } from '../../../src/ui_ipc/rpc_contract.ts';
 
 export type UnknownRecord = Record<string, unknown>;
 
@@ -27,6 +27,13 @@ export interface SidebarShortcut extends UnknownRecord {
   icon: ShortcutIcon | null;
   load: ShortcutLoad;
   last_used: number;
+  dock?: boolean;
+  stateful?: boolean;
+  host_id?: string;
+  base_url?: string;
+  restore_url?: string;
+  restoreUrl?: string;
+  readiness?: SidebarWindowReadiness | null;
 }
 
 export interface SidebarShortcutPreference extends UnknownRecord {
@@ -49,8 +56,57 @@ export interface FrameworkAppManifest extends UnknownRecord {
   icon_text?: string;
   icon_emoji?: string;
   asset_base_url?: string;
+  base_url?: string;
+  baseUrl?: string;
+  launch_url?: string;
+  embed_url?: string;
+  stateful?: boolean;
   _dir?: string;
+  sidebar_state?: UnknownRecord | null;
 }
+
+export interface SidebarWindowReadiness extends UnknownRecord {
+  status?: string;
+  phase?: string;
+  message?: string;
+  console_worker_id?: string;
+  consoleWorkerId?: string;
+  updated_at?: number;
+  updatedAt?: number;
+}
+
+export interface SidebarAppDockSlot extends UnknownRecord {
+  host_id?: string;
+  hostId?: string;
+  app_id?: string;
+  appId?: string;
+  base_url?: string;
+  baseUrl?: string;
+  stateful?: boolean;
+  token_id?: string;
+  tokenId?: string;
+  console_worker_id?: string;
+  consoleWorkerId?: string;
+  console_worker_prefix?: string;
+  consoleWorkerPrefix?: string;
+  label?: string;
+  title?: string;
+  state_kind?: string;
+  stateKind?: string;
+  url?: string;
+  restore_url?: string;
+  restoreUrl?: string;
+  query_state?: UnknownRecord;
+  queryState?: UnknownRecord;
+  load?: ShortcutLoad | string;
+  icon?: ShortcutIcon | null;
+  readiness?: SidebarWindowReadiness | null;
+  updated_at?: number;
+  updatedAt?: number;
+  version?: string | number;
+}
+
+export type SidebarStatefulWindow = SidebarAppDockSlot;
 
 export interface SidebarShortcutsHost {
   toast?: (message: string) => void;
@@ -62,7 +118,7 @@ export interface SidebarShortcutsOptions {
   pickFile?: (startPath?: string) => Promise<string | null>;
   openDrawer?: () => void;
   closeAllMenus?: () => void;
-  emitSidebarRpcRequest?: (method: SidebarIpcRpcMethod, payload?: UnknownRecord) => void;
+  emitSidebarUiRequest?: (method: UiIpcRpcMethod, payload?: UnknownRecord) => void;
   setMenuChecked?: (el: HTMLElement | null, checked: boolean) => void;
 }
 

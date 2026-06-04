@@ -1,9 +1,47 @@
+import asyncio
+import json
 import os
 from pathlib import Path
 from fastapi import APIRouter, Query, Body, HTTPException
 from typing import Optional, Dict, Any
+from urllib import request as urllib_request
+from urllib.parse import quote
 
 file_editor_bp = APIRouter()
+APP_ID = str(os.environ.get("TE_APP_ID") or "file_editor").strip() or "file_editor"
+
+
+def _framework_url() -> str:
+    explicit = str(os.environ.get("TE_FRAMEWORK_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    port = str(os.environ.get("TE_PORT") or "8089").strip() or "8089"
+    return f"http://127.0.0.1:{port}"
+
+
+def _post_serving_readiness() -> None:
+    body = {
+        "app_id": APP_ID,
+        "status": "ready",
+        "phase": "serving",
+        "source": "file_editor_backend",
+    }
+    endpoint = f"{_framework_url()}/api/apps/{quote(APP_ID, safe='')}/readiness"
+    req = urllib_request.Request(
+        endpoint,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib_request.urlopen(req, timeout=5) as resp:
+        resp.read()
+
+
+async def te2_app_backend_serving() -> None:
+    try:
+        await asyncio.to_thread(_post_serving_readiness)
+    except Exception as exc:
+        print(f"[file_editor] readiness post failed: {exc}", flush=True)
 
 def _expand_and_validate_path(path: str) -> tuple[Optional[str], Optional[str]]:
     base_home = Path.home()

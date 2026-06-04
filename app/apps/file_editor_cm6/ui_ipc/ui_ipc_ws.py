@@ -21,6 +21,7 @@ from .rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_EVENT,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
     UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
     UiIpcRpcProtocolError,
     build_jsonrpc_error,
     build_jsonrpc_notification,
@@ -118,6 +119,19 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                         ),
                         to=sid,
                     )
+            except Exception:
+                pass
+            try:
+                from .sidebar_window_state import get_sidebar_window_state
+
+                await self.emit(
+                    UI_IPC_RPC_NOTIFICATION_EVENT,
+                    build_jsonrpc_notification(
+                        UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
+                        get_sidebar_window_state(),
+                    ),
+                    to=sid,
+                )
             except Exception:
                 pass
 

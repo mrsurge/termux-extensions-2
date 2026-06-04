@@ -59,6 +59,16 @@ def _resolve_manifest_icon_src(manifest: dict) -> str:
 
 def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> list[dict]:
     running = running_apps or {}
+    readiness_by_app: dict[str, dict[str, Any]] = {}
+    if isinstance(running_apps, dict):
+        # Accept optional readiness data injected by callers under a reserved key.
+        raw_readiness = running_apps.get("__readiness__")
+        if isinstance(raw_readiness, dict):
+            readiness_by_app = {
+                str(app_id).strip(): dict(value)
+                for app_id, value in raw_readiness.items()
+                if str(app_id).strip() and isinstance(value, dict)
+            }
     catalog: list[dict] = []
     for manifest in manifests:
         if not isinstance(manifest, dict):
@@ -73,6 +83,9 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
 
         backend_required = bool(entrypoints.get("backend_blueprint"))
         icon_src_resolved = _resolve_manifest_icon_src(manifest)
+        sidebar_state = manifest.get("sidebar_state")
+        if not isinstance(sidebar_state, dict):
+            sidebar_state = None
 
         catalog.append({
             "id": app_id,
@@ -86,10 +99,12 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
             "fullscreen": bool(manifest.get("fullscreen")),
             "backend_required": backend_required,
             "running": app_id in running,
+            "readiness": readiness_by_app.get(app_id) or {},
             "launch_url": f"/app/{app_id}",
             "embed_url": f"/app/{app_id}?embed=1",
             "asset_base_url": manifest.get("asset_base_url") if isinstance(manifest.get("asset_base_url"), str) else "",
             "source_kind": manifest.get("source_kind") if isinstance(manifest.get("source_kind"), str) else "",
+            "sidebar_state": sidebar_state,
         })
 
     catalog.sort(key=lambda item: str(item.get("name") or item.get("id") or "").lower())
@@ -99,8 +114,11 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
 async def _build_apps_snapshot() -> dict[str, Any]:
     manifests = get_loaded_apps()
     running_apps = await get_app_runtime().get_running_app_map()
+    readiness = await app_lifecycle.get_all_app_readiness()
+    catalog_input = dict(running_apps)
+    catalog_input["__readiness__"] = readiness
     return {
-        "catalog": _build_apps_catalog(manifests, running_apps),
+        "catalog": _build_apps_catalog(manifests, catalog_input),
         "running_ids": sorted(str(app_id).strip() for app_id in running_apps.keys() if str(app_id).strip()),
     }
 
@@ -268,6 +286,55 @@ async def unlock_app(app_id: str, manager: FrameworkShellManager = Depends(get_f
     updated_app = await app_lifecycle.set_lock_state(app_to_unlock["shell_id"], False)
     return {"ok": True, "data": updated_app}
 
+@apps_bp.post('/api/apps/{app_id}/readiness')
+async def set_app_readiness(app_id: str, payload: dict | None = Body(None)):
+    """
+    Semantic readiness callback for apps whose backend/page needs more than TCP shell readiness.
+    Minimum body: {"status": "ready"}.
+    Stateful sidebar app windows should include host_id, token_id, url, and console_worker_id when available.
+    """
+    manifest = next((app for app in get_loaded_apps() if app.get('id') == app_id), None)
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"App '{app_id}' not found")
+    body = payload if isinstance(payload, dict) else {}
+    status = str(body.get("status") or "").strip()
+    if not status:
+        raise HTTPException(status_code=400, detail="status is required")
+    status_normalized = status.lower()
+    if status_normalized == "loading":
+        status_normalized = "starting"
+    if status_normalized not in {"starting", "ready", "error", "stopped"}:
+        raise HTTPException(status_code=400, detail="invalid readiness status")
+
+    host_id = str(body.get("host_id") or body.get("hostId") or "").strip()
+    if host_id:
+        token_id = str(body.get("token_id") or body.get("tokenId") or "").strip()
+        url = str(body.get("url") or "").strip()
+        if not token_id:
+            raise HTTPException(status_code=400, detail="token_id is required for stateful sidebar readiness")
+        if not url:
+            raise HTTPException(status_code=400, detail="url is required for stateful sidebar readiness")
+
+    readiness = await app_lifecycle.set_app_readiness(app_id, body)
+    await app_registry_events.publish("app_readiness_changed", {"app_id": app_id, "readiness": readiness})
+
+    if host_id:
+        try:
+            from app.apps.file_editor_cm6.ui_ipc.sidebar_ws import update_sidebar_window_readiness_global
+
+            await update_sidebar_window_readiness_global(
+                {
+                    **body,
+                    "app_id": app_id,
+                    "appId": app_id,
+                    "host_id": host_id,
+                    "readiness": readiness,
+                }
+            )
+        except Exception as exc:
+            print(f"[AppsExtension] sidebar readiness bridge failed for {app_id}/{host_id}: {exc}", flush=True)
+    return {"ok": True, "data": readiness}
+
 @apps_bp.get('/api/apps/running')
 async def get_running_apps(manager: FrameworkShellManager = Depends(get_framework_shell_manager)):
     """Returns a list of all currently running app shells with stats."""
@@ -307,7 +374,10 @@ async def get_apps_catalog():
     """
     manifests = get_loaded_apps()
     running_apps = await get_app_runtime().get_running_app_map()
-    catalog = _build_apps_catalog(manifests, running_apps)
+    readiness = await app_lifecycle.get_all_app_readiness()
+    catalog_input = dict(running_apps)
+    catalog_input["__readiness__"] = readiness
+    catalog = _build_apps_catalog(manifests, catalog_input)
     return {"ok": True, "data": catalog}
 
 

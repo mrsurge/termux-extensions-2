@@ -51,6 +51,9 @@ DEFAULT_UI_PREFS: Dict[str, Any] = {
     # Shortcuts list:
     #   [{"id": "...", "kind": "url"|"framework_app", "app_id": "...", "label": "...", "url": "...", "version": "...", "icon": {...}, "load": "...", "header": bool, "last_used": int}]
     "agentShortcuts": [],
+    # Stateful sidebar app-window ledger. Slots are keyed by host_id.
+    # This is intentionally separate from user-authored shortcuts.
+    "sidebarWindowState": {"version": 1, "active_host_id": "", "order": ["launcher"], "slots": {}},
     # Monaco web workers (JSON, CSS, HTML, TS language services).
     # OFF by default — the workbench adapter extension host handles everything.
     "webWorkersEnabled": False,

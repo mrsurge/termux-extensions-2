@@ -23,6 +23,14 @@ SIDEBAR_IPC_RPC_METHOD_MENTION: Final = "sidebar.mention"
 SIDEBAR_IPC_RPC_METHOD_PROJECT_LOOKUP: Final = "sidebar.project.lookup"
 SIDEBAR_IPC_RPC_METHOD_PROJECT_OPEN: Final = "sidebar.project.open"
 SIDEBAR_IPC_RPC_METHOD_PROJECT_CREATE: Final = "sidebar.project.create"
+SIDEBAR_IPC_RPC_METHOD_LAUNCHER_CATALOG_GET: Final = "sidebar.launcher.catalog.get"
+SIDEBAR_IPC_RPC_METHOD_WINDOWS_LIST: Final = "sidebar.windows.list"
+SIDEBAR_IPC_RPC_METHOD_WINDOW_CREATE: Final = "sidebar.window.create"
+SIDEBAR_IPC_RPC_METHOD_WINDOW_OPEN_URL: Final = "sidebar.window.openUrl"
+SIDEBAR_IPC_RPC_METHOD_WINDOW_STATE_UPDATE: Final = "sidebar.window.state.update"
+SIDEBAR_IPC_RPC_METHOD_WINDOW_ACTIVATE: Final = "sidebar.window.activate"
+SIDEBAR_IPC_RPC_METHOD_WINDOW_CLOSE: Final = "sidebar.window.close"
+SIDEBAR_IPC_RPC_METHOD_WINDOW_READINESS_UPDATE: Final = "sidebar.window.readiness.update"
 SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST: Final = "sidebar.drafts.list"
 SIDEBAR_IPC_RPC_METHOD_DRAFT_STATE_GET: Final = "sidebar.draftState.get"
 SIDEBAR_IPC_RPC_METHOD_DRAFT_CLEAR: Final = "sidebar.draft.clear"
@@ -47,6 +55,14 @@ SidebarIpcRpcMethod = Literal[
     "sidebar.project.lookup",
     "sidebar.project.open",
     "sidebar.project.create",
+    "sidebar.launcher.catalog.get",
+    "sidebar.windows.list",
+    "sidebar.window.create",
+    "sidebar.window.openUrl",
+    "sidebar.window.state.update",
+    "sidebar.window.activate",
+    "sidebar.window.close",
+    "sidebar.window.readiness.update",
     "sidebar.drafts.list",
     "sidebar.draftState.get",
     "sidebar.draft.clear",
@@ -68,6 +84,9 @@ SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE: Final = "sidebar.clientState"
 SIDEBAR_IPC_RPC_NOTIFICATION_MENTION: Final = "sidebar.mention"
 SIDEBAR_IPC_RPC_NOTIFICATION_FILE_OPEN: Final = "sidebar.file.open"
 SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED: Final = "sidebar.project.opened"
+SIDEBAR_IPC_RPC_NOTIFICATION_WINDOWS_CHANGED: Final = "sidebar.windows.changed"
+SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_ACTIVATED: Final = "sidebar.window.activated"
+SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_READINESS_CHANGED: Final = "sidebar.window.readiness.changed"
 SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH: Final = "sidebar.activeShortcut.refresh"
 SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE: Final = "sidebar.drawer.state"
 SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN: Final = "sidebar.drawer.open"
@@ -81,6 +100,9 @@ SidebarIpcRpcNotification = Literal[
     "sidebar.mention",
     "sidebar.file.open",
     "sidebar.project.opened",
+    "sidebar.windows.changed",
+    "sidebar.window.activated",
+    "sidebar.window.readiness.changed",
     "sidebar.activeShortcut.refresh",
     "sidebar.drawer.state",
     "sidebar.drawer.open",
@@ -98,6 +120,14 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     SIDEBAR_IPC_RPC_METHOD_PROJECT_LOOKUP,
     SIDEBAR_IPC_RPC_METHOD_PROJECT_OPEN,
     SIDEBAR_IPC_RPC_METHOD_PROJECT_CREATE,
+    SIDEBAR_IPC_RPC_METHOD_LAUNCHER_CATALOG_GET,
+    SIDEBAR_IPC_RPC_METHOD_WINDOWS_LIST,
+    SIDEBAR_IPC_RPC_METHOD_WINDOW_CREATE,
+    SIDEBAR_IPC_RPC_METHOD_WINDOW_OPEN_URL,
+    SIDEBAR_IPC_RPC_METHOD_WINDOW_STATE_UPDATE,
+    SIDEBAR_IPC_RPC_METHOD_WINDOW_ACTIVATE,
+    SIDEBAR_IPC_RPC_METHOD_WINDOW_CLOSE,
+    SIDEBAR_IPC_RPC_METHOD_WINDOW_READINESS_UPDATE,
     SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST,
     SIDEBAR_IPC_RPC_METHOD_DRAFT_STATE_GET,
     SIDEBAR_IPC_RPC_METHOD_DRAFT_CLEAR,
@@ -120,6 +150,9 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     SIDEBAR_IPC_RPC_NOTIFICATION_MENTION,
     SIDEBAR_IPC_RPC_NOTIFICATION_FILE_OPEN,
     SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED,
+    SIDEBAR_IPC_RPC_NOTIFICATION_WINDOWS_CHANGED,
+    SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_ACTIVATED,
+    SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_READINESS_CHANGED,
     SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH,
     SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE,
     SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_OPEN,

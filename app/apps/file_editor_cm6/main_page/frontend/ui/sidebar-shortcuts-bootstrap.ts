@@ -4,7 +4,7 @@ import type {
   SidebarShortcutsRuntime,
   UnknownRecord,
 } from '../sidebar-shortcuts/types.ts';
-import type { SidebarIpcRpcMethod } from '../../../src/sidebar_ipc/rpc_contract.ts';
+import type { UiIpcRpcMethod } from '../../../src/ui_ipc/rpc_contract.ts';
 
 export interface SidebarShortcutsBootstrapDeps {
   initSidebarShortcuts: (opts: SidebarShortcutsOptions) => SidebarShortcutsRuntime;
@@ -14,7 +14,7 @@ export interface SidebarShortcutsBootstrapDeps {
   openDrawer: () => void;
   closeAllMenus: () => void;
   setMenuChecked: (el: HTMLElement | null, checked: boolean) => void;
-  emitSidebarRpcRequest?: (method: SidebarIpcRpcMethod, payload?: UnknownRecord) => void;
+  emitSidebarUiRequest?: (method: UiIpcRpcMethod, payload?: UnknownRecord) => void;
 }
 
 export function initSidebarShortcutsSafe(deps: SidebarShortcutsBootstrapDeps): SidebarShortcutsRuntime | null {
@@ -26,13 +26,13 @@ export function initSidebarShortcutsSafe(deps: SidebarShortcutsBootstrapDeps): S
       openDrawer: deps.openDrawer,
       closeAllMenus: deps.closeAllMenus,
       setMenuChecked: deps.setMenuChecked,
-      emitSidebarRpcRequest: deps.emitSidebarRpcRequest,
+      emitSidebarUiRequest: deps.emitSidebarUiRequest,
     });
     // init() is deferred — called after runBootSequence completes
     // so sidebar loading doesn't compete with core editor boot.
     return shortcuts || null;
   } catch (e) {
-    console.warn('Failed to initialize sidebar shortcuts:', e);
+    console.warn('Failed to initialize sidebar app dock:', e);
     return null;
   }
 }

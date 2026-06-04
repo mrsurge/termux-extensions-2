@@ -13,6 +13,8 @@ import shlex
 import shutil
 import time
 from typing import ClassVar, Literal, NotRequired, Protocol, TypeAlias, TypedDict, cast
+from urllib import request as urllib_request
+from urllib.parse import quote
 import uuid
 
 from fastapi import APIRouter, HTTPException, WebSocket
@@ -22,7 +24,7 @@ from starlette.websockets import WebSocketDisconnect
 from framework_shells import get_manager as _manager  # pyright: ignore[reportMissingImports,reportUnknownVariableType]
 from framework_shells.orchestrator import Orchestrator  # pyright: ignore[reportMissingImports,reportUnknownVariableType]
 
-APP_ID = "terminal"
+APP_ID = str(os.environ.get("TE_APP_ID") or "terminal").strip() or "terminal"
 SHELLSPEC_DIR = Path(__file__).resolve().parent / "shellspec"
 DEFAULT_SHELL_KIND = "python"
 TERMINAL_STREAM_KIND_ENV = "TERMINAL_STREAM_KIND"
@@ -40,6 +42,39 @@ DEFAULT_ROWS = 24
 
 terminal_bp = APIRouter()
 log = logging.getLogger("terminal_backend")
+
+
+def _framework_url() -> str:
+    explicit = str(os.environ.get("TE_FRAMEWORK_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    port = str(os.environ.get("TE_PORT") or "8089").strip() or "8089"
+    return f"http://127.0.0.1:{port}"
+
+
+def _post_serving_readiness() -> None:
+    body = {
+        "app_id": APP_ID,
+        "status": "ready",
+        "phase": "serving",
+        "source": "terminal_backend",
+    }
+    endpoint = f"{_framework_url()}/api/apps/{quote(APP_ID, safe='')}/readiness"
+    req = urllib_request.Request(
+        endpoint,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib_request.urlopen(req, timeout=5) as resp:
+        resp.read()
+
+
+async def te2_app_backend_serving() -> None:
+    try:
+        await asyncio.to_thread(_post_serving_readiness)
+    except Exception as exc:
+        print(f"[terminal] readiness post failed: {exc}", flush=True)
 
 JsonObject = dict[str, object]
 TerminalMethod: TypeAlias = Literal[

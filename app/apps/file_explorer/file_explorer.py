@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import anyio
+import asyncio
 import functools
-
 import grp
 import json
 import os
@@ -12,6 +12,10 @@ import stat
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from urllib import request as urllib_request
+from urllib.parse import quote, urlencode
+
+import socketio
 
 from fastapi import APIRouter, Request, HTTPException, Body, Query
 from fastapi.responses import JSONResponse, FileResponse
@@ -21,6 +25,167 @@ from app.libs.jobs import JobCancelled, register_job_handler
 file_explorer_bp = APIRouter()
 
 HOME_DIR = Path.home()
+APP_ID = str(os.environ.get('TE_APP_ID') or 'file_explorer').strip() or 'file_explorer'
+APP_BASE_URL = f'/app/{APP_ID}'
+SIDEBAR_TOKEN_ID = str(os.environ.get('TE_SIDEBAR_TOKEN_ID') or APP_ID).strip() or APP_ID
+SIDEBAR_IPC_NAMESPACE = '/sidebar_ipc'
+SIDEBAR_IPC_SOCKET_PATH = '/ui_ipc_ws/socket.io'
+SIDEBAR_IPC_RPC_EVENT = 'rpc'
+
+
+def _framework_url() -> str:
+    explicit = str(os.environ.get('TE_FRAMEWORK_URL') or '').strip()
+    if explicit:
+        return explicit.rstrip('/')
+    port = str(os.environ.get('TE_PORT') or '8089').strip() or '8089'
+    return f'http://127.0.0.1:{port}'
+
+
+def _post_framework_readiness_sync(payload: Dict[str, Any]) -> None:
+    body = dict(payload)
+    body.setdefault('app_id', APP_ID)
+    body.setdefault('status', 'ready')
+    endpoint = f"{_framework_url()}/api/apps/{quote(APP_ID, safe='')}/readiness"
+    req = urllib_request.Request(
+        endpoint,
+        data=json.dumps(body).encode('utf-8'),
+        headers={'Content-Type': 'application/json'},
+        method='POST',
+    )
+    with urllib_request.urlopen(req, timeout=5) as resp:
+        resp.read()
+
+
+async def _post_framework_readiness(payload: Dict[str, Any]) -> None:
+    await asyncio.to_thread(_post_framework_readiness_sync, payload)
+
+
+async def te2_app_backend_serving() -> None:
+    try:
+        await _post_framework_readiness({
+            'app_id': APP_ID,
+            'status': 'ready',
+            'phase': 'serving',
+            'source': 'file_explorer_backend',
+        })
+    except Exception as exc:
+        print(f"[file_explorer] readiness post failed: {exc}", flush=True)
+
+
+def _sidebar_backend_client_id() -> str:
+    return f'{APP_ID}:backend:{os.getpid()}'
+
+
+async def _call_sidebar_rpc(method: str, params: Dict[str, Any] | None = None, *, timeout: float = 5.0) -> Dict[str, Any]:
+    safe_method = str(method or '').strip()
+    if not safe_method:
+        raise ValueError('method is required')
+    client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
+    timeout_seconds = max(1, int(timeout))
+    try:
+        await client.connect(
+            _framework_url(),
+            namespaces=[SIDEBAR_IPC_NAMESPACE],
+            socketio_path=SIDEBAR_IPC_SOCKET_PATH.lstrip('/'),
+            transports=['websocket', 'polling'],
+        )
+        register = {
+            'jsonrpc': '2.0',
+            'id': f'{APP_ID}:register:{int(asyncio.get_running_loop().time() * 1000)}',
+            'method': 'sidebar.register',
+            'params': {
+                'role': 'iframe',
+                'app': APP_ID,
+                'client_id': _sidebar_backend_client_id(),
+                'capabilities': ['sidebar.windows'],
+            },
+        }
+        await client.call(SIDEBAR_IPC_RPC_EVENT, register, namespace=SIDEBAR_IPC_NAMESPACE, timeout=timeout_seconds)
+        request = {
+            'jsonrpc': '2.0',
+            'id': f'{APP_ID}:{int(asyncio.get_running_loop().time() * 1000)}',
+            'method': safe_method,
+            'params': params or {},
+        }
+        response = await client.call(
+            SIDEBAR_IPC_RPC_EVENT,
+            request,
+            namespace=SIDEBAR_IPC_NAMESPACE,
+            timeout=timeout_seconds,
+        )
+        if not isinstance(response, dict):
+            raise RuntimeError('sidebar RPC returned a non-object response')
+        error = response.get('error')
+        if isinstance(error, dict):
+            raise RuntimeError(str(error.get('message') or error))
+        result = response.get('result')
+        return result if isinstance(result, dict) else {'result': result}
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+
+def _resolve_sidebar_directory(path_value: object) -> Path:
+    raw = str(path_value or '').strip() or str(HOME_DIR)
+    try:
+        path = Path(os.path.abspath(os.path.expanduser(raw))).resolve()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail='invalid path') from exc
+    if not path.exists():
+        raise HTTPException(status_code=404, detail='directory not found')
+    if not path.is_dir():
+        raise HTTPException(status_code=400, detail='not a directory')
+    return path
+
+
+def _canonical_sidebar_url(host_id: str, token_id: str, path_value: str, delay_ms: int, console_worker_id: str = '') -> str:
+    query = {
+        'embed': '1',
+        'te2_host_id': host_id,
+        'path': path_value,
+    }
+    if token_id:
+        query['te2_token_id'] = token_id
+    if console_worker_id:
+        query['te2_console_worker_id'] = console_worker_id
+    if delay_ms:
+        query['te2_readiness_delay_ms'] = str(delay_ms)
+    return f"{APP_BASE_URL}?{urlencode(query)}"
+
+
+def _clamp_delay_ms(value: object) -> int:
+    try:
+        delay = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(delay, 60_000))
+
+
+async def _post_readiness_after_delay(payload: Dict[str, Any]) -> None:
+    delay_ms = _clamp_delay_ms(payload.get('readiness_delay_ms') or payload.get('te2_readiness_delay_ms'))
+    if delay_ms:
+        await asyncio.sleep(delay_ms / 1000)
+    readiness_payload = {
+        'status': 'ready',
+        'app_id': APP_ID,
+        'phase': 'state_url_ready',
+        'host_id': str(payload.get('host_id') or payload.get('hostId') or '').strip(),
+        'token_id': str(payload.get('token_id') or payload.get('tokenId') or '').strip(),
+        'console_worker_id': str(payload.get('console_worker_id') or payload.get('consoleWorkerId') or '').strip(),
+        'url': str(payload.get('url') or '').strip(),
+        'path': str(payload.get('path') or '').strip(),
+        'source': 'file_explorer_backend',
+        'details': {
+            'state_kind': 'path',
+            'readiness_delay_ms': delay_ms,
+        },
+    }
+    try:
+        await _post_framework_readiness(readiness_payload)
+    except Exception as exc:
+        print(f"[file_explorer] readiness post failed: {exc}", flush=True)
 
 
 def _scandir_entries(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
@@ -239,6 +404,65 @@ async def list_directory(path: str = Query(str(HOME_DIR)), hidden: bool = Query(
         raise HTTPException(status_code=500, detail=str(exc))
     entries.sort(key=lambda item: (item.get('type') != 'directory', (item.get('name') or '').lower()))
     return {"ok": True, "data": {"entries": entries, "path": str(abs_path)}}
+
+
+@file_explorer_bp.post('/sidebar/window/open_url')
+@file_explorer_bp.post('/sidebar/window/state')
+async def publish_sidebar_window_url(payload: Dict[str, Any] | None = Body(None)):
+    """
+    Reference backend bridge for stateful sidebar app windows.
+    The frontend publishes the current path state here after loading a directory;
+    the backend records it over typed /sidebar_ipc RPC. The live iframe is not
+    reloaded for ordinary state changes.
+    """
+    body = payload if isinstance(payload, dict) else {}
+    host_id = str(body.get('host_id') or body.get('hostId') or '').strip()
+    if not host_id:
+        raise HTTPException(status_code=400, detail='host_id is required')
+    directory = _resolve_sidebar_directory(body.get('path'))
+    path_value = str(directory)
+    delay_ms = _clamp_delay_ms(body.get('readiness_delay_ms') or body.get('te2_readiness_delay_ms'))
+    console_worker_id = str(body.get('console_worker_id') or body.get('consoleWorkerId') or '').strip()
+    token_id = str(body.get('token_id') or body.get('tokenId') or SIDEBAR_TOKEN_ID).strip()
+    url_value = _canonical_sidebar_url(host_id, token_id, path_value, delay_ms, console_worker_id)
+    params: Dict[str, Any] = {
+        'lane': {
+            'app_id': APP_ID,
+            'base_url': APP_BASE_URL,
+        },
+        'app_id': APP_ID,
+        'appId': APP_ID,
+        'base_url': APP_BASE_URL,
+        'baseUrl': APP_BASE_URL,
+        'host_id': host_id,
+        'hostId': host_id,
+        'token_id': token_id,
+        'tokenId': token_id,
+        'console_worker_id': console_worker_id,
+        'consoleWorkerId': console_worker_id,
+        'state_kind': 'path',
+        'stateKind': 'path',
+        'path': path_value,
+        'query_state': {'path': path_value},
+        'queryState': {'path': path_value},
+        'url': url_value,
+        'label': path_value or 'File Explorer',
+        'load': 'eager',
+        'activate': body.get('activate', False),
+        'source': 'file_explorer_backend',
+    }
+    try:
+        rpc_result = await _call_sidebar_rpc(
+            'sidebar.window.state.update',
+            params,
+            timeout=5,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f'sidebar IPC update failed: {exc}') from exc
+
+    readiness_payload = {**params, 'readiness_delay_ms': delay_ms}
+    asyncio.create_task(_post_readiness_after_delay(readiness_payload))
+    return {"ok": True, "data": {"queued_readiness": True, "sidebar": rpc_result}}
 
 
 @file_explorer_bp.get('/download')

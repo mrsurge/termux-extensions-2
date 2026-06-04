@@ -69,10 +69,8 @@ import { initResizeManager, loadLayoutPreferences } from './main_page/frontend/h
 import type { ProblemsPanelController } from './src/diagnostics/problems-panel.ts';
 import type { OpenFileOptions } from './main_page/frontend/file-ops/open-flow.ts';
 import type { ScheduleToolbarTitleClampOptions } from './main_page/frontend/host-chrome-runtime.ts';
-import type {
-  SidebarIpcRpcMethod,
-  SidebarIpcRpcNotificationMethod,
-} from './src/sidebar_ipc/rpc_contract.ts';
+import type { SidebarIpcRpcNotificationMethod } from './src/sidebar_ipc/rpc_contract.ts';
+import type { UiIpcRpcMethod } from './src/ui_ipc/rpc_contract.ts';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -223,8 +221,8 @@ const uiIpcConnections = createUiIpcConnections({
     recentsController.broadcastRecentsUpdate(state);
   },
 });
-function _emitSidebarRpcRequest(method: SidebarIpcRpcMethod, payload?: unknown) {
-  uiIpcConnections.emitSidebarRpcRequest(method, asUnknownRecord(payload));
+function _requestSidebarUiControl(method: UiIpcRpcMethod, payload?: unknown) {
+  uiIpcConnections.requestSidebarUiControl(method, asUnknownRecord(payload));
 }
 function _emitSidebarRpcNotification(method: SidebarIpcRpcNotificationMethod, payload?: unknown) {
   uiIpcConnections.emitSidebarRpcNotification(method, asUnknownRecord(payload));
@@ -963,7 +961,7 @@ sidebarShortcuts = initSidebarShortcutsSafe({
   openDrawer: () => hostSidebarRuntime.openDrawer(),
   closeAllMenus,
   setMenuChecked,
-  emitSidebarRpcRequest: _emitSidebarRpcRequest,
+  emitSidebarUiRequest: _requestSidebarUiControl,
 });
 
 drainPendingWatcherEvents();

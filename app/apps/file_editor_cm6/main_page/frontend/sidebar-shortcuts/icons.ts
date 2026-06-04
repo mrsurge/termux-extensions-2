@@ -12,6 +12,9 @@ export function renderIconNode(icon: unknown, sizePx: number | null = 16, fallba
   wrap.style.display = 'inline-flex';
   wrap.style.alignItems = 'center';
   wrap.style.justifyContent = 'center';
+  wrap.style.overflow = 'hidden';
+  wrap.style.flex = '0 0 auto';
+  wrap.style.lineHeight = '1';
   if (sizePx === null) {
     wrap.style.width = '100%';
     wrap.style.height = '100%';
@@ -46,6 +49,7 @@ export function renderIconNode(icon: unknown, sizePx: number | null = 16, fallba
     img.src = src;
     img.alt = '';
     img.setAttribute('aria-hidden', 'true');
+    constrainIconImage(img);
     wrap.appendChild(img);
     return wrap;
   }
@@ -60,10 +64,21 @@ export function renderIconNode(icon: unknown, sizePx: number | null = 16, fallba
     img.src = src;
     img.alt = '';
     img.setAttribute('aria-hidden', 'true');
+    constrainIconImage(img);
     wrap.appendChild(img);
     return wrap;
   }
 
   if (fallbackText) wrap.textContent = fallbackText;
   return wrap;
+}
+
+function constrainIconImage(img: HTMLImageElement): void {
+  img.style.display = 'block';
+  img.style.width = '100%';
+  img.style.height = '100%';
+  img.style.maxWidth = '100%';
+  img.style.maxHeight = '100%';
+  img.style.objectFit = 'contain';
+  img.style.flex = '0 0 auto';
 }

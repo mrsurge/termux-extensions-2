@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Any, List, Optional
+from urllib.parse import quote
 from urllib.parse import urlencode
+from urllib import request as urllib_request
 
 from fastapi import APIRouter, HTTPException, Body, Query
 from fastapi.responses import JSONResponse
@@ -13,6 +17,40 @@ from app.libs.jobs import manager as job_manager
 from app.utils.paths import _resolve_user_path
 
 archive_manager_bp = APIRouter()
+APP_ID = str(os.environ.get("TE_APP_ID") or "archive_manager").strip() or "archive_manager"
+
+
+def _framework_url() -> str:
+    explicit = str(os.environ.get("TE_FRAMEWORK_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    port = str(os.environ.get("TE_PORT") or "8089").strip() or "8089"
+    return f"http://127.0.0.1:{port}"
+
+
+def _post_serving_readiness() -> None:
+    body = {
+        "app_id": APP_ID,
+        "status": "ready",
+        "phase": "serving",
+        "source": "archive_manager_backend",
+    }
+    endpoint = f"{_framework_url()}/api/apps/{quote(APP_ID, safe='')}/readiness"
+    req = urllib_request.Request(
+        endpoint,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib_request.urlopen(req, timeout=5) as resp:
+        resp.read()
+
+
+async def te2_app_backend_serving() -> None:
+    try:
+        await asyncio.to_thread(_post_serving_readiness)
+    except Exception as exc:
+        print(f"[archive_manager] readiness post failed: {exc}", flush=True)
 
 
 # ---------------------------------------------------------------------------'''
@@ -194,6 +232,4 @@ def extract_archive(payload: dict = Body(...)):
         raise HTTPException(status_code=500, detail=f"Failed to create extraction job: {exc}")
 
     return {"ok": True, "data": job.to_public_dict()}
-
-
 

@@ -1,4 +1,7 @@
+import { initConsoleBridge, getConsoleBridgeStatus } from '/static/js/te2_console_bridge.js';
+
 const HOME_DIR = '~';
+const SOCKET_IO_CLIENT_SRC = '/static/vendor/socket.io.min.js';
 const TYPE_ICON = {
   directory: '📁',
   file: '📄',
@@ -179,6 +182,50 @@ const JobStatus = {
   FAILED: 'failed',
   CANCELLED: 'cancelled',
 };
+
+let socketIoLoadPromise = null;
+
+function ensureSocketIoLoaded() {
+  if (window.io) return Promise.resolve(window.io);
+  if (socketIoLoadPromise) return socketIoLoadPromise;
+  socketIoLoadPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${SOCKET_IO_CLIENT_SRC}"]`);
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.io), { once: true });
+      existing.addEventListener('error', () => reject(new Error('Socket.IO client failed to load')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = SOCKET_IO_CLIENT_SRC;
+    script.async = true;
+    script.addEventListener('load', () => resolve(window.io));
+    script.addEventListener('error', () => reject(new Error('Socket.IO client failed to load')));
+    document.head.appendChild(script);
+  });
+  return socketIoLoadPromise;
+}
+
+async function startFileExplorerConsoleBridge(options = {}) {
+  try {
+    await ensureSocketIoLoaded();
+    const inheritedWorkerId = String(options.workerId || '').trim();
+    const bridgeOptions = {
+      appId: 'file_explorer',
+      workerLabel: 'file_explorer',
+      socketPath: '/te2_console_ws/socket.io',
+      namespace: '/te2_console',
+    };
+    if (inheritedWorkerId) {
+      bridgeOptions.workerId = inheritedWorkerId;
+    } else {
+      bridgeOptions.uniquePerWindow = true;
+    }
+    return initConsoleBridge(bridgeOptions);
+  } catch (error) {
+    console.warn('[file_explorer] console bridge unavailable', error);
+    return null;
+  }
+}
 
 const TERMINAL_STATUSES = new Set([
   JobStatus.SUCCEEDED,
@@ -501,9 +548,20 @@ export default function initFileExplorer(root, api, host) {
   // Check for path in URL query params (deep linking)
   const urlParams = new URLSearchParams(window.location.search);
   const queryPath = urlParams.get('path');
+  const statefulHostId = (urlParams.get('te2_host_id') || '').trim();
+  const statefulTokenId = (urlParams.get('te2_token_id') || '').trim();
+  const statefulConsoleWorkerId = (
+    urlParams.get('te2_console_worker_id')
+    || urlParams.get('console_worker_id')
+    || ''
+  ).trim();
+  const readinessDelayMs = Math.max(0, Math.min(60000, Number(urlParams.get('te2_readiness_delay_ms') || 0) || 0));
+  const consoleBridgeReady = startFileExplorerConsoleBridge({
+    workerId: statefulHostId && statefulTokenId ? statefulConsoleWorkerId : '',
+  });
 
   const prefs = {
-    path: queryPath || (savedState?.path && typeof savedState.path === 'string' ? savedState.path : HOME_DIR),
+    path: queryPath || (!statefulHostId && savedState?.path && typeof savedState.path === 'string' ? savedState.path : HOME_DIR),
     showHidden: !!(savedState && savedState.showHidden),
     view: savedState?.view === 'grid' ? 'grid' : 'list',
     sortBy: savedState?.sortBy || 'name',
@@ -662,6 +720,46 @@ export default function initFileExplorer(root, api, host) {
         sortBy: state.sortBy,
         sortAsc: state.sortAsc,
       });
+    }
+  }
+
+  function buildStatefulUrl(path, consoleWorkerId = '') {
+    const appId = host && typeof host.id === 'string' && host.id ? host.id : 'file_explorer';
+    const url = new URL(`/app/${encodeURIComponent(appId)}`, window.location.origin);
+    url.searchParams.set('embed', '1');
+    url.searchParams.set('path', path || HOME_DIR);
+    if (statefulHostId) url.searchParams.set('te2_host_id', statefulHostId);
+    if (statefulTokenId) url.searchParams.set('te2_token_id', statefulTokenId);
+    const workerId = String(consoleWorkerId || statefulConsoleWorkerId || '').trim();
+    if (workerId) url.searchParams.set('te2_console_worker_id', workerId);
+    if (readinessDelayMs) url.searchParams.set('te2_readiness_delay_ms', String(readinessDelayMs));
+    return `${url.pathname}${url.search}`;
+  }
+
+  async function publishStatefulSidebarUrl(path) {
+    if (!statefulHostId) return;
+    try {
+      await consoleBridgeReady;
+      const status = getConsoleBridgeStatus();
+      const consoleWorkerId = status && status.workerId ? String(status.workerId) : '';
+      const tokenId = statefulTokenId || 'file_explorer';
+      await api.post('sidebar/window/state', {
+        host_id: statefulHostId,
+        hostId: statefulHostId,
+        token_id: tokenId,
+        tokenId,
+        console_worker_id: consoleWorkerId,
+        consoleWorkerId: consoleWorkerId,
+        path,
+        query_state: { path },
+        queryState: { path },
+        url: buildStatefulUrl(path, consoleWorkerId),
+        readiness_delay_ms: readinessDelayMs,
+        te2_readiness_delay_ms: readinessDelayMs,
+        activate: false,
+      });
+    } catch (error) {
+      console.warn('[file_explorer] sidebar state publish failed', error);
     }
   }
 
@@ -1123,6 +1221,7 @@ export default function initFileExplorer(root, api, host) {
       state.view = state.view === 'grid' ? 'grid' : 'list';
       applyView();
       persistState();
+      void publishStatefulSidebarUrl(state.currentPath);
     } catch (error) {
       const message = error?.message || 'Failed to load directory';
       if (ui.listContainer) {

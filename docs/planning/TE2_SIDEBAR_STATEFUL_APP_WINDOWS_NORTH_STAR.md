@@ -1,0 +1,706 @@
+# TE2 Sidebar Stateful App Windows North Star
+
+## Status
+
+Active implementation tracker for the first stateful sidebar app/window POC.
+
+Current status: partial working model. The backend readiness/window primitives, `file_explorer` backend-to-backend POC path, ledger-backed app dock slots, non-stateful launcher slots, and numeric dock debug mode are in place in the working tree. The remaining frontend gap is whether the current header-menu app drawer is sufficient as final UX, plus fallback-entry and long-delay readiness validation.
+
+This document is the progress tracker. Update this section whenever a slice lands or a gap is found.
+
+## Progress Tracker
+
+### Done In Current Working Tree
+
+- [x] Add `/api/apps/{app_id}/readiness` endpoint with required `status`, accepted statuses, app-lifecycle storage, catalog/running readiness exposure, and stateful `host_id` bridge into the sidebar window ledger.
+- [x] Inject reliable `TE_FRAMEWORK_URL` into app-worker environments.
+- [x] Preserve `sidebar_state` capability blocks through manifest registry/catalog paths.
+- [x] Add `file_explorer` `sidebar_state` manifest capability with path-state metadata, token params, console-worker-id param, and readiness callback metadata.
+- [x] Add a framework static console bridge asset at `/static/js/te2_console_bridge.js` and wire `file_explorer` to use it with `workerLabel: "file_explorer"` plus stateful inherited `workerId` when `te2_console_worker_id` is present.
+- [x] Add backend sidebar window ledger module storing slots in `sidebarWindowState`, keyed by `host_id`, with app lane metadata, token/console ids, opaque URL string, readiness, order, and active host id.
+- [x] Add typed `/sidebar_ipc` methods for `sidebar.launcher.catalog.get`, `sidebar.windows.list`, `sidebar.window.create`, `sidebar.window.openUrl`, `sidebar.window.state.update`, `sidebar.window.activate`, `sidebar.window.close`, and `sidebar.window.readiness.update`.
+- [x] Add UI IPC request methods for host/sidebar frontend control: `ui.sidebar.window.create`, `ui.sidebar.window.activate`, `ui.sidebar.window.close`, and `ui.sidebar.activeShortcut.set`.
+- [x] Add UI IPC notifications for sidebar frontend apply/readiness: `ui.sidebar.windows.changed`, `ui.sidebar.window.activated`, and `ui.sidebar.window.readiness.changed`.
+- [x] Add `file_explorer` backend endpoint `POST /api/app/file_explorer/sidebar/window/state` with `/sidebar/window/open_url` compatibility alias; it accepts app-owned `path`/query-state data from the frontend, validates the path, marks `state_kind: "path"`, calls `sidebar.window.state.update` over `/sidebar_ipc`, and posts delayed semantic readiness.
+- [x] Make `file_explorer` stateful mode read `te2_host_id`, `te2_token_id`, `te2_console_worker_id`, and `te2_readiness_delay_ms`; when `te2_host_id` is present, saved app-shell path is not the sidebar restoration authority.
+- [x] Add test-delay readiness behavior through `te2_readiness_delay_ms`.
+- [x] Post the minimum readiness requirement to the agent log.
+- [x] Rebuild affected `file_editor_cm6` frontend bundle after the current sidebar runtime edits.
+- [x] Expand backend launcher/window creation so non-stateful launcher apps create/focus ledger-backed app dock slots that load manifest/catalog base URL without token/console URL-state fields.
+- [x] Refactor sidebar frontend behavior to render launcher, ledger-backed app dock entries, and plain URL fallback entries separately while preserving temporary compatibility names.
+- [x] Make launcher-opened stateful apps and non-stateful apps share dock focus/activate/close behavior; stateful entries still carry token/console/readiness semantics.
+- [x] Add numeric dock debug flag `te2_sidebar_dock_numbers` for replacing dock icons with slot numbers.
+- [x] Buffer one-shot sidebar window ledger notifications until the sidebar runtime has bound its frontend event listener, then replay them so reload restore does not lose the backend ledger during boot ordering.
+- [x] Make `sidebar.window.openUrl` non-activating by default and preserve existing slot readiness unless an app backend explicitly sends a readiness update.
+- [x] Make `file_explorer` state publishes update the stored restore URL/query-state and title without resetting readiness to `starting`; normal path changes should go straight to the page and not show the app-readiness placeholder.
+- [x] Document that multiple sidebar windows of the same app are required: `app_id` is only the app lane, `host_id` is the durable window identity, and state/query tracking is per `host_id`.
+- [x] Mint fresh `host_id` / concrete console-worker identity for new stateful same-app slots so the dock can track multiple states of the same app simultaneously.
+- [x] Preserve existing concrete console worker identity when a state update targets an existing `host_id` but omits `console_worker_id`.
+- [x] Bump served `file_editor_cm6` version surfaces to `0.2.257` so the rebuilt host bundle is fetched.
+- [x] Add app-author usage guide at `docs/apps/code_cm6/STATEFUL_SIDEBAR_APPS.md`.
+- [x] Bump served `file_editor_cm6` version surfaces to `0.2.258` for the commit-ready slice.
+
+### Partially Done / Must Be Finished
+
+- [ ] Finish the sidebar launcher/app drawer shell if the existing header-menu presentation is not sufficient as the final app drawer UX. The launcher now lists all apps and creates dock slots, but it still uses the existing header menu surface.
+- [x] Stop letting the old shortcut-first model define sidebar behavior. Existing `agent*` DOM ids and preference keys may remain only as compatibility names.
+- [x] Tighten the dock-control RPC boundary so frontend host create/activate/close/active-selection controls use UI IPC only; `/sidebar_ipc` remains the backend app API lane for app backends declaring app data and requested URLs.
+- [x] Preserve the existing `/sidebar_ipc` systems that share sidebar UI space, including ALS-RS/chat edit/agent file-open semantics; do not retire or repurpose them for the new dock view-control semantics.
+- [ ] Add or extract a shared backend helper for readiness POSTs instead of duplicating `_post_serving_readiness` logic in each app.
+- [ ] Equip non-stateful apps with only the minimum readiness helper/shim pattern needed to conform later, without making them stateful.
+- [ ] Track/land the currently untracked required artifacts: `app/apps/file_editor_cm6/ui_ipc/sidebar_window_state.py`, `app/apps/file_editor_cm6/static/icons/sidebar-launcher.svg`, and `app/static/js/te2_console_bridge.js`.
+- [ ] Decide and document whether stateful app slots lock app lifecycle cleanup by default while their iframe entry exists.
+
+### Validated In Live TE2
+
+- [x] `file_explorer` full-page load returns 200 for `/app/file_explorer`.
+- [x] `/app/file_explorer?embed=1&path=/tmp` returns 200 in ordinary embedded mode.
+- [x] `/app/file_explorer?embed=1&te2_host_id=...&te2_token_id=file_explorer&path=/tmp` returns 200 in sidebar-stateful query mode.
+- [x] Reloading the host/sidebar restores app dock slots from the sidebar ledger, not guest localStorage or app-shell state.
+- [x] Non-capable apps opened from the launcher create/focus dock ledger slots and load the manifest/catalog base URL; `terminal` was validated as `slot:terminal:base` with no token/console URL-state fields.
+- [x] `file_explorer` backend state publication updates stored restore URL/query-state/title over the sidebar ledger while preserving the current active dock slot.
+- [x] `file_explorer` state publication preserves existing ready readiness and does not reset the slot to `starting`.
+- [x] Backend RPC validation created two simultaneous `file_explorer` slots with the same `app_id` and distinct `host_id` values.
+- [x] Backend RPC validation showed `sidebar.window.state.update` can update one slot's stored restore URL/query-state while preserving that slot's live iframe URL.
+- [x] Frontend live DOM validation showed the dock consuming ledger slots as separate icon entries and iframes; validation slots were cleaned up after the check.
+- [x] Numeric dock debug mode can replace icons with slot numbers for order/identity inspection.
+- [x] `/api/apps/catalog` and `/api/apps` expose `file_explorer.sidebar_state`; non-capable apps such as `terminal` do not expose a stateful capability block.
+- [x] Approved live TE2 validation was run by restarting only affected app workers, not unrelated builtins.
+
+### Not Yet Validated
+
+- [ ] `te2_readiness_delay_ms=30000` shows starting/waiting readiness state on initial launch and later ready state without breaking the iframe.
+- [ ] Plain URL/framework-app fallback entries still work separately from launcher-created app dock slots.
+
+## Purpose
+
+The sidebar should stop treating every embedded surface as a stateless shortcut.
+
+The target system is:
+
+- a launcher/app drawer entry that is always present in the sidebar icon bar
+- durable sidebar app dock slots keyed by `host_id`
+- app lanes defined by manifest app id plus manifest base URL
+- multiple active or retained windows for the same app id, each with its own `host_id`, dock identity, console worker id, readiness, and stored state
+- launcher-opened non-stateful apps tracked as dock/ledger slots that load the manifest/catalog base URL
+- stateful launch identity carried by a token query parameter whose value is the manifest-defined console worker prefix for that app lane
+- app-owned stateful query/state stored by the sidebar ledger, not inferred by scraping iframe URLs
+- backend-to-backend sidebar state updates: guest/app backends send app lane data plus per-`host_id` query/state; UI IPC updates sidebar chrome/metadata without reloading live iframes for ordinary state changes
+- app-declared capability for stateful sidebar behavior
+- current stateless URL/framework-app shortcuts kept as a separate fallback path, not as the launcher-created non-stateful app model
+- a standard app readiness POST that app backends call when they are semantically ready, not merely when their TCP port opens
+
+`app/apps/file_explorer` is the first reference app for this system.
+
+## Initial POC Facts
+
+These were the facts before the first implementation attempt. Treat them as planning inputs, not guaranteed current source state.
+
+`file_explorer` is a good POC because it has path-based state and originally lacked every new integration surface:
+
+- It does not install the TE2 console bridge or expose a durable console identity.
+- It does not have a typed `/sidebar_ipc` backend client.
+- It does not have any Socket.IO backend client today.
+- It does not call a backend readiness API today.
+- It already accepts path state through the `path` query parameter in `app/apps/file_explorer/main.js`.
+- It also falls back to app-shell state through `host.loadState(...)` / `host.saveState(...)`, which is useful for full-page app-shell behavior but should not be the sidebar state authority for stateful sidebar app windows.
+
+Relevant current files:
+
+- `app/apps/file_explorer/manifest.json`
+- `app/apps/file_explorer/main.js`
+- `app/apps/file_explorer/file_explorer.py`
+- `app/apps/file_explorer/shellspec/app_worker.yaml`
+- `app/apps/file_editor_cm6/main_page/frontend/sidebar-shortcuts/runtime.ts`
+- `app/apps/file_editor_cm6/ui_ipc/sidebar_ws.py`
+- `app/apps/file_editor_cm6/src/sidebar_ipc/rpc_contract.ts`
+- `app/apps/file_editor_cm6/ui_ipc/sidebar_rpc_contract.py`
+- `app/extensions/apps/main.py`
+- `app/extensions/apps/registry.py`
+- `app/extensions/apps/runtime.py`
+- `app/templates/app_shell.html`
+
+## Vocabulary
+
+`launcher`
+
+The fixed sidebar icon-bar entry that opens the app drawer. It is not a user app slot. A URL selector can be added later as a fallback path, but the immediate launcher requirement is app launch.
+
+`app dock slot`
+
+A durable sidebar slot for one launched app instance. It has a sidebar-owned `host_id`, app lane data, an active/focused state, readiness state when available, and a URL to load. Non-stateful slots load the manifest/catalog base URL. Stateful slots are app dock slots with additional URL-state semantics.
+
+`app dock slot` identity is always `host_id`, not `app_id`. Multiple slots may have the same `app_id` and different state. For example, two File Explorer slots can both be `app_id: "file_explorer"` while one stores `path=/tmp` and another stores `path=/data/data/com.termux/files/home`.
+
+`stateful app window`
+
+A specialized app dock slot for one stateful app instance. It has a sidebar-owned `host_id`, manifest lane data, a `token_id`, and a last known opaque state URL declared by the app backend.
+
+`app lane`
+
+The manifest-defined app identity that the sidebar backend validates before accepting stateful app commands. The minimum lane is `app_id` plus the manifest/catalog `base_url`. The lane may also include the stateful console worker prefix used as the launch token.
+
+The app lane is not a sidebar window identity. It answers "which app is this?", not "which window/slot is this?" Every mutable state update must still name a `host_id`.
+
+`token_id`
+
+The app instance token carried in the stateful app URL query string. For this system the token value is the console worker prefix declared by the app manifest/catalog for the app lane. Opening the app base URL with this token puts the app into sidebar-stateful mode and causes the TE2 console bridge/`file_editor_cm6` host to track that app instance under the token/console lane.
+
+`console_worker_id`
+
+The exact TE2 console worker id for one stateful frontend instance. Normal app frontends generate their own console identity with the console bridge's per-window behavior. Stateful sidebar launches are different: the `file_editor_cm6` sidebar host creates a concrete id from the manifest-defined console worker prefix, passes it in the launch URL, and the guest frontend inherits it as its exact console bridge `workerId`.
+
+`host_id`
+
+The sidebar-owned slot id passed into app URLs as a query parameter. It is the durable key for the sidebar slot and iframe. It is not the app lane and it is not the app's internal route token.
+
+`host_id` is the only durable identity for one sidebar app window. It must be unique per opened window, including when multiple windows belong to the same `app_id`.
+
+`state URL`
+
+An opaque same-origin URL the sidebar host should load into the iframe for a slot. For the `file_explorer` POC this URL carries a file path query parameter. The sidebar stores the URL string and does not parse file path semantics beyond basic same-origin and app-id validation.
+
+Target direction: normal live app navigation should not require the host to reload the iframe. A running app should publish the app-owned query/state that represents the state it just entered, and TE2 should store that state for the `host_id`. TE2 reconstructs the full iframe URL from manifest base URL plus TE2 identity params plus stored query/state on cold load, restore, or explicit host navigation.
+
+`backend-to-backend open URL`
+
+The app frontend may decide which query/state represents its current state, but it does not mutate the sidebar ledger or host iframe directly. The app frontend sends its state to its own backend. The app backend then calls the sidebar RPC backend with the app lane, host slot identity, and the app-owned query/state to persist. The sidebar RPC backend stores that state for restore. It should not reload the live iframe for ordinary in-app state changes.
+
+`semantic readiness`
+
+The app backend has reached the point where its state URL can be used. This is different from shellspec TCP readiness.
+
+## RPC Boundary Invariants
+
+These invariants apply to the `file_editor_cm6` sidebar host and to every stateful sidebar app.
+
+### UI IPC RPC
+
+UI IPC RPC owns sidebar frontend updates.
+
+Responsibilities:
+
+- send sidebar UI update commands to the `file_editor_cm6` frontend
+- apply validated ledger changes to the sidebar frontend, including create/restore URL application when an iframe must be loaded
+- reflect sidebar backend ledger changes into visible sidebar chrome, icons, placeholders, active iframe state, and readiness display
+
+Rules:
+
+- UI IPC RPC is not the app API lane.
+- UI IPC RPC does not accept stateful app navigation requests directly from app frontends.
+- UI IPC RPC applies already-validated sidebar state from the `file_editor_cm6` backend/sidebar host to the sidebar frontend.
+
+### Sidebar IPC RPC
+
+Sidebar IPC RPC is the backend-only app API lane for stateful sidebar apps.
+
+Responsibilities:
+
+- accept API commands sent by sidebar app backends
+- validate the manifest-defined app lane: `app_id`, `base_url`, and stateful token/console prefix
+- accept the backend-declared URL that the sidebar host should persist and open
+- update the durable sidebar ledger for the target `host_id`
+- publish the resulting ledger/UI command so UI IPC can update the sidebar frontend
+
+Rules:
+
+- Sidebar IPC RPC is backend-only for this system.
+- The app frontend must not call `/sidebar_ipc` directly for the first POC.
+- The app frontend may construct the state URL from the user action, current route, and token/console identity.
+- The app frontend must POST/PUT that state to its own app backend.
+- The app backend must send the app lane, `host_id`, `token_id`, optional concrete `console_worker_id`, and exact URL to the sidebar RPC backend.
+- Sidebar IPC RPC must not parse app route semantics. For `file_explorer`, it may validate that the URL belongs to the `file_explorer` base URL, but it must not own the meaning of `path`.
+- UI IPC RPC, not Sidebar IPC RPC, is the layer that controls the sidebar frontend.
+
+## Capability Declaration
+
+Apps that support stateful sidebar windows must declare it in `manifest.json`.
+
+Proposed manifest shape:
+
+```json
+{
+  "id": "file_explorer",
+  "sidebar_state": {
+    "enabled": true,
+    "reference": true,
+    "kind": "path",
+    "launcher": true,
+    "base_url": "/app/file_explorer",
+    "token_source": "console_worker_id",
+    "console_worker_prefix": "file_explorer",
+    "host_id_param": "te2_host_id",
+    "token_id_param": "te2_token_id",
+    "console_worker_id_param": "te2_console_worker_id",
+    "url_state": {
+      "param": "path",
+      "opaque": true,
+      "default_path": "~"
+    },
+    "load": {
+      "default": "eager"
+    },
+    "readiness": {
+      "callback": true,
+      "test_delay_param": "te2_readiness_delay_ms"
+    }
+  }
+}
+```
+
+Rules:
+
+- The app registry must preserve and expose this block through `/api/apps` and `/api/apps/catalog`.
+- The catalog entry for a stateful app must expose the app lane: `app_id`/`id`, `base_url`, token query parameter, and console worker prefix.
+- Non-capable apps do not get stateful URL-state behavior.
+- Non-capable apps opened from the launcher still become app dock slots, but those slots load only the manifest/catalog base URL and have no token/console lane.
+- Existing stateless URL/framework-app shortcuts remain a separate fallback path, not the normal launcher-created app slot model.
+- The `file_explorer` POC should set `reference: true` so future app authors can inspect it as the canonical example.
+
+## Sidebar Ledger
+
+The sidebar ledger should be durable and framework/app-owned, not a volatile frontend map.
+
+The first implementation may store it in the same durable framework state family used for app/sidebar preferences, but it must be exposed through typed sidebar RPC rather than through generic app-shell `teState` keys.
+
+Proposed shape:
+
+```json
+{
+  "active_host_id": "slot:file_explorer:file_explorer_a1b2",
+  "order": [
+    "launcher",
+    "slot:file_explorer:file_explorer_a1b2",
+    "slot:file_explorer:file_explorer_c9d0",
+    "slot:terminal:base_c3d4",
+    "url:local-docs"
+  ],
+  "slots": {
+    "slot:file_explorer:file_explorer_a1b2": {
+      "kind": "app",
+      "app_id": "file_explorer",
+      "base_url": "/app/file_explorer",
+      "token_id": "file_explorer",
+      "console_worker_prefix": "file_explorer",
+      "console_worker_id": "file_explorer:a1b2",
+      "host_id": "slot:file_explorer:file_explorer_a1b2",
+      "title": "File Explorer",
+      "url": "/app/file_explorer?embed=1&te2_host_id=slot%3Afile_explorer%3Afile_explorer_a1b2&te2_token_id=file_explorer&path=%2Fdata%2Fdata%2Fcom.termux%2Ffiles%2Fhome",
+      "load": "eager",
+      "readiness": {
+        "status": "starting",
+        "phase": "app_worker",
+        "message": "",
+        "updated_at": 1770000000000
+      },
+      "updated_at": 1770000000000
+    },
+    "slot:file_explorer:file_explorer_c9d0": {
+      "kind": "app",
+      "app_id": "file_explorer",
+      "base_url": "/app/file_explorer",
+      "token_id": "file_explorer",
+      "console_worker_prefix": "file_explorer",
+      "console_worker_id": "file_explorer:c9d0",
+      "host_id": "slot:file_explorer:file_explorer_c9d0",
+      "title": "/tmp",
+      "query_state": {
+        "path": "/tmp"
+      },
+      "url": "/app/file_explorer?embed=1&te2_host_id=slot%3Afile_explorer%3Afile_explorer_c9d0&te2_token_id=file_explorer&path=%2Ftmp",
+      "load": "eager",
+      "readiness": {
+        "status": "ready",
+        "phase": "state_url_ready",
+        "updated_at": 1770000000000
+      },
+      "updated_at": 1770000000000
+    },
+    "slot:terminal:base_c3d4": {
+      "kind": "app",
+      "app_id": "terminal",
+      "base_url": "/app/terminal",
+      "host_id": "slot:terminal:base_c3d4",
+      "title": "Terminal",
+      "url": "/app/terminal",
+      "load": "lazy",
+      "updated_at": 1770000000000
+    }
+  }
+}
+```
+
+Rules:
+
+- The launcher entry is not a slot and has no app id.
+- App dock entries stay `kind: "app"` and must be keyed by `host_id`.
+- `app_id` must never be used as the dock/window key. It is valid and required for multiple slots to share one `app_id`.
+- Any create/open/focus behavior that wants a new stateful app window must mint a fresh `host_id` and concrete `console_worker_id`; otherwise it is focusing or updating an existing window.
+- Any state update from an app backend must target exactly one `host_id`. If it only names `app_id`, it is ambiguous and must be rejected or treated as a request to create a new window, depending on the method.
+- Non-stateful app dock slots carry `app_id`, manifest/catalog `base_url`, the base URL to load, and no `token_id` or `console_worker_id`.
+- Plain URL entries stay `kind: "url"` and do not require app id, token id, console worker id, or readiness. They are separate from launcher-created app dock slots.
+- Stateful app slots are app dock slots with tracked query/state.
+- `app_id` plus manifest/catalog `base_url` defines the app lane.
+- `token_id` is the stateful app token carried in the app URL query string; for this system it starts from the manifest-defined console worker prefix.
+- `console_worker_id` is separate from `token_id`. It is the concrete console bridge worker id that the host assigns for a stateful slot and passes to the guest through the manifest-defined console worker id query parameter.
+- The app-owned query/state is opaque to the sidebar state store. The store validates that it belongs to the declared app lane, then persists that state for the target `host_id`.
+- The sidebar host is the durable restore authority. It remembers the last query/state for each `host_id` and reconstructs iframe URLs from manifest base URL plus TE2 identity params plus stored app query/state on restore.
+- The sidebar host must not parse or own guest-specific query-string semantics such as `path`, `conversation_id`, `view`, or future app-specific tokens.
+- App backends must declare the state the app window entered. For ordinary in-app navigation, the sidebar backend validates the app lane and host slot, stores the query/state, and publishes chrome/readiness metadata without reloading the live iframe.
+- Full URL/open application is only for create, cold load, restore, or explicit host-driven navigation. It is not the normal path for every state change.
+- The sidebar must eagerly create/load iframe entries for app dock slots whose `load` is `eager`.
+- Existing shortcut preferences should not be silently treated as app dock slots. A migration may copy current framework-app shortcuts into plain URL/framework fallback entries, but launcher-created app dock slots should be a distinct model.
+
+## Sidebar IPC RPC Contract
+
+Extend `/sidebar_ipc` with backend-only methods stateful apps use to declare per-window app state.
+
+`/sidebar_ipc` is a backend-only control lane for stateful app windows. It takes app data and requested query/state from an app backend. It is not a frontend shortcut API and it is not the guest app's internal router.
+
+Launcher-created non-stateful app dock slots are not `/sidebar_ipc` URL-state commands. They are host/sidebar UI operations that create or focus an app dock slot and load the manifest/catalog base URL.
+
+The flow is:
+
+```text
+guest frontend enters a new app state
+guest frontend derives the query/state that can reproduce that state
+guest frontend sends state to its own app backend
+app backend calls sidebar RPC backend with app_id/base_url, host_id, token_id/console_worker_id, and query/state
+sidebar RPC backend validates and persists that state for the target host_id
+UI IPC/sidebar host updates dock chrome/metadata without reloading the live iframe
+later cold restore constructs the iframe URL from manifest base URL + TE2 params + stored query/state
+```
+
+The app backend has to declare the app-owned state the window just entered. The sidebar host stores that state for restore; it does not interpret app-specific query parameters.
+
+Proposed request methods:
+
+```text
+sidebar.windows.list
+sidebar.window.create
+sidebar.window.activate
+sidebar.window.close
+sidebar.window.openUrl
+sidebar.window.state.update
+sidebar.window.readiness.update
+sidebar.launcher.catalog.get
+```
+
+`sidebar.window.state.update` is the normal backend-to-backend state checkpoint primitive for in-app state changes. `sidebar.window.openUrl` remains as a compatibility alias and must keep the same non-activating, readiness-preserving, no-live-iframe-reload behavior unless the caller explicitly asks for host navigation.
+
+Proposed server notifications:
+
+```text
+sidebar.windows.changed
+sidebar.window.activated
+sidebar.window.readiness.changed
+```
+
+Minimum request payloads:
+
+`sidebar.window.create`
+
+```json
+{
+  "app_id": "file_explorer",
+  "base_url": "/app/file_explorer",
+  "host_id": "slot:file_explorer:file_explorer_a1b2",
+  "token_id": "file_explorer",
+  "url": "/app/file_explorer?embed=1&te2_host_id=slot%3Afile_explorer%3Afile_explorer_a1b2&te2_token_id=file_explorer",
+  "title": "File Explorer",
+  "load": "eager",
+  "source": "launcher"
+}
+```
+
+`sidebar.window.create` creates a host slot and initial iframe URL from the manifest-defined app lane. It must not invent app route state. For `file_explorer`, directory state is only added later when the `file_explorer` frontend handles a directory link and posts that URL to its own backend.
+
+`sidebar.window.state.update`
+
+```json
+{
+  "lane": {
+    "app_id": "file_explorer",
+    "base_url": "/app/file_explorer"
+  },
+  "host_id": "slot:file_explorer:file_explorer_a1b2",
+  "token_id": "file_explorer",
+  "console_worker_id": "file_explorer:a1b2",
+  "query_state": {
+    "path": "/tmp"
+  },
+  "state_kind": "path",
+  "title": "/tmp",
+  "source": "file_explorer_backend"
+}
+```
+
+`sidebar.window.state.update` is the target backend-to-backend primitive for the `file_explorer` POC. The payload means: for this app lane and host slot, persist this app-owned query/state as the restore state. The sidebar backend may validate that the query/state is allowed for the declared app lane, but it must not own the app meaning of `path` or any other app query string. It must not reload the live iframe as part of this ordinary state update.
+
+Compatibility note: `sidebar.window.openUrl` may remain as an alias for older callers, but normal app-state publication should use `sidebar.window.state.update` semantics: non-activating, readiness-preserving, and no live iframe reload unless the caller explicitly asks for host navigation.
+
+`sidebar.window.readiness.update`
+
+```json
+{
+  "app_id": "file_explorer",
+  "host_id": "slot:file_explorer:file_explorer_a1b2",
+  "token_id": "file_explorer",
+  "console_worker_id": "file_explorer:a1b2",
+  "status": "ready",
+  "phase": "state_url_ready",
+  "url": "/app/file_explorer?embed=1&te2_host_id=slot%3Afile_explorer%3Afile_explorer_a1b2&te2_token_id=file_explorer&path=%2Ftmp",
+  "message": "",
+  "source": "file_explorer_backend"
+}
+```
+
+Rules:
+
+- Guest apps should not use `postMessage` for state/query updates.
+- Guest frontend code should send state changes to its own backend when backend mediation is available.
+- The app backend should call `/sidebar_ipc` with the app-owned query/state it wants stored for the target `host_id`; TE2 should update the ledger and sidebar chrome from that backend-owned signal without reloading the live iframe.
+- UI IPC controls the sidebar frontend. `/sidebar_ipc` remains the backend RPC boundary that accepts app data and requested query/state.
+- Direct frontend calls to `/sidebar_ipc` are out of scope for this system. The invariant for stateful sidebar apps is backend-only Sidebar IPC RPC.
+
+## Standard App Readiness POST
+
+The framework needs a small app-readiness API that app backends can call right before they consider themselves ready.
+
+Proposed endpoint:
+
+```http
+POST /api/apps/{app_id}/readiness
+Content-Type: application/json
+```
+
+Minimum payload for any app:
+
+```json
+{
+  "status": "ready"
+}
+```
+
+Full payload for stateful sidebar apps:
+
+```json
+{
+  "status": "ready",
+  "phase": "state_url_ready",
+  "host_id": "slot:file_explorer:file_explorer_a1b2",
+  "token_id": "file_explorer",
+  "console_worker_id": "file_explorer:a1b2",
+  "url": "/app/file_explorer?embed=1&te2_host_id=slot%3Afile_explorer%3Afile_explorer_a1b2&te2_token_id=file_explorer&path=%2Ftmp",
+  "message": "",
+  "details": {}
+}
+```
+
+Allowed statuses:
+
+```text
+starting
+ready
+error
+stopped
+```
+
+Rules:
+
+- `status` is required.
+- `host_id` and `token_id` are required when the readiness event is for a stateful sidebar slot.
+- `url` is optional for app-level readiness and required when the event claims a specific state URL is ready.
+- The app id in the readiness endpoint URL path segment is authoritative. A body-level app id may be accepted for diagnostics only but must not override the endpoint path segment.
+- The endpoint should update app runtime readiness state and publish app/sidebar notifications.
+- Shellspec TCP readiness remains the process readiness gate. This POST is the semantic readiness gate.
+- App workers should receive a reliable `TE_FRAMEWORK_URL` environment value so they can call this endpoint from their backend process.
+
+Agent-log handoff text before later test execution:
+
+```text
+[TE2] Minimum app readiness requirement: app backends should POST to /api/apps/{app_id}/readiness before advertising semantic readiness. Minimum body is {"status":"ready"}. Stateful sidebar app-window readiness must include {"status":"ready","host_id":"...","token_id":"...","url":"..."} and should include "console_worker_id" when the app has a TE2 console bridge identity. Shellspec TCP readiness only proves process/port startup; this readiness POST proves the app/state URL is ready for eager sidebar loading.
+```
+
+Do not post this to the agent log until all planned implementation changes are in and before runtime testing begins.
+
+## File Explorer POC
+
+The POC should make `file_explorer` the reference app for path-based stateful sidebar operation.
+
+The only `file_explorer` behavior becoming stateful in this first slice is opening directory links. Each opened sidebar app window tracks the last directory query/path state for that specific `host_id`. File operations, editor opens, downloads, archive operations, selection state, and general app-shell state are not part of the stateful sidebar-window scope for this slice.
+
+Required changes:
+
+- Add `sidebar_state` capability to `app/apps/file_explorer/manifest.json`.
+- Install a TE2 console bridge in `app/apps/file_explorer/main.js` using a framework-level bridge asset, not by importing from `file_editor_cm6` source paths.
+- Use `workerLabel: "file_explorer"` plus `uniquePerWindow: true` for ordinary, non-stateful `file_explorer` launches.
+- Read `te2_host_id`, `te2_token_id`, and `te2_console_worker_id` from the query string.
+- Treat the presence of `te2_token_id` as stateful sidebar mode for `file_explorer`.
+- Use `te2_token_id=file_explorer` as the manifest-defined console worker prefix/token for this app lane unless the manifest/catalog declares a different prefix.
+- When `te2_console_worker_id` is present in stateful mode, pass it as the exact console bridge `workerId` instead of generating a per-window id.
+- Keep `path` as the app-specific state parameter.
+- On successful `loadDirectory(...)` from a directory-open navigation, send the current path/query state to the `file_explorer` backend with `te2_host_id`, `te2_token_id`, and `te2_console_worker_id`.
+- The `file_explorer` frontend must include its concrete console worker id when available so the backend can bind the state update to the token/console lane.
+- The `file_explorer` backend must call the sidebar RPC backend with manifest app lane data (`app_id` and `base_url`), `host_id`, `token_id`, optional concrete `console_worker_id`, and the app-owned query/state to persist.
+- The sidebar RPC backend persists the slot query/state for restore and publishes chrome/metadata updates. It must not reload the live iframe for ordinary directory navigation. The `file_explorer` frontend must not directly update the sidebar ledger or host iframe.
+- Stop using saved app-shell `host.loadState(...).path` as the sidebar state authority when `te2_host_id` is present.
+- Keep app-shell saved state for full-page non-sidebar loads.
+- Remove or bypass any localStorage/base-url last-path redirect if it exists in the live file or app shell path during implementation. The sidebar ledger becomes the restoration authority for stateful sidebar launches.
+- Add backend support in `app/apps/file_explorer/file_explorer.py` for the frontend to publish its current path URL.
+- Add backend support in `file_explorer.py` to call the framework readiness POST.
+- Add a test delay flag, preferably query-param based as `te2_readiness_delay_ms=30000`, that delays semantic readiness publication without delaying shellspec TCP readiness.
+- Use the delay only for testing loading states and long-start behavior.
+
+Suggested POC app backend endpoint:
+
+```http
+POST /api/app/file_explorer/sidebar/window/state
+```
+
+Suggested body:
+
+```json
+{
+  "host_id": "slot:file_explorer:file_explorer_a1b2",
+  "token_id": "file_explorer",
+  "console_worker_id": "file_explorer:a1b2",
+  "path": "/tmp",
+  "query_state": {
+    "path": "/tmp"
+  },
+  "readiness_delay_ms": 0
+}
+```
+
+This is a `file_explorer` app-backend endpoint, not the Sidebar IPC RPC schema. It may accept `path` because `path` is `file_explorer` app data. The backend should normalize and validate the path, then call the sidebar RPC backend with app lane data and the query/state to store for that `host_id`. That RPC call is backend-to-backend and declares the restore state for the sidebar window. UI IPC/sidebar host then updates dock chrome/metadata without forcing a live iframe reload. The frontend should not directly mutate the sidebar ledger.
+
+## Other Apps
+
+Other apps should not receive the full stateful sidebar-window implementation in the first POC.
+
+They should receive the minimum readiness support needed to conform later:
+
+- app-worker environment has a reliable framework URL
+- shared backend helper exists for posting readiness
+- `/api/apps/{app_id}/readiness` accepts a minimal `{"status":"ready"}` payload
+- app catalog and app runtime can expose readiness status
+
+Proxy/shim apps can then call the same readiness endpoint when their proxied target is actually ready.
+
+## Launcher And Icon
+
+The sidebar icon bar needs a dedicated launcher icon.
+
+Requirements:
+
+- Material gray/blue visual language.
+- Four dots.
+- SVG source asset, not an emoji-only placeholder.
+- The launcher icon is always present and opens the app drawer. The URL selector is a separate fallback/later path.
+- App dock icons appear after the launcher and reflect app id, readiness state, active/focused state, and close/focus behavior.
+- Stateful app dock icons also reflect token/console lane and tracked URL-state readiness.
+- Non-stateful app dock icons load the manifest/catalog base URL and still participate in the dock/ledger.
+- A debug flag should be able to replace icons with slot numbers during dock-order and slot-identity debugging.
+- Plain URL entries can still appear as user-configured stateless fallback entries.
+
+The icon asset should be added during implementation, not as part of this planning-only slice.
+
+## UI Model
+
+The current `sidebar-shortcuts` module can be evolved, but the model should become explicit:
+
+```text
+launcher entry
+app dock entries
+  stateful app slots with tracked query/state
+  non-stateful app slots with manifest/catalog base URL
+plain URL entries
+```
+
+Rules:
+
+- The iframe stack can be reused.
+- The eager/lazy loading mechanics can be reused.
+- Framework app start-before-load can be reused.
+- The active entry state should move from volatile `_client_active_shortcuts` to the durable window ledger for app dock entries.
+- Non-stateful launcher-created app entries are still app dock entries; they just load base URL instead of app-declared query/state.
+- Existing `agent*` DOM ids and pref names may remain temporarily as compatibility names, but code comments and docs should stop describing the feature as only "shortcuts."
+
+## parts that I fucked up
+
+### file_explorer app
+
+- I treated the `file_explorer` work as if the hard part was just adding a frontend URL publisher plus readiness calls. The actual boundary is backend-to-backend: `app/apps/file_explorer/main.js` can derive the current app state, but `app/apps/file_explorer/file_explorer.py` must be the component that asks `/sidebar_ipc` to persist that state for the sidebar host slot.
+- I blurred state publication, URL opening, and readiness. Normal directory navigation should publish query/state for the target `host_id`; it should not reload the live iframe and should not reset readiness. `/api/apps/{app_id}/readiness` is only the semantic readiness/status gate.
+- I let the backend rebuild/apply the sidebar URL from `path` as if the host owned `file_explorer` navigation semantics. The corrected target contract is that the app backend declares app-owned query/state, while the sidebar backend only validates the app lane and host slot. The sidebar backend must not understand `path` beyond identity/safety validation.
+- I treated `path` as if it belonged to one global app instance. It does not. For `file_explorer`, `path` is per-window app query/state keyed by `host_id`; multiple File Explorer slots can store different `path` values at the same time.
+- I allowed `token_id` fallback behavior to blur with `host_id`. The corrected model is that `host_id` identifies the sidebar slot, while `token_id` is the manifest-defined console worker prefix carried in the stateful launch URL. The concrete `console_worker_id` from the app frontend can then bind runtime observations to that token/app lane.
+- I did not keep the app-shell state boundary sharp enough. `host.loadState(...)` / `host.saveState(...)` can stay for full-page `file_explorer`, but when `te2_host_id` is present the sidebar ledger query/state is the restoration authority.
+
+### sidebar frontend
+
+- I treated the visible frontend gap as a shortcut-management problem. The sidebar frontend model must be `launcher entry`, `app dock entries`, and `plain URL entries`. App dock entries include both stateful app slots with tracked query/state and non-stateful launcher-created app slots with manifest/catalog base URL. Existing shortcuts are only the fallback path.
+- I focused on the launcher icon/dropdown before making the app drawer and pre-readiness state real. The launcher must open the app drawer, not just expose old shortcut controls behind a new icon. A URL selector is only a later/fallback path.
+- I left the old shortcut-first empty state in place. The sidebar placeholder must explain app-window launch/readiness when no app window is active, and it must show an explicit waiting state when an active stateful slot is loaded but not semantically ready.
+- I did not make UI IPC ownership explicit enough. `/sidebar_ipc` accepts backend app data and requested query/state; UI IPC/sidebar host owns frontend chrome/metadata updates and iframe URL application only for create, cold load, restore, or explicit host navigation.
+- I treated `_client_active_shortcuts`-style volatile state as acceptable for app windows. App dock active selection and restoration have to come from the durable sidebar window ledger keyed by `host_id`; volatile shortcut state is only acceptable for plain URL fallback entries.
+- I missed that the dock has to represent non-stateful apps too. If a non-stateful app is opened from the launcher, it still gets a dock/ledger slot and reloads the manifest/catalog base URL.
+- I did not add a numeric-icon debug mode. While the launcher/dock model is being brought up, a flag should render slot numbers instead of icons so identity/order bugs are visible.
+- I allowed old `agent*` names and shortcut UI to keep defining the behavior. They may remain as temporary DOM/pref compatibility names, but the user-facing behavior and code comments must stop describing the stateful app-window system as only shortcuts.
+
+## Validation Gate
+
+Do not test the runtime until all planned code changes for the first implementation slice are in.
+
+Before testing:
+
+- post the minimum readiness shape to the agent log with the `[TE2]` prefix
+- rebuild any affected frontend assets
+- reload app registry only if manifest/catalog changes need it and the user approves that action
+- avoid restarting TE2 builtins without explicit approval
+
+Minimum validation after implementation:
+
+- `file_explorer` full-page load still works with ordinary `host.loadState(...)`.
+- `/app/file_explorer?embed=1&path=/tmp` still opens `/tmp` in ordinary app mode.
+- `/app/file_explorer?embed=1&te2_host_id=...&te2_token_id=file_explorer&path=/tmp` runs in sidebar-stateful mode and publishes directory-link query/state through the `file_explorer` backend.
+- Reloading the host/sidebar restores the slot from the sidebar ledger, not from guest localStorage.
+- A `te2_readiness_delay_ms=30000` launch shows starting/loading state and later ready state without breaking the iframe.
+- Non-capable apps opened from the launcher create/focus a dock ledger slot and load the manifest/catalog base URL.
+- Plain URL/framework-app fallback entries still launch separately from launcher-created app dock slots.
+- Numeric dock debug mode can replace icons with slot numbers for order/identity inspection.
+- `/api/apps/catalog` exposes `sidebar_state` capability for capable apps and omits it or marks it disabled for non-capable apps.
+
+## Execution Order
+
+1. [x] Land this planning doc.
+2. [x] Add framework readiness endpoint and runtime/catalog readiness state.
+3. [x] Add manifest capability exposure through registry/catalog.
+4. [x] Add sidebar window ledger backend and typed `/sidebar_ipc` methods.
+5. [x] Refactor sidebar frontend behavior to include launcher, app dock entries for both stateful and non-stateful apps, and plain URL fallback entries.
+6. [ ] Finish final app drawer shell/UX if the current header-menu presentation is not sufficient. Launcher SVG, app dock behavior, and numeric-icon debug flag are in the working tree.
+7. [ ] Add generic app backend helper for readiness POST. Current working tree uses repeated per-app helpers.
+8. [x] Implement `file_explorer` console identity, backend sidebar client, directory-link URL publication, readiness POST, and delay flag.
+9. [ ] Equip other apps only with the minimum readiness POST helper or shim pattern.
+10. [x] Post the readiness requirement to the agent log.
+11. [x] Run local validation and approved live TE2 validation for the current working model.
+12. [ ] Validate long-delay readiness and plain URL/framework-app fallback entries.
+
+## Non-Goals For The First POC
+
+- Do not retrofit ALS-RS in the first implementation slice.
+- Do not force every framework app to become stateful.
+- Do not scrape iframe URLs to infer app state.
+- Do not use `postMessage` as the reference contract.
+- Do not make stateful slots depend on `file_editor_cm6` source modules.
+- Do not move app-specific URL semantics into the sidebar host.
+- Do not use the generic app-shell `teState` key as the authoritative sidebar window ledger.
+
+## Open Decisions
+
+- Exact durable storage location for the sidebar window ledger.
+- Whether `host_id` is minted before the app console bridge registers, or whether the launcher waits for the app token before persisting a slot.
+- Whether the reference console bridge should be promoted to a framework static asset such as `/static/js/te2_console_bridge.js`.
+- Whether `/api/apps/{app_id}/readiness` should also accept `starting` updates from the framework runtime itself when the app worker starts.
+- Whether stateful app slots should lock app lifecycle cleanup by default while their iframe entry exists.

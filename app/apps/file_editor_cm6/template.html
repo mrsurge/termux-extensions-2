@@ -1477,6 +1477,11 @@
     box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.38);
   }
 
+  .agent-drawer__running-dot.is-starting {
+    background: rgba(96, 165, 250, 0.95);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35), 0 0 10px rgba(96, 165, 250, 0.28);
+  }
+
   .agent-drawer__running-dot.is-active {
     outline: 1px solid rgba(59, 130, 246, 0.65);
     outline-offset: 1px;
@@ -2033,7 +2038,7 @@
         <span class="agent-drawer__title-text" id="agent-drawer-title-text">Sidebar</span>
       </div>
       <div class="agent-drawer__chrome">
-        <div class="agent-drawer__icon-grid" id="agent-drawer-icon-grid" aria-label="Side-bar header shortcuts"></div>
+        <div class="agent-drawer__icon-grid" id="agent-drawer-icon-grid" aria-label="Sidebar app dock"></div>
         <div class="fe-dropdown agent-drawer__icon-menu" id="agent-drawer-icon-menu"></div>
       </div>
       <div class="agent-drawer__actions">
@@ -2045,8 +2050,8 @@
     <div class="agent-drawer__iframe" id="agent-iframe-wrap">
       <div id="sidebar-setup-placeholder" class="sidebar-setup">
         <div class="sidebar-setup__card">
-          <div class="sidebar-setup__title">Side-bar setup</div>
-          <div class="sidebar-setup__hint">Add shortcuts to choose what loads in the side-bar.</div>
+          <div class="sidebar-setup__title">Open a sidebar app window</div>
+          <div class="sidebar-setup__hint">Use the launcher to open a stateful app window, or add a plain URL fallback entry.</div>
           <div style="font-size: 0.82rem; opacity: 0.8;">Side-bar toggle</div>
           <div style="display:flex; flex-direction: column; gap: 8px;">
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
@@ -2063,7 +2068,7 @@
             </label>
           </div>
           <div style="display:flex; gap:8px; align-items:center; margin-top: 6px;">
-            <button class="fe-btn" id="sidebar-setup-shortcuts">Shortcuts…</button>
+            <button class="fe-btn" id="sidebar-setup-shortcuts">App drawer…</button>
           </div>
         </div>
       </div>
@@ -2364,7 +2369,7 @@
         </div>
 
         <div style="display:flex; gap:8px; align-items:center; margin-top: 12px;">
-          <button class="fe-btn" id="editor-settings-agent-shortcuts">Shortcuts…</button>
+          <button class="fe-btn" id="editor-settings-agent-shortcuts">Sidebar entries…</button>
         </div>
       </div>
 
@@ -2383,17 +2388,17 @@
   </div>
 </div>
 
-<!-- Agent Shortcuts Modal -->
+<!-- Sidebar plain URL entries modal; agent* ids are compatibility ids. -->
 <div id="agent-shortcuts-modal" class="fe-modal" aria-hidden="true" style="z-index: 360;">
   <div class="fe-modal-card" style="max-width: 760px;">
     <div class="fe-modal-header">
-      <strong>Side-bar Shortcuts</strong>
+      <strong>Sidebar Plain URL Entries</strong>
       <span style="flex:1"></span>
       <button class="fe-btn" id="agent-shortcuts-close" aria-label="Close">✕</button>
     </div>
     <div class="fe-modal-body">
       <div style="display:flex; gap:8px; align-items:center; margin-bottom: 10px;">
-        <button class="fe-btn fe-btn-primary" id="agent-shortcuts-add">Add</button>
+        <button class="fe-btn fe-btn-primary" id="agent-shortcuts-add">Add plain URL</button>
       </div>
       <div id="agent-shortcuts-list"></div>
 
@@ -2403,7 +2408,7 @@
         <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px; flex-wrap: wrap;">
           <div style="flex:1; min-width: 220px;">
             <label for="agent-shortcut-label" style="display:block; margin-bottom: 6px;">Label</label>
-            <input id="agent-shortcut-label" class="lsp-rootrel-input" type="text" placeholder="My Shortcut" autocomplete="off" spellcheck="false" />
+            <input id="agent-shortcut-label" class="lsp-rootrel-input" type="text" placeholder="My entry" autocomplete="off" spellcheck="false" />
           </div>
           <div style="flex:1; min-width: 220px;">
             <label for="agent-shortcut-kind-btn" style="display:block; margin-bottom: 6px;">Type</label>

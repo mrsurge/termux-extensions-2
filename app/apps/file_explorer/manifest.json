@@ -10,5 +10,29 @@
     "backend_blueprint": "file_explorer.py",
     "frontend_template": "template.html",
     "frontend_script": "main.js"
+  },
+  "sidebar_state": {
+    "enabled": true,
+    "reference": true,
+    "kind": "path",
+    "launcher": true,
+    "base_url": "/app/file_explorer",
+    "token_source": "console_worker_id",
+    "console_worker_prefix": "file_explorer",
+    "host_id_param": "te2_host_id",
+    "token_id_param": "te2_token_id",
+    "console_worker_id_param": "te2_console_worker_id",
+    "url_state": {
+      "param": "path",
+      "opaque": true,
+      "default_path": "~"
+    },
+    "load": {
+      "default": "eager"
+    },
+    "readiness": {
+      "callback": true,
+      "test_delay_param": "te2_readiness_delay_ms"
+    }
   }
 }

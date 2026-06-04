@@ -19,6 +19,10 @@ export const UI_IPC_RPC_METHODS = {
   hostDiagnosticsMention: 'ui.host.diagnostics.mention',
   hostStateFileActivityRecord: 'ui.host.state.fileActivity.record',
   hostStateFileScrollUpdate: 'ui.host.state.fileScroll.update',
+  sidebarWindowCreate: 'ui.sidebar.window.create',
+  sidebarWindowActivate: 'ui.sidebar.window.activate',
+  sidebarWindowClose: 'ui.sidebar.window.close',
+  sidebarActiveShortcutSet: 'ui.sidebar.activeShortcut.set',
 } as const;
 
 export const UI_IPC_RPC_NOTIFICATIONS = {
@@ -40,6 +44,9 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   projectSwitching: 'ui.project.switching',
   projectSwitched: 'ui.project.switched',
   preferencesChanged: 'ui.preferences.changed',
+  sidebarWindowsChanged: 'ui.sidebar.windows.changed',
+  sidebarWindowActivated: 'ui.sidebar.window.activated',
+  sidebarWindowReadinessChanged: 'ui.sidebar.window.readiness.changed',
 } as const;
 
 type ValueOf<T> = T[keyof T];
