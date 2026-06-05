@@ -4,14 +4,42 @@ import asyncio
 import argparse
 import importlib.util
 import inspect
+import json
 import os
 import signal
 import sys
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
+from urllib import request as urllib_request
+from urllib.parse import quote
 
 from fastapi import FastAPI, APIRouter
 import uvicorn
+
+
+def _framework_url() -> str:
+    explicit = str(os.environ.get("TE_FRAMEWORK_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    port = str(os.environ.get("TE_PORT") or "8089").strip() or "8089"
+    return f"http://127.0.0.1:{port}"
+
+
+def _post_framework_readiness(app_id: str, payload: dict | None = None) -> None:
+    body = dict(payload or {})
+    body.setdefault("app_id", app_id)
+    body.setdefault("status", "ready")
+    body.setdefault("phase", "backend_serving")
+    body.setdefault("source", "app_worker")
+    endpoint = f"{_framework_url()}/api/apps/{quote(app_id, safe='')}/readiness"
+    req = urllib_request.Request(
+        endpoint,
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib_request.urlopen(req, timeout=5) as resp:
+        resp.read()
 
 
 def _runtime_loop_probe_payload(app_id: str) -> dict:
@@ -54,11 +82,22 @@ def main():
                     try:
                         result = backend_serving_hook()
                         if inspect.isawaitable(result):
-                            await result
+                            result = await result
+                        if isinstance(result, dict):
+                            await asyncio.to_thread(_post_framework_readiness, args.app_id, result)
                     except Exception as exc:
                         print(f"[app-worker] Backend serving hook failed for {args.app_id}: {exc}", file=sys.stderr)
 
                 serving_task = asyncio.create_task(_run_backend_serving_hook())
+            else:
+                async def _run_default_backend_serving_post():
+                    await asyncio.sleep(0.1)
+                    try:
+                        await asyncio.to_thread(_post_framework_readiness, args.app_id)
+                    except Exception as exc:
+                        print(f"[app-worker] Backend readiness post failed for {args.app_id}: {exc}", file=sys.stderr)
+
+                serving_task = asyncio.create_task(_run_default_backend_serving_post())
             yield
             if serving_task is not None and not serving_task.done():
                 serving_task.cancel()

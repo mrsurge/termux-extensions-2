@@ -140,7 +140,7 @@ def _resolve_sidebar_directory(path_value: object) -> Path:
     return path
 
 
-def _canonical_sidebar_url(host_id: str, token_id: str, path_value: str, delay_ms: int, console_worker_id: str = '') -> str:
+def _canonical_sidebar_url(host_id: str, token_id: str, path_value: str, console_worker_id: str = '') -> str:
     query = {
         'embed': '1',
         'te2_host_id': host_id,
@@ -150,42 +150,7 @@ def _canonical_sidebar_url(host_id: str, token_id: str, path_value: str, delay_m
         query['te2_token_id'] = token_id
     if console_worker_id:
         query['te2_console_worker_id'] = console_worker_id
-    if delay_ms:
-        query['te2_readiness_delay_ms'] = str(delay_ms)
     return f"{APP_BASE_URL}?{urlencode(query)}"
-
-
-def _clamp_delay_ms(value: object) -> int:
-    try:
-        delay = int(value or 0)
-    except (TypeError, ValueError):
-        return 0
-    return max(0, min(delay, 60_000))
-
-
-async def _post_readiness_after_delay(payload: Dict[str, Any]) -> None:
-    delay_ms = _clamp_delay_ms(payload.get('readiness_delay_ms') or payload.get('te2_readiness_delay_ms'))
-    if delay_ms:
-        await asyncio.sleep(delay_ms / 1000)
-    readiness_payload = {
-        'status': 'ready',
-        'app_id': APP_ID,
-        'phase': 'state_url_ready',
-        'host_id': str(payload.get('host_id') or payload.get('hostId') or '').strip(),
-        'token_id': str(payload.get('token_id') or payload.get('tokenId') or '').strip(),
-        'console_worker_id': str(payload.get('console_worker_id') or payload.get('consoleWorkerId') or '').strip(),
-        'url': str(payload.get('url') or '').strip(),
-        'path': str(payload.get('path') or '').strip(),
-        'source': 'file_explorer_backend',
-        'details': {
-            'state_kind': 'path',
-            'readiness_delay_ms': delay_ms,
-        },
-    }
-    try:
-        await _post_framework_readiness(readiness_payload)
-    except Exception as exc:
-        print(f"[file_explorer] readiness post failed: {exc}", flush=True)
 
 
 def _scandir_entries(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
@@ -421,10 +386,9 @@ async def publish_sidebar_window_url(payload: Dict[str, Any] | None = Body(None)
         raise HTTPException(status_code=400, detail='host_id is required')
     directory = _resolve_sidebar_directory(body.get('path'))
     path_value = str(directory)
-    delay_ms = _clamp_delay_ms(body.get('readiness_delay_ms') or body.get('te2_readiness_delay_ms'))
     console_worker_id = str(body.get('console_worker_id') or body.get('consoleWorkerId') or '').strip()
     token_id = str(body.get('token_id') or body.get('tokenId') or SIDEBAR_TOKEN_ID).strip()
-    url_value = _canonical_sidebar_url(host_id, token_id, path_value, delay_ms, console_worker_id)
+    url_value = _canonical_sidebar_url(host_id, token_id, path_value, console_worker_id)
     params: Dict[str, Any] = {
         'lane': {
             'app_id': APP_ID,
@@ -460,9 +424,7 @@ async def publish_sidebar_window_url(payload: Dict[str, Any] | None = Body(None)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f'sidebar IPC update failed: {exc}') from exc
 
-    readiness_payload = {**params, 'readiness_delay_ms': delay_ms}
-    asyncio.create_task(_post_readiness_after_delay(readiness_payload))
-    return {"ok": True, "data": {"queued_readiness": True, "sidebar": rpc_result}}
+    return {"ok": True, "data": {"sidebar": rpc_result}}
 
 
 @file_explorer_bp.get('/download')

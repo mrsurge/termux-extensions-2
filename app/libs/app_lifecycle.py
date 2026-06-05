@@ -84,6 +84,7 @@ async def register_app(app_id: str, shell_id: str, port: int):
     Called by the app launcher when a new app worker shell is spawned.
     """
     print(f"[AppLifecycle] Registering app_id={app_id} shell_id={shell_id} port={port}")
+    safe_app_id = str(app_id or "").strip()
     async with _get_lock():
         existing = _running_apps.get(shell_id, {})
         _running_apps[shell_id] = {
@@ -93,11 +94,14 @@ async def register_app(app_id: str, shell_id: str, port: int):
             "created_at": existing.get("created_at", time.time()),
             "locked": bool(existing.get("locked", False)),
         }
-        _app_readiness[str(app_id or "").strip()] = {
-            "app_id": str(app_id or "").strip(),
-            "status": "starting",
-            "updated_at": time.time(),
-        }
+        existing_readiness = _app_readiness.get(safe_app_id)
+        existing_status = str((existing_readiness or {}).get("status") or "").strip().lower()
+        if existing_status not in {"ready", "starting"}:
+            _app_readiness[safe_app_id] = {
+                "app_id": safe_app_id,
+                "status": "starting",
+                "updated_at": time.time(),
+            }
 
 async def unregister_app(shell_id: str):
     """
@@ -135,13 +139,6 @@ def _normalize_readiness_payload(app_id: str, payload: Dict[str, Any] | None = N
     }
     for key in (
         "phase",
-        "host_id",
-        "hostId",
-        "token_id",
-        "tokenId",
-        "console_worker_id",
-        "consoleWorkerId",
-        "url",
         "message",
         "source",
     ):

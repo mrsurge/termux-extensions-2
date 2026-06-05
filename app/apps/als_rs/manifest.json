@@ -11,6 +11,27 @@
     "frontend_template": "template.html",
     "frontend_script": "main.js"
   },
+  "sidebar_state": {
+    "enabled": true,
+    "kind": "conversation",
+    "launcher": true,
+    "base_url": "/app/als-rs",
+    "token_source": "console_worker_id",
+    "console_worker_prefix": "als_rs",
+    "host_id_param": "te2_host_id",
+    "token_id_param": "te2_token_id",
+    "console_worker_id_param": "te2_console_worker_id",
+    "url_state": {
+      "param": "conversation_id",
+      "opaque": true
+    },
+    "load": {
+      "default": "eager"
+    },
+    "readiness": {
+      "callback": true
+    }
+  },
   "proxy_shell": {
     "enabled": true,
     "start_path": "/",

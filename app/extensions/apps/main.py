@@ -86,6 +86,9 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
         sidebar_state = manifest.get("sidebar_state")
         if not isinstance(sidebar_state, dict):
             sidebar_state = None
+        readiness = readiness_by_app.get(app_id) or {}
+        if not readiness and backend_required and app_id in running:
+            readiness = {"app_id": app_id, "status": "starting"}
 
         catalog.append({
             "id": app_id,
@@ -99,7 +102,7 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
             "fullscreen": bool(manifest.get("fullscreen")),
             "backend_required": backend_required,
             "running": app_id in running,
-            "readiness": readiness_by_app.get(app_id) or {},
+            "readiness": readiness,
             "launch_url": f"/app/{app_id}",
             "embed_url": f"/app/{app_id}?embed=1",
             "asset_base_url": manifest.get("asset_base_url") if isinstance(manifest.get("asset_base_url"), str) else "",
@@ -286,12 +289,13 @@ async def unlock_app(app_id: str, manager: FrameworkShellManager = Depends(get_f
     updated_app = await app_lifecycle.set_lock_state(app_to_unlock["shell_id"], False)
     return {"ok": True, "data": updated_app}
 
+@apps_bp.put('/api/apps/{app_id}/readiness')
 @apps_bp.post('/api/apps/{app_id}/readiness')
 async def set_app_readiness(app_id: str, payload: dict | None = Body(None)):
     """
     Semantic readiness callback for apps whose backend/page needs more than TCP shell readiness.
-    Minimum body: {"status": "ready"}.
-    Stateful sidebar app windows should include host_id, token_id, url, and console_worker_id when available.
+    Minimum body: {"status": "ready"}. POST and PUT have the same semantics.
+    This is app/backend lifecycle state only; slot/window state belongs to the sidebar window API.
     """
     manifest = next((app for app in get_loaded_apps() if app.get('id') == app_id), None)
     if not manifest:
@@ -306,33 +310,20 @@ async def set_app_readiness(app_id: str, payload: dict | None = Body(None)):
     if status_normalized not in {"starting", "ready", "error", "stopped"}:
         raise HTTPException(status_code=400, detail="invalid readiness status")
 
-    host_id = str(body.get("host_id") or body.get("hostId") or "").strip()
-    if host_id:
-        token_id = str(body.get("token_id") or body.get("tokenId") or "").strip()
-        url = str(body.get("url") or "").strip()
-        if not token_id:
-            raise HTTPException(status_code=400, detail="token_id is required for stateful sidebar readiness")
-        if not url:
-            raise HTTPException(status_code=400, detail="url is required for stateful sidebar readiness")
-
     readiness = await app_lifecycle.set_app_readiness(app_id, body)
     await app_registry_events.publish("app_readiness_changed", {"app_id": app_id, "readiness": readiness})
+    return {"ok": True, "data": readiness}
 
-    if host_id:
-        try:
-            from app.apps.file_editor_cm6.ui_ipc.sidebar_ws import update_sidebar_window_readiness_global
 
-            await update_sidebar_window_readiness_global(
-                {
-                    **body,
-                    "app_id": app_id,
-                    "appId": app_id,
-                    "host_id": host_id,
-                    "readiness": readiness,
-                }
-            )
-        except Exception as exc:
-            print(f"[AppsExtension] sidebar readiness bridge failed for {app_id}/{host_id}: {exc}", flush=True)
+@apps_bp.get('/api/apps/{app_id}/readiness')
+async def get_app_readiness(app_id: str):
+    manifest = next((app for app in get_loaded_apps() if app.get('id') == app_id), None)
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"App '{app_id}' not found")
+    readiness = await app_lifecycle.get_app_readiness(app_id)
+    if readiness is None:
+        running = await get_app_runtime().get_running_app(app_id)
+        readiness = {"app_id": app_id, "status": "starting" if isinstance(running, dict) else "stopped"}
     return {"ok": True, "data": readiness}
 
 @apps_bp.get('/api/apps/running')
@@ -552,8 +543,6 @@ async def app_shell(app_id: str, request: Request):
             return RedirectResponse(url="/")
         port = app_info.get("port")
         if not port:
-            return RedirectResponse(url="/")
-        if not await _is_local_port_open(int(port)):
             return RedirectResponse(url="/")
 
     template_path = os.path.join(os.path.dirname(__file__), "..", "..", "templates", "app_shell.html")

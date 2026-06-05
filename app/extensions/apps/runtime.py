@@ -174,7 +174,7 @@ class AppRuntime:
                 ui=ui,
                 env_overrides=env_overrides or None,
                 subgroups_overrides=[app.app_id, shell.subgroup],
-                wait_ready=shell.wait_ready,
+                wait_ready=False,
             )
 
         specs_map = parse_shellspec_data(shell.inline_spec or {}, default_id="app-worker")
@@ -189,7 +189,7 @@ class AppRuntime:
             ui=ui,
             env_overrides=env_overrides or None,
             subgroups_overrides=[app.app_id, shell.subgroup],
-            wait_ready=shell.wait_ready,
+            wait_ready=False,
         )
 
     async def start_app(self, app_id: str) -> dict[str, Any]:
@@ -202,26 +202,18 @@ class AppRuntime:
         running = await self.get_running_app(app_id)
         if running:
             port = _parse_port(running.get("port"))
-            if port is not None and await _wait_for_port(port, timeout=1.0, interval=0.2):
-                return running
-            await self.shutdown_app(app_id)
+            shell_id = str(running.get("shell_id") or "").strip()
+            if port is not None and shell_id and await app_lifecycle.get_app_readiness(app_id) is None:
+                await app_lifecycle.register_app(app_id, shell_id, port)
+            return running
 
         if not app.backend_module and not app.shells:
             return {"app_id": app.app_id, "message": "No backend to start"}
 
-        try:
-            record = await self._start_shell(app)
-        except Exception as exc:
-            if "failed readiness" not in str(exc):
-                raise
-            record = await self._find_running_app_worker_record(app.app_id)
-            if record is None:
-                raise
+        record = await self._start_shell(app)
         port = _record_port(record)
         if port is None:
             raise RuntimeError(f"App worker shellspec did not set TE_APP_WORKER_PORT for app '{app.app_id}'")
-        if not await _wait_for_port(port, timeout=15.0, interval=0.2):
-            raise RuntimeError(f"App worker started but port {port} did not become reachable")
 
         await app_lifecycle.register_app(app.app_id, record.id, port)
         return {

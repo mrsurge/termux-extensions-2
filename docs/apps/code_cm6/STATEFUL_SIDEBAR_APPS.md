@@ -115,10 +115,6 @@ Example from `app/apps/file_explorer/manifest.json`:
     },
     "load": {
       "default": "eager"
-    },
-    "readiness": {
-      "callback": true,
-      "test_delay_param": "te2_readiness_delay_ms"
     }
   }
 }
@@ -194,6 +190,40 @@ const isSidebarStateful = !!hostId;
 If `hostId` is absent, run as a normal full-page or embedded app. Do not make
 the app require TE2 sidebar mode to function.
 
+## Normal App Access Is Not Stateful
+
+Declaring `sidebar_state` makes an app stateful-capable. It does not make every
+load of that app stateful.
+
+The app should enter sidebar-stateful behavior only when Code TE2 launches it
+with sidebar slot identity. In the current contract, `te2_host_id` is the gating
+identity parameter.
+
+For File Explorer:
+
+```text
+/app/file_explorer
+```
+
+is normal app access.
+
+```text
+/app/file_explorer?path=/tmp
+```
+
+is still normal app access with a normal deep-link path.
+
+```text
+/app/file_explorer?embed=1&te2_host_id=slot%3Afile_explorer%3Afile_explorer%3Aa1b2&te2_token_id=file_explorer&te2_console_worker_id=file_explorer%3Aa1b2&path=%2Ftmp
+```
+
+is sidebar-stateful access for one sidebar slot.
+
+The frontend may still support ordinary app-shell state, saved preferences,
+deep links, and per-window console bridge identity in normal app mode. It must
+not publish sidebar restore checkpoints or call its stateful backend bridge
+unless `te2_host_id` is present.
+
 ## Console Bridge
 
 If the app has a frontend surface and uses TE2 console instrumentation, initialize
@@ -268,7 +298,7 @@ The app backend endpoint should:
 - normalize app state
 - build a same-origin restore URL when needed
 - call `sidebar.window.state.update` over `/sidebar_ipc`
-- optionally schedule a readiness POST
+- leave app/backend readiness alone; state publication is not readiness
 
 Reference shape:
 
@@ -362,17 +392,30 @@ Expected behavior:
 - The update does not reset readiness unless readiness is explicitly sent.
 - The update does not reload an already-loaded iframe.
 
-## Readiness
+## App Backend Readiness
 
-TCP or shell readiness only means the process is running. Semantic app readiness
-means the app or slot is actually ready for the user.
+TCP or shell readiness only means the process was spawned or a port probe
+passed. App backend readiness means the app worker/backend is actually ready
+to accept the app requests its contract requires.
 
-Every app can post minimum readiness:
+For normal framework apps, the standard app worker posts this readiness after
+the backend module is imported, routes are mounted, lifespans are active, and
+the backend can accept requests. Apps with special backend readiness needs can
+provide their own backend hook and post the same endpoint from there.
+
+For proxy or shim apps where the app's own backend actually serves the
+frontend content, readiness means that upstream/backend is serving the frontend
+content. Those apps should post or put readiness only when that serving point is
+true.
+
+Every app backend can publish minimum readiness:
 
 ```http
 POST /api/apps/{app_id}/readiness
 Content-Type: application/json
 ```
+
+`PUT /api/apps/{app_id}/readiness` has the same semantics.
 
 Minimum body:
 
@@ -391,21 +434,42 @@ error
 stopped
 ```
 
-For a stateful sidebar slot, include slot identity:
+The framework stores this as app lifecycle state keyed by `app_id` for the
+running app worker lifetime. A running backend that has not posted `ready` is
+treated as `starting`. The app shell uses that state to keep the framework-level
+loading placeholder visible for as long as the backend needs, including
+compile-heavy apps that take minutes.
+
+Readiness is not sidebar-window state. Do not include `host_id`, `token_id`,
+`console_worker_id`, `url`, `path`, or conversation state in this POST.
+
+This backend gate matters for stateful sidebar apps because the frontend is not
+the authority for restore/checkpoint state. Until the backend is ready, the app
+cannot reliably validate state, persist restore checkpoints, or send canonical
+`sidebar.window.state.update` calls to the sidebar ledger. The dock/iframe can
+exist, but the app is not ready to participate in the stateful sidebar contract
+until its backend readiness is `ready`.
+
+To read the current app lifecycle readiness:
+
+```http
+GET /api/apps/{app_id}/readiness
+```
+
+For stateful sidebar window restore/checkpoint data, publish state through
+`sidebar.window.state.update` from the app backend.
+
+If a sidebar slot needs slot-local status metadata, use the sidebar RPC method
+for window readiness instead:
 
 ```json
 {
-  "status": "ready",
+  "method": "sidebar.window.readiness.update",
   "host_id": "slot:file_explorer:file_explorer:a1b2",
-  "token_id": "file_explorer",
-  "console_worker_id": "file_explorer:a1b2",
-  "url": "/app/file_explorer?embed=1&te2_host_id=slot%3Afile_explorer%3Afile_explorer%3Aa1b2&te2_token_id=file_explorer&path=%2Ftmp",
-  "phase": "state_url_ready",
-  "source": "file_explorer_backend"
+  "status": "ready",
+  "message": "Window state restored"
 }
 ```
-
-If `host_id` is present, `token_id` and `url` are required.
 
 ## Restore Semantics
 
@@ -482,8 +546,8 @@ Use this checklist when making an app stateful:
 - State update includes `app_id`, `base_url`, `host_id`, `token_id`, and `query_state`.
 - State update includes `console_worker_id` when available.
 - State update uses `activate: false` for ordinary in-app navigation.
-- Readiness POST sends at least `{"status":"ready"}`.
-- Stateful readiness includes `host_id`, `token_id`, and `url`.
+- App backend readiness POST or PUT sends at least `{"status":"ready"}` when the backend is ready for its contract.
+- App backend readiness does not include sidebar slot identity or app-owned URL state.
 - Two windows of the same app get different `host_id` values.
 - Updating one `host_id` does not mutate another slot with the same `app_id`.
 - Reloading Code TE2 restores sidebar slots from the ledger.
@@ -498,6 +562,7 @@ Use this checklist when making an app stateful:
 - Do not scrape iframe URLs to infer app state.
 - Do not make Code TE2 understand app-specific state such as File Explorer
   `path`.
+- Do not use `/api/apps/{app_id}/readiness` for sidebar slot state.
 - Do not reset readiness to `starting` for ordinary state updates.
 - Do not reload the live iframe just because the app published a new restore
   checkpoint.

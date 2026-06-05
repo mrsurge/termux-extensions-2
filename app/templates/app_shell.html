@@ -62,6 +62,40 @@
             overscroll-behavior: contain;
         }
 
+        .app-readiness-placeholder {
+            min-height: 100%;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            box-sizing: border-box;
+            text-align: left;
+            background: var(--background);
+        }
+
+        .app-readiness-card {
+            width: min(360px, 100%);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            background: var(--card);
+            padding: 16px 18px;
+            box-shadow: none;
+        }
+
+        .app-readiness-kicker {
+            color: var(--muted-foreground);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .app-readiness-title {
+            font-size: 1rem;
+            font-weight: 700;
+            margin: 0;
+        }
+
         .app-modal {
             position: fixed;
             inset: 0;
@@ -410,6 +444,123 @@
                 throw new Error(body.error || `HTTP ${response.status} - ${response.statusText}`);
             }
             return body.data;
+        }
+
+        function appsWsUrl() {
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return `${proto}//${window.location.host}/ws/apps`;
+        }
+
+        function appRequiresBackend(appDef) {
+            return !!(appDef && appDef.entrypoints && appDef.entrypoints.backend_blueprint);
+        }
+
+        function normalizeReadinessStatus(readiness) {
+            const raw = readiness && typeof readiness === 'object'
+                ? String(readiness.status || '').trim().toLowerCase()
+                : '';
+            if (raw === 'loading') return 'starting';
+            if (raw === 'ok' || raw === 'up' || raw === 'serving') return 'ready';
+            return raw || 'starting';
+        }
+
+        async function fetchAppReadiness(targetAppId) {
+            try {
+                return await teFetch(`/api/apps/${encodeURIComponent(targetAppId)}/readiness`);
+            } catch (_) {
+                return { app_id: targetAppId, status: 'starting' };
+            }
+        }
+
+        function renderBackendReadinessPlaceholder(appDef, readiness) {
+            const status = normalizeReadinessStatus(readiness);
+            const appName = appDef?.name || appId || 'App';
+            const kicker = status === 'error'
+                ? 'App error'
+                : status === 'stopped'
+                    ? 'App stopped'
+                    : 'Starting app';
+            const title = status === 'error'
+                ? `${appName} could not start`
+                : status === 'stopped'
+                    ? `${appName} stopped`
+                    : `Preparing ${appName}`;
+            appContainer.innerHTML = `
+                <div class="app-readiness-placeholder" data-readiness-status="${escapeHtml(status)}">
+                    <div class="app-readiness-card">
+                        <div class="app-readiness-kicker">${escapeHtml(kicker)}</div>
+                        <div class="app-readiness-title">${escapeHtml(title)}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function waitForBackendReadiness(appDef) {
+            if (!appRequiresBackend(appDef)) return;
+
+            let done = false;
+            let pollTimer = 0;
+            let ws = null;
+
+            function cleanup() {
+                done = true;
+                if (pollTimer) {
+                    clearTimeout(pollTimer);
+                    pollTimer = 0;
+                }
+                if (ws) {
+                    try { ws.close(); } catch (_) {}
+                    ws = null;
+                }
+            }
+
+            function extractCatalogReadiness(payload) {
+                const catalog = Array.isArray(payload?.catalog) ? payload.catalog : [];
+                const match = catalog.find((item) => String(item?.id || '').trim() === appId);
+                return match && typeof match.readiness === 'object' ? match.readiness : null;
+            }
+
+            await new Promise((resolve) => {
+                function applyReadiness(readiness) {
+                    if (done) return;
+                    const status = normalizeReadinessStatus(readiness);
+                    if (status === 'ready') {
+                        cleanup();
+                        resolve();
+                        return;
+                    }
+                    renderBackendReadinessPlaceholder(appDef, readiness || { app_id: appId, status });
+                }
+
+                async function poll() {
+                    const readiness = await fetchAppReadiness(appId);
+                    applyReadiness(readiness);
+                    if (!done) {
+                        pollTimer = setTimeout(poll, 2000);
+                    }
+                }
+
+                try {
+                    ws = new WebSocket(appsWsUrl());
+                    ws.addEventListener('message', (ev) => {
+                        let message = null;
+                        try {
+                            message = JSON.parse(ev.data);
+                        } catch (_) {
+                            return;
+                        }
+                        if (!message || typeof message !== 'object') return;
+                        if (message.type === 'apps_snapshot' || message.type === 'catalog_snapshot') {
+                            const readiness = extractCatalogReadiness(message.payload || {});
+                            if (readiness) applyReadiness(readiness);
+                        }
+                    });
+                } catch (_) {
+                    ws = null;
+                }
+
+                void poll();
+            });
         }
 
         function appLifecycleEndpoint(targetAppId, action) {
@@ -822,6 +973,7 @@
 
                 host.setTitle(appDef.name || 'Termux App');
                 await ensureStatePreloaded(stateKey);
+                await waitForBackendReadiness(appDef);
                 const assetBaseUrl = typeof appDef.asset_base_url === 'string' ? appDef.asset_base_url.trim() : '';
                 const templatePath = assetBaseUrl
                     ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_template.replace(/^\/+/, '')}`

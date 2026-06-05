@@ -29,10 +29,6 @@
     },
     "load": {
       "default": "eager"
-    },
-    "readiness": {
-      "callback": true,
-      "test_delay_param": "te2_readiness_delay_ms"
     }
   }
 }
