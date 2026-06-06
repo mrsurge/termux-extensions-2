@@ -14,10 +14,11 @@ import shutil
 import time
 from typing import ClassVar, Literal, NotRequired, Protocol, TypeAlias, TypedDict, cast
 from urllib import request as urllib_request
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 import uuid
 
-from fastapi import APIRouter, HTTPException, WebSocket
+import socketio
+from fastapi import APIRouter, Body, HTTPException, WebSocket
 from pydantic import BaseModel, ConfigDict
 from starlette.websockets import WebSocketDisconnect
 
@@ -25,6 +26,11 @@ from framework_shells import get_manager as _manager  # pyright: ignore[reportMi
 from framework_shells.orchestrator import Orchestrator  # pyright: ignore[reportMissingImports,reportUnknownVariableType]
 
 APP_ID = str(os.environ.get("TE_APP_ID") or "terminal").strip() or "terminal"
+APP_BASE_URL = "/app/terminal"
+SIDEBAR_TOKEN_ID = "terminal"
+SIDEBAR_IPC_NAMESPACE = "/sidebar_ipc"
+SIDEBAR_IPC_SOCKET_PATH = "/ui_ipc_ws/socket.io"
+SIDEBAR_IPC_RPC_EVENT = "rpc"
 SHELLSPEC_DIR = Path(__file__).resolve().parent / "shellspec"
 DEFAULT_SHELL_KIND = "python"
 TERMINAL_STREAM_KIND_ENV = "TERMINAL_STREAM_KIND"
@@ -75,6 +81,65 @@ async def te2_app_backend_serving() -> None:
         await asyncio.to_thread(_post_serving_readiness)
     except Exception as exc:
         print(f"[terminal] readiness post failed: {exc}", flush=True)
+
+
+def _sidebar_backend_client_id() -> str:
+    return f"{APP_ID}:backend:{os.getpid()}"
+
+
+async def _call_sidebar_rpc(
+    method: str,
+    params: dict[str, object] | None = None,
+    *,
+    timeout: float = 5.0,
+) -> dict[str, object]:
+    safe_method = str(method or "").strip()
+    if not safe_method:
+        raise ValueError("method is required")
+    client = socketio.AsyncClient(reconnection=False, logger=False, engineio_logger=False)
+    timeout_seconds = max(1, int(timeout))
+    try:
+        await client.connect(
+            _framework_url(),
+            namespaces=[SIDEBAR_IPC_NAMESPACE],
+            socketio_path=SIDEBAR_IPC_SOCKET_PATH.lstrip("/"),
+            transports=["websocket", "polling"],
+        )
+        register = {
+            "jsonrpc": "2.0",
+            "id": f"{APP_ID}:register:{int(asyncio.get_running_loop().time() * 1000)}",
+            "method": "sidebar.register",
+            "params": {
+                "role": "iframe",
+                "app": APP_ID,
+                "client_id": _sidebar_backend_client_id(),
+                "capabilities": ["sidebar.windows", "sidebar.cwd"],
+            },
+        }
+        await client.call(SIDEBAR_IPC_RPC_EVENT, register, namespace=SIDEBAR_IPC_NAMESPACE, timeout=timeout_seconds)
+        request = {
+            "jsonrpc": "2.0",
+            "id": f"{APP_ID}:{int(asyncio.get_running_loop().time() * 1000)}",
+            "method": safe_method,
+            "params": params or {},
+        }
+        response = await client.call(
+            SIDEBAR_IPC_RPC_EVENT,
+            request,
+            namespace=SIDEBAR_IPC_NAMESPACE,
+            timeout=timeout_seconds,
+        )
+        if not isinstance(response, dict):
+            raise RuntimeError("sidebar RPC returned a non-object response")
+        error = response.get("error")
+        if isinstance(error, dict):
+            raise RuntimeError(str(error.get("message") or error))
+        result = response.get("result")
+        return result if isinstance(result, dict) else {"result": result}
+    finally:
+        with suppress(Exception):
+            await client.disconnect()
+
 
 JsonObject = dict[str, object]
 TerminalMethod: TypeAlias = Literal[
@@ -592,6 +657,39 @@ def _annotate_shell_payload(record: ShellRecordProtocol, payload: JsonObject) ->
     return payload
 
 
+def _canonical_sidebar_url(
+    host_id: str,
+    token_id: str,
+    *,
+    shell_id: str = "",
+    cwd: str = "",
+    console_worker_id: str = "",
+) -> str:
+    query: dict[str, str] = {
+        "embed": "1",
+        "te2_host_id": host_id,
+    }
+    if token_id:
+        query["te2_token_id"] = token_id
+    if console_worker_id:
+        query["te2_console_worker_id"] = console_worker_id
+    if shell_id:
+        query["shell_id"] = shell_id
+    if cwd:
+        query["cwd"] = cwd
+    return f"{APP_BASE_URL}?{urlencode(query)}"
+
+
+async def _shell_record_cwd(record: ShellRecordProtocol) -> str:
+    manager = await mgr()
+    try:
+        payload = await manager.describe(record)
+    except Exception:
+        payload = {}
+    cwd = _coerce_optional_string(payload.get("cwd"))
+    return _normalize_cwd(cwd) if cwd else ""
+
+
 async def _next_terminal_sequence(manager: ManagerProtocol) -> int:
     max_seq = 0
     try:
@@ -1014,6 +1112,118 @@ async def _drop_session(shell_id: str) -> None:
         _ = session.reader_task.cancel()
         with suppress(asyncio.CancelledError, Exception):
             await session.reader_task
+
+
+@terminal_bp.get("/sidebar/cwd")
+async def get_sidebar_cwd() -> JsonObject:
+    try:
+        result = await _call_sidebar_rpc("sidebar.cwd.get", {}, timeout=5)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"sidebar cwd lookup failed: {exc}") from exc
+    cwd = _coerce_optional_string(result.get("cwd"))
+    if not cwd:
+        raise HTTPException(status_code=502, detail="sidebar cwd lookup returned no cwd")
+    payload: JsonObject = {
+        "cwd": _normalize_cwd(cwd),
+        "reason": _coerce_optional_string(result.get("reason")) or "request",
+        "ts": result.get("ts") if isinstance(result.get("ts"), int) else int(time.time() * 1000),
+    }
+    return _ok(payload)
+
+
+@terminal_bp.post("/sidebar/window/state")
+async def publish_sidebar_window_state(payload: JsonObject | None = Body(None)) -> JsonObject:
+    """
+    Backend bridge for Terminal stateful sidebar app windows.
+
+    The frontend declares the current shell state here; this backend validates
+    the shell against framework-shells and asks /sidebar_ipc to persist the
+    per-slot restore state. Dead or missing shells reset to the base Terminal
+    state instead of failing app/backend readiness.
+    """
+    body = payload if isinstance(payload, dict) else {}
+    host_id = _coerce_optional_string(body.get("host_id") or body.get("hostId")) or ""
+    if not host_id:
+        raise HTTPException(status_code=400, detail="host_id is required")
+    token_id = _coerce_optional_string(body.get("token_id") or body.get("tokenId")) or SIDEBAR_TOKEN_ID
+    console_worker_id = _coerce_optional_string(body.get("console_worker_id") or body.get("consoleWorkerId")) or ""
+    requested_shell_id = _coerce_optional_string(body.get("shell_id") or body.get("shellId")) or ""
+    raw_query_state = _coerce_json_object(body.get("query_state") or body.get("queryState")) or {}
+    requested_cwd = (
+        _coerce_optional_string(body.get("cwd"))
+        or _coerce_optional_string(raw_query_state.get("cwd"))
+        or ""
+    )
+    force_reset = bool(_coerce_optional_bool(body.get("reset") or body.get("clear")) or False)
+
+    live_record = await _get_alive(requested_shell_id) if requested_shell_id and not force_reset else None
+    live_shell_id = live_record.id if live_record is not None else ""
+    cwd_value = ""
+    if live_record is not None:
+        cwd_value = _normalize_cwd(requested_cwd) if requested_cwd else await _shell_record_cwd(live_record)
+
+    query_state: JsonObject = {}
+    if live_shell_id:
+        query_state["shell_id"] = live_shell_id
+        if cwd_value:
+            query_state["cwd"] = cwd_value
+
+    url_value = _canonical_sidebar_url(
+        host_id,
+        token_id,
+        shell_id=live_shell_id,
+        cwd=cwd_value if live_shell_id else "",
+        console_worker_id=console_worker_id,
+    )
+    label = f"Terminal {live_shell_id[-8:]}" if live_shell_id else "Terminal"
+    params: JsonObject = {
+        "lane": {
+            "app_id": APP_ID,
+            "base_url": APP_BASE_URL,
+        },
+        "app_id": APP_ID,
+        "appId": APP_ID,
+        "base_url": APP_BASE_URL,
+        "baseUrl": APP_BASE_URL,
+        "host_id": host_id,
+        "hostId": host_id,
+        "token_id": token_id,
+        "tokenId": token_id,
+        "console_worker_id": console_worker_id,
+        "consoleWorkerId": console_worker_id,
+        "state_kind": "shell",
+        "stateKind": "shell",
+        "query_state": query_state,
+        "queryState": query_state,
+        "url": url_value,
+        "label": label,
+        "title": label,
+        "load": "eager",
+        "activate": bool(body.get("activate", False)),
+        "source": "terminal_backend",
+    }
+    try:
+        rpc_result = await _call_sidebar_rpc(
+            "sidebar.window.state.update",
+            params,
+            timeout=5,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"sidebar IPC update failed: {exc}") from exc
+
+    return _ok(
+        {
+            "sidebar": rpc_result,
+            "state": {
+                "shell_id": live_shell_id,
+                "cwd": cwd_value,
+                "reset": not bool(live_shell_id),
+                "requested_shell_id": requested_shell_id,
+                "url": url_value,
+                "query_state": query_state,
+            },
+        }
+    )
 
 
 @terminal_bp.get("/shells")

@@ -1,4 +1,32 @@
 <style>
+  @font-face {
+    font-family: 'JetBrains Mono';
+    src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: block;
+  }
+  @font-face {
+    font-family: 'JetBrains Mono';
+    src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Italic.woff2') format('woff2');
+    font-weight: 400;
+    font-style: italic;
+    font-display: block;
+  }
+  @font-face {
+    font-family: 'JetBrains Mono';
+    src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Bold.woff2') format('woff2');
+    font-weight: 700;
+    font-style: normal;
+    font-display: block;
+  }
+  @font-face {
+    font-family: 'JetBrains Mono';
+    src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-BoldItalic.woff2') format('woff2');
+    font-weight: 700;
+    font-style: italic;
+    font-display: block;
+  }
   .fe-menu {
     position: relative;
     display: inline-flex;
@@ -93,6 +121,14 @@
     border-radius: 999px;
     font-size: 0.75em;
     color: var(--muted-foreground);
+  }
+  .ta-status-pill {
+    min-width: 1.8em;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    text-align: center;
+    line-height: 1.2;
   }
   .mode-list #ta-terminal-container { display: none !important; }
   .mode-terminal #ta-terminal-container { display: flex; flex-direction: column; }
@@ -221,7 +257,7 @@
     <div id="ta-shell-header" style="display:flex; align-items:center; gap:8px;">
       <button id="ta-btn-menu" class="app-btn">&#9776;</button>
       <span id="ta-shell-title" style="font-weight:600;">No shell selected</span>
-      <span id="ta-shell-status" style="color:var(--muted-foreground);"></span>
+      <span id="ta-shell-status" class="ta-status-pill" aria-label=""></span>
       <div class="spacer"></div>
       <button id="ta-zoom-out" class="app-btn" type="button" tabindex="-1" title="Zoom out" aria-label="Zoom out">A−</button>
       <button id="ta-zoom-in" class="app-btn" type="button" tabindex="-1" title="Zoom in" aria-label="Zoom in">A+</button>

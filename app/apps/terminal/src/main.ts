@@ -1,5 +1,8 @@
 import ReconnectingWebSocket from 'reconnecting-websocket';
-import { initConsoleBridge } from 'te2-console-bridge';
+import {
+  getConsoleBridgeStatus,
+  initConsoleBridge,
+} from 'te2-console-bridge';
 
 interface AppApi {
   get<T>(path: string): Promise<T>;
@@ -35,6 +38,23 @@ interface ShellHistoryPayload {
   after_seq: number;
   count: number;
   total_count: number;
+}
+
+interface SidebarCwdPayload {
+  cwd: string;
+  reason?: string;
+  ts?: number;
+}
+
+interface SidebarWindowStatePayload {
+  state?: {
+    shell_id?: string;
+    cwd?: string;
+    reset?: boolean;
+    requested_shell_id?: string;
+    url?: string;
+    query_state?: Record<string, string>;
+  };
 }
 
 interface TerminalConnectParams {
@@ -165,12 +185,31 @@ interface XtermDisposable {
   dispose(): void;
 }
 
-interface XtermFitAddonLike {
+interface XtermAddonLike {
+  dispose?(): void;
+  activate?(terminal: XtermTerminalLike): void;
+}
+
+interface XtermFitAddonLike extends XtermAddonLike {
   fit(): void;
 }
 
 interface XtermFitAddonConstructor {
   new (): XtermFitAddonLike;
+}
+
+interface XtermWebFontsAddonLike extends XtermAddonLike {
+  loadFonts(fonts?: (string | FontFace)[]): Promise<FontFace[]>;
+  relayout(): Promise<void>;
+}
+
+interface XtermWebFontsAddonConstructor {
+  new (initialRelayout?: boolean): XtermWebFontsAddonLike;
+}
+
+interface XtermWebFontsAddonNamespace {
+  WebFontsAddon?: XtermWebFontsAddonConstructor;
+  loadFonts?: (fonts?: (string | FontFace)[]) => Promise<FontFace[]>;
 }
 
 interface XtermTerminalLike {
@@ -181,7 +220,7 @@ interface XtermTerminalLike {
   focus(): void;
   dispose(): void;
   write(data: string): void;
-  loadAddon(addon: XtermFitAddonLike): void;
+  loadAddon(addon: XtermAddonLike): void;
   onData(handler: (data: string) => void): XtermDisposable;
   onResize(handler: (event: { cols: number; rows: number }) => void): XtermDisposable;
   attachCustomKeyEventHandler?(handler: (event: KeyboardEvent) => boolean): void;
@@ -236,6 +275,15 @@ interface AppState {
   encoder: TextEncoder;
 }
 
+interface SidebarStateContext {
+  enabled: boolean;
+  hostId: string;
+  tokenId: string;
+  consoleWorkerId: string;
+  initialShellId: string;
+  initialCwd: string;
+}
+
 type InputBatchMode = 'normal' | 'fast' | 'repeat';
 
 const INITIAL_TAIL = 2000;
@@ -243,6 +291,8 @@ const FONT_SIZE_MIN = 10;
 const FONT_SIZE_MAX = 28;
 const FONT_SIZE_STEP = 1;
 const FONT_SIZE_STORAGE_KEY = 'te2_terminal_font_size';
+const TERMINAL_WEB_FONT_FAMILY = 'JetBrains Mono';
+const TERMINAL_FONT_FAMILY = `"${TERMINAL_WEB_FONT_FAMILY}", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`;
 const INPUT_NORMAL_DELAY_MS = 16;
 const INPUT_NORMAL_MAX_HOLD_MS = 48;
 const INPUT_FAST_DELAY_MS = 24;
@@ -281,10 +331,20 @@ function getFitAddonGlobal(): XtermFitAddonConstructor | null {
   return fitGlobal.FitAddon ?? null;
 }
 
+function getWebFontsAddonGlobal(): XtermWebFontsAddonConstructor | null {
+  const fontsGlobal = (window as Window & {
+    WebFontsAddon?: XtermWebFontsAddonConstructor | XtermWebFontsAddonNamespace;
+  }).WebFontsAddon;
+  if (!fontsGlobal) return null;
+  if (typeof fontsGlobal === 'function') return fontsGlobal;
+  return fontsGlobal.WebFontsAddon ?? null;
+}
+
 function getRuntimeWindow(): Window & {
   io?: unknown;
   Terminal?: XtermTerminalConstructor;
   FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor };
+  WebFontsAddon?: XtermWebFontsAddonConstructor | XtermWebFontsAddonNamespace;
   __terminalTestingTouchToMouseLoaded?: boolean;
   ctrl?: boolean;
   term?: VendoredCtrlTerminal | null;
@@ -293,6 +353,7 @@ function getRuntimeWindow(): Window & {
     io?: unknown;
     Terminal?: XtermTerminalConstructor;
     FitAddon?: XtermFitAddonConstructor | { FitAddon?: XtermFitAddonConstructor };
+    WebFontsAddon?: XtermWebFontsAddonConstructor | XtermWebFontsAddonNamespace;
     __terminalTestingTouchToMouseLoaded?: boolean;
     ctrl?: boolean;
     term?: VendoredCtrlTerminal | null;
@@ -348,14 +409,22 @@ async function ensureSocketIoClient(): Promise<void> {
   }
 }
 
-async function ensureTerminalConsoleBridge(): Promise<void> {
+async function ensureTerminalConsoleBridge(workerId = ''): Promise<void> {
   if (terminalConsoleBridgeInitialized) return;
   try {
     await ensureSocketIoClient();
-    const bridge = initConsoleBridge({
-      workerLabel: 'terminal',
-      uniquePerWindow: true,
-    });
+    const inheritedWorkerId = workerId.trim();
+    const bridge = initConsoleBridge(
+      inheritedWorkerId
+        ? {
+            workerLabel: 'terminal',
+            workerId: inheritedWorkerId,
+          }
+        : {
+            workerLabel: 'terminal',
+            uniquePerWindow: true,
+          },
+    );
     if (bridge) {
       terminalConsoleBridgeInitialized = true;
       console.info('[terminal] console bridge ready', bridge.workerId);
@@ -449,6 +518,15 @@ async function ensureFitAddon(): Promise<XtermFitAddonConstructor> {
   await loadScript('/static/vendor/xterm/addon-fit.js');
   const loaded = getFitAddonGlobal();
   if (!loaded) throw new Error('Failed to load xterm fit addon');
+  return loaded;
+}
+
+async function ensureWebFontsAddon(): Promise<XtermWebFontsAddonConstructor> {
+  const existing = getWebFontsAddonGlobal();
+  if (existing) return existing;
+  await loadScript('/static/vendor/xterm/addon-web-fonts.js');
+  const loaded = getWebFontsAddonGlobal();
+  if (!loaded) throw new Error('Failed to load xterm web-fonts addon');
   return loaded;
 }
 
@@ -555,8 +633,33 @@ function frameHasSeq(frame: ServerFrame): frame is ServerDataFrame | ServerClose
   return 'seq' in frame && typeof frame.seq === 'number';
 }
 
+function nonEmptyString(value: string | null | undefined): string {
+  return (value || '').trim();
+}
+
+function parseSidebarStateContext(): SidebarStateContext {
+  const params = new URLSearchParams(window.location.search);
+  const hostId = nonEmptyString(params.get('te2_host_id'));
+  return {
+    enabled: Boolean(hostId),
+    hostId,
+    tokenId: nonEmptyString(params.get('te2_token_id')) || 'terminal',
+    consoleWorkerId: nonEmptyString(
+      params.get('te2_console_worker_id')
+        || params.get('console_worker_id'),
+    ),
+    initialShellId: nonEmptyString(params.get('shell_id')),
+    initialCwd: nonEmptyString(params.get('cwd')),
+  };
+}
+
+function isShellAlive(record: ShellRecord | null | undefined): boolean {
+  return Boolean(record?.stats?.alive || record?.status === 'running');
+}
+
 export default function initTerminalApp(root: HTMLElement, api: AppApi, host: HostBridge): void {
-  void ensureTerminalConsoleBridge();
+  const sidebarState = parseSidebarStateContext();
+  const consoleBridgeReady = ensureTerminalConsoleBridge(sidebarState.consoleWorkerId);
 
   const ui: UiRefs = {
     list: getRequired(root, '#ta-shell-list'),
@@ -610,6 +713,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     decoder: new TextDecoder(),
     encoder: new TextEncoder(),
   };
+  let initialSidebarStateApplied = false;
   const newTerminalItems = Array.from(ui.btnNewDropdown.querySelectorAll<HTMLElement>('[data-terminal-kind]'));
   let newTerminalLongPressTimer: number | null = null;
   let suppressNextNewClick = false;
@@ -642,9 +746,68 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     ui.btnNew.setAttribute('aria-expanded', 'false');
   }
 
+  async function concreteConsoleWorkerId(): Promise<string> {
+    try {
+      await consoleBridgeReady;
+    } catch {
+      // State publication is still useful without console bridge status.
+    }
+    const status = getConsoleBridgeStatus();
+    return nonEmptyString(status.workerId) || sidebarState.consoleWorkerId;
+  }
+
+  async function resolveNewShellCwd(): Promise<string> {
+    if (!sidebarState.enabled) return '~';
+    try {
+      const payload = await api.get<SidebarCwdPayload>('sidebar/cwd');
+      return nonEmptyString(payload.cwd) || sidebarState.initialCwd || '~';
+    } catch (error) {
+      console.warn('[terminal] sidebar cwd lookup failed; using local default', error);
+      return sidebarState.initialCwd || '~';
+    }
+  }
+
+  async function publishSidebarShellState(shellId: string | null, options: { cwd?: string; reset?: boolean; requestedShellId?: string } = {}): Promise<void> {
+    if (!sidebarState.enabled) return;
+    const liveShellId = nonEmptyString(shellId || '');
+    const cwd = nonEmptyString(options.cwd);
+    const queryState: Record<string, string> = {};
+    if (liveShellId) {
+      queryState.shell_id = liveShellId;
+      if (cwd) queryState.cwd = cwd;
+    }
+    try {
+      const consoleWorkerId = await concreteConsoleWorkerId();
+      await api.post<SidebarWindowStatePayload>('sidebar/window/state', {
+        host_id: sidebarState.hostId,
+        hostId: sidebarState.hostId,
+        token_id: sidebarState.tokenId,
+        tokenId: sidebarState.tokenId,
+        console_worker_id: consoleWorkerId,
+        consoleWorkerId,
+        shell_id: liveShellId || nonEmptyString(options.requestedShellId),
+        shellId: liveShellId || nonEmptyString(options.requestedShellId),
+        cwd,
+        reset: Boolean(options.reset || !liveShellId),
+        query_state: queryState,
+        queryState,
+      });
+    } catch (error) {
+      console.warn('[terminal] sidebar shell state publish failed', error);
+    }
+  }
+
+  function resetSidebarShellState(requestedShellId?: string): void {
+    void publishSidebarShellState(null, {
+      reset: true,
+      requestedShellId,
+    });
+  }
+
   async function createShell(kind: TerminalKind = 'python'): Promise<void> {
     try {
-      const data = await api.post<ShellRecord>('shells', { cwd: '~', kind });
+      const cwd = await resolveNewShellCwd();
+      const data = await api.post<ShellRecord>('shells', { cwd, kind });
       await listShells();
       await selectShell(data.id);
       host.toast?.('New shell started');
@@ -688,6 +851,19 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       ]);
     } catch {
       return;
+    }
+  }
+
+  async function prepareTerminalWebFonts(): Promise<XtermWebFontsAddonLike | null> {
+    try {
+      const WebFontsAddonCtor = await ensureWebFontsAddon();
+      const webFontsAddon = new WebFontsAddonCtor(true);
+      await webFontsAddon.loadFonts([TERMINAL_WEB_FONT_FAMILY]);
+      return webFontsAddon;
+    } catch (error) {
+      console.warn('[terminal] JetBrains Mono webfont preload failed; falling back to browser font handling', error);
+      await ensureFontLoaded(TERMINAL_WEB_FONT_FAMILY, 1200);
+      return null;
     }
   }
 
@@ -976,7 +1152,14 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function setStatus(message: string): void {
-    ui.status.textContent = message;
+    const status = message.trim();
+    ui.status.textContent = status
+      ? status.startsWith('connected')
+        ? '👍'
+        : '👎'
+      : '';
+    ui.status.title = status;
+    ui.status.setAttribute('aria-label', status ? `Terminal status: ${status}` : '');
   }
 
   function handleServerFrame(frame: ServerFrame): void {
@@ -1015,6 +1198,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
         state.lastSeqApplied = Math.max(state.lastSeqApplied, frame.seq);
       }
       setStatus(frame.reason || 'closed');
+      if (sidebarState.enabled) {
+        resetSidebarShellState(state.activeId || undefined);
+      }
       void listShells();
       return;
     }
@@ -1108,10 +1294,25 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     clearVendoredCtrlRuntime();
   }
 
+  async function applyInitialSidebarShellState(): Promise<void> {
+    if (!sidebarState.enabled || initialSidebarStateApplied) return;
+    initialSidebarStateApplied = true;
+    const requestedShellId = sidebarState.initialShellId;
+    if (!requestedShellId) return;
+    const rec = state.shells.find((item) => item.id === requestedShellId) || null;
+    if (rec && isShellAlive(rec)) {
+      await selectShell(rec.id);
+      return;
+    }
+    setMode('list');
+    resetSidebarShellState(requestedShellId);
+  }
+
   async function listShells(): Promise<void> {
     const data = await api.get<ShellRecord[]>('shells');
     state.shells = data;
     renderShellList();
+    await applyInitialSidebarShellState();
   }
 
   function formatUptime(seconds?: number): string {
@@ -1223,30 +1424,40 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   async function selectShell(id: string): Promise<void> {
-    state.activeId = id;
     const rec = state.shells.find((item) => item.id === id) || null;
-    const kindLabel = formatTerminalKind(rec?.kind);
-    ui.title.textContent = `${rec?.label || 'terminal-stream'}${kindLabel ? ` · ${kindLabel}` : ''} · ${shortId(id)}`;
+    if (sidebarState.enabled && (!rec || !isShellAlive(rec))) {
+      disposeSession();
+      state.activeId = null;
+      ui.title.textContent = 'No shell selected';
+      setStatus(rec ? 'closed' : 'missing shell');
+      setMode('list');
+      resetSidebarShellState(id);
+      return;
+    }
+    state.activeId = id;
+    ui.title.textContent = shortId(id);
     setStatus('');
     setMode('terminal');
     closeDrawer();
     disposeSession();
     installGlobalViewportHandlers();
 
-    await ensureFontLoaded('JetBrains Mono', 900);
-
     const TerminalCtor = await ensureXterm();
+    const webFontsAddon = await prepareTerminalWebFonts();
     const term = new TerminalCtor({
       convertEol: true,
       cursorBlink: true,
       scrollback: 5000,
-      fontFamily: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      fontFamily: TERMINAL_FONT_FAMILY,
       fontSize: getStoredFontSize(),
       theme: {
         background: '#0b1020',
         cursor: '#9cc3ff',
       },
     });
+    if (webFontsAddon) {
+      term.loadAddon(webFontsAddon);
+    }
     term.open(ui.termContainer);
     term.focus();
     emitTerminalImeIntent(true, 'select_shell');
@@ -1298,6 +1509,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     } catch {
       // ignore
     }
+    void publishSidebarShellState(id, { cwd: rec?.cwd });
   }
 
   async function doAction(action: string): Promise<void> {
@@ -1321,6 +1533,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
         state.activeId = null;
         ui.title.textContent = 'No shell selected';
         setStatus('');
+        if (sidebarState.enabled) {
+          resetSidebarShellState(shellId);
+        }
       }
       await listShells();
     } catch (error) {

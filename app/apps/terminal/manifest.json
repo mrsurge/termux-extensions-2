@@ -2,7 +2,7 @@
   "id": "terminal",
   "name": "Terminal",
   "icon_emoji": ">_",
-  "version": "0.2.11",
+  "version": "0.2.13",
   "description": "Embedded terminals for TE2.",
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"
@@ -10,6 +10,24 @@
   "entrypoints": {
     "backend_blueprint": "backend.py",
     "frontend_template": "template.html",
-    "frontend_script": "static/dist/main.js?v=0.2.11"
+    "frontend_script": "static/dist/main.js?v=0.2.13"
+  },
+  "sidebar_state": {
+    "enabled": true,
+    "kind": "shell",
+    "launcher": true,
+    "base_url": "/app/terminal",
+    "token_source": "console_worker_id",
+    "console_worker_prefix": "terminal",
+    "host_id_param": "te2_host_id",
+    "token_id_param": "te2_token_id",
+    "console_worker_id_param": "te2_console_worker_id",
+    "url_state": {
+      "param": "shell_id",
+      "opaque": true
+    },
+    "load": {
+      "default": "eager"
+    }
   }
 }

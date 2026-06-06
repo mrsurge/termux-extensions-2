@@ -13,6 +13,14 @@ declare module 'te2-console-bridge' {
     namespace?: string;
   }
 
+  export interface ConsoleBridgeStatus {
+    active: boolean;
+    connected: boolean;
+    workerId: string | null;
+    workerLabel: string | null;
+  }
+
   export function initConsoleBridge(opts?: ConsoleBridgeOptions): ConsoleBridgeHandle | null;
+  export function getConsoleBridgeStatus(): ConsoleBridgeStatus;
   export function destroyConsoleBridge(): void;
 }

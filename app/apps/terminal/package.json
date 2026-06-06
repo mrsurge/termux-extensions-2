@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@xterm/addon-web-fonts": "0.1.0",
     "node-pty": "^1.1.0",
     "reconnecting-websocket": "^4.4.0"
   },
