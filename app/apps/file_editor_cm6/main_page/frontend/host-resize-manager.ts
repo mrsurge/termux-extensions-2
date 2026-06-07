@@ -8,6 +8,11 @@ interface LayoutPreferences {
   terminalHeight?: string;
 }
 
+const EXPLORER_MIN_WIDTH = 200;
+const EXPLORER_MAX_WIDTH = 600;
+const AGENT_MIN_WIDTH = 320;
+const DESKTOP_EDITOR_MIN_WIDTH = 360;
+
 function eventClientPoint(event: MouseEvent | TouchEvent): { clientX: number; clientY: number } {
   const touch = 'touches' in event ? event.touches[0] : null;
   const mouse = event as MouseEvent;
@@ -22,6 +27,47 @@ function parseLayoutPreferences(raw: string | null): LayoutPreferences {
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
     ? parsed as LayoutPreferences
     : {};
+}
+
+function parsePixelValue(value: string | null | undefined): number | null {
+  const parsed = parseFloat((value || '').trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function rootLayoutWidth(): number {
+  const root = document.querySelector<HTMLElement>('.fe-root');
+  const measured = root?.getBoundingClientRect().width || 0;
+  return measured > 0 ? measured : window.innerWidth;
+}
+
+function cssPixelProperty(prop: string): number | null {
+  return parsePixelValue(getComputedStyle(document.documentElement).getPropertyValue(prop));
+}
+
+function measuredAgentWidth(): number | null {
+  const drawer = document.getElementById('agent-drawer');
+  const measured = drawer?.getBoundingClientRect().width || 0;
+  return measured > 0 ? measured : null;
+}
+
+function currentPanelWidth(panel: Exclude<ResizePanel, null>): number {
+  if (panel === 'agent') {
+    return measuredAgentWidth() || cssPixelProperty('--agent-width') || 400;
+  }
+  if (panel === 'explorer') {
+    return cssPixelProperty('--explorer-width') || 320;
+  }
+  return cssPixelProperty('--terminal-height') || 340;
+}
+
+function maxAgentWidth(): number {
+  const explorerWidth = cssPixelProperty('--explorer-width') || 430;
+  const available = Math.floor(rootLayoutWidth() - explorerWidth - DESKTOP_EDITOR_MIN_WIDTH);
+  return Math.max(AGENT_MIN_WIDTH, available);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 export function initResizeManager(): void {
@@ -90,16 +136,13 @@ export function initResizeManager(): void {
       
       if (panelType === 'explorer' || panelType === 'agent') {
         startPos = clientX;
-        const prop = panelType === 'explorer' ? '--explorer-width' : '--agent-width';
-        const currentWidth = getComputedStyle(document.documentElement).getPropertyValue(prop);
-        startSize = parseInt(currentWidth) || (panelType === 'explorer' ? 320 : 400);
+        startSize = currentPanelWidth(panelType);
       } else if (panelType === 'terminal') {
         startPos = clientY;
         if (terminalCollapsed) {
           startSize = 2;
         } else {
-          const currentHeight = getComputedStyle(document.documentElement).getPropertyValue('--terminal-height');
-          startSize = parseInt(currentHeight) || 340;
+          startSize = currentPanelWidth('terminal');
         }
       }
       
@@ -119,11 +162,11 @@ export function initResizeManager(): void {
       
       if (panel === 'explorer') {
         const delta = clientX - startPos;
-        const newWidth = Math.max(200, Math.min(600, startSize + delta));
+        const newWidth = clamp(startSize + delta, EXPLORER_MIN_WIDTH, EXPLORER_MAX_WIDTH);
         document.documentElement.style.setProperty('--explorer-width', `${newWidth}px`);
       } else if (panel === 'agent') {
         const delta = startPos - clientX;
-        const newWidth = Math.max(250, Math.min(700, startSize + delta));
+        const newWidth = clamp(startSize + delta, AGENT_MIN_WIDTH, maxAgentWidth());
         document.documentElement.style.setProperty('--agent-width', `${newWidth}px`);
       } else if (panel === 'terminal') {
         const terminalDrawer = document.getElementById('terminal-drawer');
@@ -132,7 +175,7 @@ export function initResizeManager(): void {
           return;
         }
         const delta = startPos - clientY;
-        const newHeight = Math.max(150, Math.min(800, startSize + delta));
+        const newHeight = clamp(startSize + delta, 150, 800);
         document.documentElement.style.setProperty('--terminal-height', `${newHeight}px`);
       }
       

@@ -86,6 +86,7 @@ SIDEBAR_IPC_RPC_NOTIFICATION_FILE_OPEN: Final = "sidebar.file.open"
 SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED: Final = "sidebar.project.opened"
 SIDEBAR_IPC_RPC_NOTIFICATION_WINDOWS_CHANGED: Final = "sidebar.windows.changed"
 SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_ACTIVATED: Final = "sidebar.window.activated"
+SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_FOCUSED: Final = "sidebar.window.focused"
 SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_READINESS_CHANGED: Final = "sidebar.window.readiness.changed"
 SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH: Final = "sidebar.activeShortcut.refresh"
 SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE: Final = "sidebar.drawer.state"
@@ -102,6 +103,7 @@ SidebarIpcRpcNotification = Literal[
     "sidebar.project.opened",
     "sidebar.windows.changed",
     "sidebar.window.activated",
+    "sidebar.window.focused",
     "sidebar.window.readiness.changed",
     "sidebar.activeShortcut.refresh",
     "sidebar.drawer.state",
@@ -152,6 +154,7 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED,
     SIDEBAR_IPC_RPC_NOTIFICATION_WINDOWS_CHANGED,
     SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_ACTIVATED,
+    SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_FOCUSED,
     SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_READINESS_CHANGED,
     SIDEBAR_IPC_RPC_NOTIFICATION_ACTIVE_SHORTCUT_REFRESH,
     SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE,

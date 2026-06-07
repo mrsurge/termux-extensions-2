@@ -202,14 +202,17 @@ Protocol error codes should follow JSON-RPC 2.0 conventions:
 ### `sidebar.register`
 
 Registers a host or sidebar-frame client and joins the appropriate rooms.
+When `app`, `app_id`, or `appId` is supplied, the client also joins that app's
+notification room so persistent app backends can receive app-specific
+notifications such as `sidebar.window.focused`.
 
 Params:
 
 ```json
 {
-  "role": "host",
-  "client_id": "client_123",
-  "app": "file_editor_cm6"
+  "role": "iframe",
+  "client_id": "als-rs-backend",
+  "app": "als-rs"
 }
 ```
 
@@ -488,6 +491,46 @@ Params:
 {
   "client_id": "client_123",
   "activeShortcutId": "shortcut-id",
+  "ts": 1778220000000
+}
+```
+
+### `sidebar.window.focused`
+
+Sent to the focused stateful app's app-specific room when a sidebar window slot
+is brought to the foreground. Apps that do not need focus targeting can ignore
+this notification.
+
+To receive it, keep a persistent `/sidebar_ipc` connection and call
+`sidebar.register` with `app`, `app_id`, or `appId` set to the manifest app id.
+
+Params:
+
+```json
+{
+  "app_id": "als-rs",
+  "appId": "als-rs",
+  "client_id": "main_page",
+  "clientId": "main_page",
+  "host_id": "slot:als-rs:als_rs:a1b2",
+  "hostId": "slot:als-rs:als_rs:a1b2",
+  "state_kind": "conversation",
+  "stateKind": "conversation",
+  "query_state": {
+    "conversation_id": "conv_123"
+  },
+  "queryState": {
+    "conversation_id": "conv_123"
+  },
+  "url": "/app/als-rs?embed=1&te2_host_id=slot%3Aals-rs%3Aals_rs%3Aa1b2&conversation_id=conv_123",
+  "restore_url": "/app/als-rs?embed=1&te2_host_id=slot%3Aals-rs%3Aals_rs%3Aa1b2&conversation_id=conv_123",
+  "restoreUrl": "/app/als-rs?embed=1&te2_host_id=slot%3Aals-rs%3Aals_rs%3Aa1b2&conversation_id=conv_123",
+  "token_id": "als_rs",
+  "tokenId": "als_rs",
+  "console_worker_id": "als_rs:a1b2",
+  "consoleWorkerId": "als_rs:a1b2",
+  "focused": true,
+  "source": "header_icon",
   "ts": 1778220000000
 }
 ```

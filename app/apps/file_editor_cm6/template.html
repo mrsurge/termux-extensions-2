@@ -28,6 +28,14 @@
     --diff-del-gap: 0px;
     --keyboard-inset: 0px;
     --keyboard-gap: 16px;
+    --agent-width-default: max(400px, 34vw);
+    --agent-width-effective: max(
+      320px,
+      min(
+        var(--agent-width, var(--agent-width-default)),
+        calc(100vw - var(--explorer-width, 430px) - 360px)
+      )
+    );
     /* Font scale control */
     --chrome-font-scale: 0.85;  /* Default to Medium */
     --chrome-base-font: calc(14px * var(--chrome-font-scale));
@@ -63,7 +71,7 @@
 
   .fe-root.layout-desktop {
     display: grid;
-    grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
+    grid-template-columns: var(--explorer-width, 430px) minmax(0, 1fr) var(--agent-width-effective);
     grid-template-rows: auto auto 1fr auto;
     height: 100%;
     min-height: 0;
@@ -157,7 +165,7 @@
     position: fixed;
     top: 0;
     right: -9999px;
-    width: var(--agent-width, 400px);
+    width: var(--agent-width-effective);
     height: var(--te-app-container-height, 100vh);
   }
 
@@ -2051,7 +2059,7 @@
       <div id="sidebar-setup-placeholder" class="sidebar-setup">
         <div class="sidebar-setup__card">
           <div class="sidebar-setup__title">Open a sidebar app window</div>
-          <div class="sidebar-setup__hint">Use the launcher to open a stateful app window, or add a plain URL fallback entry.</div>
+          <div class="sidebar-setup__hint">Use the launcher to open an app dock slot, or add a URL slot.</div>
           <div style="font-size: 0.82rem; opacity: 0.8;">Side-bar toggle</div>
           <div style="display:flex; flex-direction: column; gap: 8px;">
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
@@ -2369,7 +2377,7 @@
         </div>
 
         <div style="display:flex; gap:8px; align-items:center; margin-top: 12px;">
-          <button class="fe-btn" id="editor-settings-agent-shortcuts">Sidebar entries…</button>
+          <button class="fe-btn" id="editor-settings-agent-shortcuts">URL…</button>
         </div>
       </div>
 
@@ -2388,37 +2396,20 @@
   </div>
 </div>
 
-<!-- Sidebar plain URL entries modal; agent* ids are compatibility ids. -->
+<!-- Sidebar URL dialog; agent* ids are compatibility ids. -->
 <div id="agent-shortcuts-modal" class="fe-modal" aria-hidden="true" style="z-index: 360;">
-  <div class="fe-modal-card" style="max-width: 760px;">
+  <div class="fe-modal-card" style="max-width: 520px;">
     <div class="fe-modal-header">
-      <strong>Sidebar Plain URL Entries</strong>
+      <strong>URL</strong>
       <span style="flex:1"></span>
       <button class="fe-btn" id="agent-shortcuts-close" aria-label="Close">✕</button>
     </div>
     <div class="fe-modal-body">
-      <div style="display:flex; gap:8px; align-items:center; margin-bottom: 10px;">
-        <button class="fe-btn fe-btn-primary" id="agent-shortcuts-add">Add plain URL</button>
-      </div>
-      <div id="agent-shortcuts-list"></div>
-
-      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
-
-      <div id="agent-shortcuts-editor" style="display:none;">
+      <div id="agent-shortcuts-editor" style="display:block;">
         <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px; flex-wrap: wrap;">
           <div style="flex:1; min-width: 220px;">
             <label for="agent-shortcut-label" style="display:block; margin-bottom: 6px;">Label</label>
-            <input id="agent-shortcut-label" class="lsp-rootrel-input" type="text" placeholder="My entry" autocomplete="off" spellcheck="false" />
-          </div>
-          <div style="flex:1; min-width: 220px;">
-            <label for="agent-shortcut-kind-btn" style="display:block; margin-bottom: 6px;">Type</label>
-            <div class="fe-menu" style="width: 100%;">
-              <button id="agent-shortcut-kind-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;" aria-haspopup="listbox" aria-expanded="false">
-                <span id="agent-shortcut-kind-label">URL</span>
-                <span aria-hidden="true">▾</span>
-              </button>
-              <div id="agent-shortcut-kind-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 200px; overflow-y: auto;"></div>
-            </div>
+            <input id="agent-shortcut-label" class="lsp-rootrel-input" type="text" placeholder="Optional label" autocomplete="off" spellcheck="false" />
           </div>
         </div>
 
@@ -2427,42 +2418,6 @@
             <label for="agent-shortcut-url" style="display:block; margin-bottom: 6px;">URL</label>
             <input id="agent-shortcut-url" class="lsp-rootrel-input" type="text" placeholder="http://127.0.0.1" autocomplete="off" spellcheck="false" />
           </div>
-        </div>
-
-        <div id="agent-shortcut-target-app" style="display:none; gap:10px; align-items:flex-end; margin-bottom: 10px;">
-          <div style="flex:1; min-width: 260px;">
-            <label for="agent-shortcut-app-btn" style="display:block; margin-bottom: 6px;">App</label>
-            <div class="fe-menu" style="width: 100%;">
-              <button id="agent-shortcut-app-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;" aria-haspopup="listbox" aria-expanded="false">
-                <span id="agent-shortcut-app-label">Select app…</span>
-                <span aria-hidden="true">▾</span>
-              </button>
-              <div id="agent-shortcut-app-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: min(70vh, 480px); overflow-y: auto;"></div>
-            </div>
-          </div>
-        </div>
-
-        <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px;">
-          <div style="flex:1; min-width: 220px;">
-            <label for="agent-shortcut-load-btn" style="display:block; margin-bottom: 6px;">Load</label>
-            <div class="fe-menu" style="width: 100%;">
-              <button id="agent-shortcut-load-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;" aria-haspopup="listbox" aria-expanded="false">
-                <span id="agent-shortcut-load-label">Lazy</span>
-                <span aria-hidden="true">▾</span>
-              </button>
-              <div id="agent-shortcut-load-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 200px; overflow-y: auto;"></div>
-            </div>
-          </div>
-        </div>
-
-        <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom: 10px;">
-          <div style="flex:1;">
-            <label for="agent-shortcut-emoji" style="display:block; margin-bottom: 6px;">Abbbreviation (optional)</label>
-            <input id="agent-shortcut-emoji" class="lsp-rootrel-input" type="text" placeholder="🪝" autocomplete="off" spellcheck="false" />
-          </div>
-          <button class="fe-btn" id="agent-shortcut-icon-browse">Browse icon…</button>
-          <button class="fe-btn" id="agent-shortcut-icon-clear">Clear</button>
-          <div id="agent-shortcut-icon-preview" style="width:32px; height:32px; border-radius:8px; border:1px solid var(--border,#333); background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center;"></div>
         </div>
 
         <div style="display:flex; gap:8px; justify-content:flex-end;">

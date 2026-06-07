@@ -1,10 +1,10 @@
-import type { UiIpcRpcMethod } from '../../../src/ui_ipc/rpc_contract.ts';
+import type { UiIpcRpcMethod } from "../../../src/ui_ipc/rpc_contract.ts";
 
 export type UnknownRecord = Record<string, unknown>;
 
-export type ShortcutKind = 'url' | 'framework_app';
-export type ShortcutLoad = 'lazy' | 'eager';
-export type ShortcutIconKind = 'asset' | 'emoji' | 'image' | 'text' | '';
+export type ShortcutKind = "url" | "framework_app";
+export type ShortcutLoad = "lazy" | "eager";
+export type ShortcutIconKind = "asset" | "emoji" | "image" | "text" | "";
 
 export interface ShortcutIcon extends UnknownRecord {
   kind?: ShortcutIconKind | string;
@@ -29,6 +29,9 @@ export interface SidebarShortcut extends UnknownRecord {
   last_used: number;
   dock?: boolean;
   stateful?: boolean;
+  state?: UnknownRecord;
+  state_kind?: string;
+  stateKind?: string;
   host_id?: string;
   base_url?: string;
   restore_url?: string;
@@ -46,6 +49,9 @@ export interface SidebarShortcutPreference extends UnknownRecord {
   icon?: ShortcutIcon | null;
   load?: ShortcutLoad | string;
   last_used?: number;
+  state?: UnknownRecord;
+  state_kind?: string;
+  stateKind?: string;
 }
 
 export interface FrameworkAppManifest extends UnknownRecord {
@@ -118,7 +124,10 @@ export interface SidebarShortcutsOptions {
   pickFile?: (startPath?: string) => Promise<string | null>;
   openDrawer?: () => void;
   closeAllMenus?: () => void;
-  emitSidebarUiRequest?: (method: UiIpcRpcMethod, payload?: UnknownRecord) => void;
+  emitSidebarUiRequest?: (
+    method: UiIpcRpcMethod,
+    payload?: UnknownRecord,
+  ) => void;
   setMenuChecked?: (el: HTMLElement | null, checked: boolean) => void;
 }
 

@@ -259,6 +259,23 @@ def _validate_state_url(app_id: str, raw_url: str, base_url: str | None = None) 
     return urlunsplit(("", "", split.path, split.query, split.fragment))
 
 
+def _validate_url_slot_url(raw_url: str) -> str:
+    url = _norm(raw_url)
+    if not url:
+        raise ValueError("url is required")
+    split = urlsplit(url)
+    scheme = split.scheme.lower()
+    if scheme and scheme not in {"http", "https"}:
+        raise ValueError("URL slot must use http, https, or a relative URL")
+    if split.netloc and not scheme:
+        raise ValueError("absolute URL slots must include http:// or https://")
+    if scheme:
+        return urlunsplit(
+            (scheme, split.netloc, split.path or "/", split.query, split.fragment)
+        )
+    return urlunsplit(("", "", split.path, split.query, split.fragment))
+
+
 def _with_url_params(raw_url: str, params: dict[str, str]) -> str:
     split = urlsplit(raw_url or "/")
     query = dict(parse_qsl(split.query, keep_blank_values=True))
@@ -367,7 +384,59 @@ def _host_id_for(app_id: str, token_id: str) -> str:
     return f"slot:{app_id}:{token_id}"
 
 
+def _url_host_id() -> str:
+    return f"url:{secrets.token_hex(8)}"
+
+
+def _normalize_url_slot(raw: JsonObject) -> JsonObject:
+    host_id = _norm(raw.get("host_id") or raw.get("hostId"))
+    url = _validate_url_slot_url(
+        _norm(raw.get("url") or raw.get("restore_url") or raw.get("restoreUrl"))
+    )
+    if not host_id or not url:
+        return {}
+    title = _norm(raw.get("title")) or _norm(raw.get("label")) or "URL"
+    load = _norm(raw.get("load")) or "lazy"
+    if load not in {"lazy", "eager"}:
+        load = "lazy"
+    created_at = _as_int(raw.get("created_at") or raw.get("createdAt"), _now_ms())
+    updated_at = _as_int(raw.get("updated_at") or raw.get("updatedAt"), created_at)
+    icon = raw.get("icon")
+    if not isinstance(icon, dict):
+        icon = {"kind": "text", "text": "URL"}
+    query_state = _normalize_query_state(
+        raw.get("query_state") or raw.get("queryState") or raw.get("state")
+    )
+    query_state["url"] = url
+    slot: JsonObject = {
+        "kind": "url",
+        "host_id": host_id,
+        "hostId": host_id,
+        "title": title,
+        "label": title,
+        "url": url,
+        "restore_url": url,
+        "restoreUrl": url,
+        "load": load,
+        "icon": icon,
+        "state_kind": "url",
+        "stateKind": "url",
+        "query_state": query_state,
+        "queryState": query_state,
+        "state": {"url": url},
+        "created_at": created_at,
+        "createdAt": created_at,
+        "updated_at": updated_at,
+        "updatedAt": updated_at,
+        "version": _norm(raw.get("version")),
+    }
+    return slot
+
+
 def _normalize_slot(raw: JsonObject) -> JsonObject:
+    kind = _norm(raw.get("kind")).lower()
+    if kind == "url":
+        return _normalize_url_slot(raw)
     app_id = _norm(raw.get("app_id") or raw.get("appId"))
     host_id = _norm(raw.get("host_id") or raw.get("hostId"))
     url = _norm(raw.get("url"))
@@ -381,6 +450,7 @@ def _normalize_slot(raw: JsonObject) -> JsonObject:
     console_worker_id = _norm(raw.get("console_worker_id") or raw.get("consoleWorkerId"))
     console_worker_prefix = _norm(raw.get("console_worker_prefix") or raw.get("consoleWorkerPrefix"))
     state_kind = _norm(raw.get("state_kind") or raw.get("stateKind"))
+    explicit_query_state = "query_state" in raw or "queryState" in raw
     query_state = _query_state_from_params(raw, restore_url)
     stateful = _as_bool(raw.get("stateful"), bool(token_id or console_worker_id or console_worker_prefix))
     title = _norm(raw.get("title")) or _norm(raw.get("label")) or app_id
@@ -426,7 +496,7 @@ def _normalize_slot(raw: JsonObject) -> JsonObject:
     if stateful or state_kind:
         slot["state_kind"] = state_kind
         slot["stateKind"] = state_kind
-    if query_state:
+    if query_state or explicit_query_state:
         slot["query_state"] = query_state
         slot["queryState"] = query_state
     if stateful or raw.get("readiness") is not None:
@@ -569,6 +639,51 @@ def _upsert_slot(state: JsonObject, slot: JsonObject, *, activate: bool = True) 
 
 
 def create_sidebar_window(params: JsonObject) -> JsonObject:
+    kind = _norm(params.get("kind")).lower()
+    if kind == "url":
+        now = _now_ms()
+        url = _validate_url_slot_url(
+            _norm(
+                params.get("url")
+                or params.get("restore_url")
+                or params.get("restoreUrl")
+            )
+        )
+        host_id = _norm(params.get("host_id") or params.get("hostId")) or _url_host_id()
+        label = _norm(params.get("title") or params.get("label")) or "URL"
+        slot: JsonObject = {
+            "kind": "url",
+            "host_id": host_id,
+            "hostId": host_id,
+            "title": label,
+            "label": label,
+            "url": url,
+            "restore_url": url,
+            "restoreUrl": url,
+            "load": _norm(params.get("load")) or "lazy",
+            "icon": {"kind": "text", "text": "URL"},
+            "state_kind": "url",
+            "stateKind": "url",
+            "query_state": {"url": url},
+            "queryState": {"url": url},
+            "state": {"url": url},
+            "created_at": now,
+            "updated_at": now,
+        }
+        state = _upsert_slot(
+            _load_pref_state(),
+            slot,
+            activate=_as_bool(params.get("activate"), True),
+        )
+        saved = _save_pref_state(state)
+        window = _normalize_slot(slot)
+        return {
+            "ok": True,
+            "window": window,
+            "slot": window,
+            "state": get_sidebar_window_state(_norm(saved.get("active_host_id"))),
+        }
+
     app_id = _app_id_from_params(params)
     manifest = _app_manifest(app_id)
     if manifest is None:
@@ -712,6 +827,50 @@ def close_sidebar_window(params: JsonObject) -> JsonObject:
         state["active_host_id"] = next_active
     _save_pref_state(state)
     return {"ok": True, "closed": host_id, "state": get_sidebar_window_state(_norm(state.get("active_host_id")))}
+
+
+def _order_host_id(value: object) -> str:
+    raw = _norm(value)
+    if raw.startswith("dock:"):
+        return raw[len("dock:"):]
+    return raw
+
+
+def reorder_sidebar_windows(params: JsonObject) -> JsonObject:
+    requested = _as_list(params.get("order") or params.get("host_ids") or params.get("hostIds"))
+    if not requested:
+        raise ValueError("order is required")
+
+    state = _load_pref_state()
+    slots = _as_object(state.get("slots"))
+    current_order = [_norm(item) for item in _as_list(state.get("order")) if _norm(item)]
+    next_order: list[str] = ["launcher"]
+    seen: set[str] = set()
+
+    def append_host_id(value: object) -> None:
+        host_id = _order_host_id(value)
+        if not host_id or host_id == "launcher" or host_id in seen:
+            return
+        if host_id not in slots:
+            return
+        next_order.append(host_id)
+        seen.add(host_id)
+
+    for item in requested:
+        append_host_id(item)
+    for item in current_order:
+        append_host_id(item)
+    for host_id in slots:
+        append_host_id(host_id)
+
+    state["order"] = next_order
+    saved = _save_pref_state(state)
+    active = _norm(saved.get("active_host_id"))
+    return {
+        "ok": True,
+        "order": list(_as_list(saved.get("order"))),
+        "state": get_sidebar_window_state(active),
+    }
 
 
 def update_sidebar_window_readiness(params: JsonObject) -> JsonObject:

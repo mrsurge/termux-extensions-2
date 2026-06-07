@@ -37,6 +37,7 @@ export const SIDEBAR_IPC_RPC_NOTIFICATIONS = {
   projectOpened: 'sidebar.project.opened',
   windowsChanged: 'sidebar.windows.changed',
   windowActivated: 'sidebar.window.activated',
+  windowFocused: 'sidebar.window.focused',
   windowReadinessChanged: 'sidebar.window.readiness.changed',
   activeShortcutRefresh: 'sidebar.activeShortcut.refresh',
   drawerState: 'sidebar.drawer.state',

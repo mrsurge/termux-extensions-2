@@ -50,7 +50,9 @@ It does not own:
 
 - `sidebar.register`
   - Registers a host or iframe/sidebar-frame client.
-  - Params: `{ role, client_id }`.
+  - Params: `{ role, client_id, app? , app_id? , appId? }`.
+  - When app identity is supplied, the client joins that app's notification room
+    for app-specific server notifications.
 - `sidebar.cwd.get`
   - Requests the backend-owned current cwd/project root.
   - Params: `{}`.
@@ -108,6 +110,11 @@ It does not own:
 - `sidebar.project.opened`
   - Params: `{ path, resolved_path, state, source, ts }`.
   - Sent after sidebar IPC successfully opens or creates-and-opens a project. Host clients consume this via their existing sidebar IPC frontend transport and run their own project-open resync.
+- `sidebar.window.focused`
+  - Params: `{ app_id, appId, client_id, clientId, host_id, hostId, state_kind, stateKind, query_state, queryState, url, restore_url, restoreUrl, token_id, tokenId, console_worker_id, consoleWorkerId, focused, source, ts }`.
+  - Sent only to the focused stateful app's app room when a sidebar window slot
+    is brought to the foreground. Apps can ignore it if they do not need focus
+    targeting.
 - `sidebar.activeShortcut.refresh`
   - Params: `{ client_id? , flushCache? , source? }`.
 - `sidebar.drawer.state`

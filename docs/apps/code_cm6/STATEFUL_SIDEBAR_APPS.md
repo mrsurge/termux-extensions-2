@@ -392,6 +392,66 @@ Expected behavior:
 - The update does not reset readiness unless readiness is explicitly sent.
 - The update does not reload an already-loaded iframe.
 
+## Focused Slot Notification
+
+Stateful app backends can keep a persistent `/sidebar_ipc` connection if they
+need to know which one of their sidebar slots is currently foregrounded.
+
+Register that backend connection with the manifest app id:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "als-rs:register",
+  "method": "sidebar.register",
+  "params": {
+    "role": "iframe",
+    "client_id": "als-rs-backend",
+    "app": "als-rs"
+  }
+}
+```
+
+When a stateful slot for that app is activated, Code TE2 sends:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "sidebar.window.focused",
+  "params": {
+    "app_id": "als-rs",
+    "appId": "als-rs",
+    "client_id": "main_page",
+    "clientId": "main_page",
+    "host_id": "slot:als-rs:als_rs:a1b2",
+    "hostId": "slot:als-rs:als_rs:a1b2",
+    "state_kind": "conversation",
+    "stateKind": "conversation",
+    "query_state": {
+      "conversation_id": "conv_123"
+    },
+    "queryState": {
+      "conversation_id": "conv_123"
+    },
+    "url": "/app/als-rs?embed=1&te2_host_id=slot%3Aals-rs%3Aals_rs%3Aa1b2&conversation_id=conv_123",
+    "restore_url": "/app/als-rs?embed=1&te2_host_id=slot%3Aals-rs%3Aals_rs%3Aa1b2&conversation_id=conv_123",
+    "restoreUrl": "/app/als-rs?embed=1&te2_host_id=slot%3Aals-rs%3Aals_rs%3Aa1b2&conversation_id=conv_123",
+    "token_id": "als_rs",
+    "tokenId": "als_rs",
+    "console_worker_id": "als_rs:a1b2",
+    "consoleWorkerId": "als_rs:a1b2",
+    "focused": true,
+    "source": "header_icon",
+    "ts": 1778220000000
+  }
+}
+```
+
+The notification is app-specific and optional. Apps that do not need focus
+targeting can ignore it. Apps that do need it should derive their own target
+state from `query_state` or `restore_url`; Code TE2 still does not interpret
+app-specific state such as `conversation_id`.
+
 ## App Backend Readiness
 
 TCP or shell readiness only means the process was spawned or a port probe
@@ -532,6 +592,17 @@ base URL and do not receive stateful token/query-state semantics.
 This is useful for apps like Terminal. They get dock identity and focus/close
 behavior without becoming stateful.
 
+## Dock Order
+
+Dock/icon order is sidebar host chrome state. It is stored in the backend
+`sidebarWindowState.order` ledger, not in app-owned state and not in guest
+frontend localStorage.
+
+The current automatic order is the default until the user reorders the dock.
+When the user drags dock icons, Code TE2 writes the new `host_id` order through
+UI IPC and persists it in the sidebar ledger. App backends should not publish or
+interpret dock order.
+
 ## Validation Checklist
 
 Use this checklist when making an app stateful:
@@ -548,8 +619,12 @@ Use this checklist when making an app stateful:
 - State update uses `activate: false` for ordinary in-app navigation.
 - App backend readiness POST or PUT sends at least `{"status":"ready"}` when the backend is ready for its contract.
 - App backend readiness does not include sidebar slot identity or app-owned URL state.
+- Persistent app backend connection registers `app`, `app_id`, or `appId` if it
+  wants `sidebar.window.focused` notifications.
 - Two windows of the same app get different `host_id` values.
 - Updating one `host_id` does not mutate another slot with the same `app_id`.
+- Reordering dock icons changes only `sidebarWindowState.order`; it does not
+  mutate app-owned `query_state`.
 - Reloading Code TE2 restores sidebar slots from the ledger.
 - Existing full-page app behavior still works outside sidebar mode.
 

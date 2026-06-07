@@ -4,7 +4,7 @@
 // Owns:
 // - UI prefs wiring (agent* preference names remain compatibility storage)
 // - Sidebar header icon list + title/icon rendering
-// - Plain URL/fallback entry editor modal
+// - Plain URL slot dialog
 // - Iframe stack lifecycle (lazy/eager) with framework app start-before-load
 
 import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
@@ -240,6 +240,8 @@ export function initSidebarShortcuts(
   let _appDockSlots: SidebarAppDockSlot[] = [];
 
   let _editingId: string | null = null;
+  let _editingKey = "";
+  let _editingHostId = "";
   let _editingAssetName: string | null = null;
   let _editingKind: ShortcutKind = SHORTCUT_KIND_URL;
   let _editingAppId = "";
@@ -765,6 +767,11 @@ export function initSidebarShortcuts(
     return hostId ? `dock:${hostId}` : "";
   }
 
+  function _dockHostIdFromKey(value: unknown): string {
+    const raw = _normStr(value);
+    return raw.startsWith("dock:") ? raw.slice("dock:".length) : raw;
+  }
+
   function _findAppDockSlot(value: unknown): SidebarAppDockSlot | null {
     const raw = _normStr(value);
     if (!raw) return null;
@@ -796,7 +803,41 @@ export function initSidebarShortcuts(
     const url = _normStr(win.url);
     const restoreUrl = _normStr(win.restore_url || win.restoreUrl);
     const appId = _normStr(win.app_id || win.appId);
-    if (!hostId || !url || !appId) return null;
+    const kind = _normStr(win.kind).toLowerCase();
+    if (!hostId || !url) return null;
+    if (
+      kind === SHORTCUT_KIND_URL ||
+      (!appId && _normStr(win.state_kind || win.stateKind) === "url")
+    ) {
+      const label =
+        _normStr(win.label) || _normStr(win.title) || _deriveUrlLabel(url);
+      const state = asRecord(win.query_state || win.queryState || win.state);
+      return {
+        id: _windowKey(win),
+        key: _windowKey(win),
+        kind: SHORTCUT_KIND_URL,
+        app_id: "",
+        label,
+        url,
+        version: _normStr(win.version),
+        icon:
+          win.icon && typeof win.icon === "object"
+            ? (win.icon as ShortcutIcon)
+            : null,
+        load: _normalizeLoad(win.load || SHORTCUT_LOAD_LAZY),
+        last_used: Number(win.updated_at || win.updatedAt || 0),
+        dock: true,
+        stateful: false,
+        state: { ...state, url },
+        state_kind: "url",
+        stateKind: "url",
+        host_id: hostId,
+        restore_url: restoreUrl || url,
+        restoreUrl: restoreUrl || url,
+        readiness: win.readiness || null,
+      };
+    }
+    if (!appId) return null;
     const label =
       _normStr(win.label) || _normStr(win.title) || _normStr(win.path) || appId;
     const icon =
@@ -844,18 +885,18 @@ export function initSidebarShortcuts(
     );
   }
 
-  function _collectFallbackEntries(uiPrefs: UnknownRecord): SidebarShortcut[] {
+  function _collectUrlEntries(uiPrefs: UnknownRecord): SidebarShortcut[] {
     return _collectShortcuts(uiPrefs);
   }
 
   function _collectVisibleShortcuts(uiPrefs: UnknownRecord): SidebarShortcut[] {
     const appDockEntries = _collectAppDockEntries();
-    const activeFallbackId = _normStr(_clientActiveShortcutId);
-    if (!activeFallbackId) return appDockEntries;
-    const activeFallback = _collectFallbackEntries(uiPrefs).filter((sc) =>
-      _shortcutMatchesValue(sc, activeFallbackId),
+    const activeUrlId = _normStr(_clientActiveShortcutId);
+    if (!activeUrlId) return appDockEntries;
+    const activeUrlEntry = _collectUrlEntries(uiPrefs).filter((sc) =>
+      _shortcutMatchesValue(sc, activeUrlId),
     );
-    return [...appDockEntries, ...activeFallback];
+    return [...appDockEntries, ...activeUrlEntry];
   }
 
   function _isStatefulDockEntry(
@@ -874,7 +915,21 @@ export function initSidebarShortcuts(
     return !!(
       sc &&
       (sc as SidebarShortcut).dock &&
+      sc.kind === SHORTCUT_KIND_FRAMEWORK_APP &&
       _normStr((sc as SidebarShortcut).host_id)
+    );
+  }
+
+  function _isUrlSlotEntry(
+    sc: SidebarShortcut | SidebarShortcutPreference | null,
+  ): boolean {
+    return !!(
+      sc &&
+      sc.kind === SHORTCUT_KIND_URL &&
+      (_normStr((sc as SidebarShortcut).host_id) ||
+        _normStr(sc.id) ||
+        _normStr(sc.url) ||
+        _normStr(sc.key))
     );
   }
 
@@ -919,10 +974,10 @@ export function initSidebarShortcuts(
     const list = Array.isArray(shortcuts)
       ? shortcuts
       : _collectVisibleShortcuts(uiPrefs);
-    const explicitFallbackId = _normStr(_clientActiveShortcutId);
-    if (explicitFallbackId) {
+    const explicitUrlId = _normStr(_clientActiveShortcutId);
+    if (explicitUrlId) {
       const explicit = list.find((sc) =>
-        _shortcutMatchesValue(sc, explicitFallbackId),
+        _shortcutMatchesValue(sc, explicitUrlId),
       );
       if (explicit) return explicit;
     }
@@ -962,11 +1017,11 @@ export function initSidebarShortcuts(
       const activeId = active.id || active.url || active.key || "";
       return { active, activeId };
     }
-    const appDockFallback = _pickMruShortcut(_collectAppDockEntries());
-    if (appDockFallback) {
+    const appDockDefault = _pickMruShortcut(_collectAppDockEntries());
+    if (appDockDefault) {
       const activeId =
-        appDockFallback.id || appDockFallback.url || appDockFallback.key || "";
-      return { active: appDockFallback, activeId };
+        appDockDefault.id || appDockDefault.url || appDockDefault.key || "";
+      return { active: appDockDefault, activeId };
     }
     return { active: null, activeId: "" };
   }
@@ -1131,6 +1186,22 @@ export function initSidebarShortcuts(
     );
   }
 
+  function _deriveUrlLabel(url: unknown): string {
+    const raw = _normStr(url);
+    if (!raw) return "URL";
+    try {
+      const parsed = new URL(raw, window.location.origin);
+      const label =
+        parsed.hostname ||
+        parsed.pathname.replace(/^\/+/, "") ||
+        parsed.href ||
+        raw;
+      return _normStr(label) || raw;
+    } catch (_) {
+      return raw;
+    }
+  }
+
   function _bumpShortcutVersion(
     shortcut: SidebarShortcut | null,
   ): SidebarShortcut | null {
@@ -1239,7 +1310,7 @@ export function initSidebarShortcuts(
       _maybeUpdateShortcutLastUsed(nextId);
     }
 
-    if (options.emit && nextId && nextId !== prevId) {
+    if (options.emit && nextId !== prevId) {
       _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarActiveShortcutSet, {
         shortcutId: nextId,
         source: options.source || "sidebar_shortcuts",
@@ -1385,8 +1456,29 @@ export function initSidebarShortcuts(
     _persistShortcuts(next);
   }
 
+  function _persistDockOrder(orderedKeys: unknown): boolean {
+    const hostIds: string[] = [];
+    if (Array.isArray(orderedKeys)) {
+      for (const key of orderedKeys) {
+        const slot = _findAppDockSlot(key);
+        if (!slot) return false;
+        const hostId = _windowHostId(slot);
+        if (hostId) hostIds.push(hostId);
+      }
+    }
+    if (!hostIds.length) return false;
+    _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowOrderUpdate, {
+      order: ["launcher", ...hostIds],
+      host_ids: hostIds,
+      hostIds,
+      source: "header_icon_drag",
+    });
+    return true;
+  }
+
   function _removeShortcut(
     sc: SidebarShortcut | SidebarShortcutPreference | null,
+    options: UnknownRecord = {},
   ) {
     const raw = Array.isArray(_latestUiPrefs?.[UI_PREF_KEY_SHORTCUTS])
       ? _latestUiPrefs[UI_PREF_KEY_SHORTCUTS]
@@ -1395,7 +1487,7 @@ export function initSidebarShortcuts(
     if (idx < 0) return;
     const next = raw.slice();
     next.splice(idx, 1);
-    _persistShortcuts(next);
+    _persistShortcuts(next, options);
   }
 
   async function _quitFrameworkApp(appId: unknown) {
@@ -1517,6 +1609,7 @@ export function initSidebarShortcuts(
     const dockHostId = _isAppDockEntry(sc)
       ? _normStr((sc as SidebarShortcut).host_id)
       : "";
+    const isUrlSlot = _isUrlSlotEntry(sc);
     if (appId) {
       addSeparator();
       const kill = document.createElement("div");
@@ -1531,7 +1624,36 @@ export function initSidebarShortcuts(
     }
 
     addSeparator();
-    if (dockHostId) {
+    if (isUrlSlot) {
+      const urlHostId = _normStr((sc as SidebarShortcut).host_id);
+      const changeUrl = document.createElement("div");
+      changeUrl.className = "fe-dd-item";
+      changeUrl.textContent = "Change URL";
+      changeUrl.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        _closeHeaderIconMenu();
+        _openUrlDialog(sc);
+      });
+      menu.appendChild(changeUrl);
+
+      const closeUrlSlot = document.createElement("div");
+      closeUrlSlot.className = "fe-dd-item";
+      closeUrlSlot.textContent = "Close URL slot";
+      closeUrlSlot.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        _closeHeaderIconMenu();
+        if (urlHostId) {
+          _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowClose, {
+            hostId: urlHostId,
+            host_id: urlHostId,
+            source: "header_icon_menu",
+          });
+        } else {
+          _removeShortcut(sc, { activateDefault: false });
+        }
+      });
+      menu.appendChild(closeUrlSlot);
+    } else if (dockHostId) {
       const closeWindow = document.createElement("div");
       closeWindow.className = "fe-dd-item";
       closeWindow.textContent = "Close dock slot";
@@ -1705,13 +1827,12 @@ export function initSidebarShortcuts(
 
     const addUrl = document.createElement("div");
     addUrl.className = "fe-dd-item";
-    addUrl.textContent = "Add plain URL fallback entry...";
+    addUrl.textContent = "URL";
     addUrl.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
       _closeHeaderIconMenu();
-      _openShortcutsModal();
-      _showEditor({ kind: SHORTCUT_KIND_URL, load: SHORTCUT_LOAD_LAZY });
+      _openUrlDialog({ kind: SHORTCUT_KIND_URL, load: SHORTCUT_LOAD_LAZY });
     });
     menu.appendChild(addUrl);
   }
@@ -1729,8 +1850,8 @@ export function initSidebarShortcuts(
       : _collectVisibleShortcuts(uiPrefs);
     const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
     const activeKey = resolvedActive?.key || "";
-    const headerItems = _collectHeaderItems(resolvedShortcuts).filter((sc) =>
-      _isAppDockEntry(sc),
+    const headerItems = _collectHeaderItems(resolvedShortcuts).filter(
+      (sc) => _isAppDockEntry(sc) || _isUrlSlotEntry(sc),
     );
     const runningSet = _runningCache instanceof Set ? _runningCache : new Set();
     const isMobileLayout = !!document.querySelector(".fe-root.layout-mobile");
@@ -1835,7 +1956,7 @@ export function initSidebarShortcuts(
           const nextKeys = next
             .map((item) => _normStr(item?.key))
             .filter((key) => !!key);
-          _persistHeaderOrder(nextKeys);
+          if (!_persistDockOrder(nextKeys)) _persistHeaderOrder(nextKeys);
         }
       }
       headerDragState = null;
@@ -2459,7 +2580,7 @@ export function initSidebarShortcuts(
     // Ensure app metadata is available for default icons (best-effort).
     void _ensureAppsCache(false);
 
-    // Create iframes for app dock slots and plain URL fallback entries.
+    // Create iframes for app dock slots and active URL slots.
     resolvedShortcuts.forEach((sc) => {
       let entry = _iframeMap.get(sc.key);
       if (!entry) {
@@ -2874,6 +2995,8 @@ export function initSidebarShortcuts(
     if (!shortcutsEditorEl) return;
     shortcutsEditorEl.style.display = "none";
     _editingId = null;
+    _editingKey = "";
+    _editingHostId = "";
     _editingAssetName = null;
     _editingAppId = "";
     _setKind(SHORTCUT_KIND_URL);
@@ -2894,6 +3017,12 @@ export function initSidebarShortcuts(
     shortcutsEditorEl.style.display = "";
     const e = asRecord(entry);
     _editingId = _normStr(e.id) || null;
+    _editingKey = _normStr(e.key) || _normStr(e.id) || _normStr(e.url);
+    _editingHostId =
+      _normStr(e.host_id || e.hostId) ||
+      (_editingKey.startsWith("dock:")
+        ? _editingKey.slice("dock:".length)
+        : "");
     if (shortcutLabelInput) shortcutLabelInput.value = _normStr(e.label);
     if (shortcutUrlInput) shortcutUrlInput.value = _normStr(e.url);
     _setLoadValue(e.load);
@@ -2928,7 +3057,14 @@ export function initSidebarShortcuts(
     _renderIconPreview();
   }
 
-  function _persistShortcuts(nextList: SidebarShortcutPreference[]) {
+  function _persistShortcuts(
+    nextList: SidebarShortcutPreference[],
+    options: UnknownRecord = {},
+  ) {
+    _latestUiPrefs = { ..._latestUiPrefs, [UI_PREF_KEY_SHORTCUTS]: nextList };
+    _shortcutsCache = nextList.filter(
+      (sc): sc is SidebarShortcutPreference => !!sc && typeof sc === "object",
+    );
     _sendUiPrefUpdate(UI_PREF_KEY_SHORTCUTS, nextList);
 
     const activeId =
@@ -2940,11 +3076,12 @@ export function initSidebarShortcuts(
       nextList.some((sc) => sc && (sc.id === activeId || sc.url === activeId))
     );
     if (!hasActive) {
-      const fallback =
-        Array.isArray(nextList) && nextList.length
+      const activateDefault = options.activateDefault !== false;
+      const defaultActive =
+        activateDefault && Array.isArray(nextList) && nextList.length
           ? _normStr(nextList[0].id) || _normStr(nextList[0].url)
           : "";
-      _setClientActiveShortcut(fallback, {
+      _setClientActiveShortcut(defaultActive, {
         emit: true,
         source: "shortcut_persist",
       });
@@ -3232,11 +3369,20 @@ export function initSidebarShortcuts(
     });
   }
 
-  function _openShortcutsModal() {
+  function _openUrlDialog(
+    entry: SidebarShortcut | SidebarShortcutPreference | UnknownRecord = {},
+  ) {
     if (!shortcutsModal) return;
     shortcutsModal.classList.add("show");
     shortcutsModal.setAttribute("aria-hidden", "false");
-    _renderShortcutsList();
+    _showEditor(entry);
+    try {
+      requestAnimationFrame(() => shortcutUrlInput?.focus());
+    } catch (_) {}
+  }
+
+  function _openShortcutsModal() {
+    _openUrlDialog({});
   }
 
   function _closeShortcutsModal() {
@@ -3323,11 +3469,11 @@ export function initSidebarShortcuts(
 
     const manage = document.createElement("div");
     manage.className = "fe-dd-item";
-    manage.textContent = "Manage plain URL entries...";
+    manage.textContent = "URL";
     manage.addEventListener("click", (ev) => {
       ev.stopPropagation();
       _closeAgentDropdown();
-      _openShortcutsModal();
+      _openUrlDialog({});
     });
     dd.appendChild(manage);
   }
@@ -3430,7 +3576,7 @@ export function initSidebarShortcuts(
         _renderShortcutsList();
     } catch (_) {}
 
-    // If fallback framework-app entries exist, load the app list so
+    // If legacy framework-app shortcut entries exist, load the app list so
     // default (manifest) icons can replace placeholder chrome.
     try {
       const needsApps = normalized.some(
@@ -3714,7 +3860,7 @@ export function initSidebarShortcuts(
       shortcutsAddBtn.addEventListener("click", () => _showEditor({}));
 
     if (shortcutCancelBtn)
-      shortcutCancelBtn.addEventListener("click", _hideEditor);
+      shortcutCancelBtn.addEventListener("click", _closeShortcutsModal);
 
     if (shortcutEmojiInput)
       shortcutEmojiInput.addEventListener("input", _renderIconPreview);
@@ -3790,71 +3936,33 @@ export function initSidebarShortcuts(
 
     if (shortcutSaveBtn) {
       shortcutSaveBtn.addEventListener("click", () => {
-        const label = _normStr(shortcutLabelInput?.value);
-        const kind = _getKind();
-        const load = _getLoadValue();
-        let appId = "";
-        let url = "";
-        if (kind === SHORTCUT_KIND_FRAMEWORK_APP) {
-          appId = _normStr(shortcutAppBtn?.dataset?.value) || _editingAppId;
-          if (!appId) {
-            toast("App is required");
-            return;
-          }
-          url = _buildFrameworkAppUrl(appId);
-          if (shortcutUrlInput) shortcutUrlInput.value = url;
-        } else {
-          url = _normStr(shortcutUrlInput?.value);
-        }
-
-        if (!label || !url) {
-          toast(
-            kind === SHORTCUT_KIND_FRAMEWORK_APP
-              ? "Label and App are required"
-              : "Label and URL are required",
-          );
+        const url = _normStr(shortcutUrlInput?.value);
+        if (!url) {
+          toast("URL is required");
           return;
         }
+        const label =
+          _normStr(shortcutLabelInput?.value) || _deriveUrlLabel(url);
 
-        const id =
-          _editingId ||
-          `sc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-        let icon = null;
-        if (_editingAssetName) {
-          icon = { kind: "asset", name: _editingAssetName };
-        } else {
-          const em = _normStr(shortcutEmojiInput?.value);
-          if (em) icon = { kind: "emoji", emoji: em };
-        }
-
-        const next = Array.isArray(_shortcutsCache)
-          ? _shortcutsCache.slice()
-          : [];
-        const idx = next.findIndex((x) => x && x.id === id);
-        const existing = idx >= 0 ? next[idx] : null;
-        const lastUsed = Number.isFinite(Number(existing?.last_used))
-          ? Number(existing?.last_used)
-          : 0;
-        const version = shortcutVersion(existing?.version);
-
-        const entry = {
-          id,
-          key: id || url,
-          kind,
-          app_id: kind === SHORTCUT_KIND_FRAMEWORK_APP ? appId : "",
+        const hostId = _editingHostId;
+        _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowCreate, {
+          kind: SHORTCUT_KIND_URL,
+          hostId,
+          host_id: hostId,
           label,
+          title: label,
           url,
-          version,
-          icon,
-          load,
-          last_used: lastUsed,
-        };
-
-        if (idx >= 0) next[idx] = entry;
-        else next.push(entry);
-        _persistShortcuts(next);
-        _hideEditor();
+          restoreUrl: url,
+          restore_url: url,
+          load: _getLoadValue(),
+          stateKind: "url",
+          state_kind: "url",
+          queryState: { url },
+          query_state: { url },
+          source: "url_dialog",
+          activate: true,
+        });
+        _closeShortcutsModal();
       });
     }
 
