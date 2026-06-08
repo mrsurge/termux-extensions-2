@@ -5,7 +5,7 @@ shells:
     command:
     - sh
     - -lc
-    - python -m agent_log_server_rs.bootstrap --port 12459
+    - als-rs --port 12459
     env:
       TE_APP_ID: als-rs
       TE_APP_WORKER_PORT: '12459'
