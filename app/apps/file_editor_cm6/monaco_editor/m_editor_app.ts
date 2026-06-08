@@ -1355,6 +1355,24 @@ interface MonacoBootWindowLike extends Window {
         cacheCompletionProviderRegistration: languageBridgeProviders.cacheCompletionProviderRegistration,
         cacheInlayHintsProviderRegistration: languageBridgeProviders.cacheInlayHintsProviderRegistration,
         cacheInlineCompletionProviderRegistration: languageBridgeProviders.cacheInlineCompletionProviderRegistration,
+        onWorkspaceSwitchedAck: function(event) {
+          const win = window as Window & typeof globalThis & {
+            __te2AdapterReady?: boolean;
+            __te2AdapterProject?: string | null;
+            __te2ProjectSwitchInProgress?: boolean;
+          };
+          const project = typeof event.workspaceFolder === 'string'
+            ? event.workspaceFolder
+            : typeof event.to === 'string'
+              ? event.to
+              : null;
+          win.__te2AdapterReady = event.readyForDocumentOpen === true;
+          if (project) win.__te2AdapterProject = project;
+          if (event.readyForDocumentOpen === true) {
+            win.__te2ProjectSwitchInProgress = false;
+            try { workbenchRuntime.wbEndProjectSwitch(event); } catch (_) {}
+          }
+        },
       });
 
       if (editorRpcSocket && typeof editorRpcSocket.on === 'function') {

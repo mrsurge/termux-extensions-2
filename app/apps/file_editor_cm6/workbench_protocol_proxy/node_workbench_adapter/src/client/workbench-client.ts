@@ -809,6 +809,7 @@ export class WorkbenchClient {
       spanTraceAsync: (name, fn) => spanTraceAsync(name, fn),
       logMetrics: (type, data) => logMetrics(type, data),
       onEvent: (payload) => this.onEvent(payload),
+      clearProjectScopedSwitchState: (reason) => this._clearProjectScopedSwitchState(reason),
       sha1Short: (text) => crypto.createHash("sha1").update(text).digest("hex").slice(0, 7),
       randomUuid: () => crypto.randomUUID(),
       log: (...args) => console.log(...args),
@@ -1343,8 +1344,15 @@ export class WorkbenchClient {
    * Sends $acceptWorkspaceData so extensions (basedpyright, etc.) re-scope
    * their analysis to the new project.  Also re-subscribes the file watcher.
    */
-  async _switchWorkspace(newFolder: string): Promise<void> {
-    return switchWorkbenchWorkspace(this._workspaceLifecycleRuntime(), newFolder);
+  async _switchWorkspace(newFolder: string): Promise<Record<string, unknown>> {
+    return { ...await switchWorkbenchWorkspace(this._workspaceLifecycleRuntime(), newFolder) } as Record<string, unknown>;
+  }
+
+  _clearProjectScopedSwitchState(reason: string): { rejectedPendingRequests: number; clearedBackgroundDocuments: number } {
+    const clearedBackgroundDocuments = this._backgroundDocuments.size;
+    this._backgroundDocuments.clear();
+    const rejectedPendingRequests = this._extRequests.rejectAll(new Error(reason || "workspace_switch"));
+    return { rejectedPendingRequests, clearedBackgroundDocuments };
   }
 
   // ─── File Watcher IPC ────────────────────────────────────────────────

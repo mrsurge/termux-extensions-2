@@ -50,7 +50,7 @@ export interface WorkbenchLike {
   connect: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   disconnect?: () => void;
   resubscribeWatcher: () => Promise<void>;
-  _switchWorkspace: (folder: string) => Promise<void>;
+  _switchWorkspace: (folder: string) => Promise<Record<string, unknown>>;
   providers?: () => Record<string, unknown>;
   openFile: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
   documentSymbols: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -212,10 +212,10 @@ export async function dispatchJsonRpcRequest(
     const folder = stringValue(params.folder) ?? stringValue(params.workspaceFolder);
     if (!folder) return failure(id, -32602, "Missing required param: folder");
     try {
-      await runtime.wb._switchWorkspace(folder);
+      const result = await runtime.wb._switchWorkspace(folder);
       mergeWorkbenchState(runtime);
       runtime.logStatus("workspace_switched");
-      return success(id, { ok: true, ts_ms: runtime.nowMs(), workspaceFolder: folder });
+      return success(id, { ok: true, ts_ms: runtime.nowMs(), workspaceFolder: folder, ...result });
     } catch (error) {
       return failure(id, -32000, String((error as Error)?.message ?? error));
     }

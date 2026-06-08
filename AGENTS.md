@@ -12,6 +12,7 @@ Parent/orchestrator rule: The workflow/orchestration steps below are intended fo
 
 - **Mandate:** I operate in an unsandboxed environment. All file-system changes and commands happen directly on the user's system.
 - **Express consent required:** I will **NEVER** make codebase or file-system changes without the user's explicit consent for a specific plan. There is no implied consent.
+- **Scratch files:** Use `$TEMPDIR` for temporary/scratch files when it is set. If `$TEMPDIR` is unset, use a clearly named workspace-local scratch path. Do not hard-code `/tmp`.
 
 ### Shared Framework Server
 

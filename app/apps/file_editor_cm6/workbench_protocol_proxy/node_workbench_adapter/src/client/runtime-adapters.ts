@@ -194,6 +194,7 @@ export interface WorkspaceLifecycleRuntimeDeps {
   spanTraceAsync: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
   logMetrics: (type: string, data: Record<string, unknown>) => void;
   onEvent: (payload: Record<string, unknown>) => void;
+  clearProjectScopedSwitchState: LifecycleRuntime["clearProjectScopedSwitchState"];
   sha1Short: (text: string) => string;
   randomUuid: () => string;
   log: (...args: unknown[]) => void;
@@ -507,6 +508,7 @@ export function createWorkspaceLifecycleRuntime(deps: WorkspaceLifecycleRuntimeD
     spanTraceAsync: <T>(name: string, fn: () => Promise<T>) => deps.spanTraceAsync(name, fn),
     logMetrics: (type: string, data: Record<string, unknown>) => deps.logMetrics(type, data),
     onEvent: (payload: Record<string, unknown>) => deps.onEvent(payload),
+    clearProjectScopedSwitchState: (reason: string) => deps.clearProjectScopedSwitchState(reason),
     sha1Short: (text: string) => deps.sha1Short(text),
     randomUuid: () => deps.randomUuid(),
     log: (...args: unknown[]) => deps.log(...args),

@@ -4,9 +4,10 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable, cast
+from typing import Callable, cast
 
 from .file_ops import set_project_root
 from ..transport.connection_manager import ExplorerConnection, manager
@@ -78,11 +79,12 @@ async def switch_project_connection(
             await _mark_adapter_workspace_switching(new_root)
             adapter_status = "switching"
             adapter_rpc = _get_adapter_rpc()
-            await adapter_rpc(
+            switch_response = await adapter_rpc(
                 "adapter.switchWorkspace",
                 {"folder": str(new_root)},
                 30,
             )
+            _require_switch_ack(switch_response)
             await _mark_adapter_workspace_ready(new_root)
             adapter_status = "ready"
             logger.info("[project_open] adapter workspace switched to %s", new_root)
@@ -229,6 +231,23 @@ def _get_adapter_rpc() -> AdapterRpc:
     if not callable(adapter_rpc_obj):
         raise RuntimeError("adapter_rpc unavailable")
     return cast(AdapterRpc, adapter_rpc_obj)
+
+
+def _require_switch_ack(response: object) -> None:
+    if not isinstance(response, dict):
+        raise RuntimeError("adapter.switchWorkspace returned non-object response")
+    response_obj = cast(dict[str, object], response)
+    raw_error = response_obj.get("error")
+    if isinstance(raw_error, dict):
+        error = cast(dict[str, object], raw_error)
+        message = error.get("message")
+        raise RuntimeError(str(message if isinstance(message, str) and message else error))
+    raw_result = response_obj.get("result")
+    if not isinstance(raw_result, dict):
+        raise RuntimeError("adapter.switchWorkspace returned response without object result")
+    result = cast(dict[str, object], raw_result)
+    if result.get("ok") is not True or result.get("readyForDocumentOpen") is not True:
+        raise RuntimeError("adapter.switchWorkspace did not ack readyForDocumentOpen")
 
 
 async def _mark_adapter_workspace_switching(project_root: Path) -> None:

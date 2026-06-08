@@ -97,7 +97,6 @@ export function createEditorRpcHostActionRuntime(
         const win = deps.getWindow();
         const project = typeof params.projectPath === 'string' ? params.projectPath : null;
         const switchId = typeof params.switchId === 'string' ? params.switchId : null;
-        win.__te2ProjectSwitchInProgress = false;
         win.__te2ProjectSwitchId = switchId;
         if (project) win.__te2AdapterProject = project;
         deps.onProjectSwitched?.(params);

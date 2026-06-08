@@ -60,15 +60,6 @@ async def reset_project_session(new_project_path: str) -> bool:
         pass
 
     try:
-        from ...workbench_adapter_shell_manager import terminate_adapter_shell
-
-        killed = await terminate_adapter_shell()
-        if killed:
-            print("[reset_project_session] workbench adapter shell terminated", flush=True)
-    except Exception as exc:
-        print(f"[reset_project_session] adapter teardown error: {exc}", flush=True)
-
-    try:
         from ...diff_helper import invalidate_diff_cache
 
         invalidate_diff_cache()

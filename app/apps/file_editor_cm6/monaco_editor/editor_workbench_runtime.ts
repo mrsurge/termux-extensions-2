@@ -132,6 +132,7 @@ export function createEditorWorkbenchRuntime(
     },
   });
   let wbPostReadyRefreshSeq = 0;
+  let projectSwitchAckWaiters: Array<() => void> = [];
   const wbFlow: WorkbenchFlowLike = {
     generation: 0,
     activePath: '',
@@ -184,6 +185,42 @@ export function createEditorWorkbenchRuntime(
         return true;
       default:
         return false;
+    }
+  }
+
+  function isIntelligenceWorkbenchMethod(method: string): boolean {
+    switch (method) {
+      case 'completions':
+      case 'hover':
+      case 'symbols':
+      case 'folding_ranges':
+      case 'semantic_tokens':
+      case 'semantic_tokens_legend':
+      case 'semantic_tokens_range':
+      case 'inlay_hints':
+      case 'inlay_hints_resolve':
+      case 'inlay_hints_release':
+      case 'inline_completions':
+      case 'inline_completions_free':
+      case 'inline_completions_did_show':
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function awaitProjectSwitchAck(): Promise<void> {
+    if (!isProjectSwitchInProgress()) return Promise.resolve();
+    return new Promise((resolve) => {
+      projectSwitchAckWaiters.push(resolve);
+    });
+  }
+
+  function resolveProjectSwitchAckWaiters(): void {
+    const waiters = projectSwitchAckWaiters;
+    projectSwitchAckWaiters = [];
+    for (const resolve of waiters) {
+      try { resolve(); } catch (_) {}
     }
   }
 
@@ -558,6 +595,9 @@ export function createEditorWorkbenchRuntime(
   async function editorWorkbenchCall(method: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown> {
     const normalizedParams = params || {};
     const timeoutMs = opts && Number(opts.timeoutMs) ? Number(opts.timeoutMs) : 5000;
+    if (isIntelligenceWorkbenchMethod(method) && isProjectSwitchInProgress()) {
+      await awaitProjectSwitchAck();
+    }
     if (isDocumentBackedWorkbenchMethod(method)) {
       const openAck = await awaitOpenAckForPath(String(normalizedParams.path || deps.getCurrentPath() || ''), timeoutMs, 'workbench_' + method);
       if (!openAck.ok) {
@@ -701,6 +741,7 @@ export function createEditorWorkbenchRuntime(
 
   function endProjectSwitch(params?: Record<string, unknown>): void {
     console.log('[project_switch] workbench resumed', params?.switchId || '');
+    resolveProjectSwitchAckWaiters();
   }
 
   async function callWorkbenchProviderGuarded(kind: string, _method: string, params: Record<string, unknown>, ctx: unknown, opts?: { timeoutMs?: number; cancelToken?: { isCancellationRequested?: boolean } | null }): Promise<Record<string, unknown>> {
@@ -710,6 +751,9 @@ export function createEditorWorkbenchRuntime(
     let seq = 0;
     if (kind === 'hover') seq = ++languageBridge.hoverSeq;
 
+    if (isProjectSwitchInProgress()) {
+      await awaitProjectSwitchAck();
+    }
     const openAck = await awaitOpenAckForProvider(kind, ctx, params, timeoutMs);
     if (!openAck.ok) {
       return { ok: false, notReady: true, error: openAck.reason || 'open_ack_not_ready' };

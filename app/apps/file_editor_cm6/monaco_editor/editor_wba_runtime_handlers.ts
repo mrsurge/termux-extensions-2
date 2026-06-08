@@ -41,6 +41,7 @@ interface EditorWbaRuntimeHandlerDeps {
     debounceDelayMs?: number | null;
     eventHandle?: number | null;
   }): void;
+  onWorkspaceSwitchedAck?(event: Record<string, unknown>): void;
 }
 
 function eventType(event: Record<string, unknown>): string {
@@ -54,6 +55,11 @@ export function registerEditorWbaRuntimeHandlers(
   transport.onNotification('te2.event', (event: Record<string, unknown>) => {
     try {
       const type = eventType(event);
+      if (type === 'workspace/switched') {
+        deps.onWorkspaceSwitchedAck?.(event);
+        return;
+      }
+
       if (type === 'diagnostics/changeMany') {
         logDiagnosticsEvent(event, deps.getModel(), deps.getCurrentPath(), deps.absPathFromVscodeUri);
         applyDiagnosticsBridgeUpdate(event, deps.applyDiagnosticsUpdate);

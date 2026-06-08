@@ -128,7 +128,8 @@ export class PendingExtRequestOwner {
     return true;
   }
 
-  rejectAll(reason: Error): void {
+  rejectAll(reason: Error): number {
+    const count = this.pending.size;
     for (const entry of this.pending.values()) {
       try {
         entry.reject(reason);
@@ -137,6 +138,7 @@ export class PendingExtRequestOwner {
       }
     }
     this.pending.clear();
+    return count;
   }
 
   clear(): void {

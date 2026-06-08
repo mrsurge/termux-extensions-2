@@ -43,6 +43,21 @@ export interface WorkspaceWatcherState {
   fsWatcherSub: WatchSubscriptionLike | null;
 }
 
+export interface ProjectScopedSwitchCleanup {
+  rejectedPendingRequests: number;
+  clearedBackgroundDocuments: number;
+}
+
+export interface WorkspaceSwitchResult {
+  ok: true;
+  readyForDocumentOpen: true;
+  workspaceFolder: string;
+  previousWorkspaceFolder: string | null;
+  watcherStatus: "subscribed" | "skipped" | "error";
+  watcherError?: string;
+  cleanup: ProjectScopedSwitchCleanup;
+}
+
 export interface LifecycleRuntime {
   ensureConnected: () => void;
   state: WorkspaceClientState;
@@ -67,6 +82,7 @@ export interface LifecycleRuntime {
   spanTraceAsync: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
   logMetrics: (type: string, data: Record<string, unknown>) => void;
   onEvent: (payload: Record<string, unknown>) => void;
+  clearProjectScopedSwitchState: (reason: string) => ProjectScopedSwitchCleanup;
   sha1Short: (text: string) => string;
   randomUuid: () => string;
   log: (...args: unknown[]) => void;
@@ -488,13 +504,14 @@ export function didChange(
   return { ok: true, versionId: nextVersion };
 }
 
-export async function switchWorkspace(runtime: LifecycleRuntime, newFolder: string): Promise<void> {
+export async function switchWorkspace(runtime: LifecycleRuntime, newFolder: string): Promise<WorkspaceSwitchResult> {
   runtime.ensureConnected();
   const rootPath = String(newFolder);
   const name = rootPath.split("/").filter(Boolean).slice(-1)[0] || rootPath;
   const wsId = runtime.sha1Short(rootPath);
   const authority = runtime.useRemote ? runtime.authority : null;
   const folderUri = runtime.uriForPath(rootPath, authority);
+  const cleanup = runtime.clearProjectScopedSwitchState("workspace_switch");
 
   if (runtime.session.activeUriObj) {
     try {
@@ -534,11 +551,15 @@ export async function switchWorkspace(runtime: LifecycleRuntime, newFolder: stri
   runtime.state.activeUri = null;
   runtime.state.activeLanguageId = null;
 
+  let watcherStatus: WorkspaceSwitchResult["watcherStatus"] = runtime.watcher.mgmtIpc ? "subscribed" : "skipped";
+  let watcherError: string | undefined;
   try {
     await setupFileWatcher(runtime, rootPath);
     runtime.log(`[switchWorkspace] file watcher re-subscribed to ${rootPath}`);
   } catch (error) {
-    runtime.log(`[switchWorkspace] warn: watcher re-subscribe failed: ${String((error as Error)?.message ?? error)}`);
+    watcherStatus = "error";
+    watcherError = String((error as Error)?.message ?? error);
+    runtime.log(`[switchWorkspace] warn: watcher re-subscribe failed: ${watcherError}`);
   }
 
   runtime.onEvent({
@@ -546,7 +567,21 @@ export async function switchWorkspace(runtime: LifecycleRuntime, newFolder: stri
     ts_ms: Date.now(),
     from: prevFolder,
     to: rootPath,
+    workspaceFolder: rootPath,
+    readyForDocumentOpen: true,
+    cleanup,
+    watcherStatus,
   });
+
+  return {
+    ok: true,
+    readyForDocumentOpen: true,
+    workspaceFolder: rootPath,
+    previousWorkspaceFolder: prevFolder,
+    watcherStatus,
+    ...(watcherError ? { watcherError } : {}),
+    cleanup,
+  };
 }
 
 export async function setupFileWatcher(runtime: LifecycleRuntime, workspaceRoot: string | null): Promise<void> {
