@@ -166,6 +166,18 @@ export class VendorMarkerService {
     this.emitChanged(changedResources);
   }
 
+  clearResource(resource: string): string[] {
+    if (!resource) return [];
+    const resourceOwners = this.byResource.get(resource);
+    if (!resourceOwners) return [];
+    const owners = Array.from(resourceOwners.keys());
+    for (const owner of owners) {
+      this.deleteOwnerResource(owner, resource);
+    }
+    this.emitChanged([resource]);
+    return owners;
+  }
+
   read(filter: MarkerReadOptionsLike = {}): MarkerLike[] {
     const owner = typeof filter.owner === 'string' ? filter.owner : '';
     const resource = typeof filter.resource === 'string' ? filter.resource : '';

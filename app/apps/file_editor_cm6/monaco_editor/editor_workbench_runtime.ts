@@ -98,6 +98,7 @@ export function createEditorWorkbenchRuntime(
   applyDiagnosticsUpdate(params: unknown): void;
   emitAggregatedDiagCounts(path?: string | null): void;
   clearDiagnosticsForSwitch(): void;
+  clearDiagnosticsForLeavingModel(reason?: string): void;
   syncDiagnosticsForCurrentModel(reason?: string): void;
   currentLanguageContext(): LanguageContextLike | null;
   wbCurrentGeneration(): number;
@@ -318,6 +319,56 @@ export function createEditorWorkbenchRuntime(
     return diagMarkerStore.read().filter((marker) => {
       return typeof marker.resource === 'string' && deps.absPathFromVscodeUri(marker.resource) === activePath;
     });
+  }
+
+  function clearDiagnosticsForLeavingModel(reason: string = 'leaving_model'): void {
+    try {
+      const monacoRef = deps.getMonaco();
+      const editorNs = monacoRef && monacoRef.editor;
+      const model = deps.getModel();
+      if (!model || !model.uri || !editorNs || typeof editorNs.setModelMarkers !== 'function') return;
+
+      const activeUri = String(model.uri.toString());
+      const activePath = String(deps.getCurrentPath() || '');
+      const matchingResources = new Set<string>([activeUri]);
+      const owners = new Set<string>();
+
+      for (const marker of diagMarkerStore.read()) {
+        const resource = typeof marker.resource === 'string' ? marker.resource : '';
+        if (!resource) continue;
+        const matchesActiveModel = resource === activeUri
+          || (!!activePath && deps.absPathFromVscodeUri(resource) === activePath);
+        if (!matchesActiveModel) continue;
+        matchingResources.add(resource);
+        const owner = asString(marker.owner) || 'unknown';
+        owners.add(owner);
+      }
+
+      if (diagProjectedUri === activeUri) {
+        for (const owner of diagProjectedOwners) owners.add(owner);
+      }
+
+      for (const owner of owners) {
+        try { editorNs.setModelMarkers(model, owner, []); } catch (_) {}
+      }
+      for (const resource of matchingResources) {
+        const clearedOwners = diagMarkerStore.clearResource(resource);
+        for (const owner of clearedOwners) owners.add(owner);
+      }
+
+      if (diagProjectedUri === activeUri) {
+        diagProjectedOwners = new Set<string>();
+        diagProjectedUri = '';
+      }
+      emitAggregatedDiagCounts(activePath);
+      console.log(
+        '[workbench] diagnostics clear leaving model reason=' + reason
+        + ' resource=' + activeUri
+        + ' owners=' + owners.size
+        + ' resources=' + matchingResources.size
+        + ' path=' + activePath,
+      );
+    } catch (_) {}
   }
 
   function syncDiagnosticsForCurrentModel(reason: string = 'sync'): void {
@@ -778,6 +829,7 @@ export function createEditorWorkbenchRuntime(
     applyDiagnosticsUpdate,
     emitAggregatedDiagCounts,
     clearDiagnosticsForSwitch,
+    clearDiagnosticsForLeavingModel,
     syncDiagnosticsForCurrentModel,
     currentLanguageContext,
     wbCurrentGeneration: currentGeneration,

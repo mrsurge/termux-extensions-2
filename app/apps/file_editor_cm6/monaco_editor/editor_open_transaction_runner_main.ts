@@ -40,6 +40,7 @@ interface RunEditorOpenTransactionDeps {
   requestDraftDiff(reason: string): void;
   clearDraftDiffDecorations(): void;
   requestGitBaselines(payload: { reason: string }): void;
+  clearDiagnosticsForLeavingModel(reason: string): void;
   wbCurrentGeneration(): number;
   wbBumpGeneration(path: string, source: string): number;
   bcUpdatePath(path: string, shouldAnnounce: boolean): void;
@@ -107,6 +108,9 @@ export async function runEditorOpenTransaction(
   } catch (_) {}
 
   deps.setBaseSha256(payload.base_sha256 || deps.getBaseSha256());
+  if (!sameFileNavigationOnly) {
+    try { deps.clearDiagnosticsForLeavingModel('file_switch'); } catch (_) {}
+  }
   deps.setCurrentPath(incomingPath);
   const currentPath = incomingPath;
   const openGeneration = sameFileNavigationOnly

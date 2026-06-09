@@ -573,6 +573,10 @@ interface MonacoBootWindowLike extends Window {
     workbenchRuntime.clearDiagnosticsForSwitch();
   }
 
+  function _clearDiagnosticsForLeavingModel(reason?: string): void {
+    workbenchRuntime.clearDiagnosticsForLeavingModel(reason || 'leaving_model');
+  }
+
   function _syncDiagnosticsForCurrentModel(reason?: string): void {
     workbenchRuntime.syncDiagnosticsForCurrentModel(reason);
   }
@@ -1186,6 +1190,7 @@ interface MonacoBootWindowLike extends Window {
     requestDraftDiff: requestDraftDiff,
     clearDraftDiffDecorations: clearDraftDiffDecorations,
     requestGitBaselines: requestGitBaselines,
+    clearDiagnosticsForLeavingModel: _clearDiagnosticsForLeavingModel,
     wbCurrentGeneration: _wbCurrentGeneration,
     wbBumpGeneration: _wbBumpGeneration,
     bcUpdatePath: bcUpdatePath,
