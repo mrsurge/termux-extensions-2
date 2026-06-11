@@ -37,6 +37,10 @@ class MarkProjectDirty(Protocol):
     def __call__(self, project_root: Path) -> None: ...
 
 
+class SetProjectRoot(Protocol):
+    def __call__(self, project_root: Path) -> None: ...
+
+
 @dataclass(frozen=True)
 class ExplorerSearchReviewHandlerContext:
     project_root: Path
@@ -78,6 +82,7 @@ class ExplorerProjectHandlerContext:
     websocket: ExplorerConnection
     tracked_job_ids: set[str]
     emit_personal: EmitPersonal
+    set_project_root: SetProjectRoot
 
 
 @dataclass(frozen=True)

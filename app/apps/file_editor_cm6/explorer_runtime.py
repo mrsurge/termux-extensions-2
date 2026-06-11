@@ -81,6 +81,7 @@ from .explorer.services.job_tracking import (
 from .explorer.services.session_bootstrap import bootstrap_explorer_session
 from .explorer.services.runtime_notifications import set_explorer_event_loop
 from .explorer.transport.rpc_contract import build_jsonrpc_notification
+from .worker_services.event_bus import set_worker_event_loop
 
 # --- Dispatcher ---
 
@@ -93,7 +94,12 @@ class ExplorerDispatcher:
 
     async def initialize(self) -> None:
         # Feed the current worker loop to watcher/draft notification services.
-        set_explorer_event_loop(asyncio.get_event_loop())
+        worker_loop = asyncio.get_running_loop()
+        set_explorer_event_loop(worker_loop)
+        set_worker_event_loop(worker_loop)
+        from .workspace_events import register_workspace_event_bus_handlers
+
+        register_workspace_event_bus_handlers()
 
         bootstrap = await bootstrap_explorer_session(
             websocket=self.websocket,
@@ -279,7 +285,11 @@ class ExplorerDispatcher:
             websocket=self.websocket,
             tracked_job_ids=self._tracked_job_ids,
             emit_personal=self.emit_personal,
+            set_project_root=self._set_project_root,
         )
+
+    def _set_project_root(self, project_root: Path) -> None:
+        self.project_root = project_root
 
     def _resolve_handler(self, message_type: str) -> ExplorerMessageHandler | None:
         handler_name = f"handle_{message_type.replace(':', '_')}"

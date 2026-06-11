@@ -1,9 +1,20 @@
 # pyright: strict
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import TypedDict, cast
+
+from .worker_services.event_bus import (
+    WorkerEvent,
+    build_event,
+    current_project_generation,
+    event_payload_list,
+    publish as publish_worker_event,
+    publish_threadsafe as publish_worker_event_threadsafe,
+    subscribe as subscribe_worker_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +32,8 @@ _watcher_batch_by_project: dict[str, WatcherFilesPayload] = {}
 _watcher_error_by_project: dict[str, dict[str, object]] = {}
 _git_decorations_by_project: dict[str, dict[str, object]] = {}
 _git_status_by_project: dict[str, dict[str, object]] = {}
+_git_snapshot_debounce_tasks: dict[str, asyncio.Task[None]] = {}
+_event_bus_handlers_registered = False
 
 
 def _normalize_project_path(project_path: str) -> str:
@@ -120,15 +133,41 @@ async def publish_file_change_batch(
         except Exception as exc:
             logger.debug("[workspace_events] external file change publish failed: %s", exc)
 
-def publish_file_change_threadsafe(abs_path: str, event_type: str) -> None:
-    import asyncio
 
-    from .explorer.services.file_ops import get_project_root
-    from .explorer.services.runtime_notifications import get_explorer_event_loop
-
-    loop = get_explorer_event_loop()
-    if loop is None or not loop.is_running():
+async def publish_file_change_event(
+    project_path: str,
+    *,
+    created_abs: list[str],
+    changed_abs: list[str],
+    deleted_abs: list[str],
+) -> None:
+    """Publish a file-change event through the worker bus when available."""
+    normalized_project = _normalize_project_path(project_path)
+    if not _event_bus_handlers_registered:
+        await publish_file_change_batch(
+            normalized_project,
+            created_abs=created_abs,
+            changed_abs=changed_abs,
+            deleted_abs=deleted_abs,
+        )
         return
+    await publish_worker_event(
+        build_event(
+            "WorkspaceFilesChanged",
+            project_root=normalized_project,
+            project_generation=current_project_generation(normalized_project),
+            source="publish_file_change_event",
+            payload={
+                "created_abs": created_abs,
+                "changed_abs": changed_abs,
+                "deleted_abs": deleted_abs,
+            },
+        )
+    )
+
+
+def publish_file_change_threadsafe(abs_path: str, event_type: str) -> None:
+    from .explorer.services.file_ops import get_project_root
 
     normalized_project = _normalize_project_path(str(get_project_root()))
     created_abs: list[str] = [abs_path] if event_type == "created" else []
@@ -136,6 +175,28 @@ def publish_file_change_threadsafe(abs_path: str, event_type: str) -> None:
     changed_abs: list[str] = []
     if event_type not in {"created", "deleted"}:
         changed_abs = [abs_path]
+
+    event = build_event(
+        "WorkspaceFilesChanged",
+        project_root=normalized_project,
+        project_generation=current_project_generation(normalized_project),
+        source="publish_file_change_threadsafe",
+        payload={
+            "created_abs": created_abs,
+            "changed_abs": changed_abs,
+            "deleted_abs": deleted_abs,
+        },
+    )
+    if publish_worker_event_threadsafe(event):
+        return
+
+    import asyncio
+
+    from .explorer.services.runtime_notifications import get_explorer_event_loop
+
+    loop = get_explorer_event_loop()
+    if loop is None or not loop.is_running():
+        return
 
     asyncio.run_coroutine_threadsafe(
         publish_file_change_batch(
@@ -146,6 +207,59 @@ def publish_file_change_threadsafe(abs_path: str, event_type: str) -> None:
         ),
         loop,
     )
+
+
+def register_workspace_event_bus_handlers() -> None:
+    """Register compatibility projectors for initial worker bus consumers."""
+    global _event_bus_handlers_registered
+    if _event_bus_handlers_registered:
+        return
+    subscribe_worker_event("WorkspaceFilesChanged", _handle_workspace_files_changed_event)
+    subscribe_worker_event("GitSnapshotRequested", _handle_git_snapshot_requested_event)
+    _event_bus_handlers_registered = True
+
+
+async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project:
+        return
+    await publish_file_change_batch(
+        project,
+        created_abs=event_payload_list(event, "created_abs"),
+        changed_abs=event_payload_list(event, "changed_abs"),
+        deleted_abs=event_payload_list(event, "deleted_abs"),
+    )
+
+
+async def _handle_git_snapshot_requested_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project:
+        return
+    generation = event.get("project_generation")
+    key = project
+    existing = _git_snapshot_debounce_tasks.get(key)
+    if existing is not None and not existing.done():
+        existing.cancel()
+    _git_snapshot_debounce_tasks[key] = asyncio.create_task(
+        _debounced_git_snapshot(project, generation),
+        name="file_editor_cm6_git_snapshot_refresh",
+    )
+
+
+async def _debounced_git_snapshot(project: str, generation: int | None) -> None:
+    try:
+        await asyncio.sleep(0.5)
+        if generation is not None and current_project_generation(project) != generation:
+            return
+        from .explorer.services.runtime_notifications import broadcast_git_status_update
+
+        await broadcast_git_status_update(project)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        task = _git_snapshot_debounce_tasks.get(project)
+        if task is asyncio.current_task():
+            _git_snapshot_debounce_tasks.pop(project, None)
 
 
 async def publish_git_status_update(

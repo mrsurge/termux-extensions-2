@@ -12,6 +12,7 @@ from typing import Callable, cast
 from .file_ops import set_project_root
 from ..transport.connection_manager import ExplorerConnection, manager
 from ...project_sidecar import ProjectSidecar
+from ...worker_services.event_bus import build_event, next_project_generation, publish
 from ..contracts.watcher import build_watcher_config_payload
 from .project_session import reset_project_session
 
@@ -29,6 +30,7 @@ class ExplorerProjectSwitchResult:
     project_root: Path
     display_path: str
     was_new_sidecar: bool
+    project_generation: int
 
 
 async def switch_project_connection(
@@ -56,6 +58,7 @@ async def switch_project_connection(
         pass
 
     new_root = set_project_root(project_path)
+    project_generation = next_project_generation(new_root)
     switch_notice = await _broadcast_project_switching(
         new_root,
         display_path=normalized_display_path,
@@ -63,6 +66,20 @@ async def switch_project_connection(
         source=open_state_source,
     )
     switch_id = str(switch_notice.get("switchId") or "")
+    await publish(
+        build_event(
+            "ProjectSwitchStarted",
+            project_root=new_root,
+            project_generation=project_generation,
+            source=open_state_source,
+            correlation_id=switch_id or None,
+            payload={
+                "displayPath": normalized_display_path,
+                "reason": open_state_reason,
+                "switchId": switch_id,
+            },
+        )
+    )
     adapter_status = "unchanged"
 
     if initialize_watcher:
@@ -116,11 +133,29 @@ async def switch_project_connection(
         adapter_status=adapter_status,
         status="ready" if adapter_status != "error" else "error",
     )
+    await publish(
+        build_event(
+            "ProjectSwitchFinished",
+            project_root=new_root,
+            project_generation=project_generation,
+            source=open_state_source,
+            correlation_id=switch_id or None,
+            payload={
+                "displayPath": normalized_display_path,
+                "reason": open_state_reason,
+                "switchId": switch_id,
+                "adapterStatus": adapter_status,
+                "status": "ready" if adapter_status != "error" else "error",
+                "openState": open_state if isinstance(open_state, dict) else None,
+            },
+        )
+    )
 
     return ExplorerProjectSwitchResult(
         project_root=new_root,
         display_path=normalized_display_path,
         was_new_sidecar=was_new_sidecar,
+        project_generation=project_generation,
     )
 
 

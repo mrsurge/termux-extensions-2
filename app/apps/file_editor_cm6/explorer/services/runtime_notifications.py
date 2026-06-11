@@ -11,10 +11,15 @@ from threading import Lock, Timer
 from types import TracebackType
 from typing import Optional, Protocol, cast
 
-from .file_ops import get_git_statuses_for_root, mark_draft_cache_dirty, mark_git_cache_dirty
+from .file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
 from ..transport.connection_manager import abs_to_rel, manager
 from ..transport.rpc_emit import emit_project_explorer_rpc_notification
-from ...git_helper import get_status as git_get_status
+from ...worker_services.event_bus import (
+    build_event,
+    current_project_generation,
+    publish_threadsafe as publish_worker_event_threadsafe,
+)
+from ...worker_services import git_service as worker_git_service
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +134,16 @@ def notify_explorer_of_change(abs_path: str, event_type: str) -> None:
 
 
 def _schedule_git_status_broadcast(project_path: str) -> None:
+    event = build_event(
+        "GitSnapshotRequested",
+        project_root=project_path,
+        project_generation=current_project_generation(project_path),
+        source="runtime_notifications",
+        payload={},
+    )
+    if publish_worker_event_threadsafe(event):
+        return
+
     debounce_key = f"git:{project_path}"
     with _explorer_refresh_lock:
         existing_timer = _explorer_refresh_timers.get(debounce_key)
@@ -156,8 +171,8 @@ async def broadcast_git_status_update(project_path: str | Path) -> None:
     try:
         mark_git_cache_dirty(project)
 
-        statuses = await asyncio.to_thread(get_git_statuses_for_root, project)
-        status = await asyncio.to_thread(git_get_status, project)
+        statuses = await asyncio.to_thread(worker_git_service.get_statuses_for_root, project)
+        status = await asyncio.to_thread(worker_git_service.get_status, project)
         logger.info(
             "[GIT_STATUS_DEBUG] staged=%s, unstaged=%s, untracked=%s",
             status.staged,

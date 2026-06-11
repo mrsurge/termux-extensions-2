@@ -313,9 +313,9 @@ async def _adapter_ws_loop(_sio: object) -> None:
                             total = len(created) + len(changed) + len(deleted)
                             if total > 0:
                                 try:
-                                    from .workspace_events import publish_file_change_batch
+                                    from .workspace_events import publish_file_change_event
 
-                                    await publish_file_change_batch(
+                                    await publish_file_change_event(
                                         proj,
                                         created_abs=created_abs,
                                         changed_abs=changed_abs,

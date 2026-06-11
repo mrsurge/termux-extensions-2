@@ -11,6 +11,7 @@ import shutil
 from typing import Dict, Iterable, Optional
 
 from app.apps.file_editor_cm6.draft_index_sidecar import DraftIndexSidecar
+from ...worker_services import git_service as worker_git_service
 
 # Shared state lock: list_dir and git/draft caches can be accessed from multiple threads.
 _STATE_LOCK = threading.RLock()
@@ -60,7 +61,7 @@ def _get_draft_index_snapshot(project_root: Path) -> tuple[set[str], set[str]]:
     return draft_files, draft_dirs
 
 
-def mark_draft_cache_dirty(project_root: Path = None):
+def mark_draft_cache_dirty(project_root: Optional[Path] = None):
     """Mark draft caches as dirty so they refresh on next access."""
     with _STATE_LOCK:
         if project_root:
@@ -78,7 +79,6 @@ def set_project_root(path: str) -> Path:
     global _PROJECT_ROOT
     with _STATE_LOCK:
         _PROJECT_ROOT = p
-    _prime_git_cache(p)
     return p
 
 
@@ -178,6 +178,7 @@ def list_dir(rel: str = '.') -> dict:
 
 def mark_git_cache_dirty(project_root: Optional[Path] = None) -> None:
     """Marks the git status cache dirty so the next lookup refreshes."""
+    worker_git_service.mark_status_cache_dirty(project_root)
     if project_root is None:
         with _STATE_LOCK:
             _GIT_STATUS_CACHE.clear()
@@ -199,37 +200,19 @@ def _cache_key(root: Path) -> str:
 def _prime_git_cache(root: Path) -> None:
     """Preload git status for the given root."""
     try:
-        _refresh_git_status(root)
+        worker_git_service.refresh_status_snapshot(root)
     except Exception:
         # Non-git repositories or command failures should not block the UI
         pass
 
 
 def _get_git_status_snapshot(root: Path) -> Dict[str, str]:
-    key = _cache_key(root)
-    now = time.time()
-    with _STATE_LOCK:
-        entry = _GIT_STATUS_CACHE.get(key)
-        if entry and not entry.get('dirty') and now - entry.get('timestamp', 0) < GIT_CACHE_TTL_SECONDS:
-            return entry.get('status', {})
-    try:
-        status = _refresh_git_status(root)
-    except Exception:
-        status = {}
-    return status
+    return worker_git_service.get_status_snapshot(root)
 
 
 def _refresh_git_status(root: Path) -> Dict[str, str]:
     """Refresh the git status snapshot for the given root."""
-    status = _collect_git_status(root)
-    key = _cache_key(root)
-    with _STATE_LOCK:
-        _GIT_STATUS_CACHE[key] = {
-            'status': status,
-            'timestamp': time.time(),
-            'dirty': False,
-        }
-    return status
+    return worker_git_service.refresh_status_snapshot(root)
 
 
 def _collect_git_status(root: Path) -> Dict[str, str]:
@@ -401,20 +384,7 @@ def get_git_statuses_for_root(project_root: Path) -> Dict[str, str]:
 
     Used to broadcast git status updates to the frontend without replacing the tree.
     """
-    root = project_root
-    status_map = _get_git_status_snapshot(root)
-
-    if not status_map:
-        return {}
-    
-    result: Dict[str, str] = {}
-    
-    # Only include files with non-clean status
-    for rel_path, status in status_map.items():
-        if status and status != 'clean':
-            result[rel_path] = status
-
-    return result
+    return worker_git_service.get_statuses_for_root(project_root)
 
 
 def get_all_git_statuses() -> Dict[str, str]:

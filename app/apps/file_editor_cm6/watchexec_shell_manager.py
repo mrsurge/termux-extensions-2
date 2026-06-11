@@ -113,12 +113,12 @@ def _forward_watchexec_event(evt: dict, project_root: str) -> None:
         return
 
     try:
-        from .workspace_events import publish_file_change_batch
+        from .workspace_events import publish_file_change_event
 
         loop = asyncio.get_event_loop()
         if loop.is_running():
             loop.create_task(
-                publish_file_change_batch(
+                publish_file_change_event(
                     str(project_root),
                     created_abs=[path_abs] if created else [],
                     changed_abs=[path_abs] if changed else [],
