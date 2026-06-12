@@ -1,7 +1,6 @@
 import hashlib
 import asyncio
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -9,8 +8,8 @@ from typing import Optional, cast
 
 from urllib.parse import parse_qs
 
-from ..git_helper import _run_git_optional, is_git_repository
 from ..stores import _history_store, _preferences_store
+from ..worker_services import git_service as worker_git_service
 from ..ui_ipc.rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_EDITOR_CACHE_STATE,
     UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS,
@@ -1031,9 +1030,6 @@ def _git_head_text(project_root: str, abs_path: str) -> Optional[str]:
     except Exception:
         return None
 
-    if not is_git_repository(root):
-        return None
-
     # Compute a repo-relative path for `git show HEAD:<path>`.
     try:
         rel = p.relative_to(root).as_posix()
@@ -1042,26 +1038,4 @@ def _git_head_text(project_root: str, abs_path: str) -> Optional[str]:
 
     if not rel:
         return None
-
-    # If the repo has no commits, HEAD doesn't exist.
-    head = _run_git_optional(root, "rev-parse", "--verify", "HEAD")
-    if head is None:
-        return None
-
-    # `git show` returns non-zero for untracked paths.
-    # IMPORTANT: do not strip output; we want the exact blob content.
-    try:
-        completed = subprocess.run(
-            ["git", "-C", str(root), "show", f"HEAD:{rel}"],
-            check=False,
-            capture_output=True,
-            timeout=20,
-        )
-    except Exception:
-        return None
-    if completed.returncode != 0:
-        return None
-    try:
-        return completed.stdout.decode("utf-8", errors="replace")
-    except Exception:
-        return completed.stdout.decode(errors="replace")
+    return worker_git_service.read_head_blob_text(root, rel)

@@ -19,7 +19,6 @@ from pathlib import Path
 importlib.import_module("app.libs.git_service")
 
 from .explorer.services import file_ops as _file_ops
-from .git_helper import get_status as git_get_status
 # NOTE: search and review are imported lazily inside handler methods
 # to break a circular import chain:
 #   diagnostics_bridge → explorer transport socketio app → explorer_runtime → explorer/review
@@ -30,11 +29,9 @@ logger = logging.getLogger(__name__)
 JsonObject = dict[str, object]
 ExplorerMessageHandler = Callable[[JsonObject, str | None], Awaitable[None]]
 MarkGitCacheDirtyFn = Callable[[Path], None]
-GetAllGitStatusesFn = Callable[[], JsonObject]
 
 get_project_root = _file_ops.get_project_root
 mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _file_ops.mark_git_cache_dirty)
-get_all_git_statuses = cast(GetAllGitStatusesFn, _file_ops.get_all_git_statuses)
 
 
 @runtime_checkable
@@ -161,29 +158,9 @@ class ExplorerDispatcher:
         await self.emit_personal("explorer.error", payload, reply_to)
 
     async def broadcast_git_status(self) -> None:
-        try:
-            status = await asyncio.to_thread(git_get_status, self.project_root)
-            logger.info(f"[GIT_STATUS_DEBUG] broadcast_git_status: staged={status.staged}, unstaged={status.unstaged}, untracked={status.untracked}")
-            data: JsonObject = {
-                "branch": status.branch,
-                "detached": status.detached,
-                "ahead": status.ahead,
-                "behind": status.behind,
-                "staged": status.staged,
-                "unstaged": status.unstaged,
-                "untracked": status.untracked,
-            }
-            await self.broadcast("explorer.git.status.updated", data)
-        except Exception:
-            pass
+        from .explorer.services.runtime_notifications import broadcast_git_status_update
 
-        # Push fresh git baselines to editor so diff editor's original model
-        # updates after commits/checkouts (needed in draft mode).
-        try:
-            from .monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
-            await broadcast_git_baselines_for_active_file()
-        except Exception as e:
-            logger.warning(f"[broadcast_git_status] git baselines push failed: {e}")
+        await broadcast_git_status_update(self.project_root)
 
     async def broadcast_git_decorations(self) -> None:
         """Broadcast git status decorations for all files and directories.
@@ -191,11 +168,9 @@ class ExplorerDispatcher:
         This allows the frontend to update gitStatus classes on existing DOM nodes
         without replacing the tree structure (preserves expanded state).
         """
-        try:
-            statuses = await asyncio.to_thread(get_all_git_statuses)
-            await self.broadcast("explorer.git.decorations.updated", {"statuses": statuses})
-        except Exception:
-            pass
+        from .explorer.services.runtime_notifications import broadcast_git_status_update
+
+        await broadcast_git_status_update(self.project_root)
 
     async def broadcast_review_state(self) -> None:
         """Broadcast updated review entries and decoration updates."""

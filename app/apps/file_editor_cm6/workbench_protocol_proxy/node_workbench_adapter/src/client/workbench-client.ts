@@ -530,6 +530,8 @@ export class WorkbenchClient {
   _mgmtIpc: MgmtIpcLike | null;
   _fsWatcherSub: WatchSubscriptionLike;
   _connecting: boolean;
+  _openFileQueue: Promise<void>;
+  _openFilePending: number;
   _extRequests: PendingExtRequestOwner;
   _signService: unknown;
   _debugExtReqSeen: number;
@@ -565,6 +567,8 @@ export class WorkbenchClient {
     this._mgmtIpc = null;
     this._fsWatcherSub = null; // IPC event subscription for remoteFilesystem fileChange
     this._connecting = false;
+    this._openFileQueue = Promise.resolve();
+    this._openFilePending = 0;
     this._extRequests = new PendingExtRequestOwner();
     this._signService = createNoopSignService();
     this._debugExtReqSeen = 0;
@@ -1172,7 +1176,24 @@ export class WorkbenchClient {
   }
 
   async openFile(params: unknown = {}): Promise<Record<string, unknown>> {
-    return openWorkbenchFile(this._workspaceLifecycleRuntime(), params);
+    const queuedBehindAnotherOpen = this._openFilePending > 0;
+    const previous = this._openFileQueue.catch(() => undefined);
+    let release: () => void = () => {};
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this._openFilePending += 1;
+    this._openFileQueue = previous.then(() => current);
+    if (queuedBehindAnotherOpen) {
+      console.error("[openFile] queued behind in-flight openFile");
+    }
+    await previous;
+    try {
+      return await openWorkbenchFile(this._workspaceLifecycleRuntime(), params);
+    } finally {
+      this._openFilePending = Math.max(0, this._openFilePending - 1);
+      release();
+    }
   }
 
   /**

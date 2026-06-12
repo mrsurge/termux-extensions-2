@@ -93,7 +93,6 @@ async def handle_delete_entry(
     await _broadcast_rel_list(context, _get_parent_rel(params["rel"]))
     mark_git_cache_dirty(context.project_root)
     await context.broadcast_git_status()
-    await context.broadcast_git_decorations()
 
 
 async def handle_batch_delete(
@@ -111,7 +110,6 @@ async def handle_batch_delete(
 
     mark_git_cache_dirty(context.project_root)
     await context.broadcast_git_status()
-    await context.broadcast_git_decorations()
 
 
 async def handle_batch_copy(

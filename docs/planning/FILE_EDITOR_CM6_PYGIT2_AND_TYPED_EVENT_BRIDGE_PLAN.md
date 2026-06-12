@@ -50,8 +50,11 @@ Phase 2 checklist:
       behavior; no `pygit2` dependency change yet.
 - [x] Route `file_ops` git snapshot reads and refreshes through the service seam.
 - [x] Route runtime git-status broadcast through the service seam.
-- [ ] Replace the service backend with `pygit2` for status/read paths.
-- [ ] Migrate editor `HEAD` baseline reads through the service.
+- [x] Replace the service backend with `pygit2` for status paths, with a
+      narrow CLI fallback only for ignored decoration-entry parity.
+- [x] Route direct Explorer git status/decorations broadcasts through the
+      centralized runtime/workspace-events publication path.
+- [x] Migrate editor `HEAD` baseline reads through the service.
 - [ ] Migrate HTTP git route status/read helpers through the service.
 - [ ] Remove legacy Explorer-local `_GIT_STATUS_CACHE` once no compatibility
       fallback needs it.
@@ -85,6 +88,18 @@ Verification log:
 - Explorer project-open root timing fix verified with `py_compile` and import
   smoke for `explorer/context.py`, `explorer_runtime.py`, and
   `explorer/handlers/project.py`.
+- `pygit2` status backend slice verified with `py_compile`, focused Pyright,
+  import smoke, and parity checks against existing CLI status/decorations on
+  the current repo.
+- Direct Explorer git refresh centralization verified with `py_compile`,
+  focused Pyright, import smoke, app TypeScript typecheck, WBA TypeScript
+  typecheck, and `node build.mjs`.
+- WBA duplicate-open stabilization: serialized `WorkbenchClient.openFile()`
+  after logs showed three same-file open flows in ~33ms producing duplicate
+  `$acceptDocumentsAndEditorsDelta` extension-host errors.
+- Editor `HEAD` baseline reads now route through `worker_services/git_service.py`;
+  verified with `py_compile`, import smoke, focused Pyright on service/builder
+  modules, and parity against `git show HEAD:<path>` for the current repo.
 
 ## Purpose
 

@@ -99,7 +99,6 @@ async def handle_git_restore(
     mark_git_cache_dirty(context.project_root)
     await context.broadcast("explorer.git.restored", {"path": params["path"]})
     await context.broadcast_git_status()
-    await context.broadcast_git_decorations()
 
 
 async def handle_git_commit(
@@ -227,7 +226,6 @@ async def handle_git_list_commits(
 async def _mark_dirty_and_refresh(context: ExplorerGitHandlerContext) -> None:
     mark_git_cache_dirty(context.project_root)
     await context.broadcast_git_status()
-    await context.broadcast_git_decorations()
 
 
 def _get_history_store() -> ExplorerHistoryStore:
