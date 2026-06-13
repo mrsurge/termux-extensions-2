@@ -1,14 +1,12 @@
 import hashlib
 import asyncio
 import os
-import sys
 import time
 from pathlib import Path
-from typing import Optional, cast
+from collections.abc import Awaitable, Mapping
+from typing import Optional, Protocol, cast
 
-from urllib.parse import parse_qs
-
-from ..stores import _history_store, _preferences_store
+from ..stores import get_history_store, get_preferences_store
 from ..worker_services import git_service as worker_git_service
 from ..ui_ipc.rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_EDITOR_CACHE_STATE,
@@ -29,20 +27,10 @@ from ..open_state_backend import (
 )
 from .editor_open_backend import (
     EditorOpenPayload,
-    coerce_editor_open_request_fields,
     emit_editor_open_from_backend as _emit_editor_open_from_backend_impl,
 )
 from .editor_backend_services.contracts import RuntimeMeta
-from .editor_save_backend import (
-    handle_editor_mirror,
-    handle_editor_save_request,
-    resolve_editor_save_snapshot_response,
-)
-from .editor_view_state_backend import (
-    build_editor_draft_diff_payload,
-    build_editor_git_baselines_payload,
-    build_editor_jump_to_line_payload,
-)
+from .editor_save_backend import resolve_editor_save_snapshot_response
 from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_AGENT_EDITS_CHANGED,
     EDITOR_RPC_NOTIFICATION_CACHE_STATE,
@@ -65,18 +53,63 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHING,
     EDITOR_RPC_NOTIFICATION_READY,
     EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST,
-    EDITOR_RPC_NOTIFICATION_STATE_SSOT,
     EditorRpcNotification,
 )
 from .editor_rpc_emit import emit_editor_rpc_notification
 import logging as _logging
 _wb_log = _logging.getLogger("editor_ws.workbench")
 
+_history_store = get_history_store()
+_preferences_store = get_preferences_store()
+
+
+class ActiveProjectFn(Protocol):
+    def __call__(self) -> str | None: ...
+
+
+class NormalizeAbsPathFn(Protocol):
+    def __call__(self, path: str) -> str | None: ...
+
+
+class IsUnderProjectFn(Protocol):
+    def __call__(self, project: str, abs_path: str) -> bool: ...
+
+
+class ReadFilePayloadFn(Protocol):
+    def __call__(self, project: str, abs_path: str) -> EditorOpenPayload: ...
+
+
+class UpdateSessionStateFn(Protocol):
+    def __call__(self, partial: dict[str, object]) -> object: ...
+
+
+class SetLastFileFn(Protocol):
+    def __call__(self, project_path: str, file_path: str) -> object: ...
+
+
+class EmitEditorOpenFn(Protocol):
+    def __call__(self, payload: EditorOpenPayload) -> Awaitable[None]: ...
+
+
+class BroadcastActiveFileUpdateFn(Protocol):
+    def __call__(self, project: str, abs_path: str) -> Awaitable[None]: ...
+
+
+class EmitHostActiveFileChangedFn(Protocol):
+    def __call__(
+        self,
+        project: str,
+        abs_path: str | None,
+        *,
+        source: str | None = None,
+        request_id: str | None = None,
+    ) -> Awaitable[None]: ...
+
 _ISSUES_DUMP_WAITING: dict[str, str | asyncio.Future[dict[str, object]]] = {}
 _ISSUES_DUMP_TTL_S = 20.0
 _SAVE_SNAPSHOT_WAITING: dict[str, asyncio.Future[dict[str, object]]] = {}
 _MODEL_READY_LAST_BY_SID: dict[str, str] = {}
-_PROJECT_SWITCH_SEQ = 0
+_project_switch_seq = 0
 
 # Tracks SHA256 of the most recent editor-initiated save per abs path.
 # Used to suppress watcher reload for our own saves.
@@ -130,7 +163,7 @@ def _active_project() -> Optional[str]:
 
 
 def _normalize_abs_path(path: str) -> Optional[str]:
-    if not isinstance(path, str) or not path.strip():
+    if not path.strip():
         return None
     try:
         return str(Path(path).expanduser().resolve(strict=False))
@@ -147,26 +180,6 @@ def _is_under_project(project: str, abs_path: str) -> bool:
         return str(p).startswith(str(root) + os.sep)
     except Exception:
         return False
-
-
-def _role_from_environ(environ: dict[str, object]) -> str:
-    """Best-effort role extraction from Socket.IO connect environ."""
-    try:
-        qs_obj = environ.get("QUERY_STRING")
-        qs = qs_obj if isinstance(qs_obj, str) else ""
-        if not qs:
-            scope = environ.get("asgi.scope")
-            if isinstance(scope, dict):
-                qs_bytes = scope.get("query_string")
-                if isinstance(qs_bytes, (bytes, bytearray)):
-                    qs = qs_bytes.decode("utf-8", errors="ignore")
-        if not qs:
-            return ""
-        params = parse_qs(qs, keep_blank_values=True)
-        role = params.get("role", [""])[0]
-        return str(role or "")
-    except Exception:
-        return ""
 
 
 async def _broadcast_active_file_update(project: str, abs_path: str) -> None:
@@ -290,9 +303,9 @@ async def _emit_open_state_changed(
 
 
 def _next_project_switch_id() -> str:
-    global _PROJECT_SWITCH_SEQ
-    _PROJECT_SWITCH_SEQ += 1
-    return f"project_switch_{int(time.time() * 1000)}_{_PROJECT_SWITCH_SEQ}"
+    global _project_switch_seq
+    _project_switch_seq += 1
+    return f"project_switch_{int(time.time() * 1000)}_{_project_switch_seq}"
 
 
 async def _emit_project_switch_notification(
@@ -604,13 +617,16 @@ async def _emit_editor_rpc_notification_to_room(
 ) -> None:
     from .editor_socketio import EDITOR_SIO
 
-    await emit_editor_rpc_notification(
-        lambda event_name, notification_payload: EDITOR_SIO.emit(
+    async def _emit(event_name: str, notification_payload: dict[str, object]) -> None:
+        await EDITOR_SIO.emit(  # pyright: ignore[reportUnknownMemberType]
             event_name,
             notification_payload,
             room=room,
             namespace="/rpc/editor",
-        ),
+        )
+
+    await emit_editor_rpc_notification(
+        _emit,
         method,
         payload,
     )
@@ -659,13 +675,14 @@ async def _emit_ui_ipc_editor_notification(method: str, payload: dict[str, objec
         _wb_log.warning("[ui_ipc_bridge] failed method=%s err=%s", method, exc)
 
 
-async def editor_runtime_emit_room_event(event_name: str, payload: dict[str, object]) -> None:
+async def editor_runtime_emit_room_event(event_name: str, payload: Mapping[str, object]) -> None:
+    event_payload = dict(payload)
     rpc_notification = _rpc_notification_for_legacy_event(event_name)
     if rpc_notification:
-        await _emit_editor_rpc_notification_to_room(rpc_notification, payload, room="file_editor_cm6")
+        await _emit_editor_rpc_notification_to_room(rpc_notification, event_payload, room="file_editor_cm6")
     ui_ipc_notification = _ui_ipc_notification_for_legacy_event(event_name)
     if ui_ipc_notification:
-        await _emit_ui_ipc_editor_notification(ui_ipc_notification, payload)
+        await _emit_ui_ipc_editor_notification(ui_ipc_notification, event_payload)
 
 
 async def editor_runtime_handle_scroll_state(source_client: str, data: dict[str, object]) -> None:
@@ -673,7 +690,8 @@ async def editor_runtime_handle_scroll_state(source_client: str, data: dict[str,
     project = _active_project()
     if project:
         try:
-            path = _normalize_abs_path(payload.get("path") or "")
+            path_obj = payload.get("path")
+            path = _normalize_abs_path(path_obj if isinstance(path_obj, str) else "")
         except Exception:
             path = None
         line = payload.get("line")
@@ -783,15 +801,15 @@ async def emit_editor_open_from_backend(
     *,
     source_client: str,
     request_id: str,
-    active_project=None,
-    normalize_abs_path=None,
-    is_under_project=None,
-    read_file_payload=None,
-    update_session_state=None,
-    set_last_file=None,
-    emit_editor_open=None,
-    broadcast_active_file_update=None,
-    emit_host_active_file_changed=None,
+    active_project: ActiveProjectFn | None = None,
+    normalize_abs_path: NormalizeAbsPathFn | None = None,
+    is_under_project: IsUnderProjectFn | None = None,
+    read_file_payload: ReadFilePayloadFn | None = None,
+    update_session_state: UpdateSessionStateFn | None = None,
+    set_last_file: SetLastFileFn | None = None,
+    emit_editor_open: EmitEditorOpenFn | None = None,
+    broadcast_active_file_update: BroadcastActiveFileUpdateFn | None = None,
+    emit_host_active_file_changed: EmitHostActiveFileChangedFn | None = None,
 ) -> EditorOpenPayload:
     return await _emit_editor_open_from_backend_impl(
         payload_in,
@@ -823,7 +841,8 @@ def _read_file_payload(project: str, abs_path: str) -> EditorOpenPayload:
     try:
         editor_prefs_obj = prefs.get("editor")
         if isinstance(editor_prefs_obj, dict):
-            auto_save_raw = editor_prefs_obj.get("autoSave")
+            editor_prefs = cast(dict[str, object], editor_prefs_obj)
+            auto_save_raw = editor_prefs.get("autoSave")
             auto_save = auto_save_raw if isinstance(auto_save_raw, bool) else None
         else:
             auto_save = None
@@ -950,7 +969,6 @@ async def handle_external_file_change(changed_abs_path: str) -> bool:
 
     # Broadcast fresh payload to all editor clients
     try:
-        from .editor_socketio import EDITOR_SIO
         payload = _read_file_payload(project, active_norm)
         payload["reason"] = "external_change"
         payload["request_id"] = f"ext_{int(time.time() * 1000)}"

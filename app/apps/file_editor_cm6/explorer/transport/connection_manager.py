@@ -79,12 +79,6 @@ class ConnectionManager:
         
         if was_empty:
             self.start_pulse()
-            # Start watcher for the project (using SSOT active project)
-            try:
-                from ...core_read import init_watcher
-                init_watcher()
-            except Exception as e:
-                logger.warning(f"Failed to start watcher on connect: {e}")
 
     def reassign_all(self, project_path: str) -> None:
         """Move every active Explorer connection to the current project key."""
@@ -113,12 +107,6 @@ class ConnectionManager:
         # Check if no connections remain globally
         if not any(self.active_connections.values()):
             self.stop_pulse()
-            # Stop watcher to save resources
-            try:
-                from ...core_read import stop_watcher
-                stop_watcher()
-            except Exception as e:
-                logger.warning(f"Failed to stop watcher on disconnect: {e}")
 
     def start_pulse(self):
         """Start the heartbeat pulse task."""

@@ -1,6 +1,6 @@
 import hashlib
 from pathlib import Path
-from typing import Optional
+from typing import Awaitable, Optional, Protocol, cast
 import asyncio
 import json
 import logging
@@ -8,6 +8,19 @@ import logging
 from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
 from framework_shells.record import ShellRecord
+
+JsonObject = dict[str, object]
+
+
+class EditorSocketLike(Protocol):
+    def emit(
+        self,
+        event: str,
+        data: JsonObject,
+        *,
+        namespace: str,
+        room: str,
+    ) -> Awaitable[None]: ...
 
 APP_ID = "file_editor_cm6"
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
@@ -19,14 +32,25 @@ log = logging.getLogger("workbench_adapter_shell_manager")
 
 _active_shell_id: Optional[str] = None
 _rpc_counter: int = 0
-_rpc_pending: dict[int, asyncio.Future] = {}
-_stdout_reader_task: Optional[asyncio.Task] = None
+_rpc_pending: dict[int, asyncio.Future[JsonObject]] = {}
+_stdout_reader_task: asyncio.Task[None] | None = None
 _stdout_bytes_queue: Optional[asyncio.Queue[bytes]] = None
 _stdout_subscription_shell_id: Optional[str] = None
 _rpc_write_lock: Optional[asyncio.Lock] = None
 
 # Adapter lifecycle state — broadcast to all UI IPC clients on change.
 _adapter_state: dict[str, object] = {"status": "idle", "project": None, "error": None}
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    raw = cast(dict[object, object], value)
+    return {str(key): item for key, item in raw.items()}
+
+
+def _decode_json_object(value: str) -> JsonObject:
+    return _json_object(cast(object, json.loads(value)))
 
 
 def get_adapter_state() -> dict[str, object]:
@@ -52,7 +76,8 @@ async def _broadcast_adapter_state() -> None:
         )
         from .monaco_editor.editor_socketio import EDITOR_SIO
 
-        await EDITOR_SIO.emit(
+        editor_sio = cast(EditorSocketLike, EDITOR_SIO)
+        await editor_sio.emit(
             EDITOR_RPC_EVENT,
             {
                 "jsonrpc": JSONRPC_VERSION,
@@ -105,7 +130,7 @@ def _expected_port() -> str:
 
 
 def _matches_expected_target(record: ShellRecord, code_server_socket_path: Optional[str]) -> bool:
-    env = record.env_overrides or {}
+    env = _json_object(record.env_overrides)
     if str(env.get("TE2_ADAPTER_PORT") or "").strip() != _expected_port():
         return False
     env_socket = str(env.get("TE2_CODE_SERVER_SOCKET") or "").strip()
@@ -234,9 +259,10 @@ async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> Non
                 if line_bytes.startswith(RPC_PREFIX):
                     payload = line_bytes[len(RPC_PREFIX):].decode("utf-8", errors="replace")
                     try:
-                        obj = json.loads(payload)
-                        rid = obj.get("id")
-                        fut = _rpc_pending.pop(rid, None)
+                        obj = _decode_json_object(payload)
+                        rid_obj = obj.get("id")
+                        rid = rid_obj if isinstance(rid_obj, int) else None
+                        fut = _rpc_pending.pop(rid, None) if rid is not None else None
                         if fut and not fut.done():
                             fut.set_result(obj)
                         else:
@@ -246,7 +272,7 @@ async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> Non
                 elif line_bytes.startswith(PUSH_PREFIX):
                     payload = line_bytes[len(PUSH_PREFIX):].decode("utf-8", errors="replace")
                     try:
-                        obj = json.loads(payload)
+                        obj = _decode_json_object(payload)
                         asyncio.create_task(_handle_push_event(obj))
                     except json.JSONDecodeError:
                         log.warning("[adapter_stdio] bad PUSH JSON: %s", payload[:200])
@@ -265,13 +291,13 @@ async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> Non
             _stdout_reader_task = None
 
 
-async def _handle_push_event(obj: dict) -> None:
+async def _handle_push_event(obj: JsonObject) -> None:
     """Consume legacy adapter push frames without relaying editor WBA data."""
     if obj and log.isEnabledFor(logging.DEBUG):
         log.debug("[push] ignored legacy adapter push frame; direct WBA socket owns editor notifications")
 
 
-async def adapter_rpc(method: str, params: Optional[dict] = None, timeout: float = 30.0) -> dict:
+async def adapter_rpc(method: str, params: JsonObject | None = None, timeout: float = 30.0) -> JsonObject:
     """Send a JSON-RPC request to the adapter over stdio and await the response.
 
     Returns the full JSON-RPC response object (with 'result' or 'error').
@@ -297,11 +323,11 @@ async def adapter_rpc(method: str, params: Optional[dict] = None, timeout: float
         mgr = await get_manager()
         _rpc_counter += 1
         rid = _rpc_counter
-        msg = {"jsonrpc": "2.0", "id": rid, "method": method}
+        msg: JsonObject = {"jsonrpc": "2.0", "id": rid, "method": method}
         if params is not None:
             msg["params"] = params
 
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future[JsonObject] = asyncio.get_event_loop().create_future()
         _rpc_pending[rid] = fut
 
         line = json.dumps(msg) + "\n"
@@ -476,7 +502,7 @@ async def ensure_workbench_adapter_shell(
                 f"socket={'set' if code_server_socket_path else 'unset'} "
                 f"authority={remote_authority}"
             )
-            connect_params = {
+            connect_params: JsonObject = {
                 "proxyHttp": code_server_http,
                 "authority": remote_authority,
                 "folder": str(project_root_abs),

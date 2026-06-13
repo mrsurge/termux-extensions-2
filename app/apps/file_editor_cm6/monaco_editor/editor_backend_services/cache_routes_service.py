@@ -226,7 +226,6 @@ async def handle_set_editor_content(
     get_combined_diffs_async: CombinedDiffsAsyncFn,
     resolve_font_scale: Callable[[object | None], float],
     get_project_root: Callable[[], Path],
-    init_watcher: Callable[[Path], object],
     subscribe: Callable[[str, str, Callable[[dict[str, object]], None]], object],
     unsubscribe: Callable[[object], None],
     get_watcher_token: Callable[[], object | None],
@@ -310,7 +309,6 @@ async def handle_set_editor_content(
     )
 
     project_root = get_project_root()
-    init_watcher(project_root)
 
     def on_file_change(event: dict[str, object]) -> None:
         if event.get("type") != "replace_full":

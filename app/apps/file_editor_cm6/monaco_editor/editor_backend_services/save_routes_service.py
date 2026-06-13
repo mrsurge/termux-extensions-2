@@ -110,7 +110,6 @@ async def write_editor_buffer_to_disk(
     history_store: HistoryStoreLike,
     normalize_rel_path: NormalizeRelPathFn,
     write_full: WriteFullFn,
-    init_watcher: Callable[[Path], object],
     push_save_ack: Callable[[str, str, str, dict[str, object]], None],
     emit_diff_changed: Callable[[str, str], None],
     mark_git_cache_dirty: Callable[[Path], None],
@@ -145,7 +144,6 @@ async def write_editor_buffer_to_disk(
         except OSError:
             orig_mode = None
 
-    init_watcher(project_root)
     file_meta = await asyncio.to_thread(
         lambda: write_full(
             project_root,

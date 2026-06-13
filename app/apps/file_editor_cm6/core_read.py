@@ -88,15 +88,38 @@ def _file_meta(path: Path) -> JsonObject:
     return _json_object(getter(path))
 
 
+def _current_project_root() -> Path | None:
+    if _project_root is not None:
+        return _project_root
+    try:
+        from .explorer.services.file_ops import get_project_root
+
+        return get_project_root().resolve(strict=False)
+    except Exception:
+        return None
+
+
 def _norm_path(p: str) -> str:
     """Return a canonical absolute path for subscription bookkeeping."""
     candidate = Path(p)
-    if not candidate.is_absolute() and _project_root:
-        candidate = _project_root / candidate
+    project_root = _current_project_root()
+    if not candidate.is_absolute() and project_root is not None:
+        candidate = project_root / candidate
     try:
         return str(candidate.resolve())
     except Exception:
         return str(candidate.absolute())
+
+
+def _is_under_project(path: Path) -> bool:
+    project_root = _current_project_root()
+    if project_root is None:
+        return True
+    try:
+        path.resolve(strict=False).relative_to(project_root)
+        return True
+    except ValueError:
+        return False
 
 
 class PollingWatcher:
@@ -332,19 +355,6 @@ def _do_handle_fs_event(raw_event: CoreEvent) -> None:
     except (FileNotFoundError, IsADirectoryError):
         pass # File might have been deleted
 
-def init_watcher(project_root: Path | None = None) -> None:
-    """Initializes and starts the file system watcher.
-    
-    DISABLED: recursive watchdog hits inotify limits on large repos.
-    Will be replaced by extension host watcher relay via $onFileEvent pipeline.
-    Code preserved for reference.
-    
-    If project_root is None, reads from the history store SSOT.
-    This ensures the watcher always watches whatever the active project is.
-    """
-    logger.info("[WATCHER] init_watcher disabled — pending watcher overhaul (inotify limits)")
-    return
-
 def subscribe(path: str, client_id: str, on_event: CoreCallback) -> str:
     """Subscribes a client to file events, sends an initial snapshot, and returns a token."""
     token = str(uuid.uuid4())
@@ -358,7 +368,7 @@ def subscribe(path: str, client_id: str, on_event: CoreCallback) -> str:
     # Immediately send snapshot
     try:
         full_path = Path(norm)
-        if _project_root and not str(full_path).startswith(str(_project_root.resolve())):
+        if not _is_under_project(full_path):
             raise PermissionError("Path traversal detected")
         if full_path.is_symlink():
             raise PermissionError("Symlinks not supported")

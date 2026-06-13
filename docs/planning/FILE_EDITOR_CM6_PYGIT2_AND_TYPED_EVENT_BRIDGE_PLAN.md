@@ -2,17 +2,18 @@
 
 Date: 2026-06-10
 
-Status: Phase 1 implementation started.
+Status: Phase 2 status/read-path migration and watcher relay pruning verified; remote operations remain pending.
 
 ## Implementation Tracker
 
 Phase status:
 
-- Phase 1 - Event bus foundation and project-switch normalization: In progress
-- Phase 2 - App-wide git service for status and read paths: In progress
+- Phase 1 - Event bus foundation and project-switch normalization: Complete
+- Phase 2 - App-wide git service for status and read paths: Complete for status/read paths; remote/job work remains Phase 3
 - Phase 3 - Remote operations and progress migration: Not started
 - Phase 4 - Remaining caller cleanup and store-driven events: Not started
-- Phase 5 - Optional portability seam: Not started
+- Phase 5 - Editor source organization cleanup: Not started
+- Phase 6 - Optional portability seam: Not started
 
 Phase 1 checklist:
 
@@ -58,9 +59,9 @@ Phase 2 checklist:
 - [x] Remove current in-repo frontend HTTP git callers by routing host branch
       menu actions over UI IPC RPC and Explorer diff-base reads over Explorer
       RPC. HTTP routes remain temporarily as compatibility surface.
-- [ ] Migrate HTTP git route status/read helpers through the service.
-- [ ] Remove legacy Explorer-local `_GIT_STATUS_CACHE` once no compatibility
-      fallback needs it.
+- [x] Migrate HTTP git route status/read helpers through the service.
+- [x] Remove legacy Explorer-local `_GIT_STATUS_CACHE` once no compatibility
+       fallback needs it.
 
 Open decisions status:
 
@@ -94,6 +95,9 @@ Verification log:
 - `pygit2` status backend slice verified with `py_compile`, focused Pyright,
   import smoke, and parity checks against existing CLI status/decorations on
   the current repo.
+- Runtime implementation note: later stabilization moved the worker-local
+  service backend to the existing GitPython-backed service path and avoids
+  importing `pygit2` in `worker_services` after worker abort investigation.
 - Direct Explorer git refresh centralization verified with `py_compile`,
   focused Pyright, import smoke, app TypeScript typecheck, WBA TypeScript
   typecheck, and `node build.mjs`.
@@ -106,6 +110,25 @@ Verification log:
 - Frontend HTTP git caller removal verified with `py_compile`, focused Pyright,
   app TypeScript typecheck, `node build.mjs`, and source grep showing no
   remaining `/api/app/file_editor_cm6/git/...` TypeScript callers.
+- HTTP git status/read route migration verified by routing `/git/status` and
+  `/git/is_repo` through `worker_services.git_service`; Explorer file-op git
+  cache/subprocess helpers were removed.
+- Phase 2 cleanup and runtime typing stabilization committed and pushed in
+  `1fe0bdee Stabilize file editor runtime typing`.
+- Disabled `core_read.init_watcher(...)` plumbing removed from the main worker,
+  Explorer, editor backend, and save/cache route services. Grep found no
+  remaining `init_watcher`, `_get_init_watcher`, or `InitWatcher` references.
+- `diagnostics_bridge.py` semantics narrowed to WBA backend event relay for
+  watcher events and Explorer/problems diagnostics projection; editor
+  diagnostics remain on the direct `/wba` frontend lane.
+- Latest watcher/WBA relay pruning verified with `python -m py_compile`, focused
+  `basedpyright` on touched clean modules, full app `basedpyright` baseline at
+  971 existing legacy errors, and `git diff --check` clean. These pruning
+  changes are verified but not yet committed.
+- Planning note added for a later editor source organization pass: reconsolidate
+  unreasonably decomposed frontend modules where one semantic component was
+  split into many tiny files, and separate Python backend/editor service files
+  from TypeScript frontend source organization.
 
 ## Purpose
 
@@ -742,7 +765,49 @@ Acceptance:
 - no duplicate git publication paths remain.
 - Explorer, editor, and host observe the same generation-tagged lifecycle.
 
-### Phase 5 - Optional portability seam
+### Phase 5 - Editor source organization cleanup
+
+This phase is not part of the current git/event-bus slice, but it should be
+tracked because the editor source tree has accumulated counterproductive
+decomposition and mixed-language placement issues.
+
+Scope:
+
+- Audit editor frontend modules that were split into many tiny helper files with
+  little independent semantic value.
+- Recombine files where the split obscures the component or feature boundary
+  instead of clarifying it. Example class of problem: breadcrumb widget helpers
+  split into many 5-15 line files such as separator/append utility modules.
+- Preserve genuinely reusable modules, protocol contracts, and independently
+  testable logic. The goal is not one giant file; the goal is coherent semantic
+  grouping.
+- Review other editor frontend areas for the same over-decomposition pattern,
+  not just breadcrumbs.
+- Separate or better organize Python backend/editor service files that currently
+  sit mixed in with TypeScript frontend source files.
+- Keep frontend RPC contracts and runtime behavior stable while moving files.
+
+Acceptance:
+
+- Breadcrumb widget source is grouped around meaningful component/feature
+  boundaries, not dozens of tiny single-purpose utility files.
+- Other obviously over-decomposed editor frontend areas have a cleanup plan or
+  are consolidated where low-risk.
+- Python and TypeScript editor files have clearer directory boundaries so the
+  editor frontend source tree is not polluted by backend implementation files.
+- App TypeScript typecheck and `node build.mjs` pass after any frontend moves.
+- Python `py_compile` or focused `basedpyright` passes for any moved Python
+  backend/editor service files.
+
+Likely touched areas:
+
+- `app/apps/file_editor_cm6/monaco_editor/`
+- editor breadcrumb widget modules such as `editor_breadcrumb_*`
+- editor frontend entry/runtime modules
+- editor backend service modules that should live under clearer Python-owned
+  paths
+
+### Phase 6 - Optional portability seam
 
 This phase is not required to unlock the app-local migration, but it remains a
 valid later goal.

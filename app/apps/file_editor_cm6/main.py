@@ -4,25 +4,26 @@ import sys
 import os
 import json
 import time
-import shutil
 import faulthandler
 import threading
 import traceback
+from collections.abc import Callable
+from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Protocol, cast
 from urllib import request as urllib_request
 from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query
-from fastapi.responses import JSONResponse, FileResponse, Response
+from fastapi.responses import JSONResponse, FileResponse
 import asyncio
 from anyio import to_thread
 from .history_store import HistoryStore
-from .explorer.services.file_ops import get_project_root, set_project_root, mark_git_cache_dirty, list_dir, _normalize_rel_path
+from .explorer.services import file_ops as _file_ops
+from .explorer.services.file_ops import get_project_root, set_project_root, mark_git_cache_dirty, list_dir
 from .code_server_shell_manager import ensure_code_server_shell
 from .git_helper import (
     GitError,
     is_git_repository,
-    get_worktree_changes,
     get_commit_info,
     list_branches as git_list_branches,
     checkout_branch as git_checkout_branch,
@@ -44,13 +45,12 @@ from .git_helper import (
     get_origin_url as git_get_origin_url,
 )
 from . import edit_tracker
-from .diff_helper import invalidate_diff_cache, collect_diff
-from .draft_diff_helper import compute_draft_diff
-from .core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
-from .explorer.transport.connection_manager import manager as explorer_manager
-from .core_write import write_full, BaseMismatchError, _get_file_meta
+from .diff_helper import invalidate_diff_cache
+from .core_read import push_save_ack, emit_diff_changed, subscribe, unsubscribe
+from .core_write import FileMeta, write_full, BaseMismatchError
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
 from .explorer import search as explorer_search_module
+from .explorer.search import SearchContentOptionsParams
 from .main_page.backend.state_payload import (
     StatePayloadDeps,
     build_diff_base_payload,
@@ -60,10 +60,19 @@ from .main_page.backend.state_payload import (
     resolve_diff_base,
     status_to_payload,
 )
-from .main_page.backend.workbench_routes import WorkbenchRoutesDeps, create_workbench_router
+from .main_page.backend.workbench_routes import (
+    CodeServerConnectionTargetFn,
+    EnsureCodeServerShellFn,
+    EnsureWorkbenchAdapterShellFn,
+    HistoryStoreLike as WorkbenchHistoryStoreLike,
+    ShellRecordLike,
+    WorkbenchRoutesDeps,
+    create_workbench_router,
+)
 from .main_page.backend.project_routes import ProjectRoutesDeps, create_project_router
 from .main_page.backend.git_routes import GitRoutesDeps, create_git_router
 from .main_page.backend.history_routes import HistoryRoutesDeps, create_history_router
+from .stores import get_history_store, get_preferences_store
 
 IGNORE_PATTERNS = [
     '.git', '__pycache__', 'node_modules', '.venv', 'venv',
@@ -72,8 +81,97 @@ IGNORE_PATTERNS = [
 ]
 
 AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
-JsonDict = dict[str, Any]
+JsonDict = dict[str, object]
 APP_ID = str(os.environ.get("TE_APP_ID") or "file_editor_cm6").strip() or "file_editor_cm6"
+
+
+def _json_object(value: object) -> JsonDict:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in cast(dict[object, object], value).items()}
+
+
+def _json_list(value: object) -> list[object]:
+    return cast(list[object], value) if isinstance(value, list) else []
+
+
+def _str_value(value: object, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
+def _str_list(value: object) -> list[str]:
+    return [item for item in _json_list(value) if isinstance(item, str)]
+
+
+def _file_meta_json(meta: dict[str, str | int | None]) -> JsonDict:
+    return {key: value for key, value in meta.items()}
+
+
+def _meta_sha256(meta: dict[str, str | int | None]) -> str:
+    value = meta.get("sha256")
+    return value if isinstance(value, str) else ""
+
+
+class ReadableResponse(Protocol):
+    def read(self) -> bytes: ...
+
+    def close(self) -> None: ...
+
+
+class NormalizeRelPathFn(Protocol):
+    def __call__(self, project_root: Path, raw_path: str) -> str: ...
+
+
+class CollectDiffFn(Protocol):
+    def __call__(self, project_root: Path, rel_path: str, *, base_ref: str | None = None) -> object: ...
+
+
+class ComputeDraftDiffFn(Protocol):
+    def __call__(self, file_path: str, draft_content: str, disk_content: str) -> object: ...
+
+
+class EditTrackerSubscribeFn(Protocol):
+    def __call__(self, callback: Callable[[JsonDict], None]) -> str: ...
+
+
+class EditTrackerStatusFn(Protocol):
+    def __call__(self) -> object: ...
+
+
+def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
+    fn = cast(NormalizeRelPathFn, cast(object, getattr(_file_ops, "_normalize_rel_path")))
+    return fn(project_root, raw_path)
+
+
+def _get_file_meta(path: Path) -> FileMeta:
+    from . import core_write as _core_write
+
+    fn = cast(Callable[[Path], FileMeta], cast(object, getattr(_core_write, "_get_file_meta")))
+    return fn(path)
+
+
+def _collect_diff(project_root: Path, rel_path: str, *, base_ref: str | None = None) -> JsonDict:
+    from . import diff_helper as _diff_helper
+
+    fn = cast(CollectDiffFn, cast(object, getattr(_diff_helper, "collect_diff")))
+    return _json_object(fn(project_root, rel_path, base_ref=base_ref))
+
+
+def _compute_draft_diff(file_path: str, draft_content: str, disk_content: str) -> JsonDict:
+    from . import draft_diff_helper as _draft_diff_helper
+
+    fn = cast(ComputeDraftDiffFn, cast(object, getattr(_draft_diff_helper, "compute_draft_diff")))
+    return _json_object(fn(file_path, draft_content, disk_content))
+
+
+def _edit_tracker_status() -> JsonDict:
+    fn = cast(EditTrackerStatusFn, cast(object, getattr(edit_tracker, "get_tracking_status")))
+    return _json_object(fn())
+
+
+def _edit_tracker_subscribe(callback: Callable[[JsonDict], None]) -> str:
+    fn = cast(EditTrackerSubscribeFn, cast(object, getattr(edit_tracker, "subscribe")))
+    return fn(callback)
 
 
 def _install_crash_diagnostics() -> None:
@@ -153,8 +251,11 @@ def _post_serving_readiness() -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib_request.urlopen(req, timeout=5) as resp:
+    resp = cast(ReadableResponse, urllib_request.urlopen(req, timeout=5))
+    try:
         resp.read()
+    finally:
+        resp.close()
 
 
 async def te2_app_backend_serving() -> None:
@@ -162,261 +263,6 @@ async def te2_app_backend_serving() -> None:
         await asyncio.to_thread(_post_serving_readiness)
     except Exception as exc:
         print(f"[file_editor_cm6] readiness post failed: {exc}", flush=True)
-
-CHANGE_RESULT_LIMIT = 40
-STATUS_TEXT_MAP = {
-    'M': 'Modified',
-    'A': 'Added',
-    'D': 'Deleted',
-    'R': 'Renamed',
-    'C': 'Copied',
-    'U': 'Conflict',
-    '?': 'Untracked',
-    '!': 'Ignored',
-}
-
-async def _search_by_name(root: Path, query: str) -> JsonDict:
-    """Search files/folders by name."""
-    return await explorer_search_module.search_by_name(root, query)
-
-async def _search_by_content(root: Path, query: str) -> JsonDict:
-    """Search file contents using ripgrep or fallback."""
-    rg_path = shutil.which('rg')
-    if rg_path:
-        return await _search_with_ripgrep(root, query, rg_path)
-    else:
-        return await _search_with_python(root, query)
-
-async def _search_with_ripgrep(root: Path, query: str, rg_path: str) -> JsonDict:
-    """Use ripgrep for fast content search."""
-    cmd = [
-        rg_path,
-        '--json',
-        '--line-number',
-        '--column',
-        '--max-count', '5',  # Max 5 matches per file
-        '--max-filesize', '1M',  # Skip large files
-        '--',
-        query,
-        str(root)
-    ]
-    
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10.0)
-        
-        # Parse ripgrep JSON output
-        results_by_file = {}
-        for line in stdout.decode('utf-8').splitlines():
-            if not line.strip():
-                continue
-            try:
-                obj = json.loads(line)
-                if obj.get('type') == 'match':
-                    data = obj['data']
-                    path_str = data['path']['text']
-                    path = Path(path_str)
-                    rel = str(path.relative_to(root))
-                    
-                    if rel not in results_by_file:
-                        results_by_file[rel] = {
-                            "path": path_str,
-                            "rel": rel,
-                            "matches": []
-                        }
-                    
-                    line_num = data['line_number']
-                    line_text = data['lines']['text'].rstrip('\n')
-                    
-                    # Extract snippet around match
-                    submatch = data['submatches'][0] if data['submatches'] else {}
-                    col = submatch.get('start', 0)
-                    match_text = submatch.get('match', {}).get('text', query)
-                    
-                    # Create snippet (75 chars before/after)
-                    start = max(0, col - 75)
-                    end = min(len(line_text), col + len(match_text) + 75)
-                    snippet = line_text[start:end]
-                    
-                    results_by_file[rel]["matches"].append({
-                        "line": line_num,
-                        "column": col,
-                        "text": line_text,
-                        "snippet": snippet
-                    })
-            except (json.JSONDecodeError, KeyError):
-                continue
-        
-        results = list(results_by_file.values())[:50]  # Max 50 files
-        match_count = sum(len(r["matches"]) for r in results)
-        
-        return {
-            "mode": "content",
-            "query": query,
-            "results": results,
-            "truncated": len(results_by_file) > 50,
-            "file_count": len(results),
-            "match_count": match_count
-        }
-        
-    except asyncio.TimeoutError:
-        raise TimeoutError("Ripgrep search timed out")
-
-async def _search_with_python(root: Path, query: str) -> JsonDict:
-    """Fallback Python content search."""
-    results_by_file = {}
-    query_lower = query.lower()
-    file_count = 0
-    max_files = 50
-    
-    def is_binary(path: Path) -> bool:
-        try:
-            with path.open('rb') as f:
-                return b'\x00' in f.read(8192)
-        except:
-            return True
-    
-    def should_ignore(path: Path) -> bool:
-        for part in path.parts:
-            if part in IGNORE_PATTERNS or part.startswith('.'):
-                return True
-        return False
-    
-    for item in root.rglob('*'):
-        if not item.is_file() or file_count >= max_files:
-            break
-        if should_ignore(item.relative_to(root)) or is_binary(item):
-            continue
-        
-        try:
-            content = item.read_text(encoding='utf-8', errors='ignore')
-            lines = content.splitlines()
-            matches = []
-            
-            for line_num, line_text in enumerate(lines, 1):
-                if query_lower in line_text.lower():
-                    col = line_text.lower().find(query_lower)
-                    start = max(0, col - 75)
-                    end = min(len(line_text), col + len(query) + 75)
-                    
-                    matches.append({
-                        "line": line_num,
-                        "column": col,
-                        "text": line_text,
-                        "snippet": line_text[start:end]
-                    })
-                    
-                    if len(matches) >= 5:  # Max 5 per file
-                        break
-            
-            if matches:
-                rel = str(item.relative_to(root))
-                results_by_file[rel] = {
-                    "path": str(item),
-                    "rel": rel,
-                    "matches": matches
-                }
-                file_count += 1
-                
-        except Exception:
-            continue
-    
-    results = list(results_by_file.values())
-    match_count = sum(len(r["matches"]) for r in results)
-    
-    return {
-        "mode": "content",
-        "query": query,
-        "results": results,
-        "truncated": file_count >= max_files,
-        "file_count": len(results),
-        "match_count": match_count
-    }
-
-
-def _status_meta_from_code(code: str) -> tuple[str, str]:
-    if not code:
-        return '', STATUS_TEXT_MAP['?']
-    if code in ('??', '!!'):
-        key = '?' if code == '??' else '!'
-        short = '?' if code == '??' else '!'
-        return short, STATUS_TEXT_MAP[key]
-    compact = code.replace(' ', '')
-    primary = compact[0] if compact else '?'
-    key = primary if primary in STATUS_TEXT_MAP else '?'
-    return primary, STATUS_TEXT_MAP[key]
-
-
-def _search_by_changes(project_root: Path) -> JsonDict:
-    project_path = _history_store.get_active_project()
-    if not project_path:
-        return {
-            "mode": "changes",
-            "git": False,
-            "base": _diff_base_payload(None),
-            "changes": [],
-            "truncated": False,
-            "count": 0,
-        }
-    if not is_git_repository(project_root):
-        return {
-            "mode": "changes",
-            "git": False,
-            "base": _diff_base_payload(project_path),
-            "changes": [],
-            "truncated": False,
-            "count": 0,
-        }
-
-    try:
-        base_ref = _resolve_diff_base(project_path)
-        entries = get_worktree_changes(project_root, base_ref)
-    except GitError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    truncated = len(entries) > CHANGE_RESULT_LIMIT
-    selected = entries[:CHANGE_RESULT_LIMIT]
-    changes = []
-
-    for entry in selected:
-        rel_path = entry.path.replace('\\', '/')
-        diff_payload = collect_diff(project_root, rel_path, base_ref=base_ref)
-        status_short, status_text = _status_meta_from_code(entry.code)
-        summary = diff_payload.get("summary", {"added": 0, "deleted": 0, "tracked": False})
-
-        change = {
-            "rel": rel_path,
-            "path": str((project_root / rel_path).resolve()),
-            "label": Path(rel_path).name,
-            "status": status_short,
-            "statusCode": entry.code,
-            "statusText": status_text,
-            "summary": summary,
-            "hunks": diff_payload.get("hunks", []),
-            "isTracked": summary.get("tracked", True),
-        }
-        if entry.original_path:
-            change["renamedFrom"] = entry.original_path
-        if "error" in diff_payload:
-            change["error"] = diff_payload["error"]
-        changes.append(change)
-
-    base_info = _diff_base_payload(project_path)
-
-    return {
-        "mode": "changes",
-        "git": True,
-        "base": base_info,
-        "changes": changes,
-        "truncated": truncated,
-        "count": len(changes),
-        "total": len(entries),
-    }
 
 file_editor_cm6_bp = APIRouter()
 # sock = Sock()
@@ -450,9 +296,12 @@ file_editor_cm6_bp.include_router(terminal_router)
 
 # Include the self-contained editor routes
 from .monaco_editor.editor_backend import editor_router
-from .monaco_editor import register_monaco_editor_routes
 file_editor_cm6_bp.include_router(editor_router)
-register_monaco_editor_routes(file_editor_cm6_bp, mount_path="/ui")
+_register_monaco_editor_routes = cast(
+    Callable[[APIRouter, str], None],
+    cast(object, import_module("app.apps.file_editor_cm6.monaco_editor").__dict__["register_monaco_editor_routes"]),
+)
+_register_monaco_editor_routes(file_editor_cm6_bp, "/ui")
 
 # --- Code TE2 Socket.IO (worker-owned) ---
 # The main framework process still proxies the current physical paths to this
@@ -467,8 +316,8 @@ SUBAPPS = [
     ("/terminal_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
 ]
 
-# Import singleton store instances
-from .stores import _history_store, _preferences_store
+_history_store = get_history_store()
+_preferences_store = get_preferences_store()
 
 _STATE_PAYLOAD_DEPS = StatePayloadDeps(
     history=_history_store,
@@ -480,10 +329,10 @@ _STATE_PAYLOAD_DEPS = StatePayloadDeps(
 )
 
 
-async def _get_framework_shell_by_id(shell_id: str):
+async def _get_framework_shell_by_id(shell_id: str) -> ShellRecordLike | None:
     from .workbench_adapter_shell_manager import get_shell_record
 
-    return await get_shell_record(shell_id)
+    return cast(ShellRecordLike | None, await get_shell_record(shell_id))
 
 
 async def _ensure_workbench_adapter_shell_for_routes(
@@ -491,20 +340,21 @@ async def _ensure_workbench_adapter_shell_for_routes(
     *,
     code_server_http: str,
     code_server_socket_path: str | None,
-):
+)-> ShellRecordLike:
     from .workbench_adapter_shell_manager import ensure_workbench_adapter_shell
 
-    return await ensure_workbench_adapter_shell(
+    return cast(ShellRecordLike, await ensure_workbench_adapter_shell(
         project_root,
         code_server_http=code_server_http,
         code_server_socket_path=code_server_socket_path,
-    )
+    ))
 
 
-def _code_server_connection_target_for_routes(record):
+def _code_server_connection_target_for_routes(record: ShellRecordLike) -> tuple[str, str | None]:
+    from .code_server_shell_manager import ShellRecord as CodeServerShellRecord
     from .code_server_shell_manager import code_server_connection_target
 
-    return code_server_connection_target(record)
+    return code_server_connection_target(cast(CodeServerShellRecord, record))
 
 
 async def _nudge_diagnostics_for_file_for_routes(path: str) -> bool:
@@ -514,11 +364,11 @@ async def _nudge_diagnostics_for_file_for_routes(path: str) -> bool:
 
 
 _WORKBENCH_ROUTES_DEPS = WorkbenchRoutesDeps(
-    history=_history_store,
+    history=cast(WorkbenchHistoryStoreLike, _history_store),
     get_project_root=get_project_root,
-    ensure_code_server_shell=ensure_code_server_shell,
-    ensure_workbench_adapter_shell=_ensure_workbench_adapter_shell_for_routes,
-    code_server_connection_target=_code_server_connection_target_for_routes,
+    ensure_code_server_shell=cast(EnsureCodeServerShellFn, ensure_code_server_shell),
+    ensure_workbench_adapter_shell=cast(EnsureWorkbenchAdapterShellFn, _ensure_workbench_adapter_shell_for_routes),
+    code_server_connection_target=cast(CodeServerConnectionTargetFn, _code_server_connection_target_for_routes),
     nudge_diagnostics_for_file=_nudge_diagnostics_for_file_for_routes,
     get_shell_by_id=_get_framework_shell_by_id,
 )
@@ -588,7 +438,8 @@ def _ensure_workbench_json_sync(project_root_str: str) -> None:
         from .project_sidecar import ProjectSidecar
         from .code_server_shell_manager import sync_vscode_watcher_settings
         sc = ProjectSidecar.load_or_create(project_root_str)
-        wmode = sc._data.get("watcher", {}).get("mode", "ipc")
+        watcher = _json_object(sc.dump_raw().get("watcher"))
+        wmode = _str_value(watcher.get("mode"), "ipc")
         sync_vscode_watcher_settings(wmode)
     except Exception as exc:
         print(f"[file_editor_cm6] workbench json sync failed (non-fatal): {exc}", flush=True)
@@ -608,15 +459,15 @@ async def _eager_start_code_server():
         # Sync watcher settings BEFORE code-server launches
         _ensure_workbench_json_sync(pr)
         cs = await ensure_code_server_shell(pr)
-        cs_env = (cs.env_overrides or {})
+        cs_env = _json_object(cs.env_overrides)
         pr = str(cs_env.get("PROJECT_ROOT") or pr)
         print(f"[file_editor_cm6] eager code-server startup OK (project={pr})", flush=True)
     except Exception as exc:
         print(f"[file_editor_cm6] eager code-server startup failed: {exc}", flush=True)
 
 
-@file_editor_cm6_bp.on_event("startup")
-async def _on_startup():
+@file_editor_cm6_bp.on_event("startup")  # pyright: ignore[reportDeprecated]
+async def _on_startup():  # pyright: ignore[reportUnusedFunction]
     _install_loop_exception_handler()
     asyncio.ensure_future(_eager_start_code_server())
 
@@ -641,8 +492,10 @@ def _diff_base_payload(project_path: str | None) -> JsonDict:
 
 
 
-def _status_to_payload(status: Any) -> JsonDict:
-    return status_to_payload(status)
+def _status_to_payload(status: object) -> JsonDict:
+    from .git_helper import GitStatus
+
+    return status_to_payload(cast(GitStatus, status))
 
 def _get_runtime_metadata() -> JsonDict:
     return get_runtime_metadata()
@@ -885,23 +738,22 @@ async def write_file_route(data: JsonDict = Body(...)):
     # Edit 2025-11-17T00:13:07+00:00: This is the legacy write endpoint.
     # It was updated to capture the original file's mode before writing and
     # pass it to the `write_full` function to preserve permissions.
-    path_value = data.get('path')
+    path = _str_value(data.get('path')) or None
     content_value = data.get('content')
-    path = path_value if isinstance(path_value, str) else None
     content = content_value if isinstance(content_value, str) else None
-    client_id_value = data.get('client_id', 'unknown')
-    client_id = client_id_value if isinstance(client_id_value, str) else 'unknown'
-    op_id_value = data.get('op_id', '')
-    op_id = op_id_value if isinstance(op_id_value, str) else ''
-    base_sha256 = None
+    client_id = _str_value(data.get('client_id'), 'unknown')
+    op_id = _str_value(data.get('op_id'))
+    base_sha256: str | None = None
 
     if not path:
         raise HTTPException(status_code=400, detail="Path is required")
     if content is None:
         raise HTTPException(status_code=400, detail="Content is required")
 
-    if data.get('base') and isinstance(data['base'], dict):
-        base_sha256 = data['base'].get('sha256')
+    base_obj = _json_object(data.get('base'))
+    base_sha_obj = base_obj.get('sha256')
+    if isinstance(base_sha_obj, str):
+        base_sha256 = base_sha_obj
 
     project_root = get_project_root()
     try:
@@ -919,12 +771,6 @@ async def write_file_route(data: JsonDict = Body(...)):
             pass  # Proceed without mode preservation
     
     try:
-        # Initialize watcher if not already running
-        try:
-            init_watcher(project_root)
-        except Exception as e:
-            await _broadcast_watcher_error(project_root, str(e))
-
         # NEW: Pass mode to write_full
         file_meta = await to_thread.run_sync(
             lambda: write_full(project_root, str(rel_path), content, 
@@ -944,10 +790,10 @@ async def write_file_route(data: JsonDict = Body(...)):
                     pass
 
         # Send save acknowledgement to prevent self-echo
-        push_save_ack(str(rel_path), op_id, client_id, file_meta)
+        push_save_ack(str(rel_path), op_id, client_id, _file_meta_json(file_meta))
 
         # Notify diff subscribers of change
-        emit_diff_changed(str(rel_path), file_meta["sha256"])
+        emit_diff_changed(str(rel_path), _meta_sha256(file_meta))
 
         # Refresh caches so explorer + diff stay accurate
         mark_git_cache_dirty(project_root)
@@ -972,28 +818,6 @@ async def write_file_route(data: JsonDict = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-import asyncio
-
-async def _broadcast_watcher_error(project_root: Path | str, message: str) -> None:
-    try:
-        project_path = str(project_root)
-        from app.apps.file_editor_cm6.explorer.transport.rpc_emit import (
-            emit_project_explorer_rpc_notification,
-        )
-        payload: dict[str, object] = {
-            "message": message,
-            "limit": 524288,
-            "command": "sudo sysctl -w fs.inotify.max_user_watches=524288",
-        }
-        await emit_project_explorer_rpc_notification(
-            project_path,
-            "explorer.watcher.error",
-            payload,
-        )
-    except Exception:
-        # Avoid cascading failures from watcher error notifications
-        pass
-
 @file_editor_cm6_bp.websocket('/ws/read')
 async def ws_read(websocket: WebSocket):
     """WebSocket endpoint for file change notifications."""
@@ -1012,14 +836,8 @@ async def ws_read(websocket: WebSocket):
         await websocket.close(reason='Path outside project root')
         return
 
-    # Initialize watcher if not already running
-    try:
-        init_watcher(project_root)
-    except Exception as e:
-        await _broadcast_watcher_error(project_root, str(e))
-
     # Subscribe to file changes
-    event_queue = asyncio.Queue()
+    event_queue: asyncio.Queue[JsonDict] = asyncio.Queue()
     token = subscribe(str(rel_path), client_id, lambda event: event_queue.put_nowait(event))
 
     async def forward_events():
@@ -1038,7 +856,7 @@ async def ws_read(websocket: WebSocket):
 
     try:
         # Keep connection alive and ignore incoming messages
-        async for msg in websocket.iter_text():
+        async for _msg in websocket.iter_text():
             pass
     except Exception as e:
         print(f"[ws/read] iter_text error path={path} client={client_id} err={e}", file=sys.stderr)
@@ -1113,13 +931,13 @@ def get_preferences():
 @file_editor_cm6_bp.post('/preferences')
 async def update_preferences(payload: JsonDict = Body(...)):
     """Persist editor/UI preference changes."""
-    editor = payload.get('editor')
-    ui = payload.get('ui')
-    project = payload.get('project')
+    editor = _json_object(payload.get('editor')) or None
+    ui = _json_object(payload.get('ui')) or None
+    project: JsonDict | None = _json_object(payload.get('project')) or None
 
     active_project = _history_store.get_active_project()
     if project is None and active_project:
-        project = {"path": active_project}
+        project = cast(JsonDict, {"path": active_project})
     elif project and not project.get('path') and active_project:
         project['path'] = active_project
 
@@ -1156,7 +974,7 @@ def get_diff(path: str = Query(...)):
         raise HTTPException(status_code=400, detail=str(exc))
 
     base_ref = _resolve_diff_base(project_path)
-    payload = collect_diff(project_root, rel, base_ref=base_ref)
+    payload = _collect_diff(project_root, rel, base_ref=base_ref)
     return {"ok": True, "data": payload}
 
 @file_editor_cm6_bp.get('/explorer/list')
@@ -1170,8 +988,8 @@ def explorer_list(rel: str = Query('.')):
 @file_editor_cm6_bp.post('/explorer/search')
 async def explorer_search(data: JsonDict = Body(...)):
     """Search files by name or content within project."""
-    mode = data.get('mode', 'name')
-    query = (data.get('query') or '').strip()
+    mode = _str_value(data.get('mode'), 'name')
+    query = _str_value(data.get('query')).strip()
     
     # Get project root
     project_root = _history_store.get_active_project()
@@ -1189,11 +1007,11 @@ async def explorer_search(data: JsonDict = Body(...)):
     
     try:
         if mode == 'name':
-            results = await _search_by_name(root_path, query)
+            results = await explorer_search_module.search_by_name(root_path, query)
         elif mode == 'content':
-            results = await _search_by_content(root_path, query)
+            results = await explorer_search_module.search_by_content(root_path, cast(SearchContentOptionsParams, data))
         elif mode == 'changes':
-            results = _search_by_changes(root_path)
+            results = explorer_search_module.search_by_changes(root_path)
         else:
             raise HTTPException(status_code=400, detail="Invalid mode")
         
@@ -1204,7 +1022,7 @@ async def explorer_search(data: JsonDict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @file_editor_cm6_bp.get('/review/list')
-async def review_list(lightweight: bool = Query(False)):
+async def review_list(lightweight: bool = Query(False)) -> JsonDict:
     """
     Get list of files with unsaved drafts.
     If lightweight=True, skips diff computation and returns only metadata.
@@ -1229,7 +1047,7 @@ async def review_list(lightweight: bool = Query(False)):
             except ValueError:
                 continue # Skip files outside project
             
-            hunks = []
+            hunks: list[object] = []
             if not lightweight:
                 # Compute diff
                 try:
@@ -1240,8 +1058,8 @@ async def review_list(lightweight: bool = Query(False)):
                     else:
                         disk_content = ''
                     
-                    diff_data = compute_draft_diff(str(abs_path), draft_content, disk_content)
-                    hunks = diff_data.get('hunks', [])
+                    diff_data = _compute_draft_diff(str(abs_path), draft_content, disk_content)
+                    hunks = _json_list(diff_data.get('hunks'))
                 except Exception as e:
                     print(f"[REVIEW] Diff computation failed for {rel_path}: {e}", file=sys.stderr)
 
@@ -1259,9 +1077,9 @@ async def review_list(lightweight: bool = Query(False)):
     return {"ok": True, "data": results}
 
 @file_editor_cm6_bp.post('/review/save')
-async def review_save(data: JsonDict = Body(...)):
+async def review_save(data: JsonDict = Body(...)) -> JsonDict:
     """Save selected files from drafts to disk with full lifecycle notifications."""
-    files = data.get('files', [])
+    files = _str_list(data.get('files'))
     if not files:
         return {"ok": True, "saved_count": 0}
         
@@ -1271,13 +1089,7 @@ async def review_save(data: JsonDict = Body(...)):
     
     root_path = Path(project_root)
     saved_count = 0
-    errors = []
-    
-    # Init watcher once
-    try:
-        init_watcher(root_path)
-    except Exception as e:
-        await _broadcast_watcher_error(root_path, str(e))
+    errors: list[str] = []
     
     import time # Ensure time is available
     
@@ -1311,8 +1123,8 @@ async def review_save(data: JsonDict = Body(...)):
             # Lifecycle notifications
             file_meta = _get_file_meta(abs_path)
             op_id = f"review_save_{int(time.time())}"
-            push_save_ack(str(rel_path), op_id, "review_panel", file_meta)
-            emit_diff_changed(str(rel_path), file_meta["sha256"])
+            push_save_ack(str(rel_path), op_id, "review_panel", _file_meta_json(file_meta))
+            emit_diff_changed(str(rel_path), _meta_sha256(file_meta))
             invalidate_diff_cache(root_path, str(rel_path))
             
             # Clear draft
@@ -1339,9 +1151,9 @@ async def review_save(data: JsonDict = Body(...)):
     return {"ok": True, "saved_count": saved_count, "errors": errors}
 
 @file_editor_cm6_bp.post('/review/discard')
-async def review_discard(data: JsonDict = Body(...)):
+async def review_discard(data: JsonDict = Body(...)) -> JsonDict:
     """Discard drafts for selected files."""
-    files = data.get('files', [])
+    files = _str_list(data.get('files'))
     if not files:
         return {"ok": True, "discarded_count": 0}
         
@@ -1394,9 +1206,8 @@ async def review_discard(data: JsonDict = Body(...)):
 
 @file_editor_cm6_bp.post('/explorer/mkdir')
 async def explorer_mkdir(data: JsonDict = Body(...)):
-    project = data.get('project')
-    parent_rel = data.get('parent_rel', '.')
-    name = data.get('name', '').strip()
+    parent_rel = _str_value(data.get('parent_rel'), '.')
+    name = _str_value(data.get('name')).strip()
     
     if not name:
         raise HTTPException(status_code=400, detail="Name required")
@@ -1413,9 +1224,8 @@ async def explorer_mkdir(data: JsonDict = Body(...)):
 
 @file_editor_cm6_bp.post('/explorer/touch')
 async def explorer_touch(data: JsonDict = Body(...)):
-    project = data.get('project')
-    parent_rel = data.get('parent_rel', '.')
-    name = data.get('name', '').strip()
+    parent_rel = _str_value(data.get('parent_rel'), '.')
+    name = _str_value(data.get('name')).strip()
       
     if not name:
         raise HTTPException(status_code=400, detail="Name required")
@@ -1432,8 +1242,8 @@ async def explorer_touch(data: JsonDict = Body(...)):
 
 @file_editor_cm6_bp.post('/explorer/rename')
 async def explorer_rename(data: JsonDict = Body(...)):
-    rel = data.get('rel')
-    new_name = data.get('new_name', '').strip()
+    rel = _str_value(data.get('rel'))
+    new_name = _str_value(data.get('new_name')).strip()
     
     if not rel:
         raise HTTPException(status_code=400, detail="Path required")
@@ -1452,7 +1262,7 @@ async def explorer_rename(data: JsonDict = Body(...)):
 
 @file_editor_cm6_bp.post('/explorer/delete')
 async def explorer_delete(data: JsonDict = Body(...)):
-    rel = data.get('rel')
+    rel = _str_value(data.get('rel'))
     if not rel:
         raise HTTPException(status_code=400, detail="Path required")
     try:
@@ -1465,7 +1275,7 @@ async def explorer_delete(data: JsonDict = Body(...)):
 
 @file_editor_cm6_bp.post('/explorer/batch_delete')
 async def explorer_batch_delete(data: JsonDict = Body(...)):
-    rels = data.get('rels', [])
+    rels = _str_list(data.get('rels'))
     if not rels:
         raise HTTPException(status_code=400, detail="Paths required")
     try:
@@ -1478,8 +1288,8 @@ async def explorer_batch_delete(data: JsonDict = Body(...)):
 
 @file_editor_cm6_bp.post('/explorer/copy')
 async def explorer_copy(data: JsonDict = Body(...)):
-    rel = data.get('rel')
-    dest_path = data.get('dest_path')
+    rel = _str_value(data.get('rel'))
+    dest_path = _str_value(data.get('dest_path'))
     if not rel or not dest_path:
         raise HTTPException(status_code=400, detail="Path required")
     try:
@@ -1492,8 +1302,8 @@ async def explorer_copy(data: JsonDict = Body(...)):
 
 @file_editor_cm6_bp.post('/explorer/move')
 async def explorer_move(data: JsonDict = Body(...)):
-    rel = data.get('rel')
-    dest_path = data.get('dest_path')
+    rel = _str_value(data.get('rel'))
+    dest_path = _str_value(data.get('dest_path'))
     if not rel or not dest_path:
         raise HTTPException(status_code=400, detail="Path required")
     try:
@@ -1506,8 +1316,8 @@ async def explorer_move(data: JsonDict = Body(...)):
 
 @file_editor_cm6_bp.post('/explorer/batch_copy')
 async def explorer_batch_copy(data: JsonDict = Body(...)):
-    rels = data.get('rels', [])
-    dest_path = data.get('dest_path')
+    rels = _str_list(data.get('rels'))
+    dest_path = _str_value(data.get('dest_path'))
     if not rels or not dest_path:
         raise HTTPException(status_code=400, detail="Paths and destination required")
     try:
@@ -1520,8 +1330,8 @@ async def explorer_batch_copy(data: JsonDict = Body(...)):
 
 @file_editor_cm6_bp.post('/explorer/batch_move')
 async def explorer_batch_move(data: JsonDict = Body(...)):
-    rels = data.get('rels', [])
-    dest_path = data.get('dest_path')
+    rels = _str_list(data.get('rels'))
+    dest_path = _str_value(data.get('dest_path'))
     if not rels or not dest_path:
         raise HTTPException(status_code=400, detail="Paths and destination required")
     try:
@@ -1535,8 +1345,8 @@ async def explorer_batch_move(data: JsonDict = Body(...)):
 @file_editor_cm6_bp.post('/explorer/copy_from')
 async def explorer_copy_from(data: JsonDict = Body(...)):
     """Import (copy) a file/folder from an absolute path into the project."""
-    source_path = data.get('source_path')
-    dest_rel = data.get('dest_rel')
+    source_path = _str_value(data.get('source_path'))
+    dest_rel = _str_value(data.get('dest_rel'))
     if not source_path or not dest_rel:
         raise HTTPException(status_code=400, detail="Source path and destination relative path required")
     try:
@@ -1550,8 +1360,8 @@ async def explorer_copy_from(data: JsonDict = Body(...)):
 @file_editor_cm6_bp.post('/explorer/move_from')
 async def explorer_move_from(data: JsonDict = Body(...)):
     """Import (move) a file/folder from an absolute path into the project."""
-    source_path = data.get('source_path')
-    dest_rel = data.get('dest_rel')
+    source_path = _str_value(data.get('source_path'))
+    dest_rel = _str_value(data.get('dest_rel'))
     if not source_path or not dest_rel:
         raise HTTPException(status_code=400, detail="Source path and destination relative path required")
     try:
@@ -1566,7 +1376,7 @@ async def explorer_move_from(data: JsonDict = Body(...)):
 def get_edit_tracker_status():
     """Get current edit tracker status."""
     try:
-        status = edit_tracker.get_tracking_status()
+        status = _edit_tracker_status()
         return {"ok": True, "data": status}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1576,15 +1386,15 @@ async def edit_tracker_ws(websocket: WebSocket):
     """WebSocket endpoint for edit tracking events."""
     await websocket.accept()
     
-    event_queue = asyncio.Queue()
+    event_queue: asyncio.Queue[JsonDict] = asyncio.Queue()
     
-    def queue_callback(event):
+    def queue_callback(event: JsonDict) -> None:
         try:
             event_queue.put_nowait(event)
         except Exception:
             pass
     
-    token = edit_tracker.subscribe(queue_callback)
+    token = _edit_tracker_subscribe(queue_callback)
     
     async def forward_events_to_ws():
         """Forward edit tracker events to WebSocket"""
@@ -1601,7 +1411,7 @@ async def edit_tracker_ws(websocket: WebSocket):
     
     try:
         # Keep connection alive (receive ping/pong)
-        async for msg in websocket.iter_text():
+        async for _msg in websocket.iter_text():
             pass
     finally:
         # Clean up

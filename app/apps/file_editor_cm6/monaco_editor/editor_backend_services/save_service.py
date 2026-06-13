@@ -11,7 +11,7 @@ from typing import Protocol, cast
 from ... import core_read as _core_read
 from ... import core_write as _core_write
 from ...explorer.services import file_ops as _file_ops
-from ...core_read import emit_diff_changed, init_watcher
+from ...core_read import emit_diff_changed
 from ...core_write import BaseMismatchError
 from ...diff_helper import invalidate_diff_cache
 from ...explorer.services.file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
@@ -234,10 +234,6 @@ async def handle_editor_save_request(
         return {"ok": False, "error": "outside_project"}
 
     root_path = Path(project)
-    try:
-        init_watcher(root_path)
-    except Exception:
-        pass
 
     content_obj = snapshot.get("content", "")
     if not isinstance(content_obj, str):

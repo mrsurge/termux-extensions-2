@@ -5,8 +5,9 @@ import json
 import os
 import re
 import shutil
+from importlib import import_module
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Literal, Protocol, TypedDict, cast
 
 from ..git_helper import (
     GitError,
@@ -14,8 +15,127 @@ from ..git_helper import (
     is_git_repository,
     get_commit_info,
 )
-from ..diff_helper import collect_diff
-from ..stores import _history_store
+from ..stores import get_history_store
+from .contracts.search_review import (
+    JsonObject,
+    SearchChange,
+    SearchChangesBaseCommit,
+    SearchChangesBaseInfo,
+    SearchChangesResult,
+    SearchContentMatch,
+    SearchContentResult,
+    SearchContentResultEntry,
+    SearchNameResult,
+    SearchNameResultEntry,
+)
+
+
+class SearchContentOptions(TypedDict):
+    query: str
+    is_regex: bool
+    is_case_sensitive: bool
+    is_whole_words: bool
+    include_patterns: list[str]
+    exclude_patterns: list[str]
+    use_ignore_files: bool
+
+
+class RipgrepText(TypedDict):
+    text: str
+
+
+class RipgrepSubmatch(TypedDict, total=False):
+    start: int
+    match: RipgrepText
+
+
+class RipgrepMatchData(TypedDict):
+    path: RipgrepText
+    line_number: int
+    lines: RipgrepText
+    submatches: list[RipgrepSubmatch]
+
+
+class RipgrepMatchEvent(TypedDict):
+    type: Literal["match"]
+    data: RipgrepMatchData
+
+
+class SearchContentOptionsParams(TypedDict, total=False):
+    query: object
+    isRegex: object
+    isCaseSensitive: object
+    isWholeWords: object
+    includePattern: object
+    excludePattern: object
+    useIgnoreFiles: object
+
+
+class DiffPayload(TypedDict, total=False):
+    summary: JsonObject
+    hunks: list[JsonObject]
+    error: str
+
+
+class CollectDiffFn(Protocol):
+    def __call__(self, project_root: Path, rel_path: str, *, base_ref: str) -> object: ...
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    raw = cast(dict[object, object], value)
+    return {str(key): item for key, item in raw.items()}
+
+
+def _json_object_list(value: object) -> list[JsonObject]:
+    if not isinstance(value, list):
+        return []
+    result: list[JsonObject] = []
+    for item in cast(list[object], value):
+        if isinstance(item, dict):
+            result.append(_json_object(cast(object, item)))
+    return result
+
+
+def _decode_json_object(raw: str) -> JsonObject:
+    decoded = cast(object, json.loads(raw))
+    return _json_object(decoded)
+
+
+def _ripgrep_match_event(value: JsonObject) -> RipgrepMatchEvent | None:
+    if value.get("type") != "match":
+        return None
+    data = _json_object(value.get("data"))
+    path_obj = _json_object(data.get("path"))
+    lines_obj = _json_object(data.get("lines"))
+    path_text = path_obj.get("text")
+    line_text = lines_obj.get("text")
+    line_number = data.get("line_number")
+    if not isinstance(path_text, str) or not isinstance(line_text, str) or not isinstance(line_number, int):
+        return None
+
+    submatches: list[RipgrepSubmatch] = []
+    for item in _json_object_list(data.get("submatches")):
+        submatch: RipgrepSubmatch = {}
+        start = item.get("start")
+        if isinstance(start, int):
+            submatch["start"] = start
+        match_obj = _json_object(item.get("match"))
+        match_text = match_obj.get("text")
+        if isinstance(match_text, str):
+            submatch["match"] = {"text": match_text}
+        submatches.append(submatch)
+
+    return {
+        "type": "match",
+        "data": {
+            "path": {"text": path_text},
+            "line_number": line_number,
+            "lines": {"text": line_text},
+            "submatches": submatches,
+        },
+    }
 
 # Constants duplicated from main.py to avoid circular deps
 IGNORE_PATTERNS = [
@@ -38,14 +158,14 @@ STATUS_TEXT_MAP = {
     '!': 'Ignored',
 }
 
-def _resolve_diff_base(project_path: Optional[str]) -> str:
-    base = _history_store.get_diff_base(project_path)
+def _resolve_diff_base(project_path: str | None) -> str:
+    base = get_history_store().get_diff_base(project_path)
     return base.strip() if base else 'HEAD'
 
-def _diff_base_payload(project_path: Optional[str]) -> dict:
+def _diff_base_payload(project_path: str | None) -> SearchChangesBaseInfo:
     base_ref = _resolve_diff_base(project_path)
-    mode = 'none'
-    commit_info = None
+    mode: Literal["none", "head", "detached"] = 'none'
+    commit_info: SearchChangesBaseCommit | None = None
     
     if project_path:
         root_path = Path(project_path)
@@ -84,7 +204,7 @@ def _status_meta_from_code(code: str) -> tuple[str, str]:
     key = primary if primary in STATUS_TEXT_MAP else '?'
     return primary, STATUS_TEXT_MAP[key]
 
-async def search_by_name(root: Path, query: str) -> dict:
+async def search_by_name(root: Path, query: str) -> SearchNameResult:
     """Search files/folders by name."""
     query_lower = (query or '').lower().strip()
     max_results = 500
@@ -111,7 +231,7 @@ async def search_by_name(root: Path, query: str) -> dict:
         name = Path(rel).name.lower()
         return query_lower in name
 
-    def pack_result(rel: str, is_dir: bool) -> dict:
+    def pack_result(rel: str, is_dir: bool) -> SearchNameResultEntry:
         return {
             "path": str((root / rel).resolve()),
             "rel": rel,
@@ -119,11 +239,11 @@ async def search_by_name(root: Path, query: str) -> dict:
             "name": Path(rel).name,
         }
 
-    def run_filesystem_walk() -> dict:
-        results: list[dict] = []
+    def run_filesystem_walk() -> SearchNameResult:
+        results: list[SearchNameResultEntry] = []
         count = 0
 
-        def onerror(_err):
+        def onerror(_err: OSError) -> None:
             # Ignore unreadable dirs/files; we don't want search to fail hard.
             return
 
@@ -142,7 +262,7 @@ async def search_by_name(root: Path, query: str) -> dict:
                 continue
 
             # Prune ignored directories early.
-            pruned = []
+            pruned: list[str] = []
             for d in dirnames:
                 rel = str(Path(rel_dir, d)) if rel_dir else d
                 if should_ignore_rel(rel):
@@ -170,9 +290,15 @@ async def search_by_name(root: Path, query: str) -> dict:
                     results.append(pack_result(rel, False))
                     count += 1
 
-        return {"results": results, "count": count, "truncated": count >= max_results}
+        return {
+            "mode": "name",
+            "query": query,
+            "results": results,
+            "count": count,
+            "truncated": count >= max_results,
+        }
 
-    async def run_git_ls_files() -> Optional[dict]:
+    async def run_git_ls_files() -> SearchNameResult | None:
         # If we're in a git repo, this is much faster and respects excludes.
         try:
             if not is_git_repository(root):
@@ -193,7 +319,7 @@ async def search_by_name(root: Path, query: str) -> dict:
         if proc.returncode != 0:
             return None
 
-        results: list[dict] = []
+        results: list[SearchNameResultEntry] = []
         count = 0
         seen_dirs: set[str] = set()
 
@@ -213,7 +339,7 @@ async def search_by_name(root: Path, query: str) -> dict:
             p = Path(rel)
             parent = p.parent
             if parent and str(parent) not in ('.', ''):
-                accum = []
+                accum: list[str] = []
                 for part in parent.parts:
                     accum.append(part)
                     drel = str(Path(*accum))
@@ -232,27 +358,19 @@ async def search_by_name(root: Path, query: str) -> dict:
                 results.append(pack_result(rel, False))
                 count += 1
 
-        return {"results": results, "count": count, "truncated": count >= max_results}
+        return {
+            "mode": "name",
+            "query": query,
+            "results": results,
+            "count": count,
+            "truncated": count >= max_results,
+        }
 
     # Avoid blocking the server event loop (Termux devices can be slow).
     git_res = await run_git_ls_files()
-    if git_res is None:
-        fs_res = await asyncio.to_thread(run_filesystem_walk)
-        results = fs_res["results"]
-        count = fs_res["count"]
-        truncated = fs_res["truncated"]
-    else:
-        results = git_res["results"]
-        count = git_res["count"]
-        truncated = git_res["truncated"]
-    
-    return {
-        "mode": "name",
-        "query": query,
-        "results": results,
-        "truncated": truncated,
-        "count": count
-    }
+    if git_res is not None:
+        return git_res
+    return await asyncio.to_thread(run_filesystem_walk)
 
 def _parse_glob_patterns(raw: str) -> list[str]:
     patterns: list[str] = []
@@ -263,7 +381,7 @@ def _parse_glob_patterns(raw: str) -> list[str]:
     return patterns
 
 
-def _build_content_options(params: dict) -> dict:
+def _build_content_options(params: SearchContentOptionsParams) -> SearchContentOptions:
     return {
         "query": str(params.get("query", "")),
         "is_regex": bool(params.get("isRegex", False)),
@@ -275,7 +393,7 @@ def _build_content_options(params: dict) -> dict:
     }
 
 
-async def search_by_content(root: Path, params: dict) -> dict:
+async def search_by_content(root: Path, params: SearchContentOptionsParams) -> SearchContentResult:
     """Search file contents using ripgrep or fallback."""
     options = _build_content_options(params)
     rg_path = shutil.which('rg')
@@ -284,7 +402,7 @@ async def search_by_content(root: Path, params: dict) -> dict:
     else:
         return await _search_with_python(root, options)
 
-async def _search_with_ripgrep(root: Path, options: dict, rg_path: str) -> dict:
+async def _search_with_ripgrep(root: Path, options: SearchContentOptions, rg_path: str) -> SearchContentResult:
     query = options["query"]
     cmd = [
         rg_path,
@@ -323,40 +441,48 @@ async def _search_with_ripgrep(root: Path, options: dict, rg_path: str) -> dict:
             message = stderr.decode('utf-8', errors='ignore').strip() or 'Ripgrep search failed'
             raise RuntimeError(message)
         
-        results_by_file = {}
+        results_by_file: dict[str, SearchContentResultEntry] = {}
         for line in stdout.decode('utf-8').splitlines():
             if not line.strip(): continue
             try:
-                obj = json.loads(line)
-                if obj.get('type') == 'match':
-                    data = obj['data']
-                    path_str = data['path']['text']
-                    path = Path(path_str)
-                    rel = str(path.relative_to(root))
-                    
-                    if rel not in results_by_file:
-                        results_by_file[rel] = {
-                            "path": path_str,
-                            "rel": rel,
-                            "matches": []
-                        }
-                    
-                    line_num = data['line_number']
-                    line_text = data['lines']['text'].rstrip('\n')
-                    submatch = data['submatches'][0] if data['submatches'] else {}
-                    col = submatch.get('start', 0)
-                    match_text = submatch.get('match', {}).get('text', query)
-                    
-                    start = max(0, col - 75)
-                    end = min(len(line_text), col + len(match_text) + 75)
-                    snippet = line_text[start:end]
-                    
-                    results_by_file[rel]["matches"].append({
-                        "line": line_num,
-                        "column": col,
-                        "text": line_text,
-                        "snippet": snippet
-                    })
+                obj = _ripgrep_match_event(_decode_json_object(line))
+                if obj is None:
+                    continue
+                data = obj['data']
+                path_str = data['path']['text']
+                path = Path(path_str)
+                rel = str(path.relative_to(root))
+
+                if rel not in results_by_file:
+                    results_by_file[rel] = {
+                        "path": path_str,
+                        "rel": rel,
+                        "matches": []
+                    }
+
+                line_num = data['line_number']
+                line_text = data['lines']['text'].rstrip('\n')
+                col = 0
+                match_text = query
+                if data['submatches']:
+                    submatch = data['submatches'][0]
+                    start_value = submatch.get('start')
+                    if isinstance(start_value, int):
+                        col = start_value
+                    match_obj = submatch.get('match')
+                    if match_obj is not None:
+                        match_text = match_obj['text']
+
+                start = max(0, col - 75)
+                end = min(len(line_text), col + len(match_text) + 75)
+                snippet = line_text[start:end]
+
+                results_by_file[rel]["matches"].append({
+                    "line": line_num,
+                    "column": col,
+                    "text": line_text,
+                    "snippet": snippet
+                })
             except (json.JSONDecodeError, KeyError):
                 continue
         
@@ -413,9 +539,9 @@ def _path_matches_patterns(rel: str, patterns: list[str]) -> bool:
     return False
 
 
-async def _search_with_python(root: Path, options: dict) -> dict:
+async def _search_with_python(root: Path, options: SearchContentOptions) -> SearchContentResult:
     query = options["query"]
-    results_by_file = {}
+    results_by_file: dict[str, SearchContentResultEntry] = {}
     regex: re.Pattern[str] | None = None
     if options["is_regex"]:
         flags = 0 if options["is_case_sensitive"] else re.IGNORECASE
@@ -456,7 +582,7 @@ async def _search_with_python(root: Path, options: dict) -> dict:
         try:
             content = item.read_text(encoding='utf-8', errors='ignore')
             lines = content.splitlines()
-            matches = []
+            matches: list[SearchContentMatch] = []
             
             for line_num, line_text in enumerate(lines, 1):
                 if regex is not None:
@@ -506,7 +632,25 @@ async def _search_with_python(root: Path, options: dict) -> dict:
         "match_count": match_count
     }
 
-def search_by_changes(project_root: Path) -> dict:
+def _collect_diff(project_root: Path, rel_path: str, *, base_ref: str) -> DiffPayload:
+    module = import_module("app.apps.file_editor_cm6.diff_helper")
+    fn_obj = cast(object, module.__dict__.get("collect_diff"))
+    if not callable(fn_obj):
+        return {}
+    collect = cast(CollectDiffFn, fn_obj)
+    payload = collect(project_root, rel_path, base_ref=base_ref)
+    raw = _json_object(payload)
+    result: DiffPayload = {
+        "summary": _json_object(raw.get("summary")),
+        "hunks": _json_object_list(raw.get("hunks")),
+    }
+    error = raw.get("error")
+    if error is not None:
+        result["error"] = str(error)
+    return result
+
+
+def search_by_changes(project_root: Path) -> SearchChangesResult:
     project_path = str(project_root) # _history_store keys are strings
     
     if not is_git_repository(project_root):
@@ -535,15 +679,15 @@ def search_by_changes(project_root: Path) -> dict:
 
     truncated = len(entries) > CHANGE_RESULT_LIMIT
     selected = entries[:CHANGE_RESULT_LIMIT]
-    changes = []
+    changes: list[SearchChange] = []
 
     for entry in selected:
         rel_path = entry.path.replace('\\', '/')
-        diff_payload = collect_diff(project_root, rel_path, base_ref=base_ref)
+        diff_payload = _collect_diff(project_root, rel_path, base_ref=base_ref)
         status_short, status_text = _status_meta_from_code(entry.code)
         summary = diff_payload.get("summary", {"added": 0, "deleted": 0, "tracked": False})
 
-        change = {
+        change: SearchChange = {
             "rel": rel_path,
             "path": str((project_root / rel_path).resolve()),
             "label": Path(rel_path).name,
@@ -552,7 +696,7 @@ def search_by_changes(project_root: Path) -> dict:
             "statusText": status_text,
             "summary": summary,
             "hunks": diff_payload.get("hunks", []),
-            "isTracked": summary.get("tracked", True),
+            "isTracked": bool(summary.get("tracked", True)),
         }
         if entry.original_path:
             change["renamedFrom"] = entry.original_path

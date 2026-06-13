@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false
 # app/apps/file_editor_cm6/monaco_editor/editor_backend.py
 
 import sys
@@ -5,22 +6,20 @@ import os
 import hashlib
 import asyncio
 from pathlib import Path
-from typing import Optional, cast
+from typing import Optional, Protocol, cast
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
 from fastapi.responses import Response
 from starlette.responses import FileResponse
 
 # --- Local Imports ---
-# Import stores as singletons from the new stores module
-from app.apps.file_editor_cm6.stores import _history_store, _preferences_store
+from app.apps.file_editor_cm6.stores import get_history_store, get_preferences_store
 from app.apps.file_editor_cm6.preferences_store import ALLOWED_FONT_SCALES
 # Import helpers
-from app.apps.file_editor_cm6.explorer.services.file_ops import get_project_root, _normalize_rel_path, mark_git_cache_dirty
-from app.apps.file_editor_cm6.core_read import init_watcher, push_save_ack, emit_diff_changed, subscribe, unsubscribe
+from app.apps.file_editor_cm6.explorer.services.file_ops import get_project_root, mark_git_cache_dirty
+from app.apps.file_editor_cm6.core_read import push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from app.apps.file_editor_cm6.core_write import write_full, BaseMismatchError
-from app.apps.file_editor_cm6.diff_helper import invalidate_diff_cache, collect_diff
-from app.apps.file_editor_cm6.draft_diff_helper import compute_draft_diff
+from app.apps.file_editor_cm6.diff_helper import invalidate_diff_cache
 from .editor_backend_services.contracts import RuntimeMeta
 from .editor_backend_services.protocols import EditorLike
 from .editor_backend_services.view_settings_service import (
@@ -59,6 +58,69 @@ from .editor_backend_services.save_routes_service import (
 from .editor_backend_services.preferences_routes_service import (
     handle_update_preference as _handle_update_preference,
 )
+
+_history_store = get_history_store()
+_preferences_store = get_preferences_store()
+
+
+class WriteFullJsonFn(Protocol):
+    def __call__(
+        self,
+        project_root: Path,
+        path: str,
+        content: str,
+        *,
+        base_sha256: str | None = None,
+        mode: int | None = None,
+    ) -> dict[str, object]: ...
+
+
+class NormalizeRelPathFn(Protocol):
+    def __call__(self, project_root: Path, raw_path: str) -> str: ...
+
+
+class CollectDiffFn(Protocol):
+    def __call__(self, project_root: Path, rel_path: str, *, base_ref: str | None = None) -> object: ...
+
+
+class ComputeDraftDiffFn(Protocol):
+    def __call__(self, file_path: str, draft_content: str, disk_content: str) -> object: ...
+
+
+def _json_object(value: object) -> dict[str, object]:
+    return cast(dict[str, object], value if isinstance(value, dict) else {})
+
+
+def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
+    from app.apps.file_editor_cm6.explorer.services import file_ops as _file_ops
+
+    fn = cast(NormalizeRelPathFn, cast(object, getattr(_file_ops, "_normalize_rel_path")))
+    return fn(project_root, raw_path)
+
+
+def _collect_diff(project_root: Path, rel_path: str, base_ref: str | None = None) -> dict[str, object]:
+    from app.apps.file_editor_cm6 import diff_helper as _diff_helper
+
+    fn = cast(CollectDiffFn, cast(object, getattr(_diff_helper, "collect_diff")))
+    return _json_object(fn(project_root, rel_path, base_ref=base_ref))
+
+
+def _compute_draft_diff(file_path: str, draft_content: str, disk_content: str) -> dict[str, object]:
+    from app.apps.file_editor_cm6 import draft_diff_helper as _draft_diff_helper
+
+    fn = cast(ComputeDraftDiffFn, cast(object, getattr(_draft_diff_helper, "compute_draft_diff")))
+    return _json_object(fn(file_path, draft_content, disk_content))
+
+
+def _write_full_json(
+    project_root: Path,
+    path: str,
+    content: str,
+    *,
+    base_sha256: str | None = None,
+    mode: int | None = None,
+) -> dict[str, object]:
+    return dict(write_full(project_root, path, content, base_sha256=base_sha256, mode=mode))
 
 
 # --- FastAPI Router ---
@@ -236,10 +298,7 @@ def _get_runtime_metadata() -> RuntimeMeta:
 
 
 def _get_editor_preferences() -> dict[str, object]:
-    prefs_obj: object = _preferences_store.get_preferences()
-    if not isinstance(prefs_obj, dict):
-        return {}
-    prefs = cast(dict[str, object], prefs_obj)
+    prefs = _preferences_store.get_preferences()
     editor_obj = prefs.get("editor", {})
     return cast(dict[str, object], editor_obj if isinstance(editor_obj, dict) else {})
 
@@ -339,8 +398,8 @@ def _get_combined_diffs(project_root: Path, file_path: str, current_content: str
         preferences_store=_preferences_store,
         normalize_rel_path=_normalize_rel_path,
         current_diff_base=_current_diff_base,
-        collect_diff=collect_diff,
-        compute_draft_diff=compute_draft_diff,
+        collect_diff=_collect_diff,
+        compute_draft_diff=_compute_draft_diff,
     )
 
 
@@ -352,8 +411,8 @@ async def _get_combined_diffs_async(project_root: Path, file_path: str, current_
         preferences_store=_preferences_store,
         normalize_rel_path=_normalize_rel_path,
         current_diff_base=_current_diff_base,
-        collect_diff=collect_diff,
-        compute_draft_diff=compute_draft_diff,
+        collect_diff=_collect_diff,
+        compute_draft_diff=_compute_draft_diff,
     )
 
 
@@ -451,7 +510,7 @@ def _persist_to_cache_debounced():
             proj_norm = str(Path(project_path).expanduser().resolve(strict=False))
             source_client = source_client_id
 
-            payload = {
+            payload: dict[str, object] = {
                 "path": str(current_file),
                 "project_path": proj_norm,
                 "content": current_content,
@@ -669,11 +728,10 @@ async def set_editor_content(data: dict[str, object] = Body(...)):
         apply_watcher_replace=_apply_watcher_replace,
         current_diff_base=_current_diff_base,
         normalize_rel_path=_normalize_rel_path,
-        collect_diff=collect_diff,
+        collect_diff=_collect_diff,
         get_combined_diffs_async=_get_combined_diffs_async,
         resolve_font_scale=_resolve_font_scale,
         get_project_root=get_project_root,
-        init_watcher=init_watcher,
         subscribe=subscribe,
         unsubscribe=_unsubscribe_token,
         get_watcher_token=_get_watcher_token,
@@ -688,7 +746,7 @@ async def refresh_diffs(data: dict[str, object] = Body(...)):
         get_active_editors=get_active_editors,
         get_project_root=get_project_root,
         normalize_rel_path=_normalize_rel_path,
-        collect_diff=collect_diff,
+        collect_diff=_collect_diff,
         current_diff_base=_current_diff_base,
     )
 
@@ -785,9 +843,6 @@ async def get_view_state():
 
 @editor_router.post('/update_preference')
 async def update_preference(data: dict[str, object] = Body(...)):
-    def _collect_diff(project_root: Path, rel_path: str, base_ref: str) -> dict[str, object]:
-        return collect_diff(project_root, rel_path, base_ref=base_ref)
-
     def _emit_preferences_changed(
         project_path: str,
         key: str,
@@ -800,7 +855,7 @@ async def update_preference(data: dict[str, object] = Body(...)):
             emit_project_explorer_rpc_notification,
         )
 
-        payload = {
+        payload: dict[str, object] = {
             "project_path": project_path,
             "key": key,
             "value": value,
@@ -896,8 +951,7 @@ async def _write_editor_buffer_to_disk(*, client_id: str, op_id: str | None) -> 
         get_project_root=get_project_root,
         history_store=_history_store,
         normalize_rel_path=_normalize_rel_path,
-        write_full=write_full,
-        init_watcher=init_watcher,
+        write_full=_write_full_json,
         push_save_ack=push_save_ack,
         emit_diff_changed=emit_diff_changed,
         mark_git_cache_dirty=mark_git_cache_dirty,
@@ -945,7 +999,7 @@ async def set_view_settings(data: dict[str, object] = Body(...)):
         active_project=_history_store.get_active_project,
         project_root=get_project_root,
         normalize_rel_path=_normalize_rel_path,
-        collect_diff=collect_diff,
+        collect_diff=_collect_diff,
         current_diff_base=_current_diff_base,
         resolve_theme_preference=_resolve_theme_preference,
     )
@@ -960,7 +1014,7 @@ async def set_font_scale_endpoint(data: dict[str, object] = Body(...)):
     )
 
 
-def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
+def register_monaco_editor_routes(fastapi_app: FastAPI, mount_path: str = "/ui") -> None:
     """Register Monaco static asset routes for the inline host editor runtime."""
     app_pkg_root = Path(__file__).resolve().parents[3]
     vendored_monaco = app_pkg_root / "static" / "vendor" / "monaco-editor-core"
@@ -969,7 +1023,7 @@ def register_monaco_editor_routes(fastapi_app, mount_path: str = "/ui") -> None:
     vscode_monaco_lang_dir = vendored_monaco / "te2-lang"
     lang_ok = vscode_monaco_lang_dir.exists()
 
-    async def _serve_static_with_css_shim(base_dir: Path, file_path: str, raw: str | None):
+    async def _serve_static_with_css_shim(base_dir: Path, file_path: str, raw: str | None) -> Response | FileResponse:
         base = base_dir.resolve()
         target = (base / file_path).resolve()
         if not str(target).startswith(str(base) + "/") and target != base:
@@ -1056,16 +1110,15 @@ export default href;
                     if not isinstance(idx_obj, dict):
                         continue
                     idx = cast(dict[str, object], idx_obj)
-                    vendored_list_obj = idx.get("vendored", [])
-                    vendored_list = vendored_list_obj if isinstance(vendored_list_obj, list) else []
-                    if not isinstance(vendored_list, list):
-                        continue
+                    vendored_list_obj: object = idx.get("vendored", [])
+                    vendored_list = cast(list[object], vendored_list_obj if isinstance(vendored_list_obj, list) else [])
                     for theme_item_obj in vendored_list:
                         if not isinstance(theme_item_obj, dict):
                             continue
-                        theme_id = theme_item_obj.get("id")
-                        theme_label = theme_item_obj.get("label")
-                        theme_file = theme_item_obj.get("file")
+                        theme_item = cast(dict[str, object], theme_item_obj)
+                        theme_id = theme_item.get("id")
+                        theme_label = theme_item.get("label")
+                        theme_file = theme_item.get("file")
                         if not isinstance(theme_id, str) or not isinstance(theme_label, str) or not isinstance(theme_file, str):
                             continue
                         source_label_obj = idx.get("source")
@@ -1074,7 +1127,7 @@ export default href;
                             {
                                 "id": theme_id,
                                 "label": theme_label,
-                                "uiTheme": theme_item_obj.get("uiTheme", "vs-dark"),
+                                "uiTheme": theme_item.get("uiTheme", "vs-dark"),
                                 "source": "vendored",
                                 "sourceLabel": source_label,
                                 "serveUrl": f"monaco_editor/themes/vendored/{vendor_dir.name}/{theme_file}",
@@ -1086,39 +1139,42 @@ export default href;
         try:
             from ..extension_registry import get_extension_list
 
-            exts = get_extension_list()
-            if isinstance(exts, list):
-                for ext_obj in exts:
-                    if not isinstance(ext_obj, dict):
+            exts_obj = cast(object, get_extension_list())
+            exts = cast(list[object], exts_obj if isinstance(exts_obj, list) else [])
+            for ext_obj in exts:
+                if not isinstance(ext_obj, dict):
+                    continue
+                ext_item = cast(dict[str, object], ext_obj)
+                ext_themes_obj = ext_item.get("themes", [])
+                ext_themes = cast(list[object], ext_themes_obj if isinstance(ext_themes_obj, list) else [])
+                if not ext_themes:
+                    continue
+                ext_id = ext_item.get("id", "")
+                ext_path = ext_item.get("path", "")
+                if not isinstance(ext_id, str) or not isinstance(ext_path, str) or not ext_id or not ext_path:
+                    continue
+                for theme_obj in ext_themes:
+                    if not isinstance(theme_obj, dict):
                         continue
-                    ext_themes = ext_obj.get("themes", [])
-                    if not isinstance(ext_themes, list) or not ext_themes:
+                    theme_item = cast(dict[str, object], theme_obj)
+                    raw_path = theme_item.get("path", "")
+                    if not isinstance(raw_path, str):
                         continue
-                    ext_id = ext_obj.get("id", "")
-                    ext_path = ext_obj.get("path", "")
-                    if not isinstance(ext_id, str) or not isinstance(ext_path, str) or not ext_id or not ext_path:
-                        continue
-                    for theme_obj in ext_themes:
-                        if not isinstance(theme_obj, dict):
-                            continue
-                        raw_path = theme_obj.get("path", "")
-                        if not isinstance(raw_path, str):
-                            continue
-                        fname = raw_path.rsplit("/", 1)[-1] if "/" in raw_path else raw_path
-                        label_obj = theme_obj.get("label", fname)
-                        label = label_obj if isinstance(label_obj, str) else fname
-                        tid = label.lower().replace(" ", "-").replace("(", "").replace(")", "")
-                        ext_dir_name = Path(ext_path).name
-                        themes.append(
-                            {
-                                "id": f"ext:{ext_id}:{tid}",
-                                "label": label,
-                                "uiTheme": theme_obj.get("uiTheme", "vs-dark"),
-                                "source": "extension",
-                                "sourceLabel": ext_obj.get("display_name", ext_id),
-                                "serveUrl": f"monaco_editor/cs_themes/{ext_dir_name}/{fname}",
-                            }
-                        )
+                    fname = raw_path.rsplit("/", 1)[-1] if "/" in raw_path else raw_path
+                    label_obj = theme_item.get("label", fname)
+                    label = label_obj if isinstance(label_obj, str) else fname
+                    tid = label.lower().replace(" ", "-").replace("(", "").replace(")", "")
+                    ext_dir_name = Path(ext_path).name
+                    themes.append(
+                        {
+                            "id": f"ext:{ext_id}:{tid}",
+                            "label": label,
+                            "uiTheme": theme_item.get("uiTheme", "vs-dark"),
+                            "source": "extension",
+                            "sourceLabel": ext_item.get("display_name", ext_id),
+                            "serveUrl": f"monaco_editor/cs_themes/{ext_dir_name}/{fname}",
+                        }
+                    )
         except Exception as exc:
             print(f"[themes] extension theme scan failed: {exc}", flush=True)
 

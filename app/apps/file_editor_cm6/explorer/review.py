@@ -5,7 +5,7 @@ from pathlib import Path
 
 from anyio import to_thread
 from .services.file_ops import mark_git_cache_dirty
-from ..core_read import init_watcher, push_save_ack, emit_diff_changed
+from ..core_read import push_save_ack, emit_diff_changed
 from ..core_write import write_full, _get_file_meta
 from ..diff_helper import invalidate_diff_cache
 from ..draft_diff_helper import compute_draft_diff
@@ -66,8 +66,6 @@ async def save_reviews(project_root: Path, files: list[str]) -> dict[str, object
     root_path = project_root
     saved_count = 0
     errors = []
-    
-    init_watcher(root_path)
     
     for rel_path in files:
         try:

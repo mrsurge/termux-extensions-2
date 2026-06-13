@@ -1,10 +1,13 @@
-"""Diagnostics bridge orchestration for adapter diagnostics intake.
+"""WBA backend event relay for Explorer/backend projections.
 
 This module owns:
 
-- adapter WS intake
-- normalized explorer/problems diagnostics fanout
-- watcher-related relay behavior
+- Node WBA ``/ws`` event intake for backend-owned projections
+- workbench IPC watcher events -> workspace event bus
+- WBA-normalized diagnostics -> Explorer/problems diagnostics detail
+
+Editor diagnostics consume the direct ``/wba`` Socket.IO lane in the editor
+frontend and should not be routed through this Python relay.
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ import json
 import logging
 import time
 from importlib import import_module
-from typing import Awaitable, Callable, Protocol, cast
+from typing import Awaitable, Callable, cast
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -27,10 +30,6 @@ Marker = JsonObject
 DiagEntry = JsonObject
 DiagCacheKey = tuple[str, str]
 AdapterRpc = Callable[[str, JsonObject | None, float], Awaitable[JsonObject]]
-
-
-class WebSocketConnection(Protocol):
-    def __aiter__(self) -> object: ...
 
 
 def _json_object(value: object) -> JsonObject:
@@ -80,7 +79,7 @@ _enospc_forwarded = False
 
 
 def is_bridge_active() -> bool:
-    """Return True if the diagnostics bridge WS listener is active."""
+    """Return True if the WBA backend relay listener is active."""
     return _bridge_running and _bridge_task is not None and not _bridge_task.done()
 
 
@@ -139,7 +138,7 @@ async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bo
 
 
 def _process_diagnostics_update(params: JsonObject) -> list[DiagEntry]:
-    """Process a diagnostics/update event: update cache, return normalized items."""
+    """Process a WBA-normalized diagnostics/update event for Explorer."""
     items = _json_object_list(params.get("items"))
     if not items:
         return []
@@ -173,7 +172,7 @@ def _process_diagnostics_update(params: JsonObject) -> list[DiagEntry]:
     return result
 
 
-# ── Debounce state for explorer/problems emission ───────────────────
+# ── Debounce state for Explorer/problems emission ───────────────────
 # Trailing-edge debounce: once a timer starts, it runs to completion.
 # New events during the window just mark dirty so the timer re-fires
 # instead of cancelling/restarting (which starves emission during bursts
@@ -184,7 +183,7 @@ _DIAG_EMIT_DEBOUNCE_S = 0.3
 
 
 async def _emit_diagnostics_to_explorer_and_ui(entries: list[DiagEntry]) -> None:
-    """Debounced: aggregate full _diag_cache and emit to explorer + problems."""
+    """Debounced: aggregate full _diag_cache and emit to Explorer/problems."""
     global _diag_emit_task, _diag_emit_dirty
     _diag_emit_dirty = True
     # If a timer is already running, let it fire — it will see dirty and re-loop.
@@ -255,7 +254,8 @@ async def _emit_diagnostics_debounced() -> None:
 
 
 async def _adapter_ws_loop(_sio: object) -> None:
-    """Connect to adapter WS, listen for diagnostics, broadcast via Socket.IO."""
+    """Connect to Node WBA /ws and project backend-owned events."""
+    del _sio
     import websockets
 
     url = f"ws://127.0.0.1:{ADAPTER_PORT}/ws"
@@ -264,7 +264,7 @@ async def _adapter_ws_loop(_sio: object) -> None:
     while _bridge_running:
         try:
             async with websockets.connect(url, open_timeout=10, close_timeout=5) as ws:
-                logger.info("[diag_bridge] connected to adapter ws %s", url)
+                logger.info("[wba_relay] connected to adapter ws %s", url)
                 backoff = 1.0  # reset on successful connect
 
                 async for raw in ws:
@@ -282,11 +282,11 @@ async def _adapter_ws_loop(_sio: object) -> None:
                         continue
                     ev_type = str(ev.get("type") or "")
 
-                    # Adapter readiness now flows through the editor RPC adapter-state lane.
+                    # Adapter readiness flows through the editor RPC adapter-state lane.
                     if ev_type == "adapter/ready":
                         continue
 
-                    # Forward file watcher events to editor and explorer SIO.
+                    # Forward workbench IPC watcher events to backend workspace events.
                     if ev_type == "watcher/enospc":
                         global _enospc_forwarded
                         # Suppress repeated ENOSPC — only forward once per bridge session
@@ -303,7 +303,7 @@ async def _adapter_ws_loop(_sio: object) -> None:
                             watcher = _json_object(sc.dump_raw().get("watcher", {}))
                             watcher_mode = str(watcher.get("mode", "ipc"))
                             if watcher_mode != "ipc":
-                                print(f"[diag_bridge] watcher/enospc suppressed (mode={watcher_mode})", flush=True)
+                                print(f"[wba_relay] watcher/enospc suppressed (mode={watcher_mode})", flush=True)
                                 _enospc_forwarded = True
                                 continue
                         except Exception:
@@ -319,9 +319,9 @@ async def _adapter_ws_loop(_sio: object) -> None:
                                 proj,
                                 payload,
                             )
-                            print(f"[diag_bridge] watcher/enospc forwarded (once)", flush=True)
+                            print(f"[wba_relay] watcher/enospc forwarded (once)", flush=True)
                         except Exception as exc:
-                            print(f"[diag_bridge] watcher/enospc emit FAIL: {exc}", flush=True)
+                            print(f"[wba_relay] watcher/enospc emit FAIL: {exc}", flush=True)
                         continue
 
                     if ev_type == "watcher/fileChanges":
@@ -371,38 +371,28 @@ async def _adapter_ws_loop(_sio: object) -> None:
                                     )
                                 except Exception:
                                     pass
-                                print(f"[diag_bridge] watcher/fileChanges forwarded ({total} paths)", flush=True)
+                                print(f"[wba_relay] watcher/fileChanges forwarded ({total} paths)", flush=True)
                         except Exception as exc:
-                            print(f"[diag_bridge] watcher/fileChanges emit FAIL: {exc}", flush=True)
-                        continue
-
-                    if ev_type == "diagnostics/changeMany":
-                        # Editor-owned raw diagnostics now ride the direct WBA
-                        # Socket.IO lane. Python keeps only normalized
-                        # explorer/problems diagnostics fanout here.
+                            print(f"[wba_relay] watcher/fileChanges emit FAIL: {exc}", flush=True)
                         continue
 
                     if ev_type != "diagnostics/update":
                         continue
 
                     entries = _process_diagnostics_update(ev)
-                    print(f"[diag_bridge] rx {len(entries)} entries, paths={[e.get('path','?') for e in entries]}", flush=True)
+                    print(f"[wba_relay] diagnostics/update rx {len(entries)} entries, paths={[e.get('path','?') for e in entries]}", flush=True)
 
-                    # ── Emit to explorer + problems panel (pipe-direct, no iframe) ──
+                    # Emit WBA-normalized diagnostics to Explorer/problems only.
                     try:
                         await _emit_diagnostics_to_explorer_and_ui(entries)
                     except Exception as exc:
-                        print(f"[diag_bridge] explorer/problems emit FAIL: {exc}", flush=True)
-
-                    # Editor diagnostics consume the raw diagnostics/changeMany lane
-                    # above. Keep normalized diagnostics/update for Explorer/problems
-                    # only so the editor path can mirror the WBA/VS Code marker shape.
+                        print(f"[wba_relay] explorer/problems emit FAIL: {exc}", flush=True)
                     continue
 
         except asyncio.CancelledError:
             break
         except Exception as exc:
-            logger.debug("[diag_bridge] adapter ws error: %s, reconnecting in %.0fs", exc, backoff)
+            logger.debug("[wba_relay] adapter ws error: %s, reconnecting in %.0fs", exc, backoff)
 
         if not _bridge_running:
             break
@@ -411,7 +401,7 @@ async def _adapter_ws_loop(_sio: object) -> None:
 
 
 def start_bridge(sio: object) -> None:
-    """Start the background diagnostics bridge task. Safe to call multiple times."""
+    """Start the background WBA backend relay task. Safe to call multiple times."""
     global _bridge_task, _bridge_running
 
     if _bridge_task and not _bridge_task.done():
@@ -422,7 +412,7 @@ def start_bridge(sio: object) -> None:
 
 
 def stop_bridge() -> None:
-    """Stop the background bridge task and clear stale diagnostics state."""
+    """Stop the background relay task and clear stale projected diagnostics."""
     global _bridge_running, _bridge_task, _enospc_forwarded, _diag_cache
     global _diag_emit_dirty, _diag_emit_task
 

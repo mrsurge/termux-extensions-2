@@ -19,7 +19,6 @@ from .project_session import reset_project_session
 logger = logging.getLogger(__name__)
 
 AdapterRpc = Callable[[str, dict[str, object] | None, float], Awaitable[object]]
-InitWatcher = Callable[[Path], None]
 EnsureWatchexecShell = Callable[[str, int], Awaitable[object | None]]
 EmitProjectSwitchFn = Callable[..., Awaitable[dict[str, object]]]
 MarkAdapterWorkspaceStateFn = Callable[..., Awaitable[None]]
@@ -82,9 +81,7 @@ async def switch_project_connection(
     )
     adapter_status = "unchanged"
 
-    if initialize_watcher:
-        init_watcher = _get_init_watcher()
-        init_watcher(new_root)
+    del initialize_watcher
 
     was_new_sidecar = await reset_project_session(normalized_display_path)
     if websocket is not None:
@@ -324,14 +321,6 @@ async def _mark_adapter_workspace_error(project_root: Path, error: str) -> None:
         return
     marker = cast(MarkAdapterWorkspaceStateFn, marker_obj)
     await marker(str(project_root), str(error))
-
-
-def _get_init_watcher() -> InitWatcher:
-    core_read_module = importlib.import_module("app.apps.file_editor_cm6.core_read")
-    init_watcher_obj = getattr(core_read_module, "init_watcher", None)
-    if not callable(init_watcher_obj):
-        raise RuntimeError("init_watcher unavailable")
-    return cast(InitWatcher, init_watcher_obj)
 
 
 def _get_ensure_watchexec_shell() -> EnsureWatchexecShell:
