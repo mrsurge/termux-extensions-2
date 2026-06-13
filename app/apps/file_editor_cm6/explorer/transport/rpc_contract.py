@@ -46,6 +46,7 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.git.clone": "git:clone",
     "explorer.git.commit": "git:commit",
     "explorer.git.commits.list": "git:listCommits",
+    "explorer.git.diffBase.get": "git:getDiffBase",
     "explorer.git.diffBase.set": "git:setDiffBase",
     "explorer.git.init": "git:init",
     "explorer.git.pull": "git:pull",

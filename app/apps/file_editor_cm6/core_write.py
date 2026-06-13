@@ -1,17 +1,22 @@
+# pyright: strict
 from __future__ import annotations
+
 import os
 import hashlib
 import tempfile
 from pathlib import Path
-import stat
+
+FileMeta = dict[str, str | int | None]
 
 class BaseMismatchError(Exception):
     """Raised when the base SHA256 does not match the current file."""
-    def __init__(self, message, current_meta):
+    current_meta: FileMeta
+
+    def __init__(self, message: str, current_meta: FileMeta) -> None:
         super().__init__(message)
         self.current_meta = current_meta
 
-def _get_file_meta(path: Path) -> dict:
+def _get_file_meta(path: Path) -> FileMeta:
     """Computes SHA256 and other metadata for a file."""
     if not path.is_file():
         return {"sha256": None, "size": 0, "mtime": 0}
@@ -35,7 +40,7 @@ def _get_file_meta(path: Path) -> dict:
 
 def write_full(project_root: Path, path: str, content: str, *, 
                base_sha256: str | None = None,
-               mode: int | None = None) -> dict:
+               mode: int | None = None) -> FileMeta:
     # Edit 2025-11-17T00:13:07+00:00: This function performs the core atomic file write operation.
     # It was updated to accept an optional 'mode' parameter to explicitly set file permissions
     # on the temporary file before moving it, which is crucial for preserving the executable bit.
@@ -66,6 +71,8 @@ def write_full(project_root: Path, path: str, content: str, *,
 
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
+    tmp_path: Path | None = None
+
     try:
         with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', 
                                         dir=target_path.parent, delete=False) as tmp:
@@ -93,7 +100,7 @@ def write_full(project_root: Path, path: str, content: str, *,
             os.close(dir_fd)
     
     except Exception as e:
-        if 'tmp_path' in locals() and tmp_path.exists():
+        if tmp_path is not None and tmp_path.exists():
             tmp_path.unlink()
         raise IOError(f"Failed to write file atomically: {path}") from e
 

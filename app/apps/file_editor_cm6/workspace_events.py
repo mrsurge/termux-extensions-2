@@ -214,6 +214,20 @@ def register_workspace_event_bus_handlers() -> None:
     global _event_bus_handlers_registered
     if _event_bus_handlers_registered:
         return
+    from .explorer.services.runtime_notifications import set_git_status_publisher
+
+    async def _publish_git_status_callback(
+        project_path: str,
+        decorations_payload: dict[str, object],
+        status_payload: dict[str, object],
+    ) -> None:
+        await publish_git_status_update(
+            project_path,
+            decorations_payload=decorations_payload,
+            status_payload=status_payload,
+        )
+
+    set_git_status_publisher(_publish_git_status_callback)
     subscribe_worker_event("WorkspaceFilesChanged", _handle_workspace_files_changed_event)
     subscribe_worker_event("GitSnapshotRequested", _handle_git_snapshot_requested_event)
     _event_bus_handlers_registered = True
@@ -253,7 +267,11 @@ async def _debounced_git_snapshot(project: str, generation: int | None) -> None:
             return
         from .explorer.services.runtime_notifications import broadcast_git_status_update
 
-        await broadcast_git_status_update(project)
+        await broadcast_git_status_update(
+            project,
+            project_generation=generation,
+            source="workspace_events:GitSnapshotRequested",
+        )
     except asyncio.CancelledError:
         pass
     finally:

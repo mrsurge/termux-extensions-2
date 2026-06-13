@@ -5,6 +5,9 @@ import os
 import json
 import time
 import shutil
+import faulthandler
+import threading
+import traceback
 from pathlib import Path
 from typing import Any
 from urllib import request as urllib_request
@@ -71,6 +74,61 @@ IGNORE_PATTERNS = [
 AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "agent_icons"
 JsonDict = dict[str, Any]
 APP_ID = str(os.environ.get("TE_APP_ID") or "file_editor_cm6").strip() or "file_editor_cm6"
+
+
+def _install_crash_diagnostics() -> None:
+    try:
+        faulthandler.enable(file=sys.stderr, all_threads=True)
+    except Exception as exc:
+        print(f"[file_editor_cm6][crash_diag] faulthandler enable failed: {exc!r}", file=sys.stderr, flush=True)
+
+    def _thread_excepthook(args: threading.ExceptHookArgs) -> None:
+        try:
+            print(
+                f"[file_editor_cm6][crash_diag] unhandled thread exception "
+                f"thread={getattr(args.thread, 'name', None)} exc={args.exc_type.__name__}: {args.exc_value}",
+                file=sys.stderr,
+                flush=True,
+            )
+            traceback.print_exception(args.exc_type, args.exc_value, args.exc_traceback, file=sys.stderr)
+        except Exception:
+            pass
+
+    threading.excepthook = _thread_excepthook
+
+
+def _install_loop_exception_handler() -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    previous_handler = loop.get_exception_handler()
+
+    def _handle_loop_exception(loop: asyncio.AbstractEventLoop, context: dict[str, object]) -> None:
+        try:
+            message = context.get("message")
+            exception = context.get("exception")
+            task = context.get("task") or context.get("future")
+            print(
+                f"[file_editor_cm6][crash_diag] asyncio exception message={message!r} "
+                f"task={task!r} exception={exception!r}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if isinstance(exception, BaseException):
+                traceback.print_exception(type(exception), exception, exception.__traceback__, file=sys.stderr)
+        except Exception:
+            pass
+        if previous_handler is not None:
+            previous_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_handle_loop_exception)
+
+
+_install_crash_diagnostics()
 
 
 def _framework_url() -> str:
@@ -559,6 +617,7 @@ async def _eager_start_code_server():
 
 @file_editor_cm6_bp.on_event("startup")
 async def _on_startup():
+    _install_loop_exception_handler()
     asyncio.ensure_future(_eager_start_code_server())
 
 

@@ -1,13 +1,14 @@
 # pyright: strict
 from __future__ import annotations
 
-import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
 
-import pygit2
+from git import Repo
+from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 
 from ..git_helper import GitError, GitStatus
 
@@ -15,6 +16,18 @@ GIT_CACHE_TTL_SECONDS = 6.0
 
 _STATE_LOCK = threading.RLock()
 _STATUS_CACHE: dict[str, dict[str, object]] = {}
+
+
+class _RepoGit(Protocol):
+    def show(self, *args: object, **kwargs: object) -> object: ...
+    def rev_parse(self, *args: object, **kwargs: object) -> object: ...
+    def branch(self, *args: object, **kwargs: object) -> object: ...
+    def rev_list(self, *args: object, **kwargs: object) -> object: ...
+    def status(self, *args: object, **kwargs: object) -> object: ...
+
+
+def _git_log(message: str) -> None:
+    print(f"[worker_git_service] {message}", file=sys.stderr, flush=True)
 
 
 def mark_status_cache_dirty(project_root: Path | None = None) -> None:
@@ -54,6 +67,8 @@ def get_status_snapshot(project_root: Path) -> dict[str, str]:
 
 def refresh_status_snapshot(project_root: Path) -> dict[str, str]:
     """Refresh and store git decoration status for a project root."""
+    start = time.monotonic()
+    _git_log(f"status.refresh start root={project_root}")
     status = _collect_statuses(project_root)
     key = _cache_key(project_root)
     with _STATE_LOCK:
@@ -62,6 +77,10 @@ def refresh_status_snapshot(project_root: Path) -> dict[str, str]:
             "timestamp": time.time(),
             "dirty": False,
         }
+    _git_log(
+        f"status.refresh ok root={project_root} entries={len(status)} "
+        f"elapsed_ms={(time.monotonic() - start) * 1000:.1f}"
+    )
     return status
 
 
@@ -79,43 +98,29 @@ def get_statuses_for_root(project_root: Path) -> dict[str, str]:
 
 def get_status(project_root: Path) -> GitStatus:
     """Return branch/ahead/behind and staged/unstaged/untracked status."""
+    start = time.monotonic()
+    _git_log(f"status.summary start root={project_root}")
     repo = _open_repo(project_root)
 
-    branch = "HEAD"
-    detached = False
-    ahead = 0
-    behind = 0
-
-    if repo.head_is_unborn:
-        detached = False
-    elif repo.head_is_detached:
-        detached = True
-    else:
-        branch = str(repo.head.shorthand or "HEAD")
-        local_branch = repo.branches.get(branch)
-        try:
-            upstream = local_branch.upstream
-            ahead, behind = repo.ahead_behind(repo.head.target, upstream.target)
-        except Exception:
-            ahead = 0
-            behind = 0
+    branch, detached = _current_branch(repo)
+    ahead, behind = _ahead_behind(repo)
 
     staged: list[str] = []
     unstaged: list[str] = []
     untracked: list[str] = []
-    for path, flags in _repo_status(repo, ignored=False).items():
+    for code, path in _status_entries(repo):
         normalized = _normalize_status_path(path)
         if not normalized:
             continue
-        if flags & pygit2.GIT_STATUS_WT_NEW:
+        if code == "??":
             untracked.append(normalized)
             continue
-        if _has_index_status(flags):
+        if len(code) > 0 and code[0] != " ":
             staged.append(normalized)
-        if _has_worktree_status(flags):
+        if len(code) > 1 and code[1] != " ":
             unstaged.append(normalized)
 
-    return GitStatus(
+    result = GitStatus(
         branch=branch,
         detached=detached,
         ahead=ahead,
@@ -124,6 +129,21 @@ def get_status(project_root: Path) -> GitStatus:
         unstaged=unstaged,
         untracked=untracked,
     )
+    _git_log(
+        f"status.summary ok root={project_root} branch={branch} staged={len(staged)} "
+        f"unstaged={len(unstaged)} untracked={len(untracked)} "
+        f"elapsed_ms={(time.monotonic() - start) * 1000:.1f}"
+    )
+    return result
+
+
+def is_git_repository(project_root: Path) -> bool:
+    """Return whether project_root is inside a git worktree."""
+    try:
+        _open_repo(project_root)
+        return True
+    except GitError:
+        return False
 
 
 def read_head_blob_text(project_root: Path, rel_path: str) -> str | None:
@@ -131,16 +151,28 @@ def read_head_blob_text(project_root: Path, rel_path: str) -> str | None:
     normalized_rel = rel_path.strip().replace("\\", "/")
     if not normalized_rel:
         return None
+    start = time.monotonic()
+    _git_log(f"head.read start root={project_root} rel={normalized_rel}")
     try:
         repo = _open_repo(project_root)
-        if repo.head_is_unborn:
+        if not _has_head(repo):
+            _git_log(f"head.read unborn root={project_root} rel={normalized_rel}")
             return None
-        obj = repo.revparse_single(f"HEAD:{normalized_rel}")
-        data = getattr(obj, "data", None)
+        data = _git_show_bytes(repo, f"HEAD:{normalized_rel}")
         if not isinstance(data, bytes):
+            _git_log(f"head.read nonblob root={project_root} rel={normalized_rel} type={type(data).__name__}")
             return None
-        return data.decode("utf-8", errors="replace")
-    except Exception:
+        text = data.decode("utf-8", errors="replace")
+        _git_log(
+            f"head.read ok root={project_root} rel={normalized_rel} bytes={len(data)} "
+            f"elapsed_ms={(time.monotonic() - start) * 1000:.1f}"
+        )
+        return text
+    except Exception as exc:
+        _git_log(
+            f"head.read miss root={project_root} rel={normalized_rel} exc={exc!r} "
+            f"elapsed_ms={(time.monotonic() - start) * 1000:.1f}"
+        )
         return None
 
 
@@ -165,47 +197,103 @@ def _collect_statuses(root: Path) -> dict[str, str]:
     """Collect git decoration status for files under root."""
     try:
         repo = _open_repo(root)
-    except GitError:
+    except GitError as exc:
+        _git_log(f"status.collect skip root={root} exc={exc!r}")
         return {}
 
     status_map: dict[str, str] = {}
-    for raw_path, flags in _repo_status(repo, ignored=True).items():
+    for code, raw_path in _status_entries(repo):
         path = _normalize_status_path(raw_path)
         if not path:
             continue
-        status_map[path] = _map_git_status_flags(flags)
-    status_map.update(_collect_ignored_statuses_with_git(root))
+        status_map[path] = _map_git_status_code(code)
     return status_map
 
 
-def _open_repo(root: Path) -> pygit2.Repository:
+def _open_repo(root: Path) -> Repo:
     try:
-        git_dir = pygit2.discover_repository(str(root))
-    except Exception as exc:
-        raise GitError("Not a git repository") from exc
-    if not git_dir:
-        raise GitError("Not a git repository")
-    try:
-        return pygit2.Repository(git_dir)
-    except Exception as exc:
+        return Repo(root, search_parent_directories=True)
+    except (InvalidGitRepositoryError, NoSuchPathError) as exc:
         raise GitError("Not a git repository") from exc
 
 
-def _repo_status(repo: pygit2.Repository, *, ignored: bool) -> dict[str, int]:
-    status = {
-        str(path): int(flags)
-        for path, flags in repo.status(untracked_files="normal", ignored=False).items()
-    }
-    if not ignored:
-        return status
+def _repo_git(repo: Repo) -> _RepoGit:
+    return cast(_RepoGit, repo.git)
 
-    expanded_ignored = {
-        str(path): int(flags)
-        for path, flags in repo.status(untracked_files="all", ignored=True).items()
-        if int(flags) & pygit2.GIT_STATUS_IGNORED
-    }
-    status.update(expanded_ignored)
-    return status
+
+def _git_show_bytes(repo: Repo, spec: str) -> bytes | None:
+    git = _repo_git(repo)
+    result = git.show(spec, as_process=False, with_extended_output=False, stdout_as_string=False)
+    return result if isinstance(result, bytes) else None
+
+
+def _git_rev_parse(repo: Repo, *args: object) -> str:
+    return str(_repo_git(repo).rev_parse(*args))
+
+
+def _git_branch(repo: Repo, *args: object) -> str:
+    return str(_repo_git(repo).branch(*args))
+
+
+def _git_rev_list(repo: Repo, *args: object) -> str:
+    return str(_repo_git(repo).rev_list(*args))
+
+
+def _git_status(repo: Repo, *args: object) -> str:
+    return str(_repo_git(repo).status(*args))
+
+
+def _has_head(repo: Repo) -> bool:
+    try:
+        _git_rev_parse(repo, "--verify", "HEAD")
+        return True
+    except GitCommandError:
+        return False
+
+
+def _current_branch(repo: Repo) -> tuple[str, bool]:
+    try:
+        name = _git_branch(repo, "--show-current").strip()
+        if name:
+            return name, False
+    except GitCommandError:
+        pass
+    try:
+        short_head = _git_rev_parse(repo, "--short", "HEAD").strip()
+        return short_head or "HEAD", True
+    except GitCommandError:
+        return "HEAD", False
+
+
+def _ahead_behind(repo: Repo) -> tuple[int, int]:
+    try:
+        output = _git_rev_list(repo, "--left-right", "--count", "HEAD...@{upstream}").strip()
+    except GitCommandError:
+        return 0, 0
+    parts = output.split()
+    if len(parts) < 2:
+        return 0, 0
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return 0, 0
+
+
+def _status_entries(repo: Repo) -> list[tuple[str, str]]:
+    try:
+        output = _git_status(repo, "--porcelain=v1", "--untracked-files=normal")
+    except GitCommandError:
+        return []
+    entries: list[tuple[str, str]] = []
+    for line in output.splitlines():
+        if len(line) < 3:
+            continue
+        code = line[:2]
+        path = line[3:].strip()
+        if not path:
+            continue
+        entries.append((code, path))
+    return entries
 
 
 def _normalize_status_path(raw_path: str) -> str:
@@ -215,80 +303,25 @@ def _normalize_status_path(raw_path: str) -> str:
     return path
 
 
-def _collect_ignored_statuses_with_git(root: Path) -> dict[str, str]:
-    """Use Git's ignored matching as a narrow parity fallback for decorations."""
-    try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(root),
-                "status",
-                "--porcelain=v1",
-                "--ignored=matching",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception:
-        return {}
-    if result.returncode != 0:
-        return {}
-
-    ignored: dict[str, str] = {}
-    for raw_line in result.stdout.splitlines():
-        if not raw_line.startswith("!! "):
-            continue
-        path = _normalize_status_path(raw_line[3:])
-        if path:
-            ignored[path] = "ignored"
-    return ignored
-
-
-def _map_git_status_flags(flags: int) -> str:
-    if flags & pygit2.GIT_STATUS_IGNORED:
+def _map_git_status_code(code: str) -> str:
+    if code == "!!":
         return "ignored"
-    if flags & pygit2.GIT_STATUS_CONFLICTED:
+    if "U" in code or code in {"AA", "DD"}:
         return "conflict"
-    if flags & (pygit2.GIT_STATUS_INDEX_DELETED | pygit2.GIT_STATUS_WT_DELETED):
+    if "D" in code:
         return "deleted"
-    if flags & (pygit2.GIT_STATUS_INDEX_RENAMED | pygit2.GIT_STATUS_WT_RENAMED):
+    if "R" in code:
         return "renamed"
-    if flags & pygit2.GIT_STATUS_INDEX_NEW:
-        return "added"
-    if _has_index_status(flags) and _has_worktree_status(flags):
-        return "staged_modified"
-    if _has_index_status(flags):
-        return "staged"
-    if flags & pygit2.GIT_STATUS_WT_NEW:
+    if code == "??":
         return "untracked"
-    if _has_worktree_status(flags):
+    index_status = len(code) > 0 and code[0] != " "
+    worktree_status = len(code) > 1 and code[1] != " "
+    if code[0] == "A":
+        return "added"
+    if index_status and worktree_status:
+        return "staged_modified"
+    if index_status:
+        return "staged"
+    if worktree_status:
         return "modified"
     return "clean"
-
-
-def _has_index_status(flags: int) -> bool:
-    return bool(
-        flags
-        & (
-            pygit2.GIT_STATUS_INDEX_NEW
-            | pygit2.GIT_STATUS_INDEX_MODIFIED
-            | pygit2.GIT_STATUS_INDEX_DELETED
-            | pygit2.GIT_STATUS_INDEX_RENAMED
-            | pygit2.GIT_STATUS_INDEX_TYPECHANGE
-        )
-    )
-
-
-def _has_worktree_status(flags: int) -> bool:
-    return bool(
-        flags
-        & (
-            pygit2.GIT_STATUS_WT_MODIFIED
-            | pygit2.GIT_STATUS_WT_DELETED
-            | pygit2.GIT_STATUS_WT_RENAMED
-            | pygit2.GIT_STATUS_WT_TYPECHANGE
-            | pygit2.GIT_STATUS_WT_UNREADABLE
-        )
-    )

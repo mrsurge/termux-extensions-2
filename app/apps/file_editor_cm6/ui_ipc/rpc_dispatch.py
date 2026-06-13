@@ -15,6 +15,10 @@ from .rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_FILE_OPEN,
     UI_IPC_RPC_METHOD_HOST_FILE_RUN,
     UI_IPC_RPC_METHOD_HOST_FILE_SAVE,
+    UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CHECKOUT,
+    UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CREATE,
+    UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST,
+    UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD,
     UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE,
@@ -38,6 +42,12 @@ from ..host.editor_actions_backend import (
 )
 from ..host.editor_preferences_backend import handle_host_editor_preference_request
 from ..host.file_ops_backend import handle_host_open_request, handle_host_save_request
+from ..host.git_backend import (
+    handle_host_git_branch_checkout_request,
+    handle_host_git_branch_create_request,
+    handle_host_git_branches_list_request,
+    handle_host_git_remote_add_request,
+)
 from ..host.state_backend import (
     handle_host_file_activity_record_request,
     handle_host_file_scroll_update_request,
@@ -126,6 +136,30 @@ async def dispatch_ui_ipc_rpc_request(
 
     if method == UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_MENTION:
         return await handle_host_diagnostics_mention_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST:
+        return await handle_host_git_branches_list_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CHECKOUT:
+        return await handle_host_git_branch_checkout_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CREATE:
+        return await handle_host_git_branch_create_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD:
+        return await handle_host_git_remote_add_request(
             params,
             source_name=source_name,
         )

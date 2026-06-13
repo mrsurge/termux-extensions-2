@@ -8,6 +8,7 @@ import {
 } from './boot/path-state.ts';
 import type { ExplorerUiInitOptions } from '../../src/explorer/app/bootstrap.ts';
 import type { IoFactory } from '../../src/rpc/transport.ts';
+import type { UiIpcRpcMethod } from '../../src/ui_ipc/rpc_contract.ts';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -41,9 +42,10 @@ interface HostBootRuntimeDeps {
   reloadEditorFrame: () => void | Promise<void>;
   requestAdapterRestart: () => void | Promise<void>;
   connectUIIPC: () => void | Promise<unknown>;
+  requestUiIpc: (method: UiIpcRpcMethod, params?: UnknownRecord, timeoutMs?: number) => Promise<unknown>;
   connectSidebarIPC: () => void;
   ensureWorkbenchAdapterReady: () => Promise<unknown>;
-  initBranchMenu: () => unknown;
+  initBranchMenu: (deps: { requestUiIpc: (method: UiIpcRpcMethod, params?: UnknownRecord, timeoutMs?: number) => Promise<unknown> }) => unknown;
   setBranchMenuHandle: (handle: unknown) => void;
   waitForInitialUiPrefs: (ms?: number) => Promise<UnknownRecord>;
   seedUiPrefsSnapshot: (prefs: UnknownRecord) => void;
@@ -142,7 +144,9 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
       connectUIIPC: () => deps.connectUIIPC(),
       connectSidebarIPC: () => deps.connectSidebarIPC(),
       ensureWorkbenchAdapterReady: () => deps.ensureWorkbenchAdapterReady(),
-      initBranchMenu: () => deps.initBranchMenu(),
+      initBranchMenu: () => deps.initBranchMenu({
+        requestUiIpc: (method, params, timeoutMs) => deps.requestUiIpc(method, params || {}, timeoutMs),
+      }),
       waitForInitialUiPrefs: (ms) => deps.waitForInitialUiPrefs(ms),
       seedUiPrefsSnapshot: (prefs) => deps.seedUiPrefsSnapshot(prefs || {}),
       applySidebarUiPrefs: (prefs) => deps.applySidebarUiPrefs(prefs || {}),

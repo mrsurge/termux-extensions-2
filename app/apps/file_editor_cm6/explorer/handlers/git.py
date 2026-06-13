@@ -24,6 +24,7 @@ from ...git_helper import (
     get_commit_info,
     get_commits as git_get_commits,
     init_repository,
+    is_git_repository,
     list_branches as git_list_branches,
     reset_hard,
     restore_path,
@@ -37,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 
 class ExplorerHistoryStore(Protocol):
+    def get_diff_base(self, project_path: str | None) -> str: ...
+
     def set_diff_base(self, project_path: str, ref: str | None) -> str: ...
 
 
@@ -189,6 +192,39 @@ async def handle_git_set_diff_base(
     await context.broadcast("explorer.git.diffBase.updated", {"ref": params["ref"]})
     mark_git_cache_dirty(context.project_root)
     await context.broadcast_git_status()
+
+
+async def handle_git_get_diff_base(
+    context: ExplorerGitHandlerContext,
+    params: GitNoParams,
+    msg_id: str | None,
+) -> None:
+    del params
+    history_store = _get_history_store()
+    base_ref = history_store.get_diff_base(str(context.project_root)).strip() or "HEAD"
+    mode = "none"
+    commit_info: dict[str, object] | None = None
+
+    if context.project_root.exists() and is_git_repository(context.project_root):
+        mode = "head" if base_ref == "HEAD" else "detached"
+        try:
+            commit = get_commit_info(context.project_root, base_ref)
+        except Exception:
+            commit = None
+        if commit:
+            commit_info = {
+                "hash": commit.hash,
+                "short": commit.short_hash,
+                "subject": commit.summary,
+                "author": commit.author,
+                "date": commit.date,
+            }
+
+    await context.emit_personal(
+        "git:diffBase",
+        {"ref": base_ref, "mode": mode, "commit": commit_info},
+        msg_id,
+    )
 
 
 async def handle_git_list_branches(

@@ -5,16 +5,17 @@
   "pythonPlatform": "Linux",
   "executionEnvironments": [
     {
-      "root": "../..",
+      "root": ".",
       "extraPaths": [
         "../../.."
       ]
     }
   ],
   "include": [
-    "../.."
+    "."
   ],
   "exclude": [
+    "android_lang",
     "../file_editor",
     "../archive_manager",
     "../file_explorer",
@@ -24,6 +25,7 @@
     "../../static/vendor"
   ],
   "ignore": [
+    "android_lang",
     "../file_editor",
     "../archive_manager",
     "../file_explorer",

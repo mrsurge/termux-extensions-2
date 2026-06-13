@@ -7,11 +7,14 @@ This module owns:
 - watcher-related relay behavior
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 import time
-from typing import Any, Dict, Optional
+from importlib import import_module
+from typing import Awaitable, Callable, Protocol, cast
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -19,11 +22,54 @@ logger = logging.getLogger(__name__)
 ADAPTER_PORT = 18181
 DIAG_CACHE_MAX = 500
 
+JsonObject = dict[str, object]
+Marker = JsonObject
+DiagEntry = JsonObject
+DiagCacheKey = tuple[str, str]
+AdapterRpc = Callable[[str, JsonObject | None, float], Awaitable[JsonObject]]
+
+
+class WebSocketConnection(Protocol):
+    def __aiter__(self) -> object: ...
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    raw = cast(dict[object, object], value)
+    return {str(key): item for key, item in raw.items()}
+
+
+def _json_object_list(value: object) -> list[JsonObject]:
+    if not isinstance(value, list):
+        return []
+    result: list[JsonObject] = []
+    for item in cast(list[object], value):
+        if isinstance(item, dict):
+            result.append(_json_object(cast(object, item)))
+    return result
+
+
+def _marker_list(value: object) -> list[Marker]:
+    return _json_object_list(value)
+
+
+def _int_value(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int | float | str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
 # Server-side diagnostics cache: (abs_path, owner) -> {ts_ms, owner, path, markers, type}
-_diag_cache: Dict[tuple, Dict[str, Any]] = {}
+_diag_cache: dict[DiagCacheKey, DiagEntry] = {}
 
 # Background task handle
-_bridge_task: Optional[asyncio.Task] = None
+_bridge_task: asyncio.Task[None] | None = None
 _bridge_running = False
 
 # ENOSPC dedup: only forward to frontend once per bridge session.
@@ -38,7 +84,7 @@ def is_bridge_active() -> bool:
     return _bridge_running and _bridge_task is not None and not _bridge_task.done()
 
 
-def _abs_path_from_vscode_uri(raw: Any) -> str:
+def _abs_path_from_vscode_uri(raw: object) -> str:
     """Extract absolute filesystem path from a vscode-remote:// or file:// URI."""
     if not raw:
         return ""
@@ -69,9 +115,11 @@ def _abs_path_from_vscode_uri(raw: Any) -> str:
 async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bool:
     """Ask the adapter to re-open a file, forcing the extension host to re-emit diagnostics."""
     try:
-        from .workbench_adapter_shell_manager import adapter_rpc
-        from .stores import _history_store
-        project = _history_store.get_active_project()
+        from .stores import get_history_store
+
+        module = import_module("app.apps.file_editor_cm6.workbench_adapter_shell_manager")
+        adapter_rpc = cast(AdapterRpc, module.__dict__["adapter_rpc"])
+        project = get_history_store().get_active_project()
         request_id = f"diag_{int(time.time() * 1000)}_nudge"
         await adapter_rpc(
             "vscode.openFile",
@@ -82,6 +130,7 @@ async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bo
                 "forceRefresh": True,
                 "workspaceFolder": project or "",
             },
+            30,
         )
         return True
     except Exception as exc:
@@ -89,28 +138,24 @@ async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bo
         return False
 
 
-def _process_diagnostics_update(params: dict):
+def _process_diagnostics_update(params: JsonObject) -> list[DiagEntry]:
     """Process a diagnostics/update event: update cache, return normalized items."""
-    items = params.get("items") if isinstance(params, dict) else None
-    if not isinstance(items, list):
+    items = _json_object_list(params.get("items"))
+    if not items:
         return []
 
     owner = str(params.get("owner", "unknown"))
     ts_ms = int(time.time() * 1000)
-    result = []
+    result: list[DiagEntry] = []
 
     for item in items:
-        if not isinstance(item, dict):
-            continue
         uri = item.get("uri", "")
         abs_path = _abs_path_from_vscode_uri(uri)
         if not abs_path:
             continue
-        markers = item.get("markers", [])
-        if not isinstance(markers, list):
-            markers = []
+        markers = _marker_list(item.get("markers", []))
 
-        entry = {
+        entry: DiagEntry = {
             "type": "diagnostics/update",
             "ts_ms": ts_ms,
             "owner": owner,
@@ -122,7 +167,7 @@ def _process_diagnostics_update(params: dict):
 
     # Evict oldest if cache too large
     while len(_diag_cache) > DIAG_CACHE_MAX:
-        oldest_key = min(_diag_cache, key=lambda k: _diag_cache[k].get("ts_ms", 0))
+        oldest_key = min(_diag_cache, key=lambda k: _int_value(_diag_cache[k].get("ts_ms")))
         del _diag_cache[oldest_key]
 
     return result
@@ -133,12 +178,12 @@ def _process_diagnostics_update(params: dict):
 # New events during the window just mark dirty so the timer re-fires
 # instead of cancelling/restarting (which starves emission during bursts
 # like pyright's clear-then-re-emit cycle).
-_diag_emit_task: Optional[asyncio.Task] = None
+_diag_emit_task: asyncio.Task[None] | None = None
 _diag_emit_dirty: bool = False
 _DIAG_EMIT_DEBOUNCE_S = 0.3
 
 
-async def _emit_diagnostics_to_explorer_and_ui(entries: list):
+async def _emit_diagnostics_to_explorer_and_ui(entries: list[DiagEntry]) -> None:
     """Debounced: aggregate full _diag_cache and emit to explorer + problems."""
     global _diag_emit_task, _diag_emit_dirty
     _diag_emit_dirty = True
@@ -148,7 +193,7 @@ async def _emit_diagnostics_to_explorer_and_ui(entries: list):
     _diag_emit_task = asyncio.ensure_future(_emit_diagnostics_debounced())
 
 
-async def _emit_diagnostics_debounced():
+async def _emit_diagnostics_debounced() -> None:
     """Wait for debounce window, then emit aggregated diagnostics.
     Re-fires if new events arrived during the wait (trailing edge)."""
     global _diag_emit_dirty
@@ -156,7 +201,6 @@ async def _emit_diagnostics_debounced():
         _diag_emit_dirty = False
         await asyncio.sleep(_DIAG_EMIT_DEBOUNCE_S)
     try:
-        from .explorer.transport.socketio_app import EXPLORER_SIO
         from .explorer.services.file_ops import get_project_root
     except Exception as exc:
         print(f"[diag_bridge] import fail for explorer emit: {exc}", flush=True)
@@ -169,11 +213,11 @@ async def _emit_diagnostics_debounced():
         pass
 
     # Build per-file summary (rel paths) and detail (abs paths) from cache.
-    summary_rel: Dict[str, Dict[str, int]] = {}   # rel_path → {errors, warnings}
-    detail_abs: Dict[str, list] = {}               # abs_path → [marker, ...]
+    summary_rel: dict[str, dict[str, int]] = {}   # rel_path -> {errors, warnings}
+    detail_abs: dict[str, list[object]] = {}      # abs_path -> [marker, ...]
 
-    for (abs_path, owner), entry in _diag_cache.items():
-        markers = entry.get("markers") or []
+    for (abs_path, _owner), entry in _diag_cache.items():
+        markers = _marker_list(entry.get("markers", []))
         if not markers:
             continue
 
@@ -190,7 +234,7 @@ async def _emit_diagnostics_debounced():
         if rel not in summary_rel:
             summary_rel[rel] = {"errors": 0, "warnings": 0}
         for m in markers:
-            sev = m.get("severity", 0)
+            sev = _int_value(m.get("severity", 0))
             if sev == 8:       # MarkerSeverity.Error
                 summary_rel[rel]["errors"] += 1
             elif sev == 4:     # MarkerSeverity.Warning
@@ -225,19 +269,18 @@ async def _adapter_ws_loop(_sio: object) -> None:
 
                 async for raw in ws:
                     try:
-                        msg = json.loads(raw)
+                        decoded = cast(object, json.loads(str(raw)))
+                        msg = _json_object(decoded)
                     except (json.JSONDecodeError, TypeError):
                         continue
 
-                    if not isinstance(msg, dict):
-                        continue
                     if msg.get("method") != "te2.event":
                         continue
 
-                    ev = msg.get("params")
-                    if not isinstance(ev, dict):
+                    ev = _json_object(msg.get("params"))
+                    if not ev:
                         continue
-                    ev_type = ev.get("type")
+                    ev_type = str(ev.get("type") or "")
 
                     # Adapter readiness now flows through the editor RPC adapter-state lane.
                     if ev_type == "adapter/ready":
@@ -257,7 +300,8 @@ async def _adapter_ws_loop(_sio: object) -> None:
                             from .project_sidecar import ProjectSidecar
                             proj = str(get_project_root())
                             sc = ProjectSidecar.load_or_create(proj)
-                            watcher_mode = sc.data.get("watcher", {}).get("mode", "ipc")
+                            watcher = _json_object(sc.dump_raw().get("watcher", {}))
+                            watcher_mode = str(watcher.get("mode", "ipc"))
                             if watcher_mode != "ipc":
                                 print(f"[diag_bridge] watcher/enospc suppressed (mode={watcher_mode})", flush=True)
                                 _enospc_forwarded = True
@@ -267,8 +311,8 @@ async def _adapter_ws_loop(_sio: object) -> None:
                         _enospc_forwarded = True
                         try:
                             from .workspace_events import publish_watcher_error
-                            payload = {
-                                "message": ev.get("message", "Inotify limit reached (ENOSPC)"),
+                            payload: JsonObject = {
+                                "message": str(ev.get("message", "Inotify limit reached (ENOSPC)")),
                                 "limit": 524288,
                             }
                             await publish_watcher_error(
@@ -282,18 +326,22 @@ async def _adapter_ws_loop(_sio: object) -> None:
 
                     if ev_type == "watcher/fileChanges":
                         try:
-                            changes = ev.get("changes", [])
+                            changes = _json_object_list(ev.get("changes", []))
                             # Get project root for abs→rel conversion
                             try:
                                 from .explorer.services.file_ops import get_project_root
                                 proj = str(get_project_root())
                             except Exception:
                                 proj = ""
-                            created, changed, deleted = [], [], []
-                            created_abs, changed_abs, deleted_abs = [], [], []
+                            created: list[str] = []
+                            changed: list[str] = []
+                            deleted: list[str] = []
+                            created_abs: list[str] = []
+                            changed_abs: list[str] = []
+                            deleted_abs: list[str] = []
                             for c in changes:
-                                p = c.get("path", "") if isinstance(c, dict) else ""
-                                t = c.get("type", 0) if isinstance(c, dict) else 0
+                                p = str(c.get("path", ""))
+                                t = _int_value(c.get("type", 0))
                                 if not p:
                                     continue
                                 # Convert absolute path to relative
@@ -373,7 +421,7 @@ def start_bridge(sio: object) -> None:
     _bridge_task = asyncio.ensure_future(_adapter_ws_loop(sio))
 
 
-def stop_bridge():
+def stop_bridge() -> None:
     """Stop the background bridge task and clear stale diagnostics state."""
     global _bridge_running, _bridge_task, _enospc_forwarded, _diag_cache
     global _diag_emit_dirty, _diag_emit_task

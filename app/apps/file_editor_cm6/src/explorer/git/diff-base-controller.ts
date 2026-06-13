@@ -2,6 +2,7 @@ import {
   EXPLORER_RPC_METHODS,
   type ExplorerRpcMethod,
 } from '../rpc/contract.ts';
+import { requestExplorerRpc } from '../rpc/client.ts';
 import {
   formatDiffBaseLabel,
   truncateText,
@@ -120,12 +121,7 @@ export function createExplorerDiffBaseController(
 
   async function initFromBackend(): Promise<void> {
     try {
-      const response = await fetch('/api/app/file_editor_cm6/git/diff_base', {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const json = await response.json().catch(() => null);
-      const data = isRecord(json) ? json.data : null;
+      const data = await requestExplorerRpc(EXPLORER_RPC_METHODS.gitDiffBaseGet, {});
       if (!data) return;
       gitDiffBase = normalizeDiffBase(data);
       updateButtons();
@@ -237,18 +233,9 @@ export function createExplorerDiffBaseController(
       return;
     }
     try {
-      const response = await fetch('/api/app/file_editor_cm6/git/commits', {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const json = await response.json().catch(() => null);
-      if (!json || json.ok === false) {
-        throw new Error(
-          json?.error || response.statusText || 'Failed to load commits',
-        );
-      }
-      const commits = Array.isArray(json.data)
-        ? (json.data as ExplorerCommitChoice[])
+      const result = await requestExplorerRpc(EXPLORER_RPC_METHODS.gitCommitsList, { limit: 50 });
+      const commits = Array.isArray(result.commits)
+        ? (result.commits as ExplorerCommitChoice[])
         : [];
       renderDropdown(dropdown, commits);
     } catch (error) {

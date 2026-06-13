@@ -5,6 +5,7 @@ traffic isolated from editor/console chatter.
 """
 
 import time
+from typing import Awaitable, Protocol, cast
 
 from ..explorer.services.file_ops import get_project_root
 from ..stores import get_history_store, get_preferences_store
@@ -77,27 +78,51 @@ _client_active_windows: dict[str, str] = {}
 JsonObject = dict[str, object]
 
 
+class SidebarNamespace(Protocol):
+    def emit(
+        self,
+        event: str,
+        data: object | None = None,
+        *,
+        to: str | None = None,
+        room: str | None = None,
+        skip_sid: str | None = None,
+        namespace: str | None = None,
+    ) -> Awaitable[None]: ...
+
+    def enter_room(self, sid: str, room: str) -> Awaitable[None]: ...
+
+    def save_session(self, sid: str, session: JsonObject) -> Awaitable[None]: ...
+
+    def get_session(self, sid: str) -> Awaitable[object]: ...
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    raw = cast(dict[object, object], value)
+    return {str(key): item for key, item in raw.items()}
+
+
 def _is_agent_sidebar_tracking_enabled() -> bool:
     try:
-        prefs = get_preferences_store().get_preferences()
-        editor = prefs.get("editor") if isinstance(prefs, dict) else {}
-        if not isinstance(editor, dict):
-            return False
+        prefs = _json_object(get_preferences_store().get_preferences())
+        editor = _json_object(prefs.get("editor", {}))
         return bool(editor.get("trackAgentSidebarEdits", False))
     except Exception:
         return False
 
 
-def _norm(value) -> str:
+def _norm(value: object) -> str:
     return str(value or "").strip()
 
 
-def _has_agent_edit_capability(data: dict) -> bool:
+def _has_agent_edit_capability(data: JsonObject) -> bool:
     if data.get("agentEdits") is True or data.get("agent_edits") is True:
         return True
     capabilities = data.get("capabilities")
     if isinstance(capabilities, list):
-        normalized = {_norm(item) for item in capabilities}
+        normalized = {_norm(item) for item in cast(list[object], capabilities)}
         if {"agentEdits", "agent_edits", "sidebar.agentEdits"} & normalized:
             return True
     app_name = _norm(data.get("app") or data.get("app_id") or data.get("appId")).lower()
@@ -126,7 +151,7 @@ def _app_id_aliases(app_id: object) -> set[str]:
     return aliases
 
 
-def _client_state_payload(client_id: str) -> dict:
+def _client_state_payload(client_id: str) -> JsonObject:
     safe_client_id = _norm(client_id)
     active_window = _norm(_client_active_windows.get(safe_client_id))
     return {
@@ -137,7 +162,7 @@ def _client_state_payload(client_id: str) -> dict:
     }
 
 
-async def _emit_rpc_notification(ns, method: str, params: dict, *, to_sid: str | None = None, room: str | None = None, skip_sid: str | None = None):
+async def _emit_rpc_notification(ns: SidebarNamespace, method: str, params: JsonObject, *, to_sid: str | None = None, room: str | None = None, skip_sid: str | None = None) -> None:
     envelope = build_jsonrpc_notification(method, params)
     if to_sid:
         await ns.emit(SIDEBAR_IPC_RPC_NOTIFICATION_EVENT, envelope, to=to_sid)
@@ -145,16 +170,17 @@ async def _emit_rpc_notification(ns, method: str, params: dict, *, to_sid: str |
     await ns.emit(SIDEBAR_IPC_RPC_NOTIFICATION_EVENT, envelope, room=room or "sidebar_ipc", skip_sid=skip_sid)
 
 
-async def _emit_ui_ipc_sidebar_notification(method: str, params: dict) -> None:
+async def _emit_ui_ipc_sidebar_notification(method: str, params: JsonObject) -> None:
     from .ui_ipc_ws import emit_ui_ipc_rpc_notification
 
     await emit_ui_ipc_rpc_notification(method, params)
 
 
-async def _emit_sidebar_ipc_global_notification(method: str, params: dict) -> None:
+async def _emit_sidebar_ipc_global_notification(method: str, params: JsonObject) -> None:
     from .ui_ipc_socketio import UI_IPC_SIO
 
-    await UI_IPC_SIO.emit(
+    sio = cast(SidebarNamespace, UI_IPC_SIO)
+    await sio.emit(
         SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
         build_jsonrpc_notification(method, params),
         namespace="/sidebar_ipc",
@@ -162,7 +188,7 @@ async def _emit_sidebar_ipc_global_notification(method: str, params: dict) -> No
     )
 
 
-async def _emit_ui_sidebar_window_state(active_host_id: str | None = None) -> dict:
+async def _emit_ui_sidebar_window_state(active_host_id: str | None = None) -> JsonObject:
     from .sidebar_window_state import get_sidebar_window_state
 
     payload = get_sidebar_window_state(_norm(active_host_id) or None)
@@ -171,7 +197,7 @@ async def _emit_ui_sidebar_window_state(active_host_id: str | None = None) -> di
     return payload
 
 
-async def _emit_client_state(ns, client_id: str, *, to_sid: str | None = None, skip_sid: str | None = None):
+async def _emit_client_state(ns: SidebarNamespace, client_id: str, *, to_sid: str | None = None, skip_sid: str | None = None) -> None:
     state_payload = _client_state_payload(client_id)
     if to_sid:
         await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE, state_payload, to_sid=to_sid)
@@ -179,7 +205,7 @@ async def _emit_client_state(ns, client_id: str, *, to_sid: str | None = None, s
     await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CLIENT_STATE, state_payload, room=_client_room(client_id), skip_sid=skip_sid)
 
 
-async def _emit_sidebar_windows_changed(ns, *, client_id: str | None = None, to_sid: str | None = None, skip_sid: str | None = None):
+async def _emit_sidebar_windows_changed(ns: SidebarNamespace, *, client_id: str | None = None, to_sid: str | None = None, skip_sid: str | None = None) -> None:
     from .sidebar_window_state import get_sidebar_window_state
 
     active_host_id = _norm(_client_active_windows.get(_norm(client_id))) if client_id else ""
@@ -193,7 +219,7 @@ async def _emit_sidebar_windows_changed(ns, *, client_id: str | None = None, to_
 
 
 async def _emit_sidebar_window_activated(
-    ns,
+    ns: SidebarNamespace,
     client_id: str,
     host_id: str,
     *,
@@ -202,7 +228,7 @@ async def _emit_sidebar_window_activated(
 ):
     safe_client_id = _norm(client_id)
     safe_host_id = _norm(host_id)
-    payload = {
+    payload: JsonObject = {
         "client_id": safe_client_id,
         "host_id": safe_host_id,
         "hostId": safe_host_id,
@@ -224,17 +250,17 @@ async def _emit_sidebar_window_activated(
     )
 
 
-def _sidebar_window_focus_payload(client_id: str, host_id: str, source: object = "") -> dict:
+def _sidebar_window_focus_payload(client_id: str, host_id: str, source: object = "") -> JsonObject:
     from .sidebar_window_state import get_sidebar_window_state
 
     safe_client_id = _norm(client_id)
     safe_host_id = _norm(host_id)
     if not safe_host_id:
         return {}
-    state = get_sidebar_window_state(safe_host_id)
-    slots = state.get("slots") if isinstance(state, dict) else {}
-    slot = slots.get(safe_host_id) if isinstance(slots, dict) else {}
-    if not isinstance(slot, dict):
+    state = _json_object(get_sidebar_window_state(safe_host_id))
+    slots = _json_object(state.get("slots", {}))
+    slot = _json_object(slots.get(safe_host_id, {}))
+    if not slot:
         return {}
     app_id = _norm(slot.get("app_id") or slot.get("appId"))
     if not app_id:
@@ -249,13 +275,11 @@ def _sidebar_window_focus_payload(client_id: str, host_id: str, source: object =
     if not stateful:
         return {}
     state_kind = _norm(slot.get("state_kind") or slot.get("stateKind"))
-    query_state = slot.get("query_state") or slot.get("queryState")
-    if not isinstance(query_state, dict):
-        query_state = {}
+    query_state = _json_object(slot.get("query_state") or slot.get("queryState"))
     token_id = _norm(slot.get("token_id") or slot.get("tokenId"))
     console_worker_id = _norm(slot.get("console_worker_id") or slot.get("consoleWorkerId"))
     restore_url = _norm(slot.get("restore_url") or slot.get("restoreUrl") or slot.get("url"))
-    payload = {
+    payload: JsonObject = {
         "app_id": app_id,
         "appId": app_id,
         "client_id": safe_client_id,
@@ -264,8 +288,8 @@ def _sidebar_window_focus_payload(client_id: str, host_id: str, source: object =
         "hostId": safe_host_id,
         "state_kind": state_kind,
         "stateKind": state_kind,
-        "query_state": dict(query_state),
-        "queryState": dict(query_state),
+        "query_state": query_state,
+        "queryState": query_state,
         "url": _norm(slot.get("url")),
         "restore_url": restore_url,
         "restoreUrl": restore_url,
@@ -286,14 +310,15 @@ async def _emit_sidebar_window_focused_global(
     *,
     source: object = "",
     skip_sid: str | None = None,
-) -> dict:
+) -> JsonObject:
     payload = _sidebar_window_focus_payload(client_id, host_id, source)
-    app_id = _norm(payload.get("app_id") if isinstance(payload, dict) else "")
+    app_id = _norm(payload.get("app_id"))
     if not app_id:
         return {}
     from .ui_ipc_socketio import UI_IPC_SIO
 
-    await UI_IPC_SIO.emit(
+    sio = cast(SidebarNamespace, UI_IPC_SIO)
+    await sio.emit(
         SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
         build_jsonrpc_notification(SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_FOCUSED, payload),
         namespace="/sidebar_ipc",
@@ -303,8 +328,8 @@ async def _emit_sidebar_window_focused_global(
     return payload
 
 
-async def _emit_sidebar_window_readiness_changed(ns, payload: dict, *, skip_sid: str | None = None):
-    params = payload if isinstance(payload, dict) else {}
+async def _emit_sidebar_window_readiness_changed(ns: SidebarNamespace, payload: JsonObject, *, skip_sid: str | None = None) -> None:
+    params = _json_object(payload)
     await _emit_ui_ipc_sidebar_notification(UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED, params)
     await _emit_rpc_notification(
         ns,
@@ -315,8 +340,8 @@ async def _emit_sidebar_window_readiness_changed(ns, payload: dict, *, skip_sid:
     )
 
 
-async def _resolve_client_id(ns, sid: str, payload: dict | None = None) -> str:
-    candidate = _norm(payload.get("client_id")) if isinstance(payload, dict) else ""
+async def _resolve_client_id(ns: SidebarNamespace, sid: str, payload: JsonObject | None = None) -> str:
+    candidate = _norm(payload.get("client_id")) if payload is not None else ""
     if candidate:
         return candidate
     cached = _norm(_client_ids_by_sid.get(sid))
@@ -325,16 +350,16 @@ async def _resolve_client_id(ns, sid: str, payload: dict | None = None) -> str:
     try:
         session = await ns.get_session(sid)
     except Exception:
-        session = {}
-    if isinstance(session, dict):
-        candidate = _norm(session.get("clientId"))
-        if candidate:
-            return candidate
+        session = cast(object, {})
+    session_obj = _json_object(session)
+    candidate = _norm(session_obj.get("clientId"))
+    if candidate:
+        return candidate
     return sid
 
 
-async def _emit_presence(ns, *, to_sid: str | None = None):
-    payload = {
+async def _emit_presence(ns: SidebarNamespace, *, to_sid: str | None = None) -> None:
+    payload: JsonObject = {
         "hosts": len(_registered_hosts),
         "iframes": len(_registered_iframes),
     }
@@ -350,7 +375,7 @@ def _current_cwd() -> str:
     return str(cwd or "").strip()
 
 
-def _cwd_payload(reason: str = "sync") -> dict:
+def _cwd_payload(reason: str = "sync") -> JsonObject:
     return {
         "cwd": _current_cwd(),
         "reason": str(reason or "sync"),
@@ -358,7 +383,7 @@ def _cwd_payload(reason: str = "sync") -> dict:
     }
 
 
-async def emit_sidebar_cwd_set(ns, *, to_sid: str | None = None, reason: str = "sync") -> None:
+async def emit_sidebar_cwd_set(ns: SidebarNamespace, *, to_sid: str | None = None, reason: str = "sync") -> None:
     payload = _cwd_payload(reason)
     if to_sid:
         await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET, payload, to_sid=to_sid)
@@ -374,7 +399,8 @@ async def emit_sidebar_cwd_set_global(*, reason: str = "sync") -> None:
     from .ui_ipc_socketio import UI_IPC_SIO
 
     payload = _cwd_payload(reason)
-    await UI_IPC_SIO.emit(
+    sio = cast(SidebarNamespace, UI_IPC_SIO)
+    await sio.emit(
         SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
         build_jsonrpc_notification(SIDEBAR_IPC_RPC_NOTIFICATION_CWD_SET, payload),
         namespace="/sidebar_ipc",
@@ -389,7 +415,8 @@ async def emit_sidebar_cwd_set_global(*, reason: str = "sync") -> None:
 async def emit_sidebar_mention_global(payload: JsonObject) -> None:
     from .ui_ipc_socketio import UI_IPC_SIO
 
-    await UI_IPC_SIO.emit(
+    sio = cast(SidebarNamespace, UI_IPC_SIO)
+    await sio.emit(
         SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
         build_jsonrpc_notification(SIDEBAR_IPC_RPC_NOTIFICATION_MENTION, payload),
         namespace="/sidebar_ipc",
@@ -401,7 +428,7 @@ async def update_sidebar_window_readiness_global(payload: JsonObject) -> JsonObj
     from .sidebar_window_state import update_sidebar_window_readiness
     from .ui_ipc_ws import emit_ui_ipc_rpc_notification
 
-    result = update_sidebar_window_readiness(payload)
+    result = _json_object(update_sidebar_window_readiness(payload))
     await emit_ui_ipc_rpc_notification(UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED, result)
     await _emit_ui_sidebar_window_state()
     await _emit_sidebar_ipc_global_notification(SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_READINESS_CHANGED, result)
@@ -411,15 +438,15 @@ async def update_sidebar_window_readiness_global(payload: JsonObject) -> JsonObj
 async def handle_ui_sidebar_window_create_request(params: JsonObject) -> JsonObject:
     from .sidebar_window_state import create_sidebar_window
 
-    body = params if isinstance(params, dict) else {}
+    body = _json_object(params)
     client_id = _norm(body.get("client_id") or body.get("clientId")) or "main_page"
-    result = create_sidebar_window(body)
-    window = result.get("window") if isinstance(result, dict) else {}
-    host_id = _norm(window.get("host_id") if isinstance(window, dict) else "")
+    result = _json_object(create_sidebar_window(body))
+    window = _json_object(result.get("window", {}))
+    host_id = _norm(window.get("host_id"))
     if host_id:
         _client_active_windows[client_id] = host_id
         _client_active_shortcuts[client_id] = ""
-        activated = {
+        activated: JsonObject = {
             "client_id": client_id,
             "host_id": host_id,
             "hostId": host_id,
@@ -439,14 +466,14 @@ async def handle_ui_sidebar_window_create_request(params: JsonObject) -> JsonObj
 async def handle_ui_sidebar_window_activate_request(params: JsonObject) -> JsonObject:
     from .sidebar_window_state import activate_sidebar_window
 
-    body = params if isinstance(params, dict) else {}
+    body = _json_object(params)
     client_id = _norm(body.get("client_id") or body.get("clientId")) or "main_page"
     result = activate_sidebar_window(body)
     host_id = _norm(body.get("host_id") or body.get("hostId"))
     if host_id:
         _client_active_windows[client_id] = host_id
         _client_active_shortcuts[client_id] = ""
-        activated = {
+        activated: JsonObject = {
             "client_id": client_id,
             "host_id": host_id,
             "hostId": host_id,
@@ -466,13 +493,13 @@ async def handle_ui_sidebar_window_activate_request(params: JsonObject) -> JsonO
 async def handle_ui_sidebar_window_close_request(params: JsonObject) -> JsonObject:
     from .sidebar_window_state import close_sidebar_window
 
-    body = params if isinstance(params, dict) else {}
+    body = _json_object(params)
     client_id = _norm(body.get("client_id") or body.get("clientId")) or "main_page"
     host_id = _norm(body.get("host_id") or body.get("hostId"))
-    result = close_sidebar_window(body)
+    result = _json_object(close_sidebar_window(body))
     if _norm(_client_active_windows.get(client_id)) == host_id:
-        state = result.get("state") if isinstance(result, dict) else {}
-        next_active = _norm(state.get("activeHostId") if isinstance(state, dict) else "")
+        state = _json_object(result.get("state", {}))
+        next_active = _norm(state.get("activeHostId"))
         _client_active_windows[client_id] = next_active
         if next_active:
             await _emit_sidebar_window_focused_global(
@@ -487,16 +514,16 @@ async def handle_ui_sidebar_window_close_request(params: JsonObject) -> JsonObje
 async def handle_ui_sidebar_window_order_update_request(params: JsonObject) -> JsonObject:
     from .sidebar_window_state import reorder_sidebar_windows
 
-    body = params if isinstance(params, dict) else {}
-    result = reorder_sidebar_windows(body)
-    state = result.get("state") if isinstance(result, dict) else {}
-    active_host_id = _norm(state.get("activeHostId") if isinstance(state, dict) else "")
+    body = _json_object(params)
+    result = _json_object(reorder_sidebar_windows(body))
+    state = _json_object(result.get("state", {}))
+    active_host_id = _norm(state.get("activeHostId"))
     await _emit_ui_sidebar_window_state(active_host_id or None)
     return result
 
 
 async def handle_ui_sidebar_active_shortcut_set_request(params: JsonObject) -> JsonObject:
-    body = params if isinstance(params, dict) else {}
+    body = _json_object(params)
     client_id = _norm(body.get("client_id") or body.get("clientId")) or "main_page"
     shortcut_id = _norm(body.get("shortcutId") or body.get("activeShortcutId"))
     _client_active_shortcuts[client_id] = shortcut_id
@@ -517,7 +544,8 @@ async def request_agent_edit_document_state_from_peers(
     for sid in list(_agent_edit_peer_sids):
         if exclude_sid and sid == exclude_sid:
             continue
-        await UI_IPC_SIO.emit(
+        sio = cast(SidebarNamespace, UI_IPC_SIO)
+        await sio.emit(
             SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
             envelope,
             to=sid,
@@ -541,7 +569,8 @@ async def forward_agent_edit_decision_to_peers(
     for sid in list(_agent_edit_peer_sids):
         if exclude_sid and sid == exclude_sid:
             continue
-        await UI_IPC_SIO.emit(
+        sio = cast(SidebarNamespace, UI_IPC_SIO)
+        await sio.emit(
             SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
             envelope,
             to=sid,
@@ -553,9 +582,8 @@ async def forward_agent_edit_decision_to_peers(
     return {"ok": True, "queued": True, "peers": peers}
 
 
-async def on_sidebar_register(ns, sid, data):
-    if not isinstance(data, dict):
-        data = {}
+async def on_sidebar_register(ns: SidebarNamespace, sid: str, data: object) -> None:
+    data = _json_object(data)
     role = str(data.get("role") or "host").strip().lower()
     if role not in {"host", "iframe"}:
         role = "host"
@@ -564,7 +592,7 @@ async def on_sidebar_register(ns, sid, data):
 
     await ns.enter_room(sid, "sidebar_ipc")
     await ns.enter_room(sid, _client_room(client_id))
-    session = {"sidebarRole": role, "clientId": client_id}
+    session: JsonObject = {"sidebarRole": role, "clientId": client_id}
     if app_id:
         session["appId"] = app_id
     await ns.save_session(sid, session)
@@ -593,7 +621,7 @@ async def on_sidebar_register(ns, sid, data):
     await _emit_sidebar_windows_changed(ns, client_id=client_id, to_sid=sid)
 
 
-async def on_sidebar_disconnect(ns, sid):
+async def on_sidebar_disconnect(ns: SidebarNamespace, sid: str) -> None:
     removed = False
     if sid in _registered_hosts:
         _registered_hosts.discard(sid)
@@ -607,12 +635,12 @@ async def on_sidebar_disconnect(ns, sid):
         await _emit_presence(ns)
 
 
-async def _emit_sidebar_control_notification(ns, notification_method: str, payload: dict | None = None, *, room: str = "sidebar_ipc", skip_sid: str | None = None):
-    params = payload if isinstance(payload, dict) else {}
+async def _emit_sidebar_control_notification(ns: SidebarNamespace, notification_method: str, payload: JsonObject | None = None, *, room: str = "sidebar_ipc", skip_sid: str | None = None) -> None:
+    params = _json_object(payload)
     await _emit_rpc_notification(ns, notification_method, params, room=room, skip_sid=skip_sid)
 
 
-async def _emit_project_opened(ns, payload: dict[str, object], *, skip_sid: str | None = None) -> None:
+async def _emit_project_opened(ns: SidebarNamespace, payload: JsonObject, *, skip_sid: str | None = None) -> None:
     params = dict(payload)
     params.setdefault("ts", int(time.time() * 1000))
     await _emit_rpc_notification(
@@ -625,8 +653,8 @@ async def _emit_project_opened(ns, payload: dict[str, object], *, skip_sid: str 
 
 
 async def route_backend_open_request(
-    _ns,
-    data: dict,
+    _ns: SidebarNamespace,
+    data: JsonObject,
     *,
     source_name: str = "sidebar_ipc",
     log_prefix: str = "[sidebar_ipc] agent_open",
@@ -645,9 +673,10 @@ async def route_backend_open_request(
     )
 
 
-async def on_sidebar_mention(ns, sid, data):
+async def on_sidebar_mention(ns: SidebarNamespace, sid: str, data: object) -> None:
     """Relay a typed sidebar.mention request/notification to sidebar listeners."""
-    if not isinstance(data, dict):
+    data = _json_object(data)
+    if not data:
         return
     path = data.get("path")
     print(
@@ -657,7 +686,7 @@ async def on_sidebar_mention(ns, sid, data):
     await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_MENTION, data, room="sidebar_ipc", skip_sid=sid)
 
 
-async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict) -> object:
+async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: str, params: JsonObject) -> object:
     if method == SIDEBAR_IPC_RPC_METHOD_REGISTER:
         await on_sidebar_register(ns, sid, params)
         return {"ok": True}
@@ -666,7 +695,7 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
         print(f"[sidebar_ipc_rpc] cwd_get from={sid} cwd={payload.get('cwd') or ''}", flush=True)
         return payload
     if method == SIDEBAR_IPC_RPC_METHOD_CWD_SYNC:
-        reason = _norm(params.get("reason")) if isinstance(params, dict) else ""
+        reason = _norm(params.get("reason"))
         await emit_sidebar_cwd_set(ns, reason=reason or "authoritative")
         return {"ok": True}
     if method == SIDEBAR_IPC_RPC_METHOD_FILE_OPEN:
@@ -714,8 +743,9 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
             params,
             source_name="sidebar_ipc_rpc",
         )
-        if isinstance(result, dict) and result.get("ok") is True:
-            await _emit_project_opened(ns, result)
+        result_obj = _json_object(result)
+        if result_obj.get("ok") is True:
+            await _emit_project_opened(ns, result_obj)
         return result
     if method == SIDEBAR_IPC_RPC_METHOD_PROJECT_CREATE:
         from ..host.project_backend import handle_sidebar_project_create_request
@@ -724,8 +754,9 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
             params,
             source_name="sidebar_ipc_rpc",
         )
-        if isinstance(result, dict) and result.get("ok") is True and "resolved_path" in result:
-            await _emit_project_opened(ns, result)
+        result_obj = _json_object(result)
+        if result_obj.get("ok") is True and "resolved_path" in result_obj:
+            await _emit_project_opened(ns, result_obj)
         return result
     if method == SIDEBAR_IPC_RPC_METHOD_LAUNCHER_CATALOG_GET:
         from .sidebar_window_state import list_launcher_apps
@@ -741,8 +772,9 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
 
         client_id = await _resolve_client_id(ns, sid, params)
         result = create_sidebar_window(params)
-        window = result.get("window") if isinstance(result, dict) else {}
-        host_id = _norm(window.get("host_id") if isinstance(window, dict) else "")
+        result_obj = _json_object(result)
+        window = _json_object(result_obj.get("window", {}))
+        host_id = _norm(window.get("host_id"))
         if host_id:
             _client_active_windows[client_id] = host_id
             _client_active_shortcuts[client_id] = ""
@@ -761,8 +793,9 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
 
         client_id = await _resolve_client_id(ns, sid, params)
         result = open_sidebar_window_url(params)
-        window = result.get("window") if isinstance(result, dict) else {}
-        host_id = _norm(window.get("host_id") if isinstance(window, dict) else "")
+        result_obj = _json_object(result)
+        window = _json_object(result_obj.get("window", {}))
+        host_id = _norm(window.get("host_id"))
         if host_id and params.get("activate", False):
             _client_active_windows[client_id] = host_id
             _client_active_shortcuts[client_id] = ""
@@ -801,8 +834,9 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
         result = close_sidebar_window(params)
         host_id = _norm(params.get("host_id") or params.get("hostId"))
         if _norm(_client_active_windows.get(client_id)) == host_id:
-            state = result.get("state") if isinstance(result, dict) else {}
-            next_active = _norm(state.get("activeHostId") if isinstance(state, dict) else "")
+            result_obj = _json_object(result)
+            state = _json_object(result_obj.get("state", {}))
+            next_active = _norm(state.get("activeHostId"))
             _client_active_windows[client_id] = next_active
             if next_active:
                 await _emit_sidebar_window_focused_global(
@@ -818,8 +852,9 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
         from .sidebar_window_state import update_sidebar_window_readiness
 
         result = update_sidebar_window_readiness(params)
-        if isinstance(result, dict):
-            await _emit_sidebar_window_readiness_changed(ns, result, skip_sid=sid)
+        result_obj = _json_object(result)
+        if result_obj:
+            await _emit_sidebar_window_readiness_changed(ns, result_obj, skip_sid=sid)
         await _emit_sidebar_windows_changed(ns)
         return result
     if method == SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST:
@@ -913,7 +948,7 @@ async def _dispatch_sidebar_rpc_request(ns, sid: str, method: str, params: dict)
     raise RuntimeError(f"Unhandled sidebar IPC RPC method: {method}")
 
 
-async def _dispatch_sidebar_rpc_notification(ns, sid: str, method: str, params: dict) -> None:
+async def _dispatch_sidebar_rpc_notification(ns: SidebarNamespace, sid: str, method: str, params: JsonObject) -> None:
     if method == SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE:
         await _emit_sidebar_control_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_DRAWER_STATE, params, skip_sid=sid)
         return
@@ -945,7 +980,7 @@ async def _dispatch_sidebar_rpc_notification(ns, sid: str, method: str, params: 
     # Presence/client-state/file-open notifications are backend-owned; ignore client copies.
 
 
-async def on_sidebar_rpc(ns, sid, data):
+async def on_sidebar_rpc(ns: SidebarNamespace, sid: str, data: object) -> object | None:
     try:
         parsed_request = parse_sidebar_ipc_rpc_request(data)
         if parsed_request is None:

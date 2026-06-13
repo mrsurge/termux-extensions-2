@@ -6,14 +6,18 @@ import os
 import secrets
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, ClassVar
+from typing import ClassVar, TypeAlias, cast
+
+JsonDict: TypeAlias = dict[str, object]
+StringDict: TypeAlias = dict[str, str]
+DraftEntry: TypeAlias = dict[str, object]
 
 
 def _utc_timestamp() -> str:
     """Return current UTC timestamp in ISO 8601 format with Z suffix."""
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
 
 
 def _ensure_dir(path: Path) -> None:
@@ -45,6 +49,51 @@ def _make_file_cache_key(project_path: str, file_path: str) -> str:
     return hashlib.sha1(combined.encode("utf-8")).hexdigest()
 
 
+def _as_dict(value: object) -> JsonDict:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in cast(dict[object, object], value).items() if isinstance(key, str)}
+
+
+def _as_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for item in cast(list[object], value):
+        if item:
+            out.append(str(item))
+    return out
+
+
+def _as_dict_list(value: object) -> list[JsonDict]:
+    if not isinstance(value, list):
+        return []
+    out: list[JsonDict] = []
+    for item in cast(list[object], value):
+        if isinstance(item, dict):
+            out.append(_as_dict(cast(object, item)))
+    return out
+
+
+def _as_string_dict(value: object) -> StringDict:
+    if not isinstance(value, dict):
+        return {}
+    out: StringDict = {}
+    for key, item in cast(dict[object, object], value).items():
+        if isinstance(key, str) and isinstance(item, str):
+            out[key] = item
+    return out
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    try:
+        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            return int(value)
+    except Exception:
+        pass
+    return default
+
+
 def _sidecar_root() -> Path:
     """Return root directory for per-project sidecars."""
     root = Path.home() / ".cache" / "cm6_editor" / "projects"
@@ -68,10 +117,10 @@ class ProjectSidecar:
     VERSION: int = 2
 
     _path: Path = field(init=False, repr=False)
-    _data: Dict[str, Any] = field(init=False, repr=False)
+    _data: JsonDict = field(init=False, repr=False)
 
     # In-memory cache of instances keyed by normalized project path.
-    _instances: ClassVar[Dict[str, "ProjectSidecar"]] = {}
+    _instances: ClassVar[dict[str, "ProjectSidecar"]] = {}
 
     def __post_init__(self) -> None:
         normalized = _normalize_project_path(self.project_path)
@@ -108,7 +157,7 @@ class ProjectSidecar:
         cls._instances[normalized] = instance
         return instance
 
-    def _default_data(self) -> Dict[str, Any]:
+    def _default_data(self) -> JsonDict:
         return {
             "version": self.VERSION,
             "project_path": self.project_path,
@@ -190,9 +239,10 @@ class ProjectSidecar:
             raw = self._path.read_text(encoding="utf-8")
             if not raw.strip():
                 return
-            data = json.loads(raw)
-            if not isinstance(data, dict):
+            decoded = cast(object, json.loads(raw))
+            if not isinstance(decoded, dict):
                 return
+            data = _as_dict(cast(object, decoded))
         except Exception:
             # Corrupt or unreadable sidecar; treat as fresh.
             return
@@ -230,7 +280,7 @@ class ProjectSidecar:
     def save(self) -> None:
         """Atomically persist current sidecar state to disk."""
         _ensure_dir(self._path.parent)
-        tmp_path: Optional[Path] = None
+        tmp_path: Path | None = None
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w",
@@ -249,10 +299,11 @@ class ProjectSidecar:
             if tmp_path is not None and tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
 
-    def dump_raw(self) -> Dict[str, Any]:
+    def dump_raw(self) -> JsonDict:
         """Return the raw in-memory sidecar state (debug endpoint helper)."""
         try:
-            return json.loads(json.dumps(self._data, ensure_ascii=False, default=str))
+            decoded = cast(object, json.loads(json.dumps(self._data, ensure_ascii=False, default=str)))
+            return _as_dict(decoded)
         except Exception:
             return {"error": "failed_to_dump", "repr": repr(self._data)}
 
@@ -260,22 +311,19 @@ class ProjectSidecar:
     # Diagnostics cache API (explorer dots)
     # --------------------------------------------------------------------- #
 
-    def get_pyright_diagnostics_summary(self) -> Dict[str, Dict[str, int]]:
+    def get_pyright_diagnostics_summary(self) -> dict[str, dict[str, int]]:
         """Return cached {rel: {errors, warnings}} for Pyright, if available."""
         try:
-            dc = self._data.get("diagnostics_cache") or {}
-            py = dc.get("pyright") or {}
-            summary = py.get("summaryByRel") or {}
-            if not isinstance(summary, dict):
-                return {}
-            out: Dict[str, Dict[str, int]] = {}
+            dc = _as_dict(self._data.get("diagnostics_cache"))
+            py = _as_dict(dc.get("pyright"))
+            summary = _as_dict(py.get("summaryByRel"))
+            out: dict[str, dict[str, int]] = {}
             for rel, counts in summary.items():
-                if not isinstance(rel, str) or not rel:
+                if not rel:
                     continue
-                if not isinstance(counts, dict):
-                    continue
-                e = int(counts.get("errors") or 0)
-                w = int(counts.get("warnings") or 0)
+                counts_dict = _as_dict(counts)
+                e = _as_int(counts_dict.get("errors"))
+                w = _as_int(counts_dict.get("warnings"))
                 if e <= 0 and w <= 0:
                     continue
                 out[rel] = {"errors": e, "warnings": w}
@@ -286,25 +334,21 @@ class ProjectSidecar:
     def set_pyright_diagnostics_summary(
         self,
         *,
-        summary_by_rel: Dict[str, Dict[str, int]],
-        updated_at: Optional[str] = None,
-        effective_root: Optional[str] = None,
-        repo_fingerprint: Optional[str] = None,
+        summary_by_rel: dict[str, dict[str, int]],
+        updated_at: str | None = None,
+        effective_root: str | None = None,
+        repo_fingerprint: str | None = None,
     ) -> None:
-        dc = self._data.setdefault("diagnostics_cache", {})
-        if not isinstance(dc, dict):
-            dc = {}
-            self._data["diagnostics_cache"] = dc
-        py = dc.setdefault("pyright", {})
-        if not isinstance(py, dict):
-            py = {}
-            dc["pyright"] = py
+        dc = _as_dict(self._data.get("diagnostics_cache"))
+        py = _as_dict(dc.get("pyright"))
 
         # Store as-is (counts only); normalize in getter.
-        py["summaryByRel"] = summary_by_rel if isinstance(summary_by_rel, dict) else {}
+        py["summaryByRel"] = summary_by_rel
         py["updatedAt"] = updated_at or _utc_timestamp()
         py["effectiveRoot"] = str(effective_root) if effective_root else None
         py["repoFingerprint"] = str(repo_fingerprint) if repo_fingerprint else None
+        dc["pyright"] = py
+        self._data["diagnostics_cache"] = dc
 
     def pop_pyright_diagnostics_rel(self, rel_path: str) -> None:
         """Remove a cached pyright summary entry for a rel path (best-effort)."""
@@ -312,11 +356,13 @@ class ProjectSidecar:
             rel = str(rel_path or "").strip()
             if not rel or rel == ".":
                 return
-            dc = self._data.get("diagnostics_cache") or {}
-            py = dc.get("pyright") or {}
-            sb = py.get("summaryByRel") or {}
-            if isinstance(sb, dict):
-                sb.pop(rel, None)
+            dc = _as_dict(self._data.get("diagnostics_cache"))
+            py = _as_dict(dc.get("pyright"))
+            sb = _as_dict(py.get("summaryByRel"))
+            sb.pop(rel, None)
+            py["summaryByRel"] = sb
+            dc["pyright"] = py
+            self._data["diagnostics_cache"] = dc
         except Exception:
             return
 
@@ -326,12 +372,12 @@ class ProjectSidecar:
 
     def increment_session(self) -> None:
         """Increment session counter and update last_boot_at."""
-        self._data["session_count"] = int(self._data.get("session_count") or 0) + 1
+        self._data["session_count"] = _as_int(self._data.get("session_count")) + 1
         self._data["last_boot_at"] = _utc_timestamp()
 
     @property
     def session_count(self) -> int:
-        return int(self._data.get("session_count") or 0)
+        return _as_int(self._data.get("session_count"))
 
     @session_count.setter
     def session_count(self, value: int) -> None:
@@ -342,14 +388,16 @@ class ProjectSidecar:
     # --------------------------------------------------------------------- #
 
     def get_diff_base(self) -> str:
-        diff_base = self._data.get("diff_base") or {}
-        ref = (diff_base.get("ref") or "HEAD").strip() or "HEAD"
+        diff_base = _as_dict(self._data.get("diff_base"))
+        raw_ref = diff_base.get("ref")
+        ref = (raw_ref if isinstance(raw_ref, str) else "HEAD").strip() or "HEAD"
         return ref
 
-    def set_diff_base(self, ref: Optional[str]) -> str:
+    def set_diff_base(self, ref: str | None) -> str:
         value = (ref or "HEAD").strip() or "HEAD"
-        diff_base = self._data.setdefault("diff_base", {})
+        diff_base = _as_dict(self._data.get("diff_base"))
         diff_base["ref"] = value
+        self._data["diff_base"] = diff_base
         # commit_sha is intentionally left to git helper code; keep as-is.
         return value
 
@@ -357,11 +405,11 @@ class ProjectSidecar:
     # Session cache API
     # --------------------------------------------------------------------- #
 
-    def get_cached_document(self, file_path: str) -> Optional[Dict[str, Any]]:
+    def get_cached_document(self, file_path: str) -> DraftEntry | None:
         """Return cached draft entry for file_path, if any."""
         cache_key = _make_file_cache_key(self.project_path, file_path)
-        cache: Dict[str, Dict[str, Any]] = self._data.setdefault("session_cache", {})
-        entry = cache.get(cache_key)
+        cache = _as_dict(self._data.get("session_cache"))
+        entry = _as_dict(cache.get(cache_key))
         if not entry:
             return None
         # Return a shallow copy to prevent accidental mutation.
@@ -377,10 +425,10 @@ class ProjectSidecar:
         shell_run_id: str,
         launcher_pid: int,
         worker_pid: int,
-    ) -> Dict[str, Any]:
+    ) -> DraftEntry:
         """Insert/update draft cache entry for file_path."""
         cache_key = _make_file_cache_key(self.project_path, file_path)
-        cache: Dict[str, Dict[str, Any]] = self._data.setdefault("session_cache", {})
+        cache = _as_dict(self._data.get("session_cache"))
 
         content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
         unsaved = content_sha256 != base_sha256
@@ -402,43 +450,48 @@ class ProjectSidecar:
         }
 
         cache[cache_key] = entry
+        self._data["session_cache"] = cache
         return dict(entry)
 
     def clear_cached_document(self, file_path: str) -> bool:
         """Remove cached draft (if any) for file_path."""
         cache_key = _make_file_cache_key(self.project_path, file_path)
-        cache: Dict[str, Dict[str, Any]] = self._data.setdefault("session_cache", {})
+        cache = _as_dict(self._data.get("session_cache"))
         existed = cache_key in cache
         if existed:
             cache.pop(cache_key, None)
+            self._data["session_cache"] = cache
         return existed
 
-    def list_project_drafts(self) -> List[Dict[str, Any]]:
+    def list_project_drafts(self) -> list[DraftEntry]:
         """Return list of unsaved draft entries for this project."""
-        cache: Dict[str, Dict[str, Any]] = self._data.get("session_cache") or {}
-        results: List[Dict[str, Any]] = []
+        cache = _as_dict(self._data.get("session_cache"))
+        results: list[DraftEntry] = []
         for entry in cache.values():
+            entry_dict = _as_dict(entry)
             try:
-                if entry.get("unsaved"):
-                    results.append(dict(entry))
+                if entry_dict.get("unsaved"):
+                    results.append(dict(entry_dict))
             except Exception:
                 continue
         return results
 
     def prune_clean_drafts(self) -> int:
         """Remove cached draft entries that are explicitly marked unsaved == False."""
-        cache: Dict[str, Dict[str, Any]] = self._data.get("session_cache") or {}
+        cache = _as_dict(self._data.get("session_cache"))
         if not cache:
             return 0
-        to_remove = []
+        to_remove: list[str] = []
         for key, entry in cache.items():
+            entry_dict = _as_dict(entry)
             try:
-                if entry.get("unsaved") is False:
+                if entry_dict.get("unsaved") is False:
                     to_remove.append(key)
             except Exception:
                 continue
         for key in to_remove:
             cache.pop(key, None)
+        self._data["session_cache"] = cache
         return len(to_remove)
 
     def clear_session_cache(self) -> None:
@@ -449,31 +502,27 @@ class ProjectSidecar:
     # --------------------------------------------------------------------- #
 
     def add_tracked_job(self, job_id: str) -> None:
-        jobs: List[str] = self._data.setdefault("tracked_jobs", [])
+        jobs = _as_string_list(self._data.get("tracked_jobs"))
         if job_id not in jobs:
             jobs.append(job_id)
+        self._data["tracked_jobs"] = jobs
 
     def remove_tracked_job(self, job_id: str) -> None:
-        jobs: List[str] = self._data.setdefault("tracked_jobs", [])
+        jobs = _as_string_list(self._data.get("tracked_jobs"))
         if job_id in jobs:
             jobs.remove(job_id)
+        self._data["tracked_jobs"] = jobs
 
     def clear_tracked_jobs(self) -> None:
         self._data["tracked_jobs"] = []
 
-    def list_tracked_jobs(self) -> List[str]:
-        jobs = self._data.get("tracked_jobs") or []
-        if not isinstance(jobs, list):
-            return []
-        out: List[str] = []
-        for job_id in jobs:
-            if isinstance(job_id, str) and job_id:
-                out.append(job_id)
-        return out
+    def list_tracked_jobs(self) -> list[str]:
+        return _as_string_list(self._data.get("tracked_jobs"))
 
     @property
-    def last_boot_at(self) -> Optional[str]:
-        return self._data.get("last_boot_at")
+    def last_boot_at(self) -> str | None:
+        value = self._data.get("last_boot_at")
+        return value if isinstance(value, str) else None
 
     # --------------------------------------------------------------------- #
     # Recent files / MRU API (Phase 5 migration)
@@ -486,7 +535,7 @@ class ProjectSidecar:
         except Exception:
             return file_path
 
-    def record_file_activity(self, file_path: str, scroll_line: Optional[float] = None) -> Dict[str, Any]:
+    def record_file_activity(self, file_path: str, scroll_line: float | None = None) -> DraftEntry:
         """Record file open, updating last_file and recent_files list (LRU).
         
         Args:
@@ -500,7 +549,7 @@ class ProjectSidecar:
         self._data["last_file"] = normalized
         
         # Update recent_files (LRU, capped at 12)
-        recent: List[Dict[str, Any]] = self._data.setdefault("recent_files", [])
+        recent = _as_dict_list(self._data.get("recent_files"))
         
         # Find existing entry to preserve its scroll_line if not provided
         existing_scroll = None
@@ -513,7 +562,7 @@ class ProjectSidecar:
         recent = [e for e in recent if e.get("path") != normalized]
         
         # Build new entry, preserving scroll_line if not explicitly provided
-        entry: Dict[str, Any] = {
+        entry: DraftEntry = {
             "path": normalized,
             "label": self._file_label(normalized),
             "opened_at": timestamp,
@@ -523,7 +572,7 @@ class ProjectSidecar:
         effective_scroll = scroll_line if scroll_line is not None else existing_scroll
         if effective_scroll is not None:
             try:
-                entry["scroll_line"] = int(effective_scroll)
+                entry["scroll_line"] = _as_int(effective_scroll)
             except Exception:
                 pass
         
@@ -539,7 +588,7 @@ class ProjectSidecar:
         Returns True if the file was found and updated.
         """
         normalized = _normalize_file_path(file_path)
-        recent: List[Dict[str, Any]] = self._data.get("recent_files") or []
+        recent = _as_dict_list(self._data.get("recent_files"))
         
         for entry in recent:
             if entry.get("path") == normalized:
@@ -547,31 +596,34 @@ class ProjectSidecar:
                     entry["scroll_line"] = int(scroll_line)
                 except Exception:
                     entry["scroll_line"] = scroll_line
+                self._data["recent_files"] = recent
                 return True
         return False
 
-    def get_file_scroll_line(self, file_path: str) -> Optional[float]:
+    def get_file_scroll_line(self, file_path: str) -> float | None:
         """Get the stored scroll_line for a specific file.
         
         Returns None if file not found or no scroll_line stored.
         """
         normalized = _normalize_file_path(file_path)
-        recent: List[Dict[str, Any]] = self._data.get("recent_files") or []
+        recent = _as_dict_list(self._data.get("recent_files"))
         
         for entry in recent:
             if entry.get("path") == normalized:
-                return entry.get("scroll_line")
+                value = entry.get("scroll_line")
+                return float(value) if isinstance(value, (int, float)) else None
         return None
 
-    def get_last_file(self) -> Optional[str]:
+    def get_last_file(self) -> str | None:
         """Return the last opened file path for this project."""
-        return self._data.get("last_file")
+        value = self._data.get("last_file")
+        return value if isinstance(value, str) else None
 
     def get_open_state_revision(self) -> int:
         """Return the monotonic revision for sidecar-backed open-file state."""
         try:
             raw = self._data.get("open_state_revision", 0)
-            return int(raw) if raw is not None else 0
+            return _as_int(raw)
         except Exception:
             return 0
 
@@ -581,7 +633,7 @@ class ProjectSidecar:
         self._data["open_state_revision"] = revision
         return revision
 
-    def set_last_file(self, file_path: Optional[str]) -> Optional[str]:
+    def set_last_file(self, file_path: str | None) -> str | None:
         """Set the last opened file path for this project."""
         if file_path:
             normalized = _normalize_file_path(file_path)
@@ -591,9 +643,9 @@ class ProjectSidecar:
             self._data["last_file"] = None
             return None
 
-    def list_recent_files(self) -> List[Dict[str, Any]]:
+    def list_recent_files(self) -> list[DraftEntry]:
         """Return list of recent files for this project."""
-        recent: List[Dict[str, Any]] = self._data.get("recent_files") or []
+        recent = _as_dict_list(self._data.get("recent_files"))
         return [dict(e) for e in recent]
 
     def clear_recent_files(self) -> None:
@@ -603,23 +655,22 @@ class ProjectSidecar:
 
     def get_draft_count(self) -> int:
         """Return count of unsaved drafts for this project."""
-        cache: Dict[str, Dict[str, Any]] = self._data.get("session_cache") or {}
-        return sum(1 for e in cache.values() if e.get("unsaved"))
+        cache = _as_dict(self._data.get("session_cache"))
+        return sum(1 for e in cache.values() if _as_dict(e).get("unsaved"))
 
     # --------------------------------------------------------------------- #
     # Open directories API (explorer tree state)
     # --------------------------------------------------------------------- #
 
-    def get_open_directories(self) -> List[str]:
+    def get_open_directories(self) -> list[str]:
         """Return list of open directory rel paths in explorer tree."""
-        dirs: List[str] = self._data.get("open_directories") or []
-        return list(dirs)
+        return _as_string_list(self._data.get("open_directories"))
 
-    def set_open_directories(self, dirs: List[str]) -> None:
+    def set_open_directories(self, dirs: list[str]) -> None:
         """Set the list of open directory rel paths in explorer tree."""
         # Normalize and deduplicate, preserving order
-        seen: set = set()
-        normalized: List[str] = []
+        seen: set[str] = set()
+        normalized: list[str] = []
         for d in dirs:
             if d and d not in seen:
                 seen.add(d)
@@ -630,15 +681,16 @@ class ProjectSidecar:
         """Add a directory to the open list (if not already present)."""
         if not rel:
             return
-        dirs: List[str] = self._data.setdefault("open_directories", [])
+        dirs = _as_string_list(self._data.get("open_directories"))
         if rel not in dirs:
             dirs.append(rel)
+        self._data["open_directories"] = dirs
 
     def remove_open_directory(self, rel: str) -> None:
         """Remove a directory from the open list."""
         if not rel:
             return
-        dirs: List[str] = self._data.get("open_directories") or []
+        dirs = _as_string_list(self._data.get("open_directories"))
         if rel in dirs:
             dirs.remove(rel)
             self._data["open_directories"] = dirs
@@ -659,7 +711,7 @@ class ProjectSidecar:
             self._data["terminal_shell_titles"] = {}
 
         legacy = self._data.get("terminal_shell_id")
-        ids: List[str] = self._data.get("terminal_shell_ids") or []
+        ids = _as_string_list(self._data.get("terminal_shell_ids"))
         if legacy and legacy not in ids:
             ids.append(str(legacy))
             self._data["terminal_shell_ids"] = ids
@@ -669,23 +721,22 @@ class ProjectSidecar:
             # Clear legacy slot once migrated to avoid cross-field drift.
             self._data["terminal_shell_id"] = None
 
-    def get_terminal_shell_ids(self) -> List[str]:
+    def get_terminal_shell_ids(self) -> list[str]:
         """Return ordered terminal shell ids for this project."""
         self._migrate_terminal_legacy()
-        ids: List[str] = self._data.get("terminal_shell_ids") or []
-        return [str(i) for i in ids if i]
+        return _as_string_list(self._data.get("terminal_shell_ids"))
 
     def add_terminal_shell_id(self, shell_id: str) -> str:
         """Append a shell id to the list, enforce cap, and mark active."""
         if not shell_id:
             return shell_id
         self._migrate_terminal_legacy()
-        ids: List[str] = self._data.get("terminal_shell_ids") or []
-        titles: Dict[str, str] = self._data.get("terminal_shell_titles") or {}
+        ids = _as_string_list(self._data.get("terminal_shell_ids"))
+        titles = _as_string_dict(self._data.get("terminal_shell_titles"))
         sid = str(shell_id)
         if sid not in ids:
             ids.append(sid)
-        cap = int(self._data.get("terminal_shell_cap") or 5)
+        cap = _as_int(self._data.get("terminal_shell_cap"), 5)
         if cap > 0 and len(ids) > cap:
             # Trim oldest, but never drop the active/new shell.
             while len(ids) > cap and ids[0] != sid:
@@ -701,13 +752,13 @@ class ProjectSidecar:
         self._data["terminal_shell_titles"] = titles
         return sid
 
-    def remove_terminal_shell_id(self, shell_id: str) -> Optional[str]:
+    def remove_terminal_shell_id(self, shell_id: str) -> str | None:
         """Remove a shell id from the list. Adjust active if needed."""
         if not shell_id:
             return self.get_active_terminal_shell_id()
         self._migrate_terminal_legacy()
-        ids: List[str] = self._data.get("terminal_shell_ids") or []
-        titles: Dict[str, str] = self._data.get("terminal_shell_titles") or {}
+        ids = _as_string_list(self._data.get("terminal_shell_ids"))
+        titles = _as_string_dict(self._data.get("terminal_shell_titles"))
         sid = str(shell_id)
         if sid in ids:
             ids.remove(sid)
@@ -724,10 +775,10 @@ class ProjectSidecar:
         self._data["terminal_shell_titles"] = titles
         return str(active) if active else None
 
-    def get_active_terminal_shell_id(self) -> Optional[str]:
+    def get_active_terminal_shell_id(self) -> str | None:
         """Return active terminal shell id (fallback to newest)."""
         self._migrate_terminal_legacy()
-        ids = self._data.get("terminal_shell_ids") or []
+        ids = _as_string_list(self._data.get("terminal_shell_ids"))
         active = self._data.get("active_terminal_shell_id")
         if active and active in ids:
             return str(active)
@@ -738,7 +789,7 @@ class ProjectSidecar:
             return newest
         return None
 
-    def set_active_terminal_shell_id(self, shell_id: Optional[str]) -> Optional[str]:
+    def set_active_terminal_shell_id(self, shell_id: str | None) -> str | None:
         """Set active terminal shell id, ensuring membership in list."""
         self._migrate_terminal_legacy()
         if not shell_id:
@@ -747,20 +798,20 @@ class ProjectSidecar:
             return None
         return self.add_terminal_shell_id(str(shell_id))
 
-    def get_terminal_shell_id(self) -> Optional[str]:
+    def get_terminal_shell_id(self) -> str | None:
         """Compatibility wrapper: return the active terminal shell id."""
         return self.get_active_terminal_shell_id()
 
-    def set_terminal_shell_id(self, shell_id: Optional[str]) -> Optional[str]:
+    def set_terminal_shell_id(self, shell_id: str | None) -> str | None:
         """Compatibility wrapper: set active terminal shell id."""
         return self.set_active_terminal_shell_id(shell_id)
 
-    def get_terminal_shell_title(self, shell_id: str) -> Optional[str]:
+    def get_terminal_shell_title(self, shell_id: str) -> str | None:
         """Return the optional terminal title for a shell id."""
         if not shell_id:
             return None
         self._migrate_terminal_legacy()
-        titles: Dict[str, str] = self._data.get("terminal_shell_titles") or {}
+        titles = _as_string_dict(self._data.get("terminal_shell_titles"))
         try:
             val = titles.get(str(shell_id))
         except Exception:
@@ -768,13 +819,13 @@ class ProjectSidecar:
         text = str(val).strip() if val else ""
         return text or None
 
-    def set_terminal_shell_title(self, shell_id: str, title: Optional[str]) -> Optional[str]:
+    def set_terminal_shell_title(self, shell_id: str, title: str | None) -> str | None:
         """Set (or clear) the optional terminal title for a shell id."""
         if not shell_id:
             return None
         self._migrate_terminal_legacy()
         sid = str(shell_id)
-        titles: Dict[str, str] = self._data.get("terminal_shell_titles") or {}
+        titles = _as_string_dict(self._data.get("terminal_shell_titles"))
         text = str(title).strip() if title is not None else ""
         if not text:
             try:
@@ -791,33 +842,28 @@ class ProjectSidecar:
     # LSP configuration API (project-scoped SSOT)
     # --------------------------------------------------------------------- #
 
-    def _ensure_lsp_schema(self) -> dict:
-        lsp = self._data.get("lsp")
-        if not isinstance(lsp, dict):
-            lsp = {"enabled": False, "servers": {}, "roots": {}, "android": {}}
-        lsp.setdefault("enabled", False)
-        lsp.setdefault("project_id", "")
-        lsp.setdefault("pyrightConfigMode", "root")
-        android_cfg = lsp.get("android")
-        if not isinstance(android_cfg, dict):
-            android_cfg = {}
-        kotlin_android = android_cfg.get("kotlin-android")
-        if not isinstance(kotlin_android, dict):
-            kotlin_android = {}
+    def _ensure_lsp_schema(self) -> JsonDict:
+        lsp: JsonDict = _as_dict(self._data.get("lsp"))
+        if not lsp:
+            lsp = cast(JsonDict, {"enabled": False, "servers": {}, "roots": {}, "android": {}})
+        if "enabled" not in lsp:
+            lsp["enabled"] = False
+        if "project_id" not in lsp:
+            lsp["project_id"] = ""
+        if "pyrightConfigMode" not in lsp:
+            lsp["pyrightConfigMode"] = "root"
+        android_cfg = _as_dict(lsp.get("android"))
+        kotlin_android = _as_dict(android_cfg.get("kotlin-android"))
         kotlin_android.setdefault("module", "app")
         kotlin_android.setdefault("variant", "GeckoDebug")
         android_cfg["kotlin-android"] = kotlin_android
         lsp["android"] = android_cfg
-        servers = lsp.get("servers")
-        if not isinstance(servers, dict):
-            servers = {}
+        servers = _as_dict(lsp.get("servers"))
         for key, default in (("pyright", False), ("typescript", False), ("clangd", False), ("kotlin", False), ("kotlin-android", False)):
             servers.setdefault(key, default)
         lsp["servers"] = servers
 
-        roots = lsp.get("roots")
-        if not isinstance(roots, dict):
-            roots = {}
+        roots = _as_dict(lsp.get("roots"))
         for key in ("pyright", "typescript", "clangd", "kotlin", "kotlin-android"):
             val = roots.get(key)
             roots[key] = str(val).strip() if val else ""
@@ -851,7 +897,7 @@ class ProjectSidecar:
         self._data["lsp"] = lsp
         return pid
 
-    def get_lsp_project_id(self) -> Optional[str]:
+    def get_lsp_project_id(self) -> str | None:
         lsp = self._ensure_lsp_schema()
         val = lsp.get("project_id")
         text = str(val).strip() if val else ""
@@ -869,12 +915,12 @@ class ProjectSidecar:
 
     def get_lsp_server_enabled(self, server_id: str) -> bool:
         lsp = self._ensure_lsp_schema()
-        servers = lsp.get("servers") or {}
+        servers = _as_dict(lsp.get("servers"))
         return bool(servers.get(str(server_id), False))
 
     def set_lsp_server_enabled(self, server_id: str, enabled: bool) -> bool:
         lsp = self._ensure_lsp_schema()
-        servers = lsp.get("servers") or {}
+        servers = _as_dict(lsp.get("servers"))
         servers[str(server_id)] = bool(enabled)
         lsp["servers"] = servers
         self._data["lsp"] = lsp
@@ -882,34 +928,30 @@ class ProjectSidecar:
 
     def get_lsp_server_root_rel(self, server_id: str) -> str:
         lsp = self._ensure_lsp_schema()
-        roots = lsp.get("roots") or {}
+        roots = _as_dict(lsp.get("roots"))
         val = roots.get(str(server_id))
         text = str(val).strip() if val else ""
         return text
 
     def set_lsp_server_root_rel(self, server_id: str, root_rel: str) -> str:
         lsp = self._ensure_lsp_schema()
-        roots = lsp.get("roots") or {}
+        roots = _as_dict(lsp.get("roots"))
         text = str(root_rel).strip() if root_rel else ""
         roots[str(server_id)] = text
         lsp["roots"] = roots
         self._data["lsp"] = lsp
         return text
 
-    def get_lsp_kotlin_android_config(self) -> dict:
+    def get_lsp_kotlin_android_config(self) -> JsonDict:
         lsp = self._ensure_lsp_schema()
-        android_cfg = lsp.get("android") or {}
-        cfg = android_cfg.get("kotlin-android")
-        return cfg if isinstance(cfg, dict) else {"module": "app", "variant": "GeckoDebug"}
+        android_cfg = _as_dict(lsp.get("android"))
+        cfg = _as_dict(android_cfg.get("kotlin-android"))
+        return cfg if cfg else {"module": "app", "variant": "GeckoDebug"}
 
-    def set_lsp_kotlin_android_config(self, *, module: str | None = None, variant: str | None = None) -> dict:
+    def set_lsp_kotlin_android_config(self, *, module: str | None = None, variant: str | None = None) -> JsonDict:
         lsp = self._ensure_lsp_schema()
-        android_cfg = lsp.get("android")
-        if not isinstance(android_cfg, dict):
-            android_cfg = {}
-        cfg = android_cfg.get("kotlin-android")
-        if not isinstance(cfg, dict):
-            cfg = {}
+        android_cfg = _as_dict(lsp.get("android"))
+        cfg = _as_dict(android_cfg.get("kotlin-android"))
         if module is not None:
             cfg["module"] = str(module).strip() or "app"
         if variant is not None:
@@ -919,10 +961,10 @@ class ProjectSidecar:
         self._data["lsp"] = lsp
         return cfg
 
-    def get_lsp_state_payload(self) -> dict:
+    def get_lsp_state_payload(self) -> JsonDict:
         lsp = self._ensure_lsp_schema()
-        servers = lsp.get("servers") or {}
-        roots = lsp.get("roots") or {}
+        servers = _as_dict(lsp.get("servers"))
+        roots = _as_dict(lsp.get("roots"))
         android_cfg = self.get_lsp_kotlin_android_config()
         return {
             "enableLsp": bool(lsp.get("enabled", False)),
@@ -945,25 +987,16 @@ class ProjectSidecar:
     # Workbench extension-host config (project-scoped SSOT)
     # --------------------------------------------------------------------- #
 
-    def _ensure_workbench_extensions_schema(self) -> Dict[str, object]:
-        cfg_obj = self._data.get("workbench_extensions")
-        legacy_cfg_obj = self._data.get("vscode_api")
-        if isinstance(cfg_obj, dict):
-            cfg: Dict[str, object] = {str(key): value for key, value in cfg_obj.items() if isinstance(key, str)}
-        elif isinstance(legacy_cfg_obj, dict):
-            cfg = {str(key): value for key, value in legacy_cfg_obj.items() if isinstance(key, str)}
-        else:
-            cfg = {}
-        raw_enabled = cfg.get("enabled_extensions")
-        enabled = raw_enabled if isinstance(raw_enabled, list) else []
+    def _ensure_workbench_extensions_schema(self) -> JsonDict:
+        cfg = _as_dict(self._data.get("workbench_extensions"))
+        if not cfg:
+            cfg = _as_dict(self._data.get("vscode_api"))
+        enabled = _as_string_list(cfg.get("enabled_extensions"))
         # Normalize + de-dupe.
-        normalized: List[str] = []
+        normalized: list[str] = []
         seen: set[str] = set()
         for item in enabled:
-            try:
-                text = str(item).strip()
-            except Exception:
-                continue
+            text = str(item).strip()
             if not text or text in seen:
                 continue
             seen.add(text)
@@ -973,14 +1006,13 @@ class ProjectSidecar:
         self._data.pop("vscode_api", None)
         return cfg
 
-    def get_workbench_enabled_extensions(self) -> List[str]:
+    def get_workbench_enabled_extensions(self) -> list[str]:
         cfg = self._ensure_workbench_extensions_schema()
-        enabled = cfg.get("enabled_extensions")
-        return list(enabled) if isinstance(enabled, list) else []
+        return _as_string_list(cfg.get("enabled_extensions"))
 
-    def set_workbench_enabled_extensions(self, enabled: List[str]) -> List[str]:
+    def set_workbench_enabled_extensions(self, enabled: list[str]) -> list[str]:
         cfg = self._ensure_workbench_extensions_schema()
-        normalized: List[str] = []
+        normalized: list[str] = []
         try:
             for item in enabled or []:
                 text = str(item).strip()
@@ -996,14 +1028,14 @@ class ProjectSidecar:
         self._data.pop("vscode_api", None)
         return self.get_workbench_enabled_extensions()
 
-    def enable_workbench_extension(self, extension_id: str) -> List[str]:
+    def enable_workbench_extension(self, extension_id: str) -> list[str]:
         enabled = self.get_workbench_enabled_extensions()
         text = str(extension_id).strip()
         if text and text not in enabled:
             enabled.append(text)
         return self.set_workbench_enabled_extensions(enabled)
 
-    def disable_workbench_extension(self, extension_id: str) -> List[str]:
+    def disable_workbench_extension(self, extension_id: str) -> list[str]:
         enabled = self.get_workbench_enabled_extensions()
         text = str(extension_id).strip()
         if not text:
@@ -1038,11 +1070,12 @@ def cleanup_orphaned_sidecars() -> None:
             raw = sidecar_file.read_text(encoding="utf-8")
             if not raw.strip():
                 continue
-            data = json.loads(raw)
-            if not isinstance(data, dict):
+            decoded = cast(object, json.loads(raw))
+            if not isinstance(decoded, dict):
                 continue
+            data = _as_dict(cast(object, decoded))
             project_path = data.get("project_path")
-            if project_path and not Path(project_path).exists():
+            if isinstance(project_path, str) and project_path and not Path(project_path).exists():
                 sidecar_file.unlink()
         except Exception:
             # Corrupt sidecar; leave it for manual inspection.

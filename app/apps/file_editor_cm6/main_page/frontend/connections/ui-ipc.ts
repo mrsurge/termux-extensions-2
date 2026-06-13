@@ -399,6 +399,11 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     return await connection.request(UI_IPC_RPC_METHODS.hostStateFileScrollUpdate, payload || {}, 8000);
   }
 
+  async function requestUiIpc(method: UiIpcRpcMethod, payload: JsonObject = {}, timeoutMs = 8000): Promise<unknown> {
+    const connection = await connectUIIPC();
+    return await connection.request(method, payload || {}, timeoutMs);
+  }
+
   function emitUiIpcNotification(method: keyof typeof UI_IPC_RPC_NOTIFICATIONS | string, params: JsonObject = {}): void {
     const resolved = Object.prototype.hasOwnProperty.call(UI_IPC_RPC_NOTIFICATIONS, method)
       ? UI_IPC_RPC_NOTIFICATIONS[method as keyof typeof UI_IPC_RPC_NOTIFICATIONS]
@@ -432,5 +437,6 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     requestBackendDiagnosticsMention,
     requestBackendRecordFileActivity,
     requestBackendUpdateFileScroll,
+    requestUiIpc,
   };
 }

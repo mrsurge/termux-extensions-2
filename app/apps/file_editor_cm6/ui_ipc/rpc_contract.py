@@ -27,6 +27,10 @@ UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_COMMAND: Final = "ui.host.editor.issues.com
 UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_DUMP: Final = "ui.host.editor.issues.dump"
 UI_IPC_RPC_METHOD_HOST_EDITOR_COMMAND: Final = "ui.host.editor.command"
 UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_MENTION: Final = "ui.host.diagnostics.mention"
+UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CHECKOUT: Final = "ui.host.git.branch.checkout"
+UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CREATE: Final = "ui.host.git.branch.create"
+UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST: Final = "ui.host.git.branches.list"
+UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD: Final = "ui.host.git.remote.add"
 UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD: Final = "ui.host.state.fileActivity.record"
 UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE: Final = "ui.host.state.fileScroll.update"
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE: Final = "ui.sidebar.window.create"
@@ -49,6 +53,10 @@ UiIpcRpcMethod = Literal[
     "ui.host.editor.issues.dump",
     "ui.host.editor.command",
     "ui.host.diagnostics.mention",
+    "ui.host.git.branch.checkout",
+    "ui.host.git.branch.create",
+    "ui.host.git.branches.list",
+    "ui.host.git.remote.add",
     "ui.host.state.fileActivity.record",
     "ui.host.state.fileScroll.update",
     "ui.sidebar.window.create",
@@ -118,6 +126,10 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_EDITOR_ISSUES_DUMP,
     UI_IPC_RPC_METHOD_HOST_EDITOR_COMMAND,
     UI_IPC_RPC_METHOD_HOST_DIAGNOSTICS_MENTION,
+    UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CHECKOUT,
+    UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CREATE,
+    UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST,
+    UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE,

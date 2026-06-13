@@ -55,6 +55,9 @@ Phase 2 checklist:
 - [x] Route direct Explorer git status/decorations broadcasts through the
       centralized runtime/workspace-events publication path.
 - [x] Migrate editor `HEAD` baseline reads through the service.
+- [x] Remove current in-repo frontend HTTP git callers by routing host branch
+      menu actions over UI IPC RPC and Explorer diff-base reads over Explorer
+      RPC. HTTP routes remain temporarily as compatibility surface.
 - [ ] Migrate HTTP git route status/read helpers through the service.
 - [ ] Remove legacy Explorer-local `_GIT_STATUS_CACHE` once no compatibility
       fallback needs it.
@@ -100,6 +103,9 @@ Verification log:
 - Editor `HEAD` baseline reads now route through `worker_services/git_service.py`;
   verified with `py_compile`, import smoke, focused Pyright on service/builder
   modules, and parity against `git show HEAD:<path>` for the current repo.
+- Frontend HTTP git caller removal verified with `py_compile`, focused Pyright,
+  app TypeScript typecheck, `node build.mjs`, and source grep showing no
+  remaining `/api/app/file_editor_cm6/git/...` TypeScript callers.
 
 ## Purpose
 
@@ -846,3 +852,18 @@ Git consumers:
 No frontend contract changes are required by this plan. Frontend cleanup to
 reduce duplicate refresh requests is optional follow-up work, not a prerequisite
 for the backend migration.
+
+## Later Follow-Up: Monaco Diff Word-Wrap Layout Race
+
+Live MCP eval of the bad state showed identical original/modified model content
+and line counts, but divergent Monaco layout geometry: the collapsed original
+diff editor had gutter-only width with invalid wrap measurement while the
+modified editor had valid width and wrapping. The issue appears intermittent
+during document open/page load and recovers when a real window resize forces
+Monaco to remeasure.
+
+Treat this as a Code TE2 open/load layout race exposing brittle Monaco diff
+layout behavior, not as git baseline content drift. A later fix should make diff
+setup resilient by deferring or repeating diff layout after paint/open, detecting
+invalid original-editor geometry, and running a recovery relayout cycle when
+word wrap is enabled.

@@ -4,10 +4,18 @@ import json
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import TypeAlias, cast
+
+JsonDict: TypeAlias = dict[str, object]
 
 
-DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
+def _as_dict(value: object) -> JsonDict:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in cast(dict[object, object], value).items() if isinstance(key, str)}
+
+
+DEFAULT_EDITOR_PREFS: JsonDict = {
     "showLineNumbers": True,
     "showSyntax": True,
     "showShading": False,
@@ -36,7 +44,7 @@ DEFAULT_EDITOR_PREFS: Dict[str, Any] = {
     "kotlinLspIsolatedDocuments": True,
 }
 
-DEFAULT_UI_PREFS: Dict[str, Any] = {
+DEFAULT_UI_PREFS: JsonDict = {
     "assistantCollapsed": True,
     "gitIndicators": True,
     # Explorer drawer (Monaco-ish sticky scope headers)
@@ -78,7 +86,7 @@ def _ensure_dir(path: Path) -> None:
 class PreferencesStore:
     """Disk-backed store for Code OSS editor/UI preferences - always reads from disk."""
 
-    def __init__(self, storage_path: Optional[Path] = None) -> None:
+    def __init__(self, storage_path: Path | None = None) -> None:
         default_root = Path.home() / ".local" / "share" / "termux-extensions-2"
         default_root.mkdir(parents=True, exist_ok=True)
         self._path = storage_path or (default_root / "code_oss_prefs.json")
@@ -130,7 +138,7 @@ class PreferencesStore:
                 return
 
             modified = False
-            editor_store = data.setdefault("editor", {})
+            editor_store = _as_dict(data.get("editor"))
             if "trackAgentEdits" in editor_store:
                 editor_store.pop("trackAgentEdits", None)
                 modified = True
@@ -138,18 +146,20 @@ class PreferencesStore:
                 if key not in editor_store:
                     editor_store[key] = default_val
                     modified = True
+            data["editor"] = editor_store
             
-            ui_store = data.setdefault("ui", {})
+            ui_store = _as_dict(data.get("ui"))
             for key, default_val in DEFAULT_UI_PREFS.items():
                 if key not in ui_store:
                     ui_store[key] = default_val
                     modified = True
+            data["ui"] = ui_store
             
             if modified:
                 print(f"[PREFS] Migrating preferences with new defaults", file=sys.stderr)
                 self._write_to_disk(data)
 
-    def _read_from_disk(self) -> Dict[str, Any]:
+    def _read_from_disk(self) -> JsonDict:
         """Read preferences directly from disk - file MUST exist."""
         if not self._path.exists():
             raise RuntimeError(f"Preference file doesn't exist: {self._path}")
@@ -157,14 +167,14 @@ class PreferencesStore:
             content = self._path.read_text(encoding="utf-8")
             if not content.strip():
                 raise RuntimeError(f"Preference file is empty: {self._path}")
-            data = json.loads(content)
-            if not isinstance(data, dict):
+            decoded = cast(object, json.loads(content))
+            if not isinstance(decoded, dict):
                 raise RuntimeError(f"Preference file is not a dict: {self._path}")
-            return data
+            return _as_dict(cast(object, decoded))
         except json.JSONDecodeError as e:
             raise RuntimeError(f"Preference file has invalid JSON: {self._path}: {e}") from e
 
-    def _write_to_disk(self, data: Dict[str, Any]) -> None:
+    def _write_to_disk(self, data: JsonDict) -> None:
         """Write preferences directly to disk - atomic replace."""
         tmp_path = self._path.with_suffix(".tmp")
         try:
@@ -181,16 +191,16 @@ class PreferencesStore:
     # ---------------------------------------------------------------------
     # public API
 
-    def get_preferences(self, project_path: Optional[str] = None) -> Dict[str, Any]:
+    def get_preferences(self, project_path: str | None = None) -> JsonDict:
         """Read preferences directly from disk - NO cache, NO defaults merged."""
         with self._lock:
             data = self._read_from_disk()
-            editor = data.get("editor") or {}
-            ui = data.get("ui") or {}
-            project_entry: Dict[str, Any] = {}
+            editor = _as_dict(data.get("editor"))
+            ui = _as_dict(data.get("ui"))
+            project_entry: JsonDict = {}
             if project_path:
-                projects = data.get("projects", {}) or {}
-                project = projects.get(project_path, {}) or {}
+                projects = _as_dict(data.get("projects"))
+                project = _as_dict(projects.get(project_path))
                 project_entry = {
                     "path": project_path,
                     "last_file": project.get("last_file"),
@@ -204,37 +214,41 @@ class PreferencesStore:
     def update_preferences(
         self,
         *,
-        editor: Optional[Dict[str, Any]] = None,
-        ui: Optional[Dict[str, Any]] = None,
-        project: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        editor: JsonDict | None = None,
+        ui: JsonDict | None = None,
+        project: JsonDict | None = None,
+    ) -> JsonDict:
         """Update preferences - read from disk, modify, write back atomically."""
         with self._lock:
             # Read current state from disk
             data = self._read_from_disk()
             
             if editor:
-                editor_store = data.setdefault("editor", {})
+                editor_store = _as_dict(data.get("editor"))
                 for key, value in editor.items():
                     if key in DEFAULT_EDITOR_PREFS:
                         editor_store[key] = value
+                data["editor"] = editor_store
 
             if ui:
-                ui_store = data.setdefault("ui", {})
+                ui_store = _as_dict(data.get("ui"))
                 for key, value in ui.items():
                     if key in DEFAULT_UI_PREFS:
                         ui_store[key] = value
+                data["ui"] = ui_store
 
-            project_result: Dict[str, Any] = {}
+            project_result: JsonDict = {}
             if project:
                 path = project.get("path")
-                if not path:
+                if not isinstance(path, str) or not path:
                     raise ValueError("project.path is required when updating project preferences")
-                projects = data.setdefault("projects", {})
-                entry = projects.setdefault(path, {})
+                projects = _as_dict(data.get("projects"))
+                entry = _as_dict(projects.get(path))
                 if "last_file" in project:
                     last_file = project.get("last_file")
                     entry["last_file"] = last_file or None
+                projects[path] = entry
+                data["projects"] = projects
                 project_result = {
                     "path": path,
                     "last_file": entry.get("last_file"),

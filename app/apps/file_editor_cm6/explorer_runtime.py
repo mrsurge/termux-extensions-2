@@ -78,7 +78,7 @@ from .explorer.services.job_tracking import (
 from .explorer.services.session_bootstrap import bootstrap_explorer_session
 from .explorer.services.runtime_notifications import set_explorer_event_loop
 from .explorer.transport.rpc_contract import build_jsonrpc_notification
-from .worker_services.event_bus import set_worker_event_loop
+from .worker_services.event_bus import current_project_generation, set_worker_event_loop
 
 # --- Dispatcher ---
 
@@ -160,7 +160,11 @@ class ExplorerDispatcher:
     async def broadcast_git_status(self) -> None:
         from .explorer.services.runtime_notifications import broadcast_git_status_update
 
-        await broadcast_git_status_update(self.project_root)
+        await broadcast_git_status_update(
+            self.project_root,
+            project_generation=current_project_generation(self.project_root),
+            source="explorer_runtime:broadcast_git_status",
+        )
 
     async def broadcast_git_decorations(self) -> None:
         """Broadcast git status decorations for all files and directories.
@@ -170,7 +174,11 @@ class ExplorerDispatcher:
         """
         from .explorer.services.runtime_notifications import broadcast_git_status_update
 
-        await broadcast_git_status_update(self.project_root)
+        await broadcast_git_status_update(
+            self.project_root,
+            project_generation=current_project_generation(self.project_root),
+            source="explorer_runtime:broadcast_git_decorations",
+        )
 
     async def broadcast_review_state(self) -> None:
         """Broadcast updated review entries and decoration updates."""
@@ -757,6 +765,13 @@ class ExplorerDispatcher:
 
         params = parse_git_set_diff_base_params(payload)
         await handle_git_set_diff_base(self._build_git_context(), params, msg_id)
+
+    async def handle_git_getDiffBase(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_status_params
+        from .explorer.handlers.git import handle_git_get_diff_base
+
+        params = parse_git_status_params(payload)
+        await handle_git_get_diff_base(self._build_git_context(), params, msg_id)
 
     async def handle_git_listBranches(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.git import parse_git_list_branches_params

@@ -24,7 +24,7 @@ pydantic
 python-socketio
 pyyaml
 werkzeug
-pyright
+basedpyright
 markdown2
 pygments
 docutils

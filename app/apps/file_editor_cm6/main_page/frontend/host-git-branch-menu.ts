@@ -2,6 +2,9 @@
 // Minimal branch menu wiring for Code CM6. Front-end logic stays thin
 // and delegates all Git work to backend endpoints.
 
+import { UI_IPC_RPC_METHODS, type UiIpcRpcMethod } from '../../src/ui_ipc/rpc_contract.ts';
+import type { JsonObject } from '../../src/rpc/transport.ts';
+
 interface HostBranchMenuWindow extends Window {
   __cm6ReloadCurrentFile?: () => void;
   __cm6SyncState?: (force?: boolean) => void;
@@ -16,6 +19,10 @@ interface BranchListResponse {
 interface BranchMenuController {
   close(): void;
   refresh(): Promise<void>;
+}
+
+interface BranchMenuDeps {
+  requestUiIpc(method: UiIpcRpcMethod, params?: JsonObject, timeoutMs?: number): Promise<unknown>;
 }
 
 function hostWindow(): HostBranchMenuWindow {
@@ -46,23 +53,7 @@ function toast(message: string): void {
   }
 }
 
-async function request(path: string, options: RequestInit = {}): Promise<unknown> {
-  const resp = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-  const json: unknown = await resp.json().catch(() => null);
-  const payload = json && typeof json === 'object' && !Array.isArray(json)
-    ? json as Record<string, unknown>
-    : null;
-  if (!payload || payload.ok === false) {
-    const err = typeof payload?.error === 'string' ? payload.error : resp.statusText || 'Git request failed';
-    throw new Error(err);
-  }
-  return payload.data || {};
-}
-
-export function initBranchMenu(): BranchMenuController {
+export function initBranchMenu(deps: BranchMenuDeps): BranchMenuController {
   const btn = document.getElementById('menu-branch-btn');
   const dropdown = document.getElementById('menu-branch-dd');
   if (!btn || !dropdown) return { close: () => {}, refresh: () => Promise.resolve() };
@@ -80,7 +71,7 @@ export function initBranchMenu(): BranchMenuController {
 
   async function loadBranches(showDropdown = false): Promise<void> {
     try {
-      const data = asBranchListResponse(await request('/api/app/file_editor_cm6/git/branches'));
+      const data = asBranchListResponse(await deps.requestUiIpc(UI_IPC_RPC_METHODS.hostGitBranchesList));
       setLabel(data.current);
       if (showDropdown) {
         renderDropdown(data.current, data.branches || []);
@@ -93,10 +84,7 @@ export function initBranchMenu(): BranchMenuController {
 
   async function checkoutBranch(name: string): Promise<void> {
     try {
-      await request('/api/app/file_editor_cm6/git/checkout', {
-        method: 'POST',
-        body: JSON.stringify({ name }),
-      });
+      await deps.requestUiIpc(UI_IPC_RPC_METHODS.hostGitBranchCheckout, { name });
       await loadBranches(false);
       toast(`Checked out ${name}`);
       // Reload file to reflect changes
@@ -114,10 +102,7 @@ export function initBranchMenu(): BranchMenuController {
     if (!url || !url.trim()) return;
     
     try {
-      await request('/api/app/file_editor_cm6/git/remote/add', {
-        method: 'POST',
-        body: JSON.stringify({ name: 'origin', url: url.trim() }),
-      });
+      await deps.requestUiIpc(UI_IPC_RPC_METHODS.hostGitRemoteAdd, { name: 'origin', url: url.trim() });
       toast('Origin added');
       // Refresh state to update UI cache
       const syncState = hostWindow().__cm6SyncState;
@@ -134,10 +119,7 @@ export function initBranchMenu(): BranchMenuController {
     const name = (proposed || '').trim();
     if (!name) return;
     try {
-      await request('/api/app/file_editor_cm6/git/branch', {
-        method: 'POST',
-        body: JSON.stringify({ name }),
-      });
+      await deps.requestUiIpc(UI_IPC_RPC_METHODS.hostGitBranchCreate, { name });
       await loadBranches(false);
       toast(`Created ${name}`);
     } catch (err) {

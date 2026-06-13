@@ -6,10 +6,11 @@ import json
 import logging
 import os
 import urllib.request
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from threading import Lock, Timer
 from types import TracebackType
-from typing import Optional, Protocol, cast
+from typing import Protocol, cast
 
 from .file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
 from ..transport.connection_manager import abs_to_rel, manager
@@ -22,6 +23,7 @@ from ...worker_services.event_bus import (
 from ...worker_services import git_service as worker_git_service
 
 logger = logging.getLogger(__name__)
+GitStatusPublisher = Callable[[str, dict[str, object], dict[str, object]], Awaitable[None]]
 
 
 class UrlOpenResponse(Protocol):
@@ -36,10 +38,11 @@ class UrlOpenResponse(Protocol):
 
     def read(self) -> bytes: ...
 
-_explorer_event_loop: Optional[asyncio.AbstractEventLoop] = None
+_explorer_event_loop: asyncio.AbstractEventLoop | None = None
 _explorer_refresh_timers: dict[str, Timer] = {}
 _explorer_refresh_lock = Lock()
 _watcher_file_batches: dict[str, dict[str, set[str]]] = {}
+_git_status_publisher: GitStatusPublisher | None = None
 WATCHER_FILES_DEBOUNCE = 0.3
 
 
@@ -49,8 +52,13 @@ def set_explorer_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     _explorer_event_loop = loop
 
 
-def get_explorer_event_loop() -> Optional[asyncio.AbstractEventLoop]:
+def get_explorer_event_loop() -> asyncio.AbstractEventLoop | None:
     return _explorer_event_loop
+
+
+def set_git_status_publisher(publisher: GitStatusPublisher) -> None:
+    global _git_status_publisher
+    _git_status_publisher = publisher
 
 
 def _watcher_bucket_for_event(event_type: str) -> str:
@@ -134,10 +142,11 @@ def notify_explorer_of_change(abs_path: str, event_type: str) -> None:
 
 
 def _schedule_git_status_broadcast(project_path: str) -> None:
+    project_generation = current_project_generation(project_path)
     event = build_event(
         "GitSnapshotRequested",
         project_root=project_path,
-        project_generation=current_project_generation(project_path),
+        project_generation=project_generation,
         source="runtime_notifications",
         payload={},
     )
@@ -157,7 +166,11 @@ def _schedule_git_status_broadcast(project_path: str) -> None:
             if loop is None:
                 return
             asyncio.run_coroutine_threadsafe(
-                broadcast_git_status_update(project_path),
+                broadcast_git_status_update(
+                    project_path,
+                    project_generation=project_generation,
+                    source="runtime_notifications:fallback_timer",
+                ),
                 loop,
             )
 
@@ -166,25 +179,59 @@ def _schedule_git_status_broadcast(project_path: str) -> None:
         timer.start()
 
 
-async def broadcast_git_status_update(project_path: str | Path) -> None:
+def _is_stale_git_generation(project: Path, project_generation: int | None) -> bool:
+    return (
+        project_generation is not None
+        and current_project_generation(project) != project_generation
+    )
+
+
+async def broadcast_git_status_update(
+    project_path: str | Path,
+    *,
+    project_generation: int | None = None,
+    source: str = "runtime_notifications",
+) -> None:
     project = Path(project_path)
     try:
+        if _is_stale_git_generation(project, project_generation):
+            logger.debug(
+                "Dropping stale git refresh before work project=%s generation=%s current=%s source=%s",
+                project,
+                project_generation,
+                current_project_generation(project),
+                source,
+            )
+            return
+
         mark_git_cache_dirty(project)
 
         statuses = await asyncio.to_thread(worker_git_service.get_statuses_for_root, project)
         status = await asyncio.to_thread(worker_git_service.get_status, project)
+        if _is_stale_git_generation(project, project_generation):
+            logger.debug(
+                "Dropping stale git refresh after work project=%s generation=%s current=%s source=%s",
+                project,
+                project_generation,
+                current_project_generation(project),
+                source,
+            )
+            return
         logger.info(
             "[GIT_STATUS_DEBUG] staged=%s, unstaged=%s, untracked=%s",
             status.staged,
             status.unstaged,
             status.untracked,
         )
-        from ...workspace_events import publish_git_status_update
+        publisher = _git_status_publisher
+        if publisher is None:
+            logger.debug("No git status publisher registered for %s", project)
+            return
 
-        await publish_git_status_update(
+        await publisher(
             str(project),
-            decorations_payload={"statuses": statuses},
-            status_payload={
+            {"statuses": statuses},
+            {
                 "branch": status.branch,
                 "detached": status.detached,
                 "ahead": status.ahead,

@@ -69,8 +69,8 @@ import { initResizeManager, loadLayoutPreferences } from './main_page/frontend/h
 import type { ProblemsPanelController } from './src/diagnostics/problems-panel.ts';
 import type { OpenFileOptions } from './main_page/frontend/file-ops/open-flow.ts';
 import type { ScheduleToolbarTitleClampOptions } from './main_page/frontend/host-chrome-runtime.ts';
-import type { SidebarIpcRpcNotificationMethod } from './src/sidebar_ipc/rpc_contract.ts';
 import type { UiIpcRpcMethod } from './src/ui_ipc/rpc_contract.ts';
+import type { SidebarIpcRpcNotificationMethod } from './src/sidebar_ipc/rpc_contract.ts';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -1163,6 +1163,7 @@ createHostBootRuntime({
   reloadEditorFrame: () => _reloadEditorFrame(),
   requestAdapterRestart: () => _requestAdapterRestart(),
   connectUIIPC: () => connectUIIPC(),
+  requestUiIpc: (method: UiIpcRpcMethod, params?: UnknownRecord, timeoutMs?: number) => uiIpcConnections.requestUiIpc(method, params || {}, timeoutMs),
   connectSidebarIPC: () => connectSidebarIPC(),
   ensureWorkbenchAdapterReady: () => hostStateRuntime.ensureWorkbenchAdapterReady(),
   initBranchMenu,

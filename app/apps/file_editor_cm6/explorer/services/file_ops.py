@@ -1,14 +1,14 @@
 # app/apps/file_editor_cm6/explorer/services/file_ops.py
 
 from __future__ import annotations
+from collections.abc import Iterable
 from pathlib import Path
 import os
 import stat
-import subprocess
 import threading
 import time
 import shutil
-from typing import Dict, Iterable, Optional
+from typing import TypedDict
 
 from app.apps.file_editor_cm6.draft_index_sidecar import DraftIndexSidecar
 from ...worker_services import git_service as worker_git_service
@@ -17,12 +17,16 @@ from ...worker_services import git_service as worker_git_service
 _STATE_LOCK = threading.RLock()
 
 # Global project root for this app (default: HOME)
-_PROJECT_ROOT = Path.home()
-_GIT_STATUS_CACHE: Dict[str, dict] = {}
-GIT_CACHE_TTL_SECONDS = 6.0
+_project_root = Path.home()
+
+
+class DraftCacheEntry(TypedDict):
+    files: set[str]
+    dirs: set[str]
+    timestamp: float
 
 # Draft index cache (loaded from disk-backed DraftIndexSidecar).
-_DRAFT_INDEX_CACHE: Dict[str, dict] = {}  # project_path -> {files:set, dirs:set, timestamp: float}
+_DRAFT_INDEX_CACHE: dict[str, DraftCacheEntry] = {}
 DRAFT_INDEX_CACHE_TTL_SECONDS = 2.0
 
 _STATUS_PRIORITY = (
@@ -61,12 +65,12 @@ def _get_draft_index_snapshot(project_root: Path) -> tuple[set[str], set[str]]:
     return draft_files, draft_dirs
 
 
-def mark_draft_cache_dirty(project_root: Optional[Path] = None):
+def mark_draft_cache_dirty(project_root: Path | None = None) -> None:
     """Mark draft caches as dirty so they refresh on next access."""
     with _STATE_LOCK:
         if project_root:
             key = str(project_root.resolve())
-            _DRAFT_INDEX_CACHE.pop(key, None)
+            _ = _DRAFT_INDEX_CACHE.pop(key, None)
         else:
             _DRAFT_INDEX_CACHE.clear()
 
@@ -76,19 +80,19 @@ def set_project_root(path: str) -> Path:
     p = Path(path).expanduser().resolve()
     if not p.exists() or not p.is_dir():
         raise ValueError("project path must be an existing directory")
-    global _PROJECT_ROOT
+    global _project_root
     with _STATE_LOCK:
-        _PROJECT_ROOT = p
+        _project_root = p
     return p
 
 
 def get_project_root() -> Path:
     """Get the current project root directory."""
     with _STATE_LOCK:
-        return _PROJECT_ROOT
+        return _project_root
 
 
-def list_dir(rel: str = '.') -> dict:
+def list_dir(rel: str = '.') -> dict[str, object]:
     """
     List directory contents relative to project root.
 
@@ -116,7 +120,7 @@ def list_dir(rel: str = '.') -> dict:
 
     entries = []
     _t3 = _time.perf_counter()
-    status_map = _get_git_status_snapshot(root)
+    status_map = worker_git_service.get_status_snapshot(root)
     _t4 = _time.perf_counter()
 
     with os.scandir(base) as it:
@@ -176,112 +180,12 @@ def list_dir(rel: str = '.') -> dict:
     }
 
 
-def mark_git_cache_dirty(project_root: Optional[Path] = None) -> None:
+def mark_git_cache_dirty(project_root: Path | None = None) -> None:
     """Marks the git status cache dirty so the next lookup refreshes."""
     worker_git_service.mark_status_cache_dirty(project_root)
-    if project_root is None:
-        with _STATE_LOCK:
-            _GIT_STATUS_CACHE.clear()
-        return
-    key = _cache_key(project_root)
-    with _STATE_LOCK:
-        entry = _GIT_STATUS_CACHE.get(key)
-        if entry:
-            entry['dirty'] = True
 
 
-def _cache_key(root: Path) -> str:
-    try:
-        return str(root.resolve())
-    except Exception:
-        return str(root)
-
-
-def _prime_git_cache(root: Path) -> None:
-    """Preload git status for the given root."""
-    try:
-        worker_git_service.refresh_status_snapshot(root)
-    except Exception:
-        # Non-git repositories or command failures should not block the UI
-        pass
-
-
-def _get_git_status_snapshot(root: Path) -> Dict[str, str]:
-    return worker_git_service.get_status_snapshot(root)
-
-
-def _refresh_git_status(root: Path) -> Dict[str, str]:
-    """Refresh the git status snapshot for the given root."""
-    return worker_git_service.refresh_status_snapshot(root)
-
-
-def _collect_git_status(root: Path) -> Dict[str, str]:
-    """Collect git status information for files under root."""
-    if not _is_git_repo(root):
-        return {}
-
-    try:
-        result = subprocess.run(
-            [
-                'git',
-                '-C',
-                str(root),
-                'status',
-                '--porcelain=v1',
-                '--ignored=matching',
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception:
-        return {}
-
-    if result.returncode != 0:
-        return {}
-
-    status_map: Dict[str, str] = {}
-    for raw_line in result.stdout.splitlines():
-        if not raw_line or len(raw_line) < 3:
-            continue
-        code = raw_line[:2]
-        remainder = raw_line[3:]
-        if ' -> ' in remainder:
-            _, remainder = remainder.split(' -> ', 1)
-        path = remainder.strip().replace('\\', '/')
-        if not path:
-            continue
-        status_map[path] = _map_git_code(code)
-    return status_map
-
-
-def _map_git_code(code: str) -> str:
-    if code == '??':
-        return 'untracked'
-    if code == '!!':
-        return 'ignored'
-
-    index_status = code[0]
-    worktree_status = code[1]
-
-    if 'U' in code or (index_status == 'A' and worktree_status == 'A'):
-        return 'conflict'
-    if index_status == 'D' or worktree_status == 'D':
-        return 'deleted'
-    if index_status == 'R':
-        return 'renamed'
-    if index_status == 'A':
-        return 'added'
-    if index_status != ' ' and worktree_status != ' ':
-        return 'staged_modified'
-    if index_status != ' ':
-        return 'staged'
-    if worktree_status != ' ':
-        return 'modified'
-    return 'clean'
-
-
-def _derive_git_status(rel_path: str, kind: str, status_map: Dict[str, str]) -> str:
+def _derive_git_status(rel_path: str, kind: str, status_map: dict[str, str]) -> str:
     """Returns the primary git status for display. For directories, use
     _derive_git_flags() to get all applicable flags."""
     if not rel_path:
@@ -317,7 +221,7 @@ def _derive_git_status(rel_path: str, kind: str, status_map: Dict[str, str]) -> 
     return 'clean'
 
 
-def _derive_git_flags(rel_path: str, kind: str, status_map: Dict[str, str]) -> list:
+def _derive_git_flags(rel_path: str, kind: str, status_map: dict[str, str]) -> list[str]:
     """Returns a list of git flags for a directory entry.
     
     For files, returns a single-element list with the file's status.
@@ -360,7 +264,7 @@ def _derive_git_flags(rel_path: str, kind: str, status_map: Dict[str, str]) -> l
     return flags
 
 
-def _statuses_for_prefix(rel_path: str, status_map: Dict[str, str]) -> Iterable[str]:
+def _statuses_for_prefix(rel_path: str, status_map: dict[str, str]) -> Iterable[str]:
     prefix = rel_path.rstrip('/') + '/'
     for path, status in status_map.items():
         if path == rel_path or path.startswith(prefix):
@@ -375,7 +279,7 @@ def _select_highest_priority(statuses: Iterable[str]) -> str:
     return 'clean'
 
 
-def get_git_statuses_for_root(project_root: Path) -> Dict[str, str]:
+def get_git_statuses_for_root(project_root: Path) -> dict[str, str]:
     """
     Return a map of rel_path -> gitStatus for all files with non-clean status.
 
@@ -387,21 +291,8 @@ def get_git_statuses_for_root(project_root: Path) -> Dict[str, str]:
     return worker_git_service.get_statuses_for_root(project_root)
 
 
-def get_all_git_statuses() -> Dict[str, str]:
+def get_all_git_statuses() -> dict[str, str]:
     return get_git_statuses_for_root(get_project_root())
-
-
-def _is_git_repo(root: Path) -> bool:
-    try:
-        result = subprocess.run(
-            ['git', '-C', str(root), 'rev-parse', '--is-inside-work-tree'],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception:
-        return False
-    return result.returncode == 0 and result.stdout.strip() == 'true'
 
 
 def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
@@ -422,7 +313,7 @@ def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
     rel = resolved.relative_to(project_root_resolved)
     return rel.as_posix()
 
-def create_directory(parent_rel: str, name: str) -> dict:
+def create_directory(parent_rel: str, name: str) -> dict[str, object]:
     """Create a new directory within parent_rel."""
     root = get_project_root()
     parent = (root / parent_rel).resolve()
@@ -440,7 +331,7 @@ def create_directory(parent_rel: str, name: str) -> dict:
     rel_path = str(new_dir.relative_to(root))
     return {'rel': rel_path, 'name': name}
 
-def create_file(parent_rel: str, name: str) -> dict:
+def create_file(parent_rel: str, name: str) -> dict[str, object]:
     """Create a new empty file within parent_rel."""
     root = get_project_root()
     parent = (root / parent_rel).resolve()
@@ -458,7 +349,7 @@ def create_file(parent_rel: str, name: str) -> dict:
     rel_path = str(new_file.relative_to(root))
     return {'rel': rel_path, 'name': name}
 
-def rename_entry(rel: str, new_name: str) -> dict:
+def rename_entry(rel: str, new_name: str) -> dict[str, object]:
     """Rename a file or directory to new_name within same parent."""
     root = get_project_root()
     old_path = (root / rel).resolve()
@@ -478,7 +369,7 @@ def rename_entry(rel: str, new_name: str) -> dict:
     new_rel = str(new_path.relative_to(root))
     return {'old_rel': rel, 'new_rel': new_rel, 'new_name': new_name}
 
-def delete_entry(rel: str) -> dict:
+def delete_entry(rel: str) -> dict[str, object]:
     """Delete a file or directory."""
     root = get_project_root()
     target = (root / rel).resolve()
@@ -495,7 +386,7 @@ def delete_entry(rel: str) -> dict:
     
     return {'rel': rel, 'deleted': True}
 
-def batch_delete(rels: list[str]) -> dict:
+def batch_delete(rels: list[str]) -> dict[str, object]:
     """Delete multiple entries."""
     results = []
     for rel in rels:
@@ -506,7 +397,7 @@ def batch_delete(rels: list[str]) -> dict:
             results.append({'rel': rel, 'ok': False, 'error': str(e)})
     return {'results': results}
 
-def copy_entry(rel: str, dest_dir_path: str) -> dict:
+def copy_entry(rel: str, dest_dir_path: str) -> dict[str, object]:
     """Copy file/dir from rel to dest_dir_path."""
     root = get_project_root()
     source = (root / rel).resolve()
@@ -528,7 +419,7 @@ def copy_entry(rel: str, dest_dir_path: str) -> dict:
     
     return {'source_rel': rel, 'dest_path': str(dest)}
 
-def move_entry(rel: str, dest_dir_path: str) -> dict:
+def move_entry(rel: str, dest_dir_path: str) -> dict[str, object]:
     """Move file/dir from rel to dest_dir_path."""
     root = get_project_root()
     source = (root / rel).resolve()
@@ -548,7 +439,7 @@ def move_entry(rel: str, dest_dir_path: str) -> dict:
     new_rel = str(dest.relative_to(root)) if str(dest).startswith(str(root)) else None
     return {'old_rel': rel, 'new_path': str(dest), 'new_rel': new_rel}
 
-def batch_copy(rels: list[str], dest_dir_path: str) -> dict:
+def batch_copy(rels: list[str], dest_dir_path: str) -> dict[str, object]:
     """Copy multiple entries to dest_dir_path."""
     results = []
     for rel in rels:
@@ -559,7 +450,7 @@ def batch_copy(rels: list[str], dest_dir_path: str) -> dict:
             results.append({'rel': rel, 'ok': False, 'error': str(e)})
     return {'results': results}
 
-def batch_move(rels: list[str], dest_dir_path: str) -> dict:
+def batch_move(rels: list[str], dest_dir_path: str) -> dict[str, object]:
     """Move multiple entries to dest_dir_path."""
     results = []
     for rel in rels:
@@ -570,7 +461,7 @@ def batch_move(rels: list[str], dest_dir_path: str) -> dict:
             results.append({'rel': rel, 'ok': False, 'error': str(e)})
     return {'results': results}
 
-def create_project(parent_path_str: str, name: str) -> dict:
+def create_project(parent_path_str: str, name: str) -> dict[str, object]:
     """Create a new project directory."""
     if not name or not name.strip():
         raise ValueError("Project name cannot be empty")
@@ -596,7 +487,7 @@ def create_project(parent_path_str: str, name: str) -> dict:
 # the source is an absolute path (potentially outside the project) and the
 # destination is strictly inside the project root.
 
-def copy_entry_inbound(abs_source: str, dest_rel: str) -> dict:
+def copy_entry_inbound(abs_source: str, dest_rel: str) -> dict[str, object]:
     """
     Copy a file or directory from an absolute path (external) INTO the project.
     Source can be anywhere; Destination must be inside project root.
@@ -628,7 +519,7 @@ def copy_entry_inbound(abs_source: str, dest_rel: str) -> dict:
     return {'source_path': str(source), 'dest_rel': new_rel}
 
 
-def move_entry_inbound(abs_source: str, dest_rel: str) -> dict:
+def move_entry_inbound(abs_source: str, dest_rel: str) -> dict[str, object]:
     """
     Move a file or directory from an absolute path (external) INTO the project.
     Source can be anywhere; Destination must be inside project root.

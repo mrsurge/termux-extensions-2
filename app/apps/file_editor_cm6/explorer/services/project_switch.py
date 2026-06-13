@@ -122,7 +122,7 @@ async def switch_project_connection(
         reason=open_state_reason,
         source=open_state_source,
     )
-    await _broadcast_project_git_state(new_root)
+    await _broadcast_project_git_state(new_root, project_generation=project_generation)
     await _broadcast_project_switched(
         new_root,
         display_path=normalized_display_path,
@@ -242,11 +242,19 @@ async def _broadcast_project_switched(
     )
 
 
-async def _broadcast_project_git_state(project_root: Path) -> None:
+async def _broadcast_project_git_state(
+    project_root: Path,
+    *,
+    project_generation: int,
+) -> None:
     try:
         from .runtime_notifications import broadcast_git_status_update
 
-        await broadcast_git_status_update(project_root)
+        await broadcast_git_status_update(
+            project_root,
+            project_generation=project_generation,
+            source="project_switch:replay",
+        )
     except Exception as exc:
         logger.warning("[project_open] git state replay failed: %s", exc)
 

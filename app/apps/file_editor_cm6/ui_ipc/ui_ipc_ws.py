@@ -1,3 +1,4 @@
+# pyright: strict, reportMissingTypeStubs=false
 """UI IPC Socket.IO namespace — thin relay for host/runtime UI communication.
 
 The main page and native/sidebar UI clients consume the ``/ui_ipc`` namespace.
@@ -11,6 +12,10 @@ Console traffic is framework-owned by ``app.te2_console_runtime`` on
 Sidebar IPC only accepts typed JSON-RPC envelopes on the ``/sidebar_ipc``
 namespace.
 """
+
+from __future__ import annotations
+
+from typing import Awaitable, Protocol, cast
 
 import socketio
 
@@ -35,10 +40,67 @@ from ..stores import get_history_store
 from ..explorer.services.file_ops import get_project_root
 from ..open_state_backend import read_sidecar_open_state
 
+JsonObject = dict[str, object]
+
+
+class SocketIOServer(Protocol):
+    def emit(
+        self,
+        event: str,
+        data: object | None = None,
+        *,
+        to: str | None = None,
+        room: str | None = None,
+        skip_sid: str | None = None,
+        namespace: str | None = None,
+    ) -> Awaitable[None]: ...
+
+
+class SocketIONamespace(Protocol):
+    namespace: str
+
+    def emit(
+        self,
+        event: str,
+        data: object | None = None,
+        *,
+        to: str | None = None,
+        room: str | None = None,
+        skip_sid: str | None = None,
+        namespace: str | None = None,
+    ) -> Awaitable[None]: ...
+
+    def enter_room(self, sid: str, room: str) -> Awaitable[None]: ...
+
+    def save_session(self, sid: str, session: JsonObject) -> Awaitable[None]: ...
+
+    def get_session(self, sid: str) -> Awaitable[object]: ...
+
+    def trigger_event(self, event: str, *args: object) -> Awaitable[object | None]: ...
+
+
+class SocketIOEventHandler(Protocol):
+    def __call__(self, *args: object) -> Awaitable[object | None]: ...
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    raw = cast(dict[object, object], value)
+    return {str(key): item for key, item in raw.items()}
+
+
+def _sid(value: object) -> str:
+    return str(value or "")
+
+
+def _namespace(ns: object) -> SocketIONamespace:
+    return cast(SocketIONamespace, ns)
+
 
 async def emit_ui_ipc_rpc_notification(
     method: str,
-    params: dict[str, object],
+    params: JsonObject,
     *,
     skip_sid: str | None = None,
     to_sid: str | None = None,
@@ -46,15 +108,16 @@ async def emit_ui_ipc_rpc_notification(
     from .ui_ipc_socketio import UI_IPC_SIO
 
     envelope = build_jsonrpc_notification(method, params)
+    sio = cast(SocketIOServer, UI_IPC_SIO)
     if to_sid:
-        await UI_IPC_SIO.emit(
+        await sio.emit(
             UI_IPC_RPC_NOTIFICATION_EVENT,
             envelope,
             namespace="/ui_ipc",
             to=to_sid,
         )
     else:
-        await UI_IPC_SIO.emit(
+        await sio.emit(
             UI_IPC_RPC_NOTIFICATION_EVENT,
             envelope,
             namespace="/ui_ipc",
@@ -67,27 +130,30 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
     # python-socketio dispatches via 'on_' + event_name. Translate colons to
     # underscores for typed event names such as rpc.notify.
-    async def trigger_event(self, event, *args):
+    async def trigger_event(self, event: str, *args: object) -> object | None:
         normalized = event.replace(':', '_') if event else event
         handler_name = 'on_' + (normalized or '')
-        handler = getattr(self, handler_name, None)
+        handler = cast(SocketIOEventHandler | None, getattr(self, handler_name, None))
         if handler:
             return await handler(*args)
-        return await super().trigger_event(event, *args)
+        return await _namespace(super()).trigger_event(event, *args)
 
-    async def on_connect(self, sid, environ):
-        room = "sidebar_ipc" if self.namespace == "/sidebar_ipc" else "ui_ipc"
-        await self.enter_room(sid, room)
-        print(f"[{room}] connect sid={sid}", flush=True)
+    async def on_connect(self, sid: object, environ: object) -> None:
+        del environ
+        sid_text = _sid(sid)
+        ns = _namespace(self)
+        room = "sidebar_ipc" if ns.namespace == "/sidebar_ipc" else "ui_ipc"
+        await ns.enter_room(sid_text, room)
+        print(f"[{room}] connect sid={sid_text}", flush=True)
         # Push current adapter state to the newly connected client.
         if room == "ui_ipc":
             try:
                 from ..workbench_adapter_shell_manager import get_adapter_state
-                state = get_adapter_state()
-                await self.emit(
+                state = _json_object(get_adapter_state())
+                await ns.emit(
                     UI_IPC_RPC_NOTIFICATION_EVENT,
                     build_jsonrpc_notification(UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE, state),
-                    to=sid,
+                    to=sid_text,
                 )
             except Exception:
                 pass
@@ -98,15 +164,15 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                     open_state = read_sidecar_open_state(project, reason="reconnect")
                     current_path = open_state["openFile"]
                     rel = open_state["openFileRel"]
-                    await self.emit(
+                    await ns.emit(
                         UI_IPC_RPC_NOTIFICATION_EVENT,
                         build_jsonrpc_notification(
                             UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
                             dict(open_state),
                         ),
-                        to=sid,
+                        to=sid_text,
                     )
-                    await self.emit(
+                    await ns.emit(
                         UI_IPC_RPC_NOTIFICATION_EVENT,
                         build_jsonrpc_notification(
                             UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
@@ -117,47 +183,51 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                                 "source": "ui_ipc_connect",
                             },
                         ),
-                        to=sid,
+                        to=sid_text,
                     )
             except Exception:
                 pass
             try:
                 from .sidebar_window_state import get_sidebar_window_state
 
-                await self.emit(
+                await ns.emit(
                     UI_IPC_RPC_NOTIFICATION_EVENT,
                     build_jsonrpc_notification(
                         UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
-                        get_sidebar_window_state(),
+                        _json_object(get_sidebar_window_state()),
                     ),
-                    to=sid,
+                    to=sid_text,
                 )
             except Exception:
                 pass
 
-    async def on_disconnect(self, sid, reason=None):
-        room = "sidebar_ipc" if self.namespace == "/sidebar_ipc" else "ui_ipc"
-        print(f"[{room}] disconnect sid={sid} reason={reason}", flush=True)
-        await sidebar_ws.on_sidebar_disconnect(self, sid)
+    async def on_disconnect(self, sid: object, reason: object | None = None) -> None:
+        sid_text = _sid(sid)
+        ns = _namespace(self)
+        room = "sidebar_ipc" if ns.namespace == "/sidebar_ipc" else "ui_ipc"
+        print(f"[{room}] disconnect sid={sid_text} reason={reason}", flush=True)
+        await sidebar_ws.on_sidebar_disconnect(ns, sid_text)
 
     async def _emit_ui_ipc_rpc_notification(
         self,
         method: str,
-        params: dict[str, object],
+        params: JsonObject,
         *,
         skip_sid: str | None = None,
     ) -> None:
-        await self.emit(
+        await _namespace(self).emit(
             UI_IPC_RPC_NOTIFICATION_EVENT,
             build_jsonrpc_notification(method, params),
             room="ui_ipc",
             skip_sid=skip_sid,
         )
 
-    async def on_rpc(self, sid, data):
-        if self.namespace == SIDEBAR_IPC_RPC_NAMESPACE:
-            return await sidebar_ws.on_sidebar_rpc(self, sid, data)
-        if self.namespace != UI_IPC_RPC_NAMESPACE:
+    async def on_rpc(self, sid: object, data: object) -> object | None:
+        sid_text = _sid(sid)
+        ns = _namespace(self)
+        if ns.namespace == SIDEBAR_IPC_RPC_NAMESPACE:
+            return await sidebar_ws.on_sidebar_rpc(ns, sid_text, data)
+        if ns.namespace != UI_IPC_RPC_NAMESPACE:
             return build_jsonrpc_error(
                 request_id=None,
                 code=-32600,
@@ -171,7 +241,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 await self._emit_ui_ipc_rpc_notification(
                     notification["method"],
                     notification["params"],
-                    skip_sid=sid,
+                    skip_sid=sid_text,
                 )
                 return None
 

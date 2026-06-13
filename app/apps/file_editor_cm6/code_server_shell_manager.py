@@ -1,22 +1,123 @@
+# pyright: strict
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json as _json
 import re
 import shutil
+import time
+from importlib import import_module
 from pathlib import Path
-from typing import Optional
+from typing import Awaitable, Protocol, cast
 
-from framework_shells import get_manager
-from framework_shells.orchestrator import Orchestrator
-from framework_shells.record import ShellRecord
+JsonObject = dict[str, object]
+
+
+class ShellRecord(Protocol):
+    id: str
+    label: str
+    pid: int | None
+    status: str
+    env_overrides: object | None
+    command: object | None
+
+
+class ShellManager(Protocol):
+    def get_shell(self, shell_id: str) -> Awaitable[ShellRecord | None]: ...
+
+    def get_shell_capabilities(self, record: ShellRecord) -> Awaitable[JsonObject]: ...
+
+    def subscribe_output_bytes(self, shell_id: str) -> Awaitable[asyncio.Queue[bytes]]: ...
+
+    def unsubscribe_output_bytes(
+        self, shell_id: str, queue: asyncio.Queue[bytes]
+    ) -> Awaitable[None]: ...
+
+    def terminate_shell(self, shell_id: str, *, force: bool = False) -> Awaitable[None]: ...
+
+    def find_shell_by_label(
+        self, label: str, *, status: str | None = None
+    ) -> Awaitable[ShellRecord | None]: ...
+
+
+class OrchestratorInstance(Protocol):
+    def start_from_ref(
+        self,
+        ref: str,
+        *,
+        base_dir: Path,
+        ctx: JsonObject,
+        label: str,
+        record_spec_id: str,
+        wait_ready: bool,
+    ) -> Awaitable[ShellRecord]: ...
+
+
+class OrchestratorFactory(Protocol):
+    def __call__(self, manager: ShellManager) -> OrchestratorInstance: ...
+
+
+class ManagerGetter(Protocol):
+    def __call__(self) -> Awaitable[ShellManager]: ...
 
 APP_ID = "file_editor_cm6"
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
 SHELLSPEC_REF = "code_server.yaml#code-server"
 
-_active_shell_id: Optional[str] = None
-_ready_event: Optional[asyncio.Event] = None
+_active_shell_id: str | None = None
+_ready_event: asyncio.Event | None = None
 _spawn_lock = asyncio.Lock()
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    raw = cast(dict[object, object], value)
+    return {str(key): item for key, item in raw.items()}
+
+
+def _json_object_list(value: object) -> list[JsonObject]:
+    if not isinstance(value, list):
+        return []
+    raw = cast(list[object], value)
+    result: list[JsonObject] = []
+    for item in raw:
+        if isinstance(item, dict):
+            result.append(_json_object(cast(object, item)))
+    return result
+
+
+def _read_json_object(path: Path) -> JsonObject:
+    try:
+        decoded = cast(object, _json.loads(path.read_text("utf-8")))
+        return _json_object(decoded)
+    except Exception:
+        return {}
+
+
+def _read_json_object_list(path: Path) -> list[JsonObject]:
+    try:
+        decoded = cast(object, _json.loads(path.read_text("utf-8")))
+        return _json_object_list(decoded)
+    except Exception:
+        return []
+
+
+def _framework_get_manager() -> ManagerGetter:
+    module = import_module("framework_shells")
+    value = cast(object, module.__dict__["get_manager"])
+    return cast(ManagerGetter, value)
+
+
+def _orchestrator_factory() -> OrchestratorFactory:
+    module = import_module("framework_shells.orchestrator")
+    value = cast(object, module.__dict__["Orchestrator"])
+    return cast(OrchestratorFactory, value)
+
+
+async def _get_manager() -> ShellManager:
+    return await _framework_get_manager()()
 
 
 def _project_hash(project_root: str) -> str:
@@ -48,14 +149,11 @@ def sync_vscode_watcher_settings(watcher_mode: str) -> None:
     When using VS Code's IPC watcher, remove the key so it works normally.
     Must be called BEFORE code-server launches so it reads the setting on boot.
     """
-    settings: dict = {}
+    settings: JsonObject = {}
     _USER_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     if _USER_SETTINGS_PATH.exists():
-        try:
-            settings = _json.loads(_USER_SETTINGS_PATH.read_text("utf-8"))
-        except Exception:
-            settings = {}
+        settings = _read_json_object(_USER_SETTINGS_PATH)
 
     if watcher_mode in ("watchexec", "none"):
         settings["files.watcherExclude"] = {"**": True}
@@ -82,8 +180,6 @@ def ensure_bridge_extension_installed() -> bool:
     Also ensures the extension is registered in extensions.json so code-server loads it.
     Returns True if installed/updated, False if already current. # and a comment for good measure
     """
-    import json
-
     dest = _EXTENSIONS_DIR / _BRIDGE_EXT_ID
     src_pkg = _BRIDGE_EXT_SRC / "package.json"
 
@@ -91,14 +187,14 @@ def ensure_bridge_extension_installed() -> bool:
         print(f"[code_server] bridge extension source missing: {src_pkg}", flush=True)
         return False
 
-    src_manifest = json.loads(src_pkg.read_text())
-    src_version = src_manifest.get("version", "0")
+    src_manifest = _read_json_object(src_pkg)
+    src_version = str(src_manifest.get("version", "0"))
 
     dest_pkg = dest / "package.json"
     needs_copy = True
     if dest_pkg.exists():
         try:
-            dest_version = json.loads(dest_pkg.read_text()).get("version", "")
+            dest_version = str(_read_json_object(dest_pkg).get("version", ""))
             if dest_version == src_version:
                 needs_copy = False
         except Exception:
@@ -113,15 +209,12 @@ def ensure_bridge_extension_installed() -> bool:
 
     # Ensure extension is registered in extensions.json
     ext_json_path = _EXTENSIONS_DIR / "extensions.json"
-    try:
-        entries = json.loads(ext_json_path.read_text()) if ext_json_path.exists() else []
-    except Exception:
-        entries = []
+    entries = _read_json_object_list(ext_json_path) if ext_json_path.exists() else []
 
-    publisher = src_manifest.get("publisher", "te2")
+    publisher = str(src_manifest.get("publisher", "te2"))
     ext_id = f"{publisher}.{src_manifest.get('name', _BRIDGE_EXT_ID)}"
     already_registered = any(
-        e.get("identifier", {}).get("id", "") == ext_id for e in entries
+        _json_object(e.get("identifier", {})).get("id", "") == ext_id for e in entries
     )
 
     if not already_registered:
@@ -135,13 +228,13 @@ def ensure_bridge_extension_installed() -> bool:
             },
             "relativeLocation": _BRIDGE_EXT_ID,
             "metadata": {
-                "installedTimestamp": int(__import__("time").time() * 1000),
+                "installedTimestamp": int(time.time() * 1000),
                 "source": "vsix",
                 "isPreReleaseVersion": False,
                 "hasPreReleaseVersion": False,
             },
         })
-        ext_json_path.write_text(json.dumps(entries))
+        ext_json_path.write_text(_json.dumps(entries))
         print(f"[code_server] bridge extension registered in extensions.json: {ext_id}", flush=True)
         return True
 
@@ -152,12 +245,17 @@ def _expected_socket_path() -> str:
     return str(_CODE_SERVER_SOCKET_PATH)
 
 
-def code_server_connection_target(record: ShellRecord) -> tuple[str, Optional[str]]:
+def code_server_connection_target(record: ShellRecord) -> tuple[str, str | None]:
     """Return the code-server HTTP base and optional UDS path for the WBA."""
-    env = record.env_overrides or {}
+    env = _json_object(record.env_overrides)
     socket_path = str(env.get("TE_CODE_SERVER_SOCKET") or "").strip()
-    command = getattr(record, "command", None) or []
-    command_text = " ".join(str(part) for part in command) if isinstance(command, (list, tuple)) else str(command)
+    command = record.command
+    if isinstance(command, list):
+        command_text = " ".join(str(part) for part in cast(list[object], command))
+    elif isinstance(command, tuple):
+        command_text = " ".join(str(part) for part in cast(tuple[object, ...], command))
+    else:
+        command_text = str(command or "")
     if not socket_path and "--socket" in command_text:
         socket_path = _expected_socket_path()
     if socket_path:
@@ -173,8 +271,8 @@ def _matches_expected_target(record: ShellRecord) -> bool:
     return socket_path == _expected_socket_path()
 
 
-async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
-    mgr = await get_manager()
+async def _get_alive(shell_id: str) -> ShellRecord | None:
+    mgr = await _get_manager()
     record = await mgr.get_shell(shell_id)
     if record and record.pid and record.status == "running":
         return record
@@ -182,16 +280,16 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
 
 
 async def _has_live_pipe(record: ShellRecord) -> bool:
-    mgr = await get_manager()
+    mgr = await _get_manager()
     try:
-        caps = await mgr.get_shell_capabilities(record)
+        caps = _json_object(await mgr.get_shell_capabilities(record))
     except Exception:
         return False
     return caps.get("backend") == "pipe" and bool(caps.get("stdout_subscribe_bytes"))
 
 
 async def _wait_for_code_server_readiness(shell_id: str, timeout_s: float = 60.0) -> None:
-    mgr = await get_manager()
+    mgr = await _get_manager()
     queue = await mgr.subscribe_output_bytes(shell_id)
     ready_re = re.compile(rb"HTTP server listening")
     loop = asyncio.get_event_loop()
@@ -239,7 +337,7 @@ async def terminate_code_server_shell() -> bool:
         return False
 
     try:
-        mgr = await get_manager()
+        mgr = await _get_manager()
         await mgr.terminate_shell(_active_shell_id, force=True)
         print(f"[code_server] terminated shell {_active_shell_id}", flush=True)
     except Exception as exc:
@@ -280,8 +378,8 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
     _ready_event = asyncio.Event()
 
     try:
-        mgr = await get_manager()
-        orch = Orchestrator(mgr)
+        mgr = await _get_manager()
+        orch = _orchestrator_factory()(mgr)
         label = _label()
 
         if _active_shell_id:
@@ -330,7 +428,8 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         try:
             from .project_sidecar import ProjectSidecar
             sc = ProjectSidecar.load_or_create(str(repo_root))
-            wmode = sc._data.get("watcher", {}).get("mode", "ipc")
+            watcher = _json_object(sc.dump_raw().get("watcher", {}))
+            wmode = str(watcher.get("mode", "ipc"))
             sync_vscode_watcher_settings(wmode)
         except Exception as exc:
             print(f"[code_server] watcher settings sync failed (non-fatal): {exc}", flush=True)

@@ -9,6 +9,7 @@ from typing import Annotated, Protocol, cast
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from ...git_helper import GitBranches, GitCommit, GitError, GitStatus
+from ...worker_services import git_service as worker_git_service
 from .state_payload import JsonObject
 
 
@@ -161,7 +162,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
     def git_status_route() -> JsonObject:
         try:
             project_root = deps.get_active_project_root()
-            status = deps.get_status(project_root)
+            status = worker_git_service.get_status(project_root)
             return {"ok": True, "data": deps.status_to_payload(status)}
         except GitError as exc:
             raise _handle_git_error(exc) from exc
@@ -325,7 +326,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
     async def git_is_repo() -> JsonObject:
         try:
             project_root = deps.get_active_project_root()
-            is_repo = deps.is_git_repository(project_root)
+            is_repo = worker_git_service.is_git_repository(project_root)
             return {"ok": True, "data": {"is_repo": is_repo}}
         except Exception:
             return {"ok": True, "data": {"is_repo": False}}

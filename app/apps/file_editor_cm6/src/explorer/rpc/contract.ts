@@ -32,6 +32,7 @@ export const EXPLORER_RPC_METHODS = {
   gitClone: 'explorer.git.clone',
   gitCommit: 'explorer.git.commit',
   gitCommitsList: 'explorer.git.commits.list',
+  gitDiffBaseGet: 'explorer.git.diffBase.get',
   gitDiffBaseSet: 'explorer.git.diffBase.set',
   gitInit: 'explorer.git.init',
   gitPull: 'explorer.git.pull',
