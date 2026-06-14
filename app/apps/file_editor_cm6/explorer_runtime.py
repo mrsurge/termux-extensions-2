@@ -7,7 +7,6 @@ here. Put feature behavior in `explorer/handlers/`, `explorer/services/`, or
 `explorer/contracts/` and keep this module boring.
 """
 
-import asyncio
 from collections.abc import Awaitable, Callable
 import importlib
 import logging
@@ -76,9 +75,8 @@ from .explorer.services.job_tracking import (
     stop_job_tracking,
 )
 from .explorer.services.session_bootstrap import bootstrap_explorer_session
-from .explorer.services.runtime_notifications import set_explorer_event_loop
 from .explorer.transport.rpc_contract import build_jsonrpc_notification
-from .worker_services.event_bus import current_project_generation, set_worker_event_loop
+from .worker_services.event_bus import current_project_generation
 
 # --- Dispatcher ---
 
@@ -90,14 +88,6 @@ class ExplorerDispatcher:
         self._tracked_job_ids: set[str] = set()
 
     async def initialize(self) -> None:
-        # Feed the current worker loop to watcher/draft notification services.
-        worker_loop = asyncio.get_running_loop()
-        set_explorer_event_loop(worker_loop)
-        set_worker_event_loop(worker_loop)
-        from .workspace_events import register_workspace_event_bus_handlers
-
-        register_workspace_event_bus_handlers()
-
         bootstrap = await bootstrap_explorer_session(
             websocket=self.websocket,
             project_root=self.project_root,

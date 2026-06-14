@@ -469,6 +469,9 @@ async def _eager_start_code_server():
 @file_editor_cm6_bp.on_event("startup")  # pyright: ignore[reportDeprecated]
 async def _on_startup():  # pyright: ignore[reportUnusedFunction]
     _install_loop_exception_handler()
+    from .worker_services.runtime import bootstrap_worker_runtime
+
+    bootstrap_worker_runtime(asyncio.get_running_loop())
     asyncio.ensure_future(_eager_start_code_server())
 
 

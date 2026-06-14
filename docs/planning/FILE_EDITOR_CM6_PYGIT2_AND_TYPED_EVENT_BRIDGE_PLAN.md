@@ -3,8 +3,9 @@
 Date: 2026-06-10
 
 Status: Phase 2 status/read-path migration and watcher relay pruning verified;
-Phase 4 active-module typing cleanup is complete; remote operations and
-store/event caller migration remain pending.
+Phase 4 active-module typing cleanup is complete; central app-worker runtime-loop
+migration has started; remote operations and store/event caller migration remain
+pending.
 
 ## Implementation Tracker
 
@@ -14,7 +15,8 @@ Phase status:
 - Phase 2 - App-wide git service for status and read paths: Complete for status/read paths; remote/job work remains Phase 3
 - Phase 3 - Remote operations and progress migration: Not started
 - Phase 4 - Remaining caller cleanup and store-driven events: Active legacy
-  module typing cleanup complete; store/event caller migration still pending
+  module typing cleanup complete; central runtime-loop bootstrap started;
+  store/event caller migration still pending
 - Phase 5 - Editor source organization cleanup: Not started
 - Phase 6 - Optional portability seam: Not started
 
@@ -93,6 +95,29 @@ Phase 4 active-module typing cleanup checklist:
 - [x] Retained spike: type-clean `services/sidebar_backchannel_uds.py` later;
       do not prune unless direction changes.
 
+Phase 4 store/event caller migration checklist:
+
+- [x] Choose runtime-loop topology: one app-worker asyncio loop for backend
+      coordination, with same-loop domain actors/projectors rather than separate
+      in-process editor/explorer loops.
+- [x] Move central worker event-bus/bootstrap registration to app startup so
+      Explorer connection is no longer the owner of bus activation.
+- [x] Replace Explorer runtime-notification debounce timers with same-loop
+      asyncio tasks for watcher files, git fallback refresh, draft decorations,
+      and draft-forward refresh.
+- [x] Prune the dead `core_read.py` inotify/watchdog/polling watcher machinery;
+      keep only active file subscription, save-ack, and diff-change helpers.
+- [ ] Retire residual pre-bootstrap fallback seams in `workspace_events.py` and
+      the editor cache runtime loop bridge where safe.
+- [ ] Convert open-state writes into typed facts plus editor/Explorer/UI IPC
+      projectors, while keeping `open_state_backend.py` and `ProjectSidecar` as
+      authority.
+- [ ] Convert draft/review decoration refreshes into typed facts plus projectors.
+- [ ] Convert preferences/sidebar-window updates into typed facts plus lane-local
+      projectors.
+- [ ] Add lightweight event-loop metrics: queue depth, enqueue latency, handler
+      duration, coalesce/drop counts, and stale generation drops.
+
 Open decisions status:
 
 - Module placement: Chosen for Phase 1 as
@@ -102,6 +127,14 @@ Open decisions status:
 - Filesystem executor policy: Not decided.
 - Initial tree-paint behavior: Not decided.
 - Snapshot API fate: Not decided.
+- Event loop topology: Chosen as one app-worker runtime loop with same-loop
+  domain actors/projectors; use `asyncio.to_thread` only for blocking work, not
+  surface emits or coordination.
+- Watcher authority: WBA remote workbench IPC `watcher/fileChanges` is the
+  primary watcher event stream. `watcher/enospc` is a typed WBA event that can
+  surface fallback guidance. `watchexec` is the poll fallback producer and feeds
+  the same workspace file-change path. Internal `core_read.py` inotify/watchdog
+  watcher methods are unreachable legacy code and should not be modernized.
 
 Verification log:
 
@@ -184,6 +217,25 @@ Verification log:
   backchannel/window state; full app `basedpyright --project
 app/apps/file_editor_cm6/pyrightconfig.json` reports `0 errors`; `git diff
 --check` is clean.
+- Central runtime-loop bootstrap slice moved worker event-bus registration to app
+  startup via `worker_services/runtime.py`, leaving Explorer session bootstrap to
+  own only Explorer session work. Verified with `python -m py_compile` for
+  touched Python files, full app `basedpyright --project
+app/apps/file_editor_cm6/pyrightconfig.json` reporting `0 errors`, and
+  `git diff --check` clean.
+- Explorer runtime-notification scheduling now uses same-loop asyncio debounce
+  tasks instead of `threading.Timer` for watcher-file broadcasts, git fallback
+  refreshes, draft decoration broadcasts, and draft-forward refreshes. Verified
+  with `python -m py_compile` for touched runtime files, full app
+  `basedpyright --project app/apps/file_editor_cm6/pyrightconfig.json`
+  reporting `0 errors`, and `git diff --check` clean.
+- Dead `core_read.py` watcher machinery was pruned after confirming WBA remote
+  workbench IPC is the primary watcher producer and watchexec feeds the same
+  workspace file-change path as fallback. Active `core_read.py` exports remain
+  file subscription, save-ack, and diff-change helpers. Verified with
+  `python -m py_compile` for touched watcher/runtime files, full app
+  `basedpyright --project app/apps/file_editor_cm6/pyrightconfig.json`
+  reporting `0 errors`, and `git diff --check` clean.
 
 ## Purpose
 
