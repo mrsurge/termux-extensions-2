@@ -5,16 +5,27 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from .file_ops import list_dir, set_project_root
 from ..transport.connection_manager import ExplorerConnection, manager
 from ...project_sidecar import ProjectSidecar
 from ...open_state_backend import read_sidecar_open_state
-from ...stores import _history_store, _preferences_store
+from ...stores import get_history_store, get_preferences_store
 from ..contracts.watcher import build_watcher_config_payload
 from ..context import AsyncNoArg, EmitPersonal
 
 logger = logging.getLogger(__name__)
+JsonObject = dict[str, object]
+
+_history_store = get_history_store()
+_preferences_store = get_preferences_store()
+
+
+def _as_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in cast(dict[object, object], value).items() if isinstance(key, str)}
 
 
 @dataclass(frozen=True)
@@ -51,7 +62,7 @@ async def bootstrap_explorer_session(
 
     try:
         prefs = _preferences_store.get_preferences()
-        ui_prefs = prefs.get("ui") or {}
+        ui_prefs = _as_object(prefs.get("ui"))
         await emit_personal("explorer.prefs.ui.updated", {"ui": ui_prefs})
     except Exception as exc:
         logger.warning("Failed to load UI preferences: %s", exc)
@@ -89,8 +100,9 @@ async def bootstrap_explorer_session(
         )
 
         sidecar_watcher = ProjectSidecar.load_or_create(str(resolved_project_root))
+        sidecar_state = sidecar_watcher.dump_raw()
         watcher_config = build_watcher_config_payload(
-            sidecar_watcher._data.get("watcher"),
+            sidecar_state.get("watcher"),
             watchexec_available=is_watchexec_available(),
         )
         watcher_mode = watcher_config["mode"]

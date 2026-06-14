@@ -4,15 +4,32 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Dict, Iterable, Optional, Set, Tuple
+from typing import ClassVar, Optional, Set, Tuple, cast
 
-from .project_sidecar import _ensure_dir, _normalize_project_path
+JsonObject = dict[str, object]
 
 
 def _utc_timestamp() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(UTC).replace(tzinfo=None).isoformat() + "Z"
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in cast(dict[object, object], value).items() if isinstance(key, str)}
+
+
+def _normalize_project_path(project_path: str) -> str:
+    try:
+        return str(Path(project_path).expanduser().resolve(strict=False))
+    except Exception:
+        return project_path.strip()
+
+
+def _ensure_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
@@ -36,7 +53,7 @@ class DraftIndexSidecar:
     _draft_files: Set[str] = field(default_factory=set, init=False, repr=False)
 
     # In-memory cache of instances keyed by normalized project path.
-    _instances: ClassVar[Dict[str, "DraftIndexSidecar"]] = {}
+    _instances: ClassVar[dict[str, "DraftIndexSidecar"]] = {}
 
     def __post_init__(self) -> None:
         normalized = _normalize_project_path(self.project_path)
@@ -73,8 +90,8 @@ class DraftIndexSidecar:
                 self._draft_files = set()
                 self._source_sidecar_mtime_ns = None
                 return
-            data = json.loads(raw)
-            if not isinstance(data, dict):
+            data = _json_object(cast(object, json.loads(raw)))
+            if not data:
                 self._draft_files = set()
                 self._source_sidecar_mtime_ns = None
                 return
@@ -83,7 +100,9 @@ class DraftIndexSidecar:
             self._source_sidecar_mtime_ns = None
             return
 
-        if (data.get("version") or "").strip() != self.VERSION:
+        version_obj = data.get("version")
+        version = version_obj if isinstance(version_obj, str) else ""
+        if version.strip() != self.VERSION:
             # Wipe on version mismatch (no migration).
             self._draft_files = set()
             self._source_sidecar_mtime_ns = None
@@ -99,12 +118,12 @@ class DraftIndexSidecar:
         except Exception:
             self._source_sidecar_mtime_ns = None
 
-        files = data.get("draft_files")
-        if not isinstance(files, list):
+        files_obj = data.get("draft_files")
+        if not isinstance(files_obj, list):
             self._draft_files = set()
             return
         out: Set[str] = set()
-        for item in files:
+        for item in cast(list[object], files_obj):
             if isinstance(item, str) and item and item != ".":
                 out.add(item.replace("\\", "/").lstrip("/"))
         self._draft_files = out
@@ -136,15 +155,14 @@ class DraftIndexSidecar:
                     pass
                 return
 
-            data = json.loads(sidecar_path.read_text(encoding="utf-8"))
-            session_cache = (data.get("session_cache") or {}) if isinstance(data, dict) else {}
-            if not isinstance(session_cache, dict):
-                session_cache = {}
+            data = _json_object(cast(object, json.loads(sidecar_path.read_text(encoding="utf-8"))))
+            session_cache = _json_object(data.get("session_cache"))
 
             root = Path(self.project_path).expanduser().resolve(strict=False)
             draft_files: Set[str] = set()
-            for entry in session_cache.values():
-                if not isinstance(entry, dict):
+            for entry_obj in session_cache.values():
+                entry = _json_object(entry_obj)
+                if not entry:
                     continue
                 if not entry.get("unsaved"):
                     continue

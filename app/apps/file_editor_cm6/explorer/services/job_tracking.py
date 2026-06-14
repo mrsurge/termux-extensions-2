@@ -7,7 +7,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Iterable, Protocol, cast
 
 from ...project_sidecar import ProjectSidecar
 from ..context import EmitPersonal
@@ -16,12 +16,31 @@ logger = logging.getLogger(__name__)
 
 GetProjectRoot = Callable[[], Path]
 RefreshExplorerState = Callable[[], Awaitable[None]]
+JsonObject = dict[str, object]
+JobEventQueue = Queue[JsonObject]
+JobListener = tuple[JobEventQueue, set[str] | None]
+
+
+class JobManagerLike(Protocol):
+    def add_listener(
+        self,
+        queue: JobEventQueue,
+        job_ids: Iterable[str] | None = None,
+    ) -> JobListener: ...
+
+    def remove_listener(self, listener: JobListener) -> None: ...
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in cast(dict[object, object], value).items()}
 
 
 @dataclass
 class ExplorerJobTrackingRuntime:
-    queue: Queue[dict[str, object]]
-    listener: object
+    queue: JobEventQueue
+    listener: JobListener
     pump_task: asyncio.Task[None]
 
 
@@ -35,14 +54,16 @@ async def start_job_tracking(
     try:
         from app.libs.jobs import manager as job_manager
 
+        manager = cast(JobManagerLike, job_manager)
+
         try:
             sidecar = ProjectSidecar.load_or_create(str(get_project_root()))
             tracked_job_ids.update(sidecar.list_tracked_jobs())
         except Exception:
             pass
 
-        job_queue: Queue[dict[str, object]] = Queue()
-        listener = job_manager.add_listener(job_queue, job_ids=None)
+        job_queue: JobEventQueue = Queue()
+        listener = manager.add_listener(job_queue, job_ids=None)
         pump_task = asyncio.create_task(
             _pump_job_events(
                 get_project_root=get_project_root,
@@ -73,7 +94,8 @@ async def stop_job_tracking(runtime: ExplorerJobTrackingRuntime | None) -> None:
     try:
         from app.libs.jobs import manager as job_manager
 
-        job_manager.remove_listener(runtime.listener)
+        manager = cast(JobManagerLike, job_manager)
+        manager.remove_listener(runtime.listener)
     except Exception:
         pass
 
@@ -81,7 +103,7 @@ async def stop_job_tracking(runtime: ExplorerJobTrackingRuntime | None) -> None:
 async def _pump_job_events(
     *,
     get_project_root: GetProjectRoot,
-    queue: Queue[dict[str, object]],
+    queue: JobEventQueue,
     tracked_job_ids: set[str],
     emit_personal: EmitPersonal,
     refresh_explorer_state: RefreshExplorerState,
@@ -90,19 +112,19 @@ async def _pump_job_events(
     while True:
         try:
             payload = await asyncio.to_thread(queue.get, timeout=0.5)
-            if not isinstance(payload, dict):
-                continue
-
             jobs_value = payload.get("jobs")
             if not isinstance(jobs_value, list):
                 continue
 
-            for job_data in jobs_value:
-                if not isinstance(job_data, dict):
+            for job_obj in cast(list[object], jobs_value):
+                job_data = _json_object(job_obj)
+                if not job_data:
                     continue
                 job_id = job_data.get("id")
-                job_type = job_data.get("type")
-                job_status = job_data.get("status")
+                job_type_obj = job_data.get("type")
+                job_status_obj = job_data.get("status")
+                job_type = job_type_obj if isinstance(job_type_obj, str) else ""
+                job_status = job_status_obj if isinstance(job_status_obj, str) else ""
 
                 if not isinstance(job_id, str) or not job_id:
                     continue
@@ -129,9 +151,9 @@ async def _pump_job_events(
                 else:
                     try:
                         sidecar = ProjectSidecar.load_or_create(str(get_project_root()))
-                        tracked = set(sidecar.list_tracked_jobs())
+                        tracked: set[str] = set(sidecar.list_tracked_jobs())
                     except Exception:
-                        tracked = set()
+                        tracked = set[str]()
 
                     if job_id in tracked:
                         tracked_job_ids.add(job_id)

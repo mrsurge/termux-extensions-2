@@ -34,10 +34,7 @@ async def handle_ext_list(
     del params
     from ... import extension_registry as extension_registry
 
-    get_extension_list = cast(
-        Callable[[], list[JsonObject]],
-        extension_registry.get_extension_list,
-    )
+    get_extension_list = extension_registry.get_extension_list
     get_language_slots = cast(
         Callable[[], JsonObject],
         extension_registry.get_language_slots,
@@ -143,10 +140,7 @@ async def handle_ext_custom_settings_get(
     del params
     from ... import extension_registry as extension_registry
 
-    get_custom_settings = cast(
-        Callable[[], JsonObject],
-        extension_registry.get_custom_settings,
-    )
+    get_custom_settings = extension_registry.get_custom_settings
     await context.emit_personal(
         "ext:custom_settings_get",
         {"ok": True, "settings": get_custom_settings()},

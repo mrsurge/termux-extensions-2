@@ -30,7 +30,7 @@ async def handle_prefs_update_ui(
         raise RuntimeError(f"Unknown UI preference key: {key}")
 
     value = _normalize_ui_pref_value(key, params["value"])
-    updated = cast(JsonObject, PREFERENCES_STORE.update_preferences(ui={key: value}))
+    updated = PREFERENCES_STORE.update_preferences(ui={key: value})
     ui_prefs = _as_object(updated.get("ui")) or {}
     await context.broadcast("explorer.prefs.ui.updated", {"ui": ui_prefs})
     del msg_id
@@ -90,7 +90,7 @@ async def handle_prefs_vendor_agent_icon(
 
 
 def _normalize_ui_pref_value(key: str, value: object) -> PreferenceValue:
-    expected = cast(object, DEFAULT_UI_PREFS[key])
+    expected = DEFAULT_UI_PREFS[key]
     if isinstance(expected, bool):
         return _normalize_bool_pref(value)
     if isinstance(expected, str):

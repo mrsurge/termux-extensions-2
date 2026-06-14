@@ -11,7 +11,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
@@ -24,9 +24,17 @@ SHELLSPEC_REF = "watchexec.yaml#watchexec-poll"
 
 log = logging.getLogger("watchexec_shell_manager")
 
+JsonObject = dict[str, object]
+
 _active_shell_id: Optional[str] = None
 _pipe_state: Optional[PipeState] = None
-_stdout_reader_task: Optional[asyncio.Task] = None
+_stdout_reader_task: Optional[asyncio.Task[None]] = None
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in cast(dict[object, object], value).items()}
 
 
 def _project_hash(project_root: str) -> str:
@@ -53,9 +61,12 @@ async def _get_alive(shell_id: str) -> Optional[ShellRecord]:
 async def _stdout_reader_loop(proc: asyncio.subprocess.Process, project_root: str) -> None:
     """Read watchexec JSON events from stdout and forward as watcher:files."""
     import sys
+    stdout = proc.stdout
+    if stdout is None:
+        return
     try:
         while True:
-            line = await proc.stdout.readline()
+            line = await stdout.readline()
             if not line:
                 break
             raw = line.decode("utf-8", errors="replace").strip()
@@ -64,7 +75,7 @@ async def _stdout_reader_loop(proc: asyncio.subprocess.Process, project_root: st
             # Fan out to stderr for observability
             print(f"[watchexec] {raw}", file=sys.stderr, flush=True)
             try:
-                evt = json.loads(raw)
+                evt = _json_object(cast(object, json.loads(raw)))
             except json.JSONDecodeError:
                 continue
             _forward_watchexec_event(evt, project_root)
@@ -74,34 +85,43 @@ async def _stdout_reader_loop(proc: asyncio.subprocess.Process, project_root: st
         log.warning("[watchexec] stdout reader error: %s", exc)
 
 
-def _forward_watchexec_event(evt: dict, project_root: str) -> None:
+def _forward_watchexec_event(evt: JsonObject, project_root: str) -> None:
     """Parse a watchexec JSON event and publish it through the workspace event surface."""
     # watchexec --emit-events-to json-stdio format:
     # {"tags": [{"kind": "path", "absolute": "/abs/path", "filetype": "file"},
     #           {"kind": "fs", "simple": "create"|"modify"|"remove"|"rename"|...}], ...}
-    tags = evt.get("tags", [])
+    tags_obj = evt.get("tags", [])
+    tags = cast(list[object], tags_obj if isinstance(tags_obj, list) else [])
     if not tags:
         return
 
-    path_abs = None
-    fs_op = None
-    for tag in tags:
-        kind = tag.get("kind", "")
+    path_abs: str | None = None
+    fs_op: str | None = None
+    for tag_obj in tags:
+        if not isinstance(tag_obj, dict):
+            continue
+        tag = _json_object(cast(object, tag_obj))
+        kind_obj = tag.get("kind", "")
+        kind = kind_obj if isinstance(kind_obj, str) else ""
         if kind == "path":
-            path_abs = tag.get("absolute", "")
+            absolute_obj = tag.get("absolute", "")
+            path_abs = absolute_obj if isinstance(absolute_obj, str) else None
         elif kind == "fs":
-            fs_op = tag.get("simple", "")
+            simple_obj = tag.get("simple", "")
+            fs_op = simple_obj if isinstance(simple_obj, str) else None
 
     if not path_abs:
         return
 
     # Convert abs path to relative
     proj = str(project_root).rstrip("/")
-    rel = path_abs
+    rel: str = path_abs
     if proj and path_abs.startswith(proj):
         rel = path_abs[len(proj):].lstrip("/") or "."
 
-    created, changed, deleted = [], [], []
+    created: list[str] = []
+    changed: list[str] = []
+    deleted: list[str] = []
     if fs_op == "create":
         created.append(rel)
     elif fs_op == "remove":

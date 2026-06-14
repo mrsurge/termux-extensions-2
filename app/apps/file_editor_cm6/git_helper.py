@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, cast
 
 GIT_TIMEOUT = 20
 
@@ -59,7 +59,9 @@ def _run_git(project_root: Path, *args: str) -> str:
             timeout=GIT_TIMEOUT,
         )
     except subprocess.CalledProcessError as exc:
-        raise GitError(exc.stderr.strip() or f"git {' '.join(args)} failed") from exc
+        stderr_obj = cast(object, exc.stderr)
+        stderr = stderr_obj if isinstance(stderr_obj, str) else ""
+        raise GitError(stderr.strip() or f"git {' '.join(args)} failed") from exc
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git {' '.join(args)} timed out") from exc
     return completed.stdout.strip()
@@ -144,7 +146,7 @@ def get_worktree_changes(project_root: Path, base_ref: Optional[str] = None) -> 
             "--renames",
         ) or ""
 
-        entries: List[GitChangeEntry] = []
+        status_entries: List[GitChangeEntry] = []
         for line in output.splitlines():
             if not line or len(line) < 3:
                 continue
@@ -162,9 +164,9 @@ def get_worktree_changes(project_root: Path, base_ref: Optional[str] = None) -> 
             if not path:
                 continue
 
-            entries.append(GitChangeEntry(path=path, code=code, original_path=original))
+            status_entries.append(GitChangeEntry(path=path, code=code, original_path=original))
 
-        return entries
+        return status_entries
 
     diff_output = _run_git_optional(
         project_root,
@@ -407,7 +409,7 @@ def get_commits_for_path(project_root: Path, path: str, limit: int = 20) -> List
         path
     )
     
-    commits = []
+    commits: List[GitCommit] = []
     for line in output.splitlines():
         if not line:
             continue
@@ -438,7 +440,7 @@ def get_commits(project_root: Path, limit: int = 50) -> List[GitCommit]:
         "--format=%H|%h|%s|%an|%ai"
     )
     
-    commits = []
+    commits: List[GitCommit] = []
     for line in output.splitlines():
         if not line:
             continue
@@ -480,11 +482,11 @@ def get_origin_url(project_root: Path) -> Optional[str]:
     _ensure_repo(project_root)
     return _run_git_optional(project_root, "remote", "get-url", "origin")
 
-def get_remotes(project_root: Path) -> List[Dict[str, str]]:
+def get_remotes(project_root: Path) -> List[dict[str, str]]:
     """Get list of remotes with their URLs."""
     _ensure_repo(project_root)
     output = _run_git_optional(project_root, "remote", "-v") or ""
-    remotes = {}
+    remotes: dict[str, str] = {}
     for line in output.splitlines():
         parts = line.split()
         if len(parts) >= 2:

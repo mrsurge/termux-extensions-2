@@ -6,8 +6,24 @@ Uses difflib instead of git for arbitrary string comparison.
 import difflib
 import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Literal, TypedDict
+
+
+JsonObject = dict[str, object]
+DraftLineType = Literal["context", "del-draft", "add-draft"]
+
+
+class DraftDiffLine(TypedDict):
+    type: DraftLineType
+    text: str
+
+
+class DraftDiffHunk(TypedDict):
+    oldStart: int
+    oldLines: int
+    newStart: int
+    newLines: int
+    lines: list[DraftDiffLine]
 
 CACHE_TTL_SECONDS = 2.0  # Faster TTL for live edits
 MAX_DIFF_CHARS = 1024 * 1024  # 1MB safety cap
@@ -15,11 +31,28 @@ MAX_DIFF_CHARS = 1024 * 1024  # 1MB safety cap
 @dataclass
 class DraftDiffCacheEntry:
     timestamp: float
-    value: dict
+    value: JsonObject
 
-_DRAFT_CACHE: Dict[str, DraftDiffCacheEntry] = {}
+_DRAFT_CACHE: dict[str, DraftDiffCacheEntry] = {}
 
-def compute_draft_diff(file_path: str, draft_content: str, disk_content: str) -> dict:
+
+def _draft_diff_payload(
+    *,
+    hunks: list[DraftDiffHunk] | None = None,
+    added: int = 0,
+    deleted: int = 0,
+    error: str | None = None,
+) -> JsonObject:
+    payload: JsonObject = {
+        "hunks": hunks or [],
+        "summary": {"added": added, "deleted": deleted, "tracked": False},
+    }
+    if error is not None:
+        payload["error"] = error
+    return payload
+
+
+def compute_draft_diff(file_path: str, draft_content: str, disk_content: str) -> JsonObject:
     """
     Compare draft content against disk content.
     Returns a payload compatible with the frontend's diff decoration engine.
@@ -45,7 +78,7 @@ def compute_draft_diff(file_path: str, draft_content: str, disk_content: str) ->
         return entry.value
 
     if len(draft_content) > MAX_DIFF_CHARS or len(disk_content) > MAX_DIFF_CHARS:
-        return {"hunks": [], "summary": {"added": 0, "deleted": 0, "tracked": False}, "error": "File too large for live diff"}
+        return _draft_diff_payload(error="File too large for live diff")
 
     # Split lines (keep line endings for difflib consistency, strip later)
     a = disk_content.splitlines()
@@ -54,7 +87,7 @@ def compute_draft_diff(file_path: str, draft_content: str, disk_content: str) ->
     # autojunk=True (default) can treat very common lines as "junk" and produce overly-large
     # replace blocks in structured files (e.g. JSON), which breaks draft diff accuracy.
     matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
-    hunks = []
+    hunks: list[DraftDiffHunk] = []
     added = 0
     deleted = 0
     
@@ -75,7 +108,7 @@ def compute_draft_diff(file_path: str, draft_content: str, disk_content: str) ->
         old_len = sum(op[2] - op[1] for op in group)
         new_len = sum(op[4] - op[3] for op in group)
         
-        current_hunk = {
+        current_hunk: DraftDiffHunk = {
             "oldStart": old_start,
             "oldLines": old_len,
             "newStart": new_start,
@@ -107,10 +140,7 @@ def compute_draft_diff(file_path: str, draft_content: str, disk_content: str) ->
                     
         hunks.append(current_hunk)
 
-    payload = {
-        "hunks": hunks,
-        "summary": {"added": added, "deleted": deleted, "tracked": False}
-    }
+    payload = _draft_diff_payload(hunks=hunks, added=added, deleted=deleted)
     
     _DRAFT_CACHE[cache_key] = DraftDiffCacheEntry(timestamp=now, value=payload)
     return payload

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, NotRequired, TypedDict, cast
+from typing import Literal, TypedDict, cast
 
 JsonObject = dict[str, object]
 SearchMode = Literal["name", "content", "changes"]
@@ -186,7 +186,7 @@ def _parse_search_mode(value: object) -> SearchMode:
     if value is None:
         return "name"
     if value in ("name", "content", "changes"):
-        return cast(SearchMode, value)
+        return value
     raise ExplorerSearchReviewContractError("Invalid search mode")
 
 
@@ -201,7 +201,7 @@ def _parse_files(payload: object, command_name: str) -> list[str]:
         )
 
     files: list[str] = []
-    for idx, item in enumerate(files_value):
+    for idx, item in enumerate(cast(list[object], files_value)):
         if not isinstance(item, str):
             raise ExplorerSearchReviewContractError(
                 f"{command_name} files[{idx}] must be a string"

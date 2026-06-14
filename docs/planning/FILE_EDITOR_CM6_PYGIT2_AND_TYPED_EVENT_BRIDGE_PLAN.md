@@ -2,7 +2,9 @@
 
 Date: 2026-06-10
 
-Status: Phase 2 status/read-path migration and watcher relay pruning verified; remote operations remain pending.
+Status: Phase 2 status/read-path migration and watcher relay pruning verified;
+Phase 4 active-module typing cleanup is complete; remote operations and
+store/event caller migration remain pending.
 
 ## Implementation Tracker
 
@@ -11,7 +13,8 @@ Phase status:
 - Phase 1 - Event bus foundation and project-switch normalization: Complete
 - Phase 2 - App-wide git service for status and read paths: Complete for status/read paths; remote/job work remains Phase 3
 - Phase 3 - Remote operations and progress migration: Not started
-- Phase 4 - Remaining caller cleanup and store-driven events: Not started
+- Phase 4 - Remaining caller cleanup and store-driven events: Active legacy
+  module typing cleanup complete; store/event caller migration still pending
 - Phase 5 - Editor source organization cleanup: Not started
 - Phase 6 - Optional portability seam: Not started
 
@@ -61,7 +64,34 @@ Phase 2 checklist:
       RPC. HTTP routes remain temporarily as compatibility surface.
 - [x] Migrate HTTP git route status/read helpers through the service.
 - [x] Remove legacy Explorer-local `_GIT_STATUS_CACHE` once no compatibility
-       fallback needs it.
+      fallback needs it.
+
+Phase 4 active-module typing cleanup checklist:
+
+- [x] Remove disabled `init_watcher(...)` plumbing from the worker/editor/review
+      paths while preserving `/ws/read` subscription/save-ack behavior.
+- [x] Type-clean the main worker route surface and shared search authority:
+      `main.py` and `explorer/search.py`.
+- [x] Type-clean WBA relay/shell-manager seams that remain active:
+      `diagnostics_bridge.py` and `workbench_adapter_shell_manager.py`.
+- [x] Type-clean editor backend/socket runtime seams:
+      `monaco_editor/editor_backend.py` and `monaco_editor/editor_ws.py`.
+- [x] Type-clean Explorer review/search RPC support:
+      `explorer/review.py`, `explorer/contracts/search_review.py`, and
+      `explorer/handlers/search.py`.
+- [x] Type-clean active shell/watcher support modules:
+      `watchexec_shell_manager.py`, `terminal_shell.py`, and
+      `edit_tracker.py`.
+- [x] Type-clean the diff stack:
+      `diff_helper.py`, `draft_diff_helper.py`, and `draft_index_sidecar.py`.
+- [x] Continue active Explorer service cleanup:
+      `explorer/services/file_ops.py`, `explorer/services/job_tracking.py`,
+      `explorer/services/session_bootstrap.py`, and small handler cast cleanups.
+- [x] Decide whether `workbench_protocol_proxy/decoder.py` is still active enough
+      to type-clean or should be pruned/retired; pruned after source search found
+      no active app imports.
+- [x] Retained spike: type-clean `services/sidebar_backchannel_uds.py` later;
+      do not prune unless direction changes.
 
 Open decisions status:
 
@@ -129,6 +159,31 @@ Verification log:
   unreasonably decomposed frontend modules where one semantic component was
   split into many tiny files, and separate Python backend/editor service files
   from TypeScript frontend source organization.
+- Focused active-runtime typing stabilization committed and pushed in
+  `c094e516 Stabilize editor worker typing`. This covered watcher pruning,
+  `main.py`, `core_read.py`, `explorer/search.py`,
+  `explorer/transport/connection_manager.py`,
+  `workbench_adapter_shell_manager.py`, and
+  `monaco_editor/editor_backend.py` / `editor_ws.py`; focused `basedpyright` and
+  `py_compile` passed for touched targets, and the full app `basedpyright`
+  baseline reached 326 errors.
+- Current uncommitted Phase 4 typing slice focused-cleaned
+  `explorer/review.py`, `explorer/contracts/search_review.py`,
+  `explorer/handlers/search.py`, `watchexec_shell_manager.py`,
+  `terminal_shell.py`, and `edit_tracker.py`.
+- Current uncommitted slice verification: `python -m py_compile` passed for all
+  touched modules; focused `basedpyright` on the touched modules reports
+  `0 errors`; `git diff --check` is clean; full app `basedpyright` baseline is
+  216 errors.
+- Current uncommitted follow-up slices type-cleaned the diff stack, Explorer
+  service cluster, legacy `git_helper.py`, sidebar window state/backchannel UDS,
+  and pruned stale `workbench_protocol_proxy/decoder.py` after source search
+  found no active app imports.
+- Final Phase 4 active-module typing cleanup verification: `python -m py_compile`
+  passed for focused touched modules; focused `basedpyright` passed for sidebar
+  backchannel/window state; full app `basedpyright --project
+app/apps/file_editor_cm6/pyrightconfig.json` reports `0 errors`; `git diff
+--check` is clean.
 
 ## Purpose
 

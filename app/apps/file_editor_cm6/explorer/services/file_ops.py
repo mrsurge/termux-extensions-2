@@ -1,3 +1,4 @@
+# pyright: reportUnusedFunction=false
 # app/apps/file_editor_cm6/explorer/services/file_ops.py
 
 from __future__ import annotations
@@ -25,6 +26,21 @@ class DraftCacheEntry(TypedDict):
     dirs: set[str]
     timestamp: float
 
+
+class ExplorerEntry(TypedDict):
+    name: str
+    rel: str
+    kind: str
+    mtime: int
+    size: int
+    mode: str
+    ext: str
+    gitStatus: str
+    gitFlags: list[str]
+    isExecutable: bool
+    isSymlink: bool
+    hasDraft: bool
+
 # Draft index cache (loaded from disk-backed DraftIndexSidecar).
 _DRAFT_INDEX_CACHE: dict[str, DraftCacheEntry] = {}
 DRAFT_INDEX_CACHE_TTL_SECONDS = 2.0
@@ -49,8 +65,8 @@ def _get_draft_index_snapshot(project_root: Path) -> tuple[set[str], set[str]]:
     now = time.time()
     with _STATE_LOCK:
         cached = _DRAFT_INDEX_CACHE.get(key)
-        if cached and now - cached.get("timestamp", 0) < DRAFT_INDEX_CACHE_TTL_SECONDS:
-            return cached.get("files", set()), cached.get("dirs", set())
+        if cached and now - cached["timestamp"] < DRAFT_INDEX_CACHE_TTL_SECONDS:
+            return cached["files"], cached["dirs"]
 
     # Reload from disk (best-effort); no disk access => drafts are off (empty).
     try:
@@ -58,7 +74,8 @@ def _get_draft_index_snapshot(project_root: Path) -> tuple[set[str], set[str]]:
         idx.reload()
         draft_files, draft_dirs = idx.snapshot()
     except Exception:
-        draft_files, draft_dirs = set(), set()
+        draft_files = set[str]()
+        draft_dirs = set[str]()
 
     with _STATE_LOCK:
         _DRAFT_INDEX_CACHE[key] = {"files": draft_files, "dirs": draft_dirs, "timestamp": now}
@@ -118,7 +135,7 @@ def list_dir(rel: str = '.') -> dict[str, object]:
     if not base.exists() or not base.is_dir():
         raise ValueError("not a directory")
 
-    entries = []
+    entries: list[ExplorerEntry] = []
     _t3 = _time.perf_counter()
     status_map = worker_git_service.get_status_snapshot(root)
     _t4 = _time.perf_counter()
@@ -165,7 +182,7 @@ def list_dir(rel: str = '.') -> dict[str, object]:
     _t5 = _time.perf_counter()
     
     # Sort: directories first, then files, case-insensitive
-    entries.sort(key=lambda x: (x['kind'] != 'dir', x['name'].lower()))
+    entries.sort(key=lambda x: (x["kind"] != "dir", x["name"].lower()))
     
     _t6 = _time.perf_counter()
     
@@ -243,7 +260,7 @@ def _derive_git_flags(rel_path: str, kind: str, status_map: dict[str, str]) -> l
     if not child_statuses:
         return []
     
-    flags = []
+    flags: list[str] = []
     
     # Check for modified (orange outline)
     if child_statuses & OUTLINE_STATUSES:
@@ -388,7 +405,7 @@ def delete_entry(rel: str) -> dict[str, object]:
 
 def batch_delete(rels: list[str]) -> dict[str, object]:
     """Delete multiple entries."""
-    results = []
+    results: list[dict[str, object]] = []
     for rel in rels:
         try:
             result = delete_entry(rel)
@@ -441,7 +458,7 @@ def move_entry(rel: str, dest_dir_path: str) -> dict[str, object]:
 
 def batch_copy(rels: list[str], dest_dir_path: str) -> dict[str, object]:
     """Copy multiple entries to dest_dir_path."""
-    results = []
+    results: list[dict[str, object]] = []
     for rel in rels:
         try:
             result = copy_entry(rel, dest_dir_path)
@@ -452,7 +469,7 @@ def batch_copy(rels: list[str], dest_dir_path: str) -> dict[str, object]:
 
 def batch_move(rels: list[str], dest_dir_path: str) -> dict[str, object]:
     """Move multiple entries to dest_dir_path."""
-    results = []
+    results: list[dict[str, object]] = []
     for rel in rels:
         try:
             result = move_entry(rel, dest_dir_path)

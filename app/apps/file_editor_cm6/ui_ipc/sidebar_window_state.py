@@ -651,7 +651,7 @@ def create_sidebar_window(params: JsonObject) -> JsonObject:
         )
         host_id = _norm(params.get("host_id") or params.get("hostId")) or _url_host_id()
         label = _norm(params.get("title") or params.get("label")) or "URL"
-        slot: JsonObject = {
+        url_slot: JsonObject = {
             "kind": "url",
             "host_id": host_id,
             "hostId": host_id,
@@ -672,11 +672,11 @@ def create_sidebar_window(params: JsonObject) -> JsonObject:
         }
         state = _upsert_slot(
             _load_pref_state(),
-            slot,
+            url_slot,
             activate=_as_bool(params.get("activate"), True),
         )
         saved = _save_pref_state(state)
-        window = _normalize_slot(slot)
+        window = _normalize_slot(url_slot)
         return {
             "ok": True,
             "window": window,

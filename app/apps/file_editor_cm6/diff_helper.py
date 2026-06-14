@@ -6,7 +6,23 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple, TypedDict
+
+
+JsonObject = dict[str, object]
+
+
+class DiffLine(TypedDict):
+    type: str
+    text: str
+
+
+class DiffHunk(TypedDict):
+    oldStart: int
+    oldLines: int
+    newStart: int
+    newLines: int
+    lines: list[DiffLine]
 
 CACHE_TTL_SECONDS = 5.0
 MAX_DIFF_BYTES = 512 * 1024  # 512 KiB safety cap
@@ -15,11 +31,28 @@ MAX_DIFF_BYTES = 512 * 1024  # 512 KiB safety cap
 @dataclass
 class DiffCacheEntry:
     timestamp: float
-    value: dict
+    value: JsonObject
     size: int
 
 
-_DIFF_CACHE: Dict[Tuple[str, str, str], DiffCacheEntry] = {}
+_DIFF_CACHE: dict[Tuple[str, str, str], DiffCacheEntry] = {}
+
+
+def _diff_payload(
+    *,
+    hunks: list[DiffHunk] | None = None,
+    added: int = 0,
+    deleted: int = 0,
+    tracked: bool,
+    error: str | None = None,
+) -> JsonObject:
+    payload: JsonObject = {
+        "hunks": hunks or [],
+        "summary": {"added": added, "deleted": deleted, "tracked": tracked},
+    }
+    if error is not None:
+        payload["error"] = error
+    return payload
 
 
 def invalidate_diff_cache(project_root: Optional[Path] = None, rel_path: Optional[str] = None) -> None:
@@ -44,7 +77,7 @@ def invalidate_diff_cache(project_root: Optional[Path] = None, rel_path: Optiona
             _DIFF_CACHE.pop(key, None)
 
 
-def collect_diff(project_root: Path, rel_path: str, base_ref: Optional[str] = None) -> dict:
+def collect_diff(project_root: Path, rel_path: str, base_ref: Optional[str] = None) -> JsonObject:
     """
     Collect a unified diff (0 context) for the given file relative to the project root.
 
@@ -75,7 +108,7 @@ def collect_diff(project_root: Path, rel_path: str, base_ref: Optional[str] = No
         return entry.value
 
     if not _is_git_repo(project_root):
-        payload = {"hunks": [], "summary": {"added": 0, "deleted": 0, "tracked": False}}
+        payload = _diff_payload(tracked=False)
         _DIFF_CACHE[cache_key] = DiffCacheEntry(timestamp=now, value=payload, size=0)
         return payload
 
@@ -97,7 +130,7 @@ def collect_diff(project_root: Path, rel_path: str, base_ref: Optional[str] = No
             check=False,
         )
     except Exception:
-        payload = {"hunks": [], "summary": {"added": 0, "deleted": 0, "tracked": False}}
+        payload = _diff_payload(tracked=False)
         _DIFF_CACHE[cache_key] = DiffCacheEntry(timestamp=now, value=payload, size=0)
         return payload
 
@@ -131,27 +164,19 @@ def collect_diff(project_root: Path, rel_path: str, base_ref: Optional[str] = No
         stderr = "diff timeout"
 
     if diff_proc.returncode not in (0, 1):
-        payload = {
-            "hunks": [],
-            "summary": {"added": 0, "deleted": 0, "tracked": is_tracked},
-            "error": stderr.strip() or "Unable to compute diff",
-        }
+        payload = _diff_payload(tracked=is_tracked, error=stderr.strip() or "Unable to compute diff")
         _DIFF_CACHE[cache_key] = DiffCacheEntry(timestamp=now, value=payload, size=len(stdout))
         return payload
 
     if len(stdout) > MAX_DIFF_BYTES:
-        payload = {
-            "hunks": [],
-            "summary": {"added": 0, "deleted": 0, "tracked": is_tracked},
-            "error": "diff_too_large",
-        }
+        payload = _diff_payload(tracked=is_tracked, error="diff_too_large")
         _DIFF_CACHE[cache_key] = DiffCacheEntry(timestamp=now, value=payload, size=len(stdout))
         return payload
 
-    hunks = []
+    hunks: list[DiffHunk] = []
     added = 0
     deleted = 0
-    current_hunk = None
+    current_hunk: DiffHunk | None = None
 
     for raw_line in stdout.splitlines():
         if raw_line.startswith("@@"):
@@ -179,10 +204,7 @@ def collect_diff(project_root: Path, rel_path: str, base_ref: Optional[str] = No
     if current_hunk:
         hunks.append(current_hunk)
 
-    payload = {
-        "hunks": hunks,
-        "summary": {"added": added, "deleted": deleted, "tracked": is_tracked},
-    }
+    payload = _diff_payload(hunks=hunks, added=added, deleted=deleted, tracked=is_tracked)
 
     _DIFF_CACHE[cache_key] = DiffCacheEntry(timestamp=now, value=payload, size=len(stdout))
     return payload

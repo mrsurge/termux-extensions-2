@@ -2,14 +2,55 @@
 import sys
 import time
 from pathlib import Path
+from typing import Callable, Protocol, cast
 
 from anyio import to_thread
 from .services.file_ops import mark_git_cache_dirty
 from ..core_read import push_save_ack, emit_diff_changed
-from ..core_write import write_full, _get_file_meta
+from ..core_write import FileMeta, write_full
 from ..diff_helper import invalidate_diff_cache
-from ..draft_diff_helper import compute_draft_diff
-from ..stores import _history_store
+from ..stores import get_history_store
+
+JsonDict = dict[str, object]
+
+_history_store = get_history_store()
+
+
+class ComputeDraftDiffFn(Protocol):
+    def __call__(self, file_path: str, draft_content: str, disk_content: str) -> object: ...
+
+
+def _json_object(value: object) -> JsonDict:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in cast(dict[object, object], value).items()}
+
+
+def _json_list(value: object) -> list[object]:
+    return cast(list[object], value if isinstance(value, list) else [])
+
+
+def _file_meta_json(meta: FileMeta) -> JsonDict:
+    return dict(meta)
+
+
+def _meta_sha256(meta: FileMeta) -> str:
+    value = meta.get("sha256")
+    return value if isinstance(value, str) else ""
+
+
+def _get_file_meta(path: Path) -> FileMeta:
+    from .. import core_write as _core_write
+
+    fn = cast(Callable[[Path], FileMeta], cast(object, getattr(_core_write, "_get_file_meta")))
+    return fn(path)
+
+
+def _compute_draft_diff(file_path: str, draft_content: str, disk_content: str) -> JsonDict:
+    from .. import draft_diff_helper as _draft_diff_helper
+
+    fn = cast(ComputeDraftDiffFn, cast(object, getattr(_draft_diff_helper, "compute_draft_diff")))
+    return _json_object(fn(file_path, draft_content, disk_content))
 
 async def list_reviews(project_root: Path, lightweight: bool = False) -> list[dict[str, object]]:
     """Get list of files with unsaved drafts."""
@@ -17,7 +58,7 @@ async def list_reviews(project_root: Path, lightweight: bool = False) -> list[di
         return []
     
     root_path = project_root
-    results = []
+    results: list[dict[str, object]] = []
     
     try:
         drafts = _history_store.list_project_drafts(str(project_root))
@@ -31,7 +72,7 @@ async def list_reviews(project_root: Path, lightweight: bool = False) -> list[di
             except ValueError:
                 continue 
             
-            hunks = []
+            hunks: list[object] = []
             if not lightweight:
                 try:
                     draft_content = str(draft.get('content') or '')
@@ -40,8 +81,8 @@ async def list_reviews(project_root: Path, lightweight: bool = False) -> list[di
                     else:
                         disk_content = ''
                     
-                    diff_data = compute_draft_diff(str(abs_path), draft_content, disk_content)
-                    hunks = diff_data.get('hunks', [])
+                    diff_data = _compute_draft_diff(str(abs_path), draft_content, disk_content)
+                    hunks = _json_list(diff_data.get('hunks'))
                 except Exception as e:
                     print(f"[REVIEW] Diff computation failed for {rel_path}: {e}", file=sys.stderr)
 
@@ -65,7 +106,7 @@ async def save_reviews(project_root: Path, files: list[str]) -> dict[str, object
         
     root_path = project_root
     saved_count = 0
-    errors = []
+    errors: list[str] = []
     
     for rel_path in files:
         try:
@@ -92,8 +133,8 @@ async def save_reviews(project_root: Path, files: list[str]) -> dict[str, object
             
             file_meta = _get_file_meta(abs_path)
             op_id = f"review_save_{int(time.time())}"
-            push_save_ack(str(rel_path), op_id, "review_panel", file_meta)
-            emit_diff_changed(str(rel_path), file_meta["sha256"])
+            push_save_ack(str(rel_path), op_id, "review_panel", _file_meta_json(file_meta))
+            emit_diff_changed(str(rel_path), _meta_sha256(file_meta))
             invalidate_diff_cache(root_path, str(rel_path))
             
             _ = _history_store.clear_cached_document(str(project_root), str(abs_path))

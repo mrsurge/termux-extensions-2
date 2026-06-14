@@ -5,12 +5,23 @@ import hashlib
 import shlex
 import signal
 from pathlib import Path
+from typing import cast
 
 from framework_shells import get_manager as _manager
 from framework_shells.orchestrator import Orchestrator
 
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
 SHELLSPEC_REF = "terminal.yaml#terminal"
+
+JsonObject = dict[str, object]
+ShellCommand = list[str] | tuple[str, ...] | str
+
+
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    raw = cast(dict[object, object], value)
+    return {str(key): item for key, item in raw.items()}
 
 
 def _terminal_subgroups(project_path: str | None) -> list[str]:
@@ -58,13 +69,18 @@ def _terminal_label(project_path: str | None, sequence: int | None = None) -> st
     return label
 
 
-def _shell_cmd_string(shell_cmd: list[str] | tuple[str, ...] | str) -> str:
+def _shell_cmd_string(shell_cmd: ShellCommand) -> str:
     if isinstance(shell_cmd, str):
         return shell_cmd
     return shlex.join([str(part) for part in shell_cmd])
 
 
-async def create_editor_shell(cwd=None, shell_cmd=None, project_path: str | None = None, sequence: int | None = None):
+async def create_editor_shell(
+    cwd: str | None = None,
+    shell_cmd: ShellCommand | None = None,
+    project_path: str | None = None,
+    sequence: int | None = None,
+) -> JsonObject:
     """
     Create a new PTY-backed shell session for the code editor terminal drawer.
     
@@ -78,18 +94,15 @@ async def create_editor_shell(cwd=None, shell_cmd=None, project_path: str | None
     mgr = await _manager()
     orch = Orchestrator(mgr)
     
-    if shell_cmd is None:
-        shell_cmd = ['bash', '-l', '-i']
-    
-    if cwd is None:
-        cwd = os.path.expanduser('~')
+    shell_cmd_value: ShellCommand = shell_cmd if shell_cmd is not None else ['bash', '-l', '-i']
+    cwd_value = cwd or os.path.expanduser('~')
     
     label = _terminal_label(project_path, sequence=sequence)
 
     # Check if a shell with this label already exists and is running
     existing = await mgr.find_shell_by_label(label, status="running")
     if existing:
-        return await mgr.describe(existing)
+        return _json_object(cast(object, await mgr.describe(existing)))
 
     # Create dtach-backed shell for persistence
     subgroups = _terminal_subgroups(project_path)
@@ -97,18 +110,18 @@ async def create_editor_shell(cwd=None, shell_cmd=None, project_path: str | None
         SHELLSPEC_REF,
         base_dir=SHELLSPEC_DIR,
         ctx={
-            "CWD": cwd,
-            "SHELL_CMD": _shell_cmd_string(shell_cmd),
+            "CWD": cwd_value,
+            "SHELL_CMD": _shell_cmd_string(shell_cmd_value),
         },
         label=label,
         wait_ready=False,
         subgroups_overrides=subgroups,
     )
     
-    return await mgr.describe(rec)
+    return _json_object(cast(object, await mgr.describe(rec)))
 
 
-async def destroy_editor_shell(shell_id):
+async def destroy_editor_shell(shell_id: str) -> bool:
     """
     Terminate and remove a shell session, cleaning up PTY and logs.
     Called when user clicks the X button to permanently close the terminal.
@@ -128,7 +141,7 @@ async def destroy_editor_shell(shell_id):
         return False
 
 
-async def resize_editor_shell(shell_id, cols, rows):
+async def resize_editor_shell(shell_id: str, cols: int, rows: int) -> bool:
     """
     Resize the terminal PTY.
     
@@ -145,10 +158,12 @@ async def resize_editor_shell(shell_id, cols, rows):
         # Without SIGWINCH reaching the "front" process, readline can keep an
         # old column count and you'll see wrap/overwrite glitches in xterm.
         try:
-            proxy_pid = None
-            pty_state = getattr(mgr, "_pty", {}).get(shell_id) if hasattr(mgr, "_pty") else None
+            proxy_pid: int | None = None
+            pty_map = cast(dict[str, object] | None, getattr(cast(object, mgr), "_pty", None))
+            pty_state = pty_map.get(shell_id) if pty_map is not None else None
             if pty_state is not None:
-                proxy_pid = getattr(pty_state, "proxy_pid", None)
+                proxy_pid_obj = cast(object, getattr(pty_state, "proxy_pid", None))
+                proxy_pid = proxy_pid_obj if isinstance(proxy_pid_obj, int) else None
             if proxy_pid:
                 try:
                     os.killpg(os.getpgid(proxy_pid), signal.SIGWINCH)
@@ -164,12 +179,13 @@ async def resize_editor_shell(shell_id, cols, rows):
             rec = await mgr.get_shell(shell_id)
         except Exception:
             rec = None
-        if rec and getattr(rec, "pid", None):
+        pid = rec.pid if rec and isinstance(rec.pid, int) else None
+        if pid is not None:
             try:
-                os.killpg(os.getpgid(rec.pid), signal.SIGWINCH)
+                os.killpg(os.getpgid(pid), signal.SIGWINCH)
             except Exception:
                 try:
-                    os.kill(rec.pid, signal.SIGWINCH)
+                    os.kill(pid, signal.SIGWINCH)
                 except Exception:
                     pass
         return True

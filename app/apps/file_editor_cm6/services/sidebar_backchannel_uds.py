@@ -6,7 +6,20 @@ import os
 import stat
 import time
 from pathlib import Path
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Protocol, cast
+
+JsonObject = dict[str, object]
+
+
+class SidebarBackchannelApp(Protocol):
+    state: object
+
+    def add_event_handler(
+        self,
+        event_type: str,
+        func: Callable[[], Awaitable[None]],
+    ) -> None: ...
 
 _APP_ID = "file_editor_cm6"
 _PROTOCOL_VERSION = 1
@@ -29,19 +42,25 @@ _uds_socket_path: Path | None = None
 
 
 class _JsonRpcMethodError(Exception):
-    def __init__(self, code: int, message: str, data: Any | None = None) -> None:
+    def __init__(self, code: int, message: str, data: JsonObject | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.data = data
 
 
+def _json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): item for key, item in cast(dict[object, object], value).items()}
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _log(event: str, **fields: Any) -> None:
-    payload = {
+def _log(event: str, **fields: object) -> None:
+    payload: JsonObject = {
         "event": event,
         "ts_ms": _now_ms(),
         **fields,
@@ -83,54 +102,58 @@ def _unlink_stale_socket(socket_path: Path) -> None:
     socket_path.unlink()
 
 
-def _jsonrpc_result(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
+def _jsonrpc_result(req_id: object, result: JsonObject) -> JsonObject:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
 
 def _jsonrpc_error(
-    req_id: Any, code: int, message: str, data: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
+    req_id: object, code: int, message: str, data: JsonObject | None = None
+) -> JsonObject:
+    error: JsonObject = {"code": code, "message": message}
+    payload: JsonObject = {
         "jsonrpc": "2.0",
         "id": req_id,
-        "error": {"code": code, "message": message},
+        "error": error,
     }
     if data is not None:
-        payload["error"]["data"] = data
+        error["data"] = data
     return payload
 
 
-def _error_from_exception(req_id: Any, exc: _JsonRpcMethodError) -> dict[str, Any]:
-    data = exc.data if isinstance(exc.data, dict) else None
-    return _jsonrpc_error(req_id, exc.code, exc.message, data=data)
+def _error_from_exception(req_id: object, exc: _JsonRpcMethodError) -> JsonObject:
+    return _jsonrpc_error(req_id, exc.code, exc.message, data=exc.data)
 
 
-def _validate_request(message: Any) -> tuple[bool, Any, str, dict[str, Any]]:
+def _validate_request(message: object) -> tuple[bool, object, str, JsonObject]:
     if not isinstance(message, dict):
         raise _JsonRpcMethodError(-32600, "invalid request: expected object")
-    if message.get("jsonrpc") != "2.0":
+    request = _json_object(cast(object, message))
+    if request.get("jsonrpc") != "2.0":
         raise _JsonRpcMethodError(-32600, "invalid request: jsonrpc must be '2.0'")
-    method = message.get("method")
+    method = request.get("method")
     if not isinstance(method, str) or not method.strip():
         raise _JsonRpcMethodError(-32600, "invalid request: method must be non-empty string")
-    has_id = "id" in message
-    req_id = message.get("id")
-    params = message.get("params", {})
-    if params is None:
+    has_id = "id" in request
+    req_id = request.get("id")
+    params_obj = request.get("params", {})
+    params: JsonObject
+    if params_obj is None:
         params = {}
-    if not isinstance(params, dict):
+    else:
+        params = _json_object(params_obj)
+    if params_obj is not None and not isinstance(params_obj, dict):
         raise _JsonRpcMethodError(-32602, "invalid params: expected object")
     return has_id, req_id, method.strip(), params
 
 
-def _handle_health_ping(params: dict[str, Any]) -> dict[str, Any]:
+def _handle_health_ping(params: JsonObject) -> JsonObject:
     ts = params.get("ts")
     if ts is not None and not isinstance(ts, (int, float)):
         raise _JsonRpcMethodError(-32602, "invalid params: ts must be number")
     return {"ts": ts, "now": _now_ms()}
 
 
-def _handle_session_hello(params: dict[str, Any]) -> dict[str, Any]:
+def _handle_session_hello(params: JsonObject) -> JsonObject:
     app_id = params.get("app_id")
     run_id = params.get("run_id")
     protocol_version = params.get("protocol_version")
@@ -148,9 +171,10 @@ def _handle_session_hello(params: dict[str, Any]) -> dict[str, Any]:
         raise _JsonRpcMethodError(-32602, "invalid params: pid must be positive integer")
     if origin_role not in {"host", "agent"}:
         raise _JsonRpcMethodError(-32602, "invalid params: origin_role must be 'host' or 'agent'")
-    if not isinstance(capabilities, list) or any(
-        not isinstance(item, str) for item in capabilities
-    ):
+    if not isinstance(capabilities, list):
+        raise _JsonRpcMethodError(-32602, "invalid params: capabilities must be string[]")
+    capabilities_list = cast(list[object], capabilities)
+    if any(not isinstance(item, str) for item in capabilities_list):
         raise _JsonRpcMethodError(-32602, "invalid params: capabilities must be string[]")
     if protocol_version != _PROTOCOL_VERSION:
         raise _JsonRpcMethodError(
@@ -174,7 +198,7 @@ def _handle_session_hello(params: dict[str, Any]) -> dict[str, Any]:
             data={"field": "run_id", "expected": expected_run_id, "received": run_id},
         )
 
-    accepted = [cap for cap in capabilities if cap in _SUPPORTED_CAPABILITIES]
+    accepted = [cap for cap in capabilities_list if isinstance(cap, str) and cap in _SUPPORTED_CAPABILITIES]
     return {
         "ok": True,
         "protocol_version": _PROTOCOL_VERSION,
@@ -182,7 +206,7 @@ def _handle_session_hello(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _dispatch_request(method: str, params: dict[str, Any]) -> dict[str, Any]:
+def _dispatch_request(method: str, params: JsonObject) -> JsonObject:
     if method == "health.ping":
         return _handle_health_ping(params)
     if method == "session.hello":
@@ -190,14 +214,14 @@ def _dispatch_request(method: str, params: dict[str, Any]) -> dict[str, Any]:
     raise _JsonRpcMethodError(-32601, f"method not found: {method}")
 
 
-async def _write_message(writer: asyncio.StreamWriter, payload: dict[str, Any]) -> None:
+async def _write_message(writer: asyncio.StreamWriter, payload: JsonObject) -> None:
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     writer.write(encoded + b"\n")
     await writer.drain()
 
 
 async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-    peer = writer.get_extra_info("peername")
+    peer = cast(object, writer.get_extra_info("peername"))
     _log("client:connected", peer=str(peer))
     try:
         while True:
@@ -214,7 +238,7 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             if not line:
                 continue
             try:
-                message = json.loads(line.decode("utf-8"))
+                message = cast(object, json.loads(line.decode("utf-8")))
             except json.JSONDecodeError:
                 await _write_message(
                     writer,
@@ -223,10 +247,10 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
                 continue
 
             start_ms = _now_ms()
-            req_id = None
-            method = None
-            error_code = None
-            response: dict[str, Any] | None = None
+            req_id: object = None
+            method: str | None = None
+            error_code: int | None = None
+            response: JsonObject | None = None
             try:
                 has_id, req_id, method, params = _validate_request(message)
                 result = _dispatch_request(method, params)
@@ -235,7 +259,7 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
             except _JsonRpcMethodError as exc:
                 error_code = exc.code
                 try:
-                    req_id = message.get("id") if isinstance(message, dict) else None
+                    req_id = _json_object(cast(object, message)).get("id") if isinstance(message, dict) else None
                 except Exception:
                     req_id = None
                 response = _error_from_exception(req_id, exc)
@@ -261,7 +285,7 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
         _log("client:disconnected", peer=str(peer))
 
 
-async def _startup(app) -> None:
+async def _startup(app: SidebarBackchannelApp) -> None:
     global _uds_server, _uds_socket_path
     if _uds_server is not None:
         return
@@ -276,17 +300,17 @@ async def _startup(app) -> None:
     os.chmod(socket_path, 0o600)
     _uds_socket_path = socket_path
 
-    app.state.sidebar_backchannel_uds = {
+    setattr(app.state, "sidebar_backchannel_uds", {
         "enabled": True,
         "transport": "unix",
         "socket": str(socket_path),
         "protocol_version": _PROTOCOL_VERSION,
         "app_id": _APP_ID,
-    }
+    })
     _log("server:started", socket=str(socket_path), protocol_version=_PROTOCOL_VERSION)
 
 
-async def _shutdown(app) -> None:
+async def _shutdown(app: SidebarBackchannelApp) -> None:
     global _uds_server, _uds_socket_path
     if _uds_server is not None:
         _uds_server.close()
@@ -298,17 +322,17 @@ async def _shutdown(app) -> None:
         except Exception as exc:
             _log("server:socket_cleanup_error", socket=str(_uds_socket_path), error=str(exc))
         _uds_socket_path = None
-    app.state.sidebar_backchannel_uds = {
+    setattr(app.state, "sidebar_backchannel_uds", {
         "enabled": False,
         "transport": "unix",
-    }
+    })
     _log("server:stopped")
 
 
-def register(app) -> None:
-    if getattr(app.state, "_sidebar_backchannel_uds_registered", False):
+def register(app: SidebarBackchannelApp) -> None:
+    if bool(getattr(app.state, "_sidebar_backchannel_uds_registered", False)):
         return
-    app.state._sidebar_backchannel_uds_registered = True
+    setattr(app.state, "_sidebar_backchannel_uds_registered", True)
 
     async def on_startup() -> None:
         await _startup(app)
