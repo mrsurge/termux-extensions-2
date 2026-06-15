@@ -107,8 +107,27 @@ Phase 4 store/event caller migration checklist:
       and draft-forward refresh.
 - [x] Prune the dead `core_read.py` inotify/watchdog/polling watcher machinery;
       keep only active file subscription, save-ack, and diff-change helpers.
-- [ ] Retire residual pre-bootstrap fallback seams in `workspace_events.py` and
-      the editor cache runtime loop bridge where safe.
+- [x] Retire residual pre-bootstrap fallback seams in `workspace_events.py` and
+      remove the dead NiceGUI-loop editor cache runtime bridge.
+- [x] Move git snapshot refresh scheduling to the backend workspace-event
+      handler so repo model refresh is driven by authoritative
+      `WorkspaceFilesChanged` events, not Explorer projection/connection state.
+- [x] Split WBA event-stream intake from diagnostics projection: app-worker
+      startup and project switch now own the WBA event bridge lifecycle, while
+      diagnostics reset only clears diagnostics state. WBA `watcher/fileChanges`
+      feeds backend `WorkspaceFilesChanged` independent of editor/frontend socket
+      reconnects.
+- [x] Quick frontend pivot: treat `explorer.project.opened` as an authoritative
+      render invalidation, prefer backend `resolved_path`, drop stale Explorer
+      render/git state, and re-request backend tree/git projections.
+- [x] Quick frontend render resync: treat `explorer.git.status.updated` as a
+      backend “render state changed” signal and request backend `explorer.list`
+      projections for root/open directories so the rendered tree consumes
+      backend-mapped `gitStatus`/`gitFlags`.
+- [ ] Introduce a backend Explorer render-state machine/projector that emits
+      explicit project-generation/render-state facts so the frontend applies
+      backend “this changed” events instead of deriving render correctness from
+      local path/URI state.
 - [ ] Convert open-state writes into typed facts plus editor/Explorer/UI IPC
       projectors, while keeping `open_state_backend.py` and `ProjectSidecar` as
       authority.
@@ -220,8 +239,7 @@ app/apps/file_editor_cm6/pyrightconfig.json` reports `0 errors`; `git diff
 - Central runtime-loop bootstrap slice moved worker event-bus registration to app
   startup via `worker_services/runtime.py`, leaving Explorer session bootstrap to
   own only Explorer session work. Verified with `python -m py_compile` for
-  touched Python files, full app `basedpyright --project
-app/apps/file_editor_cm6/pyrightconfig.json` reporting `0 errors`, and
+  touched Python files, full app basedpyright reporting `0 errors`, and
   `git diff --check` clean.
 - Explorer runtime-notification scheduling now uses same-loop asyncio debounce
   tasks instead of `threading.Timer` for watcher-file broadcasts, git fallback
@@ -236,6 +254,33 @@ app/apps/file_editor_cm6/pyrightconfig.json` reporting `0 errors`, and
   `python -m py_compile` for touched watcher/runtime files, full app
   `basedpyright --project app/apps/file_editor_cm6/pyrightconfig.json`
   reporting `0 errors`, and `git diff --check` clean.
+- Residual fallback cleanup removed `workspace_events.py` direct pre-bootstrap
+  file-change delivery and the dead editor cache NiceGUI-loop scheduling bridge;
+  workspace file changes now require the central worker event bus, and diff
+  refresh scheduling stays on the running app-worker loop. Verified with
+  `python -m py_compile` for touched files, full app basedpyright reporting
+  `0 errors`, and `git diff --check` clean.
+- Backend git refresh authority was decoupled from the Explorer watcher-file
+  projector: `WorkspaceFilesChanged` now schedules the debounced
+  `GitSnapshotRequested` path directly from the event project root/generation,
+  while `notify_explorer_of_change(...)` only projects watcher-file notifications
+  to Explorer clients. This keeps git snapshot refresh independent of frontend
+  render state, Explorer connection timing, and path-to-relative projection.
+- Frontend quick fix: Explorer project-open notifications now prefer the backend
+  resolved project root and force a render/git reset plus backend tree/git
+  re-request. This is a step toward a backend Explorer render-state machine where
+  the frontend applies authoritative change events rather than using local URI or
+  path state to decide render ownership.
+- WBA event bridge lifecycle fix: `diagnostics_bridge.py` no longer owns or
+  stops the WBA `/ws` event-stream subscriber. `wba_event_bridge.py` owns WBA
+  `te2.event` intake, dispatches `watcher/fileChanges` into backend
+  `WorkspaceFilesChanged`, and forwards `diagnostics/update` to diagnostics
+  projection. App-worker startup and project switch ensure the bridge is
+  running; project switch only resets project-scoped diagnostics/ENOSPC state,
+  so backend watcher/git refresh does not wait for an editor/frontend reconnect.
+  Verified with focused `py_compile`, full app `basedpyright --project
+  app/apps/file_editor_cm6/pyrightconfig.json` reporting `0 errors`, and
+  `git diff --check` clean.
 
 ## Purpose
 

@@ -152,9 +152,6 @@ _android_draft_diag_sig: dict[str, str] = {}
 # Sprint E: in-memory cache for TE2 draft diagnostics replay.
 # key: "<effective_project_root>::<uri>" -> (cache_key, diagnostics)
 _android_draft_diag_cache: dict[str, tuple[str, list[dict[str, object]]]] = {}
-_nicegui_loop: Optional[asyncio.AbstractEventLoop] = None
-_nicegui_loop_thread: Optional[int] = None
-
 # Live draft propagation: suppress local on_change persistence briefly after applying
 # a remote draft update (prevents feedback loops).
 _suppress_on_change_until: float = 0.0
@@ -430,7 +427,6 @@ def _schedule_diff_refresh(
         editor,
         reason,
         get_running_loop=asyncio.get_running_loop,
-        get_nicegui_loop=lambda: _nicegui_loop,
         get_active_editors=get_active_editors,
         get_combined_diffs_async_fn=_get_combined_diffs_async,
     )
@@ -580,7 +576,7 @@ def _schedule_cache_persist():
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        loop = _nicegui_loop
+        loop = None
     if loop is None:
         return
     _cache_persist_timer = loop.call_later(

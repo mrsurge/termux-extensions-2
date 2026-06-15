@@ -3,18 +3,12 @@ import {
   EXPLORER_RPC_NOTIFICATIONS,
   type ExplorerRpcMethod,
   type ExplorerRpcNotificationMethod,
-} from './contract.ts';
-import type { JsonObject } from '../../rpc/transport.ts';
-import type { ExplorerRuntimeState } from '../state/runtime-state.ts';
-import type {
-  ExplorerTreeDecorationsController,
-} from '../tree/decorations.ts';
-import type {
-  ExplorerGitStatus,
-} from '../git/footer-utils.ts';
-import type {
-  ProblemsPanelApi,
-} from '../search/diagnostics-renderer.ts';
+} from "./contract.ts";
+import type { JsonObject } from "../../rpc/transport.ts";
+import type { ExplorerRuntimeState } from "../state/runtime-state.ts";
+import type { ExplorerTreeDecorationsController } from "../tree/decorations.ts";
+import type { ExplorerGitStatus } from "../git/footer-utils.ts";
+import type { ProblemsPanelApi } from "../search/diagnostics-renderer.ts";
 
 interface ExplorerSearchOverlayController {
   handleSearchResultsUpdated(payload: JsonObject): void;
@@ -76,22 +70,35 @@ interface ExplorerNotificationHandlerDeps {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function getStringValue(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
+  return typeof value === "string" ? value : null;
 }
 
 function getNonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value ? value : null;
+  return typeof value === "string" && value ? value : null;
+}
+
+function getProjectedProjectPath(
+  payload: JsonObject,
+  fallback: string | null = null,
+): string | null {
+  return (
+    getNonEmptyString(payload.resolved_path) ||
+    getNonEmptyString(payload.resolvedPath) ||
+    getNonEmptyString(payload.projectPath) ||
+    getNonEmptyString(payload.path) ||
+    fallback
+  );
 }
 
 function setWatcherRefreshBarVisible(visible: boolean): void {
   try {
-    const bar = document.getElementById('fe-watcher-refresh-bar');
+    const bar = document.getElementById("fe-watcher-refresh-bar");
     if (bar instanceof HTMLElement) {
-      bar.style.display = visible ? '' : 'none';
+      bar.style.display = visible ? "" : "none";
     }
   } catch {
     // Ignore UI refresh-bar races.
@@ -100,23 +107,55 @@ function setWatcherRefreshBarVisible(visible: boolean): void {
 
 function coerceGitStatus(payload: JsonObject): ExplorerGitStatus {
   const status: ExplorerGitStatus = {};
-  if (typeof payload.branch === 'string') status.branch = payload.branch;
+  if (typeof payload.branch === "string") status.branch = payload.branch;
   if (payload.detached === true) status.detached = true;
-  if (typeof payload.ahead === 'number') status.ahead = payload.ahead;
-  if (typeof payload.behind === 'number') status.behind = payload.behind;
+  if (typeof payload.ahead === "number") status.ahead = payload.ahead;
+  if (typeof payload.behind === "number") status.behind = payload.behind;
   if (Array.isArray(payload.staged)) status.staged = payload.staged;
   if (Array.isArray(payload.unstaged)) status.unstaged = payload.unstaged;
   if (Array.isArray(payload.untracked)) status.untracked = payload.untracked;
   return status;
 }
 
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is string => typeof item === "string" && item.length > 0,
+      )
+    : [];
+}
+
+function statusesFromGitStatus(payload: JsonObject): Record<string, string> {
+  const statuses: Record<string, string> = {};
+
+  function setStatus(rel: string, status: string): void {
+    const previous = statuses[rel];
+    if (
+      (previous === "staged" && status === "modified") ||
+      (previous === "modified" && status === "staged")
+    ) {
+      statuses[rel] = "staged_modified";
+      return;
+    }
+    statuses[rel] = status;
+  }
+
+  stringList(payload.staged).forEach((rel) => setStatus(rel, "staged"));
+  stringList(payload.unstaged).forEach((rel) => setStatus(rel, "modified"));
+  stringList(payload.untracked).forEach((rel) => setStatus(rel, "untracked"));
+  return statuses;
+}
+
 function applyProjectRootProjection(
   deps: ExplorerNotificationHandlerDeps,
   nextProjectPath: string | null,
+  options: { forceReset?: boolean } = {},
 ): boolean {
   if (!nextProjectPath) return false;
-  const prevProjectPath = deps.runtimeState.getProjectPath() || '';
-  const projectChanged = !!prevProjectPath && prevProjectPath !== nextProjectPath;
+  const prevProjectPath = deps.runtimeState.getProjectPath() || "";
+  const projectChanged =
+    options.forceReset === true ||
+    (!!prevProjectPath && prevProjectPath !== nextProjectPath);
   deps.runtimeState.setProjectPath(nextProjectPath);
   deps.renderProjectLabel();
   if (!projectChanged) return false;
@@ -129,7 +168,7 @@ function applyProjectRootProjection(
   deps.renderGitSummary();
   deps.setGitControlsEnabled(false, false);
   if (deps.hasExplorerRpc()) {
-    deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
+    deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: "." });
     deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
   }
   void deps.initDiffBaseFromBackend();
@@ -140,7 +179,7 @@ function getJobProgressPercent(value: unknown): number {
   if (!isRecord(value)) {
     return 0;
   }
-  return typeof value.completed === 'number'
+  return typeof value.completed === "number"
     ? value.completed
     : Number(value.completed || 0);
 }
@@ -149,10 +188,10 @@ function getJobProgressDetail(
   value: unknown,
   fallbackMessage: string | null,
 ): string {
-  if (isRecord(value) && typeof value.detail === 'string' && value.detail) {
+  if (isRecord(value) && typeof value.detail === "string" && value.detail) {
     return value.detail;
   }
-  return fallbackMessage || '';
+  return fallbackMessage || "";
 }
 
 export function createExplorerNotificationHandler(
@@ -184,7 +223,7 @@ export function createExplorerNotificationHandler(
         const dirsToRefresh = new Set<string>();
         let refreshRoot = false;
         rels.forEach((rel) => {
-          if (rel === '.' || rel.indexOf('/') === -1) {
+          if (rel === "." || rel.indexOf("/") === -1) {
             refreshRoot = true;
           }
 
@@ -196,40 +235,42 @@ export function createExplorerNotificationHandler(
         });
 
         if (refreshRoot) {
-          deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
+          deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: "." });
         }
         dirsToRefresh.forEach((rel) => {
-          if (!rel || rel === '.') return;
+          if (!rel || rel === ".") return;
           deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
         });
 
         const activeFileRel = deps.getActiveFileRel();
         if (activeFileRel) {
-          const touchedActive = Array.from(rels).some((rel) => rel === activeFileRel);
+          const touchedActive = Array.from(rels).some(
+            (rel) => rel === activeFileRel,
+          );
           if (touchedActive) {
             deps.requestGitBaselines();
           }
         }
       } catch (err) {
-        console.warn('[Explorer] watcher:files handler failed', err);
+        console.warn("[Explorer] watcher:files handler failed", err);
       }
       return;
     }
 
     if (method === EXPLORER_RPC_NOTIFICATIONS.watcherModeChanged) {
-      setWatcherRefreshBarVisible(payload.mode === 'none');
+      setWatcherRefreshBarVisible(payload.mode === "none");
       return;
     }
 
     if (method === EXPLORER_RPC_NOTIFICATIONS.watcherConfigUpdated) {
-      setWatcherRefreshBarVisible(payload.mode === 'none');
+      setWatcherRefreshBarVisible(payload.mode === "none");
     }
 
     switch (method) {
       case EXPLORER_RPC_NOTIFICATIONS.prefsUiUpdated: {
         const ui = isRecord(payload.ui) ? payload.ui : null;
         const next = ui?.explorerStickyHeaders;
-        if (typeof next === 'boolean') {
+        if (typeof next === "boolean") {
           deps.setExplorerStickyHeadersEnabled(next);
         }
         deps.syncExplorerPrefsUI();
@@ -237,12 +278,15 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.projectActiveUpdated: {
-        const prevProjectPath = deps.runtimeState.getProjectPath() || '';
-        const nextProjectPath =
-          getNonEmptyString(payload.path) ||
-          getNonEmptyString(payload.projectPath) ||
-          prevProjectPath;
-        const projectChanged = applyProjectRootProjection(deps, nextProjectPath);
+        const prevProjectPath = deps.runtimeState.getProjectPath() || "";
+        const nextProjectPath = getProjectedProjectPath(
+          payload,
+          prevProjectPath,
+        );
+        const projectChanged = applyProjectRootProjection(
+          deps,
+          nextProjectPath,
+        );
         void deps.initDiffBaseFromBackend();
 
         if (
@@ -280,9 +324,10 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.openStateChanged: {
-        const nextProjectPath = getNonEmptyString(payload.projectPath);
+        const nextProjectPath = getProjectedProjectPath(payload);
         applyProjectRootProjection(deps, nextProjectPath);
-        const nextRel = getStringValue(payload.openFileRel) || getStringValue(payload.rel);
+        const nextRel =
+          getStringValue(payload.openFileRel) || getStringValue(payload.rel);
         deps.setActiveFileRel(nextRel);
         if (nextRel) {
           Promise.resolve(deps.expandToFile(nextRel))
@@ -305,49 +350,54 @@ export function createExplorerNotificationHandler(
       }
       case EXPLORER_RPC_NOTIFICATIONS.openDirsUpdated: {
         const dirs = Array.isArray(payload.dirs)
-          ? payload.dirs.filter((value): value is string => typeof value === 'string')
+          ? payload.dirs.filter(
+              (value): value is string => typeof value === "string",
+            )
           : [];
         void deps.restoreOpenDirectories(dirs);
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.listUpdated: {
-        const cwd = getNonEmptyString(payload.cwd) || '.';
+        const cwd = getNonEmptyString(payload.cwd) || ".";
         let treeElement = deps.getTreeElement();
         if (!treeElement) {
-          treeElement = document.getElementById('fe-file-tree');
+          treeElement = document.getElementById("fe-file-tree");
           deps.setTreeElement(treeElement);
         }
         if (!treeElement) break;
 
-        if (cwd === '.' || cwd === '') {
+        if (cwd === "." || cwd === "") {
           const currentProjectPath = deps.runtimeState.getProjectPath();
           const sameProject =
             !!deps.runtimeState.getRenderedProjectPath() &&
             !!currentProjectPath &&
             deps.runtimeState.getRenderedProjectPath() === currentProjectPath;
           let rootLi = treeElement.querySelector<HTMLLIElement>(
-            'li.fe-tree-node.fe-tree-root',
+            "li.fe-tree-node.fe-tree-root",
           );
           if (!rootLi || !sameProject) {
             deps.renderExplorerTree();
             treeElement = deps.getTreeElement();
-            rootLi = treeElement?.querySelector<HTMLLIElement>(
-              'li.fe-tree-node.fe-tree-root',
-            ) || null;
+            rootLi =
+              treeElement?.querySelector<HTMLLIElement>(
+                "li.fe-tree-node.fe-tree-root",
+              ) || null;
           } else {
-            const label = rootLi.querySelector<HTMLElement>(':scope > .fe-tree-text');
+            const label = rootLi.querySelector<HTMLElement>(
+              ":scope > .fe-tree-text",
+            );
             if (label) {
               label.textContent =
-                deps.basename(currentProjectPath || '') || 'Project';
+                deps.basename(currentProjectPath || "") || "Project";
             }
           }
           if (!rootLi) break;
           let childList = rootLi.querySelector<HTMLUListElement>(
-            ':scope > ul.fe-tree',
+            ":scope > ul.fe-tree",
           );
           if (!childList) {
-            childList = document.createElement('ul');
-            childList.className = 'fe-tree';
+            childList = document.createElement("ul");
+            childList.className = "fe-tree";
             rootLi.appendChild(childList);
           }
           deps.renderEntriesInto(childList, payload.entries);
@@ -355,7 +405,9 @@ export function createExplorerNotificationHandler(
           if (deps.runtimeState.getReconnectResyncPending()) {
             deps.runtimeState.setReconnectResyncPending(false);
             if (deps.getOpenDirectories().size && deps.hasExplorerRpc()) {
-              void deps.restoreOpenDirectories(Array.from(deps.getOpenDirectories()));
+              void deps.restoreOpenDirectories(
+                Array.from(deps.getOpenDirectories()),
+              );
             }
           }
         } else {
@@ -364,21 +416,21 @@ export function createExplorerNotificationHandler(
           );
           if (!dirLi) break;
 
-          const wasOpen = dirLi.dataset.open === 'true';
+          const wasOpen = dirLi.dataset.open === "true";
           let childList = dirLi.querySelector<HTMLUListElement>(
-            ':scope > ul.fe-tree',
+            ":scope > ul.fe-tree",
           );
           const trackedAsOpen = deps.getOpenDirectories().has(cwd);
 
           if (wasOpen || childList || trackedAsOpen) {
             if (!childList) {
-              childList = document.createElement('ul');
-              childList.className = 'fe-tree';
+              childList = document.createElement("ul");
+              childList.className = "fe-tree";
               dirLi.appendChild(childList);
             }
-            dirLi.dataset.open = 'true';
+            dirLi.dataset.open = "true";
             deps.renderEntriesInto(childList, payload.entries);
-            if (cwd !== '.' && cwd !== '') {
+            if (cwd !== "." && cwd !== "") {
               deps.getOpenDirectories().add(cwd);
             }
           }
@@ -389,7 +441,7 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.treeUpdated: {
-        const nextProjectPath = getNonEmptyString(payload.projectPath);
+        const nextProjectPath = getProjectedProjectPath(payload);
         if (nextProjectPath) {
           deps.runtimeState.setProjectPath(nextProjectPath);
         }
@@ -398,18 +450,21 @@ export function createExplorerNotificationHandler(
         const treeElement = deps.getTreeElement();
         if (treeElement) {
           const rootLi = treeElement.querySelector<HTMLLIElement>(
-            'li.fe-tree-node.fe-tree-root',
+            "li.fe-tree-node.fe-tree-root",
           );
           if (rootLi) {
             let childList = rootLi.querySelector<HTMLUListElement>(
-              ':scope > ul.fe-tree',
+              ":scope > ul.fe-tree",
             );
             if (!childList) {
-              childList = document.createElement('ul');
-              childList.className = 'fe-tree';
+              childList = document.createElement("ul");
+              childList.className = "fe-tree";
               rootLi.appendChild(childList);
             }
-            deps.renderEntriesInto(childList, payload.entries ?? payload.nodes ?? []);
+            deps.renderEntriesInto(
+              childList,
+              payload.entries ?? payload.nodes ?? [],
+            );
           }
         }
         if (!deps.runtimeState.getGitStatus() && deps.hasExplorerRpc()) {
@@ -428,13 +483,15 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.diagnosticsDetail: {
         deps.treeDecorations.setDiagnosticsDetail(payload);
         const livePanel = deps.getDiagnosticsPanel();
-        const projectPath = (deps.runtimeState.getProjectPath() || '').replace(
+        const projectPath = (deps.runtimeState.getProjectPath() || "").replace(
           /\/+$/,
-          '',
+          "",
         );
         const activeFileRel = deps.getActiveFileRel();
         const activeAbs =
-          activeFileRel && projectPath ? `${projectPath}/${activeFileRel}` : null;
+          activeFileRel && projectPath
+            ? `${projectPath}/${activeFileRel}`
+            : null;
         if (livePanel) {
           if (activeAbs) {
             livePanel.setActiveFile(activeAbs);
@@ -453,7 +510,7 @@ export function createExplorerNotificationHandler(
 
         if (
           deps.searchOverlayController.isVisible() &&
-          deps.searchOverlayController.getSearchMode() === 'diagnostics'
+          deps.searchOverlayController.getSearchMode() === "diagnostics"
         ) {
           deps.renderSearchOverlay();
         }
@@ -472,21 +529,19 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.projectOpened: {
-        const path = getNonEmptyString(payload.path);
+        const path = getProjectedProjectPath(payload);
         if (path) {
-          applyProjectRootProjection(deps, path);
-          if (deps.hasExplorerRpc()) {
-            deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
-            deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
-          }
-          void deps.initDiffBaseFromBackend();
+          applyProjectRootProjection(deps, path, { forceReset: true });
           deps.dispatchProjectOpened(path, payload);
         }
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitStatusUpdated: {
-        console.log('[GIT_STATUS_DEBUG] Received:', payload);
+        console.log("[GIT_STATUS_DEBUG] Received:", payload);
         deps.runtimeState.setGitStatus(coerceGitStatus(payload));
+        deps.treeDecorations.applyGitDecorations({
+          statuses: statusesFromGitStatus(payload),
+        });
         deps.renderGitSummary();
         deps.setGitControlsEnabled(true, false);
         break;
@@ -515,40 +570,40 @@ export function createExplorerNotificationHandler(
         const status = getNonEmptyString(payload.status);
         const message = getNonEmptyString(payload.message);
         const error = getNonEmptyString(payload.error);
-        if (!type || !type.startsWith('git_') || !status) {
+        if (!type || !type.startsWith("git_") || !status) {
           break;
         }
 
-        if (status === 'running') {
+        if (status === "running") {
           deps.showGitProgressBar(
             getJobProgressPercent(payload.progress),
             getJobProgressDetail(payload.progress, message),
           );
-        } else if (status === 'succeeded') {
+        } else if (status === "succeeded") {
           deps.hideGitProgressBar();
-          deps.toast(message || `${type.replace('_', ' ')} completed`);
+          deps.toast(message || `${type.replace("_", " ")} completed`);
           if (
-            (type === 'git_pull' ||
-              type === 'git_push' ||
-              type === 'git_clone') &&
+            (type === "git_pull" ||
+              type === "git_push" ||
+              type === "git_clone") &&
             deps.hasExplorerRpc()
           ) {
             deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
             deps.notifyExplorer(EXPLORER_RPC_METHODS.refresh, {});
           }
-        } else if (status === 'failed') {
+        } else if (status === "failed") {
           deps.hideGitProgressBar();
-          deps.toast(error || message || `${type.replace('_', ' ')} failed`);
-        } else if (status === 'cancelled') {
+          deps.toast(error || message || `${type.replace("_", " ")} failed`);
+        } else if (status === "cancelled") {
           deps.hideGitProgressBar();
-          deps.toast(`${type.replace('_', ' ')} cancelled`);
+          deps.toast(`${type.replace("_", " ")} cancelled`);
         }
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.gitPushStarted:
       case EXPLORER_RPC_NOTIFICATIONS.gitPullStarted:
       case EXPLORER_RPC_NOTIFICATIONS.gitCloneStarted: {
-        deps.showGitProgressBar(0, 'Starting...');
+        deps.showGitProgressBar(0, "Starting...");
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchResultsUpdated: {
@@ -556,7 +611,7 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.error: {
-        const message = getNonEmptyString(payload.error) || 'Unknown error';
+        const message = getNonEmptyString(payload.error) || "Unknown error";
         if (!deps.searchOverlayController.handleSearchError(message)) {
           deps.toast(message);
         }
@@ -573,7 +628,7 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.navigate: {
-        const rel = getStringValue(payload.rel) || '';
+        const rel = getStringValue(payload.rel) || "";
         if (payload.open_drawer === true) {
           deps.toggleDrawer(true);
         }

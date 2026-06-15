@@ -109,13 +109,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
             )
         except Exception:
             pass
-        try:
-            from ..diagnostics_bridge import start_bridge
-            from .editor_socketio import EDITOR_SIO
-
-            start_bridge(EDITOR_SIO)
-        except Exception:
-            pass
         if isinstance(open_state_obj, dict):
             try:
                 await editor_runtime_emit_open_state_changed(

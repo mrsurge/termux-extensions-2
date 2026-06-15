@@ -268,7 +268,6 @@ def schedule_diff_refresh(
     reason: str,
     *,
     get_running_loop: Callable[[], asyncio.AbstractEventLoop],
-    get_nicegui_loop: Callable[[], asyncio.AbstractEventLoop | None],
     get_active_editors: Callable[[], list[EditorLike]],
     get_combined_diffs_async_fn: Callable[[Path, str, str], Awaitable[list[object]]],
 ) -> None:
@@ -290,10 +289,4 @@ def schedule_diff_refresh(
     if loop and loop.is_running():
         loop.create_task(_run())
         return
-
-    nicegui_loop = get_nicegui_loop()
-    if nicegui_loop and nicegui_loop.is_running():
-        try:
-            asyncio.run_coroutine_threadsafe(_run(), nicegui_loop)
-        except Exception as exc:
-            print(f"[DIFF_REFRESH][{reason}] Schedule failed: {exc}", file=sys.stderr)
+    print(f"[DIFF_REFRESH][{reason}] Schedule skipped: no running event loop", file=sys.stderr)

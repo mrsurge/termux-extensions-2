@@ -43,9 +43,9 @@ async def _close_active_terminal_sockets() -> None:
 
 
 def _stop_diagnostics_bridge() -> None:
-    from ..diagnostics_bridge import stop_bridge
+    from ..wba_event_bridge import reset_wba_project_event_state
 
-    stop_bridge()
+    reset_wba_project_event_state()
 
 
 async def _terminate_adapter_shell() -> bool:

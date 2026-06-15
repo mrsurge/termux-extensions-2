@@ -5,6 +5,7 @@ import asyncio
 import logging
 
 from ..explorer.services.runtime_notifications import set_explorer_event_loop
+from ..wba_event_bridge import start_wba_event_bridge
 from ..workspace_events import register_workspace_event_bus_handlers
 from .event_bus import set_worker_event_loop
 
@@ -25,5 +26,6 @@ def bootstrap_worker_runtime(loop: asyncio.AbstractEventLoop | None = None) -> N
     # Compatibility for callers that still post work through the Explorer loop seam.
     set_explorer_event_loop(runtime_loop)
     register_workspace_event_bus_handlers()
+    start_wba_event_bridge()
     _registered_loop = runtime_loop
     logger.info("[file_editor_cm6] worker runtime loop registered")

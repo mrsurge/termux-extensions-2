@@ -52,10 +52,10 @@ async def reset_project_session(new_project_path: str) -> bool:
         pass
 
     try:
-        from ...diagnostics_bridge import stop_bridge
+        from ...wba_event_bridge import reset_wba_project_event_state
 
-        stop_bridge()
-        print("[reset_project_session] diagnostics bridge stopped", flush=True)
+        reset_wba_project_event_state()
+        print("[reset_project_session] WBA project event state reset", flush=True)
     except Exception:
         pass
 

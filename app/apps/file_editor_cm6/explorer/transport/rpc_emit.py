@@ -39,10 +39,11 @@ async def emit_project_explorer_rpc_notification(
     if isinstance(project_path, str) and project_path.strip():
         from .connection_manager import manager
 
-        await manager.broadcast(
+        sent = await manager.broadcast(
             project_path,
             build_jsonrpc_notification(method, params),
         )
-        return
+        if sent:
+            return
 
     await emit_explorer_rpc_notification(method, params)

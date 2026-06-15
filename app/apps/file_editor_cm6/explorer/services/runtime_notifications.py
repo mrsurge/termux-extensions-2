@@ -14,11 +14,7 @@ from typing import Protocol, cast
 from .file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
 from ..transport.connection_manager import abs_to_rel, manager
 from ..transport.rpc_emit import emit_project_explorer_rpc_notification
-from ...worker_services.event_bus import (
-    build_event,
-    current_project_generation,
-    publish_threadsafe as publish_worker_event_threadsafe,
-)
+from ...worker_services.event_bus import current_project_generation
 from ...worker_services import git_service as worker_git_service
 
 logger = logging.getLogger(__name__)
@@ -42,7 +38,6 @@ class UrlOpenResponse(Protocol):
 _explorer_event_loop: asyncio.AbstractEventLoop | None = None
 _watcher_file_batches: dict[str, dict[str, set[str]]] = {}
 _watcher_files_tasks: DebounceTasks = {}
-_git_status_tasks: DebounceTasks = {}
 _draft_forward_tasks: DebounceTasks = {}
 _draft_decorations_tasks: DebounceTasks = {}
 _git_status_publisher: GitStatusPublisher | None = None
@@ -53,10 +48,6 @@ def set_explorer_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     """Called during app startup to set the event loop for watcher callbacks."""
     global _explorer_event_loop
     _explorer_event_loop = loop
-
-
-def get_explorer_event_loop() -> asyncio.AbstractEventLoop | None:
-    return _explorer_event_loop
 
 
 def set_git_status_publisher(publisher: GitStatusPublisher) -> None:
@@ -161,7 +152,7 @@ async def _broadcast_watcher_files(project_path: str, payload: dict[str, set[str
 
 
 def notify_explorer_of_change(abs_path: str, event_type: str) -> None:
-    """Fan out batched watcher events to explorer clients and trigger git refresh."""
+    """Fan out batched watcher events to Explorer clients."""
     def _notify() -> None:
         if not manager.active_connections:
             return
@@ -171,43 +162,11 @@ def notify_explorer_of_change(abs_path: str, event_type: str) -> None:
                 continue
             try:
                 _schedule_watcher_files_broadcast_on_loop(project_path, rel_path, event_type)
-                _schedule_git_status_broadcast(project_path)
             except Exception as exc:
                 logger.warning("Failed to notify explorer of change: %s", exc)
             break
 
     _post_to_explorer_loop(_notify)
-
-
-def _schedule_git_status_broadcast(project_path: str) -> None:
-    project_generation = current_project_generation(project_path)
-    event = build_event(
-        "GitSnapshotRequested",
-        project_root=project_path,
-        project_generation=project_generation,
-        source="runtime_notifications",
-        payload={},
-    )
-    if publish_worker_event_threadsafe(event):
-        return
-
-    def _schedule() -> None:
-        async def do_broadcast() -> None:
-            await broadcast_git_status_update(
-                project_path,
-                project_generation=project_generation,
-                source="runtime_notifications:fallback_task",
-            )
-
-        _schedule_debounce_task(
-            _git_status_tasks,
-            f"git:{project_path}",
-            delay=0.5,
-            name="file_editor_cm6_git_status_fallback",
-            callback=do_broadcast,
-        )
-
-    _post_to_explorer_loop(_schedule)
 
 
 def _is_stale_git_generation(project: Path, project_generation: int | None) -> bool:

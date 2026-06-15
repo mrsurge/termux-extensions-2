@@ -17,9 +17,9 @@ async def restart_adapter_only(emit_personal: EmitPersonal, reason: str) -> None
         print(f"[ext_restart] adapter terminate error: {exc}", flush=True)
 
     try:
-        from ...diagnostics_bridge import stop_bridge
+        from ...wba_event_bridge import reset_wba_project_event_state
 
-        stop_bridge()
+        reset_wba_project_event_state()
     except Exception:
         pass
 
@@ -38,9 +38,9 @@ async def restart_code_server_and_adapter(
         print(f"[ext_restart] adapter terminate error: {exc}", flush=True)
 
     try:
-        from ...diagnostics_bridge import stop_bridge
+        from ...wba_event_bridge import reset_wba_project_event_state
 
-        stop_bridge()
+        reset_wba_project_event_state()
     except Exception:
         pass
 

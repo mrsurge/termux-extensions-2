@@ -165,7 +165,7 @@ class ConnectionManager:
         """Returns True if there are any active connections for a project."""
         return self.get_connection_count(project_path) > 0
 
-    async def broadcast(self, project_path: str, message: JsonMessage) -> None:
+    async def broadcast(self, project_path: str, message: JsonMessage) -> bool:
         """Send message to all clients connected to a specific project."""
         resolved_key = self._resolve_project_key(project_path)
         if not resolved_key:
@@ -173,14 +173,18 @@ class ConnectionManager:
                 "[explorer_broadcast] no connections for project=%s (keys=%s)",
                 project_path, list(self.active_connections.keys()),
             )
-            return
+            return False
         if resolved_key in self.active_connections:
             text = json.dumps(message)
+            sent = False
             for connection in self.active_connections[resolved_key]:
                 try:
                     await connection.send_text(text)
+                    sent = True
                 except Exception as e:
                     logger.warning(f"Failed to send broadcast: {e}")
+            return sent
+        return False
 
     async def send_personal(self, websocket: ExplorerConnection, message: JsonMessage) -> None:
         """Send message to a single client."""

@@ -1,9 +1,7 @@
-"""WBA backend event relay for Explorer/backend projections.
+"""WBA diagnostics projection for Explorer/backend surfaces.
 
 This module owns:
 
-- Node WBA ``/ws`` event intake for backend-owned projections
-- workbench IPC watcher events -> workspace event bus
 - WBA-normalized diagnostics -> Explorer/problems diagnostics detail
 
 Editor diagnostics consume the direct ``/wba`` Socket.IO lane in the editor
@@ -13,7 +11,6 @@ frontend and should not be routed through this Python relay.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from importlib import import_module
@@ -22,7 +19,6 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
-ADAPTER_PORT = 18181
 DIAG_CACHE_MAX = 500
 
 JsonObject = dict[str, object]
@@ -66,22 +62,6 @@ def _int_value(value: object, default: int = 0) -> int:
 
 # Server-side diagnostics cache: (abs_path, owner) -> {ts_ms, owner, path, markers, type}
 _diag_cache: dict[DiagCacheKey, DiagEntry] = {}
-
-# Background task handle
-_bridge_task: asyncio.Task[None] | None = None
-_bridge_running = False
-
-# ENOSPC dedup: only forward to frontend once per bridge session.
-# Resets in stop_bridge() so each project switch gets a fresh allowance.
-# The sidecar mode check alone isn't enough because mode defaults to "ipc" on first event.
-# Once forwarded, the flag stays true until stop_bridge() resets it on project switch.
-_enospc_forwarded = False
-
-
-def is_bridge_active() -> bool:
-    """Return True if the WBA backend relay listener is active."""
-    return _bridge_running and _bridge_task is not None and not _bridge_task.done()
-
 
 def _abs_path_from_vscode_uri(raw: object) -> str:
     """Extract absolute filesystem path from a vscode-remote:// or file:// URI."""
@@ -253,178 +233,28 @@ async def _emit_diagnostics_debounced() -> None:
         print(f"[diag_bridge] explorer/problems emit error: {exc}", flush=True)
 
 
-async def _adapter_ws_loop(_sio: object) -> None:
-    """Connect to Node WBA /ws and project backend-owned events."""
-    del _sio
-    import websockets
-
-    url = f"ws://127.0.0.1:{ADAPTER_PORT}/ws"
-    backoff = 1.0
-
-    while _bridge_running:
-        try:
-            async with websockets.connect(url, open_timeout=10, close_timeout=5) as ws:
-                logger.info("[wba_relay] connected to adapter ws %s", url)
-                backoff = 1.0  # reset on successful connect
-
-                async for raw in ws:
-                    try:
-                        decoded = cast(object, json.loads(str(raw)))
-                        msg = _json_object(decoded)
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-
-                    if msg.get("method") != "te2.event":
-                        continue
-
-                    ev = _json_object(msg.get("params"))
-                    if not ev:
-                        continue
-                    ev_type = str(ev.get("type") or "")
-
-                    # Adapter readiness flows through the editor RPC adapter-state lane.
-                    if ev_type == "adapter/ready":
-                        continue
-
-                    # Forward workbench IPC watcher events to backend workspace events.
-                    if ev_type == "watcher/enospc":
-                        global _enospc_forwarded
-                        # Suppress repeated ENOSPC — only forward once per bridge session
-                        if _enospc_forwarded:
-                            continue
-                        # Suppress ENOSPC when user is on polling/watchexec fallback —
-                        # they already know inotify is limited, that's why they switched.
-                        proj = ""
-                        try:
-                            from .explorer.services.file_ops import get_project_root
-                            from .project_sidecar import ProjectSidecar
-                            proj = str(get_project_root())
-                            sc = ProjectSidecar.load_or_create(proj)
-                            watcher = _json_object(sc.dump_raw().get("watcher", {}))
-                            watcher_mode = str(watcher.get("mode", "ipc"))
-                            if watcher_mode != "ipc":
-                                print(f"[wba_relay] watcher/enospc suppressed (mode={watcher_mode})", flush=True)
-                                _enospc_forwarded = True
-                                continue
-                        except Exception:
-                            pass
-                        _enospc_forwarded = True
-                        try:
-                            from .workspace_events import publish_watcher_error
-                            payload: JsonObject = {
-                                "message": str(ev.get("message", "Inotify limit reached (ENOSPC)")),
-                                "limit": 524288,
-                            }
-                            await publish_watcher_error(
-                                proj,
-                                payload,
-                            )
-                            print(f"[wba_relay] watcher/enospc forwarded (once)", flush=True)
-                        except Exception as exc:
-                            print(f"[wba_relay] watcher/enospc emit FAIL: {exc}", flush=True)
-                        continue
-
-                    if ev_type == "watcher/fileChanges":
-                        try:
-                            changes = _json_object_list(ev.get("changes", []))
-                            # Get project root for abs→rel conversion
-                            try:
-                                from .explorer.services.file_ops import get_project_root
-                                proj = str(get_project_root())
-                            except Exception:
-                                proj = ""
-                            created: list[str] = []
-                            changed: list[str] = []
-                            deleted: list[str] = []
-                            created_abs: list[str] = []
-                            changed_abs: list[str] = []
-                            deleted_abs: list[str] = []
-                            for c in changes:
-                                p = str(c.get("path", ""))
-                                t = _int_value(c.get("type", 0))
-                                if not p:
-                                    continue
-                                # Convert absolute path to relative
-                                rel = p
-                                if proj and p.startswith(proj):
-                                    rel = p[len(proj):].lstrip("/") or "."
-                                # type: 0=UPDATED, 1=ADDED, 2=DELETED (VS Code FileChangeType)
-                                if t == 1:
-                                    created.append(rel)
-                                    created_abs.append(p)
-                                elif t == 2:
-                                    deleted.append(rel)
-                                    deleted_abs.append(p)
-                                else:
-                                    changed.append(rel)
-                                    changed_abs.append(p)
-                            total = len(created) + len(changed) + len(deleted)
-                            if total > 0:
-                                try:
-                                    from .workspace_events import publish_file_change_event
-
-                                    await publish_file_change_event(
-                                        proj,
-                                        created_abs=created_abs,
-                                        changed_abs=changed_abs,
-                                        deleted_abs=deleted_abs,
-                                    )
-                                except Exception:
-                                    pass
-                                print(f"[wba_relay] watcher/fileChanges forwarded ({total} paths)", flush=True)
-                        except Exception as exc:
-                            print(f"[wba_relay] watcher/fileChanges emit FAIL: {exc}", flush=True)
-                        continue
-
-                    if ev_type != "diagnostics/update":
-                        continue
-
-                    entries = _process_diagnostics_update(ev)
-                    print(f"[wba_relay] diagnostics/update rx {len(entries)} entries, paths={[e.get('path','?') for e in entries]}", flush=True)
-
-                    # Emit WBA-normalized diagnostics to Explorer/problems only.
-                    try:
-                        await _emit_diagnostics_to_explorer_and_ui(entries)
-                    except Exception as exc:
-                        print(f"[wba_relay] explorer/problems emit FAIL: {exc}", flush=True)
-                    continue
-
-        except asyncio.CancelledError:
-            break
-        except Exception as exc:
-            logger.debug("[wba_relay] adapter ws error: %s, reconnecting in %.0fs", exc, backoff)
-
-        if not _bridge_running:
-            break
-        await asyncio.sleep(backoff)
-        backoff = min(backoff * 2, 30.0)
+async def handle_wba_diagnostics_update(ev: JsonObject) -> None:
+    """Project WBA diagnostics/update events into Explorer/problems state."""
+    entries = _process_diagnostics_update(ev)
+    print(
+        f"[diag_bridge] diagnostics/update rx {len(entries)} entries, paths={[entry.get('path', '?') for entry in entries]}",
+        flush=True,
+    )
+    try:
+        await _emit_diagnostics_to_explorer_and_ui(entries)
+    except Exception as exc:
+        print(f"[diag_bridge] explorer/problems emit FAIL: {exc}", flush=True)
 
 
-def start_bridge(sio: object) -> None:
-    """Start the background WBA backend relay task. Safe to call multiple times."""
-    global _bridge_task, _bridge_running
-
-    if _bridge_task and not _bridge_task.done():
-        return  # already running
-
-    _bridge_running = True
-    _bridge_task = asyncio.ensure_future(_adapter_ws_loop(sio))
-
-
-def stop_bridge() -> None:
-    """Stop the background relay task and clear stale projected diagnostics."""
-    global _bridge_running, _bridge_task, _enospc_forwarded, _diag_cache
+def reset_diagnostics_projection() -> None:
+    """Clear stale diagnostics projection state for a project transition."""
+    global _diag_cache
     global _diag_emit_dirty, _diag_emit_task
 
-    _bridge_running = False
-    _enospc_forwarded = False
     _diag_emit_dirty = False
     if _diag_emit_task and not _diag_emit_task.done():
         _diag_emit_task.cancel()
     _diag_emit_task = None
-    if _bridge_task and not _bridge_task.done():
-        _bridge_task.cancel()
-    _bridge_task = None
     # Purge the diagnostics cache so stale markers are never replayed
-    # after the adapter shuts down or a project switch occurs.
+    # after the adapter changes workspace or a project switch occurs.
     _diag_cache.clear()

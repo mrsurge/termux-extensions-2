@@ -141,16 +141,8 @@ async def publish_file_change_event(
     changed_abs: list[str],
     deleted_abs: list[str],
 ) -> None:
-    """Publish a file-change event through the worker bus when available."""
+    """Publish a file-change event through the worker event bus."""
     normalized_project = _normalize_project_path(project_path)
-    if not _event_bus_handlers_registered:
-        await publish_file_change_batch(
-            normalized_project,
-            created_abs=created_abs,
-            changed_abs=changed_abs,
-            deleted_abs=deleted_abs,
-        )
-        return
     await publish_worker_event(
         build_event(
             "WorkspaceFilesChanged",
@@ -189,23 +181,11 @@ def publish_file_change_threadsafe(abs_path: str, event_type: str) -> None:
     )
     if publish_worker_event_threadsafe(event):
         return
-
-    import asyncio
-
-    from .explorer.services.runtime_notifications import get_explorer_event_loop
-
-    loop = get_explorer_event_loop()
-    if loop is None or not loop.is_running():
-        return
-
-    asyncio.run_coroutine_threadsafe(
-        publish_file_change_batch(
-            normalized_project,
-            created_abs=created_abs,
-            changed_abs=changed_abs,
-            deleted_abs=deleted_abs,
-        ),
-        loop,
+    logger.debug(
+        "[workspace_events] dropped thread-safe file-change event before worker bus startup project=%s path=%s type=%s",
+        normalized_project,
+        abs_path,
+        event_type,
     )
 
 
@@ -242,6 +222,16 @@ async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:
         created_abs=event_payload_list(event, "created_abs"),
         changed_abs=event_payload_list(event, "changed_abs"),
         deleted_abs=event_payload_list(event, "deleted_abs"),
+    )
+    await publish_worker_event(
+        build_event(
+            "GitSnapshotRequested",
+            project_root=project,
+            project_generation=event.get("project_generation"),
+            source="workspace_events:WorkspaceFilesChanged",
+            correlation_id=event.get("correlation_id"),
+            payload={},
+        )
     )
 
 
@@ -290,18 +280,20 @@ async def publish_git_status_update(
     from .monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
 
     normalized_project = _normalize_project_path(project_path)
-    _git_decorations_by_project[normalized_project] = dict(decorations_payload)
-    _git_status_by_project[normalized_project] = dict(status_payload)
+    decorations = {**decorations_payload, "projectPath": normalized_project}
+    status = {**status_payload, "projectPath": normalized_project}
+    _git_decorations_by_project[normalized_project] = dict(decorations)
+    _git_status_by_project[normalized_project] = dict(status)
 
     await emit_project_explorer_rpc_notification(
         normalized_project,
         "explorer.git.decorations.updated",
-        dict(decorations_payload),
+        dict(decorations),
     )
     await emit_project_explorer_rpc_notification(
         normalized_project,
         "explorer.git.status.updated",
-        dict(status_payload),
+        dict(status),
     )
     try:
         await broadcast_git_baselines_for_active_file()
