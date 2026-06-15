@@ -55,7 +55,6 @@ interface ExplorerNotificationHandlerDeps {
   dispatchProjectOpened(path: string, payload?: JsonObject): void;
   dispatchWatcherError(payload: JsonObject): void;
   dispatchWatcherRaiseResult(payload: JsonObject): void;
-  requestGitBaselines(): void;
   reloadCurrentFile(): void;
   showGitProgressBar(pct: number, detail?: string): void;
   hideGitProgressBar(): void;
@@ -65,8 +64,6 @@ interface ExplorerNotificationHandlerDeps {
   setGitDiffBaseRef(ref: string): void;
   updateDiffBaseButtons(): void;
   toggleDrawer(open?: boolean): void;
-  collectWatcherRels(payload: JsonObject): Set<string>;
-  isWatcherRelInOpenDir(rel: string, openDir: string): boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -208,52 +205,6 @@ export function createExplorerNotificationHandler(
 
     if (method === EXPLORER_RPC_NOTIFICATIONS.watcherLimitRaiseResult) {
       deps.dispatchWatcherRaiseResult(payload || {});
-      return;
-    }
-
-    if (method === EXPLORER_RPC_NOTIFICATIONS.watcherFiles) {
-      try {
-        if (!deps.hasExplorerRpc()) return;
-
-        deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
-
-        const rels = deps.collectWatcherRels(payload);
-        if (!rels.size) return;
-
-        const dirsToRefresh = new Set<string>();
-        let refreshRoot = false;
-        rels.forEach((rel) => {
-          if (rel === "." || rel.indexOf("/") === -1) {
-            refreshRoot = true;
-          }
-
-          deps.getOpenDirectories().forEach((openDir) => {
-            if (deps.isWatcherRelInOpenDir(rel, openDir)) {
-              dirsToRefresh.add(openDir);
-            }
-          });
-        });
-
-        if (refreshRoot) {
-          deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: "." });
-        }
-        dirsToRefresh.forEach((rel) => {
-          if (!rel || rel === ".") return;
-          deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
-        });
-
-        const activeFileRel = deps.getActiveFileRel();
-        if (activeFileRel) {
-          const touchedActive = Array.from(rels).some(
-            (rel) => rel === activeFileRel,
-          );
-          if (touchedActive) {
-            deps.requestGitBaselines();
-          }
-        }
-      } catch (err) {
-        console.warn("[Explorer] watcher:files handler failed", err);
-      }
       return;
     }
 

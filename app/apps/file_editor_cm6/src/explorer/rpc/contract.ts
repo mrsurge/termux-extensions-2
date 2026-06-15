@@ -99,7 +99,6 @@ export const EXPLORER_RPC_NOTIFICATIONS = {
   searchResultsUpdated: 'explorer.search.results.updated',
   watcherConfigUpdated: 'explorer.watcher.config.updated',
   watcherError: 'explorer.watcher.error',
-  watcherFiles: 'explorer.watcher.files',
   watcherModeChanged: 'explorer.watcher.mode.changed',
   watcherModeStatus: 'explorer.watcher.mode.status',
   watcherLimitRaiseResult: 'explorer.watcher.limit.raiseResult',

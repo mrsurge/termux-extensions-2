@@ -12,7 +12,7 @@ from types import TracebackType
 from typing import Protocol, cast
 
 from .file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
-from ..transport.connection_manager import abs_to_rel, manager
+from ..transport.connection_manager import manager
 from ..transport.rpc_emit import emit_project_explorer_rpc_notification
 from ...worker_services.event_bus import current_project_generation
 from ...worker_services import git_service as worker_git_service
@@ -36,12 +36,9 @@ class UrlOpenResponse(Protocol):
     def read(self) -> bytes: ...
 
 _explorer_event_loop: asyncio.AbstractEventLoop | None = None
-_watcher_file_batches: dict[str, dict[str, set[str]]] = {}
-_watcher_files_tasks: DebounceTasks = {}
 _draft_forward_tasks: DebounceTasks = {}
 _draft_decorations_tasks: DebounceTasks = {}
 _git_status_publisher: GitStatusPublisher | None = None
-WATCHER_FILES_DEBOUNCE = 0.3
 
 
 def set_explorer_event_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -94,79 +91,6 @@ def _schedule_debounce_task(
                 tasks.pop(key, None)
 
     tasks[key] = asyncio.create_task(_run(), name=name)
-
-
-def _watcher_bucket_for_event(event_type: str) -> str:
-    if event_type == "created":
-        return "created"
-    if event_type == "deleted":
-        return "deleted"
-    return "changed"
-
-
-def _schedule_watcher_files_broadcast_on_loop(
-    project_path: str,
-    rel_path: str,
-    event_type: str,
-) -> None:
-    bucket = _watcher_bucket_for_event(event_type)
-    batch = _watcher_file_batches.get(project_path)
-    if batch is None:
-        batch = {"created": set[str](), "changed": set[str](), "deleted": set[str]()}
-        _watcher_file_batches[project_path] = batch
-    batch[bucket].add(rel_path)
-
-    async def do_broadcast() -> None:
-        payload = _watcher_file_batches.pop(project_path, None)
-        if payload is None:
-            return
-        await _broadcast_watcher_files(project_path, payload)
-
-    _schedule_debounce_task(
-        _watcher_files_tasks,
-        f"watcher:files:{project_path}",
-        delay=WATCHER_FILES_DEBOUNCE,
-        name="file_editor_cm6_watcher_files_broadcast",
-        callback=do_broadcast,
-    )
-
-
-async def _broadcast_watcher_files(project_path: str, payload: dict[str, set[str]]) -> None:
-    try:
-        created = sorted(payload.get("created", set()))
-        changed = sorted(payload.get("changed", set()))
-        deleted = sorted(payload.get("deleted", set()))
-        if not created and not changed and not deleted:
-            return
-        await emit_project_explorer_rpc_notification(
-            project_path,
-            "explorer.watcher.files",
-            {
-                "created": created,
-                "changed": changed,
-                "deleted": deleted,
-            },
-        )
-    except Exception as exc:
-        logger.warning("Failed to broadcast watcher files for %s: %s", project_path, exc)
-
-
-def notify_explorer_of_change(abs_path: str, event_type: str) -> None:
-    """Fan out batched watcher events to Explorer clients."""
-    def _notify() -> None:
-        if not manager.active_connections:
-            return
-        for project_path in list(manager.active_connections.keys()):
-            rel_path = abs_to_rel(abs_path, project_path)
-            if rel_path is None:
-                continue
-            try:
-                _schedule_watcher_files_broadcast_on_loop(project_path, rel_path, event_type)
-            except Exception as exc:
-                logger.warning("Failed to notify explorer of change: %s", exc)
-            break
-
-    _post_to_explorer_loop(_notify)
 
 
 def _is_stale_git_generation(project: Path, project_generation: int | None) -> bool:

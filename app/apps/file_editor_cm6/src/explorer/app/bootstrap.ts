@@ -49,9 +49,6 @@ import {
 import { createExplorerNotificationHandler } from '../rpc/notifications.ts';
 import {
   getParentRel as getParentRelModule,
-  normalizeWatcherRel as normalizeWatcherRelModule,
-  collectWatcherRels as collectWatcherRelsModule,
-  isWatcherRelInOpenDir as isWatcherRelInOpenDirModule,
 } from '../tree/path-watcher-utils.ts';
 import { createExplorerGitFooterUtils } from '../git/footer-utils.ts';
 import {
@@ -690,18 +687,6 @@ function applyAggregatedDiagnosticFlags() {
   explorerTreeDecorationsController.applyAggregatedDiagnosticFlags();
 }
 
-function _normalizeWatcherRel(rel: string): string {
-  return normalizeWatcherRelModule(rel);
-}
-
-function _collectWatcherRels(payload: JsonObject): Set<string> {
-  return collectWatcherRelsModule(payload);
-}
-
-function _isWatcherRelInOpenDir(rel: string, openDir: string): boolean {
-  return isWatcherRelInOpenDirModule(rel, openDir);
-}
-
 function dispatchRemoteDraft(payload: JsonObject): void {
   try {
     if (payload && typeof window.__cm6ApplyRemoteDraft === 'function') {
@@ -769,12 +754,6 @@ function dispatchWatcherRaiseResult(payload: JsonObject): void {
   }
 }
 
-function requestGitBaselines() {
-  if (typeof window.__cm6RequestGitBaselines === 'function') {
-    window.__cm6RequestGitBaselines();
-  }
-}
-
 function reloadCurrentFile() {
   if (typeof window.__cm6ReloadCurrentFile !== 'function') {
     return;
@@ -830,7 +809,6 @@ const explorerNotificationHandler = createExplorerNotificationHandler({
   dispatchProjectOpened,
   dispatchWatcherError,
   dispatchWatcherRaiseResult,
-  requestGitBaselines,
   reloadCurrentFile,
   showGitProgressBar,
   hideGitProgressBar,
@@ -840,8 +818,6 @@ const explorerNotificationHandler = createExplorerNotificationHandler({
   setGitDiffBaseRef: (ref) => explorerDiffBaseController.setDiffBaseRef(ref),
   updateDiffBaseButtons,
   toggleDrawer: (open) => explorerChromeController.toggleDrawer(open),
-  collectWatcherRels: _collectWatcherRels,
-  isWatcherRelInOpenDir: _isWatcherRelInOpenDir,
 });
 
 const explorerRefreshController = createExplorerRefreshController({

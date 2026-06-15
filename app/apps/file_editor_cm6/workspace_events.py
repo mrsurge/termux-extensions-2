@@ -108,7 +108,6 @@ async def publish_file_change_batch(
     changed_abs: list[str],
     deleted_abs: list[str],
 ) -> None:
-    from .explorer.services.runtime_notifications import notify_explorer_of_change
     from .monaco_editor.editor_ws import handle_external_file_change
 
     normalized_project = _normalize_project_path(project_path)
@@ -119,13 +118,6 @@ async def publish_file_change_batch(
         deleted_abs=deleted_abs,
     )
     _watcher_batch_by_project[normalized_project] = rel_payload
-
-    for abs_path in created_abs:
-        notify_explorer_of_change(abs_path, "created")
-    for abs_path in changed_abs:
-        notify_explorer_of_change(abs_path, "modified")
-    for abs_path in deleted_abs:
-        notify_explorer_of_change(abs_path, "deleted")
 
     for abs_path in [*created_abs, *changed_abs]:
         try:

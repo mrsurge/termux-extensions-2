@@ -14,6 +14,7 @@ EventType = Literal[
     "GitSnapshotRequested",
     "ProjectSwitchStarted",
     "ProjectSwitchFinished",
+    "ExplorerRenderStateChanged",
     "WatcherErrorRaised",
     "WorkspaceFilesChanged",
 ]
