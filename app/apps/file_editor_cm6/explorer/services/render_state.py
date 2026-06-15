@@ -23,6 +23,7 @@ list_dir = cast(ListDirFn, _file_ops.list_dir)
 class ExplorerBootstrapSnapshot:
     root_listing: JsonObject
     open_directories: list[str]
+    open_directory_listings: list[JsonObject]
 
 
 # Backend read-model builders. These functions centralize Explorer-facing state
@@ -37,10 +38,29 @@ async def build_bootstrap_snapshot(project_root: Path) -> ExplorerBootstrapSnaps
         build_directory_listing("."),
         asyncio.to_thread(load_pruned_open_directories, project_root),
     )
+    open_directory_listings = await build_open_directory_listings(open_directories)
     return ExplorerBootstrapSnapshot(
         root_listing=root_listing,
         open_directories=open_directories,
+        open_directory_listings=open_directory_listings,
     )
+
+
+# Open-directory replay. Persisted open dirs are loaded from backend state and
+# listed shallow-to-deep so existing frontend handlers can render parents before
+# nested children without a contract change.
+async def build_open_directory_listings(open_directories: list[str]) -> list[JsonObject]:
+    listings: list[JsonObject] = []
+    for rel in _sort_open_directories_for_replay(open_directories):
+        try:
+            listings.append(await build_directory_listing(rel))
+        except Exception as exc:
+            logger.debug(
+                "[explorer_render_state] skipped open directory listing rel=%s error=%s",
+                rel,
+                exc,
+            )
+    return listings
 
 
 def load_pruned_open_directories(project_root: Path) -> list[str]:
@@ -79,6 +99,8 @@ async def emit_bootstrap_snapshot(
         "explorer.openDirs.updated",
         {"dirs": snapshot.open_directories},
     )
+    for listing in snapshot.open_directory_listings:
+        await emit_personal("explorer.list.updated", listing)
 
 
 async def broadcast_directory_listing(
@@ -98,3 +120,10 @@ def _is_existing_project_directory(project_root: Path, rel: str) -> bool:
         return target.is_dir()
     except Exception:
         return False
+
+
+def _sort_open_directories_for_replay(open_directories: list[str]) -> list[str]:
+    return sorted(
+        [rel for rel in open_directories if rel],
+        key=lambda rel: (rel.count("/"), rel),
+    )
