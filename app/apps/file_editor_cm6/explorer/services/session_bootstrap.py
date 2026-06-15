@@ -1,13 +1,13 @@
 # pyright: strict
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .file_ops import list_dir, set_project_root
+from .file_ops import set_project_root
+from .render_state import build_bootstrap_snapshot, emit_bootstrap_snapshot
 from ..transport.connection_manager import ExplorerConnection, manager
 from ...project_sidecar import ProjectSidecar
 from ...open_state_backend import read_sidecar_open_state
@@ -68,18 +68,11 @@ async def bootstrap_explorer_session(
         logger.warning("Failed to load UI preferences: %s", exc)
 
     await broadcast_git_status()
-    await emit_personal(
-        "explorer.list.updated",
-        await asyncio.to_thread(list_dir, "."),
+    await emit_bootstrap_snapshot(
+        emit_personal,
+        await build_bootstrap_snapshot(resolved_project_root),
     )
     await broadcast_review_state()
-
-    try:
-        sidecar = ProjectSidecar.load_or_create(str(resolved_project_root))
-        open_dirs = sidecar.get_open_directories()
-        await emit_personal("explorer.openDirs.updated", {"dirs": open_dirs})
-    except Exception as exc:
-        logger.warning("Failed to load open directories: %s", exc)
 
     try:
         open_state = read_sidecar_open_state(str(resolved_project_root), reason="reconnect")

@@ -1,7 +1,6 @@
 # pyright: strict
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Callable, cast
@@ -13,15 +12,14 @@ from ..contracts.session import (
 )
 from ..context import ExplorerSessionHandlerContext
 from ..services import file_ops as _file_ops
+from ..services.render_state import build_directory_listing, broadcast_directory_listing
 from ...project_sidecar import ProjectSidecar
 
 logger = logging.getLogger(__name__)
 
 JsonObject = dict[str, object]
-ListDirFn = Callable[[str], JsonObject]
 MarkGitCacheDirtyFn = Callable[[Path], None]
 
-list_dir = cast(ListDirFn, _file_ops.list_dir)
 mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _file_ops.mark_git_cache_dirty)
 
 
@@ -30,7 +28,7 @@ async def handle_explorer_list(
     params: ExplorerListParams,
     msg_id: str | None,
 ) -> None:
-    data = await asyncio.to_thread(list_dir, params["rel"])
+    data = await build_directory_listing(params["rel"])
     await context.emit_personal("explorer.list.updated", data, msg_id)
 
 
@@ -44,8 +42,7 @@ async def handle_explorer_refresh(
     mark_git_cache_dirty(context.project_root)
     await context.broadcast_git_status()
     await context.broadcast_review_state()
-    data = await asyncio.to_thread(list_dir, ".")
-    await context.broadcast("explorer.list.updated", data)
+    await broadcast_directory_listing(context.broadcast, ".")
 
 
 async def handle_set_open_dirs(
