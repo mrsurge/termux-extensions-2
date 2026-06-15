@@ -80,7 +80,10 @@ function firstSelectorLanguage(selector: unknown[]): string | null {
   return null;
 }
 
-function stringifyPreview(value: unknown, maxLength: number): string | undefined {
+function stringifyPreview(
+  value: unknown,
+  maxLength: number,
+): string | undefined {
   try {
     return JSON.stringify(value)?.slice(0, maxLength);
   } catch {
@@ -94,7 +97,10 @@ function labelFromValue(value: unknown): string | null {
   return null;
 }
 
-function tokenLegendLength(legend: unknown, key: "tokenTypes" | "tokenModifiers"): number {
+function tokenLegendLength(
+  legend: unknown,
+  key: "tokenTypes" | "tokenModifiers",
+): number {
   if (!isRecord(legend)) return 0;
   const value = legend[key];
   return Array.isArray(value) ? value.length : 0;
@@ -114,19 +120,30 @@ function methodMatches(method: unknown, name: string): method is string {
 }
 
 export class ProviderRegistry {
-  private readonly providers: Record<ProviderKind, Map<number, ProviderEntry>> = {
-    hover: new Map<number, ProviderEntry>(),
-    documentSymbols: new Map<number, ProviderEntry>(),
-    foldingRanges: new Map<number, ProviderEntry>(),
-    completions: new Map<number, ProviderEntry>(),
-    inlayHints: new Map<number, ProviderEntry>(),
-    inlineCompletions: new Map<number, ProviderEntry>(),
-    semanticTokens: new Map<number, ProviderEntry>(),
-  };
+  private readonly providers: Record<ProviderKind, Map<number, ProviderEntry>> =
+    {
+      hover: new Map<number, ProviderEntry>(),
+      documentSymbols: new Map<number, ProviderEntry>(),
+      foldingRanges: new Map<number, ProviderEntry>(),
+      completions: new Map<number, ProviderEntry>(),
+      inlayHints: new Map<number, ProviderEntry>(),
+      inlineCompletions: new Map<number, ProviderEntry>(),
+      semanticTokens: new Map<number, ProviderEntry>(),
+    };
 
   private readonly textContentProviders = new Map<string, number>();
 
-  registerFromRequest(method: unknown, args: unknown): ProviderRegistrationOutcome {
+  clear(): void {
+    for (const providerMap of Object.values(this.providers)) {
+      providerMap.clear();
+    }
+    this.textContentProviders.clear();
+  }
+
+  registerFromRequest(
+    method: unknown,
+    args: unknown,
+  ): ProviderRegistrationOutcome {
     if (!Array.isArray(args)) return emptyOutcome(false);
     if (methodMatches(method, "$registerTextDocumentContentProvider")) {
       return this.registerTextDocumentContentProvider(args);
@@ -226,7 +243,15 @@ export class ProviderRegistry {
   }
 
   buildResyncEvents(): ProviderResyncOutcome {
-    const replayed = { semanticTokens: 0, hover: 0, completions: 0, inlayHints: 0, inlineCompletions: 0, documentSymbols: 0, foldingRanges: 0 };
+    const replayed = {
+      semanticTokens: 0,
+      hover: 0,
+      completions: 0,
+      inlayHints: 0,
+      inlineCompletions: 0,
+      documentSymbols: 0,
+      foldingRanges: 0,
+    };
     const events: Record<string, unknown>[] = [];
 
     for (const entry of this.providers.completions.values()) {
@@ -235,7 +260,9 @@ export class ProviderRegistry {
           type: "provider/completions",
           handle: entry.handle,
           language,
-          triggerCharacters: Array.isArray(entry.triggerCharacters) ? entry.triggerCharacters : [],
+          triggerCharacters: Array.isArray(entry.triggerCharacters)
+            ? entry.triggerCharacters
+            : [],
           supportsResolve: !!entry.supportsResolve,
           resync: true,
         });
@@ -253,8 +280,12 @@ export class ProviderRegistry {
           extensionId: entry.extensionId ?? null,
           extensionVersion: entry.extensionVersion ?? null,
           groupId: entry.groupId ?? null,
-          yieldsToGroupIds: Array.isArray(entry.yieldsToGroupIds) ? entry.yieldsToGroupIds : [],
-          excludesGroupIds: Array.isArray(entry.excludesGroupIds) ? entry.excludesGroupIds : [],
+          yieldsToGroupIds: Array.isArray(entry.yieldsToGroupIds)
+            ? entry.yieldsToGroupIds
+            : [],
+          excludesGroupIds: Array.isArray(entry.excludesGroupIds)
+            ? entry.excludesGroupIds
+            : [],
           displayName: entry.displayName ?? null,
           debounceDelayMs: entry.debounceDelayMs ?? null,
           eventHandle: entry.eventHandle ?? null,
@@ -297,18 +328,24 @@ export class ProviderRegistry {
     return { replayed, events };
   }
 
-  private registerTextDocumentContentProvider(args: unknown[]): ProviderRegistrationOutcome {
+  private registerTextDocumentContentProvider(
+    args: unknown[],
+  ): ProviderRegistrationOutcome {
     const outcome = emptyOutcome(true);
     if (args.length < 2) return outcome;
     const handle = finiteHandle(args[0]);
     const scheme = typeof args[1] === "string" ? args[1] : null;
     if (handle === null || !scheme) return outcome;
     this.textContentProviders.set(scheme, handle);
-    outcome.logs.push(`[contentProvider] registered scheme=${scheme} handle=${handle}`);
+    outcome.logs.push(
+      `[contentProvider] registered scheme=${scheme} handle=${handle}`,
+    );
     return outcome;
   }
 
-  private registerDocumentSymbolsProvider(args: unknown[]): ProviderRegistrationOutcome {
+  private registerDocumentSymbolsProvider(
+    args: unknown[],
+  ): ProviderRegistrationOutcome {
     const outcome = emptyOutcome(true);
     if (args.length < 2) return outcome;
     const handle = finiteHandle(args[0]);
@@ -320,7 +357,11 @@ export class ProviderRegistry {
     const language = firstSelectorLanguage(selector);
     if (language) {
       outcome.ready = true;
-      outcome.events.push({ type: "provider/documentSymbols", handle, language });
+      outcome.events.push({
+        type: "provider/documentSymbols",
+        handle,
+        language,
+      });
     }
     return outcome;
   }
@@ -330,55 +371,89 @@ export class ProviderRegistry {
     if (args.length < 2) return outcome;
     const handleValue = Number(args[0]);
     const selector = args[1];
-    outcome.logs.push(`[providers] $registerHoverProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} isArr=${Array.isArray(selector)} isFinite=${Number.isFinite(handleValue)}`);
+    outcome.logs.push(
+      `[providers] $registerHoverProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} isArr=${Array.isArray(selector)} isFinite=${Number.isFinite(handleValue)}`,
+    );
 
     const handle = Number.isFinite(handleValue) ? handleValue : null;
     const normalizedSelector = normalizeSelector(selector);
     const label = typeof args[2] === "string" ? args[2] : null;
     if (handle === null || !normalizedSelector) return outcome;
 
-    this.providers.hover.set(handle, { handle, selector: normalizedSelector, label });
+    this.providers.hover.set(handle, {
+      handle,
+      selector: normalizedSelector,
+      label,
+    });
     const language = firstSelectorLanguage(normalizedSelector);
     if (language) {
       outcome.ready = true;
       outcome.events.push({ type: "provider/hover", handle, language });
     }
-    outcome.logs.push(`[providers] hover map size=${this.providers.hover.size} languages=[${this.languageSummary("hover")}]`);
+    outcome.logs.push(
+      `[providers] hover map size=${this.providers.hover.size} languages=[${this.languageSummary("hover")}]`,
+    );
     return outcome;
   }
 
-  private registerFoldingRangeProvider(args: unknown[]): ProviderRegistrationOutcome {
+  private registerFoldingRangeProvider(
+    args: unknown[],
+  ): ProviderRegistrationOutcome {
     const outcome = emptyOutcome(true);
     if (args.length < 2) return outcome;
     const handleValue = Number(args[0]);
     const selector = args[1];
     const label = labelFromValue(args[2]);
-    const eventHandle = typeof args[3] === "number" && Number.isFinite(args[3]) ? args[3] : null;
-    outcome.logs.push(`[providers] $registerFoldingRangeProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} eventHandle=${eventHandle ?? "none"} isArr=${Array.isArray(selector)} isFinite=${Number.isFinite(handleValue)}`);
+    const eventHandle =
+      typeof args[3] === "number" && Number.isFinite(args[3]) ? args[3] : null;
+    outcome.logs.push(
+      `[providers] $registerFoldingRangeProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} eventHandle=${eventHandle ?? "none"} isArr=${Array.isArray(selector)} isFinite=${Number.isFinite(handleValue)}`,
+    );
 
     const handle = Number.isFinite(handleValue) ? handleValue : null;
     const normalizedSelector = normalizeSelector(selector);
     if (handle === null || !normalizedSelector) return outcome;
 
-    this.providers.foldingRanges.set(handle, { handle, selector: normalizedSelector, label, eventHandle });
+    this.providers.foldingRanges.set(handle, {
+      handle,
+      selector: normalizedSelector,
+      label,
+      eventHandle,
+    });
     const language = firstSelectorLanguage(normalizedSelector);
     if (language) {
-      outcome.events.push({ type: "provider/foldingRanges", handle, language, eventHandle });
+      outcome.events.push({
+        type: "provider/foldingRanges",
+        handle,
+        language,
+        eventHandle,
+      });
     }
-    outcome.logs.push(`[providers] foldingRanges map size=${this.providers.foldingRanges.size} languages=[${this.languageSummary("foldingRanges")}]`);
+    outcome.logs.push(
+      `[providers] foldingRanges map size=${this.providers.foldingRanges.size} languages=[${this.languageSummary("foldingRanges")}]`,
+    );
     return outcome;
   }
 
-  private registerCompletionsProvider(args: unknown[]): ProviderRegistrationOutcome {
+  private registerCompletionsProvider(
+    args: unknown[],
+  ): ProviderRegistrationOutcome {
     const outcome = emptyOutcome(true);
     if (args.length < 2) return outcome;
     const handle = finiteHandle(args[0]);
     const selector = normalizeSelector(args[1]);
-    const triggerCharacters = Array.isArray(args[2]) ? args[2].map(String).filter(Boolean) : [];
+    const triggerCharacters = Array.isArray(args[2])
+      ? args[2].map(String).filter(Boolean)
+      : [];
     const supportsResolve = !!args[3];
     if (handle === null || !selector) return outcome;
 
-    this.providers.completions.set(handle, { handle, selector, triggerCharacters, supportsResolve });
+    this.providers.completions.set(handle, {
+      handle,
+      selector,
+      triggerCharacters,
+      supportsResolve,
+    });
     const language = firstSelectorLanguage(selector);
     if (language) {
       outcome.events.push({
@@ -389,11 +464,15 @@ export class ProviderRegistry {
         supportsResolve,
       });
     }
-    outcome.logs.push(`[providers] completions map size=${this.providers.completions.size} languages=[${this.languageSummary("completions")}]`);
+    outcome.logs.push(
+      `[providers] completions map size=${this.providers.completions.size} languages=[${this.languageSummary("completions")}]`,
+    );
     return outcome;
   }
 
-  private registerInlayHintsProvider(args: unknown[]): ProviderRegistrationOutcome {
+  private registerInlayHintsProvider(
+    args: unknown[],
+  ): ProviderRegistrationOutcome {
     const outcome = emptyOutcome(true);
     if (args.length < 2) return outcome;
     const handle = finiteHandle(args[0]);
@@ -420,11 +499,15 @@ export class ProviderRegistry {
         eventHandle,
       });
     }
-    outcome.logs.push(`[providers] inlayHints map size=${this.providers.inlayHints.size} languages=[${this.languageSummary("inlayHints")}] resolve=${supportsResolve ? 1 : 0}`);
+    outcome.logs.push(
+      `[providers] inlayHints map size=${this.providers.inlayHints.size} languages=[${this.languageSummary("inlayHints")}] resolve=${supportsResolve ? 1 : 0}`,
+    );
     return outcome;
   }
 
-  private registerInlineCompletionsProvider(args: unknown[]): ProviderRegistrationOutcome {
+  private registerInlineCompletionsProvider(
+    args: unknown[],
+  ): ProviderRegistrationOutcome {
     const outcome = emptyOutcome(true);
     if (args.length < 4) return outcome;
     const handle = finiteHandle(args[0]);
@@ -433,10 +516,15 @@ export class ProviderRegistry {
     const extensionId = typeof args[3] === "string" ? args[3] : null;
     const extensionVersion = typeof args[4] === "string" ? args[4] : null;
     const groupId = typeof args[5] === "string" ? args[5] : null;
-    const yieldsToGroupIds = Array.isArray(args[6]) ? args[6].map(String).filter(Boolean) : [];
+    const yieldsToGroupIds = Array.isArray(args[6])
+      ? args[6].map(String).filter(Boolean)
+      : [];
     const displayName = typeof args[7] === "string" ? args[7] : null;
-    const debounceDelayMs = typeof args[8] === "number" && Number.isFinite(args[8]) ? args[8] : null;
-    const excludesGroupIds = Array.isArray(args[9]) ? args[9].map(String).filter(Boolean) : [];
+    const debounceDelayMs =
+      typeof args[8] === "number" && Number.isFinite(args[8]) ? args[8] : null;
+    const excludesGroupIds = Array.isArray(args[9])
+      ? args[9].map(String).filter(Boolean)
+      : [];
     const eventHandle = finiteHandle(args[10]);
     if (handle === null || !selector) return outcome;
 
@@ -469,11 +557,15 @@ export class ProviderRegistry {
         eventHandle,
       });
     }
-    outcome.logs.push(`[providers] inlineCompletions map size=${this.providers.inlineCompletions.size} languages=[${this.languageSummary("inlineCompletions")}] handleEvents=${supportsHandleEvents ? 1 : 0}`);
+    outcome.logs.push(
+      `[providers] inlineCompletions map size=${this.providers.inlineCompletions.size} languages=[${this.languageSummary("inlineCompletions")}] handleEvents=${supportsHandleEvents ? 1 : 0}`,
+    );
     return outcome;
   }
 
-  private registerDocumentSemanticTokensProvider(args: unknown[]): ProviderRegistrationOutcome {
+  private registerDocumentSemanticTokensProvider(
+    args: unknown[],
+  ): ProviderRegistrationOutcome {
     const outcome = emptyOutcome(true);
     if (args.length < 3) return outcome;
     const handle = finiteHandle(args[0]);
@@ -482,15 +574,30 @@ export class ProviderRegistry {
     const eventHandle = finiteHandle(args[3]);
     if (handle === null || !selector || !legend) return outcome;
 
-    this.providers.semanticTokens.set(handle, { handle, selector, legend, eventHandle });
+    this.providers.semanticTokens.set(handle, {
+      handle,
+      selector,
+      legend,
+      eventHandle,
+    });
     for (const language of selectorLanguages(selector)) {
-      outcome.events.push({ type: "provider/semanticTokens", handle, language, legend, eventHandle });
+      outcome.events.push({
+        type: "provider/semanticTokens",
+        handle,
+        language,
+        legend,
+        eventHandle,
+      });
     }
-    outcome.logs.push(`[providers] semanticTokens map size=${this.providers.semanticTokens.size} languages=[${this.languageSummary("semanticTokens")}] legendTypes=${tokenLegendLength(legend, "tokenTypes")} legendMods=${tokenLegendLength(legend, "tokenModifiers")}`);
+    outcome.logs.push(
+      `[providers] semanticTokens map size=${this.providers.semanticTokens.size} languages=[${this.languageSummary("semanticTokens")}] legendTypes=${tokenLegendLength(legend, "tokenTypes")} legendMods=${tokenLegendLength(legend, "tokenModifiers")}`,
+    );
     return outcome;
   }
 
-  private registerDocumentRangeSemanticTokensProvider(args: unknown[]): ProviderRegistrationOutcome {
+  private registerDocumentRangeSemanticTokensProvider(
+    args: unknown[],
+  ): ProviderRegistrationOutcome {
     const outcome = emptyOutcome(true);
     if (args.length < 3) return outcome;
     const handleValue = Number(args[0]);
@@ -498,21 +605,40 @@ export class ProviderRegistry {
     const legend = args[2];
     const eventHandle = finiteHandle(args[3]);
     const legendKeys = isRecord(legend) ? Object.keys(legend).join(",") : "N/A";
-    outcome.logs.push(`[providers] range check: handle=${handleValue} isFinite=${Number.isFinite(handleValue)} isArrSelector=${Array.isArray(selector)} legendTruthy=${!!legend} legendType=${typeof legend} legendKeys=${legendKeys}`);
+    outcome.logs.push(
+      `[providers] range check: handle=${handleValue} isFinite=${Number.isFinite(handleValue)} isArrSelector=${Array.isArray(selector)} legendTruthy=${!!legend} legendType=${typeof legend} legendKeys=${legendKeys}`,
+    );
 
     const handle = Number.isFinite(handleValue) ? handleValue : null;
     const normalizedSelector = normalizeSelector(selector);
     if (handle === null || !normalizedSelector || !legend) return outcome;
 
     try {
-      this.providers.semanticTokens.set(handle, { handle, selector: normalizedSelector, legend, eventHandle, range: true });
+      this.providers.semanticTokens.set(handle, {
+        handle,
+        selector: normalizedSelector,
+        legend,
+        eventHandle,
+        range: true,
+      });
       for (const language of selectorLanguages(normalizedSelector)) {
-        outcome.events.push({ type: "provider/semanticTokens", handle, language, legend, eventHandle, range: true });
+        outcome.events.push({
+          type: "provider/semanticTokens",
+          handle,
+          language,
+          legend,
+          eventHandle,
+          range: true,
+        });
       }
-      outcome.logs.push(`[providers] semanticTokensRange map size=${this.providers.semanticTokens.size} languages=[${this.languageSummary("semanticTokens")}] legendTypes=${tokenLegendLength(legend, "tokenTypes")} legendMods=${tokenLegendLength(legend, "tokenModifiers")}`);
+      outcome.logs.push(
+        `[providers] semanticTokensRange map size=${this.providers.semanticTokens.size} languages=[${this.languageSummary("semanticTokens")}] legendTypes=${tokenLegendLength(legend, "tokenTypes")} legendMods=${tokenLegendLength(legend, "tokenModifiers")}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      outcome.logs.push(`[providers] semanticTokensRange EXCEPTION: ${message}`);
+      outcome.logs.push(
+        `[providers] semanticTokensRange EXCEPTION: ${message}`,
+      );
     }
     return outcome;
   }

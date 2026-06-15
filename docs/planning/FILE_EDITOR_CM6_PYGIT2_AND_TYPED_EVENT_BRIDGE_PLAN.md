@@ -117,13 +117,25 @@ Phase 4 store/event caller migration checklist:
       diagnostics reset only clears diagnostics state. WBA `watcher/fileChanges`
       feeds backend `WorkspaceFilesChanged` independent of editor/frontend socket
       reconnects.
+- [x] Make diagnostics project-switch reset explicit: after Explorer connections
+      are rebound to the new project, project switch publishes an empty
+      `explorer.diagnostics.detail` projection plus zero editor diagnostic counts
+      for the new project so Explorer badges and the Problems drawer do not keep
+      stale diagnostics from the previous project while waiting for new WBA
+      diagnostics.
+- [x] Make diagnostics projection project-scoped: WBA `workspace/switched` resets
+      diagnostics for the switched backend project, and WBA `diagnostics/update`
+      events are accepted only for absolute paths under the active backend
+      project root. Before every diagnostics emit, the backend prunes any cached
+      entries outside the current project so stale previous-project diagnostics
+      cannot repopulate the new project's Explorer/drawer projection.
 - [x] Quick frontend pivot: treat `explorer.project.opened` as an authoritative
       render invalidation, prefer backend `resolved_path`, drop stale Explorer
       render/git state, and re-request backend tree/git projections.
 - [x] Quick frontend render resync: treat `explorer.git.status.updated` as a
-      backend “render state changed” signal and request backend `explorer.list`
-      projections for root/open directories so the rendered tree consumes
-      backend-mapped `gitStatus`/`gitFlags`.
+      backend-owned projection and apply the included status lists directly to
+      existing Explorer rows without using a frontend-triggered list round trip
+      as the correctness boundary.
 - [ ] Introduce a backend Explorer render-state machine/projector that emits
       explicit project-generation/render-state facts so the frontend applies
       backend “this changed” events instead of deriving render correctness from
@@ -281,6 +293,16 @@ app/apps/file_editor_cm6/pyrightconfig.json` reports `0 errors`; `git diff
   Verified with focused `py_compile`, full app `basedpyright --project
   app/apps/file_editor_cm6/pyrightconfig.json` reporting `0 errors`, and
   `git diff --check` clean.
+- Diagnostics reset follow-up: project switch now clears diagnostics projection
+  state and immediately emits empty diagnostics detail/counts for the new
+  project after Explorer connection reassignment. Diagnostics projection is now
+  active-project scoped: WBA `workspace/switched` resets the diagnostic scope,
+  `diagnostics/update` accepts only paths under the active backend project root,
+  and every diagnostics emit prunes out-of-project cache entries first. This
+  prevents old-root diagnostics from repopulating the new project's Explorer and
+  Problems drawer after a switch. Verified with focused `py_compile`, full app
+  `basedpyright --project app/apps/file_editor_cm6/pyrightconfig.json`
+  reporting `0 errors`, and `git diff --check` clean.
 
 ## Purpose
 

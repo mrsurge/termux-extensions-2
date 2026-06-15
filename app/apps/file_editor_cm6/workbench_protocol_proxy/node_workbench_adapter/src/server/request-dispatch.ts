@@ -47,26 +47,54 @@ export interface WorkbenchLike {
   state?: WorkbenchStatus & Record<string, unknown>;
   resync: () => unknown;
   languageCatalog: () => Promise<unknown>;
-  connect: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  connect: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
   disconnect?: () => void;
   resubscribeWatcher: () => Promise<void>;
   _switchWorkspace: (folder: string) => Promise<Record<string, unknown>>;
   providers?: () => Record<string, unknown>;
-  openFile: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  documentSymbols: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  foldingRanges: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  openFile: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  documentSymbols: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  foldingRanges: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
   hover: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  completions: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  inlayHints: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  resolveInlayHint: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  releaseInlayHints: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  inlineCompletions: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  freeInlineCompletions: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  handleInlineCompletionDidShow: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  semanticTokens: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  completions: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  inlayHints: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  resolveInlayHint: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  releaseInlayHints: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  inlineCompletions: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  freeInlineCompletions: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  handleInlineCompletionDidShow: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  semanticTokens: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
   getSemanticTokensLegend: (languageId: string) => Promise<unknown>;
-  semanticTokensRange: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  didChange: (params: Record<string, unknown>) => Record<string, unknown> | Promise<Record<string, unknown>>;
+  semanticTokensRange: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  didChange: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown> | Promise<Record<string, unknown>>;
 }
 
 export interface ServerDispatchRuntime {
@@ -84,7 +112,10 @@ export interface ServerDispatchRuntime {
   emitTe2Event: (event: Record<string, unknown>) => void;
   requestShutdown: () => void;
   scheduleOpenFileSnapshot: () => void;
-  takeHeapSnapshot: (label: string, explicitPath?: string | null) => HeapSnapshotResult;
+  takeHeapSnapshot: (
+    label: string,
+    explicitPath?: string | null,
+  ) => HeapSnapshotResult;
   log: (...args: unknown[]) => void;
 }
 
@@ -108,7 +139,11 @@ function success(id: unknown, result: unknown): Record<string, unknown> {
   return { jsonrpc: "2.0", id, result };
 }
 
-function failure(id: unknown, code: number, message: string): Record<string, unknown> {
+function failure(
+  id: unknown,
+  code: number,
+  message: string,
+): Record<string, unknown> {
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
@@ -131,7 +166,10 @@ function resetDisconnectedSession(session: AdapterSessionState): void {
 
 function mergeWorkbenchState(runtime: ServerDispatchRuntime): void {
   if (!isRecord(runtime.wb.state)) return;
-  runtime.state.session = { ...runtime.state.session, ...runtime.wb.state } as AdapterSessionState;
+  runtime.state.session = {
+    ...runtime.state.session,
+    ...runtime.wb.state,
+  } as AdapterSessionState;
 }
 
 export async function dispatchJsonRpcRequest(
@@ -161,9 +199,16 @@ export async function dispatchJsonRpcRequest(
     const limit = Number.isFinite(Number(params.limit))
       ? Math.max(0, Math.min(5000, Number(params.limit)))
       : 200;
-    const slice = limit ? runtime.eventLog.slice(-limit) : [...runtime.eventLog];
+    const slice = limit
+      ? runtime.eventLog.slice(-limit)
+      : [...runtime.eventLog];
     if (params.clear === true) runtime.eventLog.length = 0;
-    return success(id, { ok: true, ts_ms: runtime.nowMs(), count: runtime.eventLog.length, events: slice });
+    return success(id, {
+      ok: true,
+      ts_ms: runtime.nowMs(),
+      count: runtime.eventLog.length,
+      events: slice,
+    });
   }
 
   if (method === "adapter.shutdown") {
@@ -174,7 +219,9 @@ export async function dispatchJsonRpcRequest(
   if (method === "adapter.connect") {
     const result = await runtime.wb.connect({
       proxyHttp: params.proxyHttp ?? runtime.state.config.proxyHttp,
-      codeServerSocketPath: params.codeServerSocketPath ?? runtime.state.config.codeServerSocketPath,
+      codeServerSocketPath:
+        params.codeServerSocketPath ??
+        runtime.state.config.codeServerSocketPath,
       token: params.token,
       folder: params.folder,
       authority: params.authority ?? runtime.defaultRemoteAuthority,
@@ -184,7 +231,11 @@ export async function dispatchJsonRpcRequest(
     });
     runtime.buildStatusResult();
     runtime.logStatus("adapter_connected");
-    runtime.emitTe2Event({ type: "adapter/ready", ts_ms: runtime.nowMs(), session: runtime.state.session });
+    runtime.emitTe2Event({
+      type: "adapter/ready",
+      ts_ms: runtime.nowMs(),
+      session: runtime.state.session,
+    });
     return success(id, result);
   }
 
@@ -209,31 +260,76 @@ export async function dispatchJsonRpcRequest(
   }
 
   if (method === "adapter.switchWorkspace") {
-    const folder = stringValue(params.folder) ?? stringValue(params.workspaceFolder);
+    const folder =
+      stringValue(params.folder) ?? stringValue(params.workspaceFolder);
     if (!folder) return failure(id, -32602, "Missing required param: folder");
     try {
       const result = await runtime.wb._switchWorkspace(folder);
       mergeWorkbenchState(runtime);
       runtime.logStatus("workspace_switched");
-      return success(id, { ok: true, ts_ms: runtime.nowMs(), workspaceFolder: folder, ...result });
+      return success(id, {
+        ok: true,
+        ts_ms: runtime.nowMs(),
+        workspaceFolder: folder,
+        ...result,
+      });
     } catch (error) {
       return failure(id, -32000, String((error as Error)?.message ?? error));
     }
   }
 
   if (method === "adapter.reconnect") {
+    const workspaceFolder =
+      stringValue(params.workspaceFolder) ?? stringValue(params.folder);
+    if (!workspaceFolder)
+      return failure(id, -32602, "Missing required param: workspaceFolder");
+    const previousWorkspaceFolder =
+      stringValue(runtime.state.session.workspaceFolder) ??
+      stringValue(field(runtime.wb.state, "workspaceFolder"));
     try {
+      runtime.emitTe2Event({
+        type: "adapter/sessionReset",
+        ts_ms: runtime.nowMs(),
+        reason: "reconnect",
+        from: previousWorkspaceFolder,
+        to: workspaceFolder,
+        workspaceFolder,
+      });
       runtime.wb.disconnect?.();
       const result = await runtime.wb.connect({
-        folder: params.workspaceFolder ?? null,
+        folder: workspaceFolder,
         authority: params.authority ?? runtime.defaultRemoteAuthority,
         proxyHttp: params.proxyHttp ?? runtime.defaultCodeServerHttp,
-        codeServerSocketPath: params.codeServerSocketPath ?? runtime.state.config.codeServerSocketPath,
+        codeServerSocketPath:
+          params.codeServerSocketPath ??
+          runtime.state.config.codeServerSocketPath,
         token: params.token ?? "00000000000000000000",
       });
       mergeWorkbenchState(runtime);
       runtime.logStatus("adapter_reconnected");
-      return success(id, { ok: true, ts_ms: runtime.nowMs(), ...result });
+      runtime.emitTe2Event({
+        type: "workspace/switched",
+        ts_ms: runtime.nowMs(),
+        from: previousWorkspaceFolder,
+        to: workspaceFolder,
+        workspaceFolder,
+        readyForDocumentOpen: true,
+        reconnect: true,
+      });
+      runtime.emitTe2Event({
+        type: "adapter/ready",
+        ts_ms: runtime.nowMs(),
+        session: runtime.state.session,
+      });
+      return success(id, {
+        ok: true,
+        ts_ms: runtime.nowMs(),
+        readyForDocumentOpen: true,
+        previousWorkspaceFolder,
+        workspaceFolder,
+        reconnect: true,
+        ...result,
+      });
     } catch (error) {
       runtime.logStatus("adapter_reconnect_error");
       return failure(id, -32000, String((error as Error)?.message ?? error));
@@ -247,15 +343,26 @@ export async function dispatchJsonRpcRequest(
   }
 
   if (method === "adapter.providers") {
-    const result = runtime.wb.providers?.() ?? { hover: [], documentSymbols: [] };
+    const result = runtime.wb.providers?.() ?? {
+      hover: [],
+      documentSymbols: [],
+    };
     return success(id, { ok: true, ts_ms: runtime.nowMs(), ...result });
   }
 
   if (method === "adapter.configure") {
-    if (typeof params.upstreamHttp === "string") runtime.state.config.upstreamHttp = params.upstreamHttp;
-    if (typeof params.proxyHttp === "string") runtime.state.config.proxyHttp = params.proxyHttp;
-    if (typeof params.codeServerSocketPath === "string") runtime.state.config.codeServerSocketPath = params.codeServerSocketPath.trim() || null;
-    return success(id, { ok: true, ts_ms: runtime.nowMs(), config: runtime.state.config });
+    if (typeof params.upstreamHttp === "string")
+      runtime.state.config.upstreamHttp = params.upstreamHttp;
+    if (typeof params.proxyHttp === "string")
+      runtime.state.config.proxyHttp = params.proxyHttp;
+    if (typeof params.codeServerSocketPath === "string")
+      runtime.state.config.codeServerSocketPath =
+        params.codeServerSocketPath.trim() || null;
+    return success(id, {
+      ok: true,
+      ts_ms: runtime.nowMs(),
+      config: runtime.state.config,
+    });
   }
 
   if (method === "vscode.openFile") {
@@ -264,7 +371,10 @@ export async function dispatchJsonRpcRequest(
     const forceRefreshReq = params.forceRefresh === true;
     if (!resolvedPath) return missingPathError(id);
 
-    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
     const alreadyActive = resolvedPath === runtime.wb.state?.activePath;
     const forceRefreshEff = forceRefreshReq || (alreadyActive && !!requestId);
     runtime.log(
@@ -282,13 +392,20 @@ export async function dispatchJsonRpcRequest(
     });
     runtime.log(`[server] wb.openFile returned for ${resolvedPath}`);
     runtime.logStatus("open_file", { path: resolvedPath });
-    return success(id, { ...result, path: resolvedPath, uri: runtime.vscodeRemoteUri(authority, resolvedPath) });
+    return success(id, {
+      ...result,
+      path: resolvedPath,
+      uri: runtime.vscodeRemoteUri(authority, resolvedPath),
+    });
   }
 
   if (method === "vscode.documentSymbols") {
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
-    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
     const result = await runtime.wb.documentSymbols({
       path: resolvedPath,
       authority,
@@ -303,7 +420,10 @@ export async function dispatchJsonRpcRequest(
   if (method === "vscode.foldingRanges") {
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
-    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
     const result = await runtime.wb.foldingRanges({
       path: resolvedPath,
       authority,
@@ -319,7 +439,10 @@ export async function dispatchJsonRpcRequest(
   if (method === "vscode.hover") {
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
-    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
     const result = await runtime.wb.hover({
       path: resolvedPath,
       authority,
@@ -335,7 +458,10 @@ export async function dispatchJsonRpcRequest(
   if (method === "vscode.completions") {
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
-    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
     const result = await runtime.wb.completions({
       path: resolvedPath,
       authority,
@@ -354,7 +480,10 @@ export async function dispatchJsonRpcRequest(
   if (method === "vscode.inlayHints") {
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
-    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
     const result = await runtime.wb.inlayHints({
       path: resolvedPath,
       authority,
@@ -387,7 +516,10 @@ export async function dispatchJsonRpcRequest(
   if (method === "vscode.inlineCompletions") {
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
-    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
     const result = await runtime.wb.inlineCompletions({
       path: resolvedPath,
       authority,
@@ -425,7 +557,10 @@ export async function dispatchJsonRpcRequest(
   if (method === "vscode.semanticTokens") {
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
-    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
     const result = await runtime.wb.semanticTokens({
       path: resolvedPath,
       authority,
@@ -447,7 +582,10 @@ export async function dispatchJsonRpcRequest(
   if (method === "vscode.semanticTokensRange") {
     const resolvedPath = runtime.normalizePathParam(params);
     if (!resolvedPath) return missingPathError(id);
-    const authority = runtime.normalizeAuthorityParam(params, runtime.defaultRemoteAuthority);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
     const result = await runtime.wb.semanticTokensRange({
       path: resolvedPath,
       authority,

@@ -162,6 +162,9 @@ async def _dispatch_wba_event(ev: JsonObject) -> None:
     ev_type = str(ev.get("type") or "")
     if ev_type == "adapter/ready":
         return
+    if ev_type == "workspace/switched":
+        await _handle_workspace_switched(ev)
+        return
     if ev_type == "watcher/enospc":
         await _handle_watcher_enospc(ev)
         return
@@ -172,6 +175,34 @@ async def _dispatch_wba_event(ev: JsonObject) -> None:
         from .diagnostics_bridge import handle_wba_diagnostics_update
 
         await handle_wba_diagnostics_update(ev)
+
+
+async def _handle_workspace_switched(ev: JsonObject) -> None:
+    raw_root = ev.get("workspaceFolder") or ev.get("to")
+    if not isinstance(raw_root, str) or not raw_root.strip():
+        return
+    try:
+        from pathlib import Path
+
+        from .explorer.services.file_ops import get_project_root
+
+        switched_root = str(Path(raw_root).expanduser().resolve(strict=False))
+        backend_root = str(Path(get_project_root()).expanduser().resolve(strict=False))
+        if switched_root != backend_root:
+            print(
+                f"[wba_event_bridge] workspace/switched ignored root={switched_root} backend={backend_root}",
+                flush=True,
+            )
+            return
+        from .diagnostics_bridge import reset_diagnostics_projection_for_project
+
+        await reset_diagnostics_projection_for_project(switched_root)
+        print(
+            f"[wba_event_bridge] workspace/switched diagnostics reset root={switched_root}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[wba_event_bridge] workspace/switched handling failed: {exc}", flush=True)
 
 
 async def _adapter_ws_loop() -> None:

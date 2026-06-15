@@ -14,7 +14,11 @@ import path from "node:path";
 
 import { VSBuffer } from "../../vscode_oss_runtime/base/common/buffer.mjs";
 import { NodeSocketFactory } from "../../vscode_oss_runtime/platform/remote/browser/browserSocketFactory.mjs";
-import { ConnectionType, connectToRemoteAgent, createNoopSignService } from "../../vscode_oss_runtime/platform/remote/common/remoteAgentConnection.mjs";
+import {
+  ConnectionType,
+  connectToRemoteAgent,
+  createNoopSignService,
+} from "../../vscode_oss_runtime/platform/remote/common/remoteAgentConnection.mjs";
 import { IpcPromiseClient } from "../../vscode_oss_runtime/base/parts/ipc/common/ipc.mjs";
 import {
   decodeExtHostRpc,
@@ -43,9 +47,7 @@ import {
   commitFromServerRootPath as commitFromWorkbenchServerRootPath,
   loadProductVersionFromAppRoot as loadWorkbenchProductVersion,
 } from "./management.mjs";
-import {
-  connectExtensionHostSession,
-} from "./extension-host.mjs";
+import { connectExtensionHostSession } from "./extension-host.mjs";
 import {
   fsPathFromUri as fsPathFromLocalUri,
   provideTextDocumentContent as provideLocalTextDocumentContent,
@@ -82,12 +84,24 @@ import {
   sendExtPending,
   trackExtSent,
 } from "./transport-session.mjs";
-import type { TransportPendingOptions, TransportRuntime } from "./transport-session";
-import type { ConfigurationRuntime, RawExtensionConfigDefaults } from "./configuration";
-import type { DocumentContentRuntime, LocalFsStatsLike } from "./document-content";
+import type {
+  TransportPendingOptions,
+  TransportRuntime,
+} from "./transport-session";
+import type {
+  ConfigurationRuntime,
+  RawExtensionConfigDefaults,
+} from "./configuration";
+import type {
+  DocumentContentRuntime,
+  LocalFsStatsLike,
+} from "./document-content";
 import type { ExtensionHostRuntime } from "./extension-host";
 import type { ManagementRuntime } from "./management";
-import type { DidChangeOptions, LifecycleRuntime } from "../workspace/lifecycle";
+import type {
+  DidChangeOptions,
+  LifecycleRuntime,
+} from "../workspace/lifecycle";
 import type { ExtHostInitOptions } from "../extensions/catalog";
 import type { ProviderKind } from "../extensions/provider-registry";
 import {
@@ -150,31 +164,43 @@ type WatchSubscriptionLike = LifecycleRuntime["watcher"]["fsWatcherSub"];
 type ExtHandshakeState = ExtensionHostRuntime["refs"]["extHandshake"];
 type ExtTraceState = ExtensionHostRuntime["refs"]["extMsgTrace"];
 
-function _hts() { const d = new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}.${String(d.getMilliseconds()).padStart(3,'0')}`; }
-const DEFAULT_CODE_SERVER_SOCKET_PATH = String(process.env.TE2_CODE_SERVER_SOCKET ?? "").trim() || null;
-const DEFAULT_CODE_SERVER_HTTP = process.env.TE2_CODE_SERVER_HTTP ?? "http://localhost";
-const DEFAULT_REMOTE_AUTHORITY = process.env.TE2_REMOTE_AUTHORITY ?? "localhost";
+function _hts() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+}
+const DEFAULT_CODE_SERVER_SOCKET_PATH =
+  String(process.env.TE2_CODE_SERVER_SOCKET ?? "").trim() || null;
+const DEFAULT_CODE_SERVER_HTTP =
+  process.env.TE2_CODE_SERVER_HTTP ?? "http://localhost";
+const DEFAULT_REMOTE_AUTHORITY =
+  process.env.TE2_REMOTE_AUTHORITY ?? "localhost";
 const DEBUG_METRICS = String(process.env.TE2_DEBUG_METRICS || "") === "1";
-const INIT_SIZE_PROFILE = String(process.env.TE2_INIT_SIZE_PROFILE || "") === "1";
-const INIT_SIZE_MAX_ITEMS = Number(process.env.TE2_INIT_SIZE_MAX_ITEMS ?? "500");
-const EXT_EXCLUDE_IDS = String(process.env.TE2_EXT_EXCLUDE_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
+const INIT_SIZE_PROFILE =
+  String(process.env.TE2_INIT_SIZE_PROFILE || "") === "1";
+const INIT_SIZE_MAX_ITEMS = Number(
+  process.env.TE2_INIT_SIZE_MAX_ITEMS ?? "500",
+);
+const EXT_EXCLUDE_IDS = String(process.env.TE2_EXT_EXCLUDE_IDS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 const REPLY_DROP_METHODS = new Set(
   String(process.env.TE2_REPLY_DROP_METHODS || "")
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean)
+    .filter(Boolean),
 );
 const REPLY_EMPTY_METHODS = new Set(
   String(process.env.TE2_REPLY_EMPTY_METHODS || "")
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean)
+    .filter(Boolean),
 );
 const REPLY_NULL_METHODS = new Set(
   String(process.env.TE2_REPLY_NULL_METHODS || "")
     .split(",")
     .map((s) => s.trim())
-    .filter(Boolean)
+    .filter(Boolean),
 );
 const PARSE_ALL_ARGS = String(process.env.TE2_PARSE_ALL_ARGS || "") === "1";
 const PARSE_ARGS_ONLY_METHODS = new Set<string>([
@@ -228,13 +254,17 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$tryOpenDocument",
   "$registerTextDocumentContentProvider",
 ]);
-for (const s of String(process.env.TE2_PARSE_ARGS_ONLY_METHODS || "").split(",")) {
+for (const s of String(process.env.TE2_PARSE_ARGS_ONLY_METHODS || "").split(
+  ",",
+)) {
   const v = s.trim();
   if (v) PARSE_ARGS_ONLY_METHODS.add(v);
 }
 
 const SKIP_ARGS_PARSE_METHODS = new Set<string>();
-for (const s of String(process.env.TE2_SKIP_ARGS_PARSE_METHODS || "").split(",")) {
+for (const s of String(process.env.TE2_SKIP_ARGS_PARSE_METHODS || "").split(
+  ",",
+)) {
   const v = s.trim();
   if (v) SKIP_ARGS_PARSE_METHODS.add(v);
 }
@@ -244,14 +274,18 @@ function _shouldParseArgsForMethod(method: string): boolean {
   if (SKIP_ARGS_PARSE_METHODS.has(method)) return false;
   return PARSE_ARGS_ONLY_METHODS.has(method);
 }
-const MAX_JSON_BYTES = Number(process.env.TE2_MAX_JSON_BYTES ?? String(8 * 1024 * 1024));
+const MAX_JSON_BYTES = Number(
+  process.env.TE2_MAX_JSON_BYTES ?? String(8 * 1024 * 1024),
+);
 const SPAN_TRACE_ENABLE = String(process.env.TE2_SPAN_TRACE || "") === "1";
 const SPAN_TRACE_MAX = Number(process.env.TE2_SPAN_TRACE_MAX ?? "200");
 const SPAN_TRACE_MIN_MS = Number(process.env.TE2_SPAN_TRACE_MIN_MS ?? "5");
 let _spanTraceRemaining = SPAN_TRACE_MAX;
 
 const EXT_MSG_TRACE = String(process.env.TE2_EXT_MSG_TRACE || "") === "1";
-const EXT_MSG_TRACE_EVERY = Number(process.env.TE2_EXT_MSG_TRACE_EVERY ?? "100");
+const EXT_MSG_TRACE_EVERY = Number(
+  process.env.TE2_EXT_MSG_TRACE_EVERY ?? "100",
+);
 const EXT_MSG_TRACE_MAX = Number(process.env.TE2_EXT_MSG_TRACE_MAX ?? "2000");
 
 const _loadedRpcIds = loadRpcIds({
@@ -356,7 +390,10 @@ function sleep(ms: number): Promise<void> {
 
 async function waitFor(
   pred: () => boolean,
-  { timeoutMs = 8000, intervalMs = 50 }: { timeoutMs?: number; intervalMs?: number } = {},
+  {
+    timeoutMs = 8000,
+    intervalMs = 50,
+  }: { timeoutMs?: number; intervalMs?: number } = {},
 ): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -414,14 +451,17 @@ function spanTrace<T>(name: string, fn: () => T): T {
             dur_ms: dur,
             ok,
             mem: memSnapshot(),
-          })
+          }),
         );
       } catch {}
     }
   }
 }
 
-async function spanTraceAsync<T>(name: string, fn: () => Promise<T>): Promise<T> {
+async function spanTraceAsync<T>(
+  name: string,
+  fn: () => Promise<T>,
+): Promise<T> {
   if (!SPAN_TRACE_ENABLE || _spanTraceRemaining <= 0) return await fn();
   const start = Date.now();
   try {
@@ -430,7 +470,16 @@ async function spanTraceAsync<T>(name: string, fn: () => Promise<T>): Promise<T>
     if (dur >= SPAN_TRACE_MIN_MS) {
       _spanTraceRemaining -= 1;
       try {
-        console.log(JSON.stringify({ type: "span", ts_ms: Date.now(), name, dur_ms: dur, ok: true, mem: memSnapshot() }));
+        console.log(
+          JSON.stringify({
+            type: "span",
+            ts_ms: Date.now(),
+            name,
+            dur_ms: dur,
+            ok: true,
+            mem: memSnapshot(),
+          }),
+        );
       } catch {}
     }
     return out;
@@ -439,7 +488,17 @@ async function spanTraceAsync<T>(name: string, fn: () => Promise<T>): Promise<T>
     if (dur >= SPAN_TRACE_MIN_MS) {
       _spanTraceRemaining -= 1;
       try {
-        console.log(JSON.stringify({ type: "span", ts_ms: Date.now(), name, dur_ms: dur, ok: false, err: e instanceof Error ? e.message : String(e), mem: memSnapshot() }));
+        console.log(
+          JSON.stringify({
+            type: "span",
+            ts_ms: Date.now(),
+            name,
+            dur_ms: dur,
+            ok: false,
+            err: e instanceof Error ? e.message : String(e),
+            mem: memSnapshot(),
+          }),
+        );
       } catch {}
     }
     throw e;
@@ -452,9 +511,13 @@ function _shouldSkipSize(obj: unknown, maxItems: number): boolean {
   return Object.keys(obj).length > maxItems;
 }
 
-function _jsonSizeOrSkip(obj: unknown, maxItems: number): Record<string, unknown> {
+function _jsonSizeOrSkip(
+  obj: unknown,
+  maxItems: number,
+): Record<string, unknown> {
   if (!INIT_SIZE_PROFILE) return { skipped: true };
-  if (_shouldSkipSize(obj, maxItems)) return { skipped: true, reason: "too_many_items" };
+  if (_shouldSkipSize(obj, maxItems))
+    return { skipped: true, reason: "too_many_items" };
   try {
     const s = JSON.stringify(obj);
     return { size: s.length };
@@ -463,36 +526,59 @@ function _jsonSizeOrSkip(obj: unknown, maxItems: number): Record<string, unknown
   }
 }
 
-
 const _EXT_TO_LANG: Record<string, string> = {
-  ".py": "python", ".pyi": "python", ".pyw": "python",
-  ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+  ".py": "python",
+  ".pyi": "python",
+  ".pyw": "python",
+  ".js": "javascript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
   ".jsx": "javascriptreact",
-  ".ts": "typescript", ".mts": "typescript", ".cts": "typescript",
+  ".ts": "typescript",
+  ".mts": "typescript",
+  ".cts": "typescript",
   ".tsx": "typescriptreact",
-  ".json": "json", ".jsonc": "jsonc", ".json5": "json5",
-  ".html": "html", ".htm": "html",
-  ".css": "css", ".scss": "scss", ".less": "less",
-  ".md": "markdown", ".markdown": "markdown",
-  ".yaml": "yaml", ".yml": "yaml",
-  ".xml": "xml", ".svg": "xml",
-  ".sh": "shellscript", ".bash": "shellscript", ".zsh": "shellscript",
-  ".c": "c", ".h": "c",
-  ".cpp": "cpp", ".cxx": "cpp", ".cc": "cpp", ".hpp": "cpp",
+  ".json": "json",
+  ".jsonc": "jsonc",
+  ".json5": "json5",
+  ".html": "html",
+  ".htm": "html",
+  ".css": "css",
+  ".scss": "scss",
+  ".less": "less",
+  ".md": "markdown",
+  ".markdown": "markdown",
+  ".yaml": "yaml",
+  ".yml": "yaml",
+  ".xml": "xml",
+  ".svg": "xml",
+  ".sh": "shellscript",
+  ".bash": "shellscript",
+  ".zsh": "shellscript",
+  ".c": "c",
+  ".h": "c",
+  ".cpp": "cpp",
+  ".cxx": "cpp",
+  ".cc": "cpp",
+  ".hpp": "cpp",
   ".java": "java",
   ".go": "go",
   ".rs": "rust",
   ".rb": "ruby",
   ".php": "php",
   ".lua": "lua",
-  ".r": "r", ".R": "r",
+  ".r": "r",
+  ".R": "r",
   ".sql": "sql",
   ".swift": "swift",
-  ".kt": "kotlin", ".kts": "kotlin",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
   ".toml": "toml",
-  ".ini": "ini", ".cfg": "ini",
+  ".ini": "ini",
+  ".cfg": "ini",
   ".dockerfile": "dockerfile",
-  ".bat": "bat", ".cmd": "bat",
+  ".bat": "bat",
+  ".cmd": "bat",
   ".ps1": "powershell",
   ".vue": "vue",
 };
@@ -514,11 +600,15 @@ function externalUriString(uriObj: unknown): string | null {
   return typeof uriObj.external === "string" ? uriObj.external : null;
 }
 
-function isTransportMgmtProtocol(value: unknown): value is NonNullable<TransportRuntime["refs"]["mgmtProtocol"]> {
+function isTransportMgmtProtocol(
+  value: unknown,
+): value is NonNullable<TransportRuntime["refs"]["mgmtProtocol"]> {
   return !!value && (typeof value === "object" || typeof value === "function");
 }
 
-function isWatchSubscription(value: unknown): value is NonNullable<WatchSubscriptionLike> {
+function isWatchSubscription(
+  value: unknown,
+): value is NonNullable<WatchSubscriptionLike> {
   if (!isRecord(value)) return false;
   return typeof value["event"] === "function";
 }
@@ -574,10 +664,14 @@ export class WorkbenchClient {
     this._debugExtReqSeen = 0;
     this._debugExtReplySeen = 0;
     this._debugMainThreadReplySeen = 0;
-    this._extHandshake = { readySeen: false, initSent: false, initialized: false };
+    this._extHandshake = {
+      readySeen: false,
+      initSent: false,
+      initialized: false,
+    };
     this._nextModelNumber = 1;
-    this._activeEditorId = null;   // track current editor for close-before-open
-    this._activeUriObj = null;     // track current URI object for close-before-open
+    this._activeEditorId = null; // track current editor for close-before-open
+    this._activeUriObj = null; // track current URI object for close-before-open
     this._backgroundDocuments = new Set(); // uri string -> addedDocuments sent without active editor churn
     this._docVersions = new Map(); // path -> versionId for didChange tracking
     this._docLineCount = new Map(); // path -> line count for didChange range
@@ -635,17 +729,26 @@ export class WorkbenchClient {
     }
   }
 
-  async _loadProductVersionFromAppRoot(envData: unknown): Promise<string | null> {
+  async _loadProductVersionFromAppRoot(
+    envData: unknown,
+  ): Promise<string | null> {
     const thisOwner = this;
-    return loadWorkbenchProductVersion({
-      refs: {
-        get productVersion() { return thisOwner._productVersion; },
-        set productVersion(value) { thisOwner._productVersion = value; },
+    return loadWorkbenchProductVersion(
+      {
+        refs: {
+          get productVersion() {
+            return thisOwner._productVersion;
+          },
+          set productVersion(value) {
+            thisOwner._productVersion = value;
+          },
+        },
+        readTextFile: (filePath: string) => fs.readFile(filePath, "utf8"),
+        joinPath: (...parts: string[]) => path.join(...parts),
+        log: (...args: unknown[]) => console.log(...args),
       },
-      readTextFile: (filePath: string) => fs.readFile(filePath, "utf8"),
-      joinPath: (...parts: string[]) => path.join(...parts),
-      log: (...args: unknown[]) => console.log(...args),
-    }, envData);
+      envData,
+    );
   }
 
   _allocExtReqId(): number {
@@ -656,11 +759,24 @@ export class WorkbenchClient {
     return trackExtSent(this._transportRuntime(), req, rpcId, method);
   }
 
-  _createExtPending(req: number, options: { timeoutMs: number; timeoutMessage: string; timeoutResult?: unknown; accept?: (message: Record<string, unknown>) => boolean }): Promise<unknown> {
+  _createExtPending(
+    req: number,
+    options: {
+      timeoutMs: number;
+      timeoutMessage: string;
+      timeoutResult?: unknown;
+      accept?: (message: Record<string, unknown>) => boolean;
+    },
+  ): Promise<unknown> {
     return createExtPending(this._transportRuntime(), req, options);
   }
 
-  _sendExt(rpcId: number, method: string, args: unknown[], cancellable = false): number {
+  _sendExt(
+    rpcId: number,
+    method: string,
+    args: unknown[],
+    cancellable = false,
+  ): number {
     return sendExt(this._transportRuntime(), rpcId, method, args, cancellable);
   }
 
@@ -672,15 +788,36 @@ export class WorkbenchClient {
     pendingOptions: TransportPendingOptions = {},
     eventExtra: Record<string, unknown> = {},
   ): { req: number; promise: Promise<unknown> } {
-    return sendExtPending(this._transportRuntime(), rpcId, method, args, cancellable, pendingOptions, eventExtra);
+    return sendExtPending(
+      this._transportRuntime(),
+      rpcId,
+      method,
+      args,
+      cancellable,
+      pendingOptions,
+      eventExtra,
+    );
   }
 
   _isTerminalExtReply(msg: unknown): boolean {
     return isTerminalExtReply(msg) && msg.type !== 12;
   }
 
-  _sendExtAwaitTerminalReply(rpcId: number, method: string, args: unknown[], cancellable = false, timeoutMs = 3000): { req: number; promise: Promise<unknown> } {
-    return sendExtAwaitTerminalReply(this._transportRuntime(), rpcId, method, args, cancellable, timeoutMs);
+  _sendExtAwaitTerminalReply(
+    rpcId: number,
+    method: string,
+    args: unknown[],
+    cancellable = false,
+    timeoutMs = 3000,
+  ): { req: number; promise: Promise<unknown> } {
+    return sendExtAwaitTerminalReply(
+      this._transportRuntime(),
+      rpcId,
+      method,
+      args,
+      cancellable,
+      timeoutMs,
+    );
   }
 
   _completionRuntime() {
@@ -690,10 +827,13 @@ export class WorkbenchClient {
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
       didChange: (params, opts) => this.didChange(params, opts),
-      findAllProviderHandles: (kind, languageId) => this._findAllProviderHandles(kind, languageId),
+      findAllProviderHandles: (kind, languageId) =>
+        this._findAllProviderHandles(kind, languageId),
       waitFor: (condition, options) => waitFor(condition, options),
-      uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
-      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) => this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+      uriForPath: (filePath, authority) =>
+        this._uriForPath(filePath, authority),
+      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
+        this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
       log: (message) => console.log(message),
       warn: (message, detail) => console.warn(message, detail),
     });
@@ -706,9 +846,24 @@ export class WorkbenchClient {
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
       didChange: (params, opts) => this.didChange(params, opts),
-      uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
-      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) => this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
-      sendExtAwaitTerminalReply: (rpcId, method, args, cancellable, timeoutMs) => this._sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
+      uriForPath: (filePath, authority) =>
+        this._uriForPath(filePath, authority),
+      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
+        this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+      sendExtAwaitTerminalReply: (
+        rpcId,
+        method,
+        args,
+        cancellable,
+        timeoutMs,
+      ) =>
+        this._sendExtAwaitTerminalReply(
+          rpcId,
+          method,
+          args,
+          cancellable,
+          timeoutMs,
+        ),
       log: (message) => console.log(message),
       warn: (message, detail) => console.warn(message, detail),
     });
@@ -720,9 +875,24 @@ export class WorkbenchClient {
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
-      uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
-      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) => this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
-      sendExtAwaitTerminalReply: (rpcId, method, args, cancellable, timeoutMs) => this._sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
+      uriForPath: (filePath, authority) =>
+        this._uriForPath(filePath, authority),
+      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
+        this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+      sendExtAwaitTerminalReply: (
+        rpcId,
+        method,
+        args,
+        cancellable,
+        timeoutMs,
+      ) =>
+        this._sendExtAwaitTerminalReply(
+          rpcId,
+          method,
+          args,
+          cancellable,
+          timeoutMs,
+        ),
       log: (message) => console.log(message),
       warn: (message, detail) => console.warn(message, detail),
     });
@@ -735,12 +905,17 @@ export class WorkbenchClient {
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
       didChange: (params, opts) => this.didChange(params, opts),
-      findAllProviderHandles: (kind, languageId) => this._findAllProviderHandles(kind, languageId),
-      findSemanticRangeHandles: (languageId) => this._providerRegistry.findSemanticRangeHandles(languageId),
+      findAllProviderHandles: (kind, languageId) =>
+        this._findAllProviderHandles(kind, languageId),
+      findSemanticRangeHandles: (languageId) =>
+        this._providerRegistry.findSemanticRangeHandles(languageId),
       waitFor: (condition, options) => waitFor(condition, options),
-      uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
-      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) => this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
-      getProvider: (kind, handle) => this._providerRegistry.getProvider(kind, handle),
+      uriForPath: (filePath, authority) =>
+        this._uriForPath(filePath, authority),
+      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
+        this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+      getProvider: (kind, handle) =>
+        this._providerRegistry.getProvider(kind, handle),
       log: (message) => console.log(message),
       warn: (message) => console.warn(message),
       timeLabel: () => _hts(),
@@ -758,11 +933,15 @@ export class WorkbenchClient {
       // Provider calls are consumers of the active-document lifecycle, not owners.
       // Let openFile()/didChange() remain the only state writers for activePath/Uri.
       updateActiveDocument: () => {},
-      selectorGroupsSummary: (kind) => this._providerRegistry.selectorGroupsSummary(kind),
-      findAllProviderHandles: (kind, languageId) => this._findAllProviderHandles(kind, languageId),
+      selectorGroupsSummary: (kind) =>
+        this._providerRegistry.selectorGroupsSummary(kind),
+      findAllProviderHandles: (kind, languageId) =>
+        this._findAllProviderHandles(kind, languageId),
       waitFor: (condition, options) => waitFor(condition, options),
-      uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
-      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) => this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+      uriForPath: (filePath, authority) =>
+        this._uriForPath(filePath, authority),
+      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
+        this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
       documentSymbolsRpcId: 94,
       foldingRangesRpcId: _rpcIds.ExtHostLanguageFeatures,
@@ -776,22 +955,34 @@ export class WorkbenchClient {
       extProtocol: this.ext?.protocol ?? null,
       state: this.state,
       activeEditorId: this._activeEditorId,
-      setActiveEditorId: (value) => { this._activeEditorId = value; },
+      setActiveEditorId: (value) => {
+        this._activeEditorId = value;
+      },
       activeUriObj: this._activeUriObj,
-      setActiveUriObj: (value) => { this._activeUriObj = value; },
+      setActiveUriObj: (value) => {
+        this._activeUriObj = value;
+      },
       activeTab: this._activeTab,
-      setActiveTab: (value) => { this._activeTab = value; },
+      setActiveTab: (value) => {
+        this._activeTab = value;
+      },
       nextModelNumber: this._nextModelNumber,
-      setNextModelNumber: (value) => { this._nextModelNumber = value; },
+      setNextModelNumber: (value) => {
+        this._nextModelNumber = value;
+      },
       docVersions: this._docVersions,
       docLineCount: this._docLineCount,
       docCharCount: this._docCharCount,
       docLastLineLength: this._docLastLineLength,
       docOpenGeneration: this._docOpenGeneration,
       mgmtIpc: this._mgmtIpc,
-      setMgmtIpc: (value) => { this._mgmtIpc = value === null ? null : this._mgmtIpc; },
+      setMgmtIpc: (value) => {
+        this._mgmtIpc = value === null ? null : this._mgmtIpc;
+      },
       fsWatcherSub: this._fsWatcherSub,
-      setFsWatcherSub: (value) => { this._fsWatcherSub = value; },
+      setFsWatcherSub: (value) => {
+        this._fsWatcherSub = value;
+      },
       useRemote: this._useRemote,
       authority: String(this._authority ?? DEFAULT_REMOTE_AUTHORITY),
       extRpcIds: {
@@ -806,15 +997,30 @@ export class WorkbenchClient {
       uriForPath: (path, authority) => this._uriForPath(path, authority),
       uriToString: (uri) => this._uriObjToStringSafe(uri),
       languageIdFromPath: (path) => _languageIdFromPath(path),
-      sendExt: (rpcId, method, args, cancellable = false) => this._sendExt(rpcId, method, args, cancellable),
-      sendExtAwaitTerminalReply: (rpcId, method, args, cancellable = false, timeoutMs = 3000) =>
-        this._sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
+      sendExt: (rpcId, method, args, cancellable = false) =>
+        this._sendExt(rpcId, method, args, cancellable),
+      sendExtAwaitTerminalReply: (
+        rpcId,
+        method,
+        args,
+        cancellable = false,
+        timeoutMs = 3000,
+      ) =>
+        this._sendExtAwaitTerminalReply(
+          rpcId,
+          method,
+          args,
+          cancellable,
+          timeoutMs,
+        ),
       spanTrace: (name, fn) => spanTrace(name, fn),
       spanTraceAsync: (name, fn) => spanTraceAsync(name, fn),
       logMetrics: (type, data) => logMetrics(type, data),
       onEvent: (payload) => this.onEvent(payload),
-      clearProjectScopedSwitchState: (reason) => this._clearProjectScopedSwitchState(reason),
-      sha1Short: (text) => crypto.createHash("sha1").update(text).digest("hex").slice(0, 7),
+      clearProjectScopedSwitchState: (reason) =>
+        this._clearProjectScopedSwitchState(reason),
+      sha1Short: (text) =>
+        crypto.createHash("sha1").update(text).digest("hex").slice(0, 7),
       randomUuid: () => crypto.randomUUID(),
       log: (...args) => console.log(...args),
       warn: (...args) => console.warn(...args),
@@ -825,7 +1031,9 @@ export class WorkbenchClient {
     return createTransportRuntime({
       requestOwner: this._extRequests,
       extProtocol: this.ext?.protocol ?? null,
-      mgmtProtocol: isTransportMgmtProtocol(this.mgmt?.protocol) ? this.mgmt.protocol : null,
+      mgmtProtocol: isTransportMgmtProtocol(this.mgmt?.protocol)
+        ? this.mgmt.protocol
+        : null,
       mgmtIpc: this._mgmtIpc,
       fsWatcherSub: this._fsWatcherSub,
       state: this.state,
@@ -834,13 +1042,33 @@ export class WorkbenchClient {
       wrapPayload: (payload) => VSBuffer.wrap(payload),
       onEvent: (payload) => this.onEvent(payload),
       nowMs: () => Date.now(),
-      setFsWatcherSub: (value) => { this._fsWatcherSub = isWatchSubscription(value) ? value : null; },
-      setMgmtIpc: (value) => { this._mgmtIpc = value === null ? null : this._mgmtIpc; },
-      setMgmtProtocol: (value) => { this.mgmt = value ? { protocol: value } : null; },
-      setExtProtocol: (value) => { this.ext = value ? { protocol: value as NonNullable<ExtSessionLike>["protocol"] } : null; },
-      resetHandshake: () => { this._extHandshake = { readySeen: false, initSent: false, initialized: false }; },
-      resetConnecting: () => { this._connecting = false; },
-      clearLanguageCatalogCache: () => { this._languageCatalogCache = null; },
+      setFsWatcherSub: (value) => {
+        this._fsWatcherSub = isWatchSubscription(value) ? value : null;
+      },
+      setMgmtIpc: (value) => {
+        this._mgmtIpc = value === null ? null : this._mgmtIpc;
+      },
+      setMgmtProtocol: (value) => {
+        this.mgmt = value ? { protocol: value } : null;
+      },
+      setExtProtocol: (value) => {
+        this.ext = value
+          ? { protocol: value as NonNullable<ExtSessionLike>["protocol"] }
+          : null;
+      },
+      resetHandshake: () => {
+        this._extHandshake = {
+          readySeen: false,
+          initSent: false,
+          initialized: false,
+        };
+      },
+      resetConnecting: () => {
+        this._connecting = false;
+      },
+      clearLanguageCatalogCache: () => {
+        this._languageCatalogCache = null;
+      },
     });
   }
 
@@ -850,22 +1078,35 @@ export class WorkbenchClient {
       useRemote: this._useRemote,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
-      extHostDocumentContentProvidersRpcId: _rpcIds.ExtHostDocumentContentProviders,
+      extHostDocumentContentProvidersRpcId:
+        _rpcIds.ExtHostDocumentContentProviders,
       extHostDocumentsAndEditorsRpcId: _rpcIds.ExtHostDocumentsAndEditors,
       backgroundDocuments: this._backgroundDocuments,
       readTextFile: (path) => fs.readFile(path, "utf8"),
       readBinaryFile: (path) => fs.readFile(path),
       statPath: (path) => fs.lstat(path),
       languageIdFromPath: (path) => _languageIdFromPath(path),
-      sendExt: (rpcId, method, args, cancellable = false) => this._sendExt(rpcId, method, args, cancellable),
+      sendExt: (rpcId, method, args, cancellable = false) =>
+        this._sendExt(rpcId, method, args, cancellable),
       sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
         this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
       log: (...args) => console.log(...args),
     });
   }
 
-  _sendExtMixed(rpcId: number, method: string, args: unknown[], cancellable = false): number {
-    return sendExtMixed(this._transportRuntime(), rpcId, method, args, cancellable);
+  _sendExtMixed(
+    rpcId: number,
+    method: string,
+    args: unknown[],
+    cancellable = false,
+  ): number {
+    return sendExtMixed(
+      this._transportRuntime(),
+      rpcId,
+      method,
+      args,
+      cancellable,
+    );
   }
 
   status() {
@@ -885,10 +1126,13 @@ export class WorkbenchClient {
       readTextFile: (filePath) => fs.readFile(filePath, "utf8"),
       joinPath: (...parts) => path.join(...parts),
       readTextFileSync: (filePath) => readFileSync(filePath, "utf8"),
-      uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
+      uriForPath: (filePath, authority) =>
+        this._uriForPath(filePath, authority),
       randomUuid: () => crypto.randomUUID(),
-      sha1Short: (text) => crypto.createHash("sha1").update(text).digest("hex").slice(0, 7),
-      logMetrics: (type, data) => logMetrics(type, { ...data, mem: memSnapshot() }),
+      sha1Short: (text) =>
+        crypto.createHash("sha1").update(text).digest("hex").slice(0, 7),
+      logMetrics: (type, data) =>
+        logMetrics(type, { ...data, mem: memSnapshot() }),
       log: (...args) => console.log(...args),
     });
   }
@@ -902,10 +1146,13 @@ export class WorkbenchClient {
       readTextFile: (filePath) => fs.readFile(filePath, "utf8"),
       joinPath: (...parts) => path.join(...parts),
       readTextFileSync: (filePath) => readFileSync(filePath, "utf8"),
-      uriForPath: (filePath, authority) => this._uriForPath(filePath, authority),
+      uriForPath: (filePath, authority) =>
+        this._uriForPath(filePath, authority),
       randomUuid: () => crypto.randomUUID(),
-      sha1Short: (text) => crypto.createHash("sha1").update(text).digest("hex").slice(0, 7),
-      logMetrics: (type, data) => logMetrics(type, { ...data, mem: memSnapshot() }),
+      sha1Short: (text) =>
+        crypto.createHash("sha1").update(text).digest("hex").slice(0, 7),
+      logMetrics: (type, data) =>
+        logMetrics(type, { ...data, mem: memSnapshot() }),
       log: (...args) => console.log(...args),
     });
   }
@@ -914,19 +1161,33 @@ export class WorkbenchClient {
     return createManagementRuntime({
       env: process.env,
       mgmt: this.mgmt,
-      setMgmt: (value) => { this.mgmt = value; },
+      setMgmt: (value) => {
+        this.mgmt = value;
+      },
       mgmtIpc: this._mgmtIpc,
-      setMgmtIpc: (value) => { this._mgmtIpc = value; },
+      setMgmtIpc: (value) => {
+        this._mgmtIpc = value;
+      },
       useRemote: this._useRemote,
-      setUseRemote: (value) => { this._useRemote = value; },
+      setUseRemote: (value) => {
+        this._useRemote = value;
+      },
       authority: this._authority,
-      setAuthority: (value) => { this._authority = value; },
+      setAuthority: (value) => {
+        this._authority = value;
+      },
       productVersion: this._productVersion,
-      setProductVersion: (value) => { this._productVersion = value; },
+      setProductVersion: (value) => {
+        this._productVersion = value;
+      },
       rawExtensionConfigs: this._rawExtensionConfigs,
-      setRawExtensionConfigs: (value) => { this._rawExtensionConfigs = value; },
+      setRawExtensionConfigs: (value) => {
+        this._rawExtensionConfigs = value;
+      },
       extensions: this._extensions,
-      setExtensions: (value) => { this._extensions = value; },
+      setExtensions: (value) => {
+        this._extensions = value;
+      },
       state: this.state,
       defaults: {
         codeServerHttp: DEFAULT_CODE_SERVER_HTTP,
@@ -939,18 +1200,29 @@ export class WorkbenchClient {
       },
       createSocketFactory: (options) => new NodeSocketFactory(options),
       connectRemoteAgent: (options) => connectToRemoteAgent(options),
-      createMgmtIpc: (protocol, authority) => new IpcPromiseClient(protocol, { remoteAuthority: authority, clientId: "renderer" }),
+      createMgmtIpc: (protocol, authority) =>
+        new IpcPromiseClient(protocol, {
+          remoteAuthority: authority,
+          clientId: "renderer",
+        }),
       randomUuid: () => crypto.randomUUID(),
       spanTraceAsync: (name, fn) => spanTraceAsync(name, fn),
-      discoverServerRootPath: (httpBase, folder, socketPath) => this._discoverServerRootPath(httpBase, folder, socketPath),
-      commitFromServerRootPath: (serverRootPath) => this._commitFromServerRootPath(serverRootPath),
-      scanExtensionsFromDisk: (authority) => this._scanExtensionsFromDisk(authority),
-      extractExtensionConfigDefaults: (scannedExtensions) => this._extractExtensionConfigDefaults(scannedExtensions),
-      sanitizeExtensionForInit: (ext, authority) => this._sanitizeExtensionForInit(ext, authority),
+      discoverServerRootPath: (httpBase, folder, socketPath) =>
+        this._discoverServerRootPath(httpBase, folder, socketPath),
+      commitFromServerRootPath: (serverRootPath) =>
+        this._commitFromServerRootPath(serverRootPath),
+      scanExtensionsFromDisk: (authority) =>
+        this._scanExtensionsFromDisk(authority),
+      extractExtensionConfigDefaults: (scannedExtensions) =>
+        this._extractExtensionConfigDefaults(scannedExtensions),
+      sanitizeExtensionForInit: (ext, authority) =>
+        this._sanitizeExtensionForInit(ext, authority),
       extensionIdentifierFrom: (ext) => this._extensionIdentifierFrom(ext),
-      loadProductVersionFromAppRoot: (envData) => this._loadProductVersionFromAppRoot(envData),
+      loadProductVersionFromAppRoot: (envData) =>
+        this._loadProductVersionFromAppRoot(envData),
       buildExtHostInitData: (options) => this._buildExtHostInitData(options),
-      setupFileWatcher: (workspaceRoot) => this._setupFileWatcher(workspaceRoot),
+      setupFileWatcher: (workspaceRoot) =>
+        this._setupFileWatcher(workspaceRoot),
       onEvent: (payload) => this.onEvent(payload),
       log: (...args) => console.log(...args),
     });
@@ -960,7 +1232,9 @@ export class WorkbenchClient {
     return createExtensionHostRuntime({
       state: this.state,
       ext: this.ext,
-      setExt: (value) => { this.ext = value; },
+      setExt: (value) => {
+        this.ext = value;
+      },
       signService: this._signService,
       connectionTypes: {
         ExtensionHost: ConnectionType.ExtensionHost,
@@ -982,13 +1256,21 @@ export class WorkbenchClient {
       initSizeProfile: INIT_SIZE_PROFILE,
       initSizeMaxItems: INIT_SIZE_MAX_ITEMS,
       extHandshake: this._extHandshake,
-      setExtHandshake: (value) => { this._extHandshake = value; },
+      setExtHandshake: (value) => {
+        this._extHandshake = value;
+      },
       extMsgTrace: this._extMsgTrace,
-      setExtMsgTrace: (value) => { this._extMsgTrace = value; },
+      setExtMsgTrace: (value) => {
+        this._extMsgTrace = value;
+      },
       extMsgCount: this._extMsgCount ?? 0,
-      setExtMsgCount: (value) => { this._extMsgCount = value; },
+      setExtMsgCount: (value) => {
+        this._extMsgCount = value;
+      },
       debugExtReqSeen: this._debugExtReqSeen,
-      setDebugExtReqSeen: (value) => { this._debugExtReqSeen = value; },
+      setDebugExtReqSeen: (value) => {
+        this._debugExtReqSeen = value;
+      },
       connectRemoteAgent: (options) => connectToRemoteAgent(options),
       randomUuid: () => crypto.randomUUID(),
       spanTrace: (name, fn) => spanTrace(name, fn),
@@ -997,25 +1279,43 @@ export class WorkbenchClient {
       memSnapshot: () => memSnapshot(),
       jsonSizeOrSkip: (value, maxItems) => _jsonSizeOrSkip(value, maxItems),
       onEvent: (payload) => this.onEvent(payload),
-      sendExtInitText: (text) => { this.ext?.protocol.send(VSBuffer.fromString(text)); },
-      decodeExtMessage: (payload) => decodeExtHostRpc(payload, {
-        shouldParseArgsForMethod: _shouldParseArgsForMethod,
-        maxJsonBytes: MAX_JSON_BYTES,
-        log: (message) => console.log(message),
-      }),
+      sendExtInitText: (text) => {
+        this.ext?.protocol.send(VSBuffer.fromString(text));
+      },
+      decodeExtMessage: (payload) =>
+        decodeExtHostRpc(payload, {
+          shouldParseArgsForMethod: _shouldParseArgsForMethod,
+          maxJsonBytes: MAX_JSON_BYTES,
+          log: (message) => console.log(message),
+        }),
       handleDecodedExtMessage: (message) => {
-        if (message.type === 1 || message.type === 2 || message.type === 3 || message.type === 4) {
+        if (
+          message.type === 1 ||
+          message.type === 2 ||
+          message.type === 3 ||
+          message.type === 4
+        ) {
           handleExtHostRequest(this._extHostDispatchRuntime(), message);
           return;
         }
-        if (message.type === 7 || message.type === 8 || message.type === 9 || message.type === 10 || message.type === 11 || message.type === 12) {
+        if (
+          message.type === 7 ||
+          message.type === 8 ||
+          message.type === 9 ||
+          message.type === 10 ||
+          message.type === 11 ||
+          message.type === 12
+        ) {
           handleExtHostReply(this._extHostDispatchRuntime(), message);
         }
       },
-      buildConfigurationInitData: (folder, authority) => this._buildConfigurationInitData(folder, authority),
-      sendExt: (rpcId, method, args, cancellable = false) => this._sendExt(rpcId, method, args, cancellable),
+      buildConfigurationInitData: (folder, authority) =>
+        this._buildConfigurationInitData(folder, authority),
+      sendExt: (rpcId, method, args, cancellable = false) =>
+        this._sendExt(rpcId, method, args, cancellable),
       uriForPath: (path, authority) => this._uriForPath(path, authority),
-      sha1Short: (text) => crypto.createHash("sha1").update(text).digest("hex").slice(0, 7),
+      sha1Short: (text) =>
+        crypto.createHash("sha1").update(text).digest("hex").slice(0, 7),
       resetExtRequestIds: () => this._extRequests.resetReqIds(),
       log: (...args) => console.log(...args),
     });
@@ -1032,22 +1332,35 @@ export class WorkbenchClient {
       mainThreadOutputServiceRpcId: _rpcIds.MainThreadOutputService,
       extHostWorkspaceRpcId: _rpcIds.ExtHostWorkspace,
       debugExtReqSeen: this._debugExtReqSeen,
-      setDebugExtReqSeen: (value) => { this._debugExtReqSeen = value; },
+      setDebugExtReqSeen: (value) => {
+        this._debugExtReqSeen = value;
+      },
       debugExtReplySeen: this._debugExtReplySeen,
-      setDebugExtReplySeen: (value) => { this._debugExtReplySeen = value; },
+      setDebugExtReplySeen: (value) => {
+        this._debugExtReplySeen = value;
+      },
       debugMainThreadReplySeen: this._debugMainThreadReplySeen,
-      setDebugMainThreadReplySeen: (value) => { this._debugMainThreadReplySeen = value; },
+      setDebugMainThreadReplySeen: (value) => {
+        this._debugMainThreadReplySeen = value;
+      },
       onEvent: (payload) => this.onEvent(payload),
       sendPayload: (payload) => {
         try {
           this.ext?.protocol.send(VSBuffer.wrap(payload));
         } catch {}
       },
-      sendExt: (rpcId, method, args, cancellable = false) => this._sendExt(rpcId, method, args, cancellable),
-      checkWorkspaceExists: (folders, includes) => checkWorkspaceContains(folders, includes, { log: (...args) => console.log(...args) }),
-      tryOpenDocument: (uri, options) => this._tryOpenDocument(uri, isRecord(options) ? options : {}),
-      provideTextDocumentContent: (handle, uri) => this._provideTextDocumentContent(handle, uri),
-      readVirtualVscodeUriBuffer: (uri) => this._readVirtualVscodeUriBuffer(uri),
+      sendExt: (rpcId, method, args, cancellable = false) =>
+        this._sendExt(rpcId, method, args, cancellable),
+      checkWorkspaceExists: (folders, includes) =>
+        checkWorkspaceContains(folders, includes, {
+          log: (...args) => console.log(...args),
+        }),
+      tryOpenDocument: (uri, options) =>
+        this._tryOpenDocument(uri, isRecord(options) ? options : {}),
+      provideTextDocumentContent: (handle, uri) =>
+        this._provideTextDocumentContent(handle, uri),
+      readVirtualVscodeUriBuffer: (uri) =>
+        this._readVirtualVscodeUriBuffer(uri),
       statVirtualVscodeUri: (uri) => this._statVirtualVscodeUri(uri),
       fsPathFromUri: (uri) => this._fsPathFromUri(uri),
       readLocalUriBuffer: (uri) => this._readLocalUriBuffer(uri),
@@ -1063,11 +1376,22 @@ export class WorkbenchClient {
    * @param {object} uri - The URI object to resolve.
    * @returns {Promise<string|null>} The document content or null.
    */
-  async _provideTextDocumentContent(handle: number, uri: unknown): Promise<string | null> {
-    return provideLocalTextDocumentContent(this._documentContentRuntime(), handle, uri);
+  async _provideTextDocumentContent(
+    handle: number,
+    uri: unknown,
+  ): Promise<string | null> {
+    return provideLocalTextDocumentContent(
+      this._documentContentRuntime(),
+      handle,
+      uri,
+    );
   }
 
-  async _discoverServerRootPath(httpBase: string, folder: string | null, socketPath: string | null): Promise<string> {
+  async _discoverServerRootPath(
+    httpBase: string,
+    folder: string | null,
+    socketPath: string | null,
+  ): Promise<string> {
     return discoverWorkbenchServerRootPath(httpBase, folder, socketPath);
   }
 
@@ -1075,7 +1399,9 @@ export class WorkbenchClient {
     return commitFromWorkbenchServerRootPath(serverRootPath);
   }
 
-  _buildExtensionsSnapshot(scannedExtensions: unknown[]): Record<string, unknown> {
+  _buildExtensionsSnapshot(
+    scannedExtensions: unknown[],
+  ): Record<string, unknown> {
     return buildExtensionsSnapshot(scannedExtensions, {
       env: process.env,
       excludeIds: EXT_EXCLUDE_IDS,
@@ -1083,11 +1409,16 @@ export class WorkbenchClient {
     });
   }
 
-  _sanitizeExtensionForInit(ext: unknown, authority: string | null): Record<string, unknown> | null {
+  _sanitizeExtensionForInit(
+    ext: unknown,
+    authority: string | null,
+  ): Record<string, unknown> | null {
     return sanitizeExtensionForInit(ext, authority, process.env);
   }
 
-  async _scanExtensionsFromDisk(authority: string | null): Promise<Record<string, unknown>[]> {
+  async _scanExtensionsFromDisk(
+    authority: string | null,
+  ): Promise<Record<string, unknown>[]> {
     return scanExtensionsFromDisk(this._extensionCatalogRuntime(), authority);
   }
 
@@ -1095,13 +1426,69 @@ export class WorkbenchClient {
     return extensionIdentifierFrom(ext);
   }
 
-  _workspaceFromFolder(folder: string | null, authority: string | null): Record<string, unknown> | null {
+  _resetSessionCaches(reason: string): void {
+    try {
+      this._extRequests.rejectAll(new Error(reason || "session_reset"));
+    } catch {}
+    try {
+      this._extRequests.clear();
+      this._extRequests.resetReqIds();
+    } catch {}
+    this._activeEditorId = null;
+    this._activeUriObj = null;
+    this._activeTab = null;
+    this._backgroundDocuments.clear();
+    this._docVersions.clear();
+    this._docLineCount.clear();
+    this._docCharCount.clear();
+    this._docLastLineLength.clear();
+    this._docOpenGeneration.clear();
+    this._providerRegistry.clear();
+    this._extensions = [];
+    this._rawExtensionConfigs = null;
+    this._languageCatalogCache = null;
+    this._extHandshake = {
+      readySeen: false,
+      initSent: false,
+      initialized: false,
+    };
+    this._debugExtReqSeen = 0;
+    this._debugExtReplySeen = 0;
+    this._debugMainThreadReplySeen = 0;
+    this._extMsgTrace = {
+      enabled: EXT_MSG_TRACE,
+      seen: 0,
+      bytes: 0,
+      maxBytes: 0,
+      lastTs: 0,
+    };
+    this._extMsgCount = 0;
+    this.state.ready = false;
+    this.state.activePath = null;
+    this.state.activeUri = null;
+    this.state.activeLanguageId = null;
+    this.state.lastOpenTs = null;
+    this.state.docSymbolsProviderHandle = null;
+    this.state.hoverProviderHandle = null;
+  }
+
+  _workspaceFromFolder(
+    folder: string | null,
+    authority: string | null,
+  ): Record<string, unknown> | null {
     void authority;
     return workspaceFromFolder(this._extensionCatalogRuntime(), folder);
   }
 
-  _uriForPath(pathStr: string, authority: string | null = this._authority): Record<string, unknown> {
-    return buildUriForPath(this._useRemote, pathStr, authority ?? DEFAULT_REMOTE_AUTHORITY);
+  _uriForPath(
+    pathStr: string,
+    authority: string | null = this._authority,
+  ): Record<string, unknown> {
+    return buildUriForPath(
+      this._useRemote,
+      pathStr,
+      authority ?? DEFAULT_REMOTE_AUTHORITY,
+    );
   }
 
   _uriObjToStringSafe(uri: unknown): string {
@@ -1124,7 +1511,10 @@ export class WorkbenchClient {
     return statLocalDocumentUri(this._documentContentRuntime(), uri);
   }
 
-  async _tryOpenDocument(uri: unknown, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  async _tryOpenDocument(
+    uri: unknown,
+    options: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> {
     return openLocalDocument(this._documentContentRuntime(), uri, options);
   }
 
@@ -1144,15 +1534,34 @@ export class WorkbenchClient {
     return statVirtualVscodeUri(this._configurationRuntime(), uri);
   }
 
-  _extractExtensionConfigDefaults(scannedExtensions: unknown[]): RawExtensionConfigDefaults {
-    return extractExtensionConfigDefaults(scannedExtensions, (...args) => console.log(...args));
+  _extractExtensionConfigDefaults(
+    scannedExtensions: unknown[],
+  ): RawExtensionConfigDefaults {
+    return extractExtensionConfigDefaults(scannedExtensions, (...args) =>
+      console.log(...args),
+    );
   }
 
-  _buildConfigurationInitData(folder: string | null, authority: string | null): Record<string, unknown> {
-    return buildConfigurationInitData(this._configurationRuntime(), folder, authority);
+  _buildConfigurationInitData(
+    folder: string | null,
+    authority: string | null,
+  ): Record<string, unknown> {
+    return buildConfigurationInitData(
+      this._configurationRuntime(),
+      folder,
+      authority,
+    );
   }
 
-  _buildExtHostInitData({ authority, commit, envData, scannedExtensions, folder, useRemote, productVersion }: ExtHostInitOptions): Record<string, unknown> {
+  _buildExtHostInitData({
+    authority,
+    commit,
+    envData,
+    scannedExtensions,
+    folder,
+    useRemote,
+    productVersion,
+  }: ExtHostInitOptions): Record<string, unknown> {
     return buildExtHostInitData(this._extensionCatalogRuntime(), {
       authority,
       commit,
@@ -1164,12 +1573,21 @@ export class WorkbenchClient {
     });
   }
 
-  async connect(params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  async connect(
+    params: Record<string, unknown> = {},
+  ): Promise<Record<string, unknown>> {
     if (this._connecting) throw new Error("already connecting");
+    this._resetSessionCaches("connect");
     this._connecting = true;
     try {
-      const management = await connectManagementSession(this._managementRuntime(), params);
-      return await connectExtensionHostSession(this._extensionHostRuntime(), management);
+      const management = await connectManagementSession(
+        this._managementRuntime(),
+        params,
+      );
+      return await connectExtensionHostSession(
+        this._extensionHostRuntime(),
+        management,
+      );
     } finally {
       this._connecting = false;
     }
@@ -1200,11 +1618,16 @@ export class WorkbenchClient {
    * Push a full-text buffer update to the extension host for live diagnostics.
    * Uses $acceptModelChanged on ExtHostDocuments with isFlush:true.
    */
-  didChange(params: unknown = {}, opts: DidChangeOptions = {}): Record<string, unknown> | Promise<Record<string, unknown>> {
+  didChange(
+    params: unknown = {},
+    opts: DidChangeOptions = {},
+  ): Record<string, unknown> | Promise<Record<string, unknown>> {
     return applyDidChange(this._workspaceLifecycleRuntime(), params, opts);
   }
 
-  async documentSymbols(params: unknown = {}): Promise<Record<string, unknown>> {
+  async documentSymbols(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
     return provideDocumentSymbols(this._documentFeatureRuntime(), params);
   }
 
@@ -1213,7 +1636,13 @@ export class WorkbenchClient {
   }
 
   /** Single-provider symbols path (for pinned handle callers). */
-  async _symbolsSingle(providerHandle: number, path: string, authority: string, languageId: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async _symbolsSingle(
+    providerHandle: number,
+    path: string,
+    authority: string,
+    languageId: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
     return provideDocumentSymbolsSingle(this._documentFeatureRuntime(), {
       providerHandle,
       path,
@@ -1247,7 +1676,14 @@ export class WorkbenchClient {
     return provideHover(this._documentFeatureRuntime(), params);
   }
 
-  async _hoverSingle(providerHandle: number, path: string, lineNumber: number, column: number, authority: string, languageId: string): Promise<Record<string, unknown>> {
+  async _hoverSingle(
+    providerHandle: number,
+    path: string,
+    lineNumber: number,
+    column: number,
+    authority: string,
+    languageId: string,
+  ): Promise<Record<string, unknown>> {
     void languageId;
     return provideHoverSingle(this._documentFeatureRuntime(), {
       providerHandle,
@@ -1267,24 +1703,37 @@ export class WorkbenchClient {
     return provideInlayHints(this._inlayHintsRuntime(), params);
   }
 
-  async resolveInlayHint(params: unknown = {}): Promise<Record<string, unknown>> {
+  async resolveInlayHint(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
     return resolveInlayHint(this._inlayHintsRuntime(), params);
   }
 
-  async releaseInlayHints(params: unknown = {}): Promise<Record<string, unknown>> {
+  async releaseInlayHints(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
     return releaseInlayHints(this._inlayHintsRuntime(), params);
   }
 
-  async inlineCompletions(params: unknown = {}): Promise<Record<string, unknown>> {
+  async inlineCompletions(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
     return provideInlineCompletions(this._inlineCompletionRuntime(), params);
   }
 
-  async freeInlineCompletions(params: unknown = {}): Promise<Record<string, unknown>> {
+  async freeInlineCompletions(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
     return freeInlineCompletions(this._inlineCompletionRuntime(), params);
   }
 
-  async handleInlineCompletionDidShow(params: unknown = {}): Promise<Record<string, unknown>> {
-    return handleInlineCompletionDidShow(this._inlineCompletionRuntime(), params);
+  async handleInlineCompletionDidShow(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
+    return handleInlineCompletionDidShow(
+      this._inlineCompletionRuntime(),
+      params,
+    );
   }
 
   /** Single-provider completions path (for pinned handle callers). */
@@ -1341,11 +1790,18 @@ export class WorkbenchClient {
 
   /** Parse a semantic tokens reply (type 7/8/9) into a structured result. Returns null on unrecognized. */
   _parseSemanticTokensReply(rep: unknown, legend: unknown): unknown {
-    return parseSemanticTokensReply(rep, legend, (message) => console.log(message), (message) => console.warn(message));
+    return parseSemanticTokensReply(
+      rep,
+      legend,
+      (message) => console.log(message),
+      (message) => console.warn(message),
+    );
   }
 
   // ─── Semantic Tokens Range ──────────────────────────────────────────
-  async semanticTokensRange(params: unknown = {}): Promise<Record<string, unknown>> {
+  async semanticTokensRange(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
     return provideSemanticTokensRange(this._semanticTokensRuntime(), params);
   }
 
@@ -1366,19 +1822,32 @@ export class WorkbenchClient {
    * their analysis to the new project.  Also re-subscribes the file watcher.
    */
   async _switchWorkspace(newFolder: string): Promise<Record<string, unknown>> {
-    return { ...await switchWorkbenchWorkspace(this._workspaceLifecycleRuntime(), newFolder) } as Record<string, unknown>;
+    return {
+      ...(await switchWorkbenchWorkspace(
+        this._workspaceLifecycleRuntime(),
+        newFolder,
+      )),
+    } as Record<string, unknown>;
   }
 
-  _clearProjectScopedSwitchState(reason: string): { rejectedPendingRequests: number; clearedBackgroundDocuments: number } {
+  _clearProjectScopedSwitchState(reason: string): {
+    rejectedPendingRequests: number;
+    clearedBackgroundDocuments: number;
+  } {
     const clearedBackgroundDocuments = this._backgroundDocuments.size;
     this._backgroundDocuments.clear();
-    const rejectedPendingRequests = this._extRequests.rejectAll(new Error(reason || "workspace_switch"));
+    const rejectedPendingRequests = this._extRequests.rejectAll(
+      new Error(reason || "workspace_switch"),
+    );
     return { rejectedPendingRequests, clearedBackgroundDocuments };
   }
 
   // ─── File Watcher IPC ────────────────────────────────────────────────
   async _setupFileWatcher(workspaceRoot: string | null): Promise<void> {
-    return setupWorkbenchWatcher(this._workspaceLifecycleRuntime(), workspaceRoot);
+    return setupWorkbenchWatcher(
+      this._workspaceLifecycleRuntime(),
+      workspaceRoot,
+    );
   }
 
   async resubscribeWatcher(): Promise<void> {
@@ -1386,17 +1855,24 @@ export class WorkbenchClient {
   }
 
   disconnect(): void {
-    return disconnectSession(this._transportRuntime());
+    disconnectSession(this._transportRuntime());
+    this._resetSessionCaches("disconnect");
   }
 
   async languageCatalog(): Promise<Record<string, unknown>> {
     if (this._languageCatalogCache) return this._languageCatalogCache;
     if (!Array.isArray(this._extensions) || this._extensions.length === 0) {
       try {
-        await waitFor(() => Array.isArray(this._extensions) && this._extensions.length > 0, { timeoutMs: 5000, intervalMs: 50 });
+        await waitFor(
+          () => Array.isArray(this._extensions) && this._extensions.length > 0,
+          { timeoutMs: 5000, intervalMs: 50 },
+        );
       } catch {}
     }
-    this._languageCatalogCache = await buildLanguageCatalog(this._extensionCatalogRuntime(), this._extensions);
+    this._languageCatalogCache = await buildLanguageCatalog(
+      this._extensionCatalogRuntime(),
+      this._extensions,
+    );
     return this._languageCatalogCache;
   }
 
@@ -1431,7 +1907,9 @@ export class WorkbenchClient {
     for (const event of events) {
       this.onEvent({ ...event, ts_ms: Date.now() });
     }
-    console.error(`[resync] replayed providers: cmp=${replayed.completions} inlay=${replayed.inlayHints} inline=${replayed.inlineCompletions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges}`);
+    console.error(
+      `[resync] replayed providers: cmp=${replayed.completions} inlay=${replayed.inlayHints} inline=${replayed.inlineCompletions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges}`,
+    );
     return { ok: true, ts_ms: Date.now(), replayed };
   }
 }

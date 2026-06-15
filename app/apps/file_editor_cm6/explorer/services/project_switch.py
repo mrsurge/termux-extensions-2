@@ -87,6 +87,7 @@ async def switch_project_connection(
     if websocket is not None:
         manager.register_existing(websocket, str(new_root))
     manager.reassign_all(str(new_root))
+    await _reset_project_diagnostics(new_root, project_generation=project_generation)
 
     if switch_adapter_workspace:
         try:
@@ -94,14 +95,15 @@ async def switch_project_connection(
             adapter_status = "switching"
             adapter_rpc = _get_adapter_rpc()
             switch_response = await adapter_rpc(
-                "adapter.switchWorkspace",
-                {"folder": str(new_root)},
-                30,
+                "adapter.reconnect",
+                {"workspaceFolder": str(new_root)},
+                75,
             )
-            _require_switch_ack(switch_response)
+            _require_switch_ack(switch_response, method="adapter.reconnect")
             await _mark_adapter_workspace_ready(new_root)
             adapter_status = "ready"
-            logger.info("[project_open] adapter workspace switched to %s", new_root)
+            await _reset_project_diagnostics(new_root, project_generation=project_generation)
+            logger.info("[project_open] adapter reconnected to workspace %s", new_root)
         except Exception as exc:
             adapter_status = "error"
             try:
@@ -109,7 +111,7 @@ async def switch_project_connection(
             except Exception:
                 pass
             logger.warning(
-                "[project_open] adapter switchWorkspace failed: %s",
+                "[project_open] adapter reconnect failed: %s",
                 exc,
             )
 
@@ -257,6 +259,28 @@ async def _broadcast_project_git_state(
         logger.warning("[project_open] git state replay failed: %s", exc)
 
 
+async def _reset_project_diagnostics(
+    project_root: Path,
+    *,
+    project_generation: int,
+) -> None:
+    try:
+        diagnostics_module = importlib.import_module(
+            "app.apps.file_editor_cm6.diagnostics_bridge"
+        )
+        reset_obj = getattr(
+            diagnostics_module,
+            "reset_diagnostics_projection_for_project",
+            None,
+        )
+        if not callable(reset_obj):
+            return
+        reset = cast(Callable[..., Awaitable[None]], reset_obj)
+        await reset(project_root, project_generation=project_generation)
+    except Exception as exc:
+        logger.warning("[project_open] diagnostics reset failed: %s", exc)
+
+
 def _sidecar_data_dict(sidecar: ProjectSidecar) -> dict[object, object] | None:
     data = getattr(sidecar, "_data", None)
     if not isinstance(data, dict):
@@ -286,9 +310,9 @@ def _ensure_wba_event_bridge() -> None:
         logger.warning("[project_open] WBA event bridge start failed: %s", exc)
 
 
-def _require_switch_ack(response: object) -> None:
+def _require_switch_ack(response: object, *, method: str = "adapter.switchWorkspace") -> None:
     if not isinstance(response, dict):
-        raise RuntimeError("adapter.switchWorkspace returned non-object response")
+        raise RuntimeError(f"{method} returned non-object response")
     response_obj = cast(dict[str, object], response)
     raw_error = response_obj.get("error")
     if isinstance(raw_error, dict):
@@ -297,10 +321,10 @@ def _require_switch_ack(response: object) -> None:
         raise RuntimeError(str(message if isinstance(message, str) and message else error))
     raw_result = response_obj.get("result")
     if not isinstance(raw_result, dict):
-        raise RuntimeError("adapter.switchWorkspace returned response without object result")
+        raise RuntimeError(f"{method} returned response without object result")
     result = cast(dict[str, object], raw_result)
     if result.get("ok") is not True or result.get("readyForDocumentOpen") is not True:
-        raise RuntimeError("adapter.switchWorkspace did not ack readyForDocumentOpen")
+        raise RuntimeError(f"{method} did not ack readyForDocumentOpen")
 
 
 async def _mark_adapter_workspace_switching(project_root: Path) -> None:
