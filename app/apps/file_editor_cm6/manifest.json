@@ -20,5 +20,6 @@
     ]
   },
   "sio_service": "sio_service.json",
+  "readiness_support": true,
   "fullscreen": true
 }

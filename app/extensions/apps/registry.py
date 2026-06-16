@@ -83,6 +83,7 @@ class AppDefinition:
     icon_text: str = ""
     icon_emoji: str = ""
     fullscreen: bool = False
+    readiness_support: bool = False
     enabled: bool = True
     raw_manifest: dict[str, Any] = field(default_factory=dict)
     registry_errors: list[str] = field(default_factory=list)
@@ -132,6 +133,7 @@ class AppDefinition:
             "asset_base_url": self.asset_base_url,
             "proxy_shell": self.proxy_shell,
             "sidebar_state": sidebar_state,
+            "readiness_support": self.readiness_support,
             "enabled": self.enabled,
         }
         if include_compat_dir:
@@ -161,6 +163,7 @@ class AppDefinition:
             "source_kind": self.source_kind,
             "asset_base_url": self.asset_base_url,
             "sidebar_state": sidebar_state,
+            "readiness_support": self.readiness_support,
             "enabled": self.enabled,
         }
 
@@ -322,6 +325,7 @@ class AppRegistry:
                     icon_text=icon_text.strip(),
                     icon_emoji=icon_emoji.strip(),
                     fullscreen=bool(manifest.get("fullscreen")),
+                    readiness_support=bool(manifest.get("readiness_support")),
                     enabled=bool(manifest.get("enabled", True)),
                     raw_manifest=dict(manifest),
                 )

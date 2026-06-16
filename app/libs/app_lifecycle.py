@@ -79,7 +79,7 @@ async def stop_background_tasks():
     print("[AppLifecycle] Background cleanup task stopped")
 
 # --- Public API for the Library ---
-async def register_app(app_id: str, shell_id: str, port: int):
+async def register_app(app_id: str, shell_id: str, port: int, *, readiness_support: bool = False):
     """
     Called by the app launcher when a new app worker shell is spawned.
     """
@@ -93,7 +93,11 @@ async def register_app(app_id: str, shell_id: str, port: int):
             "port": port,
             "created_at": existing.get("created_at", time.time()),
             "locked": bool(existing.get("locked", False)),
+            "readiness_support": bool(readiness_support),
         }
+        if not readiness_support:
+            _app_readiness.pop(safe_app_id, None)
+            return
         existing_readiness = _app_readiness.get(safe_app_id)
         existing_status = str((existing_readiness or {}).get("status") or "").strip().lower()
         if existing_status not in {"ready", "starting"}:

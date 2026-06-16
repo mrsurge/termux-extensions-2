@@ -455,6 +455,10 @@
             return !!(appDef && appDef.entrypoints && appDef.entrypoints.backend_blueprint);
         }
 
+        function appSupportsReadiness(appDef) {
+            return !!(appDef && appDef.readiness_support === true);
+        }
+
         function normalizeReadinessStatus(readiness) {
             const raw = readiness && typeof readiness === 'object'
                 ? String(readiness.status || '').trim().toLowerCase()
@@ -496,7 +500,7 @@
         }
 
         async function waitForBackendReadiness(appDef) {
-            if (!appRequiresBackend(appDef)) return;
+            if (!appRequiresBackend(appDef) || !appSupportsReadiness(appDef)) return;
 
             let done = false;
             let pollTimer = 0;

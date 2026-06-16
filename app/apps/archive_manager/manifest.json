@@ -10,5 +10,6 @@
     "frontend_template": "template.html",
     "frontend_script": "main.js",
     "backend_blueprint": "backend.py"
-  }
+  },
+  "readiness_support": true
 }

@@ -86,8 +86,9 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
         sidebar_state = manifest.get("sidebar_state")
         if not isinstance(sidebar_state, dict):
             sidebar_state = None
-        readiness = readiness_by_app.get(app_id) or {}
-        if not readiness and backend_required and app_id in running:
+        readiness_support = bool(manifest.get("readiness_support"))
+        readiness = readiness_by_app.get(app_id) if readiness_support else {}
+        if readiness_support and not readiness and backend_required and app_id in running:
             readiness = {"app_id": app_id, "status": "starting"}
 
         catalog.append({
@@ -101,8 +102,9 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
             "icon_emoji": manifest.get("icon_emoji") if isinstance(manifest.get("icon_emoji"), str) else "",
             "fullscreen": bool(manifest.get("fullscreen")),
             "backend_required": backend_required,
+            "readiness_support": readiness_support,
             "running": app_id in running,
-            "readiness": readiness,
+            "readiness": readiness or {},
             "launch_url": f"/app/{app_id}",
             "embed_url": f"/app/{app_id}?embed=1",
             "asset_base_url": manifest.get("asset_base_url") if isinstance(manifest.get("asset_base_url"), str) else "",
@@ -112,6 +114,15 @@ def _build_apps_catalog(manifests: list, running_apps: dict | None = None) -> li
 
     catalog.sort(key=lambda item: str(item.get("name") or item.get("id") or "").lower())
     return catalog
+
+
+def _readiness_manifest_or_404(app_id: str) -> dict:
+    manifest = next((app for app in get_loaded_apps() if app.get('id') == app_id), None)
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"App '{app_id}' not found")
+    if not bool(manifest.get("readiness_support")):
+        raise HTTPException(status_code=404, detail=f"App '{app_id}' does not support readiness")
+    return manifest
 
 
 async def _build_apps_snapshot() -> dict[str, Any]:
@@ -297,9 +308,7 @@ async def set_app_readiness(app_id: str, payload: dict | None = Body(None)):
     Minimum body: {"status": "ready"}. POST and PUT have the same semantics.
     This is app/backend lifecycle state only; slot/window state belongs to the sidebar window API.
     """
-    manifest = next((app for app in get_loaded_apps() if app.get('id') == app_id), None)
-    if not manifest:
-        raise HTTPException(status_code=404, detail=f"App '{app_id}' not found")
+    _readiness_manifest_or_404(app_id)
     body = payload if isinstance(payload, dict) else {}
     status = str(body.get("status") or "").strip()
     if not status:

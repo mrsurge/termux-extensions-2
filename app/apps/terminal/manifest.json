@@ -12,6 +12,7 @@
     "frontend_template": "template.html",
     "frontend_script": "static/dist/main.js?v=0.2.13"
   },
+  "readiness_support": true,
   "sidebar_state": {
     "enabled": true,
     "kind": "shell",

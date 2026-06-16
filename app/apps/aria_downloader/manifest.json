@@ -13,5 +13,6 @@
     "frontend_template": "template.html",
     "frontend_script": "main.js"
   },
+  "readiness_support": true,
   "fullscreen": true
 }

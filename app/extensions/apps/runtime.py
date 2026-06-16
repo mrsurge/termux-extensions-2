@@ -125,10 +125,16 @@ class AppRuntime:
     async def adopt_running_apps(self) -> list[dict[str, Any]]:
         adopted: list[dict[str, Any]] = []
         for app_id, info in (await self.get_running_app_map()).items():
+            app = self.registry.get_app(app_id)
             port = _parse_port(info.get("port"))
             if port is None:
                 continue
-            await app_lifecycle.register_app(app_id, str(info["shell_id"]), port)
+            await app_lifecycle.register_app(
+                app_id,
+                str(info["shell_id"]),
+                port,
+                readiness_support=bool(app and app.readiness_support),
+            )
             adopted.append(dict(info))
         return adopted
 
@@ -204,7 +210,12 @@ class AppRuntime:
             port = _parse_port(running.get("port"))
             shell_id = str(running.get("shell_id") or "").strip()
             if port is not None and shell_id and await app_lifecycle.get_app_readiness(app_id) is None:
-                await app_lifecycle.register_app(app_id, shell_id, port)
+                await app_lifecycle.register_app(
+                    app_id,
+                    shell_id,
+                    port,
+                    readiness_support=app.readiness_support,
+                )
             return running
 
         if not app.backend_module and not app.shells:
@@ -215,7 +226,12 @@ class AppRuntime:
         if port is None:
             raise RuntimeError(f"App worker shellspec did not set TE_APP_WORKER_PORT for app '{app.app_id}'")
 
-        await app_lifecycle.register_app(app.app_id, record.id, port)
+        await app_lifecycle.register_app(
+            app.app_id,
+            record.id,
+            port,
+            readiness_support=app.readiness_support,
+        )
         return {
             "app_id": app.app_id,
             "port": port,

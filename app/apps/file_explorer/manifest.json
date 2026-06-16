@@ -11,6 +11,7 @@
     "frontend_template": "template.html",
     "frontend_script": "main.js"
   },
+  "readiness_support": true,
   "sidebar_state": {
     "enabled": true,
     "reference": true,
