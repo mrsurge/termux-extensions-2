@@ -10,6 +10,7 @@ from ..contracts.prefs import (
     ExplorerPrefsVendorAgentIconParams,
 )
 from ..context import ExplorerPrefsHandlerContext
+from ..services.state_facts import publish_preferences_changed
 from ...preferences_store import DEFAULT_UI_PREFS
 from ...stores import get_preferences_store
 
@@ -32,7 +33,10 @@ async def handle_prefs_update_ui(
     value = _normalize_ui_pref_value(key, params["value"])
     updated = PREFERENCES_STORE.update_preferences(ui={key: value})
     ui_prefs = _as_object(updated.get("ui")) or {}
-    await context.broadcast("explorer.prefs.ui.updated", {"ui": ui_prefs})
+    await publish_preferences_changed(
+        ui=ui_prefs,
+        source="explorer_prefs:update_ui",
+    )
     del msg_id
 
 

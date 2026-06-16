@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, TypedDict, cast
 
 from ...project_sidecar import ProjectSidecar
+from ...open_state_events import open_state_payload_from_event
 from ...worker_services.event_bus import (
     WorkerEvent,
     build_event,
@@ -17,9 +18,12 @@ from ...worker_services.event_bus import (
     publish as publish_worker_event,
     subscribe as subscribe_worker_event,
 )
-from ..context import Broadcast, EmitPersonal
+from ..context import EmitPersonal
 from ..transport.connection_manager import abs_to_rel
-from ..transport.rpc_emit import emit_project_explorer_rpc_notification
+from ..transport.rpc_emit import (
+    emit_explorer_rpc_notification,
+    emit_project_explorer_rpc_notification,
+)
 from . import file_ops as _file_ops
 
 logger = logging.getLogger(__name__)
@@ -136,13 +140,6 @@ async def emit_bootstrap_snapshot(
         await emit_personal("explorer.list.updated", listing)
 
 
-async def broadcast_directory_listing(
-    broadcast: Broadcast,
-    rel: str,
-) -> None:
-    await broadcast("explorer.list.updated", await build_directory_listing(rel))
-
-
 # Event-bus projection. The render-state subsystem owns watcher-driven Explorer
 # relist decisions, so the frontend no longer derives affected directories from
 # watcher payloads.
@@ -151,7 +148,15 @@ def register_explorer_render_state_bus_handlers() -> None:
     if _event_bus_handlers_registered:
         return
     subscribe_worker_event("DiagnosticsDetailChanged", _handle_diagnostics_detail_changed_event)
+    subscribe_worker_event("DraftStateChanged", _handle_draft_state_changed_event)
+    subscribe_worker_event("GitDiffBaseChanged", _handle_git_diff_base_changed_event)
+    subscribe_worker_event("GitPathRestored", _handle_git_path_restored_event)
     subscribe_worker_event("GitSnapshotChanged", _handle_git_snapshot_changed_event)
+    subscribe_worker_event("OpenStateChanged", _handle_open_state_changed_event)
+    subscribe_worker_event("PreferencesChanged", _handle_preferences_changed_event)
+    subscribe_worker_event("ReviewStateChanged", _handle_review_state_changed_event)
+    subscribe_worker_event("WatcherConfigChanged", _handle_watcher_config_changed_event)
+    subscribe_worker_event("WatcherErrorRaised", _handle_watcher_error_raised_event)
     subscribe_worker_event("WorkspaceFilesChanged", _handle_workspace_files_changed_event)
     subscribe_worker_event("ExplorerRenderStateChanged", _handle_explorer_render_state_changed_event)
     _event_bus_handlers_registered = True
@@ -176,6 +181,51 @@ async def _handle_diagnostics_detail_changed_event(event: WorkerEvent) -> None:
         project,
         "explorer.diagnostics.detail",
         cast(JsonObject, _diagnostics_detail_from_event(event)),
+    )
+
+
+async def _handle_draft_state_changed_event(event: WorkerEvent) -> None:
+    # Draft/review state changes are store-backed facts; render-state owns only
+    # the Explorer decoration projection for those facts.
+    project = event.get("project_root")
+    if not project or _is_stale_project_event(event, project):
+        return
+    await emit_project_explorer_rpc_notification(
+        project,
+        "explorer.decorations.updated",
+        {"drafts": event_payload_object(event, "drafts")},
+    )
+
+
+async def _handle_git_diff_base_changed_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project or _is_stale_project_event(event, project):
+        return
+    payload = event["payload"]
+    ref = payload.get("ref")
+    if not isinstance(ref, str) or not ref:
+        return
+    await emit_project_explorer_rpc_notification(
+        project,
+        "explorer.git.diffBase.updated",
+        {
+            "ref": ref,
+            "refresh": payload.get("refresh") is True,
+        },
+    )
+
+
+async def _handle_git_path_restored_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project or _is_stale_project_event(event, project):
+        return
+    path = event["payload"].get("path")
+    if not isinstance(path, str) or not path:
+        return
+    await emit_project_explorer_rpc_notification(
+        project,
+        "explorer.git.restored",
+        {"path": path},
     )
 
 
@@ -207,6 +257,96 @@ async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:
             "explorer.git.status.updated",
             status,
         )
+
+
+async def _handle_open_state_changed_event(event: WorkerEvent) -> None:
+    # Explorer render-state is the Explorer projector for backend open-state
+    # facts; the editor runtime no longer publishes active-file state directly.
+    project = event.get("project_root")
+    if not project:
+        return
+    generation = event.get("project_generation")
+    if generation is not None and current_project_generation(project) != generation:
+        logger.debug(
+            "[explorer_render_state] dropped stale open-state project=%s generation=%s current=%s",
+            project,
+            generation,
+            current_project_generation(project),
+        )
+        return
+    open_state = open_state_payload_from_event(event)
+    if open_state is None:
+        return
+    await emit_project_explorer_rpc_notification(
+        project,
+        "explorer.openState.changed",
+        dict(open_state),
+    )
+    await emit_project_explorer_rpc_notification(
+        project,
+        "explorer.activeFile.updated",
+        {
+            "rel": open_state["openFileRel"],
+            "abs": open_state["openFile"],
+            "openState": dict(open_state),
+        },
+        )
+
+
+async def _handle_preferences_changed_event(event: WorkerEvent) -> None:
+    await emit_explorer_rpc_notification(
+        "explorer.prefs.ui.updated",
+        {"ui": event_payload_object(event, "ui")},
+    )
+
+
+async def _handle_review_state_changed_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project or _is_stale_project_event(event, project):
+        return
+    await emit_project_explorer_rpc_notification(
+        project,
+        "explorer.review.entries.updated",
+        {"entries": _event_payload_object_list(event, "entries")},
+    )
+
+
+async def _handle_watcher_config_changed_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project or _is_stale_project_event(event, project):
+        return
+    config = event_payload_object(event, "config")
+    if config:
+        await emit_project_explorer_rpc_notification(
+            project,
+            "explorer.watcher.config.updated",
+            config,
+        )
+    mode = event["payload"].get("mode")
+    if isinstance(mode, str) and mode:
+        await emit_project_explorer_rpc_notification(
+            project,
+            "explorer.watcher.mode.changed",
+            {"mode": mode},
+        )
+    mode_status = event_payload_object(event, "mode_status")
+    if mode_status:
+        await emit_project_explorer_rpc_notification(
+            project,
+            "explorer.watcher.mode.status",
+            mode_status,
+        )
+
+
+async def _handle_watcher_error_raised_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project or _is_stale_project_event(event, project):
+        return
+    await emit_project_explorer_rpc_notification(
+        project,
+        "explorer.watcher.error",
+        event_payload_object(event, "error"),
+    )
 
 
 async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:
@@ -305,6 +445,29 @@ def _diagnostics_detail_from_event(event: WorkerEvent) -> DiagnosticsDetailPaylo
         for path, markers in raw.items()
         if isinstance(markers, list)
     }
+
+
+def _event_payload_object_list(event: WorkerEvent, key: str) -> list[object]:
+    value = event["payload"].get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in cast(list[object], value)]
+
+
+def _is_stale_project_event(event: WorkerEvent, project: str) -> bool:
+    generation = event.get("project_generation")
+    if generation is None:
+        return False
+    stale = current_project_generation(project) != generation
+    if stale:
+        logger.debug(
+            "[explorer_render_state] dropped stale %s project=%s generation=%s current=%s",
+            event["type"],
+            project,
+            generation,
+            current_project_generation(project),
+        )
+    return stale
 
 
 def _affected_directories_for_rels(rels: list[str], open_directories: list[str]) -> list[str]:

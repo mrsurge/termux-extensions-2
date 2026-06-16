@@ -12,7 +12,8 @@ from ..contracts.session import (
 )
 from ..context import ExplorerSessionHandlerContext
 from ..services import file_ops as _file_ops
-from ..services.render_state import build_directory_listing, broadcast_directory_listing
+from ..services.render_state import build_directory_listing
+from ..services.state_facts import publish_explorer_directories_changed
 from ...project_sidecar import ProjectSidecar
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,12 @@ async def handle_explorer_refresh(
     mark_git_cache_dirty(context.project_root)
     await context.broadcast_git_status()
     await context.broadcast_review_state()
-    await broadcast_directory_listing(context.broadcast, ".")
+    await publish_explorer_directories_changed(
+        context.project_root,
+        ["."],
+        reason="manual_refresh",
+        source="explorer_session:refresh",
+    )
 
 
 async def handle_set_open_dirs(

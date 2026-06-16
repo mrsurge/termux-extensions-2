@@ -83,15 +83,13 @@ def _build_rel_payload(
 
 
 async def publish_watcher_error(project_path: str, payload: dict[str, object]) -> None:
-    from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
+    from .explorer.services.state_facts import publish_watcher_error_raised
 
     normalized_project = _normalize_project_path(project_path)
-    copied = dict(payload)
-    _watcher_error_by_project[normalized_project] = copied
-    await emit_project_explorer_rpc_notification(
+    await publish_watcher_error_raised(
         normalized_project,
-        "explorer.watcher.error",
-        copied,
+        dict(payload),
+        source="workspace_events:publish_watcher_error",
     )
 
 
@@ -184,6 +182,7 @@ def register_workspace_event_bus_handlers() -> None:
     subscribe_worker_event("WorkspaceFilesChanged", _handle_workspace_files_changed_event)
     subscribe_worker_event("GitSnapshotRequested", _handle_git_snapshot_requested_event)
     subscribe_worker_event("GitSnapshotChanged", _handle_git_snapshot_changed_event)
+    subscribe_worker_event("WatcherErrorRaised", _handle_watcher_error_raised_event)
     _event_bus_handlers_registered = True
 
 
@@ -218,6 +217,19 @@ async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:
             correlation_id=event.get("correlation_id"),
             payload={},
         )
+    )
+
+
+async def _handle_watcher_error_raised_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project:
+        return
+    generation = event.get("project_generation")
+    if generation is not None and current_project_generation(project) != generation:
+        return
+    _watcher_error_by_project[_normalize_project_path(project)] = event_payload_object(
+        event,
+        "error",
     )
 
 

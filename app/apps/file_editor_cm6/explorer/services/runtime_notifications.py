@@ -12,8 +12,8 @@ from types import TracebackType
 from typing import Protocol, cast
 
 from .file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
+from .state_facts import publish_draft_state_changed, publish_review_state_changed
 from ..transport.connection_manager import manager
-from ..transport.rpc_emit import emit_project_explorer_rpc_notification
 from ...worker_services.event_bus import (
     build_event,
     current_project_generation,
@@ -225,18 +225,20 @@ async def _broadcast_draft_decorations(project_path: str) -> None:
                 return set()
 
         draft_files = await asyncio.to_thread(_load_snapshot)
-        draft_decorations = {rel: {"hasDraft": True} for rel in draft_files}
-        await emit_project_explorer_rpc_notification(
+        draft_decorations: dict[str, object] = {
+            rel: {"hasDraft": True} for rel in draft_files
+        }
+        await publish_draft_state_changed(
             normalized_path,
-            "explorer.decorations.updated",
             {"drafts": draft_decorations},
+            source="runtime_notifications:draft_decorations",
         )
 
         reviews = await review.list_reviews(Path(normalized_path), lightweight=False)
-        await emit_project_explorer_rpc_notification(
+        await publish_review_state_changed(
             normalized_path,
-            "explorer.review.entries.updated",
             {"entries": reviews},
+            source="runtime_notifications:review_entries",
         )
     except Exception as exc:
         logger.warning("Failed to broadcast draft decorations: %s", exc)

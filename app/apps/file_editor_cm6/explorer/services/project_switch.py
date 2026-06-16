@@ -122,6 +122,7 @@ async def switch_project_connection(
         new_root,
         reason=open_state_reason,
         source=open_state_source,
+        project_generation=project_generation,
     )
     await _broadcast_project_git_state(new_root, project_generation=project_generation)
     await _broadcast_project_switched(
@@ -186,13 +187,19 @@ async def _replay_sidecar_open_state(
     *,
     reason: str,
     source: str,
+    project_generation: int,
 ) -> dict[str, object] | None:
     editor_module = importlib.import_module("app.apps.file_editor_cm6.monaco_editor.editor_ws")
     replay_obj = getattr(editor_module, "editor_runtime_replay_sidecar_open_state", None)
     if not callable(replay_obj):
         raise RuntimeError("editor_runtime_replay_sidecar_open_state unavailable")
     replay = cast(Callable[..., Awaitable[object | None]], replay_obj)
-    result = await replay(str(project_root), reason=reason, source=source)
+    result = await replay(
+        str(project_root),
+        reason=reason,
+        source=source,
+        project_generation=project_generation,
+    )
     return cast(dict[str, object], result) if isinstance(result, dict) else None
 
 

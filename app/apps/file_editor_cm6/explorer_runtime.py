@@ -172,10 +172,19 @@ class ExplorerDispatcher:
 
     async def broadcast_review_state(self) -> None:
         """Broadcast updated review entries and decoration updates."""
+        from .explorer.services.state_facts import (
+            publish_draft_state_changed,
+            publish_review_state_changed,
+        )
+
         # 1. Review List
         from .explorer import review
         reviews = await review.list_reviews(self.project_root, lightweight=True)
-        await self.broadcast("explorer.review.entries.updated", {"entries": reviews})
+        await publish_review_state_changed(
+            self.project_root,
+            {"entries": reviews},
+            source="explorer_runtime:broadcast_review_state",
+        )
 
         # 2. Decorations (Drafts)
         draft_decorations: JsonObject = {
@@ -185,7 +194,11 @@ class ExplorerDispatcher:
             for rel in [review_entry.get("rel")]
             if isinstance(rel, str)
         }
-        await self.broadcast("explorer.decorations.updated", {"drafts": draft_decorations})
+        await publish_draft_state_changed(
+            self.project_root,
+            {"drafts": draft_decorations},
+            source="explorer_runtime:broadcast_review_state",
+        )
 
     def _build_search_review_context(self) -> ExplorerSearchReviewHandlerContext:
         from .explorer.services.file_ops import mark_draft_cache_dirty

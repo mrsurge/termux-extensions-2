@@ -77,9 +77,19 @@ PyO3 adapters during migration.
 
 Implemented in `worker_services/event_bus.py`:
 
+- `DraftStateChanged`
+- `DiagnosticsDetailChanged`
+- `ExplorerRenderStateChanged`
+- `GitDiffBaseChanged`
+- `GitPathRestored`
+- `GitSnapshotChanged`
 - `GitSnapshotRequested`
+- `OpenStateChanged`
+- `PreferencesChanged`
 - `ProjectSwitchStarted`
 - `ProjectSwitchFinished`
+- `ReviewStateChanged`
+- `WatcherConfigChanged`
 - `WatcherErrorRaised`
 - `WorkspaceFilesChanged`
 
@@ -87,14 +97,7 @@ Near-term additions:
 
 - `AdapterSessionReset`
 - `AdapterWorkspaceReady`
-- `DiagnosticsChanged`
-- `ExplorerRenderStateChanged`
-- `ProjectOpenStateChanged`
-- `DraftStateChanged`
-- `ReviewStateChanged`
-- `PreferencesChanged`
 - `SidebarWindowStateChanged`
-- `GitSnapshotChanged`
 
 ## Runtime Rules
 
@@ -190,16 +193,23 @@ Acceptance:
 
 ### Phase 4 - Backend Explorer Render State
 
-Status: Next active implementation target.
+Status: Complete for current Explorer control-plane scope.
 
-- [ ] Define backend `ExplorerRenderStateChanged` facts.
-- [ ] Make root tree state, open dirs, active project metadata, git projection,
+- [x] Define backend `ExplorerRenderStateChanged` facts.
+- [x] Make root tree state, open dirs, active project metadata, git projection,
       watcher batches, and diagnostics detail replay from backend state.
-- [ ] Replace frontend "request again to prove correctness" behavior with
+- [x] Replace frontend "request again to prove correctness" behavior with
       backend-projected render-state changes.
-- [ ] Keep Explorer as a dumb renderer of backend-projected state.
-- [ ] Preserve existing Explorer RPC method and notification names unless a
+- [x] Keep Explorer as a dumb renderer of backend-projected state.
+- [x] Preserve existing Explorer RPC method and notification names unless a
       separate frontend contract migration is explicitly approved.
+
+Implementation note: file-tree mutations, manual refresh, watcher errors,
+watcher config/mode changes, diagnostics detail, git status/decorations, git
+diff-base/restored signals, open state, draft decorations, review entries, and
+Explorer UI preferences now publish typed backend facts and project through the
+Explorer render-state lane. Bootstrap snapshots and request/reply UI payloads
+such as search results, extension configuration, and job-start acks stay direct.
 
 Acceptance:
 
@@ -210,13 +220,13 @@ Acceptance:
 
 ### Phase 5 - Open State And Store-Backed Facts
 
-Status: Planned.
+Status: Complete for open state, Explorer-facing draft/review, and preferences.
 
-- [ ] Convert open-state writes into typed facts plus editor/Explorer/UI IPC
+- [x] Convert open-state writes into typed facts plus editor/Explorer/UI IPC
       projectors while keeping `open_state_backend.py` and `ProjectSidecar` as
       authority.
-- [ ] Convert draft/review decoration refreshes into typed facts plus projectors.
-- [ ] Convert preferences changes into typed facts plus lane-local projectors.
+- [x] Convert draft/review decoration refreshes into typed facts plus projectors.
+- [x] Convert preferences changes into typed facts plus lane-local projectors.
 - [ ] Convert sidebar-window state changes into typed facts plus lane-local
       projectors.
 - [ ] Preserve store authority: preferences store, history store, project
@@ -232,7 +242,7 @@ Acceptance:
 
 Status: Planned.
 
-- [ ] Add queue depth metrics by domain.
+- [ ] Add queue depth metrics.
 - [ ] Add enqueue-to-handler latency metrics.
 - [ ] Add handler duration metrics.
 - [ ] Add coalesce/drop counters.

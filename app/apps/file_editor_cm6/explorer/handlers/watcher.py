@@ -17,6 +17,7 @@ from ..contracts.watcher import (
     build_watcher_config_payload,
 )
 from ..context import ExplorerWatcherHandlerContext
+from ..services.state_facts import publish_watcher_config_changed
 from ...project_sidecar import ProjectSidecar
 
 logger = logging.getLogger(__name__)
@@ -112,7 +113,11 @@ async def handle_watcher_set_mode(
     except Exception as exc:
         logger.warning("[watcher] failed to sync vscode watcher settings: %s", exc)
 
-    from ...watchexec_shell_manager import ensure_watchexec_shell, stop_watchexec_shell
+    from ...watchexec_shell_manager import (
+        ensure_watchexec_shell,
+        is_watchexec_available,
+        stop_watchexec_shell,
+    )
 
     active = True
     if mode == "watchexec":
@@ -135,7 +140,21 @@ async def handle_watcher_set_mode(
         "active": active,
     }
     await context.emit_personal("explorer.watcher.mode.status", dict(status_payload), msg_id)
-    await context.broadcast("explorer.watcher.mode.changed", {"mode": mode})
+    config_payload: WatcherConfigPayload = {
+        "mode": mode,
+        "storage_type": storage_type,
+        "poll_interval_ms": poll_interval_ms,
+        "watchexec_available": is_watchexec_available(),
+    }
+    await publish_watcher_config_changed(
+        context.project_root,
+        {
+            "config": dict(config_payload),
+            "mode": mode,
+            "mode_status": dict(status_payload),
+        },
+        source="explorer_watcher:set_mode",
+    )
 
 
 async def handle_watcher_get_config(

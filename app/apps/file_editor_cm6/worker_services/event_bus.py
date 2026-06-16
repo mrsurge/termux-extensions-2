@@ -11,12 +11,19 @@ from typing import Literal, TypedDict, cast
 logger = logging.getLogger(__name__)
 
 EventType = Literal[
+    "DraftStateChanged",
     "DiagnosticsDetailChanged",
+    "GitDiffBaseChanged",
+    "GitPathRestored",
     "GitSnapshotRequested",
     "GitSnapshotChanged",
+    "OpenStateChanged",
+    "PreferencesChanged",
     "ProjectSwitchStarted",
     "ProjectSwitchFinished",
+    "ReviewStateChanged",
     "ExplorerRenderStateChanged",
+    "WatcherConfigChanged",
     "WatcherErrorRaised",
     "WorkspaceFilesChanged",
 ]

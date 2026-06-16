@@ -56,8 +56,6 @@ ReadFilePayloadFn = Callable[[str, str], EditorOpenPayload]
 UpdateSessionStateFn = Callable[[dict[str, object]], None]
 SetLastFileFn = Callable[[str, str], None]
 EmitToRoomFn = Callable[[str, dict[str, object]], Awaitable[None]]
-BroadcastActiveFileUpdateFn = Callable[[str, str], Awaitable[None]]
-EmitHostActiveFileChangedFn = Callable[..., Awaitable[None]]
 RecordSidecarOpenFileFn = Callable[..., SidecarOpenStatePayload]
 EmitOpenStateChangedFn = Callable[..., Awaitable[None]]
 NotifyDraftStateChangedFn = Callable[[str], None]
@@ -90,8 +88,6 @@ async def dispatch_editor_rpc_request(
     record_sidecar_open_file: RecordSidecarOpenFileFn,
     emit_open_state_changed: EmitOpenStateChangedFn,
     emit_to_room: EmitToRoomFn,
-    broadcast_active_file_update: BroadcastActiveFileUpdateFn,
-    emit_host_active_file_changed: EmitHostActiveFileChangedFn,
     notify_draft_state_changed: NotifyDraftStateChangedFn,
     record_save_sha: RecordSaveShaFn,
     record_file_activity: RecordFileActivityFn,
@@ -117,13 +113,6 @@ async def dispatch_editor_rpc_request(
             update_session_state=update_session_state,
             set_last_file=set_last_file,
             emit_editor_open=lambda open_payload: emit_to_room("editor:open", cast(dict[str, object], open_payload)),
-            broadcast_active_file_update=broadcast_active_file_update,
-            emit_host_active_file_changed=lambda project, abs_path, source=None, request_id=None: emit_host_active_file_changed(
-                project,
-                abs_path,
-                source=source,
-                request_id=request_id,
-            ),
             record_sidecar_open_file=record_sidecar_open_file,
             emit_open_state_changed=emit_open_state_changed,
         )

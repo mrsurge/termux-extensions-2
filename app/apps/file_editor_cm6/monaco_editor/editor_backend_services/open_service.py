@@ -9,17 +9,6 @@ from .payload_utils import get_opt_int, get_opt_str, get_str
 from ...open_state_backend import SidecarOpenStatePayload
 
 
-class EmitHostActiveFileChangedFn(Protocol):
-    def __call__(
-        self,
-        project: str,
-        abs_path: str | None,
-        *,
-        source: str | None = None,
-        request_id: str | None = None,
-    ) -> Awaitable[None]: ...
-
-
 class RecordSidecarOpenFileFn(Protocol):
     def __call__(
         self,
@@ -96,12 +85,10 @@ async def emit_editor_open_from_backend(
     update_session_state: Callable[[dict[str, object]], object],
     set_last_file: Callable[[str, str], object],
     emit_editor_open: Callable[[EditorOpenPayload], Awaitable[None]],
-    broadcast_active_file_update: Callable[[str, str], Awaitable[None]],
-    emit_host_active_file_changed: EmitHostActiveFileChangedFn,
     record_sidecar_open_file: RecordSidecarOpenFileFn,
     emit_open_state_changed: EmitOpenStateChangedFn,
 ) -> EditorOpenPayload:
-    del set_last_file, broadcast_active_file_update, emit_host_active_file_changed
+    del set_last_file
     normalized = dict(payload_in) if isinstance(payload_in, Mapping) else {}
     fields = coerce_editor_open_request_fields(
         normalized,

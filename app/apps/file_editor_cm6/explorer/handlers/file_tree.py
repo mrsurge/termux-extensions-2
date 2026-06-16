@@ -1,7 +1,6 @@
 # pyright: strict
 from __future__ import annotations
 
-import asyncio
 import importlib
 import time
 from pathlib import Path
@@ -18,6 +17,7 @@ from ..contracts.file_tree import (
     ExplorerRenameEntryParams,
 )
 from ..context import ExplorerFileTreeHandlerContext
+from ..services.state_facts import publish_explorer_directories_changed
 from ..services.file_ops import mark_git_cache_dirty
 
 ExplorerHelperCall = Callable[..., object]
@@ -46,7 +46,7 @@ async def handle_create_file(
         params["name"],
     )
     del created
-    await _broadcast_rel_list(context, params["parent_rel"])
+    await _publish_changed_dirs(context, [params["parent_rel"]], reason="create_file")
 
 
 async def handle_create_dir(
@@ -62,7 +62,7 @@ async def handle_create_dir(
         params["name"],
     )
     del created
-    await _broadcast_rel_list(context, params["parent_rel"])
+    await _publish_changed_dirs(context, [params["parent_rel"]], reason="create_dir")
 
 
 async def handle_rename_entry(
@@ -78,7 +78,11 @@ async def handle_rename_entry(
         params["new_name"],
     )
     del renamed
-    await _broadcast_rel_list(context, _get_parent_rel(params["rel"]))
+    await _publish_changed_dirs(
+        context,
+        [_get_parent_rel(params["rel"])],
+        reason="rename_entry",
+    )
 
 
 async def handle_delete_entry(
@@ -90,7 +94,11 @@ async def handle_delete_entry(
 
     deleted = _call_explorer_helper_dict("delete_entry", params["rel"])
     del deleted
-    await _broadcast_rel_list(context, _get_parent_rel(params["rel"]))
+    await _publish_changed_dirs(
+        context,
+        [_get_parent_rel(params["rel"])],
+        reason="delete_entry",
+    )
     mark_git_cache_dirty(context.project_root)
     await context.broadcast_git_status()
 
@@ -106,7 +114,7 @@ async def handle_batch_delete(
     del deleted
 
     for parent_rel in {_get_parent_rel(rel) for rel in params["rels"]}:
-        await _broadcast_rel_list_ignoring_errors(context, parent_rel)
+        await _publish_changed_dirs(context, [parent_rel], reason="batch_delete")
 
     mark_git_cache_dirty(context.project_root)
     await context.broadcast_git_status()
@@ -125,9 +133,10 @@ async def handle_batch_copy(
         params["dest_path"],
     )
     del copied
-    await _broadcast_rel_list_ignoring_errors(
+    await _publish_changed_dirs(
         context,
-        _get_rel_from_abs(params["dest_path"], context.project_root),
+        [_get_rel_from_abs(params["dest_path"], context.project_root)],
+        reason="batch_copy",
     )
 
 
@@ -148,8 +157,7 @@ async def handle_batch_move(
     dest_rel = _get_rel_from_abs(params["dest_path"], context.project_root)
     parent_rels = {_get_parent_rel(rel) for rel in params["rels"]}
     parent_rels.add(dest_rel)
-    for parent_rel in parent_rels:
-        await _broadcast_rel_list_ignoring_errors(context, parent_rel)
+    await _publish_changed_dirs(context, list(parent_rels), reason="batch_move")
 
 
 async def handle_editor_open(
@@ -204,8 +212,7 @@ async def handle_move_entry(
 
     source_parent = _get_parent_rel(params["rel"])
     dest_rel = _get_rel_from_abs(params["dest_path"], context.project_root)
-    for parent_rel in {source_parent, dest_rel}:
-        await _broadcast_rel_list_ignoring_errors(context, parent_rel)
+    await _publish_changed_dirs(context, [source_parent, dest_rel], reason="move_entry")
 
 
 async def handle_copy_entry(
@@ -221,9 +228,10 @@ async def handle_copy_entry(
         params["dest_path"],
     )
     del copied
-    await _broadcast_rel_list_ignoring_errors(
+    await _publish_changed_dirs(
         context,
-        _get_rel_from_abs(params["dest_path"], context.project_root),
+        [_get_rel_from_abs(params["dest_path"], context.project_root)],
+        reason="copy_entry",
     )
 
 
@@ -240,7 +248,7 @@ async def handle_copy_from(
         params["dest_rel"],
     )
     del copied
-    await _broadcast_rel_list_ignoring_errors(context, params["dest_rel"])
+    await _publish_changed_dirs(context, [params["dest_rel"]], reason="copy_from")
 
 
 async def handle_move_from(
@@ -256,29 +264,21 @@ async def handle_move_from(
         params["dest_rel"],
     )
     del moved
-    await _broadcast_rel_list_ignoring_errors(context, params["dest_rel"])
+    await _publish_changed_dirs(context, [params["dest_rel"]], reason="move_from")
 
 
-async def _broadcast_rel_list(
+async def _publish_changed_dirs(
     context: ExplorerFileTreeHandlerContext,
-    rel: str,
+    rels: list[str],
+    *,
+    reason: str,
 ) -> None:
-    list_payload = await asyncio.to_thread(_list_dir_payload, rel)
-    await context.broadcast("explorer.list.updated", list_payload)
-
-
-async def _broadcast_rel_list_ignoring_errors(
-    context: ExplorerFileTreeHandlerContext,
-    rel: str,
-) -> None:
-    try:
-        await _broadcast_rel_list(context, rel)
-    except Exception:
-        pass
-
-
-def _list_dir_payload(rel: str) -> dict[str, object]:
-    return _call_explorer_helper_dict("list_dir", rel)
+    await publish_explorer_directories_changed(
+        context.project_root,
+        rels,
+        reason=reason,
+        source="explorer_file_tree",
+    )
 
 
 def _call_explorer_helper_dict(name: str, *args: object) -> dict[str, object]:

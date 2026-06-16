@@ -9,9 +9,7 @@ from ..explorer.services.file_ops import get_project_root
 from ..stores import get_history_store
 from ..monaco_editor.editor_ws import (
     editor_runtime_active_project,
-    editor_runtime_broadcast_active_file_update,
     editor_runtime_emit_room_event,
-    editor_runtime_emit_host_active_file_changed,
     editor_runtime_is_under_project,
     editor_runtime_normalize_abs_path,
     editor_runtime_notify_draft_state_changed,
@@ -102,8 +100,6 @@ async def handle_host_open_request(
         update_session_state=editor_runtime_update_session_state,
         set_last_file=editor_runtime_set_last_file,
         emit_editor_open=lambda open_payload: editor_runtime_emit_room_event("editor:open", cast(dict[str, object], open_payload)),
-        broadcast_active_file_update=editor_runtime_broadcast_active_file_update,
-        emit_host_active_file_changed=editor_runtime_emit_host_active_file_changed,
         record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
         emit_open_state_changed=editor_runtime_emit_open_state_changed,
     )

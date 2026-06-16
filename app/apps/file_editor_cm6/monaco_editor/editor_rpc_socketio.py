@@ -27,9 +27,7 @@ from .editor_rpc_dispatch import dispatch_editor_rpc_request
 from .editor_rpc_emit import emit_editor_rpc_error, emit_editor_rpc_notification, emit_editor_rpc_result
 from .editor_ws import (
     editor_runtime_active_project,
-    editor_runtime_broadcast_active_file_update,
     editor_runtime_build_connect_snapshot,
-    editor_runtime_emit_host_active_file_changed,
     editor_runtime_emit_open_state_changed,
     editor_runtime_emit_room_event,
     editor_runtime_get_cached_document,
@@ -96,8 +94,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
             EDITOR_RPC_NOTIFICATION_STATE_SSOT,
             snapshot,
         )
-        current_path = snapshot.get("currentPath")
-        project = snapshot.get("project")
         open_state_obj = snapshot.get("openState")
         try:
             from ..workbench_adapter_shell_manager import get_adapter_state
@@ -115,12 +111,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                     cast(SidecarOpenStatePayload, open_state_obj),
                     source="rpc_connect",
                 )
-            except Exception:
-                pass
-        elif isinstance(project, str) and isinstance(current_path, str) and current_path:
-            try:
-                await editor_runtime_broadcast_active_file_update(project, current_path)
-                await editor_runtime_emit_host_active_file_changed(project, current_path, source="rpc_connect")
             except Exception:
                 pass
 
@@ -154,8 +144,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                     record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
                     emit_open_state_changed=editor_runtime_emit_open_state_changed,
                     emit_to_room=editor_runtime_emit_room_event,
-                    broadcast_active_file_update=editor_runtime_broadcast_active_file_update,
-                    emit_host_active_file_changed=editor_runtime_emit_host_active_file_changed,
                     notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
                     record_save_sha=editor_runtime_record_save_sha,
                     record_file_activity=editor_runtime_record_file_activity,
@@ -185,8 +173,6 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
                 emit_open_state_changed=editor_runtime_emit_open_state_changed,
                 emit_to_room=editor_runtime_emit_room_event,
-                broadcast_active_file_update=editor_runtime_broadcast_active_file_update,
-                emit_host_active_file_changed=editor_runtime_emit_host_active_file_changed,
                 notify_draft_state_changed=editor_runtime_notify_draft_state_changed,
                 record_save_sha=editor_runtime_record_save_sha,
                 record_file_activity=editor_runtime_record_file_activity,
