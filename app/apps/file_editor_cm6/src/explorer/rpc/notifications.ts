@@ -172,6 +172,36 @@ function applyProjectRootProjection(
   return true;
 }
 
+function applyBackendOpenStateProjection(
+  deps: ExplorerNotificationHandlerDeps,
+  value: unknown,
+): void {
+  // Project-open resets clear Explorer-local render state; this reapplies the
+  // backend sidecar open-state fact after that reset boundary.
+  const openState = isRecord(value) ? value : null;
+  const nextRel = openState
+    ? getStringValue(openState.openFileRel) || getStringValue(openState.rel)
+    : null;
+  deps.setActiveFileRel(nextRel);
+  if (nextRel) {
+    Promise.resolve(deps.expandToFile(nextRel))
+      .then(() => {
+        try {
+          deps.applyActiveFileMarker();
+        } catch {
+          // Ignore marker races after project reset.
+        }
+      })
+      .catch(() => {});
+  } else {
+    try {
+      deps.applyActiveFileMarker();
+    } catch {
+      // Ignore marker races while clearing project state.
+    }
+  }
+}
+
 function getJobProgressPercent(value: unknown): number {
   if (!isRecord(value)) {
     return 0;
@@ -277,26 +307,7 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.openStateChanged: {
         const nextProjectPath = getProjectedProjectPath(payload);
         applyProjectRootProjection(deps, nextProjectPath);
-        const nextRel =
-          getStringValue(payload.openFileRel) || getStringValue(payload.rel);
-        deps.setActiveFileRel(nextRel);
-        if (nextRel) {
-          Promise.resolve(deps.expandToFile(nextRel))
-            .then(() => {
-              try {
-                deps.applyActiveFileMarker();
-              } catch {
-                // Ignore marker races during replay.
-              }
-            })
-            .catch(() => {});
-        } else {
-          try {
-            deps.applyActiveFileMarker();
-          } catch {
-            // Ignore marker races during replay clear.
-          }
-        }
+        applyBackendOpenStateProjection(deps, payload);
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.openDirsUpdated: {
@@ -484,6 +495,7 @@ export function createExplorerNotificationHandler(
         if (path) {
           applyProjectRootProjection(deps, path, { forceReset: true });
           deps.dispatchProjectOpened(path, payload);
+          applyBackendOpenStateProjection(deps, payload.openState);
         }
         break;
       }

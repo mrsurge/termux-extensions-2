@@ -47,6 +47,7 @@ async def handle_project_open(
             "path": switch_result.display_path,
             "resolved_path": str(switch_result.project_root),
             "new_sidecar": switch_result.was_new_sidecar,
+            "openState": switch_result.open_state,
         },
         msg_id,
     )
@@ -111,6 +112,7 @@ async def handle_git_clone(
             "path": switch_result.display_path,
             "resolved_path": str(switch_result.project_root),
             "new_sidecar": switch_result.was_new_sidecar,
+            "openState": switch_result.open_state,
         },
         None,
     )

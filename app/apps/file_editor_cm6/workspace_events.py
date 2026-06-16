@@ -48,6 +48,15 @@ def _copy_diagnostics_detail(detail_abs: DiagnosticsDetailPayload) -> Diagnostic
     }
 
 
+def _diagnostics_detail_from_event(event: WorkerEvent) -> DiagnosticsDetailPayload:
+    raw = event_payload_object(event, "detail")
+    return {
+        path: list(cast(list[object], markers))
+        for path, markers in raw.items()
+        if isinstance(markers, list)
+    }
+
+
 def _build_rel_payload(
     project_path: str,
     *,
@@ -71,22 +80,6 @@ def _build_rel_payload(
         "changed": changed,
         "deleted": deleted,
     }
-
-
-async def publish_diagnostics_detail(
-    project_path: str,
-    detail_abs: DiagnosticsDetailPayload,
-) -> None:
-    from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
-
-    normalized_project = _normalize_project_path(project_path)
-    copied = _copy_diagnostics_detail(detail_abs)
-    _diagnostics_detail_by_project[normalized_project] = copied
-    await emit_project_explorer_rpc_notification(
-        normalized_project,
-        "explorer.diagnostics.detail",
-        cast(dict[str, object], copied),
-    )
 
 
 async def publish_watcher_error(project_path: str, payload: dict[str, object]) -> None:
@@ -187,10 +180,23 @@ def register_workspace_event_bus_handlers() -> None:
     global _event_bus_handlers_registered
     if _event_bus_handlers_registered:
         return
+    subscribe_worker_event("DiagnosticsDetailChanged", _handle_diagnostics_detail_changed_event)
     subscribe_worker_event("WorkspaceFilesChanged", _handle_workspace_files_changed_event)
     subscribe_worker_event("GitSnapshotRequested", _handle_git_snapshot_requested_event)
     subscribe_worker_event("GitSnapshotChanged", _handle_git_snapshot_changed_event)
     _event_bus_handlers_registered = True
+
+
+async def _handle_diagnostics_detail_changed_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project:
+        return
+    generation = event.get("project_generation")
+    if generation is not None and current_project_generation(project) != generation:
+        return
+
+    normalized_project = _normalize_project_path(project)
+    _diagnostics_detail_by_project[normalized_project] = _diagnostics_detail_from_event(event)
 
 
 async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:

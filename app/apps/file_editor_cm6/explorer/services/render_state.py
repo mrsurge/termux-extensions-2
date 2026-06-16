@@ -25,6 +25,7 @@ from . import file_ops as _file_ops
 logger = logging.getLogger(__name__)
 
 JsonObject = dict[str, object]
+DiagnosticsDetailPayload = dict[str, list[object]]
 ListDirFn = Callable[[str], JsonObject]
 
 list_dir = cast(ListDirFn, _file_ops.list_dir)
@@ -149,10 +150,33 @@ def register_explorer_render_state_bus_handlers() -> None:
     global _event_bus_handlers_registered
     if _event_bus_handlers_registered:
         return
+    subscribe_worker_event("DiagnosticsDetailChanged", _handle_diagnostics_detail_changed_event)
     subscribe_worker_event("GitSnapshotChanged", _handle_git_snapshot_changed_event)
     subscribe_worker_event("WorkspaceFilesChanged", _handle_workspace_files_changed_event)
     subscribe_worker_event("ExplorerRenderStateChanged", _handle_explorer_render_state_changed_event)
     _event_bus_handlers_registered = True
+
+
+async def _handle_diagnostics_detail_changed_event(event: WorkerEvent) -> None:
+    # Render-state is the Explorer projector for diagnostics facts; WBA intake
+    # and workspace caches consume the same fact on their own lanes.
+    project = event.get("project_root")
+    if not project:
+        return
+    generation = event.get("project_generation")
+    if generation is not None and current_project_generation(project) != generation:
+        logger.debug(
+            "[explorer_render_state] dropped stale diagnostics detail project=%s generation=%s current=%s",
+            project,
+            generation,
+            current_project_generation(project),
+        )
+        return
+    await emit_project_explorer_rpc_notification(
+        project,
+        "explorer.diagnostics.detail",
+        cast(JsonObject, _diagnostics_detail_from_event(event)),
+    )
 
 
 async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:
@@ -272,6 +296,15 @@ def _abs_paths_to_rels(project_root: str, abs_paths: list[str]) -> list[str]:
         if rel and rel not in rels:
             rels.append(rel)
     return rels
+
+
+def _diagnostics_detail_from_event(event: WorkerEvent) -> DiagnosticsDetailPayload:
+    raw = event_payload_object(event, "detail")
+    return {
+        path: list(cast(list[object], markers))
+        for path, markers in raw.items()
+        if isinstance(markers, list)
+    }
 
 
 def _affected_directories_for_rels(rels: list[str], open_directories: list[str]) -> list[str]:

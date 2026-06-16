@@ -142,6 +142,40 @@ def _prune_cache_to_project(project_root: str) -> int:
     return len(stale_keys)
 
 
+async def _publish_diagnostics_detail_changed(
+    project_root: str,
+    detail_abs: dict[str, list[object]],
+    *,
+    reason: str,
+    project_generation: int | None = None,
+) -> None:
+    # Diagnostics bridge owns WBA aggregation; the worker bus owns fanout to
+    # Explorer render-state and backend caches.
+    from .worker_services.event_bus import (
+        build_event,
+        current_project_generation,
+        publish as publish_worker_event,
+    )
+
+    generation = (
+        project_generation
+        if project_generation is not None
+        else current_project_generation(project_root)
+    )
+    await publish_worker_event(
+        build_event(
+            "DiagnosticsDetailChanged",
+            project_root=project_root,
+            project_generation=generation,
+            source=f"diagnostics_bridge:{reason}",
+            payload={
+                "detail": detail_abs,
+                "reason": reason,
+            },
+        )
+    )
+
+
 async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bool:
     """Ask the adapter to re-open a file, forcing the extension host to re-emit diagnostics."""
     try:
@@ -286,10 +320,11 @@ async def _emit_diagnostics_debounced() -> None:
     summary_rel = {k: v for k, v in summary_rel.items() if v["errors"] > 0 or v["warnings"] > 0}
 
     try:
-        # Problems panel + explorer tree badges (full marker detail)
-        from .workspace_events import publish_diagnostics_detail
-
-        await publish_diagnostics_detail(proj, detail_abs)
+        await _publish_diagnostics_detail_changed(
+            proj,
+            detail_abs,
+            reason="wba_update",
+        )
         total_markers = sum(len(v) for v in detail_abs.values())
         print(f"[diag_bridge] emitted explorer diagnostics: {len(summary_rel)} files, {total_markers} markers", flush=True)
     except Exception as exc:
@@ -348,9 +383,12 @@ async def reset_diagnostics_projection_for_project(
         _active_project_generation = project_generation
     reset_diagnostics_projection()
     try:
-        from .workspace_events import publish_diagnostics_detail
-
-        await publish_diagnostics_detail(normalized_project, {})
+        await _publish_diagnostics_detail_changed(
+            normalized_project,
+            {},
+            reason="project_switch",
+            project_generation=_active_project_generation,
+        )
     except Exception as exc:
         logger.warning(
             "[diag_bridge] failed to publish empty diagnostics for %s: %s",

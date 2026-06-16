@@ -30,6 +30,7 @@ class ExplorerProjectSwitchResult:
     display_path: str
     was_new_sidecar: bool
     project_generation: int
+    open_state: dict[str, object] | None
 
 
 async def switch_project_connection(
@@ -156,6 +157,7 @@ async def switch_project_connection(
         display_path=normalized_display_path,
         was_new_sidecar=was_new_sidecar,
         project_generation=project_generation,
+        open_state=open_state if isinstance(open_state, dict) else None,
     )
 
 
