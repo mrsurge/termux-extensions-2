@@ -17,6 +17,7 @@ from .worker_services.event_bus import (
     current_project_generation,
     event_payload_object,
     publish as publish_worker_event,
+    record_stale_drop,
     subscribe as subscribe_worker_event,
 )
 
@@ -89,6 +90,7 @@ async def _handle_open_state_changed_event(event: WorkerEvent) -> None:
         return
     generation = event.get("project_generation")
     if generation is not None and current_project_generation(project) != generation:
+        record_stale_drop("open_state_events:projector", event["type"])
         logger.debug(
             "[open_state_events] dropped stale open-state fact project=%s generation=%s current=%s",
             project,

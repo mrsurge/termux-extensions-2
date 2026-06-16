@@ -16,6 +16,7 @@ from ...worker_services.event_bus import (
     event_payload_list,
     event_payload_object,
     publish as publish_worker_event,
+    record_stale_drop,
     subscribe as subscribe_worker_event,
 )
 from ..context import EmitPersonal
@@ -170,6 +171,7 @@ async def _handle_diagnostics_detail_changed_event(event: WorkerEvent) -> None:
         return
     generation = event.get("project_generation")
     if generation is not None and current_project_generation(project) != generation:
+        record_stale_drop("explorer_render_state:diagnostics_detail", event["type"])
         logger.debug(
             "[explorer_render_state] dropped stale diagnostics detail project=%s generation=%s current=%s",
             project,
@@ -235,6 +237,7 @@ async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:
         return
     generation = event.get("project_generation")
     if generation is not None and current_project_generation(project) != generation:
+        record_stale_drop("explorer_render_state:git_snapshot", event["type"])
         logger.debug(
             "[explorer_render_state] dropped stale git snapshot project=%s generation=%s current=%s",
             project,
@@ -267,6 +270,7 @@ async def _handle_open_state_changed_event(event: WorkerEvent) -> None:
         return
     generation = event.get("project_generation")
     if generation is not None and current_project_generation(project) != generation:
+        record_stale_drop("explorer_render_state:open_state", event["type"])
         logger.debug(
             "[explorer_render_state] dropped stale open-state project=%s generation=%s current=%s",
             project,
@@ -460,6 +464,7 @@ def _is_stale_project_event(event: WorkerEvent, project: str) -> bool:
         return False
     stale = current_project_generation(project) != generation
     if stale:
+        record_stale_drop("explorer_render_state:project_event", event["type"])
         logger.debug(
             "[explorer_render_state] dropped stale %s project=%s generation=%s current=%s",
             event["type"],

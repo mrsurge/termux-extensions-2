@@ -14,6 +14,8 @@ from .worker_services.event_bus import (
     event_payload_list,
     publish as publish_worker_event,
     publish_threadsafe as publish_worker_event_threadsafe,
+    record_coalesced_event,
+    record_stale_drop,
     subscribe as subscribe_worker_event,
 )
 
@@ -192,6 +194,7 @@ async def _handle_diagnostics_detail_changed_event(event: WorkerEvent) -> None:
         return
     generation = event.get("project_generation")
     if generation is not None and current_project_generation(project) != generation:
+        record_stale_drop("workspace_events:diagnostics_detail", event["type"])
         return
 
     normalized_project = _normalize_project_path(project)
@@ -226,6 +229,7 @@ async def _handle_watcher_error_raised_event(event: WorkerEvent) -> None:
         return
     generation = event.get("project_generation")
     if generation is not None and current_project_generation(project) != generation:
+        record_stale_drop("workspace_events:watcher_error", event["type"])
         return
     _watcher_error_by_project[_normalize_project_path(project)] = event_payload_object(
         event,
@@ -242,6 +246,7 @@ async def _handle_git_snapshot_requested_event(event: WorkerEvent) -> None:
     existing = _git_snapshot_debounce_tasks.get(key)
     if existing is not None and not existing.done():
         existing.cancel()
+        record_coalesced_event("workspace_events:git_snapshot_debounce", event["type"])
     _git_snapshot_debounce_tasks[key] = asyncio.create_task(
         _debounced_git_snapshot(project, generation),
         name="file_editor_cm6_git_snapshot_refresh",
@@ -252,6 +257,7 @@ async def _debounced_git_snapshot(project: str, generation: int | None) -> None:
     try:
         await asyncio.sleep(0.5)
         if generation is not None and current_project_generation(project) != generation:
+            record_stale_drop("workspace_events:git_snapshot_debounce", "GitSnapshotRequested")
             return
         from .explorer.services.runtime_notifications import broadcast_git_status_update
 
@@ -276,6 +282,7 @@ async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:
         return
     generation = event.get("project_generation")
     if generation is not None and current_project_generation(project) != generation:
+        record_stale_drop("workspace_events:git_snapshot_changed", event["type"])
         return
 
     normalized_project = _normalize_project_path(project)

@@ -18,6 +18,8 @@ from ...worker_services.event_bus import (
     build_event,
     current_project_generation,
     publish as publish_worker_event,
+    record_coalesced_event,
+    record_stale_drop,
 )
 from ...worker_services import git_service as worker_git_service
 
@@ -75,6 +77,7 @@ def _schedule_debounce_task(
     existing = tasks.get(key)
     if existing is not None and not existing.done():
         existing.cancel()
+        record_coalesced_event(name, name)
 
     async def _run() -> None:
         try:
@@ -107,6 +110,7 @@ async def broadcast_git_status_update(
     normalized_project = str(project.expanduser().resolve(strict=False))
     try:
         if _is_stale_git_generation(project, project_generation):
+            record_stale_drop("runtime_notifications:git_refresh_before_work", "GitSnapshotRequested")
             logger.debug(
                 "Dropping stale git refresh before work project=%s generation=%s current=%s source=%s",
                 project,
@@ -121,6 +125,7 @@ async def broadcast_git_status_update(
         statuses = await asyncio.to_thread(worker_git_service.get_statuses_for_root, project)
         status = await asyncio.to_thread(worker_git_service.get_status, project)
         if _is_stale_git_generation(project, project_generation):
+            record_stale_drop("runtime_notifications:git_refresh_after_work", "GitSnapshotRequested")
             logger.debug(
                 "Dropping stale git refresh after work project=%s generation=%s current=%s source=%s",
                 project,

@@ -26,6 +26,7 @@ shells:
       PYTHONPATH: ${env:PYTHONPATH}:${ctx:PROJECT_ROOT}
       TE_APP_ID: ${ctx:APP_ID}
       TE_APP_WORKER_PORT: ${free_port}
+      FILE_EDITOR_CM6_EVENT_METRICS: "1"
     subgroups:
       - ${ctx:APP_ID}
       - app-worker

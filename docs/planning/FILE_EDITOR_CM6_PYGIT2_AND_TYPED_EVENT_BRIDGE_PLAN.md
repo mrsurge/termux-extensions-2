@@ -9,12 +9,19 @@ plane for `file_editor_cm6`, not a git implementation migration.
 ## Goal
 
 Make project switching, watcher intake, git refresh, diagnostics projection,
-open-state replay, draft/review refresh, preferences, and sidebar/window state
-backend-authoritative through one app-worker runtime coordination spine.
+open-state replay, draft/review refresh, preferences, editor/UI lifecycle, and
+sidebar/window state backend-authoritative through one app-worker runtime
+coordination spine.
 
 The end state is a portable corpus of backend logic that can move to an initial
 Rust/Axum/socketioxide runtime while Python modules remain reachable through
 PyO3 adapters during migration.
+
+The priority is centralization and rewritability. Event speed is a guardrail,
+not the product goal: the app is already quick because it is a text editor.
+Performance work should focus on keeping events non-blocking and observable so
+slow projectors or blocking service calls are visible instead of silently
+controlling user-facing state.
 
 ## End State
 
@@ -60,6 +67,9 @@ PyO3 adapters during migration.
 - `workspace_events.py` owns the initial compatibility projectors for watcher
   batches, git refresh scheduling, diagnostics snapshots, and editor git
   baseline refresh side effects.
+- `project_switch_events.py` projects `ProjectSwitchStarted` and
+  `ProjectSwitchFinished` facts to editor and UI IPC project-switch
+  notifications.
 - `explorer/services/project_switch.py` is the canonical backend project-switch
   path. It mints project generations, publishes switch start/finish events, uses
   WBA `adapter.reconnect`, resets diagnostics, replays sidecar open state, and
@@ -111,6 +121,8 @@ The runtime is a control plane, not a work plane.
 - Generation checks happen before expensive work and again before projection.
 - A watcher storm must not delay project-switch/open-state notifications.
 - Runtime tasks should have explicit cancellation and shutdown ownership.
+- Observability should identify blocking handlers; speed tuning is secondary to
+  proving control-plane events are not blocked.
 
 ## Portability Rules
 
@@ -240,14 +252,19 @@ Acceptance:
 
 ### Phase 6 - Runtime Observability And Performance Guards
 
-Status: Planned.
+Status: Active implementation target.
 
-- [ ] Add queue depth metrics.
-- [ ] Add enqueue-to-handler latency metrics.
-- [ ] Add handler duration metrics.
-- [ ] Add coalesce/drop counters.
-- [ ] Add stale-generation drop counters.
-- [ ] Log slow handlers and slow queue latency only above useful thresholds.
+- [x] Gate event-bus metrics behind `FILE_EDITOR_CM6_EVENT_METRICS`.
+- [x] Keep metrics code default-off so disabled overhead is limited to boolean
+      branches in publish/dispatch/drop-observer paths.
+- [x] Publish metrics to app-worker stdout as structured JSON for FWS
+      dashboard/search/inspect visibility.
+- [x] Add queue depth metrics.
+- [x] Add enqueue-to-handler latency metrics.
+- [x] Add handler duration metrics.
+- [x] Add coalesce/drop counters.
+- [x] Add stale-generation drop counters.
+- [x] Log slow handlers and slow queue latency only above useful thresholds.
 - [ ] Add event correlation ids for project switch and reconnect flows.
 
 Initial thresholds:
@@ -256,13 +273,71 @@ Initial thresholds:
 - Warn on queue latency greater than 50ms.
 - Count all stale project-generation drops.
 
+Environment:
+
+- `FILE_EDITOR_CM6_EVENT_METRICS=0` is declared in the app-worker shellspec so
+  FWS surfaces can inspect and override it deliberately.
+- `FILE_EDITOR_CM6_EVENT_METRICS=1` enables stdout metrics.
+- `FILE_EDITOR_CM6_EVENT_METRICS_INTERVAL_S=30` controls summary cadence.
+- `FILE_EDITOR_CM6_EVENT_METRICS_SLOW_HANDLER_MS=25` controls slow-handler logs.
+- `FILE_EDITOR_CM6_EVENT_METRICS_SLOW_QUEUE_MS=50` controls slow-queue logs.
+
+Stdout policy:
+
+- Do not print every event.
+- Print immediate structured JSON only for slow queue/handler cases.
+- Print periodic structured JSON summaries with event counts, max queue depth,
+  latency maxima, handler errors, coalesced work, and stale-drop counters.
+- Keep stdout as the only metrics sink for this phase; do not emit metrics back
+  through the event bus, frontend, or database.
+
 Acceptance:
 
 - We can prove the control plane is not slowing editor/app hot paths.
 - Watcher storms and diagnostics bursts have visible coalesce/drop behavior.
 - Project switch latency can be inspected as one correlated lifecycle.
 
-### Phase 7 - Portability Extraction
+Live observation from `fs_1781625392_e2a50fa3` with metrics enabled:
+
+- Event-bus stdout JSON summaries were visible to FWS inspection.
+- Queue depth stayed at 1-2 and enqueue-to-handler latency stayed around
+  1-10ms in sampled summaries.
+- No event-bus handler errors, tracebacks, or slow queue events were observed.
+- Slow cases were downstream projectors/service work, especially
+  `GitSnapshotChanged` active-file baseline projection and one
+  `ExplorerRenderStateChanged` listing projection.
+- This supports keeping the bus as the control-plane coordinator while moving
+  slow service work behind narrower projectors/service seams.
+
+### Phase 7 - Editor, Sidebar, And UI Control Plane
+
+Status: Active implementation target.
+
+- [x] Convert project-switch lifecycle notifications into
+      `ProjectSwitchStarted` / `ProjectSwitchFinished` facts plus editor/UI IPC
+      projectors.
+- [ ] Represent WBA session lifecycle facts:
+      `AdapterSessionReset`, `AdapterWorkspaceReady`, and adapter-ready/error
+      state.
+- [ ] Keep WBA language-feature requests, document sync, and provider calls on
+      the direct WBA/editor lane.
+- [ ] Convert sidebar-window state changes into typed facts plus UI IPC and
+      Sidebar IPC projectors.
+- [ ] Audit UI IPC editor notifications and convert only durable/control-plane
+      state changes; keep focus/blur/IME and other local interaction paths
+      direct.
+- [ ] Add project-switch/reconnect correlation ids across WBA, editor, UI, and
+      sidebar projections.
+
+Acceptance:
+
+- Editor, UI IPC, and Sidebar IPC consume backend facts for lifecycle/store
+  state instead of being called directly by orchestration services.
+- Editor hot paths and WBA language-feature traffic remain direct.
+- Sidebar window state remains ledger/store-authoritative and can be replayed
+  from backend facts.
+
+### Phase 8 - Portability Extraction
 
 Status: Later.
 

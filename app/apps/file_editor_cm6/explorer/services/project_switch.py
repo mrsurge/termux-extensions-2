@@ -4,6 +4,8 @@ from __future__ import annotations
 import importlib
 import logging
 import os
+import asyncio
+import time
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 AdapterRpc = Callable[[str, dict[str, object] | None, float], Awaitable[object]]
 EnsureWatchexecShell = Callable[[str, int], Awaitable[object | None]]
-EmitProjectSwitchFn = Callable[..., Awaitable[dict[str, object]]]
 MarkAdapterWorkspaceStateFn = Callable[..., Awaitable[None]]
+_project_switch_seq = 0
 
 
 @dataclass(frozen=True)
@@ -59,13 +61,7 @@ async def switch_project_connection(
 
     new_root = set_project_root(project_path)
     project_generation = next_project_generation(new_root)
-    switch_notice = await _broadcast_project_switching(
-        new_root,
-        display_path=normalized_display_path,
-        reason=open_state_reason,
-        source=open_state_source,
-    )
-    switch_id = str(switch_notice.get("switchId") or "")
+    switch_id = _next_project_switch_id()
     await publish(
         build_event(
             "ProjectSwitchStarted",
@@ -76,10 +72,12 @@ async def switch_project_connection(
             payload={
                 "displayPath": normalized_display_path,
                 "reason": open_state_reason,
+                "source": open_state_source,
                 "switchId": switch_id,
             },
         )
     )
+    await asyncio.sleep(0)
     adapter_status = "unchanged"
 
     del initialize_watcher
@@ -125,16 +123,6 @@ async def switch_project_connection(
         project_generation=project_generation,
     )
     await _broadcast_project_git_state(new_root, project_generation=project_generation)
-    await _broadcast_project_switched(
-        new_root,
-        display_path=normalized_display_path,
-        reason=open_state_reason,
-        source=open_state_source,
-        switch_id=switch_id,
-        open_state=open_state if isinstance(open_state, dict) else None,
-        adapter_status=adapter_status,
-        status="ready" if adapter_status != "error" else "error",
-    )
     await publish(
         build_event(
             "ProjectSwitchFinished",
@@ -145,6 +133,7 @@ async def switch_project_connection(
             payload={
                 "displayPath": normalized_display_path,
                 "reason": open_state_reason,
+                "source": open_state_source,
                 "switchId": switch_id,
                 "adapterStatus": adapter_status,
                 "status": "ready" if adapter_status != "error" else "error",
@@ -182,6 +171,12 @@ async def _start_project_watchexec_if_needed(project_root: Path) -> None:
         logger.warning("[project_open] watchexec start failed: %s", exc)
 
 
+def _next_project_switch_id() -> str:
+    global _project_switch_seq
+    _project_switch_seq += 1
+    return f"project_switch_{int(time.time() * 1000)}_{_project_switch_seq}"
+
+
 async def _replay_sidecar_open_state(
     project_root: Path,
     *,
@@ -201,54 +196,6 @@ async def _replay_sidecar_open_state(
         project_generation=project_generation,
     )
     return cast(dict[str, object], result) if isinstance(result, dict) else None
-
-
-async def _broadcast_project_switching(
-    project_root: Path,
-    *,
-    display_path: str,
-    reason: str,
-    source: str,
-) -> dict[str, object]:
-    editor_module = importlib.import_module("app.apps.file_editor_cm6.monaco_editor.editor_ws")
-    emit_obj = getattr(editor_module, "editor_runtime_emit_project_switching", None)
-    if not callable(emit_obj):
-        raise RuntimeError("editor_runtime_emit_project_switching unavailable")
-    emit = cast(EmitProjectSwitchFn, emit_obj)
-    return await emit(
-        str(project_root),
-        display_path=display_path,
-        reason=reason,
-        source=source,
-    )
-
-
-async def _broadcast_project_switched(
-    project_root: Path,
-    *,
-    display_path: str,
-    reason: str,
-    source: str,
-    switch_id: str,
-    open_state: dict[str, object] | None,
-    adapter_status: str,
-    status: str,
-) -> None:
-    editor_module = importlib.import_module("app.apps.file_editor_cm6.monaco_editor.editor_ws")
-    emit_obj = getattr(editor_module, "editor_runtime_emit_project_switched", None)
-    if not callable(emit_obj):
-        raise RuntimeError("editor_runtime_emit_project_switched unavailable")
-    emit = cast(EmitProjectSwitchFn, emit_obj)
-    await emit(
-        str(project_root),
-        display_path=display_path,
-        reason=reason,
-        source=source,
-        switch_id=switch_id,
-        open_state=open_state,
-        adapter_status=adapter_status,
-        status=status,
-    )
 
 
 async def _broadcast_project_git_state(
