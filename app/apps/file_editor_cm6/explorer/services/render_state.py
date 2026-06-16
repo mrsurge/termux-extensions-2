@@ -11,7 +11,9 @@ from ...project_sidecar import ProjectSidecar
 from ...worker_services.event_bus import (
     WorkerEvent,
     build_event,
+    current_project_generation,
     event_payload_list,
+    event_payload_object,
     publish as publish_worker_event,
     subscribe as subscribe_worker_event,
 )
@@ -147,9 +149,40 @@ def register_explorer_render_state_bus_handlers() -> None:
     global _event_bus_handlers_registered
     if _event_bus_handlers_registered:
         return
+    subscribe_worker_event("GitSnapshotChanged", _handle_git_snapshot_changed_event)
     subscribe_worker_event("WorkspaceFilesChanged", _handle_workspace_files_changed_event)
     subscribe_worker_event("ExplorerRenderStateChanged", _handle_explorer_render_state_changed_event)
     _event_bus_handlers_registered = True
+
+
+async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:
+    project = event.get("project_root")
+    if not project:
+        return
+    generation = event.get("project_generation")
+    if generation is not None and current_project_generation(project) != generation:
+        logger.debug(
+            "[explorer_render_state] dropped stale git snapshot project=%s generation=%s current=%s",
+            project,
+            generation,
+            current_project_generation(project),
+        )
+        return
+
+    decorations = event_payload_object(event, "decorations")
+    status = event_payload_object(event, "status")
+    if decorations:
+        await emit_project_explorer_rpc_notification(
+            project,
+            "explorer.git.decorations.updated",
+            decorations,
+        )
+    if status:
+        await emit_project_explorer_rpc_notification(
+            project,
+            "explorer.git.status.updated",
+            status,
+        )
 
 
 async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:

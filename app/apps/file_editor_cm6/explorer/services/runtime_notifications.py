@@ -14,11 +14,14 @@ from typing import Protocol, cast
 from .file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
 from ..transport.connection_manager import manager
 from ..transport.rpc_emit import emit_project_explorer_rpc_notification
-from ...worker_services.event_bus import current_project_generation
+from ...worker_services.event_bus import (
+    build_event,
+    current_project_generation,
+    publish as publish_worker_event,
+)
 from ...worker_services import git_service as worker_git_service
 
 logger = logging.getLogger(__name__)
-GitStatusPublisher = Callable[[str, dict[str, object], dict[str, object]], Awaitable[None]]
 AsyncNoArg = Callable[[], Awaitable[None]]
 DebounceTasks = dict[str, asyncio.Task[None]]
 
@@ -38,18 +41,12 @@ class UrlOpenResponse(Protocol):
 _explorer_event_loop: asyncio.AbstractEventLoop | None = None
 _draft_forward_tasks: DebounceTasks = {}
 _draft_decorations_tasks: DebounceTasks = {}
-_git_status_publisher: GitStatusPublisher | None = None
 
 
 def set_explorer_event_loop(loop: asyncio.AbstractEventLoop) -> None:
     """Called during app startup to set the event loop for watcher callbacks."""
     global _explorer_event_loop
     _explorer_event_loop = loop
-
-
-def set_git_status_publisher(publisher: GitStatusPublisher) -> None:
-    global _git_status_publisher
-    _git_status_publisher = publisher
 
 
 def _post_to_explorer_loop(callback: Callable[[], None]) -> bool:
@@ -107,6 +104,7 @@ async def broadcast_git_status_update(
     source: str = "runtime_notifications",
 ) -> None:
     project = Path(project_path)
+    normalized_project = str(project.expanduser().resolve(strict=False))
     try:
         if _is_stale_git_generation(project, project_generation):
             logger.debug(
@@ -137,23 +135,33 @@ async def broadcast_git_status_update(
             status.unstaged,
             status.untracked,
         )
-        publisher = _git_status_publisher
-        if publisher is None:
-            logger.debug("No git status publisher registered for %s", project)
-            return
-
-        await publisher(
-            str(project),
-            {"statuses": statuses},
-            {
-                "branch": status.branch,
-                "detached": status.detached,
-                "ahead": status.ahead,
-                "behind": status.behind,
-                "staged": status.staged,
-                "unstaged": status.unstaged,
-                "untracked": status.untracked,
-            },
+        decorations_payload: dict[str, object] = {
+            "statuses": statuses,
+            "projectPath": normalized_project,
+        }
+        status_payload: dict[str, object] = {
+            "branch": status.branch,
+            "detached": status.detached,
+            "ahead": status.ahead,
+            "behind": status.behind,
+            "staged": status.staged,
+            "unstaged": status.unstaged,
+            "untracked": status.untracked,
+            "projectPath": normalized_project,
+        }
+        # Git snapshot completion is a typed control-plane fact; Explorer and
+        # editor-side projectors decide how to publish it to their own lanes.
+        await publish_worker_event(
+            build_event(
+                "GitSnapshotChanged",
+                project_root=normalized_project,
+                project_generation=project_generation,
+                source=source,
+                payload={
+                    "decorations": decorations_payload,
+                    "status": status_payload,
+                },
+            )
         )
     except Exception as exc:
         logger.warning("Failed to broadcast git status update: %s", exc)

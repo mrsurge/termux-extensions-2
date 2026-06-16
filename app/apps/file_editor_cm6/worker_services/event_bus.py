@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 EventType = Literal[
     "GitSnapshotRequested",
+    "GitSnapshotChanged",
     "ProjectSwitchStarted",
     "ProjectSwitchFinished",
     "ExplorerRenderStateChanged",
@@ -157,3 +158,14 @@ def event_payload_list(event: WorkerEvent, key: str) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item for item in cast(list[object], value) if isinstance(item, str)]
+
+
+def event_payload_object(event: WorkerEvent, key: str) -> dict[str, object]:
+    value = event["payload"].get(key)
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: item
+        for key, item in cast(dict[object, object], value).items()
+        if isinstance(key, str)
+    }

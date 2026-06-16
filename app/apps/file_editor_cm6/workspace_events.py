@@ -10,6 +10,7 @@ from .worker_services.event_bus import (
     WorkerEvent,
     build_event,
     current_project_generation,
+    event_payload_object,
     event_payload_list,
     publish as publish_worker_event,
     publish_threadsafe as publish_worker_event_threadsafe,
@@ -182,26 +183,13 @@ def publish_file_change_threadsafe(abs_path: str, event_type: str) -> None:
 
 
 def register_workspace_event_bus_handlers() -> None:
-    """Register compatibility projectors for initial worker bus consumers."""
+    """Register workspace projectors for initial worker bus consumers."""
     global _event_bus_handlers_registered
     if _event_bus_handlers_registered:
         return
-    from .explorer.services.runtime_notifications import set_git_status_publisher
-
-    async def _publish_git_status_callback(
-        project_path: str,
-        decorations_payload: dict[str, object],
-        status_payload: dict[str, object],
-    ) -> None:
-        await publish_git_status_update(
-            project_path,
-            decorations_payload=decorations_payload,
-            status_payload=status_payload,
-        )
-
-    set_git_status_publisher(_publish_git_status_callback)
     subscribe_worker_event("WorkspaceFilesChanged", _handle_workspace_files_changed_event)
     subscribe_worker_event("GitSnapshotRequested", _handle_git_snapshot_requested_event)
+    subscribe_worker_event("GitSnapshotChanged", _handle_git_snapshot_changed_event)
     _event_bus_handlers_registered = True
 
 
@@ -262,31 +250,24 @@ async def _debounced_git_snapshot(project: str, generation: int | None) -> None:
             _git_snapshot_debounce_tasks.pop(project, None)
 
 
-async def publish_git_status_update(
-    project_path: str,
-    *,
-    decorations_payload: dict[str, object],
-    status_payload: dict[str, object],
-) -> None:
-    from .explorer.transport.rpc_emit import emit_project_explorer_rpc_notification
+async def _handle_git_snapshot_changed_event(event: WorkerEvent) -> None:
     from .monaco_editor.editor_ws import broadcast_git_baselines_for_active_file
 
-    normalized_project = _normalize_project_path(project_path)
-    decorations = {**decorations_payload, "projectPath": normalized_project}
-    status = {**status_payload, "projectPath": normalized_project}
+    project = event.get("project_root")
+    if not project:
+        return
+    generation = event.get("project_generation")
+    if generation is not None and current_project_generation(project) != generation:
+        return
+
+    normalized_project = _normalize_project_path(project)
+    decorations = event_payload_object(event, "decorations")
+    status = event_payload_object(event, "status")
     _git_decorations_by_project[normalized_project] = dict(decorations)
     _git_status_by_project[normalized_project] = dict(status)
 
-    await emit_project_explorer_rpc_notification(
-        normalized_project,
-        "explorer.git.decorations.updated",
-        dict(decorations),
-    )
-    await emit_project_explorer_rpc_notification(
-        normalized_project,
-        "explorer.git.status.updated",
-        dict(status),
-    )
+    # Editor git-baseline refresh is now a projector for the git snapshot fact;
+    # Explorer git notifications are emitted by the render-state projector.
     try:
         await broadcast_git_baselines_for_active_file()
     except Exception as exc:
