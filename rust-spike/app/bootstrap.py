@@ -32,6 +32,7 @@ class BootstrapArgs:
     build_only: bool
     print_command: bool
     no_ferrous_framework: bool
+    broadcast: list[str] | None
     framework_shells_base_dir: str | None
     framework_shells_secret: str | None
     framework_shells_repo_fingerprint: str | None
@@ -71,6 +72,12 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
     parser.add_argument("--build-only", action="store_true", help="Build the Rust server and exit without launching it.")
     parser.add_argument("--print-command", action="store_true", help="Print the resolved child command and exit.")
     parser.add_argument(
+        "--broadcast",
+        nargs="+",
+        metavar="IP_SUBNET_OR_IFACE",
+        help='Enable broadcasting. Requires args: "all", IPs, subnets, or interfaces',
+    )
+    parser.add_argument(
         "--no-ferrous-framework",
         action="store_true",
         default=_env_flag("TE2_RUST_SPIKE_DISABLE_FERROUS_FRAMEWORK"),
@@ -94,6 +101,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
     raw = parser.parse_args(argv)
     return BootstrapArgs(
         host=cast(str, raw.host),
+        broadcast=_normalize_broadcast_arg(raw.broadcast),
         port=cast(str, raw.port),
         server_bin=cast(str | None, raw.server_bin),
         cargo_manifest=cast(str | None, raw.cargo_manifest),
@@ -113,26 +121,45 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
 def _build_env(args: BootstrapArgs) -> dict[str, str]:
     env = os.environ.copy()
     project_root = _project_root()
+    framework_shells_root = project_root / "worktrees" / "framework-shells"
     app_roots = [
         project_root / "app" / "apps",
         Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "te2" / "apps",
     ]
 
-    env["TE2_RUST_SPIKE_HOST"] = str(args.host)
+    listen_host = _resolve_listen_host(args)
+    env["TE2_RUST_SPIKE_HOST"] = listen_host
     env["TE2_RUST_SPIKE_PORT"] = str(args.port)
     env["TE2_RUST_SPIKE_PROJECT_ROOT"] = str(project_root)
     env["TE2_RUST_SPIKE_APP_ROOTS"] = os.pathsep.join(str(root) for root in app_roots)
     env["TE_PORT"] = str(args.port)
-    env["TE_FRAMEWORK_URL"] = f"http://{args.host}:{args.port}"
-    env.setdefault("PYTHONPATH", str(project_root))
-    if str(project_root) not in env["PYTHONPATH"].split(os.pathsep):
-        env["PYTHONPATH"] = f"{project_root}{os.pathsep}{env['PYTHONPATH']}"
+    env["TE_FRAMEWORK_URL"] = f"http://{listen_host}:{args.port}"
+    env.setdefault("FRAMEWORK_SHELLS_FWS_SOCKETIO_URL", env["TE_FRAMEWORK_URL"])
+    pythonpath_parts = [part for part in env.get("PYTHONPATH", "").split(os.pathsep) if part]
+    prepend_paths = [str(project_root)]
+    if framework_shells_root.exists():
+        prepend_paths.insert(0, str(framework_shells_root))
+    for path in reversed(prepend_paths):
+        if path not in pythonpath_parts:
+            pythonpath_parts.insert(0, path)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
 
     _ensure_framework_shells_env(env, args)
     if _ferrous_framework_enabled(args):
         env.pop("PYO3_CONFIG_FILE", None)
         env["PYO3_PYTHON"] = sys.executable
     return env
+
+
+def _normalize_broadcast_arg(raw_broadcast: Sequence[str] | None) -> list[str] | None:
+    if raw_broadcast is None:
+        return None
+
+    broadcast = [str(item).strip() for item in raw_broadcast]
+    if "all" in broadcast:
+        return ["all"]
+
+    return broadcast
 
 
 def _server_command(args: BootstrapArgs, env: MutableMapping[str, str]) -> list[str]:
@@ -158,6 +185,13 @@ def _server_command(args: BootstrapArgs, env: MutableMapping[str, str]) -> list[
     if not args.build_only:
         command.append("--")
     return command
+
+
+def _resolve_listen_host(args: BootstrapArgs) -> str:
+    if args.broadcast and "all" in args.broadcast:
+        return "0.0.0.0"
+
+    return args.host
 
 
 def _ferrous_framework_enabled(args: BootstrapArgs) -> bool:
