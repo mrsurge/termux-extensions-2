@@ -47,6 +47,7 @@ pub struct AppDefinition {
     pub icon_text: String,
     pub icon_emoji: String,
     pub fullscreen: bool,
+    pub readiness_support: bool,
     pub enabled: bool,
     pub raw_manifest: Map<String, Value>,
     pub registry_errors: Vec<String>,
@@ -56,6 +57,7 @@ pub struct AppDefinition {
 pub struct AppRegistry {
     apps: Vec<AppDefinition>,
     apps_by_id: HashMap<String, usize>,
+    apps_by_dir: HashMap<String, usize>,
 }
 
 impl AppRegistry {
@@ -127,8 +129,15 @@ impl AppRegistry {
         for (index, app) in apps.iter().enumerate() {
             apps_by_id.insert(app.app_id.clone(), index);
         }
-        let _ = apps_by_dir;
-        Self { apps, apps_by_id }
+        apps_by_dir.clear();
+        for (index, app) in apps.iter().enumerate() {
+            apps_by_dir.entry(app.dir_name.clone()).or_insert(index);
+        }
+        Self {
+            apps,
+            apps_by_id,
+            apps_by_dir,
+        }
     }
 
     pub fn list_payloads(&self) -> Vec<Value> {
@@ -173,6 +182,10 @@ impl AppRegistry {
         self.apps.get(*index)
     }
 
+    pub fn apps(&self) -> &[AppDefinition] {
+        &self.apps
+    }
+
     pub fn resolve_asset_path(&self, app_id: &str, filename: &str) -> Option<PathBuf> {
         let index = self.apps_by_id.get(app_id)?;
         let app = self.apps.get(*index)?;
@@ -183,10 +196,23 @@ impl AppRegistry {
         }
         Some(candidate)
     }
+
+    pub fn resolve_asset_path_by_dir(&self, dir_name: &str, filename: &str) -> Option<PathBuf> {
+        let app = self
+            .apps_by_dir
+            .get(dir_name)
+            .and_then(|index| self.apps.get(*index))?;
+        let candidate = app.root_dir.join(filename).canonicalize().ok()?;
+        let root = app.root_dir.canonicalize().ok()?;
+        if !candidate.starts_with(root) {
+            return None;
+        }
+        Some(candidate)
+    }
 }
 
 impl AppDefinition {
-    fn backend_module(&self) -> Option<&str> {
+    pub fn backend_module(&self) -> Option<&str> {
         self.entrypoints
             .get("backend_blueprint")
             .and_then(Value::as_str)
@@ -297,6 +323,10 @@ impl AppDefinition {
             ),
         );
         payload.insert("sidebar_state".to_owned(), self.sidebar_state());
+        payload.insert(
+            "readiness_support".to_owned(),
+            Value::Bool(self.readiness_support),
+        );
         payload.insert("enabled".to_owned(), Value::Bool(self.enabled));
         payload.insert("_dir".to_owned(), Value::String(self.dir_name.clone()));
         if !self.registry_errors.is_empty() {
@@ -344,7 +374,7 @@ impl AppDefinition {
         payload.insert("running".to_owned(), Value::Bool(running));
         payload.insert(
             "readiness".to_owned(),
-            if running && self.backend_module().is_some() {
+            if running && self.backend_module().is_some() && self.readiness_support {
                 let mut readiness = Map::new();
                 readiness.insert("app_id".to_owned(), Value::String(self.app_id.clone()));
                 readiness.insert("status".to_owned(), Value::String("starting".to_owned()));
@@ -370,6 +400,11 @@ impl AppDefinition {
             Value::String(self.source_kind.clone()),
         );
         payload.insert("sidebar_state".to_owned(), self.sidebar_state());
+        payload.insert(
+            "readiness_support".to_owned(),
+            Value::Bool(self.readiness_support),
+        );
+        payload.insert("enabled".to_owned(), Value::Bool(self.enabled));
         Value::Object(payload)
     }
 }
@@ -426,6 +461,10 @@ fn load_app_definition(
         icon_text: string_field(&manifest, "icon_text").unwrap_or_default(),
         icon_emoji: string_field(&manifest, "icon_emoji").unwrap_or_default(),
         fullscreen: bool_field(&manifest, "fullscreen"),
+        readiness_support: manifest
+            .get("readiness_support")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         enabled: manifest
             .get("enabled")
             .and_then(Value::as_bool)
@@ -471,6 +510,7 @@ fn broken_app_definition(
         icon_text: String::new(),
         icon_emoji: String::new(),
         fullscreen: false,
+        readiness_support: false,
         enabled: true,
         raw_manifest: Map::new(),
         registry_errors: vec![format!("manifest load failed: {error:#}")],

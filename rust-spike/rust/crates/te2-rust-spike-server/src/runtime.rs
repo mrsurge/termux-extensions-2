@@ -75,6 +75,25 @@ impl FwsDiscovery {
         apps
     }
 
+    pub fn root_pids_for_app(&self, app_id: &str) -> Vec<i64> {
+        let app_id = app_id.trim();
+        if app_id.is_empty() {
+            return Vec::new();
+        }
+
+        let mut root_pids = self
+            .metadata_paths()
+            .into_iter()
+            .filter_map(|meta_path| {
+                let record = load_record(&meta_path)?;
+                app_root_pid_from_record(&record, app_id)
+            })
+            .collect::<Vec<_>>();
+        root_pids.sort_unstable();
+        root_pids.dedup();
+        root_pids
+    }
+
     fn metadata_paths(&self) -> Vec<PathBuf> {
         let runtimes_root = self.base_dir.join("runtimes");
         let fingerprint_dirs = match &self.fingerprint {
@@ -202,6 +221,23 @@ fn record_sort_key(app: &RunningApp) -> (u64, u64, String) {
         (app.created_at.max(0.0) * 1000.0) as u64,
         app.shell_id.clone(),
     )
+}
+
+fn app_root_pid_from_record(record: &Map<String, Value>, app_id: &str) -> Option<i64> {
+    if string_field(record, "status").as_deref() != Some("running") {
+        return None;
+    }
+    if !is_app_worker_record(record) {
+        return None;
+    }
+    if derive_app_id(record).as_deref() != Some(app_id) {
+        return None;
+    }
+    let pid = i64_field(record, "pid")?;
+    if !process_is_alive(pid) {
+        return None;
+    }
+    Some(pid)
 }
 
 fn sorted_dirs(root: &Path) -> Vec<PathBuf> {
