@@ -280,11 +280,12 @@ dependencies = [
 
 [[package]]
 name = "ferrous_framework"
-version = "0.1.0"
-source = "git+https://github.com/mrsurge/ferrous-framework.git?rev=c7e9e751022c48edc321b8e62d90cb4487c7d625#c7e9e751022c48edc321b8e62d90cb4487c7d625"
+version = "0.1.1"
+source = "git+https://github.com/mrsurge/ferrous-framework.git?rev=74bbe12e1f567cfd2556d159f6ba2e65c27331c6#74bbe12e1f567cfd2556d159f6ba2e65c27331c6"
 dependencies = [
  "anyhow",
  "pyo3",
+ "serde_json",
 ]
 
 [[package]]

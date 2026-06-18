@@ -36,6 +36,12 @@ Current scaffold:
   framework port, currently port `8089`.
 - Preserve manifest-backed app registry behavior, including multiple app roots.
 - Preserve app launch and shutdown through framework-shells `proc` semantics.
+- Retire the current Flask IPC service by folding any still-required framework
+  control/process-registry behavior into the Rust server or an explicitly
+  documented successor owned by the Rust cutover path.
+- Preserve app/backend readiness semantics and stateful-app support as
+  framework-level behavior during the cutover, even though stateful apps are
+  currently consumed only by `file_editor_cm6`.
 - Use PyO3 for loose ends while the Rust-native implementation grows,
   especially console, MCP, and any Python-only service surfaces that are not yet
   worth native porting.
@@ -79,17 +85,22 @@ The Python wrapper remains intentionally small. It owns launch-time concerns:
 - `FRAMEWORK_SHELLS_*` secret/runtime setup
 - PyO3 interpreter selection through `PYO3_PYTHON`
 - cargo build/run vs installed binary selection
-- signal forwarding to the Rust child process
+- signal forwarding to the Rust child process and graceful shutdown entry into
+  the FWS shutdown tree
 
 The Rust server owns framework behavior:
 
 - app registry DTOs and manifest loading
 - app lifecycle and readiness state
-- app worker launch/quit/restart through framework-shells/Ferrous
+- app worker launch/quit/restart and framework shutdown sequencing through
+  framework-shells/Ferrous shutdown-tree semantics
 - dynamic HTTP proxying to running app workers
 - dynamic WebSocket proxying to running app workers
 - manifest-declared raw Socket.IO route proxying
+- framework-owned TE2 runtime mounts at `/te2_console_ws/socket.io`,
+  `/te2_mcp`, and `/te2_mcp_http`
 - app shell and asset serving
+- settings app functions, including transport keepalive notifications
 - app registry events over SSE/WebSocket
 
 ### App Registry Contract
@@ -122,7 +133,21 @@ The Rust runtime must preserve these Python behaviors before cutover:
 - list/adopt running app workers from framework-shells records
 - identify app workers through subgroups or `app-worker:<app_id>` labels
 - register lifecycle state and semantic readiness by `app_id`
-- shutdown app groups through framework-shells group shutdown semantics
+- shutdown app groups through the FWS shutdown tree rather than maintaining a
+  separate legacy active-shell tracker
+- route CLI KeyboardInterrupt/SIGTERM shutdown through the FWS shutdown tree,
+  including hosted MCP and console Socket.IO sidecar/runtime processes
+
+### Stateful App Contract
+
+The Rust cutover plan must preserve the current framework contract for
+stateful apps, even though the current consumer is `file_editor_cm6`:
+
+- manifest `sidebar_state` metadata remains part of the app contract
+- stateful app launches keep their framework-owned ledger/restore semantics
+- app/backend readiness remains separate from sidebar slot/window state
+- the Rust framework must not collapse stateful-app behavior into generic app
+  launch semantics just because the current consumer set is small
 
 ### Proxy Contract
 
@@ -143,8 +168,12 @@ The Rust proxy layer must preserve these paths and semantics:
 The first Rust replacement does not need to native-port every TE2 service.
 PyO3 can bridge the surfaces that should remain live while the server moves:
 
-- TE2 console runtime
-- TE2 MCP runtime
+- TE2 console runtime, preserving the current framework-owned
+  `/te2_console_ws/socket.io` mount and `/te2_console` namespace
+- TE2 MCP runtime, preserving the current framework-owned `/te2_mcp` SSE and
+  `/te2_mcp_http` streamable-HTTP mounts
+- full TE2 MCP compatibility for ALS Codex consumers after core route parity is
+  stable
 - Python app service modules declared in manifests
 - framework-shells bridge behavior until Ferrous owns enough native FWS runtime
 - any app-framework behavior whose DTO/event boundary is not stable yet
@@ -159,7 +188,8 @@ Create an isolated `rust-spike/` path with:
 - Rust workspace under `rust-spike/rust/`
 - Axum server with socketioxide mounted
 - FWS env/secret setup in the bootstrap
-- path dependency to `worktrees/framework-shells/.external/ferrous-framework`
+- pinned Git dependency on `mrsurge/ferrous-framework` at commit
+  `74bbe12e1f567cfd2556d159f6ba2e65c27331c6`
 - placeholder app endpoints so routing shape is visible immediately
 
 ### Phase 1: Registry And Manifest DTOs
@@ -195,10 +225,14 @@ Implement the proxy layer before deeper lifecycle work:
 Wire app lifecycle to framework-shells/Ferrous:
 
 - app-worker launch from shellspec through the Ferrous bridge
-- app group shutdown by app id
+- app group and framework shutdown sequencing through the FWS shutdown tree
+- CLI KeyboardInterrupt/SIGTERM hooks that enter the FWS shutdown tree for app
+  workers, hosted MCP runtime, and console Socket.IO runtime
 - running app adoption/listing from framework-shells metadata
 - lifecycle/readiness state keyed by `app_id`
 - app registry event projection for running/readiness changes
+- retirement or replacement of the current Flask IPC service for any framework
+  control/process-registry behavior that still matters after the cutover
 
 ### Phase 4: App Shell, Readiness, And Events
 
@@ -206,6 +240,9 @@ Port the app shell and app events once registry/runtime/proxy are concrete:
 
 - `/app/{app_id}` app shell rendering
 - app backend readiness POST/PUT/GET semantics
+- framework-level stateful-app support needed by sidebar-ledger consumers
+- settings app API/function parity in Rust, including transport keepalive
+  notifications
 - `/api/apps/events` SSE
 - `/ws/apps` app catalog/running-state WebSocket
 - launcher/catalog compatibility with current frontend expectations
@@ -214,10 +251,17 @@ Port the app shell and app events once registry/runtime/proxy are concrete:
 
 Bridge rather than rewrite uncertain runtime surfaces:
 
-- mount or proxy TE2 console through Python/PyO3
-- mount or proxy TE2 MCP through Python/PyO3
+- mount or proxy TE2 console through Python/PyO3 while preserving the current
+  framework-owned `/te2_console_ws/socket.io` route and `/te2_console`
+  namespace
+- mount or proxy TE2 MCP through Python/PyO3 while preserving the current
+  framework-owned `/te2_mcp` and `/te2_mcp_http` routes
+- full TE2 MCP compatibility for the ALS Codex implementation after the primary
+  MCP route/console-eval contract is stable
 - support Python service modules declared by app manifests, or explicitly replace
   that mechanism with a documented Rust-native service interface
+- keep the Android GeckoView direct-console back door as a separate developer
+  diagnostic lane after the primary framework console/MCP contract is stable
 
 ### Phase 6: Cutover Readiness
 
@@ -236,46 +280,65 @@ Only consider cutover after:
 | Item | Status | Notes |
 | --- | --- | --- |
 | Create `rust-spike/app` Python bootstrap | Done | Build/run wrapper with FWS env setup and signal forwarding. |
-| Create `rust-spike/rust` workspace | Done | Axum/socketioxide skeleton with Ferrous path dependency. |
+| Create `rust-spike/rust` workspace | Done | Axum/socketioxide skeleton with a pinned Ferrous git dependency. |
 | Add planning/tracker document | Done | This document. |
 | Port app registry DTOs | Done | Rust read model preserves manifest entrypoints, shellspec refs, services metadata, proxy shell, icons, `sidebar_state`, and registry errors. |
 | Load builtin and user-local app roots | Done | First env app root is tagged `builtin`; second is tagged `user_local`. |
-| Expose `/api/apps` and `/api/apps/catalog` from real registry data | Done | Running/readiness state is still placeholder/empty until lifecycle work. |
-| Serve registry-resolved app assets | Done | `/apps/by-id/{app_id}/{*filename}` resolves through the registry and prevents path escape. |
+| Expose `/api/apps` and `/api/apps/catalog` from real registry data | Done | Registry payloads now preserve `readiness_support`; running/readiness state is still placeholder/empty until lifecycle work. |
+| Serve framework root `app/templates/index.html` | Done | Rust spike now serves the real framework root template at `/`, plus `/static/...`, `/sw.js`, and the app-launcher compatibility assets it already exposed. Settings endpoints are intentionally out of this MVP slice. |
+| Serve registry-resolved app assets | Done | `/apps/by-id/{app_id}/{...}` and legacy `/apps/{app_dir}/{...}` resolve arbitrary nested builtin app assets through registry/root containment checks without path escape. |
 | Fake apps extension registration for frontend compatibility | Done | `/api/extensions` returns only the `apps` extension; `/extensions/apps/...` serves only app-launcher assets. Other generic extension semantics are intentionally not ported. |
 | Add semantic-commenting rule to spike tracker | Done | Comments should label semantic/system logic groups without line-by-line narration. |
 | Adopt/list running app workers from FWS metadata | Partial | Rust server now does read-only discovery from FWS metadata and filters live `app-worker` records with `TE_APP_WORKER_PORT`; launch/adoption mutation remains Phase 3. |
 | Implement dynamic HTTP app proxy | Done | `/api/app/{app_id}/{subpath}` proxies to the discovered running app worker without auto-starting the app. |
 | Implement `/ws/apps` launcher snapshot | Partial | Sends initial app catalog/running snapshot for the existing app launcher frontend; live event fanout remains Phase 4. |
-| Implement dynamic WebSocket app proxy | Not started | Phase 2. |
-| Implement manifest `sio_service` proxy routes | Not started | Phase 2. |
-| Validate `file_editor_cm6` Socket.IO aliases | Not started | Phase 2. |
-| Implement `proxy_shell` route/rewrite parity | Not started | Phase 2. |
-| Launch app workers through Ferrous/framework-shells `proc` | Not started | Phase 3. |
-| Implement app group shutdown | Not started | Phase 3. |
-| Implement app lifecycle/readiness store | Not started | Phase 3/4. |
-| Implement `/app/{app_id}` shell rendering | Not started | Phase 4. |
+| Implement dynamic WebSocket app proxy | Done | `/ws/app/{app_id}/{route}` bridges to `/ws/{route}` on discovered running app workers without auto-starting apps. |
+| Implement manifest `sio_service` proxy routes | Done | Rust parses manifest/file `sio_service` declarations at startup, registers public paths and aliases, and proxies HTTP polling plus websocket upgrades to app-worker or static upstream targets. |
+| Validate `file_editor_cm6` Socket.IO aliases | Done | App-worker aliases `/editor_ws/socket.io`, `/explorer_ws/socket.io`, `/ui_ipc_ws/socket.io`, and `/terminal_ws/socket.io` returned Engine.IO polling handshakes; `/editor_ws/socket.io` websocket returned an Engine.IO open frame; `/wba_ws/socket.io` websocket proxied to the static WBA upstream. WBA polling returns upstream `Transport unknown`, matching direct `127.0.0.1:18181` behavior. |
+| Implement `proxy_shell` route/rewrite parity | Done | Rust spike now exposes `/api/apps/{app_id}/proxy_shell`, proxies `/api/app/{app_id}/proxy` and `/api/app/{app_id}/proxy/{rest}` for HTTP and websocket traffic, preserves `/socket.io` -> `/socket.io/` normalization, and rewrites ALS HTML/static roots through the proxy prefix. Validated `als-rs` root load, health, Engine.IO polling, and websocket upgrade through port `18089`. |
+| Bridge the FWS dashboard and peer socket through the spike | Done | Rust spike now starts a Ferrous-hosted FWS runtime on an internal free port, proxies `/fws/...`, `/ws/fws...`, and `/fws_ws/socket.io...` through the spike surface, and keeps child peers pointed at the spike-facing URL. Validated `/fws/`, Engine.IO polling at `/fws_ws/socket.io`, and a Socket.IO `/fws` connection through port `18089`. |
+| Preserve TE2 console and MCP framework mounts | Partial | Rust spike now proxies `/te2_console_ws/socket.io`, `/te2_mcp`, and `/te2_mcp_http` through an internal Python TE2-runtime sidecar so the existing framework-owned console and MCP services stay live on the spike surface. Native or tighter PyO3 ownership can follow later. |
+| Retire the Flask IPC service into the Rust cutover path | Not started | Identify which `app/ipc` behaviors still matter, then either port them into the Rust framework server or intentionally replace them with a documented Rust-owned control surface. |
+| Launch app workers through Ferrous/framework-shells `proc` | Partial | Rust spike now exposes explicit `/api/apps/{app_id}/start` and `/api/apps/{app_id}/open`, passes shellspec refs plus `ctx` into Ferrous for authoritative shellspec rendering and `${free_port}` allocation, and spawns through Ferrous using `proc` semantics. Validated `terminal` start through port `18089`; the launched worker inherited `TE_FRAMEWORK_URL=http://127.0.0.1:18089` and `FRAMEWORK_SHELLS_FWS_SOCKETIO_URL=http://127.0.0.1:18089`, reached readiness `ready`, and served backend routes after startup. |
+| Implement app quit through FWS shutdown-group semantics | Done | Rust spike now exposes `POST /api/apps/{app_id}/quit`, derives `root_pids` from FWS metadata, then posts the internal Ferrous-hosted `/fws/action/app/{app_id}/shutdown` action with `x-fws-ajax: 1` so quit follows the same FWS shutdown-group wiring as the current framework/app shell. Validated `terminal` quit returned `200` with `root_pids`, a second quit returned `404`, readiness fell back to `stopped`, and the app disappeared from `/api/apps/running`. |
+| Prefer checked-out `framework_shells` for PyO3 Ferrous launches | Done | `rust-spike/app/bootstrap.py` now prepends `worktrees/framework-shells` to `PYTHONPATH` so the spike imports the proc-capable `framework_shells.ferrous_framework` surface instead of the older site-packages copy. |
+| Implement framework shutdown sequencing through the FWS shutdown tree | Done | Explicit app quit routes through the FWS shutdown-group action. CLI KeyboardInterrupt/SIGTERM now lets Rust call the Ferrous host `shutdown_tree_blocking` hook before Axum exits, and the bootstrap keeps the hosted console/MCP runtime bridge alive until Rust completes. Isolated side-port smoke launched `terminal`, sent SIGINT, logged a successful Ferrous shutdown-tree result, and left the worker PID dead; the scratch metadata record kept a stale `running` status, which runtime discovery already filters by PID liveness. |
+| Implement app lifecycle/readiness store | Partial | Rust spike now exposes `GET/POST/PUT /api/apps/{app_id}/readiness` with an in-process readiness store keyed by `app_id`, seeds `starting` for readiness-support launches, and accepts app-worker readiness callbacks. Event fanout and restart/quit integration remain later work. |
+| Preserve framework-level stateful-app support | Low priority | Keep manifest `sidebar_state` and framework-owned restore/ledger semantics available for current sidebar consumers such as `file_editor_cm6`; remaining stateful-app loose ends can follow the primary app/proxy/runtime parity work. |
+| Implement `/app/{app_id}` shell rendering | Partial | Rust spike now serves the framework `app_shell.html` wrapper for standard apps, rewrites the minimal template placeholders, supports `/api/state`, and validated `/app/terminal` plus readiness placeholder clearing through port `18089`. Settings endpoints are intentionally out of this MVP slice. |
+| Implement Rust settings app functions | Medium priority | Port settings endpoints/app functions into Rust and preserve transport keepalive notification behavior. Settings endpoints were intentionally omitted from the MVP shell slice. |
 | Implement app events SSE/WebSocket | Not started | Phase 4. |
-| Bridge console runtime through PyO3 or equivalent | Not started | Phase 5. |
-| Bridge MCP runtime through PyO3 or equivalent | Not started | Phase 5. |
-| Run `file_editor_cm6` as the primary canary | Not started | Phase 6. |
+| Bridge console runtime through PyO3 or equivalent | Partial | Current slice restores the route and runtime contract through a bootstrap-managed Python sidecar; revisit only if tighter in-process ownership becomes necessary. |
+| Bridge MCP runtime through PyO3 or equivalent | Partial | Current slice restores `/te2_mcp` and `/te2_mcp_http` through the same Python sidecar so TE2 MCP can continue to drive console eval and framework tools. |
+| Full TE2 MCP compatibility for ALS Codex consumers | Low priority | Route parity exists through the Python sidecar; full compatibility for the ALS Codex implementation can follow after core Rust framework behavior is stable. |
+| Add Android GeckoView direct-console back door | Not started | Planned as a developer-only diagnostic escape hatch after the primary framework-owned console/MCP contract is stable. |
+| Fix WBA/editor readiness race exposed by Rust proxy | Done | Editor subscribes to adapter-state before Socket.IO connect, and WBA `te2.resync` replays the `workspace/switched` ready baton for already-ready sessions. |
+| Run `file_editor_cm6` as the primary canary | Partial | Current Rust runs fixed static asset parity and the WBA/editor readiness race. Remaining canary work is broader app lifecycle, stateful-app, event, settings, shutdown, and MCP compatibility parity. |
 
 ## Open Questions
 
 - Should normal spike launches bind `8089`, or should day-to-day side-by-side
   development default to a non-conflicting port with `8089` reserved for cutover
   smoke tests?
-- Should the Ferrous dependency remain a path dependency to
-  `worktrees/framework-shells/.external/ferrous-framework`, or should this repo
-  also carry a root-level submodule pointer for the spike?
+- The spike is now pinned to Ferrous commit `74bbe12e1f567cfd2556d159f6ba2e65c27331c6`.
+  If local iteration against the checkout becomes more important than pinning,
+  decide whether to move back to a path dependency.
 - Which Python app service modules are required for the first `file_editor_cm6`
   canary, and should they be bridged through PyO3 or re-expressed as Rust
   service hooks?
 - Should `proxy_shell` rewrite behavior be ported natively in Rust first, or
   should wrapped apps use a transitional Python bridge while app-worker proxying
   is proven?
-- What is the first acceptable compatibility line for TE2 console and MCP: full
-  mount parity, HTTP bridge, or PyO3 in-process call boundary?
+- Core console/MCP route parity is currently through the Python sidecar. What
+  remaining semantics are required for full ALS Codex TE2 MCP compatibility
+  before native/PyO3 tightening?
+- What exact settings app functions and keepalive notification contract must be
+  native before cutover?
+- Which stateful-app loose ends are required before replacing the Python
+  framework beyond manifest, ledger, and readiness preservation?
+- What should the Android GeckoView direct-console back door authenticate with,
+  and how should it stay explicitly developer-only instead of becoming a second
+  general-purpose runtime control plane?
 
 ## Guardrails
 

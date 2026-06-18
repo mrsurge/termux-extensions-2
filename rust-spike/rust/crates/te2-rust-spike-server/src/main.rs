@@ -142,13 +142,14 @@ async fn main() -> Result<()> {
         mounts = ?sio_mounts,
         "loaded manifest Socket.IO proxy routes"
     );
+    let fws_bridge_config = fws_bridge_runtime.config.clone();
     let state = AppState {
         config,
         http_client,
         sio_routes,
         launch_store: Arc::new(LaunchStore::default()),
         readiness_store: Arc::new(RwLock::new(HashMap::new())),
-        fws_bridge: Arc::new(fws_bridge_runtime.config.clone()),
+        fws_bridge: Arc::new(fws_bridge_config.clone()),
         te2_runtime_bridge: Arc::new(load_te2_runtime_bridge_config()),
     };
     let app = build_router(state);
@@ -169,6 +170,7 @@ async fn main() -> Result<()> {
 
     wait_for_shutdown_signal().await;
     info!("TE2 Rust framework spike shutdown signal received");
+    shutdown_fws_tree(&fws_bridge_runtime).await;
     shutdown_notify.notify_waiters();
     match timeout(Duration::from_secs(10), server).await {
         Ok(Ok(Ok(()))) => {}
@@ -2226,6 +2228,35 @@ async fn close_fws_bridge(runtime: FwsBridgeRuntime) {
             Ok(Err(error)) => warn!(%error, "failed to close Ferrous FWS bridge host"),
             Err(error) => warn!(%error, "Ferrous FWS bridge host shutdown task failed"),
         }
+    }
+}
+
+async fn shutdown_fws_tree(runtime: &FwsBridgeRuntime) {
+    let _ = runtime;
+
+    // Framework shutdown delegates process ownership to FWS. App-specific quit
+    // still uses the app-group endpoint; this path calls the Ferrous host hook.
+    #[cfg(feature = "ferrous-framework-pyo3")]
+    if let Some(host) = runtime.host.clone() {
+        match tokio::task::spawn_blocking(move || host.shutdown_tree_blocking(Vec::new())).await {
+            Ok(Ok(result)) => info!(
+                ok = result.ok,
+                kind = %result.kind,
+                target = %result.target,
+                elapsed_ms = result.elapsed_ms,
+                root_pids = ?result.root_pids,
+                total = result.stats.total,
+                terminated = result.stats.terminated,
+                clean_exits = result.stats.clean_exits,
+                force_killed = result.stats.force_killed,
+                errors = ?result.stats.errors,
+                "Ferrous FWS shutdown tree completed"
+            ),
+            Ok(Err(error)) => warn!(%error, "failed to run Ferrous FWS shutdown tree"),
+            Err(error) => warn!(%error, "Ferrous FWS shutdown tree task failed"),
+        }
+    } else {
+        warn!("Ferrous FWS bridge host is unavailable; skipping FWS shutdown tree");
     }
 }
 

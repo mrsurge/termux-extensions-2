@@ -289,8 +289,8 @@ def _run_child(command: Sequence[str], env: dict[str, str]) -> int:
     previous_handlers: dict[signal.Signals, SignalHandler] = {}
 
     def forward_signal(signum: int, _frame: FrameType | None) -> object:
-        if runtime_bridge.poll() is None:
-            runtime_bridge.send_signal(signum)
+        # Let the Rust server run its FWS shutdown-tree sequence first. The
+        # runtime bridge stays available for console/MCP traffic until cleanup.
         if child.poll() is None:
             child.send_signal(signum)
 
