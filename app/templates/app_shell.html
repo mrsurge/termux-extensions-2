@@ -503,15 +503,10 @@
             if (!appRequiresBackend(appDef) || !appSupportsReadiness(appDef)) return;
 
             let done = false;
-            let pollTimer = 0;
             let ws = null;
 
             function cleanup() {
                 done = true;
-                if (pollTimer) {
-                    clearTimeout(pollTimer);
-                    pollTimer = 0;
-                }
                 if (ws) {
                     try { ws.close(); } catch (_) {}
                     ws = null;
@@ -536,12 +531,9 @@
                     renderBackendReadinessPlaceholder(appDef, readiness || { app_id: appId, status });
                 }
 
-                async function poll() {
+                async function fetchInitialReadiness() {
                     const readiness = await fetchAppReadiness(appId);
                     applyReadiness(readiness);
-                    if (!done) {
-                        pollTimer = setTimeout(poll, 2000);
-                    }
                 }
 
                 try {
@@ -557,13 +549,27 @@
                         if (message.type === 'apps_snapshot' || message.type === 'catalog_snapshot') {
                             const readiness = extractCatalogReadiness(message.payload || {});
                             if (readiness) applyReadiness(readiness);
+                            return;
+                        }
+                        if (message.type === 'app_readiness_changed') {
+                            const payload = message.payload || {};
+                            if (String(payload.app_id || '').trim() === appId && payload.readiness) {
+                                applyReadiness(payload.readiness);
+                            }
+                            return;
+                        }
+                        if (message.type === 'app_running_changed') {
+                            const payload = message.payload || {};
+                            if (String(payload.app_id || '').trim() === appId && payload.running === false) {
+                                applyReadiness({ app_id: appId, status: 'stopped' });
+                            }
                         }
                     });
                 } catch (_) {
                     ws = null;
                 }
 
-                void poll();
+                void fetchInitialReadiness();
             });
         }
 

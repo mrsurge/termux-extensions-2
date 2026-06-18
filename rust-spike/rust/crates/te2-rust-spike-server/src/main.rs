@@ -10,13 +10,16 @@ use axum::{
     body::{Body, Bytes},
     extract::ws::{Message, WebSocket, WebSocketUpgrade, rejection::WebSocketUpgradeRejection},
     extract::{OriginalUri, Path, State},
-    http::{HeaderMap, Method, StatusCode, Uri, header},
-    response::{IntoResponse, Redirect, Response},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header},
+    response::{
+        IntoResponse, Redirect, Response,
+        sse::{Event, KeepAlive, Sse},
+    },
     routing::{any, get, post},
 };
 #[cfg(feature = "ferrous-framework-pyo3")]
 use ferrous_framework::{FerrousFrameworkHost, FerrousHostConfig};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt, stream};
 use launcher::{LaunchStore, launch_app, launch_supported};
 use proxy_shell::{
     parse_proxy_shell, proxy_shell_upstream_path, proxy_shell_urls,
@@ -30,13 +33,14 @@ use sio_proxy::{MatchedSioRoute, SioRouteIndex, SioTarget, join_upstream_path};
 use socketioxide::SocketIo;
 use std::{
     collections::{HashMap, HashSet},
+    convert::Infallible,
     env, fs,
     net::SocketAddr,
     path::{Path as StdPath, PathBuf},
     sync::Arc,
 };
 use tokio::{
-    sync::{Notify, RwLock},
+    sync::{Notify, RwLock, broadcast},
     time::{Duration, timeout},
 };
 use tokio_tungstenite::{
@@ -49,6 +53,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 use url::{Url, form_urlencoded};
 
 const APP_ID: &str = "te2-rust-spike";
+const APPS_EVENT_CHANNEL_CAPACITY: usize = 64;
 
 // Shared server state: config is immutable per process, while the reqwest
 // client owns reusable connection state for dynamic app proxying.
@@ -59,8 +64,37 @@ struct AppState {
     sio_routes: Arc<SioRouteIndex>,
     launch_store: Arc<LaunchStore>,
     readiness_store: Arc<RwLock<HashMap<String, JsonMap<String, Value>>>>,
+    apps_events: broadcast::Sender<AppsEvent>,
     fws_bridge: Arc<FwsBridgeConfig>,
     te2_runtime_bridge: Arc<Te2RuntimeBridgeConfig>,
+}
+
+#[derive(Clone, Debug)]
+struct AppsEvent {
+    event_type: String,
+    payload: Value,
+}
+
+impl AppsEvent {
+    fn new(event_type: impl Into<String>, payload: Value) -> Self {
+        Self {
+            event_type: event_type.into(),
+            payload,
+        }
+    }
+
+    fn ws_message(&self) -> Value {
+        json!({
+            "type": self.event_type,
+            "payload": self.payload,
+        })
+    }
+
+    fn sse_event(&self) -> Event {
+        Event::default()
+            .event(self.event_type.clone())
+            .data(self.payload.to_string())
+    }
 }
 
 #[derive(Clone)]
@@ -136,6 +170,7 @@ async fn main() -> Result<()> {
     let bootstrap_registry = AppRegistry::load(&config.app_roots);
     let sio_routes = Arc::new(SioRouteIndex::from_registry(&bootstrap_registry));
     let sio_mounts = sio_routes.mount_paths();
+    let (apps_events, _) = broadcast::channel(APPS_EVENT_CHANNEL_CAPACITY);
     info!(
         route_count = sio_routes.route_count(),
         mount_count = sio_mounts.len(),
@@ -149,6 +184,7 @@ async fn main() -> Result<()> {
         sio_routes,
         launch_store: Arc::new(LaunchStore::default()),
         readiness_store: Arc::new(RwLock::new(HashMap::new())),
+        apps_events,
         fws_bridge: Arc::new(fws_bridge_config.clone()),
         te2_runtime_bridge: Arc::new(load_te2_runtime_bridge_config()),
     };
@@ -222,6 +258,7 @@ fn build_router(state: AppState) -> Router {
         .route("/api/apps", get(list_apps))
         .route("/api/apps/catalog", get(apps_catalog))
         .route("/api/apps/running", get(running_apps))
+        .route("/api/apps/events", get(apps_events_sse))
         .route("/api/apps/{app_id}/start", post(start_app))
         .route("/api/apps/{app_id}/open", post(open_app))
         .route("/api/apps/{app_id}/quit", post(quit_app))
@@ -234,7 +271,8 @@ fn build_router(state: AppState) -> Router {
         .route("/api/apps/{app_id}/proxy_shell", get(proxy_shell_meta))
         .route("/api/apps/reload", post(reload_apps))
         .route("/sw.js", get(service_worker))
-        // App launcher event bridge. This is snapshot-only until registry events move.
+        // App launcher event bridge. WebSocket and SSE share the same app
+        // lifecycle broadcast channel so launchers and app shells do not poll.
         .route("/ws/apps", get(apps_ws))
         // Proxy-shell routes must win before the generic app proxy catches the
         // same `/api/app/{app_id}/...` prefix.
@@ -464,7 +502,10 @@ async fn delete_state(State(state): State<AppState>, uri: Uri) -> Response {
 
 async fn start_app(State(state): State<AppState>, Path(app_id): Path<String>) -> Response {
     match start_app_inner(&state, &app_id).await {
-        Ok(data) => Json(ApiResponse { ok: true, data }).into_response(),
+        Ok(data) => {
+            publish_app_running_changed(&state, &app_id, "start", Some(&data), None).await;
+            Json(ApiResponse { ok: true, data }).into_response()
+        }
         Err(response) => response,
     }
 }
@@ -550,6 +591,7 @@ async fn open_app(
         Ok(data) => data,
         Err(response) => return response,
     };
+    publish_app_running_changed(&state, &app_id, "open", Some(&app_info), None).await;
 
     let mut url = format!("/app/{app_id}");
     if !params.is_empty() {
@@ -638,6 +680,7 @@ async fn quit_app(State(state): State<AppState>, Path(app_id): Path<String>) -> 
     }
 
     state.readiness_store.write().await.remove(&app_id);
+    publish_app_running_changed(&state, &app_id, "quit", None, Some(false)).await;
     Json(ApiResponse {
         ok: true,
         data: json!({
@@ -684,6 +727,14 @@ async fn set_app_readiness(
         .write()
         .await
         .insert(app_id.clone(), readiness.clone());
+    publish_apps_event(
+        &state,
+        AppsEvent::new(
+            "app_readiness_changed",
+            json!({ "app_id": app_id, "readiness": readiness.clone() }),
+        ),
+    );
+    publish_catalog_snapshot(&state).await;
     Json(ApiResponse {
         ok: true,
         data: Value::Object(readiness),
@@ -720,6 +771,11 @@ async fn reload_apps(
         "count".to_owned(),
         Value::from(registry.list_payloads().len()),
     );
+    publish_apps_event(
+        &state,
+        AppsEvent::new("registry_reloaded", Value::Object(data.clone())),
+    );
+    publish_catalog_snapshot(&state).await;
     Json(ApiResponse { ok: true, data })
 }
 
@@ -752,32 +808,100 @@ async fn proxy_shell_meta(State(state): State<AppState>, Path(app_id): Path<Stri
 }
 
 async fn apps_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
-    // The current launcher frontend opens `/ws/apps` for catalog state. This
-    // first Rust slice sends the initial snapshot and leaves live fanout for later.
+    // `/ws/apps` is the launcher/app-shell live state lane. Every client gets
+    // the current snapshot first, then compatible lifecycle update messages.
     ws.on_upgrade(move |socket| handle_apps_ws(socket, state))
         .into_response()
 }
 
 async fn handle_apps_ws(mut socket: WebSocket, state: AppState) {
-    let snapshot = apps_snapshot_payload(&state).await;
-    let message = json!({
-        "type": "apps_snapshot",
-        "payload": snapshot,
-    });
-    if socket
-        .send(Message::Text(message.to_string().into()))
-        .await
-        .is_err()
+    if send_apps_ws_event(
+        &mut socket,
+        AppsEvent::new("apps_snapshot", apps_snapshot_payload(&state).await),
+    )
+    .await
+    .is_err()
     {
         return;
     }
 
-    while let Some(result) = socket.recv().await {
-        match result {
-            Ok(Message::Close(_)) | Err(_) => break,
-            _ => {}
+    let mut events = state.apps_events.subscribe();
+    loop {
+        tokio::select! {
+            message = socket.recv() => {
+                match message {
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                    _ => {}
+                }
+            }
+            event = events.recv() => {
+                match event {
+                    Ok(event) => {
+                        if send_apps_ws_event(&mut socket, event).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let event = AppsEvent::new("catalog_snapshot", apps_snapshot_payload(&state).await);
+                        if send_apps_ws_event(&mut socket, event).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
         }
     }
+}
+
+async fn send_apps_ws_event(socket: &mut WebSocket, event: AppsEvent) -> Result<(), axum::Error> {
+    socket
+        .send(Message::Text(event.ws_message().to_string().into()))
+        .await
+}
+
+async fn apps_events_sse(State(state): State<AppState>) -> Response {
+    // SSE mirrors the same event names as the Python apps extension while also
+    // emitting an initial snapshot so new clients can hydrate without a GET.
+    let initial_state = state.clone();
+    let initial = stream::once(async move {
+        Ok::<Event, Infallible>(
+            AppsEvent::new("apps_snapshot", apps_snapshot_payload(&initial_state).await)
+                .sse_event(),
+        )
+    });
+    let update_state = state.clone();
+    let updates = stream::unfold(
+        (state.apps_events.subscribe(), update_state),
+        |(mut events, state)| async move {
+            loop {
+                match events.recv().await {
+                    Ok(event) => {
+                        return Some((Ok::<Event, Infallible>(event.sse_event()), (events, state)));
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let event =
+                            AppsEvent::new("catalog_snapshot", apps_snapshot_payload(&state).await)
+                                .sse_event();
+                        return Some((Ok::<Event, Infallible>(event), (events, state)));
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        },
+    );
+    let mut response = Sse::new(initial.chain(updates))
+        .keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(25))
+                .text("ping"),
+        )
+        .into_response();
+    let headers = response.headers_mut();
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(header::CONNECTION, HeaderValue::from_static("keep-alive"));
+    headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
+    response
 }
 
 async fn proxy_app_websocket(
@@ -1343,6 +1467,53 @@ async fn apps_snapshot_payload(state: &AppState) -> Value {
         "catalog": catalog_payloads_with_running_and_readiness(&registry, &running_ids, &readiness),
         "running_ids": sorted_running_ids,
     })
+}
+
+fn publish_apps_event(state: &AppState, event: AppsEvent) {
+    let _ = state.apps_events.send(event);
+}
+
+async fn publish_catalog_snapshot(state: &AppState) {
+    publish_apps_event(
+        state,
+        AppsEvent::new("catalog_snapshot", apps_snapshot_payload(state).await),
+    );
+}
+
+async fn publish_app_running_changed(
+    state: &AppState,
+    app_id: &str,
+    trigger: &str,
+    app_info: Option<&Value>,
+    running_override: Option<bool>,
+) {
+    let registry = AppRegistry::load(&state.config.app_roots);
+    let running = running_app_for_id(&registry, app_id);
+    let running_flag = running_override.unwrap_or_else(|| running.is_some());
+    let shell_id = running
+        .as_ref()
+        .map(|app| app.shell_id.clone())
+        .or_else(|| {
+            app_info
+                .and_then(Value::as_object)
+                .and_then(|object| object.get("shell_id"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        });
+
+    publish_catalog_snapshot(state).await;
+    publish_apps_event(
+        state,
+        AppsEvent::new(
+            "app_running_changed",
+            json!({
+                "app_id": app_id,
+                "running": running_flag,
+                "event_type": trigger,
+                "shell_id": shell_id,
+            }),
+        ),
+    );
 }
 
 fn running_app_ids(registry: &AppRegistry) -> HashSet<String> {
@@ -2105,6 +2276,15 @@ fn catalog_payloads_with_running_and_readiness(
             };
             if let Some(readiness) = readiness_store.get(&app_id) {
                 object.insert("readiness".to_owned(), Value::Object(readiness.clone()));
+            } else if running_ids.contains(&app_id)
+                && registry
+                    .get_app(&app_id)
+                    .is_some_and(|app| app.readiness_support && app.backend_module().is_some())
+            {
+                object.insert(
+                    "readiness".to_owned(),
+                    json!({ "app_id": app_id, "status": "starting" }),
+                );
             }
             Value::Object(object)
         })

@@ -388,21 +388,73 @@ def get_apps_templates():
 
 @apps_bp.get('/api/apps/events')
 async def apps_events(request: Request):
+    def _sse_event(event_type: str, payload: dict[str, Any]) -> str:
+        data = json.dumps(payload if isinstance(payload, dict) else {}, ensure_ascii=False)
+        return f"event: {event_type}\ndata: {data}\n\n"
+
     async def stream():
-        queue = app_registry_events.subscribe()
+        registry_queue = app_registry_events.subscribe()
+        shell_queue = get_event_bus().subscribe()
+        registry_task: asyncio.Task | None = None
+        shell_task: asyncio.Task | None = None
         try:
+            yield _sse_event("apps_snapshot", await _build_apps_snapshot())
             while True:
                 if await request.is_disconnected():
                     break
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    registry_task = asyncio.create_task(registry_queue.get())
+                    shell_task = asyncio.create_task(shell_queue.get())
+                    done, pending = await asyncio.wait(
+                        {registry_task, shell_task},
+                        timeout=25.0,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
                 except asyncio.TimeoutError:
                     yield ": ping\n\n"
                     continue
-                payload = json.dumps(event.payload, ensure_ascii=False)
-                yield f"event: {event.type}\ndata: {payload}\n\n"
+                if not done:
+                    for task in (registry_task, shell_task):
+                        task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await task
+                    yield ": ping\n\n"
+                    continue
+
+                for task in pending:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+
+                if registry_task in done:
+                    event = registry_task.result()
+                    yield _sse_event(event.type, event.payload)
+                    yield _sse_event("catalog_snapshot", await _build_apps_snapshot())
+                    continue
+
+                if shell_task in done:
+                    shell_event = shell_task.result()
+                    event_dict = shell_event.to_dict() if hasattr(shell_event, "to_dict") else {}
+                    app_id = _derive_app_id_from_shell_event(event_dict if isinstance(event_dict, dict) else {})
+                    if not app_id or get_app_registry().get_app(app_id) is None:
+                        continue
+                    running = await get_app_runtime().get_running_app(app_id)
+                    yield _sse_event("catalog_snapshot", await _build_apps_snapshot())
+                    yield _sse_event("app_running_changed", {
+                        "app_id": app_id,
+                        "running": bool(running),
+                        "event_type": event_dict.get("type"),
+                        "shell_id": event_dict.get("shell_id"),
+                    })
         finally:
-            app_registry_events.unsubscribe(queue)
+            for task in (registry_task, shell_task):
+                if task is None:
+                    continue
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            app_registry_events.unsubscribe(registry_queue)
+            get_event_bus().unsubscribe(shell_queue)
 
     headers = {
         "Cache-Control": "no-cache",
