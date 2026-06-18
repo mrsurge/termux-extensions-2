@@ -67,13 +67,6 @@ async def reset_project_session(new_project_path: str) -> bool:
         pass
 
     try:
-        from ...change_ledger import clear as clear_ledger
-
-        clear_ledger()
-    except Exception:
-        pass
-
-    try:
         from ... import edit_tracker
 
         edit_tracker.set_project_root(get_project_root())

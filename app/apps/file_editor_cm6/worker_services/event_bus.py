@@ -27,6 +27,7 @@ EventType = Literal[
     "ProjectSwitchStarted",
     "ProjectSwitchFinished",
     "ReviewStateChanged",
+    "SidebarWindowStateChanged",
     "ExplorerRenderStateChanged",
     "WatcherConfigChanged",
     "WatcherErrorRaised",

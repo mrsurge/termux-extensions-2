@@ -560,12 +560,6 @@ async def _terminate_adapter_shell_for_project_routes() -> bool:
     return await terminate_adapter_shell()
 
 
-def _clear_change_ledger_for_project_routes() -> None:
-    from .change_ledger import clear as clear_ledger
-
-    clear_ledger()
-
-
 async def _emit_sidebar_cwd_set_for_project_routes(reason: str) -> None:
     from .ui_ipc import sidebar_ws
 
@@ -594,7 +588,6 @@ _PROJECT_ROUTES_DEPS = ProjectRoutesDeps(
     close_active_terminal_sockets=_close_active_terminal_sockets_for_project_routes,
     stop_diagnostics_bridge=_stop_diagnostics_bridge_for_project_routes,
     terminate_adapter_shell=_terminate_adapter_shell_for_project_routes,
-    clear_change_ledger=_clear_change_ledger_for_project_routes,
     emit_sidebar_cwd_set=_emit_sidebar_cwd_set_for_project_routes,
     build_state_payload=_build_state_payload,
     create_project=_create_project_for_project_routes,

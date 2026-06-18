@@ -8,11 +8,10 @@ import time
 from typing import Awaitable, Protocol, cast
 
 from ..explorer.services.file_ops import get_project_root
+from ..sidebar_window_events import publish_sidebar_window_state_changed
 from ..stores import get_history_store, get_preferences_store
 from .rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
-    UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED,
-    UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED,
 )
 from .sidebar_rpc_contract import (
     SIDEBAR_IPC_RPC_METHOD_AGENT_EDITS_CLEAR,
@@ -57,9 +56,7 @@ from .sidebar_rpc_contract import (
     SIDEBAR_IPC_RPC_NOTIFICATION_PRESENCE,
     SIDEBAR_IPC_RPC_NOTIFICATION_PROJECT_OPENED,
     SIDEBAR_IPC_RPC_NOTIFICATION_WINDOWS_CHANGED,
-    SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_ACTIVATED,
     SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_FOCUSED,
-    SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_READINESS_CHANGED,
     SidebarIpcRpcProtocolError,
     build_jsonrpc_error,
     build_jsonrpc_notification,
@@ -162,6 +159,17 @@ def _client_state_payload(client_id: str) -> JsonObject:
     }
 
 
+def _sidebar_window_activated_payload(client_id: str, host_id: str) -> JsonObject:
+    safe_client_id = _norm(client_id)
+    safe_host_id = _norm(host_id)
+    return {
+        "client_id": safe_client_id,
+        "host_id": safe_host_id,
+        "hostId": safe_host_id,
+        "ts": int(time.time() * 1000),
+    }
+
+
 async def _emit_rpc_notification(ns: SidebarNamespace, method: str, params: JsonObject, *, to_sid: str | None = None, room: str | None = None, skip_sid: str | None = None) -> None:
     envelope = build_jsonrpc_notification(method, params)
     if to_sid:
@@ -174,27 +182,6 @@ async def _emit_ui_ipc_sidebar_notification(method: str, params: JsonObject) -> 
     from .ui_ipc_ws import emit_ui_ipc_rpc_notification
 
     await emit_ui_ipc_rpc_notification(method, params)
-
-
-async def _emit_sidebar_ipc_global_notification(method: str, params: JsonObject) -> None:
-    from .ui_ipc_socketio import UI_IPC_SIO
-
-    sio = cast(SidebarNamespace, UI_IPC_SIO)
-    await sio.emit(
-        SIDEBAR_IPC_RPC_NOTIFICATION_EVENT,
-        build_jsonrpc_notification(method, params),
-        namespace="/sidebar_ipc",
-        room="sidebar_ipc",
-    )
-
-
-async def _emit_ui_sidebar_window_state(active_host_id: str | None = None) -> JsonObject:
-    from .sidebar_window_state import get_sidebar_window_state
-
-    payload = get_sidebar_window_state(_norm(active_host_id) or None)
-    await _emit_ui_ipc_sidebar_notification(UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED, payload)
-    await _emit_sidebar_ipc_global_notification(SIDEBAR_IPC_RPC_NOTIFICATION_WINDOWS_CHANGED, payload)
-    return payload
 
 
 async def _emit_client_state(ns: SidebarNamespace, client_id: str, *, to_sid: str | None = None, skip_sid: str | None = None) -> None:
@@ -216,38 +203,6 @@ async def _emit_sidebar_windows_changed(ns: SidebarNamespace, *, client_id: str 
         return
     room = _client_room(client_id) if client_id else "sidebar_ipc"
     await _emit_rpc_notification(ns, SIDEBAR_IPC_RPC_NOTIFICATION_WINDOWS_CHANGED, payload, room=room, skip_sid=skip_sid)
-
-
-async def _emit_sidebar_window_activated(
-    ns: SidebarNamespace,
-    client_id: str,
-    host_id: str,
-    *,
-    source: object = "",
-    skip_sid: str | None = None,
-):
-    safe_client_id = _norm(client_id)
-    safe_host_id = _norm(host_id)
-    payload: JsonObject = {
-        "client_id": safe_client_id,
-        "host_id": safe_host_id,
-        "hostId": safe_host_id,
-        "ts": int(time.time() * 1000),
-    }
-    await _emit_ui_ipc_sidebar_notification(UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED, payload)
-    await _emit_rpc_notification(
-        ns,
-        SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_ACTIVATED,
-        payload,
-        room=_client_room(safe_client_id),
-        skip_sid=skip_sid,
-    )
-    await _emit_sidebar_window_focused_global(
-        safe_client_id,
-        safe_host_id,
-        source=source or "sidebar_window_activated",
-        skip_sid=skip_sid,
-    )
 
 
 def _sidebar_window_focus_payload(client_id: str, host_id: str, source: object = "") -> JsonObject:
@@ -326,18 +281,6 @@ async def _emit_sidebar_window_focused_global(
         skip_sid=skip_sid,
     )
     return payload
-
-
-async def _emit_sidebar_window_readiness_changed(ns: SidebarNamespace, payload: JsonObject, *, skip_sid: str | None = None) -> None:
-    params = _json_object(payload)
-    await _emit_ui_ipc_sidebar_notification(UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED, params)
-    await _emit_rpc_notification(
-        ns,
-        SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_READINESS_CHANGED,
-        params,
-        room="sidebar_ipc",
-        skip_sid=skip_sid,
-    )
 
 
 async def _resolve_client_id(ns: SidebarNamespace, sid: str, payload: JsonObject | None = None) -> str:
@@ -426,12 +369,14 @@ async def emit_sidebar_mention_global(payload: JsonObject) -> None:
 
 async def update_sidebar_window_readiness_global(payload: JsonObject) -> JsonObject:
     from .sidebar_window_state import update_sidebar_window_readiness
-    from .ui_ipc_ws import emit_ui_ipc_rpc_notification
 
     result = _json_object(update_sidebar_window_readiness(payload))
-    await emit_ui_ipc_rpc_notification(UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED, result)
-    await _emit_ui_sidebar_window_state()
-    await _emit_sidebar_ipc_global_notification(SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_READINESS_CHANGED, result)
+    await publish_sidebar_window_state_changed(
+        _json_object(result.get("state", {})),
+        source=_norm(payload.get("source")) or "ui_sidebar_window_readiness_update",
+        sidebar_scope="global",
+        readiness=result,
+    )
     return result
 
 
@@ -443,23 +388,24 @@ async def handle_ui_sidebar_window_create_request(params: JsonObject) -> JsonObj
     result = _json_object(create_sidebar_window(body))
     window = _json_object(result.get("window", {}))
     host_id = _norm(window.get("host_id"))
+    activated: JsonObject | None = None
     if host_id:
         _client_active_windows[client_id] = host_id
         _client_active_shortcuts[client_id] = ""
-        activated: JsonObject = {
-            "client_id": client_id,
-            "host_id": host_id,
-            "hostId": host_id,
-            "ts": int(time.time() * 1000),
-        }
-        await _emit_ui_ipc_sidebar_notification(UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED, activated)
-        await _emit_sidebar_ipc_global_notification(SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_ACTIVATED, activated)
+        activated = _sidebar_window_activated_payload(client_id, host_id)
         await _emit_sidebar_window_focused_global(
             client_id,
             host_id,
             source=body.get("source") or "ui_sidebar_window_create",
         )
-    await _emit_ui_sidebar_window_state(host_id or None)
+    await publish_sidebar_window_state_changed(
+        _json_object(result.get("state", {})),
+        source=_norm(body.get("source")) or "ui_sidebar_window_create",
+        sidebar_scope="global",
+        activated_scope="global" if activated else None,
+        client_id=client_id if activated else None,
+        activated=activated,
+    )
     return result
 
 
@@ -468,25 +414,26 @@ async def handle_ui_sidebar_window_activate_request(params: JsonObject) -> JsonO
 
     body = _json_object(params)
     client_id = _norm(body.get("client_id") or body.get("clientId")) or "main_page"
-    result = activate_sidebar_window(body)
+    result = _json_object(activate_sidebar_window(body))
     host_id = _norm(body.get("host_id") or body.get("hostId"))
+    activated: JsonObject | None = None
     if host_id:
         _client_active_windows[client_id] = host_id
         _client_active_shortcuts[client_id] = ""
-        activated: JsonObject = {
-            "client_id": client_id,
-            "host_id": host_id,
-            "hostId": host_id,
-            "ts": int(time.time() * 1000),
-        }
-        await _emit_ui_ipc_sidebar_notification(UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED, activated)
-        await _emit_sidebar_ipc_global_notification(SIDEBAR_IPC_RPC_NOTIFICATION_WINDOW_ACTIVATED, activated)
+        activated = _sidebar_window_activated_payload(client_id, host_id)
         await _emit_sidebar_window_focused_global(
             client_id,
             host_id,
             source=body.get("source") or "ui_sidebar_window_activate",
         )
-    await _emit_ui_sidebar_window_state(host_id or None)
+    await publish_sidebar_window_state_changed(
+        _json_object(result.get("state", {})),
+        source=_norm(body.get("source")) or "ui_sidebar_window_activate",
+        sidebar_scope="global",
+        activated_scope="global" if activated else None,
+        client_id=client_id if activated else None,
+        activated=activated,
+    )
     return result
 
 
@@ -507,7 +454,11 @@ async def handle_ui_sidebar_window_close_request(params: JsonObject) -> JsonObje
                 next_active,
                 source=body.get("source") or "ui_sidebar_window_close",
             )
-    await _emit_ui_sidebar_window_state(_client_active_windows.get(client_id))
+    await publish_sidebar_window_state_changed(
+        _json_object(result.get("state", {})),
+        source=_norm(body.get("source")) or "ui_sidebar_window_close",
+        sidebar_scope="global",
+    )
     return result
 
 
@@ -516,9 +467,11 @@ async def handle_ui_sidebar_window_order_update_request(params: JsonObject) -> J
 
     body = _json_object(params)
     result = _json_object(reorder_sidebar_windows(body))
-    state = _json_object(result.get("state", {}))
-    active_host_id = _norm(state.get("activeHostId"))
-    await _emit_ui_sidebar_window_state(active_host_id or None)
+    await publish_sidebar_window_state_changed(
+        _json_object(result.get("state", {})),
+        source=_norm(body.get("source")) or "ui_sidebar_window_order_update",
+        sidebar_scope="global",
+    )
     return result
 
 
@@ -775,18 +728,27 @@ async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: 
         result_obj = _json_object(result)
         window = _json_object(result_obj.get("window", {}))
         host_id = _norm(window.get("host_id"))
+        create_activated: JsonObject | None = None
         if host_id:
             _client_active_windows[client_id] = host_id
             _client_active_shortcuts[client_id] = ""
-            await _emit_sidebar_window_activated(
-                ns,
+            create_activated = _sidebar_window_activated_payload(client_id, host_id)
+            await _emit_sidebar_window_focused_global(
                 client_id,
                 host_id,
                 source=params.get("source") or "sidebar_window_create",
                 skip_sid=sid,
             )
             await _emit_client_state(ns, client_id, skip_sid=sid)
-        await _emit_sidebar_windows_changed(ns, client_id=client_id)
+        await publish_sidebar_window_state_changed(
+            _json_object(result_obj.get("state", {})),
+            source=_norm(params.get("source")) or "sidebar_window_create",
+            sidebar_scope="client",
+            activated_scope="client" if create_activated else None,
+            client_id=client_id,
+            activated=create_activated,
+            skip_sidebar_sid=sid,
+        )
         return result
     if method in {SIDEBAR_IPC_RPC_METHOD_WINDOW_OPEN_URL, SIDEBAR_IPC_RPC_METHOD_WINDOW_STATE_UPDATE}:
         from .sidebar_window_state import open_sidebar_window_url
@@ -796,18 +758,27 @@ async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: 
         result_obj = _json_object(result)
         window = _json_object(result_obj.get("window", {}))
         host_id = _norm(window.get("host_id"))
+        state_update_activated: JsonObject | None = None
         if host_id and params.get("activate", False):
             _client_active_windows[client_id] = host_id
             _client_active_shortcuts[client_id] = ""
-            await _emit_sidebar_window_activated(
-                ns,
+            state_update_activated = _sidebar_window_activated_payload(client_id, host_id)
+            await _emit_sidebar_window_focused_global(
                 client_id,
                 host_id,
                 source=params.get("source") or "sidebar_window_state_update",
                 skip_sid=sid,
             )
             await _emit_client_state(ns, client_id, skip_sid=sid)
-        await _emit_sidebar_windows_changed(ns)
+        await publish_sidebar_window_state_changed(
+            _json_object(result_obj.get("state", {})),
+            source=_norm(params.get("source")) or "sidebar_window_state_update",
+            sidebar_scope="global",
+            activated_scope="client" if state_update_activated else None,
+            client_id=client_id if state_update_activated else None,
+            activated=state_update_activated,
+            skip_sidebar_sid=sid if state_update_activated else None,
+        )
         return result
     if method == SIDEBAR_IPC_RPC_METHOD_WINDOW_ACTIVATE:
         from .sidebar_window_state import activate_sidebar_window
@@ -817,15 +788,23 @@ async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: 
         host_id = _norm(params.get("host_id") or params.get("hostId"))
         _client_active_windows[client_id] = host_id
         _client_active_shortcuts[client_id] = ""
-        await _emit_sidebar_window_activated(
-            ns,
+        activate_activated = _sidebar_window_activated_payload(client_id, host_id)
+        await _emit_sidebar_window_focused_global(
             client_id,
             host_id,
             source=params.get("source") or "sidebar_window_activate",
             skip_sid=sid,
         )
         await _emit_client_state(ns, client_id, skip_sid=sid)
-        await _emit_sidebar_windows_changed(ns, client_id=client_id)
+        await publish_sidebar_window_state_changed(
+            _json_object(_json_object(result).get("state", {})),
+            source=_norm(params.get("source")) or "sidebar_window_activate",
+            sidebar_scope="client",
+            activated_scope="client",
+            client_id=client_id,
+            activated=activate_activated,
+            skip_sidebar_sid=sid,
+        )
         return result
     if method == SIDEBAR_IPC_RPC_METHOD_WINDOW_CLOSE:
         from .sidebar_window_state import close_sidebar_window
@@ -846,16 +825,25 @@ async def _dispatch_sidebar_rpc_request(ns: SidebarNamespace, sid: str, method: 
                     skip_sid=sid,
                 )
             await _emit_client_state(ns, client_id, skip_sid=sid)
-        await _emit_sidebar_windows_changed(ns)
+        await publish_sidebar_window_state_changed(
+            _json_object(_json_object(result).get("state", {})),
+            source=_norm(params.get("source")) or "sidebar_window_close",
+            sidebar_scope="global",
+            skip_sidebar_sid=sid,
+        )
         return result
     if method == SIDEBAR_IPC_RPC_METHOD_WINDOW_READINESS_UPDATE:
         from .sidebar_window_state import update_sidebar_window_readiness
 
         result = update_sidebar_window_readiness(params)
         result_obj = _json_object(result)
-        if result_obj:
-            await _emit_sidebar_window_readiness_changed(ns, result_obj, skip_sid=sid)
-        await _emit_sidebar_windows_changed(ns)
+        await publish_sidebar_window_state_changed(
+            _json_object(result_obj.get("state", {})),
+            source=_norm(params.get("source")) or "sidebar_window_readiness_update",
+            sidebar_scope="global",
+            readiness=result_obj,
+            skip_sidebar_sid=sid,
+        )
         return result
     if method == SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST:
         from ..host.draft_state_backend import handle_sidebar_drafts_list_request

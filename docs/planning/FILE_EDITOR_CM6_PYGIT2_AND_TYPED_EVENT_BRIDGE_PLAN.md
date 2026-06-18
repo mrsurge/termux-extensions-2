@@ -67,6 +67,9 @@ controlling user-facing state.
 - `workspace_events.py` owns the initial compatibility projectors for watcher
   batches, git refresh scheduling, diagnostics snapshots, and editor git
   baseline refresh side effects.
+- `adapter_lifecycle_events.py` projects adapter-state facts to editor/UI IPC
+  notifications and handles backend adapter-workspace-ready side effects such as
+  diagnostics reset.
 - `project_switch_events.py` projects `ProjectSwitchStarted` and
   `ProjectSwitchFinished` facts to editor and UI IPC project-switch
   notifications.
@@ -76,8 +79,10 @@ controlling user-facing state.
   broadcasts generation-tagged git state.
 - `wba_event_bridge.py` owns backend WBA `/ws` event-stream intake. It forwards
   WBA watcher changes into backend `WorkspaceFilesChanged`, forwards diagnostics
-  updates to diagnostics projection, and treats `workspace/switched` as a
-  backend project-scoped diagnostics boundary.
+  updates to diagnostics projection, and republishes adapter session lifecycle
+  events as backend facts.
+- The retired external change-ledger shim is gone. Project-switch and
+  preference paths no longer carry compatibility clears for dead ledger state.
 - `diagnostics_bridge.py` keeps diagnostics projection scoped to the active
   backend project root/generation and rejects/prunes out-of-project diagnostics.
 - WBA emits `adapter/sessionReset`, `workspace/switched`, and `adapter/ready`
@@ -88,6 +93,9 @@ controlling user-facing state.
 Implemented in `worker_services/event_bus.py`:
 
 - `DraftStateChanged`
+- `AdapterSessionReset`
+- `AdapterStateChanged`
+- `AdapterWorkspaceReady`
 - `DiagnosticsDetailChanged`
 - `ExplorerRenderStateChanged`
 - `GitDiffBaseChanged`
@@ -99,15 +107,10 @@ Implemented in `worker_services/event_bus.py`:
 - `ProjectSwitchStarted`
 - `ProjectSwitchFinished`
 - `ReviewStateChanged`
+- `SidebarWindowStateChanged`
 - `WatcherConfigChanged`
 - `WatcherErrorRaised`
 - `WorkspaceFilesChanged`
-
-Near-term additions:
-
-- `AdapterSessionReset`
-- `AdapterWorkspaceReady`
-- `SidebarWindowStateChanged`
 
 ## Runtime Rules
 
@@ -168,6 +171,8 @@ Status: Complete for current scope.
 - [x] Route direct Explorer git projection through backend publication.
 - [x] Keep frontend Explorer RPC contracts stable.
 - [x] Route editor git baseline reads through the worker git service seam.
+- [x] Remove the retired external change-ledger cleanup seam from
+      project-switch/project-service paths.
 
 Implementation note: git backend choice is now an implementation detail behind
 the service seam; `pygit2` is only one candidate/replacement direction, not the
@@ -316,12 +321,12 @@ Status: Active implementation target.
 - [x] Convert project-switch lifecycle notifications into
       `ProjectSwitchStarted` / `ProjectSwitchFinished` facts plus editor/UI IPC
       projectors.
-- [ ] Represent WBA session lifecycle facts:
+- [x] Represent WBA session lifecycle facts:
       `AdapterSessionReset`, `AdapterWorkspaceReady`, and adapter-ready/error
-      state.
+      state via `AdapterStateChanged`.
 - [ ] Keep WBA language-feature requests, document sync, and provider calls on
       the direct WBA/editor lane.
-- [ ] Convert sidebar-window state changes into typed facts plus UI IPC and
+- [x] Convert sidebar-window state changes into typed facts plus UI IPC and
       Sidebar IPC projectors.
 - [ ] Audit UI IPC editor notifications and convert only durable/control-plane
       state changes; keep focus/blur/IME and other local interaction paths

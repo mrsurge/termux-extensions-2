@@ -31,7 +31,6 @@ class ProjectServiceDeps:
     close_active_terminal_sockets: Callable[[], Awaitable[None]]
     stop_diagnostics_bridge: Callable[[], None]
     terminate_adapter_shell: Callable[[], Awaitable[bool]]
-    clear_change_ledger: Callable[[], None]
     emit_sidebar_cwd_set: Callable[[str], Awaitable[None]]
     build_state_payload: Callable[[], JsonObject]
     create_project: Callable[[str, str], JsonObject]
@@ -88,7 +87,6 @@ async def after_project_switch(deps: ProjectServiceDeps, *, reason: str) -> None
     await _ignore_async_errors(deps.close_active_terminal_sockets)
     _ignore_sync_errors(deps.stop_diagnostics_bridge)
     await _ignore_async_errors(deps.terminate_adapter_shell)
-    _ignore_sync_errors(deps.clear_change_ledger)
     await _ignore_async_errors(lambda: deps.emit_sidebar_cwd_set(reason))
 
 

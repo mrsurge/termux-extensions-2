@@ -171,13 +171,6 @@ async def handle_update_preference(
             editor_updates["autoSave"] = False
         elif key == "autoSave" and bool(value):
             editor_updates["showDraftDiffs"] = False
-        if key == "trackAgentSidebarEdits" and bool(value):
-            try:
-                from app.apps.file_editor_cm6 import change_ledger
-
-                change_ledger.clear()
-            except Exception:
-                pass
         preferences_store.update_preferences(editor=editor_updates)
 
         if key in ("showInlineDiffs", "showDraftDiffs", "autoSave"):

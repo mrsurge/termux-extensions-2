@@ -54,12 +54,6 @@ async def _terminate_adapter_shell() -> bool:
     return await terminate_adapter_shell()
 
 
-def _clear_change_ledger() -> None:
-    from ..change_ledger import clear as clear_ledger
-
-    clear_ledger()
-
-
 async def _emit_sidebar_cwd_set(reason: str) -> None:
     from ..ui_ipc import sidebar_ws
 
@@ -93,7 +87,6 @@ def _project_service_deps() -> ProjectServiceDeps:
         close_active_terminal_sockets=_close_active_terminal_sockets,
         stop_diagnostics_bridge=_stop_diagnostics_bridge,
         terminate_adapter_shell=_terminate_adapter_shell,
-        clear_change_ledger=_clear_change_ledger,
         emit_sidebar_cwd_set=_emit_sidebar_cwd_set,
         build_state_payload=_build_state_payload,
         create_project=_create_project,
