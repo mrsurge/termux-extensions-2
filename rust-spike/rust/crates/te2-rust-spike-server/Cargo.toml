@@ -13,11 +13,16 @@ ferrous-framework-pyo3 = ["dep:ferrous_framework", "ferrous_framework/pyo3-embed
 anyhow.workspace = true
 axum.workspace = true
 ferrous_framework = { workspace = true, optional = true }
+futures-util.workspace = true
+regex.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 socketioxide.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+url.workspace = true

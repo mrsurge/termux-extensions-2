@@ -204,6 +204,9 @@ export async function bootMonacoRuntime(
 
     try { deps.applyBootSnapshot(); } catch (_) {}
     await deps.ensureEditorWithPrefs();
+    // Register readiness subscribers before Socket.IO can replay connect-time
+    // adapter state; Rust can deliver that replay faster than Python did.
+    deps.connectEditorHostActions();
     await Promise.resolve(deps.connectEditorSocket());
     try { await deps.ensureWorkbenchLanguageCatalogInstalled(); } catch (_) {}
     try { deps.installWorkbenchLanguageBridgeProviders(); } catch (_) {}
@@ -213,8 +216,6 @@ export async function bootMonacoRuntime(
       const langs = deps.collectBootLanguageIds(monacoNs);
       deps.warnIfPlaintextOnlyLanguages(langs);
     } catch (_) {}
-
-    deps.connectEditorHostActions();
 
     deps.emitToHost('editor_ready', {});
     deps.updateDebug('boot=ok');

@@ -13,6 +13,9 @@ from typing import Literal, TypedDict, cast
 logger = logging.getLogger(__name__)
 
 EventType = Literal[
+    "AdapterSessionReset",
+    "AdapterStateChanged",
+    "AdapterWorkspaceReady",
     "DraftStateChanged",
     "DiagnosticsDetailChanged",
     "GitDiffBaseChanged",

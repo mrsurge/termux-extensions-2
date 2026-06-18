@@ -1,6 +1,6 @@
 import hashlib
 from pathlib import Path
-from typing import Awaitable, Optional, Protocol, cast
+from typing import Optional, cast
 import asyncio
 import json
 import logging
@@ -10,17 +10,6 @@ from framework_shells.orchestrator import Orchestrator
 from framework_shells.record import ShellRecord
 
 JsonObject = dict[str, object]
-
-
-class EditorSocketLike(Protocol):
-    def emit(
-        self,
-        event: str,
-        data: JsonObject,
-        *,
-        namespace: str,
-        room: str,
-    ) -> Awaitable[None]: ...
 
 APP_ID = "file_editor_cm6"
 SHELLSPEC_DIR = Path(__file__).parent / "shellspec"
@@ -38,7 +27,7 @@ _stdout_bytes_queue: Optional[asyncio.Queue[bytes]] = None
 _stdout_subscription_shell_id: Optional[str] = None
 _rpc_write_lock: Optional[asyncio.Lock] = None
 
-# Adapter lifecycle state — broadcast to all UI IPC clients on change.
+# Adapter lifecycle state — authoritative store for fact projection.
 _adapter_state: dict[str, object] = {"status": "idle", "project": None, "error": None}
 
 
@@ -58,62 +47,49 @@ def get_adapter_state() -> dict[str, object]:
     return dict(_adapter_state)
 
 
-async def _broadcast_adapter_state() -> None:
-    """Push current adapter state to host UI IPC clients and editor RPC clients."""
+async def _publish_adapter_state_fact() -> None:
+    """Publish the current adapter state as a backend fact."""
     try:
-        from .ui_ipc.ui_ipc_ws import emit_ui_ipc_rpc_notification
-        await emit_ui_ipc_rpc_notification(
-            "ui.adapter.state",
-            dict(_adapter_state),
-        )
-    except Exception as exc:
-        log.warning("[adapter_state] UI IPC broadcast failed: %s", exc)
-    try:
-        from .monaco_editor.editor_rpc_contract import (
-            EDITOR_RPC_EVENT,
-            EDITOR_RPC_NOTIFICATION_ADAPTER_STATE,
-            JSONRPC_VERSION,
-        )
-        from .monaco_editor.editor_socketio import EDITOR_SIO
+        from .adapter_lifecycle_events import publish_adapter_state_changed
 
-        editor_sio = cast(EditorSocketLike, EDITOR_SIO)
-        await editor_sio.emit(
-            EDITOR_RPC_EVENT,
-            {
-                "jsonrpc": JSONRPC_VERSION,
-                "method": EDITOR_RPC_NOTIFICATION_ADAPTER_STATE,
-                "params": dict(_adapter_state),
-            },
-            namespace="/rpc/editor",
-            room="file_editor_cm6",
+        project_obj = _adapter_state.get("project")
+        project_root = (
+            str(project_obj)
+            if isinstance(project_obj, str) and project_obj.strip()
+            else None
+        )
+        await publish_adapter_state_changed(
+            dict(_adapter_state),
+            project_root=project_root,
+            source="workbench_adapter_shell_manager",
         )
     except Exception as exc:
-        log.warning("[adapter_state] editor RPC broadcast failed: %s", exc)
+        log.warning("[adapter_state] fact publish failed: %s", exc)
 
 
 def _set_adapter_state(status: str, project: Optional[str] = None, error: Optional[str] = None) -> None:
-    """Update state dict. Caller must await _broadcast_adapter_state() after."""
+    """Update state dict. Caller must await _publish_adapter_state_fact() after."""
     _adapter_state["status"] = status
     _adapter_state["project"] = project
     _adapter_state["error"] = error
 
 
 async def mark_adapter_workspace_switching(project_root: str) -> None:
-    """Broadcast that the shared adapter is changing workspace roots."""
+    """Publish that the shared adapter is changing workspace roots."""
     _set_adapter_state("switching", project=str(project_root), error=None)
-    await _broadcast_adapter_state()
+    await _publish_adapter_state_fact()
 
 
 async def mark_adapter_workspace_ready(project_root: str) -> None:
-    """Broadcast that the shared adapter workspace now matches project_root."""
+    """Publish that the shared adapter workspace now matches project_root."""
     _set_adapter_state("ready", project=str(project_root), error=None)
-    await _broadcast_adapter_state()
+    await _publish_adapter_state_fact()
 
 
 async def mark_adapter_workspace_error(project_root: str, error: str) -> None:
-    """Broadcast that the shared adapter workspace switch failed."""
+    """Publish that the shared adapter workspace switch failed."""
     _set_adapter_state("error", project=str(project_root), error=str(error))
-    await _broadcast_adapter_state()
+    await _publish_adapter_state_fact()
 
 
 def _project_hash(project_root: str) -> str:
@@ -372,7 +348,7 @@ async def terminate_adapter_shell() -> bool:
     _rpc_write_lock = None
     _set_adapter_state("idle")
     try:
-        await _broadcast_adapter_state()
+        await _publish_adapter_state_fact()
     except Exception:
         pass
     return True
@@ -411,7 +387,7 @@ async def ensure_workbench_adapter_shell(
                 if await _ensure_live_adapter_io(cached.id):
                     if _adapter_state["status"] != "ready":
                         _set_adapter_state("ready", project=project_root)
-                        await _broadcast_adapter_state()
+                        await _publish_adapter_state_fact()
                     return cached
                 # Live pipe capabilities lost (process restart or FWS owner change) — re-spawn.
                 log.info("[adapter] cached shell alive but live pipe unavailable, re-spawning")
@@ -445,7 +421,7 @@ async def ensure_workbench_adapter_shell(
     remote_authority = "localhost"
 
     _set_adapter_state("starting", project=project_root)
-    await _broadcast_adapter_state()
+    await _publish_adapter_state_fact()
 
     try:
         shell = await orch.start_from_ref(
@@ -469,7 +445,7 @@ async def ensure_workbench_adapter_shell(
         )
     except Exception as exc:
         _set_adapter_state("error", project=project_root, error=str(exc))
-        await _broadcast_adapter_state()
+        await _publish_adapter_state_fact()
         raise
 
     _active_shell_id = shell.id
@@ -491,7 +467,7 @@ async def ensure_workbench_adapter_shell(
         if not ping_ok:
             print("[adapter_shell_mgr] stdio ping failed after 20 attempts")
             _set_adapter_state("error", project=project_root, error="Adapter ping timeout")
-            await _broadcast_adapter_state()
+            await _publish_adapter_state_fact()
             return shell
 
         # Bootstrap: connect adapter to code-server
@@ -516,13 +492,13 @@ async def ensure_workbench_adapter_shell(
             )
             print(f"[adapter_shell_mgr] bootstrap connect resp: {connect_resp}")
             _set_adapter_state("ready", project=project_root)
-            await _broadcast_adapter_state()
+            await _publish_adapter_state_fact()
         except Exception as exc:
             print(f"[adapter_shell_mgr] bootstrap adapter.connect FAILED: {exc}")
             _set_adapter_state("error", project=project_root, error=str(exc))
-            await _broadcast_adapter_state()
+            await _publish_adapter_state_fact()
     else:
         log.warning("[adapter] no live pipe capabilities for shell=%s — stdio RPC unavailable", shell.id)
         _set_adapter_state("error", project=project_root, error="No live pipe capabilities")
-        await _broadcast_adapter_state()
+        await _publish_adapter_state_fact()
     return shell

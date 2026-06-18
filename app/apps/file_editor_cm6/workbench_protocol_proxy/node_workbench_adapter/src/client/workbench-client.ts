@@ -1904,6 +1904,25 @@ export class WorkbenchClient {
    */
   resync(): Record<string, unknown> {
     const { replayed, events } = this._providerRegistry.buildResyncEvents();
+    const workspaceFolder =
+      typeof this.state.workspaceFolder === "string" &&
+      this.state.workspaceFolder
+        ? this.state.workspaceFolder
+        : null;
+
+    // Provider replay alone is not enough for a late editor client: the editor
+    // gates document-backed WBA calls on the workspace-ready baton.
+    if (this.state.ready && workspaceFolder) {
+      this.onEvent({
+        type: "workspace/switched",
+        ts_ms: Date.now(),
+        to: workspaceFolder,
+        workspaceFolder,
+        readyForDocumentOpen: true,
+        resync: true,
+      });
+    }
+
     for (const event of events) {
       this.onEvent({ ...event, ts_ms: Date.now() });
     }

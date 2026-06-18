@@ -1,3 +1,5 @@
+import { parse as parseJsoncDocument } from 'jsonc-parser';
+
 export function expandShortHex(color: string | null | undefined): string | null | undefined {
   if (!color || typeof color !== 'string') return color;
   const match = color.match(/^#([0-9a-fA-F]{3,4})$/);
@@ -20,10 +22,6 @@ export function toMonacoColorHex(hex: string | null | undefined): string | null 
 }
 
 export function parseJsonc(text: unknown): unknown {
-  let value = String(text || '');
-  if (value.charCodeAt(0) === 0xfeff) value = value.slice(1);
-  value = value.replace(/\/\*[\s\S]*?\*\//g, '');
-  value = value.replace(/(^|[^:])\/\/.*$/gm, '$1');
-  value = value.replace(/,\s*([}\]])/g, '$1');
-  return JSON.parse(value);
+  const value = String(text || '');
+  return parseJsoncDocument(value);
 }

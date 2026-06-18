@@ -32,7 +32,7 @@ def mount_te2_runtime_services(app: FastAPI) -> None:
 
 
 @asynccontextmanager
-async def te2_runtime_lifespan() -> AsyncIterator[None]:
+async def te2_runtime_lifespan(_app: object | None = None) -> AsyncIterator[None]:
     """Run lifespan hooks for mounted TE2 runtime-owned ASGI apps."""
 
     async with AsyncExitStack() as stack:

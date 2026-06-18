@@ -6,8 +6,10 @@ import importlib
 import os
 import secrets
 import signal
+import socket
 import subprocess
 import sys
+import time
 from collections.abc import Callable, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +19,7 @@ from typing import cast
 APP_ID = "te2-rust-spike"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "8089"
+DEFAULT_RUNTIME_BRIDGE_HOST = "127.0.0.1"
 SERVER_PACKAGE = "te2-rust-spike-server"
 
 SignalHandler = int | signal.Handlers | Callable[[int, FrameType | None], object]
@@ -134,6 +137,11 @@ def _build_env(args: BootstrapArgs) -> dict[str, str]:
     env["TE2_RUST_SPIKE_APP_ROOTS"] = os.pathsep.join(str(root) for root in app_roots)
     env["TE_PORT"] = str(args.port)
     env["TE_FRAMEWORK_URL"] = f"http://{listen_host}:{args.port}"
+    runtime_bridge_host = env.get("TE2_RUST_SPIKE_RUNTIME_BRIDGE_HOST", DEFAULT_RUNTIME_BRIDGE_HOST)
+    runtime_bridge_port = env.get("TE2_RUST_SPIKE_RUNTIME_BRIDGE_PORT") or str(_reserve_local_port(runtime_bridge_host))
+    env["TE2_RUST_SPIKE_RUNTIME_BRIDGE_HOST"] = runtime_bridge_host
+    env["TE2_RUST_SPIKE_RUNTIME_BRIDGE_PORT"] = runtime_bridge_port
+    env["TE2_RUST_SPIKE_RUNTIME_BRIDGE_URL"] = f"http://{runtime_bridge_host}:{runtime_bridge_port}"
     env.setdefault("FRAMEWORK_SHELLS_FWS_SOCKETIO_URL", env["TE_FRAMEWORK_URL"])
     pythonpath_parts = [part for part in env.get("PYTHONPATH", "").split(os.pathsep) if part]
     prepend_paths = [str(project_root)]
@@ -276,10 +284,13 @@ def _prime_framework_shells_import(env: dict[str, str]) -> None:
 
 
 def _run_child(command: Sequence[str], env: dict[str, str]) -> int:
+    runtime_bridge = _start_runtime_bridge(env)
     child = subprocess.Popen(command, env=env)
     previous_handlers: dict[signal.Signals, SignalHandler] = {}
 
     def forward_signal(signum: int, _frame: FrameType | None) -> object:
+        if runtime_bridge.poll() is None:
+            runtime_bridge.send_signal(signum)
         if child.poll() is None:
             child.send_signal(signum)
 
@@ -290,6 +301,8 @@ def _run_child(command: Sequence[str], env: dict[str, str]) -> int:
     try:
         return child.wait()
     finally:
+        _stop_process(runtime_bridge, "runtime bridge")
+        _stop_process(child, "rust spike")
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
 
@@ -308,6 +321,39 @@ def _project_root() -> Path:
 
 def _default_rust_manifest() -> Path:
     return _source_root() / "rust" / "Cargo.toml"
+
+
+def _reserve_local_port(host: str) -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        return int(sock.getsockname()[1])
+
+
+def _start_runtime_bridge(env: dict[str, str]) -> subprocess.Popen[bytes]:
+    command = [
+        sys.executable,
+        str(_source_root() / "app" / "runtime_bridge.py"),
+        "--host",
+        env["TE2_RUST_SPIKE_RUNTIME_BRIDGE_HOST"],
+        "--port",
+        env["TE2_RUST_SPIKE_RUNTIME_BRIDGE_PORT"],
+    ]
+    child = subprocess.Popen(command, env=env)
+    time.sleep(0.2)
+    if child.poll() is not None:
+        raise SystemExit(child.returncode or 1)
+    return child
+
+
+def _stop_process(child: subprocess.Popen[bytes], label: str) -> None:
+    if child.poll() is not None:
+        return
+    child.terminate()
+    try:
+        child.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait(timeout=5)
 
 
 if __name__ == "__main__":

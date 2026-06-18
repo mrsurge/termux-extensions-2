@@ -60,12 +60,18 @@ struct AppState {
     launch_store: Arc<LaunchStore>,
     readiness_store: Arc<RwLock<HashMap<String, JsonMap<String, Value>>>>,
     fws_bridge: Arc<FwsBridgeConfig>,
+    te2_runtime_bridge: Arc<Te2RuntimeBridgeConfig>,
 }
 
 #[derive(Clone)]
 struct FwsBridgeConfig {
     upstream_base_url: String,
     child_env: HashMap<String, String>,
+}
+
+#[derive(Clone)]
+struct Te2RuntimeBridgeConfig {
+    upstream_base_url: String,
 }
 
 #[derive(Debug)]
@@ -143,6 +149,7 @@ async fn main() -> Result<()> {
         launch_store: Arc::new(LaunchStore::default()),
         readiness_store: Arc::new(RwLock::new(HashMap::new())),
         fws_bridge: Arc::new(fws_bridge_runtime.config.clone()),
+        te2_runtime_bridge: Arc::new(load_te2_runtime_bridge_config()),
     };
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(addr)
@@ -196,6 +203,18 @@ fn build_router(state: AppState) -> Router {
         .route("/fws_ws/socket.io", any(proxy_fws_socketio_request))
         .route("/fws_ws/socket.io/", any(proxy_fws_socketio_request))
         .route("/fws_ws/socket.io/{*rest}", any(proxy_fws_socketio_request))
+        .route("/te2_console_ws/socket.io", any(proxy_te2_console_request))
+        .route("/te2_console_ws/socket.io/", any(proxy_te2_console_request))
+        .route(
+            "/te2_console_ws/socket.io/{*rest}",
+            any(proxy_te2_console_request),
+        )
+        .route("/te2_mcp", any(proxy_te2_mcp_request))
+        .route("/te2_mcp/", any(proxy_te2_mcp_request))
+        .route("/te2_mcp/{*rest}", any(proxy_te2_mcp_request))
+        .route("/te2_mcp_http", any(proxy_te2_mcp_http_request))
+        .route("/te2_mcp_http/", any(proxy_te2_mcp_http_request))
+        .route("/te2_mcp_http/{*rest}", any(proxy_te2_mcp_http_request))
         .route("/api/extensions", get(list_extensions))
         // Apps extension/app registry read model.
         .route("/api/apps", get(list_apps))
@@ -229,22 +248,7 @@ fn build_router(state: AppState) -> Router {
             "/extensions/{ext_dir}/{*filename}",
             get(serve_extension_file),
         )
-        .route(
-            "/apps/by-id/{app_id}/{*filename}",
-            get(serve_app_file_by_id),
-        )
-        .route(
-            "/apps/{app_dir}/{filename}",
-            get(serve_app_top_level_file_by_dir),
-        )
-        .route(
-            "/apps/{app_dir}/static/{*filename}",
-            get(serve_app_static_file_by_dir),
-        )
-        .route(
-            "/apps/{app_dir}/monaco_editor/{*filename}",
-            get(serve_app_monaco_file_by_dir),
-        )
+        .route("/apps/{*path}", get(serve_app_file))
         .route("/static/{*filename}", get(serve_static_file));
 
     register_sio_proxy_routes(router, &state.sio_routes)
@@ -1039,21 +1043,19 @@ async fn proxy_app_request_inner(
         }
     };
 
-    // Response passthrough mirrors the Python proxy by removing headers that can
-    // become invalid once the framework has consumed the upstream body.
+    // Response passthrough should stay transparent for app-worker routes. The
+    // legacy Python framework streams these bodies directly instead of waiting
+    // to buffer the full response before replying.
     let status =
         StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let upstream_headers = upstream.headers().clone();
-    let upstream_body = match upstream.bytes().await {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            warn!(%error, %app_id, "failed to read app worker response body");
-            return json_error(
-                StatusCode::BAD_GATEWAY,
-                &format!("App '{app_id}' worker response could not be read."),
-            );
+    let upstream_body = futures_util::stream::unfold(upstream, |mut upstream| async move {
+        match upstream.chunk().await {
+            Ok(Some(chunk)) => Some((Ok::<Bytes, std::io::Error>(chunk), upstream)),
+            Ok(None) => None,
+            Err(error) => Some((Err(std::io::Error::other(error)), upstream)),
         }
-    };
+    });
 
     let mut builder = Response::builder().status(status);
     for (name, value) in upstream_headers.iter() {
@@ -1065,7 +1067,7 @@ async fn proxy_app_request_inner(
         builder = builder.header(name, value);
     }
     builder
-        .body(Body::from(upstream_body))
+        .body(Body::from_stream(upstream_body))
         .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
 }
 
@@ -1171,6 +1173,80 @@ async fn proxy_fws_socketio_request(
     .await
 }
 
+async fn proxy_te2_console_request(
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    State(state): State<AppState>,
+    OriginalUri(original_uri): OriginalUri,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    proxy_absolute_bridge_request(
+        ws,
+        &state,
+        &state.te2_runtime_bridge.upstream_base_url,
+        "TE2 runtime bridge is not available.",
+        original_uri.path(),
+        original_uri.query(),
+        method,
+        headers,
+        body,
+        "te2_console",
+        false,
+    )
+    .await
+}
+
+async fn proxy_te2_mcp_request(
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    State(state): State<AppState>,
+    OriginalUri(original_uri): OriginalUri,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let upstream_path = normalize_mcp_mount_path(original_uri.path(), "/te2_mcp");
+    proxy_absolute_bridge_request(
+        ws,
+        &state,
+        &state.te2_runtime_bridge.upstream_base_url,
+        "TE2 runtime bridge is not available.",
+        &upstream_path,
+        original_uri.query(),
+        method,
+        headers,
+        body,
+        "te2_mcp",
+        true,
+    )
+    .await
+}
+
+async fn proxy_te2_mcp_http_request(
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    State(state): State<AppState>,
+    OriginalUri(original_uri): OriginalUri,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let upstream_path = normalize_mcp_mount_path(original_uri.path(), "/te2_mcp_http");
+    proxy_absolute_bridge_request(
+        ws,
+        &state,
+        &state.te2_runtime_bridge.upstream_base_url,
+        "TE2 runtime bridge is not available.",
+        &upstream_path,
+        original_uri.query(),
+        method,
+        headers,
+        body,
+        "te2_mcp_http",
+        true,
+    )
+    .await
+}
+
 async fn serve_extension_file(
     State(state): State<AppState>,
     Path((ext_dir, filename)): Path<(String, String)>,
@@ -1186,57 +1262,33 @@ async fn serve_extension_file(
     Ok(file_response(&resolved, body))
 }
 
-async fn serve_app_file_by_id(
+async fn serve_app_file(
     State(state): State<AppState>,
-    Path((app_id, filename)): Path<(String, String)>,
+    Path(path): Path<String>,
 ) -> Result<Response, StatusCode> {
-    // Manifest-backed app assets resolve by app id so directory names can differ
-    // from public ids without leaking filesystem layout to the frontend.
-    let registry = AppRegistry::load(&state.config.app_roots);
-    let Some(resolved) = registry.resolve_asset_path(&app_id, &filename) else {
-        return Err(StatusCode::NOT_FOUND);
+    let (resolved_by_id, resolved_by_dir) = if let Some(rest) = path.strip_prefix("by-id/") {
+        let Some((app_id, filename)) = rest.split_once('/') else {
+            return Err(StatusCode::NOT_FOUND);
+        };
+        (Some((app_id, filename)), None)
+    } else {
+        let Some((app_dir, filename)) = path.split_once('/') else {
+            return Err(StatusCode::NOT_FOUND);
+        };
+        (None, Some((app_dir, filename)))
     };
-    let body = fs::read(&resolved).map_err(|_| StatusCode::NOT_FOUND)?;
-    Ok(file_response(&resolved, body))
-}
 
-async fn serve_app_top_level_file_by_dir(
-    State(state): State<AppState>,
-    Path((app_dir, filename)): Path<(String, String)>,
-) -> Result<Response, StatusCode> {
-    // Builtin app templates and top-level scripts can still point at
-    // `/apps/{dir_name}/template.html` or similar legacy locations.
     let registry = AppRegistry::load(&state.config.app_roots);
-    let Some(resolved) = registry.resolve_asset_path_by_dir(&app_dir, &filename) else {
-        return Err(StatusCode::NOT_FOUND);
+    // Both `/apps/by-id/{app_id}/...` and legacy `/apps/{dir}/...` resolve
+    // through one route to avoid overlapping wildcard route ambiguity.
+    let resolved = if let Some((app_id, filename)) = resolved_by_id {
+        registry.resolve_asset_path(app_id, filename)
+    } else if let Some((app_dir, filename)) = resolved_by_dir {
+        registry.resolve_asset_path_by_dir(app_dir, filename)
+    } else {
+        None
     };
-    let body = fs::read(&resolved).map_err(|_| StatusCode::NOT_FOUND)?;
-    Ok(file_response(&resolved, body))
-}
-
-async fn serve_app_static_file_by_dir(
-    State(state): State<AppState>,
-    Path((app_dir, filename)): Path<(String, String)>,
-) -> Result<Response, StatusCode> {
-    serve_app_scoped_file_by_dir(state, app_dir, "static", filename).await
-}
-
-async fn serve_app_monaco_file_by_dir(
-    State(state): State<AppState>,
-    Path((app_dir, filename)): Path<(String, String)>,
-) -> Result<Response, StatusCode> {
-    serve_app_scoped_file_by_dir(state, app_dir, "monaco_editor", filename).await
-}
-
-async fn serve_app_scoped_file_by_dir(
-    state: AppState,
-    app_dir: String,
-    prefix: &str,
-    filename: String,
-) -> Result<Response, StatusCode> {
-    let registry = AppRegistry::load(&state.config.app_roots);
-    let scoped = format!("{prefix}/{filename}");
-    let Some(resolved) = registry.resolve_asset_path_by_dir(&app_dir, &scoped) else {
+    let Some(resolved) = resolved else {
         return Err(StatusCode::NOT_FOUND);
     };
     let body = fs::read(&resolved).map_err(|_| StatusCode::NOT_FOUND)?;
@@ -1391,35 +1443,54 @@ async fn proxy_absolute_fws_request(
     body: Bytes,
     bridge_label: &'static str,
 ) -> Response {
+    proxy_absolute_bridge_request(
+        ws,
+        state,
+        &state.fws_bridge.upstream_base_url,
+        "FWS bridge runtime is not available.",
+        upstream_path,
+        query,
+        method,
+        headers,
+        body,
+        bridge_label,
+        false,
+    )
+    .await
+}
+
+async fn proxy_absolute_bridge_request(
+    ws: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    state: &AppState,
+    upstream_base_url: &str,
+    unavailable_message: &'static str,
+    upstream_path: &str,
+    query: Option<&str>,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+    bridge_label: &'static str,
+    stream_response_body: bool,
+) -> Response {
     if let Ok(ws) = ws {
-        let Some(upstream) = absolute_upstream_url(
-            &state.fws_bridge.upstream_base_url,
-            upstream_path,
-            query,
-            true,
-        ) else {
-            return json_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "FWS bridge runtime is not available.",
-            );
+        let Some(upstream) = absolute_upstream_url(upstream_base_url, upstream_path, query, true)
+        else {
+            return json_error(StatusCode::SERVICE_UNAVAILABLE, unavailable_message);
         };
         return ws
             .on_upgrade(move |socket| bridge_websocket(socket, upstream, headers, bridge_label))
             .into_response();
     }
 
-    let Some(upstream) = absolute_upstream_url(
-        &state.fws_bridge.upstream_base_url,
-        upstream_path,
-        query,
-        false,
-    ) else {
-        return json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "FWS bridge runtime is not available.",
-        );
+    let Some(upstream) = absolute_upstream_url(upstream_base_url, upstream_path, query, false)
+    else {
+        return json_error(StatusCode::SERVICE_UNAVAILABLE, unavailable_message);
     };
-    proxy_http_request(state, method, headers, body, upstream, Vec::new()).await
+    if stream_response_body {
+        proxy_streaming_http_request(state, method, headers, body, upstream, Vec::new()).await
+    } else {
+        proxy_http_request(state, method, headers, body, upstream, Vec::new()).await
+    }
 }
 
 async fn proxy_http_request(
@@ -1478,6 +1549,62 @@ async fn proxy_http_request(
     }
     builder
         .body(Body::from(upstream_body))
+        .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
+}
+
+async fn proxy_streaming_http_request(
+    state: &AppState,
+    method: Method,
+    headers: HeaderMap,
+    body: Bytes,
+    upstream_url: String,
+    extra_headers: Vec<(&'static str, String)>,
+) -> Response {
+    let reqwest_method = match reqwest::Method::from_bytes(method.as_str().as_bytes()) {
+        Ok(method) => method,
+        Err(_) => return json_error(StatusCode::METHOD_NOT_ALLOWED, "Unsupported HTTP method."),
+    };
+    let mut request = state
+        .http_client
+        .request(reqwest_method, upstream_url.clone());
+    for (name, value) in headers.iter() {
+        if should_forward_request_header(name.as_str()) {
+            request = request.header(name, value);
+        }
+    }
+
+    let upstream = match request.body(body).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            warn!(%error, %upstream_url, "failed to reach upstream streaming proxy target");
+            return json_error(
+                StatusCode::BAD_GATEWAY,
+                "Upstream proxy target is not reachable yet. Please retry shortly.",
+            );
+        }
+    };
+    let status =
+        StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let upstream_headers = upstream.headers().clone();
+    let body_stream = futures_util::stream::unfold(upstream, |mut upstream| async move {
+        match upstream.chunk().await {
+            Ok(Some(chunk)) => Some((Ok::<Bytes, std::io::Error>(chunk), upstream)),
+            Ok(None) => None,
+            Err(error) => Some((Err(std::io::Error::other(error)), upstream)),
+        }
+    });
+
+    let mut builder = Response::builder().status(status);
+    for (name, value) in upstream_headers.iter() {
+        if should_forward_response_header(name.as_str()) {
+            builder = builder.header(name, value);
+        }
+    }
+    for (name, value) in extra_headers {
+        builder = builder.header(name, value);
+    }
+    builder
+        .body(Body::from_stream(body_stream))
         .unwrap_or_else(|_| StatusCode::BAD_GATEWAY.into_response())
 }
 
@@ -1615,6 +1742,18 @@ fn absolute_upstream_url(
     url.set_path(path);
     url.set_query(query.filter(|value| !value.is_empty()));
     Some(url.to_string())
+}
+
+fn normalize_mcp_mount_path(path: &str, mount_root: &str) -> String {
+    if path == mount_root {
+        return format!("{mount_root}/");
+    }
+    path.to_owned()
+}
+
+fn load_te2_runtime_bridge_config() -> Te2RuntimeBridgeConfig {
+    let upstream_base_url = env::var("TE2_RUST_SPIKE_RUNTIME_BRIDGE_URL").unwrap_or_default();
+    Te2RuntimeBridgeConfig { upstream_base_url }
 }
 
 fn load_apps_extension_payload(project_root: &str) -> Option<Value> {

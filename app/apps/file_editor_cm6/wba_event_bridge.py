@@ -162,6 +162,9 @@ async def _dispatch_wba_event(ev: JsonObject) -> None:
     ev_type = str(ev.get("type") or "")
     if ev_type == "adapter/ready":
         return
+    if ev_type == "adapter/sessionReset":
+        await _handle_adapter_session_reset(ev)
+        return
     if ev_type == "workspace/switched":
         await _handle_workspace_switched(ev)
         return
@@ -177,6 +180,24 @@ async def _dispatch_wba_event(ev: JsonObject) -> None:
         await handle_wba_diagnostics_update(ev)
 
 
+async def _handle_adapter_session_reset(ev: JsonObject) -> None:
+    project_root = _event_workspace_root(ev)
+    try:
+        from .adapter_lifecycle_events import publish_adapter_session_reset
+
+        await publish_adapter_session_reset(
+            dict(ev),
+            project_root=project_root,
+            source="wba_event_bridge:adapter_session_reset",
+        )
+        print(
+            f"[wba_event_bridge] adapter/sessionReset forwarded project={project_root or ''}",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[wba_event_bridge] adapter/sessionReset emit FAIL: {exc}", flush=True)
+
+
 async def _handle_workspace_switched(ev: JsonObject) -> None:
     raw_root = ev.get("workspaceFolder") or ev.get("to")
     if not isinstance(raw_root, str) or not raw_root.strip():
@@ -184,25 +205,41 @@ async def _handle_workspace_switched(ev: JsonObject) -> None:
     try:
         from pathlib import Path
 
-        from .explorer.services.file_ops import get_project_root
-
         switched_root = str(Path(raw_root).expanduser().resolve(strict=False))
-        backend_root = str(Path(get_project_root()).expanduser().resolve(strict=False))
+        backend_root = _event_workspace_root({})
         if switched_root != backend_root:
             print(
                 f"[wba_event_bridge] workspace/switched ignored root={switched_root} backend={backend_root}",
                 flush=True,
             )
             return
-        from .diagnostics_bridge import reset_diagnostics_projection_for_project
+        from .adapter_lifecycle_events import publish_adapter_workspace_ready
 
-        await reset_diagnostics_projection_for_project(switched_root)
+        await publish_adapter_workspace_ready(
+            dict(ev),
+            project_root=switched_root,
+            source="wba_event_bridge:workspace_switched",
+        )
         print(
-            f"[wba_event_bridge] workspace/switched diagnostics reset root={switched_root}",
+            f"[wba_event_bridge] workspace/switched forwarded root={switched_root}",
             flush=True,
         )
     except Exception as exc:
         print(f"[wba_event_bridge] workspace/switched handling failed: {exc}", flush=True)
+
+
+def _event_workspace_root(ev: JsonObject) -> str | None:
+    try:
+        from pathlib import Path
+
+        from .explorer.services.file_ops import get_project_root
+
+        raw_root = ev.get("workspaceFolder") or ev.get("to")
+        if isinstance(raw_root, str) and raw_root.strip():
+            return str(Path(raw_root).expanduser().resolve(strict=False))
+        return str(Path(get_project_root()).expanduser().resolve(strict=False))
+    except Exception:
+        return None
 
 
 async def _adapter_ws_loop() -> None:
