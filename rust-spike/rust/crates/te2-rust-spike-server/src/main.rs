@@ -231,6 +231,8 @@ fn build_router(state: AppState) -> Router {
             "/api/state",
             get(get_state).post(post_state).delete(delete_state),
         )
+        .route("/api/settings", get(get_settings).post(post_settings))
+        .route("/api/android/config", get(android_config))
         // The spike keeps the FWS dashboard and peer socket on its own public
         // surface, but the concrete runtime is Ferrous-hosted and proxied here.
         .route("/fws", any(proxy_fws_request))
@@ -498,6 +500,44 @@ async fn delete_state(State(state): State<AppState>, uri: Uri) -> Response {
         data: json!({ "removed": removed }),
     })
     .into_response()
+}
+
+async fn get_settings(State(state): State<AppState>) -> Json<ApiResponse<JsonMap<String, Value>>> {
+    Json(ApiResponse {
+        ok: true,
+        data: load_value_map(&state.config.settings_path()),
+    })
+}
+
+async fn post_settings(
+    State(state): State<AppState>,
+    Json(payload): Json<JsonMap<String, Value>>,
+) -> Response {
+    if let Err(error) = save_value_map(&state.config.settings_path(), &payload) {
+        return json_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            &format!("Failed to save settings: {error}"),
+        );
+    }
+    Json(ApiResponse {
+        ok: true,
+        data: payload,
+    })
+    .into_response()
+}
+
+async fn android_config(State(state): State<AppState>) -> Json<ApiResponse<Value>> {
+    // Android wrappers consume only this stable projection, not the full
+    // settings payload. Keep the Rust spike contract identical to Python.
+    let settings = load_value_map(&state.config.settings_path());
+    let enabled = settings
+        .get("persistent_network_notification")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    Json(ApiResponse {
+        ok: true,
+        data: json!({ "persistent_network_notification": enabled }),
+    })
 }
 
 async fn start_app(State(state): State<AppState>, Path(app_id): Path<String>) -> Response {
@@ -2088,6 +2128,12 @@ impl ServerConfig {
         xdg_cache_home()
             .join("termux_extensions")
             .join("state_store.json")
+    }
+
+    fn settings_path(&self) -> PathBuf {
+        xdg_cache_home()
+            .join("termux_extensions")
+            .join("settings.json")
     }
 }
 
