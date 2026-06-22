@@ -12,7 +12,7 @@ rust-version = "1.93"
 [workspace.dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
-ferrous_framework = { git = "https://github.com/mrsurge/ferrous-framework.git", rev = "74bbe12e1f567cfd2556d159f6ba2e65c27331c6" }
+ferrous_framework = { git = "https://github.com/mrsurge/ferrous-framework.git", rev = "015ab2f" }
 futures-util = "0.3"
 regex = "1"
 serde = { version = "1", features = ["derive"] }

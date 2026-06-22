@@ -17,8 +17,11 @@ use axum::{
     },
     routing::{any, get, post},
 };
-#[cfg(feature = "ferrous-framework-pyo3")]
-use ferrous_framework::{FerrousFrameworkHost, FerrousHostConfig};
+#[cfg(feature = "ferrous-framework-native")]
+use ferrous_framework::{
+    FerrousNativeHost, FerrousNativeHostConfig, FerrousNativeLifecycleEventKind,
+    FerrousNativeManager,
+};
 use futures_util::{SinkExt, StreamExt, stream};
 use launcher::{LaunchStore, launch_app, launch_supported};
 use proxy_shell::{
@@ -118,8 +121,8 @@ struct ServerConfig {
 
 struct FwsBridgeRuntime {
     config: FwsBridgeConfig,
-    #[cfg(feature = "ferrous-framework-pyo3")]
-    host: Option<FerrousFrameworkHost>,
+    #[cfg(feature = "ferrous-framework-native")]
+    host: Option<FerrousNativeHost>,
 }
 
 #[derive(Serialize)]
@@ -178,16 +181,33 @@ async fn main() -> Result<()> {
         "loaded manifest Socket.IO proxy routes"
     );
     let fws_bridge_config = fws_bridge_runtime.config.clone();
+    #[cfg(feature = "ferrous-framework-native")]
+    let launch_store = Arc::new(LaunchStore::new(
+        fws_bridge_runtime
+            .host
+            .as_ref()
+            .map(FerrousNativeHost::manager),
+    ));
+    #[cfg(not(feature = "ferrous-framework-native"))]
+    let launch_store = Arc::new(LaunchStore::default());
     let state = AppState {
         config,
         http_client,
         sio_routes,
-        launch_store: Arc::new(LaunchStore::default()),
+        launch_store,
         readiness_store: Arc::new(RwLock::new(HashMap::new())),
         apps_events,
         fws_bridge: Arc::new(fws_bridge_config.clone()),
         te2_runtime_bridge: Arc::new(load_te2_runtime_bridge_config()),
     };
+    #[cfg(feature = "ferrous-framework-native")]
+    start_fws_lifecycle_app_bridge(
+        state.clone(),
+        fws_bridge_runtime
+            .host
+            .as_ref()
+            .map(FerrousNativeHost::manager),
+    );
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -243,6 +263,9 @@ fn build_router(state: AppState) -> Router {
         .route("/fws_ws/socket.io", any(proxy_fws_socketio_request))
         .route("/fws_ws/socket.io/", any(proxy_fws_socketio_request))
         .route("/fws_ws/socket.io/{*rest}", any(proxy_fws_socketio_request))
+        .route("/api/framework_shells", any(proxy_fws_request))
+        .route("/api/framework_shells/", any(proxy_fws_request))
+        .route("/api/framework_shells/{*rest}", any(proxy_fws_request))
         .route("/te2_console_ws/socket.io", any(proxy_te2_console_request))
         .route("/te2_console_ws/socket.io/", any(proxy_te2_console_request))
         .route(
@@ -578,7 +601,7 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<Value, Respon
     if !launch_supported() {
         return Err(json_error(
             StatusCode::NOT_IMPLEMENTED,
-            "Rust spike was built without the ferrous-framework-pyo3 feature.",
+            "Rust spike was built without the ferrous-framework-native feature.",
         ));
     }
 
@@ -680,7 +703,7 @@ async fn quit_app(State(state): State<AppState>, Path(app_id): Path<String>) -> 
 
     let Some(upstream) = absolute_upstream_url(
         &state.fws_bridge.upstream_base_url,
-        &format!("/fws/action/app/{app_id}/shutdown"),
+        &format!("/api/framework_shells/app/{app_id}/shutdown"),
         None,
         false,
     ) else {
@@ -1511,6 +1534,41 @@ async fn apps_snapshot_payload(state: &AppState) -> Value {
 
 fn publish_apps_event(state: &AppState, event: AppsEvent) {
     let _ = state.apps_events.send(event);
+}
+
+#[cfg(feature = "ferrous-framework-native")]
+fn start_fws_lifecycle_app_bridge(state: AppState, manager: Option<FerrousNativeManager>) {
+    let Some(manager) = manager else {
+        return;
+    };
+    let mut lifecycle = manager.subscribe_lifecycle();
+    tokio::spawn(async move {
+        loop {
+            match lifecycle.recv().await {
+                Ok(event) => {
+                    if !event.shell.is_app_worker {
+                        continue;
+                    }
+                    let Some(app_id) = event.shell.app_id.clone() else {
+                        continue;
+                    };
+                    let (trigger, running_override) = match event.kind {
+                        FerrousNativeLifecycleEventKind::Spawned => {
+                            ("fws_shell_spawned", Some(true))
+                        }
+                        FerrousNativeLifecycleEventKind::Updated => ("fws_shell_updated", None),
+                        FerrousNativeLifecycleEventKind::Exited => {
+                            ("fws_shell_exited", Some(false))
+                        }
+                    };
+                    publish_app_running_changed(&state, &app_id, trigger, None, running_override)
+                        .await;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 async fn publish_catalog_snapshot(state: &AppState) {
@@ -2380,7 +2438,7 @@ fn content_type_for_suffix(suffix: &str) -> Option<&'static str> {
 }
 
 fn start_fws_bridge(config: &ServerConfig, public_framework_url: &str) -> Result<FwsBridgeRuntime> {
-    #[cfg(not(feature = "ferrous-framework-pyo3"))]
+    #[cfg(not(feature = "ferrous-framework-native"))]
     {
         let _ = (config, public_framework_url);
         return Ok(FwsBridgeRuntime {
@@ -2391,7 +2449,7 @@ fn start_fws_bridge(config: &ServerConfig, public_framework_url: &str) -> Result
         });
     }
 
-    #[cfg(feature = "ferrous-framework-pyo3")]
+    #[cfg(feature = "ferrous-framework-native")]
     {
         let _ = config;
         let mut host_env = env::vars().collect::<HashMap<_, _>>();
@@ -2403,26 +2461,21 @@ fn start_fws_bridge(config: &ServerConfig, public_framework_url: &str) -> Result
             "FRAMEWORK_SHELLS_FWS_SOCKETIO_URL".to_owned(),
             public_framework_url.to_owned(),
         );
-        let run_id = env::var("FRAMEWORK_SHELLS_RUN_ID")
-            .ok()
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty())
-            .unwrap_or_else(|| format!("{APP_ID}-fws"));
-        let host = FerrousFrameworkHost::spawn(FerrousHostConfig {
-            host: "127.0.0.1".to_owned(),
-            port: 0,
-            env: host_env,
-            run_id: Some(run_id),
-            python_module: None,
-            python_class: None,
-        })
-        .context("failed to start Ferrous FWS bridge host")?;
-        let upstream_base_url = host
-            .url()
-            .context("failed to read Ferrous FWS bridge URL")?;
-        let mut child_env = host
-            .child_env()
-            .context("failed to read Ferrous FWS bridge child environment")?;
+        let manager = FerrousNativeManager::try_with_env_map(&host_env)
+            .context("failed to initialize Ferrous native manager")?;
+        let host = FerrousNativeHost::spawn_with_manager(
+            FerrousNativeHostConfig {
+                host: "127.0.0.1".to_owned(),
+                port: 0,
+                // The native host is bound to loopback and published through this spike.
+                // Public callers hit the spike facade, not the internal host directly.
+                require_auth: false,
+            },
+            manager,
+        )
+        .context("failed to start Ferrous native FWS bridge host")?;
+        let upstream_base_url = host.url();
+        let mut child_env = host.child_env_overlay();
         child_env.insert(
             "FRAMEWORK_SHELLS_FWS_SOCKETIO_URL".to_owned(),
             public_framework_url.to_owned(),
@@ -2433,7 +2486,7 @@ fn start_fws_bridge(config: &ServerConfig, public_framework_url: &str) -> Result
         );
         info!(
             public_framework_url,
-            upstream_base_url, "started Ferrous FWS bridge host"
+            upstream_base_url, "started Ferrous native FWS bridge host"
         );
         Ok(FwsBridgeRuntime {
             config: FwsBridgeConfig {
@@ -2447,7 +2500,7 @@ fn start_fws_bridge(config: &ServerConfig, public_framework_url: &str) -> Result
 
 async fn close_fws_bridge(runtime: FwsBridgeRuntime) {
     let _ = &runtime;
-    #[cfg(feature = "ferrous-framework-pyo3")]
+    #[cfg(feature = "ferrous-framework-native")]
     if let Some(host) = runtime.host {
         match tokio::task::spawn_blocking(move || host.close_blocking()).await {
             Ok(Ok(())) => {}
@@ -2461,10 +2514,13 @@ async fn shutdown_fws_tree(runtime: &FwsBridgeRuntime) {
     let _ = runtime;
 
     // Framework shutdown delegates process ownership to FWS. App-specific quit
-    // still uses the app-group endpoint; this path calls the Ferrous host hook.
-    #[cfg(feature = "ferrous-framework-pyo3")]
-    if let Some(host) = runtime.host.clone() {
-        match tokio::task::spawn_blocking(move || host.shutdown_tree_blocking(Vec::new())).await {
+    // still uses the app-group endpoint; full framework teardown enters the
+    // native Ferrous tree hook before Axum closes the public facade.
+    #[cfg(feature = "ferrous-framework-native")]
+    if let Some(host) = runtime.host.as_ref() {
+        let manager = host.manager();
+        match tokio::task::spawn_blocking(move || manager.shutdown_tree_blocking(Vec::new())).await
+        {
             Ok(Ok(result)) => info!(
                 ok = result.ok,
                 kind = %result.kind,
@@ -2476,13 +2532,13 @@ async fn shutdown_fws_tree(runtime: &FwsBridgeRuntime) {
                 clean_exits = result.stats.clean_exits,
                 force_killed = result.stats.force_killed,
                 errors = ?result.stats.errors,
-                "Ferrous FWS shutdown tree completed"
+                "Ferrous native FWS shutdown tree completed"
             ),
-            Ok(Err(error)) => warn!(%error, "failed to run Ferrous FWS shutdown tree"),
-            Err(error) => warn!(%error, "Ferrous FWS shutdown tree task failed"),
+            Ok(Err(error)) => warn!(%error, "failed to run Ferrous native FWS shutdown tree"),
+            Err(error) => warn!(%error, "Ferrous native FWS shutdown tree task failed"),
         }
     } else {
-        warn!("Ferrous FWS bridge host is unavailable; skipping FWS shutdown tree");
+        warn!("Ferrous native FWS bridge host is unavailable; skipping FWS shutdown tree");
     }
 }
 

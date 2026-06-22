@@ -7,7 +7,7 @@ rust-version.workspace = true
 
 [features]
 default = []
-ferrous-framework-pyo3 = ["dep:ferrous_framework", "ferrous_framework/pyo3-embed"]
+ferrous-framework-native = ["dep:ferrous_framework"]
 
 [dependencies]
 anyhow.workspace = true

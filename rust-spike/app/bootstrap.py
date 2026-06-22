@@ -84,7 +84,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         "--no-ferrous-framework",
         action="store_true",
         default=_env_flag("TE2_RUST_SPIKE_DISABLE_FERROUS_FRAMEWORK"),
-        help="Do not enable the PyO3-backed ferrous-framework feature for cargo builds.",
+        help="Do not enable the native ferrous-framework feature for cargo builds.",
     )
     parser.add_argument("--framework-shells-base-dir", default=os.environ.get("FRAMEWORK_SHELLS_BASE_DIR"))
     parser.add_argument("--framework-shells-secret", default=os.environ.get("FRAMEWORK_SHELLS_SECRET"))
@@ -153,9 +153,6 @@ def _build_env(args: BootstrapArgs) -> dict[str, str]:
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
 
     _ensure_framework_shells_env(env, args)
-    if _ferrous_framework_enabled(args):
-        env.pop("PYO3_CONFIG_FILE", None)
-        env["PYO3_PYTHON"] = sys.executable
     return env
 
 
@@ -189,7 +186,7 @@ def _server_command(args: BootstrapArgs, env: MutableMapping[str, str]) -> list[
     if args.release:
         command.append("--release")
     if _ferrous_framework_enabled(args):
-        command.extend(["--features", "ferrous-framework-pyo3"])
+        command.extend(["--features", "ferrous-framework-native"])
     if not args.build_only:
         command.append("--")
     return command
