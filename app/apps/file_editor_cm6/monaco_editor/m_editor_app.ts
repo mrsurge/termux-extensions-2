@@ -485,6 +485,9 @@ interface MonacoBootWindowLike extends Window {
     getDocument: function () {
       return document;
     },
+    getEditor: function () {
+      return editor;
+    },
     getCurrentPath: function () {
       return currentPath;
     },
@@ -2175,6 +2178,7 @@ interface MonacoBootWindowLike extends Window {
   }
 
   function installScrollPublisher(): void {
+    breadcrumbRuntime.bindEditor();
     installScrollPublisherRuntime({
       getEditor: function () {
         return editor;
