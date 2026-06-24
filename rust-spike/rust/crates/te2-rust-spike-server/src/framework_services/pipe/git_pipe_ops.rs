@@ -1,57 +1,207 @@
 use serde_json::json;
+use std::sync::Arc;
 
-use super::protocol::{PipeEnvelope, PipeError, PipeIdentity};
-use crate::framework_services::git_ops::{
-    self, GitProviderError, GitProviderRequest, GitSnapshotRequest,
+use super::{
+    PipeEventSink,
+    protocol::{PipeEnvelope, PipeError, PipeIdentity},
+};
+use crate::framework_services::{
+    git_ops::{self, GitProviderError, GitProviderRequest, GitSnapshotRequest},
+    scheduler::FrameworkServiceScheduler,
 };
 
-pub(super) fn dispatch_git_request(
+pub(super) async fn dispatch_git_request(
     request: &PipeEnvelope,
     responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+    event_sink: Option<Arc<dyn PipeEventSink>>,
 ) -> Option<PipeEnvelope> {
     match request.method.as_deref()? {
-        "git.snapshot.get" => Some(snapshot(request, responder)),
-        "git.headBlob" => Some(provider_request(request, responder, git_ops::git_head_blob)),
-        "git.diff" => Some(provider_request(request, responder, git_ops::git_diff)),
-        "git.stage" => Some(provider_request(request, responder, git_ops::git_stage)),
-        "git.unstage" => Some(provider_request(request, responder, git_ops::git_unstage)),
-        "git.restore" => Some(provider_request(request, responder, git_ops::git_restore)),
-        "git.commit" => Some(provider_request(request, responder, git_ops::git_commit)),
-        "git.branchList" => Some(provider_request(
-            request,
-            responder,
-            git_ops::git_branch_list,
-        )),
-        "git.branchCheckout" => Some(provider_request(
-            request,
-            responder,
-            git_ops::git_branch_checkout,
-        )),
-        "git.branchCreate" => Some(provider_request(
-            request,
-            responder,
-            git_ops::git_branch_create,
-        )),
-        "git.remoteList" => Some(provider_request(
-            request,
-            responder,
-            git_ops::git_remote_list,
-        )),
-        "git.remoteAdd" => Some(provider_request(
-            request,
-            responder,
-            git_ops::git_remote_add,
-        )),
-        "git.history" => Some(provider_request(request, responder, git_ops::git_history)),
-        "git.init" => Some(provider_request(request, responder, git_ops::git_init)),
-        "git.clone" => Some(provider_request(request, responder, git_ops::git_clone)),
-        "git.pull" => Some(provider_request(request, responder, git_ops::git_pull)),
-        "git.push" => Some(provider_request(request, responder, git_ops::git_push)),
+        "git.snapshot.get" => Some(snapshot(request, responder, scheduler).await),
+        "git.headBlob" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_head_blob(params).await },
+            )
+            .await,
+        ),
+        "git.diff" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_diff(params).await },
+            )
+            .await,
+        ),
+        "git.stage" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_stage(params).await },
+            )
+            .await,
+        ),
+        "git.unstage" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_unstage(params).await },
+            )
+            .await,
+        ),
+        "git.restore" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_restore(params).await },
+            )
+            .await,
+        ),
+        "git.commit" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_commit(params).await },
+            )
+            .await,
+        ),
+        "git.branchList" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_branch_list(params).await },
+            )
+            .await,
+        ),
+        "git.branchCheckout" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_branch_checkout(params).await },
+            )
+            .await,
+        ),
+        "git.branchCreate" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_branch_create(params).await },
+            )
+            .await,
+        ),
+        "git.remoteList" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_remote_list(params).await },
+            )
+            .await,
+        ),
+        "git.remoteAdd" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_remote_add(params).await },
+            )
+            .await,
+        ),
+        "git.history" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_history(params).await },
+            )
+            .await,
+        ),
+        "git.init" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_init(params).await },
+            )
+            .await,
+        ),
+        "git.pull" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_pull(params).await },
+            )
+            .await,
+        ),
+        "git.push" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_push(params).await },
+            )
+            .await,
+        ),
+        "git.clone" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_clone(params).await },
+            )
+            .await,
+        ),
+        "git.clone.start" => Some(
+            git_job_start(
+                request,
+                responder,
+                scheduler,
+                event_sink,
+                git_ops::GitJobOperation::Clone,
+            )
+            .await,
+        ),
+        "git.pull.start" => Some(
+            git_job_start(
+                request,
+                responder,
+                scheduler,
+                event_sink,
+                git_ops::GitJobOperation::Pull,
+            )
+            .await,
+        ),
+        "git.push.start" => Some(
+            git_job_start(
+                request,
+                responder,
+                scheduler,
+                event_sink,
+                git_ops::GitJobOperation::Push,
+            )
+            .await,
+        ),
+        "git.job.cancel" => Some(git_job_cancel(request, responder, scheduler).await),
         _ => None,
     }
 }
 
-fn snapshot(request: &PipeEnvelope, responder: &PipeIdentity) -> PipeEnvelope {
+async fn snapshot(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+) -> PipeEnvelope {
     let params = request.params.clone().unwrap_or_else(|| json!({}));
     let mut params = match serde_json::from_value::<GitSnapshotRequest>(params) {
         Ok(params) => params,
@@ -76,19 +226,51 @@ fn snapshot(request: &PipeEnvelope, responder: &PipeIdentity) -> PipeEnvelope {
         params.project_generation = request.project_generation;
     }
 
-    encode_result(request, responder, git_ops::git_snapshot(params))
+    encode_result(request, responder, scheduler.git_snapshot(params).await)
 }
 
-fn provider_request<T>(
+async fn provider_request<T, Fut>(
     request: &PipeEnvelope,
     responder: &PipeIdentity,
-    handler: impl FnOnce(GitProviderRequest) -> Result<T, GitProviderError>,
+    scheduler: &FrameworkServiceScheduler,
+    handler: impl FnOnce(FrameworkServiceScheduler, GitProviderRequest) -> Fut,
 ) -> PipeEnvelope
 where
     T: serde::Serialize,
+    Fut: std::future::Future<Output = Result<T, GitProviderError>>,
 {
+    let Some(params) = provider_params(request, responder) else {
+        return invalid_params_error(request, responder, "invalid git provider params");
+    };
+    encode_result(request, responder, handler(scheduler.clone(), params).await)
+}
+
+async fn git_job_start(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+    event_sink: Option<Arc<dyn PipeEventSink>>,
+    operation: git_ops::GitJobOperation,
+) -> PipeEnvelope {
+    let Some(params) = provider_params(request, responder) else {
+        return invalid_params_error(request, responder, "invalid git job params");
+    };
+    match scheduler
+        .start_git_job(operation, params, request.clone(), event_sink)
+        .await
+    {
+        Ok(started) => encode_result::<git_ops::GitJobStarted>(request, responder, Ok(started)),
+        Err(error) => PipeEnvelope::error_response(request, responder, git_error(error)),
+    }
+}
+
+async fn git_job_cancel(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+) -> PipeEnvelope {
     let params = request.params.clone().unwrap_or_else(|| json!({}));
-    let mut params = match serde_json::from_value::<GitProviderRequest>(params) {
+    let params = match serde_json::from_value::<git_ops::GitJobCancelRequest>(params) {
         Ok(params) => params,
         Err(error) => {
             return PipeEnvelope::error_response(
@@ -96,25 +278,41 @@ where
                 responder,
                 PipeError::new(
                     "protocol.invalidParams",
-                    format!(
-                        "invalid {} params: {error}",
-                        request.method.as_deref().unwrap_or("git request")
-                    ),
+                    format!("invalid git.job.cancel params: {error}"),
                     false,
                     None,
                 ),
             );
         }
     };
+    encode_result(request, responder, scheduler.cancel_git_job(params).await)
+}
 
+fn provider_params(
+    request: &PipeEnvelope,
+    _responder: &PipeIdentity,
+) -> Option<GitProviderRequest> {
+    let params = request.params.clone().unwrap_or_else(|| json!({}));
+    let mut params = serde_json::from_value::<GitProviderRequest>(params).ok()?;
     if params.root.is_none() {
         params.root.clone_from(&request.workspace_root);
     }
     if params.project_generation.is_none() {
         params.project_generation = request.project_generation;
     }
+    Some(params)
+}
 
-    encode_result(request, responder, handler(params))
+fn invalid_params_error(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    message: impl Into<String>,
+) -> PipeEnvelope {
+    PipeEnvelope::error_response(
+        request,
+        responder,
+        PipeError::new("protocol.invalidParams", message, false, None),
+    )
 }
 
 fn encode_result<T>(

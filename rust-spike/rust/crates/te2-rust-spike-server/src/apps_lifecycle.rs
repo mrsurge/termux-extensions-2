@@ -25,8 +25,10 @@ use tokio::time::Duration;
 use tracing::warn;
 use url::form_urlencoded;
 
+#[cfg(feature = "ferrous-framework-native")]
+use crate::app_worker_pipe_bridge;
 use crate::{
-    ApiResponse, AppState, app_worker_pipe_bridge, json_error,
+    ApiResponse, AppState, json_error,
     launcher::{launch_app, launch_supported},
     proxy_transport::absolute_upstream_url,
     registry::{self, AppRegistry, AppRoot},
@@ -537,6 +539,7 @@ pub(crate) fn start_fws_lifecycle_app_bridge(
                             Some(manager.clone()),
                             event.shell_id.clone(),
                             app_id.clone(),
+                            state.service_scheduler().clone(),
                         );
                     }
                     let (trigger, running_override) = match event.kind {
@@ -564,6 +567,7 @@ fn ensure_pipe_bridge_for_running_app(state: &AppState, running: &RunningApp) {
         state.launch_store().manager(),
         running.shell_id.clone(),
         running.app_id.clone(),
+        state.service_scheduler().clone(),
     );
 }
 

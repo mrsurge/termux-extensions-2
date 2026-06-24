@@ -19,6 +19,8 @@ from app.libs.pipe_protocol import (
 )
 
 PipeDispatcher = Callable[[PipeEnvelope], object]
+PipeNotificationQueue = queue.Queue[PipeEnvelope]
+PipeNotificationListener = tuple[PipeNotificationQueue, set[str] | None]
 
 
 class PipeWriter(Protocol):
@@ -34,6 +36,7 @@ _identity: PipeIdentity | None = None
 _transport_writer: PipeWriter | None = None
 _write_lock = threading.Lock()
 _pending: dict[str, queue.Queue[PipeEnvelope]] = {}
+_notification_listeners: list[PipeNotificationListener] = []
 
 
 class PipeRuntimeError(RuntimeError):
@@ -164,6 +167,43 @@ def accept_response(envelope: PipeEnvelope) -> bool:
         return False
     pending.put(envelope)
     return True
+
+
+def add_notification_listener(
+    event_queue: PipeNotificationQueue,
+    *,
+    methods: set[str] | None = None,
+) -> PipeNotificationListener:
+    method_filter = {method for method in (methods or set()) if method}
+    listener: PipeNotificationListener = (event_queue, method_filter or None)
+    with _lock:
+        _notification_listeners.append(listener)
+    return listener
+
+
+def remove_notification_listener(listener: PipeNotificationListener) -> None:
+    with _lock:
+        if listener in _notification_listeners:
+            _notification_listeners.remove(listener)
+
+
+def accept_notification(envelope: PipeEnvelope) -> bool:
+    """Fan out one inbound framework-origin notification to local listeners."""
+    if envelope.kind not in {"notification", "progress"}:
+        return False
+    method = str(envelope.method or "")
+    delivered = False
+    with _lock:
+        listeners = list(_notification_listeners)
+    for event_queue, method_filter in listeners:
+        if method_filter is not None and method not in method_filter:
+            continue
+        try:
+            event_queue.put_nowait(envelope)
+            delivered = True
+        except Exception:
+            continue
+    return delivered
 
 
 def dispatch_request(request: PipeEnvelope) -> PipeEnvelope:

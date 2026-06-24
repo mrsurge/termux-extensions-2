@@ -1,6 +1,7 @@
 # pyright: strict
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 import os
@@ -18,7 +19,8 @@ from ..services.project_switch import (
     ExplorerProjectSwitchResult,
     switch_project_connection,
 )
-from ..services.tracked_jobs import get_job_manager, remember_tracked_job
+from ..services.tracked_jobs import forget_tracked_job, remember_tracked_job
+from ...worker_services import git_service as worker_git_service
 
 logger = logging.getLogger(__name__)
 ExplorerHelperCall = Callable[..., object]
@@ -117,22 +119,39 @@ async def handle_git_clone(
         None,
     )
 
-    job = get_job_manager().create_job(
-        "git_clone",
-        {
-            "url": params["url"],
-            "target_path": str(target),
-            "branch": params["branch"],
-            "depth": params["depth"],
-        },
-    )
-    remember_tracked_job(switch_result.project_root, context.tracked_job_ids, job.id)
-    await context.emit_personal(
-        "explorer.git.clone.started",
-        {"job_id": job.id, "target_path": str(target)},
-        msg_id,
-    )
+    op_id = worker_git_service.new_git_job_op_id("git_clone")
+    remember_tracked_job(switch_result.project_root, context.tracked_job_ids, op_id)
+    try:
+        _ = await asyncio.to_thread(
+            worker_git_service.start_clone_job,
+            switch_result.project_root,
+            url=params["url"],
+            destination=str(target),
+            branch=params["branch"],
+            depth=_clone_depth(params["depth"]),
+            op_id=op_id,
+        )
+        await context.emit_personal(
+            "explorer.git.clone.started",
+            {"job_id": op_id, "target_path": str(target)},
+            msg_id,
+        )
+    except Exception:
+        forget_tracked_job(switch_result.project_root, context.tracked_job_ids, op_id)
+        raise
     return switch_result
+
+
+def _clone_depth(value: int | str | None) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    try:
+        parsed = int(value.strip())
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _call_explorer_helper_dict(name: str, *args: object) -> dict[str, object]:

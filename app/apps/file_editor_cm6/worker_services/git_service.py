@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import sys
+import uuid
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal, TypedDict, cast
 
 from app.libs import pipe_runtime
-from ..git_helper import GitStatus
+from ..git_helper import GitBranches, GitCommit, GitStatus
 
 GitPathStatus = Literal[
     "clean",
@@ -58,6 +60,60 @@ class GitSnapshot(TypedDict):
     unstaged: list[str]
     untracked: list[str]
     statuses: dict[str, GitPathStatus]
+
+
+class GitMutationResult(TypedDict):
+    dto: Literal["GitMutationResult"]
+    version: int
+    root: str
+    operation: str
+    ok: bool
+    changedPaths: list[str]
+    statusInvalidated: bool
+
+
+class GitBranchItem(TypedDict):
+    name: str
+    current: bool
+    remote: bool
+
+
+class GitBranchList(TypedDict):
+    dto: Literal["GitBranchList"]
+    version: int
+    root: str
+    current: str | None
+    branches: list[GitBranchItem]
+
+
+class GitHistoryCommit(TypedDict):
+    id: str
+    short: str
+    summary: str | None
+    authorName: str | None
+    authorEmail: str | None
+    time: int
+
+
+class GitHistoryResult(TypedDict):
+    dto: Literal["GitHistoryResult"]
+    version: int
+    root: str
+    projectGeneration: int | None
+    commits: list[GitHistoryCommit]
+
+
+class GitJobStarted(TypedDict):
+    dto: Literal["GitJobStarted"]
+    version: int
+    jobId: str
+    opId: str
+    type: str
+    operation: str
+    root: str
+    projectGeneration: int | None
+    status: str
+    message: str
 
 
 JsonObject = dict[str, object]
@@ -117,6 +173,181 @@ def get_snapshot(project_root: Path, *, project_generation: int | None = None) -
     return snapshot
 
 
+def stage_paths(project_root: Path, paths: Iterable[str]) -> GitStatus:
+    """Stage specific paths through service.git and return a fresh status."""
+    normalized_paths = _normalized_paths(paths)
+    if normalized_paths:
+        _ = _coerce_mutation(
+            _call_git_provider(
+                "git.stage",
+                project_root,
+                {"paths": normalized_paths},
+            ),
+            expected_operation="stage",
+        )
+    return get_status(project_root)
+
+
+def unstage_paths(project_root: Path, paths: Iterable[str]) -> GitStatus:
+    """Unstage specific paths through service.git and return a fresh status."""
+    normalized_paths = _normalized_paths(paths)
+    if normalized_paths:
+        _ = _coerce_mutation(
+            _call_git_provider(
+                "git.unstage",
+                project_root,
+                {"paths": normalized_paths},
+            ),
+            expected_operation="unstage",
+        )
+    return get_status(project_root)
+
+
+def stage_all(project_root: Path) -> GitStatus:
+    """Stage all current worktree changes through service.git."""
+    status = get_status(project_root)
+    paths = _dedupe_paths([*status.unstaged, *status.untracked])
+    if not paths:
+        return status
+    return stage_paths(project_root, paths)
+
+
+def unstage_all(project_root: Path) -> GitStatus:
+    """Unstage every staged path through service.git."""
+    status = get_status(project_root)
+    if not status.staged:
+        return status
+    return unstage_paths(project_root, status.staged)
+
+
+def commit_changes(project_root: Path, message: str, amend: bool = False) -> GitStatus:
+    """Commit staged changes through service.git and return a fresh status."""
+    if amend:
+        raise RuntimeError("service.git git.commit does not support amend yet")
+    status = get_status(project_root)
+    if not status.staged:
+        raise RuntimeError("No staged changes to commit")
+    _ = _coerce_mutation(
+        _call_git_provider(
+            "git.commit",
+            project_root,
+            {"message": message},
+        ),
+        expected_operation="commit",
+    )
+    return get_status(project_root)
+
+
+def init_repository(project_root: Path) -> GitStatus:
+    """Initialize a repository through service.git and return its status."""
+    _ = _coerce_mutation(
+        _call_git_provider("git.init", project_root, {}),
+        expected_operation="init",
+    )
+    return get_status(project_root)
+
+
+def list_branches(project_root: Path) -> GitBranches:
+    """Return branch names from service.git."""
+    branch_list = _coerce_branch_list(_call_git_provider("git.branchList", project_root, {}))
+    names = [branch["name"] for branch in branch_list["branches"]]
+    return GitBranches(current=branch_list["current"] or "HEAD", branches=names)
+
+
+def get_commits(project_root: Path, limit: int = 50) -> list[GitCommit]:
+    """Return recent commit history from service.git."""
+    history = _coerce_history(
+        _call_git_provider(
+            "git.history",
+            project_root,
+            {"limit": max(1, limit)},
+        )
+    )
+    commits: list[GitCommit] = []
+    for commit in history["commits"]:
+        full_hash = commit["id"]
+        commits.append(
+            GitCommit(
+                hash=full_hash,
+                short_hash=commit["short"] or full_hash[:7],
+                summary=commit["summary"] or "",
+                author=commit["authorName"] or "",
+                date=str(commit["time"]),
+            )
+        )
+    return commits
+
+
+def new_git_job_op_id(job_type: str) -> str:
+    """Create the Explorer-visible operation id used to track pipe Git jobs."""
+    normalized_type = job_type.strip().replace(".", "_") or "git_job"
+    return f"{normalized_type}-{uuid.uuid4().hex[:12]}"
+
+
+def start_push_job(
+    project_root: Path,
+    *,
+    remote: str,
+    branch: str | None,
+    force: bool,
+    op_id: str,
+) -> GitJobStarted:
+    """Start a pipe-backed push job and return the framework job ack."""
+    if force:
+        raise RuntimeError("service.git git.push.start does not support force yet")
+    params: JsonObject = {"remote": remote}
+    if branch:
+        params["branch"] = branch
+    return _coerce_job_started(
+        _call_git_provider("git.push.start", project_root, params, op_id=op_id),
+        expected_operation="push",
+    )
+
+
+def start_pull_job(
+    project_root: Path,
+    *,
+    remote: str,
+    branch: str | None,
+    rebase: bool,
+    op_id: str,
+) -> GitJobStarted:
+    """Start a pipe-backed pull job and return the framework job ack."""
+    if rebase:
+        raise RuntimeError("service.git git.pull.start does not support rebase yet")
+    params: JsonObject = {"remote": remote}
+    if branch:
+        params["branch"] = branch
+    return _coerce_job_started(
+        _call_git_provider("git.pull.start", project_root, params, op_id=op_id),
+        expected_operation="pull",
+    )
+
+
+def start_clone_job(
+    project_root: Path,
+    *,
+    url: str,
+    destination: str,
+    branch: str | None,
+    depth: int | None,
+    op_id: str,
+) -> GitJobStarted:
+    """Start a pipe-backed clone job and return the framework job ack."""
+    params: JsonObject = {
+        "url": url,
+        "destination": destination,
+    }
+    if branch:
+        params["branch"] = branch
+    if depth is not None and depth > 0:
+        params["depth"] = depth
+    return _coerce_job_started(
+        _call_git_provider("git.clone.start", project_root, params, op_id=op_id),
+        expected_operation="clone",
+    )
+
+
 def get_status(project_root: Path) -> GitStatus:
     """Return branch/ahead/behind and staged/unstaged/untracked status."""
     snapshot = get_snapshot(project_root)
@@ -169,6 +400,154 @@ def read_head_blob_text(project_root: Path, rel_path: str) -> str | None:
         raise RuntimeError("service.git returned invalid git.headBlob content")
     _git_log(f"head.pipe ok root={root_str} rel={normalized_rel} chars={len(value)}")
     return value
+
+
+def _call_git_provider(
+    method: str,
+    project_root: Path,
+    params: JsonObject,
+    *,
+    op_id: str | None = None,
+) -> object:
+    root = project_root.expanduser().resolve(strict=False)
+    root_str = str(root)
+    payload: JsonObject = {"root": root_str, **params}
+    _git_log(f"{method}.pipe start root={root_str}")
+    data = pipe_runtime.call(
+        method,
+        payload,
+        target_nid=2200,
+        target_name="service.git",
+        workspace_root=root_str,
+        origin_name="file_editor_cm6.git",
+        op_id=op_id,
+    )
+    _git_log(f"{method}.pipe ok root={root_str}")
+    return data
+
+
+def _coerce_mutation(value: object, *, expected_operation: str) -> GitMutationResult:
+    data = _as_object(value)
+    if data.get("dto") != "GitMutationResult":
+        raise RuntimeError("service.git returned unexpected GitMutationResult DTO")
+    operation = data.get("operation")
+    if operation != expected_operation:
+        raise RuntimeError(
+            f"service.git returned GitMutationResult for {operation!r}, expected {expected_operation!r}"
+        )
+    ok = bool(data.get("ok"))
+    if not ok:
+        raise RuntimeError(f"service.git {expected_operation} did not complete")
+    return {
+        "dto": "GitMutationResult",
+        "version": _int_value(data.get("version"), default=1),
+        "root": _required_string(data.get("root"), "service.git returned invalid mutation root"),
+        "operation": expected_operation,
+        "ok": ok,
+        "changedPaths": _string_list(data.get("changedPaths")),
+        "statusInvalidated": bool(data.get("statusInvalidated")),
+    }
+
+
+def _coerce_branch_list(value: object) -> GitBranchList:
+    data = _as_object(value)
+    if data.get("dto") != "GitBranchList":
+        raise RuntimeError("service.git returned unexpected GitBranchList DTO")
+    branches: list[GitBranchItem] = []
+    raw_branches = data.get("branches")
+    if isinstance(raw_branches, list):
+        for item in cast(list[object], raw_branches):
+            branch = _as_object(item)
+            name = branch.get("name")
+            if isinstance(name, str) and name:
+                branches.append(
+                    {
+                        "name": name,
+                        "current": bool(branch.get("current")),
+                        "remote": bool(branch.get("remote")),
+                    }
+                )
+    return {
+        "dto": "GitBranchList",
+        "version": _int_value(data.get("version"), default=1),
+        "root": _required_string(data.get("root"), "service.git returned invalid branch root"),
+        "current": _optional_str(data.get("current")),
+        "branches": branches,
+    }
+
+
+def _coerce_history(value: object) -> GitHistoryResult:
+    data = _as_object(value)
+    if data.get("dto") != "GitHistoryResult":
+        raise RuntimeError("service.git returned unexpected GitHistoryResult DTO")
+    commits: list[GitHistoryCommit] = []
+    raw_commits = data.get("commits")
+    if isinstance(raw_commits, list):
+        for item in cast(list[object], raw_commits):
+            commit = _as_object(item)
+            full_hash = commit.get("id")
+            if not isinstance(full_hash, str) or not full_hash:
+                continue
+            commits.append(
+                {
+                    "id": full_hash,
+                    "short": _optional_str(commit.get("short")) or full_hash[:7],
+                    "summary": _optional_str(commit.get("summary")),
+                    "authorName": _optional_str(commit.get("authorName")),
+                    "authorEmail": _optional_str(commit.get("authorEmail")),
+                    "time": _int_value(commit.get("time")),
+                }
+            )
+    return {
+        "dto": "GitHistoryResult",
+        "version": _int_value(data.get("version"), default=1),
+        "root": _required_string(data.get("root"), "service.git returned invalid history root"),
+        "projectGeneration": _optional_int(data.get("projectGeneration")),
+        "commits": commits,
+    }
+
+
+def _coerce_job_started(value: object, *, expected_operation: str) -> GitJobStarted:
+    data = _as_object(value)
+    if data.get("dto") != "GitJobStarted":
+        raise RuntimeError("service.git returned unexpected GitJobStarted DTO")
+    operation = data.get("operation")
+    if operation != expected_operation:
+        raise RuntimeError(
+            f"service.git returned GitJobStarted for {operation!r}, expected {expected_operation!r}"
+        )
+    return {
+        "dto": "GitJobStarted",
+        "version": _int_value(data.get("version"), default=1),
+        "jobId": _required_string(data.get("jobId"), "service.git returned invalid jobId"),
+        "opId": _required_string(data.get("opId"), "service.git returned invalid opId"),
+        "type": _required_string(data.get("type"), "service.git returned invalid job type"),
+        "operation": expected_operation,
+        "root": _required_string(data.get("root"), "service.git returned invalid job root"),
+        "projectGeneration": _optional_int(data.get("projectGeneration")),
+        "status": _required_string(data.get("status"), "service.git returned invalid job status"),
+        "message": _required_string(data.get("message"), "service.git returned invalid job message"),
+    }
+
+
+def _required_string(value: object, message: str) -> str:
+    if isinstance(value, str) and value:
+        return value
+    raise RuntimeError(message)
+
+
+def _normalized_paths(paths: Iterable[str]) -> list[str]:
+    return _dedupe_paths(path.strip().replace("\\", "/") for path in paths if path.strip())
+
+
+def _dedupe_paths(paths: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for path in paths:
+        if path and path not in seen:
+            seen.add(path)
+            result.append(path)
+    return result
 
 
 def _coerce_snapshot(value: object) -> GitSnapshot:

@@ -1,19 +1,27 @@
 use serde_json::{Value, json};
 
 use super::protocol::{PipeEnvelope, PipeError, PipeIdentity};
-use crate::framework_services::fs_ops::{self, BrowseError, FsListDirectoryRequest};
+use crate::framework_services::{
+    fs_ops::{BrowseError, FsListDirectoryRequest},
+    scheduler::FrameworkServiceScheduler,
+};
 
-pub(super) fn dispatch_fs_request(
+pub(super) async fn dispatch_fs_request(
     request: &PipeEnvelope,
     responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
 ) -> Option<PipeEnvelope> {
     match request.method.as_deref() {
-        Some("fs.listDirectory") => Some(list_directory(request, responder)),
+        Some("fs.listDirectory") => Some(list_directory(request, responder, scheduler).await),
         _ => None,
     }
 }
 
-fn list_directory(request: &PipeEnvelope, responder: &PipeIdentity) -> PipeEnvelope {
+async fn list_directory(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+) -> PipeEnvelope {
     let params = request.params.clone().unwrap_or_else(|| json!({}));
     let mut params = match serde_json::from_value::<FsListDirectoryRequest>(params) {
         Ok(params) => params,
@@ -38,7 +46,7 @@ fn list_directory(request: &PipeEnvelope, responder: &PipeIdentity) -> PipeEnvel
         params.project_generation = request.project_generation;
     }
 
-    match fs_ops::list_directory(params) {
+    match scheduler.fs_list_directory(params).await {
         Ok(listing) => match serde_json::to_value(listing) {
             Ok(result) => PipeEnvelope::success_response(request, responder, result),
             Err(error) => PipeEnvelope::error_response(

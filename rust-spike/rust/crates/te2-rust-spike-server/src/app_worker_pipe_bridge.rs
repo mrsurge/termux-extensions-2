@@ -1,15 +1,19 @@
 #[cfg(feature = "ferrous-framework-native")]
 mod native {
-    use crate::framework_services::pipe::{
-        dispatch_request,
-        protocol::{PipeIdentity, PipeMessageKind, decode_line, encode_line},
+    use crate::framework_services::{
+        pipe::{
+            PipeEventSink, dispatch_request,
+            protocol::{PipeEnvelope, PipeIdentity, PipeMessageKind, decode_line, encode_line},
+        },
+        scheduler::FrameworkServiceScheduler,
     };
     use ferrous_framework::{FerrousNativeManager, FerrousNativeShellStatus};
     use std::{
         collections::HashSet,
-        sync::{Mutex, OnceLock},
+        sync::{Arc, Mutex, OnceLock},
         time::Duration,
     };
+    use tokio::runtime::Handle;
     use tracing::{debug, warn};
 
     static ACTIVE_BRIDGES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -18,6 +22,7 @@ mod native {
         manager: Option<FerrousNativeManager>,
         shell_id: impl Into<String>,
         app_id: impl Into<String>,
+        scheduler: FrameworkServiceScheduler,
     ) {
         let Some(manager) = manager else {
             return;
@@ -33,8 +38,9 @@ mod native {
                 return;
             }
         }
+        let handle = Handle::current();
         tokio::task::spawn_blocking(move || {
-            if let Err(error) = run_bridge(manager, &shell_id, &app_id) {
+            if let Err(error) = run_bridge(manager, &shell_id, &app_id, scheduler, handle) {
                 warn!(%error, %shell_id, %app_id, "app-worker pipe bridge stopped with error");
             }
             if let Some(active) = ACTIVE_BRIDGES.get() {
@@ -49,6 +55,8 @@ mod native {
         manager: FerrousNativeManager,
         shell_id: &str,
         app_id: &str,
+        scheduler: FrameworkServiceScheduler,
+        handle: Handle,
     ) -> anyhow::Result<()> {
         let mut buffer = Vec::<u8>::new();
         loop {
@@ -56,7 +64,14 @@ mod native {
                 Some(chunk) => {
                     buffer.extend_from_slice(&chunk);
                     while let Some(line) = take_line(&mut buffer) {
-                        handle_stdout_line(&manager, shell_id, app_id, &line);
+                        handle_stdout_line(
+                            &manager,
+                            shell_id,
+                            app_id,
+                            &line,
+                            scheduler.clone(),
+                            handle.clone(),
+                        );
                     }
                 }
                 None => {
@@ -74,6 +89,8 @@ mod native {
         shell_id: &str,
         app_id: &str,
         line: &[u8],
+        scheduler: FrameworkServiceScheduler,
+        handle: Handle,
     ) {
         let text = String::from_utf8_lossy(line);
         let request = match decode_line(text.as_ref()) {
@@ -93,6 +110,7 @@ mod native {
             );
             return;
         }
+
         let responder = PipeIdentity {
             nid: request.target_nid.unwrap_or(1),
             name: request
@@ -100,14 +118,33 @@ mod native {
                 .clone()
                 .unwrap_or_else(|| "framework.rust".to_owned()),
         };
-        let response = dispatch_request(request, &responder);
-        match encode_line(&response) {
-            Ok(encoded) => {
-                if let Err(error) = manager.write_to_pipe_blocking(shell_id, encoded.as_bytes()) {
-                    warn!(%error, %shell_id, %app_id, "failed to write pipe response to app-worker");
-                }
+        let sink: Arc<dyn PipeEventSink> = Arc::new(FerrousPipeSink {
+            manager: manager.clone(),
+            shell_id: shell_id.to_owned(),
+            app_id: app_id.to_owned(),
+        });
+        let response_sink = Arc::clone(&sink);
+        handle.spawn(async move {
+            let response = dispatch_request(request, &responder, &scheduler, Some(sink)).await;
+            if let Err(error) = response_sink.send(response) {
+                warn!(%error, "failed to write pipe response to app-worker");
             }
-            Err(error) => warn!(%error, %shell_id, %app_id, "failed to encode pipe response"),
+        });
+    }
+
+    struct FerrousPipeSink {
+        manager: FerrousNativeManager,
+        shell_id: String,
+        app_id: String,
+    }
+
+    impl PipeEventSink for FerrousPipeSink {
+        fn send(&self, envelope: PipeEnvelope) -> anyhow::Result<()> {
+            let encoded = encode_line(&envelope)?;
+            self.manager
+                .write_to_pipe_blocking(&self.shell_id, encoded.as_bytes())?;
+            debug!(shell_id = %self.shell_id, app_id = %self.app_id, "wrote app-worker pipe frame");
+            Ok(())
         }
     }
 
@@ -132,4 +169,11 @@ mod native {
 pub(crate) use native::ensure_bridge;
 
 #[cfg(not(feature = "ferrous-framework-native"))]
-pub(crate) fn ensure_bridge(_: Option<()>, _: impl Into<String>, _: impl Into<String>) {}
+#[allow(dead_code)]
+pub(crate) fn ensure_bridge(
+    _: Option<()>,
+    _: impl Into<String>,
+    _: impl Into<String>,
+    _: crate::framework_services::scheduler::FrameworkServiceScheduler,
+) {
+}

@@ -222,6 +222,14 @@ def _run_pipe_worker(app_id: str, module: ModuleType, protocol_stdout: object) -
                 )
             continue
 
+        if request_envelope.kind in {"notification", "progress"}:
+            if not pipe_runtime.accept_notification(request_envelope):
+                print(
+                    f"[app-worker] Unhandled pipe notification method={request_envelope.method!r}",
+                    file=sys.stderr,
+                )
+            continue
+
         if request_envelope.kind != "request":
             _write_response(
                 process_error_response(

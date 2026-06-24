@@ -48,6 +48,8 @@ pub(crate) struct AppState {
     http_client: reqwest::Client,
     sio_routes: Arc<SioRouteIndex>,
     launch_store: Arc<LaunchStore>,
+    #[cfg_attr(not(feature = "ferrous-framework-native"), allow(dead_code))]
+    service_scheduler: framework_services::scheduler::FrameworkServiceScheduler,
     readiness_store: Arc<RwLock<HashMap<String, JsonMap<String, Value>>>>,
     apps_events: broadcast::Sender<apps_lifecycle::AppsEvent>,
     fws_bridge: Arc<FwsBridgeConfig>,
@@ -77,6 +79,13 @@ impl AppState {
 
     pub(crate) fn launch_store(&self) -> &Arc<LaunchStore> {
         &self.launch_store
+    }
+
+    #[cfg_attr(not(feature = "ferrous-framework-native"), allow(dead_code))]
+    pub(crate) fn service_scheduler(
+        &self,
+    ) -> &framework_services::scheduler::FrameworkServiceScheduler {
+        &self.service_scheduler
     }
 
     pub(crate) fn readiness_store(&self) -> &Arc<RwLock<HashMap<String, JsonMap<String, Value>>>> {
@@ -180,6 +189,7 @@ async fn main() -> Result<()> {
         http_client,
         sio_routes,
         launch_store,
+        service_scheduler: framework_services::scheduler::FrameworkServiceScheduler::default(),
         readiness_store: Arc::new(RwLock::new(HashMap::new())),
         apps_events,
         fws_bridge: Arc::new(fws_bridge_config.clone()),

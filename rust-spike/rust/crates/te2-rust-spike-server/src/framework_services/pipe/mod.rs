@@ -4,9 +4,21 @@ mod fs_pipe_ops;
 mod git_pipe_ops;
 pub(crate) mod protocol;
 
+use std::sync::Arc;
+
+use crate::framework_services::scheduler::FrameworkServiceScheduler;
 use protocol::{PipeEnvelope, PipeError, PipeIdentity, PipeMessageKind};
 
-pub(crate) fn dispatch_request(request: PipeEnvelope, responder: &PipeIdentity) -> PipeEnvelope {
+pub(crate) trait PipeEventSink: Send + Sync {
+    fn send(&self, envelope: PipeEnvelope) -> anyhow::Result<()>;
+}
+
+pub(crate) async fn dispatch_request(
+    request: PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+    event_sink: Option<Arc<dyn PipeEventSink>>,
+) -> PipeEnvelope {
     if !matches!(request.kind, PipeMessageKind::Request) {
         return PipeEnvelope::error_response(
             &request,
@@ -20,10 +32,12 @@ pub(crate) fn dispatch_request(request: PipeEnvelope, responder: &PipeIdentity) 
         );
     }
 
-    if let Some(response) = fs_pipe_ops::dispatch_fs_request(&request, responder) {
+    if let Some(response) = fs_pipe_ops::dispatch_fs_request(&request, responder, scheduler).await {
         return response;
     }
-    if let Some(response) = git_pipe_ops::dispatch_git_request(&request, responder) {
+    if let Some(response) =
+        git_pipe_ops::dispatch_git_request(&request, responder, scheduler, event_sink).await
+    {
         return response;
     }
 
@@ -48,7 +62,24 @@ mod tests {
     use crate::framework_services::common::path_to_string;
     use git2::{IndexAddOption, Signature};
     use serde_json::json;
-    use std::{fs, path::PathBuf};
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
+    use tokio::time::{Duration, sleep};
+
+    #[derive(Default)]
+    struct TestSink {
+        frames: Mutex<Vec<PipeEnvelope>>,
+    }
+
+    impl PipeEventSink for TestSink {
+        fn send(&self, envelope: PipeEnvelope) -> anyhow::Result<()> {
+            self.frames.lock().expect("frames lock").push(envelope);
+            Ok(())
+        }
+    }
 
     fn test_root(name: &str) -> PathBuf {
         let mut root = std::env::temp_dir();
@@ -116,7 +147,7 @@ mod tests {
             .expect("commit");
     }
 
-    fn dispatch_git(
+    async fn dispatch_git(
         method: &str,
         params: serde_json::Value,
         root: &std::path::Path,
@@ -127,13 +158,16 @@ mod tests {
                 nid: 2200,
                 name: "service.git".to_owned(),
             },
-        );
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
         assert_eq!(response.kind, PipeMessageKind::Response);
         response.result.expect("response result")
     }
 
-    #[test]
-    fn line_codec_round_trips_request_envelope() {
+    #[tokio::test]
+    async fn line_codec_round_trips_request_envelope() {
         let root = test_root("codec");
         let envelope = request("fs.listDirectory", json!({ "path": "." }), &root);
         let encoded = protocol::encode_line(&envelope).expect("encode line");
@@ -148,15 +182,18 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
-    #[test]
-    fn dispatches_fs_list_directory_to_contract_dto() {
+    #[tokio::test]
+    async fn dispatches_fs_list_directory_to_contract_dto() {
         let root = test_root("dispatch");
         fs::write(root.join("main.py"), "print('hello')\n").expect("write file");
 
         let response = dispatch_request(
             request("fs.listDirectory", json!({ "path": "." }), &root),
             &PipeIdentity::framework_rust(),
-        );
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
 
         assert_eq!(response.kind, PipeMessageKind::Response);
         assert_eq!(response.id.as_deref(), Some("req-1"));
@@ -185,13 +222,16 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
-    #[test]
-    fn unknown_method_returns_typed_error() {
+    #[tokio::test]
+    async fn unknown_method_returns_typed_error() {
         let root = test_root("unknown");
         let response = dispatch_request(
             request("fs.nope", json!({}), &root),
             &PipeIdentity::framework_rust(),
-        );
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
 
         assert_eq!(response.kind, PipeMessageKind::Error);
         assert_eq!(
@@ -202,8 +242,8 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
-    #[test]
-    fn dispatches_git_snapshot_to_contract_dto() {
+    #[tokio::test]
+    async fn dispatches_git_snapshot_to_contract_dto() {
         let root = test_root("git-snapshot");
         git2::Repository::init(&root).expect("init repo");
 
@@ -216,7 +256,8 @@ mod tests {
                 "untracked": "normal"
             }),
             &root,
-        );
+        )
+        .await;
         assert_eq!(
             result.get("dto").and_then(|value| value.as_str()),
             Some("GitSnapshot")
@@ -235,8 +276,8 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
-    #[test]
-    fn dispatches_git_provider_methods_to_contract_dtos() {
+    #[tokio::test]
+    async fn dispatches_git_provider_methods_to_contract_dtos() {
         let root = test_root("git-provider");
         let repo = git2::Repository::init(&root).expect("init repo");
         fs::write(root.join("tracked.txt"), "tracked\n").expect("write tracked");
@@ -248,7 +289,8 @@ mod tests {
             "git.headBlob",
             json!({ "root": path_to_string(&root), "relativePath": "tracked.txt" }),
             &root,
-        );
+        )
+        .await;
         assert_eq!(
             head_blob.get("dto").and_then(|value| value.as_str()),
             Some("GitHeadBlobResult")
@@ -262,7 +304,8 @@ mod tests {
             "git.diff",
             json!({ "root": path_to_string(&root), "paths": ["tracked.txt"] }),
             &root,
-        );
+        )
+        .await;
         assert_eq!(
             diff.get("dto").and_then(|value| value.as_str()),
             Some("GitDiffResult")
@@ -277,7 +320,8 @@ mod tests {
             "git.stage",
             json!({ "root": path_to_string(&root), "paths": ["new.txt"] }),
             &root,
-        );
+        )
+        .await;
         assert_eq!(
             mutation.get("dto").and_then(|value| value.as_str()),
             Some("GitMutationResult")
@@ -291,7 +335,8 @@ mod tests {
             "git.branchList",
             json!({ "root": path_to_string(&root) }),
             &root,
-        );
+        )
+        .await;
         assert_eq!(
             branches.get("dto").and_then(|value| value.as_str()),
             Some("GitBranchList")
@@ -305,7 +350,8 @@ mod tests {
                 "fetchUrl": "https://example.invalid/repo.git"
             }),
             &root,
-        );
+        )
+        .await;
         assert_eq!(
             remote_add.get("dto").and_then(|value| value.as_str()),
             Some("GitMutationResult")
@@ -315,7 +361,8 @@ mod tests {
             "git.remoteList",
             json!({ "root": path_to_string(&root) }),
             &root,
-        );
+        )
+        .await;
         assert_eq!(
             remotes.get("dto").and_then(|value| value.as_str()),
             Some("GitRemoteList")
@@ -325,12 +372,100 @@ mod tests {
             "git.history",
             json!({ "root": path_to_string(&root) }),
             &root,
-        );
+        )
+        .await;
         assert_eq!(
             history.get("dto").and_then(|value| value.as_str()),
             Some("GitHistoryResult")
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn dispatches_git_clone_start_and_routes_progress_notifications() {
+        let source = test_root("git-clone-source");
+        let repo = git2::Repository::init(&source).expect("init source repo");
+        fs::write(source.join("tracked.txt"), "tracked\n").expect("write tracked");
+        commit_all(&repo, "initial commit");
+
+        let destination_root = test_root("git-clone-destination");
+        let destination = destination_root.join("clone");
+        let scheduler = FrameworkServiceScheduler::default();
+        let sink = Arc::new(TestSink::default());
+        let response = dispatch_request(
+            targeted_request(
+                "git.clone.start",
+                json!({
+                    "url": path_to_string(&source),
+                    "destination": path_to_string(&destination)
+                }),
+                &source,
+                2200,
+                "service.git",
+            ),
+            &PipeIdentity {
+                nid: 2200,
+                name: "service.git".to_owned(),
+            },
+            &scheduler,
+            Some(sink.clone()),
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let started = response.result.expect("start result");
+        assert_eq!(
+            started.get("dto").and_then(|value| value.as_str()),
+            Some("GitJobStarted")
+        );
+        assert_eq!(
+            started.get("status").and_then(|value| value.as_str()),
+            Some("running")
+        );
+
+        let mut terminal = None;
+        for _ in 0..100 {
+            {
+                let frames = sink.frames.lock().expect("frames lock");
+                terminal = frames.iter().find_map(|frame| {
+                    let params = frame.params.as_ref()?;
+                    let status = params.get("status")?.as_str()?;
+                    if status == "succeeded" {
+                        Some(frame.clone())
+                    } else {
+                        None
+                    }
+                });
+            }
+            if terminal.is_some() {
+                break;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+        let terminal = terminal.expect("terminal progress notification");
+        assert_eq!(terminal.kind, PipeMessageKind::Notification);
+        assert_eq!(terminal.method.as_deref(), Some("git.job.progress"));
+        assert_eq!(terminal.target_nid, Some(1100));
+        assert_eq!(
+            terminal.target_name.as_deref(),
+            Some("file_editor_cm6.explorer")
+        );
+        let params = terminal.params.expect("progress params");
+        assert_eq!(
+            params.get("dto").and_then(|value| value.as_str()),
+            Some("GitJobProgress")
+        );
+        assert_eq!(
+            params.get("operation").and_then(|value| value.as_str()),
+            Some("clone")
+        );
+        assert_eq!(
+            params.get("status").and_then(|value| value.as_str()),
+            Some("succeeded")
+        );
+
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(destination_root);
     }
 }

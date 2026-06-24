@@ -1,13 +1,15 @@
 use super::common::{expand_user_path, home_dir, normalize_lexical, path_to_string};
 use git2::{
-    BranchType, Delta, Diff, DiffFormat, DiffOptions, ErrorCode, IndexAddOption, Oid, Repository,
-    Signature, Status, StatusOptions, StatusShow, build::CheckoutBuilder,
+    BranchType, Delta, Diff, DiffFormat, DiffOptions, ErrorCode, FetchOptions, IndexAddOption, Oid,
+    PushOptions, RemoteCallbacks, Repository, Signature, Status, StatusOptions, StatusShow,
+    build::{CheckoutBuilder, RepoBuilder},
 };
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Component, Path, PathBuf},
+    sync::{Arc, Mutex as StdMutex},
 };
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -112,6 +114,10 @@ pub(crate) struct GitProviderRequest {
     pub(crate) limit: Option<usize>,
     #[serde(default)]
     pub(crate) force: Option<bool>,
+    #[serde(default)]
+    pub(crate) depth: Option<usize>,
+    #[serde(default)]
+    pub(crate) rebase: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -238,6 +244,130 @@ pub(crate) struct GitRemoteList {
     pub(crate) version: u16,
     pub(crate) root: String,
     pub(crate) remotes: Vec<GitRemoteItem>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GitJobOperation {
+    Clone,
+    Pull,
+    Push,
+}
+
+impl GitJobOperation {
+    pub(crate) fn operation(self) -> &'static str {
+        match self {
+            Self::Clone => "clone",
+            Self::Pull => "pull",
+            Self::Push => "push",
+        }
+    }
+
+    pub(crate) fn job_type(self) -> &'static str {
+        match self {
+            Self::Clone => "git_clone",
+            Self::Pull => "git_pull",
+            Self::Push => "git_push",
+        }
+    }
+
+    pub(crate) fn starting_message(self) -> &'static str {
+        match self {
+            Self::Clone => "Starting clone",
+            Self::Pull => "Starting pull",
+            Self::Push => "Starting push",
+        }
+    }
+
+    pub(crate) fn success_message(self) -> &'static str {
+        match self {
+            Self::Clone => "Cloned repository",
+            Self::Pull => "Pulled repository",
+            Self::Push => "Pushed repository",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitJobStarted {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) job_id: String,
+    pub(crate) op_id: String,
+    #[serde(rename = "type")]
+    pub(crate) job_type: &'static str,
+    pub(crate) operation: &'static str,
+    pub(crate) root: String,
+    pub(crate) project_generation: Option<u64>,
+    pub(crate) status: &'static str,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitJobProgressDetail {
+    pub(crate) completed: u64,
+    pub(crate) total: u64,
+    pub(crate) detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitJobProgressError {
+    pub(crate) code: String,
+    pub(crate) message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitJobProgress {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) job_id: String,
+    pub(crate) op_id: String,
+    #[serde(rename = "type")]
+    pub(crate) job_type: &'static str,
+    pub(crate) operation: &'static str,
+    pub(crate) root: String,
+    pub(crate) project_generation: Option<u64>,
+    pub(crate) status: String,
+    pub(crate) message: String,
+    pub(crate) progress: GitJobProgressDetail,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) error: Option<GitJobProgressError>,
+    pub(crate) sequence: u64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitJobCancelRequest {
+    #[serde(default)]
+    pub(crate) job_id: Option<String>,
+    #[serde(default)]
+    pub(crate) op_id: Option<String>,
+    #[serde(default)]
+    pub(crate) reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitJobCancelResult {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) job_id: String,
+    pub(crate) op_id: String,
+    pub(crate) ok: bool,
+    pub(crate) status: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GitOperationProgress {
+    pub(crate) phase: &'static str,
+    pub(crate) completed: u64,
+    pub(crate) total: u64,
+    pub(crate) detail: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -660,6 +790,16 @@ pub(crate) fn git_init(request: GitProviderRequest) -> Result<GitMutationResult,
 pub(crate) fn git_clone(
     request: GitProviderRequest,
 ) -> Result<GitMutationResult, GitProviderError> {
+    git_clone_with_progress(request, |_| true)
+}
+
+pub(crate) fn git_clone_with_progress<F>(
+    request: GitProviderRequest,
+    progress: F,
+) -> Result<GitMutationResult, GitProviderError>
+where
+    F: FnMut(GitOperationProgress) -> bool,
+{
     let url = required_text(request.url.as_deref(), GitProviderError::MissingUrl)?;
     let destination = request
         .destination
@@ -669,11 +809,89 @@ pub(crate) fn git_clone(
         .filter(|value| !value.trim().is_empty())
         .ok_or(GitProviderError::MissingDestination)?;
     let destination = normalize_existing_path(destination);
-    let repo = Repository::clone(url, &destination)?;
+    let progress = Arc::new(StdMutex::new(progress));
+    let mut callbacks = RemoteCallbacks::new();
+    let transfer_progress = Arc::clone(&progress);
+    callbacks.transfer_progress(move |stats| {
+        emit_operation_progress(
+            &transfer_progress,
+            GitOperationProgress {
+                phase: "fetch",
+                completed: stats.received_objects().max(stats.indexed_objects()) as u64,
+                total: stats.total_objects() as u64,
+                detail: format!(
+                    "received {} of {} objects ({} bytes)",
+                    stats.received_objects(),
+                    stats.total_objects(),
+                    stats.received_bytes()
+                ),
+            },
+        )
+    });
+    let sideband_progress = Arc::clone(&progress);
+    callbacks.sideband_progress(move |bytes| {
+        let detail = String::from_utf8_lossy(bytes).trim().to_owned();
+        if detail.is_empty() {
+            return true;
+        }
+        emit_operation_progress(
+            &sideband_progress,
+            GitOperationProgress {
+                phase: "remote",
+                completed: 0,
+                total: 0,
+                detail,
+            },
+        )
+    });
+    let mut fetch_options = FetchOptions::new();
+    fetch_options.remote_callbacks(callbacks);
+    if let Some(depth) = request.depth {
+        fetch_options.depth(depth.min(i32::MAX as usize) as i32);
+    }
+
+    let checkout_progress = Arc::clone(&progress);
+    let mut checkout = CheckoutBuilder::new();
+    checkout.progress(move |path, completed, total| {
+        let detail = path
+            .map(path_to_string)
+            .unwrap_or_else(|| "checkout".to_owned());
+        let _ = emit_operation_progress(
+            &checkout_progress,
+            GitOperationProgress {
+                phase: "checkout",
+                completed: completed as u64,
+                total: total as u64,
+                detail,
+            },
+        );
+    });
+
+    let mut builder = RepoBuilder::new();
+    builder.fetch_options(fetch_options);
+    builder.with_checkout(checkout);
+    if let Some(branch) = request
+        .branch
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        builder.branch(branch);
+    }
+    let repo = builder.clone(url, &destination)?;
     Ok(mutation_result(&repo, &destination, "clone", Vec::new()))
 }
 
 pub(crate) fn git_pull(request: GitProviderRequest) -> Result<GitMutationResult, GitProviderError> {
+    git_pull_with_progress(request, |_| true)
+}
+
+pub(crate) fn git_pull_with_progress<F>(
+    request: GitProviderRequest,
+    progress: F,
+) -> Result<GitMutationResult, GitProviderError>
+where
+    F: FnMut(GitOperationProgress) -> bool,
+{
     let (repo, root) = repo_from_request(&request)?;
     let remote_name = request.remote.as_deref().unwrap_or("origin");
     let branch = request
@@ -681,8 +899,48 @@ pub(crate) fn git_pull(request: GitProviderRequest) -> Result<GitMutationResult,
         .clone()
         .or_else(|| current_branch(&repo))
         .ok_or(GitProviderError::NoHead)?;
+    let progress = Arc::new(StdMutex::new(progress));
+    let mut callbacks = RemoteCallbacks::new();
+    let transfer_progress = Arc::clone(&progress);
+    callbacks.transfer_progress(move |stats| {
+        emit_operation_progress(
+            &transfer_progress,
+            GitOperationProgress {
+                phase: "fetch",
+                completed: stats.received_objects().max(stats.indexed_objects()) as u64,
+                total: stats.total_objects() as u64,
+                detail: format!(
+                    "received {} of {} objects ({} bytes)",
+                    stats.received_objects(),
+                    stats.total_objects(),
+                    stats.received_bytes()
+                ),
+            },
+        )
+    });
+    let sideband_progress = Arc::clone(&progress);
+    callbacks.sideband_progress(move |bytes| {
+        let detail = String::from_utf8_lossy(bytes).trim().to_owned();
+        if detail.is_empty() {
+            return true;
+        }
+        emit_operation_progress(
+            &sideband_progress,
+            GitOperationProgress {
+                phase: "remote",
+                completed: 0,
+                total: 0,
+                detail,
+            },
+        )
+    });
+    let mut fetch_options = FetchOptions::new();
+    fetch_options.remote_callbacks(callbacks);
+    if let Some(depth) = request.depth {
+        fetch_options.depth(depth.min(i32::MAX as usize) as i32);
+    }
     let mut remote = repo.find_remote(remote_name)?;
-    remote.fetch(&[branch.as_str()], None, None)?;
+    remote.fetch(&[branch.as_str()], Some(&mut fetch_options), None)?;
     let remote_ref = format!("refs/remotes/{remote_name}/{branch}");
     let remote_oid = repo.refname_to_id(&remote_ref)?;
     let annotated = repo.find_annotated_commit(remote_oid)?;
@@ -695,11 +953,32 @@ pub(crate) fn git_pull(request: GitProviderRequest) -> Result<GitMutationResult,
             "non-fast-forward pull is not implemented in the Rust spike provider".to_owned(),
         ));
     }
+    if !emit_operation_progress(
+        &progress,
+        GitOperationProgress {
+            phase: "merge",
+            completed: 1,
+            total: 1,
+            detail: "fast-forward".to_owned(),
+        },
+    ) {
+        return Err(GitProviderError::Git("git job cancelled".to_owned()));
+    }
     fast_forward(&repo, &branch, remote_oid)?;
     Ok(mutation_result(&repo, &root, "pull", Vec::new()))
 }
 
 pub(crate) fn git_push(request: GitProviderRequest) -> Result<GitMutationResult, GitProviderError> {
+    git_push_with_progress(request, |_| true)
+}
+
+pub(crate) fn git_push_with_progress<F>(
+    request: GitProviderRequest,
+    progress: F,
+) -> Result<GitMutationResult, GitProviderError>
+where
+    F: FnMut(GitOperationProgress) -> bool,
+{
     let (repo, root) = repo_from_request(&request)?;
     let remote_name = request.remote.as_deref().unwrap_or("origin");
     let branch = request
@@ -708,9 +987,73 @@ pub(crate) fn git_push(request: GitProviderRequest) -> Result<GitMutationResult,
         .or_else(|| current_branch(&repo))
         .ok_or(GitProviderError::NoHead)?;
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+    let progress = Arc::new(StdMutex::new(progress));
+    let mut callbacks = RemoteCallbacks::new();
+    let negotiation_progress = Arc::clone(&progress);
+    callbacks.push_negotiation(move |_| {
+        if emit_operation_progress(
+            &negotiation_progress,
+            GitOperationProgress {
+                phase: "negotiate",
+                completed: 0,
+                total: 0,
+                detail: "negotiating push updates".to_owned(),
+            },
+        ) {
+            Ok(())
+        } else {
+            Err(git2::Error::from_str("git job cancelled"))
+        }
+    });
+    let transfer_progress = Arc::clone(&progress);
+    callbacks.push_transfer_progress(move |current, total, bytes| {
+        let _ = emit_operation_progress(
+            &transfer_progress,
+            GitOperationProgress {
+                phase: "push",
+                completed: current as u64,
+                total: total as u64,
+                detail: format!("pushed {current} of {total} objects ({bytes} bytes)"),
+            },
+        );
+    });
+    let update_progress = Arc::clone(&progress);
+    callbacks.push_update_reference(move |reference, status| {
+        let detail = match status {
+            Some(status) => format!("{reference}: {status}"),
+            None => format!("{reference}: updated"),
+        };
+        let _ = emit_operation_progress(
+            &update_progress,
+            GitOperationProgress {
+                phase: "update",
+                completed: 1,
+                total: 1,
+                detail,
+            },
+        );
+        if let Some(status) = status {
+            Err(git2::Error::from_str(status))
+        } else {
+            Ok(())
+        }
+    });
+    let mut push_options = PushOptions::new();
+    push_options.remote_callbacks(callbacks);
+    push_options.packbuilder_parallelism(0);
     let mut remote = repo.find_remote(remote_name)?;
-    remote.push(&[refspec.as_str()], None)?;
+    remote.push(&[refspec.as_str()], Some(&mut push_options))?;
     Ok(mutation_result(&repo, &root, "push", Vec::new()))
+}
+
+fn emit_operation_progress<F>(progress: &Arc<StdMutex<F>>, update: GitOperationProgress) -> bool
+where
+    F: FnMut(GitOperationProgress) -> bool,
+{
+    match progress.lock() {
+        Ok(mut progress) => progress(update),
+        Err(_) => false,
+    }
 }
 
 fn git_summary_for_path(raw_path: &str) -> GitSummaryData {

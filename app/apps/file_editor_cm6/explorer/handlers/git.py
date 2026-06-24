@@ -1,6 +1,7 @@
 # pyright: strict
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 from typing import Protocol, cast
@@ -21,21 +22,13 @@ from ..services.state_facts import (
     publish_git_diff_base_changed,
     publish_git_path_restored,
 )
-from ..services.tracked_jobs import get_job_manager, remember_tracked_job
+from ..services.tracked_jobs import forget_tracked_job, remember_tracked_job
 from ..services.file_ops import mark_git_cache_dirty
+from ...worker_services import git_service as worker_git_service
 from ...git_helper import (
-    commit_changes,
     get_commit_info,
-    get_commits as git_get_commits,
-    init_repository,
-    is_git_repository,
-    list_branches as git_list_branches,
     reset_hard,
     restore_path,
-    stage_all as git_stage_all,
-    stage_paths,
-    unstage_all as git_unstage_all,
-    unstage_paths,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,7 +55,11 @@ async def handle_git_stage(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    stage_paths(context.project_root, params["paths"])
+    _ = await asyncio.to_thread(
+        worker_git_service.stage_paths,
+        context.project_root,
+        params["paths"],
+    )
     await _mark_dirty_and_refresh(context)
 
 
@@ -72,7 +69,11 @@ async def handle_git_unstage(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    unstage_paths(context.project_root, params["paths"])
+    _ = await asyncio.to_thread(
+        worker_git_service.unstage_paths,
+        context.project_root,
+        params["paths"],
+    )
     await _mark_dirty_and_refresh(context)
 
 
@@ -82,7 +83,7 @@ async def handle_git_stage_all(
     msg_id: str | None,
 ) -> None:
     del params, msg_id
-    git_stage_all(context.project_root)
+    _ = await asyncio.to_thread(worker_git_service.stage_all, context.project_root)
     await _mark_dirty_and_refresh(context)
 
 
@@ -92,7 +93,7 @@ async def handle_git_unstage_all(
     msg_id: str | None,
 ) -> None:
     del params, msg_id
-    git_unstage_all(context.project_root)
+    _ = await asyncio.to_thread(worker_git_service.unstage_all, context.project_root)
     await _mark_dirty_and_refresh(context)
 
 
@@ -118,7 +119,12 @@ async def handle_git_commit(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    commit_changes(context.project_root, params["message"], params["amend"])
+    _ = await asyncio.to_thread(
+        worker_git_service.commit_changes,
+        context.project_root,
+        params["message"],
+        params["amend"],
+    )
     await _mark_dirty_and_refresh(context)
     await publish_git_diff_base_changed(
         context.project_root,
@@ -133,22 +139,22 @@ async def handle_git_push(
     params: GitPushParams,
     msg_id: str | None,
 ) -> None:
-    logger.info("[GIT_PUSH] Starting push job for %s", context.project_root)
+    op_id = worker_git_service.new_git_job_op_id("git_push")
+    remember_tracked_job(context.project_root, context.tracked_job_ids, op_id)
+    logger.info("[GIT_PUSH] Starting pipe push job %s for %s", op_id, context.project_root)
     try:
-        job = get_job_manager().create_job(
-            "git_push",
-            {
-                "repo_path": str(context.project_root),
-                "remote": params["remote"],
-                "branch": params["branch"],
-                "force": params["force"],
-            },
+        _ = await asyncio.to_thread(
+            worker_git_service.start_push_job,
+            context.project_root,
+            remote=params["remote"],
+            branch=params["branch"],
+            force=params["force"],
+            op_id=op_id,
         )
-        logger.info("[GIT_PUSH] Created job %s, tracking it", job.id)
-        remember_tracked_job(context.project_root, context.tracked_job_ids, job.id)
-        await context.emit_personal("explorer.git.push.started", {"job_id": job.id}, msg_id)
+        await context.emit_personal("explorer.git.push.started", {"job_id": op_id}, msg_id)
     except Exception as exc:
-        logger.exception("[GIT_PUSH] Failed to create job: %s", exc)
+        forget_tracked_job(context.project_root, context.tracked_job_ids, op_id)
+        logger.exception("[GIT_PUSH] Failed to start pipe job: %s", exc)
         raise RuntimeError(f"Failed to start push: {exc}") from exc
 
 
@@ -157,19 +163,20 @@ async def handle_git_pull(
     params: GitPullParams,
     msg_id: str | None,
 ) -> None:
+    op_id = worker_git_service.new_git_job_op_id("git_pull")
+    remember_tracked_job(context.project_root, context.tracked_job_ids, op_id)
     try:
-        job = get_job_manager().create_job(
-            "git_pull",
-            {
-                "repo_path": str(context.project_root),
-                "remote": params["remote"],
-                "branch": params["branch"],
-                "rebase": params["rebase"],
-            },
+        _ = await asyncio.to_thread(
+            worker_git_service.start_pull_job,
+            context.project_root,
+            remote=params["remote"],
+            branch=params["branch"],
+            rebase=params["rebase"],
+            op_id=op_id,
         )
-        remember_tracked_job(context.project_root, context.tracked_job_ids, job.id)
-        await context.emit_personal("explorer.git.pull.started", {"job_id": job.id}, msg_id)
+        await context.emit_personal("explorer.git.pull.started", {"job_id": op_id}, msg_id)
     except Exception as exc:
+        forget_tracked_job(context.project_root, context.tracked_job_ids, op_id)
         raise RuntimeError(f"Failed to start pull: {exc}") from exc
 
 
@@ -179,8 +186,8 @@ async def handle_git_reset(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    reset_hard(context.project_root, params["commit"])
-    await _mark_dirty_and_refresh(context)
+    _ = reset_hard(context.project_root, params["commit"])
+    _ = await _mark_dirty_and_refresh(context)
 
 
 async def handle_git_init(
@@ -189,7 +196,7 @@ async def handle_git_init(
     msg_id: str | None,
 ) -> None:
     del params, msg_id
-    init_repository(context.project_root)
+    _ = await asyncio.to_thread(worker_git_service.init_repository, context.project_root)
     await context.broadcast_git_status()
 
 
@@ -199,9 +206,9 @@ async def handle_git_set_diff_base(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    get_commit_info(context.project_root, params["ref"])
+    _ = get_commit_info(context.project_root, params["ref"])
     history_store = _get_history_store()
-    history_store.set_diff_base(str(context.project_root), params["ref"])
+    _ = history_store.set_diff_base(str(context.project_root), params["ref"])
     await publish_git_diff_base_changed(
         context.project_root,
         ref=params["ref"],
@@ -223,7 +230,9 @@ async def handle_git_get_diff_base(
     mode = "none"
     commit_info: dict[str, object] | None = None
 
-    if context.project_root.exists() and is_git_repository(context.project_root):
+    if context.project_root.exists() and worker_git_service.is_git_repository(
+        context.project_root
+    ):
         mode = "head" if base_ref == "HEAD" else "detached"
         try:
             commit = get_commit_info(context.project_root, base_ref)
@@ -251,7 +260,7 @@ async def handle_git_list_branches(
     msg_id: str | None,
 ) -> None:
     del params
-    branches = git_list_branches(context.project_root)
+    branches = await asyncio.to_thread(worker_git_service.list_branches, context.project_root)
     await context.emit_personal(
         "git:branches",
         {"current": branches.current, "branches": branches.branches},
@@ -264,14 +273,18 @@ async def handle_git_list_commits(
     params: GitListCommitsParams,
     msg_id: str | None,
 ) -> None:
-    commits = git_get_commits(context.project_root, params["limit"])
+    commits = await asyncio.to_thread(
+        worker_git_service.get_commits,
+        context.project_root,
+        params["limit"],
+    )
     commit_entries: list[dict[str, str]] = [
-            {
-                "hash": commit.hash,
-                "short_hash": commit.short_hash,
-                "summary": commit.summary,
-            }
-            for commit in commits
+        {
+            "hash": commit.hash,
+            "short_hash": commit.short_hash,
+            "summary": commit.summary,
+        }
+        for commit in commits
     ]
     payload: dict[str, object] = {"commits": commit_entries}
     await context.emit_personal("git:commits", payload, msg_id)
