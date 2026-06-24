@@ -8,6 +8,7 @@ import json
 import os
 import signal
 import sys
+import threading
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from urllib import request as urllib_request
@@ -54,12 +55,154 @@ def _runtime_loop_probe_payload(app_id: str) -> dict:
         "is_uvloop": loop_type.__module__.startswith("uvloop"),
     }
 
+
+def _run_pipe_worker(app_id: str, module, protocol_stdout) -> None:
+    from app.libs.pipe_protocol import (
+        PipeEnvelope,
+        PipeError,
+        PipeIdentity,
+        PipeProtocolError,
+        decode_line,
+        encode_line,
+        error_response,
+        process_error_response,
+        success_response,
+    )
+
+    dispatcher = getattr(module, "te2_pipe_dispatch", None)
+    if not callable(dispatcher):
+        print(
+            f"[app-worker] Backend module for {app_id} does not expose te2_pipe_dispatch",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    responder = PipeIdentity.from_env()
+    stdin = getattr(sys.stdin, "buffer", sys.stdin)
+    stdout = getattr(protocol_stdout, "buffer", protocol_stdout)
+
+    def _target_mismatch(request_envelope: PipeEnvelope) -> PipeError | None:
+        target_name = str(request_envelope.target_name or "").strip()
+        if target_name and target_name != responder.name:
+            return PipeError(
+                "protocol.wrongTarget",
+                f"request targeted {target_name!r}, but this pipe is {responder.name!r}",
+                False,
+                {
+                    "expectedName": responder.name,
+                    "actualName": target_name,
+                    "expectedNid": responder.nid,
+                    "actualNid": request_envelope.target_nid,
+                },
+            )
+        target_nid = request_envelope.target_nid
+        if target_nid is not None and target_nid != responder.nid:
+            return PipeError(
+                "protocol.wrongTarget",
+                f"request targeted NID {target_nid}, but this pipe is NID {responder.nid}",
+                False,
+                {
+                    "expectedName": responder.name,
+                    "actualName": target_name or None,
+                    "expectedNid": responder.nid,
+                    "actualNid": target_nid,
+                },
+            )
+        return None
+
+    def _write_response(envelope) -> None:
+        payload = encode_line(envelope)
+        if isinstance(payload, bytes):
+            stdout.write(payload)
+        else:
+            stdout.write(payload.encode("utf-8"))
+        stdout.flush()
+
+    # Pipe mode reserves stdout for JSONL protocol frames. Backend imports and
+    # dispatchers can still log freely because main() redirects sys.stdout first.
+    while True:
+        raw = stdin.readline()
+        if raw in (b"", ""):
+            return
+        raw_is_blank = not raw.strip() if isinstance(raw, str) else not bytes(raw).strip()
+        if raw_is_blank:
+            continue
+        try:
+            request_envelope = decode_line(raw)
+        except PipeProtocolError as exc:
+            _write_response(
+                process_error_response(
+                    responder,
+                    PipeError("protocol.invalidFrame", str(exc), False),
+                )
+            )
+            continue
+
+        if request_envelope.kind != "request":
+            _write_response(
+                error_response(
+                    request_envelope,
+                    responder,
+                    PipeError(
+                        "protocol.expectedRequest",
+                        "pipe worker only accepts request envelopes",
+                        False,
+                    ),
+                )
+            )
+            continue
+
+        target_error = _target_mismatch(request_envelope)
+        if target_error is not None:
+            _write_response(error_response(request_envelope, responder, target_error))
+            continue
+
+        try:
+            result = dispatcher(request_envelope)
+            if inspect.isawaitable(result):
+                result = asyncio.run(result)
+            if result is None:
+                response = error_response(
+                    request_envelope,
+                    responder,
+                    PipeError(
+                        "protocol.methodNotFound",
+                        f"Method not found: {request_envelope.method or '<missing>'}",
+                        False,
+                    ),
+                )
+            elif isinstance(result, PipeEnvelope):
+                response = result
+            else:
+                response = success_response(request_envelope, responder, result)
+        except Exception as exc:
+            response = error_response(
+                request_envelope,
+                responder,
+                PipeError("protocol.dispatchFailed", str(exc), True),
+            )
+            print(f"[app-worker] Pipe dispatch failed for {app_id}: {exc}", file=sys.stderr)
+        _write_response(response)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Termux Extensions App Worker")
     parser.add_argument("--app-id", required=True, help="The ID of the app to run.")
-    parser.add_argument("--port", required=True, type=int, help="The port to run the app on.")
+    parser.add_argument("--port", type=int, help="The port to run the HTTP app worker on.")
     parser.add_argument("--backend-module", required=True, help="The path to the backend module.")
+    parser.add_argument(
+        "--pipe",
+        action="store_true",
+        help="Run the backend module as a JSONL pipe service.",
+    )
     args = parser.parse_args()
+    if not args.pipe and args.port is None:
+        parser.error("--port is required unless --pipe is set")
+
+    protocol_stdout = None
+    if args.pipe:
+        protocol_stdout = sys.stdout
+        sys.stdout = sys.stderr
     os.environ["TE_APP_ID"] = args.app_id
 
     mounted_subapps = []
@@ -120,6 +263,24 @@ def main():
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
+        if args.pipe and not callable(getattr(module, "te2_pipe_dispatch", None)):
+            raise RuntimeError(
+                f"Backend module for {args.app_id} does not expose te2_pipe_dispatch"
+            )
+
+        if args.pipe:
+            from app.libs import pipe_runtime
+            from app.libs.pipe_protocol import PipeIdentity
+
+            pipe_runtime.configure(
+                getattr(module, "te2_pipe_dispatch"),
+                PipeIdentity.from_env(),
+            )
+
+        if args.pipe and args.port is None:
+            _run_pipe_worker(args.app_id, module, protocol_stdout)
+            return
+
         # Look for the main router with app_id in the name (e.g., file_editor_cm6_bp)
         # This ensures we get the main router, not sub-routers that are included in it
         expected_router_name = f"{args.app_id}_bp"
@@ -173,6 +334,19 @@ def main():
         print(f"  - {route_path} ({route_name})", file=sys.stderr)
     if len(app.routes) > 15:
         print(f"  ... and {len(app.routes) - 15} more routes", file=sys.stderr)
+
+    if args.pipe:
+        pipe_thread = threading.Thread(
+            target=_run_pipe_worker,
+            args=(args.app_id, module, protocol_stdout),
+            name=f"te2-{args.app_id}-pipe-rpc",
+            daemon=True,
+        )
+        pipe_thread.start()
+        print(
+            f"DEBUG: Started app-worker pipe RPC loop for {args.app_id}",
+            file=sys.stderr,
+        )
     
     print(f"DEBUG: Starting uvicorn on http://127.0.0.1:{args.port}", file=sys.stderr)
 

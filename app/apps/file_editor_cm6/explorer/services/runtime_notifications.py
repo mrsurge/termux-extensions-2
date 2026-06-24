@@ -122,8 +122,11 @@ async def broadcast_git_status_update(
 
         mark_git_cache_dirty(project)
 
-        statuses = await asyncio.to_thread(worker_git_service.get_statuses_for_root, project)
-        status = await asyncio.to_thread(worker_git_service.get_status, project)
+        snapshot = await asyncio.to_thread(
+            worker_git_service.get_snapshot,
+            project,
+            project_generation=project_generation,
+        )
         if _is_stale_git_generation(project, project_generation):
             record_stale_drop("runtime_notifications:git_refresh_after_work", "GitSnapshotRequested")
             logger.debug(
@@ -136,23 +139,26 @@ async def broadcast_git_status_update(
             return
         logger.info(
             "[GIT_STATUS_DEBUG] staged=%s, unstaged=%s, untracked=%s",
-            status.staged,
-            status.unstaged,
-            status.untracked,
+            snapshot["staged"],
+            snapshot["unstaged"],
+            snapshot["untracked"],
         )
         decorations_payload: dict[str, object] = {
-            "statuses": statuses,
+            "statuses": snapshot["statuses"],
             "projectPath": normalized_project,
         }
         status_payload: dict[str, object] = {
-            "branch": status.branch,
-            "detached": status.detached,
-            "ahead": status.ahead,
-            "behind": status.behind,
-            "staged": status.staged,
-            "unstaged": status.unstaged,
-            "untracked": status.untracked,
+            "branch": snapshot["branch"],
+            "detached": snapshot["detached"],
+            "ahead": snapshot["ahead"],
+            "behind": snapshot["behind"],
+            "staged": snapshot["staged"],
+            "unstaged": snapshot["unstaged"],
+            "untracked": snapshot["untracked"],
             "projectPath": normalized_project,
+            "isRepository": snapshot["isRepository"],
+            "hasHead": snapshot["hasHead"],
+            "head": snapshot["head"],
         }
         # Git snapshot completion is a typed control-plane fact; Explorer and
         # editor-side projectors decide how to publish it to their own lanes.

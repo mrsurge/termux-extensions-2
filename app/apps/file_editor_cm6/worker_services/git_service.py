@@ -5,7 +5,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Literal, Protocol, TypedDict, cast
 
 from git import Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
@@ -16,6 +16,56 @@ GIT_CACHE_TTL_SECONDS = 6.0
 
 _STATE_LOCK = threading.RLock()
 _STATUS_CACHE: dict[str, dict[str, object]] = {}
+GitPathStatus = Literal[
+    "clean",
+    "modified",
+    "staged",
+    "staged_modified",
+    "added",
+    "deleted",
+    "renamed",
+    "conflict",
+    "untracked",
+    "ignored",
+]
+VALID_GIT_PATH_STATUSES: frozenset[str] = frozenset(
+    {
+        "clean",
+        "modified",
+        "staged",
+        "staged_modified",
+        "added",
+        "deleted",
+        "renamed",
+        "conflict",
+        "untracked",
+        "ignored",
+    }
+)
+
+
+class GitHeadRef(TypedDict, total=False):
+    full: str
+    short: str
+
+
+class GitSnapshot(TypedDict):
+    dto: Literal["GitSnapshot"]
+    version: int
+    root: str
+    projectPath: str
+    projectGeneration: int | None
+    isRepository: bool
+    hasHead: bool
+    branch: str | None
+    detached: bool
+    head: GitHeadRef | None
+    ahead: int
+    behind: int
+    staged: list[str]
+    unstaged: list[str]
+    untracked: list[str]
+    statuses: dict[str, GitPathStatus]
 
 
 class _RepoGit(Protocol):
@@ -93,6 +143,41 @@ def get_statuses_for_root(project_root: Path) -> dict[str, str]:
         rel_path: status
         for rel_path, status in status_map.items()
         if status and status != "clean"
+    }
+
+
+def get_snapshot(project_root: Path, *, project_generation: int | None = None) -> GitSnapshot:
+    """Return the Explorer git DTO using the current in-process producer."""
+    root = project_root.expanduser().resolve(strict=False)
+    root_str = str(root)
+    try:
+        repo = _open_repo(root)
+    except GitError as exc:
+        _git_log(f"snapshot nonrepo root={root} exc={exc!r}")
+        return _empty_snapshot(root_str, project_generation=project_generation)
+
+    has_head = _has_head(repo)
+    branch, detached = _current_branch(repo)
+    ahead, behind = _ahead_behind(repo)
+    status = get_status(root)
+    statuses = _typed_status_map(get_statuses_for_root(root))
+    return {
+        "dto": "GitSnapshot",
+        "version": 1,
+        "root": root_str,
+        "projectPath": root_str,
+        "projectGeneration": project_generation,
+        "isRepository": True,
+        "hasHead": has_head,
+        "branch": branch,
+        "detached": detached,
+        "head": _head_ref(repo) if has_head else None,
+        "ahead": ahead,
+        "behind": behind,
+        "staged": status.staged,
+        "unstaged": status.unstaged,
+        "untracked": status.untracked,
+        "statuses": statuses,
     }
 
 
@@ -251,6 +336,17 @@ def _has_head(repo: Repo) -> bool:
         return False
 
 
+def _head_ref(repo: Repo) -> GitHeadRef | None:
+    try:
+        full = _git_rev_parse(repo, "HEAD").strip()
+        short = _git_rev_parse(repo, "--short", "HEAD").strip()
+    except GitCommandError:
+        return None
+    if not full:
+        return None
+    return {"full": full, "short": short or full[:7]}
+
+
 def _current_branch(repo: Repo) -> tuple[str, bool]:
     try:
         name = _git_branch(repo, "--show-current").strip()
@@ -325,3 +421,32 @@ def _map_git_status_code(code: str) -> str:
     if worktree_status:
         return "modified"
     return "clean"
+
+
+def _empty_snapshot(root: str, *, project_generation: int | None = None) -> GitSnapshot:
+    return {
+        "dto": "GitSnapshot",
+        "version": 1,
+        "root": root,
+        "projectPath": root,
+        "projectGeneration": project_generation,
+        "isRepository": False,
+        "hasHead": False,
+        "branch": None,
+        "detached": False,
+        "head": None,
+        "ahead": 0,
+        "behind": 0,
+        "staged": [],
+        "unstaged": [],
+        "untracked": [],
+        "statuses": {},
+    }
+
+
+def _typed_status_map(statuses: dict[str, str]) -> dict[str, GitPathStatus]:
+    result: dict[str, GitPathStatus] = {}
+    for path, status in statuses.items():
+        if status in VALID_GIT_PATH_STATUSES:
+            result[path] = cast(GitPathStatus, status)
+    return result

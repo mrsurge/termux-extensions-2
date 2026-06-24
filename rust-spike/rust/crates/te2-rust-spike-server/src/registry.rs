@@ -523,31 +523,7 @@ fn resolve_shells(manifest: &Map<String, Value>, app_root: &Path) -> Vec<AppShel
         let app_worker = shellspec_cfg
             .get("app_worker")
             .or_else(|| shellspec_cfg.get("worker"));
-        if let Some(ref_path) = app_worker
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            shells.push(AppShell {
-                ref_path: Some(ref_path.to_owned()),
-                inline_spec: None,
-                label: None,
-                subgroup: "app-worker".to_owned(),
-                wait_ready: true,
-                env: Map::new(),
-                ui: Map::new(),
-            });
-        } else if let Some(inline_spec) = app_worker.and_then(Value::as_object) {
-            shells.push(AppShell {
-                ref_path: None,
-                inline_spec: Some(Value::Object(inline_spec.clone())),
-                label: None,
-                subgroup: "app-worker".to_owned(),
-                wait_ready: true,
-                env: Map::new(),
-                ui: Map::new(),
-            });
-        }
+        push_manifest_shell(&mut shells, app_worker, "app-worker", true);
     }
 
     if shells.is_empty() && app_root.join("shellspec").join("app_worker.yaml").exists() {
@@ -563,6 +539,39 @@ fn resolve_shells(manifest: &Map<String, Value>, app_root: &Path) -> Vec<AppShel
     }
 
     shells
+}
+
+fn push_manifest_shell(
+    shells: &mut Vec<AppShell>,
+    shell_value: Option<&Value>,
+    subgroup: &str,
+    wait_ready: bool,
+) {
+    if let Some(ref_path) = shell_value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        shells.push(AppShell {
+            ref_path: Some(ref_path.to_owned()),
+            inline_spec: None,
+            label: None,
+            subgroup: subgroup.to_owned(),
+            wait_ready,
+            env: Map::new(),
+            ui: Map::new(),
+        });
+    } else if let Some(inline_spec) = shell_value.and_then(Value::as_object) {
+        shells.push(AppShell {
+            ref_path: None,
+            inline_spec: Some(Value::Object(inline_spec.clone())),
+            label: None,
+            subgroup: subgroup.to_owned(),
+            wait_ready,
+            env: Map::new(),
+            ui: Map::new(),
+        });
+    }
 }
 
 fn services_fields(manifest: &Map<String, Value>) -> (String, Vec<String>) {

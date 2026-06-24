@@ -10,7 +10,7 @@ import traceback
 from collections.abc import Callable
 from importlib import import_module
 from pathlib import Path
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 from urllib import request as urllib_request
 from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, WebSocket, Body, Query
@@ -84,6 +84,9 @@ AGENT_ICON_DIR = Path.home() / ".local" / "share" / "termux-extensions-2" / "age
 JsonDict = dict[str, object]
 APP_ID = str(os.environ.get("TE_APP_ID") or "file_editor_cm6").strip() or "file_editor_cm6"
 
+if TYPE_CHECKING:
+    from app.libs.pipe_protocol import PipeEnvelope
+
 
 def _json_object(value: object) -> JsonDict:
     if not isinstance(value, dict):
@@ -101,6 +104,27 @@ def _str_value(value: object, default: str = "") -> str:
 
 def _str_list(value: object) -> list[str]:
     return [item for item in _json_list(value) if isinstance(item, str)]
+
+
+def _pipe_fs_list_directory(envelope: "PipeEnvelope") -> JsonDict:
+    params = _json_object(envelope.params)
+    requested_root_raw = _str_value(params.get("root")) or _str_value(envelope.workspace_root)
+    project_root = get_project_root().resolve()
+    if requested_root_raw:
+        requested_root = Path(requested_root_raw).expanduser().resolve()
+        if requested_root != project_root:
+            raise ValueError("fs.listDirectory root does not match the active Code TE2 project")
+
+    rel = _str_value(params.get("path"), ".") or "."
+    listing = dict(_file_ops.build_fs_directory_listing(rel))
+    listing["projectGeneration"] = envelope.project_generation
+    return listing
+
+
+def te2_pipe_dispatch(envelope: "PipeEnvelope") -> JsonDict | None:
+    if envelope.method == "fs.listDirectory":
+        return _pipe_fs_list_directory(envelope)
+    return None
 
 
 def _file_meta_json(meta: dict[str, str | int | None]) -> JsonDict:

@@ -2,14 +2,14 @@
 # app/apps/file_editor_cm6/explorer/services/file_ops.py
 
 from __future__ import annotations
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 import os
 import stat
 import threading
 import time
 import shutil
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from app.apps.file_editor_cm6.draft_index_sidecar import DraftIndexSidecar
 from ...worker_services import git_service as worker_git_service
@@ -40,6 +40,33 @@ class ExplorerEntry(TypedDict):
     isExecutable: bool
     isSymlink: bool
     hasDraft: bool
+
+
+class FsDirectoryEntry(TypedDict, total=False):
+    name: str
+    path: str
+    relativePath: str
+    kind: str
+    type: str
+    size: int
+    mtime: int
+    mtimeMs: int
+    isSymlink: bool
+    symlinkTarget: str | None
+    symlinkTargetExists: bool | None
+    symlinkTargetType: str | None
+    mode: int
+
+
+class FsDirectoryListing(TypedDict, total=False):
+    dto: str
+    version: int
+    root: str
+    path: str
+    resolvedPath: str
+    projectGeneration: int | None
+    entries: list[FsDirectoryEntry]
+
 
 # Draft index cache (loaded from disk-backed DraftIndexSidecar).
 _DRAFT_INDEX_CACHE: dict[str, DraftCacheEntry] = {}
@@ -109,92 +136,193 @@ def get_project_root() -> Path:
         return _project_root
 
 
-def list_dir(rel: str = '.') -> dict[str, object]:
-    """
-    List directory contents relative to project root.
-
-    Returns a dict suitable for UI rendering with:
-    - cwd: current working directory relative to project root
-    - entries: list of file/dir entries with metadata
-    """
-    import time as _time
-    _t0 = _time.perf_counter()
-    
+def build_fs_directory_listing(rel: str = ".") -> FsDirectoryListing:
+    """Build the transport-neutral filesystem DTO used by pipe services."""
     root = get_project_root()
-    
-    _t1 = _time.perf_counter()
-    draft_files, draft_dirs = _get_draft_index_snapshot(root)
-    _t2 = _time.perf_counter()
-    
-    base = (root / rel).resolve()
-
-    # Security check: ensure path is within project root
-    if not str(base).startswith(str(root.resolve())):
-        raise ValueError("dir outside project root")
-
-    if not base.exists() or not base.is_dir():
-        raise ValueError("not a directory")
-
-    entries: list[ExplorerEntry] = []
-    _t3 = _time.perf_counter()
-    status_map = worker_git_service.get_status_snapshot(root)
-    _t4 = _time.perf_counter()
+    base = _resolve_project_directory(root, rel)
+    entries: list[FsDirectoryEntry] = []
 
     with os.scandir(base) as it:
         for e in it:
             try:
                 info = e.stat(follow_symlinks=False)
-                mode = stat.S_IMODE(info.st_mode)
-                ext = ''
-
-                if e.is_file(follow_symlinks=False):
-                    ext = Path(e.name).suffix.lstrip('.')
-
-                rel_path = str((base / e.name).relative_to(root))
-                kind = 'dir' if e.is_dir(follow_symlinks=False) else 'file'
-                git_status = _derive_git_status(rel_path, kind, status_map)
-                git_flags = _derive_git_flags(rel_path, kind, status_map)
-
-                # For files: check if this exact file has a draft
-                if kind == 'file':
-                    has_draft = rel_path in draft_files
-                else:
-                    has_draft = rel_path in draft_dirs
-
-                entries.append({
-                    'name': e.name,
-                    'rel': rel_path,
-                    'kind': kind,
-                    'mtime': int(info.st_mtime),
-                    'size': int(info.st_size),
-                    'mode': oct(mode),
-                    'ext': ext,
-                    'gitStatus': git_status,
-                    'gitFlags': git_flags,
-                    'isExecutable': bool(mode & stat.S_IXUSR),
-                    'isSymlink': e.is_symlink(),
-                    'hasDraft': has_draft,
-                })
+                entry_type = _fs_entry_type(e)
+                entry_path = base / e.name
+                rel_path = str(entry_path.relative_to(root))
+                symlink_target, symlink_target_exists, symlink_target_type = (
+                    _symlink_metadata(entry_path) if entry_type == "symlink" else (None, None, None)
+                )
+                mtime = int(info.st_mtime)
+                entries.append(
+                    {
+                        "name": e.name,
+                        "path": str(entry_path),
+                        "relativePath": rel_path,
+                        "kind": entry_type,
+                        "type": entry_type,
+                        "size": int(info.st_size),
+                        "mtime": mtime,
+                        "mtimeMs": mtime * 1000,
+                        "isSymlink": e.is_symlink(),
+                        "symlinkTarget": symlink_target,
+                        "symlinkTargetExists": symlink_target_exists,
+                        "symlinkTargetType": symlink_target_type,
+                        "mode": int(info.st_mode),
+                    }
+                )
             except Exception:
-                # Skip files we can't access
+                # Preserve existing Explorer behavior: inaccessible entries are skipped.
                 continue
 
-    _t5 = _time.perf_counter()
-    
-    # Sort: directories first, then files, case-insensitive
-    entries.sort(key=lambda x: (x["kind"] != "dir", x["name"].lower()))
-    
-    _t6 = _time.perf_counter()
-    
-    # Log timing if it took more than 50ms
-    total = (_t6 - _t0) * 1000
-    if total > 50:
-        print(f"[list_dir] {rel}: total={total:.1f}ms, drafts={(_t2-_t1)*1000:.1f}ms, git={(_t4-_t3)*1000:.1f}ms, scan={(_t5-_t4)*1000:.1f}ms, sort={(_t6-_t5)*1000:.1f}ms, entries={len(entries)}")
-
+    entries.sort(key=lambda x: (x.get("type") != "directory", str(x.get("name") or "").lower()))
     return {
-        'cwd': str(base.relative_to(root)) if base != root else '.',
-        'entries': entries
+        "dto": "FsDirectoryListing",
+        "version": 1,
+        "root": str(root),
+        "path": str(base),
+        "resolvedPath": str(base.resolve()),
+        "projectGeneration": None,
+        "entries": entries,
     }
+
+
+def explorer_listing_from_fs_directory_listing(listing: FsDirectoryListing) -> dict[str, object]:
+    """Adapt the pipe DTO to the current `explorer.list.updated` payload."""
+    root = Path(str(listing.get("root") or get_project_root())).expanduser().resolve()
+    raw_path = str(listing.get("path") or root)
+    base = Path(raw_path).expanduser().resolve()
+    try:
+        cwd = str(base.relative_to(root)) if base != root else "."
+    except ValueError:
+        raise ValueError("dir outside project root")
+
+    draft_files, draft_dirs = _get_draft_index_snapshot(root)
+    status_map = worker_git_service.get_snapshot(root)["statuses"]
+    entries: list[ExplorerEntry] = []
+
+    for raw_entry in listing.get("entries", []):
+        rel_path = str(raw_entry.get("relativePath") or "")
+        if not rel_path:
+            entry_path = Path(str(raw_entry.get("path") or ""))
+            try:
+                rel_path = str(entry_path.relative_to(root))
+            except ValueError:
+                continue
+        kind = _explorer_entry_kind(raw_entry)
+        mode = _mode_bits(raw_entry.get("mode"))
+        name = str(raw_entry.get("name") or Path(rel_path).name)
+        git_status = _derive_git_status(rel_path, kind, status_map)
+        git_flags = _derive_git_flags(rel_path, kind, status_map)
+        has_draft = rel_path in (draft_files if kind == "file" else draft_dirs)
+        entries.append(
+            {
+                "name": name,
+                "rel": rel_path,
+                "kind": kind,
+                "mtime": _entry_mtime(raw_entry),
+                "size": _entry_size(raw_entry),
+                "mode": oct(mode),
+                "ext": Path(name).suffix.lstrip(".") if kind == "file" else "",
+                "gitStatus": git_status,
+                "gitFlags": git_flags,
+                "isExecutable": bool(mode & stat.S_IXUSR),
+                "isSymlink": bool(raw_entry.get("isSymlink")),
+                "hasDraft": has_draft,
+            }
+        )
+
+    entries.sort(key=lambda x: (x["kind"] != "dir", x["name"].lower()))
+    return {"cwd": cwd, "entries": entries}
+
+
+def list_dir(rel: str = ".") -> dict[str, object]:
+    """
+    List directory contents relative to project root.
+
+    Returns the existing Explorer RPC payload. Internally this now flows through
+    the `FsDirectoryListing` DTO so the future pipe origin can replace only the
+    DTO producer.
+    """
+    import time as _time
+
+    start = _time.perf_counter()
+    listing = build_fs_directory_listing(rel)
+    payload = explorer_listing_from_fs_directory_listing(listing)
+    total = (_time.perf_counter() - start) * 1000
+    if total > 50:
+        entries = payload.get("entries")
+        entry_count = len(cast(list[object], entries)) if isinstance(entries, list) else 0
+        print(f"[list_dir] {rel}: total={total:.1f}ms, entries={entry_count}")
+    return payload
+
+
+def _resolve_project_directory(root: Path, rel: str) -> Path:
+    base = (root / rel).resolve()
+    root_resolved = root.resolve()
+    try:
+        base.relative_to(root_resolved)
+    except ValueError as exc:
+        raise ValueError("dir outside project root") from exc
+    if not base.exists() or not base.is_dir():
+        raise ValueError("not a directory")
+    return base
+
+
+def _fs_entry_type(entry: os.DirEntry[str]) -> str:
+    try:
+        if entry.is_dir(follow_symlinks=False):
+            return "directory"
+        if entry.is_symlink():
+            return "symlink"
+    except PermissionError:
+        return "unknown"
+    return "file"
+
+
+def _symlink_metadata(path: Path) -> tuple[str | None, bool | None, str | None]:
+    try:
+        target = os.readlink(path)
+        resolved = path.parent.joinpath(target).resolve()
+        if resolved.is_dir():
+            target_type = "directory"
+        elif resolved.is_file():
+            target_type = "file"
+        else:
+            target_type = "other"
+        return target, resolved.exists(), target_type
+    except OSError:
+        return None, False, None
+
+
+def _explorer_entry_kind(entry: FsDirectoryEntry) -> str:
+    entry_type = str(entry.get("type") or entry.get("kind") or "file")
+    return "dir" if entry_type == "directory" else "file"
+
+
+def _mode_bits(raw_mode: object) -> int:
+    if isinstance(raw_mode, int):
+        return stat.S_IMODE(raw_mode)
+    if isinstance(raw_mode, str):
+        try:
+            return stat.S_IMODE(int(raw_mode, 8 if raw_mode.startswith("0") else 10))
+        except ValueError:
+            return 0
+    return 0
+
+
+def _entry_mtime(entry: FsDirectoryEntry) -> int:
+    raw_mtime = entry.get("mtime")
+    if isinstance(raw_mtime, (int, float)):
+        return int(raw_mtime)
+    raw_mtime_ms = entry.get("mtimeMs")
+    if isinstance(raw_mtime_ms, (int, float)):
+        return int(raw_mtime_ms / 1000)
+    return 0
+
+
+def _entry_size(entry: FsDirectoryEntry) -> int:
+    raw_size = entry.get("size")
+    return int(raw_size) if isinstance(raw_size, (int, float)) else 0
 
 
 def mark_git_cache_dirty(project_root: Path | None = None) -> None:
@@ -202,7 +330,7 @@ def mark_git_cache_dirty(project_root: Path | None = None) -> None:
     worker_git_service.mark_status_cache_dirty(project_root)
 
 
-def _derive_git_status(rel_path: str, kind: str, status_map: dict[str, str]) -> str:
+def _derive_git_status(rel_path: str, kind: str, status_map: Mapping[str, str]) -> str:
     """Returns the primary git status for display. For directories, use
     _derive_git_flags() to get all applicable flags."""
     if not rel_path:
@@ -238,7 +366,7 @@ def _derive_git_status(rel_path: str, kind: str, status_map: dict[str, str]) -> 
     return 'clean'
 
 
-def _derive_git_flags(rel_path: str, kind: str, status_map: dict[str, str]) -> list[str]:
+def _derive_git_flags(rel_path: str, kind: str, status_map: Mapping[str, str]) -> list[str]:
     """Returns a list of git flags for a directory entry.
     
     For files, returns a single-element list with the file's status.
@@ -281,7 +409,7 @@ def _derive_git_flags(rel_path: str, kind: str, status_map: dict[str, str]) -> l
     return flags
 
 
-def _statuses_for_prefix(rel_path: str, status_map: dict[str, str]) -> Iterable[str]:
+def _statuses_for_prefix(rel_path: str, status_map: Mapping[str, str]) -> Iterable[str]:
     prefix = rel_path.rstrip('/') + '/'
     for path, status in status_map.items():
         if path == rel_path or path.startswith(prefix):

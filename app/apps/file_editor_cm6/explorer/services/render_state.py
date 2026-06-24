@@ -25,15 +25,21 @@ from ..transport.rpc_emit import (
     emit_explorer_rpc_notification,
     emit_project_explorer_rpc_notification,
 )
+from . import fs_service_client
 from . import file_ops as _file_ops
 
 logger = logging.getLogger(__name__)
 
 JsonObject = dict[str, object]
 DiagnosticsDetailPayload = dict[str, list[object]]
-ListDirFn = Callable[[str], JsonObject]
+ListDirectoryFn = Callable[[str], _file_ops.FsDirectoryListing]
+ExplorerListingAdapterFn = Callable[[_file_ops.FsDirectoryListing], JsonObject]
 
-list_dir = cast(ListDirFn, _file_ops.list_dir)
+list_directory = cast(ListDirectoryFn, fs_service_client.list_directory)
+explorer_listing_from_fs_directory_listing = cast(
+    ExplorerListingAdapterFn,
+    _file_ops.explorer_listing_from_fs_directory_listing,
+)
 _event_bus_handlers_registered = False
 
 
@@ -58,7 +64,8 @@ class ExplorerBootstrapSnapshot:
 # derived from disk and sidecars so bootstrap/reconnect does not rely on frontend
 # restore attempts as the source of truth.
 async def build_directory_listing(rel: str) -> JsonObject:
-    return await asyncio.to_thread(list_dir, rel)
+    listing = await asyncio.to_thread(list_directory, rel)
+    return await asyncio.to_thread(explorer_listing_from_fs_directory_listing, listing)
 
 
 async def build_bootstrap_snapshot(project_root: Path) -> ExplorerBootstrapSnapshot:

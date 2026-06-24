@@ -11,7 +11,7 @@ import shutil
 import stat
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 from urllib import request as urllib_request
 from urllib.parse import quote, urlencode
 
@@ -21,8 +21,11 @@ from fastapi import APIRouter, Request, HTTPException, Body, Query
 from fastapi.responses import JSONResponse, FileResponse
 
 from app.libs.jobs import JobCancelled, register_job_handler
-
+from app.libs import pipe_runtime
 file_explorer_bp = APIRouter()
+
+if TYPE_CHECKING:
+    from app.libs.pipe_protocol import PipeEnvelope
 
 HOME_DIR = Path.home()
 APP_ID = str(os.environ.get('TE_APP_ID') or 'file_explorer').strip() or 'file_explorer'
@@ -74,6 +77,27 @@ async def te2_app_backend_serving() -> None:
 
 def _sidebar_backend_client_id() -> str:
     return f'{APP_ID}:backend:{os.getpid()}'
+
+
+async def _pipe_list_directory(abs_path: Path, hidden: bool) -> Dict[str, Any]:
+    try:
+        listing = await pipe_runtime.call_async(
+            'fs.listDirectory',
+            {
+                'root': '/',
+                'path': str(abs_path),
+                'hidden': hidden,
+            },
+            target_nid=2100,
+            target_name='service.fs',
+            workspace_root='/',
+        )
+    except pipe_runtime.PipeRuntimeError as exc:
+        status_code = 503 if exc.retryable else 502
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    if not isinstance(listing, dict):
+        raise HTTPException(status_code=502, detail='Pipe listing response is not an object')
+    return listing
 
 
 async def _call_sidebar_rpc(method: str, params: Dict[str, Any] | None = None, *, timeout: float = 5.0) -> Dict[str, Any]:
@@ -202,10 +226,140 @@ def _scandir_entries(path: Path, show_hidden: bool) -> List[Dict[str, Any]]:
                     'size': size,
                     'mtime': mtime,
                     'mode': mode,
+                    'uid': uid,
+                    'gid': gid,
                     'owner': owner,
                     'group': group,
                 }
             )
+    return entries
+
+
+def _boolish(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _resolve_pipe_directory(envelope: PipeEnvelope) -> tuple[Path, Path]:
+    params = envelope.params if isinstance(envelope.params, dict) else {}
+    raw_root = params.get('root') or envelope.workspace_root or str(HOME_DIR)
+    root = Path(os.path.abspath(os.path.expanduser(str(raw_root)))).resolve()
+
+    raw_path = params.get('path')
+    if raw_path is None or str(raw_path).strip() == '':
+        target = root
+    else:
+        raw_path_str = str(raw_path).strip()
+        candidate = Path(os.path.expanduser(raw_path_str))
+        if candidate.is_absolute() or raw_path_str == '~' or raw_path_str.startswith('~/'):
+            target = Path(os.path.abspath(str(candidate)))
+        else:
+            target = root / candidate
+    target = target.resolve()
+
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise PermissionError('Path is outside the requested root') from exc
+    return root, target
+
+
+def _pipe_directory_listing(envelope: PipeEnvelope) -> Dict[str, Any]:
+    params = envelope.params if isinstance(envelope.params, dict) else {}
+    root, target = _resolve_pipe_directory(envelope)
+    hidden = _boolish(params.get('hidden'))
+    entries = _scandir_entries(target, hidden)
+    entries.sort(key=lambda item: (item.get('type') != 'directory', (item.get('name') or '').lower()))
+
+    # This DTO mirrors the Rust framework service shape so net and pipe routes
+    # can converge without changing the File Explorer frontend contract first.
+    pipe_entries: List[Dict[str, Any]] = []
+    for entry in entries:
+        entry_path = Path(str(entry.get('path') or target / str(entry.get('name') or '')))
+        try:
+            relative_path = str(entry_path.relative_to(root))
+        except ValueError:
+            relative_path = entry_path.name
+        entry_type = str(entry.get('type') or 'unknown')
+        mtime = entry.get('mtime')
+        symlink_target = None
+        symlink_target_exists = None
+        symlink_target_type = None
+        if entry_type == 'symlink':
+            try:
+                symlink_target = os.readlink(entry_path)
+                resolved_target = entry_path.parent.joinpath(symlink_target).resolve()
+                symlink_target_exists = resolved_target.exists()
+                if resolved_target.is_dir():
+                    symlink_target_type = 'directory'
+                elif resolved_target.is_file():
+                    symlink_target_type = 'file'
+                else:
+                    symlink_target_type = 'other'
+            except OSError:
+                symlink_target_exists = False
+        pipe_entries.append({
+            'name': entry.get('name'),
+            'path': str(entry_path),
+            'relativePath': relative_path,
+            'kind': entry_type,
+            'type': entry_type,
+            'size': entry.get('size'),
+            'mtime': mtime,
+            'mtimeMs': int(mtime * 1000) if isinstance(mtime, (int, float)) else None,
+            'isSymlink': entry_type == 'symlink',
+            'symlinkTarget': symlink_target,
+            'symlinkTargetExists': symlink_target_exists,
+            'symlinkTargetType': symlink_target_type,
+            'mode': entry.get('mode'),
+            'uid': entry.get('uid'),
+            'gid': entry.get('gid'),
+            'owner': entry.get('owner'),
+            'group': entry.get('group'),
+            'gitStatus': None,
+            'draftState': None,
+        })
+
+    return {
+        'dto': 'FsDirectoryListing',
+        'version': 1,
+        'root': str(root),
+        'path': str(target),
+        'resolvedPath': str(target.resolve()),
+        'projectGeneration': envelope.project_generation,
+        'entries': pipe_entries,
+    }
+
+
+def te2_pipe_dispatch(envelope: PipeEnvelope) -> Dict[str, Any] | None:
+    if envelope.method == 'fs.listDirectory':
+        return _pipe_directory_listing(envelope)
+    return None
+
+
+def _legacy_entries_from_pipe_listing(listing: Dict[str, Any]) -> List[Dict[str, Any]]:
+    raw_entries = listing.get('entries')
+    if not isinstance(raw_entries, list):
+        raise HTTPException(status_code=502, detail='Pipe listing response is missing entries')
+
+    entries: List[Dict[str, Any]] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        entry_type = str(raw_entry.get('type') or raw_entry.get('kind') or 'unknown')
+        entry: Dict[str, Any] = dict(raw_entry)
+        entry['type'] = entry_type
+        entry['path'] = str(raw_entry.get('path') or '')
+        entry['name'] = str(raw_entry.get('name') or Path(entry['path']).name)
+        if 'isSymlink' in raw_entry and 'is_symlink' not in entry:
+            entry['is_symlink'] = raw_entry.get('isSymlink')
+        if 'symlinkTarget' in raw_entry and 'symlink_target' not in entry:
+            entry['symlink_target'] = raw_entry.get('symlinkTarget')
+        entries.append(entry)
+    entries.sort(key=lambda item: (item.get('type') != 'directory', (item.get('name') or '').lower()))
     return entries
 
 
@@ -350,25 +504,9 @@ async def list_directory(path: str = Query(str(HOME_DIR)), hidden: bool = Query(
         GET /api/app/file_explorer/list?path=~
     """
     abs_path = Path(os.path.abspath(os.path.expanduser(path)))
-    try:
-        entries = await anyio.to_thread.run_sync(_scandir_entries, abs_path, hidden)
-    except PermissionError:
-        try:
-            entries = await anyio.to_thread.run_sync(_scandir_with_sudo, abs_path, hidden)
-        except FileNotFoundError:
-            raise HTTPException(status_code=404, detail='Directory not found')
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc) or 'Permission denied')
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail='Directory not found')
-    except NotADirectoryError:
-        raise HTTPException(status_code=400, detail='Not a directory')
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-    entries.sort(key=lambda item: (item.get('type') != 'directory', (item.get('name') or '').lower()))
-    return {"ok": True, "data": {"entries": entries, "path": str(abs_path)}}
+    listing = await _pipe_list_directory(abs_path, hidden)
+    entries = _legacy_entries_from_pipe_listing(listing)
+    return {"ok": True, "data": {"entries": entries, "path": str(listing.get('path') or abs_path)}}
 
 
 @file_explorer_bp.post('/sidebar/window/open_url')

@@ -2,7 +2,9 @@ version: "1"
 
 shells:
   app-worker:
-    backend: proc
+    backend: pipe
+    pipe:
+      mode: native_pipe_testing
     cwd: ${ctx:PROJECT_ROOT}
     ui:
       subgroup_styles:
@@ -22,14 +24,19 @@ shells:
       - ${free_port}
       - --backend-module
       - ${ctx:BACKEND_MODULE_PATH}
+      - --pipe
     env:
       PYTHONPATH: ${env:PYTHONPATH}:${ctx:PROJECT_ROOT}
       TE_APP_ID: ${ctx:APP_ID}
       TE_APP_WORKER_PORT: ${free_port}
-      FILE_EDITOR_CM6_EVENT_METRICS: "1"
+      TE_PIPE_NAME: service.fs
+      TE_PIPE_NID: "2100"
+      FILE_EDITOR_CM6_EXPLORER_FS_ORIGIN: pipe
+      FILE_EDITOR_CM6_EVENT_METRICS: "0"
     subgroups:
       - ${ctx:APP_ID}
       - app-worker
+      - service.fs
     readiness:
       type: tcp_port
       host: 127.0.0.1
