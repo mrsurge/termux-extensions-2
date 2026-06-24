@@ -47,6 +47,11 @@ impl LaunchStore {
     pub fn new(manager: Option<FerrousNativeManager>) -> Self {
         Self { manager }
     }
+
+    #[cfg(feature = "ferrous-framework-native")]
+    pub fn manager(&self) -> Option<FerrousNativeManager> {
+        self.manager.clone()
+    }
 }
 
 pub fn launch_supported() -> bool {

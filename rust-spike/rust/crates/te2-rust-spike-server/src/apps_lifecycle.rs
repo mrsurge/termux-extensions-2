@@ -26,7 +26,7 @@ use tracing::warn;
 use url::form_urlencoded;
 
 use crate::{
-    ApiResponse, AppState, json_error,
+    ApiResponse, AppState, app_worker_pipe_bridge, json_error,
     launcher::{launch_app, launch_supported},
     proxy_transport::absolute_upstream_url,
     registry::{self, AppRegistry, AppRoot},
@@ -142,6 +142,7 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<Value, Respon
     }
     ensure_starting_readiness_if_supported(state, &app).await;
     if let Some(running) = running_app_for_id(&registry, app_id) {
+        ensure_pipe_bridge_for_running_app(state, &running);
         let readiness = state.readiness_store().read().await;
         return Ok(running_app_to_value(&registry, running, &readiness));
     }
@@ -190,6 +191,7 @@ async fn start_app_inner(state: &AppState, app_id: &str) -> Result<Value, Respon
     if let Some(running) =
         wait_for_running_app(state.app_roots(), app_id, &launch_result.shell_id).await
     {
+        ensure_pipe_bridge_for_running_app(state, &running);
         let readiness = state.readiness_store().read().await;
         return Ok(running_app_to_value(&registry, running, &readiness));
     }
@@ -530,6 +532,13 @@ pub(crate) fn start_fws_lifecycle_app_bridge(
                     let Some(app_id) = event.shell.app_id.clone() else {
                         continue;
                     };
+                    if event.shell.backend == "pipe" {
+                        app_worker_pipe_bridge::ensure_bridge(
+                            Some(manager.clone()),
+                            event.shell_id.clone(),
+                            app_id.clone(),
+                        );
+                    }
                     let (trigger, running_override) = match event.kind {
                         FerrousNativeLifecycleEventKind::Spawned => {
                             ("fws_shell_spawned", Some(true))
@@ -548,6 +557,18 @@ pub(crate) fn start_fws_lifecycle_app_bridge(
         }
     });
 }
+
+#[cfg(feature = "ferrous-framework-native")]
+fn ensure_pipe_bridge_for_running_app(state: &AppState, running: &RunningApp) {
+    app_worker_pipe_bridge::ensure_bridge(
+        state.launch_store().manager(),
+        running.shell_id.clone(),
+        running.app_id.clone(),
+    );
+}
+
+#[cfg(not(feature = "ferrous-framework-native"))]
+fn ensure_pipe_bridge_for_running_app(_state: &AppState, _running: &RunningApp) {}
 
 async fn publish_catalog_snapshot(state: &AppState) {
     publish_apps_event(

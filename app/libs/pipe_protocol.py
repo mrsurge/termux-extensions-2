@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
 import msgspec
 
@@ -13,7 +12,7 @@ class PipeError(msgspec.Struct, rename="camel"):
     code: str
     message: str
     retryable: bool = False
-    details: Any | None = None
+    details: object | None = None
 
 
 class PipeIdentity(msgspec.Struct, rename="camel"):
@@ -46,8 +45,8 @@ class PipeEnvelope(msgspec.Struct, rename="camel"):
     correlation_id: str | None = None
     op_id: str | None = None
     sequence: int | None = None
-    params: Any | None = None
-    result: Any | None = None
+    params: object | None = None
+    result: object | None = None
     error: PipeError | None = None
     reason: str | None = None
 
@@ -93,7 +92,7 @@ def encode_line(envelope: PipeEnvelope) -> bytes:
 def success_response(
     request: PipeEnvelope,
     responder: PipeIdentity,
-    result: Any,
+    result: object,
 ) -> PipeEnvelope:
     return PipeEnvelope(
         kind="response",

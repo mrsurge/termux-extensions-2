@@ -4,24 +4,36 @@ import asyncio
 import inspect
 import itertools
 import os
+import queue
 import threading
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Protocol, cast
 
 from app.libs.pipe_protocol import (
     PipeEnvelope,
     PipeError,
     PipeIdentity,
+    encode_line,
     error_response,
     success_response,
 )
 
-PipeDispatcher = Callable[[PipeEnvelope], Any]
+PipeDispatcher = Callable[[PipeEnvelope], object]
 
-_LOCK = threading.RLock()
-_COUNTER = itertools.count(1)
-_DISPATCHER: PipeDispatcher | None = None
-_IDENTITY: PipeIdentity | None = None
+
+class PipeWriter(Protocol):
+    def write(self, data: bytes) -> object: ...
+
+    def flush(self) -> object: ...
+
+
+_lock = threading.RLock()
+_counter = itertools.count(1)
+_dispatcher: PipeDispatcher | None = None
+_identity: PipeIdentity | None = None
+_transport_writer: PipeWriter | None = None
+_write_lock = threading.Lock()
+_pending: dict[str, queue.Queue[PipeEnvelope]] = {}
 
 
 class PipeRuntimeError(RuntimeError):
@@ -31,34 +43,40 @@ class PipeRuntimeError(RuntimeError):
         *,
         code: str = "pipe.error",
         retryable: bool = False,
-        details: Any | None = None,
+        details: object | None = None,
     ) -> None:
         super().__init__(message)
-        self.code = code
-        self.retryable = retryable
-        self.details = details
+        self.code: str = code
+        self.retryable: bool = retryable
+        self.details: object | None = details
 
 
 def configure(dispatcher: PipeDispatcher, identity: PipeIdentity | None = None) -> None:
-    if not callable(dispatcher):
-        raise TypeError("pipe dispatcher must be callable")
     responder = identity or PipeIdentity.from_env()
-    with _LOCK:
-        global _DISPATCHER, _IDENTITY
-        _DISPATCHER = dispatcher
-        _IDENTITY = responder
+    with _lock:
+        global _dispatcher, _identity
+        _dispatcher = dispatcher
+        _identity = responder
+
+
+def configure_stdio_transport(protocol_stdout: object) -> None:
+    """Attach the worker stdio pipe used for app-origin framework service calls."""
+    writer = getattr(protocol_stdout, "buffer", protocol_stdout)
+    with _lock:
+        global _transport_writer
+        _transport_writer = cast(PipeWriter, writer)
 
 
 def configured_identity() -> PipeIdentity:
-    with _LOCK:
-        if _IDENTITY is None:
+    with _lock:
+        if _identity is None:
             raise PipeRuntimeError("Pipe runtime is not configured", code="pipe.notConfigured")
-        return _IDENTITY
+        return _identity
 
 
 def call(
     method: str,
-    params: Any | None = None,
+    params: object | None = None,
     *,
     target_name: str | None = None,
     target_nid: int | None = None,
@@ -68,7 +86,8 @@ def call(
     origin_nid: int = 1100,
     correlation_id: str | None = None,
     op_id: str | None = None,
-) -> Any:
+    timeout_seconds: float | None = None,
+) -> object:
     method = str(method or "").strip()
     if not method:
         raise PipeRuntimeError("Pipe method is required", code="pipe.methodRequired")
@@ -87,7 +106,7 @@ def call(
         op_id=op_id,
         params=params,
     )
-    response = dispatch_request(request)
+    response = _send_outbound_request(request, timeout_seconds=timeout_seconds)
     if response.id != request.id:
         raise PipeRuntimeError("Pipe response id mismatch", code="pipe.responseIdMismatch")
     if response.kind == "response":
@@ -102,14 +121,55 @@ def call(
     raise PipeRuntimeError("Pipe returned a non-response frame", code="pipe.invalidResponse")
 
 
-async def call_async(method: str, params: Any | None = None, **kwargs: Any) -> Any:
-    return await asyncio.to_thread(call, method, params, **kwargs)
+async def call_async(
+    method: str,
+    params: object | None = None,
+    *,
+    target_name: str | None = None,
+    target_nid: int | None = None,
+    workspace_root: str | None = None,
+    project_generation: int | None = None,
+    origin_name: str | None = None,
+    origin_nid: int = 1100,
+    correlation_id: str | None = None,
+    op_id: str | None = None,
+    timeout_seconds: float | None = None,
+) -> object:
+    return await asyncio.to_thread(
+        call,
+        method,
+        params,
+        target_name=target_name,
+        target_nid=target_nid,
+        workspace_root=workspace_root,
+        project_generation=project_generation,
+        origin_name=origin_name,
+        origin_nid=origin_nid,
+        correlation_id=correlation_id,
+        op_id=op_id,
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def accept_response(envelope: PipeEnvelope) -> bool:
+    """Resolve one pending app-origin request from an inbound response frame."""
+    if envelope.kind not in {"response", "error"}:
+        return False
+    request_id = str(envelope.id or "")
+    if not request_id:
+        return False
+    with _lock:
+        pending = _pending.get(request_id)
+    if pending is None:
+        return False
+    pending.put(envelope)
+    return True
 
 
 def dispatch_request(request: PipeEnvelope) -> PipeEnvelope:
-    with _LOCK:
-        dispatcher = _DISPATCHER
-        responder = _IDENTITY
+    with _lock:
+        dispatcher = _dispatcher
+        responder = _identity
     if dispatcher is None or responder is None:
         return _process_error(PipeError("pipe.notConfigured", "Pipe runtime is not configured", False))
     if request.kind != "request":
@@ -124,7 +184,7 @@ def dispatch_request(request: PipeEnvelope) -> PipeEnvelope:
     try:
         result = dispatcher(request)
         if inspect.isawaitable(result):
-            result = asyncio.run(result)
+            result = asyncio.run(_await_result(cast(Awaitable[object], result)))
         if result is None:
             return error_response(
                 request,
@@ -144,6 +204,10 @@ def dispatch_request(request: PipeEnvelope) -> PipeEnvelope:
             responder,
             PipeError("protocol.dispatchFailed", str(exc), True),
         )
+
+
+async def _await_result(value: Awaitable[object]) -> object:
+    return await value
 
 
 def _target_mismatch(request: PipeEnvelope, responder: PipeIdentity) -> PipeError | None:
@@ -185,9 +249,68 @@ def _process_error(error: PipeError) -> PipeEnvelope:
     )
 
 
+def _send_outbound_request(
+    request: PipeEnvelope,
+    *,
+    timeout_seconds: float | None,
+) -> PipeEnvelope:
+    request_id = str(request.id or "")
+    if not request_id:
+        raise PipeRuntimeError("Pipe request id is required", code="pipe.requestIdRequired")
+    with _lock:
+        writer = _transport_writer
+        if writer is None:
+            raise PipeRuntimeError(
+                "Outbound pipe transport is not configured",
+                code="pipe.transportNotConfigured",
+            )
+        pending: queue.Queue[PipeEnvelope] = queue.Queue(maxsize=1)
+        _pending[request_id] = pending
+    try:
+        payload = encode_line(request)
+        with _write_lock:
+            _ = writer.write(payload)
+            _ = writer.flush()
+        timeout = _response_timeout(timeout_seconds)
+        try:
+            response = pending.get(timeout=timeout)
+        except queue.Empty as exc:
+            raise PipeRuntimeError(
+                f"Pipe response timed out after {timeout:.1f}s",
+                code="pipe.responseTimeout",
+                retryable=True,
+            ) from exc
+        return response
+    except PipeRuntimeError:
+        raise
+    except Exception as exc:
+        raise PipeRuntimeError(
+            f"Pipe transport write failed: {exc}",
+            code="pipe.transportWriteFailed",
+            retryable=True,
+        ) from exc
+    finally:
+        with _lock:
+            _ = _pending.pop(request_id, None)
+
+
+def _response_timeout(timeout_seconds: float | None) -> float:
+    if timeout_seconds is not None and timeout_seconds > 0:
+        return timeout_seconds
+    raw = str(os.environ.get("TE_PIPE_RESPONSE_TIMEOUT_SECONDS") or "").strip()
+    if raw:
+        try:
+            parsed = float(raw)
+        except ValueError:
+            parsed = 0.0
+        if parsed > 0:
+            return parsed
+    return 30.0
+
+
 def _next_request_id() -> str:
     app_id = str(os.environ.get("TE_APP_ID") or "app").strip() or "app"
-    return f"{app_id}:pipe:{os.getpid()}:{next(_COUNTER)}"
+    return f"{app_id}:pipe:{os.getpid()}:{next(_counter)}"
 
 
 def _default_origin_name() -> str:

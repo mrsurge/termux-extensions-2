@@ -1,4 +1,5 @@
 mod app_proxy;
+mod app_worker_pipe_bridge;
 mod apps_lifecycle;
 mod framework_services;
 mod frontend_assets;

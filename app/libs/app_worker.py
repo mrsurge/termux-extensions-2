@@ -1,4 +1,5 @@
 # /data/data/com.termux/files/home/mrselect/app/libs/app_worker.py
+from __future__ import annotations
 
 import asyncio
 import argparse
@@ -9,13 +10,61 @@ import os
 import signal
 import sys
 import threading
-from contextlib import AsyncExitStack, asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType, ModuleType, TracebackType
+from typing import Protocol, cast
 from urllib import request as urllib_request
 from urllib.parse import quote
 
 from fastapi import FastAPI, APIRouter
+from starlette.types import ASGIApp
 import uvicorn
+
+from app.libs.pipe_protocol import PipeEnvelope
+
+
+JsonObject = dict[str, object]
+PipeDispatcher = Callable[[PipeEnvelope], object]
+
+
+class PipeReader(Protocol):
+    def readline(self) -> bytes | str: ...
+
+
+class PipeWriter(Protocol):
+    def write(self, data: bytes) -> object: ...
+
+    def flush(self) -> object: ...
+
+
+class HttpResponse(Protocol):
+    def read(self) -> bytes: ...
+
+
+class HttpResponseContext(Protocol):
+    def __enter__(self) -> HttpResponse: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> object: ...
+
+
+class LifespanContextCallable(Protocol):
+    def __call__(self, app: object) -> AbstractAsyncContextManager[object]: ...
+
+
+@dataclass(frozen=True)
+class AppWorkerArgs:
+    app_id: str
+    port: int | None
+    backend_module: str
+    pipe: bool
 
 
 def _framework_url() -> str:
@@ -26,12 +75,12 @@ def _framework_url() -> str:
     return f"http://127.0.0.1:{port}"
 
 
-def _post_framework_readiness(app_id: str, payload: dict | None = None) -> None:
-    body = dict(payload or {})
-    body.setdefault("app_id", app_id)
-    body.setdefault("status", "ready")
-    body.setdefault("phase", "backend_serving")
-    body.setdefault("source", "app_worker")
+def _post_framework_readiness(app_id: str, payload: JsonObject | None = None) -> None:
+    body: JsonObject = dict(payload or {})
+    _ = body.setdefault("app_id", app_id)
+    _ = body.setdefault("status", "ready")
+    _ = body.setdefault("phase", "backend_serving")
+    _ = body.setdefault("source", "app_worker")
     endpoint = f"{_framework_url()}/api/apps/{quote(app_id, safe='')}/readiness"
     req = urllib_request.Request(
         endpoint,
@@ -39,11 +88,12 @@ def _post_framework_readiness(app_id: str, payload: dict | None = None) -> None:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib_request.urlopen(req, timeout=5) as resp:
-        resp.read()
+    response_context = cast(HttpResponseContext, urllib_request.urlopen(req, timeout=5))
+    with response_context as resp:
+        _ = resp.read()
 
 
-def _runtime_loop_probe_payload(app_id: str) -> dict:
+def _runtime_loop_probe_payload(app_id: str) -> JsonObject:
     loop = asyncio.get_running_loop()
     loop_type = type(loop)
     return {
@@ -56,21 +106,80 @@ def _runtime_loop_probe_payload(app_id: str) -> dict:
     }
 
 
-def _run_pipe_worker(app_id: str, module, protocol_stdout) -> None:
+def _pipe_dispatcher_from_module(module: ModuleType, app_id: str) -> PipeDispatcher:
+    dispatcher = getattr(module, "te2_pipe_dispatch", None)
+    if not callable(dispatcher):
+        raise RuntimeError(f"Backend module for {app_id} does not expose te2_pipe_dispatch")
+    return cast(PipeDispatcher, dispatcher)
+
+
+def _backend_serving_hook_from_module(module: ModuleType) -> Callable[[], object] | None:
+    hook = getattr(module, "te2_app_backend_serving", None)
+    if not callable(hook):
+        return None
+    return cast(Callable[[], object], hook)
+
+
+def _module_subapps(module: ModuleType) -> list[tuple[str, ASGIApp]]:
+    raw = getattr(module, "SUBAPPS", None)
+    if not isinstance(raw, list | tuple):
+        return []
+    items = cast(list[object] | tuple[object, ...], raw)
+    subapps: list[tuple[str, ASGIApp]] = []
+    for item in items:
+        if not isinstance(item, tuple):
+            continue
+        tuple_item = cast(tuple[object, ...], item)
+        if len(tuple_item) != 2:
+            continue
+        path, subapp = tuple_item
+        if isinstance(path, str) and callable(subapp):
+            subapps.append((path, cast(ASGIApp, subapp)))
+    return subapps
+
+
+def _subapp_lifespan_context(subapp: ASGIApp) -> LifespanContextCallable | None:
+    router = getattr(subapp, "router", None)
+    lifespan_context = getattr(router, "lifespan_context", None)
+    if not callable(lifespan_context):
+        return None
+    return cast(LifespanContextCallable, lifespan_context)
+
+
+def _parse_args(parser: argparse.ArgumentParser) -> AppWorkerArgs:
+    namespace_obj: object = parser.parse_args()
+    return AppWorkerArgs(
+        app_id=str(getattr(namespace_obj, "app_id", "") or ""),
+        port=_optional_int_arg(getattr(namespace_obj, "port", None)),
+        backend_module=str(getattr(namespace_obj, "backend_module", "") or ""),
+        pipe=bool(getattr(namespace_obj, "pipe", False)),
+    )
+
+
+def _optional_int_arg(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    return value if isinstance(value, int) else None
+
+
+def _raw_frame_has_content(raw: bytes | str) -> bool:
+    return bool(raw.strip())
+
+
+def _run_pipe_worker(app_id: str, module: ModuleType, protocol_stdout: object) -> None:
+    from app.libs import pipe_runtime
     from app.libs.pipe_protocol import (
-        PipeEnvelope,
         PipeError,
         PipeIdentity,
         PipeProtocolError,
         decode_line,
         encode_line,
-        error_response,
         process_error_response,
-        success_response,
     )
 
-    dispatcher = getattr(module, "te2_pipe_dispatch", None)
-    if not callable(dispatcher):
+    try:
+        _ = _pipe_dispatcher_from_module(module, app_id)
+    except RuntimeError:
         print(
             f"[app-worker] Backend module for {app_id} does not expose te2_pipe_dispatch",
             file=sys.stderr,
@@ -78,45 +187,13 @@ def _run_pipe_worker(app_id: str, module, protocol_stdout) -> None:
         sys.exit(1)
 
     responder = PipeIdentity.from_env()
-    stdin = getattr(sys.stdin, "buffer", sys.stdin)
-    stdout = getattr(protocol_stdout, "buffer", protocol_stdout)
+    stdin = cast(PipeReader, getattr(sys.stdin, "buffer", sys.stdin))
+    stdout = cast(PipeWriter, getattr(protocol_stdout, "buffer", protocol_stdout))
 
-    def _target_mismatch(request_envelope: PipeEnvelope) -> PipeError | None:
-        target_name = str(request_envelope.target_name or "").strip()
-        if target_name and target_name != responder.name:
-            return PipeError(
-                "protocol.wrongTarget",
-                f"request targeted {target_name!r}, but this pipe is {responder.name!r}",
-                False,
-                {
-                    "expectedName": responder.name,
-                    "actualName": target_name,
-                    "expectedNid": responder.nid,
-                    "actualNid": request_envelope.target_nid,
-                },
-            )
-        target_nid = request_envelope.target_nid
-        if target_nid is not None and target_nid != responder.nid:
-            return PipeError(
-                "protocol.wrongTarget",
-                f"request targeted NID {target_nid}, but this pipe is NID {responder.nid}",
-                False,
-                {
-                    "expectedName": responder.name,
-                    "actualName": target_name or None,
-                    "expectedNid": responder.nid,
-                    "actualNid": target_nid,
-                },
-            )
-        return None
-
-    def _write_response(envelope) -> None:
+    def _write_response(envelope: PipeEnvelope) -> None:
         payload = encode_line(envelope)
-        if isinstance(payload, bytes):
-            stdout.write(payload)
-        else:
-            stdout.write(payload.encode("utf-8"))
-        stdout.flush()
+        _ = stdout.write(payload)
+        _ = stdout.flush()
 
     # Pipe mode reserves stdout for JSONL protocol frames. Backend imports and
     # dispatchers can still log freely because main() redirects sys.stdout first.
@@ -124,8 +201,7 @@ def _run_pipe_worker(app_id: str, module, protocol_stdout) -> None:
         raw = stdin.readline()
         if raw in (b"", ""):
             return
-        raw_is_blank = not raw.strip() if isinstance(raw, str) else not bytes(raw).strip()
-        if raw_is_blank:
+        if not _raw_frame_has_content(raw):
             continue
         try:
             request_envelope = decode_line(raw)
@@ -138,102 +214,84 @@ def _run_pipe_worker(app_id: str, module, protocol_stdout) -> None:
             )
             continue
 
+        if request_envelope.kind in {"response", "error"}:
+            if not pipe_runtime.accept_response(request_envelope):
+                print(
+                    f"[app-worker] Unmatched pipe response id={request_envelope.id!r}",
+                    file=sys.stderr,
+                )
+            continue
+
         if request_envelope.kind != "request":
             _write_response(
-                error_response(
-                    request_envelope,
+                process_error_response(
                     responder,
                     PipeError(
                         "protocol.expectedRequest",
-                        "pipe worker only accepts request envelopes",
+                        "pipe worker only accepts request/response/error envelopes",
                         False,
                     ),
                 )
             )
             continue
 
-        target_error = _target_mismatch(request_envelope)
-        if target_error is not None:
-            _write_response(error_response(request_envelope, responder, target_error))
-            continue
-
-        try:
-            result = dispatcher(request_envelope)
-            if inspect.isawaitable(result):
-                result = asyncio.run(result)
-            if result is None:
-                response = error_response(
-                    request_envelope,
-                    responder,
-                    PipeError(
-                        "protocol.methodNotFound",
-                        f"Method not found: {request_envelope.method or '<missing>'}",
-                        False,
-                    ),
-                )
-            elif isinstance(result, PipeEnvelope):
-                response = result
-            else:
-                response = success_response(request_envelope, responder, result)
-        except Exception as exc:
-            response = error_response(
-                request_envelope,
-                responder,
-                PipeError("protocol.dispatchFailed", str(exc), True),
-            )
-            print(f"[app-worker] Pipe dispatch failed for {app_id}: {exc}", file=sys.stderr)
+        response = pipe_runtime.dispatch_request(request_envelope)
         _write_response(response)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Termux Extensions App Worker")
-    parser.add_argument("--app-id", required=True, help="The ID of the app to run.")
-    parser.add_argument("--port", type=int, help="The port to run the HTTP app worker on.")
-    parser.add_argument("--backend-module", required=True, help="The path to the backend module.")
-    parser.add_argument(
+    _ = parser.add_argument("--app-id", required=True, help="The ID of the app to run.")
+    _ = parser.add_argument("--port", type=int, help="The port to run the HTTP app worker on.")
+    _ = parser.add_argument("--backend-module", required=True, help="The path to the backend module.")
+    _ = parser.add_argument(
         "--pipe",
         action="store_true",
         help="Run the backend module as a JSONL pipe service.",
     )
-    args = parser.parse_args()
+    args = _parse_args(parser)
     if not args.pipe and args.port is None:
         parser.error("--port is required unless --pipe is set")
 
-    protocol_stdout = None
+    protocol_stdout: object | None = None
     if args.pipe:
         protocol_stdout = sys.stdout
         sys.stdout = sys.stderr
     os.environ["TE_APP_ID"] = args.app_id
 
-    mounted_subapps = []
-    backend_serving_hook = None
+    mounted_subapps: list[tuple[str, ASGIApp]] = []
+    backend_serving_hook: Callable[[], object] | None = None
 
     @asynccontextmanager
-    async def lifespan(_app):
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as stack:
             for path, subapp in mounted_subapps:
-                router = getattr(subapp, "router", None)
-                lifespan_context = getattr(router, "lifespan_context", None)
+                lifespan_context = _subapp_lifespan_context(subapp)
                 if lifespan_context is None:
                     continue
                 print(f"DEBUG: Entering lifespan for mounted sub-app at {path}", file=sys.stderr)
-                await stack.enter_async_context(lifespan_context(subapp))
-            serving_task = None
-            if callable(backend_serving_hook):
-                async def _run_backend_serving_hook():
+                _ = await stack.enter_async_context(lifespan_context(subapp))
+            serving_task: asyncio.Task[None]
+            hook = backend_serving_hook
+            if hook is not None:
+                async def _run_backend_serving_hook() -> None:
                     await asyncio.sleep(0.1)
                     try:
-                        result = backend_serving_hook()
+                        result = hook()
                         if inspect.isawaitable(result):
-                            result = await result
+                            result = await cast(Awaitable[object], result)
                         if isinstance(result, dict):
-                            await asyncio.to_thread(_post_framework_readiness, args.app_id, result)
+                            await asyncio.to_thread(
+                                _post_framework_readiness,
+                                args.app_id,
+                                cast(JsonObject, result),
+                            )
                     except Exception as exc:
                         print(f"[app-worker] Backend serving hook failed for {args.app_id}: {exc}", file=sys.stderr)
 
                 serving_task = asyncio.create_task(_run_backend_serving_hook())
             else:
-                async def _run_default_backend_serving_post():
+                async def _run_default_backend_serving_post() -> None:
                     await asyncio.sleep(0.1)
                     try:
                         await asyncio.to_thread(_post_framework_readiness, args.app_id)
@@ -242,14 +300,16 @@ def main():
 
                 serving_task = asyncio.create_task(_run_default_backend_serving_post())
             yield
-            if serving_task is not None and not serving_task.done():
-                serving_task.cancel()
+            if not serving_task.done():
+                _ = serving_task.cancel()
 
     app = FastAPI(lifespan=lifespan)
 
     @app.get("/__te2/runtime/loop")
-    async def te2_runtime_loop_probe():
+    async def te2_runtime_loop_probe() -> JsonObject:
         return {"ok": True, "data": _runtime_loop_probe_payload(args.app_id)}
+
+    _ = te2_runtime_loop_probe
 
     try:
         # Add project root to the Python path
@@ -258,26 +318,27 @@ def main():
 
         module_name = f"app.apps.{args.app_id}.{Path(args.backend_module).stem}"
         spec = importlib.util.spec_from_file_location(module_name, args.backend_module)
-        if spec is None:
+        if spec is None or spec.loader is None:
             raise ImportError(f"Could not create spec for module {module_name} at {args.backend_module}")
-        module = importlib.util.module_from_spec(spec)
+        module: ModuleType = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-
-        if args.pipe and not callable(getattr(module, "te2_pipe_dispatch", None)):
-            raise RuntimeError(
-                f"Backend module for {args.app_id} does not expose te2_pipe_dispatch"
-            )
 
         if args.pipe:
             from app.libs import pipe_runtime
             from app.libs.pipe_protocol import PipeIdentity
 
+            pipe_dispatcher = _pipe_dispatcher_from_module(module, args.app_id)
             pipe_runtime.configure(
-                getattr(module, "te2_pipe_dispatch"),
+                pipe_dispatcher,
                 PipeIdentity.from_env(),
             )
+            if protocol_stdout is None:
+                raise RuntimeError("Pipe protocol stdout is not configured")
+            pipe_runtime.configure_stdio_transport(protocol_stdout)
 
         if args.pipe and args.port is None:
+            if protocol_stdout is None:
+                raise RuntimeError("Pipe protocol stdout is not configured")
             _run_pipe_worker(args.app_id, module, protocol_stdout)
             return
 
@@ -285,12 +346,11 @@ def main():
         # This ensures we get the main router, not sub-routers that are included in it
         expected_router_name = f"{args.app_id}_bp"
         router_found = False
-        router_obj = None
         
         print(f"DEBUG: Looking for main router '{expected_router_name}' in module", file=sys.stderr)
         
         for obj_name in dir(module):
-            obj = getattr(module, obj_name)
+            obj = cast(object, object.__getattribute__(module, obj_name))
             if isinstance(obj, APIRouter):
                 print(f"DEBUG: Found APIRouter '{obj_name}' with {len(obj.routes)} routes", file=sys.stderr)
                 
@@ -304,7 +364,6 @@ def main():
                         print(f"  ... and {len(obj.routes) - 10} more routes", file=sys.stderr)
                     
                     app.include_router(obj)
-                    router_obj = obj
                     router_found = True
                     break
         
@@ -312,7 +371,7 @@ def main():
             raise RuntimeError(f"No FastAPI APIRouter named '{expected_router_name}' found in {args.backend_module}")
         
         # Mount optional sub-apps if the backend module provides them (fallback)
-        subapps = getattr(module, 'SUBAPPS', None)
+        subapps = _module_subapps(module)
         if subapps:
             print(f"DEBUG: Mounting {len(subapps)} sub-app(s)", file=sys.stderr)
             for path, subapp in subapps:
@@ -320,7 +379,7 @@ def main():
                 mounted_subapps.append((path, subapp))
                 app.mount(path, subapp)
 
-        backend_serving_hook = getattr(module, 'te2_app_backend_serving', None)
+        backend_serving_hook = _backend_serving_hook_from_module(module)
 
     except Exception as e:
         print(f"Error loading app backend: {e}", file=sys.stderr)
@@ -336,6 +395,8 @@ def main():
         print(f"  ... and {len(app.routes) - 15} more routes", file=sys.stderr)
 
     if args.pipe:
+        if protocol_stdout is None:
+            raise RuntimeError("Pipe protocol stdout is not configured")
         pipe_thread = threading.Thread(
             target=_run_pipe_worker,
             args=(args.app_id, module, protocol_stdout),
@@ -348,25 +409,29 @@ def main():
             file=sys.stderr,
         )
     
-    print(f"DEBUG: Starting uvicorn on http://127.0.0.1:{args.port}", file=sys.stderr)
+    port = args.port
+    if port is None:
+        raise RuntimeError("--port is required for HTTP app-worker mode")
+
+    print(f"DEBUG: Starting uvicorn on http://127.0.0.1:{port}", file=sys.stderr)
 
     config = uvicorn.Config(
         app,
         host="127.0.0.1",
-        port=args.port,
+        port=port,
         lifespan="on",
-        timeout_graceful_shutdown=2.0,
+        timeout_graceful_shutdown=2,
         log_config=None,
     )
     server = uvicorn.Server(config)
 
-    def _force_exit(signum, _frame):
+    def _force_exit(signum: int, _frame: FrameType | None) -> None:
         print(f"[app-worker] Received signal {signum}; forcing shutdown", file=sys.stderr)
         server.force_exit = True
         server.should_exit = True
 
-    signal.signal(signal.SIGTERM, _force_exit)
-    signal.signal(signal.SIGINT, _force_exit)
+    _ = signal.signal(signal.SIGTERM, _force_exit)
+    _ = signal.signal(signal.SIGINT, _force_exit)
 
     server.run()
 
