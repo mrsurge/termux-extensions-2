@@ -1,7 +1,8 @@
 use super::common::{expand_user_path, home_dir, normalize_lexical, path_to_string};
 use git2::{
-    BranchType, Delta, Diff, DiffFormat, DiffOptions, ErrorCode, FetchOptions, IndexAddOption, Oid,
-    PushOptions, RemoteCallbacks, Repository, Signature, Status, StatusOptions, StatusShow,
+    BranchType, Config, Cred, Delta, Diff, DiffFormat, DiffOptions, ErrorCode, FetchOptions,
+    IndexAddOption, Oid, PushOptions, RemoteCallbacks, Repository, Signature, Status,
+    StatusOptions, StatusShow,
     build::{CheckoutBuilder, RepoBuilder},
 };
 use serde::{Deserialize, Serialize};
@@ -811,6 +812,7 @@ where
     let destination = normalize_existing_path(destination);
     let progress = Arc::new(StdMutex::new(progress));
     let mut callbacks = RemoteCallbacks::new();
+    install_configured_git_credentials(&mut callbacks, Some(url.to_owned()));
     let transfer_progress = Arc::clone(&progress);
     callbacks.transfer_progress(move |stats| {
         emit_operation_progress(
@@ -901,6 +903,7 @@ where
         .ok_or(GitProviderError::NoHead)?;
     let progress = Arc::new(StdMutex::new(progress));
     let mut callbacks = RemoteCallbacks::new();
+    install_configured_git_credentials(&mut callbacks, None);
     let transfer_progress = Arc::clone(&progress);
     callbacks.transfer_progress(move |stats| {
         emit_operation_progress(
@@ -989,6 +992,7 @@ where
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
     let progress = Arc::new(StdMutex::new(progress));
     let mut callbacks = RemoteCallbacks::new();
+    install_configured_git_credentials(&mut callbacks, None);
     let negotiation_progress = Arc::clone(&progress);
     callbacks.push_negotiation(move |_| {
         if emit_operation_progress(
@@ -1054,6 +1058,55 @@ where
         Ok(mut progress) => progress(update),
         Err(_) => false,
     }
+}
+
+fn install_configured_git_credentials(
+    callbacks: &mut RemoteCallbacks<'_>,
+    operation_url: Option<String>,
+) {
+    callbacks.credentials(move |url, username_from_url, allowed| {
+        if allowed.is_ssh_key() {
+            let username = username_from_url
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("git");
+            if let Ok(credential) = Cred::ssh_key_from_agent(username) {
+                return Ok(credential);
+            }
+        }
+
+        if allowed.is_user_pass_plaintext() {
+            if let Ok(config) = Config::open_default() {
+                if let Ok(credential) = Cred::credential_helper(&config, url, username_from_url) {
+                    return Ok(credential);
+                }
+                if let Some(operation_url) = operation_url
+                    .as_deref()
+                    .filter(|operation_url| !operation_url.is_empty() && *operation_url != url)
+                    && let Ok(credential) =
+                        Cred::credential_helper(&config, operation_url, username_from_url)
+                {
+                    return Ok(credential);
+                }
+            }
+        }
+
+        if allowed.is_username() {
+            let username = username_from_url
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("git");
+            return Cred::username(username);
+        }
+
+        if allowed.is_default()
+            && let Ok(credential) = Cred::default()
+        {
+            return Ok(credential);
+        }
+
+        Err(git2::Error::from_str(
+            "no configured git credential matched remote authentication request",
+        ))
+    });
 }
 
 fn git_summary_for_path(raw_path: &str) -> GitSummaryData {
