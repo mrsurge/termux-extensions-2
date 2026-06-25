@@ -1,0 +1,153 @@
+{
+  "version_file": "app/apps/file_editor_cm6/static/version.txt",
+  "exclude_extensions": [".map", ".bak", ".bak2", ".pyc"],
+  "exclude_dirs": ["__pycache__", "node_modules"],
+  "entries": [
+    { "kind": "tree", "src": "app/static/fonts", "dest": "static/fonts" },
+    { "kind": "tree", "src": "app/static/js", "dest": "static/js" },
+    { "kind": "file", "src": "app/static/icon.png", "dest": "static/icon.png" },
+    { "kind": "file", "src": "app/static/move.png", "dest": "static/move.png" },
+    {
+      "kind": "file",
+      "src": "app/static/manifest.webmanifest",
+      "dest": "static/manifest.webmanifest"
+    },
+    {
+      "kind": "file",
+      "src": "app/static/bookmarks.json",
+      "dest": "static/bookmarks.json"
+    },
+    {
+      "kind": "tree",
+      "src": "app/static/vendor/codicons",
+      "dest": "static/vendor/codicons"
+    },
+    {
+      "kind": "tree",
+      "src": "app/static/vendor/seti-icons",
+      "dest": "static/vendor/seti-icons"
+    },
+    {
+      "kind": "tree",
+      "src": "app/static/vendor/es-module-shims",
+      "dest": "static/vendor/es-module-shims"
+    },
+    {
+      "kind": "tree",
+      "src": "app/static/vendor/xterm",
+      "dest": "static/vendor/xterm"
+    },
+    {
+      "kind": "tree",
+      "src": "app/static/vendor/ws",
+      "dest": "static/vendor/ws"
+    },
+    {
+      "kind": "file",
+      "src": "app/static/vendor/socket.io.min.js",
+      "dest": "static/vendor/socket.io.min.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js",
+      "dest": "static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.css",
+      "dest": "static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.css"
+    },
+    {
+      "kind": "glob",
+      "src": "app/static/vendor/monaco-editor-core/te2-lang/chunk-*.js",
+      "dest": "static/vendor/monaco-editor-core/te2-lang"
+    },
+    {
+      "kind": "tree",
+      "src": "app/static/vendor/monaco-editor-core/te2-lang/basic-languages",
+      "dest": "static/vendor/monaco-editor-core/te2-lang/basic-languages"
+    },
+    {
+      "kind": "tree",
+      "src": "app/static/vendor/monaco-editor-core/te2-lang/language",
+      "dest": "static/vendor/monaco-editor-core/te2-lang/language"
+    },
+    {
+      "kind": "file",
+      "src": "app/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
+      "dest": "static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor_cm6/static/dist/host.js",
+      "dest": "apps/file_editor_cm6/static/dist/host.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor_cm6/static/dist/explorer.css",
+      "dest": "apps/file_editor_cm6/static/dist/explorer.css"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor_cm6/static/version.txt",
+      "dest": "apps/file_editor_cm6/static/version.txt"
+    },
+    {
+      "kind": "tree",
+      "src": "app/apps/file_editor_cm6/static/icons",
+      "dest": "apps/file_editor_cm6/static/icons"
+    },
+    {
+      "kind": "tree",
+      "src": "app/apps/file_editor_cm6/static/vendor/monaco-touch-selection",
+      "dest": "apps/file_editor_cm6/static/vendor/monaco-touch-selection"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js",
+      "dest": "apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js"
+    },
+    {
+      "kind": "tree",
+      "src": "app/apps/file_editor_cm6/vendor/android-terminalapp-assets-js",
+      "dest": "apps/file_editor_cm6/vendor/android-terminalapp-assets-js"
+    },
+    {
+      "kind": "tree",
+      "src": "app/apps/file_editor_cm6/monaco_editor/textmate",
+      "dest": "api/app/file_editor_cm6/ui/monaco_editor/textmate"
+    },
+    {
+      "kind": "tree",
+      "src": "app/apps/file_editor_cm6/monaco_editor/themes",
+      "dest": "api/app/file_editor_cm6/ui/monaco_editor/themes"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor_cm6/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
+      "dest": "api/app/file_editor_cm6/ui/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor_cm6/template.html",
+      "dest": "apps/file_editor_cm6/template.html"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor_cm6/monaco_editor/editor_iframe.html",
+      "dest": "api/app/file_editor_cm6/ui/nc.html",
+      "required": false
+    },
+    { "kind": "file", "src": "app/templates/index.html", "dest": "index.html" },
+    {
+      "kind": "template",
+      "src": "app/templates/app_shell.html",
+      "dest": "app_shell_file_editor_cm6.html",
+      "replacements": {
+        "{{ app_id|tojson }}": "\"file_editor_cm6\"",
+        "{{ url_for('static', filename='js/ws_port.js') }}": "/static/js/ws_port.js"
+      }
+    },
+    { "kind": "version", "dest": "version.txt" }
+  ]
+}

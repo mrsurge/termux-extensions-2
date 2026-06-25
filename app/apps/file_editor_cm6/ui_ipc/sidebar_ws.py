@@ -615,12 +615,15 @@ async def route_backend_open_request(
 ) -> None:
     from ..host.file_ops_backend import handle_host_open_request
 
+    open_data = dict(data)
+    if "focus" not in open_data:
+        open_data["focus"] = False
     print(
         f"{log_prefix} routing via host file_ops backend",
         flush=True,
     )
     await handle_host_open_request(
-        data,
+        open_data,
         source_name=source_name,
         request_prefix=request_prefix,
     )

@@ -36,6 +36,42 @@ pub(super) async fn dispatch_git_request(
             )
             .await,
         ),
+        "git.diff.hunks" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_diff_hunks(params).await },
+            )
+            .await,
+        ),
+        "git.worktreeChanges.get" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_worktree_changes(params).await },
+            )
+            .await,
+        ),
+        "git.pathIndex.list" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_path_index(params).await },
+            )
+            .await,
+        ),
+        "git.commitInfo.get" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_commit_info(params).await },
+            )
+            .await,
+        ),
         "git.stage" => Some(
             provider_request(
                 request,
@@ -60,6 +96,15 @@ pub(super) async fn dispatch_git_request(
                 responder,
                 scheduler,
                 |scheduler, params| async move { scheduler.git_restore(params).await },
+            )
+            .await,
+        ),
+        "git.resetHard" => Some(
+            provider_request(
+                request,
+                responder,
+                scheduler,
+                |scheduler, params| async move { scheduler.git_reset_hard(params).await },
             )
             .await,
         ),

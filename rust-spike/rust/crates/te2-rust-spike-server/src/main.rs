@@ -1,3 +1,4 @@
+mod android_assets;
 mod app_proxy;
 mod app_worker_pipe_bridge;
 mod apps_lifecycle;
@@ -240,6 +241,7 @@ fn build_router(state: AppState) -> Router {
     let router = Router::new()
         // Host/frontend compatibility surface.
         .merge(frontend_assets::router())
+        .merge(android_assets::router())
         .route("/api/health", get(health))
         .merge(framework_services::router())
         .merge(runtime_bridge::router())

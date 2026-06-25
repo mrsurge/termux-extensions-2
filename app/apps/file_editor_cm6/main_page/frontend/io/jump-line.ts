@@ -40,7 +40,7 @@ export function createJumpLineController(deps: JumpLineControllerDeps) {
         deps.toast('Invalid line number');
         return;
       }
-      const payload: JumpLinePayload = { line: targetLine, path };
+      const payload: JumpLinePayload = { line: targetLine, path, focus: false };
       if (Object.prototype.hasOwnProperty.call(options, 'focus')) payload.focus = Boolean(options.focus);
       if (Object.prototype.hasOwnProperty.call(options, 'scrollToTop')) payload.scroll_to_top = Boolean(options.scrollToTop);
       if (Object.prototype.hasOwnProperty.call(options, 'scrollY') && typeof options.scrollY === 'string') payload.scroll_y = options.scrollY;

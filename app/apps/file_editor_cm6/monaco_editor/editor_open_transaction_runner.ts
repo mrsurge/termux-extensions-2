@@ -75,6 +75,7 @@ export function isEditorOpenSatisfied(
     const activePath = String(deps.absPathFromVscodeUri(String(activeModel.uri.toString())) || '');
     if (!activePath || activePath !== String(currentPath || '')) return false;
     if (!tx || !tx.hasExplicitNavigation) return true;
+    if (tx.focus === false && tx.navigationApplied) return true;
     const pos = editor.getPosition ? editor.getPosition() : null;
     if (!pos) return false;
     const wantLine = deps.coercePositiveInt(tx.line) || 1;

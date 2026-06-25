@@ -15,7 +15,7 @@ from typing import Protocol, cast, runtime_checkable
 from pathlib import Path
 
 # Import git_service to register job handlers in worker process.
-importlib.import_module("app.libs.git_service")
+_ = importlib.import_module("app.libs.git_service")
 
 from .explorer.services import file_ops as _file_ops
 # NOTE: search and review are imported lazily inside handler methods
@@ -82,8 +82,8 @@ from .worker_services.event_bus import current_project_generation
 
 class ExplorerDispatcher:
     def __init__(self, websocket: ExplorerConnection) -> None:
-        self.websocket = websocket
-        self.project_root = get_project_root()
+        self.websocket: ExplorerConnection = websocket
+        self.project_root: Path = get_project_root()
         self._job_tracking: ExplorerJobTrackingRuntime | None = None
         self._tracked_job_ids: set[str] = set()
 
@@ -138,7 +138,7 @@ class ExplorerDispatcher:
         )
 
     async def broadcast(self, method: str, payload: JsonObject) -> None:
-        await manager.broadcast(
+        _ = await manager.broadcast(
             str(self.project_root),
             build_jsonrpc_notification(method, payload),
         )
@@ -762,6 +762,13 @@ class ExplorerDispatcher:
         params = parse_git_init_params(payload)
         await handle_git_init(self._build_git_context(), params, msg_id)
 
+    async def handle_git_jobCancel(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.git import parse_git_job_cancel_params
+        from .explorer.handlers.git import handle_git_job_cancel
+
+        params = parse_git_job_cancel_params(payload)
+        await handle_git_job_cancel(self._build_git_context(), params, msg_id)
+
     async def handle_git_setDiffBase(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.git import parse_git_set_diff_base_params
         from .explorer.handlers.git import handle_git_set_diff_base
@@ -947,7 +954,7 @@ class ExplorerDispatcher:
                         "reason": "discard_external",
                     },
                 )
-                await editor_runtime_reload_disk_content_if_active(
+                _ = await editor_runtime_reload_disk_content_if_active(
                     abs_path,
                     source="explorer_review_discard",
                     request_id=f"explorer_draft_discard_{int(time.time() * 1000)}",

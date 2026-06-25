@@ -166,6 +166,24 @@ mod tests {
         response.result.expect("response result")
     }
 
+    async fn dispatch_git_envelope(
+        method: &str,
+        params: serde_json::Value,
+        root: &std::path::Path,
+        event_sink: Option<Arc<dyn PipeEventSink>>,
+    ) -> PipeEnvelope {
+        dispatch_request(
+            targeted_request(method, params, root, 2200, "service.git"),
+            &PipeIdentity {
+                nid: 2200,
+                name: "service.git".to_owned(),
+            },
+            &FrameworkServiceScheduler::default(),
+            event_sink,
+        )
+        .await
+    }
+
     #[tokio::test]
     async fn line_codec_round_trips_request_envelope() {
         let root = test_root("codec");
@@ -377,6 +395,136 @@ mod tests {
         assert_eq!(
             history.get("dto").and_then(|value| value.as_str()),
             Some("GitHistoryResult")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn dispatches_missing_git_contract_methods_to_dtos() {
+        let root = test_root("git-missing-methods");
+        let repo = git2::Repository::init(&root).expect("init repo");
+        fs::write(root.join("tracked.txt"), "tracked\n").expect("write tracked");
+        fs::write(root.join("stable.txt"), "stable\n").expect("write stable");
+        commit_all(&repo, "initial commit");
+        fs::write(root.join("tracked.txt"), "tracked\nmodified\n").expect("modify tracked");
+        fs::write(root.join("new.txt"), "new\n").expect("write new");
+
+        let hunks = dispatch_git(
+            "git.diff.hunks",
+            json!({ "root": path_to_string(&root), "relativePath": "tracked.txt" }),
+            &root,
+        )
+        .await;
+        assert_eq!(
+            hunks.get("dto").and_then(|value| value.as_str()),
+            Some("GitDiffHunks")
+        );
+        assert_eq!(
+            hunks.get("relativePath").and_then(|value| value.as_str()),
+            Some("tracked.txt")
+        );
+
+        let changes = dispatch_git(
+            "git.worktreeChanges.get",
+            json!({ "root": path_to_string(&root) }),
+            &root,
+        )
+        .await;
+        assert_eq!(
+            changes.get("dto").and_then(|value| value.as_str()),
+            Some("GitWorktreeChanges")
+        );
+        assert_eq!(
+            changes
+                .get("isRepository")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+
+        let path_index = dispatch_git(
+            "git.pathIndex.list",
+            json!({ "root": path_to_string(&root) }),
+            &root,
+        )
+        .await;
+        assert_eq!(
+            path_index.get("dto").and_then(|value| value.as_str()),
+            Some("GitPathIndex")
+        );
+        assert!(
+            path_index
+                .get("paths")
+                .and_then(|value| value.as_array())
+                .expect("paths")
+                .iter()
+                .any(|path| path.as_str() == Some("new.txt"))
+        );
+
+        let commit_info = dispatch_git(
+            "git.commitInfo.get",
+            json!({ "root": path_to_string(&root), "rev": "HEAD" }),
+            &root,
+        )
+        .await;
+        assert_eq!(
+            commit_info.get("dto").and_then(|value| value.as_str()),
+            Some("GitCommitInfoResult")
+        );
+        assert_eq!(
+            commit_info.get("found").and_then(|value| value.as_bool()),
+            Some(true)
+        );
+
+        let reset = dispatch_git(
+            "git.resetHard",
+            json!({ "root": path_to_string(&root), "target": "HEAD" }),
+            &root,
+        )
+        .await;
+        assert_eq!(
+            reset.get("dto").and_then(|value| value.as_str()),
+            Some("GitMutationResult")
+        );
+        assert_eq!(
+            reset.get("operation").and_then(|value| value.as_str()),
+            Some("resetHard")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn git_job_start_requires_progress_sink_and_cancel_reports_missing_job() {
+        let root = test_root("git-job-errors");
+        let response = dispatch_git_envelope(
+            "git.clone.start",
+            json!({
+                "url": path_to_string(&root),
+                "destination": path_to_string(&root.join("clone"))
+            }),
+            &root,
+            None,
+        )
+        .await;
+        assert_eq!(response.kind, PipeMessageKind::Error);
+        assert_eq!(
+            response.error.as_ref().map(|error| error.code.as_str()),
+            Some("git.unsupported")
+        );
+
+        let cancel = dispatch_git("git.job.cancel", json!({ "jobId": "missing-job" }), &root).await;
+        assert_eq!(
+            cancel.get("dto").and_then(|value| value.as_str()),
+            Some("GitJobCancelResult")
+        );
+        assert_eq!(
+            cancel.get("ok").and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            cancel.get("status").and_then(|value| value.as_str()),
+            Some("not_found")
         );
 
         let _ = fs::remove_dir_all(root);

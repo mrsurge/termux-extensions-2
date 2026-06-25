@@ -102,6 +102,38 @@ impl FrameworkServiceScheduler {
         self.git_read(move || git_ops::git_diff(request)).await
     }
 
+    pub(crate) async fn git_diff_hunks(
+        &self,
+        request: git_ops::GitProviderRequest,
+    ) -> Result<git_ops::GitDiffHunks, git_ops::GitProviderError> {
+        self.git_read(move || git_ops::git_diff_hunks(request))
+            .await
+    }
+
+    pub(crate) async fn git_worktree_changes(
+        &self,
+        request: git_ops::GitProviderRequest,
+    ) -> Result<git_ops::GitWorktreeChanges, git_ops::GitProviderError> {
+        self.git_read(move || git_ops::git_worktree_changes(request))
+            .await
+    }
+
+    pub(crate) async fn git_path_index(
+        &self,
+        request: git_ops::GitProviderRequest,
+    ) -> Result<git_ops::GitPathIndex, git_ops::GitProviderError> {
+        self.git_read(move || git_ops::git_path_index(request))
+            .await
+    }
+
+    pub(crate) async fn git_commit_info(
+        &self,
+        request: git_ops::GitProviderRequest,
+    ) -> Result<git_ops::GitCommitInfoResult, git_ops::GitProviderError> {
+        self.git_read(move || git_ops::git_commit_info(request))
+            .await
+    }
+
     pub(crate) async fn git_history(
         &self,
         request: git_ops::GitProviderRequest,
@@ -146,6 +178,14 @@ impl FrameworkServiceScheduler {
         request: git_ops::GitProviderRequest,
     ) -> Result<git_ops::GitMutationResult, git_ops::GitProviderError> {
         self.git_mutation(request.clone(), move || git_ops::git_restore(request))
+            .await
+    }
+
+    pub(crate) async fn git_reset_hard(
+        &self,
+        request: git_ops::GitProviderRequest,
+    ) -> Result<git_ops::GitMutationResult, git_ops::GitProviderError> {
+        self.git_mutation(request.clone(), move || git_ops::git_reset_hard(request))
             .await
     }
 

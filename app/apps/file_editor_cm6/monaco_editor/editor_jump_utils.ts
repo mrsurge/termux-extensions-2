@@ -70,7 +70,8 @@ export function applyJumpToLine(
       try { typedEditor.revealLineNearTop?.(line, 0); } catch (_) {}
     }
 
+    if (focus === false) return;
     try { typedEditor.setPosition?.({ lineNumber: line, column: col }); } catch (_) {}
-    try { if (focus !== false) typedEditor.focus?.(); } catch (_) {}
+    try { typedEditor.focus?.(); } catch (_) {}
   } catch (_) {}
 }

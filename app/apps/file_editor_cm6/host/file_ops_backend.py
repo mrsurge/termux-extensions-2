@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import TypedDict
 
 from ..explorer.services.file_ops import get_project_root
 from ..stores import get_history_store
@@ -23,7 +23,7 @@ from ..monaco_editor.editor_ws import (
 )
 from ..monaco_editor.editor_open_backend import emit_editor_open_from_backend
 from ..monaco_editor.editor_save_backend import handle_editor_save_request
-from ..monaco_editor.editor_backend_services.contracts import JsonMap
+from ..monaco_editor.editor_backend_services.contracts import EditorOpenPayload, JsonMap
 
 
 class HostOpenResult(TypedDict):
@@ -31,6 +31,11 @@ class HostOpenResult(TypedDict):
     request_id: str
     path: str
     rel: str
+
+
+async def _emit_editor_open_payload(open_payload: EditorOpenPayload) -> None:
+    await editor_runtime_emit_room_event("editor:open", dict(open_payload))
+
 
 async def handle_host_open_request(
     data: dict[str, object],
@@ -78,6 +83,8 @@ async def handle_host_open_request(
         'source': data.get('source') or source_name,
         'conversation_id': data.get('conversation_id'),
     }
+    if isinstance(data.get('focus'), bool):
+        payload['focus'] = data['focus']
     raw_line = data.get('line')
     if isinstance(raw_line, int):
         line = raw_line
@@ -89,7 +96,7 @@ async def handle_host_open_request(
         payload['line'] = line
 
     request_id = str(data.get('request_id') or f'{request_prefix}_{int(time.time() * 1000)}')
-    await emit_editor_open_from_backend(
+    _ = await emit_editor_open_from_backend(
         payload,
         source_client=source_name,
         request_id=request_id,
@@ -99,7 +106,7 @@ async def handle_host_open_request(
         read_file_payload=editor_runtime_read_file_payload,
         update_session_state=editor_runtime_update_session_state,
         set_last_file=editor_runtime_set_last_file,
-        emit_editor_open=lambda open_payload: editor_runtime_emit_room_event("editor:open", cast(dict[str, object], open_payload)),
+        emit_editor_open=_emit_editor_open_payload,
         record_sidecar_open_file=editor_runtime_record_sidecar_open_file,
         emit_open_state_changed=editor_runtime_emit_open_state_changed,
     )

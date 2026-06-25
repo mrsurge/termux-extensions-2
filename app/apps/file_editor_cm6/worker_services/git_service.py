@@ -4,11 +4,44 @@ from __future__ import annotations
 import sys
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypedDict, cast
 
 from app.libs import pipe_runtime
-from ..git_helper import GitBranches, GitCommit, GitStatus
+
+
+@dataclass
+class GitBranches:
+    current: str
+    branches: list[str]
+
+
+@dataclass
+class GitStatus:
+    branch: str
+    detached: bool
+    ahead: int
+    behind: int
+    staged: list[str]
+    unstaged: list[str]
+    untracked: list[str]
+
+
+@dataclass
+class GitCommit:
+    hash: str
+    short_hash: str
+    summary: str
+    author: str
+    date: str
+
+
+@dataclass
+class GitChangeEntry:
+    path: str
+    code: str
+    original_path: str | None = None
 
 GitPathStatus = Literal[
     "clean",
@@ -103,6 +136,51 @@ class GitHistoryResult(TypedDict):
     commits: list[GitHistoryCommit]
 
 
+class GitWorktreeChange(TypedDict):
+    path: str
+    code: str
+    originalPath: str | None
+
+
+class GitWorktreeChanges(TypedDict):
+    dto: Literal["GitWorktreeChanges"]
+    version: int
+    root: str
+    projectGeneration: int | None
+    base: str
+    isRepository: bool
+    changes: list[GitWorktreeChange]
+    truncated: bool
+
+
+class GitCommitInfo(TypedDict):
+    hash: str
+    shortHash: str
+    summary: str | None
+    author: str | None
+    date: str
+
+
+class GitCommitInfoResult(TypedDict):
+    dto: Literal["GitCommitInfoResult"]
+    version: int
+    root: str
+    projectGeneration: int | None
+    found: bool
+    commit: GitCommitInfo | None
+
+
+class GitPathIndex(TypedDict):
+    dto: Literal["GitPathIndex"]
+    version: int
+    root: str
+    projectGeneration: int | None
+    isRepository: bool
+    paths: list[str]
+    source: str
+    truncated: bool
+
+
 class GitJobStarted(TypedDict):
     dto: Literal["GitJobStarted"]
     version: int
@@ -114,6 +192,15 @@ class GitJobStarted(TypedDict):
     projectGeneration: int | None
     status: str
     message: str
+
+
+class GitJobCancelResult(TypedDict):
+    dto: Literal["GitJobCancelResult"]
+    version: int
+    jobId: str
+    opId: str
+    ok: bool
+    status: str
 
 
 JsonObject = dict[str, object]
@@ -238,6 +325,37 @@ def commit_changes(project_root: Path, message: str, amend: bool = False) -> Git
     return get_status(project_root)
 
 
+def restore_path(project_root: Path, path: str, commit: str = "HEAD") -> None:
+    """Restore one path through service.git."""
+    normalized_path = path.strip().replace("\\", "/")
+    if not normalized_path:
+        raise RuntimeError("service.git git.restore requires path")
+    normalized_commit = commit.strip() if commit else "HEAD"
+    if normalized_commit != "HEAD":
+        raise RuntimeError("service.git git.restore does not support source refs yet")
+    _ = _coerce_mutation(
+        _call_git_provider(
+            "git.restore",
+            project_root,
+            {"paths": [normalized_path]},
+        ),
+        expected_operation="restore",
+    )
+
+
+def reset_hard(project_root: Path, commit: str = "HEAD") -> GitStatus:
+    """Hard reset through service.git and return a fresh status."""
+    _ = _coerce_mutation(
+        _call_git_provider(
+            "git.resetHard",
+            project_root,
+            {"target": commit.strip() or "HEAD"},
+        ),
+        expected_operation="resetHard",
+    )
+    return get_status(project_root)
+
+
 def init_repository(project_root: Path) -> GitStatus:
     """Initialize a repository through service.git and return its status."""
     _ = _coerce_mutation(
@@ -245,6 +363,27 @@ def init_repository(project_root: Path) -> GitStatus:
         expected_operation="init",
     )
     return get_status(project_root)
+
+
+def get_commit_info(project_root: Path, ref: str = "HEAD") -> GitCommit | None:
+    """Return commit metadata from service.git."""
+    result = _coerce_commit_info(
+        _call_git_provider(
+            "git.commitInfo.get",
+            project_root,
+            {"rev": ref.strip() or "HEAD"},
+        )
+    )
+    commit = result["commit"]
+    if commit is None:
+        return None
+    return GitCommit(
+        hash=commit["hash"],
+        short_hash=commit["shortHash"],
+        summary=commit["summary"] or "",
+        author=commit["author"] or "",
+        date=commit["date"],
+    )
 
 
 def list_branches(project_root: Path) -> GitBranches:
@@ -276,6 +415,44 @@ def get_commits(project_root: Path, limit: int = 50) -> list[GitCommit]:
             )
         )
     return commits
+
+
+def get_worktree_changes(
+    project_root: Path,
+    base_ref: str | None = None,
+    *,
+    limit: int = 20_000,
+) -> list[GitChangeEntry]:
+    """Return worktree/index changes from service.git."""
+    result = _coerce_worktree_changes(
+        _call_git_provider(
+            "git.worktreeChanges.get",
+            project_root,
+            {
+                "base": (base_ref or "HEAD").strip() or "HEAD",
+                "limit": limit,
+            },
+        )
+    )
+    return [
+        GitChangeEntry(
+            path=change["path"],
+            code=change["code"],
+            original_path=change["originalPath"],
+        )
+        for change in result["changes"]
+    ]
+
+
+def get_path_index(project_root: Path, *, limit: int = 50_000) -> GitPathIndex:
+    """Return tracked and untracked non-ignored paths from service.git."""
+    return _coerce_path_index(
+        _call_git_provider(
+            "git.pathIndex.list",
+            project_root,
+            {"limit": limit},
+        )
+    )
 
 
 def new_git_job_op_id(job_type: str) -> str:
@@ -345,6 +522,24 @@ def start_clone_job(
     return _coerce_job_started(
         _call_git_provider("git.clone.start", project_root, params, op_id=op_id),
         expected_operation="clone",
+    )
+
+
+def cancel_git_job(
+    project_root: Path,
+    *,
+    job_id: str,
+    reason: str | None = None,
+) -> GitJobCancelResult:
+    """Cancel a pipe-backed Git job by Explorer-visible op id."""
+    normalized_job_id = job_id.strip()
+    if not normalized_job_id:
+        raise RuntimeError("service.git git.job.cancel requires job id")
+    params: JsonObject = {"opId": normalized_job_id}
+    if reason:
+        params["reason"] = reason
+    return _coerce_job_cancel_result(
+        _call_git_provider("git.job.cancel", project_root, params),
     )
 
 
@@ -507,6 +702,86 @@ def _coerce_history(value: object) -> GitHistoryResult:
     }
 
 
+def _coerce_worktree_changes(value: object) -> GitWorktreeChanges:
+    data = _as_object(value)
+    if data.get("dto") != "GitWorktreeChanges":
+        raise RuntimeError("service.git returned unexpected GitWorktreeChanges DTO")
+    changes: list[GitWorktreeChange] = []
+    raw_changes = data.get("changes")
+    if isinstance(raw_changes, list):
+        for item in cast(list[object], raw_changes):
+            change = _as_object(item)
+            path = change.get("path")
+            code = change.get("code")
+            if not isinstance(path, str) or not path or not isinstance(code, str) or not code:
+                continue
+            changes.append(
+                {
+                    "path": path,
+                    "code": code,
+                    "originalPath": _optional_str(change.get("originalPath")),
+                }
+            )
+    return {
+        "dto": "GitWorktreeChanges",
+        "version": _int_value(data.get("version"), default=1),
+        "root": _required_string(
+            data.get("root"),
+            "service.git returned invalid worktree changes root",
+        ),
+        "projectGeneration": _optional_int(data.get("projectGeneration")),
+        "base": _optional_str(data.get("base")) or "HEAD",
+        "isRepository": bool(data.get("isRepository")),
+        "changes": changes,
+        "truncated": bool(data.get("truncated")),
+    }
+
+
+def _coerce_commit_info(value: object) -> GitCommitInfoResult:
+    data = _as_object(value)
+    if data.get("dto") != "GitCommitInfoResult":
+        raise RuntimeError("service.git returned unexpected GitCommitInfoResult DTO")
+    raw_commit = _as_object(data.get("commit"))
+    commit: GitCommitInfo | None = None
+    commit_hash = raw_commit.get("hash")
+    if bool(data.get("found")) and isinstance(commit_hash, str) and commit_hash:
+        commit = {
+            "hash": commit_hash,
+            "shortHash": _optional_str(raw_commit.get("shortHash")) or commit_hash[:7],
+            "summary": _optional_str(raw_commit.get("summary")),
+            "author": _optional_str(raw_commit.get("author")),
+            "date": _optional_str(raw_commit.get("date")) or "",
+        }
+    return {
+        "dto": "GitCommitInfoResult",
+        "version": _int_value(data.get("version"), default=1),
+        "root": _required_string(
+            data.get("root"),
+            "service.git returned invalid commit info root",
+        ),
+        "projectGeneration": _optional_int(data.get("projectGeneration")),
+        "found": bool(data.get("found")),
+        "commit": commit,
+    }
+
+
+def _coerce_path_index(value: object) -> GitPathIndex:
+    data = _as_object(value)
+    if data.get("dto") != "GitPathIndex":
+        raise RuntimeError("service.git returned unexpected GitPathIndex DTO")
+    source = _optional_str(data.get("source")) or "git-index"
+    return {
+        "dto": "GitPathIndex",
+        "version": _int_value(data.get("version"), default=1),
+        "root": _required_string(data.get("root"), "service.git returned invalid path index root"),
+        "projectGeneration": _optional_int(data.get("projectGeneration")),
+        "isRepository": bool(data.get("isRepository")),
+        "paths": _string_list(data.get("paths")),
+        "source": source,
+        "truncated": bool(data.get("truncated")),
+    }
+
+
 def _coerce_job_started(value: object, *, expected_operation: str) -> GitJobStarted:
     data = _as_object(value)
     if data.get("dto") != "GitJobStarted":
@@ -527,6 +802,23 @@ def _coerce_job_started(value: object, *, expected_operation: str) -> GitJobStar
         "projectGeneration": _optional_int(data.get("projectGeneration")),
         "status": _required_string(data.get("status"), "service.git returned invalid job status"),
         "message": _required_string(data.get("message"), "service.git returned invalid job message"),
+    }
+
+
+def _coerce_job_cancel_result(value: object) -> GitJobCancelResult:
+    data = _as_object(value)
+    if data.get("dto") != "GitJobCancelResult":
+        raise RuntimeError("service.git returned unexpected GitJobCancelResult DTO")
+    return {
+        "dto": "GitJobCancelResult",
+        "version": _int_value(data.get("version"), default=1),
+        "jobId": _optional_str(data.get("jobId")) or "",
+        "opId": _optional_str(data.get("opId")) or "",
+        "ok": bool(data.get("ok")),
+        "status": _required_string(
+            data.get("status"),
+            "service.git returned invalid cancel status",
+        ),
     }
 
 

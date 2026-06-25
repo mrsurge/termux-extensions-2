@@ -49,6 +49,7 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.git.diffBase.get": "git:getDiffBase",
     "explorer.git.diffBase.set": "git:setDiffBase",
     "explorer.git.init": "git:init",
+    "explorer.git.job.cancel": "git:jobCancel",
     "explorer.git.pull": "git:pull",
     "explorer.git.push": "git:push",
     "explorer.git.reset": "git:reset",

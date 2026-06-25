@@ -1,7 +1,7 @@
 use super::common::{expand_user_path, home_dir, normalize_lexical, path_to_string};
 use git2::{
     BranchType, Config, Cred, Delta, Diff, DiffFormat, DiffOptions, ErrorCode, FetchOptions,
-    IndexAddOption, Oid, PushOptions, RemoteCallbacks, Repository, Signature, Status,
+    IndexAddOption, Oid, PushOptions, RemoteCallbacks, Repository, ResetType, Signature, Status,
     StatusOptions, StatusShow,
     build::{CheckoutBuilder, RepoBuilder},
 };
@@ -202,6 +202,45 @@ pub(crate) struct GitDiffResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct GitDiffHunkLine {
+    #[serde(rename = "type")]
+    pub(crate) line_type: String,
+    pub(crate) text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitDiffHunk {
+    pub(crate) old_start: u32,
+    pub(crate) old_lines: u32,
+    pub(crate) new_start: u32,
+    pub(crate) new_lines: u32,
+    pub(crate) lines: Vec<GitDiffHunkLine>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitDiffHunksSummary {
+    pub(crate) added: usize,
+    pub(crate) deleted: usize,
+    pub(crate) tracked: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitDiffHunks {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) root: String,
+    pub(crate) project_generation: Option<u64>,
+    pub(crate) relative_path: String,
+    pub(crate) base: String,
+    pub(crate) hunks: Vec<GitDiffHunk>,
+    pub(crate) summary: GitDiffHunksSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct GitHeadBlobResult {
     pub(crate) dto: &'static str,
     pub(crate) version: u16,
@@ -245,6 +284,61 @@ pub(crate) struct GitRemoteList {
     pub(crate) version: u16,
     pub(crate) root: String,
     pub(crate) remotes: Vec<GitRemoteItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitWorktreeChange {
+    pub(crate) path: String,
+    pub(crate) code: String,
+    pub(crate) original_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitWorktreeChanges {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) root: String,
+    pub(crate) project_generation: Option<u64>,
+    pub(crate) base: String,
+    pub(crate) is_repository: bool,
+    pub(crate) changes: Vec<GitWorktreeChange>,
+    pub(crate) truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitPathIndex {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) root: String,
+    pub(crate) project_generation: Option<u64>,
+    pub(crate) is_repository: bool,
+    pub(crate) paths: Vec<String>,
+    pub(crate) source: &'static str,
+    pub(crate) truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitCommitInfo {
+    pub(crate) hash: String,
+    pub(crate) short_hash: String,
+    pub(crate) summary: Option<String>,
+    pub(crate) author: Option<String>,
+    pub(crate) date: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct GitCommitInfoResult {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) root: String,
+    pub(crate) project_generation: Option<u64>,
+    pub(crate) found: bool,
+    pub(crate) commit: Option<GitCommitInfo>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -531,6 +625,53 @@ pub(crate) fn git_diff(request: GitProviderRequest) -> Result<GitDiffResult, Git
     })
 }
 
+pub(crate) fn git_diff_hunks(
+    request: GitProviderRequest,
+) -> Result<GitDiffHunks, GitProviderError> {
+    let raw_root = request_root(&request)?;
+    let base = request.base.clone().unwrap_or_else(|| "HEAD".to_owned());
+    let Some(repo) = discover_repo(&raw_root)? else {
+        let relative_path = single_relative_path_without_repo(&raw_root, &request)?;
+        return Ok(GitDiffHunks {
+            dto: "GitDiffHunks",
+            version: 1,
+            root: path_to_string(&raw_root),
+            project_generation: request.project_generation,
+            relative_path,
+            base,
+            hunks: Vec::new(),
+            summary: GitDiffHunksSummary {
+                added: 0,
+                deleted: 0,
+                tracked: false,
+            },
+        });
+    };
+    let relative_path = single_relative_path(&repo, &raw_root, &request)?;
+    let diff = build_diff(
+        &repo,
+        &base,
+        request.cached.unwrap_or(false),
+        Some(std::slice::from_ref(&relative_path)),
+    )?;
+    let tracked = path_exists_in_tree(&repo, &base, &relative_path);
+    let (hunks, added, deleted) = diff_hunks_for_path(&diff)?;
+    Ok(GitDiffHunks {
+        dto: "GitDiffHunks",
+        version: 1,
+        root: repo_root_string(&repo, &raw_root),
+        project_generation: request.project_generation,
+        relative_path,
+        base,
+        hunks,
+        summary: GitDiffHunksSummary {
+            added,
+            deleted,
+            tracked,
+        },
+    })
+}
+
 pub(crate) fn git_stage(
     request: GitProviderRequest,
 ) -> Result<GitMutationResult, GitProviderError> {
@@ -588,6 +729,23 @@ pub(crate) fn git_restore(
     }
     repo.checkout_head(Some(&mut checkout))?;
     Ok(mutation_result(&repo, &root, "restore", paths))
+}
+
+pub(crate) fn git_reset_hard(
+    request: GitProviderRequest,
+) -> Result<GitMutationResult, GitProviderError> {
+    let (repo, root) = repo_from_request(&request)?;
+    let target = request
+        .target
+        .as_deref()
+        .or(request.rev.as_deref())
+        .or(request.base.as_deref())
+        .unwrap_or("HEAD");
+    let object = repo.revparse_single(target)?;
+    let mut checkout = CheckoutBuilder::new();
+    checkout.force();
+    repo.reset(&object, ResetType::Hard, Some(&mut checkout))?;
+    Ok(mutation_result(&repo, &root, "resetHard", Vec::new()))
 }
 
 pub(crate) fn git_commit(
@@ -711,6 +869,159 @@ pub(crate) fn git_remote_list(
         version: 1,
         root: repo_root_string(&repo, &root),
         remotes,
+    })
+}
+
+pub(crate) fn git_worktree_changes(
+    request: GitProviderRequest,
+) -> Result<GitWorktreeChanges, GitProviderError> {
+    let root = request_root(&request)?;
+    let base = request.base.clone().unwrap_or_else(|| "HEAD".to_owned());
+    let Some(repo) = discover_repo(&root)? else {
+        return Ok(GitWorktreeChanges {
+            dto: "GitWorktreeChanges",
+            version: 1,
+            root: path_to_string(&root),
+            project_generation: request.project_generation,
+            base,
+            is_repository: false,
+            changes: Vec::new(),
+            truncated: false,
+        });
+    };
+    let limit = request.limit.unwrap_or(20_000).min(100_000);
+    let mut options = StatusOptions::new();
+    options
+        .show(StatusShow::IndexAndWorkdir)
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .renames_head_to_index(true)
+        .renames_index_to_workdir(true);
+    let statuses = repo.statuses(Some(&mut options))?;
+    let mut changes = Vec::new();
+    let mut truncated = false;
+    for entry in statuses.iter() {
+        if changes.len() >= limit {
+            truncated = true;
+            break;
+        }
+        let status = entry.status();
+        if status.contains(Status::IGNORED) || status.is_empty() || status == Status::CURRENT {
+            continue;
+        }
+        let Some(path) = status_path(&entry) else {
+            continue;
+        };
+        changes.push(GitWorktreeChange {
+            path,
+            code: status_short_code(status).to_owned(),
+            original_path: status_original_path(&entry),
+        });
+    }
+    Ok(GitWorktreeChanges {
+        dto: "GitWorktreeChanges",
+        version: 1,
+        root: repo_root_string(&repo, &root),
+        project_generation: request.project_generation,
+        base,
+        is_repository: true,
+        changes,
+        truncated,
+    })
+}
+
+pub(crate) fn git_path_index(
+    request: GitProviderRequest,
+) -> Result<GitPathIndex, GitProviderError> {
+    let root = request_root(&request)?;
+    let Some(repo) = discover_repo(&root)? else {
+        return Ok(GitPathIndex {
+            dto: "GitPathIndex",
+            version: 1,
+            root: path_to_string(&root),
+            project_generation: request.project_generation,
+            is_repository: false,
+            paths: Vec::new(),
+            source: "not-repository",
+            truncated: false,
+        });
+    };
+    let limit = request.limit.unwrap_or(50_000).min(250_000);
+    let mut paths = BTreeSet::new();
+    let index = repo.index()?;
+    for entry in index.iter() {
+        paths.insert(String::from_utf8_lossy(&entry.path).into_owned());
+        if paths.len() >= limit {
+            break;
+        }
+    }
+    let mut options = StatusOptions::new();
+    options
+        .show(StatusShow::IndexAndWorkdir)
+        .include_untracked(true)
+        .recurse_untracked_dirs(true);
+    let statuses = repo.statuses(Some(&mut options))?;
+    let mut truncated = paths.len() >= limit;
+    for entry in statuses.iter() {
+        if paths.len() >= limit {
+            truncated = true;
+            break;
+        }
+        let status = entry.status();
+        if status.contains(Status::WT_NEW)
+            && let Some(path) = status_path(&entry)
+        {
+            paths.insert(path);
+        }
+    }
+    Ok(GitPathIndex {
+        dto: "GitPathIndex",
+        version: 1,
+        root: repo_root_string(&repo, &root),
+        project_generation: request.project_generation,
+        is_repository: true,
+        paths: paths.into_iter().collect(),
+        source: "git-index",
+        truncated,
+    })
+}
+
+pub(crate) fn git_commit_info(
+    request: GitProviderRequest,
+) -> Result<GitCommitInfoResult, GitProviderError> {
+    let (repo, root) = repo_from_request(&request)?;
+    let rev = request
+        .rev
+        .as_deref()
+        .or(request.base.as_deref())
+        .unwrap_or("HEAD");
+    let commit = match repo.revparse_single(rev) {
+        Ok(object) => match object.peel_to_commit() {
+            Ok(commit) => Some(commit),
+            Err(_) => None,
+        },
+        Err(error) if error.code() == ErrorCode::NotFound => None,
+        Err(error) if error.code() == ErrorCode::InvalidSpec => None,
+        Err(error) => return Err(error.into()),
+    };
+    let commit = commit.map(|commit| {
+        let oid = commit.id().to_string();
+        let author = commit.author();
+        GitCommitInfo {
+            short_hash: short_oid(&oid),
+            hash: oid,
+            summary: commit.summary().map(str::to_owned),
+            author: author.name().map(str::to_owned),
+            date: format_git_time(commit.time()),
+        }
+    });
+    Ok(GitCommitInfoResult {
+        dto: "GitCommitInfoResult",
+        version: 1,
+        root: repo_root_string(&repo, &root),
+        project_generation: request.project_generation,
+        found: commit.is_some(),
+        commit,
     })
 }
 
@@ -1438,6 +1749,66 @@ fn diff_patch_text(diff: &Diff<'_>) -> Result<String, GitProviderError> {
     Ok(patch)
 }
 
+fn diff_hunks_for_path(
+    diff: &Diff<'_>,
+) -> Result<(Vec<GitDiffHunk>, usize, usize), GitProviderError> {
+    let mut hunks = Vec::<GitDiffHunk>::new();
+    let mut added = 0usize;
+    let mut deleted = 0usize;
+    diff.print(DiffFormat::Patch, |_delta, hunk, line| {
+        if let Some(hunk) = hunk {
+            let should_start_hunk = hunks
+                .last()
+                .map(|current| {
+                    current.old_start != hunk.old_start() || current.new_start != hunk.new_start()
+                })
+                .unwrap_or(true);
+            if should_start_hunk {
+                hunks.push(GitDiffHunk {
+                    old_start: hunk.old_start(),
+                    old_lines: hunk.old_lines(),
+                    new_start: hunk.new_start(),
+                    new_lines: hunk.new_lines(),
+                    lines: Vec::new(),
+                });
+            }
+        }
+        let origin = line.origin();
+        let line_type = match origin {
+            '+' | '>' => {
+                added += 1;
+                "add"
+            }
+            '-' | '<' => {
+                deleted += 1;
+                "del"
+            }
+            ' ' | '=' => "context",
+            _ => return true,
+        };
+        if let Some(current) = hunks.last_mut() {
+            current.lines.push(GitDiffHunkLine {
+                line_type: line_type.to_owned(),
+                text: String::from_utf8_lossy(line.content())
+                    .trim_end_matches(['\r', '\n'])
+                    .to_owned(),
+            });
+        }
+        true
+    })?;
+    Ok((hunks, added, deleted))
+}
+
+fn path_exists_in_tree(repo: &Repository, rev: &str, relative_path: &str) -> bool {
+    tree_for_rev(repo, rev)
+        .and_then(|tree| match tree.get_path(Path::new(relative_path)) {
+            Ok(_) => Ok(tree),
+            Err(error) if error.code() == ErrorCode::NotFound => Err(GitProviderError::MissingPath),
+            Err(error) => Err(error.into()),
+        })
+        .is_ok()
+}
+
 fn diff_status_for_path(diff: &Diff<'_>, relative_path: &str) -> String {
     for delta in diff.deltas() {
         let delta_path = delta
@@ -1462,6 +1833,36 @@ fn diff_delta_status(delta: Delta) -> &'static str {
         Delta::Ignored => "ignored",
         _ => "modified",
     }
+}
+
+fn single_relative_path_without_repo(
+    root: &Path,
+    request: &GitProviderRequest,
+) -> Result<String, GitProviderError> {
+    let raw_path = request
+        .relative_path
+        .as_deref()
+        .or(request.path.as_deref())
+        .filter(|path| !path.trim().is_empty())
+        .ok_or(GitProviderError::MissingPath)?;
+    let raw = raw_path.trim();
+    let path = if raw == "~" || raw.starts_with("~/") || raw.starts_with('/') {
+        expand_user_path(raw, &home_dir())
+    } else {
+        PathBuf::from(raw)
+    };
+    let relative = if path.is_absolute() {
+        let normalized = normalize_lexical(path);
+        normalized
+            .strip_prefix(root)
+            .map(Path::to_path_buf)
+            .map_err(|_| GitProviderError::InvalidPath(raw.to_owned()))?
+    } else {
+        path
+    };
+    let normalized = normalize_relative_components(&relative)
+        .ok_or_else(|| GitProviderError::InvalidPath(raw.to_owned()))?;
+    Ok(path_to_string(&normalized))
 }
 
 fn mutation_result(
@@ -1645,6 +2046,44 @@ fn status_path(entry: &git2::StatusEntry<'_>) -> Option<String> {
         .map(path_to_string)
 }
 
+fn status_original_path(entry: &git2::StatusEntry<'_>) -> Option<String> {
+    entry
+        .head_to_index()
+        .and_then(|delta| delta.old_file().path())
+        .or_else(|| {
+            entry
+                .index_to_workdir()
+                .and_then(|delta| delta.old_file().path())
+        })
+        .map(path_to_string)
+        .filter(|path| status_path(entry).as_deref() != Some(path.as_str()))
+}
+
+fn status_short_code(status: Status) -> &'static str {
+    if status.contains(Status::WT_NEW) {
+        return "??";
+    }
+    if status.intersects(Status::INDEX_RENAMED | Status::WT_RENAMED) {
+        return "R";
+    }
+    if status.intersects(Status::INDEX_DELETED | Status::WT_DELETED) {
+        return "D";
+    }
+    if status.contains(Status::INDEX_NEW) {
+        return "A";
+    }
+    if status.contains(Status::CONFLICTED) {
+        return "U";
+    }
+    if status.intersects(Status::INDEX_MODIFIED | Status::WT_MODIFIED) {
+        return "M";
+    }
+    if status.intersects(Status::INDEX_TYPECHANGE | Status::WT_TYPECHANGE) {
+        return "T";
+    }
+    "M"
+}
+
 fn map_git_status(status: Status) -> &'static str {
     if status.contains(Status::CONFLICTED) {
         return "conflict";
@@ -1703,6 +2142,14 @@ fn short_branch_name(reference_name: &str) -> String {
         .strip_prefix("refs/heads/")
         .unwrap_or(reference_name)
         .to_owned()
+}
+
+fn format_git_time(time: git2::Time) -> String {
+    let sign = if time.offset_minutes() < 0 { '-' } else { '+' };
+    let offset = time.offset_minutes().abs();
+    let hours = offset / 60;
+    let minutes = offset % 60;
+    format!("{}{}{:02}:{:02}", time.seconds(), sign, hours, minutes)
 }
 
 #[cfg(test)]
@@ -1845,6 +2292,77 @@ mod tests {
         assert_eq!(diff.files[0].relative_path, "tracked.txt");
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn git_missing_service_dtos_match_contract_shapes() {
+        let root = test_root("missing-dtos");
+        let repo = Repository::init(&root).expect("init repo");
+        fs::write(root.join("tracked.txt"), "tracked\n").expect("write tracked");
+        fs::write(root.join("stable.txt"), "stable\n").expect("write stable");
+        commit_all(&repo, "initial commit");
+        fs::write(root.join("tracked.txt"), "tracked\nmodified\n").expect("modify tracked");
+        fs::write(root.join("new.txt"), "new\n").expect("write new");
+
+        let mut hunks_request = provider_request(&root);
+        hunks_request.relative_path = Some("tracked.txt".to_owned());
+        let hunks = git_diff_hunks(hunks_request).expect("diff hunks");
+        assert_eq!(hunks.dto, "GitDiffHunks");
+        assert_eq!(hunks.relative_path, "tracked.txt");
+        assert_eq!(hunks.project_generation, Some(42));
+        assert!(hunks.summary.tracked);
+        assert!(hunks.summary.added >= 1);
+        assert!(!hunks.hunks.is_empty());
+
+        let changes = git_worktree_changes(provider_request(&root)).expect("worktree changes");
+        assert_eq!(changes.dto, "GitWorktreeChanges");
+        assert!(changes.is_repository);
+        assert!(
+            changes
+                .changes
+                .iter()
+                .any(|change| change.path == "tracked.txt" && change.code == "M")
+        );
+        assert!(
+            changes
+                .changes
+                .iter()
+                .any(|change| change.path == "new.txt" && change.code == "??")
+        );
+
+        let path_index = git_path_index(provider_request(&root)).expect("path index");
+        assert_eq!(path_index.dto, "GitPathIndex");
+        assert!(path_index.is_repository);
+        assert!(path_index.paths.iter().any(|path| path == "tracked.txt"));
+        assert!(path_index.paths.iter().any(|path| path == "stable.txt"));
+        assert!(path_index.paths.iter().any(|path| path == "new.txt"));
+
+        let commit_info = git_commit_info(provider_request(&root)).expect("commit info");
+        assert_eq!(commit_info.dto, "GitCommitInfoResult");
+        assert!(commit_info.found);
+        let commit = commit_info.commit.expect("commit");
+        assert_eq!(commit.summary.as_deref(), Some("initial commit"));
+        assert_eq!(commit.short_hash.len(), 7);
+
+        let reset = git_reset_hard(provider_request(&root)).expect("reset hard");
+        assert_eq!(reset.dto, "GitMutationResult");
+        assert_eq!(reset.operation, "resetHard");
+        assert_eq!(
+            fs::read_to_string(root.join("tracked.txt")).unwrap(),
+            "tracked\n"
+        );
+
+        let non_repo = test_root("missing-dtos-nonrepo");
+        let non_repo_changes =
+            git_worktree_changes(provider_request(&non_repo)).expect("nonrepo changes");
+        assert_eq!(non_repo_changes.dto, "GitWorktreeChanges");
+        assert!(!non_repo_changes.is_repository);
+        let non_repo_index = git_path_index(provider_request(&non_repo)).expect("nonrepo index");
+        assert_eq!(non_repo_index.dto, "GitPathIndex");
+        assert!(!non_repo_index.is_repository);
+
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(non_repo);
     }
 
     #[test]

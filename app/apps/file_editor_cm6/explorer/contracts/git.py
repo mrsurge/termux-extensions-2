@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict, cast
+from typing import TypedDict, cast, override
 
 JsonObject = dict[str, object]
 
@@ -11,6 +11,7 @@ JsonObject = dict[str, object]
 class ExplorerGitContractError(Exception):
     message: str
 
+    @override
     def __str__(self) -> str:
         return self.message
 
@@ -57,8 +58,13 @@ class GitListCommitsParams(TypedDict):
     limit: int
 
 
+class GitJobCancelParams(TypedDict):
+    job_id: str
+    reason: str | None
+
+
 def parse_git_status_params(payload: object) -> GitNoParams:
-    _as_object(payload)
+    _ = _as_object(payload)
     return {}
 
 
@@ -73,12 +79,12 @@ def parse_git_unstage_params(payload: object) -> GitPathListParams:
 
 
 def parse_git_stage_all_params(payload: object) -> GitNoParams:
-    _as_object(payload)
+    _ = _as_object(payload)
     return {}
 
 
 def parse_git_unstage_all_params(payload: object) -> GitNoParams:
-    _as_object(payload)
+    _ = _as_object(payload)
     return {}
 
 
@@ -130,7 +136,7 @@ def parse_git_reset_params(payload: object) -> GitResetParams:
 
 
 def parse_git_init_params(payload: object) -> GitNoParams:
-    _as_object(payload)
+    _ = _as_object(payload)
     return {}
 
 
@@ -140,7 +146,7 @@ def parse_git_set_diff_base_params(payload: object) -> GitDiffBaseParams:
 
 
 def parse_git_list_branches_params(payload: object) -> GitNoParams:
-    _as_object(payload)
+    _ = _as_object(payload)
     return {}
 
 
@@ -148,6 +154,18 @@ def parse_git_list_commits_params(payload: object) -> GitListCommitsParams:
     envelope = _as_object(payload)
     return {
         "limit": _coerce_positive_int(envelope.get("limit"), default=50),
+    }
+
+
+def parse_git_job_cancel_params(payload: object) -> GitJobCancelParams:
+    envelope = _as_object(payload)
+    job_id = _parse_required_string(
+        envelope.get("jobId") or envelope.get("job_id") or envelope.get("opId"),
+        missing_message="Git job cancel requires jobId",
+    )
+    return {
+        "job_id": job_id,
+        "reason": _parse_optional_string(envelope.get("reason")),
     }
 
 

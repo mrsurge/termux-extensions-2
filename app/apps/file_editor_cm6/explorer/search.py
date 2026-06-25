@@ -9,13 +9,9 @@ from importlib import import_module
 from pathlib import Path
 from typing import Literal, Protocol, TypedDict, cast
 
-from ..git_helper import (
-    GitError,
-    get_worktree_changes,
-    is_git_repository,
-    get_commit_info,
-)
 from ..stores import get_history_store
+from ..worker_services import git_service as worker_git_service
+from ..worker_services.git_service import GitChangeEntry
 from .contracts.search_review import (
     JsonObject,
     SearchChange,
@@ -169,12 +165,9 @@ def _diff_base_payload(project_path: str | None) -> SearchChangesBaseInfo:
     
     if project_path:
         root_path = Path(project_path)
-        if root_path.exists() and is_git_repository(root_path):
+        if root_path.exists() and worker_git_service.is_git_repository(root_path):
             mode = 'head' if base_ref == 'HEAD' else 'detached'
-            try:
-                commit = get_commit_info(root_path, base_ref)
-            except GitError:
-                commit = None
+            commit = worker_git_service.get_commit_info(root_path, base_ref)
             if commit:
                 commit_info = {
                     "hash": commit.hash,
@@ -203,6 +196,20 @@ def _status_meta_from_code(code: str) -> tuple[str, str]:
     primary = compact[0] if compact else '?'
     key = primary if primary in STATUS_TEXT_MAP else '?'
     return primary, STATUS_TEXT_MAP[key]
+
+
+def _change_entry_sort_key(entry: GitChangeEntry) -> tuple[int, str]:
+    """Keep tracked changes visible before untracked files consume the result cap."""
+    compact = entry.code.replace(" ", "")
+    if "U" in compact:
+        priority = 0
+    elif compact in ("??", "?"):
+        priority = 2
+    elif compact in ("!!", "!"):
+        priority = 3
+    else:
+        priority = 1
+    return priority, entry.path.replace("\\", "/")
 
 async def search_by_name(root: Path, query: str) -> SearchNameResult:
     """Search files/folders by name."""
@@ -298,25 +305,13 @@ async def search_by_name(root: Path, query: str) -> SearchNameResult:
             "truncated": count >= max_results,
         }
 
-    async def run_git_ls_files() -> SearchNameResult | None:
-        # If we're in a git repo, this is much faster and respects excludes.
-        try:
-            if not is_git_repository(root):
-                return None
-        except Exception:
-            return None
-
-        cmd = ['git', '-C', str(root), 'ls-files', '-co', '--exclude-standard', '-z']
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _stderr = await proc.communicate()
-        except Exception:
-            return None
-        if proc.returncode != 0:
+    async def run_git_path_index() -> SearchNameResult | None:
+        path_index = await asyncio.to_thread(
+            worker_git_service.get_path_index,
+            root,
+            limit=50_000,
+        )
+        if not path_index["isRepository"]:
             return None
 
         results: list[SearchNameResultEntry] = []
@@ -324,12 +319,10 @@ async def search_by_name(root: Path, query: str) -> SearchNameResult:
         seen_dirs: set[str] = set()
 
         # Files (and derived directories).
-        for raw in stdout.split(b'\0'):
+        for rel in path_index["paths"]:
             if count >= max_results:
                 break
-            if not raw:
-                continue
-            rel = raw.decode('utf-8', errors='ignore').replace('\\', '/')
+            rel = rel.replace('\\', '/')
             rel = rel.strip('/')
             if not rel or should_ignore_rel(rel):
                 continue
@@ -363,11 +356,11 @@ async def search_by_name(root: Path, query: str) -> SearchNameResult:
             "query": query,
             "results": results,
             "count": count,
-            "truncated": count >= max_results,
+            "truncated": path_index["truncated"] or count >= max_results,
         }
 
     # Avoid blocking the server event loop (Termux devices can be slow).
-    git_res = await run_git_ls_files()
+    git_res = await run_git_path_index()
     if git_res is not None:
         return git_res
     return await asyncio.to_thread(run_filesystem_walk)
@@ -653,7 +646,7 @@ def _collect_diff(project_root: Path, rel_path: str, *, base_ref: str) -> DiffPa
 def search_by_changes(project_root: Path) -> SearchChangesResult:
     project_path = str(project_root) # _history_store keys are strings
     
-    if not is_git_repository(project_root):
+    if not worker_git_service.is_git_repository(project_root):
         return {
             "mode": "changes",
             "git": False,
@@ -663,22 +656,11 @@ def search_by_changes(project_root: Path) -> SearchChangesResult:
             "count": 0,
         }
 
-    try:
-        base_ref = _resolve_diff_base(project_path)
-        entries = get_worktree_changes(project_root, base_ref)
-    except GitError:
-        # If git fails (e.g. bad ref), return empty
-        return {
-            "mode": "changes",
-            "git": True,
-            "base": _diff_base_payload(project_path),
-            "changes": [],
-            "truncated": False,
-            "count": 0,
-        }
+    base_ref = _resolve_diff_base(project_path)
+    entries = worker_git_service.get_worktree_changes(project_root, base_ref)
 
     truncated = len(entries) > CHANGE_RESULT_LIMIT
-    selected = entries[:CHANGE_RESULT_LIMIT]
+    selected = sorted(entries, key=_change_entry_sort_key)[:CHANGE_RESULT_LIMIT]
     changes: list[SearchChange] = []
 
     for entry in selected:

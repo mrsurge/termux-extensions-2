@@ -9,6 +9,7 @@ from typing import Protocol, cast
 from ..contracts.git import (
     GitCommitParams,
     GitDiffBaseParams,
+    GitJobCancelParams,
     GitListCommitsParams,
     GitNoParams,
     GitPathListParams,
@@ -25,11 +26,6 @@ from ..services.state_facts import (
 from ..services.tracked_jobs import forget_tracked_job, remember_tracked_job
 from ..services.file_ops import mark_git_cache_dirty
 from ...worker_services import git_service as worker_git_service
-from ...git_helper import (
-    get_commit_info,
-    reset_hard,
-    restore_path,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +99,12 @@ async def handle_git_restore(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    restore_path(context.project_root, params["path"], params["commit"])
+    await asyncio.to_thread(
+        worker_git_service.restore_path,
+        context.project_root,
+        params["path"],
+        params["commit"],
+    )
     mark_git_cache_dirty(context.project_root)
     await publish_git_path_restored(
         context.project_root,
@@ -186,7 +187,11 @@ async def handle_git_reset(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    _ = reset_hard(context.project_root, params["commit"])
+    _ = await asyncio.to_thread(
+        worker_git_service.reset_hard,
+        context.project_root,
+        params["commit"],
+    )
     _ = await _mark_dirty_and_refresh(context)
 
 
@@ -206,7 +211,11 @@ async def handle_git_set_diff_base(
     msg_id: str | None,
 ) -> None:
     del msg_id
-    _ = get_commit_info(context.project_root, params["ref"])
+    _ = await asyncio.to_thread(
+        worker_git_service.get_commit_info,
+        context.project_root,
+        params["ref"],
+    )
     history_store = _get_history_store()
     _ = history_store.set_diff_base(str(context.project_root), params["ref"])
     await publish_git_diff_base_changed(
@@ -235,7 +244,11 @@ async def handle_git_get_diff_base(
     ):
         mode = "head" if base_ref == "HEAD" else "detached"
         try:
-            commit = get_commit_info(context.project_root, base_ref)
+            commit = await asyncio.to_thread(
+                worker_git_service.get_commit_info,
+                context.project_root,
+                base_ref,
+            )
         except Exception:
             commit = None
         if commit:
@@ -250,6 +263,31 @@ async def handle_git_get_diff_base(
     await context.emit_personal(
         "git:diffBase",
         {"ref": base_ref, "mode": mode, "commit": commit_info},
+        msg_id,
+    )
+
+
+async def handle_git_job_cancel(
+    context: ExplorerGitHandlerContext,
+    params: GitJobCancelParams,
+    msg_id: str | None,
+) -> None:
+    result = await asyncio.to_thread(
+        worker_git_service.cancel_git_job,
+        context.project_root,
+        job_id=params["job_id"],
+        reason=params["reason"],
+    )
+    if not result["ok"]:
+        forget_tracked_job(context.project_root, context.tracked_job_ids, params["job_id"])
+    await context.emit_personal(
+        "git:jobCancel",
+        {
+            "job_id": result["opId"] or result["jobId"] or params["job_id"],
+            "provider_job_id": result["jobId"],
+            "ok": result["ok"],
+            "status": result["status"],
+        },
         msg_id,
     )
 
