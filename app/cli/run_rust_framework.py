@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import site
 import sys
 import sysconfig
 from pathlib import Path
 from types import ModuleType
+from importlib import metadata
 
 import app as app_pkg
 
@@ -34,10 +36,40 @@ def _load_bootstrap_module() -> ModuleType:
 def _bootstrap_candidates() -> list[Path]:
     package_root = Path(app_pkg.__file__).resolve().parents[1]
     data_root = Path(sysconfig.get_path("data"))
-    return [
+    candidates = [
         package_root / "rust-spike" / "app" / "bootstrap.py",
+        package_root / "te2" / "rust-spike" / "app" / "bootstrap.py",
+        *(_distribution_bootstrap_candidates()),
         data_root / "te2" / "rust-spike" / "app" / "bootstrap.py",
+        Path(site.USER_BASE) / "te2" / "rust-spike" / "app" / "bootstrap.py",
     ]
+    return _dedupe_paths(candidates)
+
+
+def _distribution_bootstrap_candidates() -> list[Path]:
+    try:
+        distribution = metadata.distribution("te2")
+    except metadata.PackageNotFoundError:
+        return []
+
+    candidates: list[Path] = []
+    for file in distribution.files or ():
+        file_text = file.as_posix()
+        if file_text.endswith("te2/rust-spike/app/bootstrap.py") or file_text.endswith("rust-spike/app/bootstrap.py"):
+            candidates.append(Path(distribution.locate_file(file)))
+    return candidates
+
+
+def _dedupe_paths(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    deduped: list[Path] = []
+    for path in paths:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(path)
+    return deduped
 
 
 if __name__ == "__main__":
