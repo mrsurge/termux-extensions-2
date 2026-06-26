@@ -6,6 +6,7 @@ import importlib
 import os
 import secrets
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -29,9 +30,12 @@ SignalHandler = int | signal.Handlers | Callable[[int, FrameType | None], object
 class BootstrapArgs:
     host: str
     port: str
+    cache_dir: str | None
     server_bin: str | None
     cargo_manifest: str | None
     release: bool
+    force_build: bool
+    no_build_cache: bool
     build_only: bool
     print_command: bool
     no_ferrous_framework: bool
@@ -44,14 +48,24 @@ class BootstrapArgs:
     framework_shells_run_id: str | None
 
 
+@dataclass(frozen=True)
+class ServerCommand:
+    argv: list[str]
+    build_already_done: bool = False
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
     env = _build_env(args)
-    command = _server_command(args, env)
+    command = _server_command(args, env, build=not args.print_command)
     if args.print_command:
-        print(" ".join(command))
+        print(" ".join(command.argv))
         return 0
-    return _run_child(command, env)
+    if args.build_only:
+        if command.build_already_done:
+            return 0
+        return subprocess.run(command.argv, env=env, check=False).returncode
+    return _run_child(command.argv, env)
 
 
 def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
@@ -61,6 +75,11 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
     )
     parser.add_argument("--host", default=os.environ.get("TE2_RUST_SPIKE_HOST", DEFAULT_HOST))
     parser.add_argument("--port", default=os.environ.get("TE2_RUST_SPIKE_PORT", os.environ.get("TE_PORT", DEFAULT_PORT)))
+    parser.add_argument(
+        "--cache-dir",
+        default=os.environ.get("TE2_RUST_SPIKE_CACHE_DIR"),
+        help="Cache root for packaged Rust builds. Defaults to XDG cache.",
+    )
     parser.add_argument(
         "--server-bin",
         default=os.environ.get("TE2_RUST_SPIKE_SERVER_BIN"),
@@ -72,6 +91,18 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         help="Path to rust/Cargo.toml for development launches.",
     )
     parser.add_argument("--release", action="store_true", default=_env_flag("TE2_RUST_SPIKE_RELEASE"))
+    parser.add_argument(
+        "--force-build",
+        action="store_true",
+        default=_env_flag("TE2_RUST_SPIKE_FORCE_BUILD"),
+        help="Rebuild the cached Rust server even when the fingerprinted binary exists.",
+    )
+    parser.add_argument(
+        "--no-build-cache",
+        action="store_true",
+        default=_env_flag("TE2_RUST_SPIKE_NO_BUILD_CACHE"),
+        help="Use cargo run/build directly instead of the fingerprinted binary cache.",
+    )
     parser.add_argument("--build-only", action="store_true", help="Build the Rust server and exit without launching it.")
     parser.add_argument("--print-command", action="store_true", help="Print the resolved child command and exit.")
     parser.add_argument(
@@ -106,9 +137,12 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
         host=cast(str, raw.host),
         broadcast=_normalize_broadcast_arg(raw.broadcast),
         port=cast(str, raw.port),
+        cache_dir=cast(str | None, raw.cache_dir),
         server_bin=cast(str | None, raw.server_bin),
         cargo_manifest=cast(str | None, raw.cargo_manifest),
         release=cast(bool, raw.release),
+        force_build=cast(bool, raw.force_build),
+        no_build_cache=cast(bool, raw.no_build_cache),
         build_only=cast(bool, raw.build_only),
         print_command=cast(bool, raw.print_command),
         no_ferrous_framework=cast(bool, raw.no_ferrous_framework),
@@ -123,6 +157,7 @@ def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
 
 def _build_env(args: BootstrapArgs) -> dict[str, str]:
     env = os.environ.copy()
+    _sanitize_runtime_env(env)
     project_root = _project_root()
     framework_shells_root = project_root / "worktrees" / "framework-shells"
     app_roots = [
@@ -156,6 +191,12 @@ def _build_env(args: BootstrapArgs) -> dict[str, str]:
     return env
 
 
+def _sanitize_runtime_env(env: dict[str, str]) -> None:
+    cargo_target_dir = env.pop("CARGO_TARGET_DIR", None)
+    if cargo_target_dir:
+        env.setdefault("TE2_RUST_SPIKE_CARGO_TARGET_DIR", cargo_target_dir)
+
+
 def _normalize_broadcast_arg(raw_broadcast: Sequence[str] | None) -> list[str] | None:
     if raw_broadcast is None:
         return None
@@ -167,13 +208,21 @@ def _normalize_broadcast_arg(raw_broadcast: Sequence[str] | None) -> list[str] |
     return broadcast
 
 
-def _server_command(args: BootstrapArgs, env: MutableMapping[str, str]) -> list[str]:
+def _server_command(
+    args: BootstrapArgs,
+    env: MutableMapping[str, str],
+    *,
+    build: bool = True,
+) -> ServerCommand:
     if args.server_bin:
         if args.build_only:
             raise SystemExit("--build-only cannot be used with --server-bin")
-        return [str(Path(args.server_bin))]
+        return ServerCommand([str(Path(args.server_bin))])
 
     manifest = Path(args.cargo_manifest) if args.cargo_manifest else _default_rust_manifest()
+    if not args.cargo_manifest and not args.no_build_cache:
+        return _cached_server_command(args, env, manifest, build=build)
+
     subcommand = "build" if args.build_only else "run"
     command = [
         "cargo",
@@ -189,7 +238,57 @@ def _server_command(args: BootstrapArgs, env: MutableMapping[str, str]) -> list[
         command.extend(["--features", "ferrous-framework-native"])
     if not args.build_only:
         command.append("--")
-    return command
+    return ServerCommand(command)
+
+
+def _cached_server_command(
+    args: BootstrapArgs,
+    env: MutableMapping[str, str],
+    manifest: Path,
+    *,
+    build: bool,
+) -> ServerCommand:
+    cache_dir = Path(args.cache_dir) if args.cache_dir else _default_cache_dir()
+    profile = "release" if args.release else "debug"
+    features = ["ferrous-framework-native"] if _ferrous_framework_enabled(args) else []
+    fingerprint = _rust_source_fingerprint(manifest, profile=profile, features=features)
+    binary_name = _server_binary_name()
+    cached_binary = cache_dir / "bin" / fingerprint / profile / binary_name
+
+    cargo_target_dir = Path(env.get("TE2_RUST_SPIKE_CARGO_TARGET_DIR", cache_dir / "cargo-target"))
+    if cached_binary.is_file() and not args.force_build:
+        return ServerCommand([str(cached_binary)], build_already_done=True)
+    if not build:
+        return ServerCommand([str(cached_binary)], build_already_done=False)
+
+    build_command = [
+        "cargo",
+        "build",
+        "--manifest-path",
+        str(manifest),
+        "-p",
+        SERVER_PACKAGE,
+    ]
+    if args.release:
+        build_command.append("--release")
+    if features:
+        build_command.extend(["--features", ",".join(features)])
+    build_env = dict(env)
+    build_env["CARGO_TARGET_DIR"] = str(cargo_target_dir)
+    result = subprocess.run(build_command, env=build_env, check=False)
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+
+    built_binary = cargo_target_dir / profile / binary_name
+    if not built_binary.is_file():
+        raise SystemExit(f"Rust server build finished but binary is missing: {built_binary}")
+    cached_binary.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(built_binary, cached_binary)
+    try:
+        cached_binary.chmod(cached_binary.stat().st_mode | 0o755)
+    except OSError:
+        pass
+    return ServerCommand([str(cached_binary)], build_already_done=True)
 
 
 def _resolve_listen_host(args: BootstrapArgs) -> str:
@@ -313,11 +412,68 @@ def _source_root() -> Path:
 
 
 def _project_root() -> Path:
-    return _source_root().parent
+    source_project_root = _source_root().parent
+    if (source_project_root / "app" / "apps").is_dir():
+        return source_project_root
+    try:
+        import app as app_pkg
+    except ImportError:
+        return source_project_root
+    package_project_root = Path(app_pkg.__file__).resolve().parents[1]
+    if (package_project_root / "app" / "apps").is_dir():
+        return package_project_root
+    return source_project_root
 
 
 def _default_rust_manifest() -> Path:
-    return _source_root() / "rust" / "Cargo.toml"
+    source_manifest = _source_root() / "rust" / "Cargo.toml"
+    if source_manifest.is_file():
+        return source_manifest
+    return _project_root() / "rust-spike" / "rust" / "Cargo.toml"
+
+
+def _default_cache_dir() -> Path:
+    return Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))) / APP_ID
+
+
+def _server_binary_name() -> str:
+    suffix = ".exe" if sys.platform == "win32" else ""
+    return f"{SERVER_PACKAGE}{suffix}"
+
+
+def _rust_source_fingerprint(manifest: Path, *, profile: str, features: Sequence[str]) -> str:
+    workspace = manifest.parent
+    hasher = hashlib.sha256()
+    hasher.update(b"te2-rust-spike-build-cache-v1\0")
+    hasher.update(str(workspace.resolve()).encode("utf-8", "surrogateescape"))
+    hasher.update(b"\0")
+    hasher.update(profile.encode("utf-8"))
+    hasher.update(b"\0")
+    hasher.update(",".join(sorted(features)).encode("utf-8"))
+    hasher.update(b"\0")
+    hasher.update(sys.platform.encode("utf-8"))
+    hasher.update(b"\0")
+    hasher.update(getattr(os, "uname", lambda: None)().machine.encode("utf-8") if hasattr(os, "uname") else b"")
+    for path in _rust_fingerprint_paths(workspace):
+        rel = path.relative_to(workspace).as_posix()
+        hasher.update(b"\0path:")
+        hasher.update(rel.encode("utf-8", "surrogateescape"))
+        hasher.update(b"\0")
+        hasher.update(path.read_bytes())
+    return hasher.hexdigest()[:24]
+
+
+def _rust_fingerprint_paths(workspace: Path) -> list[Path]:
+    candidates: list[Path] = []
+    for relative in ("Cargo.toml", "Cargo.lock"):
+        path = workspace / relative
+        if path.is_file():
+            candidates.append(path)
+    crates_root = workspace / "crates"
+    if crates_root.is_dir():
+        candidates.extend(path for path in crates_root.rglob("Cargo.toml") if path.is_file())
+        candidates.extend(path for path in crates_root.rglob("*.rs") if path.is_file())
+    return sorted(candidates)
 
 
 def _reserve_local_port(host: str) -> int:

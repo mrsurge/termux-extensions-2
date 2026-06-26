@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "te2"
-version = "0.2.273"
+version = "0.2.274"
 description = "TE2 framework runtime and tooling"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,17 +12,45 @@ dynamic = ["dependencies"]
 
 [project.scripts]
 te2 = "app.cli.run_framework:main"
+te2-rust = "app.cli.run_rust_framework:main"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.package-data]
 "app" = [
+    "android_editor_assets_bundle.json",
     "static/**/*",
+    "templates/**/*",
+    "extensions/**/*",
     "apps/**/*",
 ]
 "app.apps.file_editor_cm6" = [
     "vendor/node_socketio/**/*",
+]
+
+[tool.setuptools.data-files]
+"te2/rust-spike/app" = [
+    "rust-spike/app/*.py",
+]
+"te2/rust-spike/rust" = [
+    "rust-spike/rust/Cargo.lock",
+    "rust-spike/rust/Cargo.toml",
+]
+"te2/rust-spike/rust/crates/te2-rust-spike-server" = [
+    "rust-spike/rust/crates/te2-rust-spike-server/Cargo.toml",
+]
+"te2/rust-spike/rust/crates/te2-rust-spike-server/src" = [
+    "rust-spike/rust/crates/te2-rust-spike-server/src/*.rs",
+]
+"te2/rust-spike/rust/crates/te2-rust-spike-server/src/framework_services" = [
+    "rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/*.rs",
+]
+"te2/rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/net" = [
+    "rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/net/*.rs",
+]
+"te2/rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/pipe" = [
+    "rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/pipe/*.rs",
 ]
 
 [tool.setuptools.packages.find]
