@@ -4,19 +4,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..explorer.services.file_ops import set_project_root
-from ..git_helper import get_commit_info, is_git_repository
 from ..history_store import HistoryStore
 from ..main_page.backend.state_payload import StatePayloadDeps, build_state_payload
 from ..monaco_editor.editor_backend_services.contracts import JsonMap
 from ..stores import get_history_store, get_preferences_store
+from ..worker_services import git_service as worker_git_service
 
 
 _STATE_PAYLOAD_DEPS = StatePayloadDeps(
     history=get_history_store(),
     preferences=get_preferences_store(),
     set_project_root=set_project_root,
-    is_git_repository=is_git_repository,
-    get_commit_info=get_commit_info,
+    is_git_repository=worker_git_service.is_git_repository,
+    get_commit_info=worker_git_service.get_commit_info,
     format_label=HistoryStore.format_label,
 )
 
@@ -81,13 +81,13 @@ async def handle_host_file_activity_record_request(
     project_root_path = Path(project_path).expanduser().resolve(strict=False)
     candidate_path = Path(_path_value(data)).expanduser().resolve(strict=False)
     try:
-        candidate_path.relative_to(project_root_path)
+        _ = candidate_path.relative_to(project_root_path)
     except ValueError as exc:
         raise PermissionError("file is outside the project root") from exc
 
     scroll_line = _optional_scroll_line(data)
     if scroll_line is not None:
-        history.update_file_scroll_line(project_path, str(candidate_path), scroll_line)
+        _ = history.update_file_scroll_line(project_path, str(candidate_path), scroll_line)
     entry: JsonMap = {
         "path": str(candidate_path),
         "label": HistoryStore.format_label(str(candidate_path)),

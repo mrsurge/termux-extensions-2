@@ -7,7 +7,6 @@ from typing import cast
 from .. import edit_tracker
 from ..diff_helper import invalidate_diff_cache
 from ..explorer.services.file_ops import get_project_root, set_project_root
-from ..git_helper import get_commit_info, is_git_repository
 from ..history_store import HistoryStore
 from ..main_page.backend.project_service import (
     ProjectServiceDeps,
@@ -19,6 +18,7 @@ from ..main_page.backend.state_payload import StatePayloadDeps, build_state_payl
 from ..monaco_editor.editor_backend_services.contracts import JsonMap
 from ..project_sidecar import ProjectSidecar
 from ..stores import get_history_store, get_preferences_store
+from ..worker_services import git_service as worker_git_service
 
 
 def _state_payload_deps() -> StatePayloadDeps:
@@ -26,8 +26,8 @@ def _state_payload_deps() -> StatePayloadDeps:
         history=get_history_store(),
         preferences=get_preferences_store(),
         set_project_root=set_project_root,
-        is_git_repository=is_git_repository,
-        get_commit_info=get_commit_info,
+        is_git_repository=worker_git_service.is_git_repository,
+        get_commit_info=worker_git_service.get_commit_info,
         format_label=HistoryStore.format_label,
     )
 

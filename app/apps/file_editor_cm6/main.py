@@ -21,31 +21,9 @@ from .history_store import HistoryStore
 from .explorer.services import file_ops as _file_ops
 from .explorer.services.file_ops import get_project_root, set_project_root, mark_git_cache_dirty, list_dir
 from .code_server_shell_manager import ensure_code_server_shell
-from .git_helper import (
-    GitError,
-    is_git_repository,
-    get_commit_info,
-    list_branches as git_list_branches,
-    checkout_branch as git_checkout_branch,
-    create_branch as git_create_branch_helper,
-    get_status as git_get_status,
-    stage_all as git_stage_all,
-    unstage_all as git_unstage_all,
-    commit_changes as git_commit_changes,
-    push_changes as git_push_changes,
-    pull_changes as git_pull_changes,
-    stage_paths,
-    unstage_paths,
-    get_commits_for_path,
-    restore_path,
-    get_commits,
-    reset_hard,
-    init_repository,
-    add_remote as git_add_remote,
-    get_origin_url as git_get_origin_url,
-)
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache
+from .worker_services import git_service as worker_git_service
 from .core_read import push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from .core_write import FileMeta, write_full, BaseMismatchError
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
@@ -347,8 +325,8 @@ _STATE_PAYLOAD_DEPS = StatePayloadDeps(
     history=_history_store,
     preferences=_preferences_store,
     set_project_root=set_project_root,
-    is_git_repository=is_git_repository,
-    get_commit_info=get_commit_info,
+    is_git_repository=worker_git_service.is_git_repository,
+    get_commit_info=worker_git_service.get_commit_info,
     format_label=HistoryStore.format_label,
 )
 
@@ -502,10 +480,10 @@ async def _on_startup():  # pyright: ignore[reportUnusedFunction]
 def _get_active_project_root() -> Path:
     project_path = _history_store.get_active_project()
     if not project_path:
-        raise GitError('No project selected')
+        raise RuntimeError('No project selected')
     project = Path(project_path)
     if not project.exists():
-        raise GitError(f'Project "{project_path}" not found')
+        raise RuntimeError(f'Project "{project_path}" not found')
     set_project_root(project_path)
     return project
 
@@ -520,9 +498,7 @@ def _diff_base_payload(project_path: str | None) -> JsonDict:
 
 
 def _status_to_payload(status: object) -> JsonDict:
-    from .git_helper import GitStatus
-
-    return status_to_payload(cast(GitStatus, status))
+    return status_to_payload(cast(worker_git_service.GitStatus, status))
 
 def _get_runtime_metadata() -> JsonDict:
     return get_runtime_metadata()
@@ -538,26 +514,26 @@ _GIT_ROUTES_DEPS = GitRoutesDeps(
     history=_history_store,
     get_active_project_root=_get_active_project_root,
     get_project_root=get_project_root,
-    list_branches=git_list_branches,
-    checkout_branch=git_checkout_branch,
-    create_branch=git_create_branch_helper,
-    get_status=git_get_status,
-    stage_all=git_stage_all,
-    unstage_all=git_unstage_all,
-    commit_changes=git_commit_changes,
-    push_changes=git_push_changes,
-    pull_changes=git_pull_changes,
-    stage_paths=stage_paths,
-    unstage_paths=unstage_paths,
-    get_commits_for_path=get_commits_for_path,
-    restore_path=restore_path,
-    get_commits=get_commits,
-    reset_hard=reset_hard,
-    is_git_repository=is_git_repository,
-    init_repository=init_repository,
-    get_commit_info=get_commit_info,
-    add_remote=git_add_remote,
-    get_origin_url=git_get_origin_url,
+    list_branches=worker_git_service.list_branches,
+    checkout_branch=worker_git_service.checkout_branch,
+    create_branch=worker_git_service.create_branch,
+    get_status=worker_git_service.get_status,
+    stage_all=worker_git_service.stage_all,
+    unstage_all=worker_git_service.unstage_all,
+    commit_changes=worker_git_service.commit_changes,
+    push_changes=worker_git_service.push_changes,
+    pull_changes=worker_git_service.pull_changes,
+    stage_paths=worker_git_service.stage_paths,
+    unstage_paths=worker_git_service.unstage_paths,
+    get_commits_for_path=worker_git_service.get_commits_for_path,
+    restore_path=worker_git_service.restore_path,
+    get_commits=worker_git_service.get_commits,
+    reset_hard=worker_git_service.reset_hard,
+    is_git_repository=worker_git_service.is_git_repository,
+    init_repository=worker_git_service.init_repository,
+    get_commit_info=worker_git_service.get_commit_info,
+    add_remote=worker_git_service.add_remote,
+    get_origin_url=worker_git_service.get_origin_url,
     status_to_payload=_status_to_payload,
     diff_base_payload=_diff_base_payload,
     invalidate_diff_cache=invalidate_diff_cache,
@@ -905,9 +881,8 @@ async def get_editor_state_deprecated():
     project_origin = None
     if active_project and os.path.isdir(active_project):
         try:
-            from . import git_helper
-            if git_helper.is_git_repository(Path(active_project)):
-                project_origin = git_helper.get_origin_url(Path(active_project))
+            if worker_git_service.is_git_repository(Path(active_project)):
+                project_origin = worker_git_service.get_origin_url(Path(active_project))
                 history.set_project_origin(active_project, project_origin)
             else:
                 history.set_project_origin(active_project, None)

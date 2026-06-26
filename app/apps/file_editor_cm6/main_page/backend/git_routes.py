@@ -8,7 +8,7 @@ from typing import Annotated, Protocol, cast
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from ...git_helper import GitBranches, GitCommit, GitError, GitStatus
+from ...worker_services.git_service import GitBranches, GitCommit, GitStatus
 from ...worker_services import git_service as worker_git_service
 from .state_payload import JsonObject
 
@@ -118,7 +118,7 @@ def _commit_payload(commit: GitCommit) -> JsonObject:
     }
 
 
-def _handle_git_error(exc: GitError) -> HTTPException:
+def _handle_git_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
@@ -131,7 +131,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             project_root = deps.get_active_project_root()
             info = deps.list_branches(project_root)
             return {"ok": True, "data": _branches_payload(info)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/checkout", response_model=None)
@@ -143,7 +143,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             project_root = deps.get_active_project_root()
             info = deps.checkout_branch(project_root, name)
             return {"ok": True, "data": _branches_payload(info)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/branch", response_model=None)
@@ -155,7 +155,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             project_root = deps.get_active_project_root()
             info = deps.create_branch(project_root, name)
             return {"ok": True, "data": _branches_payload(info)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.get("/git/status", response_model=None)
@@ -164,7 +164,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             project_root = deps.get_active_project_root()
             status = worker_git_service.get_status(project_root)
             return {"ok": True, "data": deps.status_to_payload(status)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.get("/git/diff_base", response_model=None)
@@ -186,12 +186,12 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
         if ref != "HEAD":
             try:
                 commit = deps.get_commit_info(project_root, ref)
-            except GitError as exc:
+            except Exception as exc:
                 raise _handle_git_error(exc) from exc
             if not commit:
                 raise HTTPException(status_code=400, detail="Commit not found")
 
-        deps.history.set_diff_base(project_path, ref)
+        _ = deps.history.set_diff_base(project_path, ref)
         deps.invalidate_diff_cache(project_root)
         deps.mark_git_cache_dirty(project_root)
         return {"ok": True, "data": deps.diff_base_payload(project_path)}
@@ -202,7 +202,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             project_root = deps.get_active_project_root()
             status = deps.stage_all(project_root)
             return {"ok": True, "data": deps.status_to_payload(status)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/unstage_all", response_model=None)
@@ -211,7 +211,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             project_root = deps.get_active_project_root()
             status = deps.unstage_all(project_root)
             return {"ok": True, "data": deps.status_to_payload(status)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/commit", response_model=None)
@@ -224,7 +224,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             project_root = deps.get_active_project_root()
             status = deps.commit_changes(project_root, message, amend=amend)
             return {"ok": True, "data": deps.status_to_payload(status)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/push", response_model=None)
@@ -236,7 +236,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             project_root = deps.get_active_project_root()
             status = deps.push_changes(project_root, remote=remote, branch=branch, force=force)
             return {"ok": True, "data": deps.status_to_payload(status)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/pull", response_model=None)
@@ -248,7 +248,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             project_root = deps.get_active_project_root()
             status = deps.pull_changes(project_root, remote=remote, branch=branch, rebase=rebase)
             return {"ok": True, "data": deps.status_to_payload(status)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/stage", response_model=None)
@@ -261,7 +261,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             status = deps.stage_paths(project_root, paths)
             deps.mark_git_cache_dirty(project_root)
             return {"ok": True, "data": deps.status_to_payload(status)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/unstage", response_model=None)
@@ -274,16 +274,19 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             status = deps.unstage_paths(project_root, paths)
             deps.mark_git_cache_dirty(project_root)
             return {"ok": True, "data": deps.status_to_payload(status)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.get("/git/commits_for_path", response_model=None)
-    async def git_commits_for_path(path: str = Query(...), limit: int = Query(20)) -> JsonObject:
+    async def git_commits_for_path(
+        path: Annotated[str, Query()],
+        limit: Annotated[int, Query()] = 20,
+    ) -> JsonObject:
         try:
             project_root = deps.get_active_project_root()
             commits = deps.get_commits_for_path(project_root, path, limit)
             return {"ok": True, "data": [_commit_payload(commit) for commit in commits]}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/restore", response_model=None)
@@ -298,7 +301,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             deps.mark_git_cache_dirty(project_root)
             deps.invalidate_diff_cache(project_root, path)
             return {"ok": True, "data": {"path": path, "commit": commit}}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.get("/git/commits", response_model=None)
@@ -307,7 +310,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             project_root = deps.get_active_project_root()
             commits = deps.get_commits(project_root, 50)
             return {"ok": True, "data": [_commit_payload(commit) for commit in commits]}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/reset_hard", response_model=None)
@@ -319,17 +322,17 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             deps.mark_git_cache_dirty(project_root)
             deps.invalidate_diff_cache(project_root)
             return {"ok": True, "data": deps.status_to_payload(status)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.get("/git/is_repo", response_model=None)
     async def git_is_repo() -> JsonObject:
         try:
             project_root = deps.get_active_project_root()
-            is_repo = worker_git_service.is_git_repository(project_root)
+            is_repo = deps.is_git_repository(project_root)
             return {"ok": True, "data": {"is_repo": is_repo}}
-        except Exception:
-            return {"ok": True, "data": {"is_repo": False}}
+        except Exception as exc:
+            raise _handle_git_error(exc) from exc
 
     @router.post("/git/init", response_model=None)
     async def git_init_route() -> JsonObject:
@@ -338,7 +341,7 @@ def create_git_router(deps: GitRoutesDeps) -> APIRouter:
             status = deps.init_repository(project_root)
             deps.mark_git_cache_dirty(project_root)
             return {"ok": True, "data": deps.status_to_payload(status)}
-        except GitError as exc:
+        except Exception as exc:
             raise _handle_git_error(exc) from exc
 
     @router.post("/git/remote/add", response_model=None)

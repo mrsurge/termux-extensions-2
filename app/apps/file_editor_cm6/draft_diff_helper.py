@@ -57,7 +57,7 @@ def compute_draft_diff(file_path: str, draft_content: str, disk_content: str) ->
     Compare draft content against disk content.
     Returns a payload compatible with the frontend's diff decoration engine.
     
-    Payload format matches git_helper.collect_diff:
+    Payload format matches the legacy commit-diff decoration shape:
       {
         "hunks": [
           {

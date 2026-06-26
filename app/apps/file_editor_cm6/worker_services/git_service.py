@@ -119,6 +119,19 @@ class GitBranchList(TypedDict):
     branches: list[GitBranchItem]
 
 
+class GitRemoteItem(TypedDict):
+    name: str
+    fetchUrl: str | None
+    pushUrl: str | None
+
+
+class GitRemoteList(TypedDict):
+    dto: Literal["GitRemoteList"]
+    version: int
+    root: str
+    remotes: list[GitRemoteItem]
+
+
 class GitHistoryCommit(TypedDict):
     id: str
     short: str
@@ -179,6 +192,37 @@ class GitPathIndex(TypedDict):
     paths: list[str]
     source: str
     truncated: bool
+
+
+class GitDiffHunkLine(TypedDict):
+    type: str
+    text: str
+
+
+class GitDiffHunk(TypedDict):
+    oldStart: int
+    oldLines: int
+    newStart: int
+    newLines: int
+    lines: list[GitDiffHunkLine]
+
+
+class GitDiffHunksSummary(TypedDict):
+    added: int
+    deleted: int
+    tracked: bool
+
+
+class GitDiffHunks(TypedDict, total=False):
+    dto: Literal["GitDiffHunks"]
+    version: int
+    root: str
+    projectGeneration: int | None
+    relativePath: str
+    base: str
+    hunks: list[GitDiffHunk]
+    summary: GitDiffHunksSummary
+    error: str
 
 
 class GitJobStarted(TypedDict):
@@ -393,6 +437,75 @@ def list_branches(project_root: Path) -> GitBranches:
     return GitBranches(current=branch_list["current"] or "HEAD", branches=names)
 
 
+def checkout_branch(project_root: Path, name: str) -> GitBranches:
+    """Checkout a branch/ref through service.git and return the fresh branch list."""
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise RuntimeError("Branch name required")
+    _ = _coerce_mutation(
+        _call_git_provider(
+            "git.branchCheckout",
+            project_root,
+            {"name": normalized_name},
+        ),
+        expected_operation="branchCheckout",
+    )
+    return list_branches(project_root)
+
+
+def create_branch(project_root: Path, name: str) -> GitBranches:
+    """Create and checkout a branch through service.git, preserving legacy UI behavior."""
+    normalized_name = name.strip()
+    if not normalized_name:
+        raise RuntimeError("Branch name required")
+    _ = _coerce_mutation(
+        _call_git_provider(
+            "git.branchCreate",
+            project_root,
+            {"name": normalized_name},
+        ),
+        expected_operation="branchCreate",
+    )
+    _ = _coerce_mutation(
+        _call_git_provider(
+            "git.branchCheckout",
+            project_root,
+            {"name": normalized_name},
+        ),
+        expected_operation="branchCheckout",
+    )
+    return list_branches(project_root)
+
+
+def get_remote_list(project_root: Path) -> GitRemoteList:
+    """Return remotes from service.git."""
+    return _coerce_remote_list(_call_git_provider("git.remoteList", project_root, {}))
+
+
+def get_origin_url(project_root: Path) -> str | None:
+    """Return the origin fetch URL from service.git, if configured."""
+    for remote in get_remote_list(project_root)["remotes"]:
+        if remote["name"] == "origin":
+            return remote["fetchUrl"] or remote["pushUrl"]
+    return None
+
+
+def add_remote(project_root: Path, name: str, url: str) -> None:
+    """Add a remote through service.git."""
+    normalized_name = name.strip()
+    normalized_url = url.strip()
+    if not normalized_name or not normalized_url:
+        raise RuntimeError("Name and URL required")
+    _ = _coerce_mutation(
+        _call_git_provider(
+            "git.remoteAdd",
+            project_root,
+            {"name": normalized_name, "url": normalized_url},
+        ),
+        expected_operation="remoteAdd",
+    )
+
+
 def get_commits(project_root: Path, limit: int = 50) -> list[GitCommit]:
     """Return recent commit history from service.git."""
     history = _coerce_history(
@@ -400,6 +513,36 @@ def get_commits(project_root: Path, limit: int = 50) -> list[GitCommit]:
             "git.history",
             project_root,
             {"limit": max(1, limit)},
+        )
+    )
+    commits: list[GitCommit] = []
+    for commit in history["commits"]:
+        full_hash = commit["id"]
+        commits.append(
+            GitCommit(
+                hash=full_hash,
+                short_hash=commit["short"] or full_hash[:7],
+                summary=commit["summary"] or "",
+                author=commit["authorName"] or "",
+                date=str(commit["time"]),
+            )
+        )
+    return commits
+
+
+def get_commits_for_path(project_root: Path, path: str, limit: int = 20) -> list[GitCommit]:
+    """Return recent commit history for one path from service.git."""
+    normalized_path = path.strip().replace("\\", "/")
+    if not normalized_path:
+        return []
+    history = _coerce_history(
+        _call_git_provider(
+            "git.history",
+            project_root,
+            {
+                "limit": max(1, limit),
+                "path": normalized_path,
+            },
         )
     )
     commits: list[GitCommit] = []
@@ -455,6 +598,27 @@ def get_path_index(project_root: Path, *, limit: int = 50_000) -> GitPathIndex:
     )
 
 
+def get_diff_hunks(
+    project_root: Path,
+    rel_path: str,
+    base_ref: str | None = None,
+) -> GitDiffHunks:
+    """Return current diff hunks for one path from service.git."""
+    normalized_rel = rel_path.strip().replace("\\", "/")
+    if not normalized_rel:
+        raise RuntimeError("service.git git.diff.hunks requires relativePath")
+    return _coerce_diff_hunks(
+        _call_git_provider(
+            "git.diff.hunks",
+            project_root,
+            {
+                "relativePath": normalized_rel,
+                "base": (base_ref or "HEAD").strip() or "HEAD",
+            },
+        )
+    )
+
+
 def new_git_job_op_id(job_type: str) -> str:
     """Create the Explorer-visible operation id used to track pipe Git jobs."""
     normalized_type = job_type.strip().replace(".", "_") or "git_job"
@@ -481,6 +645,27 @@ def start_push_job(
     )
 
 
+def push_changes(
+    project_root: Path,
+    remote: str | None = None,
+    branch: str | None = None,
+    force: bool = False,
+) -> GitStatus:
+    """Push through synchronous service.git and return a fresh status."""
+    if force:
+        raise RuntimeError("service.git git.push does not support force yet")
+    params: JsonObject = {}
+    if remote:
+        params["remote"] = remote
+    if branch:
+        params["branch"] = branch
+    _ = _coerce_mutation(
+        _call_git_provider("git.push", project_root, params),
+        expected_operation="push",
+    )
+    return get_status(project_root)
+
+
 def start_pull_job(
     project_root: Path,
     *,
@@ -499,6 +684,27 @@ def start_pull_job(
         _call_git_provider("git.pull.start", project_root, params, op_id=op_id),
         expected_operation="pull",
     )
+
+
+def pull_changes(
+    project_root: Path,
+    remote: str | None = None,
+    branch: str | None = None,
+    rebase: bool = False,
+) -> GitStatus:
+    """Pull through synchronous service.git and return a fresh status."""
+    if rebase:
+        raise RuntimeError("service.git git.pull does not support rebase yet")
+    params: JsonObject = {}
+    if remote:
+        params["remote"] = remote
+    if branch:
+        params["branch"] = branch
+    _ = _coerce_mutation(
+        _call_git_provider("git.pull", project_root, params),
+        expected_operation="pull",
+    )
+    return get_status(project_root)
 
 
 def start_clone_job(
@@ -671,6 +877,32 @@ def _coerce_branch_list(value: object) -> GitBranchList:
     }
 
 
+def _coerce_remote_list(value: object) -> GitRemoteList:
+    data = _as_object(value)
+    if data.get("dto") != "GitRemoteList":
+        raise RuntimeError("service.git returned unexpected GitRemoteList DTO")
+    remotes: list[GitRemoteItem] = []
+    raw_remotes = data.get("remotes")
+    if isinstance(raw_remotes, list):
+        for item in cast(list[object], raw_remotes):
+            remote = _as_object(item)
+            name = remote.get("name")
+            if isinstance(name, str) and name:
+                remotes.append(
+                    {
+                        "name": name,
+                        "fetchUrl": _optional_str(remote.get("fetchUrl")),
+                        "pushUrl": _optional_str(remote.get("pushUrl")),
+                    }
+                )
+    return {
+        "dto": "GitRemoteList",
+        "version": _int_value(data.get("version"), default=1),
+        "root": _required_string(data.get("root"), "service.git returned invalid remote root"),
+        "remotes": remotes,
+    }
+
+
 def _coerce_history(value: object) -> GitHistoryResult:
     data = _as_object(value)
     if data.get("dto") != "GitHistoryResult":
@@ -780,6 +1012,57 @@ def _coerce_path_index(value: object) -> GitPathIndex:
         "source": source,
         "truncated": bool(data.get("truncated")),
     }
+
+
+def _coerce_diff_hunks(value: object) -> GitDiffHunks:
+    data = _as_object(value)
+    if data.get("dto") != "GitDiffHunks":
+        raise RuntimeError("service.git returned unexpected GitDiffHunks DTO")
+    hunks: list[GitDiffHunk] = []
+    raw_hunks = data.get("hunks")
+    if isinstance(raw_hunks, list):
+        for item in cast(list[object], raw_hunks):
+            hunk = _as_object(item)
+            lines: list[GitDiffHunkLine] = []
+            raw_lines = hunk.get("lines")
+            if isinstance(raw_lines, list):
+                for raw_line in cast(list[object], raw_lines):
+                    line = _as_object(raw_line)
+                    line_type = line.get("type")
+                    text = line.get("text")
+                    if isinstance(line_type, str) and isinstance(text, str):
+                        lines.append({"type": line_type, "text": text})
+            hunks.append(
+                {
+                    "oldStart": _int_value(hunk.get("oldStart")),
+                    "oldLines": _int_value(hunk.get("oldLines")),
+                    "newStart": _int_value(hunk.get("newStart")),
+                    "newLines": _int_value(hunk.get("newLines")),
+                    "lines": lines,
+                }
+            )
+    summary = _as_object(data.get("summary"))
+    result: GitDiffHunks = {
+        "dto": "GitDiffHunks",
+        "version": _int_value(data.get("version"), default=1),
+        "root": _required_string(data.get("root"), "service.git returned invalid diff root"),
+        "projectGeneration": _optional_int(data.get("projectGeneration")),
+        "relativePath": _required_string(
+            data.get("relativePath"),
+            "service.git returned invalid diff relativePath",
+        ),
+        "base": _optional_str(data.get("base")) or "HEAD",
+        "hunks": hunks,
+        "summary": {
+            "added": _int_value(summary.get("added")),
+            "deleted": _int_value(summary.get("deleted")),
+            "tracked": bool(summary.get("tracked")),
+        },
+    }
+    error = _optional_str(data.get("error"))
+    if error:
+        result["error"] = error
+    return result
 
 
 def _coerce_job_started(value: object, *, expected_operation: str) -> GitJobStarted:

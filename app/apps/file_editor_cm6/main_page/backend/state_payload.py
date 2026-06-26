@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from ...git_helper import GitCommit, GitError, GitStatus
 from ...open_state_backend import read_sidecar_open_state
+from ...worker_services.git_service import GitCommit, GitStatus
 
 JsonObject = dict[str, object]
 
@@ -52,7 +52,7 @@ def build_diff_base_payload(deps: StatePayloadDeps, project_path: str | None) ->
             mode = "head" if base_ref == "HEAD" else "detached"
             try:
                 commit = deps.get_commit_info(root_path, base_ref)
-            except GitError:
+            except Exception:
                 commit = None
             if commit:
                 commit_info = {
@@ -105,7 +105,7 @@ def build_state_payload(deps: StatePayloadDeps) -> JsonObject:
     else:
         # Keep the worker runtime root aligned with the active project state.
         try:
-            deps.set_project_root(project_path)
+            _ = deps.set_project_root(project_path)
         except Exception:
             project_exists = False
             project_message = f'Project "{project_label or project_path}" not accessible.'

@@ -8,17 +8,14 @@ import os
 import stat
 import threading
 import time
-import shutil
 from typing import TypedDict, cast
 
 from app.apps.file_editor_cm6.draft_index_sidecar import DraftIndexSidecar
 from ...worker_services import git_service as worker_git_service
+from . import project_root_state
 
 # Shared state lock: list_dir and git/draft caches can be accessed from multiple threads.
 _STATE_LOCK = threading.RLock()
-
-# Global project root for this app (default: HOME)
-_project_root = Path.home()
 
 
 class DraftCacheEntry(TypedDict):
@@ -66,6 +63,17 @@ class FsDirectoryListing(TypedDict, total=False):
     resolvedPath: str
     projectGeneration: int | None
     entries: list[FsDirectoryEntry]
+
+
+class FsMutationResult(TypedDict, total=False):
+    dto: str
+    version: int
+    root: str
+    projectGeneration: int | None
+    operation: str
+    ok: bool
+    changedPaths: list[str]
+    absolutePaths: list[str]
 
 
 # Draft index cache (loaded from disk-backed DraftIndexSidecar).
@@ -121,19 +129,12 @@ def mark_draft_cache_dirty(project_root: Path | None = None) -> None:
 
 def set_project_root(path: str) -> Path:
     """Set the project root directory after validation."""
-    p = Path(path).expanduser().resolve()
-    if not p.exists() or not p.is_dir():
-        raise ValueError("project path must be an existing directory")
-    global _project_root
-    with _STATE_LOCK:
-        _project_root = p
-    return p
+    return project_root_state.set_project_root(path)
 
 
 def get_project_root() -> Path:
     """Get the current project root directory."""
-    with _STATE_LOCK:
-        return _project_root
+    return project_root_state.get_project_root()
 
 
 def build_fs_directory_listing(rel: str = ".") -> FsDirectoryListing:
@@ -246,7 +247,9 @@ def list_dir(rel: str = ".") -> dict[str, object]:
     import time as _time
 
     start = _time.perf_counter()
-    listing = build_fs_directory_listing(rel)
+    from . import fs_service_client
+
+    listing = cast(FsDirectoryListing, cast(object, fs_service_client.list_directory(rel)))
     payload = explorer_listing_from_fs_directory_listing(listing)
     total = (_time.perf_counter() - start) * 1000
     if total > 50:
@@ -260,7 +263,7 @@ def _resolve_project_directory(root: Path, rel: str) -> Path:
     base = (root / rel).resolve()
     root_resolved = root.resolve()
     try:
-        base.relative_to(root_resolved)
+        _ = base.relative_to(root_resolved)
     except ValueError as exc:
         raise ValueError("dir outside project root") from exc
     if not base.exists() or not base.is_dir():
@@ -459,77 +462,28 @@ def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
     return rel.as_posix()
 
 def create_directory(parent_rel: str, name: str) -> dict[str, object]:
-    """Create a new directory within parent_rel."""
-    root = get_project_root()
-    parent = (root / parent_rel).resolve()
-    
-    if not str(parent).startswith(str(root.resolve())):
-        raise ValueError("parent outside project root")
-    if not parent.is_dir():
-        raise ValueError("parent is not a directory")
-    
-    new_dir = parent / name
-    if new_dir.exists():
-        raise ValueError(f"'{name}' already exists")
-    
-    new_dir.mkdir(parents=False, exist_ok=False)
-    rel_path = str(new_dir.relative_to(root))
-    return {'rel': rel_path, 'name': name}
+    """Create a new directory through service.fs."""
+    from . import fs_service_client
+
+    return fs_service_client.create_directory(parent_rel, name)
 
 def create_file(parent_rel: str, name: str) -> dict[str, object]:
-    """Create a new empty file within parent_rel."""
-    root = get_project_root()
-    parent = (root / parent_rel).resolve()
-    
-    if not str(parent).startswith(str(root.resolve())):
-        raise ValueError("parent outside project root")
-    if not parent.is_dir():
-        raise ValueError("parent is not a directory")
-    
-    new_file = parent / name
-    if new_file.exists():
-        raise ValueError(f"'{name}' already exists")
-    
-    new_file.touch(exist_ok=False)
-    rel_path = str(new_file.relative_to(root))
-    return {'rel': rel_path, 'name': name}
+    """Create a new empty file through service.fs."""
+    from . import fs_service_client
+
+    return fs_service_client.create_file(parent_rel, name)
 
 def rename_entry(rel: str, new_name: str) -> dict[str, object]:
-    """Rename a file or directory to new_name within same parent."""
-    root = get_project_root()
-    old_path = (root / rel).resolve()
-    
-    if not str(old_path).startswith(str(root.resolve())):
-        raise ValueError("path outside project root")
-    if not old_path.exists():
-        raise ValueError("path does not exist")
-    
-    parent = old_path.parent
-    new_path = parent / new_name
-    
-    if new_path.exists():
-        raise ValueError(f"'{new_name}' already exists")
-    
-    old_path.rename(new_path)
-    new_rel = str(new_path.relative_to(root))
-    return {'old_rel': rel, 'new_rel': new_rel, 'new_name': new_name}
+    """Rename a file or directory through service.fs."""
+    from . import fs_service_client
+
+    return fs_service_client.rename_entry(rel, new_name)
 
 def delete_entry(rel: str) -> dict[str, object]:
-    """Delete a file or directory."""
-    root = get_project_root()
-    target = (root / rel).resolve()
-    
-    if not str(target).startswith(str(root.resolve())):
-        raise ValueError("path outside project root")
-    if not target.exists():
-        raise ValueError("path does not exist")
-    
-    if target.is_dir():
-        shutil.rmtree(target)
-    else:
-        target.unlink()
-    
-    return {'rel': rel, 'deleted': True}
+    """Delete a file or directory through service.fs."""
+    from . import fs_service_client
+
+    return fs_service_client.delete_entry(rel)
 
 def batch_delete(rels: list[str]) -> dict[str, object]:
     """Delete multiple entries."""
@@ -543,46 +497,16 @@ def batch_delete(rels: list[str]) -> dict[str, object]:
     return {'results': results}
 
 def copy_entry(rel: str, dest_dir_path: str) -> dict[str, object]:
-    """Copy file/dir from rel to dest_dir_path."""
-    root = get_project_root()
-    source = (root / rel).resolve()
-    dest_dir = Path(dest_dir_path).resolve()
-    
-    if not str(source).startswith(str(root.resolve())):
-        raise ValueError("source outside project root")
-    if not source.exists():
-        raise ValueError("source does not exist")
-    
-    dest = dest_dir / source.name
-    if dest.exists():
-        raise ValueError(f"'{source.name}' already exists in destination")
-    
-    if source.is_dir():
-        shutil.copytree(source, dest)
-    else:
-        shutil.copy2(source, dest)
-    
-    return {'source_rel': rel, 'dest_path': str(dest)}
+    """Copy file/dir from rel to dest_dir_path through service.fs."""
+    from . import fs_service_client
+
+    return fs_service_client.copy_entry(rel, dest_dir_path)
 
 def move_entry(rel: str, dest_dir_path: str) -> dict[str, object]:
-    """Move file/dir from rel to dest_dir_path."""
-    root = get_project_root()
-    source = (root / rel).resolve()
-    dest_dir = Path(dest_dir_path).resolve()
-    
-    if not str(source).startswith(str(root.resolve())):
-        raise ValueError("source outside project root")
-    if not source.exists():
-        raise ValueError("source does not exist")
-    
-    dest = dest_dir / source.name
-    if dest.exists():
-        raise ValueError(f"'{source.name}' already exists in destination")
-    
-    shutil.move(str(source), str(dest))
-    
-    new_rel = str(dest.relative_to(root)) if str(dest).startswith(str(root)) else None
-    return {'old_rel': rel, 'new_path': str(dest), 'new_rel': new_rel}
+    """Move file/dir from rel to dest_dir_path through service.fs."""
+    from . import fs_service_client
+
+    return fs_service_client.move_entry(rel, dest_dir_path)
 
 def batch_copy(rels: list[str], dest_dir_path: str) -> dict[str, object]:
     """Copy multiple entries to dest_dir_path."""
@@ -607,25 +531,10 @@ def batch_move(rels: list[str], dest_dir_path: str) -> dict[str, object]:
     return {'results': results}
 
 def create_project(parent_path_str: str, name: str) -> dict[str, object]:
-    """Create a new project directory."""
-    if not name or not name.strip():
-        raise ValueError("Project name cannot be empty")
+    """Create a new project directory through service.fs."""
+    from . import fs_service_client
 
-    parent_path = Path(parent_path_str).expanduser().resolve()
-
-    if not parent_path.is_dir():
-        raise ValueError("Parent path is not a valid directory.")
-
-    new_project_path = parent_path / name
-    if new_project_path.exists():
-        raise ValueError(f"Directory '{name}' already exists in the selected location.")
-
-    new_project_path.mkdir(parents=True, exist_ok=False)
-    
-    # Optional: Add boilerplate files here if needed
-    # (new_project_path / "README.md").write_text("# My New Project")
-
-    return {'path': str(new_project_path)}
+    return fs_service_client.create_project(parent_path_str, name)
 
 # --- Inbound Operations (Importing) ---
 # These functions are specifically for "Copy From" / "Move From" operations where
@@ -633,61 +542,14 @@ def create_project(parent_path_str: str, name: str) -> dict[str, object]:
 # destination is strictly inside the project root.
 
 def copy_entry_inbound(abs_source: str, dest_rel: str) -> dict[str, object]:
-    """
-    Copy a file or directory from an absolute path (external) INTO the project.
-    Source can be anywhere; Destination must be inside project root.
-    """
-    root = get_project_root()
-    source = Path(abs_source).resolve()
-    dest_dir = (root / dest_rel).resolve()
+    """Copy an external source into the project through service.fs."""
+    from . import fs_service_client
 
-    if not source.exists():
-        raise ValueError(f"Source path does not exist: {abs_source}")
-
-    # Enforce destination is inside project root
-    if not str(dest_dir).startswith(str(root.resolve())):
-        raise ValueError("Destination is outside project root")
-    
-    if not dest_dir.is_dir():
-        raise ValueError("Destination is not a directory")
-
-    dest = dest_dir / source.name
-    if dest.exists():
-        raise ValueError(f"'{source.name}' already exists in destination")
-
-    if source.is_dir():
-        shutil.copytree(source, dest)
-    else:
-        shutil.copy2(source, dest)
-
-    new_rel = str(dest.relative_to(root))
-    return {'source_path': str(source), 'dest_rel': new_rel}
+    return fs_service_client.copy_entry_inbound(abs_source, dest_rel)
 
 
 def move_entry_inbound(abs_source: str, dest_rel: str) -> dict[str, object]:
-    """
-    Move a file or directory from an absolute path (external) INTO the project.
-    Source can be anywhere; Destination must be inside project root.
-    """
-    root = get_project_root()
-    source = Path(abs_source).resolve()
-    dest_dir = (root / dest_rel).resolve()
+    """Move an external source into the project through service.fs."""
+    from . import fs_service_client
 
-    if not source.exists():
-        raise ValueError(f"Source path does not exist: {abs_source}")
-
-    # Enforce destination is inside project root
-    if not str(dest_dir).startswith(str(root.resolve())):
-        raise ValueError("Destination is outside project root")
-    
-    if not dest_dir.is_dir():
-        raise ValueError("Destination is not a directory")
-
-    dest = dest_dir / source.name
-    if dest.exists():
-        raise ValueError(f"'{source.name}' already exists in destination")
-
-    shutil.move(str(source), str(dest))
-
-    new_rel = str(dest.relative_to(root))
-    return {'source_path': str(source), 'dest_rel': new_rel}
+    return fs_service_client.move_entry_inbound(abs_source, dest_rel)
