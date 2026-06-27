@@ -4,7 +4,6 @@
 from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-import os
 import stat
 import threading
 import time
@@ -63,17 +62,6 @@ class FsDirectoryListing(TypedDict, total=False):
     resolvedPath: str
     projectGeneration: int | None
     entries: list[FsDirectoryEntry]
-
-
-class FsMutationResult(TypedDict, total=False):
-    dto: str
-    version: int
-    root: str
-    projectGeneration: int | None
-    operation: str
-    ok: bool
-    changedPaths: list[str]
-    absolutePaths: list[str]
 
 
 # Draft index cache (loaded from disk-backed DraftIndexSidecar).
@@ -137,56 +125,6 @@ def get_project_root() -> Path:
     return project_root_state.get_project_root()
 
 
-def build_fs_directory_listing(rel: str = ".") -> FsDirectoryListing:
-    """Build the transport-neutral filesystem DTO used by pipe services."""
-    root = get_project_root()
-    base = _resolve_project_directory(root, rel)
-    entries: list[FsDirectoryEntry] = []
-
-    with os.scandir(base) as it:
-        for e in it:
-            try:
-                info = e.stat(follow_symlinks=False)
-                entry_type = _fs_entry_type(e)
-                entry_path = base / e.name
-                rel_path = str(entry_path.relative_to(root))
-                symlink_target, symlink_target_exists, symlink_target_type = (
-                    _symlink_metadata(entry_path) if entry_type == "symlink" else (None, None, None)
-                )
-                mtime = int(info.st_mtime)
-                entries.append(
-                    {
-                        "name": e.name,
-                        "path": str(entry_path),
-                        "relativePath": rel_path,
-                        "kind": entry_type,
-                        "type": entry_type,
-                        "size": int(info.st_size),
-                        "mtime": mtime,
-                        "mtimeMs": mtime * 1000,
-                        "isSymlink": e.is_symlink(),
-                        "symlinkTarget": symlink_target,
-                        "symlinkTargetExists": symlink_target_exists,
-                        "symlinkTargetType": symlink_target_type,
-                        "mode": int(info.st_mode),
-                    }
-                )
-            except Exception:
-                # Preserve existing Explorer behavior: inaccessible entries are skipped.
-                continue
-
-    entries.sort(key=lambda x: (x.get("type") != "directory", str(x.get("name") or "").lower()))
-    return {
-        "dto": "FsDirectoryListing",
-        "version": 1,
-        "root": str(root),
-        "path": str(base),
-        "resolvedPath": str(base.resolve()),
-        "projectGeneration": None,
-        "entries": entries,
-    }
-
-
 def explorer_listing_from_fs_directory_listing(listing: FsDirectoryListing) -> dict[str, object]:
     """Adapt the pipe DTO to the current `explorer.list.updated` payload."""
     root = Path(str(listing.get("root") or get_project_root())).expanduser().resolve()
@@ -240,9 +178,7 @@ def list_dir(rel: str = ".") -> dict[str, object]:
     """
     List directory contents relative to project root.
 
-    Returns the existing Explorer RPC payload. Internally this now flows through
-    the `FsDirectoryListing` DTO so the future pipe origin can replace only the
-    DTO producer.
+    Returns the existing Explorer RPC payload using the framework service.fs DTO.
     """
     import time as _time
 
@@ -257,44 +193,6 @@ def list_dir(rel: str = ".") -> dict[str, object]:
         entry_count = len(cast(list[object], entries)) if isinstance(entries, list) else 0
         print(f"[list_dir] {rel}: total={total:.1f}ms, entries={entry_count}")
     return payload
-
-
-def _resolve_project_directory(root: Path, rel: str) -> Path:
-    base = (root / rel).resolve()
-    root_resolved = root.resolve()
-    try:
-        _ = base.relative_to(root_resolved)
-    except ValueError as exc:
-        raise ValueError("dir outside project root") from exc
-    if not base.exists() or not base.is_dir():
-        raise ValueError("not a directory")
-    return base
-
-
-def _fs_entry_type(entry: os.DirEntry[str]) -> str:
-    try:
-        if entry.is_dir(follow_symlinks=False):
-            return "directory"
-        if entry.is_symlink():
-            return "symlink"
-    except PermissionError:
-        return "unknown"
-    return "file"
-
-
-def _symlink_metadata(path: Path) -> tuple[str | None, bool | None, str | None]:
-    try:
-        target = os.readlink(path)
-        resolved = path.parent.joinpath(target).resolve()
-        if resolved.is_dir():
-            target_type = "directory"
-        elif resolved.is_file():
-            target_type = "file"
-        else:
-            target_type = "other"
-        return target, resolved.exists(), target_type
-    except OSError:
-        return None, False, None
 
 
 def _explorer_entry_kind(entry: FsDirectoryEntry) -> str:

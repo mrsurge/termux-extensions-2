@@ -18,8 +18,13 @@ from fastapi.responses import JSONResponse, FileResponse
 import asyncio
 from anyio import to_thread
 from .history_store import HistoryStore
-from .explorer.services import file_ops as _file_ops
-from .explorer.services.file_ops import get_project_root, set_project_root, mark_git_cache_dirty, list_dir
+from .explorer.services.file_ops import (
+    _normalize_rel_path as _file_ops_normalize_rel_path,
+    get_project_root,
+    list_dir,
+    mark_git_cache_dirty,
+    set_project_root,
+)
 from .code_server_shell_manager import ensure_code_server_shell
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache
@@ -84,24 +89,8 @@ def _str_list(value: object) -> list[str]:
     return [item for item in _json_list(value) if isinstance(item, str)]
 
 
-def _pipe_fs_list_directory(envelope: "PipeEnvelope") -> JsonDict:
-    params = _json_object(envelope.params)
-    requested_root_raw = _str_value(params.get("root")) or _str_value(envelope.workspace_root)
-    project_root = get_project_root().resolve()
-    if requested_root_raw:
-        requested_root = Path(requested_root_raw).expanduser().resolve()
-        if requested_root != project_root:
-            raise ValueError("fs.listDirectory root does not match the active Code TE2 project")
-
-    rel = _str_value(params.get("path"), ".") or "."
-    listing = dict(_file_ops.build_fs_directory_listing(rel))
-    listing["projectGeneration"] = envelope.project_generation
-    return listing
-
-
 def te2_pipe_dispatch(envelope: "PipeEnvelope") -> JsonDict | None:
-    if envelope.method == "fs.listDirectory":
-        return _pipe_fs_list_directory(envelope)
+    del envelope
     return None
 
 
@@ -141,7 +130,7 @@ class EditTrackerStatusFn(Protocol):
 
 
 def _normalize_rel_path(project_root: Path, raw_path: str) -> str:
-    fn = cast(NormalizeRelPathFn, cast(object, getattr(_file_ops, "_normalize_rel_path")))
+    fn = cast(NormalizeRelPathFn, cast(object, _file_ops_normalize_rel_path))
     return fn(project_root, raw_path)
 
 
