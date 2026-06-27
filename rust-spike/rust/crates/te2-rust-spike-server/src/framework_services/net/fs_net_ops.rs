@@ -25,6 +25,8 @@ async fn browse(Query(request): Query<BrowseRequest>) -> Response {
 fn browse_error_response(error: BrowseError) -> Response {
     match error {
         BrowseError::AccessDenied => crate::json_error(StatusCode::BAD_REQUEST, "Access denied"),
+        BrowseError::AlreadyExists(message) => crate::json_error(StatusCode::CONFLICT, &message),
+        BrowseError::InvalidInput(message) => crate::json_error(StatusCode::BAD_REQUEST, &message),
         BrowseError::UnsupportedSudo => crate::json_error(
             StatusCode::NOT_IMPLEMENTED,
             "sudo browse is not implemented in the Rust spike.",

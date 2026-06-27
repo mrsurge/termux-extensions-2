@@ -30,6 +30,7 @@ app/static/vendor/lsp_servers/android-kotlin-lsp
 .tmp/
 android/app/build
 **/build
+.codex-scratch/
 
 # Local worktrees (not tracked)
 worktrees/monaco-editor-mobile-playground

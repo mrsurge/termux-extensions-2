@@ -241,6 +241,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatches_fs_mutations_to_contract_dtos() {
+        let root = test_root("fs-mutations");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::create_dir_all(root.join("dest")).expect("create dest");
+
+        let created_file = dispatch_request(
+            request(
+                "fs.createFile",
+                json!({ "parentRel": "src", "name": "main.py" }),
+                &root,
+            ),
+            &PipeIdentity::framework_rust(),
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+        assert_eq!(created_file.kind, PipeMessageKind::Response);
+        assert_eq!(
+            created_file
+                .result
+                .as_ref()
+                .and_then(|result| result.get("dto"))
+                .and_then(|value| value.as_str()),
+            Some("FsMutationResult")
+        );
+        assert!(root.join("src/main.py").is_file());
+
+        let renamed = dispatch_request(
+            request(
+                "fs.rename",
+                json!({ "path": "src/main.py", "newName": "renamed.py" }),
+                &root,
+            ),
+            &PipeIdentity::framework_rust(),
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+        assert_eq!(renamed.kind, PipeMessageKind::Response);
+        assert!(root.join("src/renamed.py").is_file());
+
+        let copied = dispatch_request(
+            request(
+                "fs.copy",
+                json!({ "path": "src/renamed.py", "destination": "dest" }),
+                &root,
+            ),
+            &PipeIdentity::framework_rust(),
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+        assert_eq!(copied.kind, PipeMessageKind::Response);
+        assert!(root.join("dest/renamed.py").is_file());
+
+        let deleted = dispatch_request(
+            request("fs.delete", json!({ "path": "dest/renamed.py" }), &root),
+            &PipeIdentity::framework_rust(),
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+        assert_eq!(deleted.kind, PipeMessageKind::Response);
+        assert!(!root.join("dest/renamed.py").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn unknown_method_returns_typed_error() {
         let root = test_root("unknown");
         let response = dispatch_request(

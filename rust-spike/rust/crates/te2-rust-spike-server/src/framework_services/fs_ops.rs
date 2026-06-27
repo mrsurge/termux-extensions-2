@@ -1,7 +1,7 @@
 use super::common::{expand_user_path, home_dir, normalize_lexical, path_to_string};
 use serde::{Deserialize, Serialize};
 use std::{
-    fs,
+    fs, io,
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
@@ -106,9 +106,45 @@ pub(crate) struct FsDirectoryEntry {
     pub(crate) draft_state: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FsMutationRequest {
+    pub(crate) root: Option<String>,
+    pub(crate) path: Option<String>,
+    pub(crate) parent_rel: Option<String>,
+    pub(crate) name: Option<String>,
+    pub(crate) new_name: Option<String>,
+    pub(crate) source: Option<String>,
+    pub(crate) source_path: Option<String>,
+    pub(crate) destination: Option<String>,
+    pub(crate) destination_path: Option<String>,
+    pub(crate) dest_path: Option<String>,
+    pub(crate) dest_rel: Option<String>,
+    pub(crate) project_generation: Option<u64>,
+    #[serde(default, deserialize_with = "super::common::deserialize_boolish")]
+    pub(crate) recursive: bool,
+    #[serde(default, deserialize_with = "super::common::deserialize_boolish")]
+    pub(crate) allow_source_outside_root: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FsMutationResult {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) root: String,
+    pub(crate) project_generation: Option<u64>,
+    pub(crate) operation: &'static str,
+    pub(crate) ok: bool,
+    pub(crate) changed_paths: Vec<String>,
+    pub(crate) absolute_paths: Vec<String>,
+}
+
 #[derive(Debug)]
 pub(crate) enum BrowseError {
     AccessDenied,
+    AlreadyExists(String),
+    InvalidInput(String),
     UnsupportedSudo,
     Io(std::io::Error),
 }
@@ -168,6 +204,119 @@ pub(crate) fn list_directory(
     })
 }
 
+pub(crate) fn create_directory(
+    request: FsMutationRequest,
+) -> Result<FsMutationResult, BrowseError> {
+    let root = mutation_root(request.root.as_deref())?;
+    let parent = path_inside_root(
+        &root,
+        request.parent_rel.as_deref().or(request.path.as_deref()),
+        ".",
+    )?;
+    require_directory(&parent, "parent is not a directory")?;
+    let name = safe_child_name(request.name.as_deref())?;
+    let target = parent.join(name);
+    ensure_missing(&target)?;
+    fs::create_dir(&target)?;
+    Ok(mutation_result(
+        &root,
+        request.project_generation,
+        "createDirectory",
+        vec![target],
+    ))
+}
+
+pub(crate) fn create_file(request: FsMutationRequest) -> Result<FsMutationResult, BrowseError> {
+    let root = mutation_root(request.root.as_deref())?;
+    let parent = path_inside_root(
+        &root,
+        request.parent_rel.as_deref().or(request.path.as_deref()),
+        ".",
+    )?;
+    require_directory(&parent, "parent is not a directory")?;
+    let name = safe_child_name(request.name.as_deref())?;
+    let target = parent.join(name);
+    ensure_missing(&target)?;
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)?;
+    Ok(mutation_result(
+        &root,
+        request.project_generation,
+        "createFile",
+        vec![target],
+    ))
+}
+
+pub(crate) fn rename_entry(request: FsMutationRequest) -> Result<FsMutationResult, BrowseError> {
+    let root = mutation_root(request.root.as_deref())?;
+    let source = path_inside_root(&root, request.path.as_deref(), "")?;
+    ensure_exists(&source)?;
+    let name = safe_child_name(request.new_name.as_deref().or(request.name.as_deref()))?;
+    let target = source
+        .parent()
+        .ok_or_else(|| BrowseError::InvalidInput("path has no parent".to_owned()))?
+        .join(name);
+    ensure_missing(&target)?;
+    fs::rename(&source, &target)?;
+    Ok(mutation_result(
+        &root,
+        request.project_generation,
+        "rename",
+        vec![source, target],
+    ))
+}
+
+pub(crate) fn delete_entry(request: FsMutationRequest) -> Result<FsMutationResult, BrowseError> {
+    let root = mutation_root(request.root.as_deref())?;
+    let target = path_inside_root(&root, request.path.as_deref(), "")?;
+    ensure_exists(&target)?;
+    if target.is_dir() {
+        fs::remove_dir_all(&target)?;
+    } else {
+        fs::remove_file(&target)?;
+    }
+    Ok(mutation_result(
+        &root,
+        request.project_generation,
+        "delete",
+        vec![target],
+    ))
+}
+
+pub(crate) fn copy_entry(request: FsMutationRequest) -> Result<FsMutationResult, BrowseError> {
+    let root = mutation_root(request.root.as_deref())?;
+    let source = source_path(&root, &request)?;
+    ensure_exists(&source)?;
+    let destination_dir = destination_dir(&root, &request)?;
+    let target = destination_dir.join(file_name(&source)?);
+    ensure_missing(&target)?;
+    copy_path(&source, &target)?;
+    Ok(mutation_result(
+        &root,
+        request.project_generation,
+        "copy",
+        vec![target],
+    ))
+}
+
+pub(crate) fn move_entry(request: FsMutationRequest) -> Result<FsMutationResult, BrowseError> {
+    let root = mutation_root(request.root.as_deref())?;
+    let source = source_path(&root, &request)?;
+    ensure_exists(&source)?;
+    let destination_dir = destination_dir(&root, &request)?;
+    let target = destination_dir.join(file_name(&source)?);
+    ensure_missing(&target)?;
+    move_path(&source, &target)?;
+    Ok(mutation_result(
+        &root,
+        request.project_generation,
+        "move",
+        vec![source, target],
+    ))
+}
+
 fn resolve_browse_path(
     raw_path: Option<&str>,
     root: Option<&str>,
@@ -220,6 +369,190 @@ fn resolve_list_directory_path(
     }
 
     Ok((root, path))
+}
+
+fn mutation_root(raw_root: Option<&str>) -> Result<PathBuf, BrowseError> {
+    let home_dir = home_dir();
+    let root = raw_root
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("~");
+    Ok(normalize_lexical(expand_user_path(root, &home_dir)))
+}
+
+fn path_inside_root(
+    root: &Path,
+    raw_path: Option<&str>,
+    default_path: &str,
+) -> Result<PathBuf, BrowseError> {
+    let home_dir = home_dir();
+    let raw = raw_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default_path);
+    if raw.is_empty() {
+        return Err(BrowseError::InvalidInput("path is required".to_owned()));
+    }
+    let candidate = PathBuf::from(raw);
+    let path = if candidate.is_absolute() || raw == "~" || raw.starts_with("~/") {
+        expand_user_path(raw, &home_dir)
+    } else {
+        root.join(candidate)
+    };
+    let normalized = normalize_lexical(path);
+    if !normalized.starts_with(root) {
+        return Err(BrowseError::AccessDenied);
+    }
+    Ok(normalized)
+}
+
+fn source_path(root: &Path, request: &FsMutationRequest) -> Result<PathBuf, BrowseError> {
+    let raw = request
+        .source
+        .as_deref()
+        .or(request.source_path.as_deref())
+        .or(request.path.as_deref());
+    if request.allow_source_outside_root {
+        let raw = raw
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| BrowseError::InvalidInput("source is required".to_owned()))?;
+        Ok(normalize_lexical(expand_user_path(raw, &home_dir())))
+    } else {
+        path_inside_root(root, raw, "")
+    }
+}
+
+fn destination_dir(root: &Path, request: &FsMutationRequest) -> Result<PathBuf, BrowseError> {
+    let destination = request
+        .destination
+        .as_deref()
+        .or(request.destination_path.as_deref())
+        .or(request.dest_path.as_deref())
+        .or(request.dest_rel.as_deref());
+    let destination = path_inside_root(root, destination, ".")?;
+    require_directory(&destination, "destination is not a directory")?;
+    Ok(destination)
+}
+
+fn safe_child_name(raw_name: Option<&str>) -> Result<&str, BrowseError> {
+    let name = raw_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| BrowseError::InvalidInput("name is required".to_owned()))?;
+    let path = Path::new(name);
+    if path.is_absolute()
+        || name.contains('/')
+        || name.contains('\\')
+        || matches!(name, "." | "..")
+        || path.components().count() != 1
+    {
+        return Err(BrowseError::InvalidInput(
+            "name must be a single path segment".to_owned(),
+        ));
+    }
+    Ok(name)
+}
+
+fn file_name(path: &Path) -> Result<&std::ffi::OsStr, BrowseError> {
+    path.file_name()
+        .ok_or_else(|| BrowseError::InvalidInput("source has no file name".to_owned()))
+}
+
+fn ensure_exists(path: &Path) -> Result<(), BrowseError> {
+    if path.exists() {
+        Ok(())
+    } else {
+        Err(BrowseError::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            "path does not exist",
+        )))
+    }
+}
+
+fn ensure_missing(path: &Path) -> Result<(), BrowseError> {
+    if path.exists() {
+        Err(BrowseError::AlreadyExists(format!(
+            "path already exists: {}",
+            path_to_string(path)
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+fn require_directory(path: &Path, message: &str) -> Result<(), BrowseError> {
+    if path.is_dir() {
+        Ok(())
+    } else {
+        Err(BrowseError::InvalidInput(message.to_owned()))
+    }
+}
+
+fn copy_path(source: &Path, target: &Path) -> Result<(), BrowseError> {
+    if source.is_dir() {
+        copy_dir_recursive(source, target)?;
+    } else {
+        let _bytes = fs::copy(source, target)?;
+    }
+    Ok(())
+}
+
+fn move_path(source: &Path, target: &Path) -> Result<(), BrowseError> {
+    match fs::rename(source, target) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            copy_path(source, target)?;
+            if source.is_dir() {
+                fs::remove_dir_all(source)?;
+            } else {
+                fs::remove_file(source)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), BrowseError> {
+    fs::create_dir(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_child = entry.path();
+        let target_child = target.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&source_child, &target_child)?;
+        } else {
+            let _bytes = fs::copy(&source_child, &target_child)?;
+        }
+    }
+    Ok(())
+}
+
+fn mutation_result(
+    root: &Path,
+    project_generation: Option<u64>,
+    operation: &'static str,
+    paths: Vec<PathBuf>,
+) -> FsMutationResult {
+    let mut changed_paths = Vec::new();
+    let mut absolute_paths = Vec::new();
+    for path in paths {
+        let normalized = normalize_lexical(path);
+        absolute_paths.push(path_to_string(&normalized));
+        if let Ok(rel) = normalized.strip_prefix(root) {
+            changed_paths.push(path_to_string(rel));
+        }
+    }
+    FsMutationResult {
+        dto: "FsMutationResult",
+        version: 1,
+        root: path_to_string(root),
+        project_generation,
+        operation,
+        ok: true,
+        changed_paths,
+        absolute_paths,
+    }
 }
 
 fn scan_browse_entries(

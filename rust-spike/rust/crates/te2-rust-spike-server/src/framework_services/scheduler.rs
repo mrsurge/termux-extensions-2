@@ -81,6 +81,49 @@ impl FrameworkServiceScheduler {
         self.spawn_fs(move || fs_ops::list_directory(request)).await
     }
 
+    pub(crate) async fn fs_create_directory(
+        &self,
+        request: fs_ops::FsMutationRequest,
+    ) -> Result<fs_ops::FsMutationResult, fs_ops::BrowseError> {
+        self.fs_write(move || fs_ops::create_directory(request))
+            .await
+    }
+
+    pub(crate) async fn fs_create_file(
+        &self,
+        request: fs_ops::FsMutationRequest,
+    ) -> Result<fs_ops::FsMutationResult, fs_ops::BrowseError> {
+        self.fs_write(move || fs_ops::create_file(request)).await
+    }
+
+    pub(crate) async fn fs_rename(
+        &self,
+        request: fs_ops::FsMutationRequest,
+    ) -> Result<fs_ops::FsMutationResult, fs_ops::BrowseError> {
+        self.fs_write(move || fs_ops::rename_entry(request)).await
+    }
+
+    pub(crate) async fn fs_delete(
+        &self,
+        request: fs_ops::FsMutationRequest,
+    ) -> Result<fs_ops::FsMutationResult, fs_ops::BrowseError> {
+        self.fs_write(move || fs_ops::delete_entry(request)).await
+    }
+
+    pub(crate) async fn fs_copy(
+        &self,
+        request: fs_ops::FsMutationRequest,
+    ) -> Result<fs_ops::FsMutationResult, fs_ops::BrowseError> {
+        self.fs_write(move || fs_ops::copy_entry(request)).await
+    }
+
+    pub(crate) async fn fs_move(
+        &self,
+        request: fs_ops::FsMutationRequest,
+    ) -> Result<fs_ops::FsMutationResult, fs_ops::BrowseError> {
+        self.fs_write(move || fs_ops::move_entry(request)).await
+    }
+
     pub(crate) async fn git_snapshot(
         &self,
         request: git_ops::GitSnapshotRequest,
@@ -556,6 +599,17 @@ impl FrameworkServiceScheduler {
         tokio::task::spawn_blocking(operation)
             .await
             .map_err(|error| fs_ops::BrowseError::Io(std::io::Error::other(error.to_string())))?
+    }
+
+    async fn fs_write<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, fs_ops::BrowseError> + Send + 'static,
+    ) -> Result<T, fs_ops::BrowseError>
+    where
+        T: Send + 'static,
+    {
+        let _permit = self.acquire(self.inner.fs_write.clone()).await?;
+        self.spawn_fs(operation).await
     }
 
     async fn spawn_git<T>(

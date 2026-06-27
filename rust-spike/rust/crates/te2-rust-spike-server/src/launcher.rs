@@ -109,7 +109,7 @@ pub fn launch_app(
                 ctx: ctx.clone(),
                 env: render_env,
             };
-            let rendered_shell = render_shellspec_entry(&document, &entry_name, &input)?;
+            let mut rendered_shell = render_shellspec_entry(&document, &entry_name, &input)?;
             let label = shell
                 .label
                 .clone()
@@ -119,31 +119,35 @@ pub fn launch_app(
             } else {
                 primary_shell_id.clone()
             };
+
+            // App-level readiness is the Python framework parity path for larger apps:
+            // launch the worker, then let /api/apps/{app_id}/readiness become authority.
+            if should_bypass_shellspec_readiness(app, shell) {
+                rendered_shell.readiness = None;
+            }
             let record = manager
-                .spawn_shellspec_entry_with_overrides_blocking(
-                &document,
-                &entry_name,
-                &input,
-                FerrousShellLaunchOverrides {
-                    env: launch_env_overrides,
-                    label: Some(label),
-                    spec_id: Some(format!("app:{}:{entry_name}", app.app_id)),
-                    subgroups: Some(shell_launch_subgroups(
-                        app,
-                        shell,
-                        &rendered_shell.subgroups,
-                        &rendered_shell.env,
-                    )),
-                    ui: build_shell_ui(app, shell),
-                    debug: None,
-                    parent_shell_id,
-                },
-            )
-            .with_context(|| {
-                format!(
-                    "failed to spawn app shell '{entry_name}' through ferrous_framework native manager"
+                .spawn_rendered_shellspec_with_overrides_blocking(
+                    rendered_shell.clone(),
+                    FerrousShellLaunchOverrides {
+                        env: launch_env_overrides,
+                        label: Some(label),
+                        spec_id: Some(format!("app:{}:{entry_name}", app.app_id)),
+                        subgroups: Some(shell_launch_subgroups(
+                            app,
+                            shell,
+                            &rendered_shell.subgroups,
+                            &rendered_shell.env,
+                        )),
+                        ui: build_shell_ui(app, shell),
+                        debug: None,
+                        parent_shell_id,
+                    },
                 )
-            })?;
+                .with_context(|| {
+                    format!(
+                        "failed to spawn app shell '{entry_name}' through ferrous_framework native manager"
+                    )
+                })?;
 
             if is_app_worker_shell(shell) && primary_shell_id.is_none() {
                 primary_shell_id = Some(record.id.clone());
@@ -193,6 +197,11 @@ fn default_shell_label(app: &AppDefinition, shell: &AppShell, entry_name: &str) 
 #[cfg(feature = "ferrous-framework-native")]
 fn is_app_worker_shell(shell: &AppShell) -> bool {
     shell.subgroup.trim() == "app-worker"
+}
+
+#[cfg(feature = "ferrous-framework-native")]
+fn should_bypass_shellspec_readiness(app: &AppDefinition, shell: &AppShell) -> bool {
+    app.readiness_support && is_app_worker_shell(shell)
 }
 
 #[cfg(feature = "ferrous-framework-native")]
@@ -315,5 +324,75 @@ fn json_scalar_string(value: &Value) -> Option<String> {
         Value::Number(value) => Some(value.to_string()),
         Value::String(value) => Some(value.clone()),
         _ => None,
+    }
+}
+
+#[cfg(all(test, feature = "ferrous-framework-native"))]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn shell(subgroup: &str) -> AppShell {
+        AppShell {
+            ref_path: Some("shellspec/app_worker.yaml#app-worker".to_owned()),
+            inline_spec: None,
+            label: None,
+            subgroup: subgroup.to_owned(),
+            wait_ready: true,
+            env: Map::new(),
+            ui: Map::new(),
+        }
+    }
+
+    fn app(readiness_support: bool) -> AppDefinition {
+        AppDefinition {
+            app_id: "example".to_owned(),
+            name: "Example".to_owned(),
+            description: String::new(),
+            dir_name: "example".to_owned(),
+            root_dir: PathBuf::from("/example"),
+            manifest_path: PathBuf::from("/example/manifest.json"),
+            source_kind: "test".to_owned(),
+            source_root: PathBuf::from("/"),
+            asset_base_url: "/apps/by-id/example".to_owned(),
+            entrypoints: Map::new(),
+            shells: Vec::new(),
+            services_path: "services".to_owned(),
+            service_modules: Vec::new(),
+            proxy_shell: None,
+            framework_shell_ui: None,
+            icon_src_raw: String::new(),
+            icon_text: String::new(),
+            icon_emoji: String::new(),
+            fullscreen: false,
+            readiness_support,
+            enabled: true,
+            raw_manifest: Map::new(),
+            registry_errors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn readiness_support_app_worker_uses_app_level_readiness() {
+        assert!(should_bypass_shellspec_readiness(
+            &app(true),
+            &shell("app-worker")
+        ));
+    }
+
+    #[test]
+    fn non_readiness_support_app_worker_keeps_shellspec_readiness() {
+        assert!(!should_bypass_shellspec_readiness(
+            &app(false),
+            &shell("app-worker")
+        ));
+    }
+
+    #[test]
+    fn non_app_worker_shell_keeps_shellspec_readiness() {
+        assert!(!should_bypass_shellspec_readiness(
+            &app(true),
+            &shell("service.worker")
+        ));
     }
 }

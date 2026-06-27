@@ -274,6 +274,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -401,11 +410,12 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "ferrous_framework"
-version = "0.2.8"
-source = "git+https://github.com/mrsurge/ferrous-framework.git?rev=015ab2f#015ab2f300a766df7e1ea34e1d943b20bacdef43"
+version = "0.2.13"
+source = "git+https://github.com/mrsurge/ferrous-framework.git?rev=673c156#673c156a0a1d108b562be5671029a7310cf04684"
 dependencies = [
  "anyhow",
  "axum",
+ "crossbeam-channel",
  "futures-util",
  "getrandom 0.3.4",
  "hmac",
