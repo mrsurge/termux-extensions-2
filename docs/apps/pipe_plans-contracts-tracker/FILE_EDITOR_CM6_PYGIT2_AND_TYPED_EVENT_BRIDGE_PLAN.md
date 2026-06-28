@@ -2,9 +2,18 @@
 
 Date: 2026-06-15
 
-Status: Active planning/tracker document. The historical filename is preserved
-for continuity, but the plan is now about a backend-owned typed runtime control
-plane for `file_editor_cm6`, not a git implementation migration.
+Status: Superseded historical planning/tracker document.
+
+This file was moved under `docs/apps/pipe_plans-contracts-tracker/` for
+continuity. The active direction is now the contract-first pipe-service plan in
+`FILE_EDITOR_CM6_PIPE_SERVICE_MIGRATION_PLAN.md`,
+`PIPE_SERVICE_JSON_RPC_CONTRACT_DRAFT.md`, and
+`PIPE_SERVICE_CONTRACT_TRACKER.md`.
+
+Durable facts from this document have been merged forward where they still
+support the pipe-service boundary. Event-bus tracker phases, pygit2/GitPython as
+the architecture headline, and stdout metrics as a protocol-mode sink are
+deprecated or redirected by the active docs.
 
 ## Goal
 
@@ -244,7 +253,7 @@ Status: Complete for open state, Explorer-facing draft/review, and preferences.
       authority.
 - [x] Convert draft/review decoration refreshes into typed facts plus projectors.
 - [x] Convert preferences changes into typed facts plus lane-local projectors.
-- [ ] Convert sidebar-window state changes into typed facts plus lane-local
+- [x] Convert sidebar-window state changes into typed facts plus lane-local
       projectors.
 - [ ] Preserve store authority: preferences store, history store, project
       sidecars, and open-state backend remain sources of truth.
@@ -324,13 +333,14 @@ Status: Active implementation target.
 - [x] Represent WBA session lifecycle facts:
       `AdapterSessionReset`, `AdapterWorkspaceReady`, and adapter-ready/error
       state via `AdapterStateChanged`.
-- [ ] Keep WBA language-feature requests, document sync, and provider calls on
+- [x] Keep WBA language-feature requests, document sync, and provider calls on
       the direct WBA/editor lane.
 - [x] Convert sidebar-window state changes into typed facts plus UI IPC and
       Sidebar IPC projectors.
-- [ ] Audit UI IPC editor notifications and convert only durable/control-plane
-      state changes; keep focus/blur/IME and other local interaction paths
-      direct.
+- [ ] Audit UI IPC/editor notifications to document intentional direct paths and
+      convert only durable backend-owned state that is still directly emitted by
+      orchestration code. This is not a mandate to move editor hot paths onto the
+      bus.
 - [ ] Add project-switch/reconnect correlation ids across WBA, editor, UI, and
       sidebar projections.
 
@@ -338,7 +348,9 @@ Acceptance:
 
 - Editor, UI IPC, and Sidebar IPC consume backend facts for lifecycle/store
   state instead of being called directly by orchestration services.
-- Editor hot paths and WBA language-feature traffic remain direct.
+- Editor hot paths, WBA language-feature traffic, document sync, provider calls,
+  focus/blur/IME, save request/response, content-open transactions, and
+  connect-time snapshots remain direct.
 - Sidebar window state remains ledger/store-authoritative and can be replayed
   from backend facts.
 
@@ -461,3 +473,61 @@ Use focused checks for each slice:
 
 Do not restart the shared framework server for verification unless the user
 explicitly approves that exact action.
+
+## Git Service Consolidation Addendum
+
+Status: Next cleanup target.
+
+Current state:
+
+- Git facts/events exist for refresh, invalidation, and frontend projection.
+- Git command/helper functions do not all flow through typed event-bus commands.
+- `worker_services/git_service.py` is the newer GitPython-backed read/status
+  service for status snapshots, Explorer decorations, status summary, and HEAD
+  blob reads.
+- `git_helper.py` is still the older hand-rolled direct `git` subprocess helper
+  for branch, stage, unstage, commit, restore, reset, init, history, remotes,
+  worktree-change listing, and shared git result types.
+- `diff_helper.py` and `explorer/search.py` still contain direct git subprocess
+  calls for diff/status/rev-parse and `git ls-files`.
+
+Direction:
+
+- The typed runtime bus remains the control plane for git facts such as
+  `GitSnapshotRequested`, `GitSnapshotChanged`, `GitDiffBaseChanged`, and
+  `GitPathRestored`.
+- Git execution should live behind one backend git service boundary, not across
+  both `git_helper.py` and `worker_services/git_service.py`.
+- Direct hand-written `git` subprocess calls inside `file_editor_cm6` should be
+  removed or replaced by calls through the git service boundary.
+- GitPython is acceptable as the interim adapter for this cleanup; the immediate
+  issue is duplicated/hand-rolled git subprocess wrappers, not event-bus
+  projection.
+
+Planned steps:
+
+- [ ] Move shared git result types/errors out of `git_helper.py` into a neutral
+      module such as `git_types.py`.
+- [ ] Expand the GitPython-backed git service to cover the live command/helper
+      functions currently implemented in `git_helper.py`.
+- [ ] Convert `host/git_backend.py`, `main_page/backend/git_routes.py`,
+      `explorer/handlers/git.py`, `explorer/search.py`, state payload builders,
+      and remaining `main.py` wiring to the unified git service boundary.
+- [ ] Replace direct git subprocess usage in `diff_helper.py` with service calls
+      for repository checks and diff collection.
+- [ ] Replace direct `git ls-files` usage in `explorer/search.py` with a service
+      helper or the existing filesystem search fallback.
+- [ ] Delete or shrink `git_helper.py` once no live callers depend on direct git
+      subprocess execution.
+- [ ] Keep git facts/projectors responsible for ordering, invalidation, refresh,
+      stale-drop, and surface projection; do not use the event bus as a
+      low-level git command executor.
+
+Acceptance:
+
+- No direct hand-written `git` subprocess calls remain under
+  `app/apps/file_editor_cm6`.
+- Git status, decorations, branch/history operations, diff collection, and
+  restore/reset/init paths use one backend service boundary.
+- Existing event-bus git facts continue to describe state changes and projection
+  triggers, not shell-command execution.
