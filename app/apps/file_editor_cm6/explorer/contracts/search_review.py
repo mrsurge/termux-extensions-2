@@ -83,6 +83,9 @@ class SearchContentMatch(TypedDict):
     column: int
     text: str
     snippet: str
+    matchText: str
+    lineRanges: list[SearchTextRange]
+    snippetRanges: list[SearchTextRange]
 
 
 class SearchContentResultEntry(TypedDict):
@@ -325,12 +328,7 @@ def project_search_content_result(
                 "path": file_result["path"],
                 "rel": file_result["relativePath"],
                 "matches": [
-                    {
-                        "line": match["lineNumber"],
-                        "column": max(0, match["columnNumber"] - 1),
-                        "text": match["lineText"],
-                        "snippet": match["snippet"],
-                    }
+                    _project_provider_content_match(match)
                     for match in file_result["matches"]
                 ],
             }
@@ -340,6 +338,25 @@ def project_search_content_result(
         "file_count": dto["fileCount"],
         "match_count": dto["matchCount"],
     }
+
+
+def _project_provider_content_match(match: SearchProviderContentMatch) -> SearchContentMatch:
+    return {
+        "line": match["lineNumber"],
+        "column": max(0, match["columnNumber"] - 1),
+        "text": match["lineText"],
+        "snippet": match["snippet"],
+        "matchText": match["matchText"],
+        "lineRanges": _copy_search_ranges(match["lineRanges"]),
+        "snippetRanges": _copy_search_ranges(match["snippetRanges"]),
+    }
+
+
+def _copy_search_ranges(ranges: list[SearchTextRange]) -> list[SearchTextRange]:
+    copied: list[SearchTextRange] = []
+    for range_ in ranges:
+        copied.append({"start": range_["start"], "end": range_["end"]})
+    return copied
 
 
 def parse_review_list_params(payload: object) -> ReviewListParams:

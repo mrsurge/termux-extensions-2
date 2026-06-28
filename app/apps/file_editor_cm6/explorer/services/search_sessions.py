@@ -24,6 +24,7 @@ from ..contracts.search_review import (
     SearchProviderContentMatch,
     SearchProviderFileItem,
     SearchRunParams,
+    SearchTextRange,
 )
 from ..search import cancel_search_job, start_content_search, start_file_search
 
@@ -40,11 +41,27 @@ INITIAL_MATCHES_PER_FILE = 10
 INITIAL_MATCH_TOTAL = 50
 
 
+def _file_items_list() -> list[SearchProviderFileItem]:
+    return []
+
+
+def _content_matches() -> list[SearchProviderContentMatch]:
+    return []
+
+
+def _content_file_map() -> dict[str, CachedContentFile]:
+    return {}
+
+
+def _content_order_list() -> list[str]:
+    return []
+
+
 @dataclass
 class CachedContentFile:
     path: str
     relative_path: str
-    matches: list[SearchProviderContentMatch] = field(default_factory=list)
+    matches: list[SearchProviderContentMatch] = field(default_factory=_content_matches)
     complete_match_count: int | None = None
 
 
@@ -60,9 +77,9 @@ class SearchSession:
     complete: bool = False
     cancelled: bool = False
     status: str = "running"
-    name_items: list[SearchProviderFileItem] = field(default_factory=list)
-    content_files: dict[str, CachedContentFile] = field(default_factory=dict)
-    content_order: list[str] = field(default_factory=list)
+    name_items: list[SearchProviderFileItem] = field(default_factory=_file_items_list)
+    content_files: dict[str, CachedContentFile] = field(default_factory=_content_file_map)
+    content_order: list[str] = field(default_factory=_content_order_list)
     initial_matches_emitted: int = 0
 
 
@@ -551,6 +568,9 @@ def _project_match(match: SearchProviderContentMatch) -> SearchContentMatch:
         "column": max(0, match["columnNumber"] - 1),
         "text": match["lineText"],
         "snippet": match["snippet"],
+        "matchText": match["matchText"],
+        "lineRanges": _copy_text_ranges(match["lineRanges"]),
+        "snippetRanges": _copy_text_ranges(match["snippetRanges"]),
     }
 
 
@@ -644,9 +664,30 @@ def _content_match(value: object) -> SearchProviderContentMatch | None:
         "lineText": _string(raw.get("lineText")),
         "snippet": _string(raw.get("snippet")),
         "matchText": _string(raw.get("matchText")),
-        "lineRanges": [],
-        "snippetRanges": [],
+        "lineRanges": _text_ranges(raw.get("lineRanges")),
+        "snippetRanges": _text_ranges(raw.get("snippetRanges")),
     }
+
+
+def _text_ranges(value: object) -> list[SearchTextRange]:
+    if not isinstance(value, list):
+        return []
+    ranges: list[SearchTextRange] = []
+    for item in cast(list[object], value):
+        raw = _object(item)
+        start = _optional_int(raw.get("start"))
+        end = _optional_int(raw.get("end"))
+        if start is None or end is None or start < 0 or end <= start:
+            continue
+        ranges.append({"start": start, "end": end})
+    return ranges
+
+
+def _copy_text_ranges(ranges: list[SearchTextRange]) -> list[SearchTextRange]:
+    copied: list[SearchTextRange] = []
+    for range_ in ranges:
+        copied.append({"start": range_["start"], "end": range_["end"]})
+    return copied
 
 
 def _file_items(values: list[object]) -> list[SearchProviderFileItem]:

@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "te2"
-version = "0.2.276"
+version = "0.2.278"
 description = "TE2 framework runtime and tooling"
 readme = "README.md"
 requires-python = ">=3.12"
 dynamic = ["dependencies"]
 
 [project.scripts]
-te2 = "app.cli.run_framework:main"
+te2 = "app.cli.run_rust_framework:main"
 te2-rust = "app.cli.run_rust_framework:main"
 
 [tool.setuptools]

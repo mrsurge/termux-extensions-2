@@ -11,7 +11,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
-use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc};
 use tracing::warn;
 
 const FS_READ_PERMITS: usize = 4;
@@ -22,6 +22,7 @@ const GIT_NETWORK_PERMITS: usize = 1;
 // Search has its own bounded read-heavy lane so repository scans do not
 // consume pipe-dispatch, filesystem mutation, or git-network capacity.
 const SEARCH_READ_PERMITS: usize = 4;
+const SEARCH_EVENT_QUEUE_CAPACITY: usize = 256;
 
 #[derive(Clone)]
 pub(crate) struct FrameworkServiceScheduler {
@@ -52,6 +53,23 @@ struct SearchJobEntry {
     search_id: String,
     op_id: String,
     cancelled: Arc<AtomicBool>,
+}
+
+enum SearchJobEvent {
+    Progress {
+        status: String,
+        message: String,
+        counts: search_ops::SearchProgressCounts,
+    },
+    ContentResult(search_ops::SearchContentResult),
+    Result(Value),
+    Done {
+        cancelled: bool,
+    },
+    Error {
+        code: String,
+        message: String,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -778,15 +796,35 @@ impl FrameworkServiceScheduler {
         context: SearchJobContext,
         entry: Arc<SearchJobEntry>,
     ) {
-        context.emit_progress("running", "File search queued", Default::default());
-        let progress_context = context.clone();
+        let (event_tx, event_rx) = mpsc::channel(SEARCH_EVENT_QUEUE_CAPACITY);
+        spawn_search_event_emitter(context.clone(), event_rx);
+        let _ = try_send_search_event(
+            &event_tx,
+            SearchJobEvent::Progress {
+                status: "running".to_owned(),
+                message: "File search queued".to_owned(),
+                counts: Default::default(),
+            },
+            &entry.cancelled,
+            false,
+        );
+        let progress_tx = event_tx.clone();
+        let progress_cancelled = Arc::clone(&entry.cancelled);
         let options = search_ops::SearchRunOptions {
             search_id: None,
             job_id: Some(context.job_id.clone()),
             cancelled: Some(Arc::clone(&entry.cancelled)),
             progress: Some(Arc::new(move |counts| {
-                progress_context.emit_progress("running", "File search running", counts);
-                !progress_context.cancelled.load(Ordering::Relaxed)
+                try_send_search_event(
+                    &progress_tx,
+                    SearchJobEvent::Progress {
+                        status: "running".to_owned(),
+                        message: "File search running".to_owned(),
+                        counts,
+                    },
+                    &progress_cancelled,
+                    false,
+                )
             })),
             content_result: None,
         };
@@ -800,7 +838,8 @@ impl FrameworkServiceScheduler {
                         .map_err(|error| search_ops::SearchProviderError::Search(error.to_string()))
                 })
         };
-        self.finish_search_job(result, context, entry, true).await;
+        self.finish_search_job(result, context, entry, true, event_tx)
+            .await;
     }
 
     async fn run_search_content_job(
@@ -809,23 +848,45 @@ impl FrameworkServiceScheduler {
         context: SearchJobContext,
         entry: Arc<SearchJobEntry>,
     ) {
-        context.emit_progress("running", "Content search queued", Default::default());
-        let progress_context = context.clone();
-        let result_context = context.clone();
+        let (event_tx, event_rx) = mpsc::channel(SEARCH_EVENT_QUEUE_CAPACITY);
+        spawn_search_event_emitter(context.clone(), event_rx);
+        let _ = try_send_search_event(
+            &event_tx,
+            SearchJobEvent::Progress {
+                status: "running".to_owned(),
+                message: "Content search queued".to_owned(),
+                counts: Default::default(),
+            },
+            &entry.cancelled,
+            false,
+        );
+        let progress_tx = event_tx.clone();
+        let progress_cancelled = Arc::clone(&entry.cancelled);
+        let result_tx = event_tx.clone();
+        let result_cancelled = Arc::clone(&entry.cancelled);
         let options = search_ops::SearchRunOptions {
             search_id: Some(context.search_id.clone()),
             job_id: Some(context.job_id.clone()),
             cancelled: Some(Arc::clone(&entry.cancelled)),
             progress: Some(Arc::new(move |counts| {
-                progress_context.emit_progress("running", "Content search running", counts);
-                !progress_context.cancelled.load(Ordering::Relaxed)
+                try_send_search_event(
+                    &progress_tx,
+                    SearchJobEvent::Progress {
+                        status: "running".to_owned(),
+                        message: "Content search running".to_owned(),
+                        counts,
+                    },
+                    &progress_cancelled,
+                    false,
+                )
             })),
             content_result: Some(Arc::new(move |result| {
-                let Ok(result) = serde_json::to_value(result) else {
-                    return false;
-                };
-                result_context.emit_result(result);
-                !result_context.cancelled.load(Ordering::Relaxed)
+                try_send_search_event(
+                    &result_tx,
+                    SearchJobEvent::ContentResult(result),
+                    &result_cancelled,
+                    true,
+                )
             })),
         };
         let result = if entry.cancelled.load(Ordering::Relaxed) {
@@ -838,7 +899,8 @@ impl FrameworkServiceScheduler {
                         .map_err(|error| search_ops::SearchProviderError::Search(error.to_string()))
                 })
         };
-        self.finish_search_job(result, context, entry, false).await;
+        self.finish_search_job(result, context, entry, false, event_tx)
+            .await;
     }
 
     async fn finish_search_job(
@@ -847,26 +909,54 @@ impl FrameworkServiceScheduler {
         context: SearchJobContext,
         entry: Arc<SearchJobEntry>,
         emit_result: bool,
+        event_tx: mpsc::Sender<SearchJobEvent>,
     ) {
         if context.cancelled.load(Ordering::Relaxed) {
-            context.emit_done(true);
+            let _ = try_send_search_event(
+                &event_tx,
+                SearchJobEvent::Done { cancelled: true },
+                &entry.cancelled,
+                false,
+            );
         } else {
             match result {
                 Ok(result) => {
                     if emit_result {
-                        context.emit_result(result);
+                        let _ = try_send_search_event(
+                            &event_tx,
+                            SearchJobEvent::Result(result),
+                            &entry.cancelled,
+                            true,
+                        );
                     }
-                    context.emit_done(false);
+                    let _ = try_send_search_event(
+                        &event_tx,
+                        SearchJobEvent::Done { cancelled: false },
+                        &entry.cancelled,
+                        false,
+                    );
                 }
-                Err(search_ops::SearchProviderError::Cancelled) => context.emit_done(true),
+                Err(search_ops::SearchProviderError::Cancelled) => {
+                    let _ = try_send_search_event(
+                        &event_tx,
+                        SearchJobEvent::Done { cancelled: true },
+                        &entry.cancelled,
+                        false,
+                    );
+                }
                 Err(error) => {
-                    context.emit_error(
-                        search_error_code(&error),
-                        search_provider_error_message(error),
+                    let code = search_error_code(&error).to_owned();
+                    let message = search_provider_error_message(error);
+                    let _ = try_send_search_event(
+                        &event_tx,
+                        SearchJobEvent::Error { code, message },
+                        &entry.cancelled,
+                        false,
                     );
                 }
             }
         }
+        drop(event_tx);
         self.remove_search_job(&entry).await;
     }
 
@@ -1084,6 +1174,23 @@ impl GitJobProgressContext {
 }
 
 impl SearchJobContext {
+    fn emit_event(&self, event: SearchJobEvent) {
+        match event {
+            SearchJobEvent::Progress {
+                status,
+                message,
+                counts,
+            } => self.emit_progress(status, message, counts),
+            SearchJobEvent::ContentResult(result) => match serde_json::to_value(result) {
+                Ok(result) => self.emit_result(result),
+                Err(error) => self.emit_error("protocol.encodeFailed", error.to_string()),
+            },
+            SearchJobEvent::Result(result) => self.emit_result(result),
+            SearchJobEvent::Done { cancelled } => self.emit_done(cancelled),
+            SearchJobEvent::Error { code, message } => self.emit_error(code, message),
+        }
+    }
+
     fn emit_progress(
         &self,
         status: impl Into<String>,
@@ -1209,6 +1316,34 @@ impl SearchJobContext {
         };
         if let Err(error) = self.event_sink.send(envelope) {
             warn!(%error, job_id = %self.job_id, "failed to emit search job notification");
+        }
+    }
+}
+
+fn spawn_search_event_emitter(
+    context: SearchJobContext,
+    mut event_rx: mpsc::Receiver<SearchJobEvent>,
+) {
+    tokio::task::spawn_blocking(move || {
+        while let Some(event) = event_rx.blocking_recv() {
+            context.emit_event(event);
+        }
+    });
+}
+
+fn try_send_search_event(
+    event_tx: &mpsc::Sender<SearchJobEvent>,
+    event: SearchJobEvent,
+    cancelled: &Arc<AtomicBool>,
+    required: bool,
+) -> bool {
+    match event_tx.try_send(event) {
+        Ok(()) => !cancelled.load(Ordering::Relaxed),
+        Err(mpsc::error::TrySendError::Full(_)) if !required => !cancelled.load(Ordering::Relaxed),
+        Err(error) => {
+            cancelled.store(true, Ordering::Relaxed);
+            warn!(%error, "search event queue failed; cancelling search job");
+            false
         }
     }
 }

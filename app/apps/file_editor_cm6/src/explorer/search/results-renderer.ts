@@ -172,11 +172,20 @@ export function renderContentResults(
 
       const snippet = document.createElement("span");
       snippet.className = "fe-search-snippet";
-      renderHighlightedSearchSnippet(
-        snippet,
-        match.snippet || match.text || "",
-        rel,
-      );
+      const snippetText = match.snippet || match.text || "";
+      const snippetRanges =
+        Array.isArray(match.snippetRanges) && match.snippetRanges.length > 0
+          ? match.snippetRanges
+          : snippetText === match.text &&
+              Array.isArray(match.lineRanges) &&
+              match.lineRanges.length > 0
+            ? match.lineRanges
+            : undefined;
+      renderHighlightedSearchSnippet(snippet, snippetText, rel, {
+        ranges: snippetRanges,
+        matchText: match.matchText,
+        column: snippetText === match.text ? match.column : null,
+      });
       matchRow.appendChild(snippet);
 
       fileGroup.appendChild(matchRow);

@@ -1089,8 +1089,28 @@
 
 .fe-search-snippet.fe-search-code-surface.hljs {
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
+}
+
+.fe-search-snippet-token {
+  white-space: pre;
+}
+
+.fe-search-snippet-ellipsis {
+  color: #94a3b8;
+  white-space: pre;
+}
+
+.fe-search-hit {
+  background: rgba(250, 204, 21, 0.18);
+  border: 1px solid rgba(234, 179, 8, 0.9);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.22);
+  color: inherit;
+  margin: 0 1px;
+  padding: 0 1px;
+  white-space: pre;
 }
 
 .fe-search-diff-text.fe-search-code-surface.hljs {

@@ -16,6 +16,9 @@ use std::{
 
 use super::common::{expand_user_path, home_dir, normalize_lexical, path_to_string};
 
+#[path = "search_parallel.rs"]
+mod search_parallel;
+
 // Ripgrep library stack only: filesystem walking, glob filters, and content
 // matching stay in-process and must never shell out to the `rg` command.
 const DEFAULT_MAX_RESULTS: usize = 500;
@@ -604,6 +607,13 @@ pub(crate) fn search_content_with_options(
     request: SearchContentRequest,
     options: SearchRunOptions,
 ) -> Result<SearchContentResult, SearchProviderError> {
+    if options.has_content_result_sink()
+        && request.max_files.is_none()
+        && request.max_matches_total.is_none()
+    {
+        return search_parallel::search_content_parallel_with_options(request, options);
+    }
+
     let root = resolve_root(request.root.as_deref())?;
     let matcher = build_content_matcher(&request)?;
     let include = build_glob_set(&request.include_patterns)?;
