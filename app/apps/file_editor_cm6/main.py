@@ -21,7 +21,6 @@ from .history_store import HistoryStore
 from .explorer.services.file_ops import (
     _normalize_rel_path as _file_ops_normalize_rel_path,
     get_project_root,
-    list_dir,
     mark_git_cache_dirty,
     set_project_root,
 )
@@ -32,8 +31,6 @@ from .worker_services import git_service as worker_git_service
 from .core_read import push_save_ack, emit_diff_changed, subscribe, unsubscribe
 from .core_write import FileMeta, write_full, BaseMismatchError
 from .project_sidecar import ProjectSidecar, cleanup_orphaned_sidecars
-from .explorer import search as explorer_search_module
-from .explorer.search import SearchContentOptionsParams
 from .main_page.backend.state_payload import (
     StatePayloadDeps,
     build_diff_base_payload,
@@ -961,50 +958,6 @@ def get_diff(path: str = Query(...)):
     payload = _collect_diff(project_root, rel, base_ref=base_ref)
     return {"ok": True, "data": payload}
 
-@file_editor_cm6_bp.get('/explorer/list')
-def explorer_list(rel: str = Query('.')):
-    """List directory contents for the file explorer."""
-    try:
-        return {"ok": True, "data": list_dir(rel)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/search')
-async def explorer_search(data: JsonDict = Body(...)):
-    """Search files by name or content within project."""
-    mode = _str_value(data.get('mode'), 'name')
-    query = _str_value(data.get('query')).strip()
-    
-    # Get project root
-    project_root = _history_store.get_active_project()
-    if not project_root or not Path(project_root).exists():
-        raise HTTPException(status_code=400, detail="No project open")
-    root_path = Path(project_root)
-
-    if mode in ('name', 'content'):
-        if not query:
-            raise HTTPException(status_code=400, detail="Query required")
-        if len(query) < 2:
-            raise HTTPException(status_code=400, detail="Query too short (min 2 chars)")
-        if len(query) > 200:
-            raise HTTPException(status_code=400, detail="Query too long (max 200 chars)")
-    
-    try:
-        if mode == 'name':
-            results = await explorer_search_module.search_by_name(root_path, query)
-        elif mode == 'content':
-            results = await explorer_search_module.search_by_content(root_path, cast(SearchContentOptionsParams, data))
-        elif mode == 'changes':
-            results = explorer_search_module.search_by_changes(root_path)
-        else:
-            raise HTTPException(status_code=400, detail="Invalid mode")
-        
-        return {"ok": True, "data": results}
-    except TimeoutError:
-        raise HTTPException(status_code=504, detail="Search timed out")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @file_editor_cm6_bp.get('/review/list')
 async def review_list(lightweight: bool = Query(False)) -> JsonDict:
     """
@@ -1187,174 +1140,6 @@ async def review_discard(data: JsonDict = Body(...)) -> JsonDict:
         pass
             
     return {"ok": True, "discarded_count": discarded_count}
-
-@file_editor_cm6_bp.post('/explorer/mkdir')
-async def explorer_mkdir(data: JsonDict = Body(...)):
-    parent_rel = _str_value(data.get('parent_rel'), '.')
-    name = _str_value(data.get('name')).strip()
-    
-    if not name:
-        raise HTTPException(status_code=400, detail="Name required")
-    if '/' in name or '\\' in name:
-        raise HTTPException(status_code=400, detail="Invalid name")
-    
-    try:
-        from .explorer.services.file_ops import create_directory
-        result = create_directory(parent_rel, name)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/touch')
-async def explorer_touch(data: JsonDict = Body(...)):
-    parent_rel = _str_value(data.get('parent_rel'), '.')
-    name = _str_value(data.get('name')).strip()
-      
-    if not name:
-        raise HTTPException(status_code=400, detail="Name required")
-    if '/' in name or '\\' in name:
-        raise HTTPException(status_code=400, detail="Invalid name")
-      
-    try:
-        from .explorer.services.file_ops import create_file
-        result = create_file(parent_rel, name)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/rename')
-async def explorer_rename(data: JsonDict = Body(...)):
-    rel = _str_value(data.get('rel'))
-    new_name = _str_value(data.get('new_name')).strip()
-    
-    if not rel:
-        raise HTTPException(status_code=400, detail="Path required")
-    if not new_name:
-        raise HTTPException(status_code=400, detail="New name required")
-    if '/' in new_name or '\\' in new_name:
-        raise HTTPException(status_code=400, detail="Invalid name")
-    
-    try:
-        from .explorer.services.file_ops import rename_entry
-        result = rename_entry(rel, new_name)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/delete')
-async def explorer_delete(data: JsonDict = Body(...)):
-    rel = _str_value(data.get('rel'))
-    if not rel:
-        raise HTTPException(status_code=400, detail="Path required")
-    try:
-        from .explorer.services.file_ops import delete_entry
-        result = delete_entry(rel)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/batch_delete')
-async def explorer_batch_delete(data: JsonDict = Body(...)):
-    rels = _str_list(data.get('rels'))
-    if not rels:
-        raise HTTPException(status_code=400, detail="Paths required")
-    try:
-        from .explorer.services.file_ops import batch_delete
-        result = batch_delete(rels)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/copy')
-async def explorer_copy(data: JsonDict = Body(...)):
-    rel = _str_value(data.get('rel'))
-    dest_path = _str_value(data.get('dest_path'))
-    if not rel or not dest_path:
-        raise HTTPException(status_code=400, detail="Path required")
-    try:
-        from .explorer.services.file_ops import copy_entry
-        result = copy_entry(rel, dest_path)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/move')
-async def explorer_move(data: JsonDict = Body(...)):
-    rel = _str_value(data.get('rel'))
-    dest_path = _str_value(data.get('dest_path'))
-    if not rel or not dest_path:
-        raise HTTPException(status_code=400, detail="Path required")
-    try:
-        from .explorer.services.file_ops import move_entry
-        result = move_entry(rel, dest_path)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/batch_copy')
-async def explorer_batch_copy(data: JsonDict = Body(...)):
-    rels = _str_list(data.get('rels'))
-    dest_path = _str_value(data.get('dest_path'))
-    if not rels or not dest_path:
-        raise HTTPException(status_code=400, detail="Paths and destination required")
-    try:
-        from .explorer.services.file_ops import batch_copy
-        result = batch_copy(rels, dest_path)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/batch_move')
-async def explorer_batch_move(data: JsonDict = Body(...)):
-    rels = _str_list(data.get('rels'))
-    dest_path = _str_value(data.get('dest_path'))
-    if not rels or not dest_path:
-        raise HTTPException(status_code=400, detail="Paths and destination required")
-    try:
-        from .explorer.services.file_ops import batch_move
-        result = batch_move(rels, dest_path)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/copy_from')
-async def explorer_copy_from(data: JsonDict = Body(...)):
-    """Import (copy) a file/folder from an absolute path into the project."""
-    source_path = _str_value(data.get('source_path'))
-    dest_rel = _str_value(data.get('dest_rel'))
-    if not source_path or not dest_rel:
-        raise HTTPException(status_code=400, detail="Source path and destination relative path required")
-    try:
-        from .explorer.services.file_ops import copy_entry_inbound
-        result = copy_entry_inbound(source_path, dest_rel)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-@file_editor_cm6_bp.post('/explorer/move_from')
-async def explorer_move_from(data: JsonDict = Body(...)):
-    """Import (move) a file/folder from an absolute path into the project."""
-    source_path = _str_value(data.get('source_path'))
-    dest_rel = _str_value(data.get('dest_rel'))
-    if not source_path or not dest_rel:
-        raise HTTPException(status_code=400, detail="Source path and destination relative path required")
-    try:
-        from .explorer.services.file_ops import move_entry_inbound
-        result = move_entry_inbound(source_path, dest_rel)
-        mark_git_cache_dirty(get_project_root())
-        return {"ok": True, "data": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 @file_editor_cm6_bp.get('/edit_tracker/status')
 def get_edit_tracker_status():

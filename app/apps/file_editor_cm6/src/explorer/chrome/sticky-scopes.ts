@@ -214,7 +214,7 @@ export function createExplorerStickyScopes({
     }
     if (!sample) return 0;
     const rect = sample.getBoundingClientRect();
-    return Math.round(rect.height || 0);
+    return rect.height || 0;
   }
 
   function computeFocusNode(offsetTopPx = 12): HTMLLIElement | null {
@@ -318,8 +318,8 @@ export function createExplorerStickyScopes({
     const bodyRect = drawerBodyEl.getBoundingClientRect();
     const srcRect = srcLi.getBoundingClientRect();
     if (isElementVisibleRect(bodyRect) && isElementVisibleRect(srcRect)) {
-      const left = Math.round(srcRect.left - bodyRect.left);
-      const right = Math.round(bodyRect.right - srcRect.right);
+      const left = srcRect.left - bodyRect.left;
+      const right = bodyRect.right - srcRect.right;
       let leftPx = Math.max(0, left);
       let rightPx = Math.max(0, right);
       // Deeply indented scopes can accumulate a 1px rounding drift vs the

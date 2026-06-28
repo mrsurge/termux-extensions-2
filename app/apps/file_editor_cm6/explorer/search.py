@@ -1,13 +1,8 @@
-
-import asyncio
-import fnmatch
-import json
-import os
-import re
-import shutil
 from importlib import import_module
 from pathlib import Path
 from typing import Literal, Protocol, TypedDict, cast
+
+from app.libs import pipe_runtime
 
 from ..stores import get_history_store
 from ..worker_services import git_service as worker_git_service
@@ -18,43 +13,9 @@ from .contracts.search_review import (
     SearchChangesBaseCommit,
     SearchChangesBaseInfo,
     SearchChangesResult,
-    SearchContentMatch,
-    SearchContentResult,
-    SearchContentResultEntry,
-    SearchNameResult,
-    SearchNameResultEntry,
+    SearchFilesResult,
+    SearchProviderContentResult,
 )
-
-
-class SearchContentOptions(TypedDict):
-    query: str
-    is_regex: bool
-    is_case_sensitive: bool
-    is_whole_words: bool
-    include_patterns: list[str]
-    exclude_patterns: list[str]
-    use_ignore_files: bool
-
-
-class RipgrepText(TypedDict):
-    text: str
-
-
-class RipgrepSubmatch(TypedDict, total=False):
-    start: int
-    match: RipgrepText
-
-
-class RipgrepMatchData(TypedDict):
-    path: RipgrepText
-    line_number: int
-    lines: RipgrepText
-    submatches: list[RipgrepSubmatch]
-
-
-class RipgrepMatchEvent(TypedDict):
-    type: Literal["match"]
-    data: RipgrepMatchData
 
 
 class SearchContentOptionsParams(TypedDict, total=False):
@@ -77,6 +38,11 @@ class CollectDiffFn(Protocol):
     def __call__(self, project_root: Path, rel_path: str, *, base_ref: str) -> object: ...
 
 
+SEARCH_SERVICE_TARGET_NID = 2300
+SEARCH_SERVICE_TARGET_NAME = "service.search"
+SEARCH_SERVICE_ORIGIN_NAME = "file_editor_cm6.explorer.search"
+
+
 def _json_object(value: object) -> JsonObject:
     if not isinstance(value, dict):
         return {}
@@ -94,54 +60,6 @@ def _json_object_list(value: object) -> list[JsonObject]:
     return result
 
 
-def _decode_json_object(raw: str) -> JsonObject:
-    decoded = cast(object, json.loads(raw))
-    return _json_object(decoded)
-
-
-def _ripgrep_match_event(value: JsonObject) -> RipgrepMatchEvent | None:
-    if value.get("type") != "match":
-        return None
-    data = _json_object(value.get("data"))
-    path_obj = _json_object(data.get("path"))
-    lines_obj = _json_object(data.get("lines"))
-    path_text = path_obj.get("text")
-    line_text = lines_obj.get("text")
-    line_number = data.get("line_number")
-    if not isinstance(path_text, str) or not isinstance(line_text, str) or not isinstance(line_number, int):
-        return None
-
-    submatches: list[RipgrepSubmatch] = []
-    for item in _json_object_list(data.get("submatches")):
-        submatch: RipgrepSubmatch = {}
-        start = item.get("start")
-        if isinstance(start, int):
-            submatch["start"] = start
-        match_obj = _json_object(item.get("match"))
-        match_text = match_obj.get("text")
-        if isinstance(match_text, str):
-            submatch["match"] = {"text": match_text}
-        submatches.append(submatch)
-
-    return {
-        "type": "match",
-        "data": {
-            "path": {"text": path_text},
-            "line_number": line_number,
-            "lines": {"text": line_text},
-            "submatches": submatches,
-        },
-    }
-
-# Constants duplicated from main.py to avoid circular deps
-IGNORE_PATTERNS = [
-    '.git', '__pycache__', 'node_modules', '.venv', 'venv',
-    '.pytest_cache', '.mypy_cache', '.tox', 'dist', 'build',
-    '*.egg-info', '.DS_Store'
-]
-IGNORE_GLOBS = [
-    'pip-venv-*',
-]
 CHANGE_RESULT_LIMIT = 40
 STATUS_TEXT_MAP = {
     'M': 'Modified',
@@ -211,159 +129,28 @@ def _change_entry_sort_key(entry: GitChangeEntry) -> tuple[int, str]:
         priority = 1
     return priority, entry.path.replace("\\", "/")
 
-async def search_by_name(root: Path, query: str) -> SearchNameResult:
-    """Search files/folders by name."""
-    query_lower = (query or '').lower().strip()
-    max_results = 500
-
-    def should_ignore_rel(rel: str) -> bool:
-        # Fast path: ignore dot segments + known heavy dirs.
-        parts = Path(rel).parts
-        for part in parts:
-            if not part:
-                continue
-            if part.startswith('.'):
-                return True
-            if part in IGNORE_PATTERNS:
-                return True
-            for pat in IGNORE_PATTERNS:
-                if '*' in pat and fnmatch.fnmatch(part, pat):
-                    return True
-            for pat in IGNORE_GLOBS:
-                if fnmatch.fnmatch(part, pat):
-                    return True
-        return False
-
-    def matches_name(rel: str) -> bool:
-        name = Path(rel).name.lower()
-        return query_lower in name
-
-    def pack_result(rel: str, is_dir: bool) -> SearchNameResultEntry:
-        return {
-            "path": str((root / rel).resolve()),
-            "rel": rel,
-            "type": "dir" if is_dir else "file",
-            "name": Path(rel).name,
-        }
-
-    def run_filesystem_walk() -> SearchNameResult:
-        results: list[SearchNameResultEntry] = []
-        count = 0
-
-        def onerror(_err: OSError) -> None:
-            # Ignore unreadable dirs/files; we don't want search to fail hard.
-            return
-
-        for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False, onerror=onerror):
-            if count >= max_results:
-                break
-
-            try:
-                rel_dir = str(Path(dirpath).relative_to(root))
-            except Exception:
-                continue
-            if rel_dir == '.':
-                rel_dir = ''
-            if rel_dir and should_ignore_rel(rel_dir):
-                dirnames[:] = []
-                continue
-
-            # Prune ignored directories early.
-            pruned: list[str] = []
-            for d in dirnames:
-                rel = str(Path(rel_dir, d)) if rel_dir else d
-                if should_ignore_rel(rel):
-                    continue
-                pruned.append(d)
-            dirnames[:] = pruned
-
-            # Match directories (from this level).
-            for d in dirnames:
-                if count >= max_results:
-                    break
-                rel = str(Path(rel_dir, d)) if rel_dir else d
-                if matches_name(rel):
-                    results.append(pack_result(rel, True))
-                    count += 1
-
-            # Match files.
-            for f in filenames:
-                if count >= max_results:
-                    break
-                rel = str(Path(rel_dir, f)) if rel_dir else f
-                if should_ignore_rel(rel):
-                    continue
-                if matches_name(rel):
-                    results.append(pack_result(rel, False))
-                    count += 1
-
-        return {
-            "mode": "name",
+async def search_files(root: Path, query: str) -> SearchFilesResult:
+    """Return the file/folder search DTO from service.search; no local fallback."""
+    data = await _call_search_provider(
+        "search.files.get",
+        {
+            "root": str(root),
             "query": query,
-            "results": results,
-            "count": count,
-            "truncated": count >= max_results,
-        }
+            "maxResults": 500,
+            "includeHidden": False,
+            "useIgnoreFiles": True,
+            "includePatterns": [],
+            "excludePatterns": [],
+        },
+        root=root,
+    )
+    if not isinstance(data, dict):
+        raise RuntimeError("Pipe RPC returned invalid search.files.get data")
+    result = cast(SearchFilesResult, cast(object, data))
+    if result.get("dto") != "SearchFilesResult":
+        raise RuntimeError("Pipe RPC returned unexpected search.files.get DTO")
+    return result
 
-    async def run_git_path_index() -> SearchNameResult | None:
-        path_index = await asyncio.to_thread(
-            worker_git_service.get_path_index,
-            root,
-            limit=50_000,
-        )
-        if not path_index["isRepository"]:
-            return None
-
-        results: list[SearchNameResultEntry] = []
-        count = 0
-        seen_dirs: set[str] = set()
-
-        # Files (and derived directories).
-        for rel in path_index["paths"]:
-            if count >= max_results:
-                break
-            rel = rel.replace('\\', '/')
-            rel = rel.strip('/')
-            if not rel or should_ignore_rel(rel):
-                continue
-
-            # Derived directories first so searching for "app" finds "app/" even
-            # if no file named "app" exists.
-            p = Path(rel)
-            parent = p.parent
-            if parent and str(parent) not in ('.', ''):
-                accum: list[str] = []
-                for part in parent.parts:
-                    accum.append(part)
-                    drel = str(Path(*accum))
-                    if drel in seen_dirs or should_ignore_rel(drel):
-                        continue
-                    seen_dirs.add(drel)
-                    if matches_name(drel):
-                        results.append(pack_result(drel, True))
-                        count += 1
-                        if count >= max_results:
-                            break
-
-            if count >= max_results:
-                break
-            if matches_name(rel):
-                results.append(pack_result(rel, False))
-                count += 1
-
-        return {
-            "mode": "name",
-            "query": query,
-            "results": results,
-            "count": count,
-            "truncated": path_index["truncated"] or count >= max_results,
-        }
-
-    # Avoid blocking the server event loop (Termux devices can be slow).
-    git_res = await run_git_path_index()
-    if git_res is not None:
-        return git_res
-    return await asyncio.to_thread(run_filesystem_walk)
 
 def _parse_glob_patterns(raw: str) -> list[str]:
     patterns: list[str] = []
@@ -374,256 +161,46 @@ def _parse_glob_patterns(raw: str) -> list[str]:
     return patterns
 
 
-def _build_content_options(params: SearchContentOptionsParams) -> SearchContentOptions:
-    return {
-        "query": str(params.get("query", "")),
-        "is_regex": bool(params.get("isRegex", False)),
-        "is_case_sensitive": bool(params.get("isCaseSensitive", False)),
-        "is_whole_words": bool(params.get("isWholeWords", False)),
-        "include_patterns": _parse_glob_patterns(str(params.get("includePattern", ""))),
-        "exclude_patterns": _parse_glob_patterns(str(params.get("excludePattern", ""))),
-        "use_ignore_files": bool(params.get("useIgnoreFiles", True)),
-    }
+async def search_content(
+    root: Path,
+    params: SearchContentOptionsParams,
+) -> SearchProviderContentResult:
+    """Return the content search DTO from service.search; no local fallback."""
+    data = await _call_search_provider(
+        "search.content.get",
+        {
+            "root": str(root),
+            "query": str(params.get("query", "")),
+            "isRegex": bool(params.get("isRegex", False)),
+            "isCaseSensitive": bool(params.get("isCaseSensitive", False)),
+            "isWholeWords": bool(params.get("isWholeWords", False)),
+            "includePatterns": _parse_glob_patterns(str(params.get("includePattern", ""))),
+            "excludePatterns": _parse_glob_patterns(str(params.get("excludePattern", ""))),
+            "useIgnoreFiles": bool(params.get("useIgnoreFiles", True)),
+            "maxFiles": 50,
+            "maxFileSizeBytes": 1_048_576,
+            "contextChars": 75,
+        },
+        root=root,
+    )
+    if not isinstance(data, dict):
+        raise RuntimeError("Pipe RPC returned invalid search.content.get data")
+    result = cast(SearchProviderContentResult, cast(object, data))
+    if result.get("dto") != "SearchContentResult":
+        raise RuntimeError("Pipe RPC returned unexpected search.content.get DTO")
+    return result
 
 
-async def search_by_content(root: Path, params: SearchContentOptionsParams) -> SearchContentResult:
-    """Search file contents using ripgrep or fallback."""
-    options = _build_content_options(params)
-    rg_path = shutil.which('rg')
-    if rg_path:
-        return await _search_with_ripgrep(root, options, rg_path)
-    else:
-        return await _search_with_python(root, options)
+async def _call_search_provider(method: str, params: JsonObject, *, root: Path) -> object:
+    return await pipe_runtime.call_async(
+        method,
+        params,
+        target_nid=SEARCH_SERVICE_TARGET_NID,
+        target_name=SEARCH_SERVICE_TARGET_NAME,
+        workspace_root=str(root),
+        origin_name=SEARCH_SERVICE_ORIGIN_NAME,
+    )
 
-async def _search_with_ripgrep(root: Path, options: SearchContentOptions, rg_path: str) -> SearchContentResult:
-    query = options["query"]
-    cmd = [
-        rg_path,
-        '--json',
-        '--line-number',
-        '--column',
-        '--max-count', '5',
-        '--max-filesize', '1M',
-    ]
-    if options["is_regex"]:
-        cmd.append('--engine=auto')
-    else:
-        cmd.append('--fixed-strings')
-    if options["is_case_sensitive"]:
-        cmd.append('--case-sensitive')
-    else:
-        cmd.append('--ignore-case')
-    if options["is_whole_words"]:
-        cmd.append('--word-regexp')
-    if not options["use_ignore_files"]:
-        cmd.append('--no-ignore')
-    for pattern in options["include_patterns"]:
-        cmd.extend(['-g', pattern])
-    for pattern in options["exclude_patterns"]:
-        cmd.extend(['-g', f'!{pattern}'])
-    cmd.extend(['--', query, str(root)])
-    
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
-        if proc.returncode not in (0, 1):
-            message = stderr.decode('utf-8', errors='ignore').strip() or 'Ripgrep search failed'
-            raise RuntimeError(message)
-        
-        results_by_file: dict[str, SearchContentResultEntry] = {}
-        for line in stdout.decode('utf-8').splitlines():
-            if not line.strip(): continue
-            try:
-                obj = _ripgrep_match_event(_decode_json_object(line))
-                if obj is None:
-                    continue
-                data = obj['data']
-                path_str = data['path']['text']
-                path = Path(path_str)
-                rel = str(path.relative_to(root))
-
-                if rel not in results_by_file:
-                    results_by_file[rel] = {
-                        "path": path_str,
-                        "rel": rel,
-                        "matches": []
-                    }
-
-                line_num = data['line_number']
-                line_text = data['lines']['text'].rstrip('\n')
-                col = 0
-                match_text = query
-                if data['submatches']:
-                    submatch = data['submatches'][0]
-                    start_value = submatch.get('start')
-                    if isinstance(start_value, int):
-                        col = start_value
-                    match_obj = submatch.get('match')
-                    if match_obj is not None:
-                        match_text = match_obj['text']
-
-                start = max(0, col - 75)
-                end = min(len(line_text), col + len(match_text) + 75)
-                snippet = line_text[start:end]
-
-                results_by_file[rel]["matches"].append({
-                    "line": line_num,
-                    "column": col,
-                    "text": line_text,
-                    "snippet": snippet
-                })
-            except (json.JSONDecodeError, KeyError):
-                continue
-        
-        results = list(results_by_file.values())[:50]
-        match_count = sum(len(r["matches"]) for r in results)
-        
-        return {
-            "mode": "content",
-            "query": query,
-            "results": results,
-            "truncated": len(results_by_file) > 50,
-            "file_count": len(results),
-            "match_count": match_count
-        }
-    except asyncio.TimeoutError:
-        raise TimeoutError("Ripgrep search timed out")
-
-def _match_literal(
-    line_text: str,
-    query: str,
-    *,
-    is_case_sensitive: bool,
-    is_whole_words: bool,
-) -> list[tuple[int, str]]:
-    haystack = line_text if is_case_sensitive else line_text.lower()
-    needle = query if is_case_sensitive else query.lower()
-    matches: list[tuple[int, str]] = []
-    start = 0
-    while True:
-        idx = haystack.find(needle, start)
-        if idx < 0:
-            break
-        matched_text = line_text[idx:idx + len(query)]
-        if is_whole_words:
-            before = line_text[idx - 1] if idx > 0 else ''
-            after_index = idx + len(query)
-            after = line_text[after_index] if after_index < len(line_text) else ''
-            if ((before.isalnum() or before == '_') or
-                (after.isalnum() or after == '_')):
-                start = idx + max(len(query), 1)
-                continue
-        matches.append((idx, matched_text))
-        start = idx + max(len(query), 1)
-    return matches
-
-
-def _path_matches_patterns(rel: str, patterns: list[str]) -> bool:
-    normalized = rel.replace('\\', '/')
-    for pattern in patterns:
-        if fnmatch.fnmatch(normalized, pattern):
-            return True
-        if fnmatch.fnmatch(Path(normalized).name, pattern):
-            return True
-    return False
-
-
-async def _search_with_python(root: Path, options: SearchContentOptions) -> SearchContentResult:
-    query = options["query"]
-    results_by_file: dict[str, SearchContentResultEntry] = {}
-    regex: re.Pattern[str] | None = None
-    if options["is_regex"]:
-        flags = 0 if options["is_case_sensitive"] else re.IGNORECASE
-        try:
-            regex = re.compile(query, flags)
-        except re.error as exc:
-            raise RuntimeError(f"Invalid regular expression: {exc}") from exc
-    file_count = 0
-    max_files = 50
-    
-    def is_binary(path: Path) -> bool:
-        try:
-            with path.open('rb') as f:
-                return b'\x00' in f.read(8192)
-        except:
-            return True
-    
-    def should_ignore(path: Path) -> bool:
-        if options["include_patterns"]:
-            rel_text = str(path).replace('\\', '/')
-            if not _path_matches_patterns(rel_text, options["include_patterns"]):
-                return True
-        if options["exclude_patterns"]:
-            rel_text = str(path).replace('\\', '/')
-            if _path_matches_patterns(rel_text, options["exclude_patterns"]):
-                return True
-        if not options["use_ignore_files"]:
-            return False
-        for part in path.parts:
-            if part in IGNORE_PATTERNS or part.startswith('.'):
-                return True
-        return False
-    
-    for item in root.rglob('*'):
-        if not item.is_file() or file_count >= max_files: break
-        if should_ignore(item.relative_to(root)) or is_binary(item): continue
-        
-        try:
-            content = item.read_text(encoding='utf-8', errors='ignore')
-            lines = content.splitlines()
-            matches: list[SearchContentMatch] = []
-            
-            for line_num, line_text in enumerate(lines, 1):
-                if regex is not None:
-                    found_matches = [
-                        (match.start(), match.group(0) or query)
-                        for match in regex.finditer(line_text)
-                    ]
-                else:
-                    found_matches = _match_literal(
-                        line_text,
-                        query,
-                        is_case_sensitive=options["is_case_sensitive"],
-                        is_whole_words=options["is_whole_words"],
-                    )
-                if found_matches:
-                    col, matched_text = found_matches[0]
-                    start = max(0, col - 75)
-                    end = min(len(line_text), col + len(matched_text) + 75)
-                    matches.append({
-                        "line": line_num,
-                        "column": col,
-                        "text": line_text,
-                        "snippet": line_text[start:end]
-                    })
-                    if len(matches) >= 5: break
-            
-            if matches:
-                rel = str(item.relative_to(root))
-                results_by_file[rel] = {
-                    "path": str(item),
-                    "rel": rel,
-                    "matches": matches
-                }
-                file_count += 1
-        except Exception:
-            continue
-    
-    results = list(results_by_file.values())
-    match_count = sum(len(r["matches"]) for r in results)
-    
-    return {
-        "mode": "content",
-        "query": query,
-        "results": results,
-        "truncated": file_count >= max_files,
-        "file_count": len(results),
-        "match_count": match_count
-    }
 
 def _collect_diff(project_root: Path, rel_path: str, *, base_ref: str) -> DiffPayload:
     module = import_module("app.apps.file_editor_cm6.diff_helper")

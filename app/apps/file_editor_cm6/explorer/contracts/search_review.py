@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict, cast, override
 
 JsonObject = dict[str, object]
 SearchMode = Literal["name", "content", "changes"]
@@ -13,6 +13,7 @@ DiffBaseMode = Literal["none", "head", "detached"]
 class ExplorerSearchReviewContractError(Exception):
     message: str
 
+    @override
     def __str__(self) -> str:
         return self.message
 
@@ -71,6 +72,55 @@ class SearchContentResult(TypedDict):
     truncated: bool
     file_count: int
     match_count: int
+
+
+class SearchProviderFileItem(TypedDict):
+    path: str
+    relativePath: str
+    kind: Literal["file", "dir"]
+    name: str
+
+
+class SearchFilesResult(TypedDict):
+    dto: Literal["SearchFilesResult"]
+    version: Literal[1]
+    root: str
+    query: str
+    items: list[SearchProviderFileItem]
+    truncated: bool
+    count: int
+
+
+class SearchTextRange(TypedDict):
+    start: int
+    end: int
+
+
+class SearchProviderContentMatch(TypedDict):
+    lineNumber: int
+    columnNumber: int
+    lineText: str
+    snippet: str
+    matchText: str
+    lineRanges: list[SearchTextRange]
+    snippetRanges: list[SearchTextRange]
+
+
+class SearchProviderContentFile(TypedDict):
+    path: str
+    relativePath: str
+    matches: list[SearchProviderContentMatch]
+
+
+class SearchProviderContentResult(TypedDict):
+    dto: Literal["SearchContentResult"]
+    version: Literal[1]
+    root: str
+    query: str
+    files: list[SearchProviderContentFile]
+    truncated: bool
+    fileCount: int
+    matchCount: int
 
 
 class SearchChangesBaseCommit(TypedDict, total=False):
@@ -160,6 +210,52 @@ def parse_search_run_params(payload: object) -> SearchRunParams:
             envelope.get("excludePattern"), "search:run excludePattern"
         ),
         "useIgnoreFiles": _coerce_bool(envelope.get("useIgnoreFiles"), default=True),
+    }
+
+
+def project_search_files_result(dto: SearchFilesResult) -> SearchNameResult:
+    return {
+        "mode": "name",
+        "query": dto["query"],
+        "results": [
+            {
+                "path": item["path"],
+                "rel": item["relativePath"],
+                "type": item["kind"],
+                "name": item["name"],
+            }
+            for item in dto["items"]
+        ],
+        "truncated": dto["truncated"],
+        "count": dto["count"],
+    }
+
+
+def project_search_content_result(
+    dto: SearchProviderContentResult,
+) -> SearchContentResult:
+    return {
+        "mode": "content",
+        "query": dto["query"],
+        "results": [
+            {
+                "path": file_result["path"],
+                "rel": file_result["relativePath"],
+                "matches": [
+                    {
+                        "line": match["lineNumber"],
+                        "column": max(0, match["columnNumber"] - 1),
+                        "text": match["lineText"],
+                        "snippet": match["snippet"],
+                    }
+                    for match in file_result["matches"]
+                ],
+            }
+            for file_result in dto["files"]
+        ],
+        "truncated": dto["truncated"],
+        "file_count": dto["fileCount"],
+        "match_count": dto["matchCount"],
     }
 
 

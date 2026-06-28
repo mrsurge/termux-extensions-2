@@ -5,6 +5,8 @@ from .. import search as search_service
 from ..contracts.search_review import (
     SearchRunParams,
     SearchRunResult,
+    project_search_content_result,
+    project_search_files_result,
 )
 from ..context import ExplorerSearchReviewHandlerContext
 
@@ -19,7 +21,9 @@ async def handle_search_run(
 
     result: SearchRunResult
     if mode == "name":
-        result = await search_service.search_by_name(context.project_root, query)
+        result = project_search_files_result(
+            await search_service.search_files(context.project_root, query)
+        )
     elif mode == "content":
         content_params: search_service.SearchContentOptionsParams = {
             "query": query,
@@ -30,7 +34,9 @@ async def handle_search_run(
             "excludePattern": params["excludePattern"],
             "useIgnoreFiles": params["useIgnoreFiles"],
         }
-        result = await search_service.search_by_content(context.project_root, content_params)
+        result = project_search_content_result(
+            await search_service.search_content(context.project_root, content_params)
+        )
     else:
         result = search_service.search_by_changes(context.project_root)
 
