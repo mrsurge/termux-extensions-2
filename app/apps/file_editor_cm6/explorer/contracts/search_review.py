@@ -21,6 +21,7 @@ class ExplorerSearchReviewContractError(Exception):
 class SearchRunParams(TypedDict):
     mode: SearchMode
     query: str
+    correlationId: str
     isRegex: bool
     isCaseSensitive: bool
     isWholeWords: bool
@@ -223,6 +224,9 @@ def parse_search_run_params(payload: object) -> SearchRunParams:
     return {
         "mode": mode,
         "query": query,
+        "correlationId": _coerce_string(
+            envelope.get("correlationId"), "search:run correlationId"
+        ),
         "isRegex": _coerce_bool(envelope.get("isRegex"), default=False),
         "isCaseSensitive": _coerce_bool(
             envelope.get("isCaseSensitive"), default=False

@@ -788,6 +788,7 @@ impl FrameworkServiceScheduler {
                 progress_context.emit_progress("running", "File search running", counts);
                 !progress_context.cancelled.load(Ordering::Relaxed)
             })),
+            content_result: None,
         };
         let result = if entry.cancelled.load(Ordering::Relaxed) {
             Err(search_ops::SearchProviderError::Cancelled)
@@ -799,7 +800,7 @@ impl FrameworkServiceScheduler {
                         .map_err(|error| search_ops::SearchProviderError::Search(error.to_string()))
                 })
         };
-        self.finish_search_job(result, context, entry).await;
+        self.finish_search_job(result, context, entry, true).await;
     }
 
     async fn run_search_content_job(
@@ -810,6 +811,7 @@ impl FrameworkServiceScheduler {
     ) {
         context.emit_progress("running", "Content search queued", Default::default());
         let progress_context = context.clone();
+        let result_context = context.clone();
         let options = search_ops::SearchRunOptions {
             search_id: Some(context.search_id.clone()),
             job_id: Some(context.job_id.clone()),
@@ -817,6 +819,13 @@ impl FrameworkServiceScheduler {
             progress: Some(Arc::new(move |counts| {
                 progress_context.emit_progress("running", "Content search running", counts);
                 !progress_context.cancelled.load(Ordering::Relaxed)
+            })),
+            content_result: Some(Arc::new(move |result| {
+                let Ok(result) = serde_json::to_value(result) else {
+                    return false;
+                };
+                result_context.emit_result(result);
+                !result_context.cancelled.load(Ordering::Relaxed)
             })),
         };
         let result = if entry.cancelled.load(Ordering::Relaxed) {
@@ -829,7 +838,7 @@ impl FrameworkServiceScheduler {
                         .map_err(|error| search_ops::SearchProviderError::Search(error.to_string()))
                 })
         };
-        self.finish_search_job(result, context, entry).await;
+        self.finish_search_job(result, context, entry, false).await;
     }
 
     async fn finish_search_job(
@@ -837,13 +846,16 @@ impl FrameworkServiceScheduler {
         result: Result<Value, search_ops::SearchProviderError>,
         context: SearchJobContext,
         entry: Arc<SearchJobEntry>,
+        emit_result: bool,
     ) {
         if context.cancelled.load(Ordering::Relaxed) {
             context.emit_done(true);
         } else {
             match result {
                 Ok(result) => {
-                    context.emit_result(result);
+                    if emit_result {
+                        context.emit_result(result);
+                    }
                     context.emit_done(false);
                 }
                 Err(search_ops::SearchProviderError::Cancelled) => context.emit_done(true),

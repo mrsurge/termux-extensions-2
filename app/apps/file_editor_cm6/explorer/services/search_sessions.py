@@ -14,7 +14,7 @@ from typing import Literal, cast
 from app.libs import pipe_runtime
 from app.libs.pipe_protocol import PipeEnvelope
 
-from ...worker_services.event_bus import current_project_generation
+from ...worker_services.event_bus import current_project_generation, next_project_generation
 from ..context import EmitPersonal
 from ..contracts.search_review import (
     JsonObject,
@@ -63,6 +63,7 @@ class SearchSession:
     name_items: list[SearchProviderFileItem] = field(default_factory=list)
     content_files: dict[str, CachedContentFile] = field(default_factory=dict)
     content_order: list[str] = field(default_factory=list)
+    initial_matches_emitted: int = 0
 
 
 class ExplorerSearchSessions:
@@ -112,8 +113,8 @@ class ExplorerSearchSessions:
         if mode == "changes":
             raise RuntimeError("changes search is not part of service.search progressive sessions")
         root = self._get_project_root()
-        project_generation = current_project_generation(root)
-        correlation_id = _correlation_id(reply_to)
+        project_generation = _ensure_project_generation(root)
+        correlation_id = params["correlationId"] or _correlation_id(reply_to)
         if mode == "name":
             started = await start_file_search(
                 root,
@@ -146,6 +147,8 @@ class ExplorerSearchSessions:
         payload["searchId"] = search_id
         payload["jobId"] = job_id
         payload["projectGeneration"] = project_generation
+        payload["correlationId"] = correlation_id
+        payload["root"] = str(root)
         await self._emit_personal("explorer.search.started", payload, reply_to)
 
     async def more(self, params: SearchMoreParams, reply_to: str | None) -> None:
@@ -310,27 +313,72 @@ class ExplorerSearchSessions:
 
         method = str(envelope.method or "")
         if method == "search.job.progress":
-            await self._emit_personal("explorer.search.progress", params)
+            await self._emit_personal(
+                "search.job.progress",
+                _job_payload(session, params, dto="SearchJobProgress"),
+            )
             return
         if method == "search.job.result":
             self._apply_result(session, _object(params.get("result")))
-            await self._emit_personal(
-                "explorer.search.results.updated",
-                self._visible_payload(session),
-            )
+            if session.kind == "content":
+                result = self._next_content_result_payload(session)
+                if result is not None:
+                    await self._emit_personal(
+                        "search.job.result",
+                        _job_payload(
+                            session,
+                            params,
+                            dto="SearchJobResult",
+                            result=result,
+                        ),
+                    )
+            else:
+                await self._emit_personal(
+                    "explorer.search.results.updated",
+                    self._visible_payload(session),
+                )
             return
         if method == "search.job.done":
             session.complete = True
             session.status = "done"
+            if session.kind == "content":
+                result = self._next_content_result_payload(session, force=True)
+                if result is not None:
+                    await self._emit_personal(
+                        "search.job.result",
+                        _job_payload(
+                            session,
+                            params,
+                            dto="SearchJobResult",
+                            result=result,
+                        ),
+                    )
+            else:
+                await self._emit_personal(
+                    "explorer.search.results.updated",
+                    self._visible_payload(session),
+                )
             await self._emit_personal(
-                "explorer.search.results.updated",
-                self._visible_payload(session),
+                "search.job.done",
+                _job_payload(
+                    session,
+                    params,
+                    dto="SearchJobDone",
+                    fileCount=len(session.content_order)
+                    if session.kind == "content"
+                    else len(session.name_items),
+                    matchCount=_total_content_matches(session)
+                    if session.kind == "content"
+                    else len(session.name_items),
+                ),
             )
-            await self._emit_personal("explorer.search.done", params)
             return
         if method == "search.job.error":
             session.status = "error"
-            await self._emit_personal("explorer.search.error", params)
+            await self._emit_personal(
+                "search.job.error",
+                _job_payload(session, params, dto="SearchJobError"),
+            )
 
     def _apply_result(self, session: SearchSession, result: JsonObject) -> None:
         dto = _string(result.get("dto"))
@@ -383,6 +431,27 @@ class ExplorerSearchSessions:
             max_matches_per_file=INITIAL_MATCHES_PER_FILE,
             max_matches_total=INITIAL_MATCH_TOTAL,
         )
+
+    def _next_content_result_payload(
+        self,
+        session: SearchSession,
+        *,
+        force: bool = False,
+    ) -> JsonObject | None:
+        remaining = max(0, INITIAL_MATCH_TOTAL - session.initial_matches_emitted)
+        result = self._content_window_payload(
+            session,
+            start_offset=session.initial_matches_emitted,
+            max_matches_per_file=INITIAL_MATCHES_PER_FILE,
+            max_matches_total=remaining,
+        )
+        match_count = _optional_int(result.get("match_count")) or 0
+        if match_count > 0:
+            session.initial_matches_emitted += match_count
+            return result
+        if force:
+            return result
+        return None
 
     def _content_window_payload(
         self,
@@ -511,6 +580,27 @@ def _truncated_reason(global_truncated: bool, file_truncated: bool) -> str | Non
     if file_truncated:
         return "maxMatchesPerFile"
     return None
+
+
+def _ensure_project_generation(root: Path) -> int:
+    generation = current_project_generation(root)
+    if generation is not None:
+        return generation
+    return next_project_generation(root)
+
+
+def _job_payload(session: SearchSession, params: JsonObject, *, dto: str, **extra: object) -> JsonObject:
+    payload = _copy_object(params)
+    payload["dto"] = dto
+    payload["version"] = 1
+    payload["searchId"] = session.search_id
+    payload["jobId"] = session.job_id
+    payload["root"] = str(session.root)
+    payload["kind"] = session.kind
+    payload["projectGeneration"] = session.project_generation
+    payload["correlationId"] = session.correlation_id
+    payload.update(extra)
+    return payload
 
 
 def _matches_session(session: SearchSession, params: JsonObject) -> bool:

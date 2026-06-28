@@ -288,6 +288,7 @@ pub(crate) struct SearchRunOptions {
     pub(crate) job_id: Option<String>,
     pub(crate) cancelled: Option<Arc<AtomicBool>>,
     pub(crate) progress: Option<Arc<dyn Fn(SearchProgressCounts) -> bool + Send + Sync>>,
+    pub(crate) content_result: Option<Arc<dyn Fn(SearchContentResult) -> bool + Send + Sync>>,
 }
 
 impl Default for SearchRunOptions {
@@ -297,6 +298,7 @@ impl Default for SearchRunOptions {
             job_id: None,
             cancelled: None,
             progress: None,
+            content_result: None,
         }
     }
 }
@@ -320,6 +322,20 @@ impl SearchRunOptions {
         self.check_cancelled()?;
         if let Some(progress) = &self.progress {
             if !progress(counts) {
+                return Err(SearchProviderError::Cancelled);
+            }
+        }
+        self.check_cancelled()
+    }
+
+    fn has_content_result_sink(&self) -> bool {
+        self.content_result.is_some()
+    }
+
+    fn emit_content_result(&self, result: SearchContentResult) -> Result<(), SearchProviderError> {
+        self.check_cancelled()?;
+        if let Some(content_result) = &self.content_result {
+            if !content_result(result) {
                 return Err(SearchProviderError::Cancelled);
             }
         }
@@ -601,6 +617,7 @@ pub(crate) fn search_content_with_options(
     let mut match_count = 0usize;
     let mut counts = SearchProgressCounts::default();
     let mut truncated_reason: Option<String> = None;
+    let stream_content_results = options.has_content_result_sink();
 
     // Content search delegates matching to ripgrep's matcher/searcher crates.
     // Only caller-provided caps may truncate results; absent caps mean complete scan.
@@ -684,7 +701,7 @@ pub(crate) fn search_content_with_options(
         counts.files_matched += 1;
         counts.matches_found = match_count;
         let file_truncated = sink.cap_reached;
-        files.push(SearchContentFile {
+        let file_result = SearchContentFile {
             path: path_to_string(path),
             relative_path,
             file_match_count: Some(matches_returned),
@@ -692,11 +709,38 @@ pub(crate) fn search_content_with_options(
             file_truncated: Some(file_truncated),
             next_match_cursor: file_truncated.then(|| matches_returned.to_string()),
             matches: sink.matches,
-        });
+        };
+        if stream_content_results {
+            options.emit_content_result(SearchContentResult {
+                dto: "SearchContentResult",
+                version: SEARCH_DTO_VERSION,
+                root: path_to_string(&root),
+                project_generation: request.project_generation,
+                query: request.query.clone(),
+                search_id: options.search_id.clone(),
+                job_id: options.job_id.clone(),
+                complete: Some(false),
+                total_file_count: Some(counts.files_matched),
+                total_match_count: Some(match_count),
+                next_global_cursor: None,
+                truncated_reason: None,
+                file_count: 1,
+                match_count: matches_returned,
+                files: vec![file_result],
+                truncated: false,
+            })?;
+        } else {
+            files.push(file_result);
+        }
         options.emit_progress(counts)?;
     }
 
     let truncated = truncated_reason.is_some();
+    let result_file_count = if stream_content_results {
+        counts.files_matched
+    } else {
+        files.len()
+    };
     Ok(SearchContentResult {
         dto: "SearchContentResult",
         version: SEARCH_DTO_VERSION,
@@ -706,9 +750,9 @@ pub(crate) fn search_content_with_options(
         search_id: options.search_id,
         job_id: options.job_id,
         complete: Some(!truncated),
-        total_file_count: Some(files.len()),
+        total_file_count: Some(result_file_count),
         total_match_count: Some(match_count),
-        next_global_cursor: truncated.then(|| files.len().to_string()),
+        next_global_cursor: truncated.then(|| result_file_count.to_string()),
         truncated_reason,
         file_count: files.len(),
         match_count,
