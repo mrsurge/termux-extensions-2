@@ -38,3 +38,5 @@ worktrees/vscode-te2-diff
 worktrees/monaco-vscode-api
 worktrees/
 .repo_memory.md
+.repo_memory_old.md
+OLD/
