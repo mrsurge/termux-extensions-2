@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 import importlib
 import logging
 import time
-from typing import Protocol, cast, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 from pathlib import Path
 
 # Import git_service to register job handlers in worker process.
@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 JsonObject = dict[str, object]
 ExplorerMessageHandler = Callable[[JsonObject, str | None], Awaitable[None]]
 MarkGitCacheDirtyFn = Callable[[Path], None]
+
+if TYPE_CHECKING:
+    from .explorer.services.search_sessions import ExplorerSearchSessions
 
 get_project_root = _file_ops.get_project_root
 mark_git_cache_dirty = cast(MarkGitCacheDirtyFn, _file_ops.mark_git_cache_dirty)
@@ -86,6 +89,7 @@ class ExplorerDispatcher:
         self.project_root: Path = get_project_root()
         self._job_tracking: ExplorerJobTrackingRuntime | None = None
         self._tracked_job_ids: set[str] = set()
+        self._search_sessions: object | None = None
 
     async def initialize(self) -> None:
         bootstrap = await bootstrap_explorer_session(
@@ -103,8 +107,20 @@ class ExplorerDispatcher:
             emit_personal=self.emit_personal,
             refresh_explorer_state=self._refresh_runtime_state,
         )
+        from .explorer.services.search_sessions import ExplorerSearchSessions
+
+        search_sessions = ExplorerSearchSessions(
+            get_project_root=lambda: self.project_root,
+            emit_personal=self.emit_personal,
+        )
+        await search_sessions.start()
+        self._search_sessions = search_sessions
 
     async def cleanup(self) -> None:
+        search_sessions = self._search_session_service()
+        if search_sessions is not None:
+            await search_sessions.stop()
+        self._search_sessions = None
         await stop_job_tracking(self._job_tracking)
         self._job_tracking = None
         manager.disconnect(self.websocket)
@@ -275,7 +291,19 @@ class ExplorerDispatcher:
         )
 
     def _set_project_root(self, project_root: Path) -> None:
+        search_sessions = self._search_session_service()
+        if search_sessions is not None:
+            search_sessions.cancel_for_project_switch()
         self.project_root = project_root
+
+    def _search_session_service(self) -> "ExplorerSearchSessions | None":
+        from .explorer.services.search_sessions import ExplorerSearchSessions
+
+        return (
+            self._search_sessions
+            if isinstance(self._search_sessions, ExplorerSearchSessions)
+            else None
+        )
 
     def _resolve_handler(self, message_type: str) -> ExplorerMessageHandler | None:
         handler_name = f"handle_{message_type.replace(':', '_')}"
@@ -869,10 +897,69 @@ class ExplorerDispatcher:
         except ExplorerSearchReviewContractError as exc:
             return await self.send_error(exc.message, msg_id)
 
+        if params["mode"] in ("name", "content"):
+            search_sessions = self._search_session_service()
+            if search_sessions is None:
+                return await self.send_error("Explorer search session service is unavailable", msg_id)
+            await search_sessions.run(params, msg_id)
+            return
+
         await handle_search_run_request(
             self._build_search_review_context(),
             params,
             msg_id,
+        )
+
+    async def handle_search_more(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.search_review import (
+            ExplorerSearchReviewContractError,
+            parse_search_more_params,
+        )
+
+        try:
+            params = parse_search_more_params(payload)
+        except ExplorerSearchReviewContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        search_sessions = self._search_session_service()
+        if search_sessions is None:
+            return await self.send_error("Explorer search session service is unavailable", msg_id)
+        await search_sessions.more(params, msg_id)
+
+    async def handle_search_moreInFile(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.search_review import (
+            ExplorerSearchReviewContractError,
+            parse_search_more_in_file_params,
+        )
+
+        try:
+            params = parse_search_more_in_file_params(payload)
+        except ExplorerSearchReviewContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        search_sessions = self._search_session_service()
+        if search_sessions is None:
+            return await self.send_error("Explorer search session service is unavailable", msg_id)
+        await search_sessions.more_in_file(params, msg_id)
+
+    async def handle_search_cancel(self, payload: JsonObject, msg_id: str | None) -> None:
+        from .explorer.contracts.search_review import (
+            ExplorerSearchReviewContractError,
+            parse_search_cancel_params,
+        )
+
+        try:
+            params = parse_search_cancel_params(payload)
+        except ExplorerSearchReviewContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        search_sessions = self._search_session_service()
+        if search_sessions is None:
+            return await self.send_error("Explorer search session service is unavailable", msg_id)
+        await search_sessions.cancel_requested(
+            search_id=params["searchId"],
+            reason=params["reason"],
+            reply_to=msg_id,
         )
 
     async def handle_review_list(self, payload: JsonObject, msg_id: str | None) -> None:

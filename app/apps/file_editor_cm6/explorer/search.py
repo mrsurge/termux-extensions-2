@@ -13,19 +13,8 @@ from .contracts.search_review import (
     SearchChangesBaseCommit,
     SearchChangesBaseInfo,
     SearchChangesResult,
-    SearchFilesResult,
-    SearchProviderContentResult,
+    SearchRunParams,
 )
-
-
-class SearchContentOptionsParams(TypedDict, total=False):
-    query: object
-    isRegex: object
-    isCaseSensitive: object
-    isWholeWords: object
-    includePattern: object
-    excludePattern: object
-    useIgnoreFiles: object
 
 
 class DiffPayload(TypedDict, total=False):
@@ -129,12 +118,20 @@ def _change_entry_sort_key(entry: GitChangeEntry) -> tuple[int, str]:
         priority = 1
     return priority, entry.path.replace("\\", "/")
 
-async def search_files(root: Path, query: str) -> SearchFilesResult:
-    """Return the file/folder search DTO from service.search; no local fallback."""
+async def start_file_search(
+    root: Path,
+    query: str,
+    *,
+    project_generation: int | None,
+    correlation_id: str,
+) -> JsonObject:
+    """Start framework service.search file search; no local producer or fallback."""
     data = await _call_search_provider(
-        "search.files.get",
+        "search.files.start",
         {
             "root": str(root),
+            "projectGeneration": project_generation,
+            "correlationId": correlation_id,
             "query": query,
             "maxResults": 500,
             "includeHidden": False,
@@ -144,11 +141,9 @@ async def search_files(root: Path, query: str) -> SearchFilesResult:
         },
         root=root,
     )
-    if not isinstance(data, dict):
-        raise RuntimeError("Pipe RPC returned invalid search.files.get data")
-    result = cast(SearchFilesResult, cast(object, data))
-    if result.get("dto") != "SearchFilesResult":
-        raise RuntimeError("Pipe RPC returned unexpected search.files.get DTO")
+    result = _json_object(data)
+    if result.get("dto") != "SearchJobStarted":
+        raise RuntimeError("Pipe RPC returned unexpected search.files.start DTO")
     return result
 
 
@@ -161,44 +156,92 @@ def _parse_glob_patterns(raw: str) -> list[str]:
     return patterns
 
 
-async def search_content(
+async def start_content_search(
     root: Path,
-    params: SearchContentOptionsParams,
-) -> SearchProviderContentResult:
-    """Return the content search DTO from service.search; no local fallback."""
+    params: SearchRunParams,
+    *,
+    project_generation: int | None,
+    correlation_id: str,
+) -> JsonObject:
+    """Start framework service.search content search; no local producer or fallback."""
     data = await _call_search_provider(
-        "search.content.get",
+        "search.content.start",
         {
             "root": str(root),
-            "query": str(params.get("query", "")),
-            "isRegex": bool(params.get("isRegex", False)),
-            "isCaseSensitive": bool(params.get("isCaseSensitive", False)),
-            "isWholeWords": bool(params.get("isWholeWords", False)),
-            "includePatterns": _parse_glob_patterns(str(params.get("includePattern", ""))),
-            "excludePatterns": _parse_glob_patterns(str(params.get("excludePattern", ""))),
-            "useIgnoreFiles": bool(params.get("useIgnoreFiles", True)),
-            "maxFiles": 50,
-            "maxFileSizeBytes": 1_048_576,
+            "projectGeneration": project_generation,
+            "correlationId": correlation_id,
+            "query": params["query"],
+            "isRegex": params["isRegex"],
+            "isCaseSensitive": params["isCaseSensitive"],
+            "isWholeWords": params["isWholeWords"],
+            "includePatterns": _parse_glob_patterns(params["includePattern"]),
+            "excludePatterns": _parse_glob_patterns(params["excludePattern"]),
+            "useIgnoreFiles": params["useIgnoreFiles"],
             "contextChars": 75,
+            "presentationWindow": {
+                "maxInitialMatchesPerFile": 10,
+                "maxInitialMatchesTotal": 50,
+            },
         },
         root=root,
+        project_generation=project_generation,
+        correlation_id=correlation_id,
     )
-    if not isinstance(data, dict):
-        raise RuntimeError("Pipe RPC returned invalid search.content.get data")
-    result = cast(SearchProviderContentResult, cast(object, data))
-    if result.get("dto") != "SearchContentResult":
-        raise RuntimeError("Pipe RPC returned unexpected search.content.get DTO")
+    result = _json_object(data)
+    if result.get("dto") != "SearchJobStarted":
+        raise RuntimeError("Pipe RPC returned unexpected search.content.start DTO")
     return result
 
 
-async def _call_search_provider(method: str, params: JsonObject, *, root: Path) -> object:
+async def cancel_search_job(
+    *,
+    root: Path,
+    search_id: str,
+    job_id: str,
+    project_generation: int | None,
+    reason: str,
+) -> JsonObject:
+    data = await _call_search_provider(
+        "search.job.cancel",
+        {
+            "dto": "SearchJobCancelRequest",
+            "version": 1,
+            "root": str(root),
+            "projectGeneration": project_generation,
+            "searchId": search_id,
+            "jobId": job_id,
+            "reason": reason,
+        },
+        root=root,
+        project_generation=project_generation,
+        correlation_id=search_id,
+        op_id=job_id,
+    )
+    result = _json_object(data)
+    if result.get("dto") != "SearchJobCancelResult":
+        raise RuntimeError("Pipe RPC returned unexpected search.job.cancel DTO")
+    return result
+
+
+async def _call_search_provider(
+    method: str,
+    params: JsonObject,
+    *,
+    root: Path,
+    project_generation: int | None = None,
+    correlation_id: str | None = None,
+    op_id: str | None = None,
+) -> object:
     return await pipe_runtime.call_async(
         method,
         params,
         target_nid=SEARCH_SERVICE_TARGET_NID,
         target_name=SEARCH_SERVICE_TARGET_NAME,
         workspace_root=str(root),
+        project_generation=project_generation,
         origin_name=SEARCH_SERVICE_ORIGIN_NAME,
+        correlation_id=correlation_id,
+        op_id=op_id,
     )
 
 

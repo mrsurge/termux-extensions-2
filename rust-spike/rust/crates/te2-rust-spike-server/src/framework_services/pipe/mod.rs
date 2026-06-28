@@ -3,6 +3,7 @@
 mod fs_pipe_ops;
 mod git_pipe_ops;
 pub(crate) mod protocol;
+mod search_pipe_ops;
 
 use std::sync::Arc;
 
@@ -36,7 +37,14 @@ pub(crate) async fn dispatch_request(
         return response;
     }
     if let Some(response) =
-        git_pipe_ops::dispatch_git_request(&request, responder, scheduler, event_sink).await
+        git_pipe_ops::dispatch_git_request(&request, responder, scheduler, event_sink.clone()).await
+    {
+        return response;
+    }
+    // Search provider dispatch stays on the shared pipe router so app workers
+    // call framework-owned search exactly like fs/git services.
+    if let Some(response) =
+        search_pipe_ops::dispatch_search_request(&request, responder, scheduler, event_sink).await
     {
         return response;
     }
@@ -305,6 +313,406 @@ mod tests {
         .await;
         assert_eq!(deleted.kind, PipeMessageKind::Response);
         assert!(!root.join("dest/renamed.py").exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn dispatches_search_files_to_contract_dto() {
+        let root = test_root("search-files");
+        fs::create_dir_all(root.join("src/editor")).expect("create editor dir");
+        fs::create_dir_all(root.join(".hidden")).expect("create hidden dir");
+        fs::create_dir_all(root.join("node_modules")).expect("create node modules");
+        fs::write(root.join("src/editor/main.rs"), "fn main() {}\n").expect("write source");
+        fs::write(root.join(".hidden/editor.log"), "hidden\n").expect("write hidden");
+        fs::write(root.join("node_modules/editor.js"), "ignored\n").expect("write ignored");
+
+        let response = dispatch_request(
+            targeted_request(
+                "search.files.get",
+                json!({
+                    "query": "editor",
+                    "maxResults": 10,
+                    "includeHidden": false,
+                    "useIgnoreFiles": true,
+                    "excludePatterns": ["node_modules/**"]
+                }),
+                &root,
+                2300,
+                "service.search",
+            ),
+            &PipeIdentity {
+                nid: 2300,
+                name: "service.search".to_owned(),
+            },
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let result = response.result.expect("response result");
+        assert_eq!(
+            result.get("dto").and_then(|value| value.as_str()),
+            Some("SearchFilesResult")
+        );
+        let items = result
+            .get("items")
+            .and_then(|value| value.as_array())
+            .expect("items");
+        assert!(
+            items.iter().any(|item| {
+                item.get("relativePath").and_then(|value| value.as_str()) == Some("src/editor")
+                    && item.get("kind").and_then(|value| value.as_str()) == Some("dir")
+            }),
+            "expected src/editor directory in {items:?}"
+        );
+        assert!(
+            !items.iter().any(|item| item
+                .get("relativePath")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .contains("node_modules")),
+            "node_modules result leaked into {items:?}"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn dispatches_search_content_to_contract_dto() {
+        let root = test_root("search-content");
+        fs::create_dir_all(root.join("src")).expect("create src");
+        fs::create_dir_all(root.join("docs")).expect("create docs");
+        fs::write(
+            root.join("src/open.ts"),
+            "const value = 1;\nexport function openFile(path: string) {}\n",
+        )
+        .expect("write source");
+        fs::write(root.join("docs/open.txt"), "function openFile docs\n").expect("write docs");
+
+        let response = dispatch_request(
+            targeted_request(
+                "search.content.get",
+                json!({
+                    "query": "function openFile",
+                    "isRegex": false,
+                    "isCaseSensitive": true,
+                    "includePatterns": ["*.ts"],
+                    "maxFiles": 10,
+                    "maxMatchesPerFile": 5,
+                    "contextChars": 75
+                }),
+                &root,
+                2300,
+                "service.search",
+            ),
+            &PipeIdentity {
+                nid: 2300,
+                name: "service.search".to_owned(),
+            },
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let result = response.result.expect("response result");
+        assert_eq!(
+            result.get("dto").and_then(|value| value.as_str()),
+            Some("SearchContentResult")
+        );
+        assert_eq!(
+            result.get("fileCount").and_then(|value| value.as_u64()),
+            Some(1)
+        );
+        assert_eq!(
+            result.get("matchCount").and_then(|value| value.as_u64()),
+            Some(1)
+        );
+        let first_match = result["files"][0]["matches"][0].as_object().expect("match");
+        assert_eq!(
+            first_match
+                .get("lineNumber")
+                .and_then(|value| value.as_u64()),
+            Some(2)
+        );
+        assert_eq!(
+            first_match
+                .get("columnNumber")
+                .and_then(|value| value.as_u64()),
+            Some(8)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn dispatches_search_content_invalid_regex_as_pipe_error() {
+        let root = test_root("search-invalid-regex");
+        fs::write(root.join("main.rs"), "fn main() {}\n").expect("write source");
+
+        let response = dispatch_request(
+            targeted_request(
+                "search.content.get",
+                json!({
+                    "query": "[",
+                    "isRegex": true
+                }),
+                &root,
+                2300,
+                "service.search",
+            ),
+            &PipeIdentity {
+                nid: 2300,
+                name: "service.search".to_owned(),
+            },
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Error);
+        assert_eq!(
+            response.error.as_ref().map(|error| error.code.as_str()),
+            Some("search.invalidRegex")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn search_content_has_no_hidden_file_cap() {
+        let root = test_root("search-no-hidden-cap");
+        for index in 0..55 {
+            fs::write(root.join(format!("match_{index}.txt")), "needle\n")
+                .expect("write match file");
+        }
+
+        let response = dispatch_request(
+            targeted_request(
+                "search.content.get",
+                json!({
+                    "dto": "SearchContentRequest",
+                    "version": 1,
+                    "query": "needle",
+                    "isCaseSensitive": true
+                }),
+                &root,
+                2300,
+                "service.search",
+            ),
+            &PipeIdentity {
+                nid: 2300,
+                name: "service.search".to_owned(),
+            },
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let result = response.result.expect("response result");
+        assert_eq!(
+            result.get("fileCount").and_then(|value| value.as_u64()),
+            Some(55)
+        );
+        assert_eq!(
+            result.get("matchCount").and_then(|value| value.as_u64()),
+            Some(55)
+        );
+        assert_eq!(
+            result.get("truncated").and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            result.get("complete").and_then(|value| value.as_bool()),
+            Some(true)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn search_request_metadata_mismatch_is_typed_error() {
+        let root = test_root("search-metadata");
+        fs::write(root.join("main.rs"), "fn main() {}\n").expect("write source");
+
+        let response = dispatch_request(
+            targeted_request(
+                "search.content.get",
+                json!({
+                    "dto": "WrongDto",
+                    "version": 1,
+                    "query": "main"
+                }),
+                &root,
+                2300,
+                "service.search",
+            ),
+            &PipeIdentity {
+                nid: 2300,
+                name: "service.search".to_owned(),
+            },
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Error);
+        assert_eq!(
+            response.error.as_ref().map(|error| error.code.as_str()),
+            Some("search.invalidRequest")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn dispatches_search_content_start_and_routes_result_notifications() {
+        let root = test_root("search-progressive");
+        fs::write(root.join("one.txt"), "needle one\n").expect("write one");
+        fs::write(root.join("two.txt"), "needle two\n").expect("write two");
+        let scheduler = FrameworkServiceScheduler::default();
+        let sink = Arc::new(TestSink::default());
+
+        let response = dispatch_request(
+            targeted_request(
+                "search.content.start",
+                json!({
+                    "dto": "SearchContentStartRequest",
+                    "version": 1,
+                    "query": "needle",
+                    "isCaseSensitive": true,
+                    "correlationId": "search-correlation"
+                }),
+                &root,
+                2300,
+                "service.search",
+            ),
+            &PipeIdentity {
+                nid: 2300,
+                name: "service.search".to_owned(),
+            },
+            &scheduler,
+            Some(sink.clone()),
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let started = response.result.expect("start result");
+        assert_eq!(
+            started.get("dto").and_then(|value| value.as_str()),
+            Some("SearchJobStarted")
+        );
+        let search_id = started
+            .get("searchId")
+            .and_then(|value| value.as_str())
+            .expect("search id")
+            .to_owned();
+
+        let mut result_frame = None;
+        let mut done_frame = None;
+        for _ in 0..100 {
+            {
+                let frames = sink.frames.lock().expect("frames lock");
+                result_frame = frames
+                    .iter()
+                    .find(|frame| frame.method.as_deref() == Some("search.job.result"))
+                    .cloned();
+                done_frame = frames
+                    .iter()
+                    .find(|frame| frame.method.as_deref() == Some("search.job.done"))
+                    .cloned();
+            }
+            if result_frame.is_some() && done_frame.is_some() {
+                break;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+
+        let result_frame = result_frame.expect("search result notification");
+        assert_eq!(result_frame.kind, PipeMessageKind::Notification);
+        assert_eq!(result_frame.target_nid, Some(1100));
+        assert_eq!(
+            result_frame.target_name.as_deref(),
+            Some("file_editor_cm6.explorer")
+        );
+        let result_params = result_frame.params.expect("result params");
+        assert_eq!(
+            result_params.get("dto").and_then(|value| value.as_str()),
+            Some("SearchJobResult")
+        );
+        assert_eq!(
+            result_params
+                .get("searchId")
+                .and_then(|value| value.as_str()),
+            Some(search_id.as_str())
+        );
+        assert_eq!(
+            result_params
+                .get("result")
+                .and_then(|value| value.get("dto"))
+                .and_then(|value| value.as_str()),
+            Some("SearchContentResult")
+        );
+
+        let done_params = done_frame
+            .expect("done notification")
+            .params
+            .expect("done params");
+        assert_eq!(
+            done_params.get("dto").and_then(|value| value.as_str()),
+            Some("SearchJobDone")
+        );
+        assert_eq!(
+            done_params
+                .get("cancelled")
+                .and_then(|value| value.as_bool()),
+            Some(false)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn search_job_cancel_reports_missing_job() {
+        let root = test_root("search-cancel-missing");
+        let response = dispatch_request(
+            targeted_request(
+                "search.job.cancel",
+                json!({
+                    "dto": "SearchJobCancelRequest",
+                    "version": 1,
+                    "jobId": "missing"
+                }),
+                &root,
+                2300,
+                "service.search",
+            ),
+            &PipeIdentity {
+                nid: 2300,
+                name: "service.search".to_owned(),
+            },
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let result = response.result.expect("cancel result");
+        assert_eq!(
+            result.get("dto").and_then(|value| value.as_str()),
+            Some("SearchJobCancelResult")
+        );
+        assert_eq!(
+            result.get("ok").and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            result.get("status").and_then(|value| value.as_str()),
+            Some("not_found")
+        );
 
         let _ = fs::remove_dir_all(root);
     }

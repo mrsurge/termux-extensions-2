@@ -1,4 +1,4 @@
-use super::{fs_ops, git_ops};
+use super::{fs_ops, git_ops, search_ops};
 use crate::framework_services::pipe::{
     PipeEventSink,
     protocol::{JSONRPC_VERSION, PROTOCOL_VERSION, PipeEnvelope, PipeMessageKind},
@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     sync::{
-        Arc,
+        Arc, Mutex as StdMutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
@@ -19,6 +19,9 @@ const FS_WRITE_PERMITS: usize = 2;
 const GIT_READ_PERMITS: usize = 4;
 const GIT_MUTATION_PERMITS: usize = 2;
 const GIT_NETWORK_PERMITS: usize = 1;
+// Search has its own bounded read-heavy lane so repository scans do not
+// consume pipe-dispatch, filesystem mutation, or git-network capacity.
+const SEARCH_READ_PERMITS: usize = 4;
 
 #[derive(Clone)]
 pub(crate) struct FrameworkServiceScheduler {
@@ -31,8 +34,10 @@ struct SchedulerInner {
     git_read: Arc<Semaphore>,
     git_mutation: Arc<Semaphore>,
     git_network: Arc<Semaphore>,
+    search_read: Arc<Semaphore>,
     repo_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     git_jobs: Mutex<HashMap<String, Arc<GitJobEntry>>>,
+    search_jobs: Mutex<HashMap<String, Arc<SearchJobEntry>>>,
     job_sequence: AtomicU64,
 }
 
@@ -40,6 +45,35 @@ struct GitJobEntry {
     job_id: String,
     op_id: String,
     cancelled: Arc<AtomicBool>,
+}
+
+struct SearchJobEntry {
+    job_id: String,
+    search_id: String,
+    op_id: String,
+    cancelled: Arc<AtomicBool>,
+}
+
+#[derive(Clone, Copy)]
+enum SearchJobKind {
+    Files,
+    Content,
+}
+
+impl SearchJobKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Files => "files",
+            Self::Content => "content",
+        }
+    }
+
+    fn message(self) -> &'static str {
+        match self {
+            Self::Files => "File search started",
+            Self::Content => "Content search started",
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -55,6 +89,22 @@ struct GitJobProgressContext {
     sequence: Arc<AtomicU64>,
 }
 
+#[derive(Clone)]
+struct SearchJobContext {
+    event_sink: Arc<dyn PipeEventSink>,
+    request: PipeEnvelope,
+    kind: SearchJobKind,
+    job_id: String,
+    search_id: String,
+    op_id: String,
+    root: String,
+    project_generation: Option<u64>,
+    correlation_id: Option<String>,
+    cancelled: Arc<AtomicBool>,
+    sequence: Arc<AtomicU64>,
+    last_counts: Arc<StdMutex<search_ops::SearchProgressCounts>>,
+}
+
 impl Default for FrameworkServiceScheduler {
     fn default() -> Self {
         Self {
@@ -64,8 +114,10 @@ impl Default for FrameworkServiceScheduler {
                 git_read: Arc::new(Semaphore::new(GIT_READ_PERMITS)),
                 git_mutation: Arc::new(Semaphore::new(GIT_MUTATION_PERMITS)),
                 git_network: Arc::new(Semaphore::new(GIT_NETWORK_PERMITS)),
+                search_read: Arc::new(Semaphore::new(SEARCH_READ_PERMITS)),
                 repo_locks: Mutex::new(HashMap::new()),
                 git_jobs: Mutex::new(HashMap::new()),
+                search_jobs: Mutex::new(HashMap::new()),
                 job_sequence: AtomicU64::new(1),
             }),
         }
@@ -122,6 +174,130 @@ impl FrameworkServiceScheduler {
         request: fs_ops::FsMutationRequest,
     ) -> Result<fs_ops::FsMutationResult, fs_ops::BrowseError> {
         self.fs_write(move || fs_ops::move_entry(request)).await
+    }
+
+    pub(crate) async fn search_files(
+        &self,
+        request: search_ops::SearchFilesRequest,
+    ) -> Result<search_ops::SearchFilesResult, search_ops::SearchProviderError> {
+        self.search_read(move || search_ops::search_files(request))
+            .await
+    }
+
+    pub(crate) async fn search_content(
+        &self,
+        request: search_ops::SearchContentRequest,
+    ) -> Result<search_ops::SearchContentResult, search_ops::SearchProviderError> {
+        self.search_read(move || search_ops::search_content(request))
+            .await
+    }
+
+    pub(crate) async fn start_search_files_job(
+        &self,
+        request_params: search_ops::SearchFilesStartRequest,
+        request: PipeEnvelope,
+        event_sink: Option<Arc<dyn PipeEventSink>>,
+    ) -> Result<search_ops::SearchJobStarted, search_ops::SearchProviderError> {
+        let correlation_id = request_params
+            .correlation_id
+            .clone()
+            .or_else(|| request.correlation_id.clone());
+        let provider_request = request_params.into_provider_request();
+        let root = search_ops::resolved_root_string(provider_request.root.as_deref())?;
+        let project_generation = provider_request
+            .project_generation
+            .or(request.project_generation);
+        let (started, context, entry) = self
+            .prepare_search_job(
+                SearchJobKind::Files,
+                root,
+                project_generation,
+                correlation_id,
+                request,
+                event_sink,
+            )
+            .await?;
+        let scheduler = self.clone();
+        tokio::spawn(async move {
+            scheduler
+                .run_search_files_job(provider_request, context, entry)
+                .await;
+        });
+        Ok(started)
+    }
+
+    pub(crate) async fn start_search_content_job(
+        &self,
+        request_params: search_ops::SearchContentStartRequest,
+        request: PipeEnvelope,
+        event_sink: Option<Arc<dyn PipeEventSink>>,
+    ) -> Result<search_ops::SearchJobStarted, search_ops::SearchProviderError> {
+        let correlation_id = request_params
+            .correlation_id
+            .clone()
+            .or_else(|| request.correlation_id.clone());
+        let provider_request = request_params.into_provider_request();
+        let root = search_ops::resolved_root_string(provider_request.root.as_deref())?;
+        let project_generation = provider_request
+            .project_generation
+            .or(request.project_generation);
+        let (started, context, entry) = self
+            .prepare_search_job(
+                SearchJobKind::Content,
+                root,
+                project_generation,
+                correlation_id,
+                request,
+                event_sink,
+            )
+            .await?;
+        let scheduler = self.clone();
+        tokio::spawn(async move {
+            scheduler
+                .run_search_content_job(provider_request, context, entry)
+                .await;
+        });
+        Ok(started)
+    }
+
+    pub(crate) async fn cancel_search_job(
+        &self,
+        request: search_ops::SearchJobCancelRequest,
+    ) -> Result<search_ops::SearchJobCancelResult, search_ops::SearchProviderError> {
+        let key = request
+            .job_id
+            .as_deref()
+            .or(request.search_id.as_deref())
+            .or(request.op_id.as_deref())
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                search_ops::SearchProviderError::InvalidRequest(
+                    "search.job.cancel requires jobId, searchId, or opId".to_owned(),
+                )
+            })?;
+        let Some(entry) = self.inner.search_jobs.lock().await.get(key).cloned() else {
+            return Ok(search_ops::SearchJobCancelResult {
+                dto: "SearchJobCancelResult",
+                version: 1,
+                job_id: request.job_id.unwrap_or_default(),
+                search_id: request.search_id.unwrap_or_default(),
+                op_id: request.op_id.unwrap_or_default(),
+                ok: false,
+                status: "not_found".to_owned(),
+                reason: request.reason,
+            });
+        };
+        entry.cancelled.store(true, Ordering::Relaxed);
+        Ok(search_ops::SearchJobCancelResult {
+            dto: "SearchJobCancelResult",
+            version: 1,
+            job_id: entry.job_id.clone(),
+            search_id: entry.search_id.clone(),
+            op_id: entry.op_id.clone(),
+            ok: true,
+            status: "cancelling".to_owned(),
+            reason: request.reason,
+        })
     }
 
     pub(crate) async fn git_snapshot(
@@ -520,6 +696,175 @@ impl FrameworkServiceScheduler {
         jobs.remove(&entry.op_id);
     }
 
+    async fn prepare_search_job(
+        &self,
+        kind: SearchJobKind,
+        root: String,
+        project_generation: Option<u64>,
+        correlation_id: Option<String>,
+        request: PipeEnvelope,
+        event_sink: Option<Arc<dyn PipeEventSink>>,
+    ) -> Result<
+        (
+            search_ops::SearchJobStarted,
+            SearchJobContext,
+            Arc<SearchJobEntry>,
+        ),
+        search_ops::SearchProviderError,
+    > {
+        let Some(event_sink) = event_sink else {
+            return Err(search_ops::SearchProviderError::InvalidRequest(
+                "search job progress requires a pipe event sink".to_owned(),
+            ));
+        };
+        let sequence = self.inner.job_sequence.fetch_add(1, Ordering::Relaxed);
+        let job_id = format!("search-{}-{sequence}", kind.label());
+        let search_id = format!("search-result-{sequence}");
+        let op_id = request
+            .op_id
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| job_id.clone());
+        let entry = Arc::new(SearchJobEntry {
+            job_id: job_id.clone(),
+            search_id: search_id.clone(),
+            op_id: op_id.clone(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        {
+            let mut jobs = self.inner.search_jobs.lock().await;
+            jobs.insert(job_id.clone(), Arc::clone(&entry));
+            jobs.insert(search_id.clone(), Arc::clone(&entry));
+            jobs.insert(op_id.clone(), Arc::clone(&entry));
+        }
+
+        let context = SearchJobContext {
+            event_sink,
+            request,
+            kind,
+            job_id: job_id.clone(),
+            search_id: search_id.clone(),
+            op_id: op_id.clone(),
+            root: root.clone(),
+            project_generation,
+            correlation_id: correlation_id.clone(),
+            cancelled: Arc::clone(&entry.cancelled),
+            sequence: Arc::new(AtomicU64::new(1)),
+            last_counts: Arc::new(StdMutex::new(search_ops::SearchProgressCounts::default())),
+        };
+        Ok((
+            search_ops::SearchJobStarted {
+                dto: "SearchJobStarted",
+                version: 1,
+                job_id,
+                search_id,
+                op_id,
+                kind: kind.label(),
+                root,
+                project_generation,
+                correlation_id,
+                status: "running",
+                message: kind.message().to_owned(),
+            },
+            context,
+            entry,
+        ))
+    }
+
+    async fn run_search_files_job(
+        &self,
+        request: search_ops::SearchFilesRequest,
+        context: SearchJobContext,
+        entry: Arc<SearchJobEntry>,
+    ) {
+        context.emit_progress("running", "File search queued", Default::default());
+        let progress_context = context.clone();
+        let options = search_ops::SearchRunOptions {
+            search_id: None,
+            job_id: Some(context.job_id.clone()),
+            cancelled: Some(Arc::clone(&entry.cancelled)),
+            progress: Some(Arc::new(move |counts| {
+                progress_context.emit_progress("running", "File search running", counts);
+                !progress_context.cancelled.load(Ordering::Relaxed)
+            })),
+        };
+        let result = if entry.cancelled.load(Ordering::Relaxed) {
+            Err(search_ops::SearchProviderError::Cancelled)
+        } else {
+            self.search_read(move || search_ops::search_files_with_options(request, options))
+                .await
+                .and_then(|result| {
+                    serde_json::to_value(result)
+                        .map_err(|error| search_ops::SearchProviderError::Search(error.to_string()))
+                })
+        };
+        self.finish_search_job(result, context, entry).await;
+    }
+
+    async fn run_search_content_job(
+        &self,
+        request: search_ops::SearchContentRequest,
+        context: SearchJobContext,
+        entry: Arc<SearchJobEntry>,
+    ) {
+        context.emit_progress("running", "Content search queued", Default::default());
+        let progress_context = context.clone();
+        let options = search_ops::SearchRunOptions {
+            search_id: Some(context.search_id.clone()),
+            job_id: Some(context.job_id.clone()),
+            cancelled: Some(Arc::clone(&entry.cancelled)),
+            progress: Some(Arc::new(move |counts| {
+                progress_context.emit_progress("running", "Content search running", counts);
+                !progress_context.cancelled.load(Ordering::Relaxed)
+            })),
+        };
+        let result = if entry.cancelled.load(Ordering::Relaxed) {
+            Err(search_ops::SearchProviderError::Cancelled)
+        } else {
+            self.search_read(move || search_ops::search_content_with_options(request, options))
+                .await
+                .and_then(|result| {
+                    serde_json::to_value(result)
+                        .map_err(|error| search_ops::SearchProviderError::Search(error.to_string()))
+                })
+        };
+        self.finish_search_job(result, context, entry).await;
+    }
+
+    async fn finish_search_job(
+        &self,
+        result: Result<Value, search_ops::SearchProviderError>,
+        context: SearchJobContext,
+        entry: Arc<SearchJobEntry>,
+    ) {
+        if context.cancelled.load(Ordering::Relaxed) {
+            context.emit_done(true);
+        } else {
+            match result {
+                Ok(result) => {
+                    context.emit_result(result);
+                    context.emit_done(false);
+                }
+                Err(search_ops::SearchProviderError::Cancelled) => context.emit_done(true),
+                Err(error) => {
+                    context.emit_error(
+                        search_error_code(&error),
+                        search_provider_error_message(error),
+                    );
+                }
+            }
+        }
+        self.remove_search_job(&entry).await;
+    }
+
+    async fn remove_search_job(&self, entry: &SearchJobEntry) {
+        let mut jobs = self.inner.search_jobs.lock().await;
+        jobs.remove(&entry.job_id);
+        jobs.remove(&entry.search_id);
+        jobs.remove(&entry.op_id);
+    }
+
     async fn git_read<T>(
         &self,
         operation: impl FnOnce() -> Result<T, git_ops::GitProviderError> + Send + 'static,
@@ -589,6 +934,16 @@ impl FrameworkServiceScheduler {
             .map_err(|error| git_ops::GitProviderError::Io(error.to_string()))
     }
 
+    async fn acquire_search(
+        &self,
+        semaphore: Arc<Semaphore>,
+    ) -> Result<OwnedSemaphorePermit, search_ops::SearchProviderError> {
+        semaphore
+            .acquire_owned()
+            .await
+            .map_err(|error| search_ops::SearchProviderError::Io(error.to_string()))
+    }
+
     async fn spawn_fs<T>(
         &self,
         operation: impl FnOnce() -> Result<T, fs_ops::BrowseError> + Send + 'static,
@@ -612,6 +967,17 @@ impl FrameworkServiceScheduler {
         self.spawn_fs(operation).await
     }
 
+    async fn search_read<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, search_ops::SearchProviderError> + Send + 'static,
+    ) -> Result<T, search_ops::SearchProviderError>
+    where
+        T: Send + 'static,
+    {
+        let _permit = self.acquire_search(self.inner.search_read.clone()).await?;
+        self.spawn_search(operation).await
+    }
+
     async fn spawn_git<T>(
         &self,
         operation: impl FnOnce() -> Result<T, git_ops::GitProviderError> + Send + 'static,
@@ -622,6 +988,18 @@ impl FrameworkServiceScheduler {
         tokio::task::spawn_blocking(operation)
             .await
             .map_err(|error| git_ops::GitProviderError::Io(error.to_string()))?
+    }
+
+    async fn spawn_search<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, search_ops::SearchProviderError> + Send + 'static,
+    ) -> Result<T, search_ops::SearchProviderError>
+    where
+        T: Send + 'static,
+    {
+        tokio::task::spawn_blocking(operation)
+            .await
+            .map_err(|error| search_ops::SearchProviderError::Io(error.to_string()))?
     }
 }
 
@@ -689,6 +1067,136 @@ impl GitJobProgressContext {
         };
         if let Err(error) = self.event_sink.send(envelope) {
             warn!(%error, job_id = %self.job_id, "failed to emit git job progress");
+        }
+    }
+}
+
+impl SearchJobContext {
+    fn emit_progress(
+        &self,
+        status: impl Into<String>,
+        message: impl Into<String>,
+        counts: search_ops::SearchProgressCounts,
+    ) {
+        if let Ok(mut last_counts) = self.last_counts.lock() {
+            *last_counts = counts;
+        }
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        let dto = search_ops::SearchJobProgress {
+            dto: "SearchJobProgress",
+            version: 1,
+            job_id: self.job_id.clone(),
+            search_id: self.search_id.clone(),
+            op_id: self.op_id.clone(),
+            kind: self.kind.label(),
+            root: self.root.clone(),
+            project_generation: self.project_generation,
+            correlation_id: self.correlation_id.clone(),
+            status: status.into(),
+            message: message.into(),
+            files_scanned: counts.files_scanned,
+            files_matched: counts.files_matched,
+            matches_found: counts.matches_found,
+            sequence,
+        };
+        self.emit("search.job.progress", dto, sequence);
+    }
+
+    fn emit_result(&self, result: Value) {
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        let dto = search_ops::SearchJobResult {
+            dto: "SearchJobResult",
+            version: 1,
+            job_id: self.job_id.clone(),
+            search_id: self.search_id.clone(),
+            op_id: self.op_id.clone(),
+            kind: self.kind.label(),
+            root: self.root.clone(),
+            project_generation: self.project_generation,
+            correlation_id: self.correlation_id.clone(),
+            result,
+            sequence,
+        };
+        self.emit("search.job.result", dto, sequence);
+    }
+
+    fn emit_done(&self, cancelled: bool) {
+        let counts = self
+            .last_counts
+            .lock()
+            .map(|counts| *counts)
+            .unwrap_or_default();
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        let dto = search_ops::SearchJobDone {
+            dto: "SearchJobDone",
+            version: 1,
+            job_id: self.job_id.clone(),
+            search_id: self.search_id.clone(),
+            op_id: self.op_id.clone(),
+            kind: self.kind.label(),
+            root: self.root.clone(),
+            project_generation: self.project_generation,
+            correlation_id: self.correlation_id.clone(),
+            status: "done",
+            files_scanned: counts.files_scanned,
+            files_matched: counts.files_matched,
+            matches_found: counts.matches_found,
+            cancelled,
+            sequence,
+        };
+        self.emit("search.job.done", dto, sequence);
+    }
+
+    fn emit_error(&self, code: impl Into<String>, message: impl Into<String>) {
+        let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
+        let dto = search_ops::SearchJobError {
+            dto: "SearchJobError",
+            version: 1,
+            job_id: self.job_id.clone(),
+            search_id: self.search_id.clone(),
+            op_id: self.op_id.clone(),
+            kind: self.kind.label(),
+            root: self.root.clone(),
+            project_generation: self.project_generation,
+            correlation_id: self.correlation_id.clone(),
+            status: "error",
+            code: code.into(),
+            message: message.into(),
+            sequence,
+        };
+        self.emit("search.job.error", dto, sequence);
+    }
+
+    fn emit<T>(&self, method: &str, dto: T, sequence: u64)
+    where
+        T: serde::Serialize,
+    {
+        let envelope = PipeEnvelope {
+            jsonrpc: JSONRPC_VERSION.to_owned(),
+            protocol_version: PROTOCOL_VERSION,
+            kind: PipeMessageKind::Notification,
+            id: None,
+            method: Some(method.to_owned()),
+            origin_nid: self.request.target_nid.unwrap_or(2300),
+            origin_name: self
+                .request
+                .target_name
+                .clone()
+                .unwrap_or_else(|| "service.search".to_owned()),
+            target_nid: Some(self.request.origin_nid),
+            target_name: Some(self.request.origin_name.clone()),
+            project_generation: self.project_generation,
+            workspace_root: self.request.workspace_root.clone(),
+            correlation_id: self.correlation_id.clone(),
+            op_id: Some(self.op_id.clone()),
+            sequence: Some(sequence),
+            params: serde_json::to_value(dto).ok(),
+            result: None,
+            error: None,
+            reason: None,
+        };
+        if let Err(error) = self.event_sink.send(envelope) {
+            warn!(%error, job_id = %self.job_id, "failed to emit search job notification");
         }
     }
 }
@@ -799,6 +1307,34 @@ fn git_provider_error_message(error: git_ops::GitProviderError) -> String {
         git_ops::GitProviderError::Unsupported(message)
         | git_ops::GitProviderError::Git(message)
         | git_ops::GitProviderError::Io(message) => message,
+    }
+}
+
+fn search_error_code(error: &search_ops::SearchProviderError) -> &'static str {
+    match error {
+        search_ops::SearchProviderError::MissingRoot => "search.missingRoot",
+        search_ops::SearchProviderError::InvalidRoot(_) => "search.invalidRoot",
+        search_ops::SearchProviderError::InvalidPattern(_) => "search.invalidPattern",
+        search_ops::SearchProviderError::InvalidRegex(_) => "search.invalidRegex",
+        search_ops::SearchProviderError::InvalidRequest(_) => "search.invalidRequest",
+        search_ops::SearchProviderError::Cancelled => "search.cancelled",
+        search_ops::SearchProviderError::Io(_) => "search.io",
+        search_ops::SearchProviderError::Search(_) => "search.failed",
+    }
+}
+
+fn search_provider_error_message(error: search_ops::SearchProviderError) -> String {
+    match error {
+        search_ops::SearchProviderError::MissingRoot => {
+            "search request requires root or workspaceRoot".to_owned()
+        }
+        search_ops::SearchProviderError::InvalidRoot(message)
+        | search_ops::SearchProviderError::InvalidPattern(message)
+        | search_ops::SearchProviderError::InvalidRegex(message)
+        | search_ops::SearchProviderError::InvalidRequest(message)
+        | search_ops::SearchProviderError::Io(message)
+        | search_ops::SearchProviderError::Search(message) => message,
+        search_ops::SearchProviderError::Cancelled => "search job cancelled".to_owned(),
     }
 }
 

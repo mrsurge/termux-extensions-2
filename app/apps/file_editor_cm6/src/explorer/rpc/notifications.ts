@@ -12,8 +12,13 @@ import type { ProblemsPanelApi } from "../search/diagnostics-renderer.ts";
 
 interface ExplorerSearchOverlayController {
   handleSearchResultsUpdated(payload: JsonObject): void;
+  handleSearchJobProgress(payload: JsonObject): void;
+  handleSearchJobResult(payload: JsonObject): void;
+  handleSearchJobDone(payload: JsonObject): void;
+  handleSearchJobError(payload: JsonObject): void;
   handleSearchError(message: string): boolean;
   handleReviewEntriesUpdated(payload: JsonObject): void;
+  cancelActiveSearch(reason: string): void;
   isVisible(): boolean;
   getSearchMode(): string;
 }
@@ -268,6 +273,9 @@ export function createExplorerNotificationHandler(
           deps,
           nextProjectPath,
         );
+        if (projectChanged) {
+          deps.searchOverlayController.cancelActiveSearch("projectChanged");
+        }
         void deps.initDiffBaseFromBackend();
 
         if (
@@ -493,6 +501,10 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.projectOpened: {
         const path = getProjectedProjectPath(payload);
         if (path) {
+          const prevProjectPath = deps.runtimeState.getProjectPath() || "";
+          if (prevProjectPath && prevProjectPath !== path) {
+            deps.searchOverlayController.cancelActiveSearch("projectChanged");
+          }
           applyProjectRootProjection(deps, path, { forceReset: true });
           deps.dispatchProjectOpened(path, payload);
           applyBackendOpenStateProjection(deps, payload.openState);
@@ -571,6 +583,22 @@ export function createExplorerNotificationHandler(
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchResultsUpdated: {
         deps.searchOverlayController.handleSearchResultsUpdated(payload);
+        break;
+      }
+      case EXPLORER_RPC_NOTIFICATIONS.searchJobProgress: {
+        deps.searchOverlayController.handleSearchJobProgress(payload);
+        break;
+      }
+      case EXPLORER_RPC_NOTIFICATIONS.searchJobResult: {
+        deps.searchOverlayController.handleSearchJobResult(payload);
+        break;
+      }
+      case EXPLORER_RPC_NOTIFICATIONS.searchJobDone: {
+        deps.searchOverlayController.handleSearchJobDone(payload);
+        break;
+      }
+      case EXPLORER_RPC_NOTIFICATIONS.searchJobError: {
+        deps.searchOverlayController.handleSearchJobError(payload);
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.error: {

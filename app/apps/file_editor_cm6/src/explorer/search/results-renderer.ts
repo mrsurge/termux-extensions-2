@@ -1,13 +1,13 @@
 import {
   type ExplorerContentSearchFileResult,
   type ExplorerContentSearchMatch,
-  type ExplorerContentSearchResults,
   type ExplorerNameSearchItem,
   type ExplorerNameSearchResults,
-} from './types.ts';
-import { renderHighlightedSearchSnippet } from './render-styling.ts';
-import { getErrorMessage } from '../utils/errors.ts';
-import type { ExplorerJumpOptions } from '../host/file-open-bridge.ts';
+} from "./types.ts";
+import { normalizeContentSearchResults } from "./result-model.ts";
+import { renderHighlightedSearchSnippet } from "./render-styling.ts";
+import { getErrorMessage } from "../utils/errors.ts";
+import type { ExplorerJumpOptions } from "../host/file-open-bridge.ts";
 
 interface ExplorerSearchResultsRendererDeps {
   toast(message: string): void;
@@ -18,20 +18,21 @@ interface ExplorerSearchResultsRendererDeps {
   ): Promise<void>;
   closeSearchOverlay?(): void;
   expandToPath?(rel: string): Promise<unknown> | void;
-  applySetiIconToSpan?(span: HTMLElement, fileName: string, kind?: string): void;
+  applySetiIconToSpan?(
+    span: HTMLElement,
+    fileName: string,
+    kind?: string,
+  ): void;
   basename?(path: string): string;
+  loadMoreResults?(): Promise<void> | void;
+  loadMoreInFile?(file: ExplorerContentSearchFileResult): Promise<void> | void;
+  isGlobalMoreLoading?(): boolean;
+  isFileMoreLoading?(rel: string): boolean;
 }
 
 function normalizeNameResults(data: unknown): ExplorerNameSearchResults {
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
     return data as ExplorerNameSearchResults;
-  }
-  return {};
-}
-
-function normalizeContentResults(data: unknown): ExplorerContentSearchResults {
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    return data as ExplorerContentSearchResults;
   }
   return {};
 }
@@ -43,51 +44,47 @@ export function renderNameResults(
 ): void {
   const payload = normalizeNameResults(data);
   const results = Array.isArray(payload.results) ? payload.results : [];
-  const list = document.createElement('div');
-  list.className = 'fe-search-list';
+  const list = document.createElement("div");
+  list.className = "fe-search-list";
 
   results.forEach((item: ExplorerNameSearchItem) => {
-    const rel = item.rel || '';
-    const row = document.createElement('div');
-    row.className = 'fe-search-item';
+    const rel = item.rel || "";
+    const row = document.createElement("div");
+    row.className = "fe-search-item";
     row.onclick = async () => {
-      if (item.type === 'file') {
+      if (item.type === "file") {
         if (!rel) {
-          deps.toast('File opener not available');
+          deps.toast("File opener not available");
           return;
         }
         try {
           await deps.openFileAndMaybeJump(rel);
         } catch (error) {
           deps.toast(
-            `Failed to open file: ${getErrorMessage(error, 'unknown error')}`,
+            `Failed to open file: ${getErrorMessage(error, "unknown error")}`,
           );
         }
         return;
       }
 
-      if (item.type === 'dir' && rel) {
+      if (item.type === "dir" && rel) {
         deps.closeSearchOverlay?.();
         await deps.expandToPath?.(rel);
       }
     };
 
-    const icon = document.createElement('span');
-    icon.className = 'fe-search-icon';
-    if (item.type === 'dir') {
-      icon.textContent = '📁';
+    const icon = document.createElement("span");
+    icon.className = "fe-search-icon";
+    if (item.type === "dir") {
+      icon.textContent = "📁";
     } else {
-      icon.textContent = '📄';
-      deps.applySetiIconToSpan?.(
-        icon,
-        deps.basename?.(rel) || rel,
-        'file',
-      );
+      icon.textContent = "📄";
+      deps.applySetiIconToSpan?.(icon, deps.basename?.(rel) || rel, "file");
     }
     row.appendChild(icon);
 
-    const name = document.createElement('span');
-    name.className = 'fe-search-name';
+    const name = document.createElement("span");
+    name.className = "fe-search-name";
     name.textContent = rel;
     row.appendChild(name);
 
@@ -96,10 +93,10 @@ export function renderNameResults(
 
   container.appendChild(list);
   if (payload.truncated) {
-    const notice = document.createElement('div');
-    notice.className = 'fe-search-notice';
+    const notice = document.createElement("div");
+    notice.className = "fe-search-notice";
     const shownCount =
-      typeof payload.count === 'number' ? payload.count : results.length;
+      typeof payload.count === "number" ? payload.count : results.length;
     notice.textContent = `Showing first ${shownCount} results`;
     container.appendChild(notice);
   }
@@ -110,54 +107,74 @@ export function renderContentResults(
   data: unknown,
   deps: ExplorerSearchResultsRendererDeps,
 ): void {
-  const payload = normalizeContentResults(data);
+  const payload = normalizeContentSearchResults(data);
   const results = Array.isArray(payload.results) ? payload.results : [];
-  const list = document.createElement('div');
-  list.className = 'fe-search-list';
+  const list = document.createElement("div");
+  list.className = "fe-search-list";
 
   results.forEach((fileResult: ExplorerContentSearchFileResult) => {
-    const rel = fileResult.rel || '';
-    const fileGroup = document.createElement('div');
-    fileGroup.className = 'fe-search-file-group';
+    const rel =
+      fileResult.rel || fileResult.relativePath || fileResult.path || "";
+    const fileGroup = document.createElement("div");
+    fileGroup.className = "fe-search-file-group";
 
     const matches = Array.isArray(fileResult.matches) ? fileResult.matches : [];
-    const fileHeader = document.createElement('div');
-    fileHeader.className = 'fe-search-file-header';
-    fileHeader.textContent = `${rel} (${matches.length})`;
+    const fileHeader = document.createElement("div");
+    fileHeader.className = "fe-search-file-header";
+    const fileTitle = document.createElement("span");
+    fileTitle.className = "fe-search-file-title";
+    fileTitle.textContent = rel;
+    fileHeader.appendChild(fileTitle);
+
+    const fileMeta = document.createElement("span");
+    fileMeta.className = "fe-search-file-meta";
+    const fileTotal =
+      typeof fileResult.fileMatchCount === "number"
+        ? fileResult.fileMatchCount
+        : matches.length;
+    fileMeta.textContent =
+      fileTotal > matches.length
+        ? `${matches.length} of ${fileTotal}`
+        : `${matches.length}`;
+    fileHeader.appendChild(fileMeta);
     fileGroup.appendChild(fileHeader);
 
     matches.forEach((match: ExplorerContentSearchMatch) => {
-      const matchRow = document.createElement('div');
-      matchRow.className = 'fe-search-match';
+      const matchRow = document.createElement("div");
+      matchRow.className = "fe-search-match";
       matchRow.onclick = async () => {
-      if (!rel) {
-          deps.toast('File opener not available');
+        if (!rel) {
+          deps.toast("File opener not available");
           return;
         }
         try {
-          await deps.openFileAndMaybeJump(rel, typeof match.line === 'number' ? match.line : 1, {
-            focus: false,
-            scrollY: 'center',
-          });
+          await deps.openFileAndMaybeJump(
+            rel,
+            typeof match.line === "number" ? match.line : 1,
+            {
+              focus: false,
+              scrollY: "center",
+            },
+          );
         } catch (error) {
           deps.toast(
-            `Failed to open file: ${getErrorMessage(error, 'unknown error')}`,
+            `Failed to open file: ${getErrorMessage(error, "unknown error")}`,
           );
         }
       };
 
-      const lineNum = document.createElement('span');
-      lineNum.className = 'fe-search-line-num';
+      const lineNum = document.createElement("span");
+      lineNum.className = "fe-search-line-num";
       lineNum.textContent = String(
-        typeof match.line === 'number' ? match.line : 1,
+        typeof match.line === "number" ? match.line : 1,
       );
       matchRow.appendChild(lineNum);
 
-      const snippet = document.createElement('span');
-      snippet.className = 'fe-search-snippet';
+      const snippet = document.createElement("span");
+      snippet.className = "fe-search-snippet";
       renderHighlightedSearchSnippet(
         snippet,
-        match.snippet || match.text || '',
+        match.snippet || match.text || "",
         rel,
       );
       matchRow.appendChild(snippet);
@@ -165,23 +182,76 @@ export function renderContentResults(
       fileGroup.appendChild(matchRow);
     });
 
+    if (fileResult.fileTruncated && fileResult.nextMatchCursor) {
+      const moreRow = document.createElement("div");
+      moreRow.className = "fe-search-more-row";
+      const moreButton = document.createElement("button");
+      moreButton.type = "button";
+      moreButton.className = "fe-search-more-btn";
+      const loading = deps.isFileMoreLoading?.(rel) === true;
+      moreButton.disabled = loading;
+      moreButton.textContent = loading
+        ? "Loading matches..."
+        : "Show more in file";
+      moreButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void deps.loadMoreInFile?.(fileResult);
+      });
+      moreRow.appendChild(moreButton);
+      fileGroup.appendChild(moreRow);
+    }
+
     list.appendChild(fileGroup);
   });
 
   container.appendChild(list);
-  if (payload.truncated) {
-    const notice = document.createElement('div');
-    notice.className = 'fe-search-notice';
-    const fileCount =
-      typeof payload.file_count === 'number' ? payload.file_count : results.length;
-    const matchCount =
-      typeof payload.match_count === 'number'
-        ? payload.match_count
-        : results.reduce((count, result) => {
-            const matches = Array.isArray(result.matches) ? result.matches : [];
-            return count + matches.length;
-          }, 0);
-    notice.textContent = `Showing ${fileCount} files, ${matchCount} matches`;
+
+  const visibleFileCount =
+    typeof payload.file_count === "number"
+      ? payload.file_count
+      : results.length;
+  const visibleMatchCount =
+    typeof payload.match_count === "number"
+      ? payload.match_count
+      : results.reduce((count, result) => {
+          const matches = Array.isArray(result.matches) ? result.matches : [];
+          return count + matches.length;
+        }, 0);
+  const totalFileCount = payload.totalFileCount ?? visibleFileCount;
+  const totalMatchCount = payload.totalMatchCount ?? visibleMatchCount;
+
+  const summary = document.createElement("div");
+  summary.className = "fe-search-summary";
+  summary.textContent =
+    totalFileCount > visibleFileCount || totalMatchCount > visibleMatchCount
+      ? `Showing ${visibleMatchCount} of ${totalMatchCount} matches across ${visibleFileCount} of ${totalFileCount} files`
+      : `Showing ${visibleMatchCount} matches across ${visibleFileCount} files`;
+  container.appendChild(summary);
+
+  if (payload.nextGlobalCursor) {
+    const more = document.createElement("div");
+    more.className = "fe-search-more-global";
+    const moreButton = document.createElement("button");
+    moreButton.type = "button";
+    moreButton.className = "fe-search-more-btn fe-search-more-btn-global";
+    const loading = deps.isGlobalMoreLoading?.() === true;
+    moreButton.disabled = loading;
+    moreButton.textContent = loading
+      ? "Loading results..."
+      : "Show more results";
+    moreButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void deps.loadMoreResults?.();
+    });
+    more.appendChild(moreButton);
+    container.appendChild(more);
+  } else if (payload.truncated) {
+    const notice = document.createElement("div");
+    notice.className = "fe-search-notice";
+    notice.textContent =
+      "Results are truncated, but no materialization cursor was provided.";
     container.appendChild(notice);
   }
 }

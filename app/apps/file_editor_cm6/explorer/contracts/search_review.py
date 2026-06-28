@@ -29,6 +29,31 @@ class SearchRunParams(TypedDict):
     useIgnoreFiles: bool
 
 
+class SearchMoreLimit(TypedDict):
+    maxMatchesPerFile: int
+    maxMatchesTotal: int
+
+
+class SearchMoreParams(TypedDict):
+    searchId: str
+    projectGeneration: int
+    cursor: str
+    limit: SearchMoreLimit
+
+
+class SearchMoreInFileParams(TypedDict):
+    searchId: str
+    projectGeneration: int
+    relativePath: str
+    cursor: str
+    maxMatches: int
+
+
+class SearchCancelParams(TypedDict):
+    searchId: str | None
+    reason: str
+
+
 class ReviewListParams(TypedDict):
     lightweight: bool
 
@@ -213,6 +238,60 @@ def parse_search_run_params(payload: object) -> SearchRunParams:
     }
 
 
+def parse_search_more_params(payload: object) -> SearchMoreParams:
+    envelope = _as_object(payload)
+    limit = _required_object(envelope.get("limit"), "search:more limit")
+    return {
+        "searchId": _required_string(envelope.get("searchId"), "search:more searchId"),
+        "projectGeneration": _required_int(
+            envelope.get("projectGeneration"), "search:more projectGeneration"
+        ),
+        "cursor": _required_string(envelope.get("cursor"), "search:more cursor"),
+        "limit": {
+            "maxMatchesPerFile": _required_positive_int(
+                limit.get("maxMatchesPerFile"), "search:more limit.maxMatchesPerFile"
+            ),
+            "maxMatchesTotal": _required_positive_int(
+                limit.get("maxMatchesTotal"), "search:more limit.maxMatchesTotal"
+            ),
+        },
+    }
+
+
+def parse_search_more_in_file_params(payload: object) -> SearchMoreInFileParams:
+    envelope = _as_object(payload)
+    return {
+        "searchId": _required_string(
+            envelope.get("searchId"), "search:moreInFile searchId"
+        ),
+        "projectGeneration": _required_int(
+            envelope.get("projectGeneration"), "search:moreInFile projectGeneration"
+        ),
+        "relativePath": _required_string(
+            envelope.get("relativePath"), "search:moreInFile relativePath"
+        ),
+        "cursor": _required_string(envelope.get("cursor"), "search:moreInFile cursor"),
+        "maxMatches": _required_positive_int(
+            envelope.get("maxMatches"), "search:moreInFile maxMatches"
+        ),
+    }
+
+
+def parse_search_cancel_params(payload: object) -> SearchCancelParams:
+    envelope = _as_object(payload)
+    search_id_value = envelope.get("searchId")
+    search_id = (
+        _required_string(search_id_value, "search:cancel searchId")
+        if search_id_value is not None
+        else None
+    )
+    return {
+        "searchId": search_id,
+        "reason": _coerce_string(envelope.get("reason"), "search:cancel reason")
+        or "cancelled",
+    }
+
+
 def project_search_files_result(dto: SearchFilesResult) -> SearchNameResult:
     return {
         "mode": "name",
@@ -330,6 +409,32 @@ def _coerce_string(value: object, field_name: str) -> str:
     if isinstance(value, str):
         return value
     raise ExplorerSearchReviewContractError(f"{field_name} must be a string")
+
+
+def _required_string(value: object, field_name: str) -> str:
+    result = _coerce_string(value, field_name).strip()
+    if not result:
+        raise ExplorerSearchReviewContractError(f"{field_name} is required")
+    return result
+
+
+def _required_object(value: object, field_name: str) -> JsonObject:
+    if not isinstance(value, dict):
+        raise ExplorerSearchReviewContractError(f"{field_name} must be an object")
+    return _as_object(cast(object, value))
+
+
+def _required_int(value: object, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ExplorerSearchReviewContractError(f"{field_name} must be an integer")
+    return value
+
+
+def _required_positive_int(value: object, field_name: str) -> int:
+    result = _required_int(value, field_name)
+    if result <= 0:
+        raise ExplorerSearchReviewContractError(f"{field_name} must be positive")
+    return result
 
 
 def _as_object(value: object) -> JsonObject:

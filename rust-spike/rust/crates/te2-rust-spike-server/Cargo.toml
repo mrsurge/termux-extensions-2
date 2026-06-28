@@ -16,6 +16,11 @@ ferrous_framework = { workspace = true, optional = true }
 futures-util.workspace = true
 git2.workspace = true
 glob.workspace = true
+globset.workspace = true
+grep-matcher.workspace = true
+grep-regex.workspace = true
+grep-searcher.workspace = true
+ignore.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 serde.workspace = true
