@@ -962,6 +962,36 @@ class ExplorerDispatcher:
             reply_to=msg_id,
         )
 
+    async def handle_search_benchmarkRun(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.services.search_benchmark import run_search_benchmark
+
+        result = await run_search_benchmark(
+            project_root=self.project_root,
+            payload=payload,
+            emit_personal=self.emit_personal,
+        )
+        await self.emit_personal("explorer.search.benchmark.done", result, msg_id)
+
+    async def handle_search_benchmarkFrontendResult(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.services.search_benchmark import (
+            record_search_benchmark_frontend_result,
+        )
+
+        result = await record_search_benchmark_frontend_result(payload)
+        await self.emit_personal(
+            "explorer.search.benchmark.frontendRecorded",
+            result,
+            msg_id,
+        )
+
     async def handle_review_list(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.search_review import (
             ExplorerSearchReviewContractError,

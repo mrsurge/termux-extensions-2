@@ -67,6 +67,12 @@ export interface WorkbenchLike {
   completions: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
+  documentColors: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  colorPresentations: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
   inlayHints: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
@@ -472,6 +478,43 @@ export async function dispatchJsonRpcRequest(
       triggerKind: params.triggerKind,
       triggerCharacter: params.triggerCharacter,
       text: params.text,
+      timeoutMs: params.timeoutMs,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.documentColors") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
+    const result = await runtime.wb.documentColors({
+      path: resolvedPath,
+      authority,
+      providerHandle: params.providerHandle,
+      languageId: params.languageId,
+      text: params.text,
+      modelVersionId: params.modelVersionId,
+      timeoutMs: params.timeoutMs,
+    });
+    return success(id, result);
+  }
+
+  if (method === "vscode.colorPresentations") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
+    const result = await runtime.wb.colorPresentations({
+      path: resolvedPath,
+      authority,
+      providerHandle: params.providerHandle,
+      languageId: params.languageId,
+      colorInfo: params.colorInfo,
       timeoutMs: params.timeoutMs,
     });
     return success(id, result);

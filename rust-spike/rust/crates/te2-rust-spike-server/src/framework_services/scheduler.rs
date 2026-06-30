@@ -10,6 +10,7 @@ use std::{
         Arc, Mutex as StdMutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
+    time::Instant,
 };
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc};
 use tracing::warn;
@@ -55,6 +56,14 @@ struct SearchJobEntry {
     cancelled: Arc<AtomicBool>,
 }
 
+#[derive(Default)]
+struct SearchEventMetrics {
+    optional_events_dropped: AtomicU64,
+    required_event_backpressure_count: AtomicU64,
+    required_event_backpressure_nanos: AtomicU64,
+    required_event_failures: AtomicU64,
+}
+
 enum SearchJobEvent {
     Progress {
         status: String,
@@ -65,6 +74,8 @@ enum SearchJobEvent {
     Result(Value),
     Done {
         cancelled: bool,
+        counts: Option<search_ops::SearchProgressCounts>,
+        cancellation_reason: Option<String>,
     },
     Error {
         code: String,
@@ -121,6 +132,7 @@ struct SearchJobContext {
     cancelled: Arc<AtomicBool>,
     sequence: Arc<AtomicU64>,
     last_counts: Arc<StdMutex<search_ops::SearchProgressCounts>>,
+    event_metrics: Arc<SearchEventMetrics>,
 }
 
 impl Default for FrameworkServiceScheduler {
@@ -207,6 +219,14 @@ impl FrameworkServiceScheduler {
         request: search_ops::SearchContentRequest,
     ) -> Result<search_ops::SearchContentResult, search_ops::SearchProviderError> {
         self.search_read(move || search_ops::search_content(request))
+            .await
+    }
+
+    pub(crate) async fn search_benchmark_run(
+        &self,
+        request: search_ops::SearchBenchmarkRunRequest,
+    ) -> Result<search_ops::SearchBenchmarkSuiteResult, search_ops::SearchProviderError> {
+        self.search_read(move || search_ops::run_search_benchmark(request))
             .await
     }
 
@@ -770,6 +790,7 @@ impl FrameworkServiceScheduler {
             cancelled: Arc::clone(&entry.cancelled),
             sequence: Arc::new(AtomicU64::new(1)),
             last_counts: Arc::new(StdMutex::new(search_ops::SearchProgressCounts::default())),
+            event_metrics: Arc::new(SearchEventMetrics::default()),
         };
         Ok((
             search_ops::SearchJobStarted {
@@ -806,10 +827,12 @@ impl FrameworkServiceScheduler {
                 counts: Default::default(),
             },
             &entry.cancelled,
+            &context.event_metrics,
             false,
         );
         let progress_tx = event_tx.clone();
         let progress_cancelled = Arc::clone(&entry.cancelled);
+        let progress_metrics = Arc::clone(&context.event_metrics);
         let options = search_ops::SearchRunOptions {
             search_id: None,
             job_id: Some(context.job_id.clone()),
@@ -823,6 +846,7 @@ impl FrameworkServiceScheduler {
                         counts,
                     },
                     &progress_cancelled,
+                    &progress_metrics,
                     false,
                 )
             })),
@@ -858,12 +882,15 @@ impl FrameworkServiceScheduler {
                 counts: Default::default(),
             },
             &entry.cancelled,
+            &context.event_metrics,
             false,
         );
         let progress_tx = event_tx.clone();
         let progress_cancelled = Arc::clone(&entry.cancelled);
+        let progress_metrics = Arc::clone(&context.event_metrics);
         let result_tx = event_tx.clone();
         let result_cancelled = Arc::clone(&entry.cancelled);
+        let result_metrics = Arc::clone(&context.event_metrics);
         let options = search_ops::SearchRunOptions {
             search_id: Some(context.search_id.clone()),
             job_id: Some(context.job_id.clone()),
@@ -877,15 +904,16 @@ impl FrameworkServiceScheduler {
                         counts,
                     },
                     &progress_cancelled,
+                    &progress_metrics,
                     false,
                 )
             })),
             content_result: Some(Arc::new(move |result| {
-                try_send_search_event(
+                send_required_search_event_blocking(
                     &result_tx,
                     SearchJobEvent::ContentResult(result),
                     &result_cancelled,
-                    true,
+                    &result_metrics,
                 )
             })),
         };
@@ -912,47 +940,61 @@ impl FrameworkServiceScheduler {
         event_tx: mpsc::Sender<SearchJobEvent>,
     ) {
         if context.cancelled.load(Ordering::Relaxed) {
-            let _ = try_send_search_event(
+            let _ = send_search_event(
                 &event_tx,
-                SearchJobEvent::Done { cancelled: true },
+                SearchJobEvent::Done {
+                    cancelled: true,
+                    counts: None,
+                    cancellation_reason: Some(context.cancellation_reason()),
+                },
                 &entry.cancelled,
-                false,
-            );
+            )
+            .await;
         } else {
             match result {
                 Ok(result) => {
+                    let counts = search_counts_from_result(&result);
                     if emit_result {
-                        let _ = try_send_search_event(
+                        let _ = send_search_event(
                             &event_tx,
                             SearchJobEvent::Result(result),
                             &entry.cancelled,
-                            true,
-                        );
+                        )
+                        .await;
                     }
-                    let _ = try_send_search_event(
+                    let cancelled = context.cancelled.load(Ordering::Relaxed);
+                    let _ = send_search_event(
                         &event_tx,
-                        SearchJobEvent::Done { cancelled: false },
+                        SearchJobEvent::Done {
+                            cancelled,
+                            counts,
+                            cancellation_reason: cancelled.then(|| context.cancellation_reason()),
+                        },
                         &entry.cancelled,
-                        false,
-                    );
+                    )
+                    .await;
                 }
                 Err(search_ops::SearchProviderError::Cancelled) => {
-                    let _ = try_send_search_event(
+                    let _ = send_search_event(
                         &event_tx,
-                        SearchJobEvent::Done { cancelled: true },
+                        SearchJobEvent::Done {
+                            cancelled: true,
+                            counts: None,
+                            cancellation_reason: Some(context.cancellation_reason()),
+                        },
                         &entry.cancelled,
-                        false,
-                    );
+                    )
+                    .await;
                 }
                 Err(error) => {
                     let code = search_error_code(&error).to_owned();
                     let message = search_provider_error_message(error);
-                    let _ = try_send_search_event(
+                    let _ = send_search_event(
                         &event_tx,
                         SearchJobEvent::Error { code, message },
                         &entry.cancelled,
-                        false,
-                    );
+                    )
+                    .await;
                 }
             }
         }
@@ -1186,7 +1228,11 @@ impl SearchJobContext {
                 Err(error) => self.emit_error("protocol.encodeFailed", error.to_string()),
             },
             SearchJobEvent::Result(result) => self.emit_result(result),
-            SearchJobEvent::Done { cancelled } => self.emit_done(cancelled),
+            SearchJobEvent::Done {
+                cancelled,
+                counts,
+                cancellation_reason,
+            } => self.emit_done(cancelled, counts, cancellation_reason),
             SearchJobEvent::Error { code, message } => self.emit_error(code, message),
         }
     }
@@ -1239,12 +1285,22 @@ impl SearchJobContext {
         self.emit("search.job.result", dto, sequence);
     }
 
-    fn emit_done(&self, cancelled: bool) {
-        let counts = self
-            .last_counts
-            .lock()
-            .map(|counts| *counts)
-            .unwrap_or_default();
+    fn emit_done(
+        &self,
+        cancelled: bool,
+        counts: Option<search_ops::SearchProgressCounts>,
+        cancellation_reason: Option<String>,
+    ) {
+        let counts = counts.unwrap_or_else(|| {
+            self.last_counts
+                .lock()
+                .map(|counts| *counts)
+                .unwrap_or_default()
+        });
+        let required_event_backpressure_nanos = self
+            .event_metrics
+            .required_event_backpressure_nanos
+            .load(Ordering::Relaxed);
         let sequence = self.sequence.fetch_add(1, Ordering::Relaxed);
         let dto = search_ops::SearchJobDone {
             dto: "SearchJobDone",
@@ -1261,6 +1317,20 @@ impl SearchJobContext {
             files_matched: counts.files_matched,
             matches_found: counts.matches_found,
             cancelled,
+            cancellation_reason,
+            optional_events_dropped: self
+                .event_metrics
+                .optional_events_dropped
+                .load(Ordering::Relaxed),
+            required_event_backpressure_count: self
+                .event_metrics
+                .required_event_backpressure_count
+                .load(Ordering::Relaxed),
+            required_event_backpressure_ms: required_event_backpressure_nanos / 1_000_000,
+            required_event_failures: self
+                .event_metrics
+                .required_event_failures
+                .load(Ordering::Relaxed),
             sequence,
         };
         self.emit("search.job.done", dto, sequence);
@@ -1318,6 +1388,19 @@ impl SearchJobContext {
             warn!(%error, job_id = %self.job_id, "failed to emit search job notification");
         }
     }
+
+    fn cancellation_reason(&self) -> String {
+        if self
+            .event_metrics
+            .required_event_failures
+            .load(Ordering::Relaxed)
+            > 0
+        {
+            "eventDeliveryFailed".to_owned()
+        } else {
+            "cancelled".to_owned()
+        }
+    }
 }
 
 fn spawn_search_event_emitter(
@@ -1335,17 +1418,107 @@ fn try_send_search_event(
     event_tx: &mpsc::Sender<SearchJobEvent>,
     event: SearchJobEvent,
     cancelled: &Arc<AtomicBool>,
+    metrics: &Arc<SearchEventMetrics>,
     required: bool,
 ) -> bool {
     match event_tx.try_send(event) {
         Ok(()) => !cancelled.load(Ordering::Relaxed),
-        Err(mpsc::error::TrySendError::Full(_)) if !required => !cancelled.load(Ordering::Relaxed),
+        Err(mpsc::error::TrySendError::Full(_)) if !required => {
+            metrics
+                .optional_events_dropped
+                .fetch_add(1, Ordering::Relaxed);
+            !cancelled.load(Ordering::Relaxed)
+        }
         Err(error) => {
+            metrics
+                .required_event_failures
+                .fetch_add(1, Ordering::Relaxed);
             cancelled.store(true, Ordering::Relaxed);
             warn!(%error, "search event queue failed; cancelling search job");
             false
         }
     }
+}
+
+fn send_required_search_event_blocking(
+    event_tx: &mpsc::Sender<SearchJobEvent>,
+    event: SearchJobEvent,
+    cancelled: &Arc<AtomicBool>,
+    metrics: &Arc<SearchEventMetrics>,
+) -> bool {
+    if cancelled.load(Ordering::Relaxed) {
+        return false;
+    }
+    match event_tx.try_send(event) {
+        Ok(()) => !cancelled.load(Ordering::Relaxed),
+        Err(mpsc::error::TrySendError::Full(event)) => {
+            metrics
+                .required_event_backpressure_count
+                .fetch_add(1, Ordering::Relaxed);
+            let started = Instant::now();
+            let result = event_tx.blocking_send(event);
+            let elapsed = started.elapsed().as_nanos();
+            metrics
+                .required_event_backpressure_nanos
+                .fetch_add(elapsed.min(u128::from(u64::MAX)) as u64, Ordering::Relaxed);
+            match result {
+                Ok(()) => !cancelled.load(Ordering::Relaxed),
+                Err(error) => {
+                    metrics
+                        .required_event_failures
+                        .fetch_add(1, Ordering::Relaxed);
+                    cancelled.store(true, Ordering::Relaxed);
+                    warn!(%error, "search event queue closed; cancelling search job");
+                    false
+                }
+            }
+        }
+        Err(error) => {
+            metrics
+                .required_event_failures
+                .fetch_add(1, Ordering::Relaxed);
+            cancelled.store(true, Ordering::Relaxed);
+            warn!(%error, "search event queue failed; cancelling search job");
+            false
+        }
+    }
+}
+
+async fn send_search_event(
+    event_tx: &mpsc::Sender<SearchJobEvent>,
+    event: SearchJobEvent,
+    cancelled: &Arc<AtomicBool>,
+) -> bool {
+    match event_tx.send(event).await {
+        Ok(()) => !cancelled.load(Ordering::Relaxed),
+        Err(error) => {
+            cancelled.store(true, Ordering::Relaxed);
+            warn!(%error, "search event queue closed; cancelling search job");
+            false
+        }
+    }
+}
+
+fn search_counts_from_result(result: &Value) -> Option<search_ops::SearchProgressCounts> {
+    let files_matched = result
+        .get("totalFileCount")
+        .and_then(Value::as_u64)
+        .or_else(|| result.get("count").and_then(Value::as_u64))
+        .or_else(|| result.get("fileCount").and_then(Value::as_u64))?;
+    let matches_found = result
+        .get("totalMatchCount")
+        .and_then(Value::as_u64)
+        .or_else(|| result.get("matchCount").and_then(Value::as_u64))
+        .unwrap_or(files_matched);
+    let files_scanned = result
+        .get("filesScanned")
+        .and_then(Value::as_u64)
+        .unwrap_or(files_matched);
+    Some(search_ops::SearchProgressCounts {
+        files_scanned: usize::try_from(files_scanned).unwrap_or(usize::MAX),
+        files_matched: usize::try_from(files_matched).unwrap_or(usize::MAX),
+        matches_found: usize::try_from(matches_found).unwrap_or(usize::MAX),
+    })
 }
 
 fn validate_git_job(

@@ -183,6 +183,8 @@ export function createEditorWorkbenchRuntime(
       case 'semantic_tokens_range':
       case 'inlay_hints':
       case 'inline_completions':
+      case 'document_colors':
+      case 'color_presentations':
         return true;
       default:
         return false;
@@ -204,6 +206,8 @@ export function createEditorWorkbenchRuntime(
       case 'inline_completions':
       case 'inline_completions_free':
       case 'inline_completions_did_show':
+      case 'document_colors':
+      case 'color_presentations':
         return true;
       default:
         return false;

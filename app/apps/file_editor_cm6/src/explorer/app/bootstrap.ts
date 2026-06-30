@@ -54,6 +54,7 @@ import {
   renderExplorerDiagnostics,
   getExplorerDiagnosticsPanel,
 } from "../search/diagnostics-renderer.ts";
+import { installExplorerSearchBenchmarkApi } from "../search/benchmark.ts";
 import { createExplorerRuntimeState } from "../state/runtime-state.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -986,6 +987,11 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
 
   explorerRpcRuntime = createExplorerRpcRuntime(options);
   await explorerRpcRuntime.connect();
+  installExplorerSearchBenchmarkApi({
+    requestExplorer: (method, payload, timeoutMs) =>
+      requestExplorerRpc(method, payload, timeoutMs),
+    getProjectPath: () => explorerRuntimeState.getProjectPath(),
+  });
   notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
 }
 

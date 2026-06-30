@@ -81,6 +81,10 @@ export function editorWorkbenchMethodToWbaMethod(method: string): string | null 
       return 'vscode.hover';
     case 'completions':
       return 'vscode.completions';
+    case 'document_colors':
+      return 'vscode.documentColors';
+    case 'color_presentations':
+      return 'vscode.colorPresentations';
     case 'inlay_hints':
       return 'vscode.inlayHints';
     case 'inlay_hints_resolve':

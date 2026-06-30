@@ -73,6 +73,8 @@ const EMPTY_SEARCH_IDENTITY: ExplorerSearchIdentity = {
   projectGeneration: null,
 };
 
+const SEARCH_INPUT_DEBOUNCE_MS = 500;
+
 let searchSequence = 0;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -230,7 +232,10 @@ export function createExplorerSearchController(
     return payload;
   }
 
-  async function performSearch(query: string): Promise<void> {
+  async function performSearch(
+    query: string,
+    preparedPayload?: JsonObject,
+  ): Promise<void> {
     const mode = deps.getSearchMode();
     if (mode === "changes" || mode === "review") return;
     if (!deps.getProjectPath()) {
@@ -240,11 +245,7 @@ export function createExplorerSearchController(
       return;
     }
 
-    const previousIdentity = deps.getSearchIdentity();
-    if (hasCancelableIdentity(previousIdentity)) {
-      cancelSearchIdentity(previousIdentity, "replaced");
-    }
-
+    const payload = preparedPayload || buildSearchPayload(query);
     deps.setLastKnownProjectPath(deps.getProjectPath());
     deps.setSearchLoading(true);
     deps.setSearchError(null);
@@ -265,7 +266,7 @@ export function createExplorerSearchController(
     }
 
     try {
-      deps.sendBus(EXPLORER_RPC_METHODS.searchRun, buildSearchPayload(query));
+      deps.sendBus(EXPLORER_RPC_METHODS.searchRun, payload);
     } catch (error) {
       deps.setSearchLoading(false);
       deps.setSearchError(getErrorMessage(error, "Search request failed"));
@@ -290,14 +291,16 @@ export function createExplorerSearchController(
       return;
     }
 
+    cancelActiveSearch("replaced");
+    const payload = buildSearchPayload(query);
     deps.setSearchLoading(true);
     deps.setSearchError(null);
     setSearchStatus({ status: "running", message: "Waiting to search" });
     deps.renderSearchOverlay();
     deps.setSearchDebounceTimer(
       setTimeout(() => {
-        void performSearch(query);
-      }, 300),
+        void performSearch(query, payload);
+      }, SEARCH_INPUT_DEBOUNCE_MS),
     );
   }
 

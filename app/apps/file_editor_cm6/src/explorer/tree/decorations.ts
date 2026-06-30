@@ -329,7 +329,7 @@ export function createExplorerTreeDecorationsController(
         draftDirs.add(parts.slice(0, i).join('/'));
       }
     });
-
+// TE2_search_canary_#2
     draftDirs.forEach((dirRel) => {
       const li = queryNodeByRel(root, 'dir', dirRel);
       if (!li) return;

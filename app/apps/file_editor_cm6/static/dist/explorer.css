@@ -262,13 +262,16 @@
 }
 
 .fe-search-content-widget-host {
+  box-sizing: border-box;
   display: none;
-  padding: 0 12px 8px;
+  padding: 8px 10px 10px;
   background: var(--explorer-bg);
 }
 
 .fe-search-content-widget.search-view {
+  box-sizing: border-box;
   height: auto;
+  width: 100%;
 }
 
 .fe-search-content-widget .search-widgets-container {
@@ -308,6 +311,19 @@
 
 .fe-search-content-widget .query-details .file-types {
   display: block;
+}
+
+.fe-search-content-widget .query-details .file-types > .monaco-findInput {
+  width: 100%;
+}
+
+.fe-search-content-widget .monaco-inputbox.synthetic-focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35);
+}
+
+.fe-search-content-widget .monaco-inputbox > .ibwrapper > .input:focus {
+  outline: none;
 }
 
 .fe-search-content-widget .fe-search-pattern-row {

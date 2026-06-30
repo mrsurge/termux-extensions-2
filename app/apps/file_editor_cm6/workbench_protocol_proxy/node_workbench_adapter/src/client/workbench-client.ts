@@ -61,6 +61,7 @@ import {
 import {
   createCompletionRuntime,
   createConfigurationRuntime,
+  createDocumentColorRuntime,
   createDocumentContentRuntime,
   createDocumentFeatureRuntime,
   createExtensionCatalogRuntime,
@@ -119,6 +120,10 @@ import {
   provideCompletions,
   provideCompletionSingle,
 } from "../extensions/intelligence/completions.mjs";
+import {
+  provideColorPresentations,
+  provideDocumentColors,
+} from "../extensions/intelligence/document-colors.mjs";
 import {
   provideInlayHints,
   releaseInlayHints,
@@ -212,6 +217,7 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$registerInlineCompletionsSupport",
   "$registerDocumentSemanticTokensProvider",
   "$registerDocumentRangeSemanticTokensProvider",
+  "$registerDocumentColorProvider",
   "$emitDocumentSemanticTokensEvent",
   "$emitDocumentRangeSemanticTokensEvent",
   "$registerDocumentLinkProvider",
@@ -822,6 +828,25 @@ export class WorkbenchClient {
 
   _completionRuntime() {
     return createCompletionRuntime({
+      extProtocol: this.ext?.protocol ?? null,
+      authority: this._authority,
+      defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
+      languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
+      didChange: (params, opts) => this.didChange(params, opts),
+      findAllProviderHandles: (kind, languageId) =>
+        this._findAllProviderHandles(kind, languageId),
+      waitFor: (condition, options) => waitFor(condition, options),
+      uriForPath: (filePath, authority) =>
+        this._uriForPath(filePath, authority),
+      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
+        this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+      log: (message) => console.log(message),
+      warn: (message, detail) => console.warn(message, detail),
+    });
+  }
+
+  _documentColorRuntime() {
+    return createDocumentColorRuntime({
       extProtocol: this.ext?.protocol ?? null,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
@@ -1699,6 +1724,18 @@ export class WorkbenchClient {
     return provideCompletions(this._completionRuntime(), params);
   }
 
+  async documentColors(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
+    return provideDocumentColors(this._documentColorRuntime(), params);
+  }
+
+  async colorPresentations(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
+    return provideColorPresentations(this._documentColorRuntime(), params);
+  }
+
   async inlayHints(params: unknown = {}): Promise<Record<string, unknown>> {
     return provideInlayHints(this._inlayHintsRuntime(), params);
   }
@@ -1927,7 +1964,7 @@ export class WorkbenchClient {
       this.onEvent({ ...event, ts_ms: Date.now() });
     }
     console.error(
-      `[resync] replayed providers: cmp=${replayed.completions} inlay=${replayed.inlayHints} inline=${replayed.inlineCompletions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges}`,
+      `[resync] replayed providers: cmp=${replayed.completions} inlay=${replayed.inlayHints} inline=${replayed.inlineCompletions} semTok=${replayed.semanticTokens} folding=${replayed.foldingRanges} colors=${replayed.documentColors}`,
     );
     return { ok: true, ts_ms: Date.now(), replayed };
   }

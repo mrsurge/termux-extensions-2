@@ -173,13 +173,17 @@ export async function provideWorkbenchCompletionItemsFromVscodeSuggest(
     { timeoutMs: Number.isFinite(Number(deps.callTimeoutMs)) ? Number(deps.callTimeoutMs) : 10000 },
   );
   const payload = peelWorkbenchCompletionPayload(response);
+  const inflated = alreadyInflatedCompletionList(payload);
+  if (inflated) {
+    return normalizeVscodeCompletionListFromCompletionModel(inflated);
+  }
   const dto = suggestDtoFromWorkbenchCompletionPayload(payload);
   if (dto) {
     return normalizeVscodeCompletionListFromCompletionModel(
       inflateSuggestResultDtoFromMainThreadLanguageFeatures(dto, { propertyKind: deps.propertyKind }),
     );
   }
-  return normalizeVscodeCompletionListFromCompletionModel(alreadyInflatedCompletionList(payload));
+  return normalizeVscodeCompletionListFromCompletionModel({ suggestions: [] });
 }
 
 /*

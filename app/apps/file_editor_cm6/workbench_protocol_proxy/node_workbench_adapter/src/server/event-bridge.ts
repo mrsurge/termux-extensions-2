@@ -216,6 +216,18 @@ export function createWorkbenchEventHandler(runtime: EventBridgeRuntime): (ev: u
       runtime.writePushLine(pushPayload);
     }
 
+    if (isRecord(safeEv) && safeEv.type === "provider/documentColors") {
+      const pushPayload = {
+        event: "document_colors_provider_registered",
+        handle: safeEv.handle,
+        language: safeEv.language,
+      };
+      runtime.log(
+        `[server] PUSH document_colors_provider_registered lang=${String(safeEv.language ?? "")} handle=${String(safeEv.handle ?? "")}`,
+      );
+      runtime.writePushLine(pushPayload);
+    }
+
     if (isRecord(safeEv) && safeEv.type === "provider/inlayHints") {
       const pushPayload = {
         event: "inlay_hints_provider_registered",

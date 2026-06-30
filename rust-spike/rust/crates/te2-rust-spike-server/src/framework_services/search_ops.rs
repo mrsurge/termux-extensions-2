@@ -12,6 +12,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use super::common::{expand_user_path, home_dir, normalize_lexical, path_to_string};
@@ -149,6 +150,7 @@ pub(crate) struct SearchContentRequest {
     pub(crate) max_matches_total: Option<usize>,
     pub(crate) max_file_size_bytes: Option<u64>,
     pub(crate) context_chars: Option<usize>,
+    pub(crate) presentation_window: Option<SearchPresentationWindow>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -202,6 +204,7 @@ impl SearchContentStartRequest {
             max_matches_total: self.max_matches_total,
             max_file_size_bytes: self.max_file_size_bytes,
             context_chars: self.context_chars,
+            presentation_window: self.presentation_window,
         }
     }
 }
@@ -209,8 +212,11 @@ impl SearchContentStartRequest {
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SearchPresentationWindow {
+    #[serde(alias = "maxInitialFiles")]
     pub(crate) max_visible_files: Option<usize>,
+    #[serde(alias = "maxInitialMatchesPerFile")]
     pub(crate) max_visible_matches_per_file: Option<usize>,
+    #[serde(alias = "maxInitialMatchesTotal")]
     pub(crate) max_visible_matches_total: Option<usize>,
 }
 
@@ -233,6 +239,8 @@ pub(crate) struct SearchContentResult {
     pub(crate) total_file_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) total_match_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) files_scanned: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) next_global_cursor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -423,6 +431,12 @@ pub(crate) struct SearchJobDone {
     pub(crate) files_matched: usize,
     pub(crate) matches_found: usize,
     pub(crate) cancelled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) cancellation_reason: Option<String>,
+    pub(crate) optional_events_dropped: u64,
+    pub(crate) required_event_backpressure_count: u64,
+    pub(crate) required_event_backpressure_ms: u64,
+    pub(crate) required_event_failures: u64,
     pub(crate) sequence: u64,
 }
 
@@ -471,6 +485,92 @@ pub(crate) struct SearchJobCancelResult {
     pub(crate) status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SearchBenchmarkRunRequest {
+    pub(crate) dto: Option<String>,
+    pub(crate) version: Option<u16>,
+    pub(crate) root: Option<String>,
+    pub(crate) project_generation: Option<u64>,
+    pub(crate) mode: Option<String>,
+    pub(crate) suite_id: Option<String>,
+    #[serde(default)]
+    pub(crate) cases: Vec<SearchBenchmarkCase>,
+    #[serde(default)]
+    pub(crate) lanes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SearchBenchmarkCase {
+    pub(crate) case_id: Option<String>,
+    pub(crate) query: String,
+    #[serde(default, deserialize_with = "super::common::deserialize_boolish")]
+    pub(crate) is_regex: bool,
+    #[serde(default, deserialize_with = "super::common::deserialize_boolish")]
+    pub(crate) is_case_sensitive: bool,
+    #[serde(default, deserialize_with = "super::common::deserialize_boolish")]
+    pub(crate) is_whole_words: bool,
+    #[serde(default)]
+    pub(crate) include_patterns: Vec<String>,
+    #[serde(default)]
+    pub(crate) exclude_patterns: Vec<String>,
+    #[serde(
+        default = "default_true",
+        deserialize_with = "super::common::deserialize_boolish"
+    )]
+    pub(crate) use_ignore_files: bool,
+    pub(crate) max_files: Option<usize>,
+    pub(crate) max_matches_per_file: Option<usize>,
+    pub(crate) max_matches_total: Option<usize>,
+    pub(crate) max_file_size_bytes: Option<u64>,
+    pub(crate) context_chars: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SearchBenchmarkSuiteResult {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) suite_id: String,
+    pub(crate) mode: String,
+    pub(crate) started_at_ms: u64,
+    pub(crate) finished_at_ms: u64,
+    pub(crate) status: &'static str,
+    pub(crate) cases: Vec<SearchBenchmarkCaseResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SearchBenchmarkCaseResult {
+    pub(crate) case_id: String,
+    pub(crate) lane: &'static str,
+    pub(crate) query: String,
+    pub(crate) include_patterns: Vec<String>,
+    pub(crate) exclude_patterns: Vec<String>,
+    pub(crate) rust: SearchBenchmarkRustMetrics,
+    pub(crate) status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SearchBenchmarkRustMetrics {
+    pub(crate) search_threads: usize,
+    pub(crate) duration_ms: u64,
+    pub(crate) first_result_ms: Option<u64>,
+    pub(crate) files_scanned: usize,
+    pub(crate) files_matched: usize,
+    pub(crate) matches_found: usize,
+    pub(crate) result_batches: usize,
+    pub(crate) cancelled: bool,
+    pub(crate) cancellation_reason: Option<String>,
+    pub(crate) truncated_reason: Option<String>,
+    pub(crate) dropped_optional_events: usize,
+    pub(crate) required_event_failures: usize,
 }
 
 #[derive(Debug)]
@@ -603,6 +703,44 @@ pub(crate) fn search_content(
     search_content_with_options(request, SearchRunOptions::default())
 }
 
+pub(crate) fn run_search_benchmark(
+    request: SearchBenchmarkRunRequest,
+) -> Result<SearchBenchmarkSuiteResult, SearchProviderError> {
+    let root = resolve_root(request.root.as_deref())?;
+    let mode = benchmark_mode(request.mode.as_deref())?;
+    let suite_id = request
+        .suite_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("search-benchmark-{}", epoch_ms()));
+    let cases = benchmark_cases(mode, request.cases)?;
+    let started_at_ms = epoch_ms();
+    let mut results = Vec::with_capacity(cases.len());
+    for case in cases {
+        results.push(run_search_benchmark_case(
+            &root,
+            request.project_generation,
+            case,
+        ));
+    }
+    let status = if results.iter().any(|case| case.status == "error") {
+        "error"
+    } else {
+        "ok"
+    };
+    Ok(SearchBenchmarkSuiteResult {
+        dto: "SearchBenchmarkSuiteResult",
+        version: SEARCH_DTO_VERSION,
+        suite_id,
+        mode: mode.to_owned(),
+        started_at_ms,
+        finished_at_ms: epoch_ms(),
+        status,
+        cases: results,
+    })
+}
+
 pub(crate) fn search_content_with_options(
     request: SearchContentRequest,
     options: SearchRunOptions,
@@ -732,6 +870,7 @@ pub(crate) fn search_content_with_options(
                 complete: Some(false),
                 total_file_count: Some(counts.files_matched),
                 total_match_count: Some(match_count),
+                files_scanned: Some(counts.files_scanned),
                 next_global_cursor: None,
                 truncated_reason: None,
                 file_count: 1,
@@ -762,6 +901,7 @@ pub(crate) fn search_content_with_options(
         complete: Some(!truncated),
         total_file_count: Some(result_file_count),
         total_match_count: Some(match_count),
+        files_scanned: Some(counts.files_scanned),
         next_global_cursor: truncated.then(|| result_file_count.to_string()),
         truncated_reason,
         file_count: files.len(),
@@ -1030,4 +1170,460 @@ fn match_cap_reason(per_file: Option<usize>, remaining_total: Option<usize>) -> 
 
 fn default_true() -> bool {
     true
+}
+
+fn benchmark_mode(mode: Option<&str>) -> Result<&'static str, SearchProviderError> {
+    match mode.unwrap_or("genericSuite") {
+        "genericSuite" => Ok("genericSuite"),
+        "oneShot" => Ok("oneShot"),
+        other => Err(SearchProviderError::InvalidRequest(format!(
+            "unsupported search benchmark mode: {other}"
+        ))),
+    }
+}
+
+fn benchmark_cases(
+    mode: &str,
+    cases: Vec<SearchBenchmarkCase>,
+) -> Result<Vec<SearchBenchmarkCase>, SearchProviderError> {
+    if !cases.is_empty() {
+        return Ok(cases);
+    }
+    if mode == "oneShot" {
+        return Err(SearchProviderError::InvalidRequest(
+            "oneShot search benchmark requires at least one case".to_owned(),
+        ));
+    }
+    Ok(vec![
+        SearchBenchmarkCase {
+            case_id: Some("raw-import".to_owned()),
+            query: "import".to_owned(),
+            use_ignore_files: true,
+            ..Default::default()
+        },
+        SearchBenchmarkCase {
+            case_id: Some("include-py".to_owned()),
+            query: "import".to_owned(),
+            include_patterns: vec!["*.py".to_owned()],
+            use_ignore_files: true,
+            ..Default::default()
+        },
+        SearchBenchmarkCase {
+            case_id: Some("exclude-ts".to_owned()),
+            query: "import".to_owned(),
+            exclude_patterns: vec!["*.ts".to_owned()],
+            use_ignore_files: true,
+            ..Default::default()
+        },
+        SearchBenchmarkCase {
+            case_id: Some("include-under-exclude-ts".to_owned()),
+            query: "import".to_owned(),
+            include_patterns: vec!["*_*".to_owned()],
+            exclude_patterns: vec!["*.ts".to_owned()],
+            use_ignore_files: true,
+            ..Default::default()
+        },
+    ])
+}
+
+fn run_search_benchmark_case(
+    root: &Path,
+    project_generation: Option<u64>,
+    case: SearchBenchmarkCase,
+) -> SearchBenchmarkCaseResult {
+    let case_id = case
+        .case_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| "one-shot".to_owned());
+    let include_patterns = case.include_patterns.clone();
+    let exclude_patterns = case.exclude_patterns.clone();
+    let request = SearchContentRequest {
+        root: Some(path_to_string(root)),
+        project_generation,
+        query: case.query.clone(),
+        is_regex: case.is_regex,
+        is_case_sensitive: case.is_case_sensitive,
+        is_whole_words: case.is_whole_words,
+        include_patterns: case.include_patterns,
+        exclude_patterns: case.exclude_patterns,
+        use_ignore_files: case.use_ignore_files,
+        max_files: case.max_files,
+        max_matches_per_file: case.max_matches_per_file,
+        max_matches_total: case.max_matches_total,
+        max_file_size_bytes: case.max_file_size_bytes,
+        context_chars: case.context_chars,
+        ..Default::default()
+    };
+    let counts = Arc::new(std::sync::Mutex::new(SearchProgressCounts::default()));
+    let result_batches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let first_result_ms = Arc::new(std::sync::Mutex::new(None::<u64>));
+    let started_at = Instant::now();
+    let progress_counts = Arc::clone(&counts);
+    let batch_counter = Arc::clone(&result_batches);
+    let first_result_slot = Arc::clone(&first_result_ms);
+    let options = SearchRunOptions {
+        progress: Some(Arc::new(move |next_counts| {
+            if let Ok(mut counts) = progress_counts.lock() {
+                *counts = next_counts;
+            }
+            true
+        })),
+        content_result: Some(Arc::new(move |_| {
+            batch_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut first_result_ms) = first_result_slot.lock() {
+                if first_result_ms.is_none() {
+                    *first_result_ms = Some(started_at.elapsed().as_millis() as u64);
+                }
+            }
+            true
+        })),
+        ..Default::default()
+    };
+    let search_result = search_content_with_options(request, options);
+    let duration_ms = started_at.elapsed().as_millis() as u64;
+    let counts = counts.lock().map(|counts| *counts).unwrap_or_default();
+    let first_result_ms = first_result_ms.lock().ok().and_then(|value| *value);
+    match search_result {
+        Ok(result) => SearchBenchmarkCaseResult {
+            case_id,
+            lane: "rustOnly",
+            query: case.query,
+            include_patterns,
+            exclude_patterns,
+            rust: SearchBenchmarkRustMetrics {
+                search_threads: 4,
+                duration_ms,
+                first_result_ms,
+                files_scanned: counts.files_scanned,
+                files_matched: counts.files_matched,
+                matches_found: counts.matches_found.max(result.match_count),
+                result_batches: result_batches.load(std::sync::atomic::Ordering::Relaxed),
+                cancelled: false,
+                cancellation_reason: None,
+                truncated_reason: result.truncated_reason,
+                dropped_optional_events: 0,
+                required_event_failures: 0,
+            },
+            status: "ok",
+            error: None,
+        },
+        Err(error) => SearchBenchmarkCaseResult {
+            case_id,
+            lane: "rustOnly",
+            query: case.query,
+            include_patterns,
+            exclude_patterns,
+            rust: SearchBenchmarkRustMetrics {
+                search_threads: 4,
+                duration_ms,
+                first_result_ms,
+                files_scanned: counts.files_scanned,
+                files_matched: counts.files_matched,
+                matches_found: counts.matches_found,
+                result_batches: result_batches.load(std::sync::atomic::Ordering::Relaxed),
+                cancelled: matches!(error, SearchProviderError::Cancelled),
+                cancellation_reason: matches!(error, SearchProviderError::Cancelled)
+                    .then(|| "rustCancelled".to_owned()),
+                truncated_reason: None,
+                dropped_optional_events: 0,
+                required_event_failures: 0,
+            },
+            status: "error",
+            error: Some(search_provider_error_text(error)),
+        },
+    }
+}
+
+fn epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn search_provider_error_text(error: SearchProviderError) -> String {
+    match error {
+        SearchProviderError::MissingRoot => "missing root".to_owned(),
+        SearchProviderError::InvalidRoot(message)
+        | SearchProviderError::InvalidPattern(message)
+        | SearchProviderError::InvalidRegex(message)
+        | SearchProviderError::InvalidRequest(message)
+        | SearchProviderError::Io(message)
+        | SearchProviderError::Search(message) => message,
+        SearchProviderError::Cancelled => "search cancelled".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{collections::BTreeSet, path::Path, time::Instant};
+
+    fn test_root(name: &str) -> PathBuf {
+        let mut root = std::env::var_os("TEMPDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        root.push(format!(
+            "te2-rust-spike-search-{}-{}",
+            name,
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("create test root");
+        root
+    }
+
+    fn write_file(root: &Path, relative: &str, body: &str) {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent");
+        }
+        fs::write(path, body).expect("write file");
+    }
+
+    fn content_request(root: &Path) -> SearchContentRequest {
+        SearchContentRequest {
+            root: Some(path_to_string(root)),
+            query: "import".to_owned(),
+            is_case_sensitive: true,
+            use_ignore_files: false,
+            ..Default::default()
+        }
+    }
+
+    fn result_paths(result: &SearchContentResult) -> BTreeSet<String> {
+        result
+            .files
+            .iter()
+            .map(|file| file.relative_path.clone())
+            .collect()
+    }
+
+    fn seed_import_fixture(root: &Path) {
+        write_file(root, "pkg/main.py", "import os\n");
+        write_file(root, "pkg/util_module.py", "from thing import value\n");
+        write_file(root, "src/app.ts", "import { x } from './x'\n");
+        write_file(root, "src/app_test.ts", "import test from 'test'\n");
+        write_file(root, "docs/readme.md", "import docs\n");
+        write_file(root, "docs/with_under.md", "import under\n");
+        write_file(root, "notes/nohit.txt", "nothing here\n");
+    }
+
+    const BENCH_GROUP_FILES: usize = 80;
+    const BENCH_MATCHES_PER_FILE: usize = 4;
+
+    fn seed_import_rate_fixture(root: &Path) {
+        for index in 0..BENCH_GROUP_FILES {
+            let mut body = String::new();
+            for match_index in 0..BENCH_MATCHES_PER_FILE {
+                body.push_str(&format!("import py_module_{index}_{match_index}\n"));
+            }
+            body.push_str("const untouched = true;\n");
+            write_file(root, &format!("pkg_py/module_{index}.py"), &body);
+        }
+        for index in 0..BENCH_GROUP_FILES {
+            let mut body = String::new();
+            for match_index in 0..BENCH_MATCHES_PER_FILE {
+                body.push_str(&format!("import tsModule{index}_{match_index}\n"));
+            }
+            body.push_str("export const untouched = true;\n");
+            write_file(root, &format!("src_ts/component_{index}.ts"), &body);
+        }
+        for index in 0..BENCH_GROUP_FILES {
+            let mut body = String::new();
+            for match_index in 0..BENCH_MATCHES_PER_FILE {
+                body.push_str(&format!("import docs_module_{index}_{match_index}\n"));
+            }
+            body.push_str("plain markdown text\n");
+            write_file(root, &format!("docs/with_under_{index}.md"), &body);
+        }
+        for index in 0..BENCH_GROUP_FILES {
+            let mut body = String::new();
+            for match_index in 0..BENCH_MATCHES_PER_FILE {
+                body.push_str(&format!("import noteModule{index}_{match_index}\n"));
+            }
+            body.push_str("plain text\n");
+            write_file(root, &format!("notes/note-{index}.txt"), &body);
+        }
+    }
+
+    fn expected_bench_matches(files: usize) -> usize {
+        files * BENCH_MATCHES_PER_FILE
+    }
+
+    fn run_import_rate_benchmark(
+        case: &str,
+        include_patterns: &[&str],
+        exclude_patterns: &[&str],
+        expected_files: usize,
+    ) {
+        let root = test_root(case);
+        seed_import_rate_fixture(&root);
+
+        let emitted_matches = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let emitted_files = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let result_matches = std::sync::Arc::clone(&emitted_matches);
+        let result_files = std::sync::Arc::clone(&emitted_files);
+
+        let mut request = content_request(&root);
+        request.include_patterns = include_patterns
+            .iter()
+            .map(|pattern| (*pattern).to_owned())
+            .collect();
+        request.exclude_patterns = exclude_patterns
+            .iter()
+            .map(|pattern| (*pattern).to_owned())
+            .collect();
+        let options = SearchRunOptions {
+            search_id: Some(format!("test-search-{case}")),
+            job_id: Some(format!("test-job-{case}")),
+            content_result: Some(std::sync::Arc::new(move |result| {
+                result_matches.fetch_add(result.match_count, std::sync::atomic::Ordering::Relaxed);
+                result_files.fetch_add(result.file_count, std::sync::atomic::Ordering::Relaxed);
+                true
+            })),
+            ..Default::default()
+        };
+
+        let started_at = Instant::now();
+        let result = search_content_with_options(request, options).expect("rate search");
+        let elapsed = started_at.elapsed();
+        let seconds = elapsed.as_secs_f64().max(0.001);
+        let emitted_match_count = emitted_matches.load(std::sync::atomic::Ordering::Relaxed);
+        let emitted_file_count = emitted_files.load(std::sync::atomic::Ordering::Relaxed);
+        let expected_matches = expected_bench_matches(expected_files);
+
+        assert_eq!(result.match_count, expected_matches);
+        assert_eq!(result.total_match_count, Some(expected_matches));
+        assert_eq!(result.total_file_count, Some(expected_files));
+        assert_eq!(emitted_match_count, expected_matches);
+        assert_eq!(emitted_file_count, expected_files);
+
+        println!(
+            "SEARCH_RATE_BENCH case={} query=import include={:?} exclude={:?} expected_files={} emitted_files={} matches={} duration_ms={} hits_per_second={:.2} matched_files_per_second={:.2}",
+            case,
+            include_patterns,
+            exclude_patterns,
+            expected_files,
+            emitted_file_count,
+            emitted_match_count,
+            elapsed.as_millis(),
+            emitted_match_count as f64 / seconds,
+            emitted_file_count as f64 / seconds,
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn content_search_import_variants_apply_include_exclude_filters() {
+        let root = test_root("import-variants");
+        seed_import_fixture(&root);
+
+        let raw = search_content(content_request(&root)).expect("raw search");
+        assert_eq!(raw.match_count, 6);
+        assert_eq!(
+            result_paths(&raw),
+            BTreeSet::from([
+                "docs/readme.md".to_owned(),
+                "docs/with_under.md".to_owned(),
+                "pkg/main.py".to_owned(),
+                "pkg/util_module.py".to_owned(),
+                "src/app.ts".to_owned(),
+                "src/app_test.ts".to_owned(),
+            ])
+        );
+
+        let mut include_py = content_request(&root);
+        include_py.include_patterns = vec!["*.py".to_owned()];
+        let include_py = search_content(include_py).expect("include py search");
+        assert_eq!(include_py.match_count, 2);
+        assert_eq!(
+            result_paths(&include_py),
+            BTreeSet::from(["pkg/main.py".to_owned(), "pkg/util_module.py".to_owned()])
+        );
+
+        let mut exclude_ts = content_request(&root);
+        exclude_ts.exclude_patterns = vec!["*.ts".to_owned()];
+        let exclude_ts = search_content(exclude_ts).expect("exclude ts search");
+        assert_eq!(exclude_ts.match_count, 4);
+        assert_eq!(
+            result_paths(&exclude_ts),
+            BTreeSet::from([
+                "docs/readme.md".to_owned(),
+                "docs/with_under.md".to_owned(),
+                "pkg/main.py".to_owned(),
+                "pkg/util_module.py".to_owned(),
+            ])
+        );
+
+        let mut include_under_exclude_ts = content_request(&root);
+        include_under_exclude_ts.include_patterns = vec!["*_*".to_owned()];
+        include_under_exclude_ts.exclude_patterns = vec!["*.ts".to_owned()];
+        let include_under_exclude_ts =
+            search_content(include_under_exclude_ts).expect("include underscore exclude ts search");
+        assert_eq!(include_under_exclude_ts.match_count, 2);
+        assert_eq!(
+            result_paths(&include_under_exclude_ts),
+            BTreeSet::from([
+                "docs/with_under.md".to_owned(),
+                "pkg/util_module.py".to_owned(),
+            ])
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn content_search_progress_callback_can_cancel_provider() {
+        let root = test_root("cancel-progress");
+        seed_import_fixture(&root);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let callback_cancelled = Arc::clone(&cancelled);
+        let options = SearchRunOptions {
+            cancelled: Some(Arc::clone(&cancelled)),
+            progress: Some(Arc::new(move |_| {
+                callback_cancelled.store(true, Ordering::Relaxed);
+                false
+            })),
+            ..Default::default()
+        };
+
+        let result = search_content_with_options(content_request(&root), options);
+        assert!(matches!(result, Err(SearchProviderError::Cancelled)));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    #[ignore = "benchmark-style search rate report; run with --ignored --nocapture"]
+    fn content_search_import_rate_raw_for_tests() {
+        run_import_rate_benchmark("raw", &[], &[], BENCH_GROUP_FILES * 4);
+    }
+
+    #[test]
+    #[ignore = "benchmark-style search rate report; run with --ignored --nocapture"]
+    fn content_search_import_rate_include_py_for_tests() {
+        run_import_rate_benchmark("include-py", &["*.py"], &[], BENCH_GROUP_FILES);
+    }
+
+    #[test]
+    #[ignore = "benchmark-style search rate report; run with --ignored --nocapture"]
+    fn content_search_import_rate_exclude_ts_for_tests() {
+        run_import_rate_benchmark("exclude-ts", &[], &["*.ts"], BENCH_GROUP_FILES * 3);
+    }
+    // te2_search_canary_05
+
+    #[test]
+    #[ignore = "benchmark-style search rate report; run with --ignored --nocapture"]
+    fn content_search_import_rate_include_under_exclude_ts_for_tests() {
+        run_import_rate_benchmark(
+            "include-under-exclude-ts",
+            &["*_*"],
+            &["*.ts"],
+            BENCH_GROUP_FILES * 2,
+        );
+    }
 }

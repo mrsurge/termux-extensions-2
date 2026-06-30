@@ -443,6 +443,30 @@ mod tests {
                 .and_then(|value| value.as_u64()),
             Some(8)
         );
+        assert_eq!(
+            first_match
+                .get("matchText")
+                .and_then(|value| value.as_str()),
+            Some("function openFile")
+        );
+        assert_eq!(
+            first_match
+                .get("lineRanges")
+                .and_then(|value| value.as_array())
+                .and_then(|ranges| ranges.first())
+                .and_then(|range| range.get("start"))
+                .and_then(|value| value.as_u64()),
+            Some(7)
+        );
+        assert_eq!(
+            first_match
+                .get("snippetRanges")
+                .and_then(|value| value.as_array())
+                .and_then(|ranges| ranges.first())
+                .and_then(|range| range.get("end"))
+                .and_then(|value| value.as_u64()),
+            Some(24)
+        );
 
         let _ = fs::remove_dir_all(root);
     }
@@ -571,8 +595,9 @@ mod tests {
     #[tokio::test]
     async fn dispatches_search_content_start_and_routes_result_notifications() {
         let root = test_root("search-progressive");
-        fs::write(root.join("one.txt"), "needle one\n").expect("write one");
-        fs::write(root.join("two.txt"), "needle two\n").expect("write two");
+        for index in 0..20 {
+            fs::write(root.join(format!("{index:02}.txt")), "needle\n").expect("write hit");
+        }
         let scheduler = FrameworkServiceScheduler::default();
         let sink = Arc::new(TestSink::default());
 
@@ -584,7 +609,11 @@ mod tests {
                     "version": 1,
                     "query": "needle",
                     "isCaseSensitive": true,
-                    "correlationId": "search-correlation"
+                    "correlationId": "search-correlation",
+                    "presentationWindow": {
+                        "maxInitialMatchesPerFile": 10,
+                        "maxInitialMatchesTotal": 2
+                    }
                 }),
                 &root,
                 2300,
@@ -656,6 +685,37 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("SearchContentResult")
         );
+        assert_eq!(
+            result_params
+                .get("result")
+                .and_then(|value| value.get("fileCount"))
+                .and_then(|value| value.as_u64()),
+            Some(1)
+        );
+        let (result_frame_count, result_file_count_sum, max_result_file_count): (usize, u64, u64) = {
+            let frames = sink.frames.lock().expect("frames lock");
+            let result_frames: Vec<_> = frames
+                .iter()
+                .filter(|frame| frame.method.as_deref() == Some("search.job.result"))
+                .collect();
+            let file_counts: Vec<u64> = result_frames
+                .iter()
+                .filter_map(|frame| {
+                    frame
+                        .params
+                        .as_ref()
+                        .and_then(|params| params.get("result"))
+                        .and_then(|result| result.get("fileCount"))
+                        .and_then(|value| value.as_u64())
+                })
+                .collect();
+            let file_count_sum = file_counts.iter().sum();
+            let max_file_count = file_counts.iter().copied().max().unwrap_or_default();
+            (result_frames.len(), file_count_sum, max_file_count)
+        };
+        assert_eq!(result_frame_count, 20);
+        assert_eq!(result_file_count_sum, 20);
+        assert_eq!(max_result_file_count, 1);
 
         let done_params = done_frame
             .expect("done notification")
@@ -670,6 +730,71 @@ mod tests {
                 .get("cancelled")
                 .and_then(|value| value.as_bool()),
             Some(false)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn dispatches_search_benchmark_run_to_contract_dto() {
+        let root = test_root("search-benchmark");
+        fs::write(root.join("main.py"), "import os\n").expect("write py");
+        fs::write(root.join("main.ts"), "import thing from './thing'\n").expect("write ts");
+
+        let response = dispatch_request(
+            targeted_request(
+                "search.benchmark.run",
+                json!({
+                    "dto": "SearchBenchmarkRunRequest",
+                    "version": 1,
+                    "mode": "oneShot",
+                    "suiteId": "suite-test",
+                    "cases": [{
+                        "caseId": "include-py",
+                        "query": "import",
+                        "includePatterns": ["*.py"],
+                        "excludePatterns": [],
+                        "useIgnoreFiles": false
+                    }]
+                }),
+                &root,
+                2300,
+                "service.search",
+            ),
+            &PipeIdentity {
+                nid: 2300,
+                name: "service.search".to_owned(),
+            },
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let result = response.result.expect("benchmark result");
+        assert_eq!(
+            result.get("dto").and_then(|value| value.as_str()),
+            Some("SearchBenchmarkSuiteResult")
+        );
+        assert_eq!(
+            result.get("suiteId").and_then(|value| value.as_str()),
+            Some("suite-test")
+        );
+        let cases = result
+            .get("cases")
+            .and_then(|value| value.as_array())
+            .expect("benchmark cases");
+        assert_eq!(cases.len(), 1);
+        assert_eq!(
+            cases[0].get("lane").and_then(|value| value.as_str()),
+            Some("rustOnly")
+        );
+        assert_eq!(
+            cases[0]
+                .get("rust")
+                .and_then(|value| value.get("matchesFound"))
+                .and_then(|value| value.as_u64()),
+            Some(1)
         );
 
         let _ = fs::remove_dir_all(root);

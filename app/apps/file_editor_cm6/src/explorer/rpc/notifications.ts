@@ -4,6 +4,7 @@ import {
   type ExplorerRpcMethod,
   type ExplorerRpcNotificationMethod,
 } from "./contract.ts";
+import { handleSearchBenchmarkNotification } from "../search/benchmark.ts";
 import type { JsonObject } from "../../rpc/transport.ts";
 import type { ExplorerRuntimeState } from "../state/runtime-state.ts";
 import type { ExplorerTreeDecorationsController } from "../tree/decorations.ts";
@@ -599,6 +600,14 @@ export function createExplorerNotificationHandler(
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchJobError: {
         deps.searchOverlayController.handleSearchJobError(payload);
+        break;
+      }
+      case EXPLORER_RPC_NOTIFICATIONS.searchBenchmarkProgress:
+      case EXPLORER_RPC_NOTIFICATIONS.searchBenchmarkResult:
+      case EXPLORER_RPC_NOTIFICATIONS.searchBenchmarkDone:
+      case EXPLORER_RPC_NOTIFICATIONS.searchBenchmarkError:
+      case EXPLORER_RPC_NOTIFICATIONS.searchBenchmarkFrontendRecorded: {
+        handleSearchBenchmarkNotification(method, payload);
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.error: {

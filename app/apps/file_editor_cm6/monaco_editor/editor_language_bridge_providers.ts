@@ -44,6 +44,15 @@ interface LanguageBridgeState {
     MonacoDisposableLike | null
   >;
   completionProviderSignatureByLanguage: Record<string, string>;
+  documentColorProvidersByLanguage: Record<
+    string,
+    Record<string, DocumentColorProviderRegistrationLike>
+  >;
+  documentColorProviderDisposablesByLanguage: Record<
+    string,
+    MonacoDisposableLike | null
+  >;
+  documentColorProviderSignatureByLanguage: Record<string, string>;
   inlayHintsProvidersByLanguage: Record<
     string,
     Record<string, InlayHintsProviderRegistrationLike>
@@ -70,6 +79,10 @@ interface CompletionProviderRegistrationLike {
   handle: string;
   triggerCharacters: string[];
   supportsResolve: boolean;
+}
+
+interface DocumentColorProviderRegistrationLike {
+  handle: string;
 }
 
 interface InlayHintsProviderRegistrationLike {
@@ -131,6 +144,18 @@ interface MonacoCancellationTokenLike {
 interface MonacoCompletionContextLike {
   triggerKind?: number;
   triggerCharacter?: string;
+}
+
+interface MonacoColorLike {
+  red?: number;
+  green?: number;
+  blue?: number;
+  alpha?: number;
+}
+
+interface MonacoColorInformationLike {
+  color?: MonacoColorLike;
+  range?: MonacoRangeLike;
 }
 
 interface MonacoInlineCompletionContextLike extends Record<string, unknown> {
@@ -219,6 +244,21 @@ interface MonacoLanguagesLike {
       onDidChangeInlayHints?: unknown;
     },
   ) => MonacoDisposableLike | unknown;
+  registerColorProvider?: (
+    selector: unknown,
+    provider: {
+      __te2WorkbenchColorProvider?: true;
+      provideDocumentColors(
+        model: MonacoModelLike,
+        token: MonacoCancellationTokenLike,
+      ): unknown;
+      provideColorPresentations(
+        model: MonacoModelLike,
+        colorInfo: MonacoColorInformationLike,
+        token: MonacoCancellationTokenLike,
+      ): unknown;
+    },
+  ) => MonacoDisposableLike | unknown;
   registerInlineCompletionsProvider?: (
     selector: unknown,
     provider: {
@@ -286,12 +326,13 @@ interface MonacoLike {
   languages: MonacoLanguagesLike;
 }
 
-interface MonacoCompletionRegistryLike extends Record<string, unknown> {
+interface MonacoLanguageFeatureRegistryLike extends Record<string, unknown> {
   _entries?: unknown[];
   _lastCandidate?: unknown;
 }
 
 const prunedNativeCompletionLanguages = new Set<string>();
+const prunedNativeColorLanguages = new Set<string>();
 
 interface CreateEditorLanguageBridgeProvidersDeps {
   getMonaco(): MonacoLike | null;
@@ -493,7 +534,7 @@ function iterablePairs(value: unknown): Iterable<[unknown, unknown]> | null {
 
 function completionRegistryFromActiveEditor(
   deps: CreateEditorLanguageBridgeProvidersDeps,
-): MonacoCompletionRegistryLike | null {
+): MonacoLanguageFeatureRegistryLike | null {
   const monacoRef = deps.getMonaco();
   const editors =
     monacoRef &&
@@ -518,9 +559,44 @@ function completionRegistryFromActiveEditor(
       const languageFeatures = asRecord(value);
       const completionProvider = asRecord(
         languageFeatures && languageFeatures.completionProvider,
-      ) as MonacoCompletionRegistryLike | null;
+      ) as MonacoLanguageFeatureRegistryLike | null;
       if (completionProvider && Array.isArray(completionProvider._entries))
         return completionProvider;
+    }
+  }
+  return null;
+}
+
+function colorRegistryFromActiveEditor(
+  deps: CreateEditorLanguageBridgeProvidersDeps,
+): MonacoLanguageFeatureRegistryLike | null {
+  const monacoRef = deps.getMonaco();
+  const editors =
+    monacoRef &&
+    monacoRef.editor &&
+    typeof monacoRef.editor.getEditors === "function"
+      ? monacoRef.editor.getEditors()
+      : [];
+  for (const editor of editors) {
+    const editorRecord = asRecord(editor);
+    let service = asRecord(editorRecord && editorRecord._instantiationService);
+    while (service) {
+      const parent = asRecord(service._parent);
+      if (!parent) break;
+      service = parent;
+    }
+
+    const services = asRecord(service && service._services);
+    const serviceEntries = iterablePairs(services && services._entries);
+    if (!serviceEntries) continue;
+    for (const [key, value] of serviceEntries) {
+      if (String(key) !== "ILanguageFeaturesService") continue;
+      const languageFeatures = asRecord(value);
+      const colorProvider = asRecord(
+        languageFeatures && languageFeatures.colorProvider,
+      ) as MonacoLanguageFeatureRegistryLike | null;
+      if (colorProvider && Array.isArray(colorProvider._entries))
+        return colorProvider;
     }
   }
   return null;
@@ -533,6 +609,14 @@ function selectorMatchesLanguage(selector: unknown, langId: string): boolean {
   if (typeof selector === "string") return selector === langId;
   const selectorRecord = asRecord(selector);
   return !!selectorRecord && selectorRecord.language === langId;
+}
+
+function documentColorProviderSelector(
+  deps: CreateEditorLanguageBridgeProvidersDeps,
+  langId: string,
+): unknown {
+  if (deps.getLanguageWorkersEnabled()) return langId;
+  return { language: langId, scheme: "file", exclusive: true };
 }
 
 function pruneNativeWorkerCompletionProviders(
@@ -574,12 +658,55 @@ function pruneNativeWorkerCompletionProviders(
   return removed;
 }
 
+function pruneNativeWorkerColorProviders(
+  deps: CreateEditorLanguageBridgeProvidersDeps,
+  langId: string,
+): number {
+  if (deps.getLanguageWorkersEnabled()) return 0;
+  const registry = colorRegistryFromActiveEditor(deps);
+  if (!registry || !Array.isArray(registry._entries)) return 0;
+  const entries = registry._entries;
+
+  let removed = 0;
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = asRecord(entries[i]);
+    const provider = asRecord(entry && entry.provider);
+    if (
+      entry &&
+      provider &&
+      Object.prototype.hasOwnProperty.call(provider, "_worker") &&
+      selectorMatchesLanguage(entry.selector, langId)
+    ) {
+      entries.splice(i, 1);
+      removed += 1;
+    }
+  }
+
+  if (removed > 0) {
+    registry._lastCandidate = undefined;
+    if (!prunedNativeColorLanguages.has(langId)) {
+      prunedNativeColorLanguages.add(langId);
+      console.log(
+        "[documentColors] pruned native Monaco worker color provider for lang=" +
+          langId +
+          " count=" +
+          removed,
+      );
+    }
+  }
+  return removed;
+}
+
 export function createEditorLanguageBridgeProviders(
   deps: CreateEditorLanguageBridgeProvidersDeps,
 ): {
   cacheCompletionProviderRegistration(
     langId: string,
     registration: CompletionProviderRegistrationLike,
+  ): void;
+  cacheDocumentColorProviderRegistration(
+    langId: string,
+    registration: DocumentColorProviderRegistrationLike,
   ): void;
   cacheInlayHintsProviderRegistration(
     langId: string,
@@ -599,6 +726,7 @@ export function createEditorLanguageBridgeProviders(
   installWorkbenchLanguageBridgeProviders(): void;
   hydrateProviderSnapshot(snapshot: unknown): {
     completions: number;
+    documentColors: number;
     inlayHints: number;
     inlineCompletions: number;
     semanticTokens: number;
@@ -872,6 +1000,286 @@ export function createEditorLanguageBridgeProviders(
       supportsResolve: !!registration.supportsResolve,
     };
     ensureCompletionProvidersRegistered(langId);
+  }
+
+  function getDocumentColorRegistrations(
+    langId: string,
+  ): DocumentColorProviderRegistrationLike[] {
+    const languageCache =
+      deps.languageBridge.documentColorProvidersByLanguage[langId];
+    if (!languageCache) return [];
+    return Object.values(languageCache);
+  }
+
+  function getDocumentColorProviderHandles(
+    entries: DocumentColorProviderRegistrationLike[],
+  ): string[] {
+    return entries
+      .map((entry) => String(entry.handle || "").trim())
+      .filter(Boolean)
+      .sort((left, right) => Number(left) - Number(right));
+  }
+
+  function getDocumentColorProviderSignature(
+    entries: DocumentColorProviderRegistrationLike[],
+  ): string {
+    return getDocumentColorProviderHandles(entries).join("|");
+  }
+
+  function numberFrom(value: unknown, fallback = 0): number {
+    const next = Number(value);
+    return Number.isFinite(next) ? next : fallback;
+  }
+
+  function normalizeMonacoColor(raw: unknown): Record<string, number> | null {
+    if (Array.isArray(raw) && raw.length >= 4) {
+      return {
+        red: numberFrom(raw[0]),
+        green: numberFrom(raw[1]),
+        blue: numberFrom(raw[2]),
+        alpha: numberFrom(raw[3], 1),
+      };
+    }
+    const record = asRecord(raw);
+    if (!record) return null;
+    return {
+      red: numberFrom(record.red),
+      green: numberFrom(record.green),
+      blue: numberFrom(record.blue),
+      alpha: numberFrom(record.alpha, 1),
+    };
+  }
+
+  function normalizeMonacoColorInfo(raw: unknown): Record<string, unknown> | null {
+    const record = asRecord(raw);
+    const monacoRef = deps.getMonaco();
+    if (!record || !monacoRef) return null;
+    const color = normalizeMonacoColor(record.color);
+    const range =
+      deps.monacoRangeFromProtoRange(record.range) ||
+      new monacoRef.Range(1, 1, 1, 1);
+    if (!color || !range) return null;
+    return { color, range };
+  }
+
+  function colorInfoToRaw(
+    colorInfo: MonacoColorInformationLike,
+  ): Record<string, unknown> {
+    const color = asRecord(colorInfo.color);
+    const range = asRecord(colorInfo.range);
+    return {
+      color: [
+        numberFrom(color && color.red),
+        numberFrom(color && color.green),
+        numberFrom(color && color.blue),
+        numberFrom(color && color.alpha, 1),
+      ],
+      range: {
+        startLineNumber: numberFrom(range && range.startLineNumber, 1),
+        startColumn: numberFrom(range && range.startColumn, 1),
+        endLineNumber: numberFrom(range && range.endLineNumber, 1),
+        endColumn: numberFrom(range && range.endColumn, 1),
+      },
+    };
+  }
+
+  function normalizeMonacoTextEdit(raw: unknown): Record<string, unknown> | null {
+    const record = asRecord(raw);
+    if (!record) return null;
+    const range = deps.monacoRangeFromProtoRange(record.range);
+    const text =
+      record.text == null
+        ? record.newText == null
+          ? null
+          : String(record.newText)
+        : String(record.text);
+    if (!range || text == null) return null;
+    return { ...record, range, text };
+  }
+
+  function normalizeMonacoColorPresentation(
+    raw: unknown,
+  ): Record<string, unknown> | null {
+    const record = asRecord(raw);
+    if (!record || typeof record.label !== "string" || !record.label) {
+      return null;
+    }
+    const out: Record<string, unknown> = { label: record.label };
+    const textEdit = normalizeMonacoTextEdit(record.textEdit);
+    if (textEdit) out.textEdit = textEdit;
+    if (Array.isArray(record.additionalTextEdits)) {
+      const edits = record.additionalTextEdits
+        .map(normalizeMonacoTextEdit)
+        .filter((item): item is Record<string, unknown> => !!item);
+      if (edits.length) out.additionalTextEdits = edits;
+    }
+    return out;
+  }
+
+  function ensureDocumentColorProviderRegistered(langId: string): void {
+    const monacoRef = deps.getMonaco();
+    if (
+      !monacoRef ||
+      !monacoRef.languages ||
+      !monacoRef.languages.registerColorProvider
+    )
+      return;
+    if (deps.getLanguageWorkersEnabled()) return;
+    const entries = getDocumentColorRegistrations(langId);
+    if (!entries.length) return;
+    const handles = getDocumentColorProviderHandles(entries);
+    if (!handles.length) return;
+    const nextSignature = getDocumentColorProviderSignature(entries);
+    if (
+      nextSignature &&
+      deps.languageBridge.documentColorProviderSignatureByLanguage[langId] ===
+        nextSignature &&
+      deps.languageBridge.documentColorProviderDisposablesByLanguage[langId]
+    ) {
+      return;
+    }
+
+    const existingDisposable =
+      deps.languageBridge.documentColorProviderDisposablesByLanguage[langId];
+    if (
+      existingDisposable &&
+      typeof existingDisposable.dispose === "function"
+    ) {
+      try {
+        existingDisposable.dispose();
+      } catch (_) {}
+    }
+
+    const registrationDisposable = monacoRef.languages.registerColorProvider(
+      documentColorProviderSelector(deps, langId),
+      {
+        __te2WorkbenchColorProvider: true,
+        provideDocumentColors(model, token) {
+          try {
+            if (token && token.isCancellationRequested) return [];
+            const ctx = deps.getCurrentLanguageContext();
+            if (
+              !ctx ||
+              !model ||
+              !model.uri ||
+              String(model.uri.toString()) !== String(ctx.uri)
+            ) {
+              return [];
+            }
+            deps.flushMirrorDebounce();
+            return deps
+              .editorWorkbenchCall(
+                "document_colors",
+                {
+                  uri: ctx.uri,
+                  path: ctx.path,
+                  languageId: ctx.languageId,
+                  text:
+                    model && typeof model.getValue === "function"
+                      ? model.getValue()
+                      : undefined,
+                  modelVersionId:
+                    model && typeof model.getVersionId === "function"
+                      ? model.getVersionId()
+                      : undefined,
+                  timeoutMs: 8000,
+                },
+                { timeoutMs: 10000 },
+              )
+              .then((result) => {
+                const payload = extractWorkbenchPayload(result);
+                const rawColors =
+                  asArray(payload && payload.colors) ||
+                  asArray(asRecord(payload && payload.result)?.colors) ||
+                  [];
+                return rawColors
+                  .map(normalizeMonacoColorInfo)
+                  .filter((item): item is Record<string, unknown> => !!item);
+              })
+              .catch(() => []);
+          } catch (_) {
+            return [];
+          }
+        },
+        provideColorPresentations(model, colorInfo, token) {
+          try {
+            if (token && token.isCancellationRequested) return [];
+            const ctx = deps.getCurrentLanguageContext();
+            if (
+              !ctx ||
+              !model ||
+              !model.uri ||
+              String(model.uri.toString()) !== String(ctx.uri)
+            ) {
+              return [];
+            }
+            return deps
+              .editorWorkbenchCall(
+                "color_presentations",
+                {
+                  uri: ctx.uri,
+                  path: ctx.path,
+                  languageId: ctx.languageId,
+                  colorInfo: colorInfoToRaw(colorInfo || {}),
+                  timeoutMs: 8000,
+                },
+                { timeoutMs: 10000 },
+              )
+              .then((result) => {
+                const payload = extractWorkbenchPayload(result);
+                const rawPresentations =
+                  asArray(payload && payload.presentations) ||
+                  asArray(asRecord(payload && payload.result)?.presentations) ||
+                  [];
+                return rawPresentations
+                  .map(normalizeMonacoColorPresentation)
+                  .filter((item): item is Record<string, unknown> => !!item);
+              })
+              .catch(() => []);
+          } catch (_) {
+            return [];
+          }
+        },
+      },
+    );
+    deps.languageBridge.documentColorProviderDisposablesByLanguage[langId] =
+      registrationDisposable &&
+      typeof (registrationDisposable as MonacoDisposableLike).dispose ===
+        "function"
+        ? (registrationDisposable as MonacoDisposableLike)
+        : null;
+    deps.languageBridge.documentColorProviderSignatureByLanguage[langId] =
+      nextSignature;
+    pruneNativeWorkerColorProviders(deps, langId);
+    console.log(
+      "[documentColors] registered aggregated provider bridge for lang=" +
+        langId +
+        " handles=" +
+        handles.join(","),
+    );
+  }
+
+  function ensureDocumentColorProvidersRegistered(langId: string): void {
+    ensureDocumentColorProviderRegistered(langId);
+    pruneNativeWorkerColorProviders(deps, langId);
+  }
+
+  function cacheDocumentColorProviderRegistration(
+    langId: string,
+    registration: DocumentColorProviderRegistrationLike,
+  ): void {
+    if (!langId) return;
+    const handleKey =
+      registration.handle != null ? String(registration.handle).trim() : "";
+    if (!handleKey) return;
+    if (!deps.languageBridge.documentColorProvidersByLanguage[langId]) {
+      deps.languageBridge.documentColorProvidersByLanguage[langId] =
+        Object.create(null);
+    }
+    deps.languageBridge.documentColorProvidersByLanguage[langId][handleKey] = {
+      handle: handleKey,
+    };
+    ensureDocumentColorProvidersRegistered(langId);
   }
 
   function getInlayHintsRegistrations(
@@ -1253,6 +1661,7 @@ export function createEditorLanguageBridgeProviders(
 
   function hydrateProviderSnapshot(snapshot: unknown): {
     completions: number;
+    documentColors: number;
     inlayHints: number;
     inlineCompletions: number;
     semanticTokens: number;
@@ -1260,11 +1669,14 @@ export function createEditorLanguageBridgeProviders(
     const snapshotRecord = asRecord(snapshot);
     const disableSemanticTokens = deps.getDisableSemanticTokens();
     let completionCount = 0;
+    let documentColorCount = 0;
     let inlayHintsCount = 0;
     let inlineCompletionCount = 0;
     let semanticTokensCount = 0;
     const completionEntries =
       asArray(snapshotRecord ? snapshotRecord.completions : null) || [];
+    const documentColorEntries =
+      asArray(snapshotRecord ? snapshotRecord.documentColors : null) || [];
     const inlayHintsEntries =
       asArray(snapshotRecord ? snapshotRecord.inlayHints : null) || [];
     const inlineCompletionEntries =
@@ -1315,6 +1727,19 @@ export function createEditorLanguageBridgeProviders(
               : null,
         });
         inlayHintsCount += 1;
+      }
+    }
+
+    for (const rawEntry of documentColorEntries) {
+      const entry = asRecord(rawEntry);
+      const handle =
+        entry && entry.handle != null ? String(entry.handle).trim() : "";
+      if (!handle) continue;
+      for (const langId of selectorLanguagesFromSnapshot(
+        entry && entry.selector,
+      )) {
+        cacheDocumentColorProviderRegistration(langId, { handle });
+        documentColorCount += 1;
       }
     }
 
@@ -1392,6 +1817,7 @@ export function createEditorLanguageBridgeProviders(
 
     return {
       completions: completionCount,
+      documentColors: documentColorCount,
       inlayHints: inlayHintsCount,
       inlineCompletions: inlineCompletionCount,
       semanticTokens: semanticTokensCount,
@@ -1725,6 +2151,7 @@ export function createEditorLanguageBridgeProviders(
               deps.languageBridge.registeredFolding.add(langId);
             }
             ensureCompletionProvidersRegistered(langId);
+            ensureDocumentColorProvidersRegistered(langId);
           });
         } catch (_) {}
       };
@@ -1747,6 +2174,9 @@ export function createEditorLanguageBridgeProviders(
         immediate.forEach((langId) => {
           try {
             ensureCompletionProvidersRegistered(langId);
+          } catch (_) {}
+          try {
+            ensureDocumentColorProvidersRegistered(langId);
           } catch (_) {}
           try {
             ensureInlayHintsProvidersRegistered(langId);
@@ -1775,6 +2205,9 @@ export function createEditorLanguageBridgeProviders(
                 ensureCompletionProvidersRegistered(langId);
               } catch (_) {}
               try {
+                ensureDocumentColorProvidersRegistered(langId);
+              } catch (_) {}
+              try {
                 ensureInlayHintsProvidersRegistered(langId);
               } catch (_) {}
               try {
@@ -1793,6 +2226,9 @@ export function createEditorLanguageBridgeProviders(
         deps.languageBridge.completionProviderDisposablesByLanguage,
       );
       disposeProviderRecord(
+        deps.languageBridge.documentColorProviderDisposablesByLanguage,
+      );
+      disposeProviderRecord(
         deps.languageBridge.inlayHintsProviderDisposablesByKey,
       );
       disposeProviderRecord(
@@ -1802,6 +2238,9 @@ export function createEditorLanguageBridgeProviders(
       deps.languageBridge.completionProvidersByLanguage = {};
       deps.languageBridge.completionProviderDisposablesByLanguage = {};
       deps.languageBridge.completionProviderSignatureByLanguage = {};
+      deps.languageBridge.documentColorProvidersByLanguage = {};
+      deps.languageBridge.documentColorProviderDisposablesByLanguage = {};
+      deps.languageBridge.documentColorProviderSignatureByLanguage = {};
       deps.languageBridge.inlayHintsProvidersByLanguage = {};
       deps.languageBridge.inlayHintsProviderDisposablesByKey = {};
       deps.languageBridge.inlayHintsProviderSignatureByKey = {};
@@ -1825,6 +2264,7 @@ export function createEditorLanguageBridgeProviders(
 
   return {
     cacheCompletionProviderRegistration,
+    cacheDocumentColorProviderRegistration,
     cacheInlayHintsProviderRegistration,
     cacheInlineCompletionProviderRegistration,
     registerSemanticTokensWithLegend,

@@ -13,6 +13,7 @@ use super::*;
 use crate::framework_services::common::path_to_string;
 
 const DEFAULT_PARALLEL_SEARCH_THREADS: usize = 4;
+const DEFAULT_PROGRESS_BATCH_FILES: usize = 16;
 
 // Source copy basis:
 // - BurntSushi/ripgrep@dfe4a81d2591daca76d25ae4e052c34b26578155
@@ -76,7 +77,7 @@ const DEFAULT_PARALLEL_SEARCH_THREADS: usize = 4;
 //             //     let mut stats = locked_stats.lock().unwrap();
 //             //     *stats += search_result.stats().unwrap();
 //             // }
-//             // TE2 emits SearchContentResult DTO batches instead of printing.
+//             // TE2 emits SearchContentResult DTOs instead of printing.
 //             // if let Err(err) = bufwtr.print(searcher.printer().get_mut()) {
 //             //     if err.kind() == std::io::ErrorKind::BrokenPipe {
 //             //         return WalkState::Quit;
@@ -131,6 +132,7 @@ pub(super) fn search_content_parallel_with_options(
     let files_scanned = Arc::new(AtomicUsize::new(0));
     let files_matched = Arc::new(AtomicUsize::new(0));
     let matches_found = Arc::new(AtomicUsize::new(0));
+    let next_progress_at = Arc::new(AtomicUsize::new(DEFAULT_PROGRESS_BATCH_FILES));
     let truncated_reason = Arc::new(Mutex::new(None::<String>));
     let first_error = Arc::new(Mutex::new(None::<SearchProviderError>));
 
@@ -143,6 +145,7 @@ pub(super) fn search_content_parallel_with_options(
         let files_scanned = Arc::clone(&files_scanned);
         let files_matched = Arc::clone(&files_matched);
         let matches_found = Arc::clone(&matches_found);
+        let next_progress_at = Arc::clone(&next_progress_at);
         let truncated_reason = Arc::clone(&truncated_reason);
         let first_error = Arc::clone(&first_error);
 
@@ -189,7 +192,8 @@ pub(super) fn search_content_parallel_with_options(
                 .is_some_and(|max_bytes| is_too_large(path, max_bytes))
             {
                 set_parallel_truncation(&truncated_reason, "maxFileSizeBytes");
-                return emit_parallel_progress(
+                return emit_batched_parallel_progress(
+                    &next_progress_at,
                     &options,
                     &first_error,
                     scanned,
@@ -225,7 +229,8 @@ pub(super) fn search_content_parallel_with_options(
                 }
             }
             if sink.matches.is_empty() {
-                return emit_parallel_progress(
+                return emit_batched_parallel_progress(
+                    &next_progress_at,
                     &options,
                     &first_error,
                     scanned,
@@ -259,6 +264,7 @@ pub(super) fn search_content_parallel_with_options(
                 complete: Some(false),
                 total_file_count: Some(matched),
                 total_match_count: Some(found),
+                files_scanned: Some(scanned),
                 next_global_cursor: None,
                 truncated_reason: None,
                 file_count: 1,
@@ -270,7 +276,7 @@ pub(super) fn search_content_parallel_with_options(
                 set_first_error(&first_error, error);
                 return WalkState::Quit;
             }
-            emit_parallel_progress(&options, &first_error, scanned, matched, found)
+            WalkState::Continue
         })
     });
 
@@ -293,6 +299,7 @@ pub(super) fn search_content_parallel_with_options(
         complete: Some(!truncated),
         total_file_count: Some(file_count),
         total_match_count: Some(match_count),
+        files_scanned: Some(files_scanned.load(Ordering::Relaxed)),
         next_global_cursor: None,
         truncated_reason,
         file_count: 0,
@@ -316,13 +323,17 @@ fn build_parallel_walk(root: &Path, use_ignore_files: bool) -> ignore::WalkParal
     builder.build_parallel()
 }
 
-fn emit_parallel_progress(
+fn emit_batched_parallel_progress(
+    next_progress_at: &AtomicUsize,
     options: &SearchRunOptions,
     first_error: &Mutex<Option<SearchProviderError>>,
     files_scanned: usize,
     files_matched: usize,
     matches_found: usize,
 ) -> WalkState {
+    if !should_emit_progress(next_progress_at, files_scanned) {
+        return WalkState::Continue;
+    }
     let counts = SearchProgressCounts {
         files_scanned,
         files_matched,
@@ -333,6 +344,28 @@ fn emit_parallel_progress(
         Err(error) => {
             set_first_error(first_error, error);
             WalkState::Quit
+        }
+    }
+}
+
+fn should_emit_progress(next_progress_at: &AtomicUsize, files_scanned: usize) -> bool {
+    loop {
+        let next = next_progress_at.load(Ordering::Relaxed);
+        if files_scanned < next {
+            return false;
+        }
+        let mut updated = next.saturating_add(DEFAULT_PROGRESS_BATCH_FILES);
+        while updated <= files_scanned {
+            updated = updated.saturating_add(DEFAULT_PROGRESS_BATCH_FILES);
+            if updated == usize::MAX {
+                break;
+            }
+        }
+        if next_progress_at
+            .compare_exchange(next, updated, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            return true;
         }
     }
 }

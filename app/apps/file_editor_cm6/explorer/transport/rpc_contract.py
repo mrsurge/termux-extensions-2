@@ -73,6 +73,8 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.review.list": "review:list",
     "explorer.review.save": "review:save",
     "explorer.search.cancel": "search:cancel",
+    "explorer.search.benchmark.frontendResult": "search:benchmarkFrontendResult",
+    "explorer.search.benchmark.run": "search:benchmarkRun",
     "explorer.search.more": "search:more",
     "explorer.search.moreInFile": "search:moreInFile",
     "explorer.search.run": "search:run",

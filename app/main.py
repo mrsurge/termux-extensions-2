@@ -1088,7 +1088,7 @@ async def get_editor_assets_bundle():
         media_type="application/zip",
         filename=f"editor_assets_{version}.zip"
     )
-
+# TE2_search_canary_03
 
 @app.get("/api/state")
 async def get_state(key: List[str] = Query(...)):

@@ -29,6 +29,8 @@ const DEFAULT_CONTENT_QUERY_STATE: ExplorerContentQueryWidgetState = {
   useIgnoreFiles: true,
 };
 
+const MIN_PATTERN_INPUT_WIDTH = 180;
+
 interface KeyEventLike {
   key?: string;
 }
@@ -126,7 +128,43 @@ export function createExplorerContentQueryWidget(
   );
 
   let isSyncing = false;
-  let state: ExplorerContentQueryWidgetState = { ...DEFAULT_CONTENT_QUERY_STATE };
+  let state: ExplorerContentQueryWidgetState = {
+    ...DEFAULT_CONTENT_QUERY_STATE,
+  };
+
+  const resizePatternInputs = (): void => {
+    const width = Math.floor(
+      Math.max(
+        includeRow.clientWidth,
+        excludeRow.clientWidth,
+        queryDetails.clientWidth,
+        root.clientWidth,
+      ),
+    );
+    if (width < MIN_PATTERN_INPUT_WIDTH) {
+      return;
+    }
+    includeInput.setWidth(width);
+    excludeInput.setWidth(width);
+  };
+
+  const schedulePatternInputResize = (): void => {
+    window.requestAnimationFrame(() => {
+      if (!root.isConnected) {
+        return;
+      }
+      resizePatternInputs();
+    });
+  };
+
+  const resizeObserver =
+    typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          resizePatternInputs();
+        });
+  resizeObserver?.observe(root);
+  resizeObserver?.observe(queryDetails);
 
   const emitOptionsChanged = (): void => {
     if (isSyncing) {
@@ -150,7 +188,10 @@ export function createExplorerContentQueryWidget(
     }
   };
 
-  searchInput.inputBox.inputElement.addEventListener('keydown', maybeHandleEscape);
+  searchInput.inputBox.inputElement.addEventListener(
+    'keydown',
+    maybeHandleEscape,
+  );
   includeInput.getInputElement().addEventListener('keydown', maybeHandleEscape);
   excludeInput.getInputElement().addEventListener('keydown', maybeHandleEscape);
 
@@ -167,6 +208,7 @@ export function createExplorerContentQueryWidget(
 
   return {
     dispose(): void {
+      resizeObserver?.disconnect();
       searchInput.dispose();
       includeInput.dispose();
       excludeInput.dispose();
@@ -179,6 +221,9 @@ export function createExplorerContentQueryWidget(
     },
     setVisible(visible: boolean): void {
       root.style.display = visible ? 'block' : 'none';
+      if (visible) {
+        schedulePatternInputResize();
+      }
     },
     setState(next: ExplorerContentQueryWidgetState): void {
       isSyncing = true;
@@ -208,6 +253,7 @@ export function createExplorerContentQueryWidget(
       } finally {
         isSyncing = false;
       }
+      schedulePatternInputResize();
     },
     getState(): ExplorerContentQueryWidgetState {
       return { ...state };

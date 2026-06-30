@@ -65,6 +65,7 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/catalog.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/provider-registry.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/completions.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/document-colors.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/hover.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/inlay-hints.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/inline-completions.ts',

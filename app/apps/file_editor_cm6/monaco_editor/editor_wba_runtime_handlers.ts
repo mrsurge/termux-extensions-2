@@ -2,6 +2,7 @@ import { logDiagnosticsEvent } from "./editor_diagnostics_log_utils.js";
 import { applyDiagnosticsBridgeUpdate } from "./editor_diagnostics_apply_update_utils.js";
 import { handleSemanticTokensProviderRegistered } from "./editor_socket_semantic_registered_handler_utils.js";
 import { handleCompletionProviderRegistered } from "./editor_socket_completion_registered_handler_utils.ts";
+import { handleDocumentColorProviderRegistered } from "./editor_socket_document_colors_registered_handler_utils.ts";
 import { handleInlayHintsProviderRegistered } from "./editor_socket_inlay_hints_registered_handler_utils.ts";
 import { handleInlineCompletionProviderRegistered } from "./editor_socket_inline_completions_registered_handler_utils.ts";
 
@@ -35,6 +36,12 @@ interface EditorWbaRuntimeHandlerDeps {
       handle: string;
       triggerCharacters: string[];
       supportsResolve: boolean;
+    },
+  ): void;
+  cacheDocumentColorProviderRegistration(
+    lang: string,
+    registration: {
+      handle: string;
     },
   ): void;
   cacheInlayHintsProviderRegistration(
@@ -130,6 +137,14 @@ export function registerEditorWbaRuntimeHandlers(
         handleCompletionProviderRegistered(
           event,
           deps.cacheCompletionProviderRegistration,
+        );
+        return;
+      }
+
+      if (type === "provider/documentColors") {
+        handleDocumentColorProviderRegistered(
+          event,
+          deps.cacheDocumentColorProviderRegistration,
         );
         return;
       }

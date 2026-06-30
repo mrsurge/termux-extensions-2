@@ -6,6 +6,7 @@ import type { ConfigurationRuntime } from "./configuration";
 import type { ExtHostDispatchRuntime } from "../protocol/ext-host-dispatch";
 import type { ExtensionCatalogRuntime } from "../extensions/catalog";
 import type { CompletionRuntime } from "../extensions/intelligence/completions";
+import type { DocumentColorRuntime } from "../extensions/intelligence/document-colors";
 import type { HoverRuntime } from "../extensions/intelligence/hover";
 import type { InlayHintsRuntime } from "../extensions/intelligence/inlay-hints";
 import type { InlineCompletionRuntime } from "../extensions/intelligence/inline-completions";
@@ -38,6 +39,29 @@ export interface CompletionRuntimeDeps {
   languageIdFromPath: (filePath: string) => string;
   didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => Promise<unknown> | unknown;
   findAllProviderHandles: (kind: "completions", languageId: string) => number[];
+  waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => Promise<boolean>;
+  uriForPath: (filePath: string, authority: string) => unknown;
+  sendExtPending: (
+    rpcId: number,
+    method: string,
+    args: unknown[],
+    cancellable: boolean,
+    pendingOptions: TransportPendingOptions,
+  ) => { req: number; promise: Promise<unknown> };
+  log: (message: string) => void;
+  warn: (message: string, detail?: unknown) => void;
+}
+
+export interface DocumentColorRuntimeDeps {
+  extProtocol: unknown;
+  authority: string;
+  defaultRemoteAuthority: string;
+  languageIdFromPath: (filePath: string) => string;
+  didChange: (
+    params: Record<string, unknown>,
+    opts: { waitForAck: true; timeoutMs: number },
+  ) => Promise<unknown> | unknown;
+  findAllProviderHandles: (kind: "documentColors", languageId: string) => number[];
   waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => Promise<boolean>;
   uriForPath: (filePath: string, authority: string) => unknown;
   sendExtPending: (
@@ -382,6 +406,22 @@ export function createCompletionRuntime(deps: CompletionRuntimeDeps): Completion
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
     findAllProviderHandles: (kind: "completions", languageId: string) => deps.findAllProviderHandles(kind, languageId),
+    waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => deps.waitFor(condition, options),
+    uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
+    sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>
+      deps.sendExtPending(rpcId, method, args, cancellable, pendingOptions),
+    log: (message: string) => deps.log(message),
+    warn: (message: string, detail?: unknown) => deps.warn(message, detail),
+  };
+}
+
+export function createDocumentColorRuntime(deps: DocumentColorRuntimeDeps): DocumentColorRuntime {
+  return {
+    ensureConnected: () => ensureConnected(deps.extProtocol),
+    defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
+    languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
+    didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
+    findAllProviderHandles: (kind: "documentColors", languageId: string) => deps.findAllProviderHandles(kind, languageId),
     waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => deps.waitFor(condition, options),
     uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
     sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>

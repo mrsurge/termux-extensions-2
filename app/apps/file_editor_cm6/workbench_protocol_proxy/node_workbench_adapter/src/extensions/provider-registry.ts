@@ -6,6 +6,7 @@ export const PROVIDER_KINDS = [
   "inlayHints",
   "inlineCompletions",
   "semanticTokens",
+  "documentColors",
 ] as const;
 
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
@@ -45,6 +46,7 @@ export interface ProviderResyncOutcome {
     inlineCompletions: number;
     documentSymbols: number;
     foldingRanges: number;
+    documentColors: number;
   };
   events: Record<string, unknown>[];
 }
@@ -129,6 +131,7 @@ export class ProviderRegistry {
       inlayHints: new Map<number, ProviderEntry>(),
       inlineCompletions: new Map<number, ProviderEntry>(),
       semanticTokens: new Map<number, ProviderEntry>(),
+      documentColors: new Map<number, ProviderEntry>(),
     };
 
   private readonly textContentProviders = new Map<string, number>();
@@ -172,6 +175,9 @@ export class ProviderRegistry {
     if (methodMatches(method, "$registerDocumentRangeSemanticTokensProvider")) {
       return this.registerDocumentRangeSemanticTokensProvider(args);
     }
+    if (methodMatches(method, "$registerDocumentColorProvider")) {
+      return this.registerDocumentColorProvider(args);
+    }
     return emptyOutcome(false);
   }
 
@@ -196,6 +202,7 @@ export class ProviderRegistry {
       inlayHints: this.list("inlayHints"),
       inlineCompletions: this.list("inlineCompletions"),
       semanticTokens: this.list("semanticTokens"),
+      documentColors: this.list("documentColors"),
     };
   }
 
@@ -251,6 +258,7 @@ export class ProviderRegistry {
       inlineCompletions: 0,
       documentSymbols: 0,
       foldingRanges: 0,
+      documentColors: 0,
     };
     const events: Record<string, unknown>[] = [];
 
@@ -323,6 +331,18 @@ export class ProviderRegistry {
         resync: true,
       });
       replayed.semanticTokens += 1;
+    }
+
+    for (const entry of this.providers.documentColors.values()) {
+      for (const language of selectorLanguages(entry.selector)) {
+        events.push({
+          type: "provider/documentColors",
+          handle: entry.handle,
+          language,
+          resync: true,
+        });
+        replayed.documentColors += 1;
+      }
     }
 
     return { replayed, events };
@@ -640,6 +660,38 @@ export class ProviderRegistry {
         `[providers] semanticTokensRange EXCEPTION: ${message}`,
       );
     }
+    return outcome;
+  }
+
+  private registerDocumentColorProvider(
+    args: unknown[],
+  ): ProviderRegistrationOutcome {
+    const outcome = emptyOutcome(true);
+    if (args.length < 2) return outcome;
+    const handleValue = Number(args[0]);
+    const selector = args[1];
+    outcome.logs.push(
+      `[providers] $registerDocumentColorProvider handle=${handleValue} selector=${stringifyPreview(selector, 200)} isArr=${Array.isArray(selector)} isFinite=${Number.isFinite(handleValue)}`,
+    );
+
+    const handle = Number.isFinite(handleValue) ? handleValue : null;
+    const normalizedSelector = normalizeSelector(selector);
+    if (handle === null || !normalizedSelector) return outcome;
+
+    this.providers.documentColors.set(handle, {
+      handle,
+      selector: normalizedSelector,
+    });
+    for (const language of selectorLanguages(normalizedSelector)) {
+      outcome.events.push({
+        type: "provider/documentColors",
+        handle,
+        language,
+      });
+    }
+    outcome.logs.push(
+      `[providers] documentColors map size=${this.providers.documentColors.size} languages=[${this.languageSummary("documentColors")}]`,
+    );
     return outcome;
   }
 }

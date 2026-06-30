@@ -233,6 +233,15 @@ interface LanguageBridgeStateLike {
     { dispose(): void } | null
   >;
   completionProviderSignatureByLanguage: Record<string, string>;
+  documentColorProvidersByLanguage: Record<
+    string,
+    Record<string, { handle: string }>
+  >;
+  documentColorProviderDisposablesByLanguage: Record<
+    string,
+    { dispose(): void } | null
+  >;
+  documentColorProviderSignatureByLanguage: Record<string, string>;
   inlayHintsProvidersByLanguage: Record<
     string,
     Record<
@@ -859,6 +868,9 @@ interface MonacoBootWindowLike extends Window {
     completionProvidersByLanguage: {},
     completionProviderDisposablesByLanguage: {},
     completionProviderSignatureByLanguage: {},
+    documentColorProvidersByLanguage: {},
+    documentColorProviderDisposablesByLanguage: {},
+    documentColorProviderSignatureByLanguage: {},
     inlayHintsProvidersByLanguage: {},
     inlayHintsProviderDisposablesByKey: {},
     inlayHintsProviderSignatureByKey: {},
@@ -1109,6 +1121,8 @@ interface MonacoBootWindowLike extends Window {
             String(reason || "unknown") +
             " completions=" +
             counts.completions +
+            " colors=" +
+            counts.documentColors +
             " inlay=" +
             counts.inlayHints +
             " inline=" +
@@ -2125,6 +2139,8 @@ interface MonacoBootWindowLike extends Window {
           languageBridgeProviders.fireSemanticTokensChanged,
         cacheCompletionProviderRegistration:
           languageBridgeProviders.cacheCompletionProviderRegistration,
+        cacheDocumentColorProviderRegistration:
+          languageBridgeProviders.cacheDocumentColorProviderRegistration,
         cacheInlayHintsProviderRegistration:
           languageBridgeProviders.cacheInlayHintsProviderRegistration,
         cacheInlineCompletionProviderRegistration:

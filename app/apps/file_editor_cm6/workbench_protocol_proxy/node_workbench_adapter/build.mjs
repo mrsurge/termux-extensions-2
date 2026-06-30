@@ -18,6 +18,7 @@ const config = {
     "src/extensions/catalog.ts",
     "src/extensions/provider-registry.ts",
     "src/extensions/intelligence/completions.ts",
+    "src/extensions/intelligence/document-colors.ts",
     "src/extensions/intelligence/hover.ts",
     "src/extensions/intelligence/inlay-hints.ts",
     "src/extensions/intelligence/inline-completions.ts",

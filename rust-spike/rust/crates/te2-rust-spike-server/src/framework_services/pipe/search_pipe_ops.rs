@@ -28,6 +28,7 @@ pub(super) async fn dispatch_search_request(
             Some(search_content_start(request, responder, scheduler, event_sink).await)
         }
         "search.job.cancel" => Some(search_job_cancel(request, responder, scheduler).await),
+        "search.benchmark.run" => Some(search_benchmark_run(request, responder, scheduler).await),
         _ => None,
     }
 }
@@ -230,6 +231,47 @@ async fn search_job_cancel(
         request,
         responder,
         scheduler.cancel_search_job(params).await,
+    )
+}
+
+async fn search_benchmark_run(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+) -> PipeEnvelope {
+    let params = request.params.clone().unwrap_or_else(|| json!({}));
+    let mut params = match serde_json::from_value::<search_ops::SearchBenchmarkRunRequest>(params) {
+        Ok(params) => params,
+        Err(error) => {
+            return PipeEnvelope::error_response(
+                request,
+                responder,
+                PipeError::new(
+                    "protocol.invalidParams",
+                    format!("invalid search.benchmark.run params: {error}"),
+                    false,
+                    None,
+                ),
+            );
+        }
+    };
+    if let Err(error) = search_ops::validate_contract_metadata(
+        params.dto.as_deref(),
+        params.version,
+        "SearchBenchmarkRunRequest",
+    ) {
+        return PipeEnvelope::error_response(request, responder, search_error(error));
+    }
+    if params.root.is_none() {
+        params.root.clone_from(&request.workspace_root);
+    }
+    if params.project_generation.is_none() {
+        params.project_generation = request.project_generation;
+    }
+    encode_result(
+        request,
+        responder,
+        scheduler.search_benchmark_run(params).await,
     )
 }
 
