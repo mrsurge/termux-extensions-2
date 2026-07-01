@@ -9,7 +9,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Literal, cast
+from typing import Literal, TypeAlias, cast
 
 from app.libs import pipe_runtime
 from app.libs.pipe_protocol import PipeEnvelope
@@ -21,7 +21,6 @@ from ..contracts.search_review import (
     SearchContentMatch,
     SearchMoreInFileParams,
     SearchMoreParams,
-    SearchProviderContentMatch,
     SearchProviderFileItem,
     SearchRunParams,
     SearchTextRange,
@@ -34,6 +33,7 @@ PipeEventQueue = Queue[PipeEnvelope]
 PipeNotificationListener = tuple[PipeEventQueue, set[str] | None]
 SearchKind = Literal["name", "content"]
 GetProjectRoot = Callable[[], Path]
+SearchRange: TypeAlias = tuple[int, int]
 
 _SEARCH_COUNTER = itertools.count(1)
 
@@ -45,7 +45,7 @@ def _file_items_list() -> list[SearchProviderFileItem]:
     return []
 
 
-def _content_matches() -> list[SearchProviderContentMatch]:
+def _content_matches() -> list[CachedContentMatch]:
     return []
 
 
@@ -57,15 +57,26 @@ def _content_order_list() -> list[str]:
     return []
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
+class CachedContentMatch:
+    line: int
+    column: int
+    text: str
+    snippet: str
+    match_text: str
+    line_ranges: tuple[SearchRange, ...] = ()
+    snippet_ranges: tuple[SearchRange, ...] = ()
+
+
+@dataclass(slots=True)
 class CachedContentFile:
     path: str
     relative_path: str
-    matches: list[SearchProviderContentMatch] = field(default_factory=_content_matches)
+    matches: list[CachedContentMatch] = field(default_factory=_content_matches)
     complete_match_count: int | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class SearchSession:
     search_id: str
     job_id: str
@@ -214,7 +225,7 @@ class ExplorerSearchSessions:
                 "file": {
                     "path": file_result.path,
                     "relativePath": file_result.relative_path,
-                    "matches": [_copy_object(match) for match in matches],
+                    "matches": [_provider_match_payload(match) for match in matches],
                     "fileMatchCount": len(file_result.matches),
                     "matchesReturned": len(matches),
                     "fileTruncated": file_truncated,
@@ -510,7 +521,7 @@ class ExplorerSearchSessions:
             "projectGeneration": session.project_generation,
         }
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ContentWindow:
     results: list[JsonObject]
     match_count: int
@@ -549,7 +560,7 @@ def _content_window(
                 {
                     "path": cached.path,
                     "rel": cached.relative_path,
-                    "matches": [dict(match) for match in file_matches],
+                    "matches": file_matches,
                     "fileMatchCount": len(cached.matches),
                     "matchesReturned": len(file_matches),
                     "fileTruncated": file_truncated,
@@ -562,15 +573,15 @@ def _content_window(
     return ContentWindow(results=results, match_count=emitted_matches)
 
 
-def _project_match(match: SearchProviderContentMatch) -> SearchContentMatch:
+def _project_match(match: CachedContentMatch) -> SearchContentMatch:
     return {
-        "line": match["lineNumber"],
-        "column": max(0, match["columnNumber"] - 1),
-        "text": match["lineText"],
-        "snippet": match["snippet"],
-        "matchText": match["matchText"],
-        "lineRanges": _copy_text_ranges(match["lineRanges"]),
-        "snippetRanges": _copy_text_ranges(match["snippetRanges"]),
+        "line": match.line,
+        "column": match.column,
+        "text": match.text,
+        "snippet": match.snippet,
+        "matchText": match.match_text,
+        "lineRanges": _range_objects(match.line_ranges),
+        "snippetRanges": _range_objects(match.snippet_ranges),
     }
 
 
@@ -638,7 +649,7 @@ def _content_file(value: object) -> CachedContentFile | None:
     if not path or not relative_path:
         return None
     matches_raw = raw.get("matches")
-    matches: list[SearchProviderContentMatch] = []
+    matches: list[CachedContentMatch] = []
     if isinstance(matches_raw, list):
         for match_obj in cast(list[object], matches_raw):
             match = _content_match(match_obj)
@@ -652,42 +663,51 @@ def _content_file(value: object) -> CachedContentFile | None:
     )
 
 
-def _content_match(value: object) -> SearchProviderContentMatch | None:
+def _content_match(value: object) -> CachedContentMatch | None:
     raw = _object(value)
     line_number = _optional_int(raw.get("lineNumber"))
     column_number = _optional_int(raw.get("columnNumber"))
     if line_number is None or column_number is None:
         return None
+    return CachedContentMatch(
+        line=line_number,
+        column=max(0, column_number - 1),
+        text=_string(raw.get("lineText")),
+        snippet=_string(raw.get("snippet")),
+        match_text=_string(raw.get("matchText")),
+        line_ranges=_range_tuples(raw.get("lineRanges")),
+        snippet_ranges=_range_tuples(raw.get("snippetRanges")),
+    )
+
+
+def _provider_match_payload(match: CachedContentMatch) -> JsonObject:
     return {
-        "lineNumber": line_number,
-        "columnNumber": column_number,
-        "lineText": _string(raw.get("lineText")),
-        "snippet": _string(raw.get("snippet")),
-        "matchText": _string(raw.get("matchText")),
-        "lineRanges": _text_ranges(raw.get("lineRanges")),
-        "snippetRanges": _text_ranges(raw.get("snippetRanges")),
+        "lineNumber": match.line,
+        "columnNumber": match.column + 1,
+        "lineText": match.text,
+        "snippet": match.snippet,
+        "matchText": match.match_text,
+        "lineRanges": _range_objects(match.line_ranges),
+        "snippetRanges": _range_objects(match.snippet_ranges),
     }
 
 
-def _text_ranges(value: object) -> list[SearchTextRange]:
+def _range_tuples(value: object) -> tuple[SearchRange, ...]:
     if not isinstance(value, list):
-        return []
-    ranges: list[SearchTextRange] = []
+        return ()
+    ranges: list[SearchRange] = []
     for item in cast(list[object], value):
         raw = _object(item)
         start = _optional_int(raw.get("start"))
         end = _optional_int(raw.get("end"))
         if start is None or end is None or start < 0 or end <= start:
             continue
-        ranges.append({"start": start, "end": end})
-    return ranges
+        ranges.append((start, end))
+    return tuple(ranges)
 
 
-def _copy_text_ranges(ranges: list[SearchTextRange]) -> list[SearchTextRange]:
-    copied: list[SearchTextRange] = []
-    for range_ in ranges:
-        copied.append({"start": range_["start"], "end": range_["end"]})
-    return copied
+def _range_objects(ranges: tuple[SearchRange, ...]) -> list[SearchTextRange]:
+    return [{"start": start, "end": end} for start, end in ranges]
 
 
 def _file_items(values: list[object]) -> list[SearchProviderFileItem]:
