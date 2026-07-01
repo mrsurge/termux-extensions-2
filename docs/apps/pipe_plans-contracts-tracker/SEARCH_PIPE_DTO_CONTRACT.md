@@ -71,7 +71,7 @@ These use the same item/match DTOs, but split delivery into routed notifications
 | `search.content.start` | Start long-running content search, return `SearchJobStarted`                                    |
 | `search.job.cancel`    | Cancel by `jobId` / `opId`; used by overlay close, project switch, or stale generation teardown |
 | `search.job.progress`  | Routed progress notification                                                                    |
-| `search.job.result`    | Routed result batch notification using `SearchFilesResult` / `SearchContentResult` item shapes  |
+| `search.job.result`    | Routed result notification using `SearchFilesResult` / `SearchContentResult` item shapes        |
 | `search.job.done`      | Routed terminal success notification with final counts                                          |
 | `search.job.error`     | Routed terminal failure notification                                                            |
 
@@ -98,6 +98,17 @@ Materialization ownership:
 - The Explorer frontend asks the Python Explorer backend for more results on the Explorer RPC lane.
 - The Python Explorer backend slices the accumulated `searchId` cache and returns the requested window.
 - If the Python cache is missing, stale, cancelled, or project-generation mismatched, the backend must fail explicitly instead of silently rerunning the search or falling back to a local Python producer.
+
+Python cache optimization direction:
+
+- Phase 1 compacts the Python-owned search cache without changing frontend DTOs or Rust pipe DTOs.
+- `JsonObject` / plain dictionaries should remain acceptable at RPC and pipe boundaries, but the in-memory content cache should stop storing every match as repeated dictionaries.
+- The internal cache uses compact typed structures such as slots dataclasses or tuple-like records for files, matches, and ranges.
+- Store ranges as compact `(start, end)` values internally and project them back to `{ start, end }` only when emitting frontend DTOs.
+- Store frontend-normalized values, such as zero-based display columns, once during cache insertion when that preserves current frontend behavior.
+- Keep `lineText`, `snippet`, `matchText`, and match ranges in the cache for now. Do not trade away future cache-derived search options just to save memory prematurely.
+- Phase 2 is search-specific boundary/codec cleanup: convert pipe search DTO payloads into strict Python search structures at the search layer, then construct minimal outgoing socket payloads instead of copying full pipe params/results. The Python Explorer session layer now parses routed pipe events into compact event context objects and emits minimal `search.job.*` payloads from session state.
+- Cache-derived narrowing is a later optimization. It should only use complete, same-root, same-project-generation caches and must prove the new request is a subset before avoiding a new Rust search.
 
 Cancellation boundaries:
 
@@ -328,6 +339,18 @@ Rules:
 - The Rust provider must not use this fragment to stop searching unless the request also contains an explicit provider cap such as `maxFiles`, `maxMatchesPerFile`, or `maxMatchesTotal`.
 - If the result exceeds this window, the frontend should receive `truncated: true` plus per-file/global materialization metadata from the Python adapter.
 
+## Hit Delivery And Progress Coalescing
+
+Progressive content search uses separate delivery rules for hits and non-hit progress.
+
+Rules:
+
+- Hit-bearing `SearchContentResult` frames are atomic. One matched file is delivered in one routed `search.job.result` notification.
+- Hit-bearing frames must not wait for a batch threshold. If Rust has a matched file, Python should receive it immediately so it can cache/project it.
+- No-hit/progress/count-only notifications may be coalesced. The current Rust provider emits progress at a count-based cadence of 16 scanned files and relies on terminal `search.job.done` for authoritative final counts.
+- Progress coalescing is not truncation and must not drop hit-bearing `search.job.result` frames.
+- Consumers must treat each `SearchContentResult` inside `SearchJobResult.result` as an atomic hit file. `fileCount` should normally be `1`; `matchCount` is the match count for that one file, while `totalFileCount` / `totalMatchCount` are running totals when present.
+
 ## `SearchContentStartRequest`
 
 Progressive request DTO for `search.content.start`. It uses the same search fields as `SearchContentRequest` and adds routed job/session metadata.
@@ -412,7 +435,7 @@ Routed notification for `search.job.progress`.
 
 ## `SearchJobResult`
 
-Routed notification for `search.job.result`. It carries a result batch using the same item/match shapes as `SearchFilesResult` or `SearchContentResult`.
+Routed notification for `search.job.result`. It carries result data using the same item/match shapes as `SearchFilesResult` or `SearchContentResult`.
 
 ```json
 {
@@ -431,14 +454,32 @@ Routed notification for `search.job.result`. It carries a result batch using the
     "root": "/repo/root",
     "projectGeneration": 42,
     "query": "function openFile",
-    "files": [],
-    "fileCount": 0,
-    "matchCount": 0,
+    "files": [
+      {
+        "path": "/repo/root/src/open.ts",
+        "relativePath": "src/open.ts",
+        "matches": [
+          {
+            "lineNumber": 12,
+            "columnNumber": 8,
+            "lineText": "export function openFile(path: string) {",
+            "snippet": "export function openFile(path: string) {",
+            "matchText": "function openFile",
+            "lineRanges": [{ "start": 7, "end": 24 }],
+            "snippetRanges": [{ "start": 7, "end": 24 }]
+          }
+        ]
+      }
+    ],
+    "fileCount": 1,
+    "matchCount": 1,
     "truncated": false,
     "searchId": "search-abc123",
     "jobId": "search-abc123",
     "complete": false,
-    "nextGlobalCursor": "global:50"
+    "totalFileCount": 7,
+    "totalMatchCount": 12,
+    "filesScanned": 131
   }
 }
 ```
@@ -447,7 +488,8 @@ Rules:
 
 - `sequence` is monotonically increasing per `jobId`.
 - Notifications must be routed to the initiating pipe caller lane only.
-- Python may cache these batches by `searchId` and project a frontend-sized visible window without asking Rust to recompute.
+- Python may cache these atomic hit files by `searchId` and project a frontend-sized visible window without asking Rust to recompute.
+- For content search, `result.fileCount` should normally be `1` because hit-bearing files are delivered atomically. `result.matchCount` is the match count for that file.
 
 ## Python Backend Materialization Methods
 

@@ -991,6 +991,8 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
     requestExplorer: (method, payload, timeoutMs) =>
       requestExplorerRpc(method, payload, timeoutMs),
     getProjectPath: () => explorerRuntimeState.getProjectPath(),
+    runActualSearchCase: (case_) =>
+      explorerSearchOverlayController.runActualSearchBenchmarkCase(case_),
   });
   notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
 }

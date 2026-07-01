@@ -246,6 +246,7 @@ export function createExplorerSearchController(
     }
 
     const payload = preparedPayload || buildSearchPayload(query);
+    setSearchIdentityFromPayload(payload);
     deps.setLastKnownProjectPath(deps.getProjectPath());
     deps.setSearchLoading(true);
     deps.setSearchError(null);

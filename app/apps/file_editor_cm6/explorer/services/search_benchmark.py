@@ -104,7 +104,7 @@ async def run_search_benchmark(
         case_results.extend(_json_object_list(rust_result.get("cases")))
 
     for lane in params["lanes"]:
-        if lane not in {"pythonBridge", "fullStack"}:
+        if lane != "pythonBridge":
             continue
         for case in params["cases"]:
             case_results.append(
@@ -145,7 +145,26 @@ async def record_search_benchmark_frontend_result(payload: object) -> JsonObject
     if not isinstance(frontend_results, list):
         frontend_results = []
         suite["frontendResults"] = frontend_results
-    cast(list[object], frontend_results).append(params["frontend"])
+    frontend = _object(params["frontend"])
+    cast(list[object], frontend_results).append(frontend)
+    frontend_cases = frontend.get("cases")
+    if isinstance(frontend_cases, list):
+        cases = suite.get("cases")
+        if not isinstance(cases, list):
+            cases = []
+            suite["cases"] = cases
+        existing = [
+            case
+            for case in cast(list[object], cases)
+            if _string(_object(case).get("lane")) != "fullStack"
+        ]
+        existing.extend(
+            _decorate_case_result(_object(case))
+            for case in cast(list[object], frontend_cases)
+        )
+        suite["cases"] = existing
+        suite["summary"] = _build_suite_summary(_json_object_list(existing))
+        suite["status"] = _suite_status(_json_object_list(existing))
     suite["frontendFinishedAtMs"] = _epoch_ms()
     _write_json(output_path, suite)
     return {
@@ -574,6 +593,23 @@ def _decorate_case_result(result: JsonObject) -> JsonObject:
         result["rates"] = rates
         return result
 
+    if lane == "fullStack":
+        frontend = _object(result.get("frontend"))
+        authoritative = _object(frontend.get("authoritative"))
+        rates = _rates_for_counts(
+            duration_ms=_int(frontend.get("totalRunMs")) or 0,
+            files_scanned=_int(authoritative.get("filesScanned")) or 0,
+            files_matched=_int(authoritative.get("filesMatched")) or 0,
+            matches_found=_int(authoritative.get("matchesFound")) or 0,
+            result_batches=_int(authoritative.get("resultBatches"))
+            or _int(frontend.get("resultFrames"))
+            or 0,
+        )
+        frontend["rates"] = rates
+        result["frontend"] = frontend
+        result["rates"] = rates
+        return result
+
     python = _object(result.get("python"))
     authoritative = _object(python.get("authoritative"))
     rates = _rates_for_counts(
@@ -650,6 +686,18 @@ def _case_counts(result: JsonObject) -> tuple[int, int, int, int, int]:
             _int(rust.get("filesMatched")) or 0,
             _int(rust.get("matchesFound")) or 0,
             _int(rust.get("resultBatches")) or 0,
+        )
+    if lane == "fullStack":
+        frontend = _object(result.get("frontend"))
+        authoritative = _object(frontend.get("authoritative"))
+        return (
+            _int(frontend.get("totalRunMs")) or 0,
+            _int(authoritative.get("filesScanned")) or 0,
+            _int(authoritative.get("filesMatched")) or 0,
+            _int(authoritative.get("matchesFound")) or 0,
+            _int(authoritative.get("resultBatches"))
+            or _int(frontend.get("resultFrames"))
+            or 0,
         )
 
     python = _object(result.get("python"))

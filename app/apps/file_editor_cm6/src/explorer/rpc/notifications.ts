@@ -4,7 +4,11 @@ import {
   type ExplorerRpcMethod,
   type ExplorerRpcNotificationMethod,
 } from "./contract.ts";
-import { handleSearchBenchmarkNotification } from "../search/benchmark.ts";
+import {
+  handleSearchBenchmarkNotification,
+  hasActiveActualSearchBenchmark,
+  observeActualSearchNotification,
+} from "../search/benchmark.ts";
 import type { JsonObject } from "../../rpc/transport.ts";
 import type { ExplorerRuntimeState } from "../state/runtime-state.ts";
 import type { ExplorerTreeDecorationsController } from "../tree/decorations.ts";
@@ -587,19 +591,55 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchJobProgress: {
+        const benchmarkActive = hasActiveActualSearchBenchmark();
+        const startedAt = benchmarkActive ? performance.now() : 0;
         deps.searchOverlayController.handleSearchJobProgress(payload);
+        if (benchmarkActive) {
+          observeActualSearchNotification(
+            "search.job.progress",
+            payload,
+            performance.now() - startedAt,
+          );
+        }
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchJobResult: {
+        const benchmarkActive = hasActiveActualSearchBenchmark();
+        const startedAt = benchmarkActive ? performance.now() : 0;
         deps.searchOverlayController.handleSearchJobResult(payload);
+        if (benchmarkActive) {
+          observeActualSearchNotification(
+            "search.job.result",
+            payload,
+            performance.now() - startedAt,
+          );
+        }
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchJobDone: {
+        const benchmarkActive = hasActiveActualSearchBenchmark();
+        const startedAt = benchmarkActive ? performance.now() : 0;
         deps.searchOverlayController.handleSearchJobDone(payload);
+        if (benchmarkActive) {
+          observeActualSearchNotification(
+            "search.job.done",
+            payload,
+            performance.now() - startedAt,
+          );
+        }
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchJobError: {
+        const benchmarkActive = hasActiveActualSearchBenchmark();
+        const startedAt = benchmarkActive ? performance.now() : 0;
         deps.searchOverlayController.handleSearchJobError(payload);
+        if (benchmarkActive) {
+          observeActualSearchNotification(
+            "search.job.error",
+            payload,
+            performance.now() - startedAt,
+          );
+        }
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchBenchmarkProgress:

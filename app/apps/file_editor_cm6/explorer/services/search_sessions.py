@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,7 +21,6 @@ from ..contracts.search_review import (
     SearchContentMatch,
     SearchMoreInFileParams,
     SearchMoreParams,
-    SearchProviderFileItem,
     SearchRunParams,
     SearchTextRange,
 )
@@ -41,7 +40,7 @@ INITIAL_MATCHES_PER_FILE = 10
 INITIAL_MATCH_TOTAL = 50
 
 
-def _file_items_list() -> list[SearchProviderFileItem]:
+def _file_items_list() -> list[CachedNameItem]:
     return []
 
 
@@ -55,6 +54,14 @@ def _content_file_map() -> dict[str, CachedContentFile]:
 
 def _content_order_list() -> list[str]:
     return []
+
+
+@dataclass(frozen=True, slots=True)
+class CachedNameItem:
+    path: str
+    relative_path: str
+    kind: Literal["file", "dir"]
+    name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,10 +95,29 @@ class SearchSession:
     complete: bool = False
     cancelled: bool = False
     status: str = "running"
-    name_items: list[SearchProviderFileItem] = field(default_factory=_file_items_list)
+    name_items: list[CachedNameItem] = field(default_factory=_file_items_list)
     content_files: dict[str, CachedContentFile] = field(default_factory=_content_file_map)
     content_order: list[str] = field(default_factory=_content_order_list)
     initial_matches_emitted: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class PipeSearchEvent:
+    method: str
+    search_id: str
+    job_id: str
+    root: str
+    project_generation: int | None
+    correlation_id: str
+    sequence: int | None
+    status: str
+    message: str
+    files_scanned: int | None
+    files_matched: int | None
+    matches_found: int | None
+    cancelled: bool
+    code: str
+    raw_result: object
 
 
 class ExplorerSearchSessions:
@@ -171,13 +197,11 @@ class ExplorerSearchSessions:
         self._sessions[search_id] = session
         self._job_to_search[job_id] = search_id
         self._active_search_id = search_id
-        payload = _copy_object(started)
-        payload["searchId"] = search_id
-        payload["jobId"] = job_id
-        payload["projectGeneration"] = project_generation
-        payload["correlationId"] = correlation_id
-        payload["root"] = str(root)
-        await self._emit_personal("explorer.search.started", payload, reply_to)
+        await self._emit_personal(
+            "explorer.search.started",
+            _started_payload(session, started),
+            reply_to,
+        )
 
     async def more(self, params: SearchMoreParams, reply_to: str | None) -> None:
         session = self._session_for_request(params["searchId"], params["projectGeneration"])
@@ -328,37 +352,31 @@ class ExplorerSearchSessions:
                 logger.exception("search pipe event handling failed")
 
     async def _handle_pipe_event(self, envelope: PipeEnvelope) -> None:
-        params = _object(envelope.params)
-        search_id = _string(params.get("searchId"))
-        job_id = _string(params.get("jobId") or params.get("opId"))
+        event = _pipe_search_event(envelope)
+        search_id = event.search_id
+        job_id = event.job_id
         if not search_id and job_id:
             search_id = self._job_to_search.get(job_id, "")
         session = self._sessions.get(search_id)
         if session is None or session.cancelled:
             return
-        if not _matches_session(session, params):
+        if not _matches_session(session, event):
             return
 
-        method = str(envelope.method or "")
-        if method == "search.job.progress":
+        if event.method == "search.job.progress":
             await self._emit_personal(
                 "search.job.progress",
-                _job_payload(session, params, dto="SearchJobProgress"),
+                _progress_payload(session, event),
             )
             return
-        if method == "search.job.result":
-            self._apply_result(session, _object(params.get("result")))
+        if event.method == "search.job.result":
+            self._apply_result(session, event.raw_result)
             if session.kind == "content":
                 result = self._next_content_result_payload(session)
                 if result is not None:
                     await self._emit_personal(
                         "search.job.result",
-                        _job_payload(
-                            session,
-                            params,
-                            dto="SearchJobResult",
-                            result=result,
-                        ),
+                        _result_payload(session, event, result),
                     )
             else:
                 await self._emit_personal(
@@ -366,7 +384,7 @@ class ExplorerSearchSessions:
                     self._visible_payload(session),
                 )
             return
-        if method == "search.job.done":
+        if event.method == "search.job.done":
             session.complete = True
             session.status = "done"
             if session.kind == "content":
@@ -374,12 +392,7 @@ class ExplorerSearchSessions:
                 if result is not None:
                     await self._emit_personal(
                         "search.job.result",
-                        _job_payload(
-                            session,
-                            params,
-                            dto="SearchJobResult",
-                            result=result,
-                        ),
+                        _result_payload(session, event, result),
                     )
             else:
                 await self._emit_personal(
@@ -388,10 +401,9 @@ class ExplorerSearchSessions:
                 )
             await self._emit_personal(
                 "search.job.done",
-                _job_payload(
+                _done_payload(
                     session,
-                    params,
-                    dto="SearchJobDone",
+                    event,
                     fileCount=len(session.content_order)
                     if session.kind == "content"
                     else len(session.name_items),
@@ -401,23 +413,24 @@ class ExplorerSearchSessions:
                 ),
             )
             return
-        if method == "search.job.error":
+        if event.method == "search.job.error":
             session.status = "error"
             await self._emit_personal(
                 "search.job.error",
-                _job_payload(session, params, dto="SearchJobError"),
+                _error_payload(session, event),
             )
 
-    def _apply_result(self, session: SearchSession, result: JsonObject) -> None:
-        dto = _string(result.get("dto"))
+    def _apply_result(self, session: SearchSession, result: object) -> None:
+        raw = _mapping(result)
+        dto = _string(raw.get("dto"))
         if session.kind == "name" and dto == "SearchFilesResult":
-            items = result.get("items")
+            items = raw.get("items")
             if isinstance(items, list):
                 session.name_items.extend(_file_items(cast(list[object], items)))
-            session.complete = bool(result.get("complete", session.complete))
+            session.complete = _bool(raw.get("complete"), default=session.complete)
             return
         if session.kind == "content" and dto == "SearchContentResult":
-            files = result.get("files")
+            files = raw.get("files")
             if isinstance(files, list):
                 for file_obj in cast(list[object], files):
                     file_result = _content_file(file_obj)
@@ -430,7 +443,7 @@ class ExplorerSearchSessions:
                     else:
                         cached.matches.extend(file_result.matches)
                         cached.complete_match_count = file_result.complete_match_count
-            session.complete = bool(result.get("complete", session.complete))
+            session.complete = _bool(raw.get("complete"), default=session.complete)
 
     def _visible_payload(self, session: SearchSession) -> JsonObject:
         if session.kind == "name":
@@ -441,10 +454,10 @@ class ExplorerSearchSessions:
                 "jobId": session.job_id,
                 "results": [
                     {
-                        "path": item["path"],
-                        "rel": item["relativePath"],
-                        "type": item["kind"],
-                        "name": item["name"],
+                        "path": item.path,
+                        "rel": item.relative_path,
+                        "type": item.kind,
+                        "name": item.name,
                     }
                     for item in session.name_items
                 ],
@@ -620,30 +633,120 @@ def _ensure_project_generation(root: Path) -> int:
     return next_project_generation(root)
 
 
-def _job_payload(session: SearchSession, params: JsonObject, *, dto: str, **extra: object) -> JsonObject:
-    payload = _copy_object(params)
-    payload["dto"] = dto
-    payload["version"] = 1
-    payload["searchId"] = session.search_id
-    payload["jobId"] = session.job_id
-    payload["root"] = str(session.root)
-    payload["kind"] = session.kind
-    payload["projectGeneration"] = session.project_generation
-    payload["correlationId"] = session.correlation_id
-    payload.update(extra)
+def _pipe_search_event(envelope: PipeEnvelope) -> PipeSearchEvent:
+    raw = _mapping(envelope.params)
+    return PipeSearchEvent(
+        method=str(envelope.method or ""),
+        search_id=_string(raw.get("searchId")),
+        job_id=_string(raw.get("jobId") or raw.get("opId")),
+        root=_string(raw.get("root")),
+        project_generation=_optional_int(raw.get("projectGeneration")),
+        correlation_id=_string(raw.get("correlationId")),
+        sequence=_optional_int(raw.get("sequence")),
+        status=_string(raw.get("status")),
+        message=_string(raw.get("message")),
+        files_scanned=_optional_int(raw.get("filesScanned")),
+        files_matched=_optional_int(raw.get("filesMatched")),
+        matches_found=_optional_int(raw.get("matchesFound")),
+        cancelled=raw.get("cancelled") is True,
+        code=_string(raw.get("code")),
+        raw_result=raw.get("result"),
+    )
+
+
+def _started_payload(session: SearchSession, started: object) -> JsonObject:
+    raw = _mapping(started)
+    payload = _base_job_payload(session, "SearchJobStarted")
+    payload["status"] = _string(raw.get("status")) or "running"
+    _put_optional_string(payload, "message", _string(raw.get("message")))
+    _put_optional_int(payload, "sequence", _optional_int(raw.get("sequence")))
     return payload
 
 
-def _matches_session(session: SearchSession, params: JsonObject) -> bool:
-    root = _string(params.get("root"))
+def _progress_payload(session: SearchSession, event: PipeSearchEvent) -> JsonObject:
+    payload = _base_job_payload(session, "SearchJobProgress")
+    payload["status"] = event.status or "running"
+    _put_optional_string(payload, "message", event.message)
+    _put_optional_int(payload, "sequence", event.sequence)
+    _put_optional_int(payload, "filesScanned", event.files_scanned)
+    _put_optional_int(payload, "filesMatched", event.files_matched)
+    _put_optional_int(payload, "matchesFound", event.matches_found)
+    return payload
+
+
+def _result_payload(
+    session: SearchSession,
+    event: PipeSearchEvent,
+    result: JsonObject,
+) -> JsonObject:
+    payload = _base_job_payload(session, "SearchJobResult")
+    _put_optional_int(payload, "sequence", event.sequence)
+    payload["result"] = result
+    return payload
+
+
+def _done_payload(
+    session: SearchSession,
+    event: PipeSearchEvent,
+    *,
+    fileCount: int,
+    matchCount: int,
+) -> JsonObject:
+    payload = _base_job_payload(session, "SearchJobDone")
+    payload["status"] = event.status or session.status
+    payload["fileCount"] = fileCount
+    payload["matchCount"] = matchCount
+    payload["cancelled"] = event.cancelled
+    _put_optional_string(payload, "message", event.message)
+    _put_optional_int(payload, "sequence", event.sequence)
+    _put_optional_int(payload, "filesScanned", event.files_scanned)
+    _put_optional_int(payload, "filesMatched", event.files_matched)
+    _put_optional_int(payload, "matchesFound", event.matches_found)
+    return payload
+
+
+def _error_payload(session: SearchSession, event: PipeSearchEvent) -> JsonObject:
+    payload = _base_job_payload(session, "SearchJobError")
+    payload["status"] = event.status or "error"
+    _put_optional_string(payload, "code", event.code)
+    _put_optional_string(payload, "message", event.message)
+    _put_optional_int(payload, "sequence", event.sequence)
+    return payload
+
+
+def _base_job_payload(session: SearchSession, dto: str) -> JsonObject:
+    return {
+        "dto": dto,
+        "version": 1,
+        "searchId": session.search_id,
+        "jobId": session.job_id,
+        "root": str(session.root),
+        "kind": session.kind,
+        "projectGeneration": session.project_generation,
+        "correlationId": session.correlation_id,
+    }
+
+
+def _put_optional_int(payload: JsonObject, key: str, value: int | None) -> None:
+    if value is not None:
+        payload[key] = value
+
+
+def _put_optional_string(payload: JsonObject, key: str, value: str) -> None:
+    if value:
+        payload[key] = value
+
+
+def _matches_session(session: SearchSession, event: PipeSearchEvent) -> bool:
+    root = event.root
     if root and Path(root).expanduser().resolve() != session.root:
         return False
-    generation = _optional_int(params.get("projectGeneration"))
+    generation = event.project_generation
     return generation is None or generation == session.project_generation
 
 
 def _content_file(value: object) -> CachedContentFile | None:
-    raw = _object(value)
+    raw = _mapping(value)
     path = _string(raw.get("path"))
     relative_path = _string(raw.get("relativePath"))
     if not path or not relative_path:
@@ -664,7 +767,7 @@ def _content_file(value: object) -> CachedContentFile | None:
 
 
 def _content_match(value: object) -> CachedContentMatch | None:
-    raw = _object(value)
+    raw = _mapping(value)
     line_number = _optional_int(raw.get("lineNumber"))
     column_number = _optional_int(raw.get("columnNumber"))
     if line_number is None or column_number is None:
@@ -697,7 +800,7 @@ def _range_tuples(value: object) -> tuple[SearchRange, ...]:
         return ()
     ranges: list[SearchRange] = []
     for item in cast(list[object], value):
-        raw = _object(item)
+        raw = _mapping(item)
         start = _optional_int(raw.get("start"))
         end = _optional_int(raw.get("end"))
         if start is None or end is None or start < 0 or end <= start:
@@ -710,22 +813,28 @@ def _range_objects(ranges: tuple[SearchRange, ...]) -> list[SearchTextRange]:
     return [{"start": start, "end": end} for start, end in ranges]
 
 
-def _file_items(values: list[object]) -> list[SearchProviderFileItem]:
-    items: list[SearchProviderFileItem] = []
+def _file_items(values: list[object]) -> list[CachedNameItem]:
+    items: list[CachedNameItem] = []
     for item_obj in values:
-        raw = _object(item_obj)
+        raw = _mapping(item_obj)
         kind = _string(raw.get("kind"))
         if kind not in ("file", "dir"):
             continue
         items.append(
-            {
-                "path": _string(raw.get("path")),
-                "relativePath": _string(raw.get("relativePath")),
-                "kind": kind,
-                "name": _string(raw.get("name")),
-            }
+            CachedNameItem(
+                path=_string(raw.get("path")),
+                relative_path=_string(raw.get("relativePath")),
+                kind=kind,
+                name=_string(raw.get("name")),
+            )
         )
     return items
+
+
+def _mapping(value: object) -> Mapping[object, object]:
+    if not isinstance(value, dict):
+        return {}
+    return cast(Mapping[object, object], value)
 
 
 def _object(value: object) -> JsonObject:
@@ -755,6 +864,12 @@ def _optional_int(value: object) -> int | None:
     if isinstance(value, int):
         return value
     return None
+
+
+def _bool(value: object, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    return default
 
 
 def _correlation_id(reply_to: str | None) -> str:

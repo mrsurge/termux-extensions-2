@@ -8,6 +8,7 @@ import {
 } from "./content-query-widget.ts";
 import { createExplorerReviewResultsRenderer } from "./review-results-renderer.ts";
 import { createExplorerSearchController } from "./controller.ts";
+import type { ActualSearchBenchmarkCase } from "./benchmark.ts";
 import { renderSearchOverlayBody } from "./overlay-body-renderer.ts";
 import { renderContentResults, renderNameResults } from "./results-renderer.ts";
 import type {
@@ -610,6 +611,36 @@ export function createExplorerSearchOverlayController(
     searchController.handleSearchJobError(payload);
   }
 
+  async function runActualSearchBenchmarkCase(
+    case_: ActualSearchBenchmarkCase,
+  ): Promise<void> {
+    searchOverlayVisible = true;
+    searchMode = "content";
+    searchQuery = case_.query;
+    contentSearchOptions = {
+      isRegex: case_.isRegex,
+      isCaseSensitive: case_.isCaseSensitive,
+      isWholeWords: case_.isWholeWords,
+      includePattern: case_.includePatterns.join(","),
+      excludePattern: case_.excludePatterns.join(","),
+      useIgnoreFiles: case_.useIgnoreFiles,
+    };
+    const root = deps.getProjectPath();
+    const payload: JsonObject = {
+      mode: "content",
+      query: case_.query,
+      root,
+      correlationId: case_.correlationId,
+      isRegex: case_.isRegex,
+      isCaseSensitive: case_.isCaseSensitive,
+      isWholeWords: case_.isWholeWords,
+      includePattern: contentSearchOptions.includePattern,
+      excludePattern: contentSearchOptions.excludePattern,
+      useIgnoreFiles: case_.useIgnoreFiles,
+    };
+    await searchController.performSearch(case_.query, payload);
+  }
+
   function handleReviewEntriesUpdated(payload: unknown): void {
     const typedPayload = getReviewEntriesPayload(payload);
     reviewEntries = Array.isArray(typedPayload?.entries)
@@ -653,5 +684,6 @@ export function createExplorerSearchOverlayController(
     isVisible: () => searchOverlayVisible,
     getSearchMode: () => searchMode,
     getLastKnownProjectPath: () => lastKnownProjectPath,
+    runActualSearchBenchmarkCase,
   };
 }
