@@ -96,10 +96,15 @@ interface PendingActualSearchCase {
   errorFrames: number;
   receivedFiles: number;
   receivedMatches: number;
+  visibleWindowCap: number;
+  visibleWindowFilledMs: number | null;
+  visibleWindowMatchesAtFill: number;
+  visibleWindowFilesAtFill: number;
   filesScanned: number;
   filesMatched: number;
   matchesFound: number;
   firstResultReceivedMs: number | null;
+  lastResultReceivedMs: number | null;
   doneReceivedMs: number | null;
   controllerProcessingMs: number;
   renderFrames: number;
@@ -143,6 +148,7 @@ declare global {
 
 const pendingBenchmarks = new Map<string, PendingBenchmark>();
 const pendingActualSearchCases = new Map<string, PendingActualSearchCase>();
+const VISIBLE_WINDOW_MATCH_CAP = 50;
 let benchmarkDeps: SearchBenchmarkDeps | null = null;
 
 export function installExplorerSearchBenchmarkApi(
@@ -213,16 +219,32 @@ export function handleSearchBenchmarkNotification(
   }
 }
 
-export function hasActiveActualSearchBenchmark(): boolean {
-  return pendingActualSearchCases.size > 0;
+type ActualSearchNotificationMethod =
+  | "search.job.progress"
+  | "search.job.result"
+  | "search.job.done"
+  | "search.job.error";
+
+interface ActualSearchBenchmarkObserver {
+  observe(
+    method: ActualSearchNotificationMethod,
+    payload: JsonObject,
+    controllerProcessingMs: number,
+  ): void;
 }
 
-export function observeActualSearchNotification(
-  method:
-    | "search.job.progress"
-    | "search.job.result"
-    | "search.job.done"
-    | "search.job.error",
+const actualSearchBenchmarkObserver: ActualSearchBenchmarkObserver = {
+  observe: observeActualSearchNotification,
+};
+
+export function getActualSearchBenchmarkObserver(): ActualSearchBenchmarkObserver | null {
+  return pendingActualSearchCases.size > 0
+    ? actualSearchBenchmarkObserver
+    : null;
+}
+
+function observeActualSearchNotification(
+  method: ActualSearchNotificationMethod,
   payload: JsonObject,
   controllerProcessingMs: number,
 ): void {
@@ -247,18 +269,22 @@ export function observeActualSearchNotification(
 
   if (method === "search.job.result") {
     pending.resultFrames += 1;
-    if (pending.firstResultReceivedMs === null) {
-      pending.firstResultReceivedMs = elapsedMs(pending.startedAt);
-    }
+    const receivedAtMs = elapsedMs(pending.startedAt);
+    pending.lastResultReceivedMs = receivedAtMs;
+    if (pending.firstResultReceivedMs === null)
+      pending.firstResultReceivedMs = receivedAtMs;
     const result = objectValue(payload.result);
     pending.receivedFiles += countVisibleResultFiles(result);
     pending.receivedMatches += countVisibleResultMatches(result);
+    maybeMarkVisibleWindowFilled(pending, receivedAtMs);
     return;
   }
 
   if (method === "search.job.done") {
     pending.doneFrames += 1;
     pending.doneReceivedMs = elapsedMs(pending.startedAt);
+    pending.filesScanned =
+      numberValue(payload.filesScanned) ?? pending.filesScanned;
     pending.filesMatched =
       numberValue(payload.fileCount) ??
       numberValue(payload.filesMatched) ??
@@ -268,6 +294,7 @@ export function observeActualSearchNotification(
       numberValue(payload.matchesFound) ??
       pending.matchesFound;
     pending.status = payload.cancelled === true ? "cancelled" : "ok";
+    maybeMarkSparseVisibleWindowFilled(pending);
     finishActualSearchCase(pending);
     return;
   }
@@ -442,10 +469,15 @@ async function runActualFullStackCase(
       errorFrames: 0,
       receivedFiles: 0,
       receivedMatches: 0,
+      visibleWindowCap: VISIBLE_WINDOW_MATCH_CAP,
+      visibleWindowFilledMs: null,
+      visibleWindowMatchesAtFill: 0,
+      visibleWindowFilesAtFill: 0,
       filesScanned: 0,
       filesMatched: 0,
       matchesFound: 0,
       firstResultReceivedMs: null,
+      lastResultReceivedMs: null,
       doneReceivedMs: null,
       controllerProcessingMs: 0,
       renderFrames: 0,
@@ -650,6 +682,10 @@ function actualSearchCaseResult(pending: PendingActualSearchCase): JsonObject {
     matchesFound: pending.matchesFound,
     resultBatches: pending.resultFrames,
   };
+  const visibleWindow = buildVisibleWindowMetrics(pending);
+  const visibleWindowComplete = visibleWindow.complete === true;
+  const authoritativeSearchComplete =
+    pending.status === "ok" && pending.doneFrames > 0;
   return {
     dto: "SearchBenchmarkCaseResult",
     version: 1,
@@ -672,22 +708,34 @@ function actualSearchCaseResult(pending: PendingActualSearchCase): JsonObject {
         Math.round(pending.controllerProcessingMs * 100) / 100,
       renderFrames: pending.renderFrames,
       authoritative,
+      visibleWindow,
       completion: {
-        complete:
-          pending.status === "ok" &&
-          pending.filesMatched === pending.receivedFiles &&
-          pending.matchesFound === pending.receivedMatches,
+        complete: pending.status === "ok" && visibleWindowComplete,
+        visibleWindowComplete,
+        authoritativeSearchComplete,
         reason:
-          pending.status === "ok"
-            ? "complete"
-            : pending.error || pending.status,
-        missingFiles: Math.max(0, pending.filesMatched - pending.receivedFiles),
-        missingMatches: Math.max(
+          pending.status !== "ok"
+            ? pending.error || pending.status
+            : visibleWindowComplete
+              ? "visibleWindowComplete"
+              : "visibleWindowIncomplete",
+        missingVisibleMatches: Math.max(
+          0,
+          visibleWindowExpectedMatches(pending) - pending.receivedMatches,
+        ),
+        missingFullFiles: Math.max(
+          0,
+          pending.filesMatched - pending.receivedFiles,
+        ),
+        missingFullMatches: Math.max(
           0,
           pending.matchesFound - pending.receivedMatches,
         ),
-        extraFiles: Math.max(0, pending.receivedFiles - pending.filesMatched),
-        extraMatches: Math.max(
+        extraFullFiles: Math.max(
+          0,
+          pending.receivedFiles - pending.filesMatched,
+        ),
+        extraFullMatches: Math.max(
           0,
           pending.receivedMatches - pending.matchesFound,
         ),
@@ -699,6 +747,88 @@ function actualSearchCaseResult(pending: PendingActualSearchCase): JsonObject {
         files: pending.filesMatched,
         filesScanned: pending.filesScanned,
       }),
+    },
+  };
+}
+
+function maybeMarkVisibleWindowFilled(
+  pending: PendingActualSearchCase,
+  receivedAtMs: number,
+): void {
+  if (pending.visibleWindowFilledMs !== null) return;
+  if (pending.receivedMatches < pending.visibleWindowCap) return;
+  pending.visibleWindowFilledMs = receivedAtMs;
+  pending.visibleWindowMatchesAtFill = pending.visibleWindowCap;
+  pending.visibleWindowFilesAtFill = pending.receivedFiles;
+}
+
+function maybeMarkSparseVisibleWindowFilled(
+  pending: PendingActualSearchCase,
+): void {
+  if (pending.visibleWindowFilledMs !== null) return;
+  const expectedMatches = visibleWindowExpectedMatches(pending);
+  if (expectedMatches === 0) {
+    pending.visibleWindowFilledMs = pending.doneReceivedMs;
+    pending.visibleWindowMatchesAtFill = 0;
+    pending.visibleWindowFilesAtFill = 0;
+    return;
+  }
+  if (pending.receivedMatches < expectedMatches) return;
+  pending.visibleWindowFilledMs =
+    pending.lastResultReceivedMs ?? pending.doneReceivedMs;
+  pending.visibleWindowMatchesAtFill = expectedMatches;
+  pending.visibleWindowFilesAtFill = pending.receivedFiles;
+}
+
+function visibleWindowExpectedMatches(
+  pending: PendingActualSearchCase,
+): number {
+  if (pending.doneFrames > 0) {
+    return Math.min(
+      pending.visibleWindowCap,
+      Math.max(0, pending.matchesFound),
+    );
+  }
+  return Math.min(
+    pending.visibleWindowCap,
+    Math.max(0, pending.receivedMatches),
+  );
+}
+
+function buildVisibleWindowMetrics(
+  pending: PendingActualSearchCase,
+): JsonObject {
+  const expectedMatches = visibleWindowExpectedMatches(pending);
+  const deliveredMatches = Math.min(pending.receivedMatches, expectedMatches);
+  const filledMs = pending.visibleWindowFilledMs;
+  const firstResultReceivedMs = pending.firstResultReceivedMs;
+  const deliveryMs =
+    filledMs === null || firstResultReceivedMs === null
+      ? null
+      : Math.max(0, filledMs - firstResultReceivedMs);
+  const complete =
+    pending.status === "ok" &&
+    filledMs !== null &&
+    deliveredMatches >= expectedMatches;
+  return {
+    cap: pending.visibleWindowCap,
+    expectedMatches,
+    deliveredMatches,
+    receivedMatches: pending.receivedMatches,
+    matchesAtFill: pending.visibleWindowMatchesAtFill,
+    filesAtFill: pending.visibleWindowFilesAtFill,
+    firstResultReceivedMs,
+    lastResultReceivedMs: pending.lastResultReceivedMs,
+    filledMs,
+    deliveryMs,
+    complete,
+    rates: {
+      matchesPerSecond:
+        filledMs === null ? 0 : rate(expectedMatches, filledMs / 1000),
+      deliveryMatchesPerSecond:
+        deliveryMs === null
+          ? null
+          : nullableRate(expectedMatches, deliveryMs / 1000),
     },
   };
 }
@@ -780,6 +910,11 @@ function calculateRates(input: {
 function rate(count: number, seconds: number): number {
   if (seconds <= 0) return 0;
   return Math.round((count / seconds) * 100) / 100;
+}
+
+function nullableRate(count: number, seconds: number): number | null {
+  if (seconds <= 0) return count > 0 ? null : 0;
+  return rate(count, seconds);
 }
 
 function elapsedMs(startedAt: number): number {

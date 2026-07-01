@@ -596,7 +596,7 @@ def _decorate_case_result(result: JsonObject) -> JsonObject:
     if lane == "fullStack":
         frontend = _object(result.get("frontend"))
         authoritative = _object(frontend.get("authoritative"))
-        rates = _rates_for_counts(
+        scan_rates = _rates_for_counts(
             duration_ms=_int(frontend.get("totalRunMs")) or 0,
             files_scanned=_int(authoritative.get("filesScanned")) or 0,
             files_matched=_int(authoritative.get("filesMatched")) or 0,
@@ -605,9 +605,15 @@ def _decorate_case_result(result: JsonObject) -> JsonObject:
             or _int(frontend.get("resultFrames"))
             or 0,
         )
-        frontend["rates"] = rates
+        visible_window = _object(frontend.get("visibleWindow"))
+        visible_window["rates"] = _visible_window_rates(visible_window)
+        frontend["visibleWindow"] = visible_window
+        frontend["scanRates"] = scan_rates
+        frontend["rates"] = scan_rates
         result["frontend"] = frontend
-        result["rates"] = rates
+        result["scanRates"] = scan_rates
+        result["visibleWindowRates"] = _object(visible_window.get("rates"))
+        result["rates"] = scan_rates
         return result
 
     python = _object(result.get("python"))
@@ -639,6 +645,12 @@ def _build_suite_summary(results: list[JsonObject]) -> JsonObject:
                 "filesMatched": 0,
                 "matchesFound": 0,
                 "resultBatches": 0,
+                "visibleWindowCaseCount": 0,
+                "visibleWindowCompleteCount": 0,
+                "visibleWindowExpectedMatches": 0,
+                "visibleWindowDeliveredMatches": 0,
+                "visibleWindowDurationMs": 0,
+                "visibleWindowDeliveryMs": 0,
             },
         )
         bucket["caseCount"] = (_int(bucket.get("caseCount")) or 0) + 1
@@ -653,6 +665,7 @@ def _build_suite_summary(results: list[JsonObject]) -> JsonObject:
         bucket["filesMatched"] = (_int(bucket.get("filesMatched")) or 0) + files_matched
         bucket["matchesFound"] = (_int(bucket.get("matchesFound")) or 0) + matches_found
         bucket["resultBatches"] = (_int(bucket.get("resultBatches")) or 0) + result_batches
+        _add_visible_window_counts(bucket, result)
 
     for bucket in lanes.values():
         bucket["rates"] = _rates_for_counts(
@@ -662,6 +675,8 @@ def _build_suite_summary(results: list[JsonObject]) -> JsonObject:
             matches_found=_int(bucket.get("matchesFound")) or 0,
             result_batches=_int(bucket.get("resultBatches")) or 0,
         )
+        if (_int(bucket.get("visibleWindowCaseCount")) or 0) > 0:
+            bucket["visibleWindowRates"] = _rates_for_visible_window_bucket(bucket)
     return {"lanes": lanes}
 
 
@@ -711,6 +726,67 @@ def _case_counts(result: JsonObject) -> tuple[int, int, int, int, int]:
     )
 
 
+def _add_visible_window_counts(bucket: JsonObject, result: JsonObject) -> None:
+    if _string(result.get("lane")) != "fullStack":
+        return
+    frontend = _object(result.get("frontend"))
+    visible_window = _object(frontend.get("visibleWindow"))
+    expected_matches = _int(visible_window.get("expectedMatches")) or 0
+    delivered_matches = _int(visible_window.get("deliveredMatches")) or 0
+    filled_ms = _int(visible_window.get("filledMs"))
+    delivery_ms = _int(visible_window.get("deliveryMs"))
+    bucket["visibleWindowCaseCount"] = (
+        _int(bucket.get("visibleWindowCaseCount")) or 0
+    ) + 1
+    if visible_window.get("complete") is True:
+        bucket["visibleWindowCompleteCount"] = (
+            _int(bucket.get("visibleWindowCompleteCount")) or 0
+        ) + 1
+    bucket["visibleWindowExpectedMatches"] = (
+        _int(bucket.get("visibleWindowExpectedMatches")) or 0
+    ) + expected_matches
+    bucket["visibleWindowDeliveredMatches"] = (
+        _int(bucket.get("visibleWindowDeliveredMatches")) or 0
+    ) + delivered_matches
+    if filled_ms is not None:
+        bucket["visibleWindowDurationMs"] = (
+            _int(bucket.get("visibleWindowDurationMs")) or 0
+        ) + filled_ms
+    if delivery_ms is not None:
+        bucket["visibleWindowDeliveryMs"] = (
+            _int(bucket.get("visibleWindowDeliveryMs")) or 0
+        ) + delivery_ms
+
+
+def _rates_for_visible_window_bucket(bucket: JsonObject) -> JsonObject:
+    duration_ms = _int(bucket.get("visibleWindowDurationMs")) or 0
+    delivery_ms = _int(bucket.get("visibleWindowDeliveryMs")) or 0
+    delivered_matches = _int(bucket.get("visibleWindowDeliveredMatches")) or 0
+    return {
+        "durationMs": duration_ms,
+        "deliveryMs": delivery_ms,
+        "matchesPerSecond": _rate(delivered_matches, duration_ms / 1000),
+        "deliveryMatchesPerSecond": _nullable_rate(
+            delivered_matches,
+            delivery_ms / 1000,
+        ),
+    }
+
+
+def _visible_window_rates(visible_window: JsonObject) -> JsonObject:
+    filled_ms = _int(visible_window.get("filledMs"))
+    delivery_ms = _int(visible_window.get("deliveryMs"))
+    expected_matches = _int(visible_window.get("expectedMatches")) or 0
+    return {
+        "matchesPerSecond": 0.0
+        if filled_ms is None
+        else _rate(expected_matches, filled_ms / 1000),
+        "deliveryMatchesPerSecond": None
+        if delivery_ms is None
+        else _nullable_rate(expected_matches, delivery_ms / 1000),
+    }
+
+
 def _rates_for_counts(
     *,
     duration_ms: int,
@@ -733,6 +809,12 @@ def _rate(count: int, seconds: float) -> float:
     if seconds <= 0:
         return 0.0
     return round(count / seconds, 2)
+
+
+def _nullable_rate(count: int, seconds: float) -> float | None:
+    if seconds <= 0:
+        return None if count > 0 else 0.0
+    return _rate(count, seconds)
 
 
 def _case_to_pipe(case: SearchBenchmarkCase) -> JsonObject:

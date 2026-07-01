@@ -5,9 +5,8 @@ import {
   type ExplorerRpcNotificationMethod,
 } from "./contract.ts";
 import {
+  getActualSearchBenchmarkObserver,
   handleSearchBenchmarkNotification,
-  hasActiveActualSearchBenchmark,
-  observeActualSearchNotification,
 } from "../search/benchmark.ts";
 import type { JsonObject } from "../../rpc/transport.ts";
 import type { ExplorerRuntimeState } from "../state/runtime-state.ts";
@@ -591,11 +590,11 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchJobProgress: {
-        const benchmarkActive = hasActiveActualSearchBenchmark();
-        const startedAt = benchmarkActive ? performance.now() : 0;
+        const benchmarkObserver = getActualSearchBenchmarkObserver();
+        const startedAt = benchmarkObserver ? performance.now() : 0;
         deps.searchOverlayController.handleSearchJobProgress(payload);
-        if (benchmarkActive) {
-          observeActualSearchNotification(
+        if (benchmarkObserver) {
+          benchmarkObserver.observe(
             "search.job.progress",
             payload,
             performance.now() - startedAt,
@@ -604,11 +603,11 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchJobResult: {
-        const benchmarkActive = hasActiveActualSearchBenchmark();
-        const startedAt = benchmarkActive ? performance.now() : 0;
+        const benchmarkObserver = getActualSearchBenchmarkObserver();
+        const startedAt = benchmarkObserver ? performance.now() : 0;
         deps.searchOverlayController.handleSearchJobResult(payload);
-        if (benchmarkActive) {
-          observeActualSearchNotification(
+        if (benchmarkObserver) {
+          benchmarkObserver.observe(
             "search.job.result",
             payload,
             performance.now() - startedAt,
@@ -617,11 +616,11 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchJobDone: {
-        const benchmarkActive = hasActiveActualSearchBenchmark();
-        const startedAt = benchmarkActive ? performance.now() : 0;
+        const benchmarkObserver = getActualSearchBenchmarkObserver();
+        const startedAt = benchmarkObserver ? performance.now() : 0;
         deps.searchOverlayController.handleSearchJobDone(payload);
-        if (benchmarkActive) {
-          observeActualSearchNotification(
+        if (benchmarkObserver) {
+          benchmarkObserver.observe(
             "search.job.done",
             payload,
             performance.now() - startedAt,
@@ -630,11 +629,11 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchJobError: {
-        const benchmarkActive = hasActiveActualSearchBenchmark();
-        const startedAt = benchmarkActive ? performance.now() : 0;
+        const benchmarkObserver = getActualSearchBenchmarkObserver();
+        const startedAt = benchmarkObserver ? performance.now() : 0;
         deps.searchOverlayController.handleSearchJobError(payload);
-        if (benchmarkActive) {
-          observeActualSearchNotification(
+        if (benchmarkObserver) {
+          benchmarkObserver.observe(
             "search.job.error",
             payload,
             performance.now() - startedAt,
