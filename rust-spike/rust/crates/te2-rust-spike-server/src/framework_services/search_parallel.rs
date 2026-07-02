@@ -169,6 +169,13 @@ pub(super) fn search_content_parallel_with_options(
                 set_first_error(&first_error, error);
                 return WalkState::Quit;
             }
+            if request
+                .max_matches_total
+                .is_some_and(|max| matches_found.load(Ordering::Relaxed) >= max)
+            {
+                set_parallel_truncation(&truncated_reason, "matchLimit");
+                return WalkState::Quit;
+            }
 
             let entry = match result {
                 Ok(entry) => entry,
@@ -202,9 +209,14 @@ pub(super) fn search_content_parallel_with_options(
                 );
             }
 
-            let effective_match_cap = request.max_matches_per_file;
+            let remaining_total = request.max_matches_total.map(|max_matches| {
+                max_matches.saturating_sub(matches_found.load(Ordering::Relaxed))
+            });
+            let effective_match_cap = min_optional(request.max_matches_per_file, remaining_total);
+            let effective_cap_reason =
+                match_cap_reason(request.max_matches_per_file, remaining_total);
             if explicit_cap_reached(0, effective_match_cap) {
-                set_parallel_truncation(&truncated_reason, "maxMatchesPerFile");
+                set_parallel_truncation(&truncated_reason, effective_cap_reason);
                 return WalkState::Quit;
             }
 
@@ -218,7 +230,7 @@ pub(super) fn search_content_parallel_with_options(
             match searcher.search_path(&matcher, path, &mut sink) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::Interrupted && sink.cap_reached => {
-                    set_parallel_truncation(&truncated_reason, "maxMatchesPerFile");
+                    set_parallel_truncation(&truncated_reason, effective_cap_reason);
                 }
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {
                     set_parallel_truncation(&truncated_reason, "interrupted");
@@ -239,11 +251,25 @@ pub(super) fn search_content_parallel_with_options(
                 );
             }
 
-            let matches_returned = sink.matches.len();
+            let raw_matches_returned = sink.matches.len();
+            let (matches_returned, match_limit_reached) = reserve_match_capacity(
+                &matches_found,
+                request.max_matches_total,
+                raw_matches_returned,
+            );
+            if matches_returned == 0 {
+                set_parallel_truncation(&truncated_reason, "matchLimit");
+                return WalkState::Quit;
+            }
+            if matches_returned < raw_matches_returned {
+                sink.matches.truncate(matches_returned);
+            }
+            if match_limit_reached {
+                set_parallel_truncation(&truncated_reason, "matchLimit");
+            }
             let matched = files_matched.fetch_add(1, Ordering::Relaxed) + 1;
-            let found =
-                matches_found.fetch_add(matches_returned, Ordering::Relaxed) + matches_returned;
-            let file_truncated = sink.cap_reached;
+            let found = matches_found.load(Ordering::Relaxed);
+            let file_truncated = sink.cap_reached && effective_cap_reason == "maxMatchesPerFile";
             let file_result = SearchContentFile {
                 path: path_to_string(path),
                 relative_path,
@@ -267,6 +293,7 @@ pub(super) fn search_content_parallel_with_options(
                 files_scanned: Some(scanned),
                 next_global_cursor: None,
                 truncated_reason: None,
+                match_limit: request.max_matches_total,
                 file_count: 1,
                 match_count: matches_returned,
                 files: vec![file_result],
@@ -276,7 +303,11 @@ pub(super) fn search_content_parallel_with_options(
                 set_first_error(&first_error, error);
                 return WalkState::Quit;
             }
-            WalkState::Continue
+            if match_limit_reached {
+                WalkState::Quit
+            } else {
+                WalkState::Continue
+            }
         })
     });
 
@@ -302,11 +333,38 @@ pub(super) fn search_content_parallel_with_options(
         files_scanned: Some(files_scanned.load(Ordering::Relaxed)),
         next_global_cursor: None,
         truncated_reason,
+        match_limit: request.max_matches_total,
         file_count: 0,
         match_count,
         files: Vec::new(),
         truncated,
     })
+}
+
+fn reserve_match_capacity(
+    matches_found: &AtomicUsize,
+    max_matches_total: Option<usize>,
+    requested: usize,
+) -> (usize, bool) {
+    let Some(max_matches_total) = max_matches_total else {
+        let _ = matches_found.fetch_add(requested, Ordering::Relaxed);
+        return (requested, false);
+    };
+
+    loop {
+        let current = matches_found.load(Ordering::Relaxed);
+        if current >= max_matches_total {
+            return (0, true);
+        }
+        let accepted = requested.min(max_matches_total - current);
+        let updated = current + accepted;
+        if matches_found
+            .compare_exchange(current, updated, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+        {
+            return (accepted, updated >= max_matches_total);
+        }
+    }
 }
 
 fn build_parallel_walk(root: &Path, use_ignore_files: bool) -> ignore::WalkParallel {

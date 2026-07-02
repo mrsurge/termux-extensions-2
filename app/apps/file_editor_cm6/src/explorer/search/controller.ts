@@ -538,14 +538,25 @@ export function createExplorerSearchController(
   function handleSearchJobDone(payload: SearchJobDonePayload): void {
     if (!isActiveSearchPayload(payload)) return;
     setSearchIdentityFromPayload(payload);
+    const limit =
+      typeof payload.matchLimit === "number"
+        ? payload.matchLimit
+        : (payload.matchesFound ?? payload.matchCount);
+    const limited =
+      payload.truncated === true && payload.truncatedReason === "matchLimit";
     deps.setSearchLoading(false);
     deps.setSearchError(null);
     setSearchStatus({
       status: payload.cancelled === true ? "idle" : "done",
       message:
-        payload.cancelled === true ? "Search cancelled" : "Search complete",
-      filesMatched: payload.fileCount,
-      matchesFound: payload.matchCount,
+        payload.cancelled === true
+          ? "Search cancelled"
+          : limited
+            ? `Stopped after ${limit ?? "the configured limit"} matches. Add filters to narrow the search.`
+            : "Search complete",
+      filesScanned: payload.filesScanned,
+      filesMatched: payload.filesMatched ?? payload.fileCount,
+      matchesFound: payload.matchesFound ?? payload.matchCount,
     });
     if (deps.getSearchOverlayVisible()) {
       deps.renderSearchOverlay();

@@ -99,6 +99,9 @@ class SearchSession:
     content_files: dict[str, CachedContentFile] = field(default_factory=_content_file_map)
     content_order: list[str] = field(default_factory=_content_order_list)
     initial_matches_emitted: int = 0
+    search_limit_reached: bool = False
+    search_limit_reason: str | None = None
+    search_match_limit: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +119,9 @@ class PipeSearchEvent:
     files_matched: int | None
     matches_found: int | None
     cancelled: bool
+    truncated: bool
+    truncated_reason: str
+    match_limit: int | None
     code: str
     raw_result: object
 
@@ -385,6 +391,7 @@ class ExplorerSearchSessions:
                 )
             return
         if event.method == "search.job.done":
+            _apply_search_limit_event(session, event)
             session.complete = True
             session.status = "done"
             if session.kind == "content":
@@ -430,6 +437,7 @@ class ExplorerSearchSessions:
             session.complete = _bool(raw.get("complete"), default=session.complete)
             return
         if session.kind == "content" and dto == "SearchContentResult":
+            _apply_search_limit_result(session, raw)
             files = raw.get("files")
             if isinstance(files, list):
                 for file_obj in cast(list[object], files):
@@ -516,7 +524,8 @@ class ExplorerSearchSessions:
         next_offset = start_offset + grouped.match_count
         global_truncated = next_offset < total_window_matches
         file_truncated = _has_file_truncation(session, max_matches_per_file)
-        truncated = global_truncated or file_truncated
+        truncated = global_truncated or file_truncated or session.search_limit_reached
+        truncated_reason = _truncated_reason(global_truncated, file_truncated)
         return {
             "mode": "content",
             "query": session.query,
@@ -524,7 +533,7 @@ class ExplorerSearchSessions:
             "jobId": session.job_id,
             "results": grouped.results,
             "truncated": truncated,
-            "truncatedReason": _truncated_reason(global_truncated, file_truncated),
+            "truncatedReason": truncated_reason or session.search_limit_reason,
             "file_count": len(grouped.results),
             "match_count": grouped.match_count,
             "totalFileCount": len(session.content_order),
@@ -532,6 +541,9 @@ class ExplorerSearchSessions:
             "complete": session.complete,
             "nextGlobalCursor": _global_cursor(next_offset) if global_truncated else None,
             "projectGeneration": session.project_generation,
+            "searchLimitReached": session.search_limit_reached,
+            "searchLimitReason": session.search_limit_reason,
+            "searchMatchLimit": session.search_match_limit,
         }
 
 @dataclass(frozen=True, slots=True)
@@ -626,6 +638,27 @@ def _truncated_reason(global_truncated: bool, file_truncated: bool) -> str | Non
     return None
 
 
+def _apply_search_limit_result(
+    session: SearchSession,
+    raw: Mapping[object, object],
+) -> None:
+    truncated_reason = _string(raw.get("truncatedReason"))
+    match_limit = _optional_int(raw.get("matchLimit"))
+    if raw.get("truncated") is True and truncated_reason == "matchLimit":
+        session.search_limit_reached = True
+        session.search_limit_reason = truncated_reason
+    if match_limit is not None:
+        session.search_match_limit = match_limit
+
+
+def _apply_search_limit_event(session: SearchSession, event: PipeSearchEvent) -> None:
+    if event.truncated and event.truncated_reason == "matchLimit":
+        session.search_limit_reached = True
+        session.search_limit_reason = event.truncated_reason
+    if event.match_limit is not None:
+        session.search_match_limit = event.match_limit
+
+
 def _ensure_project_generation(root: Path) -> int:
     generation = current_project_generation(root)
     if generation is not None:
@@ -649,6 +682,9 @@ def _pipe_search_event(envelope: PipeEnvelope) -> PipeSearchEvent:
         files_matched=_optional_int(raw.get("filesMatched")),
         matches_found=_optional_int(raw.get("matchesFound")),
         cancelled=raw.get("cancelled") is True,
+        truncated=raw.get("truncated") is True,
+        truncated_reason=_string(raw.get("truncatedReason")),
+        match_limit=_optional_int(raw.get("matchLimit")),
         code=_string(raw.get("code")),
         raw_result=raw.get("result"),
     )
@@ -671,6 +707,9 @@ def _progress_payload(session: SearchSession, event: PipeSearchEvent) -> JsonObj
     _put_optional_int(payload, "filesScanned", event.files_scanned)
     _put_optional_int(payload, "filesMatched", event.files_matched)
     _put_optional_int(payload, "matchesFound", event.matches_found)
+    payload["truncated"] = event.truncated
+    _put_optional_string(payload, "truncatedReason", event.truncated_reason)
+    _put_optional_int(payload, "matchLimit", event.match_limit)
     return payload
 
 

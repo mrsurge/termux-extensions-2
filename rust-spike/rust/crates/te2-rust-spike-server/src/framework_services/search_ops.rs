@@ -245,6 +245,8 @@ pub(crate) struct SearchContentResult {
     pub(crate) next_global_cursor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) truncated_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) match_limit: Option<usize>,
     pub(crate) files: Vec<SearchContentFile>,
     pub(crate) file_count: usize,
     pub(crate) match_count: usize,
@@ -433,6 +435,11 @@ pub(crate) struct SearchJobDone {
     pub(crate) cancelled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) cancellation_reason: Option<String>,
+    pub(crate) truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) truncated_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) match_limit: Option<usize>,
     pub(crate) optional_events_dropped: u64,
     pub(crate) required_event_backpressure_count: u64,
     pub(crate) required_event_backpressure_ms: u64,
@@ -745,10 +752,7 @@ pub(crate) fn search_content_with_options(
     request: SearchContentRequest,
     options: SearchRunOptions,
 ) -> Result<SearchContentResult, SearchProviderError> {
-    if options.has_content_result_sink()
-        && request.max_files.is_none()
-        && request.max_matches_total.is_none()
-    {
+    if options.has_content_result_sink() && request.max_files.is_none() {
         return search_parallel::search_content_parallel_with_options(request, options);
     }
 
@@ -776,7 +780,7 @@ pub(crate) fn search_content_with_options(
             break;
         }
         if explicit_cap_reached(match_count, request.max_matches_total) {
-            set_truncation_reason(&mut truncated_reason, "maxMatchesTotal");
+            set_truncation_reason(&mut truncated_reason, "matchLimit");
             break;
         }
         let entry = match entry {
@@ -808,11 +812,9 @@ pub(crate) fn search_content_with_options(
             .max_matches_total
             .map(|max_matches| max_matches.saturating_sub(match_count));
         let effective_match_cap = min_optional(request.max_matches_per_file, remaining_total);
+        let effective_cap_reason = match_cap_reason(request.max_matches_per_file, remaining_total);
         if explicit_cap_reached(0, effective_match_cap) {
-            set_truncation_reason(
-                &mut truncated_reason,
-                match_cap_reason(request.max_matches_per_file, remaining_total),
-            );
+            set_truncation_reason(&mut truncated_reason, effective_cap_reason);
             break;
         }
 
@@ -830,10 +832,7 @@ pub(crate) fn search_content_with_options(
         match searcher.search_path(&matcher, path, &mut sink) {
             Ok(()) => {}
             Err(error) if error.kind() == io::ErrorKind::Interrupted && sink.cap_reached => {
-                set_truncation_reason(
-                    &mut truncated_reason,
-                    match_cap_reason(request.max_matches_per_file, remaining_total),
-                );
+                set_truncation_reason(&mut truncated_reason, effective_cap_reason);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {
                 set_truncation_reason(&mut truncated_reason, "interrupted");
@@ -848,7 +847,7 @@ pub(crate) fn search_content_with_options(
         match_count += matches_returned;
         counts.files_matched += 1;
         counts.matches_found = match_count;
-        let file_truncated = sink.cap_reached;
+        let file_truncated = sink.cap_reached && effective_cap_reason == "maxMatchesPerFile";
         let file_result = SearchContentFile {
             path: path_to_string(path),
             relative_path,
@@ -873,6 +872,7 @@ pub(crate) fn search_content_with_options(
                 files_scanned: Some(counts.files_scanned),
                 next_global_cursor: None,
                 truncated_reason: None,
+                match_limit: request.max_matches_total,
                 file_count: 1,
                 match_count: matches_returned,
                 files: vec![file_result],
@@ -904,6 +904,7 @@ pub(crate) fn search_content_with_options(
         files_scanned: Some(counts.files_scanned),
         next_global_cursor: truncated.then(|| result_file_count.to_string()),
         truncated_reason,
+        match_limit: request.max_matches_total,
         file_count: files.len(),
         match_count,
         files,
@@ -1163,7 +1164,7 @@ fn match_cap_reason(per_file: Option<usize>, remaining_total: Option<usize>) -> 
             "maxMatchesPerFile"
         }
         (Some(_), None) => "maxMatchesPerFile",
-        (_, Some(_)) => "maxMatchesTotal",
+        (_, Some(_)) => "matchLimit",
         _ => "maxMatchesPerFile",
     }
 }
@@ -1593,6 +1594,53 @@ mod tests {
 
         let result = search_content_with_options(content_request(&root), options);
         assert!(matches!(result, Err(SearchProviderError::Cancelled)));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn content_search_match_limit_stays_progressive_and_reports_cap() {
+        let root = test_root("match-limit");
+        for index in 0..20 {
+            write_file(
+                &root,
+                &format!("src/file_{index}.rs"),
+                &format!("// import match {index}\n"),
+            );
+        }
+
+        let emitted_matches = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let emitted_files = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let result_frames = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let result_matches = Arc::clone(&emitted_matches);
+        let result_files = Arc::clone(&emitted_files);
+        let frame_count = Arc::clone(&result_frames);
+
+        let mut request = content_request(&root);
+        request.max_matches_total = Some(5);
+        let options = SearchRunOptions {
+            search_id: Some("match-limit-search".to_owned()),
+            job_id: Some("match-limit-job".to_owned()),
+            content_result: Some(Arc::new(move |result| {
+                frame_count.fetch_add(1, Ordering::Relaxed);
+                result_matches.fetch_add(result.match_count, Ordering::Relaxed);
+                result_files.fetch_add(result.file_count, Ordering::Relaxed);
+                true
+            })),
+            ..Default::default()
+        };
+
+        let result = search_content_with_options(request, options).expect("limited search");
+        assert_eq!(result.match_count, 5);
+        assert_eq!(result.total_match_count, Some(5));
+        assert_eq!(result.total_file_count, Some(5));
+        assert_eq!(result.truncated_reason.as_deref(), Some("matchLimit"));
+        assert_eq!(result.match_limit, Some(5));
+        assert_eq!(result.complete, Some(false));
+        assert!(result.truncated);
+        assert_eq!(emitted_matches.load(Ordering::Relaxed), 5);
+        assert_eq!(emitted_files.load(Ordering::Relaxed), 5);
+        assert_eq!(result_frames.load(Ordering::Relaxed), 5);
 
         let _ = fs::remove_dir_all(root);
     }

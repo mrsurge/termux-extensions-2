@@ -60,6 +60,9 @@ export interface ExplorerContentSearchResults {
   totalMatchCount?: number;
   nextGlobalCursor?: string | null;
   truncatedReason?: string;
+  searchLimitReached?: boolean;
+  searchLimitReason?: string;
+  searchMatchLimit?: number;
 }
 
 export interface ExplorerContentSearchOptions {
@@ -140,6 +143,7 @@ export interface SearchContentDtoResult {
   totalMatchCount?: number;
   nextGlobalCursor?: string | null;
   truncatedReason?: string;
+  matchLimit?: number;
 }
 
 export interface SearchJobStartedPayload {
@@ -198,7 +202,13 @@ export interface SearchJobDonePayload {
   status?: string;
   fileCount?: number;
   matchCount?: number;
+  filesScanned?: number;
+  filesMatched?: number;
+  matchesFound?: number;
   cancelled?: boolean;
+  truncated?: boolean;
+  truncatedReason?: string;
+  matchLimit?: number;
 }
 
 export interface SearchJobErrorPayload {

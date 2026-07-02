@@ -76,6 +76,9 @@ enum SearchJobEvent {
         cancelled: bool,
         counts: Option<search_ops::SearchProgressCounts>,
         cancellation_reason: Option<String>,
+        truncated: bool,
+        truncated_reason: Option<String>,
+        match_limit: Option<usize>,
     },
     Error {
         code: String,
@@ -946,6 +949,9 @@ impl FrameworkServiceScheduler {
                     cancelled: true,
                     counts: None,
                     cancellation_reason: Some(context.cancellation_reason()),
+                    truncated: false,
+                    truncated_reason: None,
+                    match_limit: None,
                 },
                 &entry.cancelled,
             )
@@ -954,6 +960,7 @@ impl FrameworkServiceScheduler {
             match result {
                 Ok(result) => {
                     let counts = search_counts_from_result(&result);
+                    let completion = search_completion_from_result(&result);
                     if emit_result {
                         let _ = send_search_event(
                             &event_tx,
@@ -969,6 +976,9 @@ impl FrameworkServiceScheduler {
                             cancelled,
                             counts,
                             cancellation_reason: cancelled.then(|| context.cancellation_reason()),
+                            truncated: completion.truncated,
+                            truncated_reason: completion.truncated_reason,
+                            match_limit: completion.match_limit,
                         },
                         &entry.cancelled,
                     )
@@ -981,6 +991,9 @@ impl FrameworkServiceScheduler {
                             cancelled: true,
                             counts: None,
                             cancellation_reason: Some(context.cancellation_reason()),
+                            truncated: false,
+                            truncated_reason: None,
+                            match_limit: None,
                         },
                         &entry.cancelled,
                     )
@@ -1232,7 +1245,17 @@ impl SearchJobContext {
                 cancelled,
                 counts,
                 cancellation_reason,
-            } => self.emit_done(cancelled, counts, cancellation_reason),
+                truncated,
+                truncated_reason,
+                match_limit,
+            } => self.emit_done(
+                cancelled,
+                counts,
+                cancellation_reason,
+                truncated,
+                truncated_reason,
+                match_limit,
+            ),
             SearchJobEvent::Error { code, message } => self.emit_error(code, message),
         }
     }
@@ -1290,6 +1313,9 @@ impl SearchJobContext {
         cancelled: bool,
         counts: Option<search_ops::SearchProgressCounts>,
         cancellation_reason: Option<String>,
+        truncated: bool,
+        truncated_reason: Option<String>,
+        match_limit: Option<usize>,
     ) {
         let counts = counts.unwrap_or_else(|| {
             self.last_counts
@@ -1318,6 +1344,9 @@ impl SearchJobContext {
             matches_found: counts.matches_found,
             cancelled,
             cancellation_reason,
+            truncated,
+            truncated_reason,
+            match_limit,
             optional_events_dropped: self
                 .event_metrics
                 .optional_events_dropped
@@ -1519,6 +1548,30 @@ fn search_counts_from_result(result: &Value) -> Option<search_ops::SearchProgres
         files_matched: usize::try_from(files_matched).unwrap_or(usize::MAX),
         matches_found: usize::try_from(matches_found).unwrap_or(usize::MAX),
     })
+}
+
+#[derive(Default)]
+struct SearchCompletionMetadata {
+    truncated: bool,
+    truncated_reason: Option<String>,
+    match_limit: Option<usize>,
+}
+
+fn search_completion_from_result(result: &Value) -> SearchCompletionMetadata {
+    SearchCompletionMetadata {
+        truncated: result
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        truncated_reason: result
+            .get("truncatedReason")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        match_limit: result
+            .get("matchLimit")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok()),
+    }
 }
 
 fn validate_git_job(

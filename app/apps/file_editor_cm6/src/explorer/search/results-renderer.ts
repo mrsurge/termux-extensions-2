@@ -37,6 +37,35 @@ function normalizeNameResults(data: unknown): ExplorerNameSearchResults {
   return {};
 }
 
+function splitPathForDisplay(path: string): { parent: string; name: string } {
+  const normalized = path.replace(/\\/g, "/");
+  const index = normalized.lastIndexOf("/");
+  if (index < 0) {
+    return { parent: "", name: normalized };
+  }
+  return {
+    parent: normalized.slice(0, index + 1),
+    name: normalized.slice(index + 1) || normalized,
+  };
+}
+
+function renderPathLabel(target: HTMLElement, path: string): void {
+  target.classList.add("fe-search-path-label");
+  target.title = path;
+  target.replaceChildren();
+  const { parent, name } = splitPathForDisplay(path);
+  if (parent) {
+    const parentSpan = document.createElement("span");
+    parentSpan.className = "fe-search-path-parent";
+    parentSpan.textContent = parent;
+    target.appendChild(parentSpan);
+  }
+  const nameSpan = document.createElement("span");
+  nameSpan.className = "fe-search-path-name";
+  nameSpan.textContent = name || path;
+  target.appendChild(nameSpan);
+}
+
 export function renderNameResults(
   container: HTMLElement,
   data: unknown,
@@ -85,7 +114,7 @@ export function renderNameResults(
 
     const name = document.createElement("span");
     name.className = "fe-search-name";
-    name.textContent = rel;
+    renderPathLabel(name, rel);
     row.appendChild(name);
 
     list.appendChild(row);
@@ -123,7 +152,7 @@ export function renderContentResults(
     fileHeader.className = "fe-search-file-header";
     const fileTitle = document.createElement("span");
     fileTitle.className = "fe-search-file-title";
-    fileTitle.textContent = rel;
+    renderPathLabel(fileTitle, rel);
     fileHeader.appendChild(fileTitle);
 
     const fileMeta = document.createElement("span");
@@ -237,6 +266,14 @@ export function renderContentResults(
       ? `Showing ${visibleMatchCount} of ${totalMatchCount} matches across ${visibleFileCount} of ${totalFileCount} files`
       : `Showing ${visibleMatchCount} matches across ${visibleFileCount} files`;
   container.appendChild(summary);
+
+  if (payload.searchLimitReached) {
+    const notice = document.createElement("div");
+    notice.className = "fe-search-notice";
+    const limit = payload.searchMatchLimit ?? totalMatchCount;
+    notice.textContent = `Stopped after ${limit} matches. Add filters to narrow the search.`;
+    container.appendChild(notice);
+  }
 
   if (payload.nextGlobalCursor) {
     const more = document.createElement("div");

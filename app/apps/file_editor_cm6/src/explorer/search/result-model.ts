@@ -127,6 +127,13 @@ export function normalizeContentSearchResults(
       totalMatchCount: numberValue(dto.totalMatchCount),
       nextGlobalCursor: nullableStringValue(dto.nextGlobalCursor),
       truncatedReason: stringValue(dto.truncatedReason),
+      searchLimitReached:
+        dto.truncated === true && dto.truncatedReason === "matchLimit",
+      searchLimitReason:
+        dto.truncated === true && dto.truncatedReason === "matchLimit"
+          ? dto.truncatedReason
+          : undefined,
+      searchMatchLimit: numberValue(dto.matchLimit),
     };
   }
 
@@ -151,6 +158,9 @@ export function normalizeContentSearchResults(
     totalMatchCount: numberValue(value.totalMatchCount),
     nextGlobalCursor: nullableStringValue(value.nextGlobalCursor),
     truncatedReason: stringValue(value.truncatedReason),
+    searchLimitReached: value.searchLimitReached === true,
+    searchLimitReason: stringValue(value.searchLimitReason),
+    searchMatchLimit: numberValue(value.searchMatchLimit),
   };
 }
 
@@ -210,10 +220,16 @@ export function mergeContentSearchResults(
     match_count: visibleMatchCount(results),
     totalFileCount: next.totalFileCount ?? current.totalFileCount,
     totalMatchCount: next.totalMatchCount ?? current.totalMatchCount,
+    searchLimitReached:
+      next.searchLimitReached === true || current.searchLimitReached === true,
+    searchLimitReason: next.searchLimitReason ?? current.searchLimitReason,
+    searchMatchLimit: next.searchMatchLimit ?? current.searchMatchLimit,
     truncated:
       next.truncated === true ||
       results.some((file) => file.fileTruncated === true) ||
-      Boolean(next.nextGlobalCursor),
+      Boolean(next.nextGlobalCursor) ||
+      current.searchLimitReached === true ||
+      next.searchLimitReached === true,
   };
 }
 
@@ -255,8 +271,12 @@ export function mergeContentSearchFile(
     results,
     file_count: results.length,
     match_count: visibleMatchCount(results),
+    searchLimitReached: current.searchLimitReached,
+    searchLimitReason: current.searchLimitReason,
+    searchMatchLimit: current.searchMatchLimit,
     truncated:
       Boolean(current.nextGlobalCursor) ||
-      results.some((file) => file.fileTruncated === true),
+      results.some((file) => file.fileTruncated === true) ||
+      current.searchLimitReached === true,
   };
 }

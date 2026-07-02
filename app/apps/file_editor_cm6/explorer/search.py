@@ -50,6 +50,7 @@ def _json_object_list(value: object) -> list[JsonObject]:
 
 
 CHANGE_RESULT_LIMIT = 40
+CONTENT_SEARCH_MATCH_LIMIT = 700
 STATUS_TEXT_MAP = {
     'M': 'Modified',
     'A': 'Added',
@@ -178,6 +179,7 @@ async def start_content_search(
             "excludePatterns": _parse_glob_patterns(params["excludePattern"]),
             "useIgnoreFiles": params["useIgnoreFiles"],
             "contextChars": 75,
+            "maxMatchesTotal": CONTENT_SEARCH_MATCH_LIMIT,
             "presentationWindow": {
                 "maxInitialMatchesPerFile": 10,
                 "maxInitialMatchesTotal": 50,
