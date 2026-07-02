@@ -13,7 +13,7 @@ use super::*;
 use crate::framework_services::common::path_to_string;
 
 const DEFAULT_PARALLEL_SEARCH_THREADS: usize = 4;
-const DEFAULT_PROGRESS_BATCH_FILES: usize = 16;
+const DEFAULT_PROGRESS_BATCH_FILES: usize = 256;
 
 // Source copy basis:
 // - BurntSushi/ripgrep@dfe4a81d2591daca76d25ae4e052c34b26578155

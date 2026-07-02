@@ -571,8 +571,8 @@ export function createExplorerSearchOverlayController(
     },
   });
 
-  function closeSearchOverlay(): void {
-    searchController.closeSearchOverlay();
+  function closeSearchOverlay(reason?: string): void {
+    searchController.closeSearchOverlay(reason);
   }
 
   function handleSearchResultsUpdated(payload: unknown): void {
@@ -681,6 +681,7 @@ export function createExplorerSearchOverlayController(
     handleSearchError,
     cancelActiveSearch: (reason: string) =>
       searchController.cancelActiveSearch(reason),
+    closeSearchOverlay,
     isVisible: () => searchOverlayVisible,
     getSearchMode: () => searchMode,
     getLastKnownProjectPath: () => lastKnownProjectPath,

@@ -23,6 +23,7 @@ interface ExplorerSearchOverlayController {
   handleSearchError(message: string): boolean;
   handleReviewEntriesUpdated(payload: JsonObject): void;
   cancelActiveSearch(reason: string): void;
+  closeSearchOverlay(reason?: string): void;
   isVisible(): boolean;
   getSearchMode(): string;
 }
@@ -278,7 +279,7 @@ export function createExplorerNotificationHandler(
           nextProjectPath,
         );
         if (projectChanged) {
-          deps.searchOverlayController.cancelActiveSearch("projectChanged");
+          deps.searchOverlayController.closeSearchOverlay("projectChanged");
         }
         void deps.initDiffBaseFromBackend();
 
@@ -507,7 +508,7 @@ export function createExplorerNotificationHandler(
         if (path) {
           const prevProjectPath = deps.runtimeState.getProjectPath() || "";
           if (prevProjectPath && prevProjectPath !== path) {
-            deps.searchOverlayController.cancelActiveSearch("projectChanged");
+            deps.searchOverlayController.closeSearchOverlay("projectChanged");
           }
           applyProjectRootProjection(deps, path, { forceReset: true });
           deps.dispatchProjectOpened(path, payload);

@@ -8,7 +8,6 @@ from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from queue import Empty, Queue
 from typing import Literal, TypeAlias, cast
 
 from app.libs import pipe_runtime
@@ -28,8 +27,24 @@ from ..search import cancel_search_job, start_content_search, start_file_search
 
 logger = logging.getLogger(__name__)
 
-PipeEventQueue = Queue[PipeEnvelope]
-PipeNotificationListener = tuple[PipeEventQueue, set[str] | None]
+class AsyncPipeEventQueue:
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self._queue: asyncio.Queue[PipeEnvelope] = asyncio.Queue()
+
+    def put_nowait(self, item: PipeEnvelope) -> object:
+        try:
+            self._loop.call_soon_threadsafe(self._queue.put_nowait, item)
+        except RuntimeError:
+            return None
+        return None
+
+    async def get(self) -> PipeEnvelope:
+        return await self._queue.get()
+
+
+PipeEventQueue = AsyncPipeEventQueue
+PipeNotificationListener: TypeAlias = pipe_runtime.PipeNotificationListener
 SearchKind = Literal["name", "content"]
 GetProjectRoot = Callable[[], Path]
 SearchRange: TypeAlias = tuple[int, int]
@@ -138,13 +153,14 @@ class ExplorerSearchSessions:
         self._sessions: dict[str, SearchSession] = {}
         self._job_to_search: dict[str, str] = {}
         self._active_search_id: str | None = None
-        self._queue: PipeEventQueue = Queue()
+        self._queue: PipeEventQueue | None = None
         self._listener: PipeNotificationListener | None = None
         self._pump_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         if self._listener is not None:
             return
+        self._queue = AsyncPipeEventQueue(asyncio.get_running_loop())
         self._listener = pipe_runtime.add_notification_listener(
             self._queue,
             methods={
@@ -158,14 +174,15 @@ class ExplorerSearchSessions:
 
     async def stop(self) -> None:
         await self.cancel_active(reason="disconnect")
+        if self._listener is not None:
+            pipe_runtime.remove_notification_listener(self._listener)
+        self._listener = None
         if self._pump_task is not None:
             _ = self._pump_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._pump_task
         self._pump_task = None
-        if self._listener is not None:
-            pipe_runtime.remove_notification_listener(self._listener)
-        self._listener = None
+        self._queue = None
 
     async def run(self, params: SearchRunParams, reply_to: str | None) -> None:
         await self.cancel_active(reason="superseded")
@@ -273,7 +290,7 @@ class ExplorerSearchSessions:
             return
         session = self._sessions.get(search_id)
         if session is None or session.cancelled:
-            self._active_search_id = None
+            self._remove_session(search_id)
             return
         _ = await self._cancel_session(session, reason=reason)
 
@@ -294,9 +311,11 @@ class ExplorerSearchSessions:
         await self._emit_personal("explorer.search.cancelled", result, reply_to)
 
     def cancel_for_project_switch(self) -> None:
-        sessions = [session for session in self._sessions.values() if not session.cancelled]
+        sessions = list(self._sessions.values())
         for session in sessions:
             session.cancelled = True
+        self._sessions.clear()
+        self._job_to_search.clear()
         self._active_search_id = None
         if sessions:
             _ = asyncio.create_task(self._cancel_sessions(sessions, reason="projectSwitch"))
@@ -318,14 +337,25 @@ class ExplorerSearchSessions:
         session.status = "cancelled"
         if self._active_search_id == session.search_id:
             self._active_search_id = None
-        result = await cancel_search_job(
-            root=session.root,
-            search_id=session.search_id,
-            job_id=session.job_id,
-            project_generation=session.project_generation,
-            reason=reason,
-        )
-        return _copy_object(result)
+        try:
+            result = await cancel_search_job(
+                root=session.root,
+                search_id=session.search_id,
+                job_id=session.job_id,
+                project_generation=session.project_generation,
+                reason=reason,
+            )
+            return _copy_object(result)
+        finally:
+            self._remove_session(session.search_id)
+
+    def _remove_session(self, search_id: str) -> None:
+        session = self._sessions.pop(search_id, None)
+        if self._active_search_id == search_id:
+            self._active_search_id = None
+        for job_id, mapped_search_id in list(self._job_to_search.items()):
+            if mapped_search_id == search_id or (session is not None and job_id == session.job_id):
+                self._job_to_search.pop(job_id, None)
 
     def _session_for_request(
         self,
@@ -348,10 +378,12 @@ class ExplorerSearchSessions:
     async def _pump_pipe_events(self) -> None:
         while True:
             try:
-                envelope = await asyncio.to_thread(self._queue.get, timeout=0.5)
+                queue = self._queue
+                if queue is None:
+                    await asyncio.sleep(0)
+                    continue
+                envelope = await queue.get()
                 await self._handle_pipe_event(envelope)
-            except Empty:
-                continue
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -668,8 +700,10 @@ def _ensure_project_generation(root: Path) -> int:
 
 def _pipe_search_event(envelope: PipeEnvelope) -> PipeSearchEvent:
     raw = _mapping(envelope.params)
+    method = str(envelope.method or "")
+    is_done = method == "search.job.done"
     return PipeSearchEvent(
-        method=str(envelope.method or ""),
+        method=method,
         search_id=_string(raw.get("searchId")),
         job_id=_string(raw.get("jobId") or raw.get("opId")),
         root=_string(raw.get("root")),
@@ -682,9 +716,9 @@ def _pipe_search_event(envelope: PipeEnvelope) -> PipeSearchEvent:
         files_matched=_optional_int(raw.get("filesMatched")),
         matches_found=_optional_int(raw.get("matchesFound")),
         cancelled=raw.get("cancelled") is True,
-        truncated=raw.get("truncated") is True,
-        truncated_reason=_string(raw.get("truncatedReason")),
-        match_limit=_optional_int(raw.get("matchLimit")),
+        truncated=raw.get("truncated") is True if is_done else False,
+        truncated_reason=_string(raw.get("truncatedReason")) if is_done else "",
+        match_limit=_optional_int(raw.get("matchLimit")) if is_done else None,
         code=_string(raw.get("code")),
         raw_result=raw.get("result"),
     )
@@ -707,9 +741,6 @@ def _progress_payload(session: SearchSession, event: PipeSearchEvent) -> JsonObj
     _put_optional_int(payload, "filesScanned", event.files_scanned)
     _put_optional_int(payload, "filesMatched", event.files_matched)
     _put_optional_int(payload, "matchesFound", event.matches_found)
-    payload["truncated"] = event.truncated
-    _put_optional_string(payload, "truncatedReason", event.truncated_reason)
-    _put_optional_int(payload, "matchLimit", event.match_limit)
     return payload
 
 
@@ -777,11 +808,22 @@ def _put_optional_string(payload: JsonObject, key: str, value: str) -> None:
 
 
 def _matches_session(session: SearchSession, event: PipeSearchEvent) -> bool:
-    root = event.root
-    if root and Path(root).expanduser().resolve() != session.root:
+    if not _matches_root(session, event.root):
         return False
     generation = event.project_generation
     return generation is None or generation == session.project_generation
+
+
+def _matches_root(session: SearchSession, root: str) -> bool:
+    if not root:
+        return True
+    session_root = str(session.root)
+    if root == session_root:
+        return True
+    candidate = Path(root).expanduser()
+    if str(candidate) == session_root:
+        return True
+    return candidate.resolve() == session.root
 
 
 def _content_file(value: object) -> CachedContentFile | None:

@@ -19,7 +19,10 @@ from app.libs.pipe_protocol import (
 )
 
 PipeDispatcher = Callable[[PipeEnvelope], object]
-PipeNotificationQueue = queue.Queue[PipeEnvelope]
+class PipeNotificationQueue(Protocol):
+    def put_nowait(self, item: PipeEnvelope) -> object: ...
+
+
 PipeNotificationListener = tuple[PipeNotificationQueue, set[str] | None]
 
 

@@ -430,8 +430,8 @@ export function createExplorerSearchController(
     }, 0);
   }
 
-  function closeSearchOverlay(): void {
-    cancelActiveSearch("overlayClosed");
+  function closeSearchOverlay(reason = "overlayClosed"): void {
+    cancelActiveSearch(reason);
     deps.setSearchOverlayVisible(false);
     clearSearchState();
     deps.renderSearchOverlay();
