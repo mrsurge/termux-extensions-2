@@ -94,6 +94,7 @@ EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST: Final = "editor.save.snapshot.req
 EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND: Final = "editor.issues.command"
 EDITOR_RPC_NOTIFICATION_FIND_COMMAND: Final = "editor.find.command"
 EDITOR_RPC_NOTIFICATION_EDIT_COMMAND: Final = "editor.edit.command"
+EDITOR_RPC_NOTIFICATION_SEARCH_HIGHLIGHT: Final = "editor.search.highlight"
 EDITOR_RPC_NOTIFICATION_OPEN_STATE_CHANGED: Final = "editor.openState.changed"
 EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHING: Final = "editor.project.switching"
 EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHED: Final = "editor.project.switched"
@@ -122,6 +123,7 @@ EditorRpcNotification = Literal[
     "editor.issues.command",
     "editor.find.command",
     "editor.edit.command",
+    "editor.search.highlight",
     "editor.openState.changed",
     "editor.project.switching",
     "editor.project.switched",

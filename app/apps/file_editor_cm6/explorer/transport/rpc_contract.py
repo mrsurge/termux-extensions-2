@@ -75,6 +75,8 @@ DISPATCHER_MESSAGE_TYPE_BY_RPC_METHOD: dict[str, str] = {
     "explorer.search.cancel": "search:cancel",
     "explorer.search.benchmark.frontendResult": "search:benchmarkFrontendResult",
     "explorer.search.benchmark.run": "search:benchmarkRun",
+    "explorer.search.highlight.clear": "search:highlight_clear",
+    "explorer.search.highlight.set": "search:highlight_set",
     "explorer.search.more": "search:more",
     "explorer.search.moreInFile": "search:moreInFile",
     "explorer.search.run": "search:run",

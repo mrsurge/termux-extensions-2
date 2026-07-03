@@ -1,6 +1,6 @@
-import { getErrorMessage } from '../utils/errors.ts';
-import { requestExplorerRpc } from '../rpc/client.ts';
-import { EXPLORER_RPC_METHODS } from '../rpc/contract.ts';
+import { getErrorMessage } from "../utils/errors.ts";
+import { requestExplorerRpc } from "../rpc/client.ts";
+import { EXPLORER_RPC_METHODS } from "../rpc/contract.ts";
 
 export interface ExplorerJumpOptions {
   column?: number;
@@ -29,27 +29,25 @@ function toOpenOptions(
   jumpOptions: ExplorerJumpOptions,
 ): ExplorerFileOpenOptions {
   const openOptions: ExplorerFileOpenOptions = {};
-  if (typeof lineNumber === 'number' && lineNumber >= 1) {
+  if (typeof lineNumber === "number" && lineNumber >= 1) {
     openOptions.line = lineNumber;
   }
-  if (typeof jumpOptions.column === 'number' && jumpOptions.column >= 1) {
+  if (typeof jumpOptions.column === "number" && jumpOptions.column >= 1) {
     openOptions.column = jumpOptions.column;
   }
-  if (Object.prototype.hasOwnProperty.call(jumpOptions, 'focus')) {
+  if (Object.prototype.hasOwnProperty.call(jumpOptions, "focus")) {
     openOptions.focus = Boolean(jumpOptions.focus);
   }
-  if (Object.prototype.hasOwnProperty.call(jumpOptions, 'scrollToTop')) {
+  if (Object.prototype.hasOwnProperty.call(jumpOptions, "scrollToTop")) {
     openOptions.scrollToTop = Boolean(jumpOptions.scrollToTop);
   }
-  if (typeof jumpOptions.scrollY === 'string') {
+  if (typeof jumpOptions.scrollY === "string") {
     openOptions.scrollY = jumpOptions.scrollY;
   }
   return openOptions;
 }
 
-export function createExplorerFileOpenBridge(
-  deps: ExplorerFileOpenBridgeDeps,
-) {
+export function createExplorerFileOpenBridge(deps: ExplorerFileOpenBridgeDeps) {
   async function openFileAndMaybeJump(
     rel: string,
     lineNumber: number | null = null,
@@ -61,7 +59,7 @@ export function createExplorerFileOpenBridge(
       try {
         await deps.expandToFile(rel);
       } catch (error) {
-        console.warn('[Explorer] Failed to expand tree before open:', error);
+        console.warn("[Explorer] Failed to expand tree before open:", error);
       }
       await requestExplorerRpc(EXPLORER_RPC_METHODS.editorOpen, {
         rel,
@@ -71,7 +69,9 @@ export function createExplorerFileOpenBridge(
 
       deps.closeDrawerIfMobile();
     } catch (error) {
-      deps.toast(`Failed to open file: ${getErrorMessage(error, 'unknown error')}`);
+      deps.toast(
+        `Failed to open file: ${getErrorMessage(error, "unknown error")}`,
+      );
     }
   }
 

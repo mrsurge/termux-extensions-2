@@ -9,6 +9,7 @@ from ..explorer.services.runtime_notifications import set_explorer_event_loop
 from ..explorer.services.render_state import register_explorer_render_state_bus_handlers
 from ..open_state_events import register_open_state_event_bus_handlers
 from ..project_switch_events import register_project_switch_event_bus_handlers
+from ..search_highlight_events import register_search_highlight_event_bus_handlers
 from ..sidebar_window_events import register_sidebar_window_event_bus_handlers
 from ..wba_event_bridge import start_wba_event_bridge
 from ..workspace_events import register_workspace_event_bus_handlers
@@ -33,6 +34,7 @@ def bootstrap_worker_runtime(loop: asyncio.AbstractEventLoop | None = None) -> N
     register_adapter_lifecycle_event_bus_handlers()
     register_open_state_event_bus_handlers()
     register_project_switch_event_bus_handlers()
+    register_search_highlight_event_bus_handlers()
     register_sidebar_window_event_bus_handlers()
     register_workspace_event_bus_handlers()
     register_explorer_render_state_bus_handlers()

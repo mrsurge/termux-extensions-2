@@ -52,6 +52,7 @@ from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHING,
     EDITOR_RPC_NOTIFICATION_READY,
     EDITOR_RPC_NOTIFICATION_SAVE_SNAPSHOT_REQUEST,
+    EDITOR_RPC_NOTIFICATION_SEARCH_HIGHLIGHT,
     EditorRpcNotification,
 )
 from .editor_rpc_emit import emit_editor_rpc_notification
@@ -526,6 +527,7 @@ def _rpc_notification_for_legacy_event(event_name: str) -> EditorRpcNotification
         "editor:issues_cmd": EDITOR_RPC_NOTIFICATION_ISSUES_COMMAND,
         "editor:find_cmd": EDITOR_RPC_NOTIFICATION_FIND_COMMAND,
         "editor:edit_cmd": EDITOR_RPC_NOTIFICATION_EDIT_COMMAND,
+        "editor:search_highlight": EDITOR_RPC_NOTIFICATION_SEARCH_HIGHLIGHT,
         "editor:agent_edits_changed": EDITOR_RPC_NOTIFICATION_AGENT_EDITS_CHANGED,
     }
     return mapping.get(event_name)
@@ -671,6 +673,10 @@ async def editor_runtime_handle_breadcrumb_navigate(source_client: str, data: di
 
 async def _emit_editor_open_to_default_room(payload: EditorOpenPayload) -> None:
     await editor_runtime_emit_room_event("editor:open", payload)
+
+
+async def emit_editor_search_highlight_from_backend(payload: dict[str, object]) -> None:
+    await editor_runtime_emit_room_event("editor:search_highlight", payload)
 
 
 async def emit_editor_open_from_backend(

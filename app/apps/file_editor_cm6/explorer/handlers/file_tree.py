@@ -189,7 +189,7 @@ async def handle_editor_open(
 
     request_id = msg_id if isinstance(msg_id, str) and msg_id else _make_request_id()
     emit_editor_open = _get_emit_editor_open_from_backend()
-    await emit_editor_open(
+    _ = await emit_editor_open(
         open_payload,
         source_client="explorer_rpc",
         request_id=request_id,

@@ -56,6 +56,20 @@ class SearchCancelParams(TypedDict):
     reason: str
 
 
+class SearchHighlightSetParams(TypedDict):
+    query: str
+    isRegex: bool
+    isCaseSensitive: bool
+    isWholeWords: bool
+    projectRoot: str | None
+    source: str
+
+
+class SearchHighlightClearParams(TypedDict):
+    reason: str
+    source: str
+
+
 class ReviewListParams(TypedDict):
     lightweight: bool
 
@@ -300,6 +314,49 @@ def parse_search_cancel_params(payload: object) -> SearchCancelParams:
         "searchId": search_id,
         "reason": _coerce_string(envelope.get("reason"), "search:cancel reason")
         or "cancelled",
+    }
+
+
+def parse_search_highlight_set_params(payload: object) -> SearchHighlightSetParams:
+    envelope = _as_object(payload)
+    project_root_value = envelope.get("projectRoot")
+    project_root = (
+        _coerce_string(project_root_value, "search:highlight.set projectRoot").strip()
+        if project_root_value is not None
+        else ""
+    )
+    return {
+        "query": _required_string(envelope.get("query"), "search:highlight.set query"),
+        "isRegex": _coerce_bool(envelope.get("isRegex"), default=False),
+        "isCaseSensitive": _coerce_bool(
+            envelope.get("isCaseSensitive"),
+            default=False,
+        ),
+        "isWholeWords": _coerce_bool(envelope.get("isWholeWords"), default=False),
+        "projectRoot": project_root or None,
+        "source": _coerce_string(
+            envelope.get("source"),
+            "search:highlight.set source",
+        )
+        or "explorerSearch",
+    }
+
+
+def parse_search_highlight_clear_params(
+    payload: object,
+) -> SearchHighlightClearParams:
+    envelope = _as_object(payload)
+    return {
+        "reason": _coerce_string(
+            envelope.get("reason"),
+            "search:highlight.clear reason",
+        )
+        or "cleared",
+        "source": _coerce_string(
+            envelope.get("source"),
+            "search:highlight.clear source",
+        )
+        or "explorerSearch",
     }
 
 

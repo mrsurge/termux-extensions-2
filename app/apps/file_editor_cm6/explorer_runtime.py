@@ -962,6 +962,50 @@ class ExplorerDispatcher:
             reply_to=msg_id,
         )
 
+    async def handle_search_highlight_set(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.search_review import (
+            ExplorerSearchReviewContractError,
+            parse_search_highlight_set_params,
+        )
+        from .explorer.handlers.search import handle_search_highlight_set
+
+        try:
+            params = parse_search_highlight_set_params(payload)
+        except ExplorerSearchReviewContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_search_highlight_set(
+            self._build_search_review_context(),
+            params,
+            msg_id,
+        )
+
+    async def handle_search_highlight_clear(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.search_review import (
+            ExplorerSearchReviewContractError,
+            parse_search_highlight_clear_params,
+        )
+        from .explorer.handlers.search import handle_search_highlight_clear
+
+        try:
+            params = parse_search_highlight_clear_params(payload)
+        except ExplorerSearchReviewContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_search_highlight_clear(
+            self._build_search_review_context(),
+            params,
+            msg_id,
+        )
+
     async def handle_search_benchmarkRun(
         self,
         payload: JsonObject,

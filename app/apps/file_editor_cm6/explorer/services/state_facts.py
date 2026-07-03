@@ -43,6 +43,16 @@ class ReviewStatePayload(TypedDict):
     entries: list[JsonObject]
 
 
+class SearchHighlightPayload(TypedDict):
+    active: bool
+    query: str
+    isRegex: bool
+    isCaseSensitive: bool
+    isWholeWords: bool
+    reason: str
+    source: str
+
+
 class WatcherConfigChangedPayload(TypedDict, total=False):
     config: JsonObject
     mode: str
@@ -137,6 +147,20 @@ async def publish_review_state_changed(
 ) -> None:
     await _publish_project_fact(
         "ReviewStateChanged",
+        project_root,
+        source=source,
+        payload=dict(payload),
+    )
+
+
+async def publish_search_highlight_changed(
+    project_root: str | Path,
+    payload: SearchHighlightPayload,
+    *,
+    source: str,
+) -> None:
+    await _publish_project_fact(
+        "SearchHighlightChanged",
         project_root,
         source=source,
         payload=dict(payload),

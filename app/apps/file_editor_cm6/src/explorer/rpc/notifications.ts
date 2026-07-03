@@ -506,10 +506,7 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.projectOpened: {
         const path = getProjectedProjectPath(payload);
         if (path) {
-          const prevProjectPath = deps.runtimeState.getProjectPath() || "";
-          if (prevProjectPath && prevProjectPath !== path) {
-            deps.searchOverlayController.closeSearchOverlay("projectChanged");
-          }
+          deps.searchOverlayController.closeSearchOverlay("projectChanged");
           applyProjectRootProjection(deps, path, { forceReset: true });
           deps.dispatchProjectOpened(path, payload);
           applyBackendOpenStateProjection(deps, payload.openState);
@@ -584,6 +581,10 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.gitPullStarted:
       case EXPLORER_RPC_NOTIFICATIONS.gitCloneStarted: {
         deps.showGitProgressBar(0, "Starting...");
+        break;
+      }
+      case EXPLORER_RPC_NOTIFICATIONS.searchReset: {
+        deps.searchOverlayController.closeSearchOverlay("projectChanged");
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchResultsUpdated: {

@@ -105,6 +105,8 @@ function activeFileKey(file: ExplorerContentSearchFileResult): string {
 export function createExplorerSearchController(
   deps: ExplorerSearchControllerDeps,
 ) {
+  let activeSearchHighlightKey: string | null = null;
+
   function setSearchIdentityFromPayload(payload: unknown): void {
     if (!isRecord(payload)) return;
     const current = deps.getSearchIdentity();
@@ -180,6 +182,51 @@ export function createExplorerSearchController(
     cancelSearchIdentity(identity, reason);
   }
 
+  function sendSearchHighlightClear(reason: string): void {
+    if (activeSearchHighlightKey === null) {
+      return;
+    }
+    activeSearchHighlightKey = null;
+    if (!deps.hasBus()) {
+      return;
+    }
+    try {
+      deps.sendBus(EXPLORER_RPC_METHODS.searchHighlightClear, { reason });
+    } catch (_) {}
+  }
+
+  function syncSearchHighlight(query: string): void {
+    if (
+      deps.getSearchMode() !== "content" ||
+      !deps.getSearchOverlayVisible() ||
+      query.length < 2
+    ) {
+      sendSearchHighlightClear(query.length < 2 ? "queryCleared" : "inactive");
+      return;
+    }
+
+    const options = deps.getContentSearchOptions();
+    const payload: JsonObject = {
+      query,
+      isRegex: options.isRegex,
+      isCaseSensitive: options.isCaseSensitive,
+      isWholeWords: options.isWholeWords,
+      projectRoot: deps.getProjectPath(),
+      source: "explorerSearch",
+    };
+    const nextKey = JSON.stringify(payload);
+    if (activeSearchHighlightKey === nextKey) {
+      return;
+    }
+    activeSearchHighlightKey = nextKey;
+    if (!deps.hasBus()) {
+      return;
+    }
+    try {
+      deps.sendBus(EXPLORER_RPC_METHODS.searchHighlightSet, payload);
+    } catch (_) {}
+  }
+
   function clearSearchState(preserveQuery = false): void {
     if (!preserveQuery) {
       deps.setSearchQuery("");
@@ -195,6 +242,7 @@ export function createExplorerSearchController(
 
   function clearSearchResults(preserveQuery = false): void {
     cancelActiveSearch("cleared");
+    sendSearchHighlightClear("cleared");
     clearSearchState(preserveQuery);
   }
 
@@ -246,6 +294,7 @@ export function createExplorerSearchController(
     }
 
     const payload = preparedPayload || buildSearchPayload(query);
+    syncSearchHighlight(query);
     setSearchIdentityFromPayload(payload);
     deps.setLastKnownProjectPath(deps.getProjectPath());
     deps.setSearchLoading(true);
@@ -284,6 +333,7 @@ export function createExplorerSearchController(
     if (mode === "changes" || mode === "review") return;
     deps.setSearchQuery(query);
     clearTimer();
+    syncSearchHighlight(query);
 
     if (query.length < 2) {
       cancelActiveSearch("queryCleared");
@@ -404,6 +454,7 @@ export function createExplorerSearchController(
     setSearchStatus(null);
     deps.renderSearchOverlay();
     if (deps.getSearchQuery().length >= 2) {
+      syncSearchHighlight(deps.getSearchQuery());
       void performSearch(deps.getSearchQuery());
     } else {
       setTimeout(() => deps.focusSearchInput(), 0);
@@ -418,6 +469,7 @@ export function createExplorerSearchController(
     deps.setSearchOverlayVisible(true);
     deps.setLastKnownProjectPath(deps.getProjectPath());
     deps.renderSearchOverlay();
+    syncSearchHighlight(deps.getSearchQuery());
     setTimeout(() => {
       const mode = deps.getSearchMode();
       if (mode === "changes") {
@@ -432,6 +484,7 @@ export function createExplorerSearchController(
 
   function closeSearchOverlay(reason = "overlayClosed"): void {
     cancelActiveSearch(reason);
+    sendSearchHighlightClear(reason);
     deps.setSearchOverlayVisible(false);
     clearSearchState();
     deps.renderSearchOverlay();

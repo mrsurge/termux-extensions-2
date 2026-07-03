@@ -27,7 +27,7 @@ _event_bus_handlers_registered = False
 
 
 def register_project_switch_event_bus_handlers() -> None:
-    """Register editor/UI projectors for backend project-switch facts."""
+    """Register surface projectors for backend project-switch facts."""
     global _event_bus_handlers_registered
     if _event_bus_handlers_registered:
         return
@@ -74,6 +74,8 @@ async def _emit_project_switch_notification(
 
     await _emit_editor_project_switch(editor_method, payload)
     await _emit_ui_project_switch(ui_method, payload)
+    if phase == "begin":
+        await _emit_explorer_search_reset(payload)
 
 
 def _project_switch_payload(
@@ -143,3 +145,21 @@ async def _emit_ui_project_switch(method: str, payload: JsonObject) -> None:
         await emit_ui_ipc_rpc_notification(method, payload)
     except Exception as exc:
         logger.debug("[project_switch_events] ui emit failed: %s", exc)
+
+
+async def _emit_explorer_search_reset(payload: JsonObject) -> None:
+    try:
+        from .explorer.transport.rpc_emit import emit_explorer_rpc_notification
+
+        await emit_explorer_rpc_notification(
+            "explorer.search.reset",
+            {
+                "reason": "projectSwitch",
+                "projectPath": payload.get("projectPath") or "",
+                "switchId": payload.get("switchId") or "",
+                "source": payload.get("source") or "",
+                "phase": payload.get("phase") or "begin",
+            },
+        )
+    except Exception as exc:
+        logger.debug("[project_switch_events] explorer search reset emit failed: %s", exc)
