@@ -125,7 +125,7 @@ pub(super) fn search_content_parallel_with_options(
         DEFAULT_CONTEXT_CHARS,
         PROVIDER_MAX_CONTEXT_CHARS,
     );
-    let _ = build_content_matcher(&request)?;
+    let matcher = Arc::new(build_content_matcher(&request)?);
 
     let request = Arc::new(request);
     let options = Arc::new(options);
@@ -148,14 +148,8 @@ pub(super) fn search_content_parallel_with_options(
         let next_progress_at = Arc::clone(&next_progress_at);
         let truncated_reason = Arc::clone(&truncated_reason);
         let first_error = Arc::clone(&first_error);
+        let matcher = Arc::clone(&matcher);
 
-        let matcher = match build_content_matcher(&request) {
-            Ok(matcher) => matcher,
-            Err(error) => {
-                set_first_error(&first_error, error);
-                return Box::new(|_| WalkState::Quit);
-            }
-        };
         let mut searcher = SearcherBuilder::new()
             .line_number(true)
             .binary_detection(BinaryDetection::quit(b'\x00'))
@@ -221,13 +215,13 @@ pub(super) fn search_content_parallel_with_options(
             }
 
             let mut sink = ContentSink {
-                matcher: &matcher,
+                matcher: matcher.as_ref(),
                 max_matches_per_file: effective_match_cap,
                 context_chars,
                 matches: Vec::new(),
                 cap_reached: false,
             };
-            match searcher.search_path(&matcher, path, &mut sink) {
+            match searcher.search_path(matcher.as_ref(), path, &mut sink) {
                 Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::Interrupted && sink.cap_reached => {
                     set_parallel_truncation(&truncated_reason, effective_cap_reason);

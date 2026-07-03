@@ -1297,9 +1297,13 @@ fn run_search_benchmark_case(
                 search_threads: 4,
                 duration_ms,
                 first_result_ms,
-                files_scanned: counts.files_scanned,
-                files_matched: counts.files_matched,
-                matches_found: counts.matches_found.max(result.match_count),
+                files_scanned: result.files_scanned.unwrap_or(counts.files_scanned),
+                files_matched: result
+                    .total_file_count
+                    .unwrap_or_else(|| counts.files_matched.max(result.file_count)),
+                matches_found: result
+                    .total_match_count
+                    .unwrap_or_else(|| counts.matches_found.max(result.match_count)),
                 result_batches: result_batches.load(std::sync::atomic::Ordering::Relaxed),
                 cancelled: false,
                 cancellation_reason: None,
@@ -1641,6 +1645,30 @@ mod tests {
         assert_eq!(emitted_matches.load(Ordering::Relaxed), 5);
         assert_eq!(emitted_files.load(Ordering::Relaxed), 5);
         assert_eq!(result_frames.load(Ordering::Relaxed), 5);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn search_benchmark_uses_terminal_totals_without_progress_frame() {
+        let root = test_root("benchmark-terminal-totals");
+        seed_import_rate_fixture(&root);
+
+        let case = SearchBenchmarkCase {
+            case_id: Some("include-py".to_owned()),
+            query: "import".to_owned(),
+            include_patterns: vec!["*.py".to_owned()],
+            use_ignore_files: false,
+            ..Default::default()
+        };
+        let result = run_search_benchmark_case(&root, None, case);
+        let expected_matches = expected_bench_matches(BENCH_GROUP_FILES);
+
+        assert_eq!(result.status, "ok");
+        assert_eq!(result.rust.files_scanned, BENCH_GROUP_FILES);
+        assert_eq!(result.rust.files_matched, BENCH_GROUP_FILES);
+        assert_eq!(result.rust.matches_found, expected_matches);
+        assert_eq!(result.rust.result_batches, BENCH_GROUP_FILES);
 
         let _ = fs::remove_dir_all(root);
     }
