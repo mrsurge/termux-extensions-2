@@ -357,6 +357,35 @@ type SearchBenchmarkCaseResult = {
 };
 ```
 
+`frontend.visibleWindow` is the authoritative UI-fill metric for `fullStack`.
+It is distinct from full-search throughput:
+
+```ts
+type SearchBenchmarkVisibleWindowMetrics = {
+  cap: 50;
+  expectedMatches: number; // min(cap, terminal matchCount)
+  deliveredMatches: number;
+  receivedMatches: number;
+  matchesAtFill: number;
+  filesAtFill: number;
+  firstResultReceivedMs: number | null;
+  lastResultReceivedMs: number | null;
+  filledMs: number | null;
+  deliveryMs: number | null;
+  complete: boolean;
+  rates: {
+    matchesPerSecond: number;
+    deliveryMatchesPerSecond: number | null;
+  };
+};
+```
+
+For broad searches, `filledMs` is the first real frontend result notification
+that reaches the 50-match visible window. For sparse searches, `filledMs` is
+the last result frame once terminal `done` proves all expected matches have
+arrived. Terminal full-search totals remain under
+`frontend.authoritative` / `frontend.scanRates`.
+
 ## Implementation Phases
 
 ### Phase 1: Contract And Backend Skeleton
@@ -430,7 +459,8 @@ Planning/docs scope:
 - Console output is only a summary and must not contain the full matrix.
 - Normal Explorer search should produce no benchmark output.
 - Benchmark results must separate accumulated result-frame counts from terminal `done` counts. Terminal `done` totals are the authoritative completion totals; mismatches mark the case `partial`/`incomplete` instead of `ok`.
-- Result files should include calculated rates such as results, matches, files scanned, and files matched per second at case and lane-summary level.
+- Result files should include calculated full-search rates such as results, matches, files scanned, and files matched per second at case and lane-summary level.
+- Full-stack result files must separately report visible-window fill metrics so frontend speed is calculated from the time to deliver the first visible 50 matches, or all expected matches for sparse searches.
 - Progressive search delivery must preserve required result frames under pressure. Optional progress may drop, but result frames backpressure instead of cancelling the job, and terminal `done` reports pressure metrics.
 
 ## Tracker
@@ -445,8 +475,9 @@ Planning/docs scope:
 | Add frontend full-stack runner              | Done                                  | `window.__te2SearchBenchmark` runs normal content searches and records real `search.job.*` socket/controller timing.                          |
 | Fix benchmark completion accounting         | Done                                  | Done totals are authoritative, accumulated frames stay separate, and mismatches are flagged.                                                  |
 | Add benchmark rate summaries                | Done                                  | Case and lane summaries include calculated result/match/file rates per second.                                                                |
+| Split frontend visible-window fill metrics  | Done                                  | Full-stack cases report `visibleWindow` and lane `visibleWindowRates` separately from full-search scan throughput.                            |
 | Fix progressive search result backpressure  | Done                                  | Required result frames block on full queues; optional progress drops are counted.                                                             |
-| Coalesce no-hit progress traffic            | Done                                  | Hit-bearing results stay atomic; progress/count-only updates coalesce at 16 scanned files.                                                    |
+| Coalesce no-hit progress traffic            | Done                                  | Hit-bearing results stay atomic; progress/count-only updates coalesce at 256 scanned files.                                                   |
 | Add no-filter canary benchmark case         | Done                                  | Generic suite includes `te2_search_canary` to probe targeted progressive hit delivery.                                                        |
 | Compact Python search cache                 | Done                                  | Phase 1: `search_sessions.py` now stores content hits as slots cache records with tuple ranges.                                               |
 | Add typed search boundary conversion        | Done                                  | Phase 2: routed pipe notifications parse into compact search event context objects.                                                           |

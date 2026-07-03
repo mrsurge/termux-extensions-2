@@ -67,6 +67,7 @@ These use the same item/match DTOs, but split delivery into routed notifications
 
 | Method / Notification  | Purpose                                                                                         |
 | ---------------------- | ----------------------------------------------------------------------------------------------- |
+| `search.config.get`    | Return provider search configuration such as calculated/default thread count                    |
 | `search.files.start`   | Start long-running file search, return `SearchJobStarted`                                       |
 | `search.content.start` | Start long-running content search, return `SearchJobStarted`                                    |
 | `search.job.cancel`    | Cancel by `jobId` / `opId`; used by overlay close, project switch, or stale generation teardown |
@@ -91,6 +92,13 @@ Initial UI presentation policy is explicit app policy, not a provider cap:
 - The Python Explorer backend should preserve the full result/cache behind that visible window when the provider has supplied it.
 - The frontend must receive enough metadata to know whether a "more" affordance should be shown for the whole result set or for an individual file.
 - A provider must not silently drop extra matches just because the first visible window is small.
+
+Broad content-search product cap is also explicit app policy:
+
+- Code TE2 sends `maxMatchesTotal: 700` for content search to avoid building unusable thousand-hit UI/cache payloads.
+- This cap must not disable the progressive/parallel search path.
+- When this cap stops provider collection, Rust reports `truncated: true`, `truncatedReason: "matchLimit"`, and `matchLimit: 700` on the terminal result/done metadata.
+- The frontend should tell the user the search stopped at the configured match limit and ask them to narrow the query with text or filters.
 
 Materialization ownership:
 
@@ -221,7 +229,8 @@ Request DTO for `search.content.get`.
   "includePatterns": ["*.ts"],
   "excludePatterns": ["dist/**"],
   "useIgnoreFiles": true,
-  "contextChars": 75
+  "contextChars": 75,
+  "searchThreads": 4
 }
 ```
 
@@ -230,12 +239,39 @@ Rules:
 - `maxFiles`, `maxMatchesPerFile`, `maxMatchesTotal`, and `maxFileSizeBytes` are optional explicit caps. If absent, the provider must not invent a default that truncates content results.
 - `maxFiles` caps returned file groups only when the caller explicitly sends it.
 - `maxMatchesPerFile` caps returned matches inside one file only when the caller explicitly sends it.
-- `maxMatchesTotal` caps returned match rows across all files only when the caller explicitly sends it.
+- `maxMatchesTotal` caps returned match rows across all files only when the caller explicitly sends it. Code TE2 uses this as the broad-search product cap and expects `truncatedReason: "matchLimit"` plus `matchLimit`.
 - `maxFileSizeBytes` skips files above the explicit byte limit only when the caller explicitly sends it.
 - If any explicit cap stops complete collection, the result must set `truncated: true`, identify the truncation reason, and expose a materialization cursor or `searchId`.
 - Hidden global, per-file, total-match, or file-size truncation is invalid for Code TE2 search.
 - `contextChars` defaults to `75` and controls snippet width around the first visible match.
+- `searchThreads` is optional caller policy for progressive/parallel content search. If absent, Rust uses its calculated default.
 - Regex validation errors should be returned as structured pipe errors, not as partial success DTOs.
+
+## `SearchThreadConfig`
+
+Response DTO for `search.config.get`.
+
+```json
+{
+  "dto": "SearchThreadConfig",
+  "version": 1,
+  "availableParallelism": 8,
+  "calculatedSearchThreads": 7,
+  "defaultSearchThreads": 7,
+  "minSearchThreads": 1,
+  "maxSearchThreads": 64,
+  "rustEnvVar": "TE2_RUST_SEARCH_THREADS",
+  "source": "availableParallelismMinusOne"
+}
+```
+
+Rules:
+
+- The default formula is `available_parallelism - 1`, with a floor of `1` and fallback of `4` if the system query fails.
+- `TE2_RUST_SEARCH_THREADS` may override the framework default when the framework itself is launched with it.
+- Code TE2 app workers must not rely on Rust reading `SEARCH_THREADS`; that env var is worker-owned and is propagated by Python as request `searchThreads`.
+- Request-level `searchThreads` wins over the framework default for that job and is clamped by the provider's min/max bounds.
+- `search.config.get` is informational and cheap; it does not start a repository scan.
 
 ## `SearchContentResult`
 
@@ -273,7 +309,8 @@ Response DTO for `search.content.get`.
   "complete": true,
   "totalFileCount": 1,
   "totalMatchCount": 1,
-  "nextGlobalCursor": null
+  "nextGlobalCursor": null,
+  "matchLimit": 700
 }
 ```
 
@@ -289,7 +326,8 @@ Rules:
 - `matchCount` is the number of returned match rows.
 - `truncated` is true if any file/result/provider cap stopped complete collection.
 - `searchId`, `jobId`, `complete`, `totalFileCount`, `totalMatchCount`, and `nextGlobalCursor` are optional additive fields for progressive/materialized results.
-- If `truncated` is caused by a global result cap, the DTO must expose that clearly enough for a UI materialization action, for example `truncatedReason: "maxMatchesTotal"` or a follow-up cursor/job id.
+- If `truncated` is caused by the Code TE2 broad-search product cap, the DTO must expose `truncatedReason: "matchLimit"` and `matchLimit`. This is a stop-and-narrow signal, not a Python materialization cursor.
+- If `truncated` is caused by some other global result cap, the DTO must expose that clearly enough for a UI materialization action, for example `truncatedReason: "maxMatchesTotal"` or a follow-up cursor/job id.
 - If truncation is caused by per-file capping, the provider must expose per-file materialization metadata before Code TE2 should enable that cap.
 - Per-file result objects may include optional progressive metadata: `fileMatchCount`, `matchesReturned`, `fileTruncated`, and `nextMatchCursor`.
 
@@ -347,7 +385,7 @@ Rules:
 
 - Hit-bearing `SearchContentResult` frames are atomic. One matched file is delivered in one routed `search.job.result` notification.
 - Hit-bearing frames must not wait for a batch threshold. If Rust has a matched file, Python should receive it immediately so it can cache/project it.
-- No-hit/progress/count-only notifications may be coalesced. The current Rust provider emits progress at a count-based cadence of 16 scanned files and relies on terminal `search.job.done` for authoritative final counts.
+- No-hit/progress/count-only notifications may be coalesced. The current Rust provider emits progress at a count-based cadence of 256 scanned files and relies on terminal `search.job.done` for authoritative final counts.
 - Progress coalescing is not truncation and must not drop hit-bearing `search.job.result` frames.
 - Consumers must treat each `SearchContentResult` inside `SearchJobResult.result` as an atomic hit file. `fileCount` should normally be `1`; `matchCount` is the match count for that one file, while `totalFileCount` / `totalMatchCount` are running totals when present.
 
@@ -370,6 +408,7 @@ Progressive request DTO for `search.content.start`. It uses the same search fiel
   "excludePatterns": ["dist/**"],
   "useIgnoreFiles": true,
   "contextChars": 75,
+  "searchThreads": 4,
   "presentationWindow": {
     "maxInitialMatchesPerFile": 10,
     "maxInitialMatchesTotal": 50
@@ -382,6 +421,7 @@ Rules:
 - `correlationId` identifies one frontend search action and must be echoed on routed notifications when provided.
 - `presentationWindow` is optional and exists for app/UI projection. It is not a provider stop condition.
 - Explicit provider caps use the same optional fields as `SearchContentRequest`.
+- `searchThreads` uses the same optional per-job semantics as `SearchContentRequest`.
 - The provider should assign and return `jobId` and `searchId` in `SearchJobStarted`.
 
 ## `SearchJobStarted`
@@ -615,8 +655,14 @@ Routed terminal success notification for `search.job.done`.
   "correlationId": "explorer-client-1:search-99",
   "status": "done",
   "fileCount": 167,
-  "matchCount": 12787,
-  "cancelled": false
+  "matchCount": 700,
+  "filesScanned": 9134,
+  "filesMatched": 167,
+  "matchesFound": 700,
+  "cancelled": false,
+  "truncated": true,
+  "truncatedReason": "matchLimit",
+  "matchLimit": 700
 }
 ```
 
@@ -679,6 +725,7 @@ Python is the Explorer adapter and session/cache owner, not the search producer:
 
 - `explorer/search.py::start_file_search(...)` calls `search.files.start` and returns `SearchJobStarted`.
 - `explorer/search.py::start_content_search(...)` calls `search.content.start` and returns `SearchJobStarted`.
+- If the app worker is launched with `SEARCH_THREADS=<positive integer>`, `explorer/search.py::start_content_search(...)` includes that value as request `searchThreads`; explicit frontend/benchmark `searchThreads` wins over the env value.
 - `explorer/search.py::cancel_search_job(...)` calls `search.job.cancel` and returns `SearchJobCancelResult`.
 - `explorer/contracts/search_review.py` owns projection helpers back to the current frontend payload.
 - `explorer/services/search_sessions.py` owns the Python `searchId` cache, result accumulation, visible-window projection, materialization, and stale/cancelled session rejection.
@@ -697,6 +744,7 @@ The progressive cutover uses `pipe_runtime.call_async("search.files.start", ...)
 - [x] Replace Python local provider bodies with pipe calls.
 - [x] Remove local Python/ripgrep search subprocess fallback after pipe cutover is proven.
 - [x] Document progressive search DTOs, presentation-window policy, materialization cursors, and cancel semantics.
-- [ ] Implement progressive `search.files.start` / `search.content.start` jobs.
-- [ ] Implement Python Explorer `explorer.search.more` and `explorer.search.moreInFile` materialization from the backend `searchId` cache.
-- [ ] Wire overlay close, replacement search, and project switch to `search.job.cancel`.
+- [x] Implement progressive `search.files.start` / `search.content.start` jobs.
+- [x] Implement Python Explorer `explorer.search.more` and `explorer.search.moreInFile` materialization from the backend `searchId` cache.
+- [x] Wire overlay close, replacement search, and project switch to `search.job.cancel`.
+- [x] Add optional per-job `searchThreads`, `SEARCH_THREADS` worker-env propagation, and `search.config.get` discovery.
