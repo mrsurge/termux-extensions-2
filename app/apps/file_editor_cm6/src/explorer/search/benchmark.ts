@@ -17,6 +17,7 @@ export interface SearchBenchmarkCaseOptions {
   excludePatterns?: string[];
   useIgnoreFiles?: boolean;
   resultBatching?: SearchResultBatchingOptions;
+  searchThreads?: number;
 }
 
 export interface SearchResultBatchingOptions {
@@ -29,6 +30,7 @@ export interface SearchBenchmarkRunOptions {
   outputPath?: string;
   lanes?: SearchBenchmarkLane[];
   cases?: SearchBenchmarkCaseOptions[];
+  searchThreads?: number;
 }
 
 export interface SearchBenchmarkOneShotOptions extends SearchBenchmarkRunOptions {
@@ -129,6 +131,7 @@ export interface ActualSearchBenchmarkCase {
   includePatterns: string[];
   excludePatterns: string[];
   useIgnoreFiles: boolean;
+  searchThreads?: number;
 }
 
 interface SearchBenchmarkConsoleApi {
@@ -401,8 +404,12 @@ function buildRunPayload(
   if (Array.isArray(options.lanes) && options.lanes.length > 0) {
     payload.lanes = options.lanes;
   }
+  const searchThreads = normalizedPositiveInteger(options.searchThreads);
+  if (searchThreads !== null) payload.searchThreads = searchThreads;
   if (Array.isArray(options.cases) && options.cases.length > 0) {
-    payload.cases = options.cases.map(normalizeCase);
+    payload.cases = options.cases.map((case_) =>
+      normalizeCase(case_, searchThreads),
+    );
   }
   return payload;
 }
@@ -417,33 +424,46 @@ function normalizedCasesForRun(
   mode: SearchBenchmarkMode,
   options: SearchBenchmarkRunOptions,
 ): JsonObject[] {
+  const searchThreads = normalizedPositiveInteger(options.searchThreads);
   if (Array.isArray(options.cases) && options.cases.length > 0) {
-    return options.cases.map(normalizeCase);
+    return options.cases.map((case_) => normalizeCase(case_, searchThreads));
   }
   if (mode === "oneShot") {
     return (
       normalizeOneShot(options as SearchBenchmarkOneShotOptions).cases || []
-    ).map(normalizeCase);
+    ).map((case_) => normalizeCase(case_, searchThreads));
   }
   return [
-    normalizeCase({ caseId: "raw-import", query: "import" }),
-    normalizeCase({
-      caseId: "include-py",
-      query: "import",
-      includePatterns: ["*.py"],
-    }),
-    normalizeCase({
-      caseId: "exclude-ts",
-      query: "import",
-      excludePatterns: ["*.ts"],
-    }),
-    normalizeCase({
-      caseId: "include-under-exclude-ts",
-      query: "import",
-      includePatterns: ["*_*"],
-      excludePatterns: ["*.ts"],
-    }),
-    normalizeCase({ caseId: "te2-search-canary", query: "te2_search_canary" }),
+    normalizeCase({ caseId: "raw-import", query: "import" }, searchThreads),
+    normalizeCase(
+      {
+        caseId: "include-py",
+        query: "import",
+        includePatterns: ["*.py"],
+      },
+      searchThreads,
+    ),
+    normalizeCase(
+      {
+        caseId: "exclude-ts",
+        query: "import",
+        excludePatterns: ["*.ts"],
+      },
+      searchThreads,
+    ),
+    normalizeCase(
+      {
+        caseId: "include-under-exclude-ts",
+        query: "import",
+        includePatterns: ["*_*"],
+        excludePatterns: ["*.ts"],
+      },
+      searchThreads,
+    ),
+    normalizeCase(
+      { caseId: "te2-search-canary", query: "te2_search_canary" },
+      searchThreads,
+    ),
   ];
 }
 
@@ -497,24 +517,27 @@ async function runActualFullStackCase(
       reject,
     };
     pendingActualSearchCases.set(correlationId, pending);
-    deps
-      .runActualSearchCase({
-        suiteId,
-        caseId,
-        correlationId,
-        query,
-        isRegex: rawCase.isRegex === true,
-        isCaseSensitive: rawCase.isCaseSensitive === true,
-        isWholeWords: rawCase.isWholeWords === true,
-        includePatterns: stringArray(rawCase.includePatterns),
-        excludePatterns: stringArray(rawCase.excludePatterns),
-        useIgnoreFiles: rawCase.useIgnoreFiles !== false,
-      })
-      .catch((error: unknown) => {
-        clearTimeout(pending.timeoutId);
-        pendingActualSearchCases.delete(correlationId);
-        reject(error instanceof Error ? error : new Error(String(error)));
-      });
+    const actualCase: ActualSearchBenchmarkCase = {
+      suiteId,
+      caseId,
+      correlationId,
+      query,
+      isRegex: rawCase.isRegex === true,
+      isCaseSensitive: rawCase.isCaseSensitive === true,
+      isWholeWords: rawCase.isWholeWords === true,
+      includePatterns: stringArray(rawCase.includePatterns),
+      excludePatterns: stringArray(rawCase.excludePatterns),
+      useIgnoreFiles: rawCase.useIgnoreFiles !== false,
+    };
+    const searchThreads = numberValue(rawCase.searchThreads);
+    if (searchThreads !== null) {
+      actualCase.searchThreads = Math.max(1, Math.floor(searchThreads));
+    }
+    deps.runActualSearchCase(actualCase).catch((error: unknown) => {
+      clearTimeout(pending.timeoutId);
+      pendingActualSearchCases.delete(correlationId);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
   });
 }
 
@@ -537,13 +560,17 @@ function normalizeOneShot(
         excludePatterns: options.excludePatterns,
         useIgnoreFiles: options.useIgnoreFiles,
         resultBatching: options.resultBatching,
+        searchThreads: options.searchThreads,
       },
     ],
   };
 }
 
-function normalizeCase(value: SearchBenchmarkCaseOptions): JsonObject {
-  return {
+function normalizeCase(
+  value: SearchBenchmarkCaseOptions,
+  defaultSearchThreads: number | null = null,
+): JsonObject {
+  const result: JsonObject = {
     caseId: value.caseId || "case",
     query: value.query,
     isRegex: value.isRegex === true,
@@ -560,6 +587,10 @@ function normalizeCase(value: SearchBenchmarkCaseOptions): JsonObject {
       ? { resultBatching: normalizeResultBatching(value.resultBatching) }
       : {}),
   };
+  const searchThreads =
+    normalizedPositiveInteger(value.searchThreads) ?? defaultSearchThreads;
+  if (searchThreads !== null) result.searchThreads = searchThreads;
+  return result;
 }
 
 function normalizeResultBatching(
@@ -845,6 +876,12 @@ function stringValue(value: unknown): string | null {
 
 function numberValue(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizedPositiveInteger(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const next = Math.floor(value);
+  return next > 0 ? next : null;
 }
 
 function stringArray(value: unknown): string[] {

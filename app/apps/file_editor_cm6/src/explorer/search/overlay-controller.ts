@@ -638,6 +638,12 @@ export function createExplorerSearchOverlayController(
       excludePattern: contentSearchOptions.excludePattern,
       useIgnoreFiles: case_.useIgnoreFiles,
     };
+    if (
+      typeof case_.searchThreads === "number" &&
+      Number.isFinite(case_.searchThreads)
+    ) {
+      payload.searchThreads = Math.max(1, Math.floor(case_.searchThreads));
+    }
     await searchController.performSearch(case_.query, payload);
   }
 

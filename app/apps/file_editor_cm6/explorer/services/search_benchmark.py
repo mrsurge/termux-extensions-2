@@ -44,6 +44,7 @@ class SearchBenchmarkCase(TypedDict):
     excludePatterns: list[str]
     useIgnoreFiles: bool
     resultBatching: JsonObject | None
+    searchThreads: int | None
 
 
 class SearchBenchmarkRunParams(TypedDict):
@@ -54,6 +55,7 @@ class SearchBenchmarkRunParams(TypedDict):
     outputPath: str | None
     lanes: list[BenchmarkLane]
     cases: list[SearchBenchmarkCase]
+    searchThreads: int | None
 
 
 PipeEventQueue = Queue[PipeEnvelope]
@@ -63,7 +65,11 @@ def parse_search_benchmark_run_params(payload: object) -> SearchBenchmarkRunPara
     raw = _object(payload)
     mode = _benchmark_mode(raw.get("mode"))
     suite_id = _string(raw.get("suiteId")) or f"search-benchmark-{int(time.time() * 1000)}"
-    cases = _benchmark_cases(mode, raw.get("cases"))
+    search_threads = _optional_positive_int(
+        raw.get("searchThreads"),
+        "search benchmark searchThreads",
+    )
+    cases = _benchmark_cases(mode, raw.get("cases"), search_threads)
     return {
         "dto": "SearchBenchmarkRunRequest",
         "version": 1,
@@ -72,6 +78,7 @@ def parse_search_benchmark_run_params(payload: object) -> SearchBenchmarkRunPara
         "outputPath": _optional_string(raw.get("outputPath")),
         "lanes": _benchmark_lanes(raw.get("lanes")),
         "cases": cases,
+        "searchThreads": search_threads,
     }
 
 
@@ -183,16 +190,20 @@ async def _run_rust_benchmark(
 ) -> JsonObject:
     result = await pipe_runtime.call_async(
         "search.benchmark.run",
-        {
-            "dto": "SearchBenchmarkRunRequest",
-            "version": 1,
-            "root": str(root),
-            "projectGeneration": project_generation,
-            "mode": params["mode"],
-            "suiteId": params["suiteId"],
-            "cases": [_case_to_pipe(case) for case in params["cases"]],
-            "lanes": ["rustOnly"],
-        },
+        _with_optional_int(
+            {
+                "dto": "SearchBenchmarkRunRequest",
+                "version": 1,
+                "root": str(root),
+                "projectGeneration": project_generation,
+                "mode": params["mode"],
+                "suiteId": params["suiteId"],
+                "cases": [_case_to_pipe(case) for case in params["cases"]],
+                "lanes": ["rustOnly"],
+            },
+            "searchThreads",
+            params["searchThreads"],
+        ),
         target_nid=SEARCH_SERVICE_TARGET_NID,
         target_name=SEARCH_SERVICE_TARGET_NAME,
         workspace_root=str(root),
@@ -410,22 +421,26 @@ async def _start_content_benchmark_case(
 ) -> JsonObject:
     data = await pipe_runtime.call_async(
         "search.content.start",
-        {
-            "dto": "SearchContentStartRequest",
-            "version": 1,
-            "root": str(root),
-            "projectGeneration": project_generation,
-            "correlationId": f"{suite_id}:{lane}:{case['caseId']}",
-            "query": case["query"],
-            "isRegex": case["isRegex"],
-            "isCaseSensitive": case["isCaseSensitive"],
-            "isWholeWords": case["isWholeWords"],
-            "includePatterns": case["includePatterns"],
-            "excludePatterns": case["excludePatterns"],
-            "useIgnoreFiles": case["useIgnoreFiles"],
-            "contextChars": 75,
-            "resultBatching": case["resultBatching"],
-        },
+        _with_optional_int(
+            {
+                "dto": "SearchContentStartRequest",
+                "version": 1,
+                "root": str(root),
+                "projectGeneration": project_generation,
+                "correlationId": f"{suite_id}:{lane}:{case['caseId']}",
+                "query": case["query"],
+                "isRegex": case["isRegex"],
+                "isCaseSensitive": case["isCaseSensitive"],
+                "isWholeWords": case["isWholeWords"],
+                "includePatterns": case["includePatterns"],
+                "excludePatterns": case["excludePatterns"],
+                "useIgnoreFiles": case["useIgnoreFiles"],
+                "contextChars": 75,
+                "resultBatching": case["resultBatching"],
+            },
+            "searchThreads",
+            case["searchThreads"],
+        ),
         target_nid=SEARCH_SERVICE_TARGET_NID,
         target_name=SEARCH_SERVICE_TARGET_NAME,
         workspace_root=str(root),
@@ -818,16 +833,20 @@ def _nullable_rate(count: int, seconds: float) -> float | None:
 
 
 def _case_to_pipe(case: SearchBenchmarkCase) -> JsonObject:
-    return {
-        "caseId": case["caseId"],
-        "query": case["query"],
-        "isRegex": case["isRegex"],
-        "isCaseSensitive": case["isCaseSensitive"],
-        "isWholeWords": case["isWholeWords"],
-        "includePatterns": list(case["includePatterns"]),
-        "excludePatterns": list(case["excludePatterns"]),
-        "useIgnoreFiles": case["useIgnoreFiles"],
-    }
+    return _with_optional_int(
+        {
+            "caseId": case["caseId"],
+            "query": case["query"],
+            "isRegex": case["isRegex"],
+            "isCaseSensitive": case["isCaseSensitive"],
+            "isWholeWords": case["isWholeWords"],
+            "includePatterns": list(case["includePatterns"]),
+            "excludePatterns": list(case["excludePatterns"]),
+            "useIgnoreFiles": case["useIgnoreFiles"],
+        },
+        "searchThreads",
+        case["searchThreads"],
+    )
 
 
 def _benchmark_mode(value: object) -> BenchmarkMode:
@@ -850,23 +869,62 @@ def _benchmark_lanes(value: object) -> list[BenchmarkLane]:
     return lanes
 
 
-def _benchmark_cases(mode: BenchmarkMode, value: object) -> list[SearchBenchmarkCase]:
+def _benchmark_cases(
+    mode: BenchmarkMode,
+    value: object,
+    search_threads: int | None,
+) -> list[SearchBenchmarkCase]:
     if isinstance(value, list) and value:
-        return [_benchmark_case(item, index) for index, item in enumerate(cast(list[object], value))]
+        return [
+            _benchmark_case(item, index, search_threads)
+            for index, item in enumerate(cast(list[object], value))
+        ]
     if mode == "oneShot":
         raise ValueError("oneShot search benchmark requires cases")
     return [
-        _make_case("raw-import", "import", [], []),
-        _make_case("include-py", "import", ["*.py"], []),
-        _make_case("exclude-ts", "import", [], ["*.ts"]),
-        _make_case("include-under-exclude-ts", "import", ["*_*"], ["*.ts"]),
-        _make_case("te2-search-canary", "te2_search_canary", [], []),
+        _make_case("raw-import", "import", [], [], search_threads=search_threads),
+        _make_case(
+            "include-py",
+            "import",
+            ["*.py"],
+            [],
+            search_threads=search_threads,
+        ),
+        _make_case(
+            "exclude-ts",
+            "import",
+            [],
+            ["*.ts"],
+            search_threads=search_threads,
+        ),
+        _make_case(
+            "include-under-exclude-ts",
+            "import",
+            ["*_*"],
+            ["*.ts"],
+            search_threads=search_threads,
+        ),
+        _make_case(
+            "te2-search-canary",
+            "te2_search_canary",
+            [],
+            [],
+            search_threads=search_threads,
+        ),
     ]
 
 
-def _benchmark_case(value: object, index: int) -> SearchBenchmarkCase:
+def _benchmark_case(
+    value: object,
+    index: int,
+    default_search_threads: int | None,
+) -> SearchBenchmarkCase:
     raw = _object(value)
     query = _required_string(raw.get("query"), "search benchmark case query")
+    search_threads = _optional_positive_int(
+        raw.get("searchThreads"),
+        "search benchmark case searchThreads",
+    )
     return _make_case(
         _string(raw.get("caseId")) or f"case-{index + 1}",
         query,
@@ -877,6 +935,9 @@ def _benchmark_case(value: object, index: int) -> SearchBenchmarkCase:
         is_whole_words=_bool(raw.get("isWholeWords")),
         use_ignore_files=_bool(raw.get("useIgnoreFiles"), default=True),
         result_batching=_optional_object(raw.get("resultBatching")),
+        search_threads=search_threads
+        if search_threads is not None
+        else default_search_threads,
     )
 
 
@@ -891,6 +952,7 @@ def _make_case(
     is_whole_words: bool = False,
     use_ignore_files: bool = True,
     result_batching: JsonObject | None = None,
+    search_threads: int | None = None,
 ) -> SearchBenchmarkCase:
     return {
         "caseId": case_id,
@@ -902,6 +964,7 @@ def _make_case(
         "excludePatterns": exclude_patterns,
         "useIgnoreFiles": use_ignore_files,
         "resultBatching": result_batching,
+        "searchThreads": search_threads,
     }
 
 
@@ -964,6 +1027,23 @@ def _string(value: object) -> str:
 def _optional_string(value: object) -> str | None:
     text = _string(value).strip()
     return text or None
+
+
+def _optional_positive_int(value: object, label: str) -> int | None:
+    if value is None:
+        return None
+    result = _int(value)
+    if result is None:
+        raise ValueError(f"{label} must be an integer")
+    if result <= 0:
+        raise ValueError(f"{label} must be positive")
+    return result
+
+
+def _with_optional_int(payload: JsonObject, key: str, value: int | None) -> JsonObject:
+    if value is not None:
+        payload[key] = value
+    return payload
 
 
 def _required_string(value: object, label: str) -> str:

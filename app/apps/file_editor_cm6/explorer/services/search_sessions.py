@@ -114,6 +114,9 @@ class SearchSession:
     content_files: dict[str, CachedContentFile] = field(default_factory=_content_file_map)
     content_order: list[str] = field(default_factory=_content_order_list)
     initial_matches_emitted: int = 0
+    content_match_count: int = 0
+    content_initial_window_match_count: int = 0
+    max_content_file_matches: int = 0
     search_limit_reached: bool = False
     search_limit_reason: str | None = None
     search_match_limit: int | None = None
@@ -480,9 +483,16 @@ class ExplorerSearchSessions:
                     if cached is None:
                         session.content_files[file_result.relative_path] = file_result
                         session.content_order.append(file_result.relative_path)
+                        _add_content_file_counters(session, file_result)
                     else:
+                        old_count = len(cached.matches)
                         cached.matches.extend(file_result.matches)
                         cached.complete_match_count = file_result.complete_match_count
+                        _update_content_file_counters(
+                            session,
+                            old_count=old_count,
+                            new_count=len(cached.matches),
+                        )
             session.complete = _bool(raw.get("complete"), default=session.complete)
 
     def _visible_payload(self, session: SearchSession) -> JsonObject:
@@ -643,10 +653,12 @@ def _project_match(match: CachedContentMatch) -> SearchContentMatch:
 
 
 def _total_content_matches(session: SearchSession) -> int:
-    return sum(len(session.content_files[rel].matches) for rel in session.content_order)
+    return session.content_match_count
 
 
 def _total_window_matches(session: SearchSession, *, max_matches_per_file: int) -> int:
+    if max_matches_per_file == INITIAL_MATCHES_PER_FILE:
+        return session.content_initial_window_match_count
     return sum(
         min(len(session.content_files[rel].matches), max_matches_per_file)
         for rel in session.content_order
@@ -654,9 +666,35 @@ def _total_window_matches(session: SearchSession, *, max_matches_per_file: int) 
 
 
 def _has_file_truncation(session: SearchSession, max_matches_per_file: int) -> bool:
-    return any(
-        len(session.content_files[rel].matches) > max_matches_per_file
-        for rel in session.content_order
+    return session.max_content_file_matches > max_matches_per_file
+
+
+def _add_content_file_counters(
+    session: SearchSession,
+    file_result: CachedContentFile,
+) -> None:
+    match_count = len(file_result.matches)
+    _update_content_file_counters(
+        session,
+        old_count=0,
+        new_count=match_count,
+    )
+
+
+def _update_content_file_counters(
+    session: SearchSession,
+    *,
+    old_count: int,
+    new_count: int,
+) -> None:
+    session.content_match_count += new_count - old_count
+    session.content_initial_window_match_count += min(
+        new_count,
+        INITIAL_MATCHES_PER_FILE,
+    ) - min(old_count, INITIAL_MATCHES_PER_FILE)
+    session.max_content_file_matches = max(
+        session.max_content_file_matches,
+        new_count,
     )
 
 

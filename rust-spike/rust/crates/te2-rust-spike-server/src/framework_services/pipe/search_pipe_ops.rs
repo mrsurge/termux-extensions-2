@@ -19,6 +19,7 @@ pub(super) async fn dispatch_search_request(
     event_sink: Option<Arc<dyn PipeEventSink>>,
 ) -> Option<PipeEnvelope> {
     match request.method.as_deref()? {
+        "search.config.get" => Some(search_config_get(request, responder)),
         "search.files.get" => Some(search_files(request, responder, scheduler).await),
         "search.content.get" => Some(search_content(request, responder, scheduler).await),
         "search.files.start" => {
@@ -31,6 +32,14 @@ pub(super) async fn dispatch_search_request(
         "search.benchmark.run" => Some(search_benchmark_run(request, responder, scheduler).await),
         _ => None,
     }
+}
+
+fn search_config_get(request: &PipeEnvelope, responder: &PipeIdentity) -> PipeEnvelope {
+    encode_result::<search_ops::SearchThreadConfig>(
+        request,
+        responder,
+        Ok(search_ops::search_thread_config()),
+    )
 }
 
 async fn search_files(

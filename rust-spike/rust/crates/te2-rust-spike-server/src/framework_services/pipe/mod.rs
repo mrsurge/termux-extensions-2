@@ -593,6 +593,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatches_search_config_get_to_contract_dto() {
+        let root = test_root("search-config");
+        let response = dispatch_request(
+            targeted_request(
+                "search.config.get",
+                json!({}),
+                &root,
+                2300,
+                "service.search",
+            ),
+            &PipeIdentity {
+                nid: 2300,
+                name: "service.search".to_owned(),
+            },
+            &FrameworkServiceScheduler::default(),
+            None,
+        )
+        .await;
+
+        assert_eq!(response.kind, PipeMessageKind::Response);
+        let result = response.result.expect("config result");
+        assert_eq!(
+            result.get("dto").and_then(|value| value.as_str()),
+            Some("SearchThreadConfig")
+        );
+        assert!(
+            result
+                .get("defaultSearchThreads")
+                .and_then(|value| value.as_u64())
+                .is_some_and(|value| value >= 1)
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
     async fn dispatches_search_content_start_and_routes_result_notifications() {
         let root = test_root("search-progressive");
         for index in 0..20 {

@@ -28,6 +28,7 @@ class SearchRunParams(TypedDict):
     includePattern: str
     excludePattern: str
     useIgnoreFiles: bool
+    searchThreads: int | None
 
 
 class SearchMoreLimit(TypedDict):
@@ -242,6 +243,9 @@ def parse_search_run_params(payload: object) -> SearchRunParams:
             envelope.get("excludePattern"), "search:run excludePattern"
         ),
         "useIgnoreFiles": _coerce_bool(envelope.get("useIgnoreFiles"), default=True),
+        "searchThreads": _optional_positive_int(
+            envelope.get("searchThreads"), "search:run searchThreads"
+        ),
     }
 
 
@@ -455,6 +459,13 @@ def _required_positive_int(value: object, field_name: str) -> int:
     result = _required_int(value, field_name)
     if result <= 0:
         raise ExplorerSearchReviewContractError(f"{field_name} must be positive")
+    return result
+
+
+def _optional_positive_int(value: object, field_name: str) -> int | None:
+    if value is None:
+        return None
+    result = _required_positive_int(value, field_name)
     return result
 
 

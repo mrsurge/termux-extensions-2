@@ -6,7 +6,7 @@ use ignore::{DirEntry, WalkBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    fs, io,
+    env, fs, io,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -27,6 +27,9 @@ const PROVIDER_MAX_RESULTS: usize = 10_000;
 const DEFAULT_CONTEXT_CHARS: usize = 75;
 const PROVIDER_MAX_CONTEXT_CHARS: usize = 500;
 const SEARCH_DTO_VERSION: u16 = 1;
+const MIN_SEARCH_THREADS: usize = 1;
+const MAX_SEARCH_THREADS: usize = 64;
+const RUST_SEARCH_THREADS_ENV: &str = "TE2_RUST_SEARCH_THREADS";
 
 // Provider DTOs originate at this service boundary so pipe/net adapters do not
 // invent transport-specific search schemas.
@@ -151,6 +154,7 @@ pub(crate) struct SearchContentRequest {
     pub(crate) max_file_size_bytes: Option<u64>,
     pub(crate) context_chars: Option<usize>,
     pub(crate) presentation_window: Option<SearchPresentationWindow>,
+    pub(crate) search_threads: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -183,6 +187,7 @@ pub(crate) struct SearchContentStartRequest {
     pub(crate) max_file_size_bytes: Option<u64>,
     pub(crate) context_chars: Option<usize>,
     pub(crate) presentation_window: Option<SearchPresentationWindow>,
+    pub(crate) search_threads: Option<usize>,
 }
 
 impl SearchContentStartRequest {
@@ -205,6 +210,7 @@ impl SearchContentStartRequest {
             max_file_size_bytes: self.max_file_size_bytes,
             context_chars: self.context_chars,
             presentation_window: self.presentation_window,
+            search_threads: self.search_threads,
         }
     }
 }
@@ -494,6 +500,22 @@ pub(crate) struct SearchJobCancelResult {
     pub(crate) reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SearchThreadConfig {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) available_parallelism: Option<usize>,
+    pub(crate) calculated_search_threads: usize,
+    pub(crate) default_search_threads: usize,
+    pub(crate) min_search_threads: usize,
+    pub(crate) max_search_threads: usize,
+    pub(crate) rust_env_var: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rust_env_search_threads: Option<usize>,
+    pub(crate) source: &'static str,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SearchBenchmarkRunRequest {
@@ -503,6 +525,7 @@ pub(crate) struct SearchBenchmarkRunRequest {
     pub(crate) project_generation: Option<u64>,
     pub(crate) mode: Option<String>,
     pub(crate) suite_id: Option<String>,
+    pub(crate) search_threads: Option<usize>,
     #[serde(default)]
     pub(crate) cases: Vec<SearchBenchmarkCase>,
     #[serde(default)]
@@ -534,6 +557,7 @@ pub(crate) struct SearchBenchmarkCase {
     pub(crate) max_matches_total: Option<usize>,
     pub(crate) max_file_size_bytes: Option<u64>,
     pub(crate) context_chars: Option<usize>,
+    pub(crate) search_threads: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -622,6 +646,40 @@ pub(crate) fn validate_contract_metadata(
 
 pub(crate) fn resolved_root_string(root: Option<&str>) -> Result<String, SearchProviderError> {
     resolve_root(root).map(|root| path_to_string(&root))
+}
+
+pub(crate) fn search_thread_config() -> SearchThreadConfig {
+    let available_parallelism = available_parallelism_count();
+    let calculated_search_threads = reduced_core_count(available_parallelism);
+    let rust_env_search_threads = env::var(RUST_SEARCH_THREADS_ENV)
+        .ok()
+        .and_then(|value| parse_search_threads(&value));
+    let default_search_threads = rust_env_search_threads
+        .map(clamp_search_threads)
+        .unwrap_or(calculated_search_threads);
+    SearchThreadConfig {
+        dto: "SearchThreadConfig",
+        version: SEARCH_DTO_VERSION,
+        available_parallelism,
+        calculated_search_threads,
+        default_search_threads,
+        min_search_threads: MIN_SEARCH_THREADS,
+        max_search_threads: MAX_SEARCH_THREADS,
+        rust_env_var: RUST_SEARCH_THREADS_ENV,
+        rust_env_search_threads,
+        source: if rust_env_search_threads.is_some() {
+            "rustEnv"
+        } else {
+            "availableParallelismMinusOne"
+        },
+    }
+}
+
+pub(crate) fn resolve_search_threads(search_threads: Option<usize>) -> usize {
+    search_threads
+        .filter(|value| *value > 0)
+        .map(clamp_search_threads)
+        .unwrap_or_else(|| search_thread_config().default_search_threads)
 }
 
 pub(crate) fn search_files(
@@ -728,6 +786,7 @@ pub(crate) fn run_search_benchmark(
         results.push(run_search_benchmark_case(
             &root,
             request.project_generation,
+            request.search_threads,
             case,
         ));
     }
@@ -1173,6 +1232,26 @@ fn default_true() -> bool {
     true
 }
 
+fn available_parallelism_count() -> Option<usize> {
+    std::thread::available_parallelism()
+        .ok()
+        .map(|count| count.get())
+}
+
+fn reduced_core_count(available_parallelism: Option<usize>) -> usize {
+    available_parallelism
+        .map(|cores| if cores > 1 { cores - 1 } else { 1 })
+        .unwrap_or(4)
+}
+
+fn parse_search_threads(raw: &str) -> Option<usize> {
+    raw.trim().parse::<usize>().ok().filter(|value| *value > 0)
+}
+
+fn clamp_search_threads(value: usize) -> usize {
+    value.clamp(MIN_SEARCH_THREADS, MAX_SEARCH_THREADS)
+}
+
 fn benchmark_mode(mode: Option<&str>) -> Result<&'static str, SearchProviderError> {
     match mode.unwrap_or("genericSuite") {
         "genericSuite" => Ok("genericSuite"),
@@ -1230,6 +1309,7 @@ fn benchmark_cases(
 fn run_search_benchmark_case(
     root: &Path,
     project_generation: Option<u64>,
+    suite_search_threads: Option<usize>,
     case: SearchBenchmarkCase,
 ) -> SearchBenchmarkCaseResult {
     let case_id = case
@@ -1240,6 +1320,7 @@ fn run_search_benchmark_case(
         .unwrap_or_else(|| "one-shot".to_owned());
     let include_patterns = case.include_patterns.clone();
     let exclude_patterns = case.exclude_patterns.clone();
+    let search_threads = resolve_search_threads(case.search_threads.or(suite_search_threads));
     let request = SearchContentRequest {
         root: Some(path_to_string(root)),
         project_generation,
@@ -1255,6 +1336,7 @@ fn run_search_benchmark_case(
         max_matches_total: case.max_matches_total,
         max_file_size_bytes: case.max_file_size_bytes,
         context_chars: case.context_chars,
+        search_threads: Some(search_threads),
         ..Default::default()
     };
     let counts = Arc::new(std::sync::Mutex::new(SearchProgressCounts::default()));
@@ -1294,7 +1376,7 @@ fn run_search_benchmark_case(
             include_patterns,
             exclude_patterns,
             rust: SearchBenchmarkRustMetrics {
-                search_threads: 4,
+                search_threads,
                 duration_ms,
                 first_result_ms,
                 files_scanned: result.files_scanned.unwrap_or(counts.files_scanned),
@@ -1321,7 +1403,7 @@ fn run_search_benchmark_case(
             include_patterns,
             exclude_patterns,
             rust: SearchBenchmarkRustMetrics {
-                search_threads: 4,
+                search_threads,
                 duration_ms,
                 first_result_ms,
                 files_scanned: counts.files_scanned,
@@ -1661,7 +1743,7 @@ mod tests {
             use_ignore_files: false,
             ..Default::default()
         };
-        let result = run_search_benchmark_case(&root, None, case);
+        let result = run_search_benchmark_case(&root, None, None, case);
         let expected_matches = expected_bench_matches(BENCH_GROUP_FILES);
 
         assert_eq!(result.status, "ok");
@@ -1671,6 +1753,35 @@ mod tests {
         assert_eq!(result.rust.result_batches, BENCH_GROUP_FILES);
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn search_benchmark_reports_requested_thread_count() {
+        let root = test_root("benchmark-thread-count");
+        seed_import_fixture(&root);
+
+        let case = SearchBenchmarkCase {
+            case_id: Some("threaded".to_owned()),
+            query: "import".to_owned(),
+            use_ignore_files: false,
+            ..Default::default()
+        };
+        let result = run_search_benchmark_case(&root, None, Some(2), case);
+
+        assert_eq!(result.status, "ok");
+        assert_eq!(result.rust.search_threads, 2);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn search_thread_config_reports_calculated_default() {
+        let config = search_thread_config();
+
+        assert_eq!(config.dto, "SearchThreadConfig");
+        assert!(config.default_search_threads >= MIN_SEARCH_THREADS);
+        assert!(config.default_search_threads <= MAX_SEARCH_THREADS);
+        assert!(config.calculated_search_threads >= MIN_SEARCH_THREADS);
     }
 
     #[test]

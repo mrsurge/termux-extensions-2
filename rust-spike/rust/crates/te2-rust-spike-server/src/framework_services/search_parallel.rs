@@ -12,7 +12,6 @@ use std::{
 use super::*;
 use crate::framework_services::common::path_to_string;
 
-const DEFAULT_PARALLEL_SEARCH_THREADS: usize = 4;
 const DEFAULT_PROGRESS_BATCH_FILES: usize = 256;
 
 // Source copy basis:
@@ -126,6 +125,7 @@ pub(super) fn search_content_parallel_with_options(
         PROVIDER_MAX_CONTEXT_CHARS,
     );
     let matcher = Arc::new(build_content_matcher(&request)?);
+    let search_threads = resolve_search_threads(request.search_threads);
 
     let request = Arc::new(request);
     let options = Arc::new(options);
@@ -136,7 +136,7 @@ pub(super) fn search_content_parallel_with_options(
     let truncated_reason = Arc::new(Mutex::new(None::<String>));
     let first_error = Arc::new(Mutex::new(None::<SearchProviderError>));
 
-    build_parallel_walk(&root, request.use_ignore_files).run(|| {
+    build_parallel_walk(&root, request.use_ignore_files, search_threads).run(|| {
         let root = Arc::clone(&root);
         let request = Arc::clone(&request);
         let options = Arc::clone(&options);
@@ -361,7 +361,11 @@ fn reserve_match_capacity(
     }
 }
 
-fn build_parallel_walk(root: &Path, use_ignore_files: bool) -> ignore::WalkParallel {
+fn build_parallel_walk(
+    root: &Path,
+    use_ignore_files: bool,
+    search_threads: usize,
+) -> ignore::WalkParallel {
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(true)
@@ -371,7 +375,7 @@ fn build_parallel_walk(root: &Path, use_ignore_files: bool) -> ignore::WalkParal
         .git_global(use_ignore_files)
         .git_exclude(use_ignore_files)
         .follow_links(false)
-        .threads(DEFAULT_PARALLEL_SEARCH_THREADS);
+        .threads(search_threads);
     builder.build_parallel()
 }
 

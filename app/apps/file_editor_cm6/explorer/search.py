@@ -1,4 +1,5 @@
 from importlib import import_module
+import os
 from pathlib import Path
 from typing import Literal, Protocol, TypedDict, cast
 
@@ -30,6 +31,7 @@ class CollectDiffFn(Protocol):
 SEARCH_SERVICE_TARGET_NID = 2300
 SEARCH_SERVICE_TARGET_NAME = "service.search"
 SEARCH_SERVICE_ORIGIN_NAME = "file_editor_cm6.explorer.search"
+SEARCH_THREADS_ENV = "SEARCH_THREADS"
 
 
 def _json_object(value: object) -> JsonObject:
@@ -165,26 +167,32 @@ async def start_content_search(
     correlation_id: str,
 ) -> JsonObject:
     """Start framework service.search content search; no local producer or fallback."""
+    request: JsonObject = {
+        "root": str(root),
+        "projectGeneration": project_generation,
+        "correlationId": correlation_id,
+        "query": params["query"],
+        "isRegex": params["isRegex"],
+        "isCaseSensitive": params["isCaseSensitive"],
+        "isWholeWords": params["isWholeWords"],
+        "includePatterns": _parse_glob_patterns(params["includePattern"]),
+        "excludePatterns": _parse_glob_patterns(params["excludePattern"]),
+        "useIgnoreFiles": params["useIgnoreFiles"],
+        "contextChars": 75,
+        "maxMatchesTotal": CONTENT_SEARCH_MATCH_LIMIT,
+        "presentationWindow": {
+            "maxInitialMatchesPerFile": 10,
+            "maxInitialMatchesTotal": 50,
+        },
+    }
+    _put_optional_int(
+        request,
+        "searchThreads",
+        _request_search_threads(params["searchThreads"]),
+    )
     data = await _call_search_provider(
         "search.content.start",
-        {
-            "root": str(root),
-            "projectGeneration": project_generation,
-            "correlationId": correlation_id,
-            "query": params["query"],
-            "isRegex": params["isRegex"],
-            "isCaseSensitive": params["isCaseSensitive"],
-            "isWholeWords": params["isWholeWords"],
-            "includePatterns": _parse_glob_patterns(params["includePattern"]),
-            "excludePatterns": _parse_glob_patterns(params["excludePattern"]),
-            "useIgnoreFiles": params["useIgnoreFiles"],
-            "contextChars": 75,
-            "maxMatchesTotal": CONTENT_SEARCH_MATCH_LIMIT,
-            "presentationWindow": {
-                "maxInitialMatchesPerFile": 10,
-                "maxInitialMatchesTotal": 50,
-            },
-        },
+        request,
         root=root,
         project_generation=project_generation,
         correlation_id=correlation_id,
@@ -193,6 +201,24 @@ async def start_content_search(
     if result.get("dto") != "SearchJobStarted":
         raise RuntimeError("Pipe RPC returned unexpected search.content.start DTO")
     return result
+
+
+def _request_search_threads(explicit: int | None) -> int | None:
+    if explicit is not None and explicit > 0:
+        return explicit
+    raw = os.environ.get(SEARCH_THREADS_ENV)
+    if not raw:
+        return None
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _put_optional_int(payload: JsonObject, key: str, value: int | None) -> None:
+    if value is not None:
+        payload[key] = value
 
 
 async def cancel_search_job(
