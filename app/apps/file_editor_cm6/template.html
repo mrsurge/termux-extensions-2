@@ -28,12 +28,20 @@
     --diff-del-gap: 0px;
     --keyboard-inset: 0px;
     --keyboard-gap: 16px;
+    --explorer-width-default: 430px;
+    --explorer-width-min: 360px;
+    --explorer-width-max: 600px;
+    --explorer-width-effective: clamp(
+      var(--explorer-width-min),
+      var(--explorer-width, var(--explorer-width-default)),
+      var(--explorer-width-max)
+    );
     --agent-width-default: max(400px, 34vw);
     --agent-width-effective: max(
       320px,
       min(
         var(--agent-width, var(--agent-width-default)),
-        calc(100vw - var(--explorer-width, 430px) - 360px)
+        calc(100vw - var(--explorer-width-effective) - 360px)
       )
     );
     /* Font scale control */
@@ -71,7 +79,7 @@
 
   .fe-root.layout-desktop {
     display: grid;
-    grid-template-columns: var(--explorer-width, 430px) minmax(0, 1fr) var(--agent-width-effective);
+    grid-template-columns: var(--explorer-width-effective) minmax(0, 1fr) var(--agent-width-effective);
     grid-template-rows: auto auto 1fr auto;
     height: 100%;
     min-height: 0;
@@ -157,7 +165,7 @@
 
   /* Adjust grid when sidebar is closed */
   .layout-desktop:has(.agent-drawer:not(.open)) {
-    grid-template-columns: var(--explorer-width, 430px) 1fr 0px;
+    grid-template-columns: var(--explorer-width-effective) 1fr 0px;
   }
 
   /* Keep sidebar iframes measurable while hidden (avoid zero-size resizes). */
@@ -371,12 +379,14 @@
   /* Explorer resize handle (vertical, desktop only) */
   .layout-desktop .resize-handle--explorer {
     display: block;
-    width: 5px;
+    width: 10px;
     cursor: col-resize;
     grid-column: 1;
-    grid-row: 3 / 5;
+    grid-row: 2 / 5;
     justify-self: end;
-    margin-left: -5px;
+    margin-left: -10px;
+    z-index: 260;
+    touch-action: none;
   }
 
   /* Agent resize handle (vertical, desktop only) */

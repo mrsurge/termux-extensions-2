@@ -8,8 +8,9 @@ interface LayoutPreferences {
   terminalHeight?: string;
 }
 
-const EXPLORER_MIN_WIDTH = 200;
+const EXPLORER_MIN_WIDTH = 360;
 const EXPLORER_MAX_WIDTH = 600;
+const EXPLORER_DEFAULT_WIDTH = 430;
 const AGENT_MIN_WIDTH = 320;
 const DESKTOP_EDITOR_MIN_WIDTH = 360;
 
@@ -50,12 +51,20 @@ function measuredAgentWidth(): number | null {
   return measured > 0 ? measured : null;
 }
 
+function measuredExplorerWidth(): number | null {
+  const drawer = document.getElementById('fe-drawer');
+  const measured = drawer?.getBoundingClientRect().width || 0;
+  return measured > 0 ? measured : null;
+}
+
 function currentPanelWidth(panel: Exclude<ResizePanel, null>): number {
   if (panel === 'agent') {
     return measuredAgentWidth() || cssPixelProperty('--agent-width') || 400;
   }
   if (panel === 'explorer') {
-    return cssPixelProperty('--explorer-width') || 320;
+    return measuredExplorerWidth() ||
+      cssPixelProperty('--explorer-width') ||
+      EXPLORER_DEFAULT_WIDTH;
   }
   return cssPixelProperty('--terminal-height') || 340;
 }
@@ -68,6 +77,12 @@ function maxAgentWidth(): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function clampedExplorerWidth(value: string | null | undefined): string | null {
+  const parsed = parsePixelValue(value);
+  if (parsed === null) return null;
+  return `${clamp(parsed, EXPLORER_MIN_WIDTH, EXPLORER_MAX_WIDTH)}px`;
 }
 
 export function initResizeManager(): void {
@@ -217,8 +232,9 @@ export function loadLayoutPreferences(): void {
   try {
     const prefs = parseLayoutPreferences(localStorage.getItem('code_cm6_layout_prefs'));
     
-    if (prefs.explorerWidth) {
-      document.documentElement.style.setProperty('--explorer-width', prefs.explorerWidth);
+    const explorerWidth = clampedExplorerWidth(prefs.explorerWidth);
+    if (explorerWidth) {
+      document.documentElement.style.setProperty('--explorer-width', explorerWidth);
     }
     if (prefs.agentWidth) {
       document.documentElement.style.setProperty('--agent-width', prefs.agentWidth);

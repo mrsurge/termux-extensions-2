@@ -551,6 +551,7 @@
   flex-direction: column;
   gap: 8px;
   position: relative;
+  min-width: 0;
 }
 
 .fe-git-row {
@@ -558,6 +559,7 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .fe-git-meta {
@@ -575,18 +577,28 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .fe-git-actions .fe-btn {
   flex: 0 0 auto;
   font-size: calc(0.8rem * var(--chrome-font-scale));
   padding: 5px 10px;
+  max-width: 100%;
 }
 
 .fe-git-status-btn {
   margin-left: auto;
   font-size: calc(0.8rem * var(--chrome-font-scale));
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fe-git-actions .fe-git-status-btn {
+  flex: 1 1 auto;
 }
 
 #fe-git-base-dd,
