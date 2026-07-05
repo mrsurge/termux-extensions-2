@@ -62,6 +62,7 @@ export function createExplorerChromeController(
   deps: ExplorerChromeControllerDeps,
 ) {
   let projectLabelEl: HTMLElement | null = null;
+  let drawerOpenBtn: HTMLElement | null = null;
   let explorerMenuBtn: HTMLElement | null = null;
   let explorerMenuDropdown: HTMLElement | null = null;
   let explorerMenuStickyHeadersItem: HTMLElement | null = null;
@@ -92,9 +93,34 @@ export function createExplorerChromeController(
     explorerMenuDropdown?.classList.remove('show');
   }
 
+  function isDesktopLayout(root: HTMLElement): boolean {
+    return root.classList.contains('layout-desktop');
+  }
+
+  function syncDrawerOpenButton(root: HTMLElement): void {
+    if (!drawerOpenBtn) return;
+    const desktop = isDesktopLayout(root);
+    const explorerOpen = desktop
+      ? !root.classList.contains('explorer-collapsed')
+      : root.classList.contains('drawer-open');
+    const label = explorerOpen ? 'Close Explorer' : 'Open Explorer';
+    drawerOpenBtn.setAttribute('title', label);
+    drawerOpenBtn.setAttribute('aria-label', label);
+    drawerOpenBtn.setAttribute('aria-expanded', explorerOpen ? 'true' : 'false');
+  }
+
   function toggleDrawer(open?: boolean): void {
     const root = document.querySelector('.fe-root');
     if (!(root instanceof HTMLElement)) return;
+    if (isDesktopLayout(root)) {
+      const collapsed =
+        open === undefined ? !root.classList.contains('explorer-collapsed') : !open;
+      root.classList.toggle('explorer-collapsed', collapsed);
+      root.classList.remove('drawer-open');
+      syncDrawerOpenButton(root);
+      window.dispatchEvent(new Event('resize'));
+      return;
+    }
     if (open === undefined) {
       root.classList.toggle('drawer-open');
     } else if (open) {
@@ -102,6 +128,7 @@ export function createExplorerChromeController(
     } else {
       root.classList.remove('drawer-open');
     }
+    syncDrawerOpenButton(root);
   }
 
   function renderProjectLabel(): void {
@@ -321,6 +348,7 @@ export function createExplorerChromeController(
 
   function bindUi(bindings: ExplorerChromeBindings): void {
     projectLabelEl = bindings.projectLabel;
+    drawerOpenBtn = bindings.drawerOpenBtn;
     explorerMenuBtn = bindings.explorerMenuBtn;
     explorerMenuDropdown = bindings.explorerMenuDropdown;
     explorerMenuStickyHeadersItem = bindings.explorerMenuStickyHeadersItem;
@@ -328,8 +356,18 @@ export function createExplorerChromeController(
 
     bindings.drawerClose?.addEventListener('click', () => toggleDrawer(false));
     bindings.drawerBackdrop?.addEventListener('click', () => toggleDrawer(false));
-    bindings.drawerOpenBtn?.addEventListener('click', () => toggleDrawer(true));
+    bindings.drawerOpenBtn?.addEventListener('click', () => {
+      const root = document.querySelector('.fe-root');
+      if (root instanceof HTMLElement && isDesktopLayout(root)) {
+        toggleDrawer();
+      } else {
+        toggleDrawer(true);
+      }
+    });
     bindings.searchBtn?.addEventListener('click', () => deps.openSearchOverlay());
+
+    const root = document.querySelector('.fe-root');
+    if (root instanceof HTMLElement) syncDrawerOpenButton(root);
 
     if (explorerMenuBtn && explorerMenuDropdown) {
       explorerMenuBtn.addEventListener('click', (event) => {
