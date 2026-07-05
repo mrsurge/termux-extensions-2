@@ -3,6 +3,7 @@ use grep_matcher::Matcher;
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::{BinaryDetection, Searcher, SearcherBuilder, Sink, SinkMatch};
 use ignore::{DirEntry, WalkBuilder};
+use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -811,6 +812,10 @@ pub(crate) fn search_content_with_options(
     request: SearchContentRequest,
     options: SearchRunOptions,
 ) -> Result<SearchContentResult, SearchProviderError> {
+    if is_multiline_query(&request.query) {
+        return search_content_multiline_with_options(request, options);
+    }
+
     if options.has_content_result_sink() && request.max_files.is_none() {
         return search_parallel::search_content_parallel_with_options(request, options);
     }
@@ -971,6 +976,185 @@ pub(crate) fn search_content_with_options(
     })
 }
 
+fn search_content_multiline_with_options(
+    request: SearchContentRequest,
+    options: SearchRunOptions,
+) -> Result<SearchContentResult, SearchProviderError> {
+    let root = resolve_root(request.root.as_deref())?;
+    let matcher = build_multiline_content_matcher(&request)?;
+    let include = build_glob_set(&request.include_patterns)?;
+    let exclude = build_glob_set(&request.exclude_patterns)?;
+    let context_chars = cap_usize(
+        request.context_chars,
+        DEFAULT_CONTEXT_CHARS,
+        PROVIDER_MAX_CONTEXT_CHARS,
+    );
+    let mut files = Vec::new();
+    let mut match_count = 0usize;
+    let mut counts = SearchProgressCounts::default();
+    let mut truncated_reason: Option<String> = None;
+    let stream_content_results = options.has_content_result_sink();
+
+    for entry in build_walk(&root, false, request.use_ignore_files) {
+        options.check_cancelled()?;
+        let current_file_count = if stream_content_results {
+            counts.files_matched
+        } else {
+            files.len()
+        };
+        if explicit_cap_reached(current_file_count, request.max_files) {
+            set_truncation_reason(&mut truncated_reason, "maxFiles");
+            break;
+        }
+        if explicit_cap_reached(match_count, request.max_matches_total) {
+            set_truncation_reason(&mut truncated_reason, "matchLimit");
+            break;
+        }
+
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        if !entry_is_file(&entry) {
+            continue;
+        }
+        let path = entry.path();
+        let Some(relative_path) = relative_posix(&root, path) else {
+            continue;
+        };
+        let name = entry_name(&entry);
+        if !path_allowed(&relative_path, &name, &include, &exclude) {
+            continue;
+        }
+        counts.files_scanned += 1;
+        if request
+            .max_file_size_bytes
+            .is_some_and(|max_bytes| is_too_large(path, max_bytes))
+        {
+            set_truncation_reason(&mut truncated_reason, "maxFileSizeBytes");
+            options.emit_progress(counts)?;
+            continue;
+        }
+
+        let bytes = fs::read(path).map_err(|error| SearchProviderError::Io(error.to_string()))?;
+        if bytes.contains(&b'\x00') {
+            options.emit_progress(counts)?;
+            continue;
+        }
+        let content = String::from_utf8_lossy(&bytes);
+        let remaining_total = request
+            .max_matches_total
+            .map(|max_matches| max_matches.saturating_sub(match_count));
+        let effective_match_cap = min_optional(request.max_matches_per_file, remaining_total);
+        let effective_cap_reason = match_cap_reason(request.max_matches_per_file, remaining_total);
+        if explicit_cap_reached(0, effective_match_cap) {
+            set_truncation_reason(&mut truncated_reason, effective_cap_reason);
+            break;
+        }
+
+        let mut matches = Vec::new();
+        let mut file_cap_reached = false;
+        for found in matcher.find_iter(&content) {
+            if effective_match_cap.is_some_and(|max_matches| matches.len() >= max_matches) {
+                file_cap_reached = true;
+                break;
+            }
+            matches.push(content_multiline_match_dto(
+                &content,
+                found.start(),
+                found.end(),
+                context_chars,
+            ));
+            if effective_match_cap.is_some_and(|max_matches| matches.len() >= max_matches) {
+                file_cap_reached = true;
+                break;
+            }
+        }
+        if file_cap_reached {
+            set_truncation_reason(&mut truncated_reason, effective_cap_reason);
+        }
+        if matches.is_empty() {
+            options.emit_progress(counts)?;
+            continue;
+        }
+
+        let matches_returned = matches.len();
+        match_count += matches_returned;
+        counts.files_matched += 1;
+        counts.matches_found = match_count;
+        let file_truncated = file_cap_reached && effective_cap_reason == "maxMatchesPerFile";
+        let file_result = SearchContentFile {
+            path: path_to_string(path),
+            relative_path,
+            file_match_count: Some(matches_returned),
+            matches_returned: Some(matches_returned),
+            file_truncated: Some(file_truncated),
+            next_match_cursor: file_truncated.then(|| matches_returned.to_string()),
+            matches,
+        };
+        if stream_content_results {
+            options.emit_content_result(SearchContentResult {
+                dto: "SearchContentResult",
+                version: SEARCH_DTO_VERSION,
+                root: path_to_string(&root),
+                project_generation: request.project_generation,
+                query: request.query.clone(),
+                search_id: options.search_id.clone(),
+                job_id: options.job_id.clone(),
+                complete: Some(false),
+                total_file_count: Some(counts.files_matched),
+                total_match_count: Some(match_count),
+                files_scanned: Some(counts.files_scanned),
+                next_global_cursor: None,
+                truncated_reason: None,
+                match_limit: request.max_matches_total,
+                file_count: 1,
+                match_count: matches_returned,
+                files: vec![file_result],
+                truncated: false,
+            })?;
+        } else {
+            files.push(file_result);
+        }
+        options.emit_progress(counts)?;
+
+        if request
+            .max_matches_total
+            .is_some_and(|max_matches| match_count >= max_matches)
+        {
+            set_truncation_reason(&mut truncated_reason, "matchLimit");
+            break;
+        }
+    }
+
+    let truncated = truncated_reason.is_some();
+    let result_file_count = if stream_content_results {
+        counts.files_matched
+    } else {
+        files.len()
+    };
+    Ok(SearchContentResult {
+        dto: "SearchContentResult",
+        version: SEARCH_DTO_VERSION,
+        root: path_to_string(&root),
+        project_generation: request.project_generation,
+        query: request.query,
+        search_id: options.search_id,
+        job_id: options.job_id,
+        complete: Some(!truncated),
+        total_file_count: Some(result_file_count),
+        total_match_count: Some(match_count),
+        files_scanned: Some(counts.files_scanned),
+        next_global_cursor: truncated.then(|| result_file_count.to_string()),
+        truncated_reason,
+        match_limit: request.max_matches_total,
+        file_count: files.len(),
+        match_count,
+        files,
+        truncated,
+    })
+}
+
 struct ContentSink<'a> {
     matcher: &'a grep_regex::RegexMatcher,
     max_matches_per_file: Option<usize>,
@@ -1039,6 +1223,47 @@ fn build_content_matcher(
         .map_err(|error| SearchProviderError::InvalidRegex(error.to_string()))
 }
 
+fn build_multiline_content_matcher(
+    request: &SearchContentRequest,
+) -> Result<Regex, SearchProviderError> {
+    let pattern = multiline_content_pattern(request);
+    RegexBuilder::new(&pattern)
+        .case_insensitive(!request.is_case_sensitive)
+        .multi_line(true)
+        .build()
+        .map_err(|error| SearchProviderError::InvalidRegex(error.to_string()))
+}
+
+fn multiline_content_pattern(request: &SearchContentRequest) -> String {
+    let query = normalize_search_newlines(&request.query);
+    let pattern = if request.is_regex {
+        query.replace('\n', r"\r?\n")
+    } else {
+        escaped_multiline_literal_pattern(&query)
+    };
+    if request.is_whole_words {
+        format!(r"\b(?:{pattern})\b")
+    } else {
+        pattern
+    }
+}
+
+fn escaped_multiline_literal_pattern(query: &str) -> String {
+    query
+        .split('\n')
+        .map(regex::escape)
+        .collect::<Vec<_>>()
+        .join(r"\r?\n")
+}
+
+fn normalize_search_newlines(query: &str) -> String {
+    query.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn is_multiline_query(query: &str) -> bool {
+    query.contains('\n') || query.contains('\r')
+}
+
 fn content_match_dto(
     line_number: u64,
     line_text: &str,
@@ -1068,6 +1293,80 @@ fn content_match_dto(
             end: snippet_match_end,
         }],
     }
+}
+
+fn content_multiline_match_dto(
+    text: &str,
+    match_start: usize,
+    match_end: usize,
+    context_chars: usize,
+) -> SearchContentMatch {
+    let (line_start, line_end) = containing_line_span(text, match_start, match_end);
+    let snippet_start = previous_char_boundary(
+        text,
+        line_start.max(match_start.saturating_sub(context_chars)),
+    );
+    let snippet_end =
+        next_char_boundary(text, line_end.min(match_end.saturating_add(context_chars)));
+    let line_text = text.get(line_start..line_end).unwrap_or("").to_owned();
+    let snippet = text
+        .get(snippet_start..snippet_end)
+        .unwrap_or("")
+        .to_owned();
+    let match_text = text.get(match_start..match_end).unwrap_or("").to_owned();
+    SearchContentMatch {
+        line_number: line_number_at_offset(text, match_start),
+        column_number: match_start.saturating_sub(line_start) + 1,
+        line_text,
+        snippet,
+        match_text,
+        line_ranges: vec![SearchTextRange {
+            start: match_start.saturating_sub(line_start),
+            end: match_end.saturating_sub(line_start),
+        }],
+        snippet_ranges: vec![SearchTextRange {
+            start: match_start.saturating_sub(snippet_start),
+            end: match_end.saturating_sub(snippet_start),
+        }],
+    }
+}
+
+fn containing_line_span(text: &str, match_start: usize, match_end: usize) -> (usize, usize) {
+    let start = match_start.min(text.len());
+    let end = match_end.min(text.len());
+    let line_start = text[..start]
+        .rfind('\n')
+        .map(|index| index + 1)
+        .unwrap_or(0);
+    let line_end = text[end..]
+        .find('\n')
+        .map(|index| end + index)
+        .unwrap_or(text.len());
+    (line_start, line_end)
+}
+
+fn line_number_at_offset(text: &str, offset: usize) -> u64 {
+    text[..offset.min(text.len())]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count() as u64
+        + 1
+}
+
+fn previous_char_boundary(text: &str, offset: usize) -> usize {
+    let mut index = offset.min(text.len());
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
+fn next_char_boundary(text: &str, offset: usize) -> usize {
+    let mut index = offset.min(text.len());
+    while index < text.len() && !text.is_char_boundary(index) {
+        index += 1;
+    }
+    index
 }
 
 fn resolve_root(root: Option<&str>) -> Result<PathBuf, SearchProviderError> {
@@ -1659,6 +1958,60 @@ mod tests {
                 "pkg/util_module.py".to_owned(),
             ])
         );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn content_search_multiline_literal_matches_lf_and_crlf() {
+        let root = test_root("multiline-literal");
+        write_file(
+            &root,
+            "src/lf.txt",
+            "alpha\nneedle one\nneedle two\nomega\n",
+        );
+        write_file(
+            &root,
+            "src/crlf.txt",
+            "alpha\r\nneedle one\r\nneedle two\r\nomega\r\n",
+        );
+
+        let mut request = content_request(&root);
+        request.query = "needle one\nneedle two".to_owned();
+        let result = search_content(request).expect("multiline literal search");
+
+        assert_eq!(result.match_count, 2);
+        assert_eq!(
+            result_paths(&result),
+            BTreeSet::from(["src/crlf.txt".to_owned(), "src/lf.txt".to_owned()])
+        );
+        let first_match = &result.files[0].matches[0];
+        assert_eq!(first_match.line_number, 2);
+        assert_eq!(first_match.column_number, 1);
+        assert!(first_match.match_text.contains("needle one"));
+        assert!(first_match.match_text.contains("needle two"));
+        assert_eq!(first_match.snippet_ranges.len(), 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn content_search_multiline_regex_allows_actual_newline() {
+        let root = test_root("multiline-regex");
+        write_file(&root, "src/app.ts", "before\nfoo_123\nbar_456\nafter\n");
+
+        let mut request = content_request(&root);
+        request.query = r"foo_\d+
+bar_\d+"
+            .to_owned();
+        request.is_regex = true;
+        let result = search_content(request).expect("multiline regex search");
+
+        assert_eq!(result.match_count, 1);
+        let found = &result.files[0].matches[0];
+        assert_eq!(found.line_number, 2);
+        assert_eq!(found.column_number, 1);
+        assert_eq!(found.match_text, "foo_123\nbar_456");
 
         let _ = fs::remove_dir_all(root);
     }

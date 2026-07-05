@@ -1,3 +1,11 @@
+import {
+  minimapFindMatch,
+  overviewRulerFindMatchForeground,
+} from "../../../static/vendor/monaco-editor-core/esm/vs/platform/theme/common/colorRegistry.js";
+import {
+  themeColorFromId,
+} from "../../../static/vendor/monaco-editor-core/esm/vs/platform/theme/common/themeService.js";
+
 interface SearchHighlightPayload {
   active: boolean;
   projectPath: string;
@@ -61,6 +69,8 @@ const WORD_SEPARATORS_OPTION_ID = 148;
 const MAX_FIND_DECORATIONS = 1000;
 const MAX_APPLY_ATTEMPTS = 12;
 const APPLY_RETRY_DELAY_MS = 25;
+const MINIMAP_POSITION_INLINE = 1;
+const OVERVIEW_RULER_LANE_CENTER = 2;
 
 let activeCollection: MonacoDecorationCollectionLike | null = null;
 let activeDecorationIds: unknown[] = [];
@@ -150,6 +160,14 @@ function matchDecoration(range: MonacoRangeLike): MonacoDecorationLike {
       className: "findMatch",
       inlineClassName: "findMatchInline",
       showIfCollapsed: true,
+      overviewRuler: {
+        color: themeColorFromId(overviewRulerFindMatchForeground),
+        position: OVERVIEW_RULER_LANE_CENTER,
+      },
+      minimap: {
+        color: themeColorFromId(minimapFindMatch),
+        position: MINIMAP_POSITION_INLINE,
+      },
     },
   };
 }
