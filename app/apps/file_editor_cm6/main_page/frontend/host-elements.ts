@@ -13,8 +13,6 @@ export interface HostElements {
   fileNameEl: HTMLElement;
   fileNameScrollEl: HTMLElement;
   issuesToggleBtn: HTMLButtonElement;
-  issuesPrevBtn: HTMLButtonElement;
-  issuesNextBtn: HTMLButtonElement;
   issuesBadgesEl: HTMLElement;
   statusEl: HTMLElement;
   menuFileBtn: HTMLElement;
@@ -98,8 +96,6 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     fileNameEl: requireEl('#fe-file-name'),
     fileNameScrollEl: requireEl('#fe-file-name-scroll'),
     issuesToggleBtn: requireEl('#fe-issues-toggle') as HTMLButtonElement,
-    issuesPrevBtn: requireEl('#fe-issues-prev') as HTMLButtonElement,
-    issuesNextBtn: requireEl('#fe-issues-next') as HTMLButtonElement,
     issuesBadgesEl: requireEl('#fe-issues-badges'),
     statusEl: requireEl('#fe-status'),
     menuFileBtn: requireEl('#menu-file-btn'),

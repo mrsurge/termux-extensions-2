@@ -59,10 +59,11 @@
 .fe-drawer-head {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--explorer-bg);
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  background: var(--card, #0b0f1a);
+  border-bottom: 1px solid var(--borde #333);
   box-shadow: 0 10px 18px rgba(0, 0, 0, 0.45);
   position: sticky;
   top: 0;

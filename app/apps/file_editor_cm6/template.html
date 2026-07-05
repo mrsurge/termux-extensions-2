@@ -29,21 +29,9 @@
     --keyboard-inset: 0px;
     --keyboard-gap: 16px;
     --explorer-width-default: 430px;
-    --explorer-width-min: 360px;
-    --explorer-width-max: 600px;
-    --explorer-width-effective: clamp(
-      var(--explorer-width-min),
-      var(--explorer-width, var(--explorer-width-default)),
-      var(--explorer-width-max)
-    );
+    --explorer-width-effective: var(--explorer-width, var(--explorer-width-default));
     --agent-width-default: max(400px, 34vw);
-    --agent-width-effective: max(
-      320px,
-      min(
-        var(--agent-width, var(--agent-width-default)),
-        calc(100vw - var(--explorer-width-effective) - 360px)
-      )
-    );
+    --agent-width-effective: var(--agent-width, var(--agent-width-default));
     /* Font scale control */
     --chrome-font-scale: 0.85;  /* Default to Medium */
     --chrome-base-font: calc(14px * var(--chrome-font-scale));
@@ -91,15 +79,15 @@
     grid-template-columns: 0px minmax(0, 1fr) var(--agent-width-effective);
   }
 
-  /* Desktop toolbar sits over the editor/sidebar columns; Explorer owns column 1. */
+  /* Desktop toolbar sits over the editor column; side rails own their full height. */
   .layout-desktop .fe-toolbar {
-    grid-column: 2 / -1;
+    grid-column: 2;
     grid-row: 1;
   }
 
-  /* Menubar only on right side (columns 2-3) */
+  /* Menubar stays with the editor column; side rails own columns 1 and 3. */
   .layout-desktop .fe-menubar {
-    grid-column: 2 / -1;
+    grid-column: 2;
     grid-row: 2;
     z-index: 60; /* Higher than agent-drawer (50) so dropdowns can overlay */
   }
@@ -143,7 +131,7 @@
     overflow: hidden;
   }
 
-  /* Sidebar becomes right rail - now spans rows 3-5 */
+  /* Sidebar becomes a full-height right rail in desktop mode. */
   .layout-desktop .agent-drawer {
     position: static !important;
     transform: none !important;
@@ -152,7 +140,7 @@
     bottom: auto;
     width: 100% !important;
     grid-column: 3;
-    grid-row: 3 / 5;
+    grid-row: 1 / 5;
     border-left: 1px solid var(--border);
     transition: none !important;
     overflow-y: auto;
@@ -411,13 +399,14 @@
   /* Agent resize handle (vertical, desktop only) */
   .layout-desktop .resize-handle--agent {
     display: block;
-    width: 5px;
+    width: 10px;
     cursor: col-resize;
     grid-column: 3;
-    grid-row: 3 / 5;
+    grid-row: 1 / 5;
     justify-self: start;
-    margin-right: -5px;
+    margin-right: -10px;
     z-index: 220;
+    touch-action: none;
   }
 
   /* Terminal resize handle (horizontal, desktop only - in editor column) */
@@ -603,7 +592,7 @@
     border: 1px solid rgba(59, 130, 246, 0.4);
   }
 
-.fe-drawer-head { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--border); }
+.fe-drawer-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border #333); background: var(--card, #0b0f1a); box-shadow: none; }
   #fe-project-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
   #fe-open-project { margin-left: auto; }
 
@@ -1397,10 +1386,11 @@
   .agent-drawer__header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 18px;
-    border-bottom: 1px solid var(--border);
-    background: rgba(4, 7, 12, 0.9);
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border #333);
+    background: var(--card, #0b0f1a);
+    box-shadow: none;
   }
 
   .agent-drawer__title {
@@ -1915,8 +1905,6 @@
           </div>
 	        <span class="fe-issues">
 	          <button id="fe-issues-toggle" class="fe-btn fe-icon-btn" title="Next issue (Alt+F8)" aria-label="Next issue" disabled>💡</button>
-	          <button id="fe-issues-prev" class="fe-btn fe-icon-btn" title="Previous issue" aria-label="Previous issue" disabled>‹</button>
-	          <button id="fe-issues-next" class="fe-btn fe-icon-btn" title="Next issue" aria-label="Next issue" disabled>›</button>
 	          <span id="fe-issues-badges" class="fe-issues-badge" aria-live="polite"></span>
 	        </span>
 	      </div>

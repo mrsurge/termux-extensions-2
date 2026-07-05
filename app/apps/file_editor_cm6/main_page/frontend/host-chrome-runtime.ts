@@ -36,8 +36,6 @@ export interface HostChromeRuntimeDeps {
   fileNameEl: HTMLElement;
   fileNameScrollEl: HTMLElement;
   issuesToggleBtn: HTMLButtonElement;
-  issuesPrevBtn: HTMLButtonElement;
-  issuesNextBtn: HTMLButtonElement;
   issuesBadgesEl: HTMLElement;
   isMobileLayout: () => boolean;
   basename: (path: string) => string;
@@ -302,8 +300,6 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
   function setIssuesButtonsEnabled(enabled: boolean): void {
     deps.issuesToggleBtn.disabled = !enabled;
     if (!enabled) {
-      deps.issuesPrevBtn.disabled = true;
-      deps.issuesNextBtn.disabled = true;
       deps.issuesBadgesEl.textContent = '';
     }
   }
@@ -538,8 +534,6 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
     if (installed) return;
     installed = true;
     deps.issuesToggleBtn.addEventListener('click', () => { void sendIssuesCmd('next'); });
-    deps.issuesPrevBtn.addEventListener('click', () => { void sendIssuesCmd('prev'); });
-    deps.issuesNextBtn.addEventListener('click', () => { void sendIssuesCmd('next'); });
     initToolbarFileNameDrag(deps.fileNameScrollEl);
   }
 

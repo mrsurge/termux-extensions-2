@@ -8,11 +8,9 @@ interface LayoutPreferences {
   terminalHeight?: string;
 }
 
-const EXPLORER_MIN_WIDTH = 360;
-const EXPLORER_MAX_WIDTH = 600;
 const EXPLORER_DEFAULT_WIDTH = 430;
-const AGENT_MIN_WIDTH = 320;
-const DESKTOP_EDITOR_MIN_WIDTH = 360;
+const AGENT_DEFAULT_WIDTH = 400;
+const PANEL_MIN_WIDTH = 0;
 
 function eventClientPoint(event: MouseEvent | TouchEvent): { clientX: number; clientY: number } {
   const touch = 'touches' in event ? event.touches[0] : null;
@@ -59,7 +57,7 @@ function measuredExplorerWidth(): number | null {
 
 function currentPanelWidth(panel: Exclude<ResizePanel, null>): number {
   if (panel === 'agent') {
-    return measuredAgentWidth() || cssPixelProperty('--agent-width') || 400;
+    return measuredAgentWidth() || cssPixelProperty('--agent-width') || AGENT_DEFAULT_WIDTH;
   }
   if (panel === 'explorer') {
     return measuredExplorerWidth() ||
@@ -69,20 +67,54 @@ function currentPanelWidth(panel: Exclude<ResizePanel, null>): number {
   return cssPixelProperty('--terminal-height') || 340;
 }
 
-function maxAgentWidth(): number {
-  const explorerWidth = cssPixelProperty('--explorer-width') || 430;
-  const available = Math.floor(rootLayoutWidth() - explorerWidth - DESKTOP_EDITOR_MIN_WIDTH);
-  return Math.max(AGENT_MIN_WIDTH, available);
-}
-
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function clampedExplorerWidth(value: string | null | undefined): string | null {
+function effectiveExplorerWidthForMath(): number {
+  const root = document.querySelector<HTMLElement>('.fe-root');
+  if (root?.classList.contains('explorer-collapsed')) return 0;
+  return measuredExplorerWidth() ||
+    cssPixelProperty('--explorer-width') ||
+    EXPLORER_DEFAULT_WIDTH;
+}
+
+function effectiveAgentWidthForMath(): number {
+  const drawer = document.getElementById('agent-drawer');
+  if (!drawer?.classList.contains('open')) return 0;
+  return measuredAgentWidth() ||
+    cssPixelProperty('--agent-width') ||
+    AGENT_DEFAULT_WIDTH;
+}
+
+function maxPanelWidth(panel: Exclude<ResizePanel, null>): number {
+  const rootWidth = Math.floor(rootLayoutWidth());
+  if (panel === 'explorer') {
+    return Math.max(PANEL_MIN_WIDTH, rootWidth - effectiveAgentWidthForMath());
+  }
+  if (panel === 'agent') {
+    return Math.max(PANEL_MIN_WIDTH, rootWidth - effectiveExplorerWidthForMath());
+  }
+  return rootWidth;
+}
+
+function clampedPanelWidth(value: string | null | undefined): string | null {
   const parsed = parsePixelValue(value);
   if (parsed === null) return null;
-  return `${clamp(parsed, EXPLORER_MIN_WIDTH, EXPLORER_MAX_WIDTH)}px`;
+  return `${clamp(parsed, PANEL_MIN_WIDTH, Math.floor(rootLayoutWidth()))}px`;
+}
+
+function fitPersistedSideWidthsToRoot(): void {
+  const rootWidth = Math.floor(rootLayoutWidth());
+  if (rootWidth <= 0) return;
+  const explorerWidth =
+    cssPixelProperty('--explorer-width') || EXPLORER_DEFAULT_WIDTH;
+  const agentWidth = cssPixelProperty('--agent-width') || AGENT_DEFAULT_WIDTH;
+  if (explorerWidth + agentWidth <= rootWidth) return;
+  document.documentElement.style.setProperty(
+    '--agent-width',
+    `${Math.max(PANEL_MIN_WIDTH, rootWidth - explorerWidth)}px`,
+  );
 }
 
 export function initResizeManager(): void {
@@ -177,11 +209,11 @@ export function initResizeManager(): void {
       
       if (panel === 'explorer') {
         const delta = clientX - startPos;
-        const newWidth = clamp(startSize + delta, EXPLORER_MIN_WIDTH, EXPLORER_MAX_WIDTH);
+        const newWidth = clamp(startSize + delta, PANEL_MIN_WIDTH, maxPanelWidth('explorer'));
         document.documentElement.style.setProperty('--explorer-width', `${newWidth}px`);
       } else if (panel === 'agent') {
         const delta = startPos - clientX;
-        const newWidth = clamp(startSize + delta, AGENT_MIN_WIDTH, maxAgentWidth());
+        const newWidth = clamp(startSize + delta, PANEL_MIN_WIDTH, maxPanelWidth('agent'));
         document.documentElement.style.setProperty('--agent-width', `${newWidth}px`);
       } else if (panel === 'terminal') {
         const terminalDrawer = document.getElementById('terminal-drawer');
@@ -232,13 +264,15 @@ export function loadLayoutPreferences(): void {
   try {
     const prefs = parseLayoutPreferences(localStorage.getItem('code_cm6_layout_prefs'));
     
-    const explorerWidth = clampedExplorerWidth(prefs.explorerWidth);
+    const explorerWidth = clampedPanelWidth(prefs.explorerWidth);
     if (explorerWidth) {
       document.documentElement.style.setProperty('--explorer-width', explorerWidth);
     }
-    if (prefs.agentWidth) {
-      document.documentElement.style.setProperty('--agent-width', prefs.agentWidth);
+    const agentWidth = clampedPanelWidth(prefs.agentWidth);
+    if (agentWidth) {
+      document.documentElement.style.setProperty('--agent-width', agentWidth);
     }
+    fitPersistedSideWidthsToRoot();
     if (prefs.terminalHeight) {
       document.documentElement.style.setProperty('--terminal-height', prefs.terminalHeight);
     }
