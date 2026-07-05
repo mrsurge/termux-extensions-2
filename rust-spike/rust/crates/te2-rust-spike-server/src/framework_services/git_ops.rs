@@ -186,6 +186,14 @@ pub(crate) struct GitDiffFile {
     pub(crate) relative_path: String,
     pub(crate) status: String,
     pub(crate) patch: GitTextPayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) content_suppressed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) suppressed_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) display_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) line_byte_limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -224,6 +232,16 @@ pub(crate) struct GitDiffHunksSummary {
     pub(crate) added: usize,
     pub(crate) deleted: usize,
     pub(crate) tracked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) content_suppressed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) suppressed_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) display_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) line_byte_limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -603,14 +621,25 @@ pub(crate) fn git_diff(request: GitProviderRequest) -> Result<GitDiffResult, Git
             request.cached.unwrap_or(false),
             Some(std::slice::from_ref(relative_path)),
         )?;
-        let patch = diff_patch_text(&file_diff)?;
-        if patch.is_empty() {
-            continue;
-        }
+        let status = diff_status_for_path(&file_diff, relative_path);
+        let suppression = diff_content_suppression(&file_diff, &status)?;
+        let patch = if suppression.is_some() {
+            String::new()
+        } else {
+            let patch = diff_patch_text(&file_diff)?;
+            if patch.is_empty() {
+                continue;
+            }
+            patch
+        };
         files.push(GitDiffFile {
             relative_path: relative_path.clone(),
-            status: diff_status_for_path(&file_diff, relative_path),
+            status,
             patch: GitTextPayload::utf8(patch),
+            content_suppressed: suppression.map(|_| true),
+            suppressed_reason: suppression.map(|metadata| metadata.reason.to_owned()),
+            display_text: suppression.map(|metadata| metadata.display_text.to_owned()),
+            line_byte_limit: suppression.and_then(|metadata| metadata.line_byte_limit),
         });
     }
 
@@ -640,11 +669,7 @@ pub(crate) fn git_diff_hunks(
             relative_path,
             base,
             hunks: Vec::new(),
-            summary: GitDiffHunksSummary {
-                added: 0,
-                deleted: 0,
-                tracked: false,
-            },
+            summary: diff_hunks_summary(0, 0, false, None, None),
         });
     };
     let relative_path = single_relative_path(&repo, &raw_root, &request)?;
@@ -655,7 +680,15 @@ pub(crate) fn git_diff_hunks(
         Some(std::slice::from_ref(&relative_path)),
     )?;
     let tracked = path_exists_in_tree(&repo, &base, &relative_path);
-    let (hunks, added, deleted) = diff_hunks_for_path(&diff)?;
+    let status = diff_status_for_path(&diff, &relative_path);
+    let suppression = diff_content_suppression(&diff, &status)?;
+    // Whole-file and minified-style diffs keep rows addressable without copying
+    // pathological line bodies into Python or browser memory.
+    let (hunks, added, deleted) = if suppression.is_some() {
+        (Vec::new(), 0, 0)
+    } else {
+        diff_hunks_for_path(&diff)?
+    };
     Ok(GitDiffHunks {
         dto: "GitDiffHunks",
         version: 1,
@@ -664,11 +697,7 @@ pub(crate) fn git_diff_hunks(
         relative_path,
         base,
         hunks,
-        summary: GitDiffHunksSummary {
-            added,
-            deleted,
-            tracked,
-        },
+        summary: diff_hunks_summary(added, deleted, tracked, Some(status), suppression),
     })
 }
 
@@ -1749,6 +1778,79 @@ fn diff_patch_text(diff: &Diff<'_>) -> Result<String, GitProviderError> {
     Ok(patch)
 }
 
+const MAX_DIFF_LINE_BYTES: usize = 8 * 1024;
+
+#[derive(Debug, Clone, Copy)]
+struct DiffContentSuppression {
+    reason: &'static str,
+    display_text: &'static str,
+    line_byte_limit: Option<usize>,
+}
+
+fn diff_content_suppression(
+    diff: &Diff<'_>,
+    status: &str,
+) -> Result<Option<DiffContentSuppression>, GitProviderError> {
+    match status {
+        "deleted" => {
+            return Ok(Some(DiffContentSuppression {
+                reason: "wholeFileStatusOnly",
+                display_text: "Deleted file",
+                line_byte_limit: None,
+            }));
+        }
+        "untracked" => {
+            return Ok(Some(DiffContentSuppression {
+                reason: "wholeFileStatusOnly",
+                display_text: "Untracked file",
+                line_byte_limit: None,
+            }));
+        }
+        _ => {}
+    }
+    if diff_contains_oversized_body_line(diff)? {
+        return Ok(Some(DiffContentSuppression {
+            reason: "oversizedDiffLine",
+            display_text: "Diff omitted: contains a line over 8 KB",
+            line_byte_limit: Some(MAX_DIFF_LINE_BYTES),
+        }));
+    }
+    Ok(None)
+}
+
+fn diff_contains_oversized_body_line(diff: &Diff<'_>) -> Result<bool, GitProviderError> {
+    let mut oversized = false;
+    diff.print(DiffFormat::Patch, |_delta, _hunk, line| {
+        let origin = line.origin();
+        if matches!(origin, '+' | '>' | '-' | '<' | ' ' | '=')
+            && line.content().len() > MAX_DIFF_LINE_BYTES
+        {
+            oversized = true;
+        }
+        true
+    })?;
+    Ok(oversized)
+}
+
+fn diff_hunks_summary(
+    added: usize,
+    deleted: usize,
+    tracked: bool,
+    status: Option<String>,
+    suppression: Option<DiffContentSuppression>,
+) -> GitDiffHunksSummary {
+    GitDiffHunksSummary {
+        added,
+        deleted,
+        tracked,
+        status,
+        content_suppressed: suppression.map(|_| true),
+        suppressed_reason: suppression.map(|metadata| metadata.reason.to_owned()),
+        display_text: suppression.map(|metadata| metadata.display_text.to_owned()),
+        line_byte_limit: suppression.and_then(|metadata| metadata.line_byte_limit),
+    }
+}
+
 fn diff_hunks_for_path(
     diff: &Diff<'_>,
 ) -> Result<(Vec<GitDiffHunk>, usize, usize), GitProviderError> {
@@ -2193,6 +2295,12 @@ mod tests {
         }
     }
 
+    fn text_payload_value(payload: &GitTextPayload) -> &str {
+        match payload {
+            GitTextPayload::String { value, .. } => value,
+        }
+    }
+
     #[test]
     fn git_summary_uses_git2_repository_data() {
         let root = test_root("summary");
@@ -2290,6 +2398,142 @@ mod tests {
         assert_eq!(diff.project_generation, Some(42));
         assert_eq!(diff.files.len(), 1);
         assert_eq!(diff.files[0].relative_path, "tracked.txt");
+        assert_eq!(diff.files[0].content_suppressed, None);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn git_diff_status_only_suppresses_untracked_and_deleted_bodies() {
+        let root = test_root("diff-status-only");
+        let repo = Repository::init(&root).expect("init repo");
+        fs::write(
+            root.join("deleted.txt"),
+            "deleted sentinel line\nthat should not be copied\n",
+        )
+        .expect("write deleted");
+        commit_all(&repo, "initial commit");
+        fs::remove_file(root.join("deleted.txt")).expect("remove deleted");
+        fs::write(
+            root.join("new.txt"),
+            "untracked sentinel line\nthat should not be copied\n",
+        )
+        .expect("write untracked");
+
+        let mut diff_request = provider_request(&root);
+        diff_request.paths = Some(vec!["deleted.txt".to_owned(), "new.txt".to_owned()]);
+        let diff = git_diff(diff_request).expect("diff");
+        let deleted_file = diff
+            .files
+            .iter()
+            .find(|file| file.relative_path == "deleted.txt")
+            .expect("deleted diff entry");
+        assert_eq!(deleted_file.status, "deleted");
+        assert_eq!(deleted_file.content_suppressed, Some(true));
+        assert_eq!(
+            deleted_file.suppressed_reason.as_deref(),
+            Some("wholeFileStatusOnly")
+        );
+        assert_eq!(deleted_file.display_text.as_deref(), Some("Deleted file"));
+        assert_eq!(text_payload_value(&deleted_file.patch), "");
+
+        let untracked_file = diff
+            .files
+            .iter()
+            .find(|file| file.relative_path == "new.txt")
+            .expect("untracked diff entry");
+        assert_eq!(untracked_file.status, "untracked");
+        assert_eq!(untracked_file.content_suppressed, Some(true));
+        assert_eq!(
+            untracked_file.suppressed_reason.as_deref(),
+            Some("wholeFileStatusOnly")
+        );
+        assert_eq!(
+            untracked_file.display_text.as_deref(),
+            Some("Untracked file")
+        );
+        assert_eq!(text_payload_value(&untracked_file.patch), "");
+
+        let mut deleted_hunks_request = provider_request(&root);
+        deleted_hunks_request.relative_path = Some("deleted.txt".to_owned());
+        let deleted_hunks = git_diff_hunks(deleted_hunks_request).expect("deleted hunks");
+        assert_eq!(deleted_hunks.relative_path, "deleted.txt");
+        assert!(deleted_hunks.hunks.is_empty());
+        assert!(deleted_hunks.summary.tracked);
+        assert_eq!(deleted_hunks.summary.status.as_deref(), Some("deleted"));
+        assert_eq!(deleted_hunks.summary.content_suppressed, Some(true));
+        assert_eq!(
+            deleted_hunks.summary.suppressed_reason.as_deref(),
+            Some("wholeFileStatusOnly")
+        );
+        assert_eq!(
+            deleted_hunks.summary.display_text.as_deref(),
+            Some("Deleted file")
+        );
+
+        let mut untracked_hunks_request = provider_request(&root);
+        untracked_hunks_request.relative_path = Some("new.txt".to_owned());
+        let untracked_hunks = git_diff_hunks(untracked_hunks_request).expect("untracked hunks");
+        assert_eq!(untracked_hunks.relative_path, "new.txt");
+        assert!(untracked_hunks.hunks.is_empty());
+        assert!(!untracked_hunks.summary.tracked);
+        assert_eq!(untracked_hunks.summary.status.as_deref(), Some("untracked"));
+        assert_eq!(untracked_hunks.summary.content_suppressed, Some(true));
+        assert_eq!(
+            untracked_hunks.summary.suppressed_reason.as_deref(),
+            Some("wholeFileStatusOnly")
+        );
+        assert_eq!(
+            untracked_hunks.summary.display_text.as_deref(),
+            Some("Untracked file")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn git_diff_status_only_suppresses_oversized_modified_lines() {
+        let root = test_root("diff-oversized-line");
+        let repo = Repository::init(&root).expect("init repo");
+        fs::write(root.join("minified.js"), "const value = 1;\n").expect("write tracked");
+        commit_all(&repo, "initial commit");
+        let oversized_line = format!(
+            "const value = \"{}\";\n",
+            "x".repeat(MAX_DIFF_LINE_BYTES + 128)
+        );
+        fs::write(root.join("minified.js"), oversized_line).expect("write oversized");
+
+        let mut diff_request = provider_request(&root);
+        diff_request.paths = Some(vec!["minified.js".to_owned()]);
+        let diff = git_diff(diff_request).expect("diff");
+        let file = diff
+            .files
+            .iter()
+            .find(|file| file.relative_path == "minified.js")
+            .expect("oversized diff entry");
+        assert_eq!(file.status, "modified");
+        assert_eq!(file.content_suppressed, Some(true));
+        assert_eq!(file.suppressed_reason.as_deref(), Some("oversizedDiffLine"));
+        assert_eq!(
+            file.display_text.as_deref(),
+            Some("Diff omitted: contains a line over 8 KB")
+        );
+        assert_eq!(file.line_byte_limit, Some(MAX_DIFF_LINE_BYTES));
+        assert_eq!(text_payload_value(&file.patch), "");
+
+        let mut hunks_request = provider_request(&root);
+        hunks_request.relative_path = Some("minified.js".to_owned());
+        let hunks = git_diff_hunks(hunks_request).expect("oversized hunks");
+        assert_eq!(hunks.relative_path, "minified.js");
+        assert!(hunks.hunks.is_empty());
+        assert!(hunks.summary.tracked);
+        assert_eq!(hunks.summary.status.as_deref(), Some("modified"));
+        assert_eq!(hunks.summary.content_suppressed, Some(true));
+        assert_eq!(
+            hunks.summary.suppressed_reason.as_deref(),
+            Some("oversizedDiffLine")
+        );
+        assert_eq!(hunks.summary.line_byte_limit, Some(MAX_DIFF_LINE_BYTES));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -2311,6 +2555,8 @@ mod tests {
         assert_eq!(hunks.relative_path, "tracked.txt");
         assert_eq!(hunks.project_generation, Some(42));
         assert!(hunks.summary.tracked);
+        assert_eq!(hunks.summary.status.as_deref(), Some("modified"));
+        assert_eq!(hunks.summary.content_suppressed, None);
         assert!(hunks.summary.added >= 1);
         assert!(!hunks.hunks.is_empty());
 

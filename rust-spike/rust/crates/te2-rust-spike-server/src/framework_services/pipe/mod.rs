@@ -972,6 +972,43 @@ mod tests {
             Some(7)
         );
 
+        let untracked_diff = dispatch_git(
+            "git.diff",
+            json!({ "root": path_to_string(&root), "paths": ["new.txt"] }),
+            &root,
+        )
+        .await;
+        let untracked_file = untracked_diff
+            .get("files")
+            .and_then(|value| value.as_array())
+            .and_then(|files| files.first())
+            .expect("untracked diff file");
+        assert_eq!(
+            untracked_file
+                .get("status")
+                .and_then(|value| value.as_str()),
+            Some("untracked")
+        );
+        assert_eq!(
+            untracked_file
+                .get("contentSuppressed")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            untracked_file
+                .get("suppressedReason")
+                .and_then(|value| value.as_str()),
+            Some("wholeFileStatusOnly")
+        );
+        assert_eq!(
+            untracked_file
+                .get("patch")
+                .and_then(|patch| patch.get("value"))
+                .and_then(|value| value.as_str()),
+            Some("")
+        );
+
         let mutation = dispatch_git(
             "git.stage",
             json!({ "root": path_to_string(&root), "paths": ["new.txt"] }),
@@ -1044,9 +1081,15 @@ mod tests {
         let repo = git2::Repository::init(&root).expect("init repo");
         fs::write(root.join("tracked.txt"), "tracked\n").expect("write tracked");
         fs::write(root.join("stable.txt"), "stable\n").expect("write stable");
+        fs::write(root.join("minified.js"), "const value = 1;\n").expect("write minified");
         commit_all(&repo, "initial commit");
         fs::write(root.join("tracked.txt"), "tracked\nmodified\n").expect("modify tracked");
         fs::write(root.join("new.txt"), "new\n").expect("write new");
+        fs::write(
+            root.join("minified.js"),
+            format!("const value = \"{}\";\n", "x".repeat(8 * 1024 + 128)),
+        )
+        .expect("write oversized");
 
         let hunks = dispatch_git(
             "git.diff.hunks",
@@ -1061,6 +1104,82 @@ mod tests {
         assert_eq!(
             hunks.get("relativePath").and_then(|value| value.as_str()),
             Some("tracked.txt")
+        );
+
+        let untracked_hunks = dispatch_git(
+            "git.diff.hunks",
+            json!({ "root": path_to_string(&root), "relativePath": "new.txt" }),
+            &root,
+        )
+        .await;
+        let summary = untracked_hunks
+            .get("summary")
+            .and_then(|value| value.as_object())
+            .expect("untracked hunk summary");
+        assert_eq!(
+            summary.get("status").and_then(|value| value.as_str()),
+            Some("untracked")
+        );
+        assert_eq!(
+            summary
+                .get("contentSuppressed")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            summary
+                .get("suppressedReason")
+                .and_then(|value| value.as_str()),
+            Some("wholeFileStatusOnly")
+        );
+        assert_eq!(
+            untracked_hunks
+                .get("hunks")
+                .and_then(|value| value.as_array())
+                .map(Vec::is_empty),
+            Some(true)
+        );
+
+        let oversized_hunks = dispatch_git(
+            "git.diff.hunks",
+            json!({ "root": path_to_string(&root), "relativePath": "minified.js" }),
+            &root,
+        )
+        .await;
+        let oversized_summary = oversized_hunks
+            .get("summary")
+            .and_then(|value| value.as_object())
+            .expect("oversized hunk summary");
+        assert_eq!(
+            oversized_summary
+                .get("status")
+                .and_then(|value| value.as_str()),
+            Some("modified")
+        );
+        assert_eq!(
+            oversized_summary
+                .get("contentSuppressed")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            oversized_summary
+                .get("suppressedReason")
+                .and_then(|value| value.as_str()),
+            Some("oversizedDiffLine")
+        );
+        assert_eq!(
+            oversized_summary
+                .get("lineByteLimit")
+                .and_then(|value| value.as_u64()),
+            Some(8 * 1024)
+        );
+        assert_eq!(
+            oversized_hunks
+                .get("hunks")
+                .and_then(|value| value.as_array())
+                .map(Vec::is_empty),
+            Some(true)
         );
 
         let changes = dispatch_git(

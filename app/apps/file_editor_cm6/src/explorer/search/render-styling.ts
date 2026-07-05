@@ -1,22 +1,10 @@
 import { languageIdFromPath } from "../../../monaco_editor/editor_language_utils.ts";
 import { diffWordsWithSpace } from "../../../vendor/diff/libesm/index.js";
 import hljsCoreModule from "../../../vendor/highlightjs/lib/core.js";
-import bashLanguageModule from "../../../vendor/highlightjs/lib/languages/bash.js";
-import cLanguageModule from "../../../vendor/highlightjs/lib/languages/c.js";
-import cppLanguageModule from "../../../vendor/highlightjs/lib/languages/cpp.js";
-import cssLanguageModule from "../../../vendor/highlightjs/lib/languages/css.js";
-import diffLanguageModule from "../../../vendor/highlightjs/lib/languages/diff.js";
-import goLanguageModule from "../../../vendor/highlightjs/lib/languages/go.js";
-import javaLanguageModule from "../../../vendor/highlightjs/lib/languages/java.js";
-import javascriptLanguageModule from "../../../vendor/highlightjs/lib/languages/javascript.js";
-import jsonLanguageModule from "../../../vendor/highlightjs/lib/languages/json.js";
-import kotlinLanguageModule from "../../../vendor/highlightjs/lib/languages/kotlin.js";
-import markdownLanguageModule from "../../../vendor/highlightjs/lib/languages/markdown.js";
-import pythonLanguageModule from "../../../vendor/highlightjs/lib/languages/python.js";
-import rustLanguageModule from "../../../vendor/highlightjs/lib/languages/rust.js";
-import typescriptLanguageModule from "../../../vendor/highlightjs/lib/languages/typescript.js";
-import xmlLanguageModule from "../../../vendor/highlightjs/lib/languages/xml.js";
-import yamlLanguageModule from "../../../vendor/highlightjs/lib/languages/yaml.js";
+import {
+  HIGHLIGHT_LANGUAGE_FACTORIES,
+  type HljsLanguageFactory,
+} from "./hljs-language-registry.generated.ts";
 import type { ExplorerSearchTextRange } from "./types.ts";
 
 type DiffChangeLike = {
@@ -24,8 +12,6 @@ type DiffChangeLike = {
   added?: boolean;
   removed?: boolean;
 };
-
-type HljsLanguageFactory = (hljs: unknown) => unknown;
 
 interface SearchSnippetOptions {
   ranges?: ExplorerSearchTextRange[];
@@ -57,28 +43,24 @@ interface HljsCoreLike {
 
 const hljs = hljsCoreModule as HljsCoreLike;
 
-const HIGHLIGHT_LANGUAGE_FACTORIES: ReadonlyArray<
-  readonly [string, HljsLanguageFactory]
-> = [
-  ["bash", bashLanguageModule as HljsLanguageFactory],
-  ["shell", bashLanguageModule as HljsLanguageFactory],
-  ["c", cLanguageModule as HljsLanguageFactory],
-  ["cpp", cppLanguageModule as HljsLanguageFactory],
-  ["css", cssLanguageModule as HljsLanguageFactory],
-  ["diff", diffLanguageModule as HljsLanguageFactory],
-  ["go", goLanguageModule as HljsLanguageFactory],
-  ["java", javaLanguageModule as HljsLanguageFactory],
-  ["javascript", javascriptLanguageModule as HljsLanguageFactory],
-  ["json", jsonLanguageModule as HljsLanguageFactory],
-  ["kotlin", kotlinLanguageModule as HljsLanguageFactory],
-  ["markdown", markdownLanguageModule as HljsLanguageFactory],
-  ["python", pythonLanguageModule as HljsLanguageFactory],
-  ["rust", rustLanguageModule as HljsLanguageFactory],
-  ["typescript", typescriptLanguageModule as HljsLanguageFactory],
-  ["xml", xmlLanguageModule as HljsLanguageFactory],
-  ["html", xmlLanguageModule as HljsLanguageFactory],
-  ["yaml", yamlLanguageModule as HljsLanguageFactory],
-];
+const PLAINTEXT_LANGUAGE_IDS = new Set(["", "text", "txt", "plaintext"]);
+
+const HIGHLIGHT_LANGUAGE_OVERRIDES = new Map<string, string>([
+  ["cjs", "javascript"],
+  ["cts", "typescript"],
+  ["htm", "html"],
+  ["js", "javascript"],
+  ["jsx", "javascript"],
+  ["md", "markdown"],
+  ["mdx", "markdown"],
+  ["mjs", "javascript"],
+  ["mts", "typescript"],
+  ["shell", "bash"],
+  ["sh", "bash"],
+  ["ts", "typescript"],
+  ["tsx", "typescript"],
+  ["zsh", "bash"],
+]);
 
 let highlightRuntimeReady = false;
 
@@ -87,9 +69,76 @@ function ensureHighlightRuntime(): void {
     return;
   }
   for (const [languageId, factory] of HIGHLIGHT_LANGUAGE_FACTORIES) {
-    hljs.registerLanguage(languageId, factory);
+    if (hljs.getLanguage?.(languageId)) {
+      continue;
+    }
+    try {
+      hljs.registerLanguage(languageId, factory);
+    } catch (error) {
+      console.warn(
+        "[ExplorerSearch] failed to register highlight language",
+        languageId,
+        error,
+      );
+    }
   }
   highlightRuntimeReady = true;
+}
+
+function normalizeHighlightCandidate(
+  value: string | null | undefined,
+): string | null {
+  const candidate = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\.+/, "");
+  if (PLAINTEXT_LANGUAGE_IDS.has(candidate)) {
+    return null;
+  }
+  return HIGHLIGHT_LANGUAGE_OVERRIDES.get(candidate) || candidate;
+}
+
+function pushHighlightCandidate(
+  candidates: string[],
+  seen: Set<string>,
+  value: string | null | undefined,
+): void {
+  const candidate = normalizeHighlightCandidate(value);
+  if (!candidate || seen.has(candidate)) {
+    return;
+  }
+  seen.add(candidate);
+  candidates.push(candidate);
+}
+
+function highlightCandidatesForPath(
+  filePath: string | null | undefined,
+): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  pushHighlightCandidate(
+    candidates,
+    seen,
+    languageIdFromPath(filePath, null, null),
+  );
+
+  const baseName = String(filePath || "")
+    .split(/[\\/]/)
+    .pop()
+    ?.toLowerCase();
+  if (!baseName) {
+    return candidates;
+  }
+
+  pushHighlightCandidate(candidates, seen, baseName);
+  const parts = baseName.split(".").filter(Boolean);
+  for (let index = 1; index < parts.length; index += 1) {
+    pushHighlightCandidate(candidates, seen, parts.slice(index).join("."));
+  }
+  if (parts.length > 1) {
+    pushHighlightCandidate(candidates, seen, parts.at(-1));
+  }
+  return candidates;
 }
 
 function escapeHtml(text: string): string {
@@ -102,12 +151,13 @@ function escapeHtml(text: string): string {
 function resolveHighlightLanguage(
   filePath: string | null | undefined,
 ): string | null {
-  const languageId = languageIdFromPath(filePath, null, null);
-  if (!languageId || languageId === "plaintext") {
-    return null;
-  }
   ensureHighlightRuntime();
-  return hljs.getLanguage?.(languageId) ? languageId : null;
+  for (const candidate of highlightCandidatesForPath(filePath)) {
+    if (hljs.getLanguage?.(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 function highlightToHtml(
