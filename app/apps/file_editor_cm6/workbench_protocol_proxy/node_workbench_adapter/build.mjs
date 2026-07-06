@@ -26,6 +26,7 @@ const config = {
     "src/extensions/intelligence/structure.ts",
     "src/server/event-bridge.ts",
     "src/server/editor-socket.ts",
+    "src/server/error-format.ts",
     "src/server/request-dispatch.ts",
     "src/server/server.ts",
     "src/server/stdio-protocol.ts",

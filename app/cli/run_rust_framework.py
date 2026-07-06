@@ -12,6 +12,9 @@ import app as app_pkg
 
 
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "console":
+        from app.cli.console_cli import main as console_main
+        return int(console_main(sys.argv[2:]))
     bootstrap = _load_bootstrap_module()
     entry = getattr(bootstrap, "main", None)
     if not callable(entry):

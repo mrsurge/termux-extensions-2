@@ -25,6 +25,7 @@ let _bridgeSocket = null;
 let _workerId = null;
 let _workerLabel = null;
 let _originals = {};
+let _pendingEvals = new Map();
 
 export function getConsoleBridgeStatus() {
   return {
@@ -57,6 +58,7 @@ function _safeSerialize(x) {
 }
 
 function _serializeArg(a) {
+  if (a === undefined) return null;
   try { return JSON.parse(_safeSerialize(a)); }
   catch { return String(a); }
 }
@@ -120,9 +122,28 @@ function _hookErrors() {
   });
 }
 
+function _cleanupEval(reqId) {
+  const pending = _pendingEvals.get(reqId);
+  if (pending) {
+    clearTimeout(pending.timeoutHandle);
+    _pendingEvals.delete(reqId);
+  }
+}
+
 function _hookEval() {
   if (!_bridgeSocket) return;
-  _bridgeSocket.on('console:eval', async ({ reqId, code }) => {
+  _bridgeSocket.on('console:eval', async ({ reqId, code, timeoutSeconds }) => {
+    const timeoutMs = (timeoutSeconds || 20) * 1000 + 2000;
+    let timeoutHandle;
+    let rejectTimeout;
+    const timeoutPromise = new Promise((_, reject) => {
+      rejectTimeout = reject;
+      timeoutHandle = setTimeout(
+        () => reject(new Error('eval_timeout')),
+        timeoutMs,
+      );
+    });
+    _pendingEvals.set(reqId, { timeoutHandle, reject: rejectTimeout });
     try {
       let result;
       try { result = (0, eval)(code); }
@@ -130,7 +151,8 @@ function _hookEval() {
         if (synErr instanceof SyntaxError) result = (0, eval)('(' + code + ')');
         else throw synErr;
       }
-      const value = await Promise.resolve(result);
+      const value = await Promise.race([Promise.resolve(result), timeoutPromise]);
+      _cleanupEval(reqId);
       _bridgeSocket.emit('console:evalResult', {
         workerId: _workerId,
         reqId,
@@ -138,12 +160,25 @@ function _hookEval() {
         value: _serializeArg(value),
       });
     } catch (err) {
+      _cleanupEval(reqId);
+      const errorType = err?.message === 'eval_timeout' ? 'eval_timeout'
+        : err?.message === 'eval_cancelled' ? 'eval_cancelled'
+        : undefined;
       _bridgeSocket.emit('console:evalResult', {
         workerId: _workerId,
         reqId,
         ok: false,
         error: _serializeArg(err),
+        ...(errorType ? { errorType } : {}),
       });
+    }
+  });
+  _bridgeSocket.on('console:evalCancel', ({ reqId }) => {
+    const pending = _pendingEvals.get(reqId);
+    if (pending) {
+      clearTimeout(pending.timeoutHandle);
+      _pendingEvals.delete(reqId);
+      pending.reject(new Error('eval_cancelled'));
     }
   });
 }
@@ -201,6 +236,11 @@ export function initConsoleBridge(opts = {}) {
   });
   if (typeof _bridgeSocket.on === 'function') {
     _bridgeSocket.on('disconnect', () => {
+      for (const [reqId, pending] of _pendingEvals) {
+        clearTimeout(pending.timeoutHandle);
+        pending.reject(new Error('socket_disconnected'));
+      }
+      _pendingEvals.clear();
       _emitBridgeStatus();
     });
   }
@@ -223,6 +263,11 @@ export function initConsoleBridge(opts = {}) {
  */
 export function destroyConsoleBridge() {
   if (!_bridgeActive) return;
+  for (const [reqId, pending] of _pendingEvals) {
+    clearTimeout(pending.timeoutHandle);
+    pending.reject(new Error('bridge_destroyed'));
+  }
+  _pendingEvals.clear();
   for (const level of LEVELS) {
     if (_originals[level]) console[level] = _originals[level];
   }

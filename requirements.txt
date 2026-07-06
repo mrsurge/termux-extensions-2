@@ -3,14 +3,13 @@ starlette
 uvicorn[standard]
 httpx
 websockets
+websocket-client
 msgspec>=0.21.1
 sse-starlette
 simple-websocket
 aiohttp
 anyio
 fastmcp
-flask
-flask-socketio
 framework-shells @ git+https://github.com/mrsurge/framework-shells
 agent-log-server @ git+https://github.com/mrsurge/agent_log_server.git
 libarchive-c>=5.1
@@ -20,11 +19,9 @@ aiofiles>=23.0.0
 watchdog
 git-python
 psutil
-pydantic
 python-socketio
 pyyaml
 werkzeug
-basedpyright
 markdown2
 pygments
 docutils

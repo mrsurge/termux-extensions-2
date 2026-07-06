@@ -10,7 +10,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import type { EditorWbaSocketServer } from "./editor-socket.mjs";
 import type { EventBridgeRuntime } from "./event-bridge";
-import type { AdapterServerState as DispatchServerState, HeapSnapshotResult, WorkbenchLike } from "./request-dispatch";
+import type {
+  AdapterServerState as DispatchServerState,
+  HeapSnapshotResult,
+  WorkbenchLike,
+} from "./request-dispatch";
+import { formatErrorMessage } from "./error-format.mjs";
 
 const { WorkbenchClient } = await import("../client/workbench-client.mjs");
 const bridgeMod = await import("./event-bridge.mjs");
@@ -34,10 +39,7 @@ const {
   encodeStartupBeaconLine,
   parseStdioJsonLine,
 } = stdioMod;
-const {
-  listTextmateGrammars,
-  loadTextmateGrammar,
-} = textmateMod;
+const { listTextmateGrammars, loadTextmateGrammar } = textmateMod;
 
 type AdapterRuntimeConfig = Record<string, unknown> & {
   upstreamHttp: string;
@@ -62,7 +64,10 @@ type JsonRpcEnvelope = Record<string, unknown> & {
   args?: unknown;
 };
 type SyncTraceEvent = Record<string, unknown>;
-type JsonStringifyReplacer = ((this: unknown, key: string, value: unknown) => unknown) | Array<string | number> | null;
+type JsonStringifyReplacer =
+  | ((this: unknown, key: string, value: unknown) => unknown)
+  | Array<string | number>
+  | null;
 interface WebSocketFrame {
   fin: boolean;
   opcode: number;
@@ -73,9 +78,12 @@ type WebSocketSocket = Duplex;
 
 const HOST = process.env.TE2_ADAPTER_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.TE2_ADAPTER_PORT ?? "8001");
-const DEFAULT_CODE_SERVER_SOCKET_PATH = String(process.env.TE2_CODE_SERVER_SOCKET ?? "").trim() || null;
-const DEFAULT_CODE_SERVER_HTTP = process.env.TE2_CODE_SERVER_HTTP ?? "http://localhost";
-const DEFAULT_REMOTE_AUTHORITY = process.env.TE2_REMOTE_AUTHORITY ?? "localhost";
+const DEFAULT_CODE_SERVER_SOCKET_PATH =
+  String(process.env.TE2_CODE_SERVER_SOCKET ?? "").trim() || null;
+const DEFAULT_CODE_SERVER_HTTP =
+  process.env.TE2_CODE_SERVER_HTTP ?? "http://localhost";
+const DEFAULT_REMOTE_AUTHORITY =
+  process.env.TE2_REMOTE_AUTHORITY ?? "localhost";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -86,13 +94,15 @@ function asJsonRpcEnvelope(value: unknown): JsonRpcEnvelope {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return formatErrorMessage(error);
 }
 
 const SYNC_TRACE_ENABLE = String(process.env.TE2_SYNC_TRACE || "") === "1";
 const SYNC_TRACE_MAX = Number(process.env.TE2_SYNC_TRACE_MAX ?? "200");
 const SYNC_TRACE_MIN_MS = Number(process.env.TE2_SYNC_TRACE_MIN_MS ?? "20");
-const SYNC_TRACE_MIN_BYTES = Number(process.env.TE2_SYNC_TRACE_MIN_BYTES ?? String(256 * 1024));
+const SYNC_TRACE_MIN_BYTES = Number(
+  process.env.TE2_SYNC_TRACE_MIN_BYTES ?? String(256 * 1024),
+);
 
 const _BASE_JSON_STRINGIFY = JSON.stringify;
 // With pipe backend, stdout is reserved for <<<RPC>>> responses.
@@ -109,7 +119,10 @@ process.stdout.on("error", (err: NodeJS.ErrnoException) => {
 function _stackTop(skip = 2, limit = 6): string[] {
   try {
     const s = new Error().stack || "";
-    return s.split("\n").slice(skip, skip + limit).map((l) => l.trim());
+    return s
+      .split("\n")
+      .slice(skip, skip + limit)
+      .map((l) => l.trim());
   } catch {
     return [];
   }
@@ -125,7 +138,9 @@ function installSyncTrace(): void {
     remaining -= 1;
     try {
       // Use the baseline stringify to avoid recursion if JSON.stringify is patched.
-      console.log(_BASE_JSON_STRINGIFY({ type: "sync/trace", ts_ms: Date.now(), ...ev }));
+      console.log(
+        _BASE_JSON_STRINGIFY({ type: "sync/trace", ts_ms: Date.now(), ...ev }),
+      );
     } catch {}
   };
 
@@ -150,10 +165,18 @@ function installSyncTrace(): void {
   // JSON.stringify
   try {
     const jsonHooks = JSON as {
-      stringify: (value: unknown, replacer?: JsonStringifyReplacer, space?: string | number) => string | undefined;
+      stringify: (
+        value: unknown,
+        replacer?: JsonStringifyReplacer,
+        space?: string | number,
+      ) => string | undefined;
     };
     const origStringify = jsonHooks.stringify;
-    jsonHooks.stringify = function te2Stringify(value: unknown, replacer?: JsonStringifyReplacer, space?: string | number): string | undefined {
+    jsonHooks.stringify = function te2Stringify(
+      value: unknown,
+      replacer?: JsonStringifyReplacer,
+      space?: string | number,
+    ): string | undefined {
       const start = Date.now();
       let out: string | undefined;
       try {
@@ -161,11 +184,19 @@ function installSyncTrace(): void {
         return out;
       } finally {
         const dur = Date.now() - start;
-        const bytes = typeof out === "string" ? Buffer.byteLength(out, "utf8") : 0;
+        const bytes =
+          typeof out === "string" ? Buffer.byteLength(out, "utf8") : 0;
         if (dur >= SYNC_TRACE_MIN_MS || bytes >= SYNC_TRACE_MIN_BYTES) {
           let kind: string = typeof value;
-          if (value && typeof value === "object") kind = Array.isArray(value) ? "array" : "object";
-          log({ op: "JSON.stringify", dur_ms: dur, out_bytes: bytes, in_kind: kind, stack: _stackTop(3) });
+          if (value && typeof value === "object")
+            kind = Array.isArray(value) ? "array" : "object";
+          log({
+            op: "JSON.stringify",
+            dur_ms: dur,
+            out_bytes: bytes,
+            in_kind: kind,
+            stack: _stackTop(3),
+          });
         }
       }
     };
@@ -186,10 +217,17 @@ function installSyncTrace(): void {
         let inBytes = 0;
         try {
           if (Number.isFinite(totalLength)) inBytes = Number(totalLength) || 0;
-          else if (Array.isArray(list)) inBytes = list.reduce((a, b) => a + (b?.length ?? 0), 0);
+          else if (Array.isArray(list))
+            inBytes = list.reduce((a, b) => a + (b?.length ?? 0), 0);
         } catch {}
         if (dur >= SYNC_TRACE_MIN_MS || outBytes >= SYNC_TRACE_MIN_BYTES) {
-          log({ op: "Buffer.concat", dur_ms: dur, in_bytes: inBytes, out_bytes: outBytes, stack: _stackTop(3) });
+          log({
+            op: "Buffer.concat",
+            dur_ms: dur,
+            in_bytes: inBytes,
+            out_bytes: outBytes,
+            stack: _stackTop(3),
+          });
         }
       }
     };
@@ -232,7 +270,10 @@ function normalizePathParam(params: unknown): string {
   return "";
 }
 
-function normalizeAuthorityParam(params: unknown, fallback = DEFAULT_REMOTE_AUTHORITY): string {
+function normalizeAuthorityParam(
+  params: unknown,
+  fallback = DEFAULT_REMOTE_AUTHORITY,
+): string {
   const p = isRecord(params) ? params : {};
   if (typeof p.authority === "string" && p.authority.trim()) return p.authority;
   if (typeof p.uri === "string" && p.uri.trim()) {
@@ -275,7 +316,11 @@ function wsAcceptValue(secWebSocketKey: string): string {
     .digest("base64");
 }
 
-function wsSendFrame(socket: WebSocketSocket, opcode: number, payloadBuf?: Buffer): void {
+function wsSendFrame(
+  socket: WebSocketSocket,
+  opcode: number,
+  payloadBuf?: Buffer,
+): void {
   const payload = payloadBuf ?? Buffer.alloc(0);
   const len = payload.length;
   let header: Buffer;
@@ -345,14 +390,18 @@ function wsTryReadFrame(buf: Buffer): WebSocketFrame | null {
   if (masked) {
     if (!maskKey) throw new Error("missing ws mask");
     const out = Buffer.alloc(len);
-    for (let i = 0; i < len; i++) out[i] = (payload[i] ?? 0) ^ (maskKey[i & 3] ?? 0);
+    for (let i = 0; i < len; i++)
+      out[i] = (payload[i] ?? 0) ^ (maskKey[i & 3] ?? 0);
     payload = out;
   }
 
   return { fin, opcode, payload, consumed };
 }
 
-async function readJson(req: IncomingMessage, maxBytes = 2 * 1024 * 1024): Promise<unknown | null> {
+async function readJson(
+  req: IncomingMessage,
+  maxBytes = 2 * 1024 * 1024,
+): Promise<unknown | null> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of req) {
@@ -400,12 +449,21 @@ const wsClients = new Set<WebSocketSocket>();
 const eventLog: unknown[] = [];
 const EVENT_LOG_MAX = Number(process.env.TE2_EVENT_LOG_MAX ?? "200");
 
-const EVENT_TRUNC_STR_MAX = Number(process.env.TE2_EVENT_TRUNC_STR_MAX ?? "4096");
-const EVENT_TRUNC_ARR_MAX = Number(process.env.TE2_EVENT_TRUNC_ARR_MAX ?? "200");
+const EVENT_TRUNC_STR_MAX = Number(
+  process.env.TE2_EVENT_TRUNC_STR_MAX ?? "4096",
+);
+const EVENT_TRUNC_ARR_MAX = Number(
+  process.env.TE2_EVENT_TRUNC_ARR_MAX ?? "200",
+);
 
-const HEAP_SNAPSHOT_ENABLE = String(process.env.TE2_HEAP_SNAPSHOT_ENABLE || "") === "1";
-const HEAP_SNAPSHOT_RATIO = Number(process.env.TE2_HEAP_SNAPSHOT_RATIO ?? "0.9");
-const HEAP_SNAPSHOT_INTERVAL_MS = Number(process.env.TE2_HEAP_SNAPSHOT_INTERVAL_MS ?? "1000");
+const HEAP_SNAPSHOT_ENABLE =
+  String(process.env.TE2_HEAP_SNAPSHOT_ENABLE || "") === "1";
+const HEAP_SNAPSHOT_RATIO = Number(
+  process.env.TE2_HEAP_SNAPSHOT_RATIO ?? "0.9",
+);
+const HEAP_SNAPSHOT_INTERVAL_MS = Number(
+  process.env.TE2_HEAP_SNAPSHOT_INTERVAL_MS ?? "1000",
+);
 const HEAP_SNAPSHOT_PATH = process.env.TE2_HEAP_SNAPSHOT_PATH || "";
 const HEAP_SNAPSHOT_DIR = process.env.TE2_HEAP_SNAPSHOT_DIR || "";
 let _heapSnapTimer: NodeJS.Timeout | null = null;
@@ -435,7 +493,8 @@ function bridgeRuntime(): EventBridgeRuntime {
     nowMs,
     wsClientCount: () => wsClients.size,
     wsBroadcastNotification,
-    writePushLine: (payload: unknown) => process.stdout.write(encodePushLine(payload)),
+    writePushLine: (payload: unknown) =>
+      process.stdout.write(encodePushLine(payload)),
     log: (...args: unknown[]) => console.log(...args),
   };
 }
@@ -448,24 +507,32 @@ function buildStatusResult(): Record<string, unknown> {
   return buildBridgeStatusResult(bridgeRuntime());
 }
 
-function logStatus(reason: string, extra: Record<string, unknown> | null = null): void {
+function logStatus(
+  reason: string,
+  extra: Record<string, unknown> | null = null,
+): void {
   logBridgeStatus(bridgeRuntime(), reason, extra);
 }
 
 function scheduleOpenFileSnapshot(): void {
   const openFileSnapEnabled =
-    String(process.env.TE2_OPENFILE_SNAPSHOT_ENABLE || "") === "1"
-    || Object.hasOwn(process.env, "TE2_OPENFILE_SNAPSHOT_AFTER_MS")
-    || Object.hasOwn(process.env, "TE2_OPENFILE_SNAPSHOT_PATH");
+    String(process.env.TE2_OPENFILE_SNAPSHOT_ENABLE || "") === "1" ||
+    Object.hasOwn(process.env, "TE2_OPENFILE_SNAPSHOT_AFTER_MS") ||
+    Object.hasOwn(process.env, "TE2_OPENFILE_SNAPSHOT_PATH");
   if (!openFileSnapEnabled) return;
 
   const snapAfterMs = Number(process.env.TE2_OPENFILE_SNAPSHOT_AFTER_MS ?? "0");
   const snapExit = String(process.env.TE2_OPENFILE_SNAPSHOT_EXIT || "") === "1";
   if (!Number.isFinite(snapAfterMs) || snapAfterMs < 0) return;
 
-  const snapDir = HEAP_SNAPSHOT_DIR || (HEAP_SNAPSHOT_PATH ? path.dirname(HEAP_SNAPSHOT_PATH) : "");
-  const snapPath = process.env.TE2_OPENFILE_SNAPSHOT_PATH
-    || (snapDir ? path.join(snapDir, `te2-openFile-${nowMs()}.heapsnapshot`) : undefined);
+  const snapDir =
+    HEAP_SNAPSHOT_DIR ||
+    (HEAP_SNAPSHOT_PATH ? path.dirname(HEAP_SNAPSHOT_PATH) : "");
+  const snapPath =
+    process.env.TE2_OPENFILE_SNAPSHOT_PATH ||
+    (snapDir
+      ? path.join(snapDir, `te2-openFile-${nowMs()}.heapsnapshot`)
+      : undefined);
   const timer = setTimeout(() => {
     try {
       const usage = process.memoryUsage();
@@ -481,7 +548,7 @@ function scheduleOpenFileSnapshot(): void {
           heap_used: used,
           heap_limit: limit,
           file,
-        })
+        }),
       );
     } catch {}
     if (snapExit) process.exit(0);
@@ -489,11 +556,19 @@ function scheduleOpenFileSnapshot(): void {
   timer.unref?.();
 }
 
-function takeHeapSnapshot(label = "manual", explicitPath: string | null = null): HeapSnapshotResult {
-  const dir = HEAP_SNAPSHOT_DIR || (HEAP_SNAPSHOT_PATH ? path.dirname(HEAP_SNAPSHOT_PATH) : "");
-  const outPath = typeof explicitPath === "string" && explicitPath
-    ? explicitPath
-    : (dir ? path.join(dir, `te2-${label}-${nowMs()}.heapsnapshot`) : undefined);
+function takeHeapSnapshot(
+  label = "manual",
+  explicitPath: string | null = null,
+): HeapSnapshotResult {
+  const dir =
+    HEAP_SNAPSHOT_DIR ||
+    (HEAP_SNAPSHOT_PATH ? path.dirname(HEAP_SNAPSHOT_PATH) : "");
+  const outPath =
+    typeof explicitPath === "string" && explicitPath
+      ? explicitPath
+      : dir
+        ? path.join(dir, `te2-${label}-${nowMs()}.heapsnapshot`)
+        : undefined;
   const usage = process.memoryUsage();
   const limit = v8.getHeapStatistics().heap_size_limit || 0;
   const used = usage.heapUsed || 0;
@@ -502,7 +577,8 @@ function takeHeapSnapshot(label = "manual", explicitPath: string | null = null):
 }
 
 let wb: RuntimeWorkbench;
-const workbenchEventHandler = (ev: unknown): void => createWorkbenchEventHandler(bridgeRuntime())(ev);
+const workbenchEventHandler = (ev: unknown): void =>
+  createWorkbenchEventHandler(bridgeRuntime())(ev);
 wb = new WorkbenchClient({
   onEvent: workbenchEventHandler,
 }) as unknown as RuntimeWorkbench;
@@ -511,32 +587,35 @@ installSyncTrace();
 
 if (HEAP_SNAPSHOT_ENABLE) {
   try {
-    _heapSnapTimer = setInterval(() => {
-      const usage = process.memoryUsage();
-      const limit = v8.getHeapStatistics().heap_size_limit || 0;
-      const used = usage.heapUsed || 0;
-      if (!limit || !used) return;
-      const ratio = used / limit;
-      if (ratio < HEAP_SNAPSHOT_RATIO) return;
+    _heapSnapTimer = setInterval(
+      () => {
+        const usage = process.memoryUsage();
+        const limit = v8.getHeapStatistics().heap_size_limit || 0;
+        const used = usage.heapUsed || 0;
+        if (!limit || !used) return;
+        const ratio = used / limit;
+        if (ratio < HEAP_SNAPSHOT_RATIO) return;
 
-      const outPath = HEAP_SNAPSHOT_PATH || undefined;
-      const file = v8.writeHeapSnapshot(outPath);
-      try {
-        console.log(
-          JSON.stringify({
-            type: "metrics/heap_snapshot",
-            ts_ms: nowMs(),
-            heap_used: used,
-            heap_limit: limit,
-            ratio,
-            file,
-          })
-        );
-      } catch {}
+        const outPath = HEAP_SNAPSHOT_PATH || undefined;
+        const file = v8.writeHeapSnapshot(outPath);
+        try {
+          console.log(
+            JSON.stringify({
+              type: "metrics/heap_snapshot",
+              ts_ms: nowMs(),
+              heap_used: used,
+              heap_limit: limit,
+              ratio,
+              file,
+            }),
+          );
+        } catch {}
 
-      if (_heapSnapTimer) clearInterval(_heapSnapTimer);
-      _heapSnapTimer = null;
-    }, Math.max(200, HEAP_SNAPSHOT_INTERVAL_MS));
+        if (_heapSnapTimer) clearInterval(_heapSnapTimer);
+        _heapSnapTimer = null;
+      },
+      Math.max(200, HEAP_SNAPSHOT_INTERVAL_MS),
+    );
     _heapSnapTimer.unref?.();
   } catch {}
 }
@@ -555,7 +634,11 @@ async function handleJsonRpc(reqObj: unknown): Promise<JsonRpcReply> {
   }
 
   if (typeof method !== "string") {
-    return { jsonrpc: "2.0", id, error: { code: -32600, message: "Invalid Request" } };
+    return {
+      jsonrpc: "2.0",
+      id,
+      error: { code: -32600, message: "Invalid Request" },
+    };
   }
 
   const dispatched = await dispatchJsonRpcRequest(
@@ -589,7 +672,8 @@ async function handleJsonRpc(reqObj: unknown): Promise<JsonRpcReply> {
   if (method === "vscode.textmate.grammars.list") {
     const grammars = listTextmateGrammars({
       getExtensions: () => wb.getExtensions?.() ?? [],
-      resolvePath: (basePath: string, relativePath: string) => path.resolve(basePath, relativePath),
+      resolvePath: (basePath: string, relativePath: string) =>
+        path.resolve(basePath, relativePath),
       readTextFile: (filePath: string) => fs.readFile(filePath, "utf8"),
       log: (...args: unknown[]) => console.log(...args),
     });
@@ -600,31 +684,47 @@ async function handleJsonRpc(reqObj: unknown): Promise<JsonRpcReply> {
     const p = isRecord(params) ? params : {};
     const grammarId = typeof p.id === "string" ? p.id : null;
     if (!grammarId) {
-      return { jsonrpc: "2.0", id, error: { code: -32602, message: "Missing required param: id" } };
+      return {
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32602, message: "Missing required param: id" },
+      };
     }
     const loaded = await loadTextmateGrammar(
       {
         getExtensions: () => wb.getExtensions?.() ?? [],
-        resolvePath: (basePath: string, relativePath: string) => path.resolve(basePath, relativePath),
+        resolvePath: (basePath: string, relativePath: string) =>
+          path.resolve(basePath, relativePath),
         readTextFile: (filePath: string) => fs.readFile(filePath, "utf8"),
         log: (...args: unknown[]) => console.log(...args),
       },
       grammarId,
     );
     if (!loaded.ok) {
-      return { jsonrpc: "2.0", id, error: { code: -32000, message: loaded.error } };
+      return {
+        jsonrpc: "2.0",
+        id,
+        error: { code: -32000, message: loaded.error },
+      };
     }
     return { jsonrpc: "2.0", id, result: loaded };
   }
 
   // Placeholder: next step will implement connect/bootstrap and high-level calls
   // like vscode.symbols/vscode.hover/vscode.openFile/etc.
-  return { jsonrpc: "2.0", id, error: { code: -32601, message: `Method not found: ${method}` } };
+  return {
+    jsonrpc: "2.0",
+    id,
+    error: { code: -32601, message: `Method not found: ${method}` },
+  };
 }
 
 const server = http.createServer(async (req, res) => {
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const url = new URL(
+      req.url ?? "/",
+      `http://${req.headers.host ?? "localhost"}`,
+    );
 
     if (req.method === "GET" && url.pathname === "/") {
       return textResponse(
@@ -654,13 +754,20 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === "/ws") {
-      return textResponse(res, 426, "Upgrade Required (use WebSocket upgrade)\n");
+      return textResponse(
+        res,
+        426,
+        "Upgrade Required (use WebSocket upgrade)\n",
+      );
     }
 
     if (req.method === "POST" && url.pathname === "/cmd") {
       const obj = await readJson(req);
       if (obj == null) {
-        return jsonResponse(res, 400, { ok: false, error: "missing JSON body" });
+        return jsonResponse(res, 400, {
+          ok: false,
+          error: "missing JSON body",
+        });
       }
       const reply = await handleJsonRpc(obj);
       return jsonResponse(res, 200, reply);
@@ -680,7 +787,10 @@ editorWbaSocketServer = attachEditorWbaSocket(server, {
 
 server.on("upgrade", (req, socket) => {
   try {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const url = new URL(
+      req.url ?? "/",
+      `http://${req.headers.host ?? "localhost"}`,
+    );
     if (url.pathname.startsWith("/wba_ws/socket.io")) {
       return;
     }
@@ -733,7 +843,7 @@ server.on("upgrade", (req, socket) => {
         }
         if (opcode === 0x9) {
           // ping -> pong
-          wsSendFrame(socket, 0xA, payload);
+          wsSendFrame(socket, 0xa, payload);
           continue;
         }
         if (opcode !== 0x1) {
@@ -745,18 +855,36 @@ server.on("upgrade", (req, socket) => {
         try {
           msg = JSON.parse(payload.toString("utf8"));
         } catch {
-          wsSendText(socket, JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error" } }));
+          wsSendText(
+            socket,
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: null,
+              error: { code: -32700, message: "Parse error" },
+            }),
+          );
           continue;
         }
         try {
           const reply = await handleJsonRpc(msg);
           // Notifications may have no id; in that case, don't respond.
-          if (reply && Object.prototype.hasOwnProperty.call(reply, "id") && reply.id != null) {
+          if (
+            reply &&
+            Object.prototype.hasOwnProperty.call(reply, "id") &&
+            reply.id != null
+          ) {
             wsSendText(socket, JSON.stringify(reply));
           }
         } catch (e) {
           const message = asJsonRpcEnvelope(msg);
-          wsSendText(socket, JSON.stringify({ jsonrpc: "2.0", id: message.id ?? null, error: { code: -32000, message: errorMessage(e) } }));
+          wsSendText(
+            socket,
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: message.id ?? null,
+              error: { code: -32000, message: errorMessage(e) },
+            }),
+          );
         }
       }
     });
@@ -767,7 +895,14 @@ server.on("upgrade", (req, socket) => {
 
 server.listen(PORT, HOST, () => {
   // Startup beacon MUST go to stdout (not stderr) for the shellspec stdout_regex readiness probe.
-  process.stdout.write(encodeStartupBeaconLine({ type: "adapter/start", ts_ms: nowMs(), listen: `http://${HOST}:${PORT}`, config: state.config }));
+  process.stdout.write(
+    encodeStartupBeaconLine({
+      type: "adapter/start",
+      ts_ms: nowMs(),
+      listen: `http://${HOST}:${PORT}`,
+      config: state.config,
+    }),
+  );
 });
 
 // ── stdio JSON-RPC transport ────────────────────────────────────────
@@ -776,7 +911,10 @@ server.listen(PORT, HOST, () => {
 // Protocol: one JSON object per line on stdin → <<<RPC>>> {json}\n on stdout.
 // Non-RPC output (console.log, etc.) is unchanged — Python splits on prefix.
 
-const _stdinRl = readline.createInterface({ input: process.stdin, terminal: false });
+const _stdinRl = readline.createInterface({
+  input: process.stdin,
+  terminal: false,
+});
 
 _stdinRl.on("line", async (line: string) => {
   const parsed = parseStdioJsonLine(line);
@@ -794,7 +932,11 @@ _stdinRl.on("line", async (line: string) => {
     }
   } catch (e) {
     const message = asJsonRpcEnvelope(msg);
-    const err = buildJsonRpcErrorReply(message.id ?? null, -32000, errorMessage(e));
+    const err = buildJsonRpcErrorReply(
+      message.id ?? null,
+      -32000,
+      errorMessage(e),
+    );
     process.stdout.write(encodeRpcReplyLine(err));
   }
 });

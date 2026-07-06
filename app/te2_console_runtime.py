@@ -171,7 +171,12 @@ async def request_console_eval(
     future: asyncio.Future[ConsolePayload] = loop.create_future()
     _pending_eval_results[req_id] = future
 
-    payload = {"targetWorkerId": target, "reqId": req_id, "code": str(code or "")}
+    payload = {
+        "targetWorkerId": target,
+        "reqId": req_id,
+        "code": str(code or ""),
+        "timeoutSeconds": timeout_seconds,
+    }
     await TE2_CONSOLE_SIO.emit(
         "console:eval",
         payload,
@@ -184,6 +189,14 @@ async def request_console_eval(
         if not isinstance(result, dict):
             raise TypeError("console eval result was not a dict payload")
         return result
+    except asyncio.TimeoutError:
+        await TE2_CONSOLE_SIO.emit(
+            "console:evalCancel",
+            {"reqId": req_id, "targetWorkerId": target},
+            namespace=TE2_CONSOLE_NAMESPACE,
+            room=f"console:{target}",
+        )
+        raise
     finally:
         _ = _pending_eval_results.pop(req_id, None)
 
@@ -259,6 +272,11 @@ async def on_console_eval_result(ns, sid, data):
     future = _pending_eval_results.get(req_id) if req_id else None
     if future and not future.done():
         future.set_result(data)
+    elif req_id:
+        print(
+            f"[te2_console] late eval result for reqId={req_id}, dropping",
+            flush=True,
+        )
     await ns.emit("console:evalResult", data, room="console:drawers", skip_sid=sid)
 
 

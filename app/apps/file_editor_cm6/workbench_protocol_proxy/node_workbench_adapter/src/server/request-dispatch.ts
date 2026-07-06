@@ -1,3 +1,5 @@
+import { formatErrorMessage } from "./error-format.mjs";
+
 export interface DispatchRequest {
   id: unknown;
   method: string;
@@ -148,9 +150,13 @@ function success(id: unknown, result: unknown): Record<string, unknown> {
 function failure(
   id: unknown,
   code: number,
-  message: string,
+  message: unknown,
 ): Record<string, unknown> {
-  return { jsonrpc: "2.0", id, error: { code, message } };
+  return {
+    jsonrpc: "2.0",
+    id,
+    error: { code, message: formatErrorMessage(message) },
+  };
 }
 
 function missingPathError(id: unknown): Record<string, unknown> {
@@ -261,7 +267,7 @@ export async function dispatchJsonRpcRequest(
       await runtime.wb.resubscribeWatcher();
       return success(id, { ok: true, ts_ms: runtime.nowMs() });
     } catch (error) {
-      return failure(id, -32000, String((error as Error)?.message ?? error));
+      return failure(id, -32000, error);
     }
   }
 
@@ -280,7 +286,7 @@ export async function dispatchJsonRpcRequest(
         ...result,
       });
     } catch (error) {
-      return failure(id, -32000, String((error as Error)?.message ?? error));
+      return failure(id, -32000, error);
     }
   }
 
@@ -338,7 +344,7 @@ export async function dispatchJsonRpcRequest(
       });
     } catch (error) {
       runtime.logStatus("adapter_reconnect_error");
-      return failure(id, -32000, String((error as Error)?.message ?? error));
+      return failure(id, -32000, error);
     }
   }
 
