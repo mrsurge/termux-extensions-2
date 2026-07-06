@@ -3,23 +3,9 @@
 import { createUiIpcRpcConnection } from './ui-ipc-rpc.ts';
 import { RPC_NOTIFICATION_EVENT, RPC_REQUEST_EVENT } from '../../../src/rpc/transport.ts';
 import type { IoFactory, JsonObject, SocketLike } from '../../../src/rpc/transport.ts';
-import {
-  UI_IPC_RPC_METHODS,
-  UI_IPC_RPC_NOTIFICATIONS,
-  type UiIpcRpcMethod,
-} from '../../../src/ui_ipc/rpc_contract.ts';
-import {
-  SIDEBAR_IPC_RPC_METHODS,
-  SIDEBAR_IPC_RPC_NOTIFICATIONS,
-  parseSidebarIpcRpcNotification,
-  type SidebarIpcRpcMethod,
-  type SidebarIpcRpcNotificationMethod,
-} from '../../../src/sidebar_ipc/rpc_contract.ts';
-import {
-  SOCKET_IO_NAMESPACES,
-  SOCKET_IO_PATHS,
-  fileEditorSocketQuery,
-} from '../../../src/rpc/socketio-topology.ts';
+import { UI_IPC_RPC_METHODS, UI_IPC_RPC_NOTIFICATIONS, type UiIpcRpcMethod } from '../../../src/ui_ipc/rpc_contract.ts';
+import { SIDEBAR_IPC_RPC_METHODS, SIDEBAR_IPC_RPC_NOTIFICATIONS, parseSidebarIpcRpcNotification, type SidebarIpcRpcMethod, type SidebarIpcRpcNotificationMethod } from '../../../src/sidebar_ipc/rpc_contract.ts';
+import { SOCKET_IO_NAMESPACES, SOCKET_IO_PATHS, fileEditorSocketQuery } from '../../../src/rpc/socketio-topology.ts';
 
 interface ConsoleBridgeOptions {
   workerId?: string;
@@ -54,28 +40,29 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   function startMainPageConsoleBridge(): Promise<void> {
     if (consoleBridgeStarted) return Promise.resolve();
     if (consoleBridgePromise) return consoleBridgePromise;
-    consoleBridgePromise = deps.ensureSocketIoLoaded().then((io: IoFactory | null | undefined) => {
-      if (!io) throw new Error('Socket.IO client is not available');
-      const bridge = deps.initConsoleBridge({
-        workerLabel: 'main_page',
-        uniquePerWindow: true,
-        socketPath: SOCKET_IO_PATHS.te2Console,
-        namespace: '/te2_console',
+    consoleBridgePromise = deps
+      .ensureSocketIoLoaded()
+      .then((io: IoFactory | null | undefined) => {
+        if (!io) throw new Error('Socket.IO client is not available');
+        const bridge = deps.initConsoleBridge({
+          workerLabel: 'main_page',
+          uniquePerWindow: true,
+          socketPath: SOCKET_IO_PATHS.te2Console,
+          namespace: '/te2_console',
+        });
+        if (!bridge) throw new Error('console bridge did not start');
+        consoleBridgeStarted = true;
+      })
+      .catch((err: unknown) => {
+        consoleBridgeStarted = false;
+        consoleBridgePromise = null;
+        console.warn('[console_bridge] main page start failed', err);
       });
-      if (!bridge) throw new Error('console bridge did not start');
-      consoleBridgeStarted = true;
-    }).catch((err: unknown) => {
-      consoleBridgeStarted = false;
-      consoleBridgePromise = null;
-      console.warn('[console_bridge] main page start failed', err);
-    });
     return consoleBridgePromise;
   }
 
   function activeFilePayloadFromOpenState(params: JsonObject): JsonObject {
-    const openFile = typeof params.openFile === 'string' && params.openFile
-      ? params.openFile
-      : null;
+    const openFile = typeof params.openFile === 'string' && params.openFile ? params.openFile : null;
     return {
       ...params,
       path: openFile,
@@ -89,16 +76,16 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
       const detail = { ...data };
       const runtimeWindow = window as unknown as SidebarRuntimeEventWindow;
       if (!runtimeWindow.__cm6SidebarRuntimeReady) {
-        const pending = Array.isArray(runtimeWindow.__cm6PendingSidebarEvents)
-          ? runtimeWindow.__cm6PendingSidebarEvents
-          : [];
+        const pending = Array.isArray(runtimeWindow.__cm6PendingSidebarEvents) ? runtimeWindow.__cm6PendingSidebarEvents : [];
         pending.push(detail);
         if (pending.length > 24) pending.splice(0, pending.length - 24);
         runtimeWindow.__cm6PendingSidebarEvents = pending;
       }
-      window.dispatchEvent(new CustomEvent('cm6:sidebar-event', {
-        detail,
-      }));
+      window.dispatchEvent(
+        new CustomEvent('cm6:sidebar-event', {
+          detail,
+        }),
+      );
     } catch (_) {}
   }
 
@@ -107,11 +94,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     return `sidebar_ipc_${Date.now()}_${sidebarRpcRequestCounter}`;
   }
 
-  function emitSidebarRpcRequest(
-    method: SidebarIpcRpcMethod,
-    params: JsonObject = {},
-    onResult?: (result: JsonObject) => void,
-  ): void {
+  function emitSidebarRpcRequest(method: SidebarIpcRpcMethod, params: JsonObject = {}, onResult?: (result: JsonObject) => void): void {
     if (!sidebarIpcSocket || !sidebarIpcSocket.connected) return;
     sidebarIpcSocket.emit(
       RPC_REQUEST_EVENT,
@@ -122,16 +105,14 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         params,
       },
       (response: unknown) => {
-        const data = response && typeof response === 'object' ? response as JsonObject : {};
-        const error = data.error && typeof data.error === 'object' ? data.error as JsonObject : null;
+        const data = response && typeof response === 'object' ? (response as JsonObject) : {};
+        const error = data.error && typeof data.error === 'object' ? (data.error as JsonObject) : null;
         if (error) {
           console.warn('[Sidebar_IPC_RPC] request failed', method, error.message || error);
           return;
         }
         if (onResult) {
-          const result = data.result && typeof data.result === 'object'
-            ? data.result as JsonObject
-            : data;
+          const result = data.result && typeof data.result === 'object' ? (data.result as JsonObject) : data;
           onResult(result);
         }
       },
@@ -139,15 +120,21 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   }
 
   function requestSidebarUiControl(method: UiIpcRpcMethod, params: JsonObject = {}): void {
-    void connectUIIPC().then((connection) => {
-      return connection.request(method, {
-        ...params,
-        client_id: deps.getClientId(),
-        clientId: deps.getClientId(),
-      }, 8000);
-    }).catch((error: unknown) => {
-      console.warn('[UI_IPC_RPC] sidebar control request failed', method, error);
-    });
+    void connectUIIPC()
+      .then((connection) => {
+        return connection.request(
+          method,
+          {
+            ...params,
+            client_id: deps.getClientId(),
+            clientId: deps.getClientId(),
+          },
+          8000,
+        );
+      })
+      .catch((error: unknown) => {
+        console.warn('[UI_IPC_RPC] sidebar control request failed', method, error);
+      });
   }
 
   function emitSidebarRpcNotification(method: SidebarIpcRpcNotificationMethod, params: JsonObject = {}): void {
@@ -198,50 +185,59 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
 
   function dispatchWindowCustomEvent(eventName: string, data: unknown): void {
     try {
-      window.dispatchEvent(new CustomEvent(eventName, {
-        detail: data && typeof data === 'object' ? data : {},
-      }));
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: data && typeof data === 'object' ? data : {},
+        }),
+      );
     } catch (_) {}
   }
 
   function connectSidebarIPC(): void {
-    deps.ensureSocketIoLoaded().then((io: IoFactory | null | undefined) => {
-      if (!io) return;
-      if (sidebarIpcSocket) {
-        if (!sidebarIpcSocket.connected) sidebarIpcSocket.connect?.();
-        return;
-      }
-      const socket = io(SOCKET_IO_NAMESPACES.sidebarIpc, {
-        path: SOCKET_IO_PATHS.uiIpc,
-        transports: ['websocket'],
-        query: fileEditorSocketQuery({ source: 'main_page' }),
-      });
-      sidebarIpcSocket = socket;
-      socket.on('connect', () => {
-        try {
-          emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.register, {
-            role: 'host',
-            app: 'file_editor_cm6',
-            client_id: deps.getClientId(),
-          });
-          emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.windowsList, {
-            client_id: deps.getClientId(),
-          }, (result) => {
-            dispatchSidebarEvent({
-              type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowsChanged,
-              payload: result,
+    deps
+      .ensureSocketIoLoaded()
+      .then((io: IoFactory | null | undefined) => {
+        if (!io) return;
+        if (sidebarIpcSocket) {
+          if (!sidebarIpcSocket.connected) sidebarIpcSocket.connect?.();
+          return;
+        }
+        const socket = io(SOCKET_IO_NAMESPACES.sidebarIpc, {
+          path: SOCKET_IO_PATHS.uiIpc,
+          transports: ['websocket'],
+          query: fileEditorSocketQuery({ source: 'main_page' }),
+        });
+        sidebarIpcSocket = socket;
+        socket.on('connect', () => {
+          try {
+            emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.register, {
+              role: 'host',
+              app: 'file_editor_cm6',
+              client_id: deps.getClientId(),
             });
-          });
-        } catch (_) {}
-        console.log('[Sidebar_IPC] main page connected');
+            emitSidebarRpcRequest(
+              SIDEBAR_IPC_RPC_METHODS.windowsList,
+              {
+                client_id: deps.getClientId(),
+              },
+              (result) => {
+                dispatchSidebarEvent({
+                  type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowsChanged,
+                  payload: result,
+                });
+              },
+            );
+          } catch (_) {}
+          console.log('[Sidebar_IPC] main page connected');
+        });
+        socket.on(RPC_NOTIFICATION_EVENT, handleSidebarRpcNotification);
+        socket.on('connect_error', (err: unknown) => {
+          console.warn('[Sidebar_IPC] connect failed', err);
+        });
+      })
+      .catch((err: unknown) => {
+        console.warn('[Sidebar_IPC] load failed', err);
       });
-      socket.on(RPC_NOTIFICATION_EVENT, handleSidebarRpcNotification);
-      socket.on('connect_error', (err: unknown) => {
-        console.warn('[Sidebar_IPC] connect failed', err);
-      });
-    }).catch((err: unknown) => {
-      console.warn('[Sidebar_IPC] load failed', err);
-    });
   }
 
   function connectUIIPC(): Promise<UiIpcRpcConnection> {
@@ -268,9 +264,14 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         },
         onNotification: (method, params) => {
           if (method === UI_IPC_RPC_NOTIFICATIONS.editorSave) {
-            document.dispatchEvent(new KeyboardEvent('keydown', {
-              key: 's', code: 'KeyS', ctrlKey: true, bubbles: true,
-            }));
+            document.dispatchEvent(
+              new KeyboardEvent('keydown', {
+                key: 's',
+                code: 'KeyS',
+                ctrlKey: true,
+                bubbles: true,
+              }),
+            );
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.editorFocus) {
             console.log('[focus_relay] dispatching synthetic click');
             document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -301,26 +302,41 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
             dispatchWindowCustomEvent('cm6:adapter-state', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.preferencesChanged) {
             dispatchWindowCustomEvent('cm6:preferences-changed', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.terminalOpen) {
+            dispatchWindowCustomEvent('cm6:terminal-open', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.sidebarWindowsChanged) {
-            dispatchSidebarEvent({ type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowsChanged, payload: params });
+            dispatchSidebarEvent({
+              type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowsChanged,
+              payload: params,
+            });
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.sidebarWindowActivated) {
-            dispatchSidebarEvent({ type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowActivated, payload: params });
+            dispatchSidebarEvent({
+              type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowActivated,
+              payload: params,
+            });
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.sidebarWindowReadinessChanged) {
-            dispatchSidebarEvent({ type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowReadinessChanged, payload: params });
+            dispatchSidebarEvent({
+              type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowReadinessChanged,
+              payload: params,
+            });
           }
         },
       });
     }
 
     const connection = uiIpcRpcConnection;
-    uiIpcConnectPromise = startMainPageConsoleBridge().then(() => {
-      return connection.connect();
-    }).then(() => connection).catch((err: unknown) => {
-      console.warn('[UI_IPC] connect failed', err);
-      throw err;
-    }).finally(() => {
-      uiIpcConnectPromise = null;
-    });
+    uiIpcConnectPromise = startMainPageConsoleBridge()
+      .then(() => {
+        return connection.connect();
+      })
+      .then(() => connection)
+      .catch((err: unknown) => {
+        console.warn('[UI_IPC] connect failed', err);
+        throw err;
+      })
+      .finally(() => {
+        uiIpcConnectPromise = null;
+      });
     return uiIpcConnectPromise;
   }
 
@@ -405,14 +421,14 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   }
 
   function emitUiIpcNotification(method: keyof typeof UI_IPC_RPC_NOTIFICATIONS | string, params: JsonObject = {}): void {
-    const resolved = Object.prototype.hasOwnProperty.call(UI_IPC_RPC_NOTIFICATIONS, method)
-      ? UI_IPC_RPC_NOTIFICATIONS[method as keyof typeof UI_IPC_RPC_NOTIFICATIONS]
-      : method;
-    void connectUIIPC().then((connection) => {
-      connection.notify(resolved as typeof UI_IPC_RPC_NOTIFICATIONS[keyof typeof UI_IPC_RPC_NOTIFICATIONS], params || {});
-    }).catch((error: unknown) => {
-      console.warn('[UI_IPC_RPC] notification emit failed', resolved, error);
-    });
+    const resolved = Object.prototype.hasOwnProperty.call(UI_IPC_RPC_NOTIFICATIONS, method) ? UI_IPC_RPC_NOTIFICATIONS[method as keyof typeof UI_IPC_RPC_NOTIFICATIONS] : method;
+    void connectUIIPC()
+      .then((connection) => {
+        connection.notify(resolved as (typeof UI_IPC_RPC_NOTIFICATIONS)[keyof typeof UI_IPC_RPC_NOTIFICATIONS], params || {});
+      })
+      .catch((error: unknown) => {
+        console.warn('[UI_IPC_RPC] notification emit failed', resolved, error);
+      });
   }
 
   return {

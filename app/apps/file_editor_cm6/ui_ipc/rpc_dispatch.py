@@ -15,6 +15,7 @@ from .rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_FILE_OPEN,
     UI_IPC_RPC_METHOD_HOST_FILE_RUN,
     UI_IPC_RPC_METHOD_HOST_FILE_SAVE,
+    UI_IPC_RPC_METHOD_HOST_PAGE_PREVIEW_TEMPLATE_INSTALL,
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CHECKOUT,
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CREATE,
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST,
@@ -53,6 +54,7 @@ from ..host.state_backend import (
     handle_host_file_scroll_update_request,
 )
 from ..host.terminal_actions_backend import handle_host_run_active_file_request
+from ..host.page_preview_backend import handle_host_page_preview_template_install_request
 
 
 async def dispatch_ui_ipc_rpc_request(
@@ -94,6 +96,12 @@ async def dispatch_ui_ipc_rpc_request(
 
     if method == UI_IPC_RPC_METHOD_HOST_FILE_RUN:
         return await handle_host_run_active_file_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_PAGE_PREVIEW_TEMPLATE_INSTALL:
+        return await handle_host_page_preview_template_install_request(
             params,
             source_name=source_name,
         )

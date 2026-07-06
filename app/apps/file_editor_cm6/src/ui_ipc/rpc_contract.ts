@@ -9,6 +9,7 @@ export const UI_IPC_RPC_METHODS = {
   hostDraftDiscard: 'ui.host.draft.discard',
   hostEditorPreferenceUpdate: 'ui.host.editorPreference.update',
   hostFileRun: 'ui.host.file.run',
+  hostPagePreviewTemplateInstall: 'ui.host.pagePreview.template.install',
   hostBootSnapshotGet: 'ui.host.bootSnapshot.get',
   hostEditorJumpToLine: 'ui.host.editor.jumpToLine',
   hostEditorGitBaselinesGet: 'ui.host.editor.gitBaselines.get',
@@ -49,6 +50,7 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   projectSwitching: 'ui.project.switching',
   projectSwitched: 'ui.project.switched',
   preferencesChanged: 'ui.preferences.changed',
+  terminalOpen: 'ui.terminal.open',
   sidebarWindowsChanged: 'ui.sidebar.windows.changed',
   sidebarWindowActivated: 'ui.sidebar.window.activated',
   sidebarWindowReadinessChanged: 'ui.sidebar.window.readiness.changed',
@@ -64,9 +66,7 @@ export interface UiIpcRpcNotification {
   params: JsonObject;
 }
 
-const UI_IPC_RPC_NOTIFICATION_METHOD_SET = new Set<string>(
-  Object.values(UI_IPC_RPC_NOTIFICATIONS),
-);
+const UI_IPC_RPC_NOTIFICATION_METHOD_SET = new Set<string>(Object.values(UI_IPC_RPC_NOTIFICATIONS));
 
 function isJsonObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -79,15 +79,11 @@ export function normalizeUiIpcRpcParams(payload: unknown): JsonObject {
   return {};
 }
 
-export function isUiIpcRpcNotificationMethod(
-  method: string,
-): method is UiIpcRpcNotificationMethod {
+export function isUiIpcRpcNotificationMethod(method: string): method is UiIpcRpcNotificationMethod {
   return UI_IPC_RPC_NOTIFICATION_METHOD_SET.has(method);
 }
 
-export function parseUiIpcRpcNotification(
-  notification: JsonRpcNotificationEnvelope | JsonObject,
-): UiIpcRpcNotification | null {
+export function parseUiIpcRpcNotification(notification: JsonRpcNotificationEnvelope | JsonObject): UiIpcRpcNotification | null {
   const method = typeof notification.method === 'string' ? notification.method : '';
   if (!isUiIpcRpcNotificationMethod(method)) {
     return null;
@@ -98,10 +94,7 @@ export function parseUiIpcRpcNotification(
   };
 }
 
-export function buildUiIpcRpcNotificationEnvelope(
-  method: UiIpcRpcNotificationMethod,
-  params: JsonObject = {},
-): JsonObject {
+export function buildUiIpcRpcNotificationEnvelope(method: UiIpcRpcNotificationMethod, params: JsonObject = {}): JsonObject {
   return {
     jsonrpc: '2.0',
     method,

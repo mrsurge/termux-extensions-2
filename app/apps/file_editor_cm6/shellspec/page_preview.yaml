@@ -1,0 +1,35 @@
+version: "1"
+
+shells:
+  page-preview:
+    backend: pipe
+    cwd: ${ctx:PROJECT_ROOT}
+    command:
+      - node
+      - ${ctx:PAGE_PREVIEW_ENTRYPOINT}
+    env:
+      TE_APP_ID: ${ctx:APP_ID}
+      PROJECT_ROOT: ${ctx:PROJECT_ROOT}
+      TE2_PAGE_PREVIEW_ENTRY: ${ctx:PAGE_PREVIEW_ENTRY}
+      TE2_PAGE_PREVIEW_PORT: ${ctx:PAGE_PREVIEW_PORT}
+      NODE_ENV: development
+    subgroups:
+      - ${ctx:APP_ID}
+      - page_preview
+      - "project:${ctx:PROJECT_HASH}"
+      - "profile:${ctx:PROFILE_HASH}"
+    ui:
+      subgroup_styles:
+        page_preview:
+          bg: rgba(18, 30, 35, 0.92)
+          border: rgba(90, 220, 180, 0.70)
+        project:*:
+          bg: rgba(0, 0, 0, 0.88)
+          border: rgba(29, 70, 126, 0.88)
+        profile:*:
+          bg: rgba(8, 12, 18, 0.88)
+          border: rgba(120, 180, 255, 0.45)
+    readiness:
+      type: output_match
+      pattern: "page-preview-ready"
+      timeout: 20

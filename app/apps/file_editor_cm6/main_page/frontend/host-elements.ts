@@ -32,6 +32,7 @@ export interface HostElements {
   miSaveAs: HTMLElement;
   miClose: HTMLElement;
   miQuit: HTMLElement;
+  miInstallPagePreview: HTMLElement;
   miDebugProjects: HTMLElement;
   miUndo: HTMLElement;
   miRedo: HTMLElement;
@@ -115,6 +116,7 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     miSaveAs: requireEl('#mi-saveas'),
     miClose: requireEl('#mi-close'),
     miQuit: requireEl('#mi-quit'),
+    miInstallPagePreview: requireEl('#mi-install-page-preview'),
     miDebugProjects: requireEl('#mi-debug-projects'),
     miUndo: requireEl('#mi-undo'),
     miRedo: requireEl('#mi-redo'),
