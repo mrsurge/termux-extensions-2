@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import fnmatch
 import json
 from pathlib import Path
+import re
 from typing import Literal, cast
 
 # Project-local run profiles are the backend authority for the play button.
@@ -20,6 +21,7 @@ KNOWN_RUNNERS: frozenset[str] = frozenset({"pagePreview", "node", "python", "cus
 KNOWN_RUNNING_BEHAVIORS: frozenset[str] = frozenset({"just save", "relaunch"})
 DEFAULT_PAGE_PREVIEW_PROFILE_ID = "page-preview"
 DEFAULT_PAGE_PREVIEW_URL = "http://127.0.0.1:3000/"
+ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 @dataclass(frozen=True)
@@ -30,7 +32,8 @@ class RunProfile:
     include: tuple[str, ...]
     sidebar_url: str
     running_behavior: RunningBehavior
-    execpath: str
+    exec_command: str
+    cwd: str
     args: tuple[str, ...]
     env: dict[str, str]
 
@@ -175,7 +178,7 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
 
     entry = _text(data.get("entry"))
     include = _string_tuple(data.get("include"))
-    if not include and entry:
+    if not include and runner == "pagePreview" and entry:
         include = (entry,)
     if not include:
         raise ValueError(f"Run profile {profile_id} must define include paths")
@@ -188,17 +191,24 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
             f"Run profile {profile_id} has unknown runningBehavior '{running_behavior_value}'"
         )
 
+    sidebar_url = _text(data.get("sidebarUrl") or data.get("sidebar_url"))
+    if not sidebar_url and runner == "pagePreview":
+        sidebar_url = DEFAULT_PAGE_PREVIEW_URL
+    exec_command = _text(data.get("exec"))
+    if runner != "pagePreview" and not exec_command:
+        raise ValueError(f"Run profile {profile_id} must define exec")
+
     return RunProfile(
         profile_id=profile_id,
         runner=runner,
-        entry=entry or "index.html",
+        entry=entry or ("index.html" if runner == "pagePreview" else ""),
         include=tuple(_normalize_rel_pattern(item) for item in include if item.strip()),
-        sidebar_url=_text(data.get("sidebarUrl") or data.get("sidebar_url"))
-        or DEFAULT_PAGE_PREVIEW_URL,
+        sidebar_url=sidebar_url,
         running_behavior=cast(RunningBehavior, running_behavior_value),
-        execpath=_text(data.get("execpath") or data.get("execPath")),
+        exec_command=exec_command,
+        cwd=_text(data.get("cwd")),
         args=_string_tuple(data.get("args")),
-        env=_string_map(data.get("env")),
+        env=_env_map(data.get("env"), profile_id=profile_id),
     )
 
 
@@ -330,14 +340,21 @@ def _string_tuple(value: object) -> tuple[str, ...]:
     return tuple(item.strip() for item in items if isinstance(item, str) and item.strip())
 
 
-def _string_map(value: object) -> dict[str, str]:
-    if not isinstance(value, dict):
+def _env_map(value: object, *, profile_id: str) -> dict[str, str]:
+    if value is None:
         return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"Run profile {profile_id} env must be an object")
     raw = cast(dict[object, object], value)
     result: dict[str, str] = {}
     for key, item in raw.items():
-        if isinstance(key, str) and isinstance(item, str):
-            result[key] = item
+        if not isinstance(key, str) or not ENV_NAME_RE.match(key):
+            raise ValueError(f"Run profile {profile_id} has invalid env name '{key}'")
+        if not isinstance(item, str):
+            raise ValueError(f"Run profile {profile_id} env value for '{key}' must be a string")
+        if "\x00" in item:
+            raise ValueError(f"Run profile {profile_id} env value for '{key}' contains NUL")
+        result[key] = item
     return result
 
 

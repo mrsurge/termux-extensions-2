@@ -1,0 +1,32 @@
+version: "1"
+
+shells:
+  runner-profile:
+    backend: pipe
+    cwd: ${ctx:RUN_PROFILE_CWD}
+    command:
+      - ${ctx:PYTHON_EXECUTABLE}
+      - ${ctx:RUN_PROFILE_LAUNCHER}
+    env:
+      TE_APP_ID: ${ctx:APP_ID}
+      PROJECT_ROOT: ${ctx:PROJECT_ROOT}
+      TE2_RUN_PROFILE_CWD: ${ctx:RUN_PROFILE_CWD}
+      TE2_RUN_PROFILE_ID: ${ctx:PROFILE_ID}
+      TE2_RUN_PROFILE_RUNNER: ${ctx:RUNNER}
+      TE2_RUN_PROFILE_COMMAND_B64: ${ctx:RUN_PROFILE_COMMAND_B64}
+    subgroups:
+      - ${ctx:APP_ID}
+      - runner-profile
+      - "project:${ctx:PROJECT_HASH}"
+    ui:
+      subgroup_styles:
+        runner-profile:
+          bg: rgba(26, 28, 34, 0.92)
+          border: rgba(130, 175, 255, 0.70)
+        project:*:
+          bg: rgba(0, 0, 0, 0.88)
+          border: rgba(29, 70, 126, 0.88)
+    readiness:
+      type: output_match
+      pattern: "runner-profile-ready"
+      timeout: 10

@@ -56,18 +56,18 @@ async def handle_host_run_active_file_request(
     payload: JsonMap = dict(data)
     if "source_client" not in payload:
         payload["source_client"] = source_name
-    from .page_preview_backend import maybe_handle_page_preview_run_request
+    from .runner_profiles_backend import maybe_handle_runner_profile_run_request
 
     save_failure = await _save_before_play(payload, source_name=source_name)
     if save_failure is not None:
         return save_failure
 
-    page_preview_result = await maybe_handle_page_preview_run_request(
+    run_profile_result = await maybe_handle_runner_profile_run_request(
         payload,
         source_name=source_name,
     )
-    if page_preview_result is not None:
-        return page_preview_result
+    if run_profile_result is not None:
+        return run_profile_result
 
     terminal_backend = importlib.import_module("app.apps.file_editor_cm6.terminal_backend")
     hook = cast(RunActiveFileHook, getattr(terminal_backend, "handle_run_active_file_request"))
