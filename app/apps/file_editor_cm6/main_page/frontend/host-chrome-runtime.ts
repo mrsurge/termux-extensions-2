@@ -32,7 +32,7 @@ export interface HostChromeRuntimeDeps {
   titleBlockEl: HTMLElement;
   leftToolbarControlEl: HTMLElement;
   rightToolbarControlEl: HTMLElement;
-  agentDrawerEl: HTMLElement;
+  sidebarDrawerEl: HTMLElement;
   fileNameEl: HTMLElement;
   fileNameScrollEl: HTMLElement;
   issuesToggleBtn: HTMLButtonElement;
@@ -207,7 +207,7 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
         deps.rightToolbarControlEl,
         deps.titleBlockEl,
         deps.fileNameScrollEl,
-        deps.agentDrawerEl,
+        deps.sidebarDrawerEl,
       ].forEach((el) => {
         try { toolbarClampRO?.observe(el); } catch {}
       });
@@ -233,12 +233,12 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
       });
       try {
         toolbarClampMO.observe(deps.root, { attributes: true, attributeFilter: ['class', 'style'] });
-        toolbarClampMO.observe(deps.agentDrawerEl, { attributes: true, attributeFilter: ['class', 'style'] });
+        toolbarClampMO.observe(deps.sidebarDrawerEl, { attributes: true, attributeFilter: ['class', 'style'] });
       } catch {}
     }
 
     try {
-      deps.agentDrawerEl.addEventListener('transitionend', () => schedule({ doubleRaf: true }));
+      deps.sidebarDrawerEl.addEventListener('transitionend', () => schedule({ doubleRaf: true }));
     } catch {}
   }
 

@@ -20,6 +20,8 @@ UI_IPC_RPC_METHOD_HOST_DRAFT_DISCARD: Final = "ui.host.draft.discard"
 UI_IPC_RPC_METHOD_HOST_EDITOR_PREFERENCE_UPDATE: Final = "ui.host.editorPreference.update"
 UI_IPC_RPC_METHOD_HOST_FILE_RUN: Final = "ui.host.file.run"
 UI_IPC_RPC_METHOD_HOST_PAGE_PREVIEW_TEMPLATE_INSTALL: Final = "ui.host.pagePreview.template.install"
+UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_GET: Final = "ui.host.runProfiles.get"
+UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_SAVE: Final = "ui.host.runProfiles.save"
 UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET: Final = "ui.host.bootSnapshot.get"
 UI_IPC_RPC_METHOD_HOST_EDITOR_JUMP_TO_LINE: Final = "ui.host.editor.jumpToLine"
 UI_IPC_RPC_METHOD_HOST_EDITOR_GIT_BASELINES_GET: Final = "ui.host.editor.gitBaselines.get"
@@ -47,6 +49,8 @@ UiIpcRpcMethod = Literal[
     "ui.host.editorPreference.update",
     "ui.host.file.run",
     "ui.host.pagePreview.template.install",
+    "ui.host.runProfiles.get",
+    "ui.host.runProfiles.save",
     "ui.host.bootSnapshot.get",
     "ui.host.editor.jumpToLine",
     "ui.host.editor.gitBaselines.get",
@@ -123,6 +127,8 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_EDITOR_PREFERENCE_UPDATE,
     UI_IPC_RPC_METHOD_HOST_FILE_RUN,
     UI_IPC_RPC_METHOD_HOST_PAGE_PREVIEW_TEMPLATE_INSTALL,
+    UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_GET,
+    UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_SAVE,
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
     UI_IPC_RPC_METHOD_HOST_EDITOR_JUMP_TO_LINE,
     UI_IPC_RPC_METHOD_HOST_EDITOR_GIT_BASELINES_GET,

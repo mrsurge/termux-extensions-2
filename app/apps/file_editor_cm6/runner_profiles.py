@@ -60,29 +60,46 @@ def run_profiles_config_path(project_root: str | Path) -> Path:
 
 
 def load_run_profiles(project_root: str | Path) -> list[RunProfile]:
+    return _profiles_from_config(load_run_profiles_config(project_root))
+
+
+def load_run_profiles_config(project_root: str | Path) -> JsonObject:
     config_path = run_profiles_config_path(project_root)
     if not config_path.exists():
-        return []
+        return _empty_config()
     try:
         decoded = cast(object, json.loads(config_path.read_text("utf-8")))
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid run profile JSON: {exc}") from exc
+    return parse_run_profiles_config(decoded)
 
-    raw_profiles: list[object]
-    if isinstance(decoded, list):
-        raw_profiles = list(cast(list[object], decoded))
-    elif isinstance(decoded, dict):
-        config = _json_object(cast(object, decoded))
-        if _is_single_profile_object(config):
-            raw_profiles = [config]
-        else:
-            profiles_value = config.get("profiles", [])
-            if not isinstance(profiles_value, list):
-                raise ValueError("Run profile config field 'profiles' must be a list")
-            raw_profiles = list(cast(list[object], profiles_value))
-    else:
-        raise ValueError("Run profile config must be an object or profile list")
 
+def parse_run_profiles_config_json(raw_text: str) -> JsonObject:
+    text = raw_text.strip()
+    decoded: object = _empty_config() if not text else cast(object, json.loads(text))
+    return parse_run_profiles_config(decoded)
+
+
+def parse_run_profiles_config(decoded: object) -> JsonObject:
+    config = _config_object(decoded)
+    _profiles_from_config(config)
+    return config
+
+
+def save_run_profiles_config(project_root: str | Path, raw_text: str) -> JsonObject:
+    root = _project_root_path(project_root)
+    config = parse_run_profiles_config_json(raw_text)
+    config_path = run_profiles_config_path(root)
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(config_path, config)
+    return config
+
+
+def _profiles_from_config(config: JsonObject) -> list[RunProfile]:
+    profiles_value = config.get("profiles", [])
+    if not isinstance(profiles_value, list):
+        raise ValueError("Run profile config field 'profiles' must be a list")
+    raw_profiles = list(cast(list[object], profiles_value))
     profiles: list[RunProfile] = []
     for index, item_obj in enumerate(raw_profiles):
         if not isinstance(item_obj, dict):
@@ -286,6 +303,8 @@ def _default_page_preview_profile(entry: str) -> JsonObject:
 def _config_object(decoded: object) -> JsonObject:
     if isinstance(decoded, dict):
         config = _json_object(cast(object, decoded))
+        if _is_single_profile_object(config):
+            return {"version": 1, "profiles": [config]}
         profiles_obj = config.get("profiles")
         if profiles_obj is None:
             config["profiles"] = []
@@ -297,6 +316,11 @@ def _config_object(decoded: object) -> JsonObject:
         config: JsonObject = {"version": 1, "profiles": decoded_profiles}
         return config
     raise ValueError("Run profile config must be an object or profile list")
+
+
+def _empty_config() -> JsonObject:
+    empty_profiles: list[object] = []
+    return {"version": 1, "profiles": empty_profiles}
 
 
 def _write_json(path: Path, data: JsonObject) -> None:

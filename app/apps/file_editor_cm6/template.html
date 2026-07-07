@@ -89,7 +89,7 @@
   .layout-desktop .fe-menubar {
     grid-column: 2;
     grid-row: 2;
-    z-index: 60; /* Higher than agent-drawer (50) so dropdowns can overlay */
+    z-index: 60; /* Higher than the sidebar drawer so dropdowns can overlay */
   }
 
   /* Explorer becomes left sidebar - extends from row 2 to bottom */
@@ -531,6 +531,33 @@
   .fe-modal-card { width: min(800px, 92vw); max-height: 80vh; background: var(--card, #0b0f1a); color: var(--foreground, #e5e7eb); border: 1px solid var(--border, #333); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
   .fe-modal-header { display: flex; align-items: center; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border, #333); }
   .fe-modal-body { padding: 16px 20px; overflow-y: auto; overflow-x: hidden; }
+  .declarative-modal-card { width: min(920px, 94vw); max-height: min(86vh, 900px); }
+  .declarative-modal-body { display: flex; flex-direction: column; gap: 14px; }
+  .declarative-modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border, #333); }
+  .declarative-field-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+  .declarative-field-label { font-size: 0.88rem; font-weight: 600; }
+  .declarative-field-description { font-size: 12px; opacity: 0.65; line-height: 1.35; }
+  .declarative-input { width: 100%; max-width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border, #333); background: rgba(0, 0, 0, 0.25); color: var(--foreground, #e5e7eb); font-size: 0.82rem; }
+  .declarative-textarea { resize: vertical; min-height: 0; }
+  .declarative-monospace { font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; }
+  .declarative-field-invalid { border-color: #f87171 !important; }
+  .cm6-json-textmate-field { width: 100%; max-width: 100%; min-width: 0; }
+  .cm6-json-textmate-field.is-invalid .cm-editor { border-color: #f87171 !important; }
+  .cm6-json-textmate-field .cm-editor { width: 100%; max-width: 100%; }
+  .cm6-json-textmate-field .cm-scroller { overflow: auto; }
+  .cm6-json-textmate-fallback { width: 100%; min-height: 150px; resize: vertical; }
+  .run-profiles-layout { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); gap: 14px; min-height: 420px; }
+  .run-profiles-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .run-profiles-list-items { display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
+  .run-profiles-list-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 8px; border: 1px solid var(--border, #333); border-radius: 6px; background: rgba(255, 255, 255, 0.03); color: var(--foreground, #e5e7eb); text-align: left; cursor: pointer; }
+  .run-profiles-list-item.is-active { border-color: var(--primary, #3b82f6); background: rgba(59, 130, 246, 0.16); }
+  .run-profiles-editor { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .run-profiles-meta { font-size: 12px; opacity: 0.7; overflow-wrap: anywhere; }
+  .run-profiles-json { width: 100%; min-height: 180px; font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; font-size: 12px; }
+  .run-profiles-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  @media (max-width: 720px) {
+    .run-profiles-layout { grid-template-columns: 1fr; }
+  }
   .settings-console-worker-id {
     max-width: min(42vw, 280px);
     overflow: hidden;
@@ -1612,6 +1639,9 @@
     width: 100%;
     height: 100%;
     border: 0;
+    outline: 0;
+    box-shadow: none;
+    background: var(--card, #0b0f1a);
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.18s ease;
@@ -1626,6 +1656,8 @@
     width: 100%;
     height: 100%;
     border: 0;
+    outline: 0;
+    box-shadow: none;
     display: block;
   }
 
@@ -1932,8 +1964,9 @@
         <div class="fe-dd-item" id="mi-save"><span>Save</span><span class="fe-kbd">Ctrl/Cmd+S</span></div>
         <div class="fe-dd-item" id="mi-saveas"><span>Save As…</span><span class="fe-kbd">Ctrl/Cmd+Shift+S</span></div>
         <div class="fe-dd-item" id="mi-close"><span>Close</span></div>
-        <div class="fe-dd-item" id="mi-quit"><span>Quit (Clear State)</span></div>
+        <div class="fe-dd-item" id="mi-quit"><span>Quit</span></div>
         <div class="fe-dd-separator"></div>
+        <div class="fe-dd-item" id="mi-run-profiles"><span>Run Profiles...</span></div>
         <div class="fe-dd-item" id="mi-install-page-preview"><span>Install Page Preview Profile</span></div>
         <div class="fe-dd-item" id="mi-debug-projects"><span>Projects…</span></div>
       </div>
@@ -2057,7 +2090,7 @@
   <!-- Resize handle for sidebar (desktop only) -->
   <div class="resize-handle resize-handle--agent" data-panel="agent"></div>
 
-  <!-- Sidebar Drawer -->
+  <!-- Sidebar drawer -->
   <aside id="agent-drawer" class="agent-drawer" aria-hidden="true">
     <header class="agent-drawer__header">
       <div class="agent-drawer__title">
@@ -2069,7 +2102,7 @@
         <div class="fe-dropdown agent-drawer__icon-menu" id="agent-drawer-icon-menu"></div>
       </div>
       <div class="agent-drawer__actions">
-        <button class="fe-btn" id="agent-refresh-active" type="button" title="Refresh active side-bar item" aria-label="Refresh active side-bar item">↻</button>
+        <button class="fe-btn" id="agent-refresh-active" type="button" title="Refresh active sidebar item" aria-label="Refresh active sidebar item">↻</button>
         <button class="fe-btn" id="agent-close">✕</button>
         <div class="fe-dropdown agent-drawer__refresh-menu" id="agent-refresh-menu"></div>
       </div>
@@ -2079,7 +2112,7 @@
         <div class="sidebar-setup__card">
           <div class="sidebar-setup__title">Open a sidebar app window</div>
           <div class="sidebar-setup__hint">Use the launcher to open an app dock slot, or add a URL slot.</div>
-          <div style="font-size: 0.82rem; opacity: 0.8;">Side-bar toggle</div>
+          <div style="font-size: 0.82rem; opacity: 0.8;">Sidebar toggle</div>
           <div style="display:flex; flex-direction: column; gap: 8px;">
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
               <input type="radio" name="agent-toggle-display" value="icon" checked />
@@ -2359,9 +2392,9 @@
 
       <hr style="border: 0; border-top: 1px solid var(--border, #333); margin: 12px 0;" />
 
-      <div style="font-weight: 600; margin-bottom: 6px;">Side-bar</div>
+      <div style="font-weight: 600; margin-bottom: 6px;">Sidebar</div>
       <div id="editor-settings-agent" style="font-size: 0.88rem; line-height: 1.6;">
-        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Side-bar toggle</div>
+        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Sidebar toggle</div>
         <div style="display:flex; flex-direction: column; gap: 8px;">
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
             <input type="radio" name="agent-toggle-display" value="icon" checked />
@@ -2379,7 +2412,7 @@
 
         <div class="fe-dd-separator" style="margin: 10px 0;"></div>
 
-        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Side-bar header</div>
+        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Sidebar header</div>
         <div style="display:flex; flex-direction: column; gap: 8px;">
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
             <input type="radio" name="agent-header-display" value="icon" />

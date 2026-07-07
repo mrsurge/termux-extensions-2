@@ -10,6 +10,8 @@ export const UI_IPC_RPC_METHODS = {
   hostEditorPreferenceUpdate: 'ui.host.editorPreference.update',
   hostFileRun: 'ui.host.file.run',
   hostPagePreviewTemplateInstall: 'ui.host.pagePreview.template.install',
+  hostRunProfilesGet: 'ui.host.runProfiles.get',
+  hostRunProfilesSave: 'ui.host.runProfiles.save',
   hostBootSnapshotGet: 'ui.host.bootSnapshot.get',
   hostEditorJumpToLine: 'ui.host.editor.jumpToLine',
   hostEditorGitBaselinesGet: 'ui.host.editor.gitBaselines.get',

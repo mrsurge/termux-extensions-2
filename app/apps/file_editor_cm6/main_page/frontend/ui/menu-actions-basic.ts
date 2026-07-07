@@ -10,6 +10,7 @@
  *     miSaveAs: HTMLElement,
  *     miClose: HTMLElement,
  *     miQuit: HTMLElement,
+ *     miRunProfiles: HTMLElement,
  *     miInstallPagePreview: HTMLElement,
  *     miDebugProjects: HTMLElement,
  *     miExportDiagnostics: HTMLElement,
@@ -27,9 +28,9 @@
  *   openFile: (path: string) => Promise<any>,
  *   saveFile: () => Promise<any> | any,
  *   saveAsDialog: () => Promise<any> | any,
- *   closeWebSocket: () => void,
- *   clearOnQuit: () => void,
+ *   quitApp: () => Promise<any> | any,
  *   getCurrentPath: () => string | null,
+ *   openRunProfilesModal: () => Promise<any> | any,
  *   requestBackendPagePreviewTemplateInstall: (payload: any) => Promise<any>,
  *   showProjectsDebugModal: () => void,
  *   exportDiagnosticsToFile: () => void,
@@ -51,10 +52,9 @@ export function installBasicMenuActions(deps: any) {
   b(e.miSave, () => deps.saveFile());
   b(e.miSaveAs, () => deps.saveAsDialog());
   b(e.miClose, () => deps.resetToNewFile());
-  b(e.miQuit, () => {
-    deps.closeWebSocket();
-    deps.clearOnQuit();
-  });
+  b(e.miQuit, () => void deps.quitApp());
+
+  b(e.miRunProfiles, () => void deps.openRunProfilesModal());
 
   b(e.miInstallPagePreview, async () => {
     try {

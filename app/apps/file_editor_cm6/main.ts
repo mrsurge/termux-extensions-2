@@ -22,6 +22,7 @@ import { createFontScaleController } from './main_page/frontend/ui/font-scale.ts
 import { createSearchPanelController } from './main_page/frontend/ui/search-panel.ts';
 import { createMenuCoreController } from './main_page/frontend/ui/menu-core.ts';
 import { installBasicMenuActions } from './main_page/frontend/ui/menu-actions-basic.ts';
+import { createRunProfilesModalController } from './main_page/frontend/ui/run-profiles-modal.ts';
 import { installSimplePreferenceMenuActions } from './main_page/frontend/ui/menu-actions-preferences.ts';
 import { installAdvancedMenuActions } from './main_page/frontend/ui/menu-actions-advanced.ts';
 import { installPrefsSync } from './main_page/frontend/ui/prefs-sync.ts';
@@ -240,7 +241,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     titleBlockEl,
     leftToolbarControlEl,
     rightToolbarControlEl,
-    agentDrawerEl,
+    sidebarDrawerEl,
     fileNameEl,
     fileNameScrollEl,
     issuesToggleBtn,
@@ -263,6 +264,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     miSaveAs,
     miClose,
     miQuit,
+    miRunProfiles,
     miInstallPagePreview,
     miDebugProjects,
     miUndo,
@@ -318,7 +320,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     container,
     editorFrame: editorFrameEl,
     root,
-    agentDrawerEl,
+    sidebarDrawerEl,
   });
 
   // Title/status & chrome
@@ -329,7 +331,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     titleBlockEl,
     leftToolbarControlEl,
     rightToolbarControlEl,
-    agentDrawerEl,
+    sidebarDrawerEl,
     fileNameEl,
     fileNameScrollEl,
     issuesToggleBtn,
@@ -556,7 +558,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     warn: (...args) => console.warn(...args),
   });
   const hostSidebarRuntime = createHostSidebarRuntime({
-    drawerEl: agentDrawerEl,
+    drawerEl: sidebarDrawerEl,
     toggleButtonEl: document.getElementById('fe-agent-toggle'),
     closeButtonEl: document.getElementById('agent-close'),
     emitSidebarRpcNotification: _emitSidebarRpcNotification,
@@ -1068,6 +1070,36 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     return menuCoreController.bindMenuToggle(el, action);
   }
 
+  async function quitThisFrameworkApp(): Promise<void> {
+    try {
+      const resp = await fetch('/api/apps/file_editor_cm6/quit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      let body: UnknownRecord = {};
+      try {
+        body = asUnknownRecord(await resp.json());
+      } catch (_) {}
+      if (!resp.ok || body.ok === false) {
+        const detail = body.detail || body.error || 'Failed to stop Code TE2';
+        if (resp.status === 404) {
+          host.toast('Code TE2 is not running');
+          return;
+        }
+        throw new Error(String(detail));
+      }
+      host.toast('Stopping Code TE2');
+    } catch (error) {
+      host.toast((error as { message?: string })?.message || 'Failed to stop Code TE2');
+    }
+  }
+
+  const runProfilesModalController = createRunProfilesModalController({
+    requestRunProfilesGet: () => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostRunProfilesGet, {}),
+    requestRunProfilesSave: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostRunProfilesSave, payload),
+    toast: (msg: string) => host.toast(msg),
+  });
+
   installBasicMenuActions({
     bindMenuToggle,
     els: {
@@ -1077,6 +1109,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       miSaveAs,
       miClose,
       miQuit,
+      miRunProfiles,
       miInstallPagePreview,
       miDebugProjects,
       miExportDiagnostics,
@@ -1094,9 +1127,9 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     openFile: (path: string) => openFile(path),
     saveFile: () => saveFile(),
     saveAsDialog: () => saveFlowController.saveAsDialog(),
-    closeWebSocket: () => fileWebSocketManager.closeWebSocket(),
-    clearOnQuit: () => resetActiveFileState(),
+    quitApp: () => quitThisFrameworkApp(),
     getCurrentPath: () => currentPath,
+    openRunProfilesModal: () => runProfilesModalController.open(),
     requestBackendPagePreviewTemplateInstall: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostPagePreviewTemplateInstall, payload),
     showProjectsDebugModal,
     exportDiagnosticsToFile: () => exportDiagnosticsToFile(),

@@ -9,7 +9,7 @@ export interface HostElements {
   titleBlockEl: HTMLElement;
   leftToolbarControlEl: HTMLElement;
   rightToolbarControlEl: HTMLElement;
-  agentDrawerEl: HTMLElement;
+  sidebarDrawerEl: HTMLElement;
   fileNameEl: HTMLElement;
   fileNameScrollEl: HTMLElement;
   issuesToggleBtn: HTMLButtonElement;
@@ -32,6 +32,7 @@ export interface HostElements {
   miSaveAs: HTMLElement;
   miClose: HTMLElement;
   miQuit: HTMLElement;
+  miRunProfiles: HTMLElement;
   miInstallPagePreview: HTMLElement;
   miDebugProjects: HTMLElement;
   miUndo: HTMLElement;
@@ -93,7 +94,7 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     titleBlockEl: requireEl('.fe-title-block'),
     leftToolbarControlEl: requireEl('#fe-drawer-open'),
     rightToolbarControlEl: requireEl('.fe-toolbar > .fe-menu'),
-    agentDrawerEl: requireEl('#agent-drawer'),
+    sidebarDrawerEl: requireEl('#agent-drawer'),
     fileNameEl: requireEl('#fe-file-name'),
     fileNameScrollEl: requireEl('#fe-file-name-scroll'),
     issuesToggleBtn: requireEl('#fe-issues-toggle') as HTMLButtonElement,
@@ -116,6 +117,7 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     miSaveAs: requireEl('#mi-saveas'),
     miClose: requireEl('#mi-close'),
     miQuit: requireEl('#mi-quit'),
+    miRunProfiles: requireEl('#mi-run-profiles'),
     miInstallPagePreview: requireEl('#mi-install-page-preview'),
     miDebugProjects: requireEl('#mi-debug-projects'),
     miUndo: requireEl('#mi-undo'),

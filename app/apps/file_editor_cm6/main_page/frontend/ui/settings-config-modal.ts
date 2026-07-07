@@ -1,5 +1,9 @@
 
 import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
+import {
+  createJsonTextmateField,
+  type JsonTextmateFieldHandle,
+} from './cm6-json-textmate-field.ts';
 
 type ExtConfigValues = Record<string, any>;
 type ExtConfigSchema = Record<string, any>;
@@ -60,14 +64,12 @@ function collectEnumOptions(prop: any): any[] {
   return options;
 }
 
-function parseJsonEditorValue(input: HTMLTextAreaElement): { ok: boolean; value: any } {
-  const raw = input.value.trim();
+function parseJsonRawValue(rawValue: string): { ok: boolean; value: any } {
+  const raw = rawValue.trim();
   if (!raw) return { ok: true, value: null };
   try {
-    input.style.borderColor = '';
     return { ok: true, value: JSON.parse(raw) };
   } catch (_) {
-    input.style.borderColor = 'var(--danger, #f87171)';
     return { ok: false, value: null };
   }
 }
@@ -90,8 +92,35 @@ export function createSettingsConfigModalController(deps: any) {
   let extConfigExtId = '';
   let extConfigValues: ExtConfigValues = {};
   let extConfigScope = 'user';
+  let fieldDisposables: Array<() => void> = [];
+
+  function cleanupFieldControls() {
+    fieldDisposables.forEach((dispose) => dispose());
+    fieldDisposables = [];
+  }
+
+  function createJsonEditor(options: {
+    value: string;
+    rows?: number;
+    placeholder?: string;
+    onValidValue: (value: any) => void;
+  }): JsonTextmateFieldHandle {
+    const editor = createJsonTextmateField({
+      value: options.value,
+      rows: options.rows || 8,
+      placeholder: options.placeholder || 'JSON object...',
+      className: 'ext-config-json-editor',
+      validateJson: true,
+      onJsonChange(value) {
+        options.onValidValue(value);
+      },
+    });
+    fieldDisposables.push(() => editor.destroy());
+    return editor;
+  }
 
   function openExtConfigModal(extId: string, displayName: string, schema: ExtConfigSchema, currentValues: ExtConfigValues, scope = 'user') {
+    cleanupFieldControls();
     extConfigExtId = extId;
     extConfigScope = scope;
     extConfigValues = { ...(currentValues || {}) };
@@ -165,22 +194,22 @@ export function createSettingsConfigModalController(deps: any) {
           customOption.textContent = 'Custom JSON object';
           select.appendChild(customOption);
 
-          const textarea = document.createElement('textarea');
-          textarea.className = 'lsp-rootrel-input';
-          textarea.rows = 8;
-          textarea.spellcheck = false;
-          textarea.style.width = '100%';
-          textarea.style.fontFamily = '"SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace';
-          textarea.value = formatConfigValue(customValue);
-          textarea.placeholder = 'JSON object…';
+          const jsonEditor = createJsonEditor({
+            value: formatConfigValue(customValue),
+            rows: 8,
+            placeholder: 'JSON object...',
+            onValidValue(value) {
+              if (select.value === '__json_object__') extConfigValues[key] = value;
+            },
+          });
 
           const enumMatch = enumOptions.find((opt: any) => sameConfigValue(curVal, opt));
           select.value = enumMatch !== undefined ? formatConfigValue(enumMatch) : '__json_object__';
 
           function syncMixedEditor(markChanged: boolean) {
             if (select.value !== '__json_object__') {
-              textarea.style.display = 'none';
-              textarea.style.borderColor = '';
+              jsonEditor.element.style.display = 'none';
+              jsonEditor.setInvalid(false);
               if (markChanged) {
                 const selected = enumOptions.find((opt: any) => formatConfigValue(opt) === select.value);
                 extConfigValues[key] = selected !== undefined ? selected : select.value;
@@ -188,22 +217,18 @@ export function createSettingsConfigModalController(deps: any) {
               return;
             }
 
-            textarea.style.display = '';
+            jsonEditor.element.style.display = '';
             if (markChanged) {
-              const parsed = parseJsonEditorValue(textarea);
+              const parsed = parseJsonRawValue(jsonEditor.getValue());
+              jsonEditor.setInvalid(!parsed.ok);
               if (parsed.ok) extConfigValues[key] = parsed.value;
             }
           }
 
           select.addEventListener('change', () => syncMixedEditor(true));
-          textarea.addEventListener('input', () => {
-            if (select.value !== '__json_object__') return;
-            const parsed = parseJsonEditorValue(textarea);
-            if (parsed.ok) extConfigValues[key] = parsed.value;
-          });
           syncMixedEditor(false);
           fieldRow.appendChild(select);
-          fieldRow.appendChild(textarea);
+          fieldRow.appendChild(jsonEditor.element);
         } else if (prop.enum && Array.isArray(prop.enum)) {
           const wrap = document.createElement('div');
           wrap.style.display = 'flex';
@@ -239,19 +264,15 @@ export function createSettingsConfigModalController(deps: any) {
           });
           fieldRow.appendChild(input);
         } else if (schemaAllowsObject(prop)) {
-          const textarea = document.createElement('textarea');
-          textarea.className = 'lsp-rootrel-input';
-          textarea.rows = 8;
-          textarea.spellcheck = false;
-          textarea.style.width = '100%';
-          textarea.style.fontFamily = '"SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace';
-          textarea.value = formatConfigValue(curVal);
-          textarea.placeholder = prop.default != null ? formatConfigValue(prop.default) : 'JSON object…';
-          textarea.addEventListener('input', () => {
-            const parsed = parseJsonEditorValue(textarea);
-            if (parsed.ok) extConfigValues[key] = parsed.value;
+          const jsonEditor = createJsonEditor({
+            value: formatConfigValue(curVal),
+            rows: 8,
+            placeholder: prop.default != null ? formatConfigValue(prop.default) : 'JSON object...',
+            onValidValue(value) {
+              extConfigValues[key] = value;
+            },
           });
-          fieldRow.appendChild(textarea);
+          fieldRow.appendChild(jsonEditor.element);
         } else if (prop.type === 'array') {
           // ── VS Code-style array editor ──────────────────────────
           const itemSchema = prop.items || {};
@@ -468,6 +489,7 @@ export function createSettingsConfigModalController(deps: any) {
   }
 
   function closeExtConfigModal() {
+    cleanupFieldControls();
     deps.modalEl.classList.remove('show');
     deps.modalEl.setAttribute('aria-hidden', 'true');
     extConfigExtId = '';
