@@ -538,6 +538,14 @@
   .declarative-field-label { font-size: 0.88rem; font-weight: 600; }
   .declarative-field-description { font-size: 12px; opacity: 0.65; line-height: 1.35; }
   .declarative-input { width: 100%; max-width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border, #333); background: rgba(0, 0, 0, 0.25); color: var(--foreground, #e5e7eb); font-size: 0.82rem; }
+  .declarative-select { width: 100%; }
+  .declarative-select-button { display: flex; align-items: center; justify-content: space-between; min-height: 30px; text-align: left; cursor: pointer; }
+  .declarative-select-button::after { content: ""; width: 0; height: 0; margin-left: 10px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid var(--muted, #8b949e); }
+  .declarative-select-menu { position: fixed; z-index: 1400; display: flex; flex-direction: column; overflow-y: auto; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--card, #0b0f1a); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45); padding: 4px; }
+  .declarative-select-option { width: 100%; border: 0; border-radius: 4px; background: transparent; color: var(--foreground, #e5e7eb); padding: 7px 8px; text-align: left; cursor: pointer; }
+  .declarative-select-option:hover,
+  .declarative-select-option:focus,
+  .declarative-select-option[aria-selected="true"] { background: rgba(59, 130, 246, 0.18); outline: none; }
   .declarative-textarea { resize: vertical; min-height: 0; }
   .declarative-monospace { font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; }
   .declarative-field-invalid { border-color: #f87171 !important; }
@@ -1675,6 +1683,61 @@
   .lsp-rootrel-input:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .ext-config-select {
+    width: 100%;
+    margin-bottom: 6px;
+  }
+
+  .ext-config-select-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .ext-config-select-button::after {
+    content: "";
+    width: 0;
+    height: 0;
+    margin-left: 10px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid var(--muted, #8b949e);
+  }
+
+  .ext-config-select-menu {
+    position: fixed;
+    z-index: 1200;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    border: 1px solid var(--border, #333);
+    border-radius: 6px;
+    background: var(--card, #0b0f1a);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+    padding: 4px;
+  }
+
+  .ext-config-select-option {
+    width: 100%;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--foreground, #e5e7eb);
+    padding: 7px 8px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .ext-config-select-option:hover,
+  .ext-config-select-option:focus,
+  .ext-config-select-option[aria-selected="true"] {
+    background: rgba(59, 130, 246, 0.18);
+    outline: none;
   }
 
   /* ── Array settings widget ─────────────────────────────────── */

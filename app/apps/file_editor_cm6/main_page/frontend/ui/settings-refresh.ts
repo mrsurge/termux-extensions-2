@@ -1,5 +1,41 @@
+import { EXPLORER_RPC_METHODS } from "../../../src/explorer/rpc/contract.ts";
+import { createJsonTextmateField } from "./cm6-json-textmate-field.ts";
 
-import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
+interface RawSettingsJsonField {
+  getValue: () => string;
+  setValue: (value: string) => void;
+}
+
+function createRawSettingsJsonField(
+  textarea: HTMLTextAreaElement,
+): RawSettingsJsonField {
+  const rows = Number(textarea.rows) || 6;
+  const editor = createJsonTextmateField({
+    value: textarea.value,
+    rows,
+    placeholder: textarea.placeholder,
+    validateJson: true,
+    className: "settings-raw-json-field",
+    onChange(raw) {
+      textarea.value = raw;
+    },
+  });
+
+  // Languages & Extensions keeps the textarea as the stable DOM/form anchor;
+  // the mounted CM6 field is the visible editor.
+  textarea.style.display = "none";
+  textarea.setAttribute("aria-hidden", "true");
+  textarea.tabIndex = -1;
+  textarea.insertAdjacentElement("afterend", editor.element);
+
+  return {
+    getValue: () => editor.getValue(),
+    setValue(value: string) {
+      textarea.value = value;
+      editor.setValue(value);
+    },
+  };
+}
 
 /**
  * @param {{
@@ -16,37 +52,51 @@ import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
  */
 export function createSettingsRefreshController(deps: any) {
   // ── Scope tab switching ──
-  let activeScope = 'user';
+  let activeScope = "user";
+  const customSettingsField = createRawSettingsJsonField(
+    deps.customSettingsInputEl,
+  );
+  const workspaceSettingsInputEl = document.getElementById(
+    "editor-ext-workspace-settings-input",
+  ) as HTMLTextAreaElement | null;
+  const workspaceSettingsField: RawSettingsJsonField | null =
+    workspaceSettingsInputEl
+      ? createRawSettingsJsonField(workspaceSettingsInputEl)
+      : null;
 
   function installScopeTabs() {
-    const tabs = document.querySelectorAll<HTMLElement>('#settings-scope-tabs .settings-scope-tab');
-    const userPane = document.getElementById('settings-scope-user');
-    const wsPane = document.getElementById('settings-scope-workspace');
-    const modal = document.getElementById('editor-ext-manager-modal');
+    const tabs = document.querySelectorAll<HTMLElement>(
+      "#settings-scope-tabs .settings-scope-tab",
+    );
+    const userPane = document.getElementById("settings-scope-user");
+    const wsPane = document.getElementById("settings-scope-workspace");
+    const modal = document.getElementById("editor-ext-manager-modal");
     if (!tabs.length || !userPane || !wsPane || !modal) return;
 
     tabs.forEach((tab) => {
-      tab.addEventListener('click', () => {
-        const scope = tab.dataset.scope || 'user';
+      tab.addEventListener("click", () => {
+        const scope = tab.dataset.scope || "user";
         if (scope === activeScope) return;
         activeScope = scope;
 
         tabs.forEach((t) => {
           const isActive = t.dataset.scope === scope;
-          t.classList.toggle('active', isActive);
-          t.style.borderBottomColor =
-            isActive ? 'var(--fe-accent, #58a6ff)' : 'transparent';
-          t.style.color =
-            isActive ? 'var(--fg, #e6edf3)' : 'var(--fg-dim, #6e7681)';
+          t.classList.toggle("active", isActive);
+          t.style.borderBottomColor = isActive
+            ? "var(--fe-accent, #58a6ff)"
+            : "transparent";
+          t.style.color = isActive
+            ? "var(--fg, #e6edf3)"
+            : "var(--fg-dim, #6e7681)";
         });
 
-        userPane.style.display = scope === 'user' ? '' : 'none';
-        wsPane.style.display = scope === 'workspace' ? '' : 'none';
+        userPane.style.display = scope === "user" ? "" : "none";
+        wsPane.style.display = scope === "workspace" ? "" : "none";
 
         // Toggle workspace class on modal to hide toggle/uninstall/install via CSS
-        modal.classList.toggle('ext-scope-workspace', scope === 'workspace');
+        modal.classList.toggle("ext-scope-workspace", scope === "workspace");
 
-        if (scope === 'workspace') loadWorkspaceSettings();
+        if (scope === "workspace") loadWorkspaceSettings();
       });
     });
   }
@@ -54,74 +104,94 @@ export function createSettingsRefreshController(deps: any) {
   // ── User settings (existing) ──
   async function loadCustomSettings() {
     try {
-      const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsCustomSettingsGet, {}, 8000);
+      const res = await deps.busRequest(
+        EXPLORER_RPC_METHODS.extensionsCustomSettingsGet,
+        {},
+        8000,
+      );
       const settings = res?.settings || {};
       const keys = Object.keys(settings);
-      deps.customSettingsInputEl.value = keys.length
-        ? JSON.stringify(settings, null, 2)
-        : '';
+      customSettingsField.setValue(
+        keys.length ? JSON.stringify(settings, null, 2) : "",
+      );
     } catch (_) {
-      deps.customSettingsInputEl.value = '';
+      customSettingsField.setValue("");
     }
   }
 
   // ── Workspace settings ──
   async function loadWorkspaceSettings() {
-    const input = document.getElementById('editor-ext-workspace-settings-input') as HTMLTextAreaElement | null;
-    if (!input) return;
+    if (!workspaceSettingsField) return;
     try {
-      const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet, {}, 8000);
+      const res = await deps.busRequest(
+        EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsGet,
+        {},
+        8000,
+      );
       const settings = res?.settings || {};
       const keys = Object.keys(settings);
-      input.value = keys.length ? JSON.stringify(settings, null, 2) : '';
+      workspaceSettingsField.setValue(
+        keys.length ? JSON.stringify(settings, null, 2) : "",
+      );
     } catch (_) {
-      input.value = '';
+      workspaceSettingsField.setValue("");
     }
   }
 
   function installWorkspaceSettingsSaveHandler() {
-    const saveBtn = document.getElementById('editor-ext-workspace-settings-save') as HTMLButtonElement | null;
-    const input = document.getElementById('editor-ext-workspace-settings-input') as HTMLTextAreaElement | null;
-    if (!saveBtn || !input) return;
+    const saveBtn = document.getElementById(
+      "editor-ext-workspace-settings-save",
+    ) as HTMLButtonElement | null;
+    if (!saveBtn || !workspaceSettingsField) return;
 
-    saveBtn.addEventListener('click', async () => {
-      const raw = input.value.trim();
+    saveBtn.addEventListener("click", async () => {
+      const raw = workspaceSettingsField.getValue().trim();
       let parsed = {};
       if (raw) {
         try {
           parsed = JSON.parse(raw);
         } catch (e) {
-          deps.toast('Invalid JSON: ' + (e as { message?: string }).message);
+          deps.toast("Invalid JSON: " + (e as { message?: string }).message);
           return;
         }
-        if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-          deps.toast('Settings must be a JSON object');
+        if (typeof parsed !== "object" || Array.isArray(parsed)) {
+          deps.toast("Settings must be a JSON object");
           return;
         }
       }
       saveBtn.disabled = true;
-      saveBtn.textContent = 'Saving…';
+      saveBtn.textContent = "Saving…";
       try {
-        const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsSet, { settings: parsed }, 15000);
+        const res = await deps.busRequest(
+          EXPLORER_RPC_METHODS.extensionsWorkspaceSettingsSet,
+          { settings: parsed },
+          15000,
+        );
         if (res?.ok) {
-          deps.toast(`Workspace settings saved (${res.count} keys) — reloading adapter…`);
+          deps.toast(
+            `Workspace settings saved (${res.count} keys) — reloading adapter…`,
+          );
           deps.reloadEditorFrame();
         } else {
-          deps.toast(res?.error || 'Save failed');
+          deps.toast(res?.error || "Save failed");
         }
       } catch (e) {
-        deps.toast((e as { message?: string })?.message || 'Save failed');
+        deps.toast((e as { message?: string })?.message || "Save failed");
       } finally {
         saveBtn.disabled = false;
-        saveBtn.textContent = 'Save';
+        saveBtn.textContent = "Save";
       }
     });
   }
 
   async function refreshEditorSettingsModal() {
-    const currentTheme = deps.getEditorViewState()?.theme || 'github-dark-default';
+    const currentTheme =
+      deps.getEditorViewState()?.theme || "github-dark-default";
     try {
-      const res = await fetch('/api/app/file_editor_cm6/ui/monaco_editor/available_themes', { cache: 'no-store' });
+      const res = await fetch(
+        "/api/app/file_editor_cm6/ui/monaco_editor/available_themes",
+        { cache: "no-store" },
+      );
       if (res.ok) {
         const data = await res.json();
         const themes = data?.themes || [];
@@ -136,56 +206,65 @@ export function createSettingsRefreshController(deps: any) {
     }
 
     try {
-      if (typeof deps.busRequest === 'function') {
-        const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 8000);
+      if (typeof deps.busRequest === "function") {
+        const res = await deps.busRequest(
+          EXPLORER_RPC_METHODS.extensionsList,
+          {},
+          8000,
+        );
         const exts = res?.extensions || [];
         const active = exts.filter((e: any) => e.active);
-        const user = exts.filter((e: any) => e.source === 'user');
-        deps.extSummaryEl.textContent =
-          `${active.length} active, ${user.length} user-installed, ${exts.length} total`;
+        const user = exts.filter((e: any) => e.source === "user");
+        deps.extSummaryEl.textContent = `${active.length} active, ${user.length} user-installed, ${exts.length} total`;
       }
     } catch (_) {
-      deps.extSummaryEl.textContent = 'Click to manage';
+      deps.extSummaryEl.textContent = "Click to manage";
     }
 
     try {
-      if (typeof deps.busNotify === 'function') {
+      if (typeof deps.busNotify === "function") {
         deps.busNotify(EXPLORER_RPC_METHODS.watcherConfigGet, {});
       }
     } catch (_) {}
   }
 
   function installCustomSettingsSaveHandler() {
-    deps.customSettingsSaveEl.addEventListener('click', async () => {
-      const raw = deps.customSettingsInputEl.value.trim();
+    deps.customSettingsSaveEl.addEventListener("click", async () => {
+      const raw = customSettingsField.getValue().trim();
       let parsed = {};
       if (raw) {
         try {
           parsed = JSON.parse(raw);
         } catch (e) {
-          deps.toast('Invalid JSON: ' + (e as { message?: string }).message);
+          deps.toast("Invalid JSON: " + (e as { message?: string }).message);
           return;
         }
-        if (typeof parsed !== 'object' || Array.isArray(parsed)) {
-          deps.toast('Settings must be a JSON object');
+        if (typeof parsed !== "object" || Array.isArray(parsed)) {
+          deps.toast("Settings must be a JSON object");
           return;
         }
       }
       deps.customSettingsSaveEl.disabled = true;
-      deps.customSettingsSaveEl.textContent = 'Saving…';
+      deps.customSettingsSaveEl.textContent = "Saving…";
       try {
-        const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsCustomSettingsSet, { settings: parsed }, 15000);
+        const res = await deps.busRequest(
+          EXPLORER_RPC_METHODS.extensionsCustomSettingsSet,
+          { settings: parsed },
+          15000,
+        );
         if (res?.ok) {
-          deps.toast(`Custom settings saved (${res.count} keys) — reloading adapter…`);
+          deps.toast(
+            `Custom settings saved (${res.count} keys) — reloading adapter…`,
+          );
           deps.reloadEditorFrame();
         } else {
-          deps.toast(res?.error || 'Save failed');
+          deps.toast(res?.error || "Save failed");
         }
       } catch (e) {
-        deps.toast((e as { message?: string })?.message || 'Save failed');
+        deps.toast((e as { message?: string })?.message || "Save failed");
       } finally {
         deps.customSettingsSaveEl.disabled = false;
-        deps.customSettingsSaveEl.textContent = 'Save';
+        deps.customSettingsSaveEl.textContent = "Save";
       }
     });
   }

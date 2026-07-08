@@ -69,6 +69,11 @@ interface FieldControlHandle {
   destroy?: () => void;
 }
 
+interface SelectPopupState {
+  menu: HTMLElement;
+  cleanup: () => void;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -153,6 +158,140 @@ function applyInvalidState(el: HTMLElement, invalid: boolean): void {
   el.classList.toggle("declarative-field-invalid", invalid);
 }
 
+function selectedOptionLabel(
+  options: DeclarativeFieldOption[],
+  value: unknown,
+): string {
+  const selected = options.find((item) => sameValue(item.value, value));
+  const item = selected || options[0];
+  return item ? item.label || formatValue(item.value) : "";
+}
+
+function positionSelectMenu(button: HTMLElement, menu: HTMLElement): void {
+  const rect = button.getBoundingClientRect();
+  menu.style.minWidth = `${rect.width}px`;
+  menu.style.left = `${Math.max(8, rect.left)}px`;
+  menu.style.top = `${rect.bottom + 4}px`;
+  menu.style.maxHeight = `${Math.max(160, window.innerHeight - rect.bottom - 16)}px`;
+}
+
+function createSelectControl(
+  field: DeclarativeFieldContract,
+  current: unknown,
+  onValue: (key: string, value: unknown) => void,
+): FieldControlHandle {
+  const root = document.createElement("div");
+  root.className = "declarative-select";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "declarative-input declarative-select-button";
+  button.setAttribute("aria-haspopup", "listbox");
+  button.setAttribute("aria-expanded", "false");
+  root.appendChild(button);
+
+  const options = Array.isArray(field.options) ? field.options : [];
+  let selectedValue = current;
+  let popup: SelectPopupState | null = null;
+
+  function updateButton(): void {
+    button.textContent = selectedOptionLabel(options, selectedValue);
+  }
+
+  function closeMenu(): void {
+    if (!popup) return;
+    popup.cleanup();
+    popup.menu.remove();
+    popup = null;
+    button.setAttribute("aria-expanded", "false");
+  }
+
+  function openMenu(): void {
+    if (popup || !options.length) return;
+    const menu = document.createElement("div");
+    menu.className = "declarative-select-menu";
+    menu.setAttribute("role", "listbox");
+
+    options.forEach((item, index) => {
+      const option = document.createElement("button");
+      option.type = "button";
+      option.className = "declarative-select-option";
+      option.setAttribute("role", "option");
+      option.setAttribute(
+        "aria-selected",
+        sameValue(item.value, selectedValue) ? "true" : "false",
+      );
+      option.textContent = item.label || formatValue(item.value);
+      option.addEventListener("click", () => {
+        selectedValue = item.value;
+        updateButton();
+        closeMenu();
+        onValue(field.key, item.value);
+      });
+      menu.appendChild(option);
+      if (sameValue(item.value, selectedValue)) {
+        window.setTimeout(() => option.focus(), 0);
+      } else if (index === 0 && selectedValue == null) {
+        window.setTimeout(() => option.focus(), 0);
+      }
+    });
+
+    positionSelectMenu(button, menu);
+    document.body.appendChild(menu);
+    button.setAttribute("aria-expanded", "true");
+
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        (root.contains(target) || menu.contains(target))
+      ) {
+        return;
+      }
+      closeMenu();
+    };
+    const closeOnWindowChange = () => closeMenu();
+    const closeOnKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMenu();
+        button.focus();
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOnPointerDown, true);
+    document.addEventListener("keydown", closeOnKeyDown, true);
+    window.addEventListener("resize", closeOnWindowChange, true);
+    window.addEventListener("scroll", closeOnWindowChange, true);
+
+    popup = {
+      menu,
+      cleanup: () => {
+        document.removeEventListener("pointerdown", closeOnPointerDown, true);
+        document.removeEventListener("keydown", closeOnKeyDown, true);
+        window.removeEventListener("resize", closeOnWindowChange, true);
+        window.removeEventListener("scroll", closeOnWindowChange, true);
+      },
+    };
+  }
+
+  button.addEventListener("click", () => {
+    if (popup) closeMenu();
+    else openMenu();
+  });
+  button.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openMenu();
+    }
+  });
+  updateButton();
+
+  return {
+    element: root,
+    destroy: closeMenu,
+  };
+}
+
 function createFieldLabel(field: DeclarativeFieldContract): HTMLElement {
   const label = document.createElement("label");
   label.className = "declarative-field-label";
@@ -186,21 +325,7 @@ function createFieldControl(
   }
 
   if (field.kind === "select") {
-    const select = document.createElement("select");
-    select.className = "declarative-input";
-    const options = Array.isArray(field.options) ? field.options : [];
-    options.forEach((item, index) => {
-      const option = document.createElement("option");
-      option.value = String(index);
-      option.textContent = item.label || formatValue(item.value);
-      option.selected = sameValue(item.value, current);
-      select.appendChild(option);
-    });
-    select.addEventListener("change", () => {
-      const selected = options[Number(select.value)];
-      onValue(field.key, selected ? selected.value : "");
-    });
-    return { element: select };
+    return createSelectControl(field, current, onValue);
   }
 
   if (field.kind === "jsonTextmate") {
@@ -394,6 +519,7 @@ export function createDeclarativeModalShell(
     root.setAttribute("aria-hidden", "true");
   };
   const open = () => {
+    bodyEl.scrollTop = 0;
     root.classList.add("show");
     root.setAttribute("aria-hidden", "false");
   };
