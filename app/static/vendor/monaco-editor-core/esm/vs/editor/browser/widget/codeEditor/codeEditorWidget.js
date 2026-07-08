@@ -55,6 +55,42 @@ import { IThemeService, registerThemingParticipant } from '../../../../platform/
 import { MenuId } from '../../../../platform/actions/common/actions.js';
 import { TextModelEditSource, EditSources } from '../../../common/textModelEditSource.js';
 import { isObject } from '../../../../base/common/types.js';
+const TE2_SYNTHETIC_DID_TYPE_WINDOW_MS = 35;
+const TE2_SYNTHETIC_DID_TYPE_COUNT = 2;
+const TE2_SYNTHETIC_DID_TYPE_RELEASE_MS = 140;
+let te2SyntheticDidTypeEvents = [];
+let te2SyntheticDidTypeSuppressUntil = 0;
+function te2Now() {
+    return typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now();
+}
+function te2ShouldSuppressDidType(source, text) {
+    if (source !== 'keyboard' || !text) {
+        return false;
+    }
+    const now = te2Now();
+    if (text.length > 1) {
+        te2SyntheticDidTypeEvents = [];
+        te2SyntheticDidTypeSuppressUntil = now + TE2_SYNTHETIC_DID_TYPE_RELEASE_MS;
+        return true;
+    }
+    if (text.length !== 1) {
+        return false;
+    }
+    if (now <= te2SyntheticDidTypeSuppressUntil) {
+        te2SyntheticDidTypeSuppressUntil = now + TE2_SYNTHETIC_DID_TYPE_RELEASE_MS;
+        return true;
+    }
+    // TE2: Gboard paste history is delivered as raw keyboard text, not paste/input events.
+    te2SyntheticDidTypeEvents = te2SyntheticDidTypeEvents.filter(eventTime => now - eventTime <= TE2_SYNTHETIC_DID_TYPE_WINDOW_MS);
+    te2SyntheticDidTypeEvents.push(now);
+    if (te2SyntheticDidTypeEvents.length >= TE2_SYNTHETIC_DID_TYPE_COUNT) {
+        te2SyntheticDidTypeSuppressUntil = now + TE2_SYNTHETIC_DID_TYPE_RELEASE_MS;
+        return true;
+    }
+    return false;
+}
 let CodeEditorWidget = class CodeEditorWidget extends Disposable {
     static { CodeEditorWidget_1 = this; }
     static { this.dropIntoEditorDecorationOptions = ModelDecorationOptions.register({
@@ -825,11 +861,12 @@ let CodeEditorWidget = class CodeEditorWidget extends Disposable {
         if (!this._modelData || text.length === 0) {
             return;
         }
+        const te2SuppressDidType = te2ShouldSuppressDidType(source, text);
         if (source === 'keyboard') {
             this._onWillType.fire(text);
         }
         this._modelData.viewModel.type(text, source);
-        if (source === 'keyboard') {
+        if (source === 'keyboard' && !te2SuppressDidType) {
             this._onDidType.fire(text);
         }
     }

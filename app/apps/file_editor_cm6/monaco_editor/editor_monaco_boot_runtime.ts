@@ -54,6 +54,20 @@ interface MonacoBootstrapModuleLike {
   loadMonaco?(): Promise<unknown>;
 }
 
+function resolveMonacoBootstrapVersion(win: Window): string {
+  const scripts = Array.from(win.document?.scripts || []);
+  for (const script of scripts) {
+    const src = script.getAttribute('src') || '';
+    if (!src.includes('/static/dist/')) continue;
+    try {
+      const url = new URL(src, win.location.href);
+      const version = url.searchParams.get('v');
+      if (version) return version;
+    } catch (_) {}
+  }
+  return String(Date.now());
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value != null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -189,7 +203,8 @@ export async function bootMonacoRuntime(
     } catch (_) {}
 
     const bundleName = 'monaco.bootstrap.bundle.js';
-    const bundled = await import(langBase + '/bootstrap/' + bundleName) as MonacoBootstrapModuleLike;
+    const bundleVersion = encodeURIComponent(resolveMonacoBootstrapVersion(win));
+    const bundled = await import(langBase + '/bootstrap/' + bundleName + '?v=' + bundleVersion) as MonacoBootstrapModuleLike;
     const monacoNs = bundled && typeof bundled.loadMonaco === 'function'
       ? await bundled.loadMonaco()
       : null;
