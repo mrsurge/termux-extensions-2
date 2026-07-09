@@ -1,26 +1,18 @@
-"""Backend-owned WBA event stream bridge.
+"""Backend-owned WBA control-plane event dispatch.
 
-This module owns the long-lived subscription to the Node workbench adapter
-``/ws`` event stream. It dispatches events into backend-owned projectors such
-as workspace file-change events and diagnostics projection. Its lifecycle is
-owned by app-worker startup and project switching, not frontend connections.
+The WBA process writes backend-relevant ``te2.event`` payloads over its existing
+FWS stdio pipe. The adapter shell manager reads those push frames and calls this
+module so Explorer, diagnostics, watchers, and adapter lifecycle facts stay on
+the backend control-plane path. Editor language-feature traffic remains on the
+direct WBA socket lane.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
-import logging
 from typing import cast
-
-logger = logging.getLogger(__name__)
-
-ADAPTER_PORT = 18181
 
 JsonObject = dict[str, object]
 
-_bridge_task: asyncio.Task[None] | None = None
-_bridge_running = False
 _enospc_forwarded = False
 
 
@@ -50,10 +42,6 @@ def _int_value(value: object, default: int = 0) -> int:
         except ValueError:
             return default
     return default
-
-
-def is_wba_event_bridge_active() -> bool:
-    return _bridge_running and _bridge_task is not None and not _bridge_task.done()
 
 
 def reset_wba_project_event_state() -> None:
@@ -180,6 +168,11 @@ async def _dispatch_wba_event(ev: JsonObject) -> None:
         await handle_wba_diagnostics_update(ev)
 
 
+async def dispatch_wba_pipe_event(ev: JsonObject) -> None:
+    """Dispatch a backend WBA event received from the adapter stdio pipe."""
+    await _dispatch_wba_event(ev)
+
+
 async def _handle_adapter_session_reset(ev: JsonObject) -> None:
     project_root = _event_workspace_root(ev)
     try:
@@ -240,60 +233,3 @@ def _event_workspace_root(ev: JsonObject) -> str | None:
         return str(Path(get_project_root()).expanduser().resolve(strict=False))
     except Exception:
         return None
-
-
-async def _adapter_ws_loop() -> None:
-    import websockets
-
-    url = f"ws://127.0.0.1:{ADAPTER_PORT}/ws"
-    backoff = 1.0
-    while _bridge_running:
-        try:
-            async with websockets.connect(url, open_timeout=10, close_timeout=5) as ws:
-                logger.info("[wba_event_bridge] connected to adapter ws %s", url)
-                backoff = 1.0
-                async for raw in ws:
-                    try:
-                        decoded = cast(object, json.loads(str(raw)))
-                        msg = _json_object(decoded)
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-                    if msg.get("method") != "te2.event":
-                        continue
-                    ev = _json_object(msg.get("params"))
-                    if ev:
-                        await _dispatch_wba_event(ev)
-        except asyncio.CancelledError:
-            break
-        except Exception as exc:
-            logger.debug(
-                "[wba_event_bridge] adapter ws error: %s, reconnecting in %.0fs",
-                exc,
-                backoff,
-            )
-
-        if not _bridge_running:
-            break
-        await asyncio.sleep(backoff)
-        backoff = min(backoff * 2, 30.0)
-
-
-def start_wba_event_bridge() -> None:
-    """Ensure the backend WBA event stream subscriber is running."""
-    global _bridge_task, _bridge_running
-
-    if _bridge_task and not _bridge_task.done():
-        _bridge_running = True
-        return
-    _bridge_running = True
-    _bridge_task = asyncio.ensure_future(_adapter_ws_loop())
-
-
-def stop_wba_event_bridge() -> None:
-    """Stop the backend WBA event stream subscriber."""
-    global _bridge_task, _bridge_running
-
-    _bridge_running = False
-    if _bridge_task and not _bridge_task.done():
-        _bridge_task.cancel()
-    _bridge_task = None

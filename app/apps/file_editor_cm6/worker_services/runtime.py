@@ -11,7 +11,6 @@ from ..open_state_events import register_open_state_event_bus_handlers
 from ..project_switch_events import register_project_switch_event_bus_handlers
 from ..search_highlight_events import register_search_highlight_event_bus_handlers
 from ..sidebar_window_events import register_sidebar_window_event_bus_handlers
-from ..wba_event_bridge import start_wba_event_bridge
 from ..workspace_events import register_workspace_event_bus_handlers
 from .event_bus import set_worker_event_loop
 
@@ -38,6 +37,5 @@ def bootstrap_worker_runtime(loop: asyncio.AbstractEventLoop | None = None) -> N
     register_sidebar_window_event_bus_handlers()
     register_workspace_event_bus_handlers()
     register_explorer_render_state_bus_handlers()
-    start_wba_event_bridge()
     _registered_loop = runtime_loop
     logger.info("[file_editor_cm6] worker runtime loop registered")

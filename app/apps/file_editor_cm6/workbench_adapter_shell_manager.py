@@ -268,7 +268,23 @@ async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> Non
 
 
 async def _handle_push_event(obj: JsonObject) -> None:
-    """Consume legacy adapter push frames without relaying editor WBA data."""
+    """Consume adapter control-plane push frames from the existing FWS pipe."""
+    event_name = obj.get("event")
+    method_name = obj.get("method")
+    if event_name == "te2.event" or method_name == "te2.event":
+        raw_params = obj.get("params", obj.get("payload"))
+        event = _json_object(raw_params)
+        if not event:
+            log.debug("[adapter_stdio] ignored empty te2.event push")
+            return
+        try:
+            from .wba_event_bridge import dispatch_wba_pipe_event
+
+            await dispatch_wba_pipe_event(event)
+        except Exception as exc:
+            log.warning("[adapter_stdio] te2.event push handling failed: %s", exc)
+        return
+
     if obj and log.isEnabledFor(logging.DEBUG):
         log.debug("[push] ignored legacy adapter push frame; direct WBA socket owns editor notifications")
 

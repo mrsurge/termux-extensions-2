@@ -47,6 +47,14 @@ export interface DiagnosticsUpdate {
   items: DiagnosticsItem[];
 }
 
+const BACKEND_PIPE_EVENT_TYPES = new Set([
+  "adapter/sessionReset",
+  "workspace/switched",
+  "watcher/enospc",
+  "watcher/fileChanges",
+  "diagnostics/update",
+]);
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -135,6 +143,9 @@ export function emitTe2Event(runtime: EventBridgeRuntime, ev: Record<string, unk
     while (runtime.eventLog.length > runtime.eventLogMax) runtime.eventLog.shift();
   }
   runtime.wsBroadcastNotification("te2.event", ev);
+  if (typeof ev.type === "string" && BACKEND_PIPE_EVENT_TYPES.has(ev.type)) {
+    runtime.writePushLine({ event: "te2.event", params: ev });
+  }
 }
 
 export function buildStatusResult(runtime: EventBridgeRuntime): Record<string, unknown> {

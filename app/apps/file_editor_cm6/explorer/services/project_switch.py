@@ -114,7 +114,6 @@ async def switch_project_connection(
                 exc,
             )
 
-    _ensure_wba_event_bridge()
     await _start_project_watchexec_if_needed(new_root)
     open_state = await _replay_sidecar_open_state(
         new_root,
@@ -252,18 +251,6 @@ def _get_adapter_rpc() -> AdapterRpc:
     if not callable(adapter_rpc_obj):
         raise RuntimeError("adapter_rpc unavailable")
     return cast(AdapterRpc, adapter_rpc_obj)
-
-
-def _ensure_wba_event_bridge() -> None:
-    try:
-        bridge_module = importlib.import_module(
-            "app.apps.file_editor_cm6.wba_event_bridge"
-        )
-        start_obj = getattr(bridge_module, "start_wba_event_bridge", None)
-        if callable(start_obj):
-            start_obj()
-    except Exception as exc:
-        logger.warning("[project_open] WBA event bridge start failed: %s", exc)
 
 
 def _require_switch_ack(response: object, *, method: str = "adapter.switchWorkspace") -> None:

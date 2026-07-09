@@ -1,5 +1,4 @@
 import http from "node:http";
-import crypto from "node:crypto";
 import v8 from "node:v8";
 import path from "node:path";
 import readline from "node:readline";
@@ -7,7 +6,6 @@ import fs from "node:fs/promises";
 import process from "node:process";
 import { Buffer } from "node:buffer";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Duplex } from "node:stream";
 import type { EditorWbaSocketServer } from "./editor-socket.mjs";
 import type { EventBridgeRuntime } from "./event-bridge";
 import type {
@@ -68,14 +66,6 @@ type JsonStringifyReplacer =
   | ((this: unknown, key: string, value: unknown) => unknown)
   | Array<string | number>
   | null;
-interface WebSocketFrame {
-  fin: boolean;
-  opcode: number;
-  payload: Buffer;
-  consumed: number;
-}
-type WebSocketSocket = Duplex;
-
 const HOST = process.env.TE2_ADAPTER_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.TE2_ADAPTER_PORT ?? "8001");
 const DEFAULT_CODE_SERVER_SOCKET_PATH =
@@ -307,97 +297,6 @@ function textResponse(res: ServerResponse, code: number, text: string): void {
   res.end(text);
 }
 
-function wsAcceptValue(secWebSocketKey: string): string {
-  // RFC6455: accept = base64( SHA1(key + GUID) )
-  const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-  return crypto
-    .createHash("sha1")
-    .update(secWebSocketKey + GUID, "utf8")
-    .digest("base64");
-}
-
-function wsSendFrame(
-  socket: WebSocketSocket,
-  opcode: number,
-  payloadBuf?: Buffer,
-): void {
-  const payload = payloadBuf ?? Buffer.alloc(0);
-  const len = payload.length;
-  let header: Buffer;
-  if (len < 126) {
-    header = Buffer.alloc(2);
-    header[1] = len;
-  } else if (len < 65536) {
-    header = Buffer.alloc(4);
-    header[1] = 126;
-    header.writeUInt16BE(len, 2);
-  } else {
-    header = Buffer.alloc(10);
-    header[1] = 127;
-    header.writeBigUInt64BE(BigInt(len), 2);
-  }
-  header[0] = 0x80 | (opcode & 0x0f); // FIN + opcode
-  socket.write(Buffer.concat([header, payload]));
-}
-
-function wsSendText(socket: WebSocketSocket, text: string): void {
-  wsSendFrame(socket, 0x1, Buffer.from(text, "utf8"));
-}
-
-function wsSendClose(socket: WebSocketSocket, code = 1000, reason = ""): void {
-  const reasonBuf = Buffer.from(reason, "utf8");
-  const payload = Buffer.alloc(2 + reasonBuf.length);
-  payload.writeUInt16BE(code, 0);
-  reasonBuf.copy(payload, 2);
-  wsSendFrame(socket, 0x8, payload);
-}
-
-function wsTryReadFrame(buf: Buffer): WebSocketFrame | null {
-  if (buf.length < 2) return null;
-  const b0 = buf[0] ?? 0;
-  const b1 = buf[1] ?? 0;
-  const fin = (b0 & 0x80) !== 0;
-  const opcode = b0 & 0x0f;
-  const masked = (b1 & 0x80) !== 0;
-  let len = b1 & 0x7f;
-  let off = 2;
-
-  if (len === 126) {
-    if (buf.length < off + 2) return null;
-    len = buf.readUInt16BE(off);
-    off += 2;
-  } else if (len === 127) {
-    if (buf.length < off + 8) return null;
-    const n = buf.readBigUInt64BE(off);
-    if (n > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new Error("ws frame too large");
-    }
-    len = Number(n);
-    off += 8;
-  }
-
-  let maskKey: Buffer | null = null;
-  if (masked) {
-    if (buf.length < off + 4) return null;
-    maskKey = buf.subarray(off, off + 4);
-    off += 4;
-  }
-
-  if (buf.length < off + len) return null;
-  let payload = buf.subarray(off, off + len);
-  const consumed = off + len;
-
-  if (masked) {
-    if (!maskKey) throw new Error("missing ws mask");
-    const out = Buffer.alloc(len);
-    for (let i = 0; i < len; i++)
-      out[i] = (payload[i] ?? 0) ^ (maskKey[i & 3] ?? 0);
-    payload = out;
-  }
-
-  return { fin, opcode, payload, consumed };
-}
-
 async function readJson(
   req: IncomingMessage,
   maxBytes = 2 * 1024 * 1024,
@@ -445,7 +344,6 @@ const state: AdapterRuntimeState = {
   },
 };
 
-const wsClients = new Set<WebSocketSocket>();
 const eventLog: unknown[] = [];
 const EVENT_LOG_MAX = Number(process.env.TE2_EVENT_LOG_MAX ?? "200");
 
@@ -473,13 +371,6 @@ function wsBroadcastNotification(method: string, params: unknown): void {
   try {
     editorWbaSocketServer?.broadcastNotification(method, params);
   } catch {}
-  if (wsClients.size === 0) return;
-  const msg = JSON.stringify({ jsonrpc: "2.0", method, params });
-  for (const sock of wsClients) {
-    try {
-      wsSendText(sock, msg);
-    } catch {}
-  }
 }
 
 function bridgeRuntime(): EventBridgeRuntime {
@@ -491,7 +382,7 @@ function bridgeRuntime(): EventBridgeRuntime {
     eventTruncStrMax: EVENT_TRUNC_STR_MAX,
     eventTruncArrMax: EVENT_TRUNC_ARR_MAX,
     nowMs,
-    wsClientCount: () => wsClients.size,
+    wsClientCount: () => editorWbaSocketServer?.clientCount() ?? 0,
     wsBroadcastNotification,
     writePushLine: (payload: unknown) =>
       process.stdout.write(encodePushLine(payload)),
@@ -738,7 +629,6 @@ const server = http.createServer(async (req, res) => {
           "  GET  /health",
           "",
           "Reserved:",
-          "  /ws                      (plain WebSocket JSON-RPC/event stream)",
           "  /wba_ws/socket.io /wba   (editor-facing WBA Socket.IO RPC/event stream)",
           "",
           "Try:",
@@ -751,14 +641,6 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/health") {
       return jsonResponse(res, 200, { ok: true, ts_ms: nowMs() });
-    }
-
-    if (url.pathname === "/ws") {
-      return textResponse(
-        res,
-        426,
-        "Upgrade Required (use WebSocket upgrade)\n",
-      );
     }
 
     if (req.method === "POST" && url.pathname === "/cmd") {
@@ -783,114 +665,6 @@ editorWbaSocketServer = attachEditorWbaSocket(server, {
   handleJsonRpc,
   nowMs,
   log: (...args: unknown[]) => console.log(...args),
-});
-
-server.on("upgrade", (req, socket) => {
-  try {
-    const url = new URL(
-      req.url ?? "/",
-      `http://${req.headers.host ?? "localhost"}`,
-    );
-    if (url.pathname.startsWith("/wba_ws/socket.io")) {
-      return;
-    }
-    if (url.pathname !== "/ws") {
-      socket.end("HTTP/1.1 404 Not Found\r\n\r\n");
-      return;
-    }
-
-    const key = req.headers["sec-websocket-key"];
-    if (typeof key !== "string" || !key) {
-      socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
-      return;
-    }
-
-    const accept = wsAcceptValue(key);
-    socket.write(
-      [
-        "HTTP/1.1 101 Switching Protocols",
-        "Upgrade: websocket",
-        "Connection: Upgrade",
-        `Sec-WebSocket-Accept: ${accept}`,
-        "\r\n",
-      ].join("\r\n"),
-    );
-
-    wsClients.add(socket);
-    logStatus("ws_client_open");
-    const drop = (): void => {
-      wsClients.delete(socket);
-      logStatus("ws_client_close");
-    };
-    socket.on("close", drop);
-    socket.on("end", drop);
-    socket.on("error", drop);
-
-    let buf = Buffer.alloc(0);
-    socket.on("data", async (chunk: Buffer | string) => {
-      buf = Buffer.concat([buf, Buffer.from(chunk)]);
-      while (true) {
-        const frame = wsTryReadFrame(buf);
-        if (!frame) break;
-        buf = buf.subarray(frame.consumed);
-
-        const { opcode, payload } = frame;
-        if (opcode === 0x8) {
-          wsSendClose(socket);
-          socket.end();
-          drop();
-          return;
-        }
-        if (opcode === 0x9) {
-          // ping -> pong
-          wsSendFrame(socket, 0xa, payload);
-          continue;
-        }
-        if (opcode !== 0x1) {
-          continue;
-        }
-
-        // text
-        let msg: unknown;
-        try {
-          msg = JSON.parse(payload.toString("utf8"));
-        } catch {
-          wsSendText(
-            socket,
-            JSON.stringify({
-              jsonrpc: "2.0",
-              id: null,
-              error: { code: -32700, message: "Parse error" },
-            }),
-          );
-          continue;
-        }
-        try {
-          const reply = await handleJsonRpc(msg);
-          // Notifications may have no id; in that case, don't respond.
-          if (
-            reply &&
-            Object.prototype.hasOwnProperty.call(reply, "id") &&
-            reply.id != null
-          ) {
-            wsSendText(socket, JSON.stringify(reply));
-          }
-        } catch (e) {
-          const message = asJsonRpcEnvelope(msg);
-          wsSendText(
-            socket,
-            JSON.stringify({
-              jsonrpc: "2.0",
-              id: message.id ?? null,
-              error: { code: -32000, message: errorMessage(e) },
-            }),
-          );
-        }
-      }
-    });
-  } catch {
-    socket.end("HTTP/1.1 500 Internal Server Error\r\n\r\n");
-  }
 });
 
 server.listen(PORT, HOST, () => {
