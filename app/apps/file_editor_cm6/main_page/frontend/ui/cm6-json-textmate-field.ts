@@ -111,14 +111,14 @@ interface ThemeRule {
 export interface JsonTextmateFieldHandle {
   element: HTMLElement;
   getValue: () => string;
-  setValue: (value: string) => void;
+  setValue: (value: unknown) => void;
   setInvalid: (invalid: boolean) => void;
   focus: () => void;
   destroy: () => void;
 }
 
 export interface JsonTextmateFieldOptions {
-  value: string;
+  value: unknown;
   rows?: number;
   placeholder?: string;
   className?: string;
@@ -157,6 +157,72 @@ function asString(value: unknown): string {
 
 function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
+}
+
+function coerceEditorText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (_) {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function nextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function waitForStableEditorRect(
+  host: HTMLElement,
+  shouldStop: () => boolean,
+): Promise<boolean> {
+  while (!shouldStop()) {
+    if (shouldStop()) return false;
+    const rect = host.getBoundingClientRect();
+    if (host.isConnected && rect.width > 0 && rect.height > 0) {
+      await nextAnimationFrame();
+      if (shouldStop()) return false;
+      const settled = host.getBoundingClientRect();
+      return settled.width > 0 && settled.height > 0;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
+  }
+  return false;
+}
+
+function hasFiniteMeasurement(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function hasPositiveMeasurement(value: unknown): boolean {
+  return hasFiniteMeasurement(value) && value > 0;
+}
+
+function editorMeasurementLooksValid(view: Cm6EditorView): boolean {
+  const candidate = view as unknown as {
+    viewState?: {
+      visibleTop?: unknown;
+      visibleBottom?: unknown;
+      heightMap?: { height?: unknown };
+      heightOracle?: { textHeight?: unknown; charWidth?: unknown };
+    };
+    requestMeasure?: () => void;
+  };
+  const viewState = candidate.viewState;
+  if (!viewState) return true;
+  const oracle = viewState.heightOracle;
+  const heightMap = viewState.heightMap;
+  return (
+    hasFiniteMeasurement(viewState.visibleTop) &&
+    hasFiniteMeasurement(viewState.visibleBottom) &&
+    hasFiniteMeasurement(heightMap?.height) &&
+    hasPositiveMeasurement(oracle?.textHeight) &&
+    hasPositiveMeasurement(oracle?.charWidth)
+  );
 }
 
 function dynamicImport(specifier: string): Promise<unknown> {
@@ -542,7 +608,7 @@ function validateJson(raw: string):
 export function createJsonTextmateField(
   options: JsonTextmateFieldOptions,
 ): JsonTextmateFieldHandle {
-  let currentValue = options.value || "";
+  let currentValue = coerceEditorText(options.value);
   let view: Cm6EditorView | null = null;
   let destroyed = false;
   let suppressChange = false;
@@ -591,6 +657,8 @@ export function createJsonTextmateField(
   // Lazy-load the editor system only when a JSON modal field actually mounts.
   void (async () => {
     try {
+      const hasStableRect = await waitForStableEditorRect(host, () => destroyed);
+      if (!hasStableRect) return;
       const [CM, tm] = await Promise.all([loadCm6(), loadTextmate()]);
       if (destroyed) return;
       const extensions: unknown[] = [
@@ -637,6 +705,17 @@ export function createJsonTextmateField(
         }),
         parent: host,
       });
+      await nextAnimationFrame();
+      if (destroyed || !view) return;
+      (view as unknown as { requestMeasure?: () => void }).requestMeasure?.();
+      await nextAnimationFrame();
+      if (!editorMeasurementLooksValid(view)) {
+        view.destroy();
+        view = null;
+        host.classList.remove("cm6-json-textmate");
+        host.innerHTML = "";
+        host.appendChild(textarea);
+      }
     } catch (error) {
       console.warn("[cm6-json-textmate] falling back to textarea", error);
     }
@@ -645,8 +724,8 @@ export function createJsonTextmateField(
   return {
     element: host,
     getValue: () => (view ? view.state.doc.toString() : textarea.value),
-    setValue(value: string) {
-      currentValue = value || "";
+    setValue(value: unknown) {
+      currentValue = coerceEditorText(value);
       textarea.value = currentValue;
       if (view) {
         suppressChange = true;

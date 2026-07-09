@@ -36,6 +36,7 @@ import { FoldingController } from '../../folding/browser/folding.js';
 import { toggleCollapseState } from '../../folding/browser/foldingModel.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { mainWindow } from '../../../../base/browser/window.js';
+import { onUnexpectedError } from '../../../../base/common/errors.js';
 let StickyScrollController = class StickyScrollController extends Disposable {
     static { StickyScrollController_1 = this; }
     static { this.ID = 'store.contrib.stickyScrollController'; }
@@ -503,11 +504,30 @@ let StickyScrollController = class StickyScrollController extends Disposable {
     }
     async _updateState(rebuildFromLine) {
         this._minRebuildFromLine = undefined;
-        this._foldingModel = await FoldingController.get(this._editor)?.getFoldingModel() ?? undefined;
         this._widgetState = this.findScrollWidgetState();
         const stickyWidgetHasLines = this._widgetState.startLineNumbers.length > 0;
         this._stickyScrollVisibleContextKey.set(stickyWidgetHasLines);
+        this._foldingModel = undefined;
         this._stickyScrollWidget.setState(this._widgetState, this._foldingModel, rebuildFromLine);
+        const currentModel = this._editor.getModel();
+        const currentVersionId = currentModel?.getVersionId();
+        const widgetState = this._widgetState;
+        const foldingModelPromise = FoldingController.get(this._editor)?.getFoldingModel();
+        if (foldingModelPromise) {
+            void foldingModelPromise.then(foldingModel => {
+                if (!currentModel || this._editor.getModel() !== currentModel) {
+                    return;
+                }
+                if (currentModel.getVersionId() !== currentVersionId) {
+                    return;
+                }
+                if (!this._widgetState.equals(widgetState)) {
+                    return;
+                }
+                this._foldingModel = foldingModel ?? undefined;
+                this._stickyScrollWidget.setState(this._widgetState, this._foldingModel, rebuildFromLine ?? 0);
+            }).then(undefined, onUnexpectedError);
+        }
     }
     async _resetState() {
         this._minRebuildFromLine = undefined;

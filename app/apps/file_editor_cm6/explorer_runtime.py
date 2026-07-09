@@ -7,6 +7,7 @@ here. Put feature behavior in `explorer/handlers/`, `explorer/services/`, or
 `explorer/contracts/` and keep this module boring.
 """
 
+import asyncio
 from collections.abc import Awaitable, Callable
 import importlib
 import logging
@@ -77,7 +78,10 @@ from .explorer.services.job_tracking import (
     start_job_tracking,
     stop_job_tracking,
 )
-from .explorer.services.session_bootstrap import bootstrap_explorer_session
+from .explorer.services.session_bootstrap import (
+    bootstrap_explorer_session,
+    replay_explorer_session_bootstrap,
+)
 from .explorer.transport.rpc_contract import build_jsonrpc_notification
 from .worker_services.event_bus import current_project_generation
 
@@ -90,14 +94,12 @@ class ExplorerDispatcher:
         self._job_tracking: ExplorerJobTrackingRuntime | None = None
         self._tracked_job_ids: set[str] = set()
         self._search_sessions: object | None = None
+        self._bootstrap_task: asyncio.Task[None] | None = None
 
     async def initialize(self) -> None:
         bootstrap = await bootstrap_explorer_session(
             websocket=self.websocket,
             project_root=self.project_root,
-            emit_personal=self.emit_personal,
-            broadcast_git_status=self.broadcast_git_status,
-            broadcast_review_state=self.broadcast_review_state,
         )
         self.project_root = bootstrap.project_root
 
@@ -115,8 +117,21 @@ class ExplorerDispatcher:
         )
         await search_sessions.start()
         self._search_sessions = search_sessions
+        self._bootstrap_task = asyncio.create_task(
+            self._run_bootstrap_projection(
+                bootstrap.project_root,
+                bootstrap.was_new_sidecar,
+            )
+        )
 
     async def cleanup(self) -> None:
+        if self._bootstrap_task is not None:
+            self._bootstrap_task.cancel()
+            try:
+                await self._bootstrap_task
+            except asyncio.CancelledError:
+                pass
+            self._bootstrap_task = None
         search_sessions = self._search_session_service()
         if search_sessions is not None:
             await search_sessions.stop()
@@ -129,6 +144,36 @@ class ExplorerDispatcher:
 
     async def _refresh_runtime_state(self) -> None:
         await self.handle_explorer_refresh({}, None)
+
+    async def _run_bootstrap_projection(
+        self,
+        project_root: Path,
+        was_new_sidecar: bool,
+    ) -> None:
+        async def broadcast_git_status_for_bootstrap() -> None:
+            await self._broadcast_git_status_for_project(
+                project_root,
+                source="explorer_runtime:bootstrap_git_status",
+            )
+
+        async def broadcast_review_state_for_bootstrap() -> None:
+            await self._broadcast_review_state_for_project(
+                project_root,
+                source="explorer_runtime:bootstrap_review_state",
+            )
+
+        try:
+            await replay_explorer_session_bootstrap(
+                project_root=project_root,
+                was_new_sidecar=was_new_sidecar,
+                emit_personal=self.emit_personal,
+                broadcast_git_status=broadcast_git_status_for_bootstrap,
+                broadcast_review_state=broadcast_review_state_for_bootstrap,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[ExplorerRPC] bootstrap projection failed")
 
     async def emit_personal(
         self,
@@ -164,12 +209,23 @@ class ExplorerDispatcher:
         await self.emit_personal("explorer.error", payload, reply_to)
 
     async def broadcast_git_status(self) -> None:
+        await self._broadcast_git_status_for_project(
+            self.project_root,
+            source="explorer_runtime:broadcast_git_status",
+        )
+
+    async def _broadcast_git_status_for_project(
+        self,
+        project_root: Path,
+        *,
+        source: str,
+    ) -> None:
         from .explorer.services.runtime_notifications import broadcast_git_status_update
 
         await broadcast_git_status_update(
-            self.project_root,
-            project_generation=current_project_generation(self.project_root),
-            source="explorer_runtime:broadcast_git_status",
+            project_root,
+            project_generation=current_project_generation(project_root),
+            source=source,
         )
 
     async def broadcast_git_decorations(self) -> None:
@@ -187,6 +243,17 @@ class ExplorerDispatcher:
         )
 
     async def broadcast_review_state(self) -> None:
+        await self._broadcast_review_state_for_project(
+            self.project_root,
+            source="explorer_runtime:broadcast_review_state",
+        )
+
+    async def _broadcast_review_state_for_project(
+        self,
+        project_root: Path,
+        *,
+        source: str,
+    ) -> None:
         """Broadcast updated review entries and decoration updates."""
         from .explorer.services.state_facts import (
             publish_draft_state_changed,
@@ -195,11 +262,11 @@ class ExplorerDispatcher:
 
         # 1. Review List
         from .explorer import review
-        reviews = await review.list_reviews(self.project_root, lightweight=True)
+        reviews = await review.list_reviews(project_root, lightweight=True)
         await publish_review_state_changed(
-            self.project_root,
+            project_root,
             {"entries": reviews},
-            source="explorer_runtime:broadcast_review_state",
+            source=source,
         )
 
         # 2. Decorations (Drafts)
@@ -211,9 +278,9 @@ class ExplorerDispatcher:
             if isinstance(rel, str)
         }
         await publish_draft_state_changed(
-            self.project_root,
+            project_root,
             {"drafts": draft_decorations},
-            source="explorer_runtime:broadcast_review_state",
+            source=source,
         )
 
     def _build_search_review_context(self) -> ExplorerSearchReviewHandlerContext:

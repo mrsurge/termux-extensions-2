@@ -55,12 +55,14 @@ I follow an approval-based workflow for new repo tasks so the user stays in cont
 When requesting prompt approval or final plan approval for this repo, use this order:
 
 1. built-in harness user-input or approval tool, when available
-2. MCP user-input or approval tool, when no built-in tool is available
+2. MCP user-input or approval tool, when no built-in tool is available (this the mcp `ask_user` tool in the `pty-blocks` mcp which should DEFINITELY be checked for availability)
 3. plain assistant message only when no approval tool is available
 
 Before asking the user anything, check which built-in and MCP user-input / approval tools are actually available in the current tool inventory.
 
-If a choice-capable approval tool such as `ask_user` is available, include at least one explicit button/choice option. Freeform input may supplement the choices, but freeform alone does not satisfy this requirement.
+If the choice-capable approval tool `ask_user` is available, include at least one explicit button/choice option. Freeform input may supplement the choices, but freeform alone does not satisfy this requirement.
+
+**ALWAYS** check to see if you have the te2 and pty-blocks mcp/tools available
 
 ## Inquiries
 

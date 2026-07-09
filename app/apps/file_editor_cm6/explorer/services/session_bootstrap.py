@@ -38,9 +38,6 @@ async def bootstrap_explorer_session(
     *,
     websocket: ExplorerConnection,
     project_root: Path,
-    emit_personal: EmitPersonal,
-    broadcast_git_status: AsyncNoArg,
-    broadcast_review_state: AsyncNoArg,
 ) -> ExplorerBootstrapResult:
     resolved_project_root = project_root
 
@@ -55,9 +52,23 @@ async def bootstrap_explorer_session(
 
     await manager.accept_and_register(websocket, str(resolved_project_root))
 
+    return ExplorerBootstrapResult(
+        project_root=resolved_project_root,
+        was_new_sidecar=was_new_sidecar,
+    )
+
+
+async def replay_explorer_session_bootstrap(
+    *,
+    project_root: Path,
+    was_new_sidecar: bool,
+    emit_personal: EmitPersonal,
+    broadcast_git_status: AsyncNoArg,
+    broadcast_review_state: AsyncNoArg,
+) -> None:
     await emit_personal(
         "explorer.project.active.updated",
-        {"path": str(resolved_project_root), "new_sidecar": was_new_sidecar},
+        {"path": str(project_root), "new_sidecar": was_new_sidecar},
     )
 
     try:
@@ -70,12 +81,12 @@ async def bootstrap_explorer_session(
     await broadcast_git_status()
     await emit_bootstrap_snapshot(
         emit_personal,
-        await build_bootstrap_snapshot(resolved_project_root),
+        await build_bootstrap_snapshot(project_root),
     )
     await broadcast_review_state()
 
     try:
-        open_state = read_sidecar_open_state(str(resolved_project_root), reason="reconnect")
+        open_state = read_sidecar_open_state(str(project_root), reason="reconnect")
         await emit_personal("explorer.openState.changed", dict(open_state))
         current_path = open_state["openFile"]
         rel = open_state["openFileRel"]
@@ -92,7 +103,7 @@ async def bootstrap_explorer_session(
             is_watchexec_available,
         )
 
-        sidecar_watcher = ProjectSidecar.load_or_create(str(resolved_project_root))
+        sidecar_watcher = ProjectSidecar.load_or_create(str(project_root))
         sidecar_state = sidecar_watcher.dump_raw()
         watcher_config = build_watcher_config_payload(
             sidecar_state.get("watcher"),
@@ -102,13 +113,8 @@ async def bootstrap_explorer_session(
         await emit_personal("explorer.watcher.config.updated", dict(watcher_config))
         if watcher_mode == "watchexec" and watcher_config["watchexec_available"]:
             await ensure_watchexec_shell(
-                str(resolved_project_root),
+                str(project_root),
                 watcher_config["poll_interval_ms"],
             )
     except Exception as exc:
         logger.warning("Failed to send watcher config: %s", exc)
-
-    return ExplorerBootstrapResult(
-        project_root=resolved_project_root,
-        was_new_sidecar=was_new_sidecar,
-    )

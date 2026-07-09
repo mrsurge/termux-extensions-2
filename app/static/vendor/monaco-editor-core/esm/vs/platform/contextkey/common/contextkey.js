@@ -323,7 +323,7 @@ export class Parser {
                 this._parsingErrors.push({ message: errorUnexpectedEOF, offset: peek.offset, lexeme: '', additionalInfo: hintUnexpectedEOF });
                 throw Parser._parseError;
             default:
-                throw this._errExpectedButGot(`true | false | KEY\n\t| KEY '=~' REGEX\n\t| KEY ('==' | '!=' | '<' | '<=' | '>' | '>=' | 'in' | 'not' 'in') value`, this._peek());
+                throw this._errExpectedButGot(`true | false | KEY \n\t| KEY '=~' REGEX \n\t| KEY ('==' | '!=' | '<' | '<=' | '>' | '>=' | 'in' | 'not' 'in') value`, this._peek());
         }
     }
     _value() {

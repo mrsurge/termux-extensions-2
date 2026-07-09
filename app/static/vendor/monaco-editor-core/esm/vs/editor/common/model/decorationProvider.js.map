@@ -1,0 +1,1 @@
+{"version":3,"file":"decorationProvider.js","sourceRoot":"file:///data/data/com.termux/files/home/mrselect6/worktrees/vscode-te2-diff/out-editor-src","sources":["vs/editor/common/model/decorationProvider.ts"],"names":[],"mappings":"","sourcesContent":["\n\nexport interface DecorationProvider {\n}\n"]}

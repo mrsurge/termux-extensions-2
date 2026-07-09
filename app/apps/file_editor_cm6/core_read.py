@@ -196,3 +196,4 @@ def emit_diff_changed(path: str, sha256: str) -> None:
         "sha256": sha256
     }
     _emit_event(event)
+    

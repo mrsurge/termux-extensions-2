@@ -22,7 +22,7 @@ shells:
       subgroup_styles:
         runner-profile:
           bg: rgba(26, 28, 34, 0.92)
-          border: rgba(130, 175, 255, 0.70)
+          border: rgba(130, 255, 172, 0.7)
         project:*:
           bg: rgba(0, 0, 0, 0.88)
           border: rgba(29, 70, 126, 0.88)
