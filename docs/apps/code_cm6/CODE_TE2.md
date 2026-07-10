@@ -2870,8 +2870,13 @@ The nid extraction is **version-gated** and runs automatically at boot:
 1. **Python helper** (`extension_registry.py: ensure_rpc_config()`) runs before
    the adapter launches (called from `workbench_adapter_shell_manager.py`).
 
-2. **Version check** — runs `code-server --version`, compares against the cached
-   `te2_rpc_config.json`.  If version + commit match → cache hit, skip.
+2. **Installation resolution and version check** — resolves one code-server
+   executable from `TE2_CODE_SERVER_BIN`, `PATH`, the login shell, NVM
+   installations, `$PREFIX/bin`, or `~/.local/bin`; runs that exact executable
+   with `--version`; and compares it against cached `te2_rpc_config.json`.
+   If version + commit match → cache hit, skip. The same absolute executable
+   and its `bin` directory are passed to the code-server shell, so WBA nid
+   discovery and process launch cannot select different installations.
 
 3. **Block-scoped extraction** — if regeneration is needed, reads the installed
    minified bundle (`extensionHostProcess.js`) and:
