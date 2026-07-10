@@ -10,6 +10,7 @@ export interface StructureSendResult {
 
 export interface StructureRuntime {
   ensureConnected: () => void;
+  languageFeaturesRpcId: number;
   defaultAuthority: () => string;
   languageIdFromPath: (filePath: string) => string;
   getDocumentVersion: (path: string) => number | null;
@@ -33,8 +34,6 @@ export interface StructureRuntime {
     pendingOptions: StructurePendingOptions,
   ) => StructureSendResult;
   sleep: (ms: number) => Promise<void>;
-  documentSymbolsRpcId: number;
-  foldingRangesRpcId: number;
   log: (...args: unknown[]) => void;
 }
 
@@ -149,7 +148,7 @@ export async function provideDocumentSymbols(runtime: StructureRuntime, params: 
 
   const results = await Promise.all(handles.map((handle) => {
     const { promise } = runtime.sendExtPending(
-      runtime.documentSymbolsRpcId,
+      runtime.languageFeaturesRpcId,
       "$provideDocumentSymbols",
       [handle, uriObj],
       true,
@@ -192,7 +191,7 @@ export async function provideDocumentSymbolsSingle(
   runtime.updateActiveDocument(params.path, uriObj, params.languageId);
 
   const { promise } = runtime.sendExtPending(
-    runtime.documentSymbolsRpcId,
+    runtime.languageFeaturesRpcId,
     "$provideDocumentSymbols",
     [params.providerHandle, uriObj],
     true,
@@ -260,7 +259,7 @@ export async function provideFoldingRanges(runtime: StructureRuntime, params: un
 
   const results = await Promise.all(handles.map((handle) => {
     const { promise } = runtime.sendExtPending(
-      runtime.foldingRangesRpcId,
+      runtime.languageFeaturesRpcId,
       "$provideFoldingRanges",
       [handle, uriObj, context],
       true,
@@ -316,7 +315,7 @@ export async function provideFoldingRangesSingle(
   runtime.updateActiveDocument(params.path, uriObj, params.languageId);
 
   const { promise } = runtime.sendExtPending(
-    runtime.foldingRangesRpcId,
+    runtime.languageFeaturesRpcId,
     "$provideFoldingRanges",
     [params.providerHandle, uriObj, params.context ?? {}],
     true,

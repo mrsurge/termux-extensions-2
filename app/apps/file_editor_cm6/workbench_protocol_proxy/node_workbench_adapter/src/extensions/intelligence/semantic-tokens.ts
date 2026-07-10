@@ -14,6 +14,7 @@ export interface SemanticProviderEntry {
 
 export interface SemanticRuntime {
   ensureConnected: () => void;
+  languageFeaturesRpcId: number;
   defaultAuthority: () => string;
   languageIdFromPath: (filePath: string) => string;
   didChange: (
@@ -382,7 +383,7 @@ export async function provideSemanticTokens(runtime: SemanticRuntime, params: un
   const results = await Promise.all(handles.map((handle) => {
     const legend = runtime.getProvider("semanticTokens", handle)?.legend ?? null;
     const { promise } = runtime.sendExtPending(
-      94,
+      runtime.languageFeaturesRpcId,
       "$provideDocumentSemanticTokens",
       [handle, uriObj, previousResultId],
       true,
@@ -423,7 +424,7 @@ export async function provideSemanticTokensSingle(runtime: SemanticRuntime, para
   const legend = runtime.getProvider("semanticTokens", params.providerHandle)?.legend ?? null;
   const uriObj = runtime.uriForPath(params.path, params.authority);
   const { promise } = runtime.sendExtPending(
-    94,
+    runtime.languageFeaturesRpcId,
     "$provideDocumentSemanticTokens",
     [params.providerHandle, uriObj, params.previousResultId],
     true,
@@ -472,7 +473,7 @@ export async function provideSemanticTokensRange(runtime: SemanticRuntime, param
   const results = await Promise.all(handles.map((handle) => {
     const legend = runtime.getProvider("semanticTokens", handle)?.legend ?? null;
     const { promise } = runtime.sendExtPending(
-      94,
+      runtime.languageFeaturesRpcId,
       "$provideDocumentRangeSemanticTokens",
       [handle, uriObj, range],
       true,

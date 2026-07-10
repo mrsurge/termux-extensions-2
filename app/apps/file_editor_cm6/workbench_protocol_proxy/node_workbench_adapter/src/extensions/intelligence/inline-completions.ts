@@ -10,6 +10,7 @@ export interface InlineCompletionSendResult {
 
 export interface InlineCompletionRuntime {
   ensureConnected: () => void;
+  languageFeaturesRpcId: number;
   defaultAuthority: () => string;
   languageIdFromPath: (filePath: string) => string;
   didChange: (
@@ -171,7 +172,7 @@ export async function provideInlineCompletions(
 
   const uriObj = runtime.uriForPath(path, authority);
   const { promise } = runtime.sendExtPending(
-    94,
+    runtime.languageFeaturesRpcId,
     "$provideInlineCompletions",
     [providerHandle, uriObj, { lineNumber, column }, context],
     true,
@@ -206,7 +207,7 @@ export async function freeInlineCompletions(
   }
 
   const { promise } = runtime.sendExtAwaitTerminalReply(
-    94,
+    runtime.languageFeaturesRpcId,
     "$freeInlineCompletionsList",
     [providerHandle, pid, reason],
     false,
@@ -231,7 +232,7 @@ export async function handleInlineCompletionDidShow(
   }
 
   const { promise } = runtime.sendExtAwaitTerminalReply(
-    94,
+    runtime.languageFeaturesRpcId,
     "$handleInlineCompletionDidShow",
     [providerHandle, pid, idx, updatedInsertText],
     false,

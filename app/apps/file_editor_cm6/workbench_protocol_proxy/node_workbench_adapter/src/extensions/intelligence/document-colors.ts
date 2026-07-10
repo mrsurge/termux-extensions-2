@@ -10,6 +10,7 @@ export interface DocumentColorSendResult {
 
 export interface DocumentColorRuntime {
   ensureConnected: () => void;
+  languageFeaturesRpcId: number;
   defaultAuthority: () => string;
   languageIdFromPath: (filePath: string) => string;
   didChange: (
@@ -306,7 +307,7 @@ export async function provideDocumentColors(
   const replies = await Promise.all(
     handles.map((handle) => {
       const { promise } = runtime.sendExtPending(
-        94,
+        runtime.languageFeaturesRpcId,
         "$provideDocumentColors",
         [handle, uriObj],
         true,
@@ -380,7 +381,7 @@ export async function provideColorPresentations(
   const replies = await Promise.all(
     handles.map((handle) => {
       const { promise } = runtime.sendExtPending(
-        94,
+        runtime.languageFeaturesRpcId,
         "$provideColorPresentations",
         [handle, uriObj, colorInfo],
         true,

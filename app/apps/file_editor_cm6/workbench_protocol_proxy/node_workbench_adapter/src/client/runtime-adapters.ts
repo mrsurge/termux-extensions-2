@@ -34,6 +34,7 @@ export interface RuntimeBuilderState {
 
 export interface CompletionRuntimeDeps {
   extProtocol: unknown;
+  languageFeaturesRpcId: number;
   authority: string;
   defaultRemoteAuthority: string;
   languageIdFromPath: (filePath: string) => string;
@@ -54,6 +55,7 @@ export interface CompletionRuntimeDeps {
 
 export interface DocumentColorRuntimeDeps {
   extProtocol: unknown;
+  languageFeaturesRpcId: number;
   authority: string;
   defaultRemoteAuthority: string;
   languageIdFromPath: (filePath: string) => string;
@@ -77,6 +79,7 @@ export interface DocumentColorRuntimeDeps {
 
 export interface InlineCompletionRuntimeDeps {
   extProtocol: unknown;
+  languageFeaturesRpcId: number;
   authority: string;
   defaultRemoteAuthority: string;
   languageIdFromPath: (filePath: string) => string;
@@ -105,6 +108,7 @@ export interface InlineCompletionRuntimeDeps {
 
 export interface InlayHintsRuntimeDeps {
   extProtocol: unknown;
+  languageFeaturesRpcId: number;
   authority: string;
   defaultRemoteAuthority: string;
   languageIdFromPath: (filePath: string) => string;
@@ -129,6 +133,7 @@ export interface InlayHintsRuntimeDeps {
 
 export interface SemanticTokensRuntimeDeps {
   extProtocol: unknown;
+  languageFeaturesRpcId: number;
   authority: string;
   defaultRemoteAuthority: string;
   languageIdFromPath: (filePath: string) => string;
@@ -155,6 +160,7 @@ export interface SemanticTokensRuntimeDeps {
 
 export interface DocumentFeatureRuntimeDeps {
   extProtocol: unknown;
+  languageFeaturesRpcId: number;
   authority: string;
   defaultRemoteAuthority: string;
   languageIdFromPath: (filePath: string) => string;
@@ -173,9 +179,6 @@ export interface DocumentFeatureRuntimeDeps {
     pendingOptions: TransportPendingOptions,
   ) => { req: number; promise: Promise<unknown> };
   sleep: (ms: number) => Promise<void>;
-  documentSymbolsRpcId: number;
-  foldingRangesRpcId: number;
-  hoverRpcId: number;
   log: (...args: unknown[]) => void;
 }
 
@@ -402,6 +405,7 @@ function ensureConnected(extProtocol: unknown): void {
 export function createCompletionRuntime(deps: CompletionRuntimeDeps): CompletionRuntime {
   return {
     ensureConnected: () => ensureConnected(deps.extProtocol),
+    languageFeaturesRpcId: deps.languageFeaturesRpcId,
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
@@ -418,6 +422,7 @@ export function createCompletionRuntime(deps: CompletionRuntimeDeps): Completion
 export function createDocumentColorRuntime(deps: DocumentColorRuntimeDeps): DocumentColorRuntime {
   return {
     ensureConnected: () => ensureConnected(deps.extProtocol),
+    languageFeaturesRpcId: deps.languageFeaturesRpcId,
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
@@ -434,6 +439,7 @@ export function createDocumentColorRuntime(deps: DocumentColorRuntimeDeps): Docu
 export function createInlineCompletionRuntime(deps: InlineCompletionRuntimeDeps): InlineCompletionRuntime {
   return {
     ensureConnected: () => ensureConnected(deps.extProtocol),
+    languageFeaturesRpcId: deps.languageFeaturesRpcId,
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
@@ -450,6 +456,7 @@ export function createInlineCompletionRuntime(deps: InlineCompletionRuntimeDeps)
 export function createInlayHintsRuntime(deps: InlayHintsRuntimeDeps): InlayHintsRuntime {
   return {
     ensureConnected: () => ensureConnected(deps.extProtocol),
+    languageFeaturesRpcId: deps.languageFeaturesRpcId,
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
@@ -465,6 +472,7 @@ export function createInlayHintsRuntime(deps: InlayHintsRuntimeDeps): InlayHints
 export function createSemanticTokensRuntime(deps: SemanticTokensRuntimeDeps): SemanticRuntime {
   return {
     ensureConnected: () => ensureConnected(deps.extProtocol),
+    languageFeaturesRpcId: deps.languageFeaturesRpcId,
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
@@ -484,6 +492,7 @@ export function createSemanticTokensRuntime(deps: SemanticTokensRuntimeDeps): Se
 export function createDocumentFeatureRuntime(deps: DocumentFeatureRuntimeDeps): StructureRuntime & HoverRuntime {
   return {
     ensureConnected: () => ensureConnected(deps.extProtocol),
+    languageFeaturesRpcId: deps.languageFeaturesRpcId,
     defaultAuthority: () => String(deps.authority ?? deps.defaultRemoteAuthority),
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     getDocumentVersion: (path: string) => deps.getDocumentVersion(path),
@@ -496,9 +505,6 @@ export function createDocumentFeatureRuntime(deps: DocumentFeatureRuntimeDeps): 
     sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>
       deps.sendExtPending(rpcId, method, args, cancellable, pendingOptions),
     sleep: (ms: number) => deps.sleep(ms),
-    documentSymbolsRpcId: deps.documentSymbolsRpcId,
-    foldingRangesRpcId: deps.foldingRangesRpcId,
-    hoverRpcId: deps.hoverRpcId,
     log: (...args: unknown[]) => deps.log(...args),
   };
 }

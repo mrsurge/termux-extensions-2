@@ -10,6 +10,7 @@ export interface HoverSendResult {
 
 export interface HoverRuntime {
   ensureConnected: () => void;
+  languageFeaturesRpcId: number;
   defaultAuthority: () => string;
   languageIdFromPath: (filePath: string) => string;
   updateActiveDocument: (path: string, uriObj: unknown, languageId: string) => void;
@@ -26,7 +27,6 @@ export interface HoverRuntime {
     cancellable: boolean,
     pendingOptions: HoverPendingOptions,
   ) => HoverSendResult;
-  hoverRpcId: number;
   log: (...args: unknown[]) => void;
 }
 
@@ -112,7 +112,7 @@ export async function provideHover(runtime: HoverRuntime, params: unknown = {}):
 
   const pending = handles.map((handle) => {
     const { promise } = runtime.sendExtPending(
-      runtime.hoverRpcId,
+      runtime.languageFeaturesRpcId,
       "$provideHover",
       [handle, uriObj, { lineNumber, column }, undefined],
       true,
@@ -166,7 +166,7 @@ export async function provideHoverSingle(
   runtime.ensureConnected();
   const uriObj = runtime.uriForPath(params.path, params.authority);
   const { promise } = runtime.sendExtPending(
-    runtime.hoverRpcId,
+    runtime.languageFeaturesRpcId,
     "$provideHover",
     [params.providerHandle, uriObj, { lineNumber: params.lineNumber, column: params.column }, undefined],
     true,

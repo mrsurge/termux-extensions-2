@@ -829,6 +829,7 @@ export class WorkbenchClient {
   _completionRuntime() {
     return createCompletionRuntime({
       extProtocol: this.ext?.protocol ?? null,
+      languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
@@ -848,6 +849,7 @@ export class WorkbenchClient {
   _documentColorRuntime() {
     return createDocumentColorRuntime({
       extProtocol: this.ext?.protocol ?? null,
+      languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
@@ -867,6 +869,7 @@ export class WorkbenchClient {
   _inlineCompletionRuntime() {
     return createInlineCompletionRuntime({
       extProtocol: this.ext?.protocol ?? null,
+      languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
@@ -897,6 +900,7 @@ export class WorkbenchClient {
   _inlayHintsRuntime() {
     return createInlayHintsRuntime({
       extProtocol: this.ext?.protocol ?? null,
+      languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
@@ -926,6 +930,7 @@ export class WorkbenchClient {
   _semanticTokensRuntime() {
     return createSemanticTokensRuntime({
       extProtocol: this.ext?.protocol ?? null,
+      languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
@@ -950,6 +955,7 @@ export class WorkbenchClient {
   _documentFeatureRuntime() {
     return createDocumentFeatureRuntime({
       extProtocol: this.ext?.protocol ?? null,
+      languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
@@ -968,9 +974,6 @@ export class WorkbenchClient {
       sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
         this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-      documentSymbolsRpcId: 94,
-      foldingRangesRpcId: _rpcIds.ExtHostLanguageFeatures,
-      hoverRpcId: 94,
       log: (...args) => console.log(...args),
     });
   }

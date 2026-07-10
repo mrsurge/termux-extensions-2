@@ -10,6 +10,7 @@ export interface InlayHintsSendResult {
 
 export interface InlayHintsRuntime {
   ensureConnected: () => void;
+  languageFeaturesRpcId: number;
   defaultAuthority: () => string;
   languageIdFromPath: (filePath: string) => string;
   uriForPath: (filePath: string, authority: string) => unknown;
@@ -100,7 +101,7 @@ export async function provideInlayHints(
 
   const uriObj = runtime.uriForPath(path, authority);
   const { promise } = runtime.sendExtPending(
-    94,
+    runtime.languageFeaturesRpcId,
     "$provideInlayHints",
     [providerHandle, uriObj, range],
     true,
@@ -134,7 +135,7 @@ export async function resolveInlayHint(
   }
 
   const { promise } = runtime.sendExtPending(
-    94,
+    runtime.languageFeaturesRpcId,
     "$resolveInlayHint",
     [providerHandle, cacheId],
     true,
@@ -168,7 +169,7 @@ export async function releaseInlayHints(
   }
 
   const { promise } = runtime.sendExtAwaitTerminalReply(
-    94,
+    runtime.languageFeaturesRpcId,
     "$releaseInlayHints",
     [providerHandle, cacheId],
     false,

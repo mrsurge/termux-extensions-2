@@ -2900,7 +2900,10 @@ The nid extraction is **version-gated** and runs automatically at boot:
 7. **Adapter loads** the config synchronously at startup into `_rpcIds`.
    All `_sendExt()` calls use named lookups (`_rpcIds.ExtHostConfiguration`
    instead of literal `80`).  If the config file is missing, hardcoded
-   defaults remain as fallback.
+   defaults remain as fallback. Every language-intelligence runtime receives
+   `_rpcIds.ExtHostLanguageFeatures`; hover, completions, document symbols,
+   folding ranges, semantic tokens, inlay hints, inline completions, and
+   document colors do not carry a version-specific numeric nid.
 
 ### Logging
 

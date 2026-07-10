@@ -10,6 +10,7 @@ export interface CompletionSendResult {
 
 export interface CompletionRuntime {
   ensureConnected: () => void;
+  languageFeaturesRpcId: number;
   defaultAuthority: () => string;
   languageIdFromPath: (filePath: string) => string;
   didChange: (
@@ -257,7 +258,7 @@ export async function provideCompletions(runtime: CompletionRuntime, params: unk
 
   const results = await Promise.all(handles.map((handle) => {
     const { promise } = runtime.sendExtPending(
-      94,
+      runtime.languageFeaturesRpcId,
       "$provideCompletionItems",
       [handle, uriObj, { lineNumber, column }, context],
       true,
@@ -298,7 +299,7 @@ export async function provideCompletionSingle(runtime: CompletionRuntime, params
   if (params.triggerCharacter != null) context.triggerCharacter = params.triggerCharacter;
 
   const { promise } = runtime.sendExtPending(
-    94,
+    runtime.languageFeaturesRpcId,
     "$provideCompletionItems",
     [params.providerHandle, uriObj, { lineNumber: params.lineNumber, column: params.column }, context],
     true,
