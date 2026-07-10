@@ -6,9 +6,9 @@ shells:
     cwd: ${ctx:PROJECT_ROOT}
     command:
       - sh
-      - -lc
+      - -c
       - >-
-        code-server
+        "${ctx:CODE_SERVER_BIN}"
         --socket "${ctx:CODE_SERVER_SOCKET}"
         --socket-mode 0600
         --auth none
@@ -21,7 +21,9 @@ shells:
         "${ctx:PROJECT_ROOT}"
         2>&1
     env:
+      PATH: ${ctx:CODE_SERVER_BIN_DIR}:${env:PATH}
       TE_APP_ID: ${ctx:APP_ID}
+      TE_CODE_SERVER_BIN: ${ctx:CODE_SERVER_BIN}
       TE_CODE_SERVER_SOCKET: ${ctx:CODE_SERVER_SOCKET}
       PROJECT_ROOT: ${ctx:PROJECT_ROOT}
       TE_INSTANCE_ID: ${ctx:INSTANCE_ID}
