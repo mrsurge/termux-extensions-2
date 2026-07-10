@@ -331,6 +331,19 @@ _ADAPTER_REQUIRED_NIDS = frozenset({
     "ExtHostOutputService",
 })
 
+_JS_IDENTIFIER = r"[A-Za-z_$][A-Za-z0-9_$]*"
+
+
+class NidExtractionError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class NidExtractionResult:
+    nids: dict[str, int]
+    strategy: str
+    source_path: str
+
 
 def _find_ext_host_bundle(installation: CodeServerInstallation | None = None) -> str | None:
     """Locate extensionHostProcess.js from the installed code-server."""
@@ -346,6 +359,23 @@ def _find_ext_host_bundle(installation: CodeServerInstallation | None = None) ->
         / "out" / "vs" / "workbench" / "api" / "node" / "extensionHostProcess.js"
     )
     return str(bundle) if bundle.is_file() else None
+
+
+def _find_ext_host_protocol_source(
+    installation: CodeServerInstallation | None = None,
+) -> str | None:
+    configured = os.environ.get("TE2_EXT_HOST_PROTOCOL_SOURCE", "").strip()
+    if configured:
+        source = Path(configured).expanduser()
+        return str(source) if source.is_file() else None
+    installation = installation or resolve_code_server_installation()
+    if installation is None or installation.vscode_root is None:
+        return None
+    source = (
+        installation.vscode_root
+        / "src" / "vs" / "workbench" / "api" / "common" / "extHost.protocol.ts"
+    )
+    return str(source) if source.is_file() else None
 
 
 def _get_code_server_version(installation: CodeServerInstallation | None = None) -> JsonObject | None:
@@ -373,37 +403,138 @@ def _get_code_server_version(installation: CodeServerInstallation | None = None)
     return None
 
 
-def _extract_nids_from_bundle(bundle_path: str) -> dict[str, int] | None:
-    """Block-scoped extraction of rpcId nids from the minified extension host bundle.
+def _balanced_js_object(content: str, open_brace: int, label: str) -> tuple[str, int]:
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    for index in range(open_brace, len(content)):
+        char = content[index]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {'"', "'", "`"}:
+            quote = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return content[open_brace + 1:index], index + 1
+    raise NidExtractionError(f"{label} object is not balanced")
 
-    Finds the single ``var X={MainThread...:N("MainThread..."),...};`` object
-    literal, discovers the minified function name dynamically, then extracts
-    **property keys** (not string arguments) with positional nids.
-    """
+
+def _minified_proxy_object(
+    content: str,
+    *,
+    anchor: str,
+    label: str,
+    start: int = 0,
+    expected_factory: str | None = None,
+) -> tuple[str, str, int]:
+    pattern = re.compile(
+        rf"(?P<object>{_JS_IDENTIFIER})\s*=\s*\{{\s*"
+        rf"{re.escape(anchor)}\s*:\s*(?P<factory>{_JS_IDENTIFIER})\s*\(\s*"
+        rf"(?P<quote>['\"]){re.escape(anchor)}(?P=quote)"
+    )
+    match = pattern.search(content, pos=start)
+    if match is None:
+        raise NidExtractionError(f"{label} object anchor {anchor!r} was not found")
+    factory = match.group("factory")
+    if expected_factory is not None and factory != expected_factory:
+        raise NidExtractionError(
+            f"{label} factory {factory!r} does not match MainContext factory {expected_factory!r}"
+        )
+    open_brace = content.find("{", match.start("object"), match.end())
+    if open_brace < 0:
+        raise NidExtractionError(f"{label} opening brace was not found")
+    body, end = _balanced_js_object(content, open_brace, label)
+    return body, factory, end
+
+
+def _minified_proxy_entries(body: str, factory: str, label: str) -> list[str]:
+    pattern = re.compile(
+        rf"(?P<key>{_JS_IDENTIFIER})\s*:\s*{re.escape(factory)}\s*\(\s*"
+        rf"(?P<quote>['\"])(?P<sid>{_JS_IDENTIFIER})(?P=quote)\s*\)"
+    )
+    entries = [match.group("key") for match in pattern.finditer(body)]
+    if not entries:
+        raise NidExtractionError(f"{label} contains no proxy identifier entries")
+    return entries
+
+
+def _build_nid_map(main_entries: list[str], ext_entries: list[str]) -> dict[str, int]:
+    ordered = [*main_entries, *ext_entries]
+    if len(set(ordered)) != len(ordered):
+        raise NidExtractionError("proxy identifier objects contain duplicate property keys")
+    return {name: index for index, name in enumerate(ordered, start=1)}
+
+
+def _extract_nids_from_bundle_result(bundle_path: str) -> NidExtractionResult:
     try:
-        content = Path(bundle_path).read_text(errors="ignore")
-    except Exception:
-        return None
+        content = Path(bundle_path).read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        raise NidExtractionError(f"failed to read minified bundle: {exc}") from exc
 
-    # Step 1 — isolate the proxy declaration block
-    block_match = re.search(r"var\s+[A-Za-z0-9_]+=\{MainThread[^;]+", content)
-    if not block_match:
-        return None
-    block = block_match.group(0)
+    main_body, factory, main_end = _minified_proxy_object(
+        content,
+        anchor="MainThreadAuthentication",
+        label="MainContext",
+    )
+    ext_body, _, _ = _minified_proxy_object(
+        content,
+        anchor="ExtHostCodeMapper",
+        label="ExtHostContext",
+        start=main_end,
+        expected_factory=factory,
+    )
+    return NidExtractionResult(
+        nids=_build_nid_map(
+            _minified_proxy_entries(main_body, factory, "MainContext"),
+            _minified_proxy_entries(ext_body, factory, "ExtHostContext"),
+        ),
+        strategy=f"minified-proxy-objects:{factory}",
+        source_path=bundle_path,
+    )
 
-    # Step 2 — discover the minified createProxyIdentifier function name
-    func_match = re.search(r':([A-Za-z0-9_]+)\("MainThread', block)
-    if not func_match:
-        return None
-    func_name = func_match.group(1)
 
-    # Step 3 — extract key:func("string") pairs; position = nid (1-based)
-    pattern = re.compile(r"(\w+):" + re.escape(func_name) + r'\("\w+"\)')
-    nids: dict[str, int] = {}
-    for i, m in enumerate(pattern.finditer(block), start=1):
-        nids[m.group(1)] = i
+def _source_proxy_entries(content: str, object_name: str) -> list[str]:
+    declaration = re.search(
+        rf"export\s+const\s+{re.escape(object_name)}\s*=\s*\{{",
+        content,
+    )
+    if declaration is None:
+        raise NidExtractionError(f"source {object_name} declaration was not found")
+    open_brace = content.find("{", declaration.start(), declaration.end())
+    body, _ = _balanced_js_object(content, open_brace, f"source {object_name}")
+    pattern = re.compile(
+        rf"(?m)^\s*(?P<key>{_JS_IDENTIFIER})\s*:\s*createProxyIdentifier"
+        rf"(?:<[^\n]*?>)?\s*\(\s*(?P<quote>['\"])(?P<sid>{_JS_IDENTIFIER})"
+        rf"(?P=quote)\s*\)"
+    )
+    entries = [match.group("key") for match in pattern.finditer(body)]
+    if not entries:
+        raise NidExtractionError(f"source {object_name} contains no proxy identifier entries")
+    return entries
 
-    return nids if nids else None
+
+def _extract_nids_from_protocol_source_result(source_path: str) -> NidExtractionResult:
+    try:
+        content = Path(source_path).read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        raise NidExtractionError(f"failed to read protocol source: {exc}") from exc
+    return NidExtractionResult(
+        nids=_build_nid_map(
+            _source_proxy_entries(content, "MainContext"),
+            _source_proxy_entries(content, "ExtHostContext"),
+        ),
+        strategy="extHost.protocol.ts",
+        source_path=source_path,
+    )
 
 
 def ensure_rpc_config() -> dict[str, int]:
@@ -434,11 +565,18 @@ def ensure_rpc_config() -> dict[str, int]:
                 and existing.get("code_server_commit") == version_info["commit"]
             ):
                 nids = {key: int(value) for key, value in _object_dict(existing.get("nids", {})).items() if isinstance(value, int)}
+                missing = _ADAPTER_REQUIRED_NIDS - set(nids)
+                if 100 <= len(nids) <= 300 and not missing:
+                    print(
+                        f"[rpc-config] cache hit — {len(nids)} nids (code-server {version_info['version']})",
+                        flush=True,
+                    )
+                    return nids
                 print(
-                    f"[rpc-config] cache hit — {len(nids)} nids (code-server {version_info['version']})",
+                    "[rpc-config] cache is incomplete "
+                    f"count={len(nids)} missing={sorted(missing)} — regenerating",
                     flush=True,
                 )
-                return nids
             print(
                 f"[rpc-config] version mismatch: cached={existing.get('code_server_version')} installed={version_info['version']} — regenerating",
                 flush=True,
@@ -446,22 +584,55 @@ def ensure_rpc_config() -> dict[str, int]:
         except Exception:
             print("[rpc-config] corrupt config file, regenerating", flush=True)
 
-    # Locate the bundle
+    extraction: NidExtractionResult | None = None
+    extraction_errors: list[str] = []
+
+    # Prefer the exact installed bundle used by the extension host.
     bundle = _find_ext_host_bundle(installation)
-    if not bundle:
+    if bundle:
+        print(f"[rpc-config] parsing nids from {bundle}", flush=True)
+        try:
+            extraction = _extract_nids_from_bundle_result(bundle)
+        except NidExtractionError as exc:
+            extraction_errors.append(f"bundle: {exc}")
+    else:
         print(
             "[rpc-config] extensionHostProcess.js not found for "
             f"{installation.executable}",
             flush=True,
         )
-        return {}
-    print(f"[rpc-config] parsing nids from {bundle}", flush=True)
 
-    # Extract
-    nids = _extract_nids_from_bundle(bundle)
-    if not nids:
-        print(f"[rpc-config] extraction failed — no proxy block found in {bundle}", flush=True)
+    # Some source/package layouts also ship extHost.protocol.ts. Use it as a
+    # fallback and cross-check the minified order when both forms are present.
+    protocol_source = _find_ext_host_protocol_source(installation)
+    source_extraction: NidExtractionResult | None = None
+    if protocol_source:
+        try:
+            source_extraction = _extract_nids_from_protocol_source_result(protocol_source)
+        except NidExtractionError as exc:
+            extraction_errors.append(f"source: {exc}")
+    if extraction is None and source_extraction is not None:
+        extraction = source_extraction
+        print(f"[rpc-config] using protocol source fallback {protocol_source}", flush=True)
+    elif extraction is not None and source_extraction is not None:
+        if extraction.nids != source_extraction.nids:
+            print(
+                "[rpc-config] ABORT — minified bundle nid order disagrees with "
+                f"protocol source {protocol_source}",
+                flush=True,
+            )
+            return _load_stale_nids()
+
+    if extraction is None:
+        detail = "; ".join(extraction_errors) or "no bundle or protocol source was parseable"
+        print(f"[rpc-config] extraction failed — {detail}", flush=True)
         return {}
+    nids = extraction.nids
+    print(
+        f"[rpc-config] extracted {len(nids)} nids "
+        f"strategy={extraction.strategy} source={extraction.source_path}",
+        flush=True,
+    )
 
     # Validate: all 13 adapter-required names must be present
     missing = _ADAPTER_REQUIRED_NIDS - set(nids.keys())
@@ -480,6 +651,8 @@ def ensure_rpc_config() -> dict[str, int]:
         "code_server_version": version_info["version"],
         "code_server_commit": version_info["commit"],
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "extraction_strategy": extraction.strategy,
+        "extraction_source": extraction.source_path,
         "nids": nids,
     }
     try:
