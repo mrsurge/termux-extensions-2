@@ -104,6 +104,19 @@ te2 console list-workers
 `te2-rust` is an alias for the same Rust launcher. `scripts/run_framework.sh`
 is a source-checkout helper that also invokes the Rust launcher directly.
 
+For a code-server installation outside the normal `PATH`, pass its executable
+from the TE2 entry point:
+
+```bash
+TE2_CODE_SERVER_BIN=/home/droid/.nvm/versions/node/v22.23.1/bin/code-server te2
+```
+
+The override is inherited by Rust/Ferrous and the `file_editor_cm6` app worker.
+Code TE2 uses the same resolved executable for process launch, version probing,
+builtin-extension discovery, and WBA nid extraction. Without an override it
+checks `PATH`, the login shell, NVM installations, `$PREFIX/bin`, and
+`~/.local/bin` in that order.
+
 ## Build Code TE2 Frontend
 
 Code TE2 serves generated bundles from `static/dist/`. After changing its

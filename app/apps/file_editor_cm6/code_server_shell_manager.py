@@ -266,9 +266,16 @@ def code_server_connection_target(record: ShellRecord) -> tuple[str, str | None]
     return "http://localhost", _expected_socket_path()
 
 
-def _matches_expected_target(record: ShellRecord) -> bool:
+def _matches_expected_target(record: ShellRecord, code_server_bin: str) -> bool:
     _, socket_path = code_server_connection_target(record)
-    return socket_path == _expected_socket_path()
+    env = _json_object(record.env_overrides)
+    recorded_bin = str(env.get("TE_CODE_SERVER_BIN") or "").strip()
+    if not recorded_bin:
+        return False
+    return (
+        socket_path == _expected_socket_path()
+        and Path(recorded_bin).resolve(strict=False) == Path(code_server_bin).resolve(strict=False)
+    )
 
 
 async def _get_alive(shell_id: str) -> ShellRecord | None:
@@ -294,13 +301,15 @@ async def _wait_for_code_server_readiness(shell_id: str, timeout_s: float = 60.0
     ready_re = re.compile(rb"HTTP server listening")
     loop = asyncio.get_event_loop()
     deadline = loop.time() + timeout_s
-    buf = b""
+    buf: bytes = b""
 
     try:
         while loop.time() < deadline:
             remaining = deadline - loop.time()
             try:
-                chunk = await asyncio.wait_for(queue.get(), timeout=min(5.0, remaining))
+                chunk: bytes = await asyncio.wait_for(
+                    queue.get(), timeout=min(5.0, remaining)
+                )
             except asyncio.TimeoutError:
                 continue
 
@@ -309,7 +318,9 @@ async def _wait_for_code_server_readiness(shell_id: str, timeout_s: float = 60.0
 
             buf += chunk
             while b"\n" in buf:
-                line_bytes, buf = buf.split(b"\n", 1)
+                split = buf.split(b"\n", 1)
+                line_bytes: bytes = split[0]
+                buf = split[1]
                 if line_bytes.endswith(b"\r"):
                     line_bytes = line_bytes[:-1]
                 line = line_bytes.decode("utf-8", errors="replace")
@@ -357,10 +368,19 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
 
     global _active_shell_id, _ready_event
 
+    from .extension_registry import resolve_code_server_executable
+
+    code_server_bin = resolve_code_server_executable()
+    if code_server_bin is None:
+        raise RuntimeError(
+            "code-server executable was not found in TE2_CODE_SERVER_BIN, PATH, "
+            "the login shell, NVM, PREFIX, or ~/.local/bin"
+        )
+
     # Fast path: if a previous spawn already completed, check cached shell
     if _ready_event is not None and _ready_event.is_set() and _active_shell_id:
         cached = await _get_alive(_active_shell_id)
-        if cached and _matches_expected_target(cached):
+        if cached and _matches_expected_target(cached, code_server_bin):
             if await _has_live_pipe(cached):
                 return cached
 
@@ -370,7 +390,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         await _ready_event.wait()
         if _active_shell_id:
             cached = await _get_alive(_active_shell_id)
-            if cached and _matches_expected_target(cached):
+            if cached and _matches_expected_target(cached, code_server_bin):
                 if await _has_live_pipe(cached):
                     return cached
 
@@ -385,7 +405,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         if _active_shell_id:
             cached = await _get_alive(_active_shell_id)
             if cached and cached.label == label:
-                if _matches_expected_target(cached):
+                if _matches_expected_target(cached, code_server_bin):
                     if await _has_live_pipe(cached):
                         return cached
                     print(f"[code_server] cached shell {cached.id} has no live pipe, re-spawning", flush=True)
@@ -395,7 +415,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
 
         existing = await mgr.find_shell_by_label(label, status="running")
         if existing:
-            if _matches_expected_target(existing):
+            if _matches_expected_target(existing, code_server_bin):
                 if await _has_live_pipe(existing):
                     _active_shell_id = existing.id
                     return existing
@@ -406,6 +426,7 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
         repo_root = Path(project_root).resolve(strict=False)
         data_dir = _CODE_SERVER_DATA_DIR
         data_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[code_server] executable resolved: {code_server_bin}", flush=True)
 
         # Ensure bridge extension is installed before code-server starts
         try:
@@ -442,6 +463,8 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
                 "PROJECT_ROOT": str(repo_root),
                 "PROJECT_HASH": _project_hash(str(repo_root)),
                 "INSTANCE_ID": "primary",
+                "CODE_SERVER_BIN": code_server_bin,
+                "CODE_SERVER_BIN_DIR": str(Path(code_server_bin).parent),
                 "CODE_SERVER_DATA_DIR": str(data_dir),
                 "CODE_SERVER_SOCKET": _expected_socket_path(),
             },

@@ -12,9 +12,12 @@ settings.json is an OUTPUT of the registry (one-way flow, never read back).
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import TypeAlias, cast
 
@@ -112,49 +115,198 @@ def _registry_extension_count(registry: Registry) -> int:
 def _registry_slot_count(registry: Registry) -> int:
     return len(_slot_map(registry.get("language_slots", {})))
 
-# Builtin extensions shipped with code-server.
-# Derive from `which code-server` → resolve to install root → lib/vscode/extensions
-def _find_builtin_extensions_dir() -> str:
-    env = os.environ.get("TE2_BUILTIN_EXTENSIONS_DIR")
-    if env:
-        return env
-    try:
-        cs_bin = shutil.which("code-server")
-        if cs_bin:
-            # code-server may be a wrapper script that `exec`s the real binary.
-            # Read the script to find the actual install path.
-            try:
-                text = Path(cs_bin).read_text(errors="ignore")
-                for line in text.splitlines():
-                    line = line.strip()
-                    if line.startswith("exec ") and "code-server" in line:
-                        # e.g. "exec /usr/lib/code-server/bin/code-server "$@""
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            real = Path(parts[1].strip('"').strip("'"))
-                            if real.exists():
-                                # .../lib/code-server/bin/code-server → .../lib/code-server
-                                install_root = real.parent.parent
-                                candidate = install_root / "lib" / "vscode" / "extensions"
-                                if candidate.is_dir():
-                                    return str(candidate)
-            except Exception:
-                pass
-            # Fallback: resolve symlinks and walk up
-            real = Path(cs_bin).resolve()
-            for depth in range(1, 4):
-                root = real
-                for _ in range(depth):
-                    root = root.parent
-                candidate = root / "lib" / "vscode" / "extensions"
-                if candidate.is_dir():
-                    return str(candidate)
-    except Exception:
-        pass
-    # Last-resort fallback
-    return str(Path.home() / ".local" / "lib" / "code-server" / "lib" / "vscode" / "extensions")
+@dataclass(frozen=True)
+class CodeServerInstallation:
+    executable: Path
+    vscode_root: Path | None
+    source: str
 
-_BUILTIN_EXTENSIONS_DIR = Path(_find_builtin_extensions_dir())
+
+def _path_is_executable(path: Path) -> bool:
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def _node_version_key(path: Path) -> tuple[int, ...]:
+    matches = cast(list[str], re.findall(r"\d+", path.name))
+    values = tuple(int(value) for value in matches)
+    return values or (0,)
+
+
+def _nvm_code_server_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    nvm_bin = os.environ.get("NVM_BIN", "").strip()
+    if nvm_bin:
+        candidates.append(Path(nvm_bin).expanduser() / "code-server")
+
+    roots: list[Path] = []
+    configured_root = os.environ.get("NVM_DIR", "").strip()
+    if configured_root:
+        roots.append(Path(configured_root).expanduser())
+    default_root = Path.home() / ".nvm"
+    if default_root not in roots:
+        roots.append(default_root)
+
+    for root in roots:
+        version_bins = sorted(
+            (root / "versions" / "node").glob("*/bin/code-server"),
+            key=lambda path: _node_version_key(path.parent.parent),
+            reverse=True,
+        )
+        alias_path = root / "alias" / "default"
+        alias = ""
+        try:
+            alias = alias_path.read_text(encoding="utf-8").strip().lstrip("v")
+        except OSError:
+            pass
+        if alias and alias[0].isdigit():
+            preferred = [
+                path
+                for path in version_bins
+                if path.parent.parent.name.lstrip("v") == alias
+                or path.parent.parent.name.lstrip("v").startswith(f"{alias}.")
+            ]
+            candidates.extend(preferred)
+            candidates.extend(path for path in version_bins if path not in preferred)
+        else:
+            candidates.extend(version_bins)
+    return candidates
+
+
+def _login_shell_code_server() -> Path | None:
+    try:
+        output = subprocess.check_output(
+            ["sh", "-lc", "command -v code-server"],
+            text=True,
+            timeout=5,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        return None
+    resolved = output.strip().splitlines()
+    return Path(resolved[-1]).expanduser() if resolved else None
+
+
+def _wrapper_exec_target(launcher: Path) -> Path | None:
+    try:
+        if launcher.stat().st_size > 256 * 1024:
+            return None
+        text = launcher.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("exec "):
+            continue
+        try:
+            parts = shlex.split(line)
+        except ValueError:
+            continue
+        if len(parts) < 2:
+            continue
+        target_text = os.path.expandvars(parts[1])
+        if not target_text or target_text.startswith("-"):
+            continue
+        target = Path(target_text).expanduser()
+        if not target.is_absolute():
+            target = launcher.parent / target
+        if target.exists():
+            return target.resolve()
+    return None
+
+
+def _vscode_root_from_anchors(anchors: list[Path]) -> Path | None:
+    configured_root = os.environ.get("TE2_CODE_SERVER_ROOT", "").strip()
+    roots: list[Path] = []
+    if configured_root:
+        roots.append(Path(configured_root).expanduser())
+    for anchor in anchors:
+        current = anchor if anchor.is_dir() else anchor.parent
+        roots.extend([current, *list(current.parents)[:8]])
+    seen: set[Path] = set()
+    for root in roots:
+        for candidate in (
+            root / "lib" / "vscode",
+            root / "vscode",
+            root / "lib" / "node_modules" / "code-server" / "lib" / "vscode",
+        ):
+            normalized = candidate.resolve(strict=False)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            if (normalized / "extensions").is_dir():
+                return normalized
+    return None
+
+
+def _installation_from_executable(executable: Path, source: str) -> CodeServerInstallation | None:
+    launcher = executable.expanduser()
+    if not launcher.is_absolute():
+        launcher = Path.cwd() / launcher
+    launcher = Path(os.path.abspath(launcher))
+    if not _path_is_executable(launcher):
+        return None
+    anchors = [launcher, launcher.resolve(strict=False)]
+    wrapper_target = _wrapper_exec_target(launcher)
+    if wrapper_target is not None:
+        anchors.append(wrapper_target)
+    return CodeServerInstallation(
+        executable=launcher,
+        vscode_root=_vscode_root_from_anchors(anchors),
+        source=source,
+    )
+
+
+@lru_cache(maxsize=1)
+def resolve_code_server_installation() -> CodeServerInstallation | None:
+    candidates: list[tuple[Path, str]] = []
+    configured_bin = os.environ.get("TE2_CODE_SERVER_BIN", "").strip()
+    if configured_bin:
+        candidates.append((Path(configured_bin), "TE2_CODE_SERVER_BIN"))
+    path_bin = shutil.which("code-server")
+    if path_bin:
+        candidates.append((Path(path_bin), "PATH"))
+    login_bin = _login_shell_code_server()
+    if login_bin is not None:
+        candidates.append((login_bin, "login-shell"))
+    candidates.extend((path, "nvm") for path in _nvm_code_server_candidates())
+    prefix = os.environ.get("PREFIX", "").strip()
+    if prefix:
+        candidates.append((Path(prefix) / "bin" / "code-server", "PREFIX"))
+    candidates.append((Path.home() / ".local" / "bin" / "code-server", "user-local"))
+
+    seen: set[Path] = set()
+    for candidate, source in candidates:
+        normalized = candidate.expanduser().resolve(strict=False)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        installation = _installation_from_executable(candidate, source)
+        if installation is not None:
+            return installation
+    return None
+
+
+def resolve_code_server_executable() -> str | None:
+    installation = resolve_code_server_installation()
+    return str(installation.executable) if installation is not None else None
+
+
+def _code_server_subprocess_env(installation: CodeServerInstallation) -> dict[str, str]:
+    env = os.environ.copy()
+    launcher_dir = str(installation.executable.parent)
+    current_path = env.get("PATH", "")
+    env["PATH"] = f"{launcher_dir}{os.pathsep}{current_path}" if current_path else launcher_dir
+    return env
+
+
+def _find_builtin_extensions_dir() -> str:
+    configured = os.environ.get("TE2_BUILTIN_EXTENSIONS_DIR", "").strip()
+    if configured:
+        return str(Path(configured).expanduser())
+    installation = resolve_code_server_installation()
+    if installation is not None and installation.vscode_root is not None:
+        return str(installation.vscode_root / "extensions")
+    return str(Path.home() / ".local" / "lib" / "code-server" / "lib" / "vscode" / "extensions")
 
 # ── RPC Config (nid auto-discovery) ───────────────────────────────────
 #
@@ -180,24 +332,34 @@ _ADAPTER_REQUIRED_NIDS = frozenset({
 })
 
 
-def _find_ext_host_bundle() -> str | None:
+def _find_ext_host_bundle(installation: CodeServerInstallation | None = None) -> str | None:
     """Locate extensionHostProcess.js from the installed code-server."""
-    # _BUILTIN_EXTENSIONS_DIR = .../lib/vscode/extensions
-    # bundle = .../lib/vscode/out/vs/workbench/api/node/extensionHostProcess.js
+    configured = os.environ.get("TE2_EXTENSION_HOST_BUNDLE", "").strip()
+    if configured:
+        bundle = Path(configured).expanduser()
+        return str(bundle) if bundle.is_file() else None
+    installation = installation or resolve_code_server_installation()
+    if installation is None or installation.vscode_root is None:
+        return None
     bundle = (
-        _BUILTIN_EXTENSIONS_DIR.parent
+        installation.vscode_root
         / "out" / "vs" / "workbench" / "api" / "node" / "extensionHostProcess.js"
     )
-    if bundle.exists():
-        return str(bundle)
-    return None
+    return str(bundle) if bundle.is_file() else None
 
 
-def _get_code_server_version() -> JsonObject | None:
+def _get_code_server_version(installation: CodeServerInstallation | None = None) -> JsonObject | None:
     """Run ``code-server --version`` and return version + commit."""
+    installation = installation or resolve_code_server_installation()
+    if installation is None:
+        return None
     try:
         out = subprocess.check_output(
-            ["code-server", "--version"], text=True, timeout=5, stderr=subprocess.DEVNULL
+            [str(installation.executable), "--version"],
+            text=True,
+            timeout=5,
+            stderr=subprocess.DEVNULL,
+            env=_code_server_subprocess_env(installation),
         )
         # Output may be multi-line or single-line:
         #   "4.109.2\n9184b645...\nwith Code 1.109.2"      (multi-line)
@@ -250,10 +412,18 @@ def ensure_rpc_config() -> dict[str, int]:
     Returns the nids dict (from cache or freshly extracted).
     Returns empty dict on failure (adapter falls back to hardcoded defaults).
     """
-    version_info = _get_code_server_version()
+    installation = resolve_code_server_installation()
+    version_info = _get_code_server_version(installation)
     if not version_info:
         print("[rpc-config] code-server not found, skipping", flush=True)
         return {}
+    assert installation is not None
+    print(
+        "[rpc-config] resolved code-server "
+        f"source={installation.source} executable={installation.executable} "
+        f"vscode_root={installation.vscode_root or 'unresolved'}",
+        flush=True,
+    )
 
     # Check existing config
     if _RPC_CONFIG_PATH.exists():
@@ -277,10 +447,15 @@ def ensure_rpc_config() -> dict[str, int]:
             print("[rpc-config] corrupt config file, regenerating", flush=True)
 
     # Locate the bundle
-    bundle = _find_ext_host_bundle()
+    bundle = _find_ext_host_bundle(installation)
     if not bundle:
-        print("[rpc-config] extensionHostProcess.js not found", flush=True)
+        print(
+            "[rpc-config] extensionHostProcess.js not found for "
+            f"{installation.executable}",
+            flush=True,
+        )
         return {}
+    print(f"[rpc-config] parsing nids from {bundle}", flush=True)
 
     # Extract
     nids = _extract_nids_from_bundle(bundle)
@@ -474,11 +649,12 @@ def _parse_package_json(pkg_path: Path) -> ExtensionEntry | None:
 def _scan_builtin_extensions() -> ExtensionMap:
     """Scan builtin extensions dir, return {ext_id: entry}."""
     results: ExtensionMap = {}
-    if not _BUILTIN_EXTENSIONS_DIR.is_dir():
-        print(f"[ext_registry] builtin dir not found: {_BUILTIN_EXTENSIONS_DIR}", flush=True)
+    builtin_extensions_dir = Path(_find_builtin_extensions_dir())
+    if not builtin_extensions_dir.is_dir():
+        print(f"[ext_registry] builtin dir not found: {builtin_extensions_dir}", flush=True)
         return results
 
-    for d in sorted(_BUILTIN_EXTENSIONS_DIR.iterdir()):
+    for d in sorted(builtin_extensions_dir.iterdir()):
         pkg = d / "package.json"
         if not pkg.is_file():
             continue
@@ -858,7 +1034,15 @@ def ensure_registry_and_gate() -> Registry:
 
 # ── Install / Uninstall ───────────────────────────────────────────────
 
-_CODE_SERVER_BIN = shutil.which("code-server") or "code-server"
+
+def _require_code_server_installation() -> CodeServerInstallation:
+    installation = resolve_code_server_installation()
+    if installation is None:
+        raise RuntimeError(
+            "code-server executable was not found in TE2_CODE_SERVER_BIN, PATH, "
+            "the login shell, NVM, PREFIX, or ~/.local/bin"
+        )
+    return installation
 
 
 def install_extension(vsix_path: str) -> dict[str, object]:
@@ -880,8 +1064,9 @@ def install_extension(vsix_path: str) -> dict[str, object]:
     if not vsix.name.endswith(".vsix"):
         raise ValueError(f"Not a .vsix file: {vsix_path}")
 
+    installation = _require_code_server_installation()
     cmd = [
-        _CODE_SERVER_BIN,
+        str(installation.executable),
         "--install-extension", str(vsix.resolve()),
         "--extensions-dir", str(_EXTENSIONS_DIR),
         "--force",
@@ -893,6 +1078,7 @@ def install_extension(vsix_path: str) -> dict[str, object]:
         capture_output=True,
         text=True,
         timeout=120,
+        env=_code_server_subprocess_env(installation),
     )
 
     if result.returncode != 0:
@@ -950,8 +1136,9 @@ def uninstall_extension(ext_id: str) -> dict[str, object]:
     if _entry_string(ext, "source") == "builtin":
         raise ValueError(f"Cannot uninstall builtin extension: {ext_id}. Use toggle instead.")
 
+    installation = _require_code_server_installation()
     cmd = [
-        _CODE_SERVER_BIN,
+        str(installation.executable),
         "--uninstall-extension", ext_id,
         "--extensions-dir", str(_EXTENSIONS_DIR),
     ]
@@ -962,6 +1149,7 @@ def uninstall_extension(ext_id: str) -> dict[str, object]:
         capture_output=True,
         text=True,
         timeout=60,
+        env=_code_server_subprocess_env(installation),
     )
 
     if result.returncode != 0:
