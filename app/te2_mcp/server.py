@@ -4,7 +4,6 @@ import asyncio
 
 from fastmcp import FastMCP
 
-from app.extensions.apps import loader as apps_loader
 from app.extensions.apps.scaffold import (
     list_templates as list_app_templates,
     scaffold_proxy_shell_wrapper,

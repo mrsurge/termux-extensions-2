@@ -173,61 +173,6 @@
 </style>
 
 <div class="settings-page">
-  <section class="settings-card" data-section="lifecycle">
-    <header>
-      <h2>Lifecycle Management</h2>
-      <button data-action="save-lifecycle-settings">Save</button>
-    </header>
-    <div class="shutdown-form">
-      <label for="max-service-shells">Max Service Shells</label>
-      <input id="max-service-shells" type="number" min="1" step="1" placeholder="5">
-      <p class="hint">Max number of persistent services (e.g., containers, daemons). Does not include app workers.</p>
-      <label for="max-app-shells">Max App Shells</label>
-      <input id="max-app-shells" type="number" min="1" step="1" placeholder="5">
-      <p class="hint">Max number of concurrent app workers. Oldest unlocked apps will be terminated to make room.</p>
-      <label for="app-ttl">App TTL (minutes)</label>
-      <input id="app-ttl" type="number" min="0" step="1" placeholder="30">
-      <p class="hint">How long an unlocked app can run before being automatically terminated. Set to 0 to disable.</p>
-    </div>
-  </section>
-
-  <section class="settings-card" data-section="metrics">
-    <header>
-      <h2>Framework Runtime</h2>
-      <button data-action="refresh-metrics">Refresh</button>
-    </header>
-    <div class="metrics-grid">
-      <div class="metrics-item">
-        <span class="label">Run ID</span>
-        <span class="value" data-field="run-id">--</span>
-      </div>
-      <div class="metrics-item">
-        <span class="label">Supervisor PID</span>
-        <span class="value" data-field="supervisor-pid">--</span>
-      </div>
-      <div class="metrics-item">
-        <span class="label">App PID</span>
-        <span class="value" data-field="app-pid">--</span>
-      </div>
-      <div class="metrics-item">
-        <span class="label">Uptime</span>
-        <span class="value" data-field="uptime">--</span>
-      </div>
-      <div class="metrics-item">
-        <span class="label">Framework Shells</span>
-        <span class="value" data-field="shell-count">0 running / 0 total</span>
-      </div>
-      <div class="metrics-item">
-        <span class="label">Interactive Sessions</span>
-        <span class="value" data-field="session-count">0 / 0</span>
-      </div>
-      <div class="metrics-item">
-        <span class="label">Shell Memory</span>
-        <span class="value" data-field="shell-memory">0</span>
-      </div>
-    </div>
-  </section>
-
   <section class="settings-card" data-section="shells">
     <header>
       <h2>Framework Shells</h2>
@@ -262,9 +207,9 @@
     </div>
   </section>
 
-  <section class="settings-card" data-section="shutdown">
+  <section class="settings-card" data-section="authentication">
     <header>
-      <h2>Supervisor Shutdown</h2>
+      <h2>Framework Shell Authentication</h2>
     </header>
     <div class="shutdown-form">
       <label for="framework-token">Framework token (optional)</label>
@@ -272,10 +217,8 @@
       <div class="shell-actions">
         <button data-action="store-token">Save Token</button>
         <button data-action="clear-token">Clear Token</button>
-        <button data-action="shutdown" class="danger">Shutdown Framework</button>
-        <button data-action="ipc-shutdown" class="danger secondary">Force Shutdown (IPC)</button>
       </div>
-      <p class="hint">Sends a shutdown request to the supervisor. All framework shells are terminated before the server stops.</p>
+      <p class="hint">Used only when the Framework-Shells control surface requires an access token.</p>
     </div>
   </section>
 </div>

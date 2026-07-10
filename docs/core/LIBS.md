@@ -1,42 +1,25 @@
-# Framework Shared Libraries
+# Shared Python Support Modules
 
-The `app/libs/` directory contains shared Python modules that provide core functionality accessible to both the framework and individual applications.
+`app/libs/` is not a framework plugin directory. The Rust framework does not
+scan it, import every module, or auto-register Python routers.
 
-## Automatic Loading & Router Registration
+The remaining modules are imported explicitly by manifest-launched Python app
+workers:
 
-The framework automatically scans and imports all modules in `app/libs/` during startup.
+- `app_worker.py` starts an app backend module selected by the Rust-rendered
+  shellspec.
+- `pipe_protocol.py` and `pipe_runtime.py` connect pipe-backed app workers to
+  Rust framework-service providers.
+- `jobs.py` provides the app-level background-job helpers still used by current
+  app backends.
+- `archiver.py` and `archiver_service.py` provide archive operations used by
+  Archive Manager and File Explorer.
 
-### How it works
+Framework lifecycle, app registry, proxying, Git, filesystem, search,
+bookmarks, settings, and state are Rust-owned. Do not add a shared Python module
+expecting automatic framework discovery; either import it from an app worker or
+implement a framework service in Rust.
 
-1.  **Scanning:** The `load_services()` function in `app/main.py` iterates through all `.py` files in `app/libs/`.
-2.  **Importing:** Each module is imported.
-3.  **Router Registration:** If the module defines an `APIRouter` instance named `bp` or `router`, it is automatically registered with the main FastAPI application.
-
-### Creating a New Library
-
-To create a new shared library (e.g., `my_utils.py`):
-
-1.  Create the file: `app/libs/my_utils.py`
-2.  Define your router with a prefix:
-    ```python
-    from fastapi import APIRouter
-
-    # IMPORTANT: Define the prefix here.
-    # The router will be mounted at this path.
-    bp = APIRouter(prefix="/api/my_utils")
-
-    @bp.get("/status")
-    def get_status():
-        return {"ok": True}
-    ```
-3.  **Done!** The framework will automatically serve `GET /api/my_utils/status`.
-
-## Existing Libraries
-
-*   **`app_manager.py`**: Manages app worker processes.
-*   **`app_lifecycle.py`**: Handles startup/shutdown tasks and app state tracking.
-*   **`app_worker.py`**: The entry point for spawned app processes.
-*   **`bookmarks.py`**: Provides the `/api/bookmarks` endpoints.
-*   **`framework_shells.py`**: Manages background shells (terminals, daemons).
-*   **`jobs.py`**: Provides the `/api/jobs` background task system.
-*   **`git_utils.py`**: Shared Git operations and `/api/git/summary` endpoint.
+See `app/libs/README.md` for the concise module inventory and
+`rust-spike/rust/crates/te2-rust-spike-server/src/framework_services/` for
+framework-owned service implementations.

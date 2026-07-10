@@ -2,7 +2,7 @@
   "id": "settings",
   "name": "Settings",
   "icon_emoji": "🎛️",
-  "description": "Framework diagnostics, launcher ordering, and supervisor controls.",
+  "description": "Framework settings, launcher ordering, and shell diagnostics.",
   "entrypoints": {
     "frontend_template": "template.html",
     "frontend_script": "main.js"

@@ -1,259 +1,236 @@
-# AGENTS.md instructions for `/data/data/com.termux/files/home/mrselect6`
+# AGENTS.md
 
-## Delegation Rule
+These instructions govern work in this repository. Current source code is the
+architecture authority. Documentation and `.repo_memory.md` are orientation
+aids and must be corrected when source proves them stale.
 
-Sub-agent rule: If this session/task was delegated by another Codex agent, do not follow the repository workflow/orchestration steps below unless explicitly told to do so. Execute only the assigned subtask and return results to the parent agent.
+## Delegation
 
-Parent/orchestrator rule: The workflow/orchestration steps below are intended for the top-level agent coordinating work.
+- These workflow rules apply to the top-level agent coordinating a task.
+- A delegated sub-agent should perform only its assigned subtask and report to
+  its parent unless the parent explicitly delegates workflow coordination too.
 
-## Safety Protocol
+## Safety And Approval
 
-### Unsandboxed Execution
+This repository is commonly used in an unsandboxed environment.
 
-- **Mandate:** I operate in an unsandboxed environment. All file-system changes and commands happen directly on the user's system.
-- **Express consent required:** I will **NEVER** make codebase or file-system changes without the user's explicit consent for a specific plan. There is no implied consent.
-- **Scratch files:** Use `$TEMPDIR` for temporary/scratch files when it is set. If `$TEMPDIR` is unset, use a clearly named workspace-local scratch path. Do not hard-code `/tmp`.
+- Never change repository or filesystem state without explicit user approval
+  for a concrete plan.
+- Preserve user changes and untracked files. Do not revert unrelated work.
+- Use `$TEMPDIR` for scratch data when it is set. Otherwise use a clearly named
+  workspace-local scratch directory. Do not hard-code `/tmp`.
+- Treat `android/` as read-only unless the approved plan explicitly includes
+  Android changes.
+- Never restart or terminate the shared TE2 framework runtime unless the user
+  explicitly approves that action. The shared runtime is the Rust TE2 server
+  launched by `te2` / `app.cli.run_rust_framework`, not `app.main`.
 
-### Shared Framework Server
+## Approval Workflow
 
-- I will **NEVER** restart the shared main framework server (`python -m app.main`) for feature work, verification, or debugging unless the user explicitly tells me to do that exact action.
-- I will treat the main `app.main` process as shared infrastructure that may be serving the harness and other active agents/projects.
-- If I think a restart is needed, I will stop and ask first.
+For a new repository task:
 
-## Standard Approval Workflow
+1. Restate the requested outcome and obtain prompt approval.
+2. Investigate read-only and derive a source-backed plan.
+3. Present the concrete edit and validation scope for final approval.
+4. Execute only the approved scope.
+5. Stop for new approval if investigation or implementation materially changes
+   the plan.
 
-I follow an approval-based workflow for new repo tasks so the user stays in control.
+Use a built-in approval/input tool when available, then an MCP choice-capable
+tool such as `ask_user`, and plain chat only when neither exists. An approval
+prompt must include at least one explicit choice.
 
-### Step 1: Restate and Confirm
+Questions that can be answered without repository inspection may be answered
+directly. A user-requested read-only inspection must remain read-only.
 
-1. Restate the prompt in a clear, structured way. This is the **Prompt Approval** stage.
-2. For bug fixes, summarize the reported issue.
-3. For features or changes, outline the requested behavior.
-4. For Markdown instructions, summarize the document goals and implied actions.
-5. Do not proceed until the user explicitly approves the restatement.
+## User Statements And Source Authority
 
-### Step 2: Investigate and Propose a Plan
+- Treat direct user statements about this repository as authoritative unless a
+  current source path proves otherwise.
+- Source wins over prose. Do not challenge the user from planning documents,
+  stale memory, or historical paths.
+- `docs/planning/` records designs and implementation history. It is not a
+  declaration that every described path or phase is still current.
+- Generated bundles are validation/publication artifacts, not editable source,
+  unless the task explicitly targets generated output.
 
-1. After prompt approval, inspect the relevant code and docs.
-2. Produce a concrete, actionable plan.
-3. Present that plan for **Final Approval**.
-4. Do not execute the plan until the user explicitly approves it.
+## Current Runtime Architecture
 
-### Step 3: Execute the Approved Plan
+The supported framework is Rust-first:
 
-- Execute only the approved plan.
-- If the investigation changes the plan materially, stop and ask for approval again.
-- Preserve user changes. Do not revert unrelated work.
+```text
+te2 / te2-rust
+  -> app/cli/run_rust_framework.py
+  -> rust-spike/app/bootstrap.py
+  -> Rust server under rust-spike/rust/
+       + Python runtime bridge for TE2 console/MCP
+       + Python app workers launched through Framework-Shells/Ferrous
+```
 
-### Step 4: Same-Task Followups
+`rust-spike/` is a historical directory name. Its server is the current TE2
+framework implementation, not an optional Python-framework experiment.
 
-- After the initial workflow is complete, same-task interaction may become more fluid.
-- The core rule still applies: before making further changes, get explicit approval for the new change.
+Python remains intentionally in these roles:
 
-### Approval Tool Hierarchy
+- CLI/bootstrap discovery in `app/cli/`
+- runtime bridge services in `app/te2_runtime_mounts.py`,
+  `app/te2_console_runtime.py`, and `app/te2_mcp/`
+- manifest/scaffolding helpers in `app/extensions/apps/`
+- app-worker and pipe support in `app/libs/`
+- app backends under `app/apps/`
 
-When requesting prompt approval or final plan approval for this repo, use this order:
+This is a hard framework cutover, not a Python compatibility arrangement.
+Outside app code, retain Python only when the packaged Rust launcher, the
+Axum-proxied console/FastMCP sidecar, or a Rust-launched app worker imports it.
+Do not recreate the removed Python framework, supervisor, IPC server, app
+lifecycle, generic-extension runtime, or duplicate Git provider. Framework
+lifecycle, proxying, app registry, bookmarks/settings/state, Git, filesystem,
+and search services are Rust-owned.
 
-1. built-in harness user-input or approval tool, when available
-2. MCP user-input or approval tool, when no built-in tool is available (this the mcp `ask_user` tool in the `pty-blocks` mcp which should DEFINITELY be checked for availability)
-3. plain assistant message only when no approval tool is available
+## Source Map
 
-Before asking the user anything, check which built-in and MCP user-input / approval tools are actually available in the current tool inventory.
+Framework and packaging:
 
-If the choice-capable approval tool `ask_user` is available, include at least one explicit button/choice option. Freeform input may supplement the choices, but freeform alone does not satisfy this requirement.
+- `pyproject.toml` — Python package metadata and `te2` entrypoints
+- `requirements.txt` — Python runtime dependencies
+- `app/cli/run_rust_framework.py` — installed CLI/bootstrap locator
+- `rust-spike/app/bootstrap.py` — cached Rust build and launch orchestration
+- `rust-spike/app/runtime_bridge.py` — Python console/MCP sidecar
+- `rust-spike/rust/crates/te2-rust-spike-server/src/` — framework source
+- `app/templates/` and `app/static/` — framework-served frontend assets
+- `app/apps/` — built-in apps and app workers
 
-**ALWAYS** check to see if you have the te2 and pty-blocks mcp/tools available
+Code TE2:
 
-## Inquiries
+- `app/apps/file_editor_cm6/main.py` — app-worker assembly
+- `app/apps/file_editor_cm6/main.ts` — host frontend entrypoint
+- `app/apps/file_editor_cm6/main_page/frontend/` — host/main-page source
+- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts` — editor entrypoint
+- `app/apps/file_editor_cm6/monaco_editor/` — editor UI and backend services
+- `app/apps/file_editor_cm6/src/explorer/` — Explorer frontend
+- `app/apps/file_editor_cm6/explorer/` — Explorer backend and RPC transport
+- `app/apps/file_editor_cm6/ui_ipc/` — host/sidebar IPC backend
+- `app/apps/file_editor_cm6/host/` — host-owned backend actions
+- `app/apps/file_editor_cm6/workbench_protocol_proxy/` — WBA/code-server bridge
 
-Questions are handled case by case.
+Open-file authority is backend-owned through `ProjectSidecar.last_file`,
+`open_state_backend.py`, and editor open services. Frontend `currentPath` values
+are projections, not cross-client authority.
 
-- If the answer is already known, answer directly.
-- If the question requires reading files/code, restate the question first to confirm the target before continuing.
-- If the user asks for read-only inspection, keep it read-only.
+## Code TE2 Ownership Boundary
 
-## Workflow Scope
+Frontend surfaces initiate user intent and render state. Durable authority,
+cross-surface orchestration, and project/editor state changes belong in backend
+hooks or services.
 
-- This workflow governs work on this repo.
-- This repo is also a tool/platform used to work on other repos.
-- Do not assume downstream target repos, sibling worktrees, or related repos inherit this repo's workflow or approval rules unless those repos explicitly define them.
-- `android/` is read-only by default. Inspecting is fine; modifying, moving, deleting, or formatting files under `android/` requires explicit approval for that directory.
+- Host/main page owns toolbar and menu intent, sidebar and terminal drawer
+  shells, preferences UI, save/run/draft-discard initiation, and host panels.
+- Editor frontend owns Monaco rendering, active-document behavior, editor
+  commands, file-scoped decorations, mentions, draft diff, and review UI.
+- Explorer frontend owns tree rendering, Explorer menus, project/file navigation
+  intent, and Explorer presentation.
+- Sidebar windows own activation, Sidebar IPC, cwd/project sync, sidebar
+  mentions, and sidebar-originated effects through backend hooks.
+- Terminal backends own shell/session selection and execution.
+- WBA owns code-server intelligence, extension-host interaction, diagnostics
+  production, and language features.
 
-## User Direct Statements
+If one surface needs another surface to act, use:
 
-If the user makes a direct statement about this repo's code, architecture, or runtime behavior, treat that statement as authoritative unless an actual code reference proves otherwise.
+```text
+surface frontend
+  -> its own RPC lane
+  -> its backend
+  -> target backend hook/service
+  -> target surface notification
+```
 
-Do not question the user from documentation, stale memory, or assumptions. If the user appears wrong, push back only with the exact code path that proves it.
+Do not move authority into a frontend for convenience.
 
-## Repo Basics
+## RPC Lanes
 
-This repo is the TE2 framework/workspace repo. The main user-facing workspace app is `file_editor_cm6` / Code TE2: a Monaco-editor workspace with Explorer, host toolbar/menus, sidebar shortcut windows, terminal surfaces, diagnostics, draft/review flows, and the Workbench Adapter (WBA).
+Each frontend surface uses only its own lane:
 
-Use these references before guessing:
+- Editor: namespace `/rpc/editor`, path `/editor_ws/socket.io`
+- Explorer: namespace `/rpc/explorer`, path `/explorer_ws/socket.io`
+- Host/main page: namespace `/ui_ipc`, path `/ui_ipc_ws/socket.io`
+- Sidebar backends: namespace `/sidebar_ipc` on the app Socket.IO service
+- Terminal: namespace `/terminal`, path `/terminal_ws/socket.io`
+- WBA: namespace `/wba`, path `/wba_ws/socket.io`
+- TE2 console: namespace `/te2_console`, path `/te2_console_ws/socket.io`
 
-- `.repo_memory.md` for concise current repo memory
-- `AGENTS.md` for the repo workflow gate
-- `docs/apps/code_cm6/CODE_TE2.md` for Code TE2 orientation
-- `docs/planning/FILE_EDITOR_CM6_OWNERSHIP_BOUNDARY_CONTRACT.md` for workspace ownership/RPC reference material
-- `docs/planning/FILE_EDITOR_CM6_REFACTOR_NORTH_STAR.md` for the broader direction
-
-Source wins over docs if they disagree. `.repo_memory.md` and current source are the first check for current repo facts; planning docs can lag implementation.
-
-## Important Acronyms
-
-- WBA = Workbench Adapter, the Node/code-server adapter under `app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/`.
-- FWS = Framework-Shells, the shell/runtime orchestration system and sibling package maintained with this repo family.
-
-## Current Source Map
-
-Core framework and app entrypoints:
-
-- `app/main.py` - TE2 framework entrypoint
-- `app/apps/file_editor_cm6/main.py` - `file_editor_cm6` app worker
-- `app/apps/file_editor_cm6/main.ts` - main host frontend entrypoint
-- `app/apps/file_editor_cm6/manifest.json` - app manifest
-- `app/apps/file_editor_cm6/sio_service.json` - Socket.IO service topology
-- `app/apps/file_editor_cm6/socketio_gateway.py` - app Socket.IO gateway
-
-`file_editor_cm6` frontend and backend areas:
-
-- `app/apps/file_editor_cm6/main_page/frontend/` - host/main-page frontend
-- `app/apps/file_editor_cm6/monaco_editor/` - Monaco editor frontend and editor backend services
-- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts` - active editor frontend entrypoint
-- `app/apps/file_editor_cm6/src/explorer/` - Explorer frontend
-- `app/apps/file_editor_cm6/explorer/` - Explorer backend services and RPC transport
-- `app/apps/file_editor_cm6/ui_ipc/` - host/sidebar IPC backend
-- `app/apps/file_editor_cm6/host/` - host-owned backend actions
-- `app/apps/file_editor_cm6/workbench_protocol_proxy/` - code-server/WBA integration
-
-Open-file and project state authority:
-
-- `app/apps/file_editor_cm6/open_state_backend.py`
-- `app/apps/file_editor_cm6/project_sidecar.py`
-- `app/apps/file_editor_cm6/monaco_editor/editor_backend_services/open_service.py`
-
-Generated or bundled outputs such as `app/apps/file_editor_cm6/static/dist/` are not the source of truth unless the task explicitly targets built assets.
-
-## `file_editor_cm6` Ownership Boundary
-
-The boundary rules below are for the `file_editor_cm6` workspace app.
-
-Frontend surfaces initiate user intent and render state. Durable authority, cross-surface orchestration, and project/editor state changes belong in backend hooks or backend services.
-
-Surface ownership:
-
-- Host/main page owns toolbar/menu initiation, sidebar and terminal drawer shells, preferences UI, save/run/draft discard initiation, and host-level panels.
-- Editor frontend owns Monaco rendering, active-document behavior, editor commands, file-scoped decorations, editor mentions, draft diff UI, and editor review interactions.
-- Explorer frontend owns tree rendering, Explorer context menus, project/file navigation intent, and Explorer-scoped presentation.
-- Sidebar shortcut/windows lane owns sidebar window activation, sidebar IPC, cwd/project sync, sidebar mentions, and sidebar-originated editor/project effects through backend hooks.
-- Terminal backend owns shell/session selection and execution.
-- WBA owns code-server/workbench intelligence such as language features, diagnostics production, and extension-host interaction.
-
-Do not move authority into a frontend because it is convenient. If a surface needs another surface to do something, the surface sends intent on its own lane; its backend calls the appropriate backend hook.
-
-## RPC Lane Rules
-
-Each `file_editor_cm6` frontend element MUST use only its own RPC lane. No frontend should directly call another frontend's socket, namespace, or private API.
-
-Current lanes:
-
-- Editor frontend -> `/rpc/editor` namespace, Socket.IO path `/editor_ws/socket.io`; backend in `monaco_editor/editor_rpc_dispatch.py`, `monaco_editor/editor_ws.py`, and editor backend services.
-- Explorer frontend -> `/rpc/explorer` namespace, Socket.IO path `/explorer_ws/socket.io`; backend in `explorer/transport/rpc_socketio.py`, `explorer_runtime.py`, and Explorer handlers/services.
-- Host/main-page frontend -> `/ui_ipc` namespace, Socket.IO path `/ui_ipc_ws/socket.io`; backend in `ui_ipc/rpc_dispatch.py` and `host/*`. UI IPC owns host/sidebar frontend UI updates and URL-apply commands.
-- Sidebar shortcuts/windows -> `/sidebar_ipc` namespace on the app Socket.IO service, currently reached through the UI IPC Socket.IO path; backend in `ui_ipc/sidebar_ws.py` and sidebar RPC contract files. For stateful sidebar app windows, Sidebar IPC is a backend-only app API lane: app frontends send state to their own backend, and app backends send app lane data plus the exact URL to open over Sidebar IPC.
-- Terminal frontend/shell surfaces -> `/terminal` namespace, Socket.IO path `/terminal_ws/socket.io`; backend terminal services and routes.
-- WBA/code-server intelligence -> `/wba` namespace, Socket.IO path `/wba_ws/socket.io`; Node adapter side owns this lane.
-- TE2 console -> `/te2_console` namespace, Socket.IO path `/te2_console_ws/socket.io`; framework-owned console/debug lane.
-
-Examples of respecting the boundary:
-
-- Explorer open: Explorer UI sends `explorer.editor.open` on the Explorer RPC lane. The Explorer backend resolves the request, calls the editor backend open hook, and the editor backend records sidecar/open state and emits editor/open-state updates through the editor lane. Explorer UI does not call the editor socket directly.
-- Editor mention: Editor UI sends `editor.mention.request` on the editor RPC lane. The editor backend relays to the sidebar mention system, which fans out through `/sidebar_ipc`. Editor UI does not speak to `/sidebar_ipc` directly.
-- Host diagnostics mention: Host UI sends `ui.host.diagnostics.mention` on `/ui_ipc`. The host backend calls the sidebar mention helper. Host UI does not bypass its lane.
-- Stateful sidebar app URL update: app frontend constructs the state URL, posts it to its own app backend, and the app backend sends `sidebar.window.openUrl` over `/sidebar_ipc`. UI IPC applies the persisted URL to the sidebar frontend iframe stack.
-
-If a new action crosses domains, model it as: surface frontend -> that surface's RPC lane -> that surface's backend -> target backend hook/service -> target surface notification on its own lane.
-
-## Open File Authority
-
-Active open-file authority is backend-owned. The durable sidecar value is `ProjectSidecar.last_file`, coordinated by `open_state_backend.py` and editor open services.
-
-Do not treat transient frontend values such as `currentPath` as the cross-client source of truth. They are projections of backend state.
+Sidebar IPC is a backend app API lane. Stateful app frontends publish state to
+their own backend; that backend sends typed state/URL commands through Sidebar
+IPC. Frontends must not call another surface's private socket or API directly.
 
 ## Existing Methods First
 
-- If the user names an existing method, function, or pattern, reuse it.
-- If an existing method likely exists, search for it before inventing a new one.
-- Do not reimplement a local convention. If the codebase has a drawer toggle, Explorer scroll method, RPC helper, or backend hook, use that path.
+- Search for an existing method, backend hook, RPC helper, or UI convention
+  before adding a new one.
+- Reuse named methods and patterns supplied by the user.
+- Avoid parallel implementations of established runtime behavior.
 
-## Build and Formatting
+## Build And Validation
 
-If frontend source under `app/apps/file_editor_cm6/` changes, rebuild before testing:
+For Code TE2 frontend source changes:
 
 ```bash
-cd app/apps/file_editor_cm6 && node build.mjs
+cd app/apps/file_editor_cm6
+npm run typecheck
+node build.mjs
 ```
 
-Rationale: the app serves built bundles from `static/dist/`.
+The app serves generated bundles from `static/dist/`, but source remains the
+authority. Android bundled-asset publication is separate and requires explicit
+approval.
 
-- Smoke tests must start as their own command. Do not chain setup before a smoke with `&&` unless the user explicitly approves it.
-- Chaining after a smoke step is acceptable.
-- After follow-up build work, rerun smoke as a separate command when feasible.
-- Prettier is installed and in `PATH`; use it for Markdown/JS/TS formatting when appropriate.
+For Rust framework work, preserve the target cache and validate proportionally
+with Cargo formatting/check/tests. Do not delete `rust-spike/rust/target/` as a
+routine cleanup step.
 
-Android asset publication is separate from normal live app work. Only run the Android bundled-asset publication chain when the user explicitly asks to republish bundled Android assets.
+Smoke tests must begin as their own command. Do not prepend setup with `&&` to a
+smoke command unless the user explicitly approves that shape.
 
 ## Search Discipline
 
-Use targeted search. Prefer `rg --files` for discovery, then search only the source directories relevant to the task.
-
-No blind content searches in high-noise/generated roots unless the user explicitly asks:
+Use `rg --files` for discovery and targeted `rg` searches. Avoid blind searches
+through generated or high-noise roots:
 
 - `node_modules/`
-- `build/`
-- `worktrees/**/build/`
-- `app/apps/file_editor_cm6/static/dist/`
+- `build/` and `**/build/`
+- `worktrees/`
+- `app/apps/*/static/dist/`
 - `app/static/vendor/`
 - `android/app/build/`
-- `*.map`, `*.min.js`, `*.min.css`, `*.bundle.js`
+- maps, minified files, and bundles
 
-For known minified/bundled files, keep inspection stream-only:
-
-```bash
-prettier /path/to/file.js 2>/dev/null | nl -ba | rg -n "pattern"
-```
-
-For unknown files, first narrow candidates:
-
-```bash
-rg -l -g'*.js' -g'!*.map' "anchor" app/apps/file_editor_cm6
-```
-
-Then prettify only those candidates. Do not write fallback formatted files unless the user explicitly approves it.
+Use `rg --no-ignore` / `rg -uuu` or an explicit path only when one of those
+trees is the intended target. For known bundled JS, keep formatting inspection
+stream-only; do not write prettified copies without approval.
 
 ## Runtime Inspection
 
-When debugging live Code TE2 behavior, inspect the exact current worker/runtime instead of assuming a stale worker or old iframe shape.
+- Inspect exact current workers and FWS shells instead of assuming a stale
+  process or iframe shape.
+- Use TE2 console tools for browser/runtime state and FWS tools for process and
+  shell state.
+- Do not blame browser cache without concrete header or asset evidence.
+- Backend edits do not authorize a shared framework restart. Ask first.
 
-- For app/WBA process facts, use FWS/live shell visibility when available.
-- For `file_editor_cm6` host/editor frontend state, the relevant runtime is usually the main page workspace surface.
-- Do not reload or restart shared runtime infrastructure without explicit user approval.
-- Do not blame browser cache without concrete evidence such as headers proving a stale asset.
+## Repo Memory And Agent Log
 
-## Agent Log
+- `.repo_memory.md` contains concise durable facts, not task history. Keep it
+  synchronized with verified architectural changes.
+- Agent logs are for short-lived coordination and handoff. Prefix repo summaries
+  with `[TE2]` when an agent-log tool is used.
+- Do not store a durable repo fact only in transient memory or an agent log.
 
-Use the agent log for coordination with other agents and verified edit summaries when the user asks or when a verified round of work should be recorded.
+## Working Principle
 
-- Prefer the agent-log MCP tool if available.
-- All repo summaries posted to the agent log must start with `[TE2]`.
-- Agent log is for coordination/status, not long-lived architecture memory.
+When a required prerequisite is missing, identify and address that prerequisite
+within the approved scope instead of treating it as a reason to abandon the
+requested outcome.
 
-## Repo Memory
+## Parallelization
 
-`.repo_memory.md` is the concise durable memory file for this repo. Use it when resuming after context loss, handoff, or uncertainty about current architecture.
-
-Prefer focused repo-memory updates over long one-off summaries. Do not preserve stale facts when current source or user direction supersedes them.
-
-## Core Working Principle
-
-There is no "we can't do this unless we do that, so we're not doing it." There is only, "we can't do this unless we do that, so we're going to do that."
+Don't do it with the `ask_user` mcp tool. This is all. You may do it with any other task.

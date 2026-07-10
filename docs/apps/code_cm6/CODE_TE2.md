@@ -96,13 +96,15 @@ Browser host shell (file_editor_cm6/template.html + main.js)
         ├─ Editor WBA RPC socket:      /wba_ws/socket.io    namespace /wba
         └─ Touch selection: /api/app/file_editor_cm6/static/vendor/monaco-touch-selection/...
 
-Main framework process (app/main.py)
+Rust/Axum framework process
   ├─ Proxies /app/file_editor_cm6 → worker port
-  ├─ Loads app services declared in manifest.json
+  ├─ Loads the app registry and shellspec metadata
+  ├─ Owns app lifecycle/readiness and native Ferrous framework services
   ├─ Explorer transport service (WS proxy): /explorer_ws/socket.io → worker
   ├─ Editor transport service (WS proxy)  : /editor_ws/socket.io  → worker
   ├─ WBA transport service (WS proxy)     : /wba_ws/socket.io     → workbench adapter
-  └─ UI IPC transport service (WS proxy)  : /ui_ipc_ws/socket.io  → worker
+  ├─ UI IPC transport service (WS proxy)  : /ui_ipc_ws/socket.io  → worker
+  └─ Proxies TE2 console/FastMCP to the Python runtime sidecar
 
 App worker process (app/apps/file_editor_cm6/main.py)
   ├─ HTTP routes: /api/app/file_editor_cm6/*

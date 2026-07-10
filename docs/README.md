@@ -1,13 +1,29 @@
-# Documentation Index
+# Documentation Guide
 
-The `docs/` tree groups project documentation by scope:
+Current source code is authoritative. This documentation tree contains a mix of
+current reference material, app notes, investigations, and completed or
+superseded plans. Do not infer that a path or architecture is live merely
+because a planning document describes it.
 
-| Folder | Purpose |
+## Layout
+
+| Path | Contents |
 | --- | --- |
-| `core/` | Framework-wide architecture references (framework shells, repo overview, jobs, state store). |
-| `apps/` | App-specific documentation (per-app folders plus shared specs; see `apps/legacy/` for archived plans). |
-| `howto/` | Task-oriented guides and shared component docs (e.g., file picker workflow). |
-| `planning/` | Design notes, specifications, and long-form planning documents. |
-| `temp/` | Scratchpad space for work-in-progress notes (safe to ignore). |
+| `apps/` | App-specific guides, contracts, and historical implementation notes |
+| `core/` | Current shared-service boundaries plus explicitly historical notes |
+| `planning/` | Design records, investigations, phase plans, and migration history |
+| `extensions/` | Historical extension documentation |
+| `pngs/` | Documentation screenshots |
 
-When adding a new document drop it into the appropriate folder and, if needed, create a short README alongside it that lists the files contained in that folder.
+Some individual documents predate the Rust framework cutover and still mention
+removed Python framework modules or older Code TE2 paths. Use them to understand
+intent or prior decisions, then verify the claim against:
+
+1. current source;
+2. `AGENTS.md` for workflow and ownership rules;
+3. `.repo_memory.md` for concise durable architecture;
+4. the root `README.md` for supported install and launch behavior.
+
+New documents should say whether they are a current contract, an investigation,
+or a historical plan. Prefer updating the concise root guidance when a durable
+runtime fact changes instead of adding another competing overview.

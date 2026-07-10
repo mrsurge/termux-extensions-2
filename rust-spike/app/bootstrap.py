@@ -71,7 +71,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _parse_args(argv: Sequence[str] | None) -> BootstrapArgs:
     parser = argparse.ArgumentParser(
         prog="te2-rust-spike",
-        description="Build and launch the TE2 Rust framework spike.",
+        description="Build and launch the TE2 Rust framework.",
     )
     parser.add_argument("--host", default=os.environ.get("TE2_RUST_SPIKE_HOST", DEFAULT_HOST))
     parser.add_argument("--port", default=os.environ.get("TE2_RUST_SPIKE_PORT", os.environ.get("TE_PORT", DEFAULT_PORT)))
@@ -398,7 +398,7 @@ def _run_child(command: Sequence[str], env: dict[str, str]) -> int:
         return child.wait()
     finally:
         _stop_process(runtime_bridge, "runtime bridge")
-        _stop_process(child, "rust spike")
+        _stop_process(child, "Rust framework")
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
 

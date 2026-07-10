@@ -9,14 +9,10 @@ here. Put feature behavior in `explorer/handlers/`, `explorer/services/`, or
 
 import asyncio
 from collections.abc import Awaitable, Callable
-import importlib
 import logging
 import time
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 from pathlib import Path
-
-# Import git_service to register job handlers in worker process.
-_ = importlib.import_module("app.libs.git_service")
 
 from .explorer.services import file_ops as _file_ops
 # NOTE: search and review are imported lazily inside handler methods

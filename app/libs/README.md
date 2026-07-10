@@ -1,23 +1,21 @@
-# `app/libs`
+# Shared Python App-Worker Libraries
 
-This directory contains shared, core framework libraries that are not specific to any single application or extension. They provide foundational services used throughout the Termux Extensions project.
+`app/libs/` contains Python support used by current app workers. It is not the
+TE2 framework implementation; framework lifecycle and shared filesystem, Git,
+search, state, and proxy services are Rust-owned.
 
-## Modules
+Current modules:
 
-- **`app_lifecycle.py`**: Manages the lifecycle of all running application shells, including tracking their state, enforcing TTL and resource limits, and handling lock states.
+- `app_worker.py` — loads one app backend and serves its FastAPI/Socket.IO and
+  pipe-facing runtime.
+- `pipe_protocol.py` — typed JSONL envelope definitions for Rust/Python pipe
+  communication.
+- `pipe_runtime.py` — app-worker request, response, and notification dispatch
+  over that pipe.
+- `jobs.py` — generic in-process background jobs still used by non-Git app work.
+- `archiver.py` — safe archive listing/extraction through `libarchive-c`.
+- `archiver_service.py` — Archive Manager projections and extraction job
+  registration.
 
-- **`app_manager.py`**: Responsible for the on-demand spawning of app worker processes.
-
-- **`app_worker.py`**: A generic script that runs as a dedicated process for each application, hosting the app's specific backend blueprint.
-
-- **`archiver.py` / `archiver_service.py`**: Provides centralized services for archive operations (e.g., extraction) using `libarchive`.
-
-- **`bookmarks.py`**: Manages user-defined file system bookmarks.
-
-- **`framework_shells.py`**: The core service for managing all long-running background processes, including both app workers and persistent services.
-
-- **`jobs.py`**: A lightweight background job registry for short-to-medium duration asynchronous tasks.
-
-- **`optional_import.py`**: A utility for safely importing modules that may not be installed.
-
-- **`shell_groups.py`**: Provides helpers for managing groups of related framework shells.
+Code TE2 Git and search operations use Rust framework services through the pipe
+runtime. Do not add local GitPython, filesystem, or search fallbacks here.

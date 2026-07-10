@@ -4,7 +4,7 @@ import errno
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional
 
-from libarchive.public import file_reader
+from libarchive import file_reader
 
 
 def list_archive_entries(archive_path: Path) -> List[Dict]:

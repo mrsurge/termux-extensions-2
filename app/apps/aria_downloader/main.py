@@ -1,4 +1,4 @@
-"""Aria Downloader Flask blueprint with aria2 RPC + framework shell helpers."""
+"""Aria Downloader FastAPI routes with aria2 RPC and shell helpers."""
 
 from __future__ import annotations
 

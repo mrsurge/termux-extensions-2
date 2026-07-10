@@ -1,63 +1,15 @@
-const METRICS_ENDPOINT = '/api/framework/runtime/metrics';
 const SHELLS_ENDPOINT = '/api/framework_shells';
 const SHELL_ACTION_ENDPOINT = (id) => `/api/framework_shells/${id}/action`;
 const SHELL_DELETE_ENDPOINT = (id) => `/api/framework_shells/${id}`;
-const SHUTDOWN_ENDPOINT = '/api/framework/runtime/shutdown';
 const SETTINGS_ENDPOINT = '/api/settings';
 const EXTENSIONS_ENDPOINT = '/api/extensions';
-const IPC_PORT_DEFAULT = parseInt(window.__TE_IPC_PORT__ || '9099', 10);
-const IPC_HOST = window.__TE_IPC_HOST__ || window.location.hostname || '127.0.0.1';
-const IPC_BASE_URL = `${window.location.protocol}//${IPC_HOST}:${IPC_PORT_DEFAULT}`;
-
-function formatDuration(seconds) {
-  if (!Number.isFinite(seconds)) return '--';
-  const total = Math.max(0, Math.floor(seconds));
-  const days = Math.floor(total / 86400);
-  const hours = Math.floor((total % 86400) / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const secs = total % 60;
-  const parts = [];
-  if (days) parts.push(`${days}d`);
-  if (hours || parts.length) parts.push(`${hours}h`);
-  if (minutes || parts.length) parts.push(`${minutes}m`);
-  parts.push(`${secs}s`);
-  return parts.join(' ');
-}
-
-function formatBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  const decimals = value >= 10 || unit === 0 ? 0 : 1;
-  return `${value.toFixed(decimals)} ${units[unit]}`;
-}
 
 export default function init(root, _api, host) {
-  const metricsSection = root.querySelector('[data-section="metrics"]');
-  const metricsFields = {
-    runId: metricsSection?.querySelector('[data-field="run-id"]') || null,
-    supervisorPid: metricsSection?.querySelector('[data-field="supervisor-pid"]') || null,
-    appPid: metricsSection?.querySelector('[data-field="app-pid"]') || null,
-    uptime: metricsSection?.querySelector('[data-field="uptime"]') || null,
-    shellCount: metricsSection?.querySelector('[data-field="shell-count"]') || null,
-    sessionCount: metricsSection?.querySelector('[data-field="session-count"]') || null,
-    shellMemory: metricsSection?.querySelector('[data-field="shell-memory"]') || null,
-  };
-
   const shellListEl = root.querySelector('[data-role="shell-list"]');
   const tokenInput = root.querySelector('#framework-token');
   const extensionOrderContainer = root.querySelector('[data-role="extension-order"]');
   const saveExtensionOrderBtn = root.querySelector('[data-action="save-extension-order"]');
   const reloadExtensionsBtn = root.querySelector('[data-action="reload-extensions"]');
-  const maxServiceShellsInput = root.querySelector('#max-service-shells');
-  const maxAppShellsInput = root.querySelector('#max-app-shells');
-  const appTtlInput = root.querySelector('#app-ttl');
-  const saveLifecycleBtn = root.querySelector('[data-action="save-lifecycle-settings"]');
   const saveIntegrationBtn = root.querySelector('[data-action="save-integration-settings"]');
 
   const persistentNetworkToggle = root.querySelector('#setting-persistent-network');
@@ -124,24 +76,6 @@ export default function init(root, _api, host) {
     if (!settingsCache || typeof settingsCache !== 'object') settingsCache = {};
     settingsLoaded = true;
     return settingsCache;
-  }
-
-  function updateMetrics(data) {
-    const uptime = data?.uptime ?? 0;
-    const shellStats = data?.framework_shells ?? {};
-    const sessions = data?.interactive_sessions ?? {};
-
-    const assign = (node, value) => {
-      if (node) node.textContent = value;
-    };
-
-    assign(metricsFields.runId, data?.run_id || '--');
-    assign(metricsFields.supervisorPid, data?.supervisor_pid ?? '--');
-    assign(metricsFields.appPid, data?.app_pid ?? '--');
-    assign(metricsFields.uptime, formatDuration(uptime));
-    assign(metricsFields.shellCount, `${shellStats.num_running || 0} running / ${shellStats.num_shells || 0} total`);
-    assign(metricsFields.sessionCount, `${sessions.matching_run || 0} / ${sessions.total || 0}`);
-    assign(metricsFields.shellMemory, formatBytes(shellStats.memory_rss || 0));
   }
 
   function renderShells(shells) {
@@ -279,11 +213,6 @@ export default function init(root, _api, host) {
     extensionOrderContainer.appendChild(list);
   }
 
-  async function loadMetrics() {
-    const data = await request(METRICS_ENDPOINT);
-    updateMetrics(data);
-  }
-
   async function loadShells() {
     const shells = await request(SHELLS_ENDPOINT, {}, true);
     renderShells(shells || []);
@@ -295,56 +224,18 @@ export default function init(root, _api, host) {
     renderExtensionOrderList(extensions || []);
   }
 
-  async function triggerIpcShutdown() {
-    if (!window.confirm('Force shutdown via IPC service?')) {
-      return;
-    }
-    try {
-      const headers = { 'Content-Type': 'application/json' };
-      if (frameworkToken) {
-        headers['X-Framework-Key'] = frameworkToken;
-      }
-      const response = await fetch(`${IPC_BASE_URL}/actions/shutdown`, {
-        method: 'POST',
-        headers,
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok || body.ok === false) {
-        throw new Error(body.error || `HTTP ${response.status}`);
-      }
-      if (host?.toast) host.toast('IPC shutdown forwarded', 3000);
-    } catch (err) {
-      if (host?.toast) host.toast('IPC shutdown failed', 3000);
-    }
-  }
-
   async function performShellAction(shellId, action) {
     await request(SHELL_ACTION_ENDPOINT(shellId), { method: 'POST', body: { action } }, true);
     if (host?.toast) host.toast(`Shell ${shellId} ${action} requested`, 2500);
-    await Promise.allSettled([loadShells(), loadMetrics()]);
+    await loadShells();
   }
 
   async function removeShell(shellId) {
     await request(SHELL_DELETE_ENDPOINT(shellId), { method: 'DELETE' }, true);
     if (host?.toast) host.toast(`Shell ${shellId} removed`, 2500);
-    await Promise.allSettled([loadShells(), loadMetrics()]);
+    await loadShells();
   }
 
-  async function shutdownSupervisor() {
-    if (!window.confirm('Shutdown the framework supervisor and terminate all shells?')) {
-      return;
-    }
-    try {
-      await request(SHUTDOWN_ENDPOINT, { method: 'POST' }, true);
-      if (host?.toast) host.toast('Shutdown signal sent', 3000);
-    } catch (_) {
-      /* errors already surfaced */
-    }
-  }
-
-  root.querySelector('[data-action="refresh-metrics"]')?.addEventListener('click', () => {
-    loadMetrics().catch(() => { });
-  });
   root.querySelector('[data-action="refresh-shells"]')?.addEventListener('click', () => {
     loadShells().catch(() => { });
   });
@@ -355,12 +246,6 @@ export default function init(root, _api, host) {
   root.querySelector('[data-action="clear-token"]')?.addEventListener('click', () => {
     persistToken('');
     if (host?.toast) host.toast('Framework token cleared', 2000);
-  });
-  root.querySelector('[data-action="shutdown"]')?.addEventListener('click', () => {
-    shutdownSupervisor().catch(() => { });
-  });
-  root.querySelector('[data-action="ipc-shutdown"]')?.addEventListener('click', () => {
-    triggerIpcShutdown().catch(() => { });
   });
   reloadExtensionsBtn?.addEventListener('click', () => {
     loadExtensions().catch(() => { });
@@ -375,31 +260,6 @@ export default function init(root, _api, host) {
     } catch (err) {
       console.error('Failed to save extension order', err);
       if (host?.toast) host.toast('Failed to save extension order', 3000);
-    }
-  });
-
-  saveLifecycleBtn?.addEventListener('click', async () => {
-    const maxServiceShells = parseInt(maxServiceShellsInput.value, 10);
-    const maxAppShells = parseInt(maxAppShellsInput.value, 10);
-    const appTtlMinutes = parseInt(appTtlInput.value, 10);
-
-    const patch = {};
-    if (Number.isInteger(maxServiceShells) && maxServiceShells > 0) {
-      patch.TE_MAX_SERVICE_SHELLS = maxServiceShells;
-    }
-    if (Number.isInteger(maxAppShells) && maxAppShells > 0) {
-      patch.TE_MAX_APP_SHELLS = maxAppShells;
-    }
-    if (Number.isInteger(appTtlMinutes) && appTtlMinutes >= 0) {
-      patch.APP_TTL_SECONDS = appTtlMinutes * 60;
-    }
-
-    try {
-      await persistSettingsPatch(patch);
-      if (host?.toast) host.toast('Lifecycle settings saved', 2000);
-    } catch (err) {
-      console.error('Failed to save lifecycle settings', err);
-      if (host?.toast) host.toast('Failed to save settings', 3000);
     }
   });
 
@@ -418,22 +278,10 @@ export default function init(root, _api, host) {
   });
 
   async function loadAndRenderAll() {
-    await loadMetrics().catch(() => { });
     await loadShells().catch(() => { });
     await loadExtensions().catch(() => { });
 
     const settings = await ensureSettings();
-    if (maxServiceShellsInput) {
-      maxServiceShellsInput.value = settings.TE_MAX_SERVICE_SHELLS || '5';
-    }
-    if (maxAppShellsInput) {
-      maxAppShellsInput.value = settings.TE_MAX_APP_SHELLS || '5';
-    }
-    if (appTtlInput) {
-      const ttlSeconds = settings.APP_TTL_SECONDS || 1800;
-      appTtlInput.value = Math.floor(ttlSeconds / 60);
-    }
-
     if (persistentNetworkToggle) {
       persistentNetworkToggle.checked = !!settings.persistent_network_notification;
     }

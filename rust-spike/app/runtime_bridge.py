@@ -23,7 +23,7 @@ def build_app() -> FastAPI:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="te2-runtime-bridge",
-        description="Serve the TE2 console and MCP runtime mounts for the Rust spike.",
+        description="Serve the TE2 console and MCP mounts for the Rust framework.",
     )
     parser.add_argument(
         "--host",

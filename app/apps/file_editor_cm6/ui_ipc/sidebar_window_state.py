@@ -6,7 +6,7 @@ import secrets
 import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from app.extensions.apps import loader as apps_loader
+from app.extensions.apps.registry import AppRegistry
 
 from ..stores import get_preferences_store
 
@@ -71,15 +71,9 @@ def _empty_state() -> JsonObject:
 
 
 def _iter_app_manifests() -> list[JsonObject]:
-    loaded = [
-        dict(manifest)
-        for manifest in apps_loader.get_loaded_apps()
-        if isinstance(manifest, dict)
-    ]
-    if loaded:
-        return loaded
     try:
-        return [app_def.to_payload() for app_def in apps_loader.get_app_registry().list_apps()]
+        registry = AppRegistry()
+        return [app_def.to_payload() for app_def in registry.reload()]
     except Exception:
         return []
 

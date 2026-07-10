@@ -9,7 +9,7 @@ from typing import Any, Optional
 import yaml
 from framework_shells.shellspec import parse_shellspec_data
 
-from app.extensions.apps.proxy_shell import validate_proxy_shell_manifest
+from app.extensions.apps.manifest_validation import validate_proxy_shell_manifest
 from app.extensions.apps.registry import (
     builtin_templates_root,
     ensure_user_local_layout,
