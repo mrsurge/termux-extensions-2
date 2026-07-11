@@ -158,20 +158,25 @@
   .drawer-open #ta-drawer-overlay { display: block; }
   .ta-list-scroll { max-height: calc(100vh - 120px); overflow: auto; }
   #ta-keys {
-    display: flex;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 0;
     margin: 0;
-    padding: 8px 10px calc(env(safe-area-inset-bottom, 0px) + 8px);
-    border-top: 1px solid var(--border);
+    padding: 0;
+    border: 0;
     background: var(--card);
   }
   #ta-keys .kbtn {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
     font-size: 0.85em;
-    padding: 4px 8px;
-    border: 1px solid var(--border);
+    padding: 8px 2px calc(env(safe-area-inset-bottom, 0px) + 8px);
+    border: 0;
     background: var(--secondary);
     color: var(--foreground);
-    border-radius: 6px;
+    border-radius: 0;
     touch-action: manipulation;
     user-select: none;
   }
