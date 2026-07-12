@@ -1,3 +1,5 @@
+import { loadMonaco as loadBundledMonaco } from '../../../static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js';
+
 interface WorkerCtorLike {
   new (url: string | URL, options?: WorkerOptions): Worker;
 }
@@ -48,24 +50,6 @@ interface EditorMonacoBootRuntimeDeps {
   connectEditorHostActions(): void;
   emitToHost(eventName: string, payload: Record<string, unknown>): void;
   updateDebug(extra: string): void;
-}
-
-interface MonacoBootstrapModuleLike {
-  loadMonaco?(): Promise<unknown>;
-}
-
-function resolveMonacoBootstrapVersion(win: Window): string {
-  const scripts = Array.from(win.document?.scripts || []);
-  for (const script of scripts) {
-    const src = script.getAttribute('src') || '';
-    if (!src.includes('/static/dist/')) continue;
-    try {
-      const url = new URL(src, win.location.href);
-      const version = url.searchParams.get('v');
-      if (version) return version;
-    } catch (_) {}
-  }
-  return String(Date.now());
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -202,14 +186,9 @@ export async function bootMonacoRuntime(
       }
     } catch (_) {}
 
-    const bundleName = 'monaco.bootstrap.bundle.js';
-    const bundleVersion = encodeURIComponent(resolveMonacoBootstrapVersion(win));
-    const bundled = await import(langBase + '/bootstrap/' + bundleName + '?v=' + bundleVersion) as MonacoBootstrapModuleLike;
-    const monacoNs = bundled && typeof bundled.loadMonaco === 'function'
-      ? await bundled.loadMonaco()
-      : null;
-    win._loadedMonacoBundle = bundleName;
-    console.log('[Monaco] loaded ' + bundleName);
+    const monacoNs = await loadBundledMonaco();
+    win._loadedMonacoBundle = 'host.js';
+    console.log('[Monaco] loaded from host.js');
 
     win.monaco = monacoNs || undefined;
     deps.ensureTe2DiffTheme();

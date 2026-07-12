@@ -1,5 +1,6 @@
 // build.mjs — esbuild config for TE2 file editor
-// Two entry points: host page + Monaco editor iframe
+// Code TE2 ships one browser entrypoint. The inline Monaco editor is part of
+// the host graph so its runtime cannot race a second editor bundle.
 import { context, build } from 'esbuild';
 import { copyFile, mkdir } from 'node:fs/promises';
 
@@ -20,7 +21,7 @@ async function copyHostCss() {
   ]);
 }
 
-/** Shared config for both bundles */
+/** Shared browser bundle config */
 const shared = {
   bundle: true,
   sourcemap: isWatch,
@@ -38,14 +39,6 @@ const hostConfig = {
   entryPoints: ['main.ts'],
   outfile: 'static/dist/host.js',
   format: 'esm',
-};
-
-/** Monaco editor iframe bundle (IIFE — no module system in iframe) */
-const editorConfig = {
-  ...shared,
-  entryPoints: ['monaco_editor/m_editor_app.ts'],
-  outfile: 'static/dist/editor.js',
-  format: 'iife',
 };
 
 /** Workbench Adapter typed helper modules (Node ESM) */
@@ -109,16 +102,14 @@ const workbenchAdapterCodecConfig = {
 };
 
 if (isWatch) {
-  const [hostCtx, editorCtx, workbenchAdapterCtx, workbenchAdapterCodecCtx] = await Promise.all([
+  const [hostCtx, workbenchAdapterCtx, workbenchAdapterCodecCtx] = await Promise.all([
     context(hostConfig),
-    context(editorConfig),
     context(workbenchAdapterConfig),
     context(workbenchAdapterCodecConfig),
   ]);
   await copyHostCss();
   await Promise.all([
     hostCtx.watch(),
-    editorCtx.watch(),
     workbenchAdapterCtx.watch(),
     workbenchAdapterCodecCtx.watch(),
   ]);
@@ -126,7 +117,6 @@ if (isWatch) {
 } else {
   await Promise.all([
     build(hostConfig),
-    build(editorConfig),
     build(workbenchAdapterConfig),
     build(workbenchAdapterCodecConfig),
   ]);

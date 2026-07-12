@@ -49,28 +49,18 @@
     },
     {
       "kind": "file",
-      "src": "app/static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js",
-      "dest": "static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js"
-    },
-    {
-      "kind": "file",
       "src": "app/static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.css",
       "dest": "static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.css"
     },
     {
-      "kind": "glob",
-      "src": "app/static/vendor/monaco-editor-core/te2-lang/chunk-*.js",
-      "dest": "static/vendor/monaco-editor-core/te2-lang"
+      "kind": "file",
+      "src": "app/static/vendor/monaco-editor-core/te2-lang/bootstrap/codicon-LN6W7LCM.ttf",
+      "dest": "static/vendor/monaco-editor-core/te2-lang/bootstrap/codicon-LN6W7LCM.ttf"
     },
     {
       "kind": "tree",
-      "src": "app/static/vendor/monaco-editor-core/te2-lang/basic-languages",
-      "dest": "static/vendor/monaco-editor-core/te2-lang/basic-languages"
-    },
-    {
-      "kind": "tree",
-      "src": "app/static/vendor/monaco-editor-core/te2-lang/language",
-      "dest": "static/vendor/monaco-editor-core/te2-lang/language"
+      "src": "app/static/vendor/monaco-editor-core/te2-lang/workers",
+      "dest": "static/vendor/monaco-editor-core/te2-lang/workers"
     },
     {
       "kind": "file",
@@ -84,8 +74,23 @@
     },
     {
       "kind": "file",
+      "src": "app/apps/file_editor_cm6/static/dist/host.css",
+      "dest": "apps/file_editor_cm6/static/dist/host.css"
+    },
+    {
+      "kind": "file",
       "src": "app/apps/file_editor_cm6/static/dist/explorer.css",
       "dest": "apps/file_editor_cm6/static/dist/explorer.css"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor_cm6/static/dist/explorer-highlight-github.css",
+      "dest": "apps/file_editor_cm6/static/dist/explorer-highlight-github.css"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor_cm6/static/dist/explorer-search-widget.css",
+      "dest": "apps/file_editor_cm6/static/dist/explorer-search-widget.css"
     },
     {
       "kind": "file",
@@ -129,14 +134,18 @@
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/template.html",
-      "dest": "apps/file_editor_cm6/template.html"
+      "src": "app/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css",
+      "dest": "apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css"
     },
     {
       "kind": "file",
-      "src": "app/apps/file_editor_cm6/monaco_editor/editor_iframe.html",
-      "dest": "api/app/file_editor_cm6/ui/nc.html",
-      "required": false
+      "src": "app/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css",
+      "dest": "apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
+    },
+    {
+      "kind": "file",
+      "src": "app/apps/file_editor_cm6/template.html",
+      "dest": "apps/file_editor_cm6/template.html"
     },
     { "kind": "file", "src": "app/templates/index.html", "dest": "index.html" },
     {

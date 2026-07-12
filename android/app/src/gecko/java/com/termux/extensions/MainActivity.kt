@@ -967,10 +967,9 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "Force-updating assets…", Toast.LENGTH_SHORT).show()
         Thread {
             try {
-                val port = java.net.URI(frameworkBaseUrl).port.let { if (it == -1) 8089 else it }
                 val mgr = editorAssetManager
                 if (mgr != null) {
-                    val ok = mgr.forceUpdateFromServer(port)
+                    val ok = mgr.forceUpdateFromServer(frameworkBaseUrl)
                     runOnUiThread {
                         if (ok) {
                             val ver = mgr.getLocalVersion() ?: "?"
@@ -1341,10 +1340,9 @@ class MainActivity : AppCompatActivity() {
 
             // Check server for newer assets and download bundle if needed
             try {
-                val port = java.net.URI(frameworkUrl).port.let { if (it == -1) 8089 else it }
                 val mgr = editorAssetManager
                 if (mgr != null) {
-                    val serverVer = mgr.checkServerVersion(port)
+                    val serverVer = mgr.checkServerVersion(frameworkUrl)
                     if (serverVer != null) {
                         val localVer = mgr.getLocalVersion() ?: "none"
                         runOnUiThread {
@@ -1352,7 +1350,7 @@ class MainActivity : AppCompatActivity() {
                                 "Updating assets: v$localVer → v$serverVer…",
                                 Toast.LENGTH_LONG).show()
                         }
-                        val ok = mgr.downloadFromServer(port)
+                        val ok = mgr.downloadFromServer(frameworkUrl)
                         if (ok) {
                             runOnUiThread {
                                 Toast.makeText(this@MainActivity,

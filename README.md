@@ -1,4 +1,7 @@
-# Termux Extensions 2
+# Termux Extensions 2 
+
+> It won't change you into a professional programmer... but it'll make you feel like one.
+---
 
 TE2 is a local development workspace that runs the same project environment on
 Linux desktops and in Termux. Its framework launches isolated apps, owns shell

@@ -76,69 +76,75 @@ class MainActivity : AppCompatActivity() {
 
     // ── Asset intercept ─────────────────────────────────────────────
 
-    /**
-     * URL prefixes that should be served from the local asset server
-     * instead of going to the Python framework. Mirrors background.js.
-     */
-    private val INTERCEPT_PREFIXES = arrayOf(
+    /** Static OTA trees mirrored by the GeckoView request interceptor. */
+    private val LOCAL_PREFIXES = arrayOf(
         "/static/vendor/codicons/",
         "/static/vendor/seti-icons/",
         "/static/vendor/es-module-shims/",
         "/static/vendor/xterm/",
         "/static/vendor/ws/",
-        "/static/vendor/monaco-editor-core/te2-lang/bootstrap/",
-        "/static/vendor/monaco-editor-core/te2-lang/basic-languages/",
-        "/static/vendor/monaco-editor-core/te2-lang/language/",
-        "/static/vendor/monaco-editor-core/esm/",
         "/static/fonts/",
         "/static/js/",
         "/extensions/",
-        "/apps/file_editor_cm6/",
-        "/apps/file_editor_cm6/static/",
-        "/api/app/file_editor_cm6/ui/monaco_editor/",
-        "/api/app/file_editor_cm6/ui/monaco_vscode/lang/",
-        "/api/app/file_editor_cm6/ui/monaco_vscode/esm/",
-        "/apps/file_editor_cm6/monaco_editor/vscode_build_src/"
+        "/apps/file_editor_cm6/static/icons/",
+        "/apps/file_editor_cm6/static/vendor/monaco-touch-selection/",
+        "/apps/file_editor_cm6/vendor/android-terminalapp-assets-js/",
+        "/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/",
+        "/api/app/file_editor_cm6/ui/monaco_editor/textmate/",
+        "/api/app/file_editor_cm6/ui/monaco_editor/themes/",
+        "/api/app/file_editor_cm6/ui/monaco_vscode/lang/workers/"
     )
 
-    private val INTERCEPT_FILES = arrayOf(
+    private val LOCAL_FILES = setOf(
         "/static/icon.png",
         "/static/move.png",
         "/static/manifest.webmanifest",
         "/static/bookmarks.json",
-        "/static/vendor/socket.io.min.js"
+        "/static/vendor/socket.io.min.js",
+        "/static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.css",
+        "/static/vendor/monaco-editor-core/te2-lang/bootstrap/codicon-LN6W7LCM.ttf",
+        "/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
+        "/apps/file_editor_cm6/template.html",
+        "/apps/by-id/file_editor_cm6/template.html",
+        "/apps/file_editor_cm6/static/dist/host.js",
+        "/apps/by-id/file_editor_cm6/static/dist/host.js",
+        "/apps/file_editor_cm6/static/dist/host.css",
+        "/apps/file_editor_cm6/static/dist/explorer.css",
+        "/apps/file_editor_cm6/static/dist/explorer-highlight-github.css",
+        "/apps/file_editor_cm6/static/dist/explorer-search-widget.css",
+        "/apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js",
+        "/api/app/file_editor_cm6/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css",
+        "/api/app/file_editor_cm6/ui/monaco_vscode/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
+        "/apps/file_editor_cm6/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
+        "/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css",
+        "/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
     )
 
-    private val WORKER_RE = Regex("/te2-lang/workers/")
-    private val TE2_LANG_CHUNK_RE = Regex("^/static/vendor/monaco-editor-core/te2-lang/chunk-[A-Z0-9]+\\.js$")
-
-    private fun mapPath(urlPath: String): String {
+    private fun localPathFor(urlPath: String): String? {
+        if (urlPath == "/") return "/index.html"
+        if (urlPath == "/app/file_editor_cm6") return "/app_shell_file_editor_cm6.html"
+        if (urlPath !in LOCAL_FILES && LOCAL_PREFIXES.none { urlPath.startsWith(it) }) {
+            return null
+        }
+        if (urlPath == "/apps/by-id/file_editor_cm6/template.html") {
+            return "/apps/file_editor_cm6/template.html"
+        }
+        if (urlPath.startsWith("/apps/by-id/file_editor_cm6/static/")) {
+            return "/apps/file_editor_cm6/static/" + urlPath.removePrefix("/apps/by-id/file_editor_cm6/static/")
+        }
         if (urlPath.startsWith("/api/app/file_editor_cm6/static/")) {
             return "/apps/file_editor_cm6/static/" + urlPath.removePrefix("/api/app/file_editor_cm6/static/")
         }
-        if (urlPath == "/api/app/file_editor_cm6/ui/nc") {
-            return "/api/app/file_editor_cm6/ui/nc.html"
+        if (urlPath.startsWith("/api/app/file_editor_cm6/ui/monaco_vscode/lang/")) {
+            return "/static/vendor/monaco-editor-core/te2-lang/" + urlPath.removePrefix("/api/app/file_editor_cm6/ui/monaco_vscode/lang/")
         }
-        if (urlPath.startsWith("/app/")) {
-            return "/app_shell.html"
+        if (urlPath.startsWith("/api/app/file_editor_cm6/ui/monaco_vscode/esm/")) {
+            return "/static/vendor/monaco-editor-core/esm/" + urlPath.removePrefix("/api/app/file_editor_cm6/ui/monaco_vscode/esm/")
         }
-        if (urlPath == "/") {
-            return "/index.html"
+        if (urlPath.startsWith("/apps/file_editor_cm6/monaco_editor/vscode_build_src/")) {
+            return "/api/app/file_editor_cm6/ui/monaco_editor/vscode_build_src/" + urlPath.removePrefix("/apps/file_editor_cm6/monaco_editor/vscode_build_src/")
         }
         return urlPath
-    }
-
-    private fun shouldIntercept(urlPath: String): Boolean {
-        if (WORKER_RE.containsMatchIn(urlPath)) return false
-        if (TE2_LANG_CHUNK_RE.matches(urlPath)) return true
-        if (urlPath == "/" || urlPath.startsWith("/app/") || urlPath == "/api/app/file_editor_cm6/ui/nc") return true
-        for (f in INTERCEPT_FILES) {
-            if (urlPath == f) return true
-        }
-        for (prefix in INTERCEPT_PREFIXES) {
-            if (urlPath.startsWith(prefix)) return true
-        }
-        return false
     }
 
     private fun interceptRequest(request: WebResourceRequest): WebResourceResponse? {
@@ -146,13 +152,8 @@ class MainActivity : AppCompatActivity() {
         if (server.port == 0) return null
 
         val url = request.url ?: return null
-        val host = url.host ?: return null
-        if (host != "127.0.0.1" && host != "localhost") return null
-
         val path = url.path ?: return null
-        if (!shouldIntercept(path)) return null
-
-        val localPath = mapPath(path).removePrefix("/")
+        val localPath = localPathFor(path)?.removePrefix("/") ?: return null
         val assetRoot = editorAssetManager?.getAssetRoot() ?: return null
         val file = File(assetRoot, localPath)
 
@@ -532,10 +533,9 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "Force-updating assets…", Toast.LENGTH_SHORT).show()
         Thread {
             try {
-                val port = java.net.URI(frameworkBaseUrl).port.let { if (it == -1) 8089 else it }
                 val mgr = editorAssetManager
                 if (mgr != null) {
-                    val ok = mgr.forceUpdateFromServer(port)
+                    val ok = mgr.forceUpdateFromServer(frameworkBaseUrl)
                     runOnUiThread {
                         if (ok) {
                             val ver = mgr.getLocalVersion() ?: "?"
@@ -719,10 +719,9 @@ class MainActivity : AppCompatActivity() {
 
             // Check server for newer assets and download bundle if needed
             try {
-                val port = java.net.URI(frameworkUrl).port.let { if (it == -1) 8089 else it }
                 val mgr = editorAssetManager
                 if (mgr != null) {
-                    val serverVer = mgr.checkServerVersion(port)
+                    val serverVer = mgr.checkServerVersion(frameworkUrl)
                     if (serverVer != null) {
                         val localVer = mgr.getLocalVersion() ?: "none"
                         runOnUiThread {
@@ -730,7 +729,7 @@ class MainActivity : AppCompatActivity() {
                                 "Updating assets: v$localVer → v$serverVer…",
                                 Toast.LENGTH_LONG).show()
                         }
-                        val ok = mgr.downloadFromServer(port)
+                        val ok = mgr.downloadFromServer(frameworkUrl)
                         if (ok) {
                             runOnUiThread {
                                 Toast.makeText(this@MainActivity,

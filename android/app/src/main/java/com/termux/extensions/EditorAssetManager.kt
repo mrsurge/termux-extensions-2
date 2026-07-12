@@ -99,14 +99,14 @@ class EditorAssetManager(private val context: Context) {
      * Check server for a newer asset version. Returns the server version
      * if it's different from local, or null if up-to-date / unreachable.
      */
-    fun checkServerVersion(port: Int): String? {
+    fun checkServerVersion(serverBaseUrl: String): String? {
         return try {
             val client = OkHttpClient.Builder()
                 .connectTimeout(3, TimeUnit.SECONDS)
                 .readTimeout(3, TimeUnit.SECONDS)
                 .build()
             val req = Request.Builder()
-                .url("http://127.0.0.1:$port/api/editor_version")
+                .url(serverEndpoint(serverBaseUrl, "/api/editor_version"))
                 .get()
                 .build()
             client.newCall(req).execute().use { resp ->
@@ -126,14 +126,14 @@ class EditorAssetManager(private val context: Context) {
      * filesDir/editor_static/, replacing the current local copy.
      * Returns true on success, false on failure.
      */
-    fun downloadFromServer(port: Int): Boolean {
+    fun downloadFromServer(serverBaseUrl: String): Boolean {
         return try {
             val client = OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
                 .build()
             val req = Request.Builder()
-                .url("http://127.0.0.1:$port/api/editor_assets_bundle")
+                .url(serverEndpoint(serverBaseUrl, "/api/editor_assets_bundle"))
                 .get()
                 .build()
 
@@ -198,11 +198,14 @@ class EditorAssetManager(private val context: Context) {
      * Force re-download: clear local assets and download fresh bundle.
      * Returns true on success.
      */
-    fun forceUpdateFromServer(port: Int): Boolean {
+    fun forceUpdateFromServer(serverBaseUrl: String): Boolean {
         Log.i(TAG, "Force update: clearing local assets and re-downloading")
         if (assetRoot.exists()) assetRoot.deleteRecursively()
-        return downloadFromServer(port)
+        return downloadFromServer(serverBaseUrl)
     }
+
+    private fun serverEndpoint(serverBaseUrl: String, path: String): String =
+        serverBaseUrl.trimEnd('/') + path
 
     companion object {
         private const val TAG = "EditorAssetManager"

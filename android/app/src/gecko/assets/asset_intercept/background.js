@@ -8,76 +8,76 @@
 let assetServerPort = 0;
 let enabled = false;
 
-// URL path prefixes that map directly to the local asset server.
-// The local server mirrors the same path structure.
-const INTERCEPT_PREFIXES = [
+// Prefixes backed by complete OTA directory entries. Keep API prefixes limited
+// to immutable static trees so dynamic backend routes always stay on TE2.
+const LOCAL_PREFIXES = [
   "/static/vendor/codicons/",
   "/static/vendor/seti-icons/",
   "/static/vendor/es-module-shims/",
   "/static/vendor/xterm/",
   "/static/vendor/ws/",
-  "/static/vendor/monaco-editor-core/te2-lang/bootstrap/",
-  "/static/vendor/monaco-editor-core/te2-lang/basic-languages/",
-  "/static/vendor/monaco-editor-core/te2-lang/language/",
-  "/static/vendor/monaco-editor-core/esm/",
   "/static/fonts/",
   "/static/js/",
   "/extensions/",
-  "/apps/file_editor_cm6/",
-  "/apps/file_editor_cm6/static/",
-  "/api/app/file_editor_cm6/ui/monaco_editor/",
-  "/api/app/file_editor_cm6/ui/monaco_vscode/lang/",
-  "/api/app/file_editor_cm6/ui/monaco_vscode/esm/",
-  "/apps/file_editor_cm6/monaco_editor/vscode_build_src/"
+  "/apps/file_editor_cm6/static/icons/",
+  "/apps/file_editor_cm6/static/vendor/monaco-touch-selection/",
+  "/apps/file_editor_cm6/vendor/android-terminalapp-assets-js/",
+  "/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/",
+  "/api/app/file_editor_cm6/ui/monaco_editor/textmate/",
+  "/api/app/file_editor_cm6/ui/monaco_editor/themes/",
+  "/api/app/file_editor_cm6/ui/monaco_vscode/lang/workers/"
 ];
 
-// Exact file matches at /static/ root
-const INTERCEPT_FILES = [
+const LOCAL_FILES = new Set([
   "/static/icon.png",
   "/static/move.png",
   "/static/manifest.webmanifest",
   "/static/bookmarks.json",
-  "/static/vendor/socket.io.min.js"
-];
+  "/static/vendor/socket.io.min.js",
+  "/static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.css",
+  "/static/vendor/monaco-editor-core/te2-lang/bootstrap/codicon-LN6W7LCM.ttf",
+  "/static/vendor/monaco-editor-core/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
+  "/apps/file_editor_cm6/template.html",
+  "/apps/by-id/file_editor_cm6/template.html",
+  "/apps/file_editor_cm6/static/dist/host.js",
+  "/apps/by-id/file_editor_cm6/static/dist/host.js",
+  "/apps/file_editor_cm6/static/dist/host.css",
+  "/apps/file_editor_cm6/static/dist/explorer.css",
+  "/apps/file_editor_cm6/static/dist/explorer-highlight-github.css",
+  "/apps/file_editor_cm6/static/dist/explorer-search-widget.css",
+  "/apps/file_editor_cm6/static/vendor/vconsole/vconsole.min.js",
+  "/api/app/file_editor_cm6/ui/monaco_vscode/lang/bootstrap/monaco.bootstrap.bundle.css",
+  "/api/app/file_editor_cm6/ui/monaco_vscode/esm/vs/editor/common/services/editorWebWorkerMain.bundle.js",
+  "/apps/file_editor_cm6/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css",
+  "/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditorController.css",
+  "/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media/chatEditingEditorOverlay.css"
+]);
 
-// te2-lang chunk files (top-level in te2-lang dir)
-const TE2_LANG_CHUNK_RE = /^\/static\/vendor\/monaco-editor-core\/te2-lang\/chunk-[A-Z0-9]+\.js$/;
-
-// Exclude workers — they stay server-fetched
-const WORKER_RE = /\/te2-lang\/workers\//;
-
-// /api/app/file_editor_cm6/static/ maps to /apps/file_editor_cm6/static/ locally
-function mapPath(urlPath) {
+function localPathFor(urlPath) {
+  if (urlPath === "/") return "/index.html";
+  if (urlPath === "/app/file_editor_cm6") return "/app_shell_file_editor_cm6.html";
+  if (!LOCAL_FILES.has(urlPath) && !LOCAL_PREFIXES.some((prefix) => urlPath.startsWith(prefix))) {
+    return null;
+  }
+  if (urlPath === "/apps/by-id/file_editor_cm6/template.html") {
+    return "/apps/file_editor_cm6/template.html";
+  }
+  if (urlPath.startsWith("/apps/by-id/file_editor_cm6/static/")) {
+    return "/apps/file_editor_cm6/static/" + urlPath.slice("/apps/by-id/file_editor_cm6/static/".length);
+  }
   if (urlPath.startsWith("/api/app/file_editor_cm6/static/")) {
     return "/apps/file_editor_cm6/static/" + urlPath.slice("/api/app/file_editor_cm6/static/".length);
   }
-  // iframe HTML page
-  if (urlPath === "/api/app/file_editor_cm6/ui/nc") {
-    return "/api/app/file_editor_cm6/ui/nc.html";
+  if (urlPath.startsWith("/api/app/file_editor_cm6/ui/monaco_vscode/lang/")) {
+    return "/static/vendor/monaco-editor-core/te2-lang/" + urlPath.slice("/api/app/file_editor_cm6/ui/monaco_vscode/lang/".length);
   }
-  // generic app shell
-  if (urlPath.startsWith("/app/")) {
-    return "/app_shell.html";
+  if (urlPath.startsWith("/api/app/file_editor_cm6/ui/monaco_vscode/esm/")) {
+    return "/static/vendor/monaco-editor-core/esm/" + urlPath.slice("/api/app/file_editor_cm6/ui/monaco_vscode/esm/".length);
   }
-  // index page
-  if (urlPath === "/") {
-    return "/index.html";
+  if (urlPath.startsWith("/apps/file_editor_cm6/monaco_editor/vscode_build_src/")) {
+    return "/api/app/file_editor_cm6/ui/monaco_editor/vscode_build_src/" + urlPath.slice("/apps/file_editor_cm6/monaco_editor/vscode_build_src/".length);
   }
   return urlPath;
-}
-
-function shouldIntercept(urlPath) {
-  if (WORKER_RE.test(urlPath)) return false;
-  if (TE2_LANG_CHUNK_RE.test(urlPath)) return true;
-  // HTML pages
-  if (urlPath === "/" || urlPath.startsWith("/app/") || urlPath === "/api/app/file_editor_cm6/ui/nc") return true;
-  for (const f of INTERCEPT_FILES) {
-    if (urlPath === f) return true;
-  }
-  for (const prefix of INTERCEPT_PREFIXES) {
-    if (urlPath.startsWith(prefix)) return true;
-  }
-  return false;
 }
 
 browser.webRequest.onBeforeRequest.addListener(
@@ -86,27 +86,25 @@ browser.webRequest.onBeforeRequest.addListener(
 
     try {
       const url = new URL(details.url);
-      // Only intercept requests to the framework server on localhost
-      if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") return {};
+      const isLocalAssetRequest =
+        (url.hostname === "127.0.0.1" || url.hostname === "localhost") &&
+        Number(url.port) === assetServerPort;
+      if (isLocalAssetRequest) return {};
 
       const path = url.pathname;
-      if (!shouldIntercept(path)) return {};
-
-      const localPath = mapPath(path);
+      const localPath = localPathFor(path);
+      if (!localPath) return {};
       let search = url.search || "";
-      if (path.startsWith("/app/")) {
-        const appId = path.slice("/app/".length);
-        const params = new URLSearchParams(search);
-        if (appId && !params.has("app_id")) params.set("app_id", appId);
-        search = `?${params.toString()}`;
-      }
       const redirectUrl = `http://127.0.0.1:${assetServerPort}${localPath}${search}`;
+      console.debug(`[asset_intercept] ${path} -> ${localPath}`);
       return { redirectUrl };
     } catch (e) {
       return {};
     }
   },
-  { urls: ["*://127.0.0.1/*", "*://localhost/*"] },
+  // Framework pages may be loaded from localhost, LAN, or Tailscale. The path
+  // allowlist above remains the authority for what can be redirected locally.
+  { urls: ["<all_urls>"] },
   ["blocking"]
 );
 

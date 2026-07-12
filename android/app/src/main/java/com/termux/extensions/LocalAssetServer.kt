@@ -95,6 +95,7 @@ class LocalAssetServer(private val assetRoot: File) {
                 return
             }
 
+            Log.d(TAG, "Serving $path -> $relPath")
             val mime = guessMimeType(file.name)
             val length = file.length()
 
