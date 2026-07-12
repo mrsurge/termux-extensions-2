@@ -9,6 +9,10 @@ import {
   type JsonObject,
 } from '../../rpc/transport.ts';
 import {
+  RPC_CODEC_MSGPACK_V1,
+  messagePackRpcWireCodec,
+} from '../../rpc/codec.ts';
+import {
   SOCKET_IO_NAMESPACES,
   SOCKET_IO_PATHS,
   fileEditorSocketQuery,
@@ -27,11 +31,14 @@ export function createExplorerRpcConnection(options: CreateExplorerRpcConnection
     namespace: SOCKET_IO_NAMESPACES.explorerRpc,
     path: SOCKET_IO_PATHS.explorer,
     query: fileEditorSocketQuery(),
+    auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
+    codec: messagePackRpcWireCodec,
     requestIdPrefix: 'explorer',
     ensureSocketIoLoaded: options.ensureSocketIoLoaded,
     onConnect: options.onConnect,
     onDisconnect: options.onDisconnect,
     onConnectError: options.onConnectError,
+    onProtocolError: options.onConnectError,
     onNotification: (notification) => {
       const parsedNotification = parseExplorerRpcNotification(notification);
       if (!parsedNotification) return;

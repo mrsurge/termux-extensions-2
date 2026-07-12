@@ -1,3 +1,8 @@
+import {
+  identityRpcWireCodec,
+  type RpcWireCodec,
+} from './codec.ts';
+
 export const RPC_REQUEST_EVENT = 'rpc' as const;
 export const RPC_NOTIFICATION_EVENT = 'rpc.notify' as const;
 
@@ -49,11 +54,14 @@ export interface CreateSocketIoJsonRpcClientOptions {
   namespace: string;
   path: string;
   query?: JsonObject;
+  auth?: JsonObject;
+  codec?: RpcWireCodec;
   requestIdPrefix?: string;
   ensureSocketIoLoaded: () => Promise<IoFactory | null | undefined>;
   onConnect?: () => void;
   onDisconnect?: (reason?: string) => void;
   onConnectError?: (error: unknown) => void;
+  onProtocolError?: (error: Error) => void;
   onNotification?: (notification: JsonRpcNotificationEnvelope) => void;
 }
 
@@ -115,6 +123,7 @@ export class JsonRpcCallError extends Error {
 }
 
 export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClientOptions) {
+  const codec = options.codec ?? identityRpcWireCodec;
   let socket: SocketLike | null = null;
   let connectPromise: Promise<void> | null = null;
   let requestCounter = 0;
@@ -145,9 +154,10 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
       queued.reject(new Error(`RPC request timeout: ${queued.envelope.method}`));
     }, timeoutMs);
 
-    socket.emit(RPC_REQUEST_EVENT, queued.envelope, (response: unknown) => {
+    socket.emit(RPC_REQUEST_EVENT, codec.encode(queued.envelope), (wireResponse: unknown) => {
       clearTimeout(timer);
       try {
+        const response = codec.decode(wireResponse);
         if (isJsonRpcErrorEnvelope(response)) {
           const data = isJsonObject(response.error.data) ? response.error.data : undefined;
           throw new JsonRpcCallError(response.error.code, response.error.message, data);
@@ -167,7 +177,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
     while (queuedNotifications.length) {
       const queued = queuedNotifications.shift();
       if (!queued) continue;
-      socket.emit(RPC_REQUEST_EVENT, queued);
+      socket.emit(RPC_REQUEST_EVENT, codec.encode(queued));
     }
     while (queuedRequests.length) {
       const queued = queuedRequests.shift();
@@ -189,6 +199,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
           path: options.path,
           transports: ['websocket'],
           query: options.query || {},
+          auth: options.auth || {},
         });
         socket.on('connect', () => {
           flushQueues();
@@ -200,9 +211,14 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
         socket.on('connect_error', (error: unknown) => {
           options.onConnectError?.(error);
         });
-        socket.on(RPC_NOTIFICATION_EVENT, (payload: unknown) => {
-          if (!isJsonRpcNotificationEnvelope(payload)) return;
-          options.onNotification?.(payload);
+        socket.on(RPC_NOTIFICATION_EVENT, (wirePayload: unknown) => {
+          try {
+            const payload = codec.decode(wirePayload);
+            if (!isJsonRpcNotificationEnvelope(payload)) return;
+            options.onNotification?.(payload);
+          } catch (error) {
+            options.onProtocolError?.(normalizeError(error));
+          }
         });
       })
       .catch((error) => {
@@ -233,7 +249,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
       params,
     };
     if (socket?.connected) {
-      socket.emit(RPC_REQUEST_EVENT, envelope);
+      socket.emit(RPC_REQUEST_EVENT, codec.encode(envelope));
       return;
     }
     queuedNotifications.push(envelope);

@@ -33,6 +33,7 @@ shells:
       TE_PIPE_NID: "2100"
       FILE_EDITOR_CM6_EXPLORER_FS_ORIGIN: pipe
       FILE_EDITOR_CM6_EVENT_METRICS: "0"
+      FILE_EDITOR_CM6_RPC_CODEC_METRICS: "0"
     subgroups:
       - ${ctx:APP_ID}
       - app-worker

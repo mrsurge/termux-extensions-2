@@ -7,6 +7,12 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from ...frontend_rpc_codec import (
+    FrontendRpcCodecError,
+    decode_frontend_rpc_message,
+    encode_frontend_rpc_message,
+    require_msgpack_v1_auth,
+)
 from .rpc_contract import (
     ExplorerRpcProtocolError,
     JsonRpcErrorEnvelope,
@@ -36,6 +42,8 @@ def sync_active_explorer_dispatchers_project_root(project_root: Path) -> None:
 
 
 if TYPE_CHECKING:
+    class _SocketIOConnectionRefusedError(Exception): ...
+
     class _SocketIOAsyncNamespace:
         def __init__(self, namespace: str = "/rpc/explorer") -> None: ...
 
@@ -51,6 +59,7 @@ else:
     import socketio
 
     _SocketIOAsyncNamespace = socketio.AsyncNamespace
+    _SocketIOConnectionRefusedError = socketio.exceptions.ConnectionRefusedError
 
 
 class ExplorerRpcSocketShim:
@@ -125,7 +134,11 @@ class ExplorerRpcSocketShim:
                     return
             method = payload.get("method")
             if isinstance(method, str) and method:
-                await self.namespace.emit("rpc.notify", payload, room=self.sid)
+                await self.namespace.emit(
+                    "rpc.notify",
+                    encode_frontend_rpc_message(payload, lane="explorer", method=method),
+                    room=self.sid,
+                )
 
 
 class ExplorerRpcSocketIONamespace(_SocketIOAsyncNamespace):
@@ -135,7 +148,17 @@ class ExplorerRpcSocketIONamespace(_SocketIOAsyncNamespace):
         self.rpc_sockets: dict[str, ExplorerRpcSocketShim] = {}
         _ACTIVE_EXPLORER_NAMESPACES.append(self)
 
-    async def on_connect(self, sid: str, environ: dict[str, object]) -> None:
+    async def on_connect(
+        self,
+        sid: str,
+        environ: dict[str, object],
+        auth: object | None = None,
+    ) -> None:
+        del environ
+        try:
+            require_msgpack_v1_auth(auth)
+        except FrontendRpcCodecError as exc:
+            raise _SocketIOConnectionRefusedError(str(exc)) from exc
         rpc_socket = ExplorerRpcSocketShim(self, sid)
         dispatcher = ExplorerDispatcher(rpc_socket)
         await dispatcher.initialize()
@@ -153,6 +176,34 @@ class ExplorerRpcSocketIONamespace(_SocketIOAsyncNamespace):
         logger.info("[ExplorerRPC] client disconnected sid=%s reason=%s", sid, reason)
 
     async def on_rpc(
+        self,
+        sid: str,
+        data: object,
+    ) -> bytes | None:
+        try:
+            decoded = decode_frontend_rpc_message(data, lane="explorer")
+        except FrontendRpcCodecError as exc:
+            return encode_frontend_rpc_message(
+                build_jsonrpc_error(
+                    request_id=None,
+                    code=-32700,
+                    message=str(exc),
+                ),
+                lane="explorer",
+            )
+
+        response = await self._dispatch_rpc(sid, decoded)
+        if response is None:
+            return None
+        decoded_obj = cast(dict[object, object], decoded) if isinstance(decoded, dict) else {}
+        method = decoded_obj.get("method")
+        return encode_frontend_rpc_message(
+            response,
+            lane="explorer",
+            method=method if isinstance(method, str) else None,
+        )
+
+    async def _dispatch_rpc(
         self,
         sid: str,
         data: object,
