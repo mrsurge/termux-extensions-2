@@ -249,6 +249,38 @@
             try { console.log('[app_shell] gv-native enabled'); } catch (e) {}
         }
 
+        // Native Android shells use their OTA asset layer and must not be controlled by the PWA worker.
+        window.teNativeServiceWorkerReady = enabled ? (async function () {
+            if (!('serviceWorker' in navigator)) return true;
+
+            const wasControlled = navigator.serviceWorker.controller !== null;
+            try {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(registrations.map(registration => registration.unregister()));
+
+                if ('caches' in window) {
+                    const cacheNames = await caches.keys();
+                    await Promise.all(
+                        cacheNames
+                            .filter(name => name.startsWith('te2-v'))
+                            .map(name => caches.delete(name))
+                    );
+                }
+            } catch (error) {
+                console.warn('[app_shell] native service worker cleanup failed:', error);
+            }
+
+            const reloadKey = 'te_gv_native_sw_reloaded';
+            if (wasControlled && sessionStorage.getItem(reloadKey) !== '1') {
+                sessionStorage.setItem(reloadKey, '1');
+                location.reload();
+                return false;
+            }
+
+            sessionStorage.removeItem(reloadKey);
+            return true;
+        })() : Promise.resolve(true);
+
         if (embed) {
             document.documentElement.classList.add('te-embed');
             try { console.log('[app_shell] embed enabled'); } catch (e) {}
@@ -1019,6 +1051,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
+            if (!await window.teNativeServiceWorkerReady) return;
             try {
                 const settings = await fetchSettings();
                 debugFullStack = !!settings.debugFullStack;
@@ -1031,7 +1064,7 @@
 
         <script>
 // Register Service Worker for PWA installability (app shell view)
-if ('serviceWorker' in navigator) {
+if (!document.documentElement.classList.contains('gv-native') && 'serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').catch(err => {
             console.error('Service worker registration failed:', err);
