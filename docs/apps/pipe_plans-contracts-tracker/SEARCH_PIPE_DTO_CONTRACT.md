@@ -18,6 +18,8 @@ The Explorer backend is the adapter. It calls `service.search`, receives provide
 - Do not expose raw `rg --json` records as the app contract.
 - Do not add HTTP fallback. Missing pipe support must fail explicitly once the pipe cutover is enabled.
 - Do not make Rust own Explorer "more results" materialization in the baseline. Python owns the accumulated `searchId` cache and serves materialized windows from that cache.
+- Do not treat repo-wide replace as a hidden extension of content search results.
+  Replace preview/apply has a separate contract in `SEARCH_REPLACE_PIPE_DTO_CONTRACT.md`.
 
 ## Routing Requirements
 

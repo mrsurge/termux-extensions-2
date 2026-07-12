@@ -518,11 +518,23 @@ Rules:
         "payloadKind": "string",
         "encoding": "utf-8",
         "value": "diff --git ..."
-      }
+      },
+      "contentSuppressed": false
     }
   ]
 }
 ```
+
+Whole-file deleted and untracked entries are status-only at the framework
+producer boundary. They must remain present in `files` so app UIs can keep file
+links/status rows, but the `patch.value` must be empty and the entry must expose
+`contentSuppressed: true`, `suppressedReason: "wholeFileStatusOnly"`, and a
+short `displayText` such as `"Deleted file"` or `"Untracked file"`. Modified
+tracked files keep normal patch production unless any diff body line in that
+file exceeds `8192` bytes. In that case the entry remains present with empty
+`patch.value`, `contentSuppressed: true`, `suppressedReason:
+"oversizedDiffLine"`, `displayText: "Diff omitted: contains a line over 8 KB"`,
+and `lineByteLimit: 8192`.
 
 ### GitHeadBlobResult
 
@@ -657,9 +669,22 @@ Git:
 
 Search:
 
-- `search.files`
-- `search.content`
-- `search.changes`
+- `search.config.get`
+- `search.files.get`
+- `search.content.get`
+- `search.files.start`
+- `search.content.start`
+- `search.job.cancel`
+- `search.job.progress` notification
+- `search.job.result` notification
+- `search.job.done` notification
+- `search.job.error` notification
+- `search.benchmark.run`
+- `search.replace.preview.start`
+- `search.replace.apply.start`
+
+`search.changes` is not a current Rust `service.search` method. Code TE2 changes
+search is still an Explorer/Git projection using `service.git` DTOs.
 
 OS:
 

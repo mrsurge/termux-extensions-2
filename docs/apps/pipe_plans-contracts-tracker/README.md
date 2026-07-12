@@ -14,6 +14,10 @@ The current direction is contract-first:
 - `FILE_EDITOR_CM6_PIPE_SERVICE_MIGRATION_PLAN.md` - migration plan and expected source surface.
 - `PIPE_SERVICE_JSON_RPC_CONTRACT_DRAFT.md` - protocol, envelope, NID, request id, codec, and DTO draft.
 - `PIPE_SERVICE_CONTRACT_TRACKER.md` - to-do/done/outcome tracker.
+- `GIT_PIPE_SUPPLEMENTARY_CONTRACT.md` - current `service.git` method and DTO contract.
+- `SEARCH_PIPE_DTO_CONTRACT.md` - current `service.search` file/content/progressive search contract.
+- `SEARCH_REPLACE_PIPE_DTO_CONTRACT.md` - planned repo-wide find/replace preview/apply contract.
+- `SEARCH_FULL_STACK_BENCHMARK_HARNESS_PLAN.md` - explicit diagnostic benchmark harness contract.
 
 ## Superseded Historical Document
 

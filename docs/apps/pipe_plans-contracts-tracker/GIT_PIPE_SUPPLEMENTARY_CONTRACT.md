@@ -2,9 +2,16 @@
 
 ## Goal
 
-Define the missing Git pipe methods and DTOs needed to make Code TE2 Git consumers treat the pipe as the origin for all Git data and Git mutations.
+Define the current Git pipe method and DTO contract that makes Code TE2 Git consumers treat the pipe as the origin for all Git data and Git mutations.
 
-The adapter rule is: keep current frontend and backend projection payloads stable where possible, and make Python modules thin pipe adapters until the old helper modules can be removed.
+The adapter rule is: keep current frontend and backend projection payloads stable where possible, and keep Python Git code limited to thin pipe adapters/projection glue. There is no local Git fallback in `file_editor_cm6`.
+
+Current state:
+
+- The Rust framework `service.git` pipe provider implements the method set below through `framework_services/pipe/git_pipe_ops.rs`, backed by `framework_services/git_ops.rs`.
+- Code TE2 app-side consumers use `app/apps/file_editor_cm6/worker_services/git_service.py` as the pipe adapter.
+- Historical subprocess/GitPython producer paths such as `git_helper.py` are removed; `diff_helper.collect_diff(...)` is backed by `git.diff.hunks`.
+- Any unsupported adapter option must fail loudly at the adapter boundary instead of silently falling back to a local Git implementation.
 
 ## Execution Requirements
 
@@ -20,6 +27,7 @@ The adapter rule is: keep current frontend and backend projection payloads stabl
 |---|---|
 | `git.snapshot.get` | Return repository status, branch, head, and path decorations as `GitSnapshot` |
 | `git.headBlob` | Return file text at `HEAD` or requested rev as `GitHeadBlobResult` |
+| `git.diff` | Return file-level patches/change rows as `GitDiffResult` |
 | `git.diff.hunks` | Return current `diff_helper.collect_diff`-compatible hunks as `GitDiffHunks` |
 | `git.worktreeChanges.get` | Return changed paths vs `HEAD` or a diff base as `GitWorktreeChanges` |
 | `git.pathIndex.list` | Return tracked and untracked non-ignored file paths for search/name indexing |
@@ -36,8 +44,9 @@ The adapter rule is: keep current frontend and backend projection payloads stabl
 | `git.commit` | Commit staged changes and return `GitMutationResult` |
 | `git.resetHard` | Hard-reset to a ref and return `GitMutationResult` |
 | `git.init` | Initialize a repository and return `GitMutationResult` |
-| `git.pull` | Synchronous pull for compatibility routes; return `GitMutationResult` |
-| `git.push` | Synchronous push for compatibility routes; return `GitMutationResult` |
+| `git.clone` | Bounded clone call for non-progress callers; return `GitMutationResult` |
+| `git.pull` | Bounded pull call for non-progress callers; return `GitMutationResult` |
+| `git.push` | Bounded push call for non-progress callers; return `GitMutationResult` |
 | `git.clone.start` | Start long-running clone, return `GitJobStarted` |
 | `git.pull.start` | Start long-running pull, return `GitJobStarted` |
 | `git.push.start` | Start long-running push, return `GitJobStarted` |
@@ -158,6 +167,40 @@ Terminal failure/cancel uses the same DTO with `status: "failed"` plus `error`, 
 }
 ```
 
+### GitDiffResult
+
+Returned by `git.diff` when a caller needs file-level patch/change rows rather
+than editor hunk DTOs.
+
+```json
+{
+  "dto": "GitDiffResult",
+  "version": 1,
+  "root": "/repo/root",
+  "projectGeneration": 42,
+  "base": "HEAD",
+  "files": [
+    {
+      "relativePath": "src/file.ts",
+      "status": "modified",
+      "patch": {
+        "payloadKind": "string",
+        "encoding": "utf-8",
+        "value": "diff --git a/src/file.ts b/src/file.ts\n..."
+      },
+      "contentSuppressed": false
+    }
+  ]
+}
+```
+
+Whole-file deleted and untracked bodies are status-only here as well. Return the
+file row with `contentSuppressed: true` and
+`suppressedReason: "wholeFileStatusOnly"` instead of materializing the full file
+body into a patch. Modified files with any diff body line over `8192` bytes are
+also status-only with `suppressedReason: "oversizedDiffLine"` and
+`lineByteLimit: 8192`.
+
 ### GitDiffHunks
 
 This is intentionally shaped to adapt directly to the current `diff_helper.collect_diff` return payload.
@@ -185,16 +228,77 @@ This is intentionally shaped to adapt directly to the current `diff_helper.colle
   "summary": {
     "added": 1,
     "deleted": 1,
-    "tracked": true
+    "tracked": true,
+    "status": "modified"
   }
 }
 ```
 
-On non-repo/untracked/no-diff cases, return the same DTO with empty `hunks` and a truthful `summary.tracked` value. Use `error` only for an actual provider failure or capped result.
+The diff producer must preserve file identity even when no line corpus is
+returned. On non-repo/no-diff cases, return the same DTO with empty `hunks` and
+a truthful `summary.tracked` value. Use `error` only for an actual provider
+failure or capped result.
+
+Whole-file deleted and untracked bodies are status-only in this DTO. The Rust
+producer must not materialize the deleted/untracked file body into hunk lines for
+Explorer "by changes" overlays or any other app-origin pipe caller. For those
+statuses, return empty `hunks` and keep the row/link usable through
+`relativePath`, `summary.status`, and the existing worktree-change metadata:
+
+```json
+{
+  "dto": "GitDiffHunks",
+  "version": 1,
+  "root": "/repo/root",
+  "projectGeneration": 42,
+  "relativePath": "deleted.log",
+  "base": "HEAD",
+  "hunks": [],
+  "summary": {
+    "added": 0,
+    "deleted": 0,
+    "tracked": true,
+    "status": "deleted",
+    "contentSuppressed": true,
+    "suppressedReason": "wholeFileStatusOnly",
+    "displayText": "Deleted file"
+  }
+}
+```
+
+Modified tracked files keep normal hunk production unless any diff body line in
+that file exceeds `8192` bytes. A single oversized body line is treated as a
+minified/generated-file memory hazard, so the whole file diff becomes
+status-only while preserving the row/link:
+
+```json
+{
+  "dto": "GitDiffHunks",
+  "version": 1,
+  "root": "/repo/root",
+  "projectGeneration": 42,
+  "relativePath": "static/dist/host.js",
+  "base": "HEAD",
+  "hunks": [],
+  "summary": {
+    "added": 0,
+    "deleted": 0,
+    "tracked": true,
+    "status": "modified",
+    "contentSuppressed": true,
+    "suppressedReason": "oversizedDiffLine",
+    "displayText": "Diff omitted: contains a line over 8 KB",
+    "lineByteLimit": 8192
+  }
+}
+```
+
+Do not add broad truncation or sampling to modified hunks until a separate
+caller-visible limit/cursor contract is designed.
 
 ### GitWorktreeChanges
 
-Replaces `git_helper.get_worktree_changes` for search/review change lists.
+Replaces the retired `git_helper.get_worktree_changes` producer for search/review change lists.
 
 ```json
 {
@@ -222,7 +326,7 @@ Replaces `git_helper.get_worktree_changes` for search/review change lists.
 
 ### GitPathIndex
 
-Replaces the `git ls-files -co --exclude-standard` path in Explorer name search.
+Replaces any local `git ls-files -co --exclude-standard` producer path when a Git-backed path index is needed.
 
 ```json
 {
@@ -244,7 +348,7 @@ If not a repository, return `isRepository: false` and an empty `paths` list so t
 
 ### GitCommitInfoResult
 
-Replaces `git_helper.get_commit_info`.
+Replaces the retired `git_helper.get_commit_info` producer.
 
 ```json
 {
@@ -364,31 +468,37 @@ After any `statusInvalidated: true` mutation, the Python adapter should request 
 }
 ```
 
-## Python Adapter Targets
+## Current Python Adapter State
 
-The Python side can remove local Git behavior by turning these modules into pipe adapters or deleting them after callers move:
+The app-side Git adapter is `worker_services/git_service.py`. It calls the pipe
+provider, validates DTO names, coerces returned DTOs into existing app
+projection payloads, and fails loudly when a requested option is not supported.
 
-| Current module/function family | Pipe replacement |
+| Current consumer/source boundary | Pipe replacement |
 |---|---|
-| `worker_services/git_service.py` snapshot/status | `git.snapshot.get` |
-| `worker_services/git_service.py` head blob | `git.headBlob` |
-| `git_helper.get_status` / `is_git_repository` | `git.snapshot.get` |
-| `git_helper.get_commit_info` | `git.commitInfo.get` |
-| `git_helper.get_worktree_changes` | `git.worktreeChanges.get` |
-| `git_helper.list_branches` | `git.branchList` |
-| `git_helper.checkout_branch` | `git.branchCheckout` |
-| `git_helper.create_branch` | `git.branchCreate` |
-| `git_helper.stage_all` / `stage_paths` | `git.stage` |
-| `git_helper.unstage_all` / `unstage_paths` | `git.unstage` |
-| `git_helper.commit_changes` | `git.commit` |
-| `git_helper.restore_path` | `git.restore` |
-| `git_helper.reset_hard` | `git.resetHard` |
-| `git_helper.init_repository` | `git.init` |
-| `git_helper.get_origin_url` / `get_remotes` / `add_remote` | `git.remoteList` / `git.remoteAdd` |
-| `git_helper.get_commits` / `get_commits_for_path` | `git.history` |
-| `diff_helper.collect_diff` | `git.diff.hunks` |
-| Explorer name-search git index path | `git.pathIndex.list` |
-| `app.libs.git_service` clone/pull/push jobs | `git.clone.start` / `git.pull.start` / `git.push.start` plus `git.job.progress` notifications |
+| Snapshot/status/decorations | `git.snapshot.get` |
+| Head blob reads | `git.headBlob` |
+| Commit info | `git.commitInfo.get` |
+| Worktree change lists | `git.worktreeChanges.get` |
+| Git-backed path index | `git.pathIndex.list` |
+| Branch list/checkout/create | `git.branchList` / `git.branchCheckout` / `git.branchCreate` |
+| Remote list/add | `git.remoteList` / `git.remoteAdd` |
+| Stage/unstage/commit/restore/reset/init | `git.stage` / `git.unstage` / `git.commit` / `git.restore` / `git.resetHard` / `git.init` |
+| History | `git.history` |
+| Editor diff hunk helper | `git.diff.hunks` |
+| File-level diff rows | `git.diff` |
+| Clone/pull/push jobs | `git.clone.start` / `git.pull.start` / `git.push.start` plus `git.job.progress` notifications |
+
+Historical local producers such as `git_helper.py`, direct `git` subprocess
+calls, GitPython/pygit2 producers, and app-local clone/pull/push job producers
+are not part of the active Code TE2 Git data path.
+
+Current adapter limitations:
+
+- `git.restore` supports the default restore source through the app adapter; non-default source refs are rejected at the adapter boundary until the app projection contract needs them.
+- `git.pull` and `git.pull.start` reject `rebase: true` at the app adapter boundary.
+- `git.push` and `git.push.start` reject `force: true` at the app adapter boundary.
+- Active push cancellation is best-effort where libgit2 exposes progress/cancellation hooks; cancellation is still honored before queued jobs and before push negotiation.
 
 ## Routing And Scheduling Rules
 
@@ -400,10 +510,10 @@ The Python side can remove local Git behavior by turning these modules into pipe
 - Short get/read operations may return one response, but their blocking work still runs off-loop.
 - Long operations return `GitJobStarted` quickly and emit progress/completion later.
 
-## Adoption Shape
+## Adoption State
 
-1. Keep current Explorer/frontend notifications unchanged.
-2. Add Python pipe adapter functions that coerce these DTOs into existing `GitStatus`, `GitBranches`, `GitCommit`, diff payloads, and `explorer.job.progress` payloads.
-3. Cut each consumer from direct helpers to pipe adapters.
-4. Remove `app.libs.git_service` import/registration from `file_editor_cm6` once clone/pull/push use pipe jobs.
-5. Delete or hollow out direct `git` subprocess/GitPython paths after all callers are pipe-backed.
+1. Current Explorer/frontend notification shapes stay unchanged.
+2. `worker_services/git_service.py` is the Python pipe adapter and projection seam.
+3. Explorer Git status/decorations/search/commands/jobs, main host Git UI, UI IPC branch actions, state/diff-base metadata, `read_head_blob_text(...)`, and `diff_helper.collect_diff(...)` are pipe-backed.
+4. No app-worker HTTP route owns the Explorer Git data path; Git data production stays behind the pipe adapter.
+5. Future Git expansion should extend this pipe contract first, then add app adapter projection code only where a current frontend/backend payload needs it.

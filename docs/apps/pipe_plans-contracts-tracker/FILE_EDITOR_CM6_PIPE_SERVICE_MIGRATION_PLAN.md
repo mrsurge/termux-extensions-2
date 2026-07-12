@@ -248,6 +248,7 @@ Initial producer targets:
 - Legacy git helper mutation results
 - Diff helper results
 - Explorer search result batches
+- Explorer search replace preview/apply results
 - Editor open/read/save/baseline operations
 - WBA watcher file-change normalization
 - Existing `workspace_events.py` side effects made explicit as DTO producers, invalidators, or projectors
@@ -299,9 +300,10 @@ Suggested order:
 2. git status/decorations/head blob reads
 3. editor baseline reads
 4. search
-5. fs write/mutation operations
-6. git mutations/history/remotes
-7. OS/subprocess helpers
+5. search replace preview/apply
+6. fs write/mutation operations
+7. git mutations/history/remotes
+8. OS/subprocess helpers
 
 Exit criteria:
 
@@ -329,10 +331,13 @@ Explorer:
 - `app/apps/file_editor_cm6/explorer/services/file_ops.py`
 - `app/apps/file_editor_cm6/explorer/services/render_state.py`
 - `app/apps/file_editor_cm6/explorer/search.py`
+- `app/apps/file_editor_cm6/explorer/services/search_sessions.py`
 - `app/apps/file_editor_cm6/explorer/handlers/file_tree.py`
 - `app/apps/file_editor_cm6/explorer/handlers/git.py`
+- `app/apps/file_editor_cm6/explorer/handlers/search.py`
 - `app/apps/file_editor_cm6/explorer/transport/rpc_contract.py`
 - `app/apps/file_editor_cm6/src/explorer/rpc/contract.ts`
+- `app/apps/file_editor_cm6/src/explorer/search/`
 
 Editor:
 
