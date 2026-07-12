@@ -8,11 +8,13 @@
 - First migration target: Explorer frontend/backend communication
 - Current migration targets: editor/Python, direct editor/WBA, and UI IPC
 
-Current checkpoint: Code TE2 `0.2.298` uses strict `msgpack-v1` application
+Current checkpoint: Code TE2 `0.2.299` uses strict `msgpack-v1` application
 payloads for Explorer, editor/Python, direct editor/WBA, and UI IPC Socket.IO
 namespaces. Python lanes share `frontend_rpc_codec.py`; browser lanes share the
 TypeScript codec; WBA owns a runtime-local JavaScript codec at its direct socket
-boundary. No migrated lane has a JSON fallback. Explorer is live-validated;
+boundary. The generated WBA codec is one self-contained bundled ESM artifact;
+installed apps do not resolve `@msgpack/msgpack` from a development
+`node_modules` tree. No migrated lane has a JSON fallback. Explorer is live-validated;
 editor, WBA, and UI IPC live validation remains pending. Sidebar IPC and terminal
 retain their current codecs and behavior.
 
@@ -559,6 +561,8 @@ no behavior regression.
 - [ ] Separate code-server/ext-host latency from transport overhead.
 - [x] Encode WBA requests, responses, notifications, and broadcasts with strict
       `msgpack-v1` inside existing Socket.IO events.
+- [x] Bundle the WBA codec dependency into one self-contained installed ESM
+      artifact while leaving the rest of the WBA module graph split.
 - [x] Preserve direct editor/WBA ownership and avoid routing the hot path through
       Python or the worker event bus.
 - [ ] Validate hover, completion, symbols, semantic tokens, inlay hints,

@@ -52,7 +52,6 @@ const editorConfig = {
 const workbenchAdapterConfig = {
   entryPoints: [
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/wire-encoding.ts',
-    'workbench_protocol_proxy/node_workbench_adapter/src/protocol/messagepack-codec.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/rpc-ids.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/pending-requests.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/protocol/ext-host-dispatch.ts',
@@ -93,16 +92,43 @@ const workbenchAdapterConfig = {
   outExtension: { '.js': '.mjs' },
 };
 
+/** Self-contained WBA codec; installed apps do not ship the build node_modules tree. */
+const workbenchAdapterCodecConfig = {
+  entryPoints: [
+    'workbench_protocol_proxy/node_workbench_adapter/src/protocol/messagepack-codec.ts',
+  ],
+  outfile: 'workbench_protocol_proxy/node_workbench_adapter/dist/protocol/messagepack-codec.mjs',
+  bundle: true,
+  sourcemap: isWatch,
+  minify: !isWatch,
+  logLevel: 'info',
+  platform: 'neutral',
+  mainFields: ['module', 'main'],
+  target: 'es2022',
+  format: 'esm',
+};
+
 if (isWatch) {
-  const [hostCtx, editorCtx, workbenchAdapterCtx] = await Promise.all([
+  const [hostCtx, editorCtx, workbenchAdapterCtx, workbenchAdapterCodecCtx] = await Promise.all([
     context(hostConfig),
     context(editorConfig),
     context(workbenchAdapterConfig),
+    context(workbenchAdapterCodecConfig),
   ]);
   await copyHostCss();
-  await Promise.all([hostCtx.watch(), editorCtx.watch(), workbenchAdapterCtx.watch()]);
+  await Promise.all([
+    hostCtx.watch(),
+    editorCtx.watch(),
+    workbenchAdapterCtx.watch(),
+    workbenchAdapterCodecCtx.watch(),
+  ]);
   console.log('Watching for changes...');
 } else {
-  await Promise.all([build(hostConfig), build(editorConfig), build(workbenchAdapterConfig)]);
+  await Promise.all([
+    build(hostConfig),
+    build(editorConfig),
+    build(workbenchAdapterConfig),
+    build(workbenchAdapterCodecConfig),
+  ]);
   await copyHostCss();
 }

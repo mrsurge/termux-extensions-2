@@ -2,10 +2,9 @@ import { build, context } from "esbuild";
 
 const isWatch = process.argv.includes("--watch");
 
-const config = {
+const moduleConfig = {
   entryPoints: [
     "src/protocol/wire-encoding.ts",
-    "src/protocol/messagepack-codec.ts",
     "src/protocol/rpc-ids.ts",
     "src/protocol/pending-requests.ts",
     "src/protocol/ext-host-dispatch.ts",
@@ -47,10 +46,27 @@ const config = {
   outExtension: { ".js": ".mjs" },
 };
 
+// Keep the installed codec self-contained without collapsing the WBA module graph.
+const codecConfig = {
+  entryPoints: ["src/protocol/messagepack-codec.ts"],
+  outfile: "dist/protocol/messagepack-codec.mjs",
+  bundle: true,
+  platform: "neutral",
+  mainFields: ["module", "main"],
+  format: "esm",
+  target: "es2022",
+  sourcemap: isWatch,
+  minify: !isWatch,
+  logLevel: "info",
+};
+
 if (isWatch) {
-  const ctx = await context(config);
-  await ctx.watch();
+  const [moduleCtx, codecCtx] = await Promise.all([
+    context(moduleConfig),
+    context(codecConfig),
+  ]);
+  await Promise.all([moduleCtx.watch(), codecCtx.watch()]);
   console.log("Watching Workbench Adapter TypeScript...");
 } else {
-  await build(config);
+  await Promise.all([build(moduleConfig), build(codecConfig)]);
 }
