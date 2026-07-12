@@ -325,11 +325,13 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     }
 
     const connection = uiIpcRpcConnection;
-    uiIpcConnectPromise = startMainPageConsoleBridge()
+    uiIpcConnectPromise = connection.connect()
       .then(() => {
-        return connection.connect();
+        // Console observability is optional and must never gate core UI IPC or
+        // the editor boot sequence.
+        void startMainPageConsoleBridge();
+        return connection;
       })
-      .then(() => connection)
       .catch((err: unknown) => {
         console.warn('[UI_IPC] connect failed', err);
         throw err;

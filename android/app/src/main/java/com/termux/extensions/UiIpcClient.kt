@@ -45,6 +45,7 @@ class UiIpcClient(
             val opts = IO.Options().apply {
                 path = "/ui_ipc_ws/socket.io"
                 transports = arrayOf("websocket")
+                upgrade = false
                 query = "app_id=file_editor_cm6&source=android_native"
                 reconnection = true
                 reconnectionDelay = 2000
@@ -85,6 +86,8 @@ class UiIpcClient(
         try {
             val opts = IO.Options().apply {
                 path = "/te2_console_ws/socket.io"
+                transports = arrayOf("websocket")
+                upgrade = false
                 query = "app_id=file_editor_cm6&source=android_console"
                 reconnection = true
                 reconnectionDelay = 2000
