@@ -495,7 +495,7 @@ async def _emit_editor_rpc_notification_to_room(
 ) -> None:
     from .editor_socketio import EDITOR_SIO
 
-    async def _emit(event_name: str, notification_payload: dict[str, object]) -> None:
+    async def _emit(event_name: str, notification_payload: bytes) -> None:
         await EDITOR_SIO.emit(  # pyright: ignore[reportUnknownMemberType]
             event_name,
             notification_payload,

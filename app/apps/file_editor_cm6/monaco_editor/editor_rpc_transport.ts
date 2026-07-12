@@ -9,6 +9,7 @@ import {
   isJsonRpcNotificationEnvelope,
   isJsonRpcSuccessEnvelope,
 } from './editor_rpc_contract.ts';
+import { messagePackRpcWireCodec } from '../src/rpc/codec.ts';
 
 interface EditorRpcSocketLike {
   connected?: boolean;
@@ -27,6 +28,7 @@ interface EditorRpcTransportDeps {
   getSocket(): EditorRpcSocketLike | null;
   setTimeoutFn(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
   clearTimeoutFn(timer: ReturnType<typeof setTimeout>): void;
+  onProtocolError?(error: unknown): void;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -95,11 +97,18 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   }
 
   function handleMessage(payload: unknown): void {
-    if (Array.isArray(payload)) {
-      payload.forEach(handleEnvelope);
+    let decoded: unknown;
+    try {
+      decoded = messagePackRpcWireCodec.decode(payload);
+    } catch (error) {
+      deps.onProtocolError?.(error);
       return;
     }
-    handleEnvelope(payload);
+    if (Array.isArray(decoded)) {
+      decoded.forEach(handleEnvelope);
+      return;
+    }
+    handleEnvelope(decoded);
   }
 
   function attachSocket(socket: EditorRpcSocketLike): void {
@@ -137,7 +146,17 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
         reject(new Error(`editor rpc timeout: ${method}`));
       }, timeoutMs);
       pending.set(idKey(requestId), { timer, resolve, reject, method });
-      emit(EDITOR_RPC_EVENT, buildEditorRpcRequestEnvelope(requestId, method, params || {}));
+      let wirePayload: unknown;
+      try {
+        wirePayload = messagePackRpcWireCodec.encode(buildEditorRpcRequestEnvelope(requestId, method, params || {}));
+      } catch (error) {
+        deps.clearTimeoutFn(timer);
+        pending.delete(idKey(requestId));
+        deps.onProtocolError?.(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      emit(EDITOR_RPC_EVENT, wirePayload);
     });
   }
 
@@ -145,7 +164,12 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     const socket = deps.getSocket();
     const emit = socket && typeof socket.emit === 'function' ? socket.emit.bind(socket) : null;
     if (!socket || !socket.connected || !emit) return false;
-    emit(EDITOR_RPC_EVENT, buildEditorRpcNotificationEnvelope(method, params || {}));
+    try {
+      emit(EDITOR_RPC_EVENT, messagePackRpcWireCodec.encode(buildEditorRpcNotificationEnvelope(method, params || {})));
+    } catch (error) {
+      deps.onProtocolError?.(error);
+      return false;
+    }
     return true;
   }
 

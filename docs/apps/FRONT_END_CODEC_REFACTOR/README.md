@@ -3,19 +3,18 @@
 ## Status
 
 - Planning and source audit: in progress
-- Implementation: Phase 1 complete and live-validated
+- Implementation: Explorer live-validated; editor, WBA, and UI IPC codec code complete
 - Initial application scope: `app/apps/file_editor_cm6`
 - First migration target: Explorer frontend/backend communication
-- Second migration target: editor frontend/Python communication
-- Separate later target: direct editor/WBA language-intelligence traffic
+- Current migration targets: editor/Python, direct editor/WBA, and UI IPC
 
-Current checkpoint: Code TE2 `0.2.297` opts the Explorer namespace into strict
-`msgpack-v1` over Socket.IO. The shared frontend transport remains
-codec-injectable so UI IPC keeps its existing object/JSON behavior. Python uses
-the shared `frontend_rpc_codec.py` boundary, and default-off stdout codec metrics
-are available through `FILE_EDITOR_CM6_RPC_CODEC_METRICS=1`. No Explorer JSON
-fallback is implemented. Live Explorer request, notification, file-operation,
-search, and reconnect behavior has been validated against the running app.
+Current checkpoint: Code TE2 `0.2.298` uses strict `msgpack-v1` application
+payloads for Explorer, editor/Python, direct editor/WBA, and UI IPC Socket.IO
+namespaces. Python lanes share `frontend_rpc_codec.py`; browser lanes share the
+TypeScript codec; WBA owns a runtime-local JavaScript codec at its direct socket
+boundary. No migrated lane has a JSON fallback. Explorer is live-validated;
+editor, WBA, and UI IPC live validation remains pending. Sidebar IPC and terminal
+retain their current codecs and behavior.
 
 ## Goal
 
@@ -142,9 +141,11 @@ but are not the active Code TE2 frontend path.
 | Active file/open state | Project | Backend open-state authority | Socket.IO project room |
 | Explorer preferences/bootstrap state | Personal or app-global | Backend-owned snapshot/fact | Socket.IO, scope explicitly |
 | File create/move/delete effects | Project fact after mutation | Backend filesystem fact/projector | Request personally; broadcast resulting fact |
-| Editor/Python commands and snapshots | Personal or editor room | Editor backend contract | MessagePack over Socket.IO after Explorer |
+| Editor/Python commands and snapshots | Personal or editor room | Editor backend contract | MessagePack over Socket.IO |
 | Editor document/draft/edit projections | Multi-client when shared | Backend/editor projector | Retain room/fanout behavior |
-| Editor/WBA language features | Personal hot lane | Direct editor/WBA contract | Separate audit; do not route through Python |
+| Editor/WBA language features | Personal hot lane | Direct editor/WBA contract | MessagePack over direct Socket.IO lane |
+| Host/UI IPC commands and projections | Personal or UI room | Host backend contract | MessagePack over Socket.IO |
+| Sidebar IPC commands and projections | Sidebar client/room | Sidebar backend contract | Current codec; out of this slice |
 | Terminal stream | Personal hot stream | Terminal backend | Out of initial scope |
 
 ## Confirmed Scoping Facts
@@ -261,9 +262,10 @@ notifications. Unsupported or stale clients receive a clear connection error.
 
 ### JSON fallback
 
-Explorer does not retain a JSON fallback. It requires `msgpack-v1` during
-namespace authentication. The shared transport's identity/object codec remains
-only because UI IPC has not entered this migration yet.
+Explorer, editor/Python, direct editor/WBA, and UI IPC do not retain JSON
+fallbacks. Each requires `msgpack-v1` during namespace authentication. The
+shared transport's identity/object codec remains for namespaces that have not
+entered this migration, including Sidebar IPC.
 
 Do not introduce mixed per-client JSON and MessagePack operation as a debugging
 feature. Mixed codecs complicate project-room broadcasts because every payload
@@ -293,8 +295,10 @@ The implemented first-slice flag is:
 FILE_EDITOR_CM6_RPC_CODEC_METRICS=1
 ```
 
-It emits one JSON record per Explorer encode/decode operation to stdout and is
-declared as `0` in the app-worker shellspec by default.
+It emits one JSON record per Python Explorer, editor, or UI IPC encode/decode
+operation to stdout and is declared as `0` in the app-worker shellspec by
+default. Direct WBA traffic uses the JavaScript codec boundary and is not
+included in this Python metric stream.
 
 Frontend debug builds may expose a decoder helper for console eval, such as a
 debug-only `window.__te2RpcCodec.decode(...)` surface. Payload content logging
@@ -402,20 +406,21 @@ MessagePack and physical-path consolidation.
 
 ### Editor/Python RPC
 
-After Explorer proves the codec:
+The editor/Python namespace now:
 
-- encode editor/Python requests and notifications with the same versioned
+- encodes editor/Python requests and notifications with the same versioned
   MessagePack envelope
-- preserve request correlation and timeout behavior
-- preserve editor room broadcasts where multiple clients need state
-- keep document/model code unaware of serialization
-- benchmark large snapshots, diagnostics, draft diffs, and edit projections
+- preserves request correlation and timeout behavior
+- preserves editor room broadcasts where multiple clients need state
+- keeps document/model code unaware of serialization
+- still requires live validation and payload benchmarking
 
 ### Editor/WBA language intelligence
 
-Language intelligence is a separate direct editor-to-WBA lane. Migrating the
-editor/Python namespace does not optimize hover, completion, symbols, semantic
-tokens, inlay hints, or other WBA requests.
+Language intelligence remains a separate direct editor-to-WBA lane. It now uses
+strict MessagePack application payloads without routing hover, completion,
+symbols, semantic tokens, inlay hints, or other WBA requests through Python or
+the worker event bus.
 
 The WBA audit must measure:
 
@@ -426,9 +431,9 @@ The WBA audit must measure:
 - payload size and result shaping
 - queueing and concurrency behavior
 
-Possible WBA outcomes include keeping Socket.IO, using its custom parser,
-placing MessagePack bytes inside existing events, or introducing a dedicated
-binary language-feature WebSocket. No outcome is selected before measurement.
+Socket.IO lifecycle and the direct WBA namespace remain intact; MessagePack
+bytes are carried inside the existing `rpc` events. Further transport changes
+remain measurement-gated.
 
 ## HTTP Long-Polling And Upgrade Policy
 
@@ -537,31 +542,43 @@ authoritative production path.
 
 ### Phase 4: Editor/Python MessagePack Codec
 
-- [ ] Reuse the Explorer-proven codec and version contract.
-- [ ] Encode editor/Python requests, responses, and notifications.
-- [ ] Preserve room-scoped editor projections.
+- [x] Reuse the Explorer-proven codec and version contract.
+- [x] Encode editor/Python requests, responses, and notifications.
+- [x] Preserve room-scoped editor projections.
 - [ ] Validate save, open, draft, diagnostics, edit, and reconnect flows.
 - [ ] Benchmark large editor payloads and normal low-volume commands.
-- [ ] Remove editor JSON application envelopes after validation.
+- [x] Remove the editor JSON application-payload path.
 
 Exit condition: editor/Python communication uses the versioned binary codec with
 no behavior regression.
 
-### Phase 5: WBA Language-Intelligence Audit
+### Phase 5: Direct WBA/Editor MessagePack Codec
 
 - [ ] Measure representative hover, completion, symbols, semantic tokens, inlay
       hints, and diagnostics flows.
 - [ ] Separate code-server/ext-host latency from transport overhead.
-- [ ] Evaluate MessagePack within Socket.IO versus an alternative parser or raw
-      binary lane.
-- [ ] Preserve direct editor/WBA ownership and avoid routing the hot path through
+- [x] Encode WBA requests, responses, notifications, and broadcasts with strict
+      `msgpack-v1` inside existing Socket.IO events.
+- [x] Preserve direct editor/WBA ownership and avoid routing the hot path through
       Python or the worker event bus.
-- [ ] Implement only the evidence-backed transport change.
+- [ ] Validate hover, completion, symbols, semantic tokens, inlay hints,
+      reconnect, adapter reset, and provider re-registration.
 
-Exit condition: language-intelligence transport has measured latency ownership
-and a deliberate codec/transport contract.
+Exit condition: direct language-intelligence traffic is live-validated on the
+strict binary contract and retains measured latency ownership.
 
-### Phase 6: Cleanup And JSON Retirement
+### Phase 6: UI IPC MessagePack Codec
+
+- [x] Opt the host `/ui_ipc` namespace into strict `msgpack-v1`.
+- [x] Encode requests, acknowledgements, broadcasts, and connect snapshots.
+- [x] Keep `/sidebar_ipc` on its current codec without implicit migration.
+- [ ] Validate host commands, menus, preferences, run profiles, sidebar-window
+      projections, editor relays, reconnect, and project switching.
+
+Exit condition: host/UI IPC behavior is live-validated without changing Sidebar
+IPC clients or cross-surface ownership.
+
+### Phase 7: Cleanup And JSON Retirement
 
 - [ ] Remove temporary JSON codec fallback.
 - [ ] Rename generic transport types away from `JsonRpc*` where the wire is no
@@ -588,8 +605,9 @@ surface, and durable source-aligned documentation.
 | Consolidate worker Engine.IO paths | Planned | Current aliases prevent Manager reuse across namespaces |
 | Keep clients WebSocket-only | Current direction | Controlled environment; avoids polling overhead |
 | Remove server polling support | Open | Requires supported-client verification |
-| Migrate editor/Python after Explorer | Planned | Reuse proven codec without risking editor first |
-| Optimize WBA with editor/Python migration | Rejected assumption | WBA is a separate direct lane |
+| Migrate editor/Python after Explorer | Implemented, validation pending | Reuses the proven codec without changing editor ownership |
+| Migrate direct editor/WBA payloads | Implemented, validation pending | Keeps language intelligence direct while removing JSON application payloads |
+| Migrate UI IPC without Sidebar IPC | Implemented, validation pending | Preserves namespace-specific client contracts |
 | Permanent mixed JSON/MessagePack clients | Not recommended | Complicates broadcast encoding and contract ownership |
 | Preserve decoded protocol tracing | Planned | Binary wire format must remain observable |
 
@@ -627,7 +645,8 @@ Reassess architecture after:
 2. Worker namespaces share the canonical physical path.
 3. Search is benchmarked under concurrent project broadcasts.
 4. Editor/Python MessagePack is proven.
-5. WBA language-feature latency is decomposed by stage.
+5. Direct WBA/editor MessagePack is proven and latency is decomposed by stage.
+6. UI IPC MessagePack is proven without changing Sidebar IPC behavior.
 
 At each point, update this tracker with measured results and either advance or
 close the corresponding raw-transport proposal.

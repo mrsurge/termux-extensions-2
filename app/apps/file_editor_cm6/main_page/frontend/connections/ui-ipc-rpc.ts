@@ -1,4 +1,5 @@
 import { createSocketIoJsonRpcClient, type IoFactory, type JsonObject } from '../../../src/rpc/transport.ts';
+import { messagePackRpcWireCodec, RPC_CODEC_MSGPACK_V1 } from '../../../src/rpc/codec.ts';
 import {
   UI_IPC_RPC_METHODS,
   UI_IPC_RPC_NAMESPACE,
@@ -21,10 +22,13 @@ export function createUiIpcRpcConnection(options: CreateUiIpcRpcConnectionOption
     path: '/ui_ipc_ws/socket.io',
     query: { app_id: 'file_editor_cm6', source: 'main_page' },
     requestIdPrefix: 'ui_ipc',
+    auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
+    codec: messagePackRpcWireCodec,
     ensureSocketIoLoaded: options.ensureSocketIoLoaded,
     onConnect: options.onConnect,
     onDisconnect: options.onDisconnect,
     onConnectError: options.onConnectError,
+    onProtocolError: options.onConnectError,
     onNotification: (notification) => {
       const parsedNotification = parseUiIpcRpcNotification(notification);
       if (!parsedNotification) return;

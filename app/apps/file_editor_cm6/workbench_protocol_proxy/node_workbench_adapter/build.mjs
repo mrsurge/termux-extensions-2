@@ -5,6 +5,7 @@ const isWatch = process.argv.includes("--watch");
 const config = {
   entryPoints: [
     "src/protocol/wire-encoding.ts",
+    "src/protocol/messagepack-codec.ts",
     "src/protocol/rpc-ids.ts",
     "src/protocol/pending-requests.ts",
     "src/protocol/ext-host-dispatch.ts",

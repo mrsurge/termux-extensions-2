@@ -6,6 +6,11 @@ from typing import cast
 
 import socketio
 
+from ..frontend_rpc_codec import (
+    FrontendRpcCodecError,
+    decode_frontend_rpc_message,
+    require_msgpack_v1_auth,
+)
 from ..open_state_backend import SidecarOpenStatePayload
 from .editor_rpc_contract import (
     EDITOR_RPC_METHOD_DRAFT_DIFF_GET,
@@ -52,11 +57,11 @@ from .editor_ws import (
 
 
 class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
-    async def _emit_to_sid(self, sid: str, event_name: str, payload: dict[str, object]) -> None:
+    async def _emit_to_sid(self, sid: str, event_name: str, payload: bytes) -> None:
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
         await emit_to_room(event_name, payload, room=sid)
 
-    async def _emit_to_room(self, room: str, event_name: str, payload: dict[str, object]) -> None:
+    async def _emit_to_room(self, room: str, event_name: str, payload: bytes) -> None:
         emit_to_room = cast(Callable[..., Awaitable[object]], self.emit)
         await emit_to_room(event_name, payload, room=room)
 
@@ -85,7 +90,17 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
                 payload,
             )
 
-    async def on_connect(self, sid: str, environ: dict[str, object], auth: object) -> None:
+    async def on_connect(
+        self,
+        sid: str,
+        environ: dict[str, object],
+        auth: object | None = None,
+    ) -> None:
+        del environ
+        try:
+            require_msgpack_v1_auth(auth)
+        except FrontendRpcCodecError as exc:
+            raise socketio.exceptions.ConnectionRefusedError(str(exc)) from exc  # pyright: ignore[reportUnknownMemberType]
         enter_room = cast(Callable[..., Awaitable[object]], self.enter_room)
         await enter_room(sid, "file_editor_cm6")
         snapshot = editor_runtime_build_connect_snapshot()
@@ -124,9 +139,20 @@ class EditorRpcSocketIONamespace(socketio.AsyncNamespace):
     async def on_rpc(self, sid: str, data: object) -> None:
         request_id: object = None
         try:
-            request = coerce_jsonrpc_request_envelope(data)
+            decoded = decode_frontend_rpc_message(data, lane="editor")
+        except FrontendRpcCodecError as exc:
+            await emit_editor_rpc_error(
+                lambda event_name, payload: self._emit_to_sid(sid, event_name, payload),
+                None,
+                -32700,
+                str(exc),
+            )
+            return
+
+        try:
+            request = coerce_jsonrpc_request_envelope(decoded)
             if request is None:
-                notification = coerce_jsonrpc_notification_envelope(data)
+                notification = coerce_jsonrpc_notification_envelope(decoded)
                 await dispatch_editor_rpc_request(
                     notification["method"],
                     notification["params"],

@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import TypeAlias, cast
 
+from ..frontend_rpc_codec import encode_frontend_rpc_message
 from .editor_rpc_contract import (
     EDITOR_RPC_EVENT,
     JSONRPC_VERSION,
@@ -13,7 +14,7 @@ from .editor_rpc_contract import (
     JsonRpcSuccessEnvelope,
 )
 
-EmitFn = Callable[[str, dict[str, object]], Awaitable[None]]
+EmitFn = Callable[[str, bytes], Awaitable[None]]
 JsonSafe: TypeAlias = None | bool | int | float | str | list["JsonSafe"] | dict[str, "JsonSafe"]
 
 
@@ -61,7 +62,10 @@ async def emit_editor_rpc_result(emit_fn: EmitFn, request_id: JsonRpcId, result:
         "id": request_id,
         "result": _json_safe(result),
     }
-    await emit_fn(EDITOR_RPC_EVENT, cast(dict[str, object], payload))
+    await emit_fn(
+        EDITOR_RPC_EVENT,
+        encode_frontend_rpc_message(cast(dict[str, object], payload), lane="editor"),
+    )
 
 
 async def emit_editor_rpc_error(
@@ -82,7 +86,10 @@ async def emit_editor_rpc_error(
     }
     if data:
         payload["error"]["data"] = _json_safe_object(data)
-    await emit_fn(EDITOR_RPC_EVENT, cast(dict[str, object], payload))
+    await emit_fn(
+        EDITOR_RPC_EVENT,
+        encode_frontend_rpc_message(cast(dict[str, object], payload), lane="editor"),
+    )
 
 
 async def emit_editor_rpc_notification(
@@ -90,11 +97,12 @@ async def emit_editor_rpc_notification(
     method: EditorRpcNotification,
     params: dict[str, object],
 ) -> None:
+    envelope: dict[str, object] = {
+        "jsonrpc": JSONRPC_VERSION,
+        "method": method,
+        "params": _json_safe_object(params),
+    }
     await emit_fn(
         EDITOR_RPC_EVENT,
-        {
-            "jsonrpc": JSONRPC_VERSION,
-            "method": method,
-            "params": _json_safe_object(params),
-        },
+        encode_frontend_rpc_message(envelope, lane="editor", method=method),
     )

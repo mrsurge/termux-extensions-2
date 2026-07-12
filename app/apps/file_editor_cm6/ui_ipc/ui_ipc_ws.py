@@ -19,6 +19,12 @@ from typing import Awaitable, Protocol, cast
 
 import socketio
 
+from ..frontend_rpc_codec import (
+    FrontendRpcCodecError,
+    decode_frontend_rpc_message,
+    encode_frontend_rpc_message,
+    require_msgpack_v1_auth,
+)
 from . import sidebar_ws
 from .rpc_contract import (
     UI_IPC_RPC_NAMESPACE,
@@ -98,6 +104,14 @@ def _namespace(ns: object) -> SocketIONamespace:
     return cast(SocketIONamespace, ns)
 
 
+def _encode_ui_ipc_envelope(envelope: JsonObject, *, method: str | None = None) -> bytes:
+    return encode_frontend_rpc_message(envelope, lane="ui_ipc", method=method)
+
+
+def _encode_ui_ipc_notification(method: str, params: JsonObject) -> bytes:
+    return _encode_ui_ipc_envelope(build_jsonrpc_notification(method, params), method=method)
+
+
 async def emit_ui_ipc_rpc_notification(
     method: str,
     params: JsonObject,
@@ -107,7 +121,7 @@ async def emit_ui_ipc_rpc_notification(
 ) -> None:
     from .ui_ipc_socketio import UI_IPC_SIO
 
-    envelope = build_jsonrpc_notification(method, params)
+    envelope = _encode_ui_ipc_notification(method, params)
     sio = cast(SocketIOServer, UI_IPC_SIO)
     if to_sid:
         await sio.emit(
@@ -138,11 +152,16 @@ class UIIPCNamespace(socketio.AsyncNamespace):
             return await handler(*args)
         return await _namespace(super()).trigger_event(event, *args)
 
-    async def on_connect(self, sid: object, environ: object) -> None:
+    async def on_connect(self, sid: object, environ: object, auth: object | None = None) -> None:
         del environ
         sid_text = _sid(sid)
         ns = _namespace(self)
         room = "sidebar_ipc" if ns.namespace == "/sidebar_ipc" else "ui_ipc"
+        if room == "ui_ipc":
+            try:
+                require_msgpack_v1_auth(auth)
+            except FrontendRpcCodecError as exc:
+                raise socketio.exceptions.ConnectionRefusedError(str(exc)) from exc  # pyright: ignore[reportUnknownMemberType]
         await ns.enter_room(sid_text, room)
         print(f"[{room}] connect sid={sid_text}", flush=True)
         # Push current adapter state to the newly connected client.
@@ -152,7 +171,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 state = _json_object(get_adapter_state())
                 await ns.emit(
                     UI_IPC_RPC_NOTIFICATION_EVENT,
-                    build_jsonrpc_notification(UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE, state),
+                    _encode_ui_ipc_notification(UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE, state),
                     to=sid_text,
                 )
             except Exception:
@@ -166,7 +185,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                     rel = open_state["openFileRel"]
                     await ns.emit(
                         UI_IPC_RPC_NOTIFICATION_EVENT,
-                        build_jsonrpc_notification(
+                        _encode_ui_ipc_notification(
                             UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
                             dict(open_state),
                         ),
@@ -174,7 +193,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                     )
                     await ns.emit(
                         UI_IPC_RPC_NOTIFICATION_EVENT,
-                        build_jsonrpc_notification(
+                        _encode_ui_ipc_notification(
                             UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
                             {
                                 "path": current_path,
@@ -192,7 +211,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
 
                 await ns.emit(
                     UI_IPC_RPC_NOTIFICATION_EVENT,
-                    build_jsonrpc_notification(
+                    _encode_ui_ipc_notification(
                         UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
                         _json_object(get_sidebar_window_state()),
                     ),
@@ -217,7 +236,7 @@ class UIIPCNamespace(socketio.AsyncNamespace):
     ) -> None:
         await _namespace(self).emit(
             UI_IPC_RPC_NOTIFICATION_EVENT,
-            build_jsonrpc_notification(method, params),
+            _encode_ui_ipc_notification(method, params),
             room="ui_ipc",
             skip_sid=skip_sid,
         )
@@ -235,9 +254,20 @@ class UIIPCNamespace(socketio.AsyncNamespace):
             )
 
         try:
-            parsed_request = parse_ui_ipc_rpc_request(data)
+            decoded = decode_frontend_rpc_message(data, lane="ui_ipc")
+        except FrontendRpcCodecError as exc:
+            return _encode_ui_ipc_envelope(
+                build_jsonrpc_error(
+                    request_id=None,
+                    code=-32700,
+                    message=str(exc),
+                )
+            )
+
+        try:
+            parsed_request = parse_ui_ipc_rpc_request(decoded)
             if parsed_request is None:
-                notification = parse_ui_ipc_rpc_notification(data)
+                notification = parse_ui_ipc_rpc_notification(decoded)
                 await self._emit_ui_ipc_rpc_notification(
                     notification["method"],
                     notification["params"],
@@ -250,12 +280,17 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                 parsed_request["params"],
                 source_name="ui_ipc_rpc",
             )
-            return build_jsonrpc_result(parsed_request["request_id"], result)
+            return _encode_ui_ipc_envelope(
+                build_jsonrpc_result(parsed_request["request_id"], result),
+                method=parsed_request["method"],
+            )
         except UiIpcRpcProtocolError as exc:
-            return exc.to_json()
+            return _encode_ui_ipc_envelope(exc.to_json())
         except Exception as exc:
-            return build_jsonrpc_error(
-                request_id=None,
-                code=-32603,
-                message=str(exc),
+            return _encode_ui_ipc_envelope(
+                build_jsonrpc_error(
+                    request_id=None,
+                    code=-32603,
+                    message=str(exc),
+                )
             )

@@ -1,7 +1,4 @@
-import {
-  decode as decodeMessagePack,
-  encode as encodeMessagePack,
-} from '@msgpack/msgpack';
+import { decode as decodeMessagePack, encode as encodeMessagePack } from '@msgpack/msgpack';
 
 export const RPC_CODEC_MSGPACK_V1 = 'msgpack-v1' as const;
 
@@ -26,7 +23,9 @@ export const identityRpcWireCodec: RpcWireCodec = {
 export const messagePackRpcWireCodec: RpcWireCodec = {
   id: RPC_CODEC_MSGPACK_V1,
   encode(payload: unknown): Uint8Array {
-    return encodeMessagePack(payload);
+    // Match JSON semantics during the wire migration: omit undefined object
+    // fields while preserving undefined array slots as null.
+    return encodeMessagePack(payload, { ignoreUndefined: true });
   },
   decode(payload: unknown): unknown {
     return decodeMessagePack(normalizeBinaryPayload(payload));

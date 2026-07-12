@@ -1,3 +1,5 @@
+import { messagePackRpcWireCodec } from '../src/rpc/codec.ts';
+
 export const WBA_RPC_EVENT = 'rpc' as const;
 
 export type WbaRpcId = string | number;
@@ -47,6 +49,7 @@ interface WbaRpcTransportDeps {
   getSocket(): WbaRpcSocketLike | null;
   setTimeoutFn(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
   clearTimeoutFn(timer: ReturnType<typeof setTimeout>): void;
+  onProtocolError?(error: unknown): void;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -199,11 +202,18 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   }
 
   function handleMessage(payload: unknown): void {
-    if (Array.isArray(payload)) {
-      payload.forEach(handleEnvelope);
+    let decoded: unknown;
+    try {
+      decoded = messagePackRpcWireCodec.decode(payload);
+    } catch (error) {
+      deps.onProtocolError?.(error);
       return;
     }
-    handleEnvelope(payload);
+    if (Array.isArray(decoded)) {
+      decoded.forEach(handleEnvelope);
+      return;
+    }
+    handleEnvelope(decoded);
   }
 
   function attachSocket(socket: WbaRpcSocketLike): void {
@@ -271,12 +281,22 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
         reject(new Error(`wba rpc timeout: ${method}`));
       }, remainingMs);
       pending.set(idKey(requestId), { timer, resolve, reject, method });
-      emit(WBA_RPC_EVENT, {
-        jsonrpc: '2.0',
-        id: requestId,
-        method,
-        params: params || {},
-      });
+      try {
+        emit(
+          WBA_RPC_EVENT,
+          messagePackRpcWireCodec.encode({
+            jsonrpc: '2.0',
+            id: requestId,
+            method,
+            params: params || {},
+          }),
+        );
+      } catch (error) {
+        deps.clearTimeoutFn(timer);
+        pending.delete(idKey(requestId));
+        deps.onProtocolError?.(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -284,11 +304,19 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
     const socket = deps.getSocket();
     const emit = socket && typeof socket.emit === 'function' ? socket.emit.bind(socket) : null;
     if (!socket || !socket.connected || !emit) return false;
-    emit(WBA_RPC_EVENT, {
-      jsonrpc: '2.0',
-      method,
-      params: params || {},
-    });
+    try {
+      emit(
+        WBA_RPC_EVENT,
+        messagePackRpcWireCodec.encode({
+          jsonrpc: '2.0',
+          method,
+          params: params || {},
+        }),
+      );
+    } catch (error) {
+      deps.onProtocolError?.(error);
+      return false;
+    }
     return true;
   }
 

@@ -1,15 +1,19 @@
 import type { Server as HttpServer } from "node:http";
 import { createRequire } from "node:module";
 import type { Server as SocketIoServerCtor } from "socket.io";
+import {
+  WBA_RPC_CODEC_MSGPACK_V1,
+  decodeWbaRpcMessage,
+  encodeWbaRpcMessage,
+} from "../protocol/messagepack-codec.mjs";
 
 type SocketIoModule = {
   Server: typeof SocketIoServerCtor;
 };
 
 const require = createRequire(import.meta.url);
-const { Server: SocketIoServer } = require(
-  "../../../../vendor/node_socketio/node_modules/socket.io/dist/index.js",
-) as SocketIoModule;
+const { Server: SocketIoServer } =
+  require("../../../../vendor/node_socketio/node_modules/socket.io/dist/index.js") as SocketIoModule;
 
 export const WBA_SOCKET_PATH = "/wba_ws/socket.io";
 export const WBA_SOCKET_NAMESPACE = "/wba";
@@ -33,7 +37,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function shouldDeliverReply(reply: JsonRpcReply): reply is Record<string, unknown> {
+function shouldDeliverReply(
+  reply: JsonRpcReply,
+): reply is Record<string, unknown> {
   if (!isRecord(reply)) return false;
   if (Object.prototype.hasOwnProperty.call(reply, "error")) return true;
   return Object.prototype.hasOwnProperty.call(reply, "id") && reply.id != null;
@@ -55,6 +61,15 @@ export function attachEditorWbaSocket(
   });
   const namespace = io.of(WBA_SOCKET_NAMESPACE);
 
+  namespace.use((socket, next) => {
+    const auth = socket.handshake.auth;
+    if (!isRecord(auth) || auth.rpcCodec !== WBA_RPC_CODEC_MSGPACK_V1) {
+      next(new Error("unsupported_rpc_codec"));
+      return;
+    }
+    next();
+  });
+
   namespace.on("connection", (socket) => {
     runtime.log(
       JSON.stringify({
@@ -68,22 +83,31 @@ export function attachEditorWbaSocket(
     socket.on(WBA_RPC_EVENT, (payload: unknown) => {
       void (async () => {
         try {
-          if (Array.isArray(payload)) {
-            const replies = await Promise.all(payload.map((entry) => runtime.handleJsonRpc(entry)));
+          const decoded = decodeWbaRpcMessage(payload);
+          if (Array.isArray(decoded)) {
+            const replies = await Promise.all(
+              decoded.map((entry) => runtime.handleJsonRpc(entry)),
+            );
             const deliverable = replies.filter(shouldDeliverReply);
-            if (deliverable.length) socket.emit(WBA_RPC_EVENT, deliverable);
+            if (deliverable.length)
+              socket.emit(WBA_RPC_EVENT, encodeWbaRpcMessage(deliverable));
             return;
           }
 
-          const reply = await runtime.handleJsonRpc(payload);
-          if (shouldDeliverReply(reply)) socket.emit(WBA_RPC_EVENT, reply);
+          const reply = await runtime.handleJsonRpc(decoded);
+          if (shouldDeliverReply(reply))
+            socket.emit(WBA_RPC_EVENT, encodeWbaRpcMessage(reply));
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          socket.emit(WBA_RPC_EVENT, {
-            jsonrpc: "2.0",
-            id: null,
-            error: { code: -32000, message },
-          });
+          const message =
+            error instanceof Error ? error.message : String(error);
+          socket.emit(
+            WBA_RPC_EVENT,
+            encodeWbaRpcMessage({
+              jsonrpc: "2.0",
+              id: null,
+              error: { code: -32000, message },
+            }),
+          );
         }
       })();
     });
@@ -103,7 +127,10 @@ export function attachEditorWbaSocket(
 
   return {
     broadcastNotification(method: string, params: unknown): void {
-      namespace.emit(WBA_RPC_EVENT, { jsonrpc: "2.0", method, params });
+      namespace.emit(
+        WBA_RPC_EVENT,
+        encodeWbaRpcMessage({ jsonrpc: "2.0", method, params }),
+      );
     },
     clientCount(): number {
       return namespace.sockets.size;

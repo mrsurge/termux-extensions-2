@@ -121,7 +121,7 @@ async def _emit_editor_project_switch(
     try:
         from .monaco_editor.editor_socketio import EDITOR_SIO
 
-        async def _emit(event_name: str, notification_payload: JsonObject) -> None:
+        async def _emit(event_name: str, notification_payload: bytes) -> None:
             await EDITOR_SIO.emit(  # pyright: ignore[reportUnknownMemberType]
                 event_name,
                 notification_payload,

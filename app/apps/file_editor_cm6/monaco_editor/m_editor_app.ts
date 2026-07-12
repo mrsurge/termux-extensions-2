@@ -111,6 +111,7 @@ import { createEditorWorkbenchRuntime } from "./editor_workbench_runtime.ts";
 import { createEditorRpcTransport } from "./editor_rpc_transport.ts";
 import { EDITOR_RPC_METHODS } from "./editor_rpc_contract.ts";
 import { createEditorWbaRpcTransport } from "./editor_wba_rpc_transport.ts";
+import { RPC_CODEC_MSGPACK_V1 } from "../src/rpc/codec.ts";
 import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.ts";
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
@@ -605,6 +606,9 @@ interface MonacoBootWindowLike extends Window {
     },
     setTimeoutFn: _setTimeoutBound,
     clearTimeoutFn: _clearTimeoutBound,
+    onProtocolError: function (error: unknown) {
+      console.error("[editor-rpc] MessagePack protocol error", error);
+    },
   });
   var editorWbaRpcTransport = createEditorWbaRpcTransport({
     getSocket: function () {
@@ -612,6 +616,9 @@ interface MonacoBootWindowLike extends Window {
     },
     setTimeoutFn: _setTimeoutBound,
     clearTimeoutFn: _clearTimeoutBound,
+    onProtocolError: function (error: unknown) {
+      console.error("[editor-wba-rpc] MessagePack protocol error", error);
+    },
   });
 
   var textmateRuntime = createEditorTextmateRuntime({
@@ -1867,11 +1874,13 @@ interface MonacoBootWindowLike extends Window {
         path: "/editor_ws/socket.io",
         transports: ["websocket"],
         query: { app_id: "file_editor_cm6" },
+        auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
       }) as EditorSocketLike;
       wbaRpcSocket = window.io("/wba", {
         path: "/wba_ws/socket.io",
         transports: ["websocket"],
         query: { app_id: "file_editor_cm6" },
+        auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
       }) as EditorSocketLike;
       editorRpcTransport.attachSocket(editorRpcSocket);
       editorWbaRpcTransport.attachSocket(wbaRpcSocket);
