@@ -147,6 +147,26 @@
       "src": "app/apps/file_editor_cm6/template.html",
       "dest": "apps/file_editor_cm6/template.html"
     },
+    {
+      "kind": "file",
+      "src": "app/extensions/apps/main.js",
+      "dest": "extensions/apps/main.js"
+    },
+    {
+      "kind": "file",
+      "src": "app/extensions/apps/manifest.json",
+      "dest": "extensions/apps/manifest.json"
+    },
+    {
+      "kind": "file",
+      "src": "app/extensions/apps/template.html",
+      "dest": "extensions/apps/template.html"
+    },
+    {
+      "kind": "file",
+      "src": "app/extensions/apps/proxy_shell.schema.json",
+      "dest": "extensions/apps/proxy_shell.schema.json"
+    },
     { "kind": "file", "src": "app/templates/index.html", "dest": "index.html" },
     {
       "kind": "template",

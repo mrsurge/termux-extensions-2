@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <title>Code TE2</title>
 <link rel="stylesheet" href="/apps/file_editor_cm6/static/dist/explorer.css" />
+<link rel="stylesheet" href="/apps/file_editor_cm6/static/dist/host.css" />
 <link rel="stylesheet" href="/static/vendor/codicons/codicon.css" />
 <style>
   :root {
@@ -27,6 +28,10 @@
     --diff-del-gap: 0px;
     --keyboard-inset: 0px;
     --keyboard-gap: 16px;
+    --explorer-width-default: 430px;
+    --explorer-width-effective: var(--explorer-width, var(--explorer-width-default));
+    --agent-width-default: max(400px, 34vw);
+    --agent-width-effective: var(--agent-width, var(--agent-width-default));
     /* Font scale control */
     --chrome-font-scale: 0.85;  /* Default to Medium */
     --chrome-base-font: calc(14px * var(--chrome-font-scale));
@@ -62,7 +67,7 @@
 
   .fe-root.layout-desktop {
     display: grid;
-    grid-template-columns: var(--explorer-width, 430px) 1fr var(--agent-width, 400px);
+    grid-template-columns: var(--explorer-width-effective) minmax(0, 1fr) var(--agent-width-effective);
     grid-template-rows: auto auto 1fr auto;
     height: 100%;
     min-height: 0;
@@ -70,17 +75,21 @@
     overflow: hidden;
   }
 
-  /* Toolbar spans full width */
+  .fe-root.layout-desktop.explorer-collapsed {
+    grid-template-columns: 0px minmax(0, 1fr) var(--agent-width-effective);
+  }
+
+  /* Desktop toolbar sits over the editor column; side rails own their full height. */
   .layout-desktop .fe-toolbar {
-    grid-column: 1 / -1;
+    grid-column: 2;
     grid-row: 1;
   }
 
-  /* Menubar only on right side (columns 2-3) */
+  /* Menubar stays with the editor column; side rails own columns 1 and 3. */
   .layout-desktop .fe-menubar {
-    grid-column: 2 / -1;
+    grid-column: 2;
     grid-row: 2;
-    z-index: 60; /* Higher than agent-drawer (50) so dropdowns can overlay */
+    z-index: 60; /* Higher than the sidebar drawer so dropdowns can overlay */
   }
 
   /* Explorer becomes left sidebar - extends from row 2 to bottom */
@@ -92,12 +101,19 @@
     bottom: auto;
     width: 100%;
     grid-column: 1;
-    grid-row: 2 / 5;
+    grid-row: 1 / 5;
     border-right: 1px solid var(--border);
   }
 
-  /* Hide drawer toggle button and close button in desktop */
-  .layout-desktop #fe-drawer-open,
+  .layout-desktop.explorer-collapsed .fe-drawer {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    border-right: 0;
+    overflow: hidden;
+  }
+
+  /* Desktop uses the toolbar hamburger as the Explorer toggle. */
   .layout-desktop #fe-drawer-close {
     display: none;
   }
@@ -115,7 +131,7 @@
     overflow: hidden;
   }
 
-  /* Sidebar becomes right rail - now spans rows 3-5 */
+  /* Sidebar becomes a full-height right rail in desktop mode. */
   .layout-desktop .agent-drawer {
     position: static !important;
     transform: none !important;
@@ -124,7 +140,7 @@
     bottom: auto;
     width: 100% !important;
     grid-column: 3;
-    grid-row: 3 / 5;
+    grid-row: 1 / 5;
     border-left: 1px solid var(--border);
     transition: none !important;
     overflow-y: auto;
@@ -148,7 +164,11 @@
 
   /* Adjust grid when sidebar is closed */
   .layout-desktop:has(.agent-drawer:not(.open)) {
-    grid-template-columns: var(--explorer-width, 430px) 1fr 0px;
+    grid-template-columns: var(--explorer-width-effective) 1fr 0px;
+  }
+
+  .layout-desktop.explorer-collapsed:has(.agent-drawer:not(.open)) {
+    grid-template-columns: 0px 1fr 0px;
   }
 
   /* Keep sidebar iframes measurable while hidden (avoid zero-size resizes). */
@@ -156,7 +176,7 @@
     position: fixed;
     top: 0;
     right: -9999px;
-    width: var(--agent-width, 400px);
+    width: var(--agent-width-effective);
     height: var(--te-app-container-height, 100vh);
   }
 
@@ -362,24 +382,31 @@
   /* Explorer resize handle (vertical, desktop only) */
   .layout-desktop .resize-handle--explorer {
     display: block;
-    width: 5px;
+    width: 10px;
     cursor: col-resize;
     grid-column: 1;
-    grid-row: 3 / 5;
+    grid-row: 1 / 5;
     justify-self: end;
-    margin-left: -5px;
+    margin-left: -10px;
+    z-index: 260;
+    touch-action: none;
+  }
+
+  .layout-desktop.explorer-collapsed .resize-handle--explorer {
+    display: none;
   }
 
   /* Agent resize handle (vertical, desktop only) */
   .layout-desktop .resize-handle--agent {
     display: block;
-    width: 5px;
+    width: 10px;
     cursor: col-resize;
     grid-column: 3;
-    grid-row: 3 / 5;
+    grid-row: 1 / 5;
     justify-self: start;
-    margin-right: -5px;
+    margin-right: -10px;
     z-index: 220;
+    touch-action: none;
   }
 
   /* Terminal resize handle (horizontal, desktop only - in editor column) */
@@ -504,6 +531,56 @@
   .fe-modal-card { width: min(800px, 92vw); max-height: 80vh; background: var(--card, #0b0f1a); color: var(--foreground, #e5e7eb); border: 1px solid var(--border, #333); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
   .fe-modal-header { display: flex; align-items: center; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border, #333); }
   .fe-modal-body { padding: 16px 20px; overflow-y: auto; overflow-x: hidden; }
+  .declarative-modal-card { width: min(920px, 94vw); max-height: min(86vh, 900px); }
+  .declarative-modal-body { display: flex; flex-direction: column; gap: 14px; }
+  .declarative-modal-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border, #333); }
+  .declarative-field-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+  .declarative-field-label { font-size: 0.88rem; font-weight: 600; }
+  .declarative-field-description { font-size: 12px; opacity: 0.65; line-height: 1.35; }
+  .declarative-input { width: 100%; max-width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border, #333); background: rgba(0, 0, 0, 0.25); color: var(--foreground, #e5e7eb); font-size: 0.82rem; }
+  .declarative-select { width: 100%; }
+  .declarative-select-button { display: flex; align-items: center; justify-content: space-between; min-height: 30px; text-align: left; cursor: pointer; }
+  .declarative-select-button::after { content: ""; width: 0; height: 0; margin-left: 10px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid var(--muted, #8b949e); }
+  .declarative-select-menu { position: fixed; z-index: 1400; display: flex; flex-direction: column; overflow-y: auto; border: 1px solid var(--border, #333); border-radius: 6px; background: var(--card, #0b0f1a); box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45); padding: 4px; }
+  .declarative-select-option { width: 100%; border: 0; border-radius: 4px; background: transparent; color: var(--foreground, #e5e7eb); padding: 7px 8px; text-align: left; cursor: pointer; }
+  .declarative-select-option:hover,
+  .declarative-select-option:focus,
+  .declarative-select-option[aria-selected="true"] { background: rgba(59, 130, 246, 0.18); outline: none; }
+  .declarative-textarea { resize: vertical; min-height: 0; }
+  .declarative-monospace { font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; }
+  .declarative-field-invalid { border-color: #f87171 !important; }
+  .cm6-json-textmate-field { width: 100%; max-width: 100%; min-width: 0; }
+  .cm6-json-textmate-field.is-invalid .cm-editor { border-color: #f87171 !important; }
+  .cm6-json-textmate-field .cm-editor { width: 100%; max-width: 100%; }
+  .cm6-json-textmate-field .cm-scroller { overflow: auto; }
+  .cm6-json-textmate-fallback { width: 100%; min-height: 150px; resize: vertical; }
+  .run-profiles-layout { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); gap: 14px; min-height: 420px; }
+  .run-profiles-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .run-profiles-list-items { display: flex; flex-direction: column; gap: 4px; min-height: 0; overflow-y: auto; }
+  .run-profiles-list-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 8px; border: 1px solid var(--border, #333); border-radius: 6px; background: rgba(255, 255, 255, 0.03); color: var(--foreground, #e5e7eb); text-align: left; cursor: pointer; }
+  .run-profiles-list-item.is-active { border-color: var(--primary, #3b82f6); background: rgba(59, 130, 246, 0.16); }
+  .run-profiles-editor { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .run-profiles-meta { font-size: 12px; opacity: 0.7; overflow-wrap: anywhere; }
+  .run-profiles-json { width: 100%; min-height: 180px; font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; font-size: 12px; }
+  .run-profiles-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  @media (max-width: 720px) {
+    .run-profiles-layout { grid-template-columns: 1fr; }
+  }
+  .settings-console-worker-id {
+    max-width: min(42vw, 280px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px 8px;
+    border: 1px solid var(--border, #333);
+    border-radius: 999px;
+    font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    opacity: 0.72;
+  }
+  .settings-console-worker-id[data-state="ready"] { opacity: 0.9; }
+  .settings-console-worker-id[data-state="pending"] { opacity: 0.52; }
   /* Workspace scope: hide toggle, uninstall, and install — settings-only */
   .fe-modal.ext-scope-workspace .ext-toggle-btn,
   .fe-modal.ext-scope-workspace .ext-uninstall-btn,
@@ -550,7 +627,7 @@
     border: 1px solid rgba(59, 130, 246, 0.4);
   }
 
-.fe-drawer-head { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--border); }
+.fe-drawer-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border #333); background: var(--card, #0b0f1a); box-shadow: none; }
   #fe-project-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
   #fe-open-project { margin-left: auto; }
 
@@ -1344,10 +1421,11 @@
   .agent-drawer__header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 18px;
-    border-bottom: 1px solid var(--border);
-    background: rgba(4, 7, 12, 0.9);
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border #333);
+    background: var(--card, #0b0f1a);
+    box-shadow: none;
   }
 
   .agent-drawer__title {
@@ -1397,9 +1475,17 @@
   .agent-drawer__refresh-menu {
     position: absolute;
     top: calc(100% + 4px);
-    right: 36px;
+    left: auto;
+    right: 0;
     min-width: 190px;
+    max-width: calc(100vw - 16px);
     z-index: 80;
+  }
+
+  .agent-drawer__refresh-menu .fe-dd-item {
+    justify-content: flex-end;
+    text-align: right;
+    white-space: nowrap;
   }
 
   .agent-drawer__chrome {
@@ -1451,6 +1537,11 @@
   .agent-drawer__running-dot.is-down {
     background: rgba(248, 113, 113, 0.9);
     box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.38);
+  }
+
+  .agent-drawer__running-dot.is-starting {
+    background: rgba(96, 165, 250, 0.95);
+    box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35), 0 0 10px rgba(96, 165, 250, 0.28);
   }
 
   .agent-drawer__running-dot.is-active {
@@ -1556,6 +1647,9 @@
     width: 100%;
     height: 100%;
     border: 0;
+    outline: 0;
+    box-shadow: none;
+    background: var(--card, #0b0f1a);
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.18s ease;
@@ -1570,6 +1664,8 @@
     width: 100%;
     height: 100%;
     border: 0;
+    outline: 0;
+    box-shadow: none;
     display: block;
   }
 
@@ -1587,6 +1683,61 @@
   .lsp-rootrel-input:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .ext-config-select {
+    width: 100%;
+    margin-bottom: 6px;
+  }
+
+  .ext-config-select-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .ext-config-select-button::after {
+    content: "";
+    width: 0;
+    height: 0;
+    margin-left: 10px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid var(--muted, #8b949e);
+  }
+
+  .ext-config-select-menu {
+    position: fixed;
+    z-index: 1200;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    border: 1px solid var(--border, #333);
+    border-radius: 6px;
+    background: var(--card, #0b0f1a);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+    padding: 4px;
+  }
+
+  .ext-config-select-option {
+    width: 100%;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--foreground, #e5e7eb);
+    padding: 7px 8px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .ext-config-select-option:hover,
+  .ext-config-select-option:focus,
+  .ext-config-select-option[aria-selected="true"] {
+    background: rgba(59, 130, 246, 0.18);
+    outline: none;
   }
 
   /* ── Array settings widget ─────────────────────────────────── */
@@ -1845,12 +1996,10 @@
 	    <div class="fe-title-block">
 	      <div class="fe-file-name">
           <div id="fe-file-name-scroll" class="fe-file-name-scroll">
-            <span id="fe-file-name" title="Current file">Untitled</span>
+            <span id="fe-file-name" title="Current file">No file</span>
           </div>
 	        <span class="fe-issues">
 	          <button id="fe-issues-toggle" class="fe-btn fe-icon-btn" title="Next issue (Alt+F8)" aria-label="Next issue" disabled>💡</button>
-	          <button id="fe-issues-prev" class="fe-btn fe-icon-btn" title="Previous issue" aria-label="Previous issue" disabled>‹</button>
-	          <button id="fe-issues-next" class="fe-btn fe-icon-btn" title="Next issue" aria-label="Next issue" disabled>›</button>
 	          <span id="fe-issues-badges" class="fe-issues-badge" aria-live="polite"></span>
 	        </span>
 	      </div>
@@ -1867,7 +2016,6 @@
       <div id="fe-agent-dd" class="fe-dropdown"></div>
     </div>
     <span id="fe-status" class="fe-status" style="display: none;"></span>
-    <span id="edit-tracker-status" class="fe-status" style="display: none; margin-left: 0.5rem;"></span>
   </div>
 
   <div class="fe-menubar">
@@ -1879,7 +2027,10 @@
         <div class="fe-dd-item" id="mi-save"><span>Save</span><span class="fe-kbd">Ctrl/Cmd+S</span></div>
         <div class="fe-dd-item" id="mi-saveas"><span>Save As…</span><span class="fe-kbd">Ctrl/Cmd+Shift+S</span></div>
         <div class="fe-dd-item" id="mi-close"><span>Close</span></div>
-        <div class="fe-dd-item" id="mi-quit"><span>Quit (Clear State)</span></div>
+        <div class="fe-dd-item" id="mi-quit"><span>Quit</span></div>
+        <div class="fe-dd-separator"></div>
+        <div class="fe-dd-item" id="mi-run-profiles"><span>Run Profiles...</span></div>
+        <div class="fe-dd-item" id="mi-install-page-preview"><span>Install Page Preview Profile</span></div>
         <div class="fe-dd-item" id="mi-debug-projects"><span>Projects…</span></div>
       </div>
     </div>
@@ -1901,6 +2052,8 @@
         <div class="fe-dd-item" id="mi-toggle-syntax" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Syntax Highlighting</span></div>
         <div class="fe-dd-item" id="mi-toggle-closebrackets" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Close Brackets</span></div>
         <div class="fe-dd-item" id="mi-toggle-autocomplete" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Autocompletion</span></div>
+        <div class="fe-dd-separator"></div>
+        <div class="fe-dd-item" id="mi-toggle-autosave" role="menuitem" tabindex="0"><span>Auto Save</span></div>
 
         <!-- NEW: Font Size submenu -->
         <div class="fe-dd-separator"></div>
@@ -1927,15 +2080,13 @@
         <div class="fe-dd-item" id="mi-toggle-wrap" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Word Wrap</span></div>
         <div class="fe-dd-item" id="mi-toggle-shading" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Line Shading</span></div>
         <div class="fe-dd-item" id="mi-toggle-indent-guides" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Indentation Guides</span></div>
-        <div class="fe-dd-item" id="mi-toggle-diffs" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Show Git Diffs</span></div>
-        <div class="fe-dd-item" id="mi-toggle-draft-diffs" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Show Draft Diffs</span></div>
+        <div class="fe-dd-item" id="mi-toggle-diffs" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Show Commit Diff</span></div>
+        <div class="fe-dd-item" id="mi-toggle-draft-diffs" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Show Disk vs Draft Diff</span></div>
         <div class="fe-dd-item" id="mi-toggle-minimap" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Show Minimap</span></div>
         <div class="fe-dd-item" id="mi-toggle-sticky-scroll" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Sticky Scroll</span></div>
         <div class="fe-dd-item" id="mi-toggle-color-picker" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>CSS Color Picker</span></div>
         <div class="fe-dd-item" id="mi-toggle-readonly" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Read Only Mode</span></div>
-        <div class="fe-dd-item" id="mi-track-edits" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Auto-Jump to External Edits</span></div>
         <div class="fe-dd-item" id="mi-track-agent-sidebar-edits" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Auto-Jump to Sidebar Agent Edits</span></div>
-        <div class="fe-dd-item" id="mi-toggle-autosave" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Save</span></div>
         <div class="fe-dd-item" id="mi-toggle-terminal"><span>Toggle Terminal</span><span class="fe-kbd">Ctrl/Cmd+`</span></div>
         <div class="fe-dd-item" id="mi-toggle-console"><span>Toggle Console</span></div>
         <div class="fe-dd-item" id="mi-find"><span>Find/Replace</span><span class="fe-kbd">Ctrl/Cmd+F</span></div>
@@ -2002,7 +2153,7 @@
   <!-- Resize handle for sidebar (desktop only) -->
   <div class="resize-handle resize-handle--agent" data-panel="agent"></div>
 
-  <!-- Sidebar Drawer -->
+  <!-- Sidebar drawer -->
   <aside id="agent-drawer" class="agent-drawer" aria-hidden="true">
     <header class="agent-drawer__header">
       <div class="agent-drawer__title">
@@ -2010,11 +2161,11 @@
         <span class="agent-drawer__title-text" id="agent-drawer-title-text">Sidebar</span>
       </div>
       <div class="agent-drawer__chrome">
-        <div class="agent-drawer__icon-grid" id="agent-drawer-icon-grid" aria-label="Side-bar header shortcuts"></div>
+        <div class="agent-drawer__icon-grid" id="agent-drawer-icon-grid" aria-label="Sidebar app dock"></div>
         <div class="fe-dropdown agent-drawer__icon-menu" id="agent-drawer-icon-menu"></div>
       </div>
       <div class="agent-drawer__actions">
-        <button class="fe-btn" id="agent-refresh-active" type="button" title="Refresh active side-bar item" aria-label="Refresh active side-bar item">↻</button>
+        <button class="fe-btn" id="agent-refresh-active" type="button" title="Refresh active sidebar item" aria-label="Refresh active sidebar item">↻</button>
         <button class="fe-btn" id="agent-close">✕</button>
         <div class="fe-dropdown agent-drawer__refresh-menu" id="agent-refresh-menu"></div>
       </div>
@@ -2022,9 +2173,9 @@
     <div class="agent-drawer__iframe" id="agent-iframe-wrap">
       <div id="sidebar-setup-placeholder" class="sidebar-setup">
         <div class="sidebar-setup__card">
-          <div class="sidebar-setup__title">Side-bar setup</div>
-          <div class="sidebar-setup__hint">Add shortcuts to choose what loads in the side-bar.</div>
-          <div style="font-size: 0.82rem; opacity: 0.8;">Side-bar toggle</div>
+          <div class="sidebar-setup__title">Open a sidebar app window</div>
+          <div class="sidebar-setup__hint">Use the launcher to open an app dock slot, or add a URL slot.</div>
+          <div style="font-size: 0.82rem; opacity: 0.8;">Sidebar toggle</div>
           <div style="display:flex; flex-direction: column; gap: 8px;">
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
               <input type="radio" name="agent-toggle-display" value="icon" checked />
@@ -2040,7 +2191,7 @@
             </label>
           </div>
           <div style="display:flex; gap:8px; align-items:center; margin-top: 6px;">
-            <button class="fe-btn" id="sidebar-setup-shortcuts">Shortcuts…</button>
+            <button class="fe-btn" id="sidebar-setup-shortcuts">App drawer…</button>
           </div>
         </div>
       </div>
@@ -2230,6 +2381,7 @@
   <div class="fe-modal-card" style="max-width: 760px;">
     <div class="fe-modal-header">
       <strong>Editor Settings</strong>
+      <span id="editor-settings-console-worker-id" class="settings-console-worker-id" data-state="pending" title="main_page TE2 console worker id">main_page console: pending</span>
       <span style="flex:1"></span>
       <button class="fe-btn" id="editor-settings-close" aria-label="Close">✕</button>
     </div>
@@ -2303,9 +2455,9 @@
 
       <hr style="border: 0; border-top: 1px solid var(--border, #333); margin: 12px 0;" />
 
-      <div style="font-weight: 600; margin-bottom: 6px;">Side-bar</div>
+      <div style="font-weight: 600; margin-bottom: 6px;">Sidebar</div>
       <div id="editor-settings-agent" style="font-size: 0.88rem; line-height: 1.6;">
-        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Side-bar toggle</div>
+        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Sidebar toggle</div>
         <div style="display:flex; flex-direction: column; gap: 8px;">
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
             <input type="radio" name="agent-toggle-display" value="icon" checked />
@@ -2323,7 +2475,7 @@
 
         <div class="fe-dd-separator" style="margin: 10px 0;"></div>
 
-        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Side-bar header</div>
+        <div style="font-size: 0.82rem; opacity: 0.8; margin-bottom: 6px;">Sidebar header</div>
         <div style="display:flex; flex-direction: column; gap: 8px;">
           <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
             <input type="radio" name="agent-header-display" value="icon" />
@@ -2340,7 +2492,7 @@
         </div>
 
         <div style="display:flex; gap:8px; align-items:center; margin-top: 12px;">
-          <button class="fe-btn" id="editor-settings-agent-shortcuts">Shortcuts…</button>
+          <button class="fe-btn" id="editor-settings-agent-shortcuts">URL…</button>
         </div>
       </div>
 
@@ -2359,81 +2511,28 @@
   </div>
 </div>
 
-<!-- Agent Shortcuts Modal -->
+<!-- Sidebar URL dialog; agent* ids are compatibility ids. -->
 <div id="agent-shortcuts-modal" class="fe-modal" aria-hidden="true" style="z-index: 360;">
-  <div class="fe-modal-card" style="max-width: 760px;">
+  <div class="fe-modal-card" style="max-width: 520px;">
     <div class="fe-modal-header">
-      <strong>Side-bar Shortcuts</strong>
+      <strong>URL</strong>
       <span style="flex:1"></span>
       <button class="fe-btn" id="agent-shortcuts-close" aria-label="Close">✕</button>
     </div>
     <div class="fe-modal-body">
-      <div style="display:flex; gap:8px; align-items:center; margin-bottom: 10px;">
-        <button class="fe-btn fe-btn-primary" id="agent-shortcuts-add">Add</button>
-      </div>
-      <div id="agent-shortcuts-list"></div>
-
-      <div class="fe-dd-separator" style="margin: 12px 0;"></div>
-
-      <div id="agent-shortcuts-editor" style="display:none;">
+      <div id="agent-shortcuts-editor" style="display:block;">
         <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px; flex-wrap: wrap;">
           <div style="flex:1; min-width: 220px;">
             <label for="agent-shortcut-label" style="display:block; margin-bottom: 6px;">Label</label>
-            <input id="agent-shortcut-label" class="lsp-rootrel-input" type="text" placeholder="Codex Agent" autocomplete="off" spellcheck="false" />
-          </div>
-          <div style="flex:1; min-width: 220px;">
-            <label for="agent-shortcut-kind-btn" style="display:block; margin-bottom: 6px;">Type</label>
-            <div class="fe-menu" style="width: 100%;">
-              <button id="agent-shortcut-kind-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;" aria-haspopup="listbox" aria-expanded="false">
-                <span id="agent-shortcut-kind-label">URL</span>
-                <span aria-hidden="true">▾</span>
-              </button>
-              <div id="agent-shortcut-kind-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 200px; overflow-y: auto;"></div>
-            </div>
+            <input id="agent-shortcut-label" class="lsp-rootrel-input" type="text" placeholder="Optional label" autocomplete="off" spellcheck="false" />
           </div>
         </div>
 
         <div id="agent-shortcut-target-url" style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px;">
           <div style="flex:1; min-width: 260px;">
             <label for="agent-shortcut-url" style="display:block; margin-bottom: 6px;">URL</label>
-            <input id="agent-shortcut-url" class="lsp-rootrel-input" type="text" placeholder="http://127.0.0.1:12359/codex-agent" autocomplete="off" spellcheck="false" />
+            <input id="agent-shortcut-url" class="lsp-rootrel-input" type="text" placeholder="http://127.0.0.1" autocomplete="off" spellcheck="false" />
           </div>
-        </div>
-
-        <div id="agent-shortcut-target-app" style="display:none; gap:10px; align-items:flex-end; margin-bottom: 10px;">
-          <div style="flex:1; min-width: 260px;">
-            <label for="agent-shortcut-app-btn" style="display:block; margin-bottom: 6px;">App</label>
-            <div class="fe-menu" style="width: 100%;">
-              <button id="agent-shortcut-app-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;" aria-haspopup="listbox" aria-expanded="false">
-                <span id="agent-shortcut-app-label">Select app…</span>
-                <span aria-hidden="true">▾</span>
-              </button>
-              <div id="agent-shortcut-app-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: min(70vh, 480px); overflow-y: auto;"></div>
-            </div>
-          </div>
-        </div>
-
-        <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom: 10px;">
-          <div style="flex:1; min-width: 220px;">
-            <label for="agent-shortcut-load-btn" style="display:block; margin-bottom: 6px;">Load</label>
-            <div class="fe-menu" style="width: 100%;">
-              <button id="agent-shortcut-load-btn" class="fe-btn" type="button" style="width: 100%; display: flex; justify-content: space-between; align-items: center;" aria-haspopup="listbox" aria-expanded="false">
-                <span id="agent-shortcut-load-label">Lazy</span>
-                <span aria-hidden="true">▾</span>
-              </button>
-              <div id="agent-shortcut-load-dd" class="fe-dropdown fe-dropdown--modal" style="width: 100%; max-height: 200px; overflow-y: auto;"></div>
-            </div>
-          </div>
-        </div>
-
-        <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom: 10px;">
-          <div style="flex:1;">
-            <label for="agent-shortcut-emoji" style="display:block; margin-bottom: 6px;">Emoji (optional)</label>
-            <input id="agent-shortcut-emoji" class="lsp-rootrel-input" type="text" placeholder="🤖" autocomplete="off" spellcheck="false" />
-          </div>
-          <button class="fe-btn" id="agent-shortcut-icon-browse">Browse icon…</button>
-          <button class="fe-btn" id="agent-shortcut-icon-clear">Clear</button>
-          <div id="agent-shortcut-icon-preview" style="width:32px; height:32px; border-radius:8px; border:1px solid var(--border,#333); background: rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center;"></div>
         </div>
 
         <div style="display:flex; gap:8px; justify-content:flex-end;">

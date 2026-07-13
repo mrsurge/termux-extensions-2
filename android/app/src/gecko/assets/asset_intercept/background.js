@@ -7,6 +7,8 @@
 
 let assetServerPort = 0;
 let enabled = false;
+let nativePort = null;
+let reconnectTimer = 0;
 
 // Prefixes backed by complete OTA directory entries. Keep API prefixes limited
 // to immutable static trees so dynamic backend routes always stay on TE2.
@@ -54,8 +56,6 @@ const LOCAL_FILES = new Set([
 ]);
 
 function localPathFor(urlPath) {
-  if (urlPath === "/") return "/index.html";
-  if (urlPath === "/app/file_editor_cm6") return "/app_shell_file_editor_cm6.html";
   if (!LOCAL_FILES.has(urlPath) && !LOCAL_PREFIXES.some((prefix) => urlPath.startsWith(prefix))) {
     return null;
   }
@@ -82,9 +82,11 @@ function localPathFor(urlPath) {
 
 browser.webRequest.onBeforeRequest.addListener(
   (details) => {
-    if (!enabled || assetServerPort === 0) return {};
-
     try {
+      // Redirecting a document changes its origin to LocalAssetServer. Keep
+      // framework pages on TE2 so relative APIs and socket URLs stay valid.
+      if (details.type === "main_frame") return {};
+
       const url = new URL(details.url);
       const isLocalAssetRequest =
         (url.hostname === "127.0.0.1" || url.hostname === "localhost") &&
@@ -94,6 +96,10 @@ browser.webRequest.onBeforeRequest.addListener(
       const path = url.pathname;
       const localPath = localPathFor(path);
       if (!localPath) return {};
+      if (!enabled || assetServerPort === 0) {
+        console.error(`[asset_intercept] blocked network fallback for ${path}`);
+        return { cancel: true };
+      }
       let search = url.search || "";
       const redirectUrl = `http://127.0.0.1:${assetServerPort}${localPath}${search}`;
       console.debug(`[asset_intercept] ${path} -> ${localPath}`);
@@ -108,25 +114,41 @@ browser.webRequest.onBeforeRequest.addListener(
   ["blocking"]
 );
 
-// Receive port from native app via runtime messaging
-browser.runtime.onMessage.addListener((message, sender) => {
-  if (message && message.type === "set_asset_port") {
-    assetServerPort = message.port;
-    enabled = message.port > 0;
-    console.log(`[asset_intercept] Port set to ${assetServerPort}, enabled=${enabled}`);
-  }
-});
-
-// Also support native messaging from the Kotlin side
-try {
-  const nativePort = browser.runtime.connectNative("browser");
-  nativePort.onMessage.addListener((message) => {
-    if (message && message.type === "set_asset_port") {
-      assetServerPort = message.port;
-      enabled = message.port > 0;
-      console.log(`[asset_intercept] (native) Port set to ${assetServerPort}, enabled=${enabled}`);
-    }
-  });
-} catch (e) {
-  // Native messaging may not be available yet
+function scheduleNativeReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = 0;
+    connectNativeBridge();
+  }, 250);
 }
+
+// Static interception stays disabled until Kotlin confirms the local server port.
+function connectNativeBridge() {
+  try {
+    const port = browser.runtime.connectNative("browser");
+    nativePort = port;
+    port.onMessage.addListener((message) => {
+      if (message && message.type === "set_asset_port") {
+        assetServerPort = message.port;
+        enabled = message.port > 0;
+        console.log(`[asset_intercept] Port set to ${assetServerPort}, enabled=${enabled}`);
+        port.postMessage({
+          type: "asset_intercept_ready",
+          port: assetServerPort,
+        });
+      }
+    });
+    port.onDisconnect.addListener(() => {
+      if (nativePort === port) nativePort = null;
+      assetServerPort = 0;
+      enabled = false;
+      scheduleNativeReconnect();
+    });
+  } catch (error) {
+    assetServerPort = 0;
+    enabled = false;
+    scheduleNativeReconnect();
+  }
+}
+
+connectNativeBridge();

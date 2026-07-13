@@ -9,6 +9,18 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 
+internal fun compareEditorAssetVersions(a: String, b: String): Int {
+    val aParts = a.split(".").map { it.toIntOrNull() ?: 0 }
+    val bParts = b.split(".").map { it.toIntOrNull() ?: 0 }
+    val length = maxOf(aParts.size, bParts.size)
+    for (index in 0 until length) {
+        val aValue = aParts.getOrElse(index) { 0 }
+        val bValue = bParts.getOrElse(index) { 0 }
+        if (aValue != bValue) return aValue.compareTo(bValue)
+    }
+    return 0
+}
+
 /**
  * Manages bundled editor static assets:
  *  - Seeds filesDir/editor_static/ from APK assets on first boot
@@ -44,7 +56,7 @@ class EditorAssetManager(private val context: Context) {
                 Log.i(TAG, "Local assets up-to-date (v$localVersion), skipping seed")
                 return false
             }
-            if (compareVersions(localVersion, bundledVersion) > 0) {
+            if (compareEditorAssetVersions(localVersion, bundledVersion) > 0) {
                 Log.i(TAG, "Local assets newer than APK (local=$localVersion, bundled=$bundledVersion), skipping seed")
                 return false
             }
@@ -61,19 +73,6 @@ class EditorAssetManager(private val context: Context) {
         val elapsed = System.currentTimeMillis() - start
         Log.i(TAG, "Asset seed complete: ${countFiles(assetRoot)} files in ${elapsed}ms")
         return true
-    }
-
-    /** Compare dotted version strings segment by segment (e.g. "0.1.6" > "0.1.5"). */
-    private fun compareVersions(a: String, b: String): Int {
-        val ap = a.split(".").map { it.toIntOrNull() ?: 0 }
-        val bp = b.split(".").map { it.toIntOrNull() ?: 0 }
-        val len = maxOf(ap.size, bp.size)
-        for (i in 0 until len) {
-            val av = ap.getOrElse(i) { 0 }
-            val bv = bp.getOrElse(i) { 0 }
-            if (av != bv) return av.compareTo(bv)
-        }
-        return 0
     }
 
     private fun copyAssetDir(assetPath: String, destDir: File) {
@@ -95,30 +94,21 @@ class EditorAssetManager(private val context: Context) {
     private fun countFiles(dir: File): Int =
         dir.walkTopDown().count { it.isFile }
 
-    /**
-     * Check server for a newer asset version. Returns the server version
-     * if it's different from local, or null if up-to-date / unreachable.
-     */
+    /** Return a server version only when it is newer than the installed assets. */
     fun checkServerVersion(serverBaseUrl: String): String? {
-        return try {
-            val client = OkHttpClient.Builder()
-                .connectTimeout(3, TimeUnit.SECONDS)
-                .readTimeout(3, TimeUnit.SECONDS)
-                .build()
-            val req = Request.Builder()
-                .url(serverEndpoint(serverBaseUrl, "/api/editor_version"))
-                .get()
-                .build()
-            client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                val serverVersion = resp.body?.string()?.trim() ?: return null
-                val local = getLocalVersion()
-                if (serverVersion != local) serverVersion else null
+        val serverVersion = fetchServerVersion(serverBaseUrl) ?: return null
+        val localVersion = getLocalVersion() ?: return serverVersion
+        val comparison = compareEditorAssetVersions(serverVersion, localVersion)
+        if (comparison <= 0) {
+            if (comparison < 0) {
+                Log.w(
+                    TAG,
+                    "Ignoring OTA downgrade server=$serverVersion local=$localVersion",
+                )
             }
-        } catch (e: Exception) {
-            Log.d(TAG, "Version check failed: ${e.message}")
-            null
+            return null
         }
+        return serverVersion
     }
 
     /**
@@ -178,9 +168,44 @@ class EditorAssetManager(private val context: Context) {
                     }
                 }
 
-                // Swap: delete old → rename staging
-                if (assetRoot.exists()) assetRoot.deleteRecursively()
-                staging.renameTo(assetRoot)
+                val stagedVersion = File(staging, "version.txt")
+                    .takeIf { it.isFile }
+                    ?.readText()
+                    ?.trim()
+                if (stagedVersion.isNullOrBlank()) {
+                    Log.e(TAG, "Bundle rejected: missing staged version.txt")
+                    staging.deleteRecursively()
+                    return false
+                }
+                val localVersion = getLocalVersion()
+                if (
+                    localVersion != null &&
+                    compareEditorAssetVersions(stagedVersion, localVersion) < 0
+                ) {
+                    Log.e(
+                        TAG,
+                        "Bundle rejected: OTA downgrade staged=$stagedVersion local=$localVersion",
+                    )
+                    staging.deleteRecursively()
+                    return false
+                }
+
+                // Keep the last valid tree available until the staged tree is installed.
+                val backup = File(context.filesDir, "editor_static_backup")
+                if (backup.exists()) backup.deleteRecursively()
+                if (assetRoot.exists() && !assetRoot.renameTo(backup)) {
+                    Log.e(TAG, "Bundle install failed: could not preserve current assets")
+                    staging.deleteRecursively()
+                    return false
+                }
+                if (!staging.renameTo(assetRoot)) {
+                    Log.e(TAG, "Bundle install failed: staging swap failed")
+                    if (backup.exists() && !backup.renameTo(assetRoot)) {
+                        Log.e(TAG, "Bundle rollback failed: preserved assets remain at ${backup.path}")
+                    }
+                    return false
+                }
+                backup.deleteRecursively()
 
                 val elapsed = System.currentTimeMillis() - start
                 val newVersion = getLocalVersion() ?: "unknown"
@@ -194,14 +219,42 @@ class EditorAssetManager(private val context: Context) {
         }
     }
 
-    /**
-     * Force re-download: clear local assets and download fresh bundle.
-     * Returns true on success.
-     */
+    /** Reinstall current/newer assets, but never replace local assets with an older OTA. */
     fun forceUpdateFromServer(serverBaseUrl: String): Boolean {
-        Log.i(TAG, "Force update: clearing local assets and re-downloading")
-        if (assetRoot.exists()) assetRoot.deleteRecursively()
+        val serverVersion = fetchServerVersion(serverBaseUrl) ?: return false
+        val localVersion = getLocalVersion()
+        if (
+            localVersion != null &&
+            compareEditorAssetVersions(serverVersion, localVersion) < 0
+        ) {
+            Log.w(
+                TAG,
+                "Force update rejected OTA downgrade server=$serverVersion local=$localVersion",
+            )
+            return false
+        }
+        Log.i(TAG, "Force update: downloading v$serverVersion over local=${localVersion ?: "none"}")
         return downloadFromServer(serverBaseUrl)
+    }
+
+    private fun fetchServerVersion(serverBaseUrl: String): String? {
+        return try {
+            val client = OkHttpClient.Builder()
+                .connectTimeout(3, TimeUnit.SECONDS)
+                .readTimeout(3, TimeUnit.SECONDS)
+                .build()
+            val req = Request.Builder()
+                .url(serverEndpoint(serverBaseUrl, "/api/editor_version"))
+                .get()
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return null
+                resp.body?.string()?.trim()?.takeIf { it.isNotEmpty() }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Version check failed: ${e.message}")
+            null
+        }
     }
 
     private fun serverEndpoint(serverBaseUrl: String, path: String): String =

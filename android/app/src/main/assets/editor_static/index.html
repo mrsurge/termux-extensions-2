@@ -10,6 +10,53 @@
     <meta name="theme-color" content="#4caf50">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <script>
+    // Native Android shells use their OTA asset layer and must not be controlled by the PWA worker.
+    (function () {
+        let enabled = false;
+        try {
+            const params = new URLSearchParams(location.search);
+            if (params.get('gv_native') === '1') {
+                enabled = true;
+                sessionStorage.setItem('te_gv_native', '1');
+            } else if (sessionStorage.getItem('te_gv_native') === '1') {
+                enabled = true;
+            }
+        } catch (error) {}
+
+        window.teNativeServiceWorkerDisabled = enabled;
+        window.teNativeServiceWorkerReady = enabled ? (async function () {
+            if (!('serviceWorker' in navigator)) return true;
+
+            const wasControlled = navigator.serviceWorker.controller !== null;
+            try {
+                const registrations = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(registrations.map(registration => registration.unregister()));
+
+                if ('caches' in window) {
+                    const cacheNames = await caches.keys();
+                    await Promise.all(
+                        cacheNames
+                            .filter(name => name.startsWith('te2-v'))
+                            .map(name => caches.delete(name))
+                    );
+                }
+            } catch (error) {
+                console.warn('[index] native service worker cleanup failed:', error);
+            }
+
+            const reloadKey = 'te_gv_native_sw_reloaded';
+            if (wasControlled && sessionStorage.getItem(reloadKey) !== '1') {
+                sessionStorage.setItem(reloadKey, '1');
+                location.reload();
+                return false;
+            }
+
+            sessionStorage.removeItem(reloadKey);
+            return true;
+        })() : Promise.resolve(true);
+    })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -402,6 +449,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
+            if (!await window.teNativeServiceWorkerReady) return;
             if (!settingsLoaded) {
                 await fetchSettings();
             }
@@ -412,7 +460,7 @@
     </script>
         <script>
 // Register Service Worker for PWA installability
-if ('serviceWorker' in navigator) {
+if (!window.teNativeServiceWorkerDisabled && 'serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').catch(err => {
             console.error('Service worker registration failed:', err);

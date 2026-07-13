@@ -4,7 +4,6 @@
   "description": "A launcher for full-page applications.",
   "author": "",
   "entrypoints": {
-    "backend_blueprint": "main.py",
     "frontend_template": "template.html",
     "frontend_script": "main.js"
   }

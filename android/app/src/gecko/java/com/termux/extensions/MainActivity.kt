@@ -39,7 +39,9 @@ import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.WebExtension
+import org.mozilla.geckoview.WebExtensionController
 import android.view.inputmethod.InputMethodManager
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
     private lateinit var geckoView: FilteredGeckoView
@@ -60,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     private var localAssetServer: LocalAssetServer? = null
     private var assetExtension: WebExtension? = null
     private var assetExtensionPort: WebExtension.Port? = null
+    @Volatile private var assetInterceptorReady: Boolean = false
 
     private lateinit var btnConsoleBack: Button
     private lateinit var btnConsoleStart: Button
@@ -396,6 +399,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun recoverSessionAfterContentDeath(reason: String) {
+        if (!requireAssetInterceptor("session recovery")) return
         try {
             appendConsoleLine("warn", "Gecko content process $reason; recovering session...", null)
         } catch (_: Exception) {
@@ -558,7 +562,13 @@ class MainActivity : AppCompatActivity() {
         btnConsoleStop = findViewById(R.id.btnConsoleStop)
 
         findViewById<Button>(R.id.btnHome).setOnClickListener { loadHome() }
-        findViewById<Button>(R.id.btnReload).setOnClickListener { if (::geckoSession.isInitialized) geckoSession.reload() }
+        findViewById<Button>(R.id.btnReload).setOnClickListener {
+            if (!::geckoSession.isInitialized || !requireAssetInterceptor("reload")) return@setOnClickListener
+            try {
+                geckoSession.reload()
+            } catch (_: Exception) {
+            }
+        }
         findViewById<Button>(R.id.btnRecents).setOnClickListener { showRecents() }
         findViewById<Button>(R.id.btnLock).setOnClickListener { toggleLock() }
         findViewById<Button>(R.id.btnQuit).setOnClickListener { quitCurrentApp() }
@@ -855,17 +865,34 @@ class MainActivity : AppCompatActivity() {
 
         runtime = GeckoRuntimeProvider.get(applicationContext)
 
-        // Initialize local asset serving before any page loads
-        initEditorAssets()
-
+        // A blank open session starts Gecko's extension process. Restore and
+        // navigation remain locked until the local static route is confirmed.
         geckoSession.open(runtime)
-
         geckoView.setSession(geckoSession)
 
+        initEditorAssets { ready ->
+            runOnUiThread {
+                if (!ready) {
+                    Log.e("MainActivity", "Local asset interceptor failed; Gecko navigation blocked")
+                    Toast.makeText(
+                        this,
+                        "Local editor assets unavailable; navigation blocked",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    return@runOnUiThread
+                }
+                unlockGeckoNavigation()
+            }
+        }
+    }
+
+    private fun unlockGeckoNavigation() {
+        if (!assetInterceptorReady) return
+
         val restored = try {
-            val st = loadSavedSessionState()
-            if (st != null) {
-                geckoSession.restoreState(st)
+            val state = loadSavedSessionState()
+            if (state != null) {
+                geckoSession.restoreState(state)
                 true
             } else {
                 false
@@ -874,6 +901,7 @@ class MainActivity : AppCompatActivity() {
             false
         }
 
+        Log.i("MainActivity", "Asset interceptor ready; Gecko navigation unlocked")
         wakeFrameworkAndLoad(forceLoadHome = !restored)
     }
 
@@ -994,6 +1022,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadHome() {
         if (!::geckoSession.isInitialized) return
+        if (!requireAssetInterceptor("home navigation")) return
         inAppShell = false
         nativeHeader.visibility = View.GONE
         updatePersistentNetworkService()
@@ -1002,6 +1031,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadApp(appId: String) {
         if (!::geckoSession.isInitialized) return
+        if (!requireAssetInterceptor("app navigation")) return
         inAppShell = true
         nativeHeader.visibility = View.VISIBLE
         updatePersistentNetworkService()
@@ -1240,7 +1270,7 @@ class MainActivity : AppCompatActivity() {
      * Seed bundled editor assets to filesDir and start the local asset server.
      * Must be called after runtime is available but before pages load.
      */
-    private fun initEditorAssets() {
+    private fun initEditorAssets(onReady: (Boolean) -> Unit) {
         try {
             val mgr = EditorAssetManager(this)
             editorAssetManager = mgr
@@ -1254,6 +1284,7 @@ class MainActivity : AppCompatActivity() {
 
             if (!mgr.getAssetRoot().exists()) {
                 Log.w("MainActivity", "No editor assets available, skipping asset server")
+                onReady(false)
                 return
             }
 
@@ -1264,25 +1295,85 @@ class MainActivity : AppCompatActivity() {
             Log.i("MainActivity", "Local asset server on port ${server.port}")
 
             // Install the asset intercept WebExtension
-            installAssetExtension(server.port)
+            if (server.port <= 0) {
+                Log.e("MainActivity", "Local asset server did not bind a port")
+                onReady(false)
+                return
+            }
+            installAssetExtension(server.port, onReady)
         } catch (e: Exception) {
             Log.e("MainActivity", "initEditorAssets failed", e)
+            onReady(false)
         }
     }
 
-    private fun installAssetExtension(assetPort: Int) {
+    private fun installAssetExtension(assetPort: Int, onReady: (Boolean) -> Unit) {
+        val completed = AtomicBoolean(false)
+        lateinit var timeout: Runnable
+
+        fun completeReady() {
+            if (!completed.compareAndSet(false, true)) return
+            assetInterceptorReady = true
+            uiHandler.removeCallbacks(timeout)
+            onReady(true)
+        }
+
+        fun completeFailure(error: String) {
+            if (!completed.compareAndSet(false, true)) return
+            assetInterceptorReady = false
+            uiHandler.removeCallbacks(timeout)
+            Log.e("MainActivity", error)
+            onReady(false)
+        }
+
+        timeout = Runnable {
+            completeFailure("Timed out waiting for asset interceptor acknowledgement")
+        }
+        uiHandler.postDelayed(timeout, ASSET_INTERCEPT_READY_TIMEOUT_MS)
+
         val extLocation = "resource://android/assets/asset_intercept/"
         runtime.webExtensionController
             .ensureBuiltIn(extLocation, "asset_intercept@mrselect6")
             .accept(
                 { extension ->
-                    val ext = extension ?: return@accept
+                    val ext = extension ?: run {
+                        completeFailure("Asset extension install returned no extension")
+                        return@accept
+                    }
                     assetExtension = ext
+                    Log.i(
+                        "MainActivity",
+                        "Asset intercept extension ready id=${ext.id} version=${ext.metaData.version}",
+                    )
 
                     // Send the asset server port to the extension via MessageDelegate
                     val delegate = object : WebExtension.MessageDelegate {
                         override fun onConnect(port: WebExtension.Port) {
                             assetExtensionPort = port
+                            port.setDelegate(object : WebExtension.PortDelegate {
+                                override fun onPortMessage(
+                                    message: Any,
+                                    source: WebExtension.Port,
+                                ) {
+                                    val payload = message as? JSONObject ?: return
+                                    if (
+                                        payload.optString("type") == "asset_intercept_ready" &&
+                                        payload.optInt("port") == assetPort
+                                    ) {
+                                        Log.i(
+                                            "MainActivity",
+                                            "Asset interceptor acknowledged local port $assetPort",
+                                        )
+                                        completeReady()
+                                    }
+                                }
+
+                                override fun onDisconnect(source: WebExtension.Port) {
+                                    if (assetExtensionPort === source) assetExtensionPort = null
+                                    assetInterceptorReady = false
+                                    Log.e("MainActivity", "Asset interceptor native port disconnected")
+                                }
+                            })
                             val msg = JSONObject().apply {
                                 put("type", "set_asset_port")
                                 put("port", assetPort)
@@ -1302,15 +1393,27 @@ class MainActivity : AppCompatActivity() {
                     ext.setMessageDelegate(delegate, "browser")
 
                     try {
-                        runtime.webExtensionController.enable(ext, 0)
-                    } catch (_: Exception) {}
+                        runtime.webExtensionController.enable(
+                            ext,
+                            WebExtensionController.EnableSource.APP,
+                        )
+                    } catch (e: Exception) {
+                        Log.w("MainActivity", "Asset extension enable request failed", e)
+                    }
 
                     Log.i("MainActivity", "Asset intercept extension installed")
                 },
                 { e ->
-                    Log.e("MainActivity", "Asset extension install failed: ${e?.message}")
+                    completeFailure("Asset extension install failed: ${e?.message}")
                 }
             )
+    }
+
+    private fun requireAssetInterceptor(action: String): Boolean {
+        if (assetInterceptorReady) return true
+        Log.e("MainActivity", "Blocked $action while local asset interceptor is unavailable")
+        Toast.makeText(this, "Local editor assets are not ready", Toast.LENGTH_LONG).show()
+        return false
     }
 
     private fun wakeFrameworkAndLoad(forceLoadHome: Boolean = true) {
@@ -1465,6 +1568,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val CONSOLE_TAIL_LINES = 500
         private const val DEFAULT_FRAMEWORK_URL = "http://127.0.0.1:8089"
+        private const val ASSET_INTERCEPT_READY_TIMEOUT_MS = 10_000L
         private const val IPC_SLEEP_BASE_URL = "http://127.0.0.1:9100"
         private const val DEFAULT_APP_ID = "file_editor_cm6"
     }

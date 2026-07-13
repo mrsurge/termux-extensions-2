@@ -1,4 +1,5 @@
 import ReconnectingWebSocket from 'reconnecting-websocket';
+import { encode as encodeMessagePack } from '@msgpack/msgpack';
 import {
   getConsoleBridgeStatus,
   initConsoleBridge,
@@ -305,6 +306,7 @@ const HELPER_BASE_URL = '/apps/terminal/vendor/android-terminalapp-assets-js';
 const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
 const NEW_TERMINAL_LONG_PRESS_MS = 450;
 const UI_IPC_RPC_EVENT = 'rpc';
+const UI_IPC_RPC_CODEC = 'msgpack-v1';
 const UI_IPC_IME_FOCUS = 'ui.ime.focus';
 const UI_IPC_IME_BLUR = 'ui.ime.blur';
 let terminalConsoleBridgeInitialized = false;
@@ -457,6 +459,7 @@ async function ensureUiIpcSocket(): Promise<SocketIoSocketLike | null> {
         app_id: 'file_editor_cm6',
         source: 'terminal_app',
       },
+      auth: { rpcCodec: UI_IPC_RPC_CODEC },
     });
     socket.on('connect_error', (error: unknown) => {
       if (terminalUiIpcConnectWarningShown) return;
@@ -477,15 +480,21 @@ async function ensureUiIpcSocket(): Promise<SocketIoSocketLike | null> {
 function emitTerminalImeIntent(active: boolean, trigger: string): void {
   void ensureUiIpcSocket().then((socket) => {
     if (!socket) return;
-    socket.emit(UI_IPC_RPC_EVENT, {
-      jsonrpc: '2.0',
-      method: active ? UI_IPC_IME_FOCUS : UI_IPC_IME_BLUR,
-      params: {
-        source: 'terminal_app',
-        surface: 'terminal',
-        trigger,
-      },
-    });
+    socket.emit(
+      UI_IPC_RPC_EVENT,
+      encodeMessagePack(
+        {
+          jsonrpc: '2.0',
+          method: active ? UI_IPC_IME_FOCUS : UI_IPC_IME_BLUR,
+          params: {
+            source: 'terminal_app',
+            surface: 'terminal',
+            trigger,
+          },
+        },
+        { ignoreUndefined: true },
+      ),
+    );
   });
 }
 

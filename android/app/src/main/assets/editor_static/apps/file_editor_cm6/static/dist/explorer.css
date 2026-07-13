@@ -2,6 +2,9 @@
 
 /* explorer.css - File Explorer Drawer Styles */
 
+@import "./explorer-highlight-github.css";
+@import "./explorer-search-widget.css";
+
 :root {
   --drawer-width: 100vw; /* Change from 75vw to 100vw for full width */
   --explorer-bg: #0b1220;
@@ -17,7 +20,9 @@
 .fe-drawer {
   position: fixed;
   top: 0;
-  left: calc(-1 * var(--drawer-width)); /* Position off-screen by its own width */
+  left: calc(
+    -1 * var(--drawer-width)
+  ); /* Position off-screen by its own width */
   width: var(--drawer-width);
   bottom: 0;
   background: var(--explorer-bg);
@@ -54,10 +59,11 @@
 .fe-drawer-head {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--explorer-bg);
+  gap: 10px;
+  padding: 10px 12px;
+  border: 0;
+  background: var(--card, #0b0f1a);
+  border-bottom: 1px solid var(--borde #333);
   box-shadow: 0 10px 18px rgba(0, 0, 0, 0.45);
   position: sticky;
   top: 0;
@@ -111,7 +117,7 @@
 
 /* Drawer body */
 .fe-drawer-body {
-  position: relative;  /* ← This one line fixes it */
+  position: relative; /* ← This one line fixes it */
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -183,7 +189,7 @@
 
 .fe-tree li {
   display: grid;
-  grid-template-columns: 20px 1fr auto;    /* icon, text, menu (twisty removed) */
+  grid-template-columns: 20px 1fr auto; /* icon, text, menu (twisty removed) */
   gap: 8px;
   padding: 6px 1px 6px 10px;
   cursor: pointer;
@@ -196,7 +202,7 @@
   background: var(--explorer-card-bg);
   margin-left: 0;
   align-items: center;
-  position: relative;  /* For ::after pseudo-element positioning */
+  position: relative; /* For ::after pseudo-element positioning */
 }
 
 .fe-tree-node.fe-active-file[data-kind="file"] {
@@ -206,14 +212,14 @@
 
 /* Make nested ul span the full width */
 .fe-tree li > ul {
-  grid-column: 1 / -1;         /* Span both grid columns */
+  grid-column: 1 / -1; /* Span both grid columns */
   margin: 0;
   padding: 0;
 }
 
 .fe-tree-twisty {
   display: none; /* Hidden - directories expand/collapse by clicking anywhere on the row */
-  width: 0;      /* Takes no space */
+  width: 0; /* Takes no space */
   padding: 0;
   margin: 0;
 }
@@ -223,7 +229,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;  /* Add this if not present - critical for ellipsis to
+  min-width: 0; /* Add this if not present - critical for ellipsis to
     work */
 }
 
@@ -256,6 +262,75 @@
   font-style: italic;
 }
 
+.fe-search-content-widget-host {
+  box-sizing: border-box;
+  display: none;
+  padding: 8px 10px 10px;
+  background: var(--explorer-bg);
+}
+
+.fe-search-content-widget.search-view {
+  box-sizing: border-box;
+  height: auto;
+  width: 100%;
+}
+
+.fe-search-content-widget .search-widgets-container {
+  margin: 0;
+  padding: 0;
+}
+
+.fe-search-content-widget .search-widget .search-container,
+.fe-search-content-widget .search-widget .replace-container,
+.fe-search-content-widget .query-details {
+  margin-left: 0;
+}
+
+.fe-search-content-widget .search-widget .search-container,
+.fe-search-content-widget .search-widget .monaco-findInput,
+.fe-search-content-widget .search-widget .monaco-scrollable-element,
+.fe-search-content-widget .search-widget .monaco-inputbox,
+.fe-search-content-widget .search-widget .monaco-inputbox > .ibwrapper {
+  min-height: 28px !important;
+}
+
+.fe-search-content-widget
+  .search-widget
+  .monaco-inputbox
+  > .ibwrapper
+  > textarea.input {
+  min-height: 22px !important;
+}
+
+.fe-search-content-widget .query-details {
+  margin-top: 8px;
+}
+
+.fe-search-content-widget .query-details h4 {
+  color: rgba(229, 231, 235, 0.8);
+}
+
+.fe-search-content-widget .query-details .file-types {
+  display: block;
+}
+
+.fe-search-content-widget .query-details .file-types > .monaco-findInput {
+  width: 100%;
+}
+
+.fe-search-content-widget .monaco-inputbox.synthetic-focus {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.35);
+}
+
+.fe-search-content-widget .monaco-inputbox > .ibwrapper > .input:focus {
+  outline: none;
+}
+
+.fe-search-content-widget .fe-search-pattern-row {
+  margin-bottom: 8px;
+}
+
 .fe-tree-label {
   transition: color 0.15s ease;
 }
@@ -275,7 +350,7 @@
 }
 
 .fe-entry-symlink::after {
-  content: ' ↗';
+  content: " ↗";
   font-size: calc(0.75em * var(--chrome-font-scale));
   opacity: 0.7;
 }
@@ -301,12 +376,12 @@
 }
 
 .fe-entry-icon-dir::before {
-  content: '📁';
+  content: "📁";
 }
 
 /* Files get Seti SVGs injected via JS; keep CSS fallback empty. */
 .fe-entry-icon-file::before {
-  content: '';
+  content: "";
 }
 
 .fe-card-menu-btn {
@@ -420,7 +495,7 @@
    precise per-node fe-git-* classes. */
 
 .fe-tree-node[data-kind="dir"].fe-dir-has-modified {
-  border-color: rgb(149, 72, 17);        /* strong orange border */
+  border-color: rgb(149, 72, 17); /* strong orange border */
 }
 
 .fe-tree-node[data-kind="dir"].fe-dir-has-conflict {
@@ -441,10 +516,10 @@
 .fe-tree-node[data-kind="dir"].fe-dir-has-untracked.fe-dir-has-staged {
   background: linear-gradient(
     135deg,
-    rgba(15, 49, 101, 1.0) 0%,
-    rgba(10, 52, 89, 1.0) 40%,
-    rgba(5, 55, 57, 1.0) 60%,
-    rgba(0, 58, 43, 1.0) 100%
+    rgba(15, 49, 101, 1) 0%,
+    rgba(10, 52, 89, 1) 40%,
+    rgba(5, 55, 57, 1) 60%,
+    rgba(0, 58, 43, 1) 100%
   );
 }
 
@@ -477,6 +552,7 @@
   flex-direction: column;
   gap: 8px;
   position: relative;
+  min-width: 0;
 }
 
 .fe-git-row {
@@ -484,6 +560,7 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .fe-git-meta {
@@ -501,18 +578,28 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .fe-git-actions .fe-btn {
   flex: 0 0 auto;
   font-size: calc(0.8rem * var(--chrome-font-scale));
   padding: 5px 10px;
+  max-width: 100%;
 }
 
 .fe-git-status-btn {
   margin-left: auto;
   font-size: calc(0.8rem * var(--chrome-font-scale));
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fe-git-actions .fe-git-status-btn {
+  flex: 1 1 auto;
 }
 
 #fe-git-base-dd,
@@ -535,31 +622,31 @@
   top: auto;
 }
 
-     .fe-git-badge {
-       display: inline-flex;
-       align-items: center;
-       justify-content: center;
-       width: 1.3em;
-       height: 1.3em;
-       margin-left: 6px;
-       font-size: calc(0.75em * var(--chrome-font-scale));
-       font-weight: 300;           /* Thin weight */
-       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-   Helvetica, Arial, sans-serif;  /* Thin sans-serif */
-       border-radius: 50%;         /* Makes it circular */
-       line-height: 1;
-       background: transparent;    /* No background fill */
-     }
+.fe-git-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3em;
+  height: 1.3em;
+  margin-left: 6px;
+  font-size: calc(0.75em * var(--chrome-font-scale));
+  font-weight: 300; /* Thin weight */
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; /* Thin sans-serif */
+  border-radius: 50%; /* Makes it circular */
+  line-height: 1;
+  background: transparent; /* No background fill */
+}
 
-     .fe-git-badge-modified {
-       border: 1.5px solid #c2410c;  /* Dark orange thin border */
-       color: #ea580c;               /* Orange-ish letter */
-     }
+.fe-git-badge-modified {
+  border: 1.5px solid #c2410c; /* Dark orange thin border */
+  color: #ea580c; /* Orange-ish letter */
+}
 
-     .fe-git-badge-untracked {
-       border: 1.5px solid #1e40af;  /* Dark blue thin border */
-       color: #2563eb;               /* Blue-ish letter */
-     }
+.fe-git-badge-untracked {
+  border: 1.5px solid #1e40af; /* Dark blue thin border */
+  color: #2563eb; /* Blue-ish letter */
+}
 
 /* --- Select Mode --- */
 .fe-entry-checkbox {
@@ -643,7 +730,9 @@
   color: var(--fg);
   border-radius: 4px;
   cursor: pointer;
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .fe-search-mode button.active {
@@ -738,6 +827,30 @@
   color: #ef4444;
 }
 
+.fe-search-error-inline {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(127, 29, 29, 0.18);
+}
+
+.fe-search-status {
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  color: #94a3b8;
+  background: rgba(15, 23, 42, 0.82);
+  font-size: 12px;
+}
+
+.fe-search-status-running,
+.fe-search-status-loadingMore {
+  color: #bfdbfe;
+}
+
+.fe-search-status-error {
+  color: #fca5a5;
+}
+
 .fe-search-list {
   display: flex;
   flex-direction: column;
@@ -784,9 +897,14 @@
 
 .fe-search-file-group {
   margin-bottom: 0;
+  border-bottom: 1px solid rgba(51, 65, 85, 0.75);
 }
 
 .fe-search-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 8px 12px;
   background: var(--explorer-bg);
   border-radius: 0;
@@ -795,9 +913,49 @@
   margin-bottom: 0;
 }
 
+.fe-search-file-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-search-path-label {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.fe-search-path-parent {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  unicode-bidi: plaintext;
+  color: #94a3b8;
+}
+
+.fe-search-path-name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-search-file-meta {
+  flex: none;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
 .fe-search-match {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 6px 12px;
   cursor: pointer;
@@ -811,15 +969,18 @@
   color: var(--muted);
   min-width: 40px;
   text-align: right;
+  line-height: 1.45;
 }
 
 .fe-search-snippet {
   flex: 1;
+  display: block;
   font-size: 12px;
   font-family: monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .fe-search-changes {
@@ -974,6 +1135,57 @@
   white-space: pre-wrap;
 }
 
+.fe-search-code-surface.hljs {
+  display: block;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+}
+
+.fe-search-snippet.fe-search-code-surface.hljs {
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.fe-search-snippet-token {
+  white-space: pre;
+}
+
+.fe-search-snippet-ellipsis {
+  color: #94a3b8;
+  white-space: pre;
+}
+
+.fe-search-hit {
+  background: rgba(250, 204, 21, 0.18);
+  border: 1px solid rgba(234, 179, 8, 0.9);
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(250, 204, 21, 0.22);
+  color: inherit;
+  margin: 0 1px;
+  padding: 0 1px;
+  white-space: pre;
+}
+
+.fe-search-diff-text.fe-search-code-surface.hljs {
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.fe-search-diff-token {
+  border-radius: 2px;
+}
+
+.fe-search-diff-token.is-added {
+  background: rgba(34, 197, 94, 0.22);
+}
+
+.fe-search-diff-token.is-removed {
+  background: rgba(248, 113, 113, 0.24);
+}
+
 .fe-search-diff-more {
   font-size: 11px;
   color: var(--muted);
@@ -1011,6 +1223,47 @@
   margin-top: 8px;
 }
 
+.fe-search-summary {
+  padding: 8px 12px;
+  color: #94a3b8;
+  font-size: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.fe-search-more-row,
+.fe-search-more-global {
+  display: flex;
+  justify-content: center;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.fe-search-more-row {
+  justify-content: flex-start;
+  padding-left: 60px;
+}
+
+.fe-search-more-btn {
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  background: rgba(30, 41, 59, 0.9);
+  color: #bfdbfe;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.fe-search-more-btn:hover:not(:disabled) {
+  border-color: rgba(147, 197, 253, 0.75);
+  background: rgba(51, 65, 85, 0.95);
+}
+
+.fe-search-more-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .fe-changes-filter-container {
   display: flex;
   align-items: center;
@@ -1045,7 +1298,6 @@
   outline: none;
   border-color: var(--primary);
 }
-
 
 /* Review Panel Styles */
 .fe-review-toolbar {
@@ -1121,11 +1373,10 @@
   color: #ef4444;
 }
 
-
 /* Tree Highlights - Draft styling */
 /* Use ::after pseudo-element so draft indicator layers ON TOP of git status border */
 .fe-tree-node.fe-draft[data-kind="file"]::after {
-  content: '';
+  content: "";
   position: absolute;
   top: 0;
   right: 0;
@@ -1136,7 +1387,7 @@
 }
 
 .fe-tree-node.fe-dir-has-draft::after {
-  content: '';
+  content: "";
   position: absolute;
   top: 0;
   right: 0;

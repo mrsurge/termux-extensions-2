@@ -75,11 +75,6 @@ self.addEventListener('fetch', (event) => {
 
   const url = req.url;
 
-  // API calls (non-static) — network only
-  if (url.includes('/api/') && !shouldCache(url)) {
-    return;
-  }
-
   // Cacheable static assets — cache-first, fallback to network (then cache)
   if (shouldCache(url)) {
     event.respondWith(
@@ -97,16 +92,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Everything else — network-first, cache fallback
+  // Navigation remains network-first for PWA clients. Other requests bypass the worker.
+  if (req.mode !== 'navigate') return;
+
   event.respondWith(
-    fetch(req)
-      .then(resp => {
-        if (resp.ok && (url.endsWith('.html') || url === self.registration.scope)) {
-          const clone = resp.clone();
-          caches.open(CACHE_NAME).then(c => c.put(req, clone));
-        }
-        return resp;
-      })
-      .catch(() => caches.match(req))
+    fetch(req).then(resp => {
+      if (resp.ok) {
+        const clone = resp.clone();
+        caches.open(CACHE_NAME).then(c => c.put(req, clone));
+      }
+      return resp;
+    }).catch(async () => (await caches.match(req)) || caches.match('/'))
   );
 });
