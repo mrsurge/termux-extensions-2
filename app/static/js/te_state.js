@@ -87,6 +87,11 @@ function getSync(key, defaultValue = null) {
   return fromCache(key, defaultValue);
 }
 
+function seed(key, value) {
+  if (typeof key !== 'string' || key.trim() === '') return;
+  CACHE.set(key, value);
+}
+
 async function preload(keys) {
   try {
     await fetchKeys(keys);
@@ -153,6 +158,7 @@ const teState = {
   merge,
   remove,
   preload,
+  seed,
   has,
 };
 

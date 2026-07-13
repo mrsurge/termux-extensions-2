@@ -11,8 +11,8 @@ android {
         applicationId = "com.termux.extensions"
         minSdk = 24
         targetSdk = 34
-        versionCode = 20303
-        versionName = "1.0.7-r0.2.303"
+        versionCode = 20306
+        versionName = "1.0.7-r0.2.306"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.base"
@@ -106,6 +106,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.socket:socket.io-client:2.1.1")
+    implementation("org.msgpack:msgpack-core:0.9.12")
     add("geckoImplementation", "org.mozilla.geckoview:geckoview:131.0.20240923135042")
     debugImplementation("androidx.compose.ui:ui-tooling")
     

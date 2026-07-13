@@ -77,28 +77,25 @@ done
     copy_file "$APP_DIR/static/vendor/socket.io.min.js" "$DEST/static/vendor/socket.io.min.js"
 
 # ===================================================================
-# 3. Monaco bootstrap + chunks + basic-languages + language (NOT workers)
+# 3. Monaco runtime CSS + workers
 # ===================================================================
-echo "[3/8] Monaco te2-lang (no workers)..."
+echo "[3/8] Monaco te2-lang runtime assets..."
 
 MONACO_SRC="$APP_DIR/static/vendor/monaco-editor-core/te2-lang"
 MONACO_DST="$DEST/static/vendor/monaco-editor-core/te2-lang"
 
-# Bootstrap (JS + CSS only, skip .map/.bak)
+# Monaco JavaScript is compiled into Code TE2's host.js. Keep only the runtime
+# stylesheet, its font, and optional language-worker modules as separate files.
 mkdir -p "$MONACO_DST/bootstrap"
-for ext in js css; do
-    [ -f "$MONACO_SRC/bootstrap/monaco.bootstrap.bundle.$ext" ] && \
-        cp "$MONACO_SRC/bootstrap/monaco.bootstrap.bundle.$ext" "$MONACO_DST/bootstrap/"
-done
-
-# Chunks
-for f in "$MONACO_SRC"/chunk-*.js; do
-    [ -f "$f" ] && cp "$f" "$MONACO_DST/"
-done
-
-# basic-languages + language
-[ -d "$MONACO_SRC/basic-languages" ] && copy_tree "$MONACO_SRC/basic-languages" "$MONACO_DST/basic-languages"
-[ -d "$MONACO_SRC/language" ] && copy_tree "$MONACO_SRC/language" "$MONACO_DST/language"
+[ -f "$MONACO_SRC/bootstrap/monaco.bootstrap.bundle.css" ] && \
+    copy_file \
+        "$MONACO_SRC/bootstrap/monaco.bootstrap.bundle.css" \
+        "$MONACO_DST/bootstrap/monaco.bootstrap.bundle.css"
+[ -f "$MONACO_SRC/bootstrap/codicon-LN6W7LCM.ttf" ] && \
+    copy_file \
+        "$MONACO_SRC/bootstrap/codicon-LN6W7LCM.ttf" \
+        "$MONACO_DST/bootstrap/codicon-LN6W7LCM.ttf"
+[ -d "$MONACO_SRC/workers" ] && copy_tree "$MONACO_SRC/workers" "$MONACO_DST/workers"
 
 # ===================================================================
 # 4. Monaco ESM (worker-only)
@@ -108,10 +105,8 @@ echo "[4/8] Monaco ESM worker bundle..."
 MONACO_ESM_SRC="$APP_DIR/static/vendor/monaco-editor-core/esm"
 MONACO_ESM_DST="$DEST/static/vendor/monaco-editor-core/esm"
 
-# The main Monaco UI is already bundled into te2-lang/bootstrap/monaco.bootstrap.bundle.js.
-# Android still needs the editor web worker entrypoint because the host-bundled
-# editor runtime loads it from /ui/monaco_vscode/esm/vs/editor/common/services/
-# editorWebWorkerMain.bundle.js at runtime.
+# The main Monaco UI is compiled into Code TE2's host.js. Android still needs
+# the generic editor worker entrypoint as a separate module worker.
 [ -f "$MONACO_ESM_SRC/vs/editor/common/services/editorWebWorkerMain.bundle.js" ] && \
     copy_file \
         "$MONACO_ESM_SRC/vs/editor/common/services/editorWebWorkerMain.bundle.js" \
@@ -128,6 +123,8 @@ CM6_STATIC_DST="$DEST/apps/file_editor_cm6/static"
 # The Android shell loads the built host bundle, not the raw host source tree.
 [ -f "$CM6_STATIC_SRC/dist/host.js" ] && \
     copy_file "$CM6_STATIC_SRC/dist/host.js" "$CM6_STATIC_DST/dist/host.js"
+[ -f "$CM6_STATIC_SRC/dist/host.css" ] && \
+    copy_file "$CM6_STATIC_SRC/dist/host.css" "$CM6_STATIC_DST/dist/host.css"
 
 # Version surface kept in sync with the server and APK bundle.
 [ -f "$CM6_STATIC_SRC/version.txt" ] && \
@@ -136,6 +133,14 @@ CM6_STATIC_DST="$DEST/apps/file_editor_cm6/static"
 # Direct host-page runtime references that are not bundled into host.js.
 [ -f "$CM6_STATIC_SRC/dist/explorer.css" ] && \
     copy_file "$CM6_STATIC_SRC/dist/explorer.css" "$CM6_STATIC_DST/dist/explorer.css"
+[ -f "$CM6_STATIC_SRC/dist/explorer-highlight-github.css" ] && \
+    copy_file \
+        "$CM6_STATIC_SRC/dist/explorer-highlight-github.css" \
+        "$CM6_STATIC_DST/dist/explorer-highlight-github.css"
+[ -f "$CM6_STATIC_SRC/dist/explorer-search-widget.css" ] && \
+    copy_file \
+        "$CM6_STATIC_SRC/dist/explorer-search-widget.css" \
+        "$CM6_STATIC_DST/dist/explorer-search-widget.css"
 
 # App icons referenced by manifests/sidebar surfaces.
 [ -d "$CM6_STATIC_SRC/icons" ] && copy_tree "$CM6_STATIC_SRC/icons" "$CM6_STATIC_DST/icons"
@@ -178,13 +183,17 @@ mkdir -p "$UI_DST/monaco_editor"
         "$CM6_MONACO/vscode_build_src/out/breadcrumbsWidget.css" \
         "$UI_DST/monaco_editor/vscode_build_src/out/breadcrumbsWidget.css"
 
+# Editor overlay styles loaded by inline_host.ts.
+CHAT_STYLE_SRC="$CM6_MONACO/vscode_chat_editing_vendor/upstream/media"
+CHAT_STYLE_DST="$DEST/apps/file_editor_cm6/monaco_editor/vscode_chat_editing_vendor/upstream/media"
+for style in chatEditorController.css chatEditingEditorOverlay.css; do
+    [ -f "$CHAT_STYLE_SRC/$style" ] && \
+        copy_file "$CHAT_STYLE_SRC/$style" "$CHAT_STYLE_DST/$style"
+done
+
 # file_editor_cm6 top-level HTML served by routes.
 [ -f "$APP_DIR/apps/file_editor_cm6/template.html" ] && \
     copy_file "$APP_DIR/apps/file_editor_cm6/template.html" "$DEST/apps/file_editor_cm6/template.html"
-
-# editor_iframe.html (served at /api/app/file_editor_cm6/ui/nc)
-[ -f "$CM6_MONACO/editor_iframe.html" ] && \
-    copy_file "$CM6_MONACO/editor_iframe.html" "$UI_DST/nc.html"
 
 # ===================================================================
 # 7. TE2 extension frontend assets
@@ -226,10 +235,10 @@ echo "[8/8] HTML pages..."
 [ -f "$APP_DIR/templates/index.html" ] && \
     copy_file "$APP_DIR/templates/index.html" "$DEST/index.html"
 
-# generic app_shell.html served locally for /app/<app_id>
+# Code TE2 app shell served locally for /app/file_editor_cm6.
 if [ -f "$APP_DIR/templates/app_shell.html" ]; then
-    sed 's/{{ app_id|tojson }}/null/g; s|{{ url_for('\''static'\'', filename='\''js/ws_port.js'\'') }}|/static/js/ws_port.js|g' \
-        "$APP_DIR/templates/app_shell.html" > "$DEST/app_shell.html"
+    sed 's/{{ app_id|tojson }}/"file_editor_cm6"/g; s|{{ url_for('\''static'\'', filename='\''js/ws_port.js'\'') }}|/static/js/ws_port.js|g' \
+        "$APP_DIR/templates/app_shell.html" > "$DEST/app_shell_file_editor_cm6.html"
 fi
 
 # ===================================================================

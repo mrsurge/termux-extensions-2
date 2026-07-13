@@ -144,6 +144,10 @@ impl AppRegistry {
         self.apps.iter().map(AppDefinition::to_payload).collect()
     }
 
+    pub fn app_payload(&self, app_id: &str) -> Option<Value> {
+        self.get_app(app_id).map(AppDefinition::to_payload)
+    }
+
     pub fn catalog_payloads_with_running(&self, running_ids: &HashSet<String>) -> Vec<Value> {
         self.apps
             .iter()

@@ -422,8 +422,6 @@
     </script>
     
     <script type="module">
-        const SETTINGS_ENDPOINT = '/api/settings';
-
         function escapeHtml(value) {
             return String(value == null ? '' : value)
                 .replace(/&/g, '&amp;')
@@ -478,11 +476,6 @@
             return body.data;
         }
 
-        function appsWsUrl() {
-            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            return `${proto}//${window.location.host}/ws/apps`;
-        }
-
         function appRequiresBackend(appDef) {
             return !!(appDef && appDef.entrypoints && appDef.entrypoints.backend_blueprint);
         }
@@ -498,14 +491,6 @@
             if (raw === 'loading') return 'starting';
             if (raw === 'ok' || raw === 'up' || raw === 'serving') return 'ready';
             return raw || 'starting';
-        }
-
-        async function fetchAppReadiness(targetAppId) {
-            try {
-                return await teFetch(`/api/apps/${encodeURIComponent(targetAppId)}/readiness`);
-            } catch (_) {
-                return { app_id: targetAppId, status: 'starting' };
-            }
         }
 
         function renderBackendReadinessPlaceholder(appDef, readiness) {
@@ -531,77 +516,118 @@
             `;
         }
 
-        async function waitForBackendReadiness(appDef) {
-            if (!appRequiresBackend(appDef) || !appSupportsReadiness(appDef)) return;
-
+        // Rust lifecycle snapshots and readiness facts are the only release authority.
+        async function waitForAppLifecycle() {
+            renderBackendReadinessPlaceholder(null, { app_id: appId, status: 'starting' });
             let done = false;
-            let ws = null;
+            let events = null;
+            let appDef = null;
+            let bootstrapApp = null;
 
             function cleanup() {
                 done = true;
-                if (ws) {
-                    try { ws.close(); } catch (_) {}
-                    ws = null;
+                if (events) {
+                    try { events.close(); } catch (_) {}
+                    events = null;
                 }
             }
 
-            function extractCatalogReadiness(payload) {
+            function extractCatalogApp(payload) {
                 const catalog = Array.isArray(payload?.catalog) ? payload.catalog : [];
-                const match = catalog.find((item) => String(item?.id || '').trim() === appId);
-                return match && typeof match.readiness === 'object' ? match.readiness : null;
+                return catalog.find((item) => String(item?.id || '').trim() === appId) || null;
             }
 
-            await new Promise((resolve) => {
+            function parseEventPayload(event) {
+                try {
+                    return JSON.parse(event.data);
+                } catch (_) {
+                    return null;
+                }
+            }
+
+            function applyBootstrap(payload) {
+                const bootstrap = payload?.app_bootstrap;
+                if (!bootstrap || String(bootstrap.app_id || '').trim() !== appId) return;
+                bootstrapApp = bootstrap.app && typeof bootstrap.app === 'object'
+                    ? bootstrap.app
+                    : null;
+                debugFullStack = bootstrap.debug_full_stack === true;
+                const bootstrapStateKey = String(bootstrap.state_key || '').trim();
+                if (teStateStore && bootstrapStateKey === stateKey && typeof teStateStore.seed === 'function') {
+                    teStateStore.seed(stateKey, bootstrap.state);
+                    stateCache.set(stateKey, bootstrap.state);
+                }
+            }
+
+            return await new Promise((resolve, reject) => {
+                function resolveApp() {
+                    const resolved = appDef;
+                    cleanup();
+                    resolve(resolved);
+                }
+
                 function applyReadiness(readiness) {
-                    if (done) return;
+                    if (done || !appDef) return;
                     const status = normalizeReadinessStatus(readiness);
                     if (status === 'ready') {
-                        cleanup();
-                        resolve();
+                        resolveApp();
                         return;
                     }
                     renderBackendReadinessPlaceholder(appDef, readiness || { app_id: appId, status });
                 }
 
-                async function fetchInitialReadiness() {
-                    const readiness = await fetchAppReadiness(appId);
-                    applyReadiness(readiness);
+                function applyCatalog(payload) {
+                    if (done) return;
+                    const match = extractCatalogApp(payload);
+                    if (!match || !bootstrapApp) {
+                        cleanup();
+                        reject(new Error(`Lifecycle bootstrap for app "${appId}" is incomplete.`));
+                        return;
+                    }
+                    appDef = {
+                        ...match,
+                        ...bootstrapApp,
+                        readiness: match.readiness,
+                    };
+                    if (!appDef.entrypoints || typeof appDef.entrypoints.frontend_template !== 'string') {
+                        cleanup();
+                        reject(new Error(`Lifecycle bootstrap for app "${appId}" has no frontend entrypoint.`));
+                        return;
+                    }
+                    host.setTitle(appDef.name || 'Termux App');
+                    if (!appRequiresBackend(appDef) || !appSupportsReadiness(appDef)) {
+                        resolveApp();
+                        return;
+                    }
+                    applyReadiness(appDef.readiness || { app_id: appId, status: 'starting' });
                 }
 
-                try {
-                    ws = new WebSocket(appsWsUrl());
-                    ws.addEventListener('message', (ev) => {
-                        let message = null;
-                        try {
-                            message = JSON.parse(ev.data);
-                        } catch (_) {
-                            return;
-                        }
-                        if (!message || typeof message !== 'object') return;
-                        if (message.type === 'apps_snapshot' || message.type === 'catalog_snapshot') {
-                            const readiness = extractCatalogReadiness(message.payload || {});
-                            if (readiness) applyReadiness(readiness);
-                            return;
-                        }
-                        if (message.type === 'app_readiness_changed') {
-                            const payload = message.payload || {};
-                            if (String(payload.app_id || '').trim() === appId && payload.readiness) {
-                                applyReadiness(payload.readiness);
-                            }
-                            return;
-                        }
-                        if (message.type === 'app_running_changed') {
-                            const payload = message.payload || {};
-                            if (String(payload.app_id || '').trim() === appId && payload.running === false) {
-                                applyReadiness({ app_id: appId, status: 'stopped' });
-                            }
+                events = new EventSource(`/api/apps/events?app_id=${encodeURIComponent(appId)}`);
+                for (const eventName of ['apps_snapshot', 'catalog_snapshot']) {
+                    events.addEventListener(eventName, (event) => {
+                        const payload = parseEventPayload(event);
+                        if (payload) {
+                            applyBootstrap(payload);
+                            applyCatalog(payload);
                         }
                     });
-                } catch (_) {
-                    ws = null;
                 }
-
-                void fetchInitialReadiness();
+                events.addEventListener('app_readiness_changed', (event) => {
+                    const payload = parseEventPayload(event) || {};
+                    if (String(payload.app_id || '').trim() === appId && payload.readiness) {
+                        applyReadiness(payload.readiness);
+                    }
+                });
+                events.addEventListener('app_running_changed', (event) => {
+                    const payload = parseEventPayload(event) || {};
+                    if (String(payload.app_id || '').trim() === appId && payload.running === false) {
+                        if (appDef) {
+                            applyReadiness({ app_id: appId, status: 'stopped' });
+                        } else {
+                            renderBackendReadinessPlaceholder(null, { app_id: appId, status: 'stopped' });
+                        }
+                    }
+                });
             });
         }
 
@@ -620,33 +646,11 @@
             });
         }
 
-        async function fetchSettings() {
-            try {
-                const data = await teFetch(SETTINGS_ENDPOINT);
-                return data && typeof data === 'object' ? data : {};
-            } catch (err) {
-                console.warn('Failed to load settings', err);
-                return {};
-            }
-        }
-
         const teStateStore = window.teState || null;
         const stateCache = new Map();
 
         function getStateKey() { return `app_state:${appId}`; }
         const stateKey = getStateKey();
-
-        async function ensureStatePreloaded(key) {
-            if (!teStateStore || stateCache.has(key)) return;
-            try {
-                await teStateStore.preload([key]);
-                if (teStateStore.has(key)) {
-                    stateCache.set(key, teStateStore.getSync(key, null));
-                }
-            } catch (err) {
-                console.warn('Failed to preload app state', err);
-            }
-        }
 
         function getCachedState(key, defaultValue = null) {
             if (stateCache.has(key)) {
@@ -1007,15 +1011,7 @@
             try {
                 if (!appId) throw new Error('App ID not available for app shell');
                 const sidebarVersion = sidebarShortcutVersion();
-                const response = await fetch('/api/apps');
-                const result = await response.json();
-                if (!result.ok) throw new Error(result.error);
-                const appDef = result.data.find(a => a.id === appId);
-                if (!appDef) throw new Error(`App with ID "${appId}" not found.`);
-
-                host.setTitle(appDef.name || 'Termux App');
-                await ensureStatePreloaded(stateKey);
-                await waitForBackendReadiness(appDef);
+                const appDef = await waitForAppLifecycle();
                 const assetBaseUrl = typeof appDef.asset_base_url === 'string' ? appDef.asset_base_url.trim() : '';
                 const templatePath = assetBaseUrl
                     ? `${assetBaseUrl.replace(/\/+$/, '')}/${appDef.entrypoints.frontend_template.replace(/^\/+/, '')}`
@@ -1052,12 +1048,6 @@
 
         document.addEventListener('DOMContentLoaded', async () => {
             if (!await window.teNativeServiceWorkerReady) return;
-            try {
-                const settings = await fetchSettings();
-                debugFullStack = !!settings.debugFullStack;
-            } catch (err) {
-                debugFullStack = false;
-            }
             await loadApp();
         });
     </script>

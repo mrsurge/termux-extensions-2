@@ -22,6 +22,7 @@ class UiIpcClient(
         private const val UI_IPC_EDITOR_BLUR = "ui.editor.blur"
         private const val UI_IPC_IME_FOCUS = "ui.ime.focus"
         private const val UI_IPC_IME_BLUR = "ui.ime.blur"
+        private const val UI_IPC_RPC_CODEC = "msgpack-v1"
         private const val DEFAULT_CONSOLE_TARGET_WORKER_ID = "main_page"
     }
 
@@ -47,6 +48,7 @@ class UiIpcClient(
                 transports = arrayOf("websocket")
                 upgrade = false
                 query = "app_id=file_editor_cm6&source=android_native"
+                auth = mapOf("rpcCodec" to UI_IPC_RPC_CODEC)
                 reconnection = true
                 reconnectionDelay = 2000
                 reconnectionDelayMax = 10000
@@ -67,8 +69,8 @@ class UiIpcClient(
                 }
                 on(UI_IPC_RPC_NOTIFICATION_EVENT) { args ->
                     try {
-                        val json = parseJsonArg(args.firstOrNull()) ?: return@on
-                        handleUiIpcNotification(json)
+                        val notification = UiIpcMessagePackDecoder.decode(args.firstOrNull()) ?: return@on
+                        handleUiIpcNotification(notification)
                     } catch (e: Exception) {
                         Log.w(TAG, "Error processing UI IPC RPC notification", e)
                     }
@@ -161,9 +163,9 @@ class UiIpcClient(
         return socket
     }
 
-    private fun handleUiIpcNotification(json: JSONObject) {
-        if (json.optString("jsonrpc", "") != "2.0") return
-        when (json.optString("method", "")) {
+    private fun handleUiIpcNotification(notification: UiIpcRpcNotification) {
+        if (notification.jsonRpc != "2.0") return
+        when (notification.method) {
             UI_IPC_EDITOR_FOCUS -> {
                 handleImeFocus("editor")
             }
@@ -171,18 +173,12 @@ class UiIpcClient(
                 handleImeBlur("editor")
             }
             UI_IPC_IME_FOCUS -> {
-                handleImeFocus(notificationSource(json, "ime"))
+                handleImeFocus(notification.source?.trim().orEmpty().ifEmpty { "ime" })
             }
             UI_IPC_IME_BLUR -> {
-                handleImeBlur(notificationSource(json, "ime"))
+                handleImeBlur(notification.source?.trim().orEmpty().ifEmpty { "ime" })
             }
         }
-    }
-
-    private fun notificationSource(json: JSONObject, fallback: String): String {
-        val params = json.optJSONObject("params")
-        val raw = params?.optString("source", "")?.trim().orEmpty()
-        return raw.ifEmpty { fallback }
     }
 
     private fun handleImeFocus(owner: String) {

@@ -4,7 +4,7 @@ use ferrous_framework::{FerrousNativeLifecycleEventKind, FerrousNativeManager};
 use axum::{
     Json, Router,
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderValue, StatusCode, header},
     response::{
         IntoResponse, Response,
@@ -28,7 +28,12 @@ use url::form_urlencoded;
 #[cfg(feature = "ferrous-framework-native")]
 use crate::app_worker_pipe_bridge;
 use crate::{
-    ApiResponse, AppState, json_error,
+    ApiResponse, AppState,
+    framework_services::{
+        settings_ops::{self, SettingsStore},
+        state_ops::{self, StateReadRequest, StateStore},
+    },
+    json_error,
     launcher::{launch_app, launch_supported},
     proxy_transport::absolute_upstream_url,
     registry::{self, AppRegistry, AppRoot},
@@ -67,6 +72,12 @@ impl AppsEvent {
 struct OpenAppRequest {
     #[serde(default)]
     params: JsonMap<String, Value>,
+}
+
+// App-scoped SSE clients receive every frontend boot fact in the initial snapshot.
+#[derive(Debug, Default, Deserialize)]
+struct AppsEventsQuery {
+    app_id: Option<String>,
 }
 
 pub(crate) fn router() -> Router<AppState> {
@@ -409,7 +420,7 @@ async fn apps_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Respons
 async fn handle_apps_ws(mut socket: WebSocket, state: AppState) {
     if send_apps_ws_event(
         &mut socket,
-        AppsEvent::new("apps_snapshot", apps_snapshot_payload(&state).await),
+        AppsEvent::new("apps_snapshot", apps_snapshot_payload(&state, None).await),
     )
     .await
     .is_err()
@@ -434,7 +445,10 @@ async fn handle_apps_ws(mut socket: WebSocket, state: AppState) {
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
-                        let event = AppsEvent::new("catalog_snapshot", apps_snapshot_payload(&state).await);
+                        let event = AppsEvent::new(
+                            "catalog_snapshot",
+                            apps_snapshot_payload(&state, None).await,
+                        );
                         if send_apps_ws_event(&mut socket, event).await.is_err() {
                             break;
                         }
@@ -452,30 +466,43 @@ async fn send_apps_ws_event(socket: &mut WebSocket, event: AppsEvent) -> Result<
         .await
 }
 
-async fn apps_events_sse(State(state): State<AppState>) -> Response {
+async fn apps_events_sse(
+    State(state): State<AppState>,
+    Query(query): Query<AppsEventsQuery>,
+) -> Response {
     // SSE mirrors the same event names as the Python apps extension while also
     // emitting an initial snapshot so new clients can hydrate without a GET.
     let initial_state = state.clone();
+    let app_id = normalized_app_id(query.app_id);
+    let initial_app_id = app_id.clone();
     let initial = stream::once(async move {
         Ok::<Event, Infallible>(
-            AppsEvent::new("apps_snapshot", apps_snapshot_payload(&initial_state).await)
-                .sse_event(),
+            AppsEvent::new(
+                "apps_snapshot",
+                apps_snapshot_payload(&initial_state, initial_app_id.as_deref()).await,
+            )
+            .sse_event(),
         )
     });
     let update_state = state.clone();
     let updates = stream::unfold(
-        (state.apps_events().subscribe(), update_state),
-        |(mut events, state)| async move {
+        (state.apps_events().subscribe(), update_state, app_id),
+        |(mut events, state, app_id)| async move {
             loop {
                 match events.recv().await {
                     Ok(event) => {
-                        return Some((Ok::<Event, Infallible>(event.sse_event()), (events, state)));
+                        return Some((
+                            Ok::<Event, Infallible>(event.sse_event()),
+                            (events, state, app_id),
+                        ));
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
-                        let event =
-                            AppsEvent::new("catalog_snapshot", apps_snapshot_payload(&state).await)
-                                .sse_event();
-                        return Some((Ok::<Event, Infallible>(event), (events, state)));
+                        let event = AppsEvent::new(
+                            "catalog_snapshot",
+                            apps_snapshot_payload(&state, app_id.as_deref()).await,
+                        )
+                        .sse_event();
+                        return Some((Ok::<Event, Infallible>(event), (events, state, app_id)));
                     }
                     Err(broadcast::error::RecvError::Closed) => return None,
                 }
@@ -496,18 +523,86 @@ async fn apps_events_sse(State(state): State<AppState>) -> Response {
     response
 }
 
-async fn apps_snapshot_payload(state: &AppState) -> Value {
+async fn apps_snapshot_payload(state: &AppState, app_id: Option<&str>) -> Value {
     // Launcher snapshots combine the manifest registry with read-only FWS
     // discovery so running markers work before lifecycle mutation is ported.
     let registry = AppRegistry::load(state.app_roots());
     let running_ids = running_app_ids(&registry);
-    let readiness = state.readiness_store().read().await;
+    let mut catalog = {
+        let readiness = state.readiness_store().read().await;
+        catalog_payloads_with_running_and_readiness(&registry, &running_ids, &readiness)
+    };
     let mut sorted_running_ids = running_ids.iter().cloned().collect::<Vec<_>>();
+    if let Some(app_id) = app_id {
+        catalog.retain(|app| app.get("id").and_then(Value::as_str) == Some(app_id));
+        sorted_running_ids.retain(|running_id| running_id == app_id);
+    }
     sorted_running_ids.sort();
 
-    json!({
-        "catalog": catalog_payloads_with_running_and_readiness(&registry, &running_ids, &readiness),
+    let mut payload = json!({
+        "catalog": catalog,
         "running_ids": sorted_running_ids,
+    });
+    if let Some((app_id, app)) = app_id.and_then(|app_id| {
+        registry
+            .app_payload(app_id)
+            .map(|app| (app_id.to_owned(), app))
+    }) {
+        payload["app_bootstrap"] = app_bootstrap_payload(app_id, app).await;
+    }
+    payload
+}
+
+fn normalized_app_id(app_id: Option<String>) -> Option<String> {
+    app_id
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+async fn app_bootstrap_payload(app_id: String, app: Value) -> Value {
+    let fallback_app_id = app_id.clone();
+    let fallback_app = app.clone();
+    match tokio::task::spawn_blocking(move || {
+        let state_key = format!("app_state:{app_id}");
+        let state = state_ops::get_state(
+            &StateStore::default(),
+            StateReadRequest {
+                keys: vec![state_key.clone()],
+            },
+        )
+        .ok()
+        .and_then(|mut values| values.remove(&state_key))
+        .unwrap_or(Value::Null);
+        let settings = settings_ops::load_settings(&SettingsStore::default());
+        let debug_full_stack = settings
+            .get("debugFullStack")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        build_app_bootstrap_payload(&app_id, app, state, debug_full_stack)
+    })
+    .await
+    {
+        Ok(payload) => payload,
+        Err(error) => {
+            warn!(%error, app_id = %fallback_app_id, "app bootstrap snapshot task failed");
+            build_app_bootstrap_payload(&fallback_app_id, fallback_app, Value::Null, false)
+        }
+    }
+}
+
+fn build_app_bootstrap_payload(
+    app_id: &str,
+    app: Value,
+    state: Value,
+    debug_full_stack: bool,
+) -> Value {
+    let state_key = format!("app_state:{app_id}");
+    json!({
+        "app_id": app_id,
+        "app": app,
+        "state_key": state_key,
+        "state": state,
+        "debug_full_stack": debug_full_stack,
     })
 }
 
@@ -577,7 +672,7 @@ fn ensure_pipe_bridge_for_running_app(_state: &AppState, _running: &RunningApp) 
 async fn publish_catalog_snapshot(state: &AppState) {
     publish_apps_event(
         state,
-        AppsEvent::new("catalog_snapshot", apps_snapshot_payload(state).await),
+        AppsEvent::new("catalog_snapshot", apps_snapshot_payload(state, None).await),
     );
 }
 
@@ -772,4 +867,42 @@ fn catalog_payloads_with_running_and_readiness(
             Value::Object(object)
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_app_bootstrap_payload, normalized_app_id};
+    use serde_json::json;
+
+    #[test]
+    fn apps_events_app_id_is_trimmed_and_empty_values_are_ignored() {
+        assert_eq!(
+            normalized_app_id(Some("  file_editor_cm6  ".to_owned())),
+            Some("file_editor_cm6".to_owned())
+        );
+        assert_eq!(normalized_app_id(Some("   ".to_owned())), None);
+        assert_eq!(normalized_app_id(None), None);
+    }
+
+    #[test]
+    fn app_bootstrap_snapshot_carries_state_and_debug_contract() {
+        let payload = build_app_bootstrap_payload(
+            "file_editor_cm6",
+            json!({
+                "id": "file_editor_cm6",
+                "entrypoints": { "frontend_template": "template.html" },
+            }),
+            json!({ "activeProject": "/workspace" }),
+            true,
+        );
+
+        assert_eq!(payload["app_id"], "file_editor_cm6");
+        assert_eq!(
+            payload["app"]["entrypoints"]["frontend_template"],
+            "template.html"
+        );
+        assert_eq!(payload["state_key"], "app_state:file_editor_cm6");
+        assert_eq!(payload["state"]["activeProject"], "/workspace");
+        assert_eq!(payload["debug_full_stack"], true);
+    }
 }
