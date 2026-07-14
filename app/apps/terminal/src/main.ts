@@ -1,5 +1,5 @@
 import ReconnectingWebSocket from 'reconnecting-websocket';
-import { encode as encodeMessagePack } from '@msgpack/msgpack';
+import { decode as decodeMessagePack, encode as encodeMessagePack } from '@msgpack/msgpack';
 import {
   getConsoleBridgeStatus,
   initConsoleBridge,
@@ -27,18 +27,10 @@ interface ShellLogs {
 interface ShellRecord {
   id: string;
   label?: string;
-  kind?: string;
   status?: string;
   cwd?: string;
   stats?: ShellStats;
   logs?: ShellLogs;
-}
-
-interface ShellHistoryPayload {
-  frames: ServerFrame[];
-  after_seq: number;
-  count: number;
-  total_count: number;
 }
 
 interface SidebarCwdPayload {
@@ -58,68 +50,56 @@ interface SidebarWindowStatePayload {
   };
 }
 
-interface TerminalConnectParams {
-  session_id?: string;
-  shell_id?: string;
-  cols?: number;
-  rows?: number;
-  resume_after_seq?: number;
-  create_if_missing?: boolean;
-  cwd?: string;
-  shell?: string | string[];
-}
-
-interface TerminalInputParams {
-  data_b64: string;
-  flush?: 'auto' | 'immediate';
-}
-
-interface TerminalResizeParams {
+interface ClientAttachMessage {
+  type: 'attach';
+  request_id: string;
+  shell_id: string;
   cols: number;
   rows: number;
 }
 
-interface TerminalDestroyParams {}
-
-interface TerminalPingParams {
-  nonce?: string;
+interface ClientInputMessage {
+  type: 'input';
+  data: Uint8Array;
 }
 
-type TerminalKind = 'python' | 'native' | 'node';
-
-interface ClientNotificationMap {
-  'terminal.connect': TerminalConnectParams;
-  'terminal.input': TerminalInputParams;
-  'terminal.resize': TerminalResizeParams;
-  'terminal.destroy': TerminalDestroyParams;
-  'terminal.ping': TerminalPingParams;
+interface ClientResizeMessage {
+  type: 'resize';
+  cols: number;
+  rows: number;
 }
 
-type ClientMethod = keyof ClientNotificationMap;
-
-interface JsonRpcNotification<M extends ClientMethod> {
-  jsonrpc: '2.0';
-  method: M;
-  params: ClientNotificationMap[M];
+interface ClientDestroyMessage {
+  type: 'destroy';
 }
 
-interface ServerHelloFrame {
-  type: 'hello';
-  session_id: string;
+interface ClientPingMessage {
+  type: 'ping';
+  request_id: string;
+}
+
+type ClientMessage = ClientAttachMessage | ClientInputMessage | ClientResizeMessage | ClientDestroyMessage | ClientPingMessage;
+
+interface ServerCheckpointFrame {
+  type: 'checkpoint';
+  request_id: string;
   shell_id: string;
-  next_seq?: number;
-  resume_mode?: string;
+  sequence: number;
+  cols: number;
+  rows: number;
+  scrollback: number;
+  state: Uint8Array;
 }
 
-interface ServerDataFrame {
-  type: 'data';
-  seq: number;
-  data_b64: string;
+interface ServerOutputFrame {
+  type: 'output';
+  sequence: number;
+  data: Uint8Array;
 }
 
-interface ServerClosedFrame {
-  type: 'closed';
-  seq?: number;
+interface ServerExitFrame {
+  type: 'exit';
+  sequence: number;
   exit_code?: number | null;
   reason?: string;
 }
@@ -133,14 +113,10 @@ interface ServerErrorFrame {
 
 interface ServerPongFrame {
   type: 'pong';
-  nonce?: string;
+  request_id?: string;
 }
 
-interface ServerReadyFrame {
-  type: 'ready';
-}
-
-type ServerFrame = ServerHelloFrame | ServerDataFrame | ServerClosedFrame | ServerErrorFrame | ServerPongFrame | ServerReadyFrame;
+type ServerFrame = ServerCheckpointFrame | ServerOutputFrame | ServerExitFrame | ServerErrorFrame | ServerPongFrame;
 
 interface UiRefs {
   list: HTMLElement;
@@ -149,7 +125,6 @@ interface UiRefs {
   drawerOverlay: HTMLElement;
   btnMenu: HTMLButtonElement;
   btnNew: HTMLButtonElement;
-  btnNewDropdown: HTMLElement;
   btnRefresh: HTMLButtonElement;
   btnStop: HTMLButtonElement;
   btnKill: HTMLButtonElement;
@@ -220,7 +195,10 @@ interface XtermTerminalLike {
   open(container: HTMLElement): void;
   focus(): void;
   dispose(): void;
-  write(data: string): void;
+  reset(): void;
+  resize(cols: number, rows: number): void;
+  scrollToBottom(): void;
+  write(data: string | Uint8Array, callback?: () => void): void;
   loadAddon(addon: XtermAddonLike): void;
   onData(handler: (data: string) => void): XtermDisposable;
   onResize(handler: (event: { cols: number; rows: number }) => void): XtermDisposable;
@@ -254,7 +232,8 @@ interface AppState {
   activeId: string | null;
   ws: ReconnectingWebSocket | null;
   wsDesiredId: string | null;
-  sessionId: string | null;
+  attachRequestId: string | null;
+  checkpointReady: boolean;
   lastSeqApplied: number;
   term: XtermTerminalLike | null;
   fitAddon: XtermFitAddonLike | null;
@@ -272,7 +251,6 @@ interface AppState {
   inputFlushTimer: number | null;
   inputLastChunk: string | null;
   inputLastChunkAt: number | null;
-  decoder: TextDecoder;
   encoder: TextEncoder;
 }
 
@@ -287,7 +265,6 @@ interface SidebarStateContext {
 
 type InputBatchMode = 'normal' | 'fast' | 'repeat';
 
-const INITIAL_TAIL = 2000;
 const FONT_SIZE_MIN = 10;
 const FONT_SIZE_MAX = 28;
 const FONT_SIZE_STEP = 1;
@@ -304,7 +281,7 @@ const INPUT_REPEAT_GAP_MS = 42;
 const INPUT_FLUSH_THRESHOLD = 1024;
 const HELPER_BASE_URL = '/apps/terminal/vendor/android-terminalapp-assets-js';
 const CTRL_STATE_EVENT = 'android-terminalapp-ctrl-state';
-const NEW_TERMINAL_LONG_PRESS_MS = 450;
+const TERMINAL_STREAM_CODEC = 'msgpack-v1';
 const UI_IPC_RPC_EVENT = 'rpc';
 const UI_IPC_RPC_CODEC = 'msgpack-v1';
 const UI_IPC_IME_FOCUS = 'ui.ime.focus';
@@ -551,56 +528,33 @@ function shortId(id: string | null | undefined): string {
   return String(id || '').slice(-8);
 }
 
-function formatTerminalKind(raw: string | null | undefined): string | null {
-  if (raw === 'native') return 'Native';
-  if (raw === 'node') return 'Node';
-  if (raw === 'python') return 'Python';
-  return null;
-}
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-}
-
-function fromBase64(raw: string): Uint8Array {
-  const binary = atob(raw);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
 function isObjectRecord(raw: unknown): raw is Record<string, unknown> {
   return !!raw && typeof raw === 'object' && !Array.isArray(raw);
 }
 
-function isServerHelloFrame(raw: unknown): raw is ServerHelloFrame {
+function isServerCheckpointFrame(raw: unknown): raw is ServerCheckpointFrame {
   if (!isObjectRecord(raw)) return false;
-  return raw.type === 'hello'
-    && typeof raw.session_id === 'string'
+  return raw.type === 'checkpoint'
+    && typeof raw.request_id === 'string'
     && typeof raw.shell_id === 'string'
-    && (raw.next_seq === undefined || typeof raw.next_seq === 'number')
-    && (raw.resume_mode === undefined || typeof raw.resume_mode === 'string');
+    && typeof raw.sequence === 'number'
+    && typeof raw.cols === 'number'
+    && typeof raw.rows === 'number'
+    && typeof raw.scrollback === 'number'
+    && raw.state instanceof Uint8Array;
 }
 
-function isServerDataFrame(raw: unknown): raw is ServerDataFrame {
+function isServerOutputFrame(raw: unknown): raw is ServerOutputFrame {
   if (!isObjectRecord(raw)) return false;
-  return raw.type === 'data'
-    && typeof raw.seq === 'number'
-    && typeof raw.data_b64 === 'string';
+  return raw.type === 'output'
+    && typeof raw.sequence === 'number'
+    && raw.data instanceof Uint8Array;
 }
 
-function isServerClosedFrame(raw: unknown): raw is ServerClosedFrame {
+function isServerExitFrame(raw: unknown): raw is ServerExitFrame {
   if (!isObjectRecord(raw)) return false;
-  return raw.type === 'closed'
-    && (raw.seq === undefined || typeof raw.seq === 'number')
+  return raw.type === 'exit'
+    && typeof raw.sequence === 'number'
     && (raw.exit_code === undefined || raw.exit_code === null || typeof raw.exit_code === 'number')
     && (raw.reason === undefined || typeof raw.reason === 'string');
 }
@@ -616,30 +570,31 @@ function isServerErrorFrame(raw: unknown): raw is ServerErrorFrame {
 function isServerPongFrame(raw: unknown): raw is ServerPongFrame {
   if (!isObjectRecord(raw)) return false;
   return raw.type === 'pong'
-    && (raw.nonce === undefined || typeof raw.nonce === 'string');
+    && (raw.request_id === undefined || typeof raw.request_id === 'string');
 }
 
-function isServerReadyFrame(raw: unknown): raw is ServerReadyFrame {
-  return isObjectRecord(raw) && raw.type === 'ready';
-}
-
-function parseServerFrame(raw: string): ServerFrame | null {
+async function parseServerFrame(raw: unknown): Promise<ServerFrame | null> {
   try {
-    const parsed: unknown = JSON.parse(raw);
-    if (isServerHelloFrame(parsed)) return parsed;
-    if (isServerDataFrame(parsed)) return parsed;
-    if (isServerClosedFrame(parsed)) return parsed;
+    let bytes: Uint8Array;
+    if (raw instanceof Blob) {
+      bytes = new Uint8Array(await raw.arrayBuffer());
+    } else if (raw instanceof ArrayBuffer) {
+      bytes = new Uint8Array(raw);
+    } else if (ArrayBuffer.isView(raw)) {
+      bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+    } else {
+      return null;
+    }
+    const parsed: unknown = decodeMessagePack(bytes);
+    if (isServerCheckpointFrame(parsed)) return parsed;
+    if (isServerOutputFrame(parsed)) return parsed;
+    if (isServerExitFrame(parsed)) return parsed;
     if (isServerErrorFrame(parsed)) return parsed;
     if (isServerPongFrame(parsed)) return parsed;
-    if (isServerReadyFrame(parsed)) return parsed;
     return null;
   } catch {
     return null;
   }
-}
-
-function frameHasSeq(frame: ServerFrame): frame is ServerDataFrame | ServerClosedFrame {
-  return 'seq' in frame && typeof frame.seq === 'number';
 }
 
 function nonEmptyString(value: string | null | undefined): string {
@@ -677,7 +632,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     drawerOverlay: getRequired(root, '#ta-drawer-overlay'),
     btnMenu: getRequired(root, '#ta-btn-menu'),
     btnNew: getRequired(root, '#ta-btn-new'),
-    btnNewDropdown: getRequired(root, '#ta-btn-new-dd'),
     btnRefresh: getRequired(root, '#ta-btn-refresh'),
     btnStop: getRequired(root, '#ta-btn-stop'),
     btnKill: getRequired(root, '#ta-btn-kill'),
@@ -701,7 +655,8 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     activeId: null,
     ws: null,
     wsDesiredId: null,
-    sessionId: null,
+    attachRequestId: null,
+    checkpointReady: false,
     lastSeqApplied: 0,
     term: null,
     fitAddon: null,
@@ -719,41 +674,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     inputFlushTimer: null,
     inputLastChunk: null,
     inputLastChunkAt: null,
-    decoder: new TextDecoder(),
     encoder: new TextEncoder(),
   };
   let initialSidebarStateApplied = false;
-  const newTerminalItems = Array.from(ui.btnNewDropdown.querySelectorAll<HTMLElement>('[data-terminal-kind]'));
-  let newTerminalLongPressTimer: number | null = null;
-  let suppressNextNewClick = false;
-
-  function normalizeTerminalKind(raw: string | null | undefined): TerminalKind {
-    if (raw === 'native' || raw === 'node') return raw;
-    return 'python';
-  }
-
-  function clearNewTerminalLongPress(): void {
-    if (newTerminalLongPressTimer !== null) {
-      clearTimeout(newTerminalLongPressTimer);
-      newTerminalLongPressTimer = null;
-    }
-  }
-
-  function isNewTerminalMenuOpen(): boolean {
-    return ui.btnNewDropdown.classList.contains('show');
-  }
-
-  function openNewTerminalMenu(): void {
-    clearNewTerminalLongPress();
-    ui.btnNewDropdown.classList.add('show');
-    ui.btnNew.setAttribute('aria-expanded', 'true');
-  }
-
-  function closeNewTerminalMenu(): void {
-    clearNewTerminalLongPress();
-    ui.btnNewDropdown.classList.remove('show');
-    ui.btnNew.setAttribute('aria-expanded', 'false');
-  }
 
   async function concreteConsoleWorkerId(): Promise<string> {
     try {
@@ -813,10 +736,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     });
   }
 
-  async function createShell(kind: TerminalKind = 'python'): Promise<void> {
+  async function createShell(): Promise<void> {
     try {
       const cwd = await resolveNewShellCwd();
-      const data = await api.post<ShellRecord>('shells', { cwd, kind });
+      const data = await api.post<ShellRecord>('shells', { cwd });
       await listShells();
       await selectShell(data.id);
       host.toast?.('New shell started');
@@ -1041,7 +964,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
 
   function wsUrl(): string {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${location.host}/ws/app/terminal/terminal`;
+    return `${proto}//${location.host}/ws/app/terminal/terminal?codec=${encodeURIComponent(TERMINAL_STREAM_CODEC)}`;
   }
 
   function getTerminalCols(term: XtermTerminalLike | null): number {
@@ -1062,11 +985,10 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
   }
 
-  function sendNotification<M extends ClientMethod>(method: M, params: ClientNotificationMap[M]): void {
+  function sendMessage(payload: ClientMessage): void {
     const ws = state.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const payload: JsonRpcNotification<M> = { jsonrpc: '2.0', method, params };
-    ws.send(JSON.stringify(payload));
+    ws.send(encodeMessagePack(payload, { ignoreUndefined: true }));
   }
 
   function shouldFlushImmediately(data: string): boolean {
@@ -1106,15 +1028,12 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     return { delayMs: INPUT_NORMAL_DELAY_MS, maxHoldMs: INPUT_NORMAL_MAX_HOLD_MS };
   }
 
-  function flushInput(flush: 'auto' | 'immediate' = 'auto'): void {
+  function flushInput(): void {
     if (!state.inputBuffer) return;
     const data = state.inputBuffer;
     clearInputBuffer();
     const bytes = state.encoder.encode(data);
-    sendNotification('terminal.input', {
-      data_b64: toBase64(bytes),
-      flush,
-    });
+    sendMessage({ type: 'input', data: bytes });
   }
 
   function queueInput(data: string): void {
@@ -1128,7 +1047,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
     const bytes = state.encoder.encode(state.inputBuffer);
     if (shouldFlushImmediately(data) || isLikelyBulkInput(data) || bytes.byteLength >= INPUT_FLUSH_THRESHOLD) {
-      flushInput('immediate');
+      flushInput();
       return;
     }
 
@@ -1137,7 +1056,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     const { delayMs, maxHoldMs } = batchPolicy(mode);
     const heldForMs = now - state.inputBufferStartedAt;
     if (heldForMs >= maxHoldMs) {
-      flushInput('auto');
+      flushInput();
       return;
     }
 
@@ -1145,7 +1064,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       clearTimeout(state.inputFlushTimer);
     }
     const nextDelayMs = Math.max(0, Math.min(delayMs, maxHoldMs - heldForMs));
-    state.inputFlushTimer = window.setTimeout(() => flushInput('auto'), nextDelayMs);
+    state.inputFlushTimer = window.setTimeout(flushInput, nextDelayMs);
   }
 
   function clearSocket(): void {
@@ -1172,41 +1091,36 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   }
 
   function handleServerFrame(frame: ServerFrame): void {
-    if (frame.type === 'hello') {
-      state.sessionId = frame.session_id;
-      if (typeof frame.next_seq === 'number' && frame.next_seq > 0) {
-        state.lastSeqApplied = Math.max(state.lastSeqApplied, frame.next_seq - 1);
+    if (frame.type === 'checkpoint') {
+      if (!state.term || frame.request_id !== state.attachRequestId) return;
+      if (frame.shell_id !== state.wsDesiredId) return;
+      state.checkpointReady = false;
+      state.lastSeqApplied = frame.sequence;
+      state.term.reset();
+      if (state.term.cols !== frame.cols || state.term.rows !== frame.rows) {
+        state.term.resize(frame.cols, frame.rows);
       }
-      setStatus(frame.resume_mode ? `connected (${frame.resume_mode})` : 'connected');
-      requestFit(6);
-      try {
-        const cols = getTerminalCols(state.term);
-        const rows = getTerminalRows(state.term);
-        if (cols && rows) {
-          sendNotification('terminal.resize', { cols, rows });
-        }
-      } catch {
-        // ignore
-      }
+      state.term.write(frame.state, () => {
+        if (frame.request_id !== state.attachRequestId || !state.term) return;
+        state.term.scrollToBottom();
+        requestFit(6);
+      });
+      state.checkpointReady = true;
+      setStatus('connected');
       return;
     }
 
-    if (frame.type === 'data') {
-      if (!state.term) return;
-      if (frame.seq <= state.lastSeqApplied) return;
-      state.lastSeqApplied = frame.seq;
-      const text = state.decoder.decode(fromBase64(frame.data_b64), { stream: true });
-      if (text) {
-        state.term.write(text);
-      }
+    if (frame.type === 'output') {
+      if (!state.term || !state.checkpointReady) return;
+      if (frame.sequence <= state.lastSeqApplied) return;
+      state.lastSeqApplied = frame.sequence;
+      state.term.write(frame.data);
       return;
     }
 
-    if (frame.type === 'closed') {
-      if (frameHasSeq(frame) && typeof frame.seq === 'number') {
-        state.lastSeqApplied = Math.max(state.lastSeqApplied, frame.seq);
-      }
-      setStatus(frame.reason || 'closed');
+    if (frame.type === 'exit') {
+      state.lastSeqApplied = Math.max(state.lastSeqApplied, frame.sequence);
+      setStatus(frame.reason || 'exited');
       if (sidebarState.enabled) {
         resetSidebarShellState(state.activeId || undefined);
       }
@@ -1217,13 +1131,13 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     if (frame.type === 'error') {
       const message = frame.message || 'Terminal socket error';
       setStatus(message);
-      const expectedDeadShellWrite =
-        (frame.code === 'write_failed' || frame.code === 'resize_failed' || frame.code === 'destroy_failed')
-        && message.startsWith('Shell is not writable');
-      if (!expectedDeadShellWrite) {
-        host.toast?.(message);
-      }
+      host.toast?.(message);
     }
+  }
+
+  function makeRequestId(): string {
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   }
 
   function connectWs(shellId: string): void {
@@ -1238,27 +1152,30 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       maxEnqueuedMessages: 0,
       minUptime: 1000,
     });
+    ws.binaryType = 'arraybuffer';
     state.ws = ws;
 
     ws.addEventListener('open', () => {
       const cols = getTerminalCols(state.term);
       const rows = getTerminalRows(state.term);
-      const params: TerminalConnectParams = {
+      const requestId = makeRequestId();
+      state.attachRequestId = requestId;
+      state.checkpointReady = false;
+      const message: ClientAttachMessage = {
+        type: 'attach',
+        request_id: requestId,
         shell_id: shellId,
-        session_id: state.sessionId || undefined,
-        resume_after_seq: state.lastSeqApplied,
-        cols: cols || undefined,
-        rows: rows || undefined,
+        cols,
+        rows,
       };
       setStatus('connecting…');
-      sendNotification('terminal.connect', params);
+      sendMessage(message);
     });
 
     ws.addEventListener('message', (event: MessageEvent) => {
-      if (typeof event.data !== 'string') return;
-      const frame = parseServerFrame(event.data);
-      if (!frame) return;
-      handleServerFrame(frame);
+      void parseServerFrame(event.data).then((frame) => {
+        if (frame) handleServerFrame(frame);
+      });
     });
 
     ws.addEventListener('close', () => {
@@ -1274,9 +1191,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
   function disposeSession(): void {
     emitTerminalImeIntent(false, 'dispose_session');
     state.wsDesiredId = null;
-    state.sessionId = null;
+    state.attachRequestId = null;
+    state.checkpointReady = false;
     state.lastSeqApplied = 0;
-    state.decoder = new TextDecoder();
     clearSocket();
     state.lastResizeSent = null;
     if (state.fitRaf !== null) {
@@ -1344,7 +1261,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     state.shells.forEach((rec) => {
       const alive = Boolean(rec.stats?.alive);
       const uptime = formatUptime(rec.stats?.uptime);
-      const kindLabel = formatTerminalKind(rec.kind);
       const el = document.createElement('div');
       el.className = `ta-shell-item${state.activeId === rec.id ? ' active' : ''}`;
       const removeMarkup = alive ? '' : '<button class="app-btn ta-shell-remove" type="button">Close</button>';
@@ -1354,7 +1270,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
           <div class="ta-shell-title">${rec.label || 'terminal-stream'} · <span style="color:var(--muted-foreground);">${shortId(rec.id)}</span></div>
           <div class="ta-shell-meta">
             <span class="ta-badge">${rec.status || (alive ? 'running' : 'exited')}</span>
-            ${kindLabel ? `<span class="ta-badge">${kindLabel}</span>` : ''}
             ${rec.cwd ? `<span>${rec.cwd}</span>` : ''}
             ${uptime ? `<span>uptime ${uptime}</span>` : ''}
           </div>
@@ -1391,37 +1306,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
   }
 
-  function applyReplayFrame(frame: ServerFrame): void {
-    if (frame.type === 'data') {
-      if (!state.term) return;
-      if (frame.seq <= state.lastSeqApplied) return;
-      state.lastSeqApplied = frame.seq;
-      const text = state.decoder.decode(fromBase64(frame.data_b64), { stream: true });
-      if (text) {
-        state.term.write(text);
-      }
-      return;
-    }
-
-    if (frame.type === 'closed') {
-      if (frameHasSeq(frame) && typeof frame.seq === 'number') {
-        state.lastSeqApplied = Math.max(state.lastSeqApplied, frame.seq);
-      }
-    }
-  }
-
-  async function primeFromHistory(shellId: string): Promise<void> {
-    const detail = await api.get<ShellHistoryPayload>(`shells/${shellId}/history?after_seq=0`);
-    const frames = detail.frames;
-    if (!Array.isArray(frames) || !state.term) {
-      return;
-    }
-
-    for (const frame of frames) {
-      applyReplayFrame(frame);
-    }
-  }
-
   function scheduleResizeSync(shellId: string, cols: number, rows: number, force = false): void {
     const nextCols = Math.max(1, Number(cols) || 0);
     const nextRows = Math.max(1, Number(rows) || 0);
@@ -1429,12 +1313,12 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     const key = `${shellId}:${nextCols}x${nextRows}`;
     if (!force && state.lastResizeSent === key) return;
     state.lastResizeSent = key;
-    sendNotification('terminal.resize', { cols: nextCols, rows: nextRows });
+    sendMessage({ type: 'resize', cols: nextCols, rows: nextRows });
   }
 
   async function selectShell(id: string): Promise<void> {
     const rec = state.shells.find((item) => item.id === id) || null;
-    if (sidebarState.enabled && (!rec || !isShellAlive(rec))) {
+    if (!rec || !isShellAlive(rec)) {
       disposeSession();
       state.activeId = null;
       ui.title.textContent = 'No shell selected';
@@ -1506,7 +1390,6 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     }
 
     applyFontSize(getCurrentFontSize());
-    await primeFromHistory(id);
     connectWs(id);
 
     try {
@@ -1560,53 +1443,7 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
     refocusTerm();
   }, { passive: true });
 
-  ui.btnNew.addEventListener('contextmenu', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    openNewTerminalMenu();
-  });
-  ui.btnNew.addEventListener('pointerdown', (event) => {
-    if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
-    clearNewTerminalLongPress();
-    newTerminalLongPressTimer = window.setTimeout(() => {
-      suppressNextNewClick = true;
-      openNewTerminalMenu();
-    }, NEW_TERMINAL_LONG_PRESS_MS);
-  }, { passive: true });
-  ui.btnNew.addEventListener('pointerup', clearNewTerminalLongPress, { passive: true });
-  ui.btnNew.addEventListener('pointercancel', clearNewTerminalLongPress, { passive: true });
-  ui.btnNew.addEventListener('pointerleave', clearNewTerminalLongPress, { passive: true });
-  ui.btnNew.addEventListener('click', (event) => {
-    if (suppressNextNewClick) {
-      suppressNextNewClick = false;
-      event.preventDefault();
-      event.stopPropagation();
-      return;
-    }
-    closeNewTerminalMenu();
-    void createShell('python');
-  });
-  document.addEventListener('pointerdown', (event) => {
-    const target = event.target;
-    if (!(target instanceof Node)) return;
-    if (ui.btnNew.contains(target) || ui.btnNewDropdown.contains(target)) return;
-    closeNewTerminalMenu();
-  }, { passive: true });
-  newTerminalItems.forEach((item) => {
-    const activate = (event?: Event): void => {
-      event?.preventDefault();
-      event?.stopPropagation();
-      const kind = normalizeTerminalKind(item.dataset.terminalKind);
-      closeNewTerminalMenu();
-      void createShell(kind);
-    };
-    item.addEventListener('click', activate);
-    item.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        activate(event);
-      }
-    });
-  });
+  ui.btnNew.addEventListener('click', () => void createShell());
   ui.btnRefresh.addEventListener('click', () => void listShells());
   ui.btnStop.addEventListener('click', () => void doAction('stop'));
   ui.btnKill.addEventListener('click', () => void doAction('kill'));

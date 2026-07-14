@@ -155,13 +155,24 @@ Each frontend surface uses only its own lane:
 - Explorer: namespace `/rpc/explorer`, path `/explorer_ws/socket.io`
 - Host/main page: namespace `/ui_ipc`, path `/ui_ipc_ws/socket.io`
 - Sidebar backends: namespace `/sidebar_ipc` on the app Socket.IO service
-- Terminal: namespace `/terminal`, path `/terminal_ws/socket.io`
+- Code TE2 terminal: namespace `/terminal`, path `/terminal_ws/socket.io`
+- Standalone Terminal app: raw WebSocket `/ws/app/terminal/terminal` (backend
+  route `/ws/terminal`), with required `codec=msgpack-v1`
 - WBA: namespace `/wba`, path `/wba_ws/socket.io`
 - TE2 console: namespace `/te2_console`, path `/te2_console_ws/socket.io`
 
 Sidebar IPC is a backend app API lane. Stateful app frontends publish state to
 their own backend; that backend sends typed state/URL commands through Sidebar
 IPC. Frontends must not call another surface's private socket or API directly.
+
+The standalone Terminal app has one supported shell implementation:
+`shellspec/node_terminal_stream.yaml`. Its persistent Node worker owns
+`node-pty`, `xterm-headless`, sequence assignment, and serialized checkpoints.
+Browser messages are binary MessagePack WebSocket frames. Framework-Shell pipe
+messages are `uint32` big-endian length-prefixed MessagePack frames. Python uses
+`msgspec.msgpack`; Node and the browser use `@msgpack/msgpack`. Do not restore
+the removed Python/native shell types, JSON/base64 stream codec, log-tail replay,
+or reopening of dead terminal shells.
 
 ## Existing Methods First
 

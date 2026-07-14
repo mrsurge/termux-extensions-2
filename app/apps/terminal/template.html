@@ -27,43 +27,6 @@
     font-style: italic;
     font-display: block;
   }
-  .fe-menu {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-  }
-  .fe-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    min-width: 180px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    display: none;
-    z-index: 400 !important;
-  }
-  .fe-dropdown.show { display: block; }
-  .fe-dd-item {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 8px 12px;
-    cursor: pointer;
-    align-items: center;
-    font-size: 0.95rem;
-  }
-  .fe-dd-item:hover { background: rgba(255,255,255,0.06); }
-  .fe-dd-item-label {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .fe-dd-item-note {
-    font-size: 0.78rem;
-    color: var(--muted-foreground);
-  }
   .ta-shell-item {
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -217,38 +180,13 @@
     width: 100%;
     height: 100%;
   }
-  .ta-new-menu .fe-dropdown {
-    min-width: 210px;
-  }
 </style>
 <div class="terminal-app" style="display:flex; flex-direction:column; gap:0;">
   <div id="ta-list-container" class="ta-list-container">
     <div class="section-header">
       <h3 class="section-title">Terminal</h3>
       <div style="display:flex; gap:8px; align-items:center;">
-        <div class="fe-menu ta-new-menu">
-          <button id="ta-btn-new" class="app-btn" aria-haspopup="menu" aria-expanded="false">New Terminal</button>
-          <div id="ta-btn-new-dd" class="fe-dropdown" role="menu" aria-label="New terminal type">
-            <div class="fe-dd-item" data-terminal-kind="python" role="menuitem" tabindex="0">
-              <div class="fe-dd-item-label">
-                <span>Python</span>
-                <span class="fe-dd-item-note">Default</span>
-              </div>
-            </div>
-            <div class="fe-dd-item" data-terminal-kind="native" role="menuitem" tabindex="0">
-              <div class="fe-dd-item-label">
-                <span>Native</span>
-                <span class="fe-dd-item-note">Native path</span>
-              </div>
-            </div>
-            <div class="fe-dd-item" data-terminal-kind="node" role="menuitem" tabindex="0">
-              <div class="fe-dd-item-label">
-                <span>Node</span>
-                <span class="fe-dd-item-note">Node path</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <button id="ta-btn-new" class="app-btn">New Terminal</button>
         <button id="ta-btn-refresh" class="app-btn">Refresh</button>
       </div>
     </div>

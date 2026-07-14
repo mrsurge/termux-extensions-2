@@ -2,6 +2,7 @@
   "id": "settings",
   "name": "Settings",
   "icon_emoji": "🎛️",
+  "version": "0.2.315",
   "description": "Framework settings, launcher ordering, and shell diagnostics.",
   "entrypoints": {
     "frontend_template": "template.html",

@@ -42,7 +42,7 @@ Important roots:
 ## Included Apps
 
 - `file_editor_cm6` — Code TE2, the primary workspace/editor app
-- `terminal` — standalone stateful terminal app
+- `terminal` — standalone Node PTY terminal with reconnect checkpoints
 - `file_explorer` — standalone file browser
 - `archive_manager` — archive browsing and extraction
 - `aria_downloader` — aria2 download surface

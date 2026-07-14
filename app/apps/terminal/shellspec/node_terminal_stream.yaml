@@ -10,13 +10,15 @@ shells:
       - sh
       - -lc
       - >-
-        node "${ctx:BROKER_ENTRY}"
+        exec node "${ctx:BROKER_ENTRY}"
     env:
       TE_APP_ID: ${ctx:APP_ID}
       TERMINAL_STREAM_CWD: ${ctx:CWD}
       TERMINAL_STREAM_COLS: ${ctx:COLS}
       TERMINAL_STREAM_ROWS: ${ctx:ROWS}
+      TERMINAL_STREAM_SCROLLBACK: ${ctx:SCROLLBACK}
       TERMINAL_STREAM_SHELL_CMD_JSON: ${ctx:SHELL_CMD_JSON}
+      TERMINAL_STREAM_PROTOCOL: msgpack-v1
     subgroups:
       - ${ctx:APP_ID}
       - terminal_stream

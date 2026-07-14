@@ -1,9 +1,29 @@
 import process from 'node:process';
-import readline from 'node:readline';
 import * as nodePty from 'node-pty';
+import {
+  asBytes,
+  encodePipeFrame,
+  isRecord,
+  PipeFrameDecoder,
+  TERMINAL_STREAM_CODEC,
+} from './terminal_stream_protocol.mjs';
+
+// Node 21+ exposes a browser-shaped navigator global. The xterm 5.3 packages
+// use navigator absence to select their headless path, so remove it before the
+// legacy, browser-version-matched packages are evaluated.
+if (Object.prototype.hasOwnProperty.call(globalThis, 'navigator')) {
+  delete globalThis.navigator;
+}
+const [headlessModule, serializeModule] = await Promise.all([
+  import('xterm-headless'),
+  import('xterm-addon-serialize'),
+]);
+const { Terminal: HeadlessTerminal } = headlessModule.default;
+const { SerializeAddon } = serializeModule;
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
+const DEFAULT_SCROLLBACK = 5000;
 const DEFAULT_TERM = 'xterm-256color';
 
 function logError(message, error) {
@@ -36,68 +56,38 @@ function resolveInnerShellCommand() {
   if (sep >= 0 && process.argv.length > sep + 1) {
     return process.argv.slice(sep + 1).map((part) => String(part));
   }
-
   return ['sh', '-i'];
 }
 
-function writeFrame(frame) {
-  process.stdout.write(JSON.stringify(frame) + '\n');
+function writeHeadless(terminal, data) {
+  return new Promise((resolve) => {
+    terminal.write(data, resolve);
+  });
 }
 
-function isObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function parseJsonRpcNotification(line) {
-  let parsed;
-  try {
-    parsed = JSON.parse(line);
-  } catch (error) {
-    logError(`bad JSON command: ${line.slice(0, 200)}`, error);
-    return null;
-  }
-
-  if (!isObject(parsed)) {
-    return null;
-  }
-
-  if (String(parsed.jsonrpc || '') !== '2.0') {
-    logError(`unexpected stdin payload without jsonrpc envelope: ${line.slice(0, 200)}`);
-    return null;
-  }
-
-  const method = String(parsed.method || '');
-  if (!method) {
-    logError(`stdin payload missing method: ${line.slice(0, 200)}`);
-    return null;
-  }
-
-  const params = isObject(parsed.params) ? parsed.params : {};
-  return { method, params };
-}
-
-function encodeDataFrame(data, nextSeq) {
-  return {
-    type: 'data',
-    seq: nextSeq,
-    ts: Date.now(),
-    data_b64: Buffer.from(data, 'utf8').toString('base64'),
-  };
+const configuredProtocol = String(process.env.TERMINAL_STREAM_PROTOCOL || TERMINAL_STREAM_CODEC);
+if (configuredProtocol !== TERMINAL_STREAM_CODEC) {
+  throw new Error(`unsupported terminal stream protocol: ${configuredProtocol}`);
 }
 
 const shellCmd = resolveInnerShellCommand();
 const [file, ...args] = shellCmd;
 const cwd = process.env.TERMINAL_STREAM_CWD || process.cwd();
-const cols = parsePositiveInt(process.env.TERMINAL_STREAM_COLS, DEFAULT_COLS);
-const rows = parsePositiveInt(process.env.TERMINAL_STREAM_ROWS, DEFAULT_ROWS);
+let cols = parsePositiveInt(process.env.TERMINAL_STREAM_COLS, DEFAULT_COLS);
+let rows = parsePositiveInt(process.env.TERMINAL_STREAM_ROWS, DEFAULT_ROWS);
+const scrollback = parsePositiveInt(process.env.TERMINAL_STREAM_SCROLLBACK, DEFAULT_SCROLLBACK);
 const termName = process.env.TERM || DEFAULT_TERM;
-const env = {
-  ...process.env,
-  TERM: termName,
-};
+const env = { ...process.env, TERM: termName };
 
-let seq = 0;
-let closed = false;
+const stateTerminal = new HeadlessTerminal({
+  cols,
+  rows,
+  scrollback,
+  convertEol: true,
+  allowProposedApi: true,
+});
+const serializeAddon = new SerializeAddon();
+stateTerminal.loadAddon(serializeAddon);
 
 const pty = nodePty.spawn(file, args, {
   name: termName,
@@ -107,125 +97,175 @@ const pty = nodePty.spawn(file, args, {
   env,
 });
 
-function emitClosed(reason, exitCode = null) {
-  if (closed) {
-    return;
-  }
-  closed = true;
-  seq += 1;
-  writeFrame({
-    type: 'closed',
-    seq,
-    ts: Date.now(),
-    exit_code: exitCode,
-    reason,
-  });
+const inputDecoder = new PipeFrameDecoder();
+let sequence = 0;
+let closed = false;
+let operationQueue = Promise.resolve();
+let outputQueue = Promise.resolve();
+
+function sendFrame(message) {
+  const frame = encodePipeFrame(message);
+  outputQueue = outputQueue.then(() => new Promise((resolve, reject) => {
+    process.stdout.write(frame, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  }));
+  return outputQueue;
 }
 
-writeFrame({
-  type: 'ready',
-  ts: Date.now(),
-  pid: pty.pid,
-  shell: shellCmd,
-  cwd,
-});
+function enqueueOperation(label, operation) {
+  operationQueue = operationQueue
+    .then(operation)
+    .catch(async (error) => {
+      logError(`${label} failed`, error);
+      try {
+        await sendFrame({
+          type: 'error',
+          code: 'worker_operation_failed',
+          message: error instanceof Error ? error.message : String(error),
+          fatal: false,
+        });
+      } catch (sendError) {
+        logError('failed to send worker error', sendError);
+      }
+    });
+  return operationQueue;
+}
+
+function resizeTerminal(nextCols, nextRows) {
+  cols = parsePositiveInt(nextCols, cols);
+  rows = parsePositiveInt(nextRows, rows);
+  pty.resize(cols, rows);
+  stateTerminal.resize(cols, rows);
+}
+
+async function handleControlMessage(message) {
+  if (!isRecord(message)) {
+    return;
+  }
+  const type = String(message.type || '');
+
+  if (type === 'attach') {
+    const requestId = String(message.request_id || '');
+    if (!requestId) {
+      throw new Error('attach requires request_id');
+    }
+    if (message.cols !== undefined || message.rows !== undefined) {
+      resizeTerminal(message.cols, message.rows);
+    }
+    const checkpointState = serializeAddon.serialize({ scrollback });
+    await sendFrame({
+      type: 'checkpoint',
+      request_id: requestId,
+      sequence,
+      cols,
+      rows,
+      scrollback,
+      state: Buffer.from(checkpointState, 'utf8'),
+    });
+    return;
+  }
+
+  if (type === 'input') {
+    const data = asBytes(message.data);
+    if (!data || data.byteLength === 0) {
+      return;
+    }
+    pty.write(Buffer.from(data).toString('utf8'));
+    return;
+  }
+
+  if (type === 'resize') {
+    resizeTerminal(message.cols, message.rows);
+    return;
+  }
+
+  if (type === 'ping') {
+    await sendFrame({ type: 'pong', request_id: String(message.request_id || '') });
+    return;
+  }
+
+  if (type === 'destroy') {
+    pty.kill();
+    return;
+  }
+
+  throw new Error(`unsupported terminal message type: ${type || '<empty>'}`);
+}
 
 pty.onData((data) => {
-  seq += 1;
-  writeFrame(encodeDataFrame(data, seq));
+  enqueueOperation('pty output', async () => {
+    if (closed) return;
+    sequence += 1;
+    await writeHeadless(stateTerminal, data);
+    await sendFrame({
+      type: 'output',
+      sequence,
+      data: Buffer.from(data, 'utf8'),
+    });
+  });
 });
 
 pty.onExit(({ exitCode, signal }) => {
-  const reason = signal ? `signal:${signal}` : 'exited';
-  emitClosed(reason, typeof exitCode === 'number' ? exitCode : null);
-  process.exit(typeof exitCode === 'number' ? exitCode : 0);
+  enqueueOperation('pty exit', async () => {
+    if (closed) return;
+    closed = true;
+    sequence += 1;
+    await sendFrame({
+      type: 'exit',
+      sequence,
+      exit_code: typeof exitCode === 'number' ? exitCode : null,
+      reason: signal ? `signal:${signal}` : 'exited',
+    });
+    stateTerminal.dispose();
+    await outputQueue;
+    process.exit(typeof exitCode === 'number' ? exitCode : 0);
+  });
 });
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  crlfDelay: Infinity,
-  terminal: false,
-});
-
-rl.on('line', (line) => {
-  if (!line.trim()) {
-    return;
-  }
-
-  const notification = parseJsonRpcNotification(line);
-  if (!notification) {
-    return;
-  }
-
-  const { method, params } = notification;
-
-  if (method === 'terminal.connect') {
-    const nextCols = parsePositiveInt(params.cols, cols);
-    const nextRows = parsePositiveInt(params.rows, rows);
-    try {
-      pty.resize(nextCols, nextRows);
-    } catch (error) {
-      logError(`connect resize failed cols=${nextCols} rows=${nextRows}`, error);
-    }
-    return;
-  }
-
-  if (method === 'terminal.ping') {
-    writeFrame({ type: 'pong', nonce: params.nonce ?? null });
-    return;
-  }
-
-  if (method === 'terminal.input') {
-    const dataB64 = params.data_b64;
-    if (typeof dataB64 !== 'string' || !dataB64) {
-      return;
-    }
-    try {
-      const text = Buffer.from(dataB64, 'base64').toString('utf8');
-      pty.write(text);
-    } catch (error) {
-      logError('failed to decode input frame', error);
-    }
-    return;
-  }
-
-  if (method === 'terminal.resize') {
-    const nextCols = parsePositiveInt(params.cols, cols);
-    const nextRows = parsePositiveInt(params.rows, rows);
-    try {
-      pty.resize(nextCols, nextRows);
-    } catch (error) {
-      logError(`resize failed cols=${nextCols} rows=${nextRows}`, error);
-    }
-    return;
-  }
-
-  if (method === 'terminal.destroy') {
-    try {
-      pty.kill();
-    } catch (error) {
-      logError('destroy failed', error);
-    }
-    return;
-  }
-
-  logError(`unsupported JSON-RPC method: ${method}`);
-});
-
-rl.on('close', () => {
+process.stdin.on('data', (chunk) => {
+  let messages;
   try {
-    pty.kill();
+    messages = inputDecoder.push(chunk);
   } catch (error) {
-    logError('stdin closed while killing PTY', error);
+    logError('invalid framed MessagePack input', error);
+    pty.kill();
+    return;
+  }
+  for (const message of messages) {
+    enqueueOperation('control message', () => handleControlMessage(message));
+  }
+});
+
+process.stdin.on('end', () => {
+  if (!closed) {
+    pty.kill();
+  }
+});
+
+process.stdout.on('error', (error) => {
+  logError('stdout pipe failed', error);
+  if (!closed) {
+    pty.kill();
   }
 });
 
 for (const signalName of ['SIGINT', 'SIGTERM']) {
   process.on(signalName, () => {
-    try {
+    if (!closed) {
       pty.kill();
-    } catch (error) {
-      logError(`failed to kill PTY on ${signalName}`, error);
     }
   });
 }
+
+enqueueOperation('ready frame', () => sendFrame({
+  type: 'ready',
+  protocol: TERMINAL_STREAM_CODEC,
+  pid: pty.pid,
+  cols,
+  rows,
+  scrollback,
+  shell: shellCmd,
+  cwd,
+}));
