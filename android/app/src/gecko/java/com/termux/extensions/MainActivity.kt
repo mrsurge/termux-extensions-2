@@ -1196,6 +1196,30 @@ class MainActivity : AppCompatActivity() {
         put("inAppShell", inAppShell)
     }
 
+    // Gecko exposes wrapper/runtime probes through the same native console
+    // worker contract; page JavaScript remains a separate main_page worker.
+    private fun evaluateAndroidConsoleCommand(
+        rawCommand: String,
+        callback: (Result<Any?>) -> Unit,
+    ) {
+        val command = rawCommand.trim().removeSuffix("()")
+        when (command) {
+            "runtime.help" -> callback(
+                Result.success(listOf("runtime.snapshot", "logcat.tail")),
+            )
+            "runtime.snapshot" -> Thread {
+                callback(Result.success(androidDiagnostics.snapshot(androidDiagnosticRuntimeState())))
+            }.start()
+            "logcat.tail" -> Thread {
+                val dump = androidDiagnostics.captureWarningsAndErrors()
+                callback(Result.success(mapOf("lines" to dump.lines, "error" to dump.error)))
+            }.start()
+            else -> callback(
+                Result.failure(IllegalArgumentException("Unknown native console command: $command")),
+            )
+        }
+    }
+
     private fun recordStartupFailure(message: String, error: Throwable? = null) {
         val detail = formatStartupFailure(message, error)
         lastStartupFailure = detail
@@ -1575,7 +1599,7 @@ class MainActivity : AppCompatActivity() {
             // Connect IME filter IPC after server URL is known
             try {
                 uiIpcClient?.disconnect()
-                uiIpcClient = UiIpcClient(editorInputFilter) { active ->
+                uiIpcClient = UiIpcClient(editorInputFilter, "android_gecko") { active ->
                     runOnUiThread {
                         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
                         if (active) {
@@ -1589,6 +1613,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 uiIpcClient?.onConsoleEvent = { eventName, data ->
                     composeConsoleState.onConsoleEvent(eventName, data)
+                }
+                uiIpcClient?.onConsoleCommand = ::evaluateAndroidConsoleCommand
+                androidDiagnostics.startConsoleStream { level, line ->
+                    uiIpcClient?.publishConsoleLog(level, line)
                 }
                 uiIpcClient?.connect(frameworkUrl)
                 if (consoleOverlay.visibility == View.VISIBLE) {
@@ -1632,6 +1660,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        androidDiagnostics.stopConsoleStream()
         uiIpcClient?.disconnect()
         uiIpcClient = null
         releaseAssetInterceptor()

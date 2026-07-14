@@ -75,6 +75,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -102,11 +103,15 @@ dependencies {
     androidTestImplementation(composeBom)
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.socket:socket.io-client:2.1.1")
     implementation("org.msgpack:msgpack-core:0.9.12")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    add("webviewImplementation", "io.github.Rosemoe.sora-editor:editor:0.23.5")
+    add("webviewImplementation", "io.github.Rosemoe.sora-editor:language-textmate:0.23.5")
     add("geckoImplementation", "org.mozilla.geckoview:geckoview:131.0.20240923135042")
     debugImplementation("androidx.compose.ui:ui-tooling")
     

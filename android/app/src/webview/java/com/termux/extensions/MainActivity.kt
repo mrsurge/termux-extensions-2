@@ -26,10 +26,13 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.termux.extensions.nativeeditor.NativeCodeTe2Screen
+import com.termux.extensions.nativeeditor.NativeEditorController
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -41,6 +44,7 @@ import java.io.FileInputStream
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: FilteredWebView
     private lateinit var nativeHeader: View
+    private lateinit var nativeEditorContainer: ComposeView
 
     private lateinit var consoleOverlay: FrameLayout
     private lateinit var composeConsoleContainer: ComposeView
@@ -50,6 +54,8 @@ class MainActivity : AppCompatActivity() {
     private val editorInputFilter = EditorInputFilter()
     private val composeConsoleState = ComposeConsoleState()
     private var uiIpcClient: UiIpcClient? = null
+    private var nativeEditorController: NativeEditorController? = null
+    private var nativeEditorActive = false
 
     private var editorAssetManager: EditorAssetManager? = null
     private var localAssetServer: LocalAssetServer? = null
@@ -255,6 +261,10 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webview)
         webView.editorInputFilter = editorInputFilter
         nativeHeader = findViewById(R.id.nativeHeader)
+        nativeEditorContainer = findViewById(R.id.nativeEditorContainer)
+        nativeEditorContainer.setViewCompositionStrategy(
+            ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed,
+        )
 
         consoleOverlay = findViewById(R.id.consoleOverlay)
         composeConsoleContainer = findViewById(R.id.composeConsoleContainer)
@@ -276,7 +286,7 @@ class MainActivity : AppCompatActivity() {
         btnConsoleStop = findViewById(R.id.btnConsoleStop)
 
         findViewById<Button>(R.id.btnHome).setOnClickListener { loadHome() }
-        findViewById<Button>(R.id.btnReload).setOnClickListener { webView.reload() }
+        findViewById<Button>(R.id.btnReload).setOnClickListener { reloadCurrentSurface() }
         findViewById<Button>(R.id.btnRecents).setOnClickListener { showRecents() }
         findViewById<Button>(R.id.btnLock).setOnClickListener { toggleLock() }
         findViewById<Button>(R.id.btnQuit).setOnClickListener { quitCurrentApp() }
@@ -344,9 +354,14 @@ class MainActivity : AppCompatActivity() {
                         return true
                     }
                     if (isFrameworkOrigin && isAppShellUrl(url)) {
+                        val appId = path.removePrefix("/app/")
+                        if (appId == DEFAULT_APP_ID) {
+                            enterNativeEditor()
+                            return true
+                        }
+                        leaveNativeEditor()
                         inAppShell = true
                         nativeHeader.visibility = View.VISIBLE
-                        val appId = path.removePrefix("/app/").split("?").first()
                         if (appId.isNotBlank()) {
                             currentAppId = appId
                             isLocked = false
@@ -532,7 +547,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun flushBrowserCache() {
         webView.clearCache(true)
-        webView.reload()
+        reloadCurrentSurface()
         Toast.makeText(this, "Browser cache flushed", Toast.LENGTH_SHORT).show()
         hideConsoleOverlay()
     }
@@ -569,6 +584,7 @@ class MainActivity : AppCompatActivity() {
     // ── Navigation ──────────────────────────────────────────────────
 
     private fun loadHome() {
+        leaveNativeEditor()
         inAppShell = false
         updatePersistentNetworkService()
         val server = localAssetServer
@@ -581,6 +597,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadApp(appId: String) {
+        if (appId == DEFAULT_APP_ID) {
+            enterNativeEditor()
+            return
+        }
+        leaveNativeEditor()
         inAppShell = true
         nativeHeader.visibility = View.VISIBLE
         updatePersistentNetworkService()
@@ -591,6 +612,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showRecents() {
+        if (nativeEditorActive) {
+            showNativeRecents()
+            return
+        }
         if (inAppShell) {
             webView.evaluateJavascript(
                 "(function(){try{if(window.teOpenRecentsModal){window.teOpenRecentsModal();return;}var b=document.getElementById('btn-recents');if(b){b.click();}}catch(e){}})()",
@@ -680,6 +705,65 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    // Native Code TE2 is a WebView-flavor frontend adapter over the same
+    // backend contracts. Other apps and the Android launcher stay in WebView.
+    private fun enterNativeEditor() {
+        inAppShell = true
+        currentAppId = DEFAULT_APP_ID
+        isLocked = false
+        nativeEditorActive = true
+        nativeHeader.visibility = View.GONE
+        webView.stopLoading()
+        webView.visibility = View.GONE
+        nativeEditorContainer.visibility = View.VISIBLE
+        updatePersistentNetworkService()
+
+        nativeEditorController?.release()
+        val assetRoot = editorAssetManager?.getAssetRoot()
+        if (assetRoot == null || !assetRoot.isDirectory) {
+            nativeEditorActive = false
+            nativeEditorContainer.visibility = View.GONE
+            webView.visibility = View.VISIBLE
+            showFatalStartupToast("Native editor assets are unavailable")
+            return
+        }
+        val controller = NativeEditorController(assetRoot)
+        nativeEditorController = controller
+        nativeEditorContainer.disposeComposition()
+        nativeEditorContainer.setContent {
+            NativeCodeTe2Screen(
+                controller = controller,
+                onHome = ::loadHome,
+                onReload = ::reloadCurrentSurface,
+                onQuit = ::quitCurrentApp,
+                onTools = ::showConsoleOverlay,
+            )
+        }
+        controller.connect(frameworkBaseUrl, uiIpcClient)
+    }
+
+    private fun leaveNativeEditor() {
+        if (!nativeEditorActive && nativeEditorController == null) {
+            webView.visibility = View.VISIBLE
+            nativeEditorContainer.visibility = View.GONE
+            return
+        }
+        nativeEditorActive = false
+        nativeEditorController?.release()
+        nativeEditorController = null
+        nativeEditorContainer.disposeComposition()
+        nativeEditorContainer.visibility = View.GONE
+        webView.visibility = View.VISIBLE
+    }
+
+    private fun reloadCurrentSurface() {
+        if (nativeEditorActive) {
+            nativeEditorController?.reconnect(frameworkBaseUrl, uiIpcClient)
+        } else {
+            webView.reload()
+        }
+    }
+
     // ── Console overlay ─────────────────────────────────────────────
 
     private fun showConsoleOverlay() {
@@ -729,6 +813,47 @@ class MainActivity : AppCompatActivity() {
         put("inAppShell", inAppShell)
     }
 
+    // The native console worker intentionally exposes a small command registry,
+    // not arbitrary Kotlin evaluation or reflection.
+    private fun evaluateAndroidConsoleCommand(
+        rawCommand: String,
+        callback: (Result<Any?>) -> Unit,
+    ) {
+        val command = rawCommand.trim().removeSuffix("()")
+        when (command) {
+            "runtime.help" -> callback(
+                Result.success(
+                    listOf(
+                        "runtime.snapshot",
+                        "logcat.tail",
+                        "native.help",
+                        "native.snapshot",
+                        "wba.ping",
+                        "wba.status",
+                        "wba.events",
+                    ),
+                ),
+            )
+            "runtime.snapshot" -> Thread {
+                callback(Result.success(androidDiagnostics.snapshot(androidDiagnosticRuntimeState())))
+            }.start()
+            "logcat.tail" -> Thread {
+                val dump = androidDiagnostics.captureWarningsAndErrors()
+                callback(Result.success(mapOf("lines" to dump.lines, "error" to dump.error)))
+            }.start()
+            else -> {
+                val handled = nativeEditorController?.evaluateConsoleCommand(command, callback) == true
+                if (!handled) {
+                    callback(
+                        Result.failure(
+                            IllegalArgumentException("Unknown native console command: $command"),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
     private fun recordStartupFailure(message: String, error: Throwable? = null) {
         val detail = formatStartupFailure(message, error)
         lastStartupFailure = detail
@@ -752,6 +877,7 @@ class MainActivity : AppCompatActivity() {
         }
         uiIpcClient?.disconnect()
         uiIpcClient = null
+        nativeEditorController?.attachUiIpc(null)
         wakeFrameworkAndLoad(forceLoadHome = false)
     }
 
@@ -816,7 +942,7 @@ class MainActivity : AppCompatActivity() {
             // Connect IME filter IPC
             try {
                 uiIpcClient?.disconnect()
-                uiIpcClient = UiIpcClient(editorInputFilter) { active ->
+                uiIpcClient = UiIpcClient(editorInputFilter, "android_webview") { active ->
                     runOnUiThread {
                         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
                         if (active) {
@@ -831,7 +957,12 @@ class MainActivity : AppCompatActivity() {
                 uiIpcClient?.onConsoleEvent = { eventName, data ->
                     composeConsoleState.onConsoleEvent(eventName, data)
                 }
+                uiIpcClient?.onConsoleCommand = ::evaluateAndroidConsoleCommand
+                androidDiagnostics.startConsoleStream { level, line ->
+                    uiIpcClient?.publishConsoleLog(level, line)
+                }
                 uiIpcClient?.connect(frameworkUrl)
+                nativeEditorController?.attachUiIpc(uiIpcClient)
                 if (consoleOverlay.visibility == View.VISIBLE) {
                     uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
                 }
@@ -870,6 +1001,11 @@ class MainActivity : AppCompatActivity() {
             hideConsoleOverlay()
             return
         }
+        if (nativeEditorActive) {
+            if (nativeEditorController?.closeOverlay() == true) return
+            loadHome()
+            return
+        }
         if (webView.canGoBack()) {
             webView.goBack()
             return
@@ -878,6 +1014,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        nativeEditorActive = false
+        nativeEditorController?.release()
+        nativeEditorController = null
+        nativeEditorContainer.disposeComposition()
+        androidDiagnostics.stopConsoleStream()
         uiIpcClient?.disconnect()
         uiIpcClient = null
         localAssetServer?.stop()

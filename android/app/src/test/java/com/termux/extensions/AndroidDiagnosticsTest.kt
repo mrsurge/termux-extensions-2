@@ -40,6 +40,14 @@ class AndroidDiagnosticsTest {
             "warn",
             androidLogcatLevel("07-13 18:00:00.000 100 101 W MainActivity: warning"),
         )
+        assertEquals(
+            "debug",
+            androidLogcatLevel("07-13 18:00:00.000 100 101 D NativeEditor: request"),
+        )
+        assertEquals(
+            "info",
+            androidLogcatLevel("07-13 18:00:00.000 100 101 I SocketIoJsonRpc: connected"),
+        )
     }
 
     @Test
