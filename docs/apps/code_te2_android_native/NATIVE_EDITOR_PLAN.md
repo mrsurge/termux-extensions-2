@@ -112,18 +112,22 @@ architecture into Compose.
 
 1. Connect UI IPC, request `ui.host.bootSnapshot.get`, and let that existing
    backend transaction prime the adapter runtime.
-2. Connect Editor RPC, consume `editor.state.ssot`, and treat backend
-   `editor.adapter.state` / `ui.adapter.state` facts as the WBA readiness gate.
+2. Connect Editor RPC, consume `editor.state.ssot`, and attach the WBA lane
+   immediately. Recover current readiness through `adapter.status` polling in
+   addition to consuming `editor.adapter.state` / `ui.adapter.state` pushes.
 3. Open the backend-selected active file in Sora.
-4. After adapter readiness, connect WBA and replay `vscode.openFile` followed by
-   the complete current model. Repeat that replay after WBA reconnect or
-   workspace reset before incremental changes resume.
-5. Publish debounced editor mirror changes through Editor RPC.
-6. Publish debounced WBA document changes directly on the WBA lane.
-7. Save through `editor.save` with path, content, and base digest.
-8. Apply backend open-state and file-state notifications by generation/version,
+4. Publish `editor.modelReady` for each native model generation so the backend
+   replays the existing workspace baton and cached provider registrations.
+5. After adapter readiness, force-open the current model through
+   `vscode.openFile` with its generation. Hold document changes and provider
+   calls until the exact path/generation open acknowledgement arrives. Repeat
+   that replay after WBA reconnect or workspace reset.
+6. Publish debounced editor mirror changes through Editor RPC.
+7. Publish debounced WBA document changes directly on the WBA lane.
+8. Save through `editor.save` with path, content, and base digest.
+9. Apply backend open-state and file-state notifications by generation/version,
    preserving unsaved local content according to the existing conflict rules.
-9. Release Sora, subscriptions, pending RPC calls, and sidebar WebView state on
+10. Release Sora, subscriptions, pending RPC calls, and sidebar WebView state on
    native editor exit.
 
 This is an orchestration port, not an editor rewrite. Sora remains the native

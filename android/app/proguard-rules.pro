@@ -8,3 +8,8 @@
 # Keep OkHttp (used by EditorAssetManager)
 -dontwarn okhttp3.**
 -dontwarn okio.**
+
+# msgpack-core selects the platform buffer implementation with Class.forName.
+-keep class org.msgpack.core.buffer.MessageBufferU { *; }
+-keep class org.msgpack.core.buffer.MessageBufferBE { *; }
+-dontwarn sun.nio.ch.DirectBuffer

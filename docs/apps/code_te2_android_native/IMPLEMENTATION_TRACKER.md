@@ -57,9 +57,9 @@ editor widget. Device workflow validation remains the acceptance boundary.
 - [x] `verified` Add exact-pinned Sora dependencies to the WebView flavor.
 - [x] `verified` Add required core-library desugaring.
 - [x] `verified` Add a native editor content host to the WebView activity layout.
-- [ ] `in_progress` Intercept launcher intent for `file_editor_cm6`; source and
-  APK are complete, device navigation remains to be checked.
-- [ ] `in_progress` Intercept framework `/app/file_editor_cm6` navigation.
+- [x] `verified` Intercept launcher intent for `file_editor_cm6`; verified from
+  the device application launcher into the native editor.
+- [x] `verified` Intercept framework `/app/file_editor_cm6` navigation.
 - [ ] `in_progress` Implement native enter, back, home, reload, and exit lifecycle.
 - [x] `verified` Release Sora, sidebar WebView, and RPC resources on exit/destruction.
 - [x] `verified` Keep non-Code-TE2 apps on the existing WebView path.
@@ -67,11 +67,13 @@ editor widget. Device workflow validation remains the acceptance boundary.
 
 ## Phase 3: Editor Projection
 
-- [ ] `in_progress` Consume `editor.state.ssot`.
-- [ ] `in_progress` Render the backend-selected active document in Sora.
+- [x] `verified` Consume `editor.state.ssot`.
+- [x] `verified` Render the backend-selected active document in Sora.
 - [ ] `in_progress` Publish debounced editor mirror updates.
 - [ ] `in_progress` Save through `editor.save` with the backend digest contract.
-- [ ] `in_progress` Handle backend active-file and open-state notifications.
+- [x] `verified` Handle backend active-file and open-state notifications; an
+  Explorer RPC open projected `open_state_events.py` into the running native
+  editor without direct frontend state mutation.
 - [ ] `in_progress` Preserve unsaved local text across safe reconnects.
 - [ ] `in_progress` Handle project switch and stale document events correctly.
 - [ ] `in_progress` Surface save conflict and transport failure states.
@@ -80,8 +82,11 @@ editor widget. Device workflow validation remains the acceptance boundary.
 
 - [x] `verified` Request `ui.host.bootSnapshot.get` so native launch primes the
   backend-owned WBA runtime without another browser client.
-- [x] `verified` Consume backend adapter-state facts and connect WBA only after
-  the adapter reports `ready`.
+- [x] `verified` Attach the WBA lane independently of one-shot adapter-state
+  notifications, query/poll `adapter.status`, and still consume typed readiness
+  pushes when they arrive. This supports late attachment to an existing WBA.
+- [x] `verified` Publish `editor.modelReady` for each native model generation so
+  the backend runs `te2.resync` and replays the workspace baton and providers.
 - [x] `verified` Replay `vscode.openFile` plus the complete active document on
   WBA socket attach, adapter readiness, and workspace reconnect before
   incremental changes resume.
@@ -89,13 +94,15 @@ editor widget. Device workflow validation remains the acceptance boundary.
   reimplement the editor in Kotlin.
 - [x] `verified` Resolve active-language grammar metadata and bodies through
   WBA `vscode.textmate.grammars.list` / `vscode.textmate.grammars.load`.
-- [ ] `in_progress` Apply GitHub Dark Default.
+- [x] `verified` Apply GitHub Dark Default and derive the TM4E fallback token
+  foreground/background from the theme's own editor colors.
 - [x] `verified` Map backend language IDs to preferred WBA TextMate scopes and
   include grammars that declare injection into the selected scope.
 - [x] `verified` Fail WBA grammar loading visibly and stale-drop results after
   a document or adapter-session transition.
-- [ ] `in_progress` Send WBA open-file lifecycle notifications.
-- [ ] `in_progress` Send debounced WBA document changes.
+- [x] `verified` Send generation-tagged WBA open-file lifecycle requests and
+  hold document/provider traffic behind an exact path-and-generation open ACK.
+- [x] `verified` Send debounced WBA document changes only after that open ACK.
 - [ ] `in_progress` Request WBA completions from Sora's completion hook.
 - [ ] `in_progress` Map stable completion text, range, kind, and detail fields;
   snippet expansion, docs UI, and additional edits remain Slice 2.
@@ -142,8 +149,8 @@ editor widget. Device workflow validation remains the acceptance boundary.
   `logcat.tail`, `native.snapshot`, `wba.ping`, `wba.status`, and `wba.events`.
 - [x] `verified` Keep arbitrary Kotlin execution, reflection, scripting engines,
   and destructive WBA commands outside the native console contract.
-- [ ] `pending` Verify the Android worker appears in MCP and use its probes to
-  diagnose the missing Sora completion request.
+- [x] `verified` Connect to the Android console worker and use `native.snapshot`,
+  `wba.status`, and `wba.events` to diagnose and verify native-only WBA replay.
 
 - [x] `verified` Run Android unit tests for the WebView staging variant.
 - [x] `verified` Run Android unit tests for the Gecko staging variant after the
@@ -153,21 +160,42 @@ editor widget. Device workflow validation remains the acceptance boundary.
 - [x] `verified` Assemble WebView staging APK.
 - [x] `verified` Assemble Gecko staging APK after the shared native console
   change.
+- [x] `verified` Run `testWebviewDebugUnitTest` and assemble the minified WebView
+  debug APK on Linux x86_64 with the local SDK/JDK environment.
 - [ ] `pending` Verify open/edit/save/reopen.
 - [ ] `pending` Verify Explorer and search.
-- [ ] `pending` Verify TextMate highlighting and WBA completion.
+- [x] `verified` Verify native Python TextMate highlighting on-device, including
+  visible punctuation and import tokens against GitHub Dark Default.
+- [x] `verified` Verify the active Python WBA model and provider by receiving 82
+  completion items at a real position in `open_state_events.py`; direct Sora UI
+  trigger ergonomics remain follow-up validation.
 - [ ] `pending` Verify diagnostics and project switching.
 - [ ] `pending` Verify sidebar activation and return-home flow.
-- [ ] `pending` Verify disconnect/reconnect and process recreation.
+- [x] `verified` Verify late attachment after WebView process recreation while
+  the device WBA remains running, and verify launcher leave/return behavior.
 - [x] `verified` Review `git diff --check` and exact changed-file scope.
 - [x] `verified` Update `.repo_memory.md` with only verified durable architecture.
+
+### Native-only device evidence (2026-07-14)
+
+- USB device: Pixel 9 Pro XL, package `com.termux.extensions.webview`.
+- Isolation: Gecko was stopped; no browser Monaco client was required.
+- Final process recreation probe: adapter `ready`, WBA connected, Python model
+  generation `1`, matching open ACK generation/path, 95 grammar descriptors,
+  `source.python` installed, and one Python completion provider cached.
+- The active WBA session reported the same Python path and workspace root.
+- A direct WBA completion probe at `open_state_events.py` returned 82 items.
+- Screenshot inspection confirmed visible Python `:`, `|`, imports, keywords,
+  and identifiers on the native GitHub Dark Default surface.
+- The minified APK initially exposed a reflected msgpack buffer class removed by
+  R8; narrow keep/dontwarn rules now cover that runtime path.
 
 ## Deferred Publication Work
 
 - [ ] `deferred` Android payload version bump.
 - [ ] `deferred` APK seed/OTA asset publication changes.
 - [ ] `deferred` GeckoView native interception decision.
-- [ ] `in_progress` Create and push the user-approved targeted checkpoint.
+- [x] `verified` Create and push the user-approved targeted checkpoint.
 
 ## Decisions
 
@@ -180,7 +208,11 @@ editor widget. Device workflow validation remains the acceptance boundary.
 | 2026-07-14 | Consume backend diagnostics projection. | Project generation and stale-result filtering remain backend-owned. |
 | 2026-07-14 | Port browser orchestration, not the editor, to Kotlin. | Sora already owns native editing; Kotlin must participate in backend boot/readiness and WBA model lifecycle without embedding Node. |
 | 2026-07-14 | Reuse `/te2_console` for Android diagnostics and bounded probes. | It exposes the device-side half through existing MCP/runtime tooling without another transport or arbitrary native code evaluation. |
+| 2026-07-14 | Attach WBA before adapter readiness and recover readiness with `adapter.status`. | Adapter/UI pushes can be missed by a late native client; current WBA state must be queryable rather than edge-triggered. |
+| 2026-07-14 | Treat `editor.modelReady` and exact open ACKs as required native model lifecycle barriers. | `modelReady` triggers provider/workspace replay, while the generation ACK prevents changes and completions from targeting a stale WBA model. |
+| 2026-07-14 | Derive unmatched TextMate token colors from the selected theme. | The VS Code theme has no unscoped token rule; TM4E otherwise falls back to low-contrast Sora defaults for punctuation and some import scopes. |
 
 ## Blockers
 
-None currently. Device workflow validation is the next gate.
+None currently. Save/conflict, diagnostics, project switching, and direct Sora
+completion-popup interaction remain broader workflow validation gates.

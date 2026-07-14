@@ -193,7 +193,8 @@ internal class SocketIoJsonRpcClient(
                 handleEnvelope(decoded)
             }
         } catch (error: Exception) {
-            Log.w(TAG, "Invalid ${lane.name} RPC payload", error)
+            val payloadType = payload?.javaClass?.name ?: "null"
+            Log.w(TAG, "Invalid ${lane.name} RPC payload type=$payloadType", error)
         }
     }
 

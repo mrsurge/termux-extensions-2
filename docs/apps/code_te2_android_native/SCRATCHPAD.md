@@ -99,16 +99,21 @@ Official references:
 - `NativeEditorController` is the lane adapter and projection reducer. It owns
   no backend project, filesystem, diagnostics, or sidebar authority.
 - Native launch now requests the same UI IPC boot snapshot as the browser host.
-  That backend transaction primes WBA; backend adapter-state facts then gate the
-  native WBA socket instead of relying on another client to activate it.
-- WBA attach and workspace reconnect replay `vscode.openFile` and the complete
-  active model before debounced document changes resume. This orchestration is
+  The native WBA lane attaches immediately, queries/polls `adapter.status`, and
+  does not depend on receiving a one-time adapter-state push.
+- Each native model generation publishes `editor.modelReady`, which invokes the
+  backend `te2.resync` path and replays the existing workspace/provider state.
+- WBA attach and workspace reconnect force-open the active model with its local
+  generation. Debounced changes and completion requests remain blocked until
+  the exact path/generation open acknowledgement arrives. This orchestration is
   implemented in Kotlin; Sora remains the editor and Android embeds no Node
   runtime.
 - Sora consumes the live WBA extension-host grammar catalog and grammar bodies,
-  while GitHub Dark Default remains an installed theme asset. Active-language
-  loading runs off the UI thread and stale results are dropped across document
-  or adapter-session transitions.
+  while GitHub Dark Default remains an installed theme asset. Android inserts
+  an in-memory unscoped token fallback derived from that theme's own editor
+  foreground/background so unmatched TM4E punctuation/import scopes remain
+  visible. Active-language loading runs off the UI thread and stale results are
+  dropped across document or adapter-session transitions.
 - The stable completion subset maps label, detail, insert text, kind, and the
   single-line replacement prefix. Snippet expansion, documentation UI, and
   additional edits remain follow-up work.
@@ -121,27 +126,33 @@ Official references:
 Validation completed on 2026-07-14:
 
 ```text
-./gradlew :app:testWebviewStagingUnitTest \
-  :app:compileGeckoStagingKotlin \
-  :app:assembleWebviewStaging
+./gradlew -Pandroid.aapt2FromMavenOverride="$ANDROID_SDK_ROOT/build-tools/34.0.0/aapt2" \
+  :app:testWebviewDebugUnitTest \
+  :app:assembleWebviewDebug
 
 BUILD SUCCESSFUL
 ```
 
-Device workflow validation remains outstanding.
+The minified APK also requires explicit R8 retention for msgpack-core's
+reflectively selected `MessageBufferU`/`MessageBufferBE` implementations.
 
-## WBA Follow-up Evidence
+## WBA Device Evidence
 
-- The live WBA framework-shell log shows Android-originated
-  `vscode.openFile`, a subsequent `vscode.didChange`, and a ready
-  remote-agent/extension-host session.
-- The same log contains no `vscode.completions` request from the native client.
-  Current evidence therefore places the remaining failure after WBA model sync,
-  around Sora completion triggering or the Kotlin completion bridge.
-- Android now registers `android_webview:<pid>` / `android_gecko:<pid>` on the
-  existing TE2 console lane, streams filtered process Logcat, and supports
-  bounded `runtime.*`, `native.*`, and read-only `wba.*` probes for the next
-  on-device diagnosis.
+- A clean native-only launch originally had an editor model but
+  `adapterStatus=idle`, no WBA client, and no TextMate catalog. The device WBA
+  itself was already ready; the native client had missed edge-triggered adapter
+  state and never sent the browser's `editor.modelReady` replay signal.
+- After the fix, a process-recreated WebView attached to the already-running WBA
+  with no Monaco client: adapter ready, one WBA socket, matching model/open-ACK
+  generation, 95 grammar descriptors, `source.python`, and the Python
+  completion provider.
+- Opening `app/apps/file_editor_cm6/open_state_events.py` through Explorer RPC
+  advanced the native generation and WBA ACK together. A completion probe at a
+  real Python position returned 82 items.
+- Python punctuation and imports are visibly high contrast in the native Sora
+  screenshot. No invalid MessagePack notification warnings remained in Logcat.
+- Direct Sora completion-popup interaction is still a focused UI validation
+  item; the WBA provider/model/completion path itself is verified.
 
 ## Investigation Rules
 

@@ -16,11 +16,12 @@ import io.github.rosemoe.sora.langs.textmate.registry.model.ThemeModel
 import io.github.rosemoe.sora.text.CharPosition
 import io.github.rosemoe.sora.text.ContentReference
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
+import org.json.JSONArray
+import org.json.JSONObject
 import org.eclipse.tm4e.core.registry.IGrammarSource
 import org.eclipse.tm4e.core.registry.IThemeSource
+import java.io.ByteArrayInputStream
 import java.io.File
-import java.io.FileInputStream
-import java.nio.charset.Charset
 import java.util.concurrent.ConcurrentHashMap
 
 internal data class NativeCompletion(
@@ -41,6 +42,7 @@ internal class NativeEditorTextMate(private val assetRoot: File) {
         private const val THEME_PATH =
             "api/app/file_editor_cm6/ui/monaco_editor/textmate/themes/" +
                 "github-dark-default.vscode.json"
+        private const val NATIVE_THEME_NAME = "github-dark-default-native"
     }
 
     private val registryLock = Any()
@@ -177,22 +179,48 @@ internal class NativeEditorTextMate(private val assetRoot: File) {
 
     private fun loadTheme(targetRegistry: GrammarRegistry) {
         val themeRegistry = ThemeRegistry.getInstance()
-        var model = themeRegistry.findThemeByThemeName("github-dark-default")
+        var model = themeRegistry.findThemeByThemeName(NATIVE_THEME_NAME)
         if (model == null) {
             val theme = File(assetRoot, THEME_PATH)
             check(theme.isFile) { "GitHub Dark Default TextMate theme is missing: $theme" }
+            val normalizedTheme = normalizeTheme(theme.readText(Charsets.UTF_8))
             model = ThemeModel(
                 IThemeSource.fromInputStream(
-                    FileInputStream(theme),
+                    ByteArrayInputStream(normalizedTheme.toByteArray(Charsets.UTF_8)),
                     theme.absolutePath,
-                    Charset.defaultCharset(),
+                    Charsets.UTF_8,
                 ),
-                "github-dark-default",
+                NATIVE_THEME_NAME,
             ).apply { isDark = true }
             themeRegistry.loadTheme(model)
         }
         themeRegistry.setTheme(model)
         targetRegistry.setTheme(model)
+    }
+
+    private fun normalizeTheme(raw: String): String {
+        val theme = JSONObject(raw)
+        val colors = theme.optJSONObject("colors") ?: JSONObject()
+        val foreground = colors.optString("editor.foreground")
+            .ifBlank { colors.optString("foreground") }
+        val background = colors.optString("editor.background")
+        check(foreground.isNotBlank()) { "TextMate theme has no editor foreground" }
+        check(background.isNotBlank()) { "TextMate theme has no editor background" }
+
+        val sourceRules = theme.optJSONArray("tokenColors") ?: JSONArray()
+        val normalizedRules = JSONArray().put(
+            JSONObject().put(
+                "settings",
+                JSONObject()
+                    .put("foreground", foreground)
+                    .put("background", background),
+            ),
+        )
+        for (index in 0 until sourceRules.length()) {
+            normalizedRules.put(sourceRules.get(index))
+        }
+        theme.put("tokenColors", normalizedRules)
+        return theme.toString()
     }
 
     private fun completionKind(kind: Int): CompletionItemKind = when (kind) {

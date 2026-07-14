@@ -31,7 +31,12 @@ internal class NativeEditorController(
         private const val TAG = "NativeEditor"
         private const val MIRROR_DEBOUNCE_MS = 180L
         private const val WBA_CHANGE_DEBOUNCE_MS = 120L
+        private const val WBA_STATUS_RETRY_MS = 1_000L
     }
+
+    private data class CompletionProvider(
+        val triggerCharacters: Set<String>,
+    )
 
     private val mutableState = mutableStateOf(NativeEditorUiState())
     val state: State<NativeEditorUiState> = mutableState
@@ -44,9 +49,27 @@ internal class NativeEditorController(
     private var uiIpcClient: UiIpcClient? = null
     private var mirrorTask: Runnable? = null
     private var wbaChangeTask: Runnable? = null
+    private var wbaStatusTask: Runnable? = null
     private var bootSnapshotInFlight = false
+    private var wbaStatusInFlight = false
+    private var providerSnapshotInFlight = false
+    @Volatile
     private var adapterReady = false
     private var released = false
+    @Volatile
+    private var modelGeneration = 0L
+    @Volatile
+    private var modelVersion = 0L
+    private var lastModelReadySyncKey = ""
+    @Volatile
+    private var wbaOpenAckPath = ""
+    @Volatile
+    private var wbaOpenAckGeneration = -1L
+    private var wbaOpenInFlightPath = ""
+    private var wbaOpenInFlightGeneration = -1L
+    private var wbaPendingChange = false
+    @Volatile
+    private var completionProvidersByLanguage: Map<String, Map<String, CompletionProvider>> = emptyMap()
     private var textMateCatalog: List<NativeTextMateGrammarDescriptor>? = null
     private var textMateRequestGeneration = 0L
     private var textMateLoadingLanguage = ""
@@ -55,6 +78,8 @@ internal class NativeEditorController(
         if (released) return
         disconnectLanes()
         resetTextMateSession()
+        resetWbaDocumentSync()
+        completionProvidersByLanguage = emptyMap()
         adapterReady = false
         baseUrl = nextBaseUrl.trimEnd('/')
         Log.i(TAG, "connect baseUrl=$baseUrl")
@@ -66,8 +91,15 @@ internal class NativeEditorController(
                 path = "/editor_ws/socket.io",
                 responseMode = RpcResponseMode.IN_BAND,
             ),
-            onConnected = { update { it.copy(editorConnected = true, errorMessage = null) } },
-            onDisconnected = { update { it.copy(editorConnected = false) } },
+            onConnected = {
+                lastModelReadySyncKey = ""
+                update { it.copy(editorConnected = true, errorMessage = null) }
+                publishModelReady("editor_socket_connect")
+            },
+            onDisconnected = {
+                lastModelReadySyncKey = ""
+                update { it.copy(editorConnected = false) }
+            },
             onNotification = ::handleEditorNotification,
         )
         explorerClient = createLane(
@@ -81,6 +113,7 @@ internal class NativeEditorController(
             onDisconnected = { update { it.copy(explorerConnected = false) } },
             onNotification = ::handleExplorerNotification,
         )
+        ensureWbaClient()
         editorClient?.connect()
         explorerClient?.connect()
         requestBootSnapshot()
@@ -103,8 +136,10 @@ internal class NativeEditorController(
         released = true
         mirrorTask?.let(mainHandler::removeCallbacks)
         wbaChangeTask?.let(mainHandler::removeCallbacks)
+        wbaStatusTask?.let(mainHandler::removeCallbacks)
         mirrorTask = null
         wbaChangeTask = null
+        wbaStatusTask = null
         disconnectLanes()
         uiIpcClient?.onRpcNotification = null
         uiIpcClient?.onRpcConnectionChanged = null
@@ -131,6 +166,7 @@ internal class NativeEditorController(
             contentSha256 = sha256(content),
             unsaved = true,
         )
+        modelVersion += 1
         update {
             it.copy(
                 document = updated,
@@ -337,7 +373,17 @@ internal class NativeEditorController(
     ): List<NativeCompletion> {
         val document = state.value.document ?: return emptyList()
         val client = wbaClient ?: return emptyList()
-        if (!client.isConnected) return emptyList()
+        val generation = modelGeneration
+        if (
+            !adapterReady ||
+            !client.isConnected ||
+            wbaOpenAckPath != document.path ||
+            wbaOpenAckGeneration != generation
+        ) {
+            mainHandler.post { flushActiveWbaDocument("completion_barrier") }
+            return emptyList()
+        }
+        val triggerCharacter = completionTriggerCharacter(text, line, column, languageId)
         Log.d(TAG, "completion request path=${document.path} line=$line column=$column")
         val latch = CountDownLatch(1)
         var response: Any? = null
@@ -350,6 +396,10 @@ internal class NativeEditorController(
                 "lineNumber" to line + 1,
                 "column" to column + 1,
                 "text" to text,
+                "generation" to generation,
+                "modelVersionId" to modelVersion,
+                "triggerKind" to if (triggerCharacter == null) 0 else 2,
+                "triggerCharacter" to triggerCharacter,
                 "timeoutMs" to 4_000,
             ),
             timeoutMs = 5_000,
@@ -438,7 +488,16 @@ internal class NativeEditorController(
                     val snapshot = response["snapshot"].asStringMap().orEmpty()
                     snapshot["editor_ssot"].asStringMap()?.let(::applyEditorSnapshot)
                     Log.i(TAG, "backend boot snapshot received")
-                    update { it.copy(statusMessage = "Waiting for workbench...", errorMessage = null) }
+                    update {
+                        it.copy(
+                            statusMessage = if (adapterReady) {
+                                it.document?.relativePath ?: "Workbench ready"
+                            } else {
+                                "Waiting for workbench..."
+                            },
+                            errorMessage = null,
+                        )
+                    }
                 },
                 onFailure = { error -> setError("Native boot failed: ${error.message}") },
             )
@@ -448,14 +507,20 @@ internal class NativeEditorController(
     private fun applyAdapterState(payload: Map<String, Any?>) {
         val status = payload.string("status").ifBlank { "idle" }
         Log.i(TAG, "adapter state status=$status project=${payload.string("project")}")
+        val wasReady = adapterReady
         adapterReady = status == "ready"
+        if (wasReady && !adapterReady) resetWbaDocumentSync()
         update {
             it.copy(
                 adapterStatus = status,
                 statusMessage = when (status) {
                     "starting" -> "Starting workbench..."
                     "switching" -> "Switching workbench..."
-                    "ready" -> it.statusMessage
+                    "ready" -> when {
+                        it.document?.unsaved == true -> "Modified"
+                        it.document != null -> it.document.relativePath
+                        else -> "Workbench ready"
+                    }
                     "error" -> payload.string("error").ifBlank { "Workbench failed" }
                     else -> it.statusMessage
                 },
@@ -468,14 +533,20 @@ internal class NativeEditorController(
         }
         if (adapterReady) {
             ensureWbaClient()
+            stopWbaStatusPolling()
+            publishModelReady("adapter_ready")
             flushActiveWbaDocument("adapter_ready")
             ensureTextMateForActiveDocument()
+            if (!wasReady) refreshCompletionProviders("adapter_ready")
+        } else if (wbaClient?.isConnected == true) {
+            scheduleWbaStatusPoll()
         }
     }
 
     private fun ensureWbaClient() {
-        if (released || !adapterReady || wbaClient != null) return
-        wbaClient = createLane(
+        if (released || baseUrl.isBlank() || wbaClient != null) return
+        lateinit var nextClient: SocketIoJsonRpcClient
+        nextClient = createLane(
             SocketIoRpcLane(
                 name = "wba",
                 namespace = "/wba",
@@ -483,18 +554,37 @@ internal class NativeEditorController(
                 responseMode = RpcResponseMode.IN_BAND,
                 notificationEvent = "rpc",
             ),
-            onConnected = {
+            onConnected = connected@{
+                if (wbaClient !== nextClient) return@connected
                 Log.i(TAG, "WBA socket connected")
                 update { it.copy(wbaConnected = true, errorMessage = null) }
-                flushActiveWbaDocument("wba_socket_connect")
-                ensureTextMateForActiveDocument()
+                requestWbaStatus("wba_socket_connect")
+                publishModelReady("wba_socket_connect")
+                if (adapterReady) {
+                    flushActiveWbaDocument("wba_socket_connect")
+                    ensureTextMateForActiveDocument()
+                    refreshCompletionProviders("wba_socket_connect")
+                }
             },
-            onDisconnected = {
+            onDisconnected = disconnected@{
+                if (wbaClient !== nextClient) return@disconnected
                 Log.i(TAG, "WBA socket disconnected")
-                update { it.copy(wbaConnected = false) }
+                stopWbaStatusPolling()
+                wbaStatusInFlight = false
+                adapterReady = false
+                resetWbaDocumentSync()
+                update {
+                    it.copy(
+                        wbaConnected = false,
+                        adapterStatus = "starting",
+                        statusMessage = "Reconnecting workbench...",
+                    )
+                }
             },
             onNotification = ::handleWbaNotification,
-        ).also(SocketIoJsonRpcClient::connect)
+        )
+        wbaClient = nextClient
+        nextClient.connect()
     }
 
     private fun handleWbaNotification(notification: JsonRpcNotification) {
@@ -504,17 +594,23 @@ internal class NativeEditorController(
         when (type) {
             "adapter/sessionReset" -> {
                 adapterReady = false
+                resetWbaDocumentSync()
+                completionProvidersByLanguage = emptyMap()
                 resetTextMateSession()
                 update { it.copy(adapterStatus = "switching", textMateReady = false) }
+                scheduleWbaStatusPoll()
             }
             "workspace/switched" -> {
                 if (notification.params["readyForDocumentOpen"] == true) {
-                    adapterReady = true
-                    update { it.copy(adapterStatus = "ready") }
-                    flushActiveWbaDocument("workspace_switched")
-                    ensureTextMateForActiveDocument()
+                    applyAdapterState(
+                        mapOf(
+                            "status" to "ready",
+                            "project" to notification.params.string("workspaceFolder"),
+                        ),
+                    )
                 }
             }
+            "provider/completions" -> cacheCompletionProvider(notification.params)
         }
     }
 
@@ -528,6 +624,9 @@ internal class NativeEditorController(
             "editor.save.snapshot.request" -> respondToSaveSnapshot(notification.params)
             "editor.project.switching" -> {
                 adapterReady = false
+                resetWbaDocumentSync()
+                completionProvidersByLanguage = emptyMap()
+                resetTextMateSession()
                 update {
                     it.copy(
                         projectSwitching = true,
@@ -642,6 +741,16 @@ internal class NativeEditorController(
             languageId = languageIdForPath(path),
             unsaved = payload["unsaved"] == true,
         )
+        val replacesModel = existing == null ||
+            existing.path != document.path ||
+            existing.projectPath != document.projectPath ||
+            existing.languageId != document.languageId ||
+            existing.contentSha256 != document.contentSha256
+        if (replacesModel) {
+            modelGeneration += 1
+            modelVersion += 1
+            resetWbaDocumentSync()
+        }
         update {
             it.copy(
                 projectPath = project,
@@ -652,6 +761,7 @@ internal class NativeEditorController(
                 errorMessage = null,
             )
         }
+        publishModelReady("document_projection")
         flushActiveWbaDocument("document_projection")
         ensureTextMateForActiveDocument()
     }
@@ -683,6 +793,11 @@ internal class NativeEditorController(
 
     private fun applyProjectSwitched(payload: Map<String, Any?>) {
         val project = projectPath(payload)
+        modelGeneration += 1
+        modelVersion += 1
+        lastModelReadySyncKey = ""
+        resetWbaDocumentSync()
+        completionProvidersByLanguage = emptyMap()
         update {
             it.copy(
                 projectPath = project,
@@ -908,22 +1023,60 @@ internal class NativeEditorController(
         val document = state.value.document ?: return
         val client = wbaClient ?: return
         if (!adapterReady || !client.isConnected) return
-        Log.i(TAG, "WBA open path=${document.path} reason=$reason")
+        val generation = modelGeneration
+        if (wbaOpenAckPath == document.path && wbaOpenAckGeneration == generation) {
+            if (wbaPendingChange) publishWbaDocument(document)
+            return
+        }
+        if (
+            wbaOpenInFlightPath == document.path &&
+            wbaOpenInFlightGeneration == generation
+        ) return
+        wbaOpenInFlightPath = document.path
+        wbaOpenInFlightGeneration = generation
+        wbaPendingChange = true
+        Log.i(TAG, "WBA open path=${document.path} generation=$generation reason=$reason")
         client.request(
             "vscode.openFile",
             mapOf(
                 "path" to document.path,
                 "languageId" to document.languageId,
+                "uri" to "vscode-remote://localhost${document.path}",
                 "workspaceFolder" to document.projectPath,
                 "requestId" to requestId("native_open_${reason}"),
+                "forceRefresh" to true,
+                "generation" to generation,
             ),
             timeoutMs = 30_000,
         ) { result ->
+            if (
+                wbaOpenInFlightPath == document.path &&
+                wbaOpenInFlightGeneration == generation
+            ) {
+                wbaOpenInFlightPath = ""
+                wbaOpenInFlightGeneration = -1L
+            }
+            val payload = result.getOrNull().asStringMap().orEmpty()
+            val accepted = result.isSuccess && payload["ok"] != false
             result.exceptionOrNull()?.let { setError("Workbench open failed: ${it.message}") }
-            Log.i(TAG, "WBA open result path=${document.path} ok=${result.isSuccess}")
+            if (result.isSuccess && !accepted) {
+                setError(payload.string("error").ifBlank { "Workbench open failed" })
+            }
+            Log.i(
+                TAG,
+                "WBA open result path=${document.path} generation=$generation ok=$accepted",
+            )
             val current = state.value.document
-            if (result.isSuccess && current?.path == document.path) {
+            if (
+                accepted &&
+                current?.path == document.path &&
+                modelGeneration == generation
+            ) {
+                wbaOpenAckPath = document.path
+                wbaOpenAckGeneration = generation
                 publishWbaDocument(current)
+            } else if (current != null && client.isConnected && adapterReady) {
+                flushActiveWbaDocument("stale_open_result")
             }
         }
     }
@@ -931,17 +1084,187 @@ internal class NativeEditorController(
     private fun publishWbaDocument(document: NativeDocument) {
         val client = wbaClient ?: return
         if (!adapterReady || !client.isConnected) return
-        Log.d(TAG, "WBA didChange path=${document.path} bytes=${document.content.length}")
+        val generation = modelGeneration
+        if (wbaOpenAckPath != document.path || wbaOpenAckGeneration != generation) {
+            wbaPendingChange = true
+            flushActiveWbaDocument("did_change_barrier")
+            return
+        }
+        wbaPendingChange = false
+        Log.d(
+            TAG,
+            "WBA didChange path=${document.path} generation=$generation " +
+                "version=$modelVersion bytes=${document.content.length}",
+        )
         client.request(
             "vscode.didChange",
             mapOf(
                 "path" to document.path,
                 "text" to document.content,
                 "languageId" to document.languageId,
+                "generation" to generation,
+                "modelVersionId" to modelVersion,
             ),
         ) { result ->
             result.exceptionOrNull()?.let { Log.d(TAG, "WBA didChange failed: ${it.message}") }
         }
+    }
+
+    private fun requestWbaStatus(reason: String) {
+        val client = wbaClient ?: return
+        if (released || !client.isConnected || wbaStatusInFlight) return
+        wbaStatusInFlight = true
+        Log.d(TAG, "WBA status request reason=$reason")
+        client.request("adapter.status", timeoutMs = 10_000) { result ->
+            wbaStatusInFlight = false
+            result.fold(
+                onSuccess = { raw ->
+                    val payload = raw.asStringMap().orEmpty()
+                    val session = payload["session"].asStringMap().orEmpty()
+                    val workspace = session.string("workspaceFolder")
+                        .ifBlank { payload.string("workspaceFolder") }
+                    val expectedProject = state.value.projectPath
+                    val workspaceMatches = expectedProject.isBlank() ||
+                        workspace.isBlank() ||
+                        workspace == expectedProject
+                    val ready = (session["ready"] == true || payload["readyForDocumentOpen"] == true) &&
+                        workspaceMatches
+                    applyAdapterState(
+                        mapOf(
+                            "status" to if (ready) "ready" else "starting",
+                            "project" to workspace,
+                        ),
+                    )
+                    if (!ready) scheduleWbaStatusPoll()
+                },
+                onFailure = { error ->
+                    Log.d(TAG, "WBA status failed reason=$reason: ${error.message}")
+                    scheduleWbaStatusPoll()
+                },
+            )
+        }
+    }
+
+    private fun scheduleWbaStatusPoll() {
+        if (
+            released ||
+            adapterReady ||
+            wbaClient?.isConnected != true ||
+            wbaStatusTask != null
+        ) return
+        wbaStatusTask = Runnable {
+            wbaStatusTask = null
+            requestWbaStatus("poll")
+        }.also { mainHandler.postDelayed(it, WBA_STATUS_RETRY_MS) }
+    }
+
+    private fun stopWbaStatusPolling() {
+        wbaStatusTask?.let(mainHandler::removeCallbacks)
+        wbaStatusTask = null
+    }
+
+    private fun publishModelReady(reason: String) {
+        val document = state.value.document ?: return
+        val client = editorClient ?: return
+        if (!client.isConnected) return
+        val key = "${document.path}::$modelGeneration"
+        if (key == lastModelReadySyncKey) return
+        if (
+            client.notify(
+                "editor.modelReady",
+                mapOf(
+                    "path" to document.path,
+                    "languageId" to document.languageId,
+                    "generation" to modelGeneration,
+                    "request_id" to requestId("native_model_ready"),
+                    "source" to "android_native_$reason",
+                ),
+            )
+        ) {
+            lastModelReadySyncKey = key
+            Log.i(TAG, "model ready path=${document.path} generation=$modelGeneration reason=$reason")
+        }
+    }
+
+    private fun refreshCompletionProviders(reason: String) {
+        val client = wbaClient ?: return
+        if (!adapterReady || !client.isConnected || providerSnapshotInFlight) return
+        providerSnapshotInFlight = true
+        client.request("adapter.providers", timeoutMs = 10_000) { result ->
+            providerSnapshotInFlight = false
+            result.fold(
+                onSuccess = { raw ->
+                    val payload = raw.asStringMap().orEmpty()
+                    val next = linkedMapOf<String, MutableMap<String, CompletionProvider>>()
+                    payload["completions"].asList().forEach { rawProvider ->
+                        val provider = rawProvider.asStringMap() ?: return@forEach
+                        val handle = provider["handle"]?.toString()?.trim().orEmpty()
+                        if (handle.isBlank()) return@forEach
+                        val triggers = provider["triggerCharacters"].asList()
+                            .mapNotNull { it as? String }
+                            .filter(String::isNotBlank)
+                            .toSet()
+                        val languages = provider["selector"].asList().mapNotNull { rawSelector ->
+                            rawSelector.asStringMap()?.string("language")?.takeIf(String::isNotBlank)
+                        }.distinct()
+                        languages.forEach { language ->
+                            next.getOrPut(language) { linkedMapOf() }[handle] =
+                                CompletionProvider(triggers)
+                        }
+                    }
+                    completionProvidersByLanguage = next.mapValues { (_, providers) ->
+                        providers.toMap()
+                    }
+                    Log.i(
+                        TAG,
+                        "completion provider snapshot reason=$reason " +
+                            "languages=${next.size} providers=${next.values.sumOf { it.size }}",
+                    )
+                },
+                onFailure = { error ->
+                    Log.d(TAG, "Completion provider snapshot failed reason=$reason: ${error.message}")
+                },
+            )
+        }
+    }
+
+    private fun cacheCompletionProvider(payload: Map<String, Any?>) {
+        val language = payload.string("language")
+        val handle = payload["handle"]?.toString()?.trim().orEmpty()
+        if (language.isBlank() || handle.isBlank()) return
+        val triggers = payload["triggerCharacters"].asList()
+            .mapNotNull { it as? String }
+            .filter(String::isNotBlank)
+            .toSet()
+        val providers = completionProvidersByLanguage[language].orEmpty().toMutableMap()
+        providers[handle] = CompletionProvider(triggers)
+        completionProvidersByLanguage = completionProvidersByLanguage + (language to providers)
+    }
+
+    private fun completionTriggerCharacter(
+        text: String,
+        line: Int,
+        column: Int,
+        languageId: String,
+    ): String? {
+        val lineText = text.lineSequence().drop(line).firstOrNull().orEmpty()
+        val safeColumn = column.coerceIn(0, lineText.length)
+        if (safeColumn == 0) return null
+        val candidate = lineText.substring(safeColumn - 1, safeColumn)
+        val triggers = completionProvidersByLanguage[languageId]
+            ?.values
+            ?.flatMap { it.triggerCharacters }
+            ?.toSet()
+            .orEmpty()
+        return candidate.takeIf(triggers::contains)
+    }
+
+    private fun resetWbaDocumentSync() {
+        wbaOpenAckPath = ""
+        wbaOpenAckGeneration = -1L
+        wbaOpenInFlightPath = ""
+        wbaOpenInFlightGeneration = -1L
+        wbaPendingChange = state.value.document != null
     }
 
     private fun resetTextMateSession() {
@@ -1122,6 +1445,7 @@ internal class NativeEditorController(
             "baseUrl" to baseUrl,
             "released" to released,
             "bootSnapshotInFlight" to bootSnapshotInFlight,
+            "wbaStatusInFlight" to wbaStatusInFlight,
             "adapterReady" to adapterReady,
             "adapterStatus" to current.adapterStatus,
             "projectPath" to current.projectPath,
@@ -1133,6 +1457,20 @@ internal class NativeEditorController(
                     "languageId" to it.languageId,
                     "contentLength" to it.content.length,
                     "unsaved" to it.unsaved,
+                )
+            },
+            "modelGeneration" to modelGeneration,
+            "modelVersion" to modelVersion,
+            "lastModelReadySyncKey" to lastModelReadySyncKey,
+            "wbaOpenAckPath" to wbaOpenAckPath,
+            "wbaOpenAckGeneration" to wbaOpenAckGeneration,
+            "wbaOpenInFlightPath" to wbaOpenInFlightPath,
+            "wbaOpenInFlightGeneration" to wbaOpenInFlightGeneration,
+            "wbaPendingChange" to wbaPendingChange,
+            "completionProviders" to completionProvidersByLanguage.mapValues { (_, providers) ->
+                mapOf(
+                    "count" to providers.size,
+                    "triggers" to providers.values.flatMap { it.triggerCharacters }.distinct().sorted(),
                 )
             },
             "textMateReady" to current.textMateReady,
@@ -1205,12 +1543,17 @@ internal class NativeEditorController(
     }
 
     private fun disconnectLanes() {
+        stopWbaStatusPolling()
+        wbaStatusInFlight = false
+        providerSnapshotInFlight = false
         editorClient?.disconnect()
         explorerClient?.disconnect()
         wbaClient?.disconnect()
         editorClient = null
         explorerClient = null
         wbaClient = null
+        lastModelReadySyncKey = ""
+        resetWbaDocumentSync()
         update {
             it.copy(
                 editorConnected = false,
