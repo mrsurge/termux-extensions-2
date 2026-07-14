@@ -60,6 +60,9 @@ class MainActivity : AppCompatActivity() {
 
     private var editorAssetManager: EditorAssetManager? = null
     private var localAssetServer: LocalAssetServer? = null
+    private lateinit var androidSettingsStore: AndroidAppSettingsStore
+    private lateinit var androidDiagnostics: AndroidDiagnostics
+    @Volatile private var lastStartupFailure: String? = null
     private var assetExtension: WebExtension? = null
     private var assetExtensionPort: WebExtension.Port? = null
     @Volatile private var assetInterceptorReady: Boolean = false
@@ -86,7 +89,6 @@ class MainActivity : AppCompatActivity() {
     private var persistentNetworkNotificationEnabled: Boolean = false
     private var pendingSurfaceRecover: Boolean = false
     private var notificationPermissionRequestInFlight: Boolean = false
-    private var pendingPersistentServiceStart: Boolean = false
     private var persistentNetworkPermissionDenied: Boolean = false
     private var persistentNetworkStartFailed: Boolean = false
 
@@ -123,6 +125,28 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun shouldRestoreRemoteAppSession(): Boolean {
+        val lastUrl = loadLastUrl() ?: return false
+        return try {
+            val path = Uri.parse(lastUrl).path.orEmpty()
+            path == "/app" || path.startsWith("/app/")
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun effectivePort(uri: Uri): Int {
+        if (uri.port >= 0) return uri.port
+        return if (uri.scheme.equals("https", ignoreCase = true)) 443 else 80
+    }
+
+    private fun isFrameworkOrigin(uri: Uri): Boolean {
+        val frameworkUri = Uri.parse(frameworkBaseUrl)
+        return uri.scheme.equals(frameworkUri.scheme, ignoreCase = true) &&
+            uri.host.equals(frameworkUri.host, ignoreCase = true) &&
+            effectivePort(uri) == effectivePort(frameworkUri)
     }
 
     private fun createGeckoSession(): GeckoSession {
@@ -371,6 +395,12 @@ class MainActivity : AppCompatActivity() {
                         return GeckoResult.fromValue(AllowOrDeny.ALLOW)
                     }
 
+                    val path = uri.path.orEmpty()
+                    if (isFrameworkOrigin(uri) && (path == "/" || path.isEmpty())) {
+                        runOnUiThread { loadHome() }
+                        return GeckoResult.fromValue(AllowOrDeny.DENY)
+                    }
+
                     val isAppShell = isAppShellUrl(uri)
                     runOnUiThread {
                         inAppShell = isAppShell
@@ -427,7 +457,7 @@ class MainActivity : AppCompatActivity() {
 
         val restored = try {
             val st = loadSavedSessionState()
-            if (st != null) {
+            if (st != null && shouldRestoreRemoteAppSession()) {
                 geckoSession.restoreState(st)
                 true
             } else {
@@ -444,16 +474,13 @@ class MainActivity : AppCompatActivity() {
 
         if (!restored) {
             val last = loadLastUrl()
-            if (!last.isNullOrBlank()) {
+            if (!last.isNullOrBlank() && shouldRestoreRemoteAppSession()) {
                 try {
                     geckoSession.loadUri(last)
                 } catch (_: Exception) {
                 }
             } else {
-                try {
-                    geckoSession.loadUri(frameworkBaseUrl.trimEnd('/') + "/")
-                } catch (_: Exception) {
-                }
+                loadHome()
             }
         }
     }
@@ -481,12 +508,7 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
             if (!granted) {
-                if (persistentNetworkPermissionDenied) {
-                    pendingPersistentServiceStart = false
-                    return
-                }
-                pendingPersistentServiceStart = true
-                if (!notificationPermissionRequestInFlight) {
+                if (!persistentNetworkPermissionDenied && !notificationPermissionRequestInFlight) {
                     notificationPermissionRequestInFlight = true
                     ActivityCompat.requestPermissions(
                         this,
@@ -494,11 +516,9 @@ class MainActivity : AppCompatActivity() {
                         9301
                     )
                 }
-                return
             }
         }
 
-        pendingPersistentServiceStart = false
         try {
             val intent = Intent(this, PersistentNetworkService::class.java)
             if (android.os.Build.VERSION.SDK_INT >= 26) {
@@ -513,29 +533,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopPersistentNetworkServiceLocally() {
-        pendingPersistentServiceStart = false
         notificationPermissionRequestInFlight = false
         stopService(Intent(this, PersistentNetworkService::class.java))
     }
 
-    private fun fetchPersistentNetworkSetting(frameworkUrl: String): Boolean? {
-        return try {
-            val androidCfgUrl = frameworkUrl.trimEnd('/') + "/api/android/config"
-            val req = Request.Builder().url(androidCfgUrl).get().build()
-            httpClient.newCall(req).execute().use { resp ->
-                val body = resp.body?.string()
-                if (!resp.isSuccessful || body.isNullOrBlank()) return null
-                val json = JSONObject(body)
-                val data = json.optJSONObject("data") ?: return null
-                data.optBoolean("persistent_network_notification", false)
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        androidDiagnostics = AndroidDiagnostics(applicationContext)
+        androidDiagnostics.beginSession()
+        androidSettingsStore = AndroidAppSettingsStore(applicationContext)
+        applyAndroidSettings(androidSettingsStore.load(), reconnect = false)
         setContentView(R.layout.activity_main)
 
         geckoView = findViewById(R.id.geckoView)
@@ -837,6 +844,12 @@ class MainActivity : AppCompatActivity() {
                         return GeckoResult.fromValue(AllowOrDeny.ALLOW)
                     }
 
+                    val path = uri.path.orEmpty()
+                    if (isFrameworkOrigin(uri) && (path == "/" || path.isEmpty())) {
+                        runOnUiThread { loadHome() }
+                        return GeckoResult.fromValue(AllowOrDeny.DENY)
+                    }
+
                     val isAppShell = isAppShellUrl(uri)
                     runOnUiThread {
                         inAppShell = isAppShell
@@ -874,11 +887,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 if (!ready) {
                     Log.e("MainActivity", "Local asset interceptor failed; Gecko navigation blocked")
-                    Toast.makeText(
-                        this,
-                        "Local editor assets unavailable; navigation blocked",
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    showFatalStartupToast("Local editor assets unavailable; navigation blocked")
                     return@runOnUiThread
                 }
                 unlockGeckoNavigation()
@@ -891,7 +900,7 @@ class MainActivity : AppCompatActivity() {
 
         val restored = try {
             val state = loadSavedSessionState()
-            if (state != null) {
+            if (state != null && shouldRestoreRemoteAppSession()) {
                 geckoSession.restoreState(state)
                 true
             } else {
@@ -902,7 +911,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         Log.i("MainActivity", "Asset interceptor ready; Gecko navigation unlocked")
-        wakeFrameworkAndLoad(forceLoadHome = !restored)
+        if (!restored) loadHome()
+        wakeFrameworkAndLoad(forceLoadHome = false)
     }
 
     override fun onResume() {
@@ -950,13 +960,10 @@ class MainActivity : AppCompatActivity() {
             val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
             if (granted) {
                 persistentNetworkPermissionDenied = false
-                if (pendingPersistentServiceStart) {
-                    updatePersistentNetworkService()
-                }
             } else {
                 persistentNetworkPermissionDenied = true
-                stopPersistentNetworkServiceLocally()
             }
+            updatePersistentNetworkService()
         }
     }
 
@@ -1026,7 +1033,14 @@ class MainActivity : AppCompatActivity() {
         inAppShell = false
         nativeHeader.visibility = View.GONE
         updatePersistentNetworkService()
-        geckoSession.loadUri(frameworkBaseUrl.trimEnd('/') + "/")
+        val server = localAssetServer
+        if (server == null || server.port <= 0) {
+            showFatalStartupToast("Android launcher server is unavailable")
+            return
+        }
+        val launcherUrl = server.url("/android-shell/index.html")
+        persistLastUrl(launcherUrl)
+        geckoSession.loadUri(launcherUrl)
     }
 
     private fun loadApp(appId: String) {
@@ -1137,6 +1151,7 @@ class MainActivity : AppCompatActivity() {
     private fun showConsoleOverlay() {
         consoleOverlay.visibility = View.VISIBLE
         composeConsoleState.resetSession()
+        loadAndroidDiagnosticsIntoTools()
         uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
         // Show asset version inline with title
         try {
@@ -1153,6 +1168,43 @@ class MainActivity : AppCompatActivity() {
 
     private fun toggleConsoleOverlay() {
         if (consoleOverlay.visibility == View.VISIBLE) hideConsoleOverlay() else showConsoleOverlay()
+    }
+
+    private fun loadAndroidDiagnosticsIntoTools() {
+        Thread {
+            val dump = androidDiagnostics.captureWarningsAndErrors()
+            when {
+                dump.error != null -> composeConsoleState.appendNativeLog("error", dump.error)
+                dump.lines.isEmpty() -> composeConsoleState.appendNativeLog(
+                    "info",
+                    "No Android warnings or errors in this session",
+                )
+                else -> dump.lines.forEach { line ->
+                    composeConsoleState.appendNativeLog(androidLogcatLevel(line), line)
+                }
+            }
+        }.start()
+    }
+
+    private fun androidDiagnosticRuntimeState(): JSONObject = JSONObject().apply {
+        put("frameworkBaseUrl", frameworkBaseUrl)
+        put("localAssetServerPort", localAssetServer?.port ?: 0)
+        put("assetRootExists", editorAssetManager?.getAssetRoot()?.exists() == true)
+        put("localAssetVersion", editorAssetManager?.getLocalVersion() ?: JSONObject.NULL)
+        put("lastStartupFailure", lastStartupFailure ?: JSONObject.NULL)
+        put("assetInterceptorReady", assetInterceptorReady)
+        put("inAppShell", inAppShell)
+    }
+
+    private fun recordStartupFailure(message: String, error: Throwable? = null) {
+        val detail = formatStartupFailure(message, error)
+        lastStartupFailure = detail
+        if (error == null) Log.e("MainActivity", detail) else Log.e("MainActivity", detail, error)
+    }
+
+    private fun showFatalStartupToast(fallback: String) {
+        nativeHeader.visibility = View.VISIBLE
+        Toast.makeText(this, lastStartupFailure ?: fallback, Toast.LENGTH_LONG).show()
     }
 
     private fun updateConsoleControls() {
@@ -1283,26 +1335,36 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (!mgr.getAssetRoot().exists()) {
-                Log.w("MainActivity", "No editor assets available, skipping asset server")
+                recordStartupFailure("APK editor asset seed did not create the local asset root")
                 onReady(false)
                 return
             }
 
             // Start local file server
-            val server = LocalAssetServer(mgr.getAssetRoot())
+            val gateway = AndroidShellGateway(
+                settingsStore = androidSettingsStore,
+                httpClient = httpClient,
+                onSettingsChanged = { settings ->
+                    applyAndroidSettings(settings, reconnect = true)
+                },
+                diagnosticsProvider = {
+                    androidDiagnostics.snapshot(androidDiagnosticRuntimeState())
+                },
+            )
+            val server = LocalAssetServer(mgr.getAssetRoot(), gateway::handle)
             server.start()
             localAssetServer = server
             Log.i("MainActivity", "Local asset server on port ${server.port}")
 
             // Install the asset intercept WebExtension
             if (server.port <= 0) {
-                Log.e("MainActivity", "Local asset server did not bind a port")
+                recordStartupFailure("Local asset server did not bind a port")
                 onReady(false)
                 return
             }
             installAssetExtension(server.port, onReady)
         } catch (e: Exception) {
-            Log.e("MainActivity", "initEditorAssets failed", e)
+            recordStartupFailure("Local launcher initialization failed", e)
             onReady(false)
         }
     }
@@ -1314,6 +1376,7 @@ class MainActivity : AppCompatActivity() {
         fun completeReady() {
             if (!completed.compareAndSet(false, true)) return
             assetInterceptorReady = true
+            lastStartupFailure = null
             uiHandler.removeCallbacks(timeout)
             onReady(true)
         }
@@ -1321,6 +1384,7 @@ class MainActivity : AppCompatActivity() {
         fun completeFailure(error: String) {
             if (!completed.compareAndSet(false, true)) return
             assetInterceptorReady = false
+            lastStartupFailure = error
             uiHandler.removeCallbacks(timeout)
             Log.e("MainActivity", error)
             onReady(false)
@@ -1411,16 +1475,53 @@ class MainActivity : AppCompatActivity() {
 
     private fun requireAssetInterceptor(action: String): Boolean {
         if (assetInterceptorReady) return true
-        Log.e("MainActivity", "Blocked $action while local asset interceptor is unavailable")
-        Toast.makeText(this, "Local editor assets are not ready", Toast.LENGTH_LONG).show()
+        val detail = "Blocked $action while local asset interceptor is unavailable"
+        Log.e("MainActivity", detail)
+        showFatalStartupToast(detail)
         return false
+    }
+
+    private fun releaseAssetInterceptor() {
+        // GeckoRuntime survives activity recreation, so its native port must not
+        // retain the destroyed activity's delegates or local-server port.
+        assetInterceptorReady = false
+        try {
+            assetExtension?.setMessageDelegate(null, "browser")
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Failed to clear asset extension message delegate", e)
+        }
+        try {
+            assetExtensionPort?.setDelegate(null)
+            assetExtensionPort?.disconnect()
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Failed to disconnect asset extension native port", e)
+        }
+        assetExtensionPort = null
+        assetExtension = null
+        Log.i("MainActivity", "Released asset interceptor for activity teardown")
+    }
+
+    private fun applyAndroidSettings(settings: AndroidAppSettings, reconnect: Boolean) {
+        frameworkBaseUrl = settings.frameworkBaseUrl
+        persistentNetworkNotificationEnabled = settings.persistentNetworkNotification
+        if (!reconnect) return
+
+        runOnUiThread {
+            updatePersistentNetworkService()
+        }
+        uiIpcClient?.disconnect()
+        uiIpcClient = null
+        wakeFrameworkAndLoad(forceLoadHome = false)
     }
 
     private fun wakeFrameworkAndLoad(forceLoadHome: Boolean = true) {
         Thread {
             val base = IPC_SLEEP_BASE_URL.trimEnd('/')
-            var frameworkUrl = loadFrameworkUrl(base)
-            if (!isFrameworkReachable(frameworkUrl)) {
+            val settings = androidSettingsStore.load()
+            val frameworkUrl = settings.frameworkBaseUrl
+            val localTarget = settings.frameworkHost == "127.0.0.1" ||
+                settings.frameworkHost.equals("localhost", ignoreCase = true)
+            if (localTarget && !isFrameworkReachable(frameworkUrl)) {
                 try {
                     val wakeReq = Request.Builder()
                         .url("$base/actions/wake")
@@ -1432,7 +1533,6 @@ class MainActivity : AppCompatActivity() {
 
                 for (_attempt in 0 until 10) {
                     Thread.sleep(200)
-                    frameworkUrl = loadFrameworkUrl(base)
                     if (isFrameworkReachable(frameworkUrl)) {
                         break
                     }
@@ -1474,7 +1574,7 @@ class MainActivity : AppCompatActivity() {
 
             // Connect IME filter IPC after server URL is known
             try {
-                val port = java.net.URI(frameworkUrl).port.let { if (it == -1) 8089 else it }
+                uiIpcClient?.disconnect()
                 uiIpcClient = UiIpcClient(editorInputFilter) { active ->
                     runOnUiThread {
                         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
@@ -1490,7 +1590,7 @@ class MainActivity : AppCompatActivity() {
                 uiIpcClient?.onConsoleEvent = { eventName, data ->
                     composeConsoleState.onConsoleEvent(eventName, data)
                 }
-                uiIpcClient?.connect(port)
+                uiIpcClient?.connect(frameworkUrl)
                 if (consoleOverlay.visibility == View.VISIBLE) {
                     uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
                 }
@@ -1498,9 +1598,6 @@ class MainActivity : AppCompatActivity() {
                 android.util.Log.w("MainActivity", "UiIpcClient setup failed", e)
             }
 
-            fetchPersistentNetworkSetting(frameworkUrl)?.let {
-                persistentNetworkNotificationEnabled = it
-            }
             runOnUiThread {
                 if (forceLoadHome) {
                     loadHome()
@@ -1516,28 +1613,8 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun loadFrameworkUrl(base: String): String {
-        var frameworkUrl = DEFAULT_FRAMEWORK_URL
-        try {
-            val cfgReq = Request.Builder().url("$base/config").get().build()
-            httpClient.newCall(cfgReq).execute().use { resp ->
-                val body = resp.body?.string()
-                if (resp.isSuccessful && !body.isNullOrBlank()) {
-                    val json = JSONObject(body)
-                    val data = json.optJSONObject("data")
-                    val candidate = data?.optString("framework_url")
-                    if (!candidate.isNullOrBlank()) {
-                        frameworkUrl = candidate
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return frameworkUrl
-    }
-
     private fun isFrameworkReachable(frameworkUrl: String): Boolean {
-        val probeUrl = frameworkUrl.trimEnd('/') + "/api/android/config"
+        val probeUrl = frameworkUrl.trimEnd('/') + "/api/apps/catalog"
         return try {
             val req = Request.Builder().url(probeUrl).get().build()
             httpClient.newCall(req).execute().use { resp -> resp.isSuccessful }
@@ -1557,6 +1634,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         uiIpcClient?.disconnect()
         uiIpcClient = null
+        releaseAssetInterceptor()
         localAssetServer?.stop()
         localAssetServer = null
         if (::geckoSession.isInitialized) {

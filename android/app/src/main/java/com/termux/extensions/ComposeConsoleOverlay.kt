@@ -169,6 +169,22 @@ class ComposeConsoleState(
         entries.clear()
     }
 
+    fun appendNativeLog(level: String, text: String) {
+        mainHandler.post {
+            val workerId = "android"
+            if (workerId !in knownWorkerIds) knownWorkerIds.add(workerId)
+            appendEntry(
+                ConsoleEntry(
+                    level = level,
+                    workerId = workerId,
+                    leadText = text,
+                    searchText = text,
+                    timestampLabel = TimeFormatter.format(Date()),
+                )
+            )
+        }
+    }
+
     fun resetSession() {
         entries.clear()
         knownWorkerIds.clear()

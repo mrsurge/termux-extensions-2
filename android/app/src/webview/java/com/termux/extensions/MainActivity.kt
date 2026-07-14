@@ -53,6 +53,9 @@ class MainActivity : AppCompatActivity() {
 
     private var editorAssetManager: EditorAssetManager? = null
     private var localAssetServer: LocalAssetServer? = null
+    private lateinit var androidSettingsStore: AndroidAppSettingsStore
+    private lateinit var androidDiagnostics: AndroidDiagnostics
+    @Volatile private var lastStartupFailure: String? = null
 
     private lateinit var btnConsoleBack: Button
     private lateinit var btnConsoleStart: Button
@@ -68,7 +71,6 @@ class MainActivity : AppCompatActivity() {
     private var inAppShell: Boolean = true
     private var persistentNetworkNotificationEnabled: Boolean = false
     private var notificationPermissionRequestInFlight: Boolean = false
-    private var pendingPersistentServiceStart: Boolean = false
     private var persistentNetworkPermissionDenied: Boolean = false
     private var persistentNetworkStartFailed: Boolean = false
 
@@ -195,22 +197,6 @@ class MainActivity : AppCompatActivity() {
 
     // ── Persistent network ──────────────────────────────────────────
 
-    private fun fetchPersistentNetworkSetting(frameworkUrl: String): Boolean? {
-        return try {
-            val androidCfgUrl = frameworkUrl.trimEnd('/') + "/api/android/config"
-            val req = Request.Builder().url(androidCfgUrl).get().build()
-            httpClient.newCall(req).execute().use { resp ->
-                val body = resp.body?.string()
-                if (!resp.isSuccessful || body.isNullOrBlank()) return null
-                val json = JSONObject(body)
-                val data = json.optJSONObject("data") ?: return null
-                data.optBoolean("persistent_network_notification", false)
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     private fun updatePersistentNetworkService() {
         if (!persistentNetworkNotificationEnabled || !inAppShell) {
             stopPersistentNetworkServiceLocally()
@@ -226,12 +212,7 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
             if (!granted) {
-                if (persistentNetworkPermissionDenied) {
-                    pendingPersistentServiceStart = false
-                    return
-                }
-                pendingPersistentServiceStart = true
-                if (!notificationPermissionRequestInFlight) {
+                if (!persistentNetworkPermissionDenied && !notificationPermissionRequestInFlight) {
                     notificationPermissionRequestInFlight = true
                     ActivityCompat.requestPermissions(
                         this,
@@ -239,11 +220,9 @@ class MainActivity : AppCompatActivity() {
                         9301
                     )
                 }
-                return
             }
         }
 
-        pendingPersistentServiceStart = false
         try {
             val intent = Intent(this, PersistentNetworkService::class.java)
             if (android.os.Build.VERSION.SDK_INT >= 26) {
@@ -258,7 +237,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopPersistentNetworkServiceLocally() {
-        pendingPersistentServiceStart = false
         notificationPermissionRequestInFlight = false
         stopService(Intent(this, PersistentNetworkService::class.java))
     }
@@ -268,6 +246,10 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        androidDiagnostics = AndroidDiagnostics(applicationContext)
+        androidDiagnostics.beginSession()
+        androidSettingsStore = AndroidAppSettingsStore(applicationContext)
+        applyAndroidSettings(androidSettingsStore.load(), reconnect = false)
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webview)
@@ -345,11 +327,23 @@ class MainActivity : AppCompatActivity() {
 
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url ?: return false
-                val host = url.host ?: return false
-                if (host == "127.0.0.1" || host == "localhost") {
+                val frameworkUri = Uri.parse(frameworkBaseUrl)
+                val isFrameworkOrigin =
+                    url.scheme.equals(frameworkUri.scheme, ignoreCase = true) &&
+                        url.host.equals(frameworkUri.host, ignoreCase = true) &&
+                        effectivePort(url) == effectivePort(frameworkUri)
+                val isAndroidShell =
+                    (url.host == "127.0.0.1" || url.host == "localhost") &&
+                        url.port == localAssetServer?.port &&
+                        (url.path ?: "").startsWith("/android-shell/")
+                if (isFrameworkOrigin || isAndroidShell) {
                     // App shell detection
                     val path = url.path ?: ""
-                    if (isAppShellUrl(url)) {
+                    if (isFrameworkOrigin && (path == "/" || path.isEmpty())) {
+                        loadHome()
+                        return true
+                    }
+                    if (isFrameworkOrigin && isAppShellUrl(url)) {
                         inAppShell = true
                         nativeHeader.visibility = View.VISIBLE
                         val appId = path.removePrefix("/app/").split("?").first()
@@ -364,7 +358,7 @@ class MainActivity : AppCompatActivity() {
                             view?.loadUrl(newUri.toString())
                             return true
                         }
-                    } else if (path == "/" || path.isEmpty()) {
+                    } else if (isAndroidShell) {
                         inAppShell = false
                         nativeHeader.visibility = View.GONE
                     }
@@ -377,6 +371,11 @@ class MainActivity : AppCompatActivity() {
             private fun isAppShellUrl(uri: Uri): Boolean {
                 val path = uri.path ?: return false
                 return path.startsWith("/app/") && path.count { it == '/' } <= 2
+            }
+
+            private fun effectivePort(uri: Uri): Int {
+                if (uri.port >= 0) return uri.port
+                return if (uri.scheme.equals("https", ignoreCase = true)) 443 else 80
             }
 
             private fun ensureGvNative(uri: Uri): Uri {
@@ -454,8 +453,9 @@ class MainActivity : AppCompatActivity() {
         // Init editor assets (local server for intercept)
         initEditorAssets()
 
-        // Wake framework and load
-        wakeFrameworkAndLoad()
+        // The local launcher is never gated on framework reachability.
+        loadHome()
+        wakeFrameworkAndLoad(forceLoadHome = false)
     }
 
     // ── Editor assets ───────────────────────────────────────────────
@@ -472,16 +472,27 @@ class MainActivity : AppCompatActivity() {
             }
 
             if (!mgr.getAssetRoot().exists()) {
-                Log.w("MainActivity", "No editor assets available, skipping asset server")
+                recordStartupFailure("APK editor asset seed did not create the local asset root")
                 return
             }
 
-            val server = LocalAssetServer(mgr.getAssetRoot())
+            val gateway = AndroidShellGateway(
+                settingsStore = androidSettingsStore,
+                httpClient = httpClient,
+                onSettingsChanged = { settings ->
+                    applyAndroidSettings(settings, reconnect = true)
+                },
+                diagnosticsProvider = {
+                    androidDiagnostics.snapshot(androidDiagnosticRuntimeState())
+                },
+            )
+            val server = LocalAssetServer(mgr.getAssetRoot(), gateway::handle)
             server.start()
             localAssetServer = server
+            lastStartupFailure = null
             Log.i("MainActivity", "Local asset server on port ${server.port}")
         } catch (e: Exception) {
-            Log.e("MainActivity", "initEditorAssets failed", e)
+            recordStartupFailure("Local launcher initialization failed", e)
         }
     }
 
@@ -510,13 +521,10 @@ class MainActivity : AppCompatActivity() {
             val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
             if (granted) {
                 persistentNetworkPermissionDenied = false
-                if (pendingPersistentServiceStart) {
-                    updatePersistentNetworkService()
-                }
             } else {
                 persistentNetworkPermissionDenied = true
-                stopPersistentNetworkServiceLocally()
             }
+            updatePersistentNetworkService()
         }
     }
 
@@ -562,9 +570,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadHome() {
         inAppShell = false
-        nativeHeader.visibility = View.GONE
         updatePersistentNetworkService()
-        webView.loadUrl(frameworkBaseUrl.trimEnd('/') + "/")
+        val server = localAssetServer
+        if (server == null || server.port <= 0) {
+            showFatalStartupToast("Android launcher server is unavailable")
+            return
+        }
+        nativeHeader.visibility = View.GONE
+        webView.loadUrl(server.url("/android-shell/index.html"))
     }
 
     private fun loadApp(appId: String) {
@@ -672,6 +685,7 @@ class MainActivity : AppCompatActivity() {
     private fun showConsoleOverlay() {
         consoleOverlay.visibility = View.VISIBLE
         composeConsoleState.resetSession()
+        loadAndroidDiagnosticsIntoTools()
         uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
         // Show asset version inline with title
         try {
@@ -690,13 +704,65 @@ class MainActivity : AppCompatActivity() {
         if (consoleOverlay.visibility == View.VISIBLE) hideConsoleOverlay() else showConsoleOverlay()
     }
 
+    private fun loadAndroidDiagnosticsIntoTools() {
+        Thread {
+            val dump = androidDiagnostics.captureWarningsAndErrors()
+            when {
+                dump.error != null -> composeConsoleState.appendNativeLog("error", dump.error)
+                dump.lines.isEmpty() -> composeConsoleState.appendNativeLog(
+                    "info",
+                    "No Android warnings or errors in this session",
+                )
+                else -> dump.lines.forEach { line ->
+                    composeConsoleState.appendNativeLog(androidLogcatLevel(line), line)
+                }
+            }
+        }.start()
+    }
+
+    private fun androidDiagnosticRuntimeState(): JSONObject = JSONObject().apply {
+        put("frameworkBaseUrl", frameworkBaseUrl)
+        put("localAssetServerPort", localAssetServer?.port ?: 0)
+        put("assetRootExists", editorAssetManager?.getAssetRoot()?.exists() == true)
+        put("localAssetVersion", editorAssetManager?.getLocalVersion() ?: JSONObject.NULL)
+        put("lastStartupFailure", lastStartupFailure ?: JSONObject.NULL)
+        put("inAppShell", inAppShell)
+    }
+
+    private fun recordStartupFailure(message: String, error: Throwable? = null) {
+        val detail = formatStartupFailure(message, error)
+        lastStartupFailure = detail
+        if (error == null) Log.e("MainActivity", detail) else Log.e("MainActivity", detail, error)
+    }
+
+    private fun showFatalStartupToast(fallback: String) {
+        nativeHeader.visibility = View.VISIBLE
+        Toast.makeText(this, lastStartupFailure ?: fallback, Toast.LENGTH_LONG).show()
+    }
+
     // ── Framework wake ──────────────────────────────────────────────
+
+    private fun applyAndroidSettings(settings: AndroidAppSettings, reconnect: Boolean) {
+        frameworkBaseUrl = settings.frameworkBaseUrl
+        persistentNetworkNotificationEnabled = settings.persistentNetworkNotification
+        if (!reconnect) return
+
+        runOnUiThread {
+            updatePersistentNetworkService()
+        }
+        uiIpcClient?.disconnect()
+        uiIpcClient = null
+        wakeFrameworkAndLoad(forceLoadHome = false)
+    }
 
     private fun wakeFrameworkAndLoad(forceLoadHome: Boolean = true) {
         Thread {
             val base = IPC_SLEEP_BASE_URL.trimEnd('/')
-            var frameworkUrl = loadFrameworkUrl(base)
-            if (!isFrameworkReachable(frameworkUrl)) {
+            val settings = androidSettingsStore.load()
+            val frameworkUrl = settings.frameworkBaseUrl
+            val localTarget = settings.frameworkHost == "127.0.0.1" ||
+                settings.frameworkHost.equals("localhost", ignoreCase = true)
+            if (localTarget && !isFrameworkReachable(frameworkUrl)) {
                 try {
                     val wakeReq = Request.Builder()
                         .url("$base/actions/wake")
@@ -708,7 +774,6 @@ class MainActivity : AppCompatActivity() {
 
                 for (_attempt in 0 until 10) {
                     Thread.sleep(200)
-                    frameworkUrl = loadFrameworkUrl(base)
                     if (isFrameworkReachable(frameworkUrl)) {
                         break
                     }
@@ -750,7 +815,7 @@ class MainActivity : AppCompatActivity() {
 
             // Connect IME filter IPC
             try {
-                val port = java.net.URI(frameworkUrl).port.let { if (it == -1) 8089 else it }
+                uiIpcClient?.disconnect()
                 uiIpcClient = UiIpcClient(editorInputFilter) { active ->
                     runOnUiThread {
                         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
@@ -766,7 +831,7 @@ class MainActivity : AppCompatActivity() {
                 uiIpcClient?.onConsoleEvent = { eventName, data ->
                     composeConsoleState.onConsoleEvent(eventName, data)
                 }
-                uiIpcClient?.connect(port)
+                uiIpcClient?.connect(frameworkUrl)
                 if (consoleOverlay.visibility == View.VISIBLE) {
                     uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
                 }
@@ -774,9 +839,6 @@ class MainActivity : AppCompatActivity() {
                 Log.w("MainActivity", "UiIpcClient setup failed", e)
             }
 
-            fetchPersistentNetworkSetting(frameworkUrl)?.let {
-                persistentNetworkNotificationEnabled = it
-            }
             runOnUiThread {
                 if (forceLoadHome) {
                     loadHome()
@@ -790,28 +852,8 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    private fun loadFrameworkUrl(base: String): String {
-        var frameworkUrl = DEFAULT_FRAMEWORK_URL
-        try {
-            val cfgReq = Request.Builder().url("$base/config").get().build()
-            httpClient.newCall(cfgReq).execute().use { resp ->
-                val body = resp.body?.string()
-                if (resp.isSuccessful && !body.isNullOrBlank()) {
-                    val json = JSONObject(body)
-                    val data = json.optJSONObject("data")
-                    val candidate = data?.optString("framework_url")
-                    if (!candidate.isNullOrBlank()) {
-                        frameworkUrl = candidate
-                    }
-                }
-            }
-        } catch (_: Exception) {
-        }
-        return frameworkUrl
-    }
-
     private fun isFrameworkReachable(frameworkUrl: String): Boolean {
-        val probeUrl = frameworkUrl.trimEnd('/') + "/api/android/config"
+        val probeUrl = frameworkUrl.trimEnd('/') + "/api/apps/catalog"
         return try {
             val req = Request.Builder().url(probeUrl).get().build()
             httpClient.newCall(req).execute().use { resp -> resp.isSuccessful }

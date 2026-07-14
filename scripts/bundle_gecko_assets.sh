@@ -241,6 +241,11 @@ if [ -f "$APP_DIR/templates/app_shell.html" ]; then
         "$APP_DIR/templates/app_shell.html" > "$DEST/app_shell_file_editor_cm6.html"
 fi
 
+# Android-owned launcher and Settings pages. These intentionally use the local
+# shell API instead of framework-relative routes so they remain available offline.
+ANDROID_SHELL_SRC="$REPO_ROOT/android/app/src/main/android_shell"
+[ -d "$ANDROID_SHELL_SRC" ] && copy_tree "$ANDROID_SHELL_SRC" "$DEST/android-shell"
+
 # ===================================================================
 # Version file
 # ===================================================================

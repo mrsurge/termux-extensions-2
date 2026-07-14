@@ -28,7 +28,7 @@ class UiIpcClient(
 
     private var uiIpcSocket: Socket? = null
     private var consoleSocket: Socket? = null
-    private var serverPort: Int? = null
+    private var serverBaseUrl: String? = null
     private var consoleDrawerEnabled = false
     private var consoleTailLines = DEFAULT_CONSOLE_TAIL_LINES
     private var activeImeOwner: String? = null
@@ -38,10 +38,11 @@ class UiIpcClient(
 
     /**
      * Connect to the UI IPC Socket.IO namespace.
-     * @param port The server port (e.g. 8089)
+     * @param baseUrl The configured framework origin (for example http://127.0.0.1:8089)
      */
-    fun connect(port: Int) {
-        serverPort = port
+    fun connect(baseUrl: String) {
+        val normalizedBaseUrl = baseUrl.trimEnd('/')
+        serverBaseUrl = normalizedBaseUrl
         try {
             val opts = IO.Options().apply {
                 path = "/ui_ipc_ws/socket.io"
@@ -55,10 +56,10 @@ class UiIpcClient(
                 forceNew = true
                 multiplex = false
             }
-            val uri = URI.create("http://127.0.0.1:$port/ui_ipc")
+            val uri = URI.create("$normalizedBaseUrl/ui_ipc")
             uiIpcSocket = IO.socket(uri, opts).apply {
                 on(Socket.EVENT_CONNECT) {
-                    Log.i(TAG, "Connected to UI IPC on port $port")
+                    Log.i(TAG, "Connected to UI IPC at $normalizedBaseUrl")
                 }
                 on(Socket.EVENT_DISCONNECT) {
                     Log.i(TAG, "Disconnected from UI IPC — deactivating filter")
@@ -84,7 +85,7 @@ class UiIpcClient(
 
     private fun createConsoleSocket(): Socket? {
         consoleSocket?.let { return it }
-        val port = serverPort ?: return null
+        val baseUrl = serverBaseUrl ?: return null
         try {
             val opts = IO.Options().apply {
                 path = "/te2_console_ws/socket.io"
@@ -97,12 +98,12 @@ class UiIpcClient(
                 forceNew = true
                 multiplex = false
             }
-            val uri = URI.create("http://127.0.0.1:$port/te2_console")
+            val uri = URI.create("$baseUrl/te2_console")
             val socket = IO.socket(uri, opts)
             consoleSocket = socket
             socket.apply {
                 on(Socket.EVENT_CONNECT) {
-                    Log.i(TAG, "Connected to TE2 console on port $port")
+                    Log.i(TAG, "Connected to TE2 console at $baseUrl")
                     if (consoleDrawerEnabled) {
                         registerAsDrawer(socket)
                     }
