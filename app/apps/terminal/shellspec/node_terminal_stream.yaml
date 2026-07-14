@@ -7,18 +7,18 @@ shells:
       mode: native_pipe_testing
     cwd: ${ctx:CWD}
     command:
-      - sh
-      - -lc
-      - >-
-        exec node "${ctx:BROKER_ENTRY}"
+      - ${ctx:NODE_BIN}
+      - ${ctx:BROKER_ENTRY}
     env:
       TE_APP_ID: ${ctx:APP_ID}
+      PATH: ${ctx:NODE_PATH}
       TERMINAL_STREAM_CWD: ${ctx:CWD}
       TERMINAL_STREAM_COLS: ${ctx:COLS}
       TERMINAL_STREAM_ROWS: ${ctx:ROWS}
       TERMINAL_STREAM_SCROLLBACK: ${ctx:SCROLLBACK}
       TERMINAL_STREAM_SHELL_CMD_JSON: ${ctx:SHELL_CMD_JSON}
       TERMINAL_STREAM_PROTOCOL: msgpack-v1
+      TERMINAL_STREAM_NODE_RUNTIME_ROOT: ${ctx:NODE_RUNTIME_ROOT}
     subgroups:
       - ${ctx:APP_ID}
       - terminal_stream

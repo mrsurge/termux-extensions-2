@@ -2,7 +2,7 @@
   "id": "file_explorer",
   "name": "File Explorer",
   "icon_emoji": "🗂️",
-  "version": "0.2.315",
+  "version": "0.2.316",
   "description": "Browse, manage, and organize files across the Termux sandbox (with sudo helpers when needed).",
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"

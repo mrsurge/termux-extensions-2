@@ -174,6 +174,12 @@ messages are `uint32` big-endian length-prefixed MessagePack frames. Python uses
 the removed Python/native shell types, JSON/base64 stream codec, log-tail replay,
 or reopening of dead terminal shells.
 
+The Terminal Python backend bootstraps its locked production Node dependencies
+under `$XDG_DATA_HOME/te2/node_runtime/terminal`, fingerprinted by the package
+lock, platform, architecture, and Node ABI. The shellspec receives the exact
+resolved Node executable and runtime directory. Source `node_modules` is only a
+development fallback; installed Python packages must not depend on it.
+
 ## Existing Methods First
 
 - Search for an existing method, backend hook, RPC helper, or UI convention

@@ -1,5 +1,7 @@
 import { Buffer } from 'node:buffer';
-import { decode, encode } from '@msgpack/msgpack';
+import { requireTerminalNodeModule } from './terminal_node_modules.mjs';
+
+const { decode, encode } = requireTerminalNodeModule('@msgpack/msgpack');
 
 export const TERMINAL_STREAM_CODEC = 'msgpack-v1';
 export const MAX_TERMINAL_FRAME_BYTES = 32 * 1024 * 1024;

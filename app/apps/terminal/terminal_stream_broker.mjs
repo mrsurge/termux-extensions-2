@@ -1,5 +1,4 @@
 import process from 'node:process';
-import * as nodePty from 'node-pty';
 import {
   asBytes,
   encodePipeFrame,
@@ -7,6 +6,7 @@ import {
   PipeFrameDecoder,
   TERMINAL_STREAM_CODEC,
 } from './terminal_stream_protocol.mjs';
+import { requireTerminalNodeModule } from './terminal_node_modules.mjs';
 
 // Node 21+ exposes a browser-shaped navigator global. The xterm 5.3 packages
 // use navigator absence to select their headless path, so remove it before the
@@ -14,12 +14,14 @@ import {
 if (Object.prototype.hasOwnProperty.call(globalThis, 'navigator')) {
   delete globalThis.navigator;
 }
-const [headlessModule, serializeModule] = await Promise.all([
-  import('xterm-headless'),
-  import('xterm-addon-serialize'),
-]);
-const { Terminal: HeadlessTerminal } = headlessModule.default;
-const { SerializeAddon } = serializeModule;
+const nodePty = requireTerminalNodeModule('node-pty');
+const headlessModule = requireTerminalNodeModule('xterm-headless');
+const serializeModule = requireTerminalNodeModule('xterm-addon-serialize');
+const HeadlessTerminal = headlessModule.Terminal || headlessModule.default?.Terminal;
+const SerializeAddon = serializeModule.SerializeAddon || serializeModule.default?.SerializeAddon;
+if (!HeadlessTerminal || !SerializeAddon) {
+  throw new Error('Terminal Node runtime did not expose the expected xterm constructors');
+}
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;

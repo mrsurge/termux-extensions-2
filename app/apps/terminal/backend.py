@@ -31,6 +31,7 @@ from .terminal_stream_protocol import (
     pack_message,
     unpack_message,
 )
+from .node_runtime import NodeRuntimeError, ensure_terminal_node_runtime
 
 APP_ID = str(os.environ.get("TE_APP_ID") or "terminal").strip() or "terminal"
 APP_BASE_URL = "/app/terminal"
@@ -550,6 +551,11 @@ async def _create_shell_record(payload: CreateShellRequest | None = None) -> Jso
     cols = max(1, request.cols)
     rows = max(1, request.rows)
 
+    try:
+        node_runtime = await asyncio.to_thread(ensure_terminal_node_runtime)
+    except NodeRuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     manager = await mgr()
     orch = orchestrator_ctor(manager)
     label = f"{LABEL_PREFIX}:{await _next_terminal_sequence(manager)}"
@@ -560,6 +566,9 @@ async def _create_shell_record(payload: CreateShellRequest | None = None) -> Jso
             ctx={
                 "APP_ID": APP_ID,
                 "BROKER_ENTRY": str(BROKER_ENTRY),
+                "NODE_BIN": str(node_runtime.node_binary),
+                "NODE_PATH": node_runtime.executable_path,
+                "NODE_RUNTIME_ROOT": str(node_runtime.root),
                 "CWD": cwd,
                 "COLS": str(cols),
                 "ROWS": str(rows),

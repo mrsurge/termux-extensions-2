@@ -55,10 +55,11 @@ under `app/apps/*/manifest.json`; there is no built-in `codex_agent` app.
 
 ## Requirements
 
-The supported package requires Python 3.12 or newer and a Rust toolchain with
-Cargo. Git and Framework-Shells are required for the normal development
-workflow. Node.js is required when rebuilding TypeScript/JavaScript frontends,
-and code-server is required for Code TE2 language/extension integration.
+The supported package requires Python 3.12 or newer, a Rust toolchain with
+Cargo, and Node.js with npm. Git and Framework-Shells are required for the
+normal development workflow. The standalone Terminal uses Node.js at runtime
+and builds its native `node-pty` dependency for the current device on first
+use. Code-server is required for Code TE2 language/extension integration.
 
 Platform package lists live under `scripts/requirements/`. Install their
 non-Python dependencies with:
@@ -95,6 +96,12 @@ access is intentional.
 The first launch builds a fingerprinted Rust binary and caches Cargo/build
 artifacts under the TE2 cache directory. Later launches reuse that binary until
 the Rust source fingerprint changes.
+
+The first standalone Terminal launch installs its locked production Node
+dependencies under `$XDG_DATA_HOME/te2/node_runtime/terminal` (normally
+`~/.local/share/te2/node_runtime/terminal`). The runtime is keyed by the lockfile,
+platform, architecture, and Node ABI, so Python package installs do not depend
+on a source-checkout `node_modules` tree.
 
 Useful launcher commands:
 

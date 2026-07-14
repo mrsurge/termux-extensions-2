@@ -1,5 +1,6 @@
 # Official Termux repository packages.
 python
+nodejs
 clang
 build-essential
 libev

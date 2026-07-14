@@ -6,7 +6,8 @@ import { encodePipeFrame, PipeFrameDecoder } from './terminal_stream_protocol.mj
 
 
 test('broker restores parsed PTY state at a reconnect sequence boundary', { timeout: 12_000 }, async () => {
-  const child = spawn(process.execPath, ['./terminal_stream_broker.mjs'], {
+  const brokerEntry = process.env.TERMINAL_STREAM_BROKER_ENTRY || './terminal_stream_broker.mjs';
+  const child = spawn(process.execPath, [brokerEntry], {
     cwd: process.cwd(),
     env: {
       ...process.env,

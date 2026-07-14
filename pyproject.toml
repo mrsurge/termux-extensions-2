@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "te2"
-version = "0.2.315"
+version = "0.2.316"
 description = "TE2 framework runtime and tooling"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -28,6 +28,14 @@ include-package-data = true
 ]
 "app.apps.file_editor_cm6" = [
     "vendor/node_socketio/**/*",
+]
+
+[tool.setuptools.exclude-package-data]
+"app" = [
+    "apps/file_editor_cm6/node_modules",
+    "apps/file_editor_cm6/node_modules/**/*",
+    "apps/terminal/node_modules",
+    "apps/terminal/node_modules/**/*",
 ]
 
 [tool.setuptools.data-files]
@@ -60,6 +68,8 @@ include = ["app*"]
 exclude = [
     "app.apps.file_editor_cm6.node_modules",
     "app.apps.file_editor_cm6.node_modules.*",
+    "app.apps.terminal.node_modules",
+    "app.apps.terminal.node_modules.*",
 ]
 namespaces = true
 

@@ -1,7 +1,7 @@
 {
   "name": "ALS-RS",
   "id": "als-rs",
-  "version": "0.2.315",
+  "version": "0.2.316",
   "description": "Rust-backed Agent Log Server migration branch",
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"
