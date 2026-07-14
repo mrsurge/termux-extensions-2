@@ -21,6 +21,23 @@ internal fun compareEditorAssetVersions(a: String, b: String): Int {
     return 0
 }
 
+internal val REQUIRED_OTA_ASSET_FILES = listOf(
+    "version.txt",
+    "android-shell/index.html",
+    "android-shell/host.js",
+    "android-shell/launcher.js",
+    "android-shell/settings.html",
+    "android-shell/settings.js",
+    "android-shell/shell.css",
+    "android-shell/extensions/apps.js",
+    "android-shell/extensions/registry.js",
+)
+
+internal fun findMissingRequiredOtaAsset(root: File): String? =
+    REQUIRED_OTA_ASSET_FILES.firstOrNull { relativePath ->
+        !File(root, relativePath).isFile
+    }
+
 /**
  * Manages bundled editor static assets:
  *  - Seeds filesDir/editor_static/ from APK assets on first boot
@@ -174,6 +191,14 @@ class EditorAssetManager(private val context: Context) {
                     ?.trim()
                 if (stagedVersion.isNullOrBlank()) {
                     Log.e(TAG, "Bundle rejected: missing staged version.txt")
+                    staging.deleteRecursively()
+                    return false
+                }
+                // OTA installation replaces the full local tree. Reject an
+                // incomplete bundle before preserving or renaming current assets.
+                val missingRequiredAsset = findMissingRequiredOtaAsset(staging)
+                if (missingRequiredAsset != null) {
+                    Log.e(TAG, "Bundle rejected: missing required asset $missingRequiredAsset")
                     staging.deleteRecursively()
                     return false
                 }

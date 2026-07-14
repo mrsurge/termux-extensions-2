@@ -58,6 +58,44 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function isGeckoRuntime(win: WindowWithMonacoBoot): boolean {
+  return /\bGecko\//.test(String(win.navigator && win.navigator.userAgent || ''));
+}
+
+// Gecko rejects a module worker when the Android asset WebExtension redirects
+// its entry module to the APK loopback server. A same-origin Blob entrypoint can
+// import the normal worker URL, whose module fetch may follow that local redirect.
+function createGeckoModuleWorker(
+  win: WindowWithMonacoBoot,
+  WorkerRef: WorkerCtorLike,
+  URLRef: typeof URL,
+  BlobRef: typeof Blob,
+  moduleUrl: string,
+): Worker {
+  const absoluteModuleUrl = new URLRef(moduleUrl, win.location.href).href;
+  const bootstrap = new BlobRef(
+    [`import ${JSON.stringify(absoluteModuleUrl)};`],
+    { type: 'application/javascript' },
+  );
+  const bootstrapUrl = URLRef.createObjectURL(bootstrap);
+  try {
+    const worker = new WorkerRef(bootstrapUrl, { type: 'module' });
+    let revoked = false;
+    const revokeBootstrapUrl = (): void => {
+      if (revoked) return;
+      revoked = true;
+      URLRef.revokeObjectURL(bootstrapUrl);
+    };
+    worker.addEventListener('message', revokeBootstrapUrl, { once: true });
+    worker.addEventListener('error', revokeBootstrapUrl, { once: true });
+    setTimeout(revokeBootstrapUrl, 30_000);
+    return worker;
+  } catch (error) {
+    URLRef.revokeObjectURL(bootstrapUrl);
+    throw error;
+  }
+}
+
 function configureMonacoEnvironment(
   deps: EditorMonacoBootRuntimeDeps,
   base: string,
@@ -95,11 +133,19 @@ function configureMonacoEnvironment(
       const url = isLangWorker
         ? (langBase + langWorkerMap[label])
         : (base + '/vs/editor/common/services/editorWebWorkerMain.bundle.js');
-      const worker = new WorkerRef(url, { type: 'module' });
+      const useGeckoBlobImport = isGeckoRuntime(win);
+      const worker = useGeckoBlobImport
+        ? createGeckoModuleWorker(win, WorkerRef, URLRef, BlobRef, url)
+        : new WorkerRef(url, { type: 'module' });
       const key = label + ':' + url.split('/').pop();
       if (!workerLogOnce[key]) {
         workerLogOnce[key] = true;
-        console.log('[MonacoWorker]', { moduleId, label, url });
+        console.log('[MonacoWorker]', {
+          moduleId,
+          label,
+          url,
+          transport: useGeckoBlobImport ? 'gecko-blob-import' : 'direct-module',
+        });
       }
       worker.onerror = (event) => {
         console.error('[MonacoWorker] error', { moduleId, label, event });

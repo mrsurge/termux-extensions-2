@@ -177,6 +177,11 @@
         "{{ url_for('static', filename='js/ws_port.js') }}": "/static/js/ws_port.js"
       }
     },
+    {
+      "kind": "tree",
+      "src": "app/android_shell",
+      "dest": "android-shell"
+    },
     { "kind": "version", "dest": "version.txt" }
   ]
 }
