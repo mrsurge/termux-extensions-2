@@ -516,6 +516,8 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         webView.onResume()
+        uiIpcClient?.ensureConnected()
+        nativeEditorController?.onResume()
         persistentNetworkPermissionDenied = false
         persistentNetworkStartFailed = false
     }
@@ -727,7 +729,7 @@ class MainActivity : AppCompatActivity() {
             showFatalStartupToast("Native editor assets are unavailable")
             return
         }
-        val controller = NativeEditorController(assetRoot)
+        val controller = NativeEditorController(assetRoot, httpClient)
         nativeEditorController = controller
         nativeEditorContainer.disposeComposition()
         nativeEditorContainer.setContent {

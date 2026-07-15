@@ -49,7 +49,17 @@ class UiIpcClient(
         set(value) {
             field = value
             if (value != null) {
-                latestRpcNotifications.values.forEach(value)
+                latestRpcNotifications.values.forEach { notification ->
+                    try {
+                        value(notification)
+                    } catch (error: Exception) {
+                        Log.e(
+                            TAG,
+                            "Error replaying UI IPC RPC notification method=${notification.method}",
+                            error,
+                        )
+                    }
+                }
             }
         }
 
@@ -249,8 +259,23 @@ class UiIpcClient(
         timeoutMs: Long = 8_000,
         callback: (Result<Any?>) -> Unit,
     ) {
-        rpcClient?.request(method, params, timeoutMs, callback)
-            ?: callback(Result.failure(IllegalStateException("UI IPC is unavailable")))
+        val client = rpcClient
+        if (client == null) {
+            val error = IllegalStateException("UI IPC is unavailable")
+            Log.w(TAG, "UI IPC RPC request failed kind=client_unavailable method=$method error=${error.message}")
+            callback(Result.failure(error))
+            return
+        }
+        client.request(method, params, timeoutMs, callback)
+    }
+
+    fun ensureConnected() {
+        rpcClient?.ensureConnected()
+        try {
+            ensureConsoleSocketConnected()
+        } catch (error: Exception) {
+            Log.w(TAG, "Foreground TE2 console reconnect failed", error)
+        }
     }
 
     private fun handleImeFocus(owner: String) {

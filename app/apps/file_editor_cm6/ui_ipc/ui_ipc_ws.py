@@ -15,6 +15,7 @@ namespace.
 
 from __future__ import annotations
 
+import logging
 from typing import Awaitable, Protocol, cast
 
 import socketio
@@ -47,6 +48,7 @@ from ..explorer.services.file_ops import get_project_root
 from ..open_state_backend import read_sidecar_open_state
 
 JsonObject = dict[str, object]
+log = logging.getLogger(__name__)
 
 
 class SocketIOServer(Protocol):
@@ -217,8 +219,8 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                     ),
                     to=sid_text,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("[ui_ipc] initial sidebar projection failed sid=%s: %s", sid_text, exc)
 
     async def on_disconnect(self, sid: object, reason: object | None = None) -> None:
         sid_text = _sid(sid)

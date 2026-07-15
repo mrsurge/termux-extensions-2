@@ -30,6 +30,8 @@ internal data class NativeCompletion(
     val insertText: String,
     val prefixLength: Int,
     val kind: Int,
+    val filterText: String,
+    val sortText: String,
 )
 
 /**
@@ -133,16 +135,21 @@ internal class NativeEditorTextMate(private val assetRoot: File) {
                 extraArguments: android.os.Bundle,
             ) {
                 val text = content.reference.toString()
-                completionProvider(text, position.line, position.column, languageId)
+                NativeCompletionFilter.filter(
+                    text,
+                    position.line,
+                    position.column,
+                    completionProvider(text, position.line, position.column, languageId),
+                )
                     .forEach { completion ->
-                        publisher.addItem(
-                            SimpleCompletionItem(
-                                completion.label,
-                                completion.detail,
-                                completion.prefixLength,
-                                completion.insertText,
-                            ).kind(completionKind(completion.kind)),
-                        )
+                        val item = SimpleCompletionItem(
+                            completion.label,
+                            completion.detail,
+                            completion.prefixLength,
+                            completion.insertText,
+                        ).kind(completionKind(completion.kind))
+                        item.sortText = completion.sortText.ifBlank { completion.label }
+                        publisher.addItem(item)
                     }
             }
 

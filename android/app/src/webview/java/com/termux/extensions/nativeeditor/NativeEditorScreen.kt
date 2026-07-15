@@ -3,11 +3,15 @@ package com.termux.extensions.nativeeditor
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Typeface
+import android.view.View
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,8 +26,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BugReport
@@ -112,6 +114,7 @@ internal fun NativeCodeTe2Screen(
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     NativeSoraEditor(controller, state)
                     NativeOverlay(controller, state)
+                    PersistentSidebarLayer(controller, state)
                     if (state.projectSwitching) {
                         Box(
                             modifier = Modifier.fillMaxSize().background(Color(0xAA0D1117)),
@@ -268,13 +271,35 @@ private class NativeSoraEditorView(
             )
             activeLanguageId = nextLanguageId
         }
-        if (activePath != document.path || text.toString() != document.content) {
+        if (activePath != document.path) {
             applyingBackendText = true
-            setText(document.content)
-            applyingBackendText = false
+            try {
+                setText(document.content)
+            } finally {
+                applyingBackendText = false
+            }
             activePath = document.path
+        } else if (text.toString() != document.content) {
+            replaceProjectedContent(document.content)
         }
         applyDiagnostics(diagnostics)
+    }
+
+    /** Applies a same-document backend projection as one edit without losing selection. */
+    private fun replaceProjectedContent(content: String) {
+        val leftIndex = cursor.left.coerceIn(0, content.length)
+        val rightIndex = cursor.right.coerceIn(0, content.length)
+        applyingBackendText = true
+        text.beginBatchEdit()
+        try {
+            text.replace(0, text.length, content)
+        } finally {
+            text.endBatchEdit()
+            applyingBackendText = false
+        }
+        val left = text.indexer.getCharPosition(leftIndex)
+        val right = text.indexer.getCharPosition(rightIndex)
+        setSelectionRegion(left.line, left.column, right.line, right.column)
     }
 
     private fun applyDiagnostics(items: List<NativeDiagnostic>) {
@@ -315,18 +340,13 @@ private class NativeSoraEditorView(
 
 @Composable
 private fun NativeOverlay(controller: NativeEditorController, state: NativeEditorUiState) {
-    if (state.overlay == NativeEditorOverlay.NONE) return
-    val fullScreen = state.overlay == NativeEditorOverlay.SIDEBAR
+    if (state.overlay == NativeEditorOverlay.NONE || state.overlay == NativeEditorOverlay.SIDEBAR) return
     Box(
         modifier = Modifier.fillMaxSize().background(Color(0x66000000))
             .clickable(onClick = controller::closeOverlay),
     ) {
         Surface(
-            modifier = if (fullScreen) {
-                Modifier.fillMaxSize().clickable {}
-            } else {
-                Modifier.fillMaxHeight().fillMaxWidth(0.9f).clickable {}
-            },
+            modifier = Modifier.fillMaxHeight().fillMaxWidth(0.9f).clickable {},
             color = Panel,
             shadowElevation = 8.dp,
         ) {
@@ -334,7 +354,7 @@ private fun NativeOverlay(controller: NativeEditorController, state: NativeEdito
                 NativeEditorOverlay.EXPLORER -> ExplorerOverlay(controller, state)
                 NativeEditorOverlay.SEARCH -> SearchOverlay(controller, state)
                 NativeEditorOverlay.PROBLEMS -> ProblemsOverlay(controller, state)
-                NativeEditorOverlay.SIDEBAR -> SidebarOverlay(controller, state)
+                NativeEditorOverlay.SIDEBAR -> Unit
                 NativeEditorOverlay.NONE -> Unit
             }
         }
@@ -520,66 +540,190 @@ private fun ProblemsOverlay(controller: NativeEditorController, state: NativeEdi
     }
 }
 
+/**
+ * Persistent native counterpart to the browser sidebar iframe stack. It stays
+ * mounted while the editor is active so background sidebar apps retain their
+ * document, socket, and query-state sessions when the drawer is closed.
+ */
 @Composable
-private fun SidebarOverlay(controller: NativeEditorController, state: NativeEditorUiState) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        OverlayHeader("Sidebar", controller::closeOverlay)
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            state.sidebarItems.forEach { item ->
-                FilterChip(
-                    selected = item.active,
-                    onClick = { controller.activateSidebar(item.hostId) },
-                    label = { Text(item.title, maxLines = 1) },
+@OptIn(ExperimentalFoundationApi::class)
+private fun PersistentSidebarLayer(controller: NativeEditorController, state: NativeEditorUiState) {
+    val visible = state.overlay == NativeEditorOverlay.SIDEBAR
+    val activeItem = state.sidebarItems.firstOrNull { it.active }
+    var appMenuOpen by remember { mutableStateOf(false) }
+    var contextHostId by remember { mutableStateOf<String?>(null) }
+    Surface(
+        modifier = if (visible) Modifier.fillMaxSize() else Modifier.size(1.dp),
+        color = if (visible) Panel else Color.Transparent,
+        shadowElevation = if (visible) 8.dp else 0.dp,
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            PersistentSidebarWebViewPool(
+                items = state.sidebarItems,
+                loadedUrls = state.sidebarLoadedUrls,
+                activeHostId = activeItem?.hostId.orEmpty(),
+                visible = visible,
+                modifier = if (visible) {
+                    Modifier.fillMaxSize().padding(start = 57.dp, top = 49.dp)
+                } else {
+                    Modifier.size(1.dp)
+                },
+            )
+            if (visible) {
+                OverlayHeader(
+                    activeItem?.title ?: "Sidebar",
+                    controller::closeOverlay,
+                    action = {
+                        Box {
+                            IconButton(onClick = { appMenuOpen = true }) {
+                                Icon(Icons.Default.Add, "Open sidebar app", tint = SecondaryText)
+                            }
+                            DropdownMenu(
+                                expanded = appMenuOpen,
+                                onDismissRequest = { appMenuOpen = false },
+                            ) {
+                                state.sidebarCatalog
+                                    .filter { catalog ->
+                                        state.sidebarItems.none { item -> item.appId == catalog.appId }
+                                    }
+                                    .forEach { app ->
+                                        DropdownMenuItem(
+                                            text = { Text(app.title) },
+                                            onClick = {
+                                                appMenuOpen = false
+                                                controller.openSidebarApp(app.appId)
+                                            },
+                                        )
+                                    }
+                            }
+                        }
+                    },
                 )
-            }
-            state.sidebarCatalog
-                .filter { catalog -> state.sidebarItems.none { it.title == catalog.title } }
-                .forEach { app ->
-                    FilterChip(
-                        selected = false,
-                        onClick = { controller.openSidebarApp(app.appId) },
-                        leadingIcon = { Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp)) },
-                        label = { Text(app.title, maxLines = 1) },
-                    )
+                LazyColumn(
+                    modifier = Modifier.padding(top = 49.dp).width(56.dp).fillMaxHeight()
+                        .background(Raised).padding(vertical = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    items(state.sidebarItems, key = { it.hostId }) { item ->
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(48.dp)
+                                .background(if (item.active) Accent.copy(alpha = 0.2f) else Color.Transparent),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().combinedClickable(
+                                    onClick = { controller.activateSidebar(item.hostId) },
+                                    onLongClick = { contextHostId = item.hostId },
+                                ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    item.title.trim().take(1).uppercase().ifBlank { "S" },
+                                    color = if (item.active) Accent else SecondaryText,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = contextHostId == item.hostId,
+                                onDismissRequest = { contextHostId = null },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Close ${item.title}") },
+                                    leadingIcon = { Icon(Icons.Default.Close, null) },
+                                    onClick = {
+                                        contextHostId = null
+                                        controller.closeSidebar(item.hostId)
+                                    },
+                                )
+                            }
+                        }
+                    }
                 }
-        }
-        Divider(color = Border)
-        if (state.activeSidebarUrl.isBlank()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Select a sidebar app", color = SecondaryText)
+                if (state.activeSidebarUrl.isBlank()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize().padding(start = 57.dp, top = 49.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            if (state.sidebarLoading) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                            }
+                            Text(
+                                state.sidebarError ?: state.sidebarMessage,
+                                color = if (state.sidebarError == null) SecondaryText else Error,
+                            )
+                        }
+                    }
+                }
             }
-        } else {
-            SidebarWebView(state.activeSidebarUrl)
         }
     }
 }
 
+/** Owns one attached WebView for every backend sidebar slot. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun SidebarWebView(url: String) {
-    var webView: WebView? by remember { mutableStateOf(null) }
+private fun PersistentSidebarWebViewPool(
+    items: List<NativeSidebarItem>,
+    loadedUrls: Map<String, String>,
+    activeHostId: String,
+    visible: Boolean,
+    modifier: Modifier,
+) {
+    val webViews = remember { linkedMapOf<String, WebView>() }
     AndroidView(
-        factory = { context ->
-            WebView(context).apply {
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.cacheMode = WebSettings.LOAD_DEFAULT
-                webViewClient = WebViewClient()
-                webView = this
-                loadUrl(url)
+        factory = { FrameLayout(it) },
+        update = { container ->
+            val desiredHostIds = items.mapTo(mutableSetOf()) { it.hostId }
+            webViews.keys.filter { it !in desiredHostIds }.forEach { hostId ->
+                webViews.remove(hostId)?.let { view ->
+                    container.removeView(view)
+                    view.stopLoading()
+                    view.destroy()
+                }
+            }
+            items.forEach { item ->
+                val view = webViews.getOrPut(item.hostId) {
+                    WebView(container.context).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.cacheMode = WebSettings.LOAD_DEFAULT
+                        webViewClient = WebViewClient()
+                        visibility = View.INVISIBLE
+                        container.addView(
+                            this,
+                            FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                            ),
+                        )
+                    }
+                }
+                val targetUrl = loadedUrls[item.hostId].orEmpty()
+                if (targetUrl.isNotBlank() && view.tag != targetUrl) {
+                    view.tag = targetUrl
+                    view.loadUrl(targetUrl)
+                }
+                view.visibility = if (visible && item.hostId == activeHostId && targetUrl.isNotBlank()) {
+                    View.VISIBLE
+                } else {
+                    View.INVISIBLE
+                }
             }
         },
-        update = { view -> if (view.url != url) view.loadUrl(url) },
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
     )
     DisposableEffect(Unit) {
         onDispose {
-            webView?.stopLoading()
-            webView?.destroy()
-            webView = null
+            webViews.values.forEach { view ->
+                (view.parent as? FrameLayout)?.removeView(view)
+                view.stopLoading()
+                view.destroy()
+            }
+            webViews.clear()
         }
     }
 }

@@ -62,6 +62,9 @@ editor widget. Device workflow validation remains the acceptance boundary.
 - [x] `verified` Intercept framework `/app/file_editor_cm6` navigation.
 - [ ] `in_progress` Implement native enter, back, home, reload, and exit lifecycle.
 - [x] `verified` Release Sora, sidebar WebView, and RPC resources on exit/destruction.
+- [x] `verified` On Android foreground resume, idempotently reconnect UI IPC,
+  Editor, Explorer, WBA, and console sockets and request a fresh authoritative
+  boot snapshot even when no disconnect edge was observed.
 - [x] `verified` Keep non-Code-TE2 apps on the existing WebView path.
 - [x] `verified` Leave GeckoView app routing unchanged; Gecko staging compiles.
 
@@ -69,7 +72,11 @@ editor widget. Device workflow validation remains the acceptance boundary.
 
 - [x] `verified` Consume `editor.state.ssot`.
 - [x] `verified` Render the backend-selected active document in Sora.
-- [ ] `in_progress` Publish debounced editor mirror updates.
+- [ ] `in_progress` Publish debounced editor mirror updates. Native mirror
+  intake now drops same-SID echoes, wrong-path and duplicate payloads, and
+  remote projections inside the local-edit hot window before state mutation.
+  Accepted same-document projections use one batched Sora replacement and
+  preserve the clamped selection; device cursor-stability verification remains.
 - [ ] `in_progress` Save through `editor.save` with the backend digest contract.
 - [x] `verified` Handle backend active-file and open-state notifications; an
   Explorer RPC open projected `open_state_events.py` into the running native
@@ -103,9 +110,12 @@ editor widget. Device workflow validation remains the acceptance boundary.
 - [x] `verified` Send generation-tagged WBA open-file lifecycle requests and
   hold document/provider traffic behind an exact path-and-generation open ACK.
 - [x] `verified` Send debounced WBA document changes only after that open ACK.
-- [ ] `in_progress` Request WBA completions from Sora's completion hook.
-- [ ] `in_progress` Map stable completion text, range, kind, and detail fields;
-  snippet expansion, docs UI, and additional edits remain Slice 2.
+- [x] `verified` Request WBA completions from Sora's completion hook and treat
+  Sora's interrupted superseded request as cancellation rather than an error.
+- [x] `verified` Map stable completion text, range, kind, detail, `filterText`,
+  and `sortText`; apply tested case-insensitive character filtering against the
+  WBA replacement prefix before publishing candidates to Sora. Snippet
+  expansion, docs UI, and additional edits remain Slice 2.
 - [ ] `in_progress` Consume backend-projected diagnostics in Sora.
 - [ ] `deferred` Hover UI.
 - [ ] `deferred` Semantic tokens and inlay hints.
@@ -128,9 +138,23 @@ editor widget. Device workflow validation remains the acceptance boundary.
 
 - [ ] `in_progress` Add compact native toolbar and command menu.
 - [ ] `in_progress` Add Explorer, search, and problems overlays.
-- [ ] `in_progress` Consume UI IPC sidebar catalog/order/active-slot state.
+- [x] `verified` Consume UI IPC sidebar catalog/order/active-slot state from the
+  authoritative host boot snapshot as well as live notifications, so native
+  startup does not depend on another browser client perturbing backend state.
 - [ ] `in_progress` Add sidebar app rail.
-- [ ] `in_progress` Render the active sidebar URL in a contained WebView.
+- [x] `verified` Preserve backend slot kind/app/load/readiness metadata and
+  `restore_url` query semantics, start framework app slots through the existing
+  Rust lifecycle endpoint with concurrent-start dedupe and activation
+  stale-drop, then render the active URL in a contained WebView.
+- [x] `verified` Keep one WebView attached per backend sidebar slot for the
+  native editor lifetime. Load every backend-open slot using
+  `/api/apps/running` plus `/start`, keep inactive views connected but invisible,
+  and destroy only removed slots or the released editor surface. Native rail
+  taps activate slots; long press invokes the existing backend close action and
+  waits for the authoritative projection to remove the slot.
+- [x] `verified` Replace the temporary title-chip row with a full-screen sidebar
+  surface using an active-title header, add-app menu, compact left app rail, and
+  persistent content stack aligned with the browser client's layout model.
 - [x] `verified` Render the sidebar overlay as a full-screen native surface;
   on-device layout confirmation remains in Phase 7.
 - [ ] `in_progress` Send sidebar and host intents only through UI IPC.
@@ -145,6 +169,11 @@ editor widget. Device workflow validation remains the acceptance boundary.
 - [x] `verified` Stream targeted native editor/RPC info and debug entries plus
   process warnings/errors into the shared console transcript with a bounded
   disconnected queue.
+- [x] `verified` Report every terminal native RPC request failure centrally,
+  including disconnected clients, timeouts, encode/emit errors, remote errors,
+  pending disconnect failures, malformed envelopes, orphan responses, and
+  callback exceptions. Reports include bounded lane/method/id/event/payload
+  context and reach the existing Android console stream without a JSON fallback.
 - [x] `verified` Add bounded native console commands: `runtime.snapshot`,
   `logcat.tail`, `native.snapshot`, `wba.ping`, `wba.status`, and `wba.events`.
 - [x] `verified` Keep arbitrary Kotlin execution, reflection, scripting engines,
@@ -162,6 +191,14 @@ editor widget. Device workflow validation remains the acceptance boundary.
   change.
 - [x] `verified` Run `testWebviewDebugUnitTest` and assemble the minified WebView
   debug APK on Linux x86_64 with the local SDK/JDK environment.
+- [x] `verified` Add and run native mirror-policy tests covering self-author
+  rejection, local-edit hot-window rejection, remote acceptance, duplicate
+  content, and wrong-path payloads.
+- [x] `verified` Add and run native completion-filter and RPC-diagnostic tests.
+- [x] `verified` Add and run native sidebar persistence-policy tests proving
+  every backend-open slot is planned, including inactive lazy app slots.
+- [ ] `pending` Verify continuous native typing no longer jumps the cursor when
+  debounced mirror broadcasts return from the backend.
 - [ ] `pending` Verify open/edit/save/reopen.
 - [ ] `pending` Verify Explorer and search.
 - [x] `verified` Verify native Python TextMate highlighting on-device, including
@@ -170,7 +207,10 @@ editor widget. Device workflow validation remains the acceptance boundary.
   completion items at a real position in `open_state_events.py`; direct Sora UI
   trigger ergonomics remain follow-up validation.
 - [ ] `pending` Verify diagnostics and project switching.
-- [ ] `pending` Verify sidebar activation and return-home flow.
+- [ ] `known_issue` Fix unnecessary sidebar WebView reloads when switching the
+  active window. All open windows load in the background and persist across
+  drawer close/open, but roughly 80 percent of active-window transitions reload
+  the selected app across all tested apps.
 - [x] `verified` Verify late attachment after WebView process recreation while
   the device WBA remains running, and verify launcher leave/return behavior.
 - [x] `verified` Review `git diff --check` and exact changed-file scope.
@@ -211,8 +251,15 @@ editor widget. Device workflow validation remains the acceptance boundary.
 | 2026-07-14 | Attach WBA before adapter readiness and recover readiness with `adapter.status`. | Adapter/UI pushes can be missed by a late native client; current WBA state must be queryable rather than edge-triggered. |
 | 2026-07-14 | Treat `editor.modelReady` and exact open ACKs as required native model lifecycle barriers. | `modelReady` triggers provider/workspace replay, while the generation ACK prevents changes and completions from targeting a stale WBA model. |
 | 2026-07-14 | Derive unmatched TextMate token colors from the selected theme. | The VS Code theme has no unscoped token rule; TM4E otherwise falls back to low-contrast Sora defaults for punctuation and some import scopes. |
+| 2026-07-14 | Put sidebar state in the host boot snapshot and run native app-start orchestration from backend slot facts. | A native client must recover windows, query state, and launch prerequisites without waiting for a JavaScript client to perturb the backend. |
+| 2026-07-14 | Log native RPC failures at the shared lane client boundary. | Callers may ignore callbacks, but transport/protocol failures must still reach the persistent Android TE2 console worker. |
+| 2026-07-14 | Keep a persistent native WebView per sidebar slot and explicitly replay on foreground resume. | Android process/network suspension must not require another browser client to wake backend state, and closing the drawer must not tear down sidebar app sessions. |
+| 2026-07-14 | Treat every backend-open sidebar slot as persistent and close it only through the backend ledger. | Active/eager flags control presentation and startup hints, not window ownership; native long press mirrors the web close affordance. |
 
 ## Blockers
 
-None currently. Save/conflict, diagnostics, project switching, and direct Sora
-completion-popup interaction remain broader workflow validation gates.
+Native sidebar activation frequently reloads an already-loaded persistent
+WebView. This is deferred for the next sidebar investigation; likely stale
+single-active-window URL/load handling remains in the native transition path.
+Save/conflict, diagnostics, project switching, and direct Sora completion-popup
+interaction remain broader workflow validation gates.

@@ -122,7 +122,11 @@ architecture into Compose.
    `vscode.openFile` with its generation. Hold document changes and provider
    calls until the exact path/generation open acknowledgement arrives. Repeat
    that replay after WBA reconnect or workspace reset.
-6. Publish debounced editor mirror changes through Editor RPC.
+6. Publish debounced editor mirror changes through Editor RPC. Treat returned
+   mirrors as projections rather than file-open commands: reject the native
+   editor's own `source_client`, wrong-path/duplicate payloads, and projections
+   inside the local-edit hot window before model mutation. Apply accepted
+   same-document content as one batched Sora edit while preserving selection.
 7. Publish debounced WBA document changes directly on the WBA lane.
 8. Save through `editor.save` with path, content, and base digest.
 9. Apply backend open-state and file-state notifications by generation/version,
@@ -183,6 +187,16 @@ backend.
 
 The native frontend must not connect to `/sidebar_ipc`; that lane belongs to
 sidebar app backends.
+
+### Known Sidebar Defect
+
+Every backend-open sidebar window loads in the background and remains connected
+when the drawer closes and reopens. Switching the active window still causes an
+unnecessary reload on roughly 80 percent of transitions across all tested apps.
+This is an activation-transition defect, not a persistence failure, and is
+intentionally deferred from the current slice. Investigate stale URL/load logic
+left from the earlier single-active-window implementation before changing the
+backend ledger or persistence contract.
 
 ## Delivery Slices
 

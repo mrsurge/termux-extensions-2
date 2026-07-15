@@ -2,6 +2,7 @@ package com.termux.extensions.nativeeditor
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -17,6 +18,7 @@ import java.security.MessageDigest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
+import okhttp3.OkHttpClient
 
 /**
  * Native Code TE2 is a projection client. This controller translates user
@@ -25,11 +27,13 @@ import kotlin.math.max
  */
 internal class NativeEditorController(
     private val assetRoot: File,
+    httpClient: OkHttpClient,
     private val mainHandler: Handler = Handler(Looper.getMainLooper()),
 ) {
     companion object {
         private const val TAG = "NativeEditor"
         private const val MIRROR_DEBOUNCE_MS = 180L
+        private const val MIRROR_HOT_WINDOW_MS = 250L
         private const val WBA_CHANGE_DEBOUNCE_MS = 120L
         private const val WBA_STATUS_RETRY_MS = 1_000L
     }
@@ -41,6 +45,7 @@ internal class NativeEditorController(
     private val mutableState = mutableStateOf(NativeEditorUiState())
     val state: State<NativeEditorUiState> = mutableState
     val textMate = NativeEditorTextMate(assetRoot)
+    private val sidebarRuntime = NativeSidebarRuntime(httpClient)
 
     private var baseUrl = ""
     private var editorClient: SocketIoJsonRpcClient? = null
@@ -48,6 +53,7 @@ internal class NativeEditorController(
     private var wbaClient: SocketIoJsonRpcClient? = null
     private var uiIpcClient: UiIpcClient? = null
     private var mirrorTask: Runnable? = null
+    private var lastLocalEditAtMs = 0L
     private var wbaChangeTask: Runnable? = null
     private var wbaStatusTask: Runnable? = null
     private var bootSnapshotInFlight = false
@@ -82,6 +88,7 @@ internal class NativeEditorController(
         completionProvidersByLanguage = emptyMap()
         adapterReady = false
         baseUrl = nextBaseUrl.trimEnd('/')
+        sidebarRuntime.bind(baseUrl)
         Log.i(TAG, "connect baseUrl=$baseUrl")
         attachUiIpc(uiClient)
         editorClient = createLane(
@@ -132,6 +139,15 @@ internal class NativeEditorController(
         connect(nextBaseUrl, uiClient)
     }
 
+    fun onResume() {
+        if (released) return
+        uiIpcClient?.ensureConnected()
+        editorClient?.ensureConnected()
+        explorerClient?.ensureConnected()
+        wbaClient?.ensureConnected()
+        if (uiIpcClient?.isRpcConnected == true) requestBootSnapshot()
+    }
+
     fun release() {
         released = true
         mirrorTask?.let(mainHandler::removeCallbacks)
@@ -141,6 +157,7 @@ internal class NativeEditorController(
         wbaChangeTask = null
         wbaStatusTask = null
         disconnectLanes()
+        sidebarRuntime.release()
         uiIpcClient?.onRpcNotification = null
         uiIpcClient?.onRpcConnectionChanged = null
         uiIpcClient = null
@@ -161,6 +178,7 @@ internal class NativeEditorController(
     fun onDocumentChanged(content: String) {
         val document = state.value.document ?: return
         if (document.content == content) return
+        lastLocalEditAtMs = SystemClock.uptimeMillis()
         val updated = document.copy(
             content = content,
             contentSha256 = sha256(content),
@@ -350,6 +368,16 @@ internal class NativeEditorController(
         }
     }
 
+    fun closeSidebar(hostId: String) {
+        uiIpcClient?.request(
+            "ui.sidebar.window.close",
+            mapOf("host_id" to hostId, "source" to "android_native"),
+        ) { result ->
+            result.onSuccess(::applyUiResultState)
+            result.exceptionOrNull()?.let { setError("Sidebar close failed: ${it.message}") }
+        }
+    }
+
     fun openSidebarApp(appId: String) {
         uiIpcClient?.request(
             "ui.sidebar.window.create",
@@ -410,7 +438,12 @@ internal class NativeEditorController(
             )
             latch.countDown()
         }
-        if (!latch.await(5_500, TimeUnit.MILLISECONDS)) return emptyList()
+        try {
+            if (!latch.await(5_500, TimeUnit.MILLISECONDS)) return emptyList()
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return emptyList()
+        }
         failure?.let {
             Log.d(TAG, "Completion request failed: ${it.message}")
             return emptyList()
@@ -487,6 +520,7 @@ internal class NativeEditorController(
                     val response = value.asStringMap().orEmpty()
                     val snapshot = response["snapshot"].asStringMap().orEmpty()
                     snapshot["editor_ssot"].asStringMap()?.let(::applyEditorSnapshot)
+                    snapshot["sidebar_state"].asStringMap()?.let(::applySidebarState)
                     Log.i(TAG, "backend boot snapshot received")
                     update {
                         it.copy(
@@ -617,7 +651,8 @@ internal class NativeEditorController(
     private fun handleEditorNotification(notification: JsonRpcNotification) {
         when (notification.method) {
             "editor.state.ssot" -> applyEditorSnapshot(notification.params)
-            "editor.file.opened", "editor.mirror.updated" -> applyDocumentPayload(notification.params)
+            "editor.file.opened" -> applyDocumentPayload(notification.params)
+            "editor.mirror.updated" -> applyMirrorPayload(notification.params)
             "editor.openState.changed" -> applyOpenState(notification.params)
             "editor.cache.state" -> applyCacheState(notification.params)
             "editor.adapter.state" -> applyAdapterState(notification.params)
@@ -714,7 +749,26 @@ internal class NativeEditorController(
         payload["openState"].asStringMap()?.let(::applyOpenState)
     }
 
-    private fun applyDocumentPayload(payload: Map<String, Any?>) {
+    private fun applyMirrorPayload(payload: Map<String, Any?>) {
+        val dropReason = NativeEditorMirrorPolicy.dropReason(
+            payload = payload,
+            editorSocketId = editorClient?.socketId,
+            document = state.value.document,
+            lastLocalEditAtMs = lastLocalEditAtMs,
+            nowMs = SystemClock.uptimeMillis(),
+            hotWindowMs = MIRROR_HOT_WINDOW_MS,
+        )
+        if (dropReason != null) {
+            Log.d(TAG, "mirror projection dropped reason=${dropReason.name.lowercase()}")
+            return
+        }
+        applyDocumentPayload(payload, resetLocalEditWindow = false)
+    }
+
+    private fun applyDocumentPayload(
+        payload: Map<String, Any?>,
+        resetLocalEditWindow: Boolean = true,
+    ) {
         val path = payload.string("path")
         if (path.isBlank()) return
         val project = state.value.projectPath.ifBlank { projectPath(payload) }
@@ -751,6 +805,7 @@ internal class NativeEditorController(
             modelVersion += 1
             resetWbaDocumentSync()
         }
+        if (resetLocalEditWindow) lastLocalEditAtMs = 0L
         update {
             it.copy(
                 projectPath = project,
@@ -793,6 +848,7 @@ internal class NativeEditorController(
 
     private fun applyProjectSwitched(payload: Map<String, Any?>) {
         val project = projectPath(payload)
+        lastLocalEditAtMs = 0L
         modelGeneration += 1
         modelVersion += 1
         lastModelReadySyncKey = ""
@@ -959,13 +1015,26 @@ internal class NativeEditorController(
         val items = order.mapNotNull { hostId ->
             if (hostId == "launcher") return@mapNotNull null
             val slot = slots[hostId].asStringMap() ?: return@mapNotNull null
-            val rawUrl = slot.string("url").ifBlank { slot.string("restore_url") }
+            val rawUrl = slot.string("restore_url").ifBlank {
+                slot.string("restoreUrl")
+            }.ifBlank { slot.string("url") }
+            val readiness = slot["readiness"].asStringMap().orEmpty()
             NativeSidebarItem(
                 hostId = hostId,
                 title = slot.string("title").ifBlank { slot.string("label") }
                     .ifBlank { slot.string("app_id") }.ifBlank { "Sidebar" },
                 url = resolveUrl(rawUrl),
                 active = hostId == active,
+                kind = slot.string("kind").ifBlank {
+                    if (slot.string("app_id").isBlank()) "url" else "app"
+                },
+                appId = slot.string("app_id"),
+                stateful = slot["stateful"] == true,
+                load = slot.string("load").ifBlank { "lazy" },
+                readinessStatus = readiness.string("status"),
+                readinessMessage = readiness.string("message").ifBlank {
+                    readiness.string("detail")
+                },
             )
         }
         val catalog = statePayload["catalog"].asList().mapNotNull { raw ->
@@ -977,13 +1046,24 @@ internal class NativeEditorController(
                 title = item.string("name").ifBlank { item.string("title") }.ifBlank { appId },
             )
         }
-        val activeUrl = items.firstOrNull { it.active }?.url.orEmpty()
         update {
             it.copy(
                 sidebarItems = items,
                 sidebarCatalog = catalog,
-                activeSidebarUrl = activeUrl,
                 uiConnected = true,
+            )
+        }
+        sidebarRuntime.reconcile(items, ::applySidebarProjection)
+    }
+
+    private fun applySidebarProjection(projection: NativeSidebarProjection) {
+        update { current ->
+            current.copy(
+                activeSidebarUrl = projection.loadedUrls[projection.activeHostId].orEmpty(),
+                sidebarLoadedUrls = projection.loadedUrls,
+                sidebarLoading = projection.loading,
+                sidebarMessage = projection.message,
+                sidebarError = projection.error,
             )
         }
     }
@@ -1513,6 +1593,8 @@ internal class NativeEditorController(
                 insertText = insertText,
                 prefixLength = prefixLength(item["range"], line, column) ?: fallbackPrefix,
                 kind = item.int("kind") ?: 1,
+                filterText = item.string("filterText"),
+                sortText = item.string("sortText"),
             )
         }
     }

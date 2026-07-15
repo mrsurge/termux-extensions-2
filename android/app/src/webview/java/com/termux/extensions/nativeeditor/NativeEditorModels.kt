@@ -60,6 +60,12 @@ internal data class NativeSidebarItem(
     val title: String,
     val url: String,
     val active: Boolean,
+    val kind: String,
+    val appId: String,
+    val stateful: Boolean,
+    val load: String,
+    val readinessStatus: String,
+    val readinessMessage: String,
 )
 
 internal data class NativeSidebarCatalogItem(
@@ -85,6 +91,10 @@ internal data class NativeEditorUiState(
     val sidebarItems: List<NativeSidebarItem> = emptyList(),
     val sidebarCatalog: List<NativeSidebarCatalogItem> = emptyList(),
     val activeSidebarUrl: String = "",
+    val sidebarLoadedUrls: Map<String, String> = emptyMap(),
+    val sidebarLoading: Boolean = false,
+    val sidebarMessage: String = "Select a sidebar app",
+    val sidebarError: String? = null,
     val editorConnected: Boolean = false,
     val explorerConnected: Boolean = false,
     val wbaConnected: Boolean = false,
