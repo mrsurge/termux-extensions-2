@@ -31,11 +31,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -77,6 +74,9 @@ import io.github.rosemoe.sora.lang.diagnostic.DiagnosticRegion
 import io.github.rosemoe.sora.lang.diagnostic.DiagnosticsContainer
 import io.github.rosemoe.sora.widget.CodeEditor
 import io.github.rosemoe.sora.widget.subscribeAlways
+import com.termux.extensions.nativeeditor.explorer.NativeExplorerOverlay
+import com.termux.extensions.nativeeditor.structure.NativeEditorStructureBlock
+import com.termux.extensions.nativeeditor.structure.NativeStructureLanguage
 import kotlin.math.max
 
 private val Background = Color(0xFF0D1117)
@@ -216,6 +216,7 @@ private fun NativeSoraEditor(controller: NativeEditorController, state: NativeEd
                 state.document,
                 state.document?.let { state.diagnostics[it.path] }.orEmpty(),
                 state.textMateReady,
+                state.structureBlocks,
             )
         },
         onRelease = { editor -> editor.release() },
@@ -229,6 +230,7 @@ private class NativeSoraEditorView(
     private var applyingBackendText = false
     private var activePath = ""
     private var activeLanguageId = ""
+    private var activeStructureLanguage: NativeStructureLanguage? = null
     private var textMateSchemeInstalled = false
 
     init {
@@ -236,6 +238,9 @@ private class NativeSoraEditorView(
         setTextSize(14f)
         isLineNumberEnabled = true
         isWordwrap = false
+        props.stickyScroll = true
+        props.stickyScrollMaxLines = 4
+        props.stickyScrollPreferInnerScope = true
         subscribeAlways<ContentChangeEvent> { event ->
             if (!applyingBackendText && event.action != ContentChangeEvent.ACTION_SET_NEW_TEXT) {
                 controller.onDocumentChanged(text.toString())
@@ -247,6 +252,7 @@ private class NativeSoraEditorView(
         document: NativeDocument?,
         diagnostics: List<NativeDiagnostic>,
         textMateReady: Boolean,
+        structureBlocks: List<NativeEditorStructureBlock>,
     ) {
         if (textMateReady && !textMateSchemeInstalled) {
             controller.textMate.install()?.let {
@@ -255,6 +261,7 @@ private class NativeSoraEditorView(
             }
         }
         if (document == null) {
+            activeStructureLanguage?.updateStructureBlocks(emptyList())
             if (activePath.isNotEmpty()) {
                 applyingBackendText = true
                 setText("")
@@ -266,11 +273,12 @@ private class NativeSoraEditorView(
         }
         val nextLanguageId = "${document.languageId}:$textMateReady"
         if (activeLanguageId != nextLanguageId) {
-            setEditorLanguage(
-                controller.textMate.language(document.languageId, controller::completions),
-            )
+            val language = controller.textMate.language(document.languageId, controller::completions)
+            activeStructureLanguage = language
+            setEditorLanguage(language)
             activeLanguageId = nextLanguageId
         }
+        activeStructureLanguage?.updateStructureBlocks(structureBlocks)
         if (activePath != document.path) {
             applyingBackendText = true
             try {
@@ -351,7 +359,18 @@ private fun NativeOverlay(controller: NativeEditorController, state: NativeEdito
             shadowElevation = 8.dp,
         ) {
             when (state.overlay) {
-                NativeEditorOverlay.EXPLORER -> ExplorerOverlay(controller, state)
+                NativeEditorOverlay.EXPLORER -> {
+                    val explorerState by controller.explorer.state
+                    NativeExplorerOverlay(
+                        state = explorerState,
+                        projectPath = state.projectPath,
+                        diagnostics = state.diagnostics,
+                        onClose = controller::closeOverlay,
+                        onRefresh = controller::refreshExplorer,
+                        onToggleDirectory = controller::toggleDirectory,
+                        onOpenFile = { controller.openFile(it) },
+                    )
+                }
                 NativeEditorOverlay.SEARCH -> SearchOverlay(controller, state)
                 NativeEditorOverlay.PROBLEMS -> ProblemsOverlay(controller, state)
                 NativeEditorOverlay.SIDEBAR -> Unit
@@ -374,69 +393,6 @@ private fun OverlayHeader(title: String, onClose: () -> Unit, action: (@Composab
         }
     }
     Divider(color = Border)
-}
-
-private data class ExplorerRow(val entry: NativeExplorerEntry, val depth: Int)
-
-@Composable
-private fun ExplorerOverlay(controller: NativeEditorController, state: NativeEditorUiState) {
-    val rows = remember(state.listings, state.expandedDirectories) {
-        flattenExplorerRows(state.listings, state.expandedDirectories)
-    }
-    Column(modifier = Modifier.fillMaxSize()) {
-        OverlayHeader(
-            title = state.projectPath.substringAfterLast('/').ifBlank { "Explorer" },
-            onClose = controller::closeOverlay,
-            action = {
-                IconButton(onClick = { controller.requestDirectory(".") }) {
-                    Icon(Icons.Default.Refresh, "Refresh", tint = SecondaryText)
-                }
-            },
-        )
-        LazyColumn(modifier = Modifier.fillMaxSize()) {
-            items(rows, key = { it.entry.rel }) { row ->
-                val entry = row.entry
-                val selected = state.activeFile == entry.rel || state.activeFile.endsWith("/${entry.rel}")
-                val problemCount = state.diagnostics.entries
-                    .firstOrNull { it.key.endsWith("/${entry.rel}") || it.key == entry.rel }
-                    ?.value?.size ?: 0
-                Row(
-                    modifier = Modifier.fillMaxWidth()
-                        .background(if (selected) Raised else Color.Transparent)
-                        .clickable {
-                            if (entry.isDirectory) controller.toggleDirectory(entry.rel)
-                            else controller.openFile(entry.rel)
-                        }
-                        .padding(start = (8 + row.depth * 16).dp, end = 10.dp)
-                        .height(40.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (entry.isDirectory) {
-                        Icon(
-                            if (entry.rel in state.expandedDirectories) Icons.Default.ExpandMore else Icons.Default.KeyboardArrowRight,
-                            null,
-                            tint = SecondaryText,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Icon(Icons.Default.Folder, null, tint = Accent, modifier = Modifier.size(18.dp))
-                    } else {
-                        Spacer(Modifier.width(18.dp))
-                        Icon(Icons.Default.InsertDriveFile, null, tint = SecondaryText, modifier = Modifier.size(18.dp))
-                    }
-                    Text(
-                        entry.name,
-                        color = gitColor(entry.gitStatus),
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f).padding(start = 7.dp),
-                    )
-                    if (entry.hasDraft) Text("D", color = Accent, fontSize = 10.sp)
-                    if (problemCount > 0) Text(problemCount.toString(), color = Error, fontSize = 11.sp, modifier = Modifier.padding(start = 8.dp))
-                }
-            }
-        }
-    }
 }
 
 @Composable
@@ -761,27 +717,3 @@ private fun ConnectionDot(connected: Boolean) {
 
 private fun overlayTint(state: NativeEditorUiState, overlay: NativeEditorOverlay): Color =
     if (state.overlay == overlay) Accent else SecondaryText
-
-private fun gitColor(status: String): Color = when (status) {
-    "added", "untracked", "staged" -> Success
-    "modified", "staged_modified" -> Warning
-    "deleted", "conflict" -> Error
-    else -> PrimaryText
-}
-
-private fun flattenExplorerRows(
-    listings: Map<String, List<NativeExplorerEntry>>,
-    expanded: Set<String>,
-): List<ExplorerRow> {
-    val rows = mutableListOf<ExplorerRow>()
-    val seen = mutableSetOf<String>()
-    fun append(cwd: String, depth: Int) {
-        listings[cwd].orEmpty().forEach { entry ->
-            if (!seen.add(entry.rel)) return@forEach
-            rows += ExplorerRow(entry, depth)
-            if (entry.isDirectory && entry.rel in expanded) append(entry.rel, depth + 1)
-        }
-    }
-    append(".", 0)
-    return rows
-}

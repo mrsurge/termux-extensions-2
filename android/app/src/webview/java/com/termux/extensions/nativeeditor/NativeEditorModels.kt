@@ -1,5 +1,7 @@
 package com.termux.extensions.nativeeditor
 
+import com.termux.extensions.nativeeditor.structure.NativeEditorStructureBlock
+
 internal enum class NativeEditorOverlay {
     NONE,
     EXPLORER,
@@ -19,18 +21,6 @@ internal data class NativeDocument(
 ) {
     val relativePath: String
         get() = path.removePrefix(projectPath.trimEnd('/') + "/")
-}
-
-internal data class NativeExplorerEntry(
-    val name: String,
-    val rel: String,
-    val kind: String,
-    val gitStatus: String,
-    val gitFlags: List<String>,
-    val hasDraft: Boolean,
-) {
-    val isDirectory: Boolean
-        get() = kind == "dir"
 }
 
 internal data class NativeSearchResult(
@@ -77,9 +67,6 @@ internal data class NativeEditorUiState(
     val projectPath: String = "",
     val document: NativeDocument? = null,
     val overlay: NativeEditorOverlay = NativeEditorOverlay.NONE,
-    val listings: Map<String, List<NativeExplorerEntry>> = emptyMap(),
-    val expandedDirectories: Set<String> = emptySet(),
-    val activeFile: String = "",
     val searchMode: String = "content",
     val searchQuery: String = "",
     val searchResults: List<NativeSearchResult> = emptyList(),
@@ -88,6 +75,7 @@ internal data class NativeEditorUiState(
     val searchNextCursor: String = "",
     val projectGeneration: Int? = null,
     val diagnostics: Map<String, List<NativeDiagnostic>> = emptyMap(),
+    val structureBlocks: List<NativeEditorStructureBlock> = emptyList(),
     val sidebarItems: List<NativeSidebarItem> = emptyList(),
     val sidebarCatalog: List<NativeSidebarCatalogItem> = emptyList(),
     val activeSidebarUrl: String = "",

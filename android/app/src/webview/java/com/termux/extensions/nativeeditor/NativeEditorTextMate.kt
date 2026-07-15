@@ -13,6 +13,7 @@ import io.github.rosemoe.sora.langs.textmate.registry.ThemeRegistry
 import io.github.rosemoe.sora.langs.textmate.registry.model.DefaultGrammarDefinition
 import io.github.rosemoe.sora.langs.textmate.registry.model.GrammarDefinition
 import io.github.rosemoe.sora.langs.textmate.registry.model.ThemeModel
+import com.termux.extensions.nativeeditor.structure.NativeStructureLanguage
 import io.github.rosemoe.sora.text.CharPosition
 import io.github.rosemoe.sora.text.ContentReference
 import io.github.rosemoe.sora.widget.schemes.EditorColorScheme
@@ -113,7 +114,7 @@ internal class NativeEditorTextMate(private val assetRoot: File) {
     fun language(
         languageId: String,
         completionProvider: (String, Int, Int, String) -> List<NativeCompletion>,
-    ): Language {
+    ): NativeStructureLanguage {
         val base = synchronized(registryLock) {
             val scope = scopeByLanguage[languageId]
             if (scope == null) {
@@ -127,7 +128,7 @@ internal class NativeEditorTextMate(private val assetRoot: File) {
                 }
             }
         }
-        return object : Language by base {
+        val completingLanguage = object : Language by base {
             override fun requireAutoComplete(
                 content: ContentReference,
                 position: CharPosition,
@@ -157,6 +158,7 @@ internal class NativeEditorTextMate(private val assetRoot: File) {
                 base.destroy()
             }
         }
+        return NativeStructureLanguage(completingLanguage)
     }
 
     fun debugSnapshot(): Map<String, Any?> = mapOf(

@@ -7,6 +7,9 @@ import android.util.Log
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import com.termux.extensions.UiIpcClient
+import com.termux.extensions.nativeeditor.explorer.NativeExplorerRpcController
+import com.termux.extensions.nativeeditor.structure.NativeEditorStructureBlock
+import com.termux.extensions.nativeeditor.structure.NativeEditorStructureParser
 import com.termux.extensions.rpc.JsonRpcNotification
 import com.termux.extensions.rpc.RpcResponseMode
 import com.termux.extensions.rpc.SocketIoJsonRpcClient
@@ -35,6 +38,7 @@ internal class NativeEditorController(
         private const val MIRROR_DEBOUNCE_MS = 180L
         private const val MIRROR_HOT_WINDOW_MS = 250L
         private const val WBA_CHANGE_DEBOUNCE_MS = 120L
+        private const val WBA_STRUCTURE_DEBOUNCE_MS = 320L
         private const val WBA_STATUS_RETRY_MS = 1_000L
     }
 
@@ -52,9 +56,15 @@ internal class NativeEditorController(
     private var explorerClient: SocketIoJsonRpcClient? = null
     private var wbaClient: SocketIoJsonRpcClient? = null
     private var uiIpcClient: UiIpcClient? = null
+    val explorer = NativeExplorerRpcController(
+        client = { explorerClient },
+        onOpenFile = { update { it.copy(overlay = NativeEditorOverlay.NONE) } },
+        onError = ::setError,
+    )
     private var mirrorTask: Runnable? = null
     private var lastLocalEditAtMs = 0L
     private var wbaChangeTask: Runnable? = null
+    private var wbaStructureTask: Runnable? = null
     private var wbaStatusTask: Runnable? = null
     private var bootSnapshotInFlight = false
     private var wbaStatusInFlight = false
@@ -79,6 +89,7 @@ internal class NativeEditorController(
     private var textMateCatalog: List<NativeTextMateGrammarDescriptor>? = null
     private var textMateRequestGeneration = 0L
     private var textMateLoadingLanguage = ""
+    private var structureRequestSequence = 0L
 
     fun connect(nextBaseUrl: String, uiClient: UiIpcClient?) {
         if (released) return
@@ -116,7 +127,10 @@ internal class NativeEditorController(
                 path = "/explorer_ws/socket.io",
                 responseMode = RpcResponseMode.ACK,
             ),
-            onConnected = { update { it.copy(explorerConnected = true, errorMessage = null) } },
+            onConnected = {
+                update { it.copy(explorerConnected = true, errorMessage = null) }
+                explorer.onConnected()
+            },
             onDisconnected = { update { it.copy(explorerConnected = false) } },
             onNotification = ::handleExplorerNotification,
         )
@@ -145,6 +159,7 @@ internal class NativeEditorController(
         editorClient?.ensureConnected()
         explorerClient?.ensureConnected()
         wbaClient?.ensureConnected()
+        if (explorerClient?.isConnected == true) explorer.onResume()
         if (uiIpcClient?.isRpcConnected == true) requestBootSnapshot()
     }
 
@@ -152,9 +167,11 @@ internal class NativeEditorController(
         released = true
         mirrorTask?.let(mainHandler::removeCallbacks)
         wbaChangeTask?.let(mainHandler::removeCallbacks)
+        wbaStructureTask?.let(mainHandler::removeCallbacks)
         wbaStatusTask?.let(mainHandler::removeCallbacks)
         mirrorTask = null
         wbaChangeTask = null
+        wbaStructureTask = null
         wbaStatusTask = null
         disconnectLanes()
         sidebarRuntime.release()
@@ -164,9 +181,11 @@ internal class NativeEditorController(
     }
 
     fun setOverlay(overlay: NativeEditorOverlay) {
+        val openingExplorer = overlay == NativeEditorOverlay.EXPLORER && state.value.overlay != overlay
         update { current ->
             current.copy(overlay = if (current.overlay == overlay) NativeEditorOverlay.NONE else overlay)
         }
+        if (openingExplorer) explorer.refresh("overlay_open")
     }
 
     fun closeOverlay(): Boolean {
@@ -188,11 +207,11 @@ internal class NativeEditorController(
         update {
             it.copy(
                 document = updated,
-                activeFile = updated.path,
                 statusMessage = "Modified",
                 errorMessage = null,
             )
         }
+        explorer.setActiveFile(updated.path)
         scheduleMirror()
         scheduleWbaChange()
     }
@@ -245,38 +264,19 @@ internal class NativeEditorController(
     }
 
     fun toggleDirectory(rel: String) {
-        val current = state.value
-        val next = current.expandedDirectories.toMutableSet()
-        if (!next.add(rel)) {
-            next.remove(rel)
-        } else {
-            requestDirectory(rel)
-        }
-        update { it.copy(expandedDirectories = next) }
-        explorerClient?.request(
-            "explorer.openDirs.set",
-            mapOf("dirs" to next.toList()),
-        ) { }
+        explorer.toggleDirectory(rel)
     }
 
     fun requestDirectory(rel: String = ".") {
-        explorerClient?.request("explorer.list", mapOf("rel" to rel)) { result ->
-            result.exceptionOrNull()?.let { setError("Explorer failed: ${it.message}") }
-        }
+        explorer.requestDirectory(rel)
+    }
+
+    fun refreshExplorer() {
+        explorer.refresh()
     }
 
     fun openFile(relOrPath: String, line: Int? = null, column: Int? = null) {
-        val params = linkedMapOf<String, Any?>(
-            "path" to relOrPath,
-            "source" to "android_native_explorer",
-            "focus" to true,
-        )
-        if (line != null) params["line"] = line
-        if (column != null) params["column"] = column
-        explorerClient?.request("explorer.editor.open", params) { result ->
-            result.exceptionOrNull()?.let { setError("Open failed: ${it.message}") }
-        }
-        update { it.copy(overlay = NativeEditorOverlay.NONE) }
+        explorer.openFile(relOrPath, line, column)
     }
 
     fun setSearchMode(mode: String) {
@@ -630,6 +630,7 @@ internal class NativeEditorController(
                 adapterReady = false
                 resetWbaDocumentSync()
                 completionProvidersByLanguage = emptyMap()
+                clearStructureProjection()
                 resetTextMateSession()
                 update { it.copy(adapterStatus = "switching", textMateReady = false) }
                 scheduleWbaStatusPoll()
@@ -645,6 +646,8 @@ internal class NativeEditorController(
                 }
             }
             "provider/completions" -> cacheCompletionProvider(notification.params)
+            "provider/documentSymbols", "provider/foldingRanges" ->
+                scheduleStructureRefresh(type)
         }
     }
 
@@ -661,6 +664,7 @@ internal class NativeEditorController(
                 adapterReady = false
                 resetWbaDocumentSync()
                 completionProvidersByLanguage = emptyMap()
+                clearStructureProjection()
                 resetTextMateSession()
                 update {
                     it.copy(
@@ -679,18 +683,8 @@ internal class NativeEditorController(
     }
 
     private fun handleExplorerNotification(notification: JsonRpcNotification) {
+        if (explorer.handleNotification(notification)) return
         when (notification.method) {
-            "explorer.list.updated" -> applyDirectoryListing(notification.params)
-            "explorer.openDirs.updated" -> {
-                val dirs = notification.params["dirs"].asList().mapNotNull { it as? String }.toSet()
-                update { it.copy(expandedDirectories = dirs) }
-            }
-            "explorer.activeFile.updated", "explorer.openState.changed" -> {
-                val active = notification.params.string("path")
-                    .ifBlank { notification.params.string("openFile") }
-                    .ifBlank { notification.params.string("rel") }
-                if (active.isNotBlank()) update { it.copy(activeFile = active) }
-            }
             "explorer.project.opened", "explorer.project.active.updated" -> {
                 val project = projectPath(notification.params)
                 val generation = notification.params.int("projectGeneration")
@@ -804,18 +798,19 @@ internal class NativeEditorController(
             modelGeneration += 1
             modelVersion += 1
             resetWbaDocumentSync()
+            clearStructureProjection()
         }
         if (resetLocalEditWindow) lastLocalEditAtMs = 0L
         update {
             it.copy(
                 projectPath = project,
                 document = document,
-                activeFile = path,
                 projectSwitching = false,
                 statusMessage = if (document.unsaved) "Modified" else document.relativePath,
                 errorMessage = null,
             )
         }
+        explorer.setActiveFile(path)
         publishModelReady("document_projection")
         flushActiveWbaDocument("document_projection")
         ensureTextMateForActiveDocument()
@@ -823,7 +818,7 @@ internal class NativeEditorController(
 
     private fun applyOpenState(payload: Map<String, Any?>) {
         val path = payload.string("openFile").ifBlank { payload.string("path") }
-        if (path.isNotBlank()) update { it.copy(activeFile = path) }
+        explorer.setActiveFile(path)
     }
 
     private fun applyCacheState(payload: Map<String, Any?>) {
@@ -854,13 +849,12 @@ internal class NativeEditorController(
         lastModelReadySyncKey = ""
         resetWbaDocumentSync()
         completionProvidersByLanguage = emptyMap()
+        clearStructureProjection()
+        explorer.reset()
         update {
             it.copy(
                 projectPath = project,
                 document = null,
-                listings = emptyMap(),
-                expandedDirectories = emptySet(),
-                activeFile = "",
                 searchResults = emptyList(),
                 searchId = "",
                 searchNextCursor = "",
@@ -870,7 +864,7 @@ internal class NativeEditorController(
                 errorMessage = null,
             )
         }
-        requestDirectory(".")
+        explorer.refresh("project_switched")
     }
 
     private fun respondToSaveSnapshot(payload: Map<String, Any?>) {
@@ -910,26 +904,6 @@ internal class NativeEditorController(
                 statusMessage = "Saved",
                 errorMessage = null,
             )
-        }
-    }
-
-    private fun applyDirectoryListing(payload: Map<String, Any?>) {
-        val cwd = payload.string("cwd").ifBlank { "." }
-        val entries = payload["entries"].asList().mapNotNull { raw ->
-            val item = raw.asStringMap() ?: return@mapNotNull null
-            val rel = item.string("rel")
-            if (rel.isBlank()) return@mapNotNull null
-            NativeExplorerEntry(
-                name = item.string("name").ifBlank { rel.substringAfterLast('/') },
-                rel = rel,
-                kind = item.string("kind"),
-                gitStatus = item.string("gitStatus"),
-                gitFlags = item["gitFlags"].asList().mapNotNull { it as? String },
-                hasDraft = item["hasDraft"] == true,
-            )
-        }
-        update { current ->
-            current.copy(listings = current.listings + (cwd to entries))
         }
     }
 
@@ -1203,7 +1177,90 @@ internal class NativeEditorController(
                 "modelVersionId" to modelVersion,
             ),
         ) { result ->
-            result.exceptionOrNull()?.let { Log.d(TAG, "WBA didChange failed: ${it.message}") }
+            result.fold(
+                onSuccess = { scheduleStructureRefresh("did_change") },
+                onFailure = { Log.d(TAG, "WBA didChange failed: ${it.message}") },
+            )
+        }
+    }
+
+    private fun scheduleStructureRefresh(reason: String) {
+        wbaStructureTask?.let(mainHandler::removeCallbacks)
+        wbaStructureTask = Runnable {
+            wbaStructureTask = null
+            requestEditorStructure(reason)
+        }.also { mainHandler.postDelayed(it, WBA_STRUCTURE_DEBOUNCE_MS) }
+    }
+
+    private fun requestEditorStructure(reason: String) {
+        val document = state.value.document ?: return
+        val client = wbaClient ?: return
+        val generation = modelGeneration
+        val version = modelVersion
+        if (
+            !adapterReady ||
+            !client.isConnected ||
+            wbaOpenAckPath != document.path ||
+            wbaOpenAckGeneration != generation
+        ) return
+        val sequence = ++structureRequestSequence
+        var symbolBlocks = emptyList<NativeEditorStructureBlock>()
+        var foldingBlocks = emptyList<NativeEditorStructureBlock>()
+        var symbolsDone = false
+        var foldingDone = false
+
+        fun publishIfComplete() {
+            if (!symbolsDone || !foldingDone || sequence != structureRequestSequence) return
+            val current = state.value.document
+            if (
+                current?.path != document.path ||
+                modelGeneration != generation ||
+                modelVersion != version
+            ) return
+            val blocks = NativeEditorStructureParser.merge(symbolBlocks, foldingBlocks)
+            Log.d(
+                TAG,
+                "WBA structure path=${document.path} reason=$reason " +
+                    "symbols=${symbolBlocks.size} folding=${foldingBlocks.size} blocks=${blocks.size}",
+            )
+            update { it.copy(structureBlocks = blocks) }
+        }
+
+        val params = mapOf(
+            "path" to document.path,
+            "languageId" to document.languageId,
+            "generation" to generation,
+            "modelVersionId" to version,
+            "timeoutMs" to 6_000,
+        )
+        client.request("vscode.documentSymbols", params, timeoutMs = 7_000) { result ->
+            mainHandler.post {
+                if (sequence != structureRequestSequence) return@post
+                result.exceptionOrNull()?.let {
+                    Log.d(TAG, "WBA document symbols failed: ${it.message}")
+                }
+                symbolBlocks = NativeEditorStructureParser.documentSymbols(result.getOrNull())
+                symbolsDone = true
+                publishIfComplete()
+            }
+        }
+        client.request(
+            "vscode.foldingRanges",
+            params + ("context" to emptyMap<String, Any?>()),
+            timeoutMs = 7_000,
+        ) { result ->
+            mainHandler.post {
+                if (sequence != structureRequestSequence) return@post
+                result.exceptionOrNull()?.let {
+                    Log.d(TAG, "WBA folding ranges failed: ${it.message}")
+                }
+                foldingBlocks = NativeEditorStructureParser.foldingRanges(
+                    result.getOrNull(),
+                    document.content,
+                )
+                foldingDone = true
+                publishIfComplete()
+            }
         }
     }
 
@@ -1357,11 +1414,25 @@ internal class NativeEditorController(
     }
 
     private fun resetWbaDocumentSync() {
+        cancelStructureRefresh()
         wbaOpenAckPath = ""
         wbaOpenAckGeneration = -1L
         wbaOpenInFlightPath = ""
         wbaOpenInFlightGeneration = -1L
         wbaPendingChange = state.value.document != null
+    }
+
+    private fun cancelStructureRefresh() {
+        wbaStructureTask?.let(mainHandler::removeCallbacks)
+        wbaStructureTask = null
+        structureRequestSequence += 1
+    }
+
+    private fun clearStructureProjection() {
+        cancelStructureRefresh()
+        if (state.value.structureBlocks.isNotEmpty()) {
+            update { it.copy(structureBlocks = emptyList()) }
+        }
     }
 
     private fun resetTextMateSession() {
@@ -1547,7 +1618,7 @@ internal class NativeEditorController(
             "adapterStatus" to current.adapterStatus,
             "projectPath" to current.projectPath,
             "projectGeneration" to current.projectGeneration,
-            "activeFile" to current.activeFile,
+            "activeFile" to explorer.state.value.activeFile,
             "document" to document?.let {
                 mapOf(
                     "path" to it.path,
@@ -1574,6 +1645,7 @@ internal class NativeEditorController(
             "textMateLoadingLanguage" to textMateLoadingLanguage,
             "textMateCatalogCount" to textMateCatalog?.size,
             "textMate" to textMate.debugSnapshot(),
+            "structureBlockCount" to current.structureBlocks.size,
             "errorMessage" to current.errorMessage,
             "uiConnected" to current.uiConnected,
             "editor" to editorClient?.debugSnapshot(),

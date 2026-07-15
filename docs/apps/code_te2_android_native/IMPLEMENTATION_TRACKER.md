@@ -119,16 +119,31 @@ editor widget. Device workflow validation remains the acceptance boundary.
 - [ ] `in_progress` Consume backend-projected diagnostics in Sora.
 - [ ] `deferred` Hover UI.
 - [ ] `deferred` Semantic tokens and inlay hints.
-- [ ] `deferred` Symbols, folding ranges, colors, and inline completions.
+- [x] `verified` Request generation-tagged WBA document symbols and folding
+  ranges after the complete-document `didChange` barrier, stale-drop responses
+  by request/path/generation/version, and merge valid ranges into Sora code
+  blocks without replacing TextMate spans.
+- [x] `verified` Enable Sora's built-in sticky scroll over the merged WBA
+  structure blocks. A native Python device probe returned two document-symbol
+  blocks; the same probe returned no folding ranges from its registered
+  providers.
+- [ ] `deferred` Collapsible folding affordances, colors, and inline completions.
 
 ## Phase 5: Explorer And Search
 
-- [ ] `in_progress` Render backend-projected Explorer roots and open directories.
-- [ ] `in_progress` Implement lazy directory expansion.
-- [ ] `in_progress` Mark the backend-projected active file.
-- [ ] `in_progress` Open files through Explorer backend intent.
+- [x] `verified` Render backend-projected Explorer roots and open directories as
+  nested asymmetric card containers in the dedicated
+  `nativeeditor.explorer` package.
+- [x] `verified` Treat listings as disposable projections: collapse evicts the
+  directory and descendant listings, while expand, reconnect, foreground
+  resume, overlay open, and manual refresh issue live Explorer RPC reads.
+- [x] `verified` Mark the backend-projected active file.
+- [x] `verified` Open files through Explorer backend intent.
 - [ ] `in_progress` Implement search start, more, cancel, and result navigation.
 - [ ] `in_progress` Render git and diagnostic decorations.
+- [x] `verified` Port browser-style Explorer sticky directory ancestry into a
+  separate geometry policy/UI module; on-device scrolling retained the project
+  root and open `.codex-scratch` scope over the live tree.
 - [ ] `pending` Implement create, rename, delete, move, and copy through existing
   backend RPC methods.
 - [ ] `in_progress` Verify project switching does not depend on local Explorer
@@ -137,7 +152,8 @@ editor widget. Device workflow validation remains the acceptance boundary.
 ## Phase 6: Native Mobile Shell And Sidebar
 
 - [ ] `in_progress` Add compact native toolbar and command menu.
-- [ ] `in_progress` Add Explorer, search, and problems overlays.
+- [x] `verified` Add the Explorer overlay; search and problems remain
+  `in_progress`.
 - [x] `verified` Consume UI IPC sidebar catalog/order/active-slot state from the
   authoritative host boot snapshot as well as live notifications, so native
   startup does not depend on another browser client perturbing backend state.
@@ -200,19 +216,22 @@ editor widget. Device workflow validation remains the acceptance boundary.
 - [ ] `pending` Verify continuous native typing no longer jumps the cursor when
   debounced mirror broadcasts return from the backend.
 - [ ] `pending` Verify open/edit/save/reopen.
-- [ ] `pending` Verify Explorer and search.
+- [x] `verified` Verify Explorer rendering, live root/open-directory refresh,
+  active-file marking, backend file open, and nested sticky scopes on-device.
+- [ ] `pending` Verify search.
 - [x] `verified` Verify native Python TextMate highlighting on-device, including
   visible punctuation and import tokens against GitHub Dark Default.
 - [x] `verified` Verify the active Python WBA model and provider by receiving 82
   completion items at a real position in `open_state_events.py`; direct Sora UI
   trigger ergonomics remain follow-up validation.
 - [ ] `pending` Verify diagnostics and project switching.
-- [ ] `in_progress` Prevent unnecessary sidebar WebView reloads when switching
+- [x] `verified` Prevent unnecessary sidebar WebView reloads when switching
   the active window. Static investigation confirmed that Android treated the
   activation-only UI IPC delta as a complete ledger, transiently removed every
   slot, and destroyed the persistent WebViews before the full ledger arrived.
   Activation now updates only active flags, while full-state reduction rejects
-  payloads without `slots` and `order`; device verification is still pending.
+  payloads without `slots` and `order`; subsequent device use confirmed the
+  sidebar window switch no longer reloads its persistent view.
 - [x] `verified` Verify late attachment after WebView process recreation while
   the device WBA remains running, and verify launcher leave/return behavior.
 - [x] `verified` Review `git diff --check` and exact changed-file scope.
@@ -231,6 +250,20 @@ editor widget. Device workflow validation remains the acceptance boundary.
   and identifiers on the native GitHub Dark Default surface.
 - The minified APK initially exposed a reflected msgpack buffer class removed by
   R8; narrow keep/dontwarn rules now cover that runtime path.
+
+### Explorer and structure device evidence (2026-07-15)
+
+- Installed the minified `webviewDebug` APK on the connected Pixel 9 Pro XL.
+- Opening Explorer issued 45 live `explorer.list` requests for root plus every
+  backend-open directory, followed by `explorer.git.status.get`; it did not
+  render from the initial projection alone.
+- Screenshot and accessibility-tree inspection confirmed nested directory
+  cards, the active-file underline, and sticky project plus nested-directory
+  scopes while scrolling.
+- Opening `pyright_unused_func_probe.py` through Explorer completed the exact
+  WBA open/didChange barrier, then called `vscode.documentSymbols` and
+  `vscode.foldingRanges`. Symbols produced two Sora structure blocks; folding
+  returned zero ranges for that provider/document.
 
 ## Deferred Publication Work
 
@@ -257,11 +290,11 @@ editor widget. Device workflow validation remains the acceptance boundary.
 | 2026-07-14 | Log native RPC failures at the shared lane client boundary. | Callers may ignore callbacks, but transport/protocol failures must still reach the persistent Android TE2 console worker. |
 | 2026-07-14 | Keep a persistent native WebView per sidebar slot and explicitly replay on foreground resume. | Android process/network suspension must not require another browser client to wake backend state, and closing the drawer must not tear down sidebar app sessions. |
 | 2026-07-14 | Treat every backend-open sidebar slot as persistent and close it only through the backend ledger. | Active/eager flags control presentation and startup hints, not window ownership; native long press mirrors the web close affordance. |
+| 2026-07-15 | Keep native Explorer RPC, projection policy, card tree, and sticky scopes in `nativeeditor.explorer`. | Explorer is an independently owned surface; the editor coordinator should not become its state or UI monolith. |
+| 2026-07-15 | Feed WBA document symbols and folding ranges into Sora `Styles.blocks`. | Sora 0.23.5 already renders sticky scroll from code blocks, so the adapter can preserve TextMate spans and avoid a second language engine. |
 
 ## Blockers
 
-Native sidebar activation frequently reloads an already-loaded persistent
-WebView. This is deferred for the next sidebar investigation; likely stale
-single-active-window URL/load handling remains in the native transition path.
-Save/conflict, diagnostics, project switching, and direct Sora completion-popup
-interaction remain broader workflow validation gates.
+Save/conflict, diagnostics, project switching, search, collapsible folding, and
+direct Sora completion-popup interaction remain broader workflow validation
+gates.
