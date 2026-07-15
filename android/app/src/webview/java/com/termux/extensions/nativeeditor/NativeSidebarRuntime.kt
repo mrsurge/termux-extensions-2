@@ -1,6 +1,7 @@
 package com.termux.extensions.nativeeditor
 
 import android.util.Log
+import com.termux.extensions.rpc.asStringMap
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -301,6 +302,28 @@ internal fun nativeSidebarPersistencePlan(
         item = item,
         startRequired = item.requiresFrameworkStart && item.appId !in runningApps,
     )
+}
+
+/** Returns only complete backend ledger projections; activation deltas are not ledgers. */
+internal fun nativeSidebarLedgerState(payload: Map<String, Any?>): Map<String, Any?>? {
+    val state = if (payload.containsKey("state")) {
+        payload["state"].asStringMap() ?: return null
+    } else {
+        payload
+    }
+    if (!state.containsKey("slots") || !state.containsKey("order")) return null
+    if (state["slots"].asStringMap() == null || state["order"] !is List<*>) return null
+    return state
+}
+
+/** Applies an activation delta without replacing the backend window ledger. */
+internal fun nativeSidebarItemsAfterActivation(
+    items: List<NativeSidebarItem>,
+    hostId: String,
+): List<NativeSidebarItem> {
+    if (hostId.isBlank() || items.none { it.hostId == hostId }) return items
+    if (items.all { it.active == (it.hostId == hostId) }) return items
+    return items.map { item -> item.copy(active = item.hostId == hostId) }
 }
 
 /** Matches the browser iframe pool: projection updates do not navigate an already loaded slot. */

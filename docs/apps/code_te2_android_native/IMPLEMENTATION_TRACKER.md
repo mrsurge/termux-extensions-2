@@ -208,10 +208,11 @@ editor widget. Device workflow validation remains the acceptance boundary.
   trigger ergonomics remain follow-up validation.
 - [ ] `pending` Verify diagnostics and project switching.
 - [ ] `in_progress` Prevent unnecessary sidebar WebView reloads when switching
-  the active window. Android now retains the first loaded URL for each live
-  backend host ID, matching the browser iframe pool instead of navigating on
-  later `restore_url` projections. Static tests pass; device verification is
-  still pending.
+  the active window. Static investigation confirmed that Android treated the
+  activation-only UI IPC delta as a complete ledger, transiently removed every
+  slot, and destroyed the persistent WebViews before the full ledger arrived.
+  Activation now updates only active flags, while full-state reduction rejects
+  payloads without `slots` and `order`; device verification is still pending.
 - [x] `verified` Verify late attachment after WebView process recreation while
   the device WBA remains running, and verify launcher leave/return behavior.
 - [x] `verified` Review `git diff --check` and exact changed-file scope.

@@ -729,8 +729,8 @@ internal class NativeEditorController(
         update { it.copy(uiConnected = true) }
         when (notification.method) {
             "ui.adapter.state" -> applyAdapterState(notification.params)
-            "ui.sidebar.windows.changed",
-            "ui.sidebar.window.activated",
+            "ui.sidebar.windows.changed" -> applySidebarState(notification.params)
+            "ui.sidebar.window.activated" -> applySidebarActivation(notification.params)
             "ui.sidebar.window.readiness.changed" -> applySidebarState(notification.params)
         }
     }
@@ -1006,7 +1006,11 @@ internal class NativeEditorController(
     }
 
     private fun applySidebarState(payload: Map<String, Any?>) {
-        val statePayload = payload["state"].asStringMap() ?: payload
+        val statePayload = nativeSidebarLedgerState(payload)
+        if (statePayload == null) {
+            Log.w(TAG, "Ignoring incomplete sidebar ledger keys=${payload.keys.sorted()}")
+            return
+        }
         val active = statePayload.string("active_host_id").ifBlank {
             statePayload.string("activeHostId")
         }
@@ -1054,6 +1058,19 @@ internal class NativeEditorController(
             )
         }
         sidebarRuntime.reconcile(items, ::applySidebarProjection)
+    }
+
+    private fun applySidebarActivation(payload: Map<String, Any?>) {
+        val hostId = payload.string("host_id").ifBlank { payload.string("hostId") }
+        if (hostId.isBlank()) return
+        update { current ->
+            if (current.sidebarItems.none { it.hostId == hostId }) return@update current
+            val items = nativeSidebarItemsAfterActivation(current.sidebarItems, hostId)
+            current.copy(
+                sidebarItems = items,
+                activeSidebarUrl = current.sidebarLoadedUrls[hostId].orEmpty(),
+            )
+        }
     }
 
     private fun applySidebarProjection(projection: NativeSidebarProjection) {
