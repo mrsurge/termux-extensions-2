@@ -1,0 +1,31 @@
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for the release (e.g., v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Create Zip Archive
+        run: |
+          git archive --format=zip --output=android-skills.zip HEAD
+
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ inputs.tag_name }} android-skills.zip --title "Release ${{ inputs.tag_name }}" --notes "Manual release of main branch contents."

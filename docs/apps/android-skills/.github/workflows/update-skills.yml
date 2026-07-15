@@ -1,0 +1,69 @@
+name: Update Skills
+
+on:
+  workflow_dispatch:
+  # TODO(JoseAlcerreca): enable schedule when ready
+  # schedule:
+  #   - cron: '0 * * * *' # Runs at minute 0 of every hour
+
+permissions:
+  contents: write
+
+jobs:
+  update-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.ADR_GITHUB_BOT_PAT }}
+
+      - name: Delete existing non-hidden directories
+        run: |
+          # Cleans up existing folders so we don't have stale files
+          find . -mindepth 1 -maxdepth 1 -type d ! -name '.*' -exec rm -rf {} +
+
+      - name: Download and Extract dac_skills
+        run: |
+          curl -L -O https://dl.google.com/dac/dac_skills.zip
+          mkdir temp_extract
+          unzip -o dac_skills.zip -d temp_extract
+          # Only copy directories from the root of the zip, ignoring files in the root
+          if ls -d temp_extract/[!.]*/ >/dev/null 2>&1; then
+            cp -r temp_extract/[!.]*/ .
+          fi
+          rm -rf temp_extract dac_skills.zip
+
+      - name: Copy contents of github-skills branch
+        run: |
+          git fetch origin github-skills:github-skills
+
+          # 2. Create a temporary directory to hold the skills files
+          mkdir temp_skills
+
+          # 3. Use 'git archive' to "export" the folders from that branch 
+          # and extract them into our temp folder. This avoids index errors.
+          git archive github-skills | tar -x -C temp_skills
+
+          # 4. Move the contents into the root directory
+          # This will overwrite any existing folders with the same name
+          if ls -d temp_skills/[!.]*/ >/dev/null 2>&1; then
+            cp -r temp_skills/[!.]*/ .
+            echo "Successfully moved non-hidden directories from github-skills."
+          else
+            echo "No non-hidden directories found to copy."
+          fi
+          
+          # 5. Clean up the temp folder
+          rm -rf temp_skills
+          echo "Successfully copied directories from github-skills branch."
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "android-devrel-github-bot"
+          git config user.email "android-devrel-github-bot@users.noreply.github.com"
+          git add -A
+          # The '|| true' ensures the workflow doesn't fail if there's nothing new
+          git commit -m "Updates skills ($(date +'%Y-%m-%d %H:%M'))" || echo "No changes to commit"
+          git push origin main
