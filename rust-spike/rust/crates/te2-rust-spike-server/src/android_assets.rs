@@ -10,18 +10,16 @@ use axum::{
 use glob::glob;
 use serde::Deserialize;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     env, fs,
     io::Write,
     path::{Component, Path, PathBuf},
-    sync::{Mutex, OnceLock},
 };
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 use crate::{AppState, json_error};
 
 const BUNDLE_MANIFEST_REL_PATH: &str = "app/android_editor_assets_bundle.json";
-static BUNDLE_CACHE: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -134,10 +132,11 @@ fn read_editor_version(project_root: &Path) -> Result<String> {
 fn build_asset_bundle_payload(project_root: &Path) -> Result<AssetBundlePayload> {
     let bundle = build_asset_bundle_zip(project_root)?;
     let bytes =
-        fs::read(&bundle.path).with_context(|| format!("read bundle {}", bundle.path.display()))?;
+        fs::read(&bundle.path).with_context(|| format!("read bundle {}", bundle.path.display()));
+    let _ = fs::remove_file(&bundle.path);
     Ok(AssetBundlePayload {
         version: bundle.version,
-        bytes,
+        bytes: bytes?,
     })
 }
 
@@ -146,13 +145,8 @@ fn build_asset_bundle_zip(project_root: &Path) -> Result<AssetBundleFile> {
     let version_path = project_relative_path(project_root, &manifest.version_file)?;
     let version = read_version_file(&version_path)?;
 
-    // Android OTA bundles are immutable per editor version. Reusing the same
-    // zip keeps repeated version checks cheap while preserving the legacy API.
-    let cache_key = cache_key(project_root, &version);
-    if let Some(path) = cached_bundle_path(&cache_key) {
-        return Ok(AssetBundleFile { version, path });
-    }
-
+    // This endpoint is a cold OTA path. Build from current sources so a forced
+    // same-version refresh cannot receive an older mixed-generation archive.
     let temp_root = bundle_temp_root(project_root);
     fs::create_dir_all(&temp_root)
         .with_context(|| format!("create bundle temp root {}", temp_root.display()))?;
@@ -170,7 +164,6 @@ fn build_asset_bundle_zip(project_root: &Path) -> Result<AssetBundleFile> {
 
     let temp = zip.finish().context("finish asset bundle zip")?;
     let (_file, path) = temp.keep().context("persist asset bundle zip")?;
-    remember_cached_bundle(cache_key, &path);
     Ok(AssetBundleFile { version, path })
 }
 
@@ -468,33 +461,6 @@ fn zip_file_options() -> SimpleFileOptions {
         .unix_permissions(0o644)
 }
 
-fn cached_bundle_path(key: &str) -> Option<PathBuf> {
-    let cache = BUNDLE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let cache = cache.lock().ok()?;
-    let path = cache.get(key)?;
-    path.exists().then(|| path.clone())
-}
-
-fn remember_cached_bundle(key: String, path: &Path) {
-    let cache = BUNDLE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let Ok(mut cache) = cache.lock() else {
-        return;
-    };
-    for (_old_key, old_path) in cache.drain() {
-        if old_path != path {
-            let _ = fs::remove_file(old_path);
-        }
-    }
-    cache.insert(key, path.to_path_buf());
-}
-
-fn cache_key(project_root: &Path, version: &str) -> String {
-    let project_root = project_root
-        .canonicalize()
-        .unwrap_or_else(|_| project_root.to_path_buf());
-    format!("{}\n{version}", project_root.display())
-}
-
 fn bundle_temp_root(project_root: &Path) -> PathBuf {
     env::var_os("TEMPDIR")
         .map(PathBuf::from)
@@ -523,6 +489,7 @@ fn zip_response(payload: AssetBundlePayload) -> Response {
             header::CONTENT_DISPOSITION,
             format!("attachment; filename=\"{filename}\""),
         )
+        .header(header::CACHE_CONTROL, "no-store")
         .body(Body::from(payload.bytes))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
@@ -618,6 +585,42 @@ mod tests {
         );
 
         assert_eq!(read_editor_version(temp.path()).unwrap(), "2.4.6");
+    }
+
+    #[test]
+    fn same_version_bundle_rebuild_reads_current_source_bytes() {
+        let temp = temp_project();
+        let version_path = temp
+            .path()
+            .join("app/apps/file_editor_cm6/static/version.txt");
+        let source_path = temp.path().join("app/static/touch.js");
+        write_file(version_path, "3.2.1\n");
+        write_file(source_path.clone(), "old touch bundle");
+        write_file(
+            temp.path().join(BUNDLE_MANIFEST_REL_PATH),
+            r#"{
+              "version_file": "app/apps/file_editor_cm6/static/version.txt",
+              "entries": [
+                { "kind": "file", "src": "app/static/touch.js", "dest": "static/touch.js" },
+                { "kind": "version", "dest": "version.txt" }
+              ]
+            }"#,
+        );
+
+        let first = build_asset_bundle_zip(temp.path()).unwrap();
+        let mut first_archive = ZipArchive::new(File::open(first.path).unwrap()).unwrap();
+        assert_eq!(
+            read_zip_string(&mut first_archive, "static/touch.js"),
+            "old touch bundle"
+        );
+
+        write_file(source_path, "new touch bundle");
+        let second = build_asset_bundle_zip(temp.path()).unwrap();
+        let mut second_archive = ZipArchive::new(File::open(second.path).unwrap()).unwrap();
+        assert_eq!(
+            read_zip_string(&mut second_archive, "static/touch.js"),
+            "new touch bundle"
+        );
     }
 
     #[test]

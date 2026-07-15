@@ -3022,8 +3022,10 @@ The extension hooks into a Monaco `ICodeEditor` and adds:
 - **Teardrop cursor indicator** — a draggable handle below the cursor.
 - **Selection handle bars** — left/right draggable handles around a selection range.
 - **Touch context menu** — a floating toolbar with clipboard, selection, hover, and undo/redo tools.
+- **Selection adjustment island** — a second matching toolbar with one-character grow-left and grow-right controls.
 - **Drag-to-reveal** — while dragging a handle, the editor auto-scrolls to keep the cursor visible.
 - **Touch offset** — during drag, the target position is shifted up by 1.5 line-heights so the user's finger doesn't occlude the text.
+- **Rendered-column hit testing** — horizontal touch coordinates are resolved against Monaco's rendered column offsets, including tabs and variable-width glyph advances.
 
 ### TE2-specific patches (on top of upstream)
 
@@ -3033,7 +3035,10 @@ The extension hooks into a Monaco `ICodeEditor` and adds:
 | **`bottomCursor` positioning fix** | Uses `top` + `marginTop` instead of `bottom` so the teardrop renders at the correct vertical offset |
 | **Config-change listener** | Re-reads `fontSize` / `lineHeight` on `editor.onDidChangeConfiguration` so teardrop position updates after settings changes |
 | **Touch offset correction** | During drag, targets `clientY + touchOffsetY - lineHeight * 1.5` for finger clearance |
-| **Drag debounce** | `setInterval` for cursor tracking only starts on the first `touchmove`, not `touchstart` — so taps on the teardrop open the menu instead of repositioning the cursor |
+| **Precise horizontal targeting** | Uses `getOffsetForColumn()` with a binary search bounded to the touched visual row, choosing the nearest rendered column without crossing Monaco wrap boundaries |
+| **Fixed-rate drag sampling** | `touchmove` records only the latest touch; one 50 ms loop resolves rendered columns, performs edge scrolling, and writes changed Monaco positions without accumulating per-event work |
+| **Touch menu activation** | Handle taps and completed handle drags open the menu islands automatically; desktop remains explicit right-click behavior |
+| **Selection grow tools** | A separate menu island grows the selection one model position left or right, crossing line boundaries when needed |
 | **Select Word tool** | Built-in tool that selects the word at the cursor position |
 | **Hover tool** | Built-in tool (🚁) that closes the menu and triggers `editor.action.showHover` at the cursor |
 
@@ -3049,26 +3054,22 @@ The extension hooks into a Monaco `ICodeEditor` and adds:
 # 1. Source lives in the local worktree
 cd worktrees/monaco-touch-selection/
 
-# 2. Compile TypeScript
-npx tsc
-
-# 3. Build UMD bundle with Vite
-npx vite build
+# 2. Compile TypeScript and build both JavaScript and CSS
+npm run build
 #    → dist/index.umd.cjs   (deployed file)
 #    → dist/index.js         (ESM, not used)
+#    → dist/style.css         (deployed file)
 
-# 4. Back up the existing vendored file
-cp app/apps/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js \
-   app/apps/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js.bak
-
-# 5. Deploy
-cp dist/index.umd.cjs \
+# 3. From the repository root, deploy the generated vendor assets
+cp worktrees/monaco-touch-selection/dist/index.umd.cjs \
    app/apps/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js
+cp worktrees/monaco-touch-selection/dist/style.css \
+   app/apps/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.css
 ```
 
-The CSS file (`monaco-touch-selection.css`) is **manually patched** in the vendor
-directory (larger touch targets, bigger menu, `::before` pseudo-elements for hit area).
-It is NOT built from source — do not overwrite it during deploy.
+The patched CSS source is `worktrees/monaco-touch-selection/src/style.css`.
+The files under the Code TE2 static vendor directory are deployment artifacts;
+do not patch them independently from the worktree source.
 
 ### Gesture reference
 
@@ -3076,9 +3077,9 @@ It is NOT built from source — do not overwrite it during deploy.
 |---------|--------|--------|
 | **Tap** | Editor surface | Set cursor position |
 | **Double-tap** | Editor surface | Select word at tap position |
-| **Tap** | Teardrop (cursor handle) | Open touch context menu |
-| **Drag** | Teardrop (cursor handle) | Reposition cursor (with 1.5-line vertical offset for finger clearance) |
-| **Drag** | Selection handle bar | Adjust selection range boundary |
+| **Tap** | Teardrop (cursor handle) | Open both touch-menu islands |
+| **Drag** | Teardrop (cursor handle) | Reposition the cursor through the fixed-rate rendered-column sampler with calibrated 1.5-line finger clearance; open menus on release |
+| **Drag** | Selection handle bar | Adjust the range boundary through the fixed-rate sampler; open menus on release |
 | **Tap** | Line number gutter | Select entire line above the tapped line |
 | **Tap then drag** | Line number gutter | Change line range selection |
 
@@ -3098,6 +3099,13 @@ Tools appear in the context menu in the order listed below.
 | 8 | **Hover** | 🚁 (helicopter emoji) | Close menu, show hover info at cursor position | Closes |
 | 9 | **Close** | ✕ (X SVG) | Dismiss the touch menu | Closes |
 
+The second menu island contains two halves of the Select All icon:
+
+| Tool | Action |
+|------|--------|
+| **Grow selection left** | Move the normalized range start one model position left, crossing to the previous line when needed |
+| **Grow selection right** | Move the normalized range end one model position right, crossing to the next line when needed |
+
 ### Initialization
 
 The extension is loaded in `m_editor_app.ts` as a UMD global:
@@ -3116,9 +3124,10 @@ need to add custom tools, but TE2 does not use it.
 | File | Role |
 |------|------|
 | `worktrees/monaco-touch-selection/src/index.ts` | TypeScript source — all patches, tools, and logic |
+| `worktrees/monaco-touch-selection/src/style.css` | Patched touch-target and menu CSS source |
 | `worktrees/monaco-touch-selection/dist/index.umd.cjs` | Build output (UMD) |
 | `app/.../vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js` | Deployed vendored UMD (copy of build output) |
-| `app/.../vendor/monaco-touch-selection/monaco-touch-selection.css` | Manually patched CSS (do NOT overwrite) |
+| `app/.../vendor/monaco-touch-selection/monaco-touch-selection.css` | Deployed CSS (copy of worktree build output) |
 | `app/.../monaco_editor/m_editor_app.ts` | Initialization call (`editorTouchSelectionHelp(editor)`) |
 
 ## 33) Diagnostics Owner-Keyed Markers (Multi-Source Fix)
