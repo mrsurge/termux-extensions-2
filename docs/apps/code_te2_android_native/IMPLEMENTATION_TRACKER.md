@@ -207,10 +207,11 @@ editor widget. Device workflow validation remains the acceptance boundary.
   completion items at a real position in `open_state_events.py`; direct Sora UI
   trigger ergonomics remain follow-up validation.
 - [ ] `pending` Verify diagnostics and project switching.
-- [ ] `known_issue` Fix unnecessary sidebar WebView reloads when switching the
-  active window. All open windows load in the background and persist across
-  drawer close/open, but roughly 80 percent of active-window transitions reload
-  the selected app across all tested apps.
+- [ ] `in_progress` Prevent unnecessary sidebar WebView reloads when switching
+  the active window. Android now retains the first loaded URL for each live
+  backend host ID, matching the browser iframe pool instead of navigating on
+  later `restore_url` projections. Static tests pass; device verification is
+  still pending.
 - [x] `verified` Verify late attachment after WebView process recreation while
   the device WBA remains running, and verify launcher leave/return behavior.
 - [x] `verified` Review `git diff --check` and exact changed-file scope.

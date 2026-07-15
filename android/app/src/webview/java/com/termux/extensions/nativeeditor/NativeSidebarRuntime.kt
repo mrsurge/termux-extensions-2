@@ -77,7 +77,7 @@ internal class NativeSidebarRuntime(private val httpClient: OkHttpClient) {
 
         val active = items.firstOrNull { it.active }
         items.filter { it.kind != "app" }
-            .forEach { item -> loadedUrls[item.hostId] = item.url }
+            .forEach(::retainLoadedUrl)
         publishCurrent(active, publish)
 
         fetchRunningApps().whenComplete { runningApps, runningFailure ->
@@ -92,13 +92,13 @@ internal class NativeSidebarRuntime(private val httpClient: OkHttpClient) {
             nativeSidebarPersistencePlan(items, running).forEach { plan ->
                 val item = plan.item
                 if (!item.requiresFrameworkStart) {
-                    loadedUrls[item.hostId] = item.url
+                    retainLoadedUrl(item)
                     publishCurrent(active, publish)
                     return@forEach
                 }
                 if (!plan.startRequired) {
                     startedApps.add(startKey(item.appId))
-                    loadedUrls[item.hostId] = item.url
+                    retainLoadedUrl(item)
                     publishCurrent(active, publish)
                     return@forEach
                 }
@@ -108,7 +108,7 @@ internal class NativeSidebarRuntime(private val httpClient: OkHttpClient) {
                     val error = startFailure?.message ?: result?.error
                     if (error == null) {
                         slotErrors.remove(item.hostId)
-                        loadedUrls[item.hostId] = item.url
+                        retainLoadedUrl(item)
                     } else {
                         slotErrors[item.hostId] = error
                     }
@@ -196,6 +196,12 @@ internal class NativeSidebarRuntime(private val httpClient: OkHttpClient) {
             }
         })
         return future
+    }
+
+    private fun retainLoadedUrl(item: NativeSidebarItem) {
+        loadedUrls.compute(item.hostId) { _, currentUrl ->
+            nativeSidebarRetainedLoadUrl(currentUrl, item.url)
+        }
     }
 
     private fun ensureStarted(appId: String): CompletableFuture<NativeSidebarStartResult> {
@@ -296,6 +302,10 @@ internal fun nativeSidebarPersistencePlan(
         startRequired = item.requiresFrameworkStart && item.appId !in runningApps,
     )
 }
+
+/** Matches the browser iframe pool: projection updates do not navigate an already loaded slot. */
+internal fun nativeSidebarRetainedLoadUrl(currentUrl: String?, projectedUrl: String): String? =
+    currentUrl?.takeIf(String::isNotBlank) ?: projectedUrl.takeIf(String::isNotBlank)
 
 private val NativeSidebarItem.requiresFrameworkStart: Boolean
     get() = kind == "app" && appId.isNotBlank()

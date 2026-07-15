@@ -22,6 +22,24 @@ class NativeSidebarRuntimePolicyTest {
         assertEquals(false, plans.single { it.item.hostId == "terminal" }.startRequired)
     }
 
+    @Test
+    fun retainsLoadedUrlAcrossProjectionChanges() {
+        assertEquals(
+            "http://localhost/app/terminal?te2_host_id=terminal:base",
+            nativeSidebarRetainedLoadUrl(
+                currentUrl = "http://localhost/app/terminal?te2_host_id=terminal:base",
+                projectedUrl = "http://localhost/app/terminal?te2_host_id=terminal:base&cwd=/next",
+            ),
+        )
+        assertEquals(
+            "http://localhost/app/terminal?te2_host_id=terminal:base",
+            nativeSidebarRetainedLoadUrl(
+                currentUrl = null,
+                projectedUrl = "http://localhost/app/terminal?te2_host_id=terminal:base",
+            ),
+        )
+    }
+
     private fun item(
         hostId: String,
         appId: String = "",
