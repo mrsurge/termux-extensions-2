@@ -186,20 +186,20 @@ UI IPC remains the native shell's host-control lane. The native client consumes
 sidebar catalog/order/active-slot projections and sends existing create,
 activate, close, reorder, save, run, and related host intents. Sidebar app URLs
 render in a dedicated contained WebView, while sidebar authority stays in the
-backend.
+backend. Initial sidebar state arrives through the same
+`ui.sidebar.windows.changed` connection notification as the browser client;
+Android does not add sidebar state to the host boot snapshot.
 
 The native frontend must not connect to `/sidebar_ipc`; that lane belongs to
 sidebar app backends.
 
-### Known Sidebar Defect
+### Resolved Sidebar Reload Defect
 
 Every backend-open sidebar window loads in the background and remains connected
-when the drawer closes and reopens. Switching the active window still causes an
-unnecessary reload on roughly 80 percent of transitions across all tested apps.
-This is an activation-transition defect, not a persistence failure, and is
-intentionally deferred from the current slice. Investigate stale URL/load logic
-left from the earlier single-active-window implementation before changing the
-backend ledger or persistence contract.
+when the drawer closes and reopens. Activation-only notifications update active
+flags without replacing the full window ledger; full-state reduction requires
+`slots` and `order`. This prevents transient slot removal and WebView reloads
+while preserving backend authority.
 
 ## Delivery Slices
 

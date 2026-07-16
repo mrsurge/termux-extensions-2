@@ -9,6 +9,8 @@ import androidx.compose.runtime.mutableStateOf
 import com.termux.extensions.UiIpcClient
 import com.termux.extensions.nativeeditor.explorer.NativeExplorerRpcController
 import com.termux.extensions.nativeeditor.explorer.SocketIoNativeExplorerRpcTransport
+import com.termux.extensions.nativeeditor.sidebar.NativeSidebarRpcController
+import com.termux.extensions.nativeeditor.sidebar.UiIpcNativeSidebarRpcTransport
 import com.termux.extensions.nativeeditor.structure.NativeEditorStructureBlock
 import com.termux.extensions.nativeeditor.structure.NativeEditorStructureParser
 import com.termux.extensions.rpc.JsonRpcNotification
@@ -17,7 +19,6 @@ import com.termux.extensions.rpc.SocketIoJsonRpcClient
 import com.termux.extensions.rpc.SocketIoRpcLane
 import com.termux.extensions.rpc.asStringMap
 import java.io.File
-import java.net.URI
 import java.security.MessageDigest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -50,13 +51,17 @@ internal class NativeEditorController(
     private val mutableState = mutableStateOf(NativeEditorUiState())
     val state: State<NativeEditorUiState> = mutableState
     val textMate = NativeEditorTextMate(assetRoot)
-    private val sidebarRuntime = NativeSidebarRuntime(httpClient)
 
     private var baseUrl = ""
     private var editorClient: SocketIoJsonRpcClient? = null
     private var explorerClient: SocketIoJsonRpcClient? = null
     private var wbaClient: SocketIoJsonRpcClient? = null
     private var uiIpcClient: UiIpcClient? = null
+    val sidebar = NativeSidebarRpcController(
+        httpClient = httpClient,
+        transport = UiIpcNativeSidebarRpcTransport { uiIpcClient },
+        onError = ::setError,
+    )
     val explorer = NativeExplorerRpcController(
         transport = SocketIoNativeExplorerRpcTransport { explorerClient },
         onOpenFile = { update { it.copy(overlay = NativeEditorOverlay.NONE) } },
@@ -100,7 +105,7 @@ internal class NativeEditorController(
         completionProvidersByLanguage = emptyMap()
         adapterReady = false
         baseUrl = nextBaseUrl.trimEnd('/')
-        sidebarRuntime.bind(baseUrl)
+        sidebar.bind(baseUrl)
         Log.i(TAG, "connect baseUrl=$baseUrl")
         attachUiIpc(uiClient)
         editorClient = createLane(
@@ -175,7 +180,7 @@ internal class NativeEditorController(
         wbaStructureTask = null
         wbaStatusTask = null
         disconnectLanes()
-        sidebarRuntime.release()
+        sidebar.release()
         uiIpcClient?.onRpcNotification = null
         uiIpcClient?.onRpcConnectionChanged = null
         uiIpcClient = null
@@ -359,41 +364,6 @@ internal class NativeEditorController(
         update { it.copy(searchRunning = false, statusMessage = "Search cancelled") }
     }
 
-    fun activateSidebar(hostId: String) {
-        uiIpcClient?.request(
-            "ui.sidebar.window.activate",
-            mapOf("host_id" to hostId, "source" to "android_native"),
-        ) { result ->
-            result.onSuccess(::applyUiResultState)
-            result.exceptionOrNull()?.let { setError("Sidebar activation failed: ${it.message}") }
-        }
-    }
-
-    fun closeSidebar(hostId: String) {
-        uiIpcClient?.request(
-            "ui.sidebar.window.close",
-            mapOf("host_id" to hostId, "source" to "android_native"),
-        ) { result ->
-            result.onSuccess(::applyUiResultState)
-            result.exceptionOrNull()?.let { setError("Sidebar close failed: ${it.message}") }
-        }
-    }
-
-    fun openSidebarApp(appId: String) {
-        uiIpcClient?.request(
-            "ui.sidebar.window.create",
-            mapOf(
-                "app_id" to appId,
-                "activate" to true,
-                "source" to "android_native",
-            ),
-            timeoutMs = 15_000,
-        ) { result ->
-            result.onSuccess(::applyUiResultState)
-            result.exceptionOrNull()?.let { setError("Sidebar open failed: ${it.message}") }
-        }
-    }
-
     fun completions(
         text: String,
         line: Int,
@@ -521,7 +491,6 @@ internal class NativeEditorController(
                     val response = value.asStringMap().orEmpty()
                     val snapshot = response["snapshot"].asStringMap().orEmpty()
                     snapshot["editor_ssot"].asStringMap()?.let(::applyEditorSnapshot)
-                    snapshot["sidebar_state"].asStringMap()?.let(::applySidebarState)
                     Log.i(TAG, "backend boot snapshot received")
                     update {
                         it.copy(
@@ -722,11 +691,9 @@ internal class NativeEditorController(
 
     private fun handleUiNotification(notification: JsonRpcNotification) {
         update { it.copy(uiConnected = true) }
+        if (sidebar.handleNotification(notification)) return
         when (notification.method) {
             "ui.adapter.state" -> applyAdapterState(notification.params)
-            "ui.sidebar.windows.changed" -> applySidebarState(notification.params)
-            "ui.sidebar.window.activated" -> applySidebarActivation(notification.params)
-            "ui.sidebar.window.readiness.changed" -> applySidebarState(notification.params)
         }
     }
 
@@ -978,91 +945,6 @@ internal class NativeEditorController(
                 statusMessage = "${combined.size} search results",
             )
         }
-    }
-
-    private fun applySidebarState(payload: Map<String, Any?>) {
-        val statePayload = nativeSidebarLedgerState(payload)
-        if (statePayload == null) {
-            Log.w(TAG, "Ignoring incomplete sidebar ledger keys=${payload.keys.sorted()}")
-            return
-        }
-        val active = statePayload.string("active_host_id").ifBlank {
-            statePayload.string("activeHostId")
-        }
-        val slots = statePayload["slots"].asStringMap().orEmpty()
-        val order = statePayload["order"].asList().mapNotNull { it as? String }
-        val items = order.mapNotNull { hostId ->
-            if (hostId == "launcher") return@mapNotNull null
-            val slot = slots[hostId].asStringMap() ?: return@mapNotNull null
-            val rawUrl = slot.string("restore_url").ifBlank {
-                slot.string("restoreUrl")
-            }.ifBlank { slot.string("url") }
-            val readiness = slot["readiness"].asStringMap().orEmpty()
-            NativeSidebarItem(
-                hostId = hostId,
-                title = slot.string("title").ifBlank { slot.string("label") }
-                    .ifBlank { slot.string("app_id") }.ifBlank { "Sidebar" },
-                url = resolveUrl(rawUrl),
-                active = hostId == active,
-                kind = slot.string("kind").ifBlank {
-                    if (slot.string("app_id").isBlank()) "url" else "app"
-                },
-                appId = slot.string("app_id"),
-                stateful = slot["stateful"] == true,
-                load = slot.string("load").ifBlank { "lazy" },
-                readinessStatus = readiness.string("status"),
-                readinessMessage = readiness.string("message").ifBlank {
-                    readiness.string("detail")
-                },
-            )
-        }
-        val catalog = statePayload["catalog"].asList().mapNotNull { raw ->
-            val item = raw.asStringMap() ?: return@mapNotNull null
-            val appId = item.string("app_id").ifBlank { item.string("id") }
-            if (appId.isBlank()) return@mapNotNull null
-            NativeSidebarCatalogItem(
-                appId = appId,
-                title = item.string("name").ifBlank { item.string("title") }.ifBlank { appId },
-            )
-        }
-        update {
-            it.copy(
-                sidebarItems = items,
-                sidebarCatalog = catalog,
-                uiConnected = true,
-            )
-        }
-        sidebarRuntime.reconcile(items, ::applySidebarProjection)
-    }
-
-    private fun applySidebarActivation(payload: Map<String, Any?>) {
-        val hostId = payload.string("host_id").ifBlank { payload.string("hostId") }
-        if (hostId.isBlank()) return
-        update { current ->
-            if (current.sidebarItems.none { it.hostId == hostId }) return@update current
-            val items = nativeSidebarItemsAfterActivation(current.sidebarItems, hostId)
-            current.copy(
-                sidebarItems = items,
-                activeSidebarUrl = current.sidebarLoadedUrls[hostId].orEmpty(),
-            )
-        }
-    }
-
-    private fun applySidebarProjection(projection: NativeSidebarProjection) {
-        update { current ->
-            current.copy(
-                activeSidebarUrl = projection.loadedUrls[projection.activeHostId].orEmpty(),
-                sidebarLoadedUrls = projection.loadedUrls,
-                sidebarLoading = projection.loading,
-                sidebarMessage = projection.message,
-                sidebarError = projection.error,
-            )
-        }
-    }
-
-    private fun applyUiResultState(value: Any?) {
-        val payload = value.asStringMap().orEmpty()
-        payload["state"].asStringMap()?.let(::applySidebarState)
     }
 
     private fun scheduleMirror() {
@@ -1754,15 +1636,6 @@ internal class NativeEditorController(
             .ifBlank { payload.string("root") }
             .ifBlank { payload.string("resolved_path") }
             .ifBlank { payload.string("path") }
-
-    private fun resolveUrl(raw: String): String {
-        if (raw.isBlank()) return ""
-        return try {
-            URI(baseUrl.trimEnd('/') + "/").resolve(raw).toString()
-        } catch (_: Exception) {
-            raw
-        }
-    }
 
     private fun requestId(prefix: String): String =
         "${prefix}_${System.currentTimeMillis()}_${Thread.currentThread().id}"

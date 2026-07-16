@@ -1,4 +1,4 @@
-package com.termux.extensions.nativeeditor
+package com.termux.extensions.nativeeditor.sidebar
 
 import android.util.Log
 import com.termux.extensions.rpc.asStringMap
@@ -16,23 +16,10 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
-internal data class NativeSidebarProjection(
-    val activeHostId: String,
-    val loadedUrls: Map<String, String>,
-    val loading: Boolean,
-    val message: String,
-    val error: String? = null,
-)
-
 private data class NativeSidebarStartResult(val error: String? = null) {
     val isSuccess: Boolean
         get() = error == null
 }
-
-internal data class NativeSidebarSlotPlan(
-    val item: NativeSidebarItem,
-    val startRequired: Boolean,
-)
 
 /**
  * Native sidebar lifecycle subsystem. Backend slot facts remain authoritative;

@@ -1,4 +1,4 @@
-package com.termux.extensions.nativeeditor
+package com.termux.extensions.nativeeditor.sidebar
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull

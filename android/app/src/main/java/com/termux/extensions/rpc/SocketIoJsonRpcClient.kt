@@ -34,6 +34,11 @@ internal class JsonRpcRemoteException(
     val data: Map<String, Any?>?,
 ) : RuntimeException(message)
 
+internal fun socketIoInboundPayload(event: String, args: Array<out Any?>): Any? {
+    val payloadIndex = if (args.firstOrNull() == event) 1 else 0
+    return args.getOrNull(payloadIndex)
+}
+
 /**
  * Socket.IO owns connection/reconnect behavior; this subsystem owns only the
  * strict MessagePack JSON-RPC envelope, correlation, and lane response mode.
@@ -107,11 +112,16 @@ internal class SocketIoJsonRpcClient(
             postCallback("connect_error") { onConnectError?.invoke(error) }
         }
         if (lane.responseMode == RpcResponseMode.IN_BAND) {
-            nextSocket.on(RPC_EVENT) { args -> handleWirePayload(RPC_EVENT, args.firstOrNull()) }
+            nextSocket.on(RPC_EVENT) { args ->
+                handleWirePayload(RPC_EVENT, socketIoInboundPayload(RPC_EVENT, args))
+            }
         }
         if (lane.notificationEvent != RPC_EVENT) {
             nextSocket.on(lane.notificationEvent) { args ->
-                handleWirePayload(lane.notificationEvent, args.firstOrNull())
+                handleWirePayload(
+                    lane.notificationEvent,
+                    socketIoInboundPayload(lane.notificationEvent, args),
+                )
             }
         }
         nextSocket.connect()

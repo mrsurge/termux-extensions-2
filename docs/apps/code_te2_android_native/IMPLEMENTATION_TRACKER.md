@@ -156,10 +156,11 @@ editor widget. Device workflow validation remains the acceptance boundary.
 - [ ] `in_progress` Add compact native toolbar and command menu.
 - [x] `verified` Add the Explorer overlay; search and problems remain
   `in_progress`.
-- [x] `verified` Consume UI IPC sidebar catalog/order/active-slot state from the
-  authoritative host boot snapshot as well as live notifications, so native
-  startup does not depend on another browser client perturbing backend state.
-- [ ] `in_progress` Add sidebar app rail.
+- [x] `verified` Consume the initial and live UI IPC sidebar
+  `ui.sidebar.windows.changed` projections used by the browser client. The
+  Android UI IPC client caches and replays the initial projection, so no native
+  sidebar field or method is added to the backend boot contract.
+- [x] `verified` Add sidebar app rail.
 - [x] `verified` Preserve backend slot kind/app/load/readiness metadata and
   `restore_url` query semantics, start framework app slots through the existing
   Rust lifecycle endpoint with concurrent-start dedupe and activation
@@ -175,7 +176,7 @@ editor widget. Device workflow validation remains the acceptance boundary.
   persistent content stack aligned with the browser client's layout model.
 - [x] `verified` Render the sidebar overlay as a full-screen native surface;
   on-device layout confirmation remains in Phase 7.
-- [ ] `in_progress` Send sidebar and host intents only through UI IPC.
+- [x] `verified` Send sidebar and host intents only through UI IPC.
 - [x] `verified` Ensure no native frontend connects to `/sidebar_ipc`.
 - [ ] `pending` Validate Android keyboard, selection, and drawer focus behavior.
 
@@ -215,6 +216,13 @@ editor widget. Device workflow validation remains the acceptance boundary.
 - [x] `verified` Add and run native completion-filter and RPC-diagnostic tests.
 - [x] `verified` Add and run native sidebar persistence-policy tests proving
   every backend-open slot is planned, including inactive lazy app slots.
+- [x] `verified` Normalize Java Socket.IO buffered callbacks that repeat the
+  event name before the strict MessagePack payload, and verify both direct and
+  buffered callback shapes with unit tests.
+- [x] `verified` Cold-start the installed WebView debug APK against the desktop
+  `main` backend without the removed boot field; the existing ALS-RS sidebar
+  slot, persistent WebView content, app menu, and close control projected on
+  first open with no binary-codec or sidebar failure in process Logcat.
 - [ ] `pending` Verify continuous native typing no longer jumps the cursor when
   debounced mirror broadcasts return from the backend.
 - [ ] `pending` Verify open/edit/save/reopen.
@@ -297,13 +305,14 @@ editor widget. Device workflow validation remains the acceptance boundary.
 | 2026-07-14 | Attach WBA before adapter readiness and recover readiness with `adapter.status`. | Adapter/UI pushes can be missed by a late native client; current WBA state must be queryable rather than edge-triggered. |
 | 2026-07-14 | Treat `editor.modelReady` and exact open ACKs as required native model lifecycle barriers. | `modelReady` triggers provider/workspace replay, while the generation ACK prevents changes and completions from targeting a stale WBA model. |
 | 2026-07-14 | Derive unmatched TextMate token colors from the selected theme. | The VS Code theme has no unscoped token rule; TM4E otherwise falls back to low-contrast Sora defaults for punctuation and some import scopes. |
-| 2026-07-14 | Put sidebar state in the host boot snapshot and run native app-start orchestration from backend slot facts. | A native client must recover windows, query state, and launch prerequisites without waiting for a JavaScript client to perturb the backend. |
+| 2026-07-15 | Reuse the browser's initial `ui.sidebar.windows.changed` notification and remove the native-only boot snapshot field. | Java Socket.IO buffered callbacks repeated the event name before the binary payload; fixing that client decode gap preserves the established backend contract. |
 | 2026-07-14 | Log native RPC failures at the shared lane client boundary. | Callers may ignore callbacks, but transport/protocol failures must still reach the persistent Android TE2 console worker. |
 | 2026-07-14 | Keep a persistent native WebView per sidebar slot and explicitly replay on foreground resume. | Android process/network suspension must not require another browser client to wake backend state, and closing the drawer must not tear down sidebar app sessions. |
 | 2026-07-14 | Treat every backend-open sidebar slot as persistent and close it only through the backend ledger. | Active/eager flags control presentation and startup hints, not window ownership; native long press mirrors the web close affordance. |
 | 2026-07-15 | Keep native Explorer RPC, projection policy, card tree, and dormant sticky policy in `nativeeditor.explorer`. | Explorer is an independently owned surface; the editor coordinator should not become its state or UI monolith. |
 | 2026-07-15 | Send Explorer list/open-directory/Git projection triggers as notifications. | Request IDs convert handler projections into ACK results; the browser contract uses notifications so typed `*.updated` events reach the projection client. |
 | 2026-07-15 | Feed WBA document symbols and folding ranges into Sora `Styles.blocks`. | Sora 0.23.5 already renders sticky scroll from code blocks, so the adapter can preserve TextMate spans and avoid a second language engine. |
+| 2026-07-15 | Keep native sidebar models, RPC, runtime, Compose chrome, WebView pool, and tests in `nativeeditor.sidebar`. | Sidebar is an independently owned surface and must not grow the editor coordinator or screen into monoliths. |
 
 ## Blockers
 

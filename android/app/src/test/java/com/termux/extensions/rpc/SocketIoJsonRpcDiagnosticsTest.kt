@@ -1,10 +1,28 @@
 package com.termux.extensions.rpc
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SocketIoJsonRpcDiagnosticsTest {
+    @Test
+    fun selectsDirectSocketIoBinaryPayload() {
+        val payload = byteArrayOf(1, 2, 3)
+
+        assertSame(payload, socketIoInboundPayload("rpc.notify", arrayOf(payload)))
+    }
+
+    @Test
+    fun skipsEventNameRepeatedByBufferedSocketIoReplay() {
+        val payload = byteArrayOf(1, 2, 3)
+
+        assertSame(
+            payload,
+            socketIoInboundPayload("rpc.notify", arrayOf("rpc.notify", payload)),
+        )
+    }
+
     @Test
     fun remoteFailureIncludesLaneMethodIdCodeAndMessage() {
         val message = rpcFailureMessage(

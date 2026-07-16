@@ -117,9 +117,10 @@ Official references:
 - The stable completion subset maps label, detail, insert text, kind, and the
   single-line replacement prefix. Snippet expansion, documentation UI, and
   additional edits remain follow-up work.
-- A dedicated sidebar WebView is created only while the native sidebar panel is
-  active and is destroyed with that composition. The sidebar panel now occupies
-  the complete native editor surface.
+- Native sidebar models, UI IPC orchestration, framework-app lifecycle,
+  Compose chrome, persistent WebView pool, and tests live in the dedicated
+  `nativeeditor.sidebar` package. One WebView remains attached per backend-open
+  slot until that slot is removed or the editor is released.
 - The first command surface contains save, backend-orchestrated run, Explorer,
   search, problems, sidebar, home, reconnect, Tools, and quit.
 

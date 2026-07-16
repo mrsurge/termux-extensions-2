@@ -40,7 +40,6 @@ class BootSnapshotPayload(TypedDict):
     editor_ssot: JsonMap
     ui_prefs: JsonMap
     explorer_bootstrap: ExplorerBootstrapPayload | None
-    sidebar_state: JsonMap
 
 
 async def _prime_backend_runtime(project_root: str) -> None:
@@ -226,9 +225,6 @@ async def handle_boot_snapshot_request(
         project_root=active_project,
         session_state=session_state,
     )
-    from .ui_ipc.sidebar_window_state import get_sidebar_window_state
-
-    sidebar_state = get_sidebar_window_state()
 
     snapshot: BootSnapshotPayload = {
         "host_state": host_state,
@@ -236,7 +232,6 @@ async def handle_boot_snapshot_request(
         "editor_ssot": editor_ssot,
         "ui_prefs": ui_prefs,
         "explorer_bootstrap": explorer_bootstrap,
-        "sidebar_state": sidebar_state,
     }
     return {
         "ok": True,
