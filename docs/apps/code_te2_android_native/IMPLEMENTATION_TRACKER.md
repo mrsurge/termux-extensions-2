@@ -27,8 +27,9 @@ editor widget. Device workflow validation remains the acceptance boundary.
 - [x] `verified` Editor, Explorer, UI IPC, and WBA are separate namespaces on
   the existing Socket.IO service family.
 - [x] `verified` Migrated lanes use strict binary MessagePack JSON-RPC payloads.
-- [x] `verified` Explorer/UI IPC use acknowledgement responses; Editor/WBA use
-  in-band responses.
+- [x] `verified` Explorer/UI IPC requests use acknowledgement responses;
+  Explorer projection refresh triggers use notifications so typed
+  `*.updated` events are delivered. Editor/WBA use in-band responses.
 - [x] `verified` WBA already abstracts the VS Code remote workbench and remains
   the native editor's intelligence backend.
 - [x] `verified` Direct editor-to-WBA requests are the established hot path.
@@ -136,14 +137,15 @@ editor widget. Device workflow validation remains the acceptance boundary.
   `nativeeditor.explorer` package.
 - [x] `verified` Treat listings as disposable projections: collapse evicts the
   directory and descendant listings, while expand, reconnect, foreground
-  resume, overlay open, and manual refresh issue live Explorer RPC reads.
+  resume, overlay open, and manual refresh issue live Explorer notifications.
 - [x] `verified` Mark the backend-projected active file.
 - [x] `verified` Open files through Explorer backend intent.
 - [ ] `in_progress` Implement search start, more, cancel, and result navigation.
 - [ ] `in_progress` Render git and diagnostic decorations.
-- [x] `verified` Port browser-style Explorer sticky directory ancestry into a
-  separate geometry policy/UI module; on-device scrolling retained the project
-  root and open `.codex-scratch` scope over the live tree.
+- [ ] `deferred` Restore browser-style Explorer sticky directory ancestry after
+  replacing the geometry-to-Compose-state feedback path. The isolated policy
+  remains tested, but its runtime overlay is disabled because it made scrolling
+  slow and positioned scopes incorrectly.
 - [ ] `pending` Implement create, rename, delete, move, and copy through existing
   backend RPC methods.
 - [ ] `in_progress` Verify project switching does not depend on local Explorer
@@ -217,7 +219,9 @@ editor widget. Device workflow validation remains the acceptance boundary.
   debounced mirror broadcasts return from the backend.
 - [ ] `pending` Verify open/edit/save/reopen.
 - [x] `verified` Verify Explorer rendering, live root/open-directory refresh,
-  active-file marking, backend file open, and nested sticky scopes on-device.
+  active-file marking, and backend file open on-device.
+- [ ] `deferred` Re-verify Explorer sticky scopes after an efficient replacement
+  is implemented.
 - [ ] `pending` Verify search.
 - [x] `verified` Verify native Python TextMate highlighting on-device, including
   visible punctuation and import tokens against GitHub Dark Default.
@@ -264,6 +268,13 @@ editor widget. Device workflow validation remains the acceptance boundary.
   WBA open/didChange barrier, then called `vscode.documentSymbols` and
   `vscode.foldingRanges`. Symbols produced two Sora structure blocks; folding
   returned zero ranges for that provider/document.
+- The notification-contract repair was installed as a minified `webviewDebug`
+  APK. Expanding collapsed `.code_cm6` dynamically rendered its `lang` child,
+  produced no pending `explorer.list` request, and emitted no timeout/footer
+  error.
+- The custom Explorer sticky stack is disabled. After scrolling the live tree,
+  only the fixed Explorer title remained; Sora document sticky scroll was not
+  changed.
 
 ## Deferred Publication Work
 
@@ -290,11 +301,12 @@ editor widget. Device workflow validation remains the acceptance boundary.
 | 2026-07-14 | Log native RPC failures at the shared lane client boundary. | Callers may ignore callbacks, but transport/protocol failures must still reach the persistent Android TE2 console worker. |
 | 2026-07-14 | Keep a persistent native WebView per sidebar slot and explicitly replay on foreground resume. | Android process/network suspension must not require another browser client to wake backend state, and closing the drawer must not tear down sidebar app sessions. |
 | 2026-07-14 | Treat every backend-open sidebar slot as persistent and close it only through the backend ledger. | Active/eager flags control presentation and startup hints, not window ownership; native long press mirrors the web close affordance. |
-| 2026-07-15 | Keep native Explorer RPC, projection policy, card tree, and sticky scopes in `nativeeditor.explorer`. | Explorer is an independently owned surface; the editor coordinator should not become its state or UI monolith. |
+| 2026-07-15 | Keep native Explorer RPC, projection policy, card tree, and dormant sticky policy in `nativeeditor.explorer`. | Explorer is an independently owned surface; the editor coordinator should not become its state or UI monolith. |
+| 2026-07-15 | Send Explorer list/open-directory/Git projection triggers as notifications. | Request IDs convert handler projections into ACK results; the browser contract uses notifications so typed `*.updated` events reach the projection client. |
 | 2026-07-15 | Feed WBA document symbols and folding ranges into Sora `Styles.blocks`. | Sora 0.23.5 already renders sticky scroll from code blocks, so the adapter can preserve TextMate spans and avoid a second language engine. |
 
 ## Blockers
 
-Save/conflict, diagnostics, project switching, search, collapsible folding, and
-direct Sora completion-popup interaction remain broader workflow validation
-gates.
+Save/conflict, diagnostics, project switching, search, efficient Explorer
+sticky scopes, collapsible folding, and direct Sora completion-popup interaction
+remain broader workflow validation gates.

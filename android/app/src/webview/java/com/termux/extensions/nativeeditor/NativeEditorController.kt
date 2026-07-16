@@ -8,6 +8,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import com.termux.extensions.UiIpcClient
 import com.termux.extensions.nativeeditor.explorer.NativeExplorerRpcController
+import com.termux.extensions.nativeeditor.explorer.SocketIoNativeExplorerRpcTransport
 import com.termux.extensions.nativeeditor.structure.NativeEditorStructureBlock
 import com.termux.extensions.nativeeditor.structure.NativeEditorStructureParser
 import com.termux.extensions.rpc.JsonRpcNotification
@@ -57,7 +58,7 @@ internal class NativeEditorController(
     private var wbaClient: SocketIoJsonRpcClient? = null
     private var uiIpcClient: UiIpcClient? = null
     val explorer = NativeExplorerRpcController(
-        client = { explorerClient },
+        transport = SocketIoNativeExplorerRpcTransport { explorerClient },
         onOpenFile = { update { it.copy(overlay = NativeEditorOverlay.NONE) } },
         onError = ::setError,
     )

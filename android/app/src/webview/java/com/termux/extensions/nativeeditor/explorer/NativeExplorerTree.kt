@@ -23,13 +23,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.termux.extensions.nativeeditor.NativeDiagnostic
@@ -62,8 +58,6 @@ internal fun NativeExplorerTree(
     state: NativeExplorerUiState,
     projectPath: String,
     diagnostics: Map<String, List<NativeDiagnostic>>,
-    viewportTop: Int,
-    onScopePositioned: (NativeExplorerScopeMetric) -> Unit,
     onToggleDirectory: (String) -> Unit,
     onOpenFile: (String) -> Unit,
 ) {
@@ -80,8 +74,6 @@ internal fun NativeExplorerTree(
         entry = rootEntry,
         depth = 0,
         diagnosticCount = nativeExplorerDiagnosticCount(".", projectPath, diagnostics),
-        viewportTop = viewportTop,
-        onScopePositioned = onScopePositioned,
         onClick = null,
     ) {
         NativeExplorerChildren(
@@ -91,8 +83,6 @@ internal fun NativeExplorerTree(
             projectPath = projectPath,
             activeRelative = activeRelative,
             diagnostics = diagnostics,
-            viewportTop = viewportTop,
-            onScopePositioned = onScopePositioned,
             onToggleDirectory = onToggleDirectory,
             onOpenFile = onOpenFile,
         )
@@ -107,8 +97,6 @@ private fun NativeExplorerChildren(
     projectPath: String,
     activeRelative: String,
     diagnostics: Map<String, List<NativeDiagnostic>>,
-    viewportTop: Int,
-    onScopePositioned: (NativeExplorerScopeMetric) -> Unit,
     onToggleDirectory: (String) -> Unit,
     onOpenFile: (String) -> Unit,
 ) {
@@ -119,8 +107,6 @@ private fun NativeExplorerChildren(
                 entry = entry,
                 depth = depth,
                 diagnosticCount = diagnosticCount,
-                viewportTop = viewportTop,
-                onScopePositioned = onScopePositioned,
                 onClick = { onToggleDirectory(entry.rel) },
             ) {
                 NativeExplorerChildren(
@@ -130,8 +116,6 @@ private fun NativeExplorerChildren(
                     projectPath = projectPath,
                     activeRelative = activeRelative,
                     diagnostics = diagnostics,
-                    viewportTop = viewportTop,
-                    onScopePositioned = onScopePositioned,
                     onToggleDirectory = onToggleDirectory,
                     onOpenFile = onOpenFile,
                 )
@@ -154,27 +138,13 @@ private fun NativeExplorerDirectoryCard(
     entry: NativeExplorerEntry,
     depth: Int,
     diagnosticCount: Int,
-    viewportTop: Int,
-    onScopePositioned: (NativeExplorerScopeMetric) -> Unit,
     onClick: (() -> Unit)?,
     content: @Composable () -> Unit,
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = if (depth == 0) 7.dp else 4.dp, vertical = 3.dp)
-            .onGloballyPositioned { coordinates ->
-                val top = coordinates.positionInRoot().y.toInt() - viewportTop
-                onScopePositioned(
-                    NativeExplorerScopeMetric(
-                        entry = entry,
-                        depth = depth,
-                        top = top,
-                        bottom = top + coordinates.size.height,
-                        diagnosticCount = diagnosticCount,
-                    ),
-                )
-            },
+            .padding(horizontal = if (depth == 0) 7.dp else 4.dp, vertical = 3.dp),
         color = nativeExplorerCardColor(entry),
         contentColor = NativeExplorerColors.primaryText,
         shape = NativeExplorerDimensions.cardShape,

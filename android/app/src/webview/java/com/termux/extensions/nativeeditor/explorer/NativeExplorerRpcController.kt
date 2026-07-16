@@ -4,11 +4,10 @@ import android.util.Log
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import com.termux.extensions.rpc.JsonRpcNotification
-import com.termux.extensions.rpc.SocketIoJsonRpcClient
 import com.termux.extensions.rpc.asStringMap
 
 internal class NativeExplorerRpcController(
-    private val client: () -> SocketIoJsonRpcClient?,
+    private val transport: NativeExplorerRpcTransport,
     private val onOpenFile: () -> Unit,
     private val onError: (String) -> Unit,
 ) {
@@ -51,27 +50,23 @@ internal class NativeExplorerRpcController(
                 expandedDirectories = next.expandedDirectories,
             )
         }
-        client()?.request(
+        notifyProjection(
             "explorer.openDirs.set",
             mapOf("dirs" to next.expandedDirectories.toList()),
-        ) { }
+            "Explorer state sync failed",
+        )
     }
 
     fun requestDirectory(rel: String = ".") {
-        client()?.request("explorer.list", mapOf("rel" to rel)) { result ->
-            result.exceptionOrNull()?.let { onError("Explorer failed: ${it.message}") }
-        }
+        notifyProjection("explorer.list", mapOf("rel" to rel), "Explorer failed")
     }
 
     fun refresh(reason: String = "manual") {
-        val rpc = client() ?: return
-        if (!rpc.isConnected) return
+        if (!transport.isConnected) return
         val directories = nativeExplorerRefreshDirectories(state.value.expandedDirectories)
         Log.d(TAG, "refresh reason=$reason directories=${directories.size}")
         directories.forEach(::requestDirectory)
-        rpc.request("explorer.git.status.get") { result ->
-            result.exceptionOrNull()?.let { Log.d(TAG, "Git refresh failed: ${it.message}") }
-        }
+        notifyProjection("explorer.git.status.get", errorPrefix = "Git refresh failed")
     }
 
     fun openFile(relOrPath: String, line: Int? = null, column: Int? = null) {
@@ -82,7 +77,7 @@ internal class NativeExplorerRpcController(
         )
         if (line != null) params["line"] = line
         if (column != null) params["column"] = column
-        client()?.request("explorer.editor.open", params) { result ->
+        transport.request("explorer.editor.open", params) { result ->
             result.exceptionOrNull()?.let { onError("Open failed: ${it.message}") }
         }
         onOpenFile()
@@ -157,6 +152,16 @@ internal class NativeExplorerRpcController(
 
     private fun update(transform: (NativeExplorerUiState) -> NativeExplorerUiState) {
         mutableState.value = transform(mutableState.value)
+    }
+
+    private fun notifyProjection(
+        method: String,
+        params: Map<String, Any?> = emptyMap(),
+        errorPrefix: String,
+    ) {
+        if (!transport.notify(method, params)) {
+            onError("$errorPrefix: Explorer RPC is not connected")
+        }
     }
 }
 

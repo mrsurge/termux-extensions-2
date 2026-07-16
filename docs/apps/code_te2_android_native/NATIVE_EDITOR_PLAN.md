@@ -78,7 +78,9 @@ configuration for:
 
 - namespace and Socket.IO path;
 - strict `rpcCodec = msgpack-v1` authentication;
-- Socket.IO acknowledgement responses for Explorer and UI IPC;
+- Socket.IO acknowledgement responses for Explorer and UI IPC requests;
+- notification dispatch for Explorer projection refreshes whose results arrive
+  through typed `*.updated` events;
 - in-band `rpc` responses for Editor and WBA;
 - `rpc.notify` and WBA notification dispatch;
 - request correlation, bounded timeouts, reconnect, and pending-request failure
@@ -166,7 +168,8 @@ native document lifecycle and reconnect behavior are proven.
 
 The native Explorer is a dumb projection of Explorer RPC state:
 
-- lazy directory expansion through `explorer.list`;
+- lazy directory expansion by notifying `explorer.list` and consuming
+  `explorer.list.updated`;
 - active-file and open-directory updates from backend notifications;
 - file open intent through `explorer.editor.open`;
 - search start, pagination, cancellation, and result navigation through the

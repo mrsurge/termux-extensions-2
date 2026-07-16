@@ -18,16 +18,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,16 +37,6 @@ internal fun NativeExplorerOverlay(
     onOpenFile: (String) -> Unit,
 ) {
     val scrollState = rememberScrollState()
-    val scopeMetrics = remember { mutableStateMapOf<String, NativeExplorerScopeMetric>() }
-    var viewportTop by remember { mutableIntStateOf(0) }
-    val density = LocalDensity.current
-    val rowHeightPx = with(density) { NativeExplorerDimensions.rowHeight.roundToPx() }
-    val sticky = nativeExplorerStickyScopes(
-        scopeMetrics.values.filter { metric ->
-            metric.entry.rel == "." || metric.entry.rel in state.expandedDirectories
-        },
-        rowHeightPx,
-    )
 
     Column(modifier = Modifier.fillMaxSize().background(NativeExplorerColors.background)) {
         Row(
@@ -78,11 +60,7 @@ internal fun NativeExplorerOverlay(
             }
         }
         Divider(color = NativeExplorerColors.border)
-        Box(
-            modifier = Modifier.fillMaxSize().onGloballyPositioned { coordinates ->
-                viewportTop = coordinates.positionInRoot().y.toInt()
-            },
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(vertical = 5.dp),
             ) {
@@ -90,13 +68,10 @@ internal fun NativeExplorerOverlay(
                     state = state,
                     projectPath = projectPath,
                     diagnostics = diagnostics,
-                    viewportTop = viewportTop,
-                    onScopePositioned = { metric -> scopeMetrics[metric.entry.rel] = metric },
                     onToggleDirectory = onToggleDirectory,
                     onOpenFile = onOpenFile,
                 )
             }
-            NativeExplorerStickyScopeStack(sticky)
         }
     }
 }
