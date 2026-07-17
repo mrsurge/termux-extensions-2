@@ -179,17 +179,11 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext 
                     return TextAreaState.EMPTY;
                 }
                 if (browser.isAndroid) {
-                    // when tapping in the editor on a word, Android enters composition mode.
-                    // in the `compositionstart` event we cannot clear the textarea, because
-                    // it then forgets to ever send a `compositionend`.
-                    // we therefore only write the current word in the textarea
-                    const selection = this._selections[0];
-                    if (selection.isEmpty()) {
-                        const position = selection.getStartPosition();
-                        const [wordAtPosition, positionOffsetInWord] = this._getAndroidWordAtPosition(position);
-                        if (wordAtPosition.length > 0) {
-                            return new TextAreaState(wordAtPosition, positionOffsetInWord, positionOffsetInWord, Range.fromPositions(position), 0);
-                        }
+                    const modelSelection = this._modelSelections[0];
+                    if (modelSelection.startLineNumber === modelSelection.endLineNumber) {
+                        const modelLineNumber = modelSelection.startLineNumber;
+                        const lineContent = this._context.viewModel.model.getLineContent(modelLineNumber);
+                        return new TextAreaState(lineContent, modelSelection.startColumn - 1, modelSelection.endColumn - 1, this._selections[0], 0, modelLineNumber);
                     }
                     return TextAreaState.EMPTY;
                 }
@@ -241,6 +235,38 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext 
                 }
                 this._viewController.type(e.text);
             }
+        }));
+        this._register(this._textAreaInput.onAndroidImeType((e) => {
+            const model = this._context.viewModel.model;
+            if (e.modelLineNumber < 1 || e.modelLineNumber > model.getLineCount()) {
+                return;
+            }
+            const lineLength = model.getLineLength(e.modelLineNumber);
+            const rangeStartOffset = Math.min(e.rangeStartOffset, lineLength);
+            const rangeEndOffset = Math.min(Math.max(e.rangeEndOffset, rangeStartOffset), lineLength);
+            const range = new Range(e.modelLineNumber, rangeStartOffset + 1, e.modelLineNumber, rangeEndOffset + 1);
+            const currentSelection = this._modelSelections[0];
+            const isAlignedInsertion = (!e.deferCursor
+                && e.text.length > 0
+                && range.isEmpty()
+                && currentSelection.isEmpty()
+                && currentSelection.positionLineNumber === e.modelLineNumber
+                && currentSelection.positionColumn === range.startColumn
+                && e.selectionStartOffset === rangeStartOffset + e.text.length
+                && e.selectionEndOffset === e.selectionStartOffset);
+            if (isAlignedInsertion) {
+                this._viewController.type(e.text);
+                return;
+            }
+            // A null cursor state recovers from model markers and can still shift after
+            // edits. Pin the visible selection until the native cursor settles.
+            const selection = e.deferCursor
+                ? currentSelection
+                : this._androidImeSelection(e);
+            this._viewController.androidImeType(range, e.text, selection);
+        }));
+        this._register(this._textAreaInput.onAndroidImeCursor((e) => {
+            this._viewController.setSelection(this._androidImeSelection(e));
         }));
         this._register(this._textAreaInput.onSelectionChangeRequest((modelSelection) => {
             this._viewController.setSelection(modelSelection);
@@ -343,45 +369,13 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext 
         this.textArea.domNode.remove();
         this.textAreaCover.domNode.remove();
     }
-    _getAndroidWordAtPosition(position) {
-        const ANDROID_WORD_SEPARATORS = '`~!@#$%^&*()-=+[{]}\\|;:",.<>/?';
-        const lineContent = this._context.viewModel.getLineContent(position.lineNumber);
-        const wordSeparators = getMapForWordSeparators(ANDROID_WORD_SEPARATORS, []);
-        let goingLeft = true;
-        let startColumn = position.column;
-        let goingRight = true;
-        let endColumn = position.column;
-        let distance = 0;
-        while (distance < 50 && (goingLeft || goingRight)) {
-            if (goingLeft && startColumn <= 1) {
-                goingLeft = false;
-            }
-            if (goingLeft) {
-                const charCode = lineContent.charCodeAt(startColumn - 2);
-                const charClass = wordSeparators.get(charCode);
-                if (charClass !== 0 /* WordCharacterClass.Regular */) {
-                    goingLeft = false;
-                }
-                else {
-                    startColumn--;
-                }
-            }
-            if (goingRight && endColumn > lineContent.length) {
-                goingRight = false;
-            }
-            if (goingRight) {
-                const charCode = lineContent.charCodeAt(endColumn - 1);
-                const charClass = wordSeparators.get(charCode);
-                if (charClass !== 0 /* WordCharacterClass.Regular */) {
-                    goingRight = false;
-                }
-                else {
-                    endColumn++;
-                }
-            }
-            distance++;
-        }
-        return [lineContent.substring(startColumn - 1, endColumn - 1), position.column - startColumn];
+    _androidImeSelection(data) {
+        const model = this._context.viewModel.model;
+        const modelLineNumber = Math.min(Math.max(data.modelLineNumber, 1), model.getLineCount());
+        const lineLength = model.getLineLength(modelLineNumber);
+        const selectionStartOffset = Math.min(Math.max(data.selectionStartOffset, 0), lineLength);
+        const selectionEndOffset = Math.min(Math.max(data.selectionEndOffset, selectionStartOffset), lineLength);
+        return new Selection(modelLineNumber, selectionStartOffset + 1, modelLineNumber, selectionEndOffset + 1);
     }
     _getWordBeforePosition(position) {
         const lineContent = this._context.viewModel.getLineContent(position.lineNumber);

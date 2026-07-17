@@ -21,6 +21,9 @@ export class ViewController {
     compositionType(text, replacePrevCharCnt, replaceNextCharCnt, positionDelta) {
         this.commandDelegate.compositionType(text, replacePrevCharCnt, replaceNextCharCnt, positionDelta);
     }
+    androidImeType(range, text, selection) {
+        this.commandDelegate.androidImeType(range, text, selection);
+    }
     compositionStart() {
         this.commandDelegate.startComposition();
     }

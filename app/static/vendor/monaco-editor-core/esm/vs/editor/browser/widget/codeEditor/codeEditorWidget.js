@@ -876,6 +876,13 @@ let CodeEditorWidget = class CodeEditorWidget extends Disposable {
         }
         this._modelData.viewModel.compositionType(text, replacePrevCharCnt, replaceNextCharCnt, positionDelta, source);
     }
+    _androidImeType(source, range, text, selection) {
+        if (!this._modelData) {
+            return;
+        }
+        const cursorStateComputer = () => [selection];
+        this._modelData.viewModel.executeEdits(source, [{ range, text }], cursorStateComputer, EditSources.cursor({ kind: 'compositionType', detailedSource: source }));
+    }
     _paste(source, text, pasteOnNewLine, multicursorText, mode, clipboardEvent) {
         if (!this._modelData) {
             return;
@@ -1419,6 +1426,9 @@ let CodeEditorWidget = class CodeEditorWidget extends Disposable {
                 compositionType: (text, replacePrevCharCnt, replaceNextCharCnt, positionDelta) => {
                     this._compositionType('keyboard', text, replacePrevCharCnt, replaceNextCharCnt, positionDelta);
                 },
+                androidImeType: (range, text, selection) => {
+                    this._androidImeType('keyboard', range, text, selection);
+                },
                 startComposition: () => {
                     this._startComposition();
                 },
@@ -1451,6 +1461,9 @@ let CodeEditorWidget = class CodeEditorWidget extends Disposable {
                         const payload = { text, replaceCharCnt: replacePrevCharCnt };
                         this._commandService.executeCommand("replacePreviousChar" /* editorCommon.Handler.ReplacePreviousChar */, payload);
                     }
+                },
+                androidImeType: (range, text, selection) => {
+                    this._androidImeType('keyboard', range, text, selection);
                 },
                 startComposition: () => {
                     this._commandService.executeCommand("compositionStart" /* editorCommon.Handler.CompositionStart */, {});

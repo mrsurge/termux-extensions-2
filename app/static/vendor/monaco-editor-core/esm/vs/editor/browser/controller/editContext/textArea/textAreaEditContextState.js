@@ -14,12 +14,15 @@ export class TextAreaState {
     /** the editor range in the view coordinate system that matches the selection inside `value` */
     selection, 
     /** the visible line count (wrapped, not necessarily matching \n characters) for the text in `value` before `selectionStart` */
-    newlineCountBeforeSelection) {
+    newlineCountBeforeSelection, 
+    /** the model line represented by `value` while Android owns the textarea */
+    androidModelLineNumber = undefined) {
         this.value = value;
         this.selectionStart = selectionStart;
         this.selectionEnd = selectionEnd;
         this.selection = selection;
         this.newlineCountBeforeSelection = newlineCountBeforeSelection;
+        this.androidModelLineNumber = androidModelLineNumber;
     }
     toString() {
         return `[ <${this.value}>, selectionStart: ${this.selectionStart}, selectionEnd: ${this.selectionEnd}]`;
@@ -36,13 +39,13 @@ export class TextAreaState {
                 newlineCountBeforeSelection = previousState.newlineCountBeforeSelection;
             }
         }
-        return new TextAreaState(value, selectionStart, selectionEnd, null, newlineCountBeforeSelection);
+        return new TextAreaState(value, selectionStart, selectionEnd, null, newlineCountBeforeSelection, previousState?.androidModelLineNumber);
     }
     collapseSelection() {
         if (this.selectionStart === this.value.length) {
             return this;
         }
-        return new TextAreaState(this.value, this.value.length, this.value.length, null, undefined);
+        return new TextAreaState(this.value, this.value.length, this.value.length, null, undefined, this.androidModelLineNumber);
     }
     isWrittenToTextArea(textArea, select) {
         const valuesEqual = this.value === textArea.getValue();
@@ -174,6 +177,28 @@ export class TextAreaState {
             replacePrevCharCnt: previousSelectionEnd,
             replaceNextCharCnt: previousValue.length - previousSelectionEnd,
             positionDelta: currentSelectionEnd - currentValue.length
+        };
+    }
+    static deduceAndroidImeLineEdit(previousState, currentState) {
+        const modelLineNumber = previousState.androidModelLineNumber;
+        if (modelLineNumber === undefined
+            || currentState.androidModelLineNumber !== modelLineNumber
+            || previousState.value === currentState.value
+            || previousState.value.includes('\n')
+            || previousState.value.includes('\r')
+            || currentState.value.includes('\n')
+            || currentState.value.includes('\r')) {
+            return null;
+        }
+        const prefixLength = commonPrefixLength(previousState.value, currentState.value);
+        const suffixLength = Math.min(commonSuffixLength(previousState.value, currentState.value), previousState.value.length - prefixLength, currentState.value.length - prefixLength);
+        return {
+            modelLineNumber,
+            rangeStartOffset: prefixLength,
+            rangeEndOffset: previousState.value.length - suffixLength,
+            text: currentState.value.substring(prefixLength, currentState.value.length - suffixLength),
+            selectionStartOffset: currentState.selectionStart,
+            selectionEndOffset: currentState.selectionEnd,
         };
     }
     static fromScreenReaderContentState(screenReaderContentState) {
