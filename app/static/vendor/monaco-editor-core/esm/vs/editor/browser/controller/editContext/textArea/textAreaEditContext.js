@@ -119,7 +119,7 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext 
         // Text Area (The focus will always be in the textarea when the cursor is blinking)
         this.textArea = createFastDomNode(document.createElement('textarea'));
         PartFingerprints.write(this.textArea, 7 /* PartFingerprint.TextArea */);
-        this.textArea.setClassName(`inputarea ${MOUSE_CURSOR_TEXT_CSS_CLASS_NAME}`);
+        this.textArea.setClassName(`inputarea ${MOUSE_CURSOR_TEXT_CSS_CLASS_NAME}${browser.isAndroid ? ' android-ime-input' : ''}`);
         this.textArea.setAttribute('wrap', this._textAreaWrapping && !this._visibleTextArea ? 'on' : 'off');
         const { tabSize } = this._context.viewModel.model.getOptions();
         this.textArea.domNode.style.tabSize = `${tabSize * this._fontInfo.spaceWidth}px`;
@@ -145,6 +145,14 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext 
                 return getDataToCopy(this._context.viewModel, this._modelSelections, this._emptySelectionClipboard, this._copyWithSyntaxHighlighting);
             },
             getScreenReaderContent: () => {
+                if (browser.isAndroid) {
+                    const modelSelection = this._modelSelections[0];
+                    if (modelSelection.startLineNumber === modelSelection.endLineNumber) {
+                        const modelLineNumber = modelSelection.startLineNumber;
+                        return TextAreaState.createAndroidImeLine(this._context.viewModel.model.getLineContent(modelLineNumber), modelSelection.startColumn - 1, modelSelection.endColumn - 1, this._selections[0], modelLineNumber);
+                    }
+                    return TextAreaState.EMPTY;
+                }
                 if (this._accessibilitySupport === 1 /* AccessibilitySupport.Disabled */) {
                     // We know for a fact that a screen reader is not attached
                     // On OSX, we write the character before the cursor to allow for "long-press" composition
@@ -175,15 +183,6 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext 
                     if (browser.isSafari && !selection.isEmpty()) {
                         const placeholderText = 'vscode-placeholder';
                         return new TextAreaState(placeholderText, 0, placeholderText.length, null, undefined);
-                    }
-                    return TextAreaState.EMPTY;
-                }
-                if (browser.isAndroid) {
-                    const modelSelection = this._modelSelections[0];
-                    if (modelSelection.startLineNumber === modelSelection.endLineNumber) {
-                        const modelLineNumber = modelSelection.startLineNumber;
-                        const lineContent = this._context.viewModel.model.getLineContent(modelLineNumber);
-                        return new TextAreaState(lineContent, modelSelection.startColumn - 1, modelSelection.endColumn - 1, this._selections[0], 0, modelLineNumber);
                     }
                     return TextAreaState.EMPTY;
                 }
@@ -245,9 +244,11 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext 
             const rangeStartOffset = Math.min(e.rangeStartOffset, lineLength);
             const rangeEndOffset = Math.min(Math.max(e.rangeEndOffset, rangeStartOffset), lineLength);
             const range = new Range(e.modelLineNumber, rangeStartOffset + 1, e.modelLineNumber, rangeEndOffset + 1);
+            const lineContent = model.getLineContent(e.modelLineNumber);
+            const resultingValue = lineContent.substring(0, rangeStartOffset) + e.text + lineContent.substring(rangeEndOffset);
             const currentSelection = this._modelSelections[0];
-            const isAlignedInsertion = (!e.deferCursor
-                && e.text.length > 0
+            const isAlignedInsertion = (e.text.length > 0
+                && !e.text.includes('\n')
                 && range.isEmpty()
                 && currentSelection.isEmpty()
                 && currentSelection.positionLineNumber === e.modelLineNumber
@@ -258,15 +259,7 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext 
                 this._viewController.type(e.text);
                 return;
             }
-            // A null cursor state recovers from model markers and can still shift after
-            // edits. Pin the visible selection until the native cursor settles.
-            const selection = e.deferCursor
-                ? currentSelection
-                : this._androidImeSelection(e);
-            this._viewController.androidImeType(range, e.text, selection);
-        }));
-        this._register(this._textAreaInput.onAndroidImeCursor((e) => {
-            this._viewController.setSelection(this._androidImeSelection(e));
+            this._viewController.androidImeType(range, e.text, this._androidImeSelection(e, resultingValue));
         }));
         this._register(this._textAreaInput.onSelectionChangeRequest((modelSelection) => {
             this._viewController.setSelection(modelSelection);
@@ -369,13 +362,15 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext 
         this.textArea.domNode.remove();
         this.textAreaCover.domNode.remove();
     }
-    _androidImeSelection(data) {
-        const model = this._context.viewModel.model;
-        const modelLineNumber = Math.min(Math.max(data.modelLineNumber, 1), model.getLineCount());
-        const lineLength = model.getLineLength(modelLineNumber);
-        const selectionStartOffset = Math.min(Math.max(data.selectionStartOffset, 0), lineLength);
-        const selectionEndOffset = Math.min(Math.max(data.selectionEndOffset, selectionStartOffset), lineLength);
-        return new Selection(modelLineNumber, selectionStartOffset + 1, modelLineNumber, selectionEndOffset + 1);
+    _androidImeSelection(data, resultingValue) {
+        const offsetToPosition = (offset) => {
+            const prefix = resultingValue.substring(0, Math.min(Math.max(offset, 0), resultingValue.length));
+            const lines = prefix.split('\n');
+            return new Position(data.modelLineNumber + lines.length - 1, lines[lines.length - 1].length + 1);
+        };
+        const start = offsetToPosition(data.selectionStartOffset);
+        const end = offsetToPosition(Math.max(data.selectionStartOffset, data.selectionEndOffset));
+        return new Selection(start.lineNumber, start.column, end.lineNumber, end.column);
     }
     _getWordBeforePosition(position) {
         const lineContent = this._context.viewModel.getLineContent(position.lineNumber);

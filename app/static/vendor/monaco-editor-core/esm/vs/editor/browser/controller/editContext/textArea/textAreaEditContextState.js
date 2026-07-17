@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 import { commonPrefixLength, commonSuffixLength } from '../../../../../base/common/strings.js';
 export const _debugComposition = false;
+const ANDROID_IME_LINE_PREFIX = '\u21dd';
+const ANDROID_IME_LINE_SUFFIX = '\n\n';
 export class TextAreaState {
     static { this.EMPTY = new TextAreaState('', 0, 0, null, undefined); }
     constructor(value, 
@@ -26,6 +28,12 @@ export class TextAreaState {
     }
     toString() {
         return `[ <${this.value}>, selectionStart: ${this.selectionStart}, selectionEnd: ${this.selectionEnd}]`;
+    }
+    static createAndroidImeLine(lineContent, selectionStartOffset, selectionEndOffset, selection, modelLineNumber) {
+        const lineLength = lineContent.length;
+        const startOffset = Math.min(Math.max(selectionStartOffset, 0), lineLength);
+        const endOffset = Math.min(Math.max(selectionEndOffset, startOffset), lineLength);
+        return new TextAreaState(`${ANDROID_IME_LINE_PREFIX}${lineContent}${ANDROID_IME_LINE_SUFFIX}`, ANDROID_IME_LINE_PREFIX.length + startOffset, ANDROID_IME_LINE_PREFIX.length + endOffset, selection, 0, modelLineNumber);
     }
     static readFromTextArea(textArea, previousState) {
         const value = textArea.getValue();
@@ -137,69 +145,39 @@ export class TextAreaState {
             positionDelta: 0
         };
     }
-    static deduceAndroidCompositionInput(previousState, currentState) {
-        if (!previousState) {
-            // This is the EMPTY state
-            return {
-                text: '',
-                replacePrevCharCnt: 0,
-                replaceNextCharCnt: 0,
-                positionDelta: 0
-            };
-        }
-        if (_debugComposition) {
-            console.log('------------------------deduceAndroidCompositionInput');
-            console.log(`PREVIOUS STATE: ${previousState.toString()}`);
-            console.log(`CURRENT STATE: ${currentState.toString()}`);
-        }
-        if (previousState.value === currentState.value) {
-            return {
-                text: '',
-                replacePrevCharCnt: 0,
-                replaceNextCharCnt: 0,
-                positionDelta: currentState.selectionEnd - previousState.selectionEnd
-            };
-        }
-        const prefixLength = Math.min(commonPrefixLength(previousState.value, currentState.value), previousState.selectionEnd);
-        const suffixLength = Math.min(commonSuffixLength(previousState.value, currentState.value), previousState.value.length - previousState.selectionEnd);
-        const previousValue = previousState.value.substring(prefixLength, previousState.value.length - suffixLength);
-        const currentValue = currentState.value.substring(prefixLength, currentState.value.length - suffixLength);
-        const previousSelectionStart = previousState.selectionStart - prefixLength;
-        const previousSelectionEnd = previousState.selectionEnd - prefixLength;
-        const currentSelectionStart = currentState.selectionStart - prefixLength;
-        const currentSelectionEnd = currentState.selectionEnd - prefixLength;
-        if (_debugComposition) {
-            console.log(`AFTER DIFFING PREVIOUS STATE: <${previousValue}>, selectionStart: ${previousSelectionStart}, selectionEnd: ${previousSelectionEnd}`);
-            console.log(`AFTER DIFFING CURRENT STATE: <${currentValue}>, selectionStart: ${currentSelectionStart}, selectionEnd: ${currentSelectionEnd}`);
-        }
-        return {
-            text: currentValue,
-            replacePrevCharCnt: previousSelectionEnd,
-            replaceNextCharCnt: previousValue.length - previousSelectionEnd,
-            positionDelta: currentSelectionEnd - currentValue.length
-        };
-    }
     static deduceAndroidImeLineEdit(previousState, currentState) {
         const modelLineNumber = previousState.androidModelLineNumber;
         if (modelLineNumber === undefined
-            || currentState.androidModelLineNumber !== modelLineNumber
-            || previousState.value === currentState.value
-            || previousState.value.includes('\n')
-            || previousState.value.includes('\r')
-            || currentState.value.includes('\n')
-            || currentState.value.includes('\r')) {
+            || currentState.androidModelLineNumber !== modelLineNumber) {
             return null;
         }
-        const prefixLength = commonPrefixLength(previousState.value, currentState.value);
-        const suffixLength = Math.min(commonSuffixLength(previousState.value, currentState.value), previousState.value.length - prefixLength, currentState.value.length - prefixLength);
+        const previousProjection = TextAreaState._readAndroidImeLineProjection(previousState);
+        const currentProjection = TextAreaState._readAndroidImeLineProjection(currentState);
+        if (!previousProjection || !currentProjection || previousProjection.value === currentProjection.value) {
+            return null;
+        }
+        const prefixLength = commonPrefixLength(previousProjection.value, currentProjection.value);
+        const suffixLength = Math.min(commonSuffixLength(previousProjection.value, currentProjection.value), previousProjection.value.length - prefixLength, currentProjection.value.length - prefixLength);
         return {
             modelLineNumber,
             rangeStartOffset: prefixLength,
-            rangeEndOffset: previousState.value.length - suffixLength,
-            text: currentState.value.substring(prefixLength, currentState.value.length - suffixLength),
-            selectionStartOffset: currentState.selectionStart,
-            selectionEndOffset: currentState.selectionEnd,
+            rangeEndOffset: previousProjection.value.length - suffixLength,
+            text: currentProjection.value.substring(prefixLength, currentProjection.value.length - suffixLength),
+            selectionStartOffset: currentProjection.selectionStartOffset,
+            selectionEndOffset: currentProjection.selectionEndOffset,
         };
+    }
+    static _readAndroidImeLineProjection(state) {
+        if (!state.value.startsWith(ANDROID_IME_LINE_PREFIX) || !state.value.endsWith(ANDROID_IME_LINE_SUFFIX)) {
+            return null;
+        }
+        const lineStart = ANDROID_IME_LINE_PREFIX.length;
+        const lineEnd = state.value.length - ANDROID_IME_LINE_SUFFIX.length;
+        const value = state.value.substring(lineStart, lineEnd);
+        const clampSelectionOffset = (offset) => Math.min(Math.max(offset - lineStart, 0), value.length);
+        const selectionStartOffset = clampSelectionOffset(state.selectionStart);
+        const selectionEndOffset = Math.max(selectionStartOffset, clampSelectionOffset(state.selectionEnd));
+        return { value, selectionStartOffset, selectionEndOffset };
     }
     static fromScreenReaderContentState(screenReaderContentState) {
         return new TextAreaState(screenReaderContentState.value, screenReaderContentState.selectionStart, screenReaderContentState.selectionEnd, screenReaderContentState.selection, screenReaderContentState.newlineCountBeforeSelection);

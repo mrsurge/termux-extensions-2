@@ -101,8 +101,9 @@ let EditorConfiguration = class EditorConfiguration extends Disposable {
             outerHeight: this._containerObserver.getHeight(),
             emptySelectionClipboard: browser.isWebKit || browser.isFirefox,
             pixelRatio: PixelRatio.getInstance(getWindowById(this._targetWindowId, true).window).value,
+            // Android IMEs need the textarea transaction path; Chromium EditContext bypasses it.
             // eslint-disable-next-line local/code-no-any-casts, @typescript-eslint/no-explicit-any
-            editContextSupported: typeof globalThis.EditContext === 'function',
+            editContextSupported: !browser.isAndroid && typeof globalThis.EditContext === 'function',
             accessibilitySupport: (this._accessibilityService.isScreenReaderOptimized()
                 ? 2 /* AccessibilitySupport.Enabled */
                 : this._accessibilityService.getAccessibilitySupport())

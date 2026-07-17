@@ -32733,8 +32733,9 @@ var init_editorConfiguration = __esm({
           outerHeight: this._containerObserver.getHeight(),
           emptySelectionClipboard: isWebKit || isFirefox,
           pixelRatio: PixelRatio.getInstance(getWindowById(this._targetWindowId, true).window).value,
+          // Android IMEs need the textarea transaction path; Chromium EditContext bypasses it.
           // eslint-disable-next-line local/code-no-any-casts, @typescript-eslint/no-explicit-any
-          editContextSupported: typeof globalThis.EditContext === "function",
+          editContextSupported: !isAndroid && typeof globalThis.EditContext === "function",
           accessibilitySupport: this._accessibilityService.isScreenReaderOptimized() ? 2 : this._accessibilityService.getAccessibilitySupport()
         };
       }
@@ -40564,11 +40565,13 @@ var init_clipboardUtils = __esm({
 });
 
 // app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js
-var _debugComposition, TextAreaState;
+var _debugComposition, ANDROID_IME_LINE_PREFIX, ANDROID_IME_LINE_SUFFIX, TextAreaState;
 var init_textAreaEditContextState = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.js"() {
     init_strings();
     _debugComposition = false;
+    ANDROID_IME_LINE_PREFIX = "\u21DD";
+    ANDROID_IME_LINE_SUFFIX = "\n\n";
     TextAreaState = class _TextAreaState {
       static {
         this.EMPTY = new _TextAreaState("", 0, 0, null, void 0);
@@ -40583,6 +40586,12 @@ var init_textAreaEditContextState = __esm({
       }
       toString() {
         return `[ <${this.value}>, selectionStart: ${this.selectionStart}, selectionEnd: ${this.selectionEnd}]`;
+      }
+      static createAndroidImeLine(lineContent, selectionStartOffset, selectionEndOffset, selection, modelLineNumber) {
+        const lineLength = lineContent.length;
+        const startOffset = Math.min(Math.max(selectionStartOffset, 0), lineLength);
+        const endOffset = Math.min(Math.max(selectionEndOffset, startOffset), lineLength);
+        return new _TextAreaState(`${ANDROID_IME_LINE_PREFIX}${lineContent}${ANDROID_IME_LINE_SUFFIX}`, ANDROID_IME_LINE_PREFIX.length + startOffset, ANDROID_IME_LINE_PREFIX.length + endOffset, selection, 0, modelLineNumber);
       }
       static readFromTextArea(textArea, previousState) {
         const value = textArea.getValue();
@@ -40691,62 +40700,38 @@ var init_textAreaEditContextState = __esm({
           positionDelta: 0
         };
       }
-      static deduceAndroidCompositionInput(previousState, currentState) {
-        if (!previousState) {
-          return {
-            text: "",
-            replacePrevCharCnt: 0,
-            replaceNextCharCnt: 0,
-            positionDelta: 0
-          };
-        }
-        if (_debugComposition) {
-          console.log("------------------------deduceAndroidCompositionInput");
-          console.log(`PREVIOUS STATE: ${previousState.toString()}`);
-          console.log(`CURRENT STATE: ${currentState.toString()}`);
-        }
-        if (previousState.value === currentState.value) {
-          return {
-            text: "",
-            replacePrevCharCnt: 0,
-            replaceNextCharCnt: 0,
-            positionDelta: currentState.selectionEnd - previousState.selectionEnd
-          };
-        }
-        const prefixLength = Math.min(commonPrefixLength(previousState.value, currentState.value), previousState.selectionEnd);
-        const suffixLength = Math.min(commonSuffixLength(previousState.value, currentState.value), previousState.value.length - previousState.selectionEnd);
-        const previousValue = previousState.value.substring(prefixLength, previousState.value.length - suffixLength);
-        const currentValue = currentState.value.substring(prefixLength, currentState.value.length - suffixLength);
-        const previousSelectionStart = previousState.selectionStart - prefixLength;
-        const previousSelectionEnd = previousState.selectionEnd - prefixLength;
-        const currentSelectionStart = currentState.selectionStart - prefixLength;
-        const currentSelectionEnd = currentState.selectionEnd - prefixLength;
-        if (_debugComposition) {
-          console.log(`AFTER DIFFING PREVIOUS STATE: <${previousValue}>, selectionStart: ${previousSelectionStart}, selectionEnd: ${previousSelectionEnd}`);
-          console.log(`AFTER DIFFING CURRENT STATE: <${currentValue}>, selectionStart: ${currentSelectionStart}, selectionEnd: ${currentSelectionEnd}`);
-        }
-        return {
-          text: currentValue,
-          replacePrevCharCnt: previousSelectionEnd,
-          replaceNextCharCnt: previousValue.length - previousSelectionEnd,
-          positionDelta: currentSelectionEnd - currentValue.length
-        };
-      }
       static deduceAndroidImeLineEdit(previousState, currentState) {
         const modelLineNumber = previousState.androidModelLineNumber;
-        if (modelLineNumber === void 0 || currentState.androidModelLineNumber !== modelLineNumber || previousState.value === currentState.value || previousState.value.includes("\n") || previousState.value.includes("\r") || currentState.value.includes("\n") || currentState.value.includes("\r")) {
+        if (modelLineNumber === void 0 || currentState.androidModelLineNumber !== modelLineNumber) {
           return null;
         }
-        const prefixLength = commonPrefixLength(previousState.value, currentState.value);
-        const suffixLength = Math.min(commonSuffixLength(previousState.value, currentState.value), previousState.value.length - prefixLength, currentState.value.length - prefixLength);
+        const previousProjection = _TextAreaState._readAndroidImeLineProjection(previousState);
+        const currentProjection = _TextAreaState._readAndroidImeLineProjection(currentState);
+        if (!previousProjection || !currentProjection || previousProjection.value === currentProjection.value) {
+          return null;
+        }
+        const prefixLength = commonPrefixLength(previousProjection.value, currentProjection.value);
+        const suffixLength = Math.min(commonSuffixLength(previousProjection.value, currentProjection.value), previousProjection.value.length - prefixLength, currentProjection.value.length - prefixLength);
         return {
           modelLineNumber,
           rangeStartOffset: prefixLength,
-          rangeEndOffset: previousState.value.length - suffixLength,
-          text: currentState.value.substring(prefixLength, currentState.value.length - suffixLength),
-          selectionStartOffset: currentState.selectionStart,
-          selectionEndOffset: currentState.selectionEnd
+          rangeEndOffset: previousProjection.value.length - suffixLength,
+          text: currentProjection.value.substring(prefixLength, currentProjection.value.length - suffixLength),
+          selectionStartOffset: currentProjection.selectionStartOffset,
+          selectionEndOffset: currentProjection.selectionEndOffset
         };
+      }
+      static _readAndroidImeLineProjection(state) {
+        if (!state.value.startsWith(ANDROID_IME_LINE_PREFIX) || !state.value.endsWith(ANDROID_IME_LINE_SUFFIX)) {
+          return null;
+        }
+        const lineStart = ANDROID_IME_LINE_PREFIX.length;
+        const lineEnd = state.value.length - ANDROID_IME_LINE_SUFFIX.length;
+        const value = state.value.substring(lineStart, lineEnd);
+        const clampSelectionOffset = (offset) => Math.min(Math.max(offset - lineStart, 0), value.length);
+        const selectionStartOffset = clampSelectionOffset(state.selectionStart);
+        const selectionEndOffset = Math.max(selectionStartOffset, clampSelectionOffset(state.selectionEnd));
+        return { value, selectionStartOffset, selectionEndOffset };
       }
       static fromScreenReaderContentState(screenReaderContentState) {
         return new _TextAreaState(screenReaderContentState.value, screenReaderContentState.selectionStart, screenReaderContentState.selectionEnd, screenReaderContentState.selection, screenReaderContentState.newlineCountBeforeSelection);
@@ -40804,10 +40789,7 @@ var init_uuid = __esm({
 });
 
 // app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.js
-function androidImeNow() {
-  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
-}
-var __decorate7, __param6, ANDROID_IME_RAPID_INPUT_WINDOW_MS, ANDROID_IME_SETTLE_DELAY_MS, TextAreaSyntethicEvents, CompositionContext, TextAreaInput, TextAreaWrapper;
+var __decorate7, __param6, TextAreaSyntethicEvents, CompositionContext, TextAreaInput, TextAreaWrapper;
 var init_textAreaEditContextInput = __esm({
   "app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.js"() {
     init_browser();
@@ -40836,8 +40818,6 @@ var init_textAreaEditContextInput = __esm({
         decorator(target, key, paramIndex);
       };
     };
-    ANDROID_IME_RAPID_INPUT_WINDOW_MS = 35;
-    ANDROID_IME_SETTLE_DELAY_MS = 140;
     (function(TextAreaSyntethicEvents2) {
       TextAreaSyntethicEvents2.Tap = "-monaco-textarea-synthetic-tap";
     })(TextAreaSyntethicEvents || (TextAreaSyntethicEvents = {}));
@@ -40885,8 +40865,6 @@ var init_textAreaEditContextInput = __esm({
         this.onType = this._onType.event;
         this._onAndroidImeType = this._register(new Emitter());
         this.onAndroidImeType = this._onAndroidImeType.event;
-        this._onAndroidImeCursor = this._register(new Emitter());
-        this.onAndroidImeCursor = this._onAndroidImeCursor.event;
         this._onCompositionStart = this._register(new Emitter());
         this.onCompositionStart = this._onCompositionStart.event;
         this._onCompositionUpdate = this._register(new Emitter());
@@ -40895,9 +40873,10 @@ var init_textAreaEditContextInput = __esm({
         this.onCompositionEnd = this._onCompositionEnd.event;
         this._onSelectionChangeRequest = this._register(new Emitter());
         this.onSelectionChangeRequest = this._onSelectionChangeRequest.event;
+        this._androidImeFrame = this._register(new MutableDisposable());
         this._asyncFocusGainWriteScreenReaderContent = this._register(new MutableDisposable());
         this._asyncTriggerCut = this._register(new RunOnceScheduler(() => this._onCut.fire(), 0));
-        this._androidImeSettle = this._register(new RunOnceScheduler(() => this._settleAndroidIme(), ANDROID_IME_SETTLE_DELAY_MS));
+        this._androidImeReseed = this._register(new RunOnceScheduler(() => this._reseedAndroidIme(), 0));
         this._textAreaState = TextAreaState.EMPTY;
         this._selectionChangeListener = null;
         if (this._accessibilityService.isScreenReaderOptimized()) {
@@ -40912,10 +40891,9 @@ var init_textAreaEditContextInput = __esm({
         }));
         this._hasFocus = false;
         this._currentComposition = null;
-        this._androidImeOwnsTextArea = false;
-        this._androidImeRapidInput = false;
-        this._androidImeLastMutationTime = Number.NEGATIVE_INFINITY;
-        this._androidImePendingCursor = null;
+        this._androidImeInputGeneration = 0;
+        this._androidImeReseedGeneration = 0;
+        this._androidImeTransactionPending = false;
         let lastKeyDown = null;
         this._register(this._textArea.onKeyDown((_e) => {
           const e = new StandardKeyboardEvent(_e);
@@ -40939,15 +40917,15 @@ var init_textAreaEditContextInput = __esm({
           if (_debugComposition) {
             console.log(`[compositionstart]`, e);
           }
+          if (this._browser.isAndroid) {
+            return;
+          }
           const currentComposition = new CompositionContext();
           if (this._currentComposition) {
             this._currentComposition = currentComposition;
             return;
           }
           this._currentComposition = currentComposition;
-          if (this._browser.isAndroid) {
-            this._beginAndroidImeOwnership();
-          }
           if (this._OS === 2 && lastKeyDown && lastKeyDown.equals(
             114
             /* KeyCode.KEY_IN_COMPOSITION */
@@ -40959,28 +40937,17 @@ var init_textAreaEditContextInput = __esm({
             this._onCompositionStart.fire({ data: e.data });
             return;
           }
-          if (this._browser.isAndroid) {
-            this._onCompositionStart.fire({ data: e.data });
-            return;
-          }
           this._onCompositionStart.fire({ data: e.data });
         }));
         this._register(this._textArea.onCompositionUpdate((e) => {
           if (_debugComposition) {
             console.log(`[compositionupdate]`, e);
           }
-          const currentComposition = this._currentComposition;
-          if (!currentComposition) {
+          if (this._browser.isAndroid) {
             return;
           }
-          if (this._browser.isAndroid) {
-            if (!this._handleAndroidImeLineInput(e.timeStamp)) {
-              const newState = TextAreaState.readFromTextArea(this._textArea, this._textAreaState);
-              const typeInput2 = TextAreaState.deduceAndroidCompositionInput(this._textAreaState, newState);
-              this._textAreaState = newState;
-              this._onType.fire(typeInput2);
-            }
-            this._onCompositionUpdate.fire(e);
+          const currentComposition = this._currentComposition;
+          if (!currentComposition) {
             return;
           }
           const typeInput = currentComposition.handleCompositionUpdate(e.data);
@@ -40992,21 +40959,14 @@ var init_textAreaEditContextInput = __esm({
           if (_debugComposition) {
             console.log(`[compositionend]`, e);
           }
+          if (this._browser.isAndroid) {
+            return;
+          }
           const currentComposition = this._currentComposition;
           if (!currentComposition) {
             return;
           }
           this._currentComposition = null;
-          if (this._browser.isAndroid) {
-            if (!this._handleAndroidImeLineInput(e.timeStamp)) {
-              const newState = TextAreaState.readFromTextArea(this._textArea, this._textAreaState);
-              const typeInput2 = TextAreaState.deduceAndroidCompositionInput(this._textAreaState, newState);
-              this._textAreaState = newState;
-              this._onType.fire(typeInput2);
-            }
-            this._onCompositionEnd.fire();
-            return;
-          }
           const typeInput = currentComposition.handleCompositionUpdate(e.data);
           this._textAreaState = TextAreaState.readFromTextArea(this._textArea, this._textAreaState);
           this._onType.fire(typeInput);
@@ -41017,10 +40977,11 @@ var init_textAreaEditContextInput = __esm({
             console.log(`[input]`, e);
           }
           this._textArea.setIgnoreSelectionChangeTime("received input event");
-          if (this._currentComposition) {
+          if (this._browser.isAndroid && this._textAreaState.androidModelLineNumber !== void 0) {
+            this._scheduleAndroidImeInput();
             return;
           }
-          if (this._browser.isAndroid && this._handleAndroidImeLineInput(e.timeStamp)) {
+          if (this._currentComposition) {
             return;
           }
           const newState = TextAreaState.readFromTextArea(this._textArea, this._textAreaState);
@@ -41095,83 +41056,62 @@ var init_textAreaEditContextInput = __esm({
             endedComposition = true;
           }
           if (this._browser.isAndroid) {
-            this._settleAndroidIme();
+            this._flushAndroidImeInput();
+            this._cancelAndroidImeTransaction();
+            this.writeNativeTextAreaContent("android blur");
           } else if (endedComposition) {
             this.writeNativeTextAreaContent("blurWithoutCompositionEnd");
           }
           this._setHasFocus(false);
         }));
         this._register(this._textArea.onSyntheticTap(() => {
-          if (this._browser.isAndroid && this._currentComposition) {
-            this._currentComposition = null;
-            this._resetAndroidImeOwnership();
-            this._setAndWriteTextAreaState("tapWithoutCompositionEnd", TextAreaState.EMPTY);
-            this._onCompositionEnd.fire();
+          if (this._browser.isAndroid) {
+            this._flushAndroidImeInput();
           }
         }));
       }
-      _beginAndroidImeOwnership() {
-        if (!this._androidImeOwnsTextArea) {
-          this._androidImeRapidInput = false;
-          this._androidImeLastMutationTime = Number.NEGATIVE_INFINITY;
-        }
-        this._androidImeOwnsTextArea = true;
-        this._androidImeSettle.cancel();
-      }
-      _handleAndroidImeLineInput(eventTime) {
-        const previousState = this._textAreaState;
-        if (previousState.androidModelLineNumber === void 0) {
-          return false;
-        }
-        const currentState = TextAreaState.readFromTextArea(this._textArea, previousState);
-        if (currentState.androidModelLineNumber !== previousState.androidModelLineNumber || previousState.value.includes("\n") || previousState.value.includes("\r") || currentState.value.includes("\n") || currentState.value.includes("\r")) {
-          return false;
-        }
-        const lineEdit = TextAreaState.deduceAndroidImeLineEdit(previousState, currentState);
-        this._textAreaState = currentState;
-        const deferCursor = this._recordAndroidImeActivity(currentState, lineEdit !== null, eventTime);
-        if (lineEdit) {
-          this._onAndroidImeType.fire({ ...lineEdit, deferCursor });
-        }
-        return true;
-      }
-      _recordAndroidImeActivity(state, textChanged, eventTime = androidImeNow()) {
-        this._beginAndroidImeOwnership();
-        if (state.androidModelLineNumber !== void 0) {
-          this._androidImePendingCursor = {
-            modelLineNumber: state.androidModelLineNumber,
-            selectionStartOffset: state.selectionStart,
-            selectionEndOffset: state.selectionEnd
-          };
-        }
-        if (textChanged) {
-          if (eventTime - this._androidImeLastMutationTime <= ANDROID_IME_RAPID_INPUT_WINDOW_MS) {
-            this._androidImeRapidInput = true;
-          }
-          this._androidImeLastMutationTime = eventTime;
-        }
-        if (!this._currentComposition) {
-          this._androidImeSettle.schedule();
-        }
-        return this._androidImeRapidInput;
-      }
-      _settleAndroidIme() {
-        if (!this._browser.isAndroid || !this._androidImeOwnsTextArea || this._currentComposition) {
+      _scheduleAndroidImeInput() {
+        this._androidImeInputGeneration++;
+        this._androidImeTransactionPending = true;
+        if (this._androidImeFrame.value) {
           return;
         }
-        const pendingCursor = this._androidImePendingCursor;
-        if (pendingCursor) {
-          this._onAndroidImeCursor.fire(pendingCursor);
-        }
-        this._resetAndroidImeOwnership();
-        this.writeNativeTextAreaContent("android ime settled");
+        this._androidImeFrame.value = scheduleAtNextAnimationFrame(getWindow(this._textArea.ownerDocument), () => {
+          this._androidImeFrame.clear();
+          this._flushAndroidImeInput();
+        });
       }
-      _resetAndroidImeOwnership() {
-        this._androidImeSettle.cancel();
-        this._androidImeOwnsTextArea = false;
-        this._androidImeRapidInput = false;
-        this._androidImeLastMutationTime = Number.NEGATIVE_INFINITY;
-        this._androidImePendingCursor = null;
+      _flushAndroidImeInput() {
+        if (!this._browser.isAndroid || !this._androidImeTransactionPending) {
+          return;
+        }
+        this._androidImeFrame.clear();
+        const generation = this._androidImeInputGeneration;
+        const previousState = this._textAreaState;
+        if (previousState.androidModelLineNumber === void 0) {
+          this._cancelAndroidImeTransaction();
+          return;
+        }
+        const currentState = TextAreaState.readFromTextArea(this._textArea, previousState);
+        const lineEdit = TextAreaState.deduceAndroidImeLineEdit(previousState, currentState);
+        this._textAreaState = currentState;
+        if (lineEdit) {
+          this._onAndroidImeType.fire(lineEdit);
+        }
+        this._androidImeReseedGeneration = generation;
+        this._androidImeReseed.schedule();
+      }
+      _reseedAndroidIme() {
+        if (this._androidImeReseedGeneration !== this._androidImeInputGeneration) {
+          return;
+        }
+        this._androidImeTransactionPending = false;
+        this.writeNativeTextAreaContent("android ime reseed");
+      }
+      _cancelAndroidImeTransaction() {
+        this._androidImeFrame.clear();
+        this._androidImeReseed.cancel();
+        this._androidImeTransactionPending = false;
       }
       _installSelectionChangeListener() {
         let previousSelectionChangeEventTime = 0;
@@ -41198,14 +41138,6 @@ var init_textAreaEditContextInput = __esm({
             return;
           }
           if (this._browser.isAndroid && this._textAreaState.androidModelLineNumber !== void 0) {
-            const currentState = TextAreaState.readFromTextArea(this._textArea, this._textAreaState);
-            if (this._textAreaState.value !== currentState.value) {
-              return;
-            }
-            if (this._textAreaState.selectionStart !== currentState.selectionStart || this._textAreaState.selectionEnd !== currentState.selectionEnd) {
-              this._textAreaState = currentState;
-              this._recordAndroidImeActivity(currentState, false);
-            }
             return;
           }
           if (!this._textAreaState.selection) {
@@ -41277,7 +41209,7 @@ var init_textAreaEditContextInput = __esm({
         this._textAreaState = textAreaState;
       }
       writeNativeTextAreaContent(reason) {
-        if (!this._accessibilityService.isScreenReaderOptimized() && reason === "render" || this._currentComposition || this._browser.isAndroid && this._androidImeOwnsTextArea) {
+        if (!this._accessibilityService.isScreenReaderOptimized() && reason === "render" || this._currentComposition || this._browser.isAndroid && this._androidImeTransactionPending) {
           return;
         }
         this._setAndWriteTextAreaState(reason, this._host.getScreenReaderContent());
@@ -55920,7 +55852,7 @@ var init_textAreaEditContext2 = __esm({
           7
           /* PartFingerprint.TextArea */
         );
-        this.textArea.setClassName(`inputarea ${MOUSE_CURSOR_TEXT_CSS_CLASS_NAME}`);
+        this.textArea.setClassName(`inputarea ${MOUSE_CURSOR_TEXT_CSS_CLASS_NAME}${isAndroid ? " android-ime-input" : ""}`);
         this.textArea.setAttribute("wrap", this._textAreaWrapping && !this._visibleTextArea ? "on" : "off");
         const { tabSize } = this._context.viewModel.model.getOptions();
         this.textArea.domNode.style.tabSize = `${tabSize * this._fontInfo.spaceWidth}px`;
@@ -55955,6 +55887,14 @@ var init_textAreaEditContext2 = __esm({
             return getDataToCopy(this._context.viewModel, this._modelSelections, this._emptySelectionClipboard, this._copyWithSyntaxHighlighting);
           },
           getScreenReaderContent: () => {
+            if (isAndroid) {
+              const modelSelection = this._modelSelections[0];
+              if (modelSelection.startLineNumber === modelSelection.endLineNumber) {
+                const modelLineNumber = modelSelection.startLineNumber;
+                return TextAreaState.createAndroidImeLine(this._context.viewModel.model.getLineContent(modelLineNumber), modelSelection.startColumn - 1, modelSelection.endColumn - 1, this._selections[0], modelLineNumber);
+              }
+              return TextAreaState.EMPTY;
+            }
             if (this._accessibilitySupport === 1) {
               const selection = this._selections[0];
               if (isMacintosh && selection.isEmpty()) {
@@ -55983,15 +55923,6 @@ var init_textAreaEditContext2 = __esm({
               if (isSafari && !selection.isEmpty()) {
                 const placeholderText = "vscode-placeholder";
                 return new TextAreaState(placeholderText, 0, placeholderText.length, null, void 0);
-              }
-              return TextAreaState.EMPTY;
-            }
-            if (isAndroid) {
-              const modelSelection = this._modelSelections[0];
-              if (modelSelection.startLineNumber === modelSelection.endLineNumber) {
-                const modelLineNumber = modelSelection.startLineNumber;
-                const lineContent = this._context.viewModel.model.getLineContent(modelLineNumber);
-                return new TextAreaState(lineContent, modelSelection.startColumn - 1, modelSelection.endColumn - 1, this._selections[0], 0, modelLineNumber);
               }
               return TextAreaState.EMPTY;
             }
@@ -56057,17 +55988,15 @@ var init_textAreaEditContext2 = __esm({
           const rangeStartOffset = Math.min(e.rangeStartOffset, lineLength);
           const rangeEndOffset = Math.min(Math.max(e.rangeEndOffset, rangeStartOffset), lineLength);
           const range2 = new Range(e.modelLineNumber, rangeStartOffset + 1, e.modelLineNumber, rangeEndOffset + 1);
+          const lineContent = model.getLineContent(e.modelLineNumber);
+          const resultingValue = lineContent.substring(0, rangeStartOffset) + e.text + lineContent.substring(rangeEndOffset);
           const currentSelection = this._modelSelections[0];
-          const isAlignedInsertion = !e.deferCursor && e.text.length > 0 && range2.isEmpty() && currentSelection.isEmpty() && currentSelection.positionLineNumber === e.modelLineNumber && currentSelection.positionColumn === range2.startColumn && e.selectionStartOffset === rangeStartOffset + e.text.length && e.selectionEndOffset === e.selectionStartOffset;
+          const isAlignedInsertion = e.text.length > 0 && !e.text.includes("\n") && range2.isEmpty() && currentSelection.isEmpty() && currentSelection.positionLineNumber === e.modelLineNumber && currentSelection.positionColumn === range2.startColumn && e.selectionStartOffset === rangeStartOffset + e.text.length && e.selectionEndOffset === e.selectionStartOffset;
           if (isAlignedInsertion) {
             this._viewController.type(e.text);
             return;
           }
-          const selection = e.deferCursor ? currentSelection : this._androidImeSelection(e);
-          this._viewController.androidImeType(range2, e.text, selection);
-        }));
-        this._register(this._textAreaInput.onAndroidImeCursor((e) => {
-          this._viewController.setSelection(this._androidImeSelection(e));
+          this._viewController.androidImeType(range2, e.text, this._androidImeSelection(e, resultingValue));
         }));
         this._register(this._textAreaInput.onSelectionChangeRequest((modelSelection) => {
           this._viewController.setSelection(modelSelection);
@@ -56152,13 +56081,15 @@ var init_textAreaEditContext2 = __esm({
         this.textArea.domNode.remove();
         this.textAreaCover.domNode.remove();
       }
-      _androidImeSelection(data) {
-        const model = this._context.viewModel.model;
-        const modelLineNumber = Math.min(Math.max(data.modelLineNumber, 1), model.getLineCount());
-        const lineLength = model.getLineLength(modelLineNumber);
-        const selectionStartOffset = Math.min(Math.max(data.selectionStartOffset, 0), lineLength);
-        const selectionEndOffset = Math.min(Math.max(data.selectionEndOffset, selectionStartOffset), lineLength);
-        return new Selection(modelLineNumber, selectionStartOffset + 1, modelLineNumber, selectionEndOffset + 1);
+      _androidImeSelection(data, resultingValue) {
+        const offsetToPosition = (offset) => {
+          const prefix = resultingValue.substring(0, Math.min(Math.max(offset, 0), resultingValue.length));
+          const lines = prefix.split("\n");
+          return new Position(data.modelLineNumber + lines.length - 1, lines[lines.length - 1].length + 1);
+        };
+        const start = offsetToPosition(data.selectionStartOffset);
+        const end = offsetToPosition(Math.max(data.selectionStartOffset, data.selectionEndOffset));
+        return new Selection(start.lineNumber, start.column, end.lineNumber, end.column);
       }
       _getWordBeforePosition(position) {
         const lineContent = this._context.viewModel.getLineContent(position.lineNumber);

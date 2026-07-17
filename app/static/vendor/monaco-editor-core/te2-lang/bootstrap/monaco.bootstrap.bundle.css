@@ -555,6 +555,11 @@
   caret-color: var(--vscode-editorCursor-foreground);
   color: var(--vscode-editor-foreground);
 }
+.monaco-editor .inputarea.android-ime-input {
+  top: -150px !important;
+  left: -150px !important;
+  transform: translate(-150px, -150px) !important;
+}
 
 /* app/static/vendor/monaco-editor-core/esm/vs/editor/browser/controller/editContext/native/nativeEditContext.css */
 .monaco-editor .native-edit-context {
