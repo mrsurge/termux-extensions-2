@@ -43,6 +43,7 @@ class UrlOpenResponse(Protocol):
 _explorer_event_loop: asyncio.AbstractEventLoop | None = None
 _draft_forward_tasks: DebounceTasks = {}
 _draft_decorations_tasks: DebounceTasks = {}
+_git_status_tasks: DebounceTasks = {}
 
 
 def set_explorer_event_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -62,7 +63,7 @@ def _post_to_explorer_loop(callback: Callable[[], None]) -> bool:
     if running_loop is loop:
         callback()
     else:
-        loop.call_soon_threadsafe(callback)
+        _ = loop.call_soon_threadsafe(callback)
     return True
 
 
@@ -76,7 +77,7 @@ def _schedule_debounce_task(
 ) -> None:
     existing = tasks.get(key)
     if existing is not None and not existing.done():
-        existing.cancel()
+        _ = existing.cancel()
         record_coalesced_event(name, name)
 
     async def _run() -> None:
@@ -88,7 +89,7 @@ def _schedule_debounce_task(
         finally:
             current = asyncio.current_task()
             if current is not None and tasks.get(key) is current:
-                tasks.pop(key, None)
+                _ = tasks.pop(key, None)
 
     tasks[key] = asyncio.create_task(_run(), name=name)
 
@@ -129,6 +130,7 @@ async def broadcast_git_status_update(
         )
         if _is_stale_git_generation(project, project_generation):
             record_stale_drop("runtime_notifications:git_refresh_after_work", "GitSnapshotRequested")
+            mark_git_cache_dirty(project)
             logger.debug(
                 "Dropping stale git refresh after work project=%s generation=%s current=%s source=%s",
                 project,
@@ -145,6 +147,7 @@ async def broadcast_git_status_update(
         )
         decorations_payload: dict[str, object] = {
             "statuses": snapshot["statuses"],
+            "nodes": _git_tree_decorations(snapshot["statuses"]),
             "projectPath": normalized_project,
         }
         status_payload: dict[str, object] = {
@@ -178,6 +181,46 @@ async def broadcast_git_status_update(
         logger.warning("Failed to broadcast git status update: %s", exc)
 
 
+def schedule_git_status_update(
+    project_path: str | Path,
+    *,
+    project_generation: int | None = None,
+    source: str = "runtime_notifications:scheduled_git_status",
+    delay: float = 0.1,
+) -> None:
+    """Debounce watcher-triggered Git refresh without blocking FS hydration."""
+    project = Path(project_path)
+    normalized_project = str(project.expanduser().resolve(strict=False))
+
+    def _schedule() -> None:
+        if not manager.has_connections(normalized_project):
+            return
+        mark_git_cache_dirty(project)
+
+        async def do_broadcast() -> None:
+            await broadcast_git_status_update(
+                normalized_project,
+                project_generation=project_generation,
+                source=source,
+            )
+
+        _schedule_debounce_task(
+            _git_status_tasks,
+            f"git-status:{normalized_project}",
+            delay=delay,
+            name="file_editor_cm6_git_status",
+            callback=do_broadcast,
+        )
+
+    _ = _post_to_explorer_loop(_schedule)
+
+
+def _git_tree_decorations(statuses: dict[str, worker_git_service.GitPathStatus]) -> dict[str, object]:
+    from .file_ops import build_git_tree_decorations
+
+    return cast(dict[str, object], build_git_tree_decorations(statuses))
+
+
 def _is_worker_process() -> bool:
     return bool(os.getenv("TE_APP_ID") or os.getenv("TE_APP_WORKER_PORT"))
 
@@ -198,7 +241,7 @@ def _forward_draft_notification(project_path: str) -> None:
     try:
         response = cast(UrlOpenResponse, urllib.request.urlopen(req, timeout=2.0))
         with response as resp:
-            resp.read()
+            _ = resp.read()
     except Exception as exc:
         logger.debug("Failed to forward draft notify to main: %s", exc)
 
@@ -216,7 +259,7 @@ def _schedule_forward_draft_refresh(project_path: str) -> None:
             callback=do_forward,
         )
 
-    _post_to_explorer_loop(_schedule)
+    _ = _post_to_explorer_loop(_schedule)
 
 
 async def _broadcast_draft_decorations(project_path: str) -> None:
@@ -281,4 +324,4 @@ def notify_draft_state_changed(project_path: str) -> None:
             callback=do_broadcast,
         )
 
-    _post_to_explorer_loop(_notify)
+    _ = _post_to_explorer_loop(_notify)

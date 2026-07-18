@@ -38,6 +38,11 @@ class ExplorerEntry(TypedDict):
     hasDraft: bool
 
 
+class GitNodeDecoration(TypedDict):
+    gitStatus: str
+    gitFlags: list[str]
+
+
 class FsDirectoryEntry(TypedDict, total=False):
     name: str
     path: str
@@ -80,6 +85,10 @@ _STATUS_PRIORITY = (
     "ignored",
     "clean",
 )
+_OUTLINE_STATUSES = frozenset(
+    ("modified", "staged", "staged_modified", "added", "deleted", "renamed", "conflict")
+)
+_STAGED_STATUSES = frozenset(("staged", "staged_modified", "added"))
 
 
 def _get_draft_index_snapshot(project_root: Path) -> tuple[set[str], set[str]]:
@@ -136,7 +145,7 @@ def explorer_listing_from_fs_directory_listing(listing: FsDirectoryListing) -> d
         raise ValueError("dir outside project root")
 
     draft_files, draft_dirs = _get_draft_index_snapshot(root)
-    status_map = worker_git_service.get_snapshot(root)["statuses"]
+    status_map = worker_git_service.get_cached_statuses(root)
     entries: list[ExplorerEntry] = []
 
     for raw_entry in listing.get("entries", []):
@@ -231,6 +240,36 @@ def mark_git_cache_dirty(project_root: Path | None = None) -> None:
     worker_git_service.mark_status_cache_dirty(project_root)
 
 
+def build_git_tree_decorations(status_map: Mapping[str, str]) -> dict[str, GitNodeDecoration]:
+    """Build backend-owned visible-node Git decorations from file statuses."""
+    nodes: dict[str, GitNodeDecoration] = {}
+    directory_flags: dict[str, set[str]] = {}
+
+    for raw_rel, status in status_map.items():
+        rel = raw_rel.strip("/")
+        if not rel or not status or status == "clean":
+            continue
+        nodes[rel] = {"gitStatus": status, "gitFlags": [status]}
+        parts = rel.split("/")
+        for index in range(1, len(parts)):
+            directory = "/".join(parts[:index])
+            flags = directory_flags.setdefault(directory, set())
+            flags.update(_git_flags_for_status(status))
+            root_flags = directory_flags.setdefault(".", set())
+            root_flags.update(_git_flags_for_status(status))
+        if len(parts) == 1:
+            root_flags = directory_flags.setdefault(".", set())
+            root_flags.update(_git_flags_for_status(status))
+
+    for rel, flags in directory_flags.items():
+        ordered_flags = _ordered_git_flags(flags)
+        nodes[rel] = {
+            "gitStatus": _primary_git_status_from_flags(ordered_flags),
+            "gitFlags": ordered_flags,
+        }
+    return nodes
+
+
 def _derive_git_status(rel_path: str, kind: str, status_map: Mapping[str, str]) -> str:
     """Returns the primary git status for display. For directories, use
     _derive_git_flags() to get all applicable flags."""
@@ -244,10 +283,8 @@ def _derive_git_status(rel_path: str, kind: str, status_map: Mapping[str, str]) 
     # These are statuses representing actual changes to tracked content:
     # modified, staged, staged_modified, added, deleted, renamed, conflict
     # Excluded: clean, ignored, untracked (untracked gets blue background, not orange outline)
-    OUTLINE_STATUSES = ('modified', 'staged', 'staged_modified', 'added', 'deleted', 'renamed', 'conflict')
-    
     dir_status = status_map.get(rel_path)
-    if dir_status and dir_status in OUTLINE_STATUSES:
+    if dir_status and dir_status in _OUTLINE_STATUSES:
         return 'modified'
 
     child_statuses = list(_statuses_for_prefix(rel_path, status_map))
@@ -256,7 +293,7 @@ def _derive_git_status(rel_path: str, kind: str, status_map: Mapping[str, str]) 
     
     # If any child warrants the orange outline, directory gets 'modified'
     for status in child_statuses:
-        if status in OUTLINE_STATUSES:
+        if status in _OUTLINE_STATUSES:
             return 'modified'
     
     # Check for untracked - directory gets 'untracked' for blue background
@@ -282,9 +319,6 @@ def _derive_git_flags(rel_path: str, kind: str, status_map: Mapping[str, str]) -
         return [status] if status and status != 'clean' else []
 
     # For directories, collect all flags based on child statuses
-    OUTLINE_STATUSES = frozenset(('modified', 'staged', 'staged_modified', 'added', 'deleted', 'renamed', 'conflict'))
-    STAGED_STATUSES = frozenset(('staged', 'staged_modified', 'added'))
-    
     child_statuses = set(_statuses_for_prefix(rel_path, status_map))
     if not child_statuses:
         return []
@@ -292,7 +326,7 @@ def _derive_git_flags(rel_path: str, kind: str, status_map: Mapping[str, str]) -
     flags: list[str] = []
     
     # Check for modified (orange outline)
-    if child_statuses & OUTLINE_STATUSES:
+    if child_statuses & _OUTLINE_STATUSES:
         flags.append('modified')
     
     # Check for untracked (blue background)
@@ -300,7 +334,7 @@ def _derive_git_flags(rel_path: str, kind: str, status_map: Mapping[str, str]) -
         flags.append('untracked')
     
     # Check for staged (green background)
-    if child_statuses & STAGED_STATUSES:
+    if child_statuses & _STAGED_STATUSES:
         flags.append('staged')
     
     # Check for conflict (red indicator)
@@ -308,6 +342,33 @@ def _derive_git_flags(rel_path: str, kind: str, status_map: Mapping[str, str]) -
         flags.append('conflict')
     
     return flags
+
+
+def _git_flags_for_status(status: str) -> set[str]:
+    flags: set[str] = set()
+    if status in _OUTLINE_STATUSES:
+        flags.add("modified")
+    if status in _STAGED_STATUSES:
+        flags.add("staged")
+    if status == "untracked":
+        flags.add("untracked")
+    if status == "conflict":
+        flags.add("conflict")
+    return flags
+
+
+def _ordered_git_flags(flags: Iterable[str]) -> list[str]:
+    order = ("modified", "staged", "untracked", "conflict")
+    seen = set(flags)
+    return [flag for flag in order if flag in seen]
+
+
+def _primary_git_status_from_flags(flags: list[str]) -> str:
+    if "modified" in flags:
+        return "modified"
+    if "untracked" in flags:
+        return "untracked"
+    return "clean"
 
 
 def _statuses_for_prefix(rel_path: str, status_map: Mapping[str, str]) -> Iterable[str]:

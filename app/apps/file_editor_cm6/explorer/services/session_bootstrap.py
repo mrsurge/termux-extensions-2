@@ -1,12 +1,13 @@
 # pyright: strict
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from .file_ops import set_project_root
+from .file_ops import mark_git_cache_dirty, set_project_root
 from .render_state import build_bootstrap_snapshot, emit_bootstrap_snapshot
 from ..transport.connection_manager import ExplorerConnection, manager
 from ...project_sidecar import ProjectSidecar
@@ -78,24 +79,34 @@ async def replay_explorer_session_bootstrap(
     except Exception as exc:
         logger.warning("Failed to load UI preferences: %s", exc)
 
-    await broadcast_git_status()
+    open_state: JsonObject | None = None
+    active_file_rel: str | None = None
+    try:
+        raw_open_state = read_sidecar_open_state(str(project_root), reason="reconnect")
+        open_state = dict(raw_open_state)
+        active_file_rel = str(raw_open_state["openFileRel"])
+    except Exception as exc:
+        logger.warning("Failed to rehydrate active file: %s", exc)
+
+    mark_git_cache_dirty(project_root)
     await emit_bootstrap_snapshot(
         emit_personal,
-        await build_bootstrap_snapshot(project_root),
+        await build_bootstrap_snapshot(
+            project_root,
+            extra_open_directories=_active_file_parent_directories(active_file_rel),
+        ),
     )
+    _schedule_bootstrap_git_status(project_root, broadcast_git_status)
     await broadcast_review_state()
 
-    try:
-        open_state = read_sidecar_open_state(str(project_root), reason="reconnect")
+    if open_state is not None:
         await emit_personal("explorer.openState.changed", dict(open_state))
-        current_path = open_state["openFile"]
-        rel = open_state["openFileRel"]
+        current_path = str(open_state["openFile"])
+        rel = str(open_state["openFileRel"])
         await emit_personal(
             "explorer.activeFile.updated",
             {"rel": rel, "abs": current_path, "openState": dict(open_state)},
         )
-    except Exception as exc:
-        logger.warning("Failed to rehydrate active file: %s", exc)
 
     try:
         from ...watchexec_shell_manager import (
@@ -112,9 +123,29 @@ async def replay_explorer_session_bootstrap(
         watcher_mode = watcher_config["mode"]
         await emit_personal("explorer.watcher.config.updated", dict(watcher_config))
         if watcher_mode == "watchexec" and watcher_config["watchexec_available"]:
-            await ensure_watchexec_shell(
+            _ = await ensure_watchexec_shell(
                 str(project_root),
                 watcher_config["poll_interval_ms"],
             )
     except Exception as exc:
         logger.warning("Failed to send watcher config: %s", exc)
+
+
+def _schedule_bootstrap_git_status(
+    project_root: Path,
+    broadcast_git_status: AsyncNoArg,
+) -> None:
+    async def _run() -> None:
+        try:
+            await broadcast_git_status()
+        except Exception as exc:
+            logger.warning("Failed to load bootstrap git status for %s: %s", project_root, exc)
+
+    _ = asyncio.create_task(_run(), name="explorer_bootstrap_git_status")
+
+
+def _active_file_parent_directories(rel: str | None) -> list[str]:
+    if not rel:
+        return []
+    parts = [part for part in rel.strip("/").split("/") if part]
+    return ["/".join(parts[:index]) for index in range(1, len(parts))]

@@ -1643,6 +1643,9 @@ fn git_error_progress(error: git_ops::GitProviderError) -> git_ops::GitJobProgre
         git_ops::GitProviderError::InvalidPath(_) => "git.invalidPath",
         git_ops::GitProviderError::NotRepository => "git.notRepository",
         git_ops::GitProviderError::NoHead => "git.noHead",
+        git_ops::GitProviderError::LocalChangesWouldBeOverwritten(_) => {
+            "git.localChangesWouldBeOverwritten"
+        }
         git_ops::GitProviderError::Unsupported(_) => "git.unsupported",
         git_ops::GitProviderError::Git(_) => "git.error",
         git_ops::GitProviderError::Io(_) => "git.io",
@@ -1677,6 +1680,12 @@ fn git_provider_error_message(error: git_ops::GitProviderError) -> String {
             "path is not inside a git repository".to_owned()
         }
         git_ops::GitProviderError::NoHead => "repository has no HEAD for this operation".to_owned(),
+        git_ops::GitProviderError::LocalChangesWouldBeOverwritten(paths) => {
+            format!(
+                "git pull would overwrite local changes: {}",
+                paths.join(", ")
+            )
+        }
         git_ops::GitProviderError::Unsupported(message)
         | git_ops::GitProviderError::Git(message)
         | git_ops::GitProviderError::Io(message) => message,

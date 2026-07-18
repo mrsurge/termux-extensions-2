@@ -437,95 +437,6 @@ function syncOpenDirsToBackend(): void {
   explorerDirectoryStateHelpers.syncOpenDirsToBackend();
 }
 
-async function restoreOpenDirectories(dirs: string[]): Promise<void> {
-  /**
-   * Restore open directories from backend on page load.
-   * Expands each directory in order, skipping any that don't exist.
-   */
-  if (!Array.isArray(dirs) || !dirs.length) {
-    openDirsInitialized = true;
-    return;
-  }
-
-  // Sort by depth (shortest paths first) to expand parents before children
-  const sorted = [...dirs].sort((a, b) => {
-    const depthA = (a.match(/\//g) || []).length;
-    const depthB = (b.match(/\//g) || []).length;
-    return depthA - depthB;
-  });
-
-  for (const rel of sorted) {
-    try {
-      await expandDirectoryIfExists(rel);
-    } catch (e) {
-      // Directory doesn't exist or failed to expand - skip it
-      console.warn(`[Explorer] Failed to restore open directory: ${rel}`, e);
-    }
-  }
-
-  openDirsInitialized = true;
-
-  // Sync cleaned list back to backend (removes any dirs that no longer exist)
-  scheduleOpenDirsSync();
-}
-
-async function expandDirectoryIfExists(rel: string): Promise<void> {
-  /**
-   * Expand a single directory if it exists in the tree.
-   * Unlike expandToPath, this only expands the target directory itself,
-   * assuming parent directories are already open.
-   */
-  if (!treeElement) {
-    treeElement = document.getElementById("fe-file-tree");
-  }
-  if (!treeElement || !rel) return;
-
-  // First, expand any parent directories needed
-  const parts = rel.split("/").filter(Boolean);
-  let currentRel = ".";
-
-  for (let i = 0; i < parts.length; i++) {
-    const segment = parts[i];
-    const nextRel = currentRel === "." ? segment : `${currentRel}/${segment}`;
-
-    let targetLi = treeElement.querySelector<HTMLLIElement>(
-      `li.fe-tree-node[data-kind="dir"][data-rel="${nextRel}"]`,
-    );
-
-    if (!targetLi) {
-      // Node not in DOM - need to request parent listing first
-      const parentLi = treeElement.querySelector<HTMLLIElement>(
-        `li.fe-tree-node[data-kind="dir"][data-rel="${currentRel}"]`,
-      );
-
-      if (parentLi && parentLi.dataset.open !== "true") {
-        parentLi.dataset.open = "true";
-        openDirectories.add(currentRel === "." ? "" : currentRel);
-        await _requestDirListAndWait(currentRel);
-      }
-
-      // Try again after parent expanded
-      targetLi = treeElement.querySelector<HTMLLIElement>(
-        `li.fe-tree-node[data-kind="dir"][data-rel="${nextRel}"]`,
-      );
-
-      if (!targetLi) {
-        // Directory doesn't exist - stop here
-        throw new Error(`Directory not found: ${nextRel}`);
-      }
-    }
-
-    // Expand this directory if not already open
-    if (targetLi.dataset.open !== "true") {
-      targetLi.dataset.open = "true";
-      openDirectories.add(nextRel);
-      await _requestDirListAndWait(nextRel);
-    }
-
-    currentRel = nextRel;
-  }
-}
-
 // --- Expand to file/directory ---
 
 // Pending directory list requests - maps rel -> { resolve, reject, timeout }
@@ -807,7 +718,6 @@ const explorerNotificationHandler = createExplorerNotificationHandler({
   renderExplorerTree,
   renderEntriesInto,
   basename,
-  restoreOpenDirectories,
   notifyDirListComplete: _notifyDirListComplete,
   expandToFile,
   expandToPath,
@@ -841,7 +751,6 @@ const explorerNotificationHandler = createExplorerNotificationHandler({
 const explorerRefreshController = createExplorerRefreshController({
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),
-  getOpenDirectories: () => openDirectories,
   setReconnectResyncPending: (next) => {
     explorerRuntimeState.setReconnectResyncPending(next);
   },
@@ -994,7 +903,6 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
     runActualSearchCase: (case_) =>
       explorerSearchOverlayController.runActualSearchBenchmarkCase(case_),
   });
-  notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
 }
 
 // --- Unified file open + jump helper ---

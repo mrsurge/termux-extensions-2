@@ -443,6 +443,15 @@ fn git_error(error: GitProviderError) -> PipeError {
             false,
             None,
         ),
+        GitProviderError::LocalChangesWouldBeOverwritten(paths) => PipeError::new(
+            "git.localChangesWouldBeOverwritten",
+            format!(
+                "git pull would overwrite local changes: {}",
+                paths.join(", ")
+            ),
+            false,
+            None,
+        ),
         GitProviderError::Unsupported(message) => {
             PipeError::new("git.unsupported", message, false, None)
         }

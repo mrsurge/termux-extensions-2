@@ -521,6 +521,7 @@ pub(crate) enum GitProviderError {
     InvalidPath(String),
     NotRepository,
     NoHead,
+    LocalChangesWouldBeOverwritten(Vec<String>),
     Unsupported(String),
     Git(String),
     Io(String),
@@ -2049,6 +2050,13 @@ fn ahead_behind(repo: &Repository) -> (usize, usize) {
 }
 
 fn fast_forward(repo: &Repository, branch: &str, target: Oid) -> Result<(), GitProviderError> {
+    let head_oid = repo.head()?.target().ok_or(GitProviderError::NoHead)?;
+    let changed_paths = changed_paths_between(repo, head_oid, target)?;
+    let conflicts = local_changes_overlapping(repo, &changed_paths);
+    if !conflicts.is_empty() {
+        return Err(GitProviderError::LocalChangesWouldBeOverwritten(conflicts));
+    }
+
     let refname = format!("refs/heads/{branch}");
     match repo.find_reference(&refname) {
         Ok(mut reference) => {
@@ -2059,10 +2067,57 @@ fn fast_forward(repo: &Repository, branch: &str, target: Oid) -> Result<(), GitP
         }
     }
     repo.set_head(&refname)?;
+    if changed_paths.is_empty() {
+        return Ok(());
+    }
     let mut checkout = CheckoutBuilder::new();
+    // libgit2 needs a forced checkout to materialize fast-forward updates, so
+    // scope it to paths already proven not to overlap local changes.
     checkout.force();
+    for path in changed_paths {
+        checkout.path(path.as_str());
+    }
     repo.checkout_head(Some(&mut checkout))?;
     Ok(())
+}
+
+fn changed_paths_between(
+    repo: &Repository,
+    local_oid: Oid,
+    target_oid: Oid,
+) -> Result<BTreeSet<String>, GitProviderError> {
+    let local_tree = repo.find_commit(local_oid)?.tree()?;
+    let target_tree = repo.find_commit(target_oid)?.tree()?;
+    let diff = repo.diff_tree_to_tree(Some(&local_tree), Some(&target_tree), None)?;
+    let mut paths = BTreeSet::new();
+    for delta in diff.deltas() {
+        if let Some(path) = delta.old_file().path() {
+            paths.insert(path_to_string(path));
+        }
+        if let Some(path) = delta.new_file().path() {
+            paths.insert(path_to_string(path));
+        }
+    }
+    Ok(paths)
+}
+
+fn local_changes_overlapping(repo: &Repository, candidate_paths: &BTreeSet<String>) -> Vec<String> {
+    if candidate_paths.is_empty() {
+        return Vec::new();
+    }
+    let status = collect_status_snapshot(repo, "normal");
+    let mut conflicts = BTreeSet::new();
+    for path in status
+        .staged
+        .iter()
+        .chain(status.unstaged.iter())
+        .chain(status.untracked.iter())
+    {
+        if candidate_paths.contains(path) {
+            conflicts.insert(path.clone());
+        }
+    }
+    conflicts.into_iter().collect()
 }
 
 fn commit_touches_path(
@@ -2536,6 +2591,112 @@ mod tests {
         assert_eq!(hunks.summary.line_byte_limit, Some(MAX_DIFF_LINE_BYTES));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn git_pull_fast_forward_updates_clean_worktree() {
+        let remote_root = test_root("pull-clean-remote");
+        let remote_repo = Repository::init(&remote_root).expect("init remote repo");
+        fs::write(remote_root.join("tracked.txt"), "base\n").expect("write base");
+        commit_all(&remote_repo, "initial commit");
+        let branch = current_branch(&remote_repo).expect("remote branch");
+
+        let local_root = test_root("pull-clean-local");
+        let _local_repo = RepoBuilder::new()
+            .clone(&path_to_string(&remote_root), &local_root)
+            .expect("clone local");
+
+        fs::write(remote_root.join("tracked.txt"), "remote\n").expect("write remote");
+        commit_all(&remote_repo, "remote update");
+
+        let mut request = provider_request(&local_root);
+        request.branch = Some(branch);
+        let result = git_pull(request).expect("pull");
+
+        assert_eq!(result.dto, "GitMutationResult");
+        assert_eq!(result.operation, "pull");
+        assert_eq!(
+            fs::read_to_string(local_root.join("tracked.txt")).unwrap(),
+            "remote\n"
+        );
+
+        let _ = fs::remove_dir_all(remote_root);
+        let _ = fs::remove_dir_all(local_root);
+    }
+
+    #[test]
+    fn git_pull_rejects_fast_forward_that_would_overwrite_local_tracked_changes() {
+        let remote_root = test_root("pull-dirty-remote");
+        let remote_repo = Repository::init(&remote_root).expect("init remote repo");
+        fs::write(remote_root.join("tracked.txt"), "base\n").expect("write base");
+        commit_all(&remote_repo, "initial commit");
+        let branch = current_branch(&remote_repo).expect("remote branch");
+
+        let local_root = test_root("pull-dirty-local");
+        let local_repo = RepoBuilder::new()
+            .clone(&path_to_string(&remote_root), &local_root)
+            .expect("clone local");
+        let head_before = local_repo.head().unwrap().target().unwrap();
+
+        fs::write(remote_root.join("tracked.txt"), "remote\n").expect("write remote");
+        commit_all(&remote_repo, "remote update");
+        fs::write(local_root.join("tracked.txt"), "local\n").expect("write local change");
+
+        let mut request = provider_request(&local_root);
+        request.branch = Some(branch);
+        let result = git_pull(request);
+
+        match result {
+            Err(GitProviderError::LocalChangesWouldBeOverwritten(paths)) => {
+                assert_eq!(paths, vec!["tracked.txt".to_owned()]);
+            }
+            other => panic!("expected local-change protection, got {other:?}"),
+        }
+        let reopened = Repository::open(&local_root).expect("reopen local");
+        assert_eq!(reopened.head().unwrap().target().unwrap(), head_before);
+        assert_eq!(
+            fs::read_to_string(local_root.join("tracked.txt")).unwrap(),
+            "local\n"
+        );
+
+        let _ = fs::remove_dir_all(remote_root);
+        let _ = fs::remove_dir_all(local_root);
+    }
+
+    #[test]
+    fn git_pull_fast_forward_preserves_unrelated_local_tracked_changes() {
+        let remote_root = test_root("pull-unrelated-remote");
+        let remote_repo = Repository::init(&remote_root).expect("init remote repo");
+        fs::write(remote_root.join("pulled.txt"), "base\n").expect("write pulled base");
+        fs::write(remote_root.join("local.txt"), "base\n").expect("write local base");
+        commit_all(&remote_repo, "initial commit");
+        let branch = current_branch(&remote_repo).expect("remote branch");
+
+        let local_root = test_root("pull-unrelated-local");
+        let _local_repo = RepoBuilder::new()
+            .clone(&path_to_string(&remote_root), &local_root)
+            .expect("clone local");
+
+        fs::write(remote_root.join("pulled.txt"), "remote\n").expect("write remote update");
+        commit_all(&remote_repo, "remote update");
+        fs::write(local_root.join("local.txt"), "local\n").expect("write unrelated local change");
+
+        let mut request = provider_request(&local_root);
+        request.branch = Some(branch);
+        let result = git_pull(request).expect("pull");
+
+        assert_eq!(result.operation, "pull");
+        assert_eq!(
+            fs::read_to_string(local_root.join("pulled.txt")).unwrap(),
+            "remote\n"
+        );
+        assert_eq!(
+            fs::read_to_string(local_root.join("local.txt")).unwrap(),
+            "local\n"
+        );
+
+        let _ = fs::remove_dir_all(remote_root);
+        let _ = fs::remove_dir_all(local_root);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 # pyright: strict
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Callable, cast
@@ -12,8 +13,9 @@ from ..contracts.session import (
 )
 from ..context import ExplorerSessionHandlerContext
 from ..services import file_ops as _file_ops
-from ..services.render_state import build_directory_listing
+from ..services.render_state import build_directory_listing, load_pruned_open_directories
 from ..services.state_facts import publish_explorer_directories_changed
+from ...worker_services.event_bus import current_project_generation
 from ...project_sidecar import ProjectSidecar
 
 logger = logging.getLogger(__name__)
@@ -41,14 +43,25 @@ async def handle_explorer_refresh(
     del params, msg_id
 
     mark_git_cache_dirty(context.project_root)
-    await context.broadcast_git_status()
-    await context.broadcast_review_state()
+    open_directories = await asyncio.to_thread(
+        load_pruned_open_directories,
+        context.project_root,
+    )
     await publish_explorer_directories_changed(
         context.project_root,
-        ["."],
+        [".", *open_directories],
         reason="manual_refresh",
         source="explorer_session:refresh",
     )
+    from ..services.runtime_notifications import schedule_git_status_update
+
+    schedule_git_status_update(
+        context.project_root,
+        project_generation=current_project_generation(context.project_root),
+        source="explorer_session:refresh",
+        delay=0.0,
+    )
+    await context.broadcast_review_state()
 
 
 async def handle_set_open_dirs(

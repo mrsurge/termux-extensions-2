@@ -47,7 +47,6 @@ interface ExplorerNotificationHandlerDeps {
     parentRel?: string | null,
   ): void;
   basename(path: string): string;
-  restoreOpenDirectories(dirs: string[]): Promise<void> | void;
   notifyDirListComplete(rel: string): void;
   expandToFile(rel: string): Promise<void>;
   expandToPath(rel: string): Promise<void>;
@@ -124,35 +123,6 @@ function coerceGitStatus(payload: JsonObject): ExplorerGitStatus {
   return status;
 }
 
-function stringList(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter(
-        (item): item is string => typeof item === "string" && item.length > 0,
-      )
-    : [];
-}
-
-function statusesFromGitStatus(payload: JsonObject): Record<string, string> {
-  const statuses: Record<string, string> = {};
-
-  function setStatus(rel: string, status: string): void {
-    const previous = statuses[rel];
-    if (
-      (previous === "staged" && status === "modified") ||
-      (previous === "modified" && status === "staged")
-    ) {
-      statuses[rel] = "staged_modified";
-      return;
-    }
-    statuses[rel] = status;
-  }
-
-  stringList(payload.staged).forEach((rel) => setStatus(rel, "staged"));
-  stringList(payload.unstaged).forEach((rel) => setStatus(rel, "modified"));
-  stringList(payload.untracked).forEach((rel) => setStatus(rel, "untracked"));
-  return statuses;
-}
-
 function applyProjectRootProjection(
   deps: ExplorerNotificationHandlerDeps,
   nextProjectPath: string | null,
@@ -174,10 +144,6 @@ function applyProjectRootProjection(
   deps.renderExplorerTree();
   deps.renderGitSummary();
   deps.setGitControlsEnabled(false, false);
-  if (deps.hasExplorerRpc()) {
-    deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: "." });
-    deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
-  }
   void deps.initDiffBaseFromBackend();
   return true;
 }
@@ -329,7 +295,12 @@ export function createExplorerNotificationHandler(
               (value): value is string => typeof value === "string",
             )
           : [];
-        void deps.restoreOpenDirectories(dirs);
+        const openDirectories = deps.getOpenDirectories();
+        openDirectories.clear();
+        dirs.forEach((dir) => {
+          if (dir) openDirectories.add(dir);
+        });
+        deps.setOpenDirsInitialized(true);
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.listUpdated: {
@@ -379,11 +350,6 @@ export function createExplorerNotificationHandler(
 
           if (deps.runtimeState.getReconnectResyncPending()) {
             deps.runtimeState.setReconnectResyncPending(false);
-            if (deps.getOpenDirectories().size && deps.hasExplorerRpc()) {
-              void deps.restoreOpenDirectories(
-                Array.from(deps.getOpenDirectories()),
-              );
-            }
           }
         } else {
           const dirLi = treeElement.querySelector<HTMLLIElement>(
@@ -441,9 +407,6 @@ export function createExplorerNotificationHandler(
               payload.entries ?? payload.nodes ?? [],
             );
           }
-        }
-        if (!deps.runtimeState.getGitStatus() && deps.hasExplorerRpc()) {
-          deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
         }
         break;
       }
@@ -516,9 +479,6 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.gitStatusUpdated: {
         console.log("[GIT_STATUS_DEBUG] Received:", payload);
         deps.runtimeState.setGitStatus(coerceGitStatus(payload));
-        deps.treeDecorations.applyGitDecorations({
-          statuses: statusesFromGitStatus(payload),
-        });
         deps.renderGitSummary();
         deps.setGitControlsEnabled(true, false);
         break;
@@ -565,7 +525,6 @@ export function createExplorerNotificationHandler(
               type === "git_clone") &&
             deps.hasExplorerRpc()
           ) {
-            deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
             deps.notifyExplorer(EXPLORER_RPC_METHODS.refresh, {});
           }
         } else if (status === "failed") {

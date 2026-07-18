@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -250,13 +251,49 @@ class GitJobCancelResult(TypedDict):
 JsonObject = dict[str, object]
 
 
+@dataclass
+class GitSnapshotCacheEntry:
+    snapshot: GitSnapshot
+    dirty: bool
+
+
+_SNAPSHOT_CACHE_LOCK = threading.RLock()
+_SNAPSHOT_CACHE: dict[str, GitSnapshotCacheEntry] = {}
+
+
 def _git_log(message: str) -> None:
     print(f"[worker_git_service] {message}", file=sys.stderr, flush=True)
 
 
 def mark_status_cache_dirty(project_root: Path | None = None) -> None:
-    """Compatibility hook: service.git owns fresh snapshot production."""
-    del project_root
+    """Prevent list hydration from projecting stale Git state."""
+    with _SNAPSHOT_CACHE_LOCK:
+        if project_root is None:
+            for entry in _SNAPSHOT_CACHE.values():
+                entry.dirty = True
+            return
+        key = _snapshot_cache_key(project_root)
+        cached = _SNAPSHOT_CACHE.get(key)
+        if cached is not None:
+            cached.dirty = True
+
+
+def get_cached_snapshot(project_root: Path) -> GitSnapshot | None:
+    """Return the last clean Git snapshot without calling service.git."""
+    key = _snapshot_cache_key(project_root)
+    with _SNAPSHOT_CACHE_LOCK:
+        cached = _SNAPSHOT_CACHE.get(key)
+        if cached is None or cached.dirty:
+            return None
+        return cached.snapshot
+
+
+def get_cached_statuses(project_root: Path) -> dict[str, str]:
+    """Return cached statuses for FS hydration, or no statuses when dirty/unknown."""
+    snapshot = get_cached_snapshot(project_root)
+    if snapshot is None:
+        return {}
+    return {path: status for path, status in snapshot["statuses"].items()}
 
 
 def get_status_snapshot(project_root: Path) -> dict[str, str]:
@@ -299,6 +336,8 @@ def get_snapshot(project_root: Path, *, project_generation: int | None = None) -
         origin_name="file_editor_cm6.git",
     )
     snapshot = _coerce_snapshot(data)
+    with _SNAPSHOT_CACHE_LOCK:
+        _SNAPSHOT_CACHE[root_str] = GitSnapshotCacheEntry(snapshot=snapshot, dirty=False)
     status_count = len(snapshot["statuses"])
     _git_log(f"snapshot.pipe ok root={root_str} repo={snapshot['isRepository']} statuses={status_count}")
     return snapshot
@@ -1109,6 +1148,10 @@ def _required_string(value: object, message: str) -> str:
     if isinstance(value, str) and value:
         return value
     raise RuntimeError(message)
+
+
+def _snapshot_cache_key(project_root: Path) -> str:
+    return str(project_root.expanduser().resolve(strict=False))
 
 
 def _normalized_paths(paths: Iterable[str]) -> list[str]:

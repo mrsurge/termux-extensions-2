@@ -68,11 +68,16 @@ async def build_directory_listing(rel: str) -> JsonObject:
     return await asyncio.to_thread(explorer_listing_from_fs_directory_listing, listing)
 
 
-async def build_bootstrap_snapshot(project_root: Path) -> ExplorerBootstrapSnapshot:
+async def build_bootstrap_snapshot(
+    project_root: Path,
+    *,
+    extra_open_directories: list[str] | None = None,
+) -> ExplorerBootstrapSnapshot:
     root_listing, open_directories = await asyncio.gather(
         build_directory_listing("."),
         asyncio.to_thread(load_pruned_open_directories, project_root),
     )
+    open_directories = _merge_open_directories(open_directories, extra_open_directories or [])
     open_directory_listings = await build_open_directory_listings(open_directories)
     return ExplorerBootstrapSnapshot(
         root_listing=root_listing,
@@ -142,7 +147,7 @@ async def emit_bootstrap_snapshot(
     await emit_personal("explorer.list.updated", snapshot.root_listing)
     await emit_personal(
         "explorer.openDirs.updated",
-        {"dirs": snapshot.open_directories},
+        {"dirs": snapshot.open_directories, "hydrate": "backend"},
     )
     for listing in snapshot.open_directory_listings:
         await emit_personal("explorer.list.updated", listing)
@@ -365,6 +370,7 @@ async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:
     if not project:
         return
     project_root = Path(project)
+    _file_ops.mark_git_cache_dirty(project_root)
     created = _abs_paths_to_rels(project, event_payload_list(event, "created_abs"))
     changed = _abs_paths_to_rels(project, event_payload_list(event, "changed_abs"))
     deleted = _abs_paths_to_rels(project, event_payload_list(event, "deleted_abs"))
@@ -389,8 +395,15 @@ async def _handle_workspace_files_changed_event(event: WorkerEvent) -> None:
             project_generation=event.get("project_generation"),
             source="explorer_render_state:WorkspaceFilesChanged",
             correlation_id=event.get("correlation_id"),
-            payload=cast(JsonObject, payload),
+            payload=cast(JsonObject, cast(object, payload)),
         )
+    )
+    from .runtime_notifications import schedule_git_status_update
+
+    schedule_git_status_update(
+        project,
+        project_generation=event.get("project_generation"),
+        source="explorer_render_state:WorkspaceFilesChanged",
     )
 
 
@@ -403,7 +416,7 @@ async def _handle_explorer_render_state_changed_event(event: WorkerEvent) -> Non
         await emit_project_explorer_rpc_notification(
             project,
             "explorer.openDirs.updated",
-            {"dirs": event_payload_list(event, "open_directories")},
+            {"dirs": event_payload_list(event, "open_directories"), "hydrate": "backend"},
         )
     for rel in event_payload_list(event, "directories"):
         try:
@@ -427,7 +440,7 @@ def _is_existing_project_directory(project_root: Path, rel: str) -> bool:
     try:
         root = project_root.expanduser().resolve(strict=False)
         target = (root / rel).resolve(strict=False)
-        target.relative_to(root)
+        _ = target.relative_to(root)
         return target.is_dir()
     except Exception:
         return False
@@ -438,6 +451,18 @@ def _sort_open_directories_for_replay(open_directories: list[str]) -> list[str]:
         [rel for rel in open_directories if rel],
         key=lambda rel: (rel.count("/"), rel),
     )
+
+
+def _merge_open_directories(base: list[str], extra: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for rel in [*base, *extra]:
+        normalized = rel.strip().strip("/")
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        merged.append(normalized)
+    return _sort_open_directories_for_replay(merged)
 
 
 def _abs_paths_to_rels(project_root: str, abs_paths: list[str]) -> list[str]:

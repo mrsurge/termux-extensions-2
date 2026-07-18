@@ -103,77 +103,8 @@ export function createExplorerTreeDecorationsController(
     if (!root) return;
 
     root.querySelectorAll<HTMLLIElement>('li.fe-tree-node[data-kind="dir"]').forEach((li) => {
-      li.classList.remove(
-        'fe-dir-has-modified',
-        'fe-dir-has-staged',
-        'fe-dir-has-untracked',
-        'fe-dir-has-conflict',
-      );
       if (!li.dataset.hasDraft) {
         li.classList.remove('fe-dir-has-draft');
-      }
-    });
-
-    const nodesWithStatus = root.querySelectorAll<HTMLLIElement>(
-      'li.fe-tree-node[data-git-status], li.fe-tree-node[data-git-flags]',
-    );
-    nodesWithStatus.forEach((node) => {
-      const statusesToPropagate = new Set<string>();
-      const status = node.dataset.gitStatus || '';
-      if (status && status !== 'clean') {
-        statusesToPropagate.add(status);
-      }
-
-      const flagsStr = node.dataset.gitFlags || '';
-      if (flagsStr) {
-        flagsStr.split(',').forEach((flag) => {
-          if (flag) {
-            statusesToPropagate.add(flag);
-          }
-        });
-      }
-
-      if (statusesToPropagate.size === 0) {
-        return;
-      }
-
-      let current =
-        node.dataset.kind === 'dir'
-          ? node
-          : node.parentElement?.closest<HTMLLIElement>(
-              'li.fe-tree-node[data-kind="dir"]',
-            ) || null;
-
-      while (current) {
-        const dirNode = current;
-        statusesToPropagate.forEach((value) => {
-          if (
-            value === 'modified' ||
-            value === 'staged_modified' ||
-            value === 'deleted' ||
-            value === 'renamed'
-          ) {
-            dirNode.classList.add('fe-dir-has-modified');
-          }
-          if (value === 'untracked') {
-            dirNode.classList.add('fe-dir-has-untracked');
-          }
-          if (
-            value === 'staged' ||
-            value === 'staged_modified' ||
-            value === 'added'
-          ) {
-            dirNode.classList.add('fe-dir-has-staged');
-          }
-          if (value === 'conflict') {
-            dirNode.classList.add('fe-dir-has-conflict');
-          }
-        });
-
-        current =
-          dirNode.parentElement?.closest<HTMLLIElement>(
-            'li.fe-tree-node[data-kind="dir"]',
-          ) || null;
       }
     });
 
@@ -347,21 +278,10 @@ export function createExplorerTreeDecorationsController(
   }
 
   function applyGitDecorations(payload: unknown): void {
-    const statuses =
-      isRecord(payload) && isRecord(payload.statuses) ? payload.statuses : {};
+    const nodes =
+      isRecord(payload) && isRecord(payload.nodes) ? payload.nodes : {};
     const root = getTreeRoot();
     if (!root) return;
-
-    const outlineStatuses = new Set([
-      'modified',
-      'staged',
-      'staged_modified',
-      'added',
-      'deleted',
-      'renamed',
-      'conflict',
-    ]);
-    const stagedStatuses = new Set(['staged', 'staged_modified', 'added']);
 
     root.querySelectorAll<HTMLLIElement>('li.fe-tree-node').forEach((li) => {
       const classesToRemove: string[] = [];
@@ -380,74 +300,31 @@ export function createExplorerTreeDecorationsController(
       delete li.dataset.gitFlags;
     });
 
-    Object.entries(statuses).forEach(([rel, status]) => {
-      if (typeof status !== 'string' || status === 'clean') return;
-      const li = queryNodeByRel(root, 'file', rel);
+    Object.entries(nodes).forEach(([rel, decoration]) => {
+      if (!isRecord(decoration)) return;
+      const status =
+        typeof decoration.gitStatus === 'string' ? decoration.gitStatus : '';
+      const flags = Array.isArray(decoration.gitFlags)
+        ? decoration.gitFlags.filter(
+            (flag): flag is string =>
+              typeof flag === 'string' && flag.length > 0,
+          )
+        : [];
+      const li =
+        rel === '.'
+          ? root.querySelector<HTMLLIElement>('li.fe-tree-node.fe-tree-root')
+          : queryNodeByRel(root, 'file', rel) || queryNodeByRel(root, 'dir', rel);
       if (!li) return;
-      li.dataset.gitStatus = status;
-      li.classList.add(`fe-git-${status}`);
-    });
 
-    const modifiedDirs = new Set<string>();
-    const stagedDirs = new Set<string>();
-    const untrackedDirs = new Set<string>();
-
-    Object.entries(statuses).forEach(([rel, status]) => {
-      if (typeof status !== 'string' || status === 'clean') return;
-      const parts = rel.split('/');
-      for (let i = 1; i < parts.length; i += 1) {
-        const dirRel = parts.slice(0, i).join('/');
-        if (outlineStatuses.has(status)) {
-          modifiedDirs.add(dirRel);
-        }
-        if (stagedStatuses.has(status)) {
-          stagedDirs.add(dirRel);
-        }
-        if (status === 'untracked') {
-          untrackedDirs.add(dirRel);
-        }
+      if (status && status !== 'clean') {
+        li.dataset.gitStatus = status;
+        li.classList.add(`fe-git-${status}`);
+      }
+      if (flags.length > 0) {
+        li.dataset.gitFlags = flags.join(',');
+        flags.forEach((flag) => li.classList.add(`fe-dir-has-${flag}`));
       }
     });
-
-    new Set([...modifiedDirs, ...stagedDirs, ...untrackedDirs]).forEach(
-      (dirRel) => {
-        const li = queryNodeByRel(root, 'dir', dirRel);
-        if (!li) return;
-
-        if (modifiedDirs.has(dirRel)) {
-          li.classList.add('fe-dir-has-modified');
-          li.classList.add('fe-git-modified');
-          li.dataset.gitStatus = 'modified';
-        }
-        if (stagedDirs.has(dirRel)) {
-          li.classList.add('fe-dir-has-staged');
-        }
-        if (untrackedDirs.has(dirRel)) {
-          li.classList.add('fe-dir-has-untracked');
-          if (!modifiedDirs.has(dirRel)) {
-            li.classList.add('fe-git-untracked');
-            li.dataset.gitStatus = li.dataset.gitStatus || 'untracked';
-          }
-        }
-      },
-    );
-
-    const rootLi = root.querySelector<HTMLLIElement>('li.fe-tree-node.fe-tree-root');
-    if (rootLi) {
-      if (modifiedDirs.size > 0) {
-        rootLi.classList.add('fe-git-modified');
-        rootLi.classList.add('fe-dir-has-modified');
-      }
-      if (stagedDirs.size > 0) {
-        rootLi.classList.add('fe-dir-has-staged');
-      }
-      if (untrackedDirs.size > 0) {
-        rootLi.classList.add('fe-dir-has-untracked');
-        if (modifiedDirs.size === 0) {
-          rootLi.classList.add('fe-git-untracked');
-        }
-      }
-    }
 
     applyAggregatedDiagnosticFlags();
   }

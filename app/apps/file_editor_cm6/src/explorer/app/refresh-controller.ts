@@ -7,7 +7,6 @@ import type { JsonObject } from '../../rpc/transport.ts';
 interface ExplorerRefreshControllerDeps {
   hasExplorerRpc(): boolean;
   notifyExplorer(method: ExplorerRpcMethod, payload: JsonObject): void;
-  getOpenDirectories(): Set<string>;
   setReconnectResyncPending(next: boolean): void;
 }
 
@@ -16,20 +15,14 @@ export function createExplorerRefreshController(
 ) {
   function refreshRootAndOpenDirectories(): void {
     if (!deps.hasExplorerRpc()) return;
-    deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
-    deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
-    deps.getOpenDirectories().forEach((rel) => {
-      if (!rel || rel === '.') return;
-      deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel });
-    });
+    deps.notifyExplorer(EXPLORER_RPC_METHODS.refresh, {});
   }
 
   function handleReconnect(): void {
     if (!deps.hasExplorerRpc()) return;
     deps.setReconnectResyncPending(true);
     try {
-      deps.notifyExplorer(EXPLORER_RPC_METHODS.list, { rel: '.' });
-      deps.notifyExplorer(EXPLORER_RPC_METHODS.gitStatusGet, {});
+      deps.notifyExplorer(EXPLORER_RPC_METHODS.refresh, {});
     } catch {
       // Reconnect recovery should not throw into the host caller.
     }
