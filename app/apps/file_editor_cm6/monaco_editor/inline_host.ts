@@ -35,6 +35,9 @@ const INLINE_EDITOR_MARKUP = `
   </div>
 `;
 const INLINE_EDITOR_HOST_STYLE = `
+#editor-frame .monaco-editor .find-widget {
+  z-index: 300;
+}
 #editor-frame .monaco-editor .te2-draft-add-line,
 #editor-frame .monaco-editor .te2-draft-add-line.line-insert,
 #editor-frame .monaco-editor .line-insert.te2-draft-add-line,

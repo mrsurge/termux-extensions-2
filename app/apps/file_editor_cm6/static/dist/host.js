@@ -1616,6 +1616,9 @@ Attempt to raise the limit now?`:"File watcher limit reached. Attempt to raise n
     <div id="fh-monaco"></div>
   </div>
 `,Xmn=`
+#editor-frame .monaco-editor .find-widget {
+  z-index: 300;
+}
 #editor-frame .monaco-editor .te2-draft-add-line,
 #editor-frame .monaco-editor .te2-draft-add-line.line-insert,
 #editor-frame .monaco-editor .line-insert.te2-draft-add-line,
