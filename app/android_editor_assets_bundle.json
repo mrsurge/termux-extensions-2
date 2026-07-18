@@ -34,6 +34,11 @@
     },
     {
       "kind": "tree",
+      "src": "app/static/vendor/codemirror.1",
+      "dest": "static/vendor/codemirror.1"
+    },
+    {
+      "kind": "tree",
       "src": "app/static/vendor/xterm",
       "dest": "static/vendor/xterm"
     },

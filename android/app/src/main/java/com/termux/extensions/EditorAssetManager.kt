@@ -31,6 +31,7 @@ internal val REQUIRED_OTA_ASSET_FILES = listOf(
     "android-shell/shell.css",
     "android-shell/extensions/apps.js",
     "android-shell/extensions/registry.js",
+    "static/vendor/codemirror.1/codemirror.bundle.js",
 )
 
 internal fun findMissingRequiredOtaAsset(root: File): String? =

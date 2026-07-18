@@ -225,6 +225,40 @@ function editorMeasurementLooksValid(view: Cm6EditorView): boolean {
   );
 }
 
+async function waitForValidEditorMeasurement(
+  view: Cm6EditorView,
+  shouldStop: () => boolean,
+): Promise<boolean> {
+  const measurableView = view as unknown as { requestMeasure?: () => void };
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (shouldStop()) return false;
+    measurableView.requestMeasure?.();
+    await nextAnimationFrame();
+    if (shouldStop()) return false;
+    if (editorMeasurementLooksValid(view)) return true;
+  }
+  return false;
+}
+
+function editorMeasurementSnapshot(view: Cm6EditorView): UnknownRecord {
+  const candidate = view as unknown as {
+    viewState?: {
+      visibleTop?: unknown;
+      visibleBottom?: unknown;
+      heightMap?: { height?: unknown };
+      heightOracle?: { textHeight?: unknown; charWidth?: unknown };
+    };
+  };
+  const viewState = candidate.viewState;
+  return {
+    visibleTop: viewState?.visibleTop,
+    visibleBottom: viewState?.visibleBottom,
+    height: viewState?.heightMap?.height,
+    textHeight: viewState?.heightOracle?.textHeight,
+    charWidth: viewState?.heightOracle?.charWidth,
+  };
+}
+
 function dynamicImport(specifier: string): Promise<unknown> {
   const importer = new Function("specifier", "return import(specifier)") as (
     specifier: string,
@@ -705,11 +739,16 @@ export function createJsonTextmateField(
         }),
         parent: host,
       });
-      await nextAnimationFrame();
+      const measurementsSettled = await waitForValidEditorMeasurement(
+        view,
+        () => destroyed,
+      );
       if (destroyed || !view) return;
-      (view as unknown as { requestMeasure?: () => void }).requestMeasure?.();
-      await nextAnimationFrame();
-      if (!editorMeasurementLooksValid(view)) {
+      if (!measurementsSettled) {
+        console.warn(
+          "[cm6-json-textmate] falling back after unstable editor measurement",
+          editorMeasurementSnapshot(view),
+        );
         view.destroy();
         view = null;
         host.classList.remove("cm6-json-textmate");

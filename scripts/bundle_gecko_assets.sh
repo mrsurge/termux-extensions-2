@@ -68,7 +68,7 @@ done
 # ===================================================================
 echo "[2/8] Selected vendor libs..."
 
-for vdir in codicons seti-icons es-module-shims xterm ws; do
+for vdir in codicons seti-icons es-module-shims codemirror.1 xterm ws; do
     [ -d "$APP_DIR/static/vendor/$vdir" ] && copy_tree "$APP_DIR/static/vendor/$vdir" "$DEST/static/vendor/$vdir"
 done
 

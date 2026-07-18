@@ -34,4 +34,23 @@ class EditorAssetVersionTest {
             root.deleteRecursively()
         }
     }
+
+    @Test
+    fun rejectsAnOtaAssetTreeWithoutCodeMirror() {
+        val root = Files.createTempDirectory("te2-editor-assets-cm6").toFile()
+        try {
+            for (relativePath in REQUIRED_OTA_ASSET_FILES) {
+                File(root, relativePath).apply {
+                    parentFile?.mkdirs()
+                    writeText("test")
+                }
+            }
+
+            val codeMirrorPath = "static/vendor/codemirror.1/codemirror.bundle.js"
+            assertTrue(File(root, codeMirrorPath).delete())
+            assertEquals(codeMirrorPath, findMissingRequiredOtaAsset(root))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }

@@ -16,6 +16,7 @@ const LOCAL_PREFIXES = [
   "/static/vendor/codicons/",
   "/static/vendor/seti-icons/",
   "/static/vendor/es-module-shims/",
+  "/static/vendor/codemirror.1/",
   "/static/vendor/xterm/",
   "/static/vendor/ws/",
   "/static/fonts/",
