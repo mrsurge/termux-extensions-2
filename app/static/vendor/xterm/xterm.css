@@ -76,6 +76,17 @@
     resize: none;
 }
 
+/* Android IMEs keep their own cumulative text transaction off the visual cursor. */
+.xterm .xterm-helper-textarea.xterm-android-ime-textarea {
+    position: fixed !important;
+    left: -10000px !important;
+    top: 0 !important;
+    width: 1px !important;
+    height: 1px !important;
+    line-height: 1px !important;
+    pointer-events: none;
+}
+
 .xterm .composition-view {
     /* TODO: Composition position got messed up somewhere */
     background: #000;
@@ -88,6 +99,10 @@
 
 .xterm .composition-view.active {
     display: block;
+}
+
+.xterm .composition-view.xterm-android-ime-composition {
+    display: none !important;
 }
 
 .xterm .xterm-viewport {
