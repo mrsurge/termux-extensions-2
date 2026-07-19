@@ -1,9 +1,10 @@
 :root {
-  --monaco-editor_touch-selection_z-index: 100000;
+  /* Above Monaco content, but below Code TE2's lowest drawer layer at 50. */
+  --monaco-editor_touch-selection_z-index: 40;
   --monaco-editor_touch-selector_color: #1E90FF;
   --monaco-editor_touch-selector_size: 1.2rem;
 
-  --monaco-editor_touch-selector-menu_z-index: 100001;
+  --monaco-editor_touch-selector-menu_z-index: 41;
   --monaco-editor_touch-selector-menu_bg-color: #f7f7f7;
   --monaco-editor_touch-selector-menu_height: 2.4rem;
   --monaco-editor_touch-selector-menu_border-color: #ccc;
@@ -135,4 +136,3 @@ html.hc-light, html.hc-light body {
   height: 1.2rem;
   margin-top: calc((var(--monaco-editor_touch-selector-menu_height) - 1.2rem) / 2);
 }
-
