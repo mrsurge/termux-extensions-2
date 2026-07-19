@@ -39,6 +39,8 @@ html.hc-light, html.hc-light body {
 .monaco-editor-touch-selections,
 .monaco-editor-touch-selections > .selector > .text-cursor,
 .monaco-editor-touch-selections > .selector > .bottom-cursor,
+.monaco-editor-touch-selector-menu-stack,
+.monaco-editor-touch-selector-menu-stack > .selection-adjustment-row,
 .monaco-editor-touch-selector-menu,
 .monaco-editor-touch-selector-menu > .menu-item {
   box-sizing: border-box;
@@ -95,16 +97,43 @@ html.hc-light, html.hc-light body {
   background: transparent;
 }
 
-.monaco-editor-touch-selector-menu {
+.monaco-editor-touch-selector-menu-stack {
   position: absolute;
   top: 0;
   left: 0;
   display: none;
   max-width: 90vw;
-  width: fit-content;
-  overflow-x: auto;
-  overflow-y: hidden;
+  width: max-content;
   z-index: var(--monaco-editor_touch-selector-menu_z-index);
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.monaco-editor-touch-selector-menu-stack.show {
+  display: flex;
+}
+
+.monaco-editor-touch-selector-menu-stack > .selection-adjustment-row {
+  display: none;
+  width: 100%;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.monaco-editor-touch-selector-menu-stack.touch-mode > .selection-adjustment-row {
+  display: flex;
+  margin-bottom: -1px;
+}
+
+.monaco-editor-touch-selector-menu {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  max-width: 90vw;
+  width: fit-content;
+  overflow: hidden;
   background: var(--monaco-editor_touch-selector-menu_bg-color);
   height: var(--monaco-editor_touch-selector-menu_height);
   line-height: var(--monaco-editor_touch-selector-menu_height);
@@ -114,8 +143,9 @@ html.hc-light, html.hc-light body {
   border-radius: calc(var(--monaco-editor_touch-selector-menu_height) / 2);
 }
 
-.monaco-editor-touch-selector-menu.show {
-  display: flex;
+.monaco-editor-touch-selector-menu.main-menu {
+  overflow-x: auto;
+  overflow-y: hidden;
   gap: 0.4rem;
 }
 

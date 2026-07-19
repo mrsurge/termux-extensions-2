@@ -6,7 +6,37 @@
 <link rel="stylesheet" href="/apps/file_editor_cm6/static/dist/explorer.css" />
 <link rel="stylesheet" href="/apps/file_editor_cm6/static/dist/host.css" />
 <link rel="stylesheet" href="/static/vendor/codicons/codicon.css" />
+<link rel="preload" href="/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
 <style>
+  @font-face {
+    font-family: 'JetBrains Mono Nerd';
+    src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Regular.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'JetBrains Mono Nerd';
+    src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Italic.woff2') format('woff2');
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'JetBrains Mono Nerd';
+    src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-Bold.woff2') format('woff2');
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'JetBrains Mono Nerd';
+    src: url('/static/fonts/jetbrains/webfonts/JetBrainsMono-BoldItalic.woff2') format('woff2');
+    font-style: italic;
+    font-weight: 700;
+    font-display: swap;
+  }
+
   :root {
     --fg: var(--foreground, #e5e7eb);
     --bg: var(--background, #2e323cff);

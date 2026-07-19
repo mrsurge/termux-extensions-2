@@ -71,7 +71,7 @@ export function buildMonacoOptionsFromPrefsState(
     }
   } catch (_) {}
 
-  let fontFamily = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+  let fontFamily = "'JetBrains Mono Nerd', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
   try {
     if (typeof editorPrefs.fontFamily === 'string' && editorPrefs.fontFamily.trim()) {
       fontFamily = editorPrefs.fontFamily.trim();
@@ -109,5 +109,6 @@ export function buildMonacoOptionsFromPrefsState(
     tabCompletion: autocompletion ? 'on' : 'off',
     fontSize,
     fontFamily,
+    fontLigatures: true,
   };
 }
