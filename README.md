@@ -1,6 +1,6 @@
 # Termux Extensions 2 
 
-> It won't change you into a professional programmer... but it'll make you feel like one.
+> It won't make you a professional programmer... but it'll make you feel like one.
 ---
 
 TE2 is a local development workspace that runs the same project environment on
