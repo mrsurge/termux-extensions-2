@@ -149,10 +149,27 @@ class MainActivity : AppCompatActivity() {
             effectivePort(uri) == effectivePort(frameworkUri)
     }
 
+    private fun createClipboardSelectionActionDelegate() =
+        object : GeckoSession.SelectionActionDelegate {
+            override fun onShowClipboardPermissionRequest(
+                session: GeckoSession,
+                permission: GeckoSession.SelectionActionDelegate.ClipboardPermission,
+            ): GeckoResult<AllowOrDeny> {
+                val requestUri = Uri.parse(permission.uri)
+                val allowed = permission.type ==
+                    GeckoSession.SelectionActionDelegate.PERMISSION_CLIPBOARD_READ &&
+                    isFrameworkOrigin(requestUri)
+                return GeckoResult.fromValue(
+                    if (allowed) AllowOrDeny.ALLOW else AllowOrDeny.DENY,
+                )
+            }
+        }
+
     private fun createGeckoSession(): GeckoSession {
         return GeckoSession(
             GeckoSessionSettings.Builder().usePrivateMode(false).build()
         ).apply {
+            selectionActionDelegate = createClipboardSelectionActionDelegate()
             historyDelegate = object : GeckoSession.HistoryDelegate {
                 override fun onHistoryStateChange(
                     session: GeckoSession,
@@ -597,6 +614,7 @@ class MainActivity : AppCompatActivity() {
         geckoSession = GeckoSession(
             GeckoSessionSettings.Builder().usePrivateMode(false).build()
         ).apply {
+            selectionActionDelegate = createClipboardSelectionActionDelegate()
             historyDelegate = object : GeckoSession.HistoryDelegate {
                 override fun onHistoryStateChange(
                     session: GeckoSession,
@@ -876,7 +894,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        runtime = GeckoRuntimeProvider.get(applicationContext)
+        runtime = GeckoRuntimeProvider.get(
+            applicationContext,
+            androidSettingsStore.load().frameworkHost,
+        )
 
         // A blank open session starts Gecko's extension process. Restore and
         // navigation remain locked until the local static route is confirmed.

@@ -1,10 +1,10 @@
 :root {
-  /* Above Monaco content, but below Code TE2's lowest drawer layer at 50. */
+  /* Handles stay with Monaco content; the floating menu must clear host chrome. */
   --monaco-editor_touch-selection_z-index: 40;
   --monaco-editor_touch-selector_color: #1E90FF;
   --monaco-editor_touch-selector_size: 1.2rem;
 
-  --monaco-editor_touch-selector-menu_z-index: 41;
+  --monaco-editor_touch-selector-menu_z-index: 350;
   --monaco-editor_touch-selector-menu_bg-color: #f7f7f7;
   --monaco-editor_touch-selector-menu_height: 2.4rem;
   --monaco-editor_touch-selector-menu_border-color: #ccc;
@@ -116,10 +116,9 @@ html.hc-light, html.hc-light body {
 
 .monaco-editor-touch-selector-menu-stack > .selection-adjustment-row {
   display: none;
-  width: 100%;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 0.65rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
 }
 
 .monaco-editor-touch-selector-menu-stack.touch-mode > .selection-adjustment-row {
@@ -150,6 +149,9 @@ html.hc-light, html.hc-light body {
 }
 
 .monaco-editor-touch-selector-menu > .menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   height: 100%;
   white-space: nowrap;
   font-size: 0.95rem;
@@ -158,11 +160,10 @@ html.hc-light, html.hc-light body {
 }
 
 .monaco-editor-touch-selector-menu > .menu-item > svg.icon {
-  display: inline-block;
+  display: block;
   user-select: none;
-  vertical-align: top;
   stroke: var(--monaco-editor_touch-selector-menu_icon-color);
   stroke-width: 1.8;
   height: 1.2rem;
-  margin-top: calc((var(--monaco-editor_touch-selector-menu_height) - 1.2rem) / 2);
+  margin: 0;
 }
