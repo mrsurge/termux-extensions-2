@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Desktop Settings</title>
+  <link rel="stylesheet" href="./shell.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="title-row">
+      <a class="back-link" href="./index.html">Back</a>
+      <h1>Settings</h1>
+    </div>
+    <div id="settings-status" class="status-line" data-state="loading">Loading local settings</div>
+  </header>
+
+  <main class="settings-page">
+    <section class="settings-section">
+      <header class="section-header">
+        <h2>Framework Connection</h2>
+        <button id="test-framework" class="secondary-button" type="button">Test</button>
+      </header>
+      <div class="field-grid">
+        <label class="field" for="framework-host">
+          <span>Framework host</span>
+          <input id="framework-host" type="text" inputmode="url" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="field field-port" for="framework-port">
+          <span>Port</span>
+          <input id="framework-port" type="number" inputmode="numeric" min="1" max="65535">
+        </label>
+      </div>
+      <div class="section-actions">
+        <button id="save-settings" class="primary-button" type="button">Save</button>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <header class="section-header">
+        <div>
+          <h2>Desktop Assets</h2>
+          <div id="asset-status" class="status-line" data-state="loading">Checking local assets</div>
+        </div>
+        <button id="update-assets" class="secondary-button" type="button">Update</button>
+      </header>
+      <dl class="asset-details">
+        <div>
+          <dt>Installed version</dt>
+          <dd id="asset-version">None</dd>
+        </div>
+        <div>
+          <dt>Interception</dt>
+          <dd id="asset-interceptor">Checking</dd>
+        </div>
+        <div>
+          <dt>Data directory</dt>
+          <dd id="asset-root">Unknown</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="settings-section framework-shells-section">
+      <header class="section-header">
+        <div>
+          <h2>Framework Shells</h2>
+          <div id="fws-status" class="status-line" data-state="loading">Checking availability</div>
+        </div>
+        <button id="refresh-fws" class="secondary-button" type="button">Refresh</button>
+      </header>
+      <iframe id="fws-frame" title="Framework Shells" hidden></iframe>
+      <div id="fws-unavailable" class="empty-state" hidden>Framework Shells is unavailable.</div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./settings.js"></script>
+</body>
+</html>

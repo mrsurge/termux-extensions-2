@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>TE2 Apps</title>
+  <link rel="stylesheet" href="./shell.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Applications</h1>
+      <div id="framework-status" class="status-line" data-state="loading">Checking framework</div>
+    </div>
+    <button id="refresh-apps" class="command-button" type="button">Refresh</button>
+  </header>
+
+  <main id="launcher-root" class="launcher-root" aria-live="polite"></main>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="./launcher.js"></script>
+</body>
+</html>

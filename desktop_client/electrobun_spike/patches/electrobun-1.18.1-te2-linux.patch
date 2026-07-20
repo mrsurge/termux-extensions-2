@@ -1,0 +1,635 @@
+diff --git a/package/src/browser/webviewtag.ts b/package/src/browser/webviewtag.ts
+index 22ca638..b47b15d 100644
+--- a/package/src/browser/webviewtag.ts
++++ b/package/src/browser/webviewtag.ts
+@@ -43,6 +43,10 @@ interface WebviewTagElement extends HTMLElement {
+ 	goBack(): void;
+ 	goForward(): void;
+ 	reload(): void;
++	reloadIgnoringCache(): void;
++	setPageZoom(zoomLevel: number): void;
++	getPageZoom(): Promise<number>;
++	setAssetRedirectRules(rules: string): void;
+ 	loadURL(url: string): void;
+ 	loadHTML(html: string): void;
+ 
+diff --git a/package/src/bun/core/BrowserView.ts b/package/src/bun/core/BrowserView.ts
+index 815be82..5f5ac82 100644
+--- a/package/src/bun/core/BrowserView.ts
++++ b/package/src/bun/core/BrowserView.ts
+@@ -240,6 +240,14 @@ export class BrowserView<T extends RPCWithTransport = RPCWithTransport> {
+ 		}
+ 	}
+ 
++	reloadIgnoringCache() {
++		native!.symbols.webviewReloadIgnoringCache(this.ptr);
++	}
++
++	setAssetRedirectRules(rules: string) {
++		native!.symbols.webviewSetAssetRedirectRules(this.ptr, toCString(rules));
++	}
++
+ 	setNavigationRules(rules: string[]) {
+ 		this.navigationRules = JSON.stringify(rules);
+ 		const rulesJson = JSON.stringify(rules);
+@@ -277,7 +285,7 @@ export class BrowserView<T extends RPCWithTransport = RPCWithTransport> {
+ 	}
+ 
+ 	/**
+-	 * Set the page zoom level (WebKit only, similar to browser zoom).
++	 * Set the page zoom level (1.0 = 100%).
+ 	 * @param zoomLevel - The zoom level (1.0 = 100%, 1.5 = 150%, etc.)
+ 	 */
+ 	setPageZoom(zoomLevel: number) {
+diff --git a/package/src/bun/preload/webviewTag.ts b/package/src/bun/preload/webviewTag.ts
+index 15f664e..83c003a 100644
+--- a/package/src/bun/preload/webviewTag.ts
++++ b/package/src/bun/preload/webviewTag.ts
+@@ -208,6 +208,26 @@ export class ElectrobunWebviewTag extends HTMLElement {
+ 			send("webviewTagReload", { id: this.webviewId });
+ 	}
+ 
++	reloadIgnoringCache() {
++		if (this.webviewId !== null)
++			send("webviewTagReloadIgnoringCache", { id: this.webviewId });
++	}
++
++	setPageZoom(zoomLevel: number) {
++		if (this.webviewId !== null)
++			send("webviewTagSetPageZoom", { id: this.webviewId, zoomLevel });
++	}
++
++	async getPageZoom(): Promise<number> {
++		if (this.webviewId === null) return 1.0;
++		return (await request("webviewTagGetPageZoom", { id: this.webviewId })) as number;
++	}
++
++	setAssetRedirectRules(rules: string) {
++		if (this.webviewId !== null)
++			send("webviewTagSetAssetRedirectRules", { id: this.webviewId, rules });
++	}
++
+ 	goBack() {
+ 		if (this.webviewId !== null)
+ 			send("webviewTagGoBack", { id: this.webviewId });
+diff --git a/package/src/bun/proc/native.ts b/package/src/bun/proc/native.ts
+index f0f6c25..c14e596 100644
+--- a/package/src/bun/proc/native.ts
++++ b/package/src/bun/proc/native.ts
+@@ -309,6 +309,14 @@ export const native = (() => {
+ 				args: [FFIType.ptr],
+ 				returns: FFIType.void,
+ 			},
++			webviewReloadIgnoringCache: {
++				args: [FFIType.ptr],
++				returns: FFIType.void,
++			},
++			webviewSetAssetRedirectRules: {
++				args: [FFIType.ptr, FFIType.cstring],
++				returns: FFIType.void,
++			},
+ 			webviewRemove: {
+ 				args: [FFIType.ptr],
+ 				returns: FFIType.void,
+@@ -1320,7 +1328,7 @@ window.__electrobunBunBridge = window.__electrobunBunBridge || window.webkit?.me
+ 				width,
+ 				height,
+ 				autoResize,
+-				toCString(partition || "persist:default"),
++				toCString(partition || ""),
+ 				webviewDecideNavigation,
+ 				webviewEventJSCallback,
+ 				eventBridgeHandler, // Event-only bridge (always active, for dom-ready, navigation, etc.)
+@@ -2966,6 +2974,24 @@ export const internalRpcHandlers = {
+ 			}
+ 			native_.symbols.webviewReload(webview.ptr);
+ 		},
++		webviewTagReloadIgnoringCache: (params: { id: number }) => {
++			const webview = BrowserView.getById(params.id);
++			if (webview?.ptr) native_.symbols.webviewReloadIgnoringCache(webview.ptr);
++		},
++		webviewTagSetPageZoom: (params: { id: number; zoomLevel: number }) => {
++			const webview = BrowserView.getById(params.id);
++			if (webview?.ptr) native_.symbols.webviewSetPageZoom(webview.ptr, params.zoomLevel);
++		},
++		webviewTagGetPageZoom: (params: { id: number }) => {
++			const webview = BrowserView.getById(params.id);
++			return webview?.ptr ? native_.symbols.webviewGetPageZoom(webview.ptr) : 1.0;
++		},
++		webviewTagSetAssetRedirectRules: (params: { id: number; rules: string }) => {
++			const webview = BrowserView.getById(params.id);
++			if (webview?.ptr) {
++				native_.symbols.webviewSetAssetRedirectRules(webview.ptr, toCString(params.rules));
++			}
++		},
+ 		webviewTagRemove: (params: { id: number }) => {
+ 			const webview = BrowserView.getById(params.id);
+ 			if (!webview || !webview.ptr) {
+diff --git a/package/src/native/linux/cef_process_helper_linux.cpp b/package/src/native/linux/cef_process_helper_linux.cpp
+index 461d87d..b7334e0 100644
+--- a/package/src/native/linux/cef_process_helper_linux.cpp
++++ b/package/src/native/linux/cef_process_helper_linux.cpp
+@@ -1,6 +1,7 @@
+ #include <iostream>
+ #include <map>
+ #include <mutex>
++#include <unistd.h>
+ #include "include/cef_app.h"
+ #include "include/cef_client.h"
+ #include "include/cef_v8.h"
+@@ -148,12 +149,15 @@ int main(int argc, char* argv[]) {
+     // if this is a sub-process, executes the appropriate logic.
+     int exit_code = CefExecuteProcess(main_args, new HelperApp(), nullptr);
+     if (exit_code >= 0) {
+-        // The sub-process has completed so return here.
++        // CEF has completed its own shutdown. Bypass C++ static destruction
++        // because CEF helper teardown can leave process-global state that is
++        // unsafe to unwind through after CefExecuteProcess returns.
+         printf("CEF Helper: Helper process exiting with code %d\n", exit_code);
+-        return exit_code;
++        fflush(stdout);
++        _exit(exit_code);
+     }
+ 
+     // Should not reach here for helper processes
+     std::cerr << "CEF helper process failed to initialize properly" << std::endl;
+-    return -1;
+-}
+\ No newline at end of file
++    _exit(1);
++}
+diff --git a/package/src/native/linux/nativeWrapper.cpp b/package/src/native/linux/nativeWrapper.cpp
+index c3765d7..07e1788 100644
+--- a/package/src/native/linux/nativeWrapper.cpp
++++ b/package/src/native/linux/nativeWrapper.cpp
+@@ -79,6 +79,7 @@ static std::atomic<bool> g_shuttingDown{false};
+ static QuitRequestedHandler g_quitRequestedHandler = nullptr;
+ static std::atomic<bool> g_shutdownComplete{false};
+ static std::atomic<bool> g_eventLoopStopping{false};
++static std::atomic<int> g_cefBrowserCount{0};
+ 
+ // Self-pipe for async-signal-safe signal handling.
+ // Signal handler writes to pipe, GLib IO watch reads and dispatches.
+@@ -93,6 +94,46 @@ static std::mutex g_cefBrowserMutex;
+ static std::map<int, uint32_t> g_browserIdToWebviewId;
+ static std::mutex g_browserIdToWebviewIdMutex;
+ 
++struct AssetRedirectRule {
++    bool prefix;
++    std::string source;
++    std::string destination;
++};
++
++struct AssetRedirectConfig {
++    std::string baseUrl;
++    std::string rootPath;
++    std::vector<AssetRedirectRule> rules;
++};
++
++static std::map<uint32_t, AssetRedirectConfig> g_assetRedirectConfigs;
++static std::mutex g_assetRedirectConfigsMutex;
++
++static bool resolveAssetMapping(uint32_t webviewId,
++                                const std::string& requestPath,
++                                AssetRedirectConfig& config,
++                                std::string& mappedPath) {
++    {
++        std::lock_guard<std::mutex> lock(g_assetRedirectConfigsMutex);
++        auto it = g_assetRedirectConfigs.find(webviewId);
++        if (it == g_assetRedirectConfigs.end()) return false;
++        config = it->second;
++    }
++    for (const auto& rule : config.rules) {
++        const bool matches = rule.prefix
++            ? requestPath.rfind(rule.source, 0) == 0
++            : requestPath == rule.source;
++        if (!matches) continue;
++        mappedPath = rule.prefix
++            ? rule.destination + requestPath.substr(rule.source.length())
++            : rule.destination;
++        return !mappedPath.empty() && mappedPath.front() == '/' &&
++               mappedPath.find("/../") == std::string::npos &&
++               mappedPath.compare(mappedPath.size() >= 3 ? mappedPath.size() - 3 : 0, 3, "/..") != 0;
++    }
++    return false;
++}
++
+ // Use OperationGuard from shared/shutdown_guard.h
+ using electrobun::OperationGuard;
+ 
+@@ -110,6 +151,7 @@ using electrobun::OperationGuard;
+ #include "include/cef_response_filter.h"
+ #include "include/cef_permission_handler.h"
+ #include "include/cef_dialog_handler.h"
++#include "include/cef_parser.h"
+ #include "../shared/permissions_cef.h"
+ #include "../shared/partition_context.h"
+ #include "include/cef_download_handler.h"
+@@ -722,6 +764,76 @@ private:
+     IMPLEMENT_REFCOUNTING(ViewsSchemeHandlerFactory);
+ };
+ 
++// Serve installed assets without changing the request URL. Preserving the
++// framework origin is required for Chromium module workers and avoids exposing
++// the loopback asset server as a cross-origin redirect target.
++class LocalAssetResourceHandler : public CefResourceHandler {
++public:
++    explicit LocalAssetResourceHandler(std::string path)
++        : path_(std::move(path)), offset_(0), status_(200), mimeType_("application/octet-stream") {}
++
++    bool Open(CefRefPtr<CefRequest> request,
++              bool& handle_request,
++              CefRefPtr<CefCallback> callback) override {
++        (void)request;
++        (void)callback;
++        gchar* contents = nullptr;
++        gsize length = 0;
++        GError* error = nullptr;
++        if (g_file_get_contents(path_.c_str(), &contents, &length, &error)) {
++            data_.assign(contents, length);
++            g_free(contents);
++            mimeType_ = getMimeTypeFromUrl(path_);
++        } else {
++            status_ = 404;
++            data_ = "Not found";
++            mimeType_ = "text/plain";
++            if (error) g_error_free(error);
++        }
++        handle_request = true;
++        return true;
++    }
++
++    void GetResponseHeaders(CefRefPtr<CefResponse> response,
++                            int64_t& response_length,
++                            CefString& redirectUrl) override {
++        (void)redirectUrl;
++        response->SetStatus(status_);
++        response->SetStatusText(status_ == 200 ? "OK" : "Not Found");
++        response->SetMimeType(mimeType_);
++        CefResponse::HeaderMap headers;
++        headers.insert({"Access-Control-Allow-Origin", "*"});
++        headers.insert({"Cache-Control", "max-age=31536000, immutable"});
++        response->SetHeaderMap(headers);
++        response_length = static_cast<int64_t>(data_.size());
++    }
++
++    bool Read(void* data_out,
++              int bytes_to_read,
++              int& bytes_read,
++              CefRefPtr<CefResourceReadCallback> callback) override {
++        (void)callback;
++        bytes_read = 0;
++        if (offset_ >= data_.size()) return false;
++        const size_t amount = std::min(static_cast<size_t>(bytes_to_read), data_.size() - offset_);
++        memcpy(data_out, data_.data() + offset_, amount);
++        offset_ += amount;
++        bytes_read = static_cast<int>(amount);
++        return true;
++    }
++
++    void Cancel() override {}
++
++private:
++    std::string path_;
++    std::string data_;
++    size_t offset_;
++    int status_;
++    std::string mimeType_;
++
++    IMPLEMENT_REFCOUNTING(LocalAssetResourceHandler);
++};
++
+ // V8 Handler for postMessage functions
+ class V8MessageHandler : public CefV8Handler {
+ public:
+@@ -1208,6 +1320,55 @@ public:
+         bool& disable_default_handling) override {
+         return this;
+     }
++
++    CefRefPtr<CefResourceHandler> GetResourceHandler(
++        CefRefPtr<CefBrowser> browser,
++        CefRefPtr<CefFrame> frame,
++        CefRefPtr<CefRequest> request) override {
++        (void)browser;
++        (void)frame;
++        CefURLParts parts;
++        if (!CefParseURL(request->GetURL(), parts)) return nullptr;
++        const std::string scheme = CefString(&parts.scheme).ToString();
++        if (scheme != "http" && scheme != "https") return nullptr;
++
++        AssetRedirectConfig config;
++        std::string mappedPath;
++        if (!resolveAssetMapping(
++                webview_id_, CefString(&parts.path).ToString(), config, mappedPath) ||
++            config.rootPath.empty()) {
++            return nullptr;
++        }
++        return new LocalAssetResourceHandler(config.rootPath + mappedPath);
++    }
++
++    cef_return_value_t OnBeforeResourceLoad(
++        CefRefPtr<CefBrowser> browser,
++        CefRefPtr<CefFrame> frame,
++        CefRefPtr<CefRequest> request,
++        CefRefPtr<CefCallback> callback) override {
++        (void)browser;
++        (void)frame;
++        (void)callback;
++
++        CefURLParts parts;
++        if (!CefParseURL(request->GetURL(), parts)) {
++            return RV_CONTINUE;
++        }
++        std::string scheme = CefString(&parts.scheme).ToString();
++        if (scheme != "http" && scheme != "https") {
++            return RV_CONTINUE;
++        }
++        std::string path = CefString(&parts.path).ToString();
++
++        AssetRedirectConfig config;
++        std::string mappedPath;
++        if (resolveAssetMapping(webview_id_, path, config, mappedPath) &&
++            config.rootPath.empty() && !config.baseUrl.empty()) {
++            request->SetURL(config.baseUrl + mappedPath);
++        }
++        return RV_CONTINUE;
++    }
+     
+     // Response filter for preload script injection (Mac-style clean approach)
+     virtual CefRefPtr<CefResponseFilter> GetResourceResponseFilter(
+@@ -1244,24 +1405,32 @@ public:
+         
+     }
+ 
+-    // Context menu handler with DevTools option
++    // Keep editing actions while removing browser navigation from the native
++    // context menu. TE2 owns Back/Forward/Reload in its persistent header.
+     void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
+                             CefRefPtr<CefFrame> frame,
+                             CefRefPtr<CefContextMenuParams> params,
+                             CefRefPtr<CefMenuModel> model) override {
+-        printf("CEF: Creating context menu with DevTools options\n");
+-        
+-        // Don't clear the default menu - let CEF show its default items
+-        // model->Clear();
+-        
+-        // Add DevTools option to existing menu
+-        if (model->GetCount() > 0) {
+-            model->AddSeparator();
++        (void)browser;
++        (void)frame;
++
++        for (int index = static_cast<int>(model->GetCount()) - 1; index >= 0; --index) {
++            const int command = model->GetCommandIdAt(index);
++            if (command == MENU_ID_BACK || command == MENU_ID_FORWARD ||
++                command == MENU_ID_RELOAD || command == MENU_ID_RELOAD_NOCACHE) {
++                model->RemoveAt(index);
++            }
+         }
+-        model->AddItem(26501, "Inspect Element");
+-        model->AddItem(26502, "Open DevTools");
+-        
+-        printf("CEF: Context menu now has %zu items\n", model->GetCount());
++
++        if (model->GetIndexOf(MENU_ID_PASTE) < 0) {
++            model->InsertItemAt(0, MENU_ID_PASTE, "Paste");
++        }
++        if (model->GetIndexOf(MENU_ID_COPY) < 0) {
++            model->InsertItemAt(0, MENU_ID_COPY, "Copy");
++        }
++        const int editFlags = params->GetEditStateFlags();
++        model->SetEnabled(MENU_ID_COPY, (editFlags & CM_EDITFLAG_CAN_COPY) != 0);
++        model->SetEnabled(MENU_ID_PASTE, (editFlags & CM_EDITFLAG_CAN_PASTE) != 0);
+     }
+     
+     // Handle context menu display
+@@ -1347,6 +1516,7 @@ public:
+     }
+     
+     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
++        g_cefBrowserCount.fetch_add(1);
+         
+         // Set the browser reference
+         SetBrowser(browser);
+@@ -1481,6 +1651,7 @@ public:
+     // Critical: Handle browser cleanup to prevent use-after-free
+     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+         printf("CEF: OnBeforeClose called for browser %d\n", browser->GetIdentifier());
++        g_cefBrowserCount.fetch_sub(1);
+         
+         // Remove browser ID → webviewId mapping
+         {
+@@ -2467,6 +2638,7 @@ public:
+     virtual void goBack() = 0;
+     virtual void goForward() = 0;
+     virtual void reload() = 0;
++    virtual void reloadIgnoringCache() { reload(); }
+     virtual void remove() = 0;
+     virtual bool canGoBack() = 0;
+     virtual bool canGoForward() = 0;
+@@ -2492,6 +2664,8 @@ public:
+     virtual void openDevTools() = 0;
+     virtual void closeDevTools() = 0;
+     virtual void toggleDevTools() = 0;
++    virtual void setPageZoom(double zoomLevel) { (void)zoomLevel; }
++    virtual double getPageZoom() { return 1.0; }
+ 
+     void storePendingResize(const GdkRectangle& frame, const char* masksJson) {
+         std::lock_guard<std::mutex> lock(pendingResizeMutex);
+@@ -2813,6 +2987,20 @@ public:
+             webkit_web_view_reload(WEBKIT_WEB_VIEW(webview));
+         }
+     }
++
++    void reloadIgnoringCache() override {
++        if (webview) {
++            webkit_web_view_reload_bypass_cache(WEBKIT_WEB_VIEW(webview));
++        }
++    }
++
++    void setPageZoom(double zoomLevel) override {
++        if (webview) webkit_web_view_set_zoom_level(WEBKIT_WEB_VIEW(webview), zoomLevel);
++    }
++
++    double getPageZoom() override {
++        return webview ? webkit_web_view_get_zoom_level(WEBKIT_WEB_VIEW(webview)) : 1.0;
++    }
+     
+     void remove() override {
+         // Remove from global webview map first
+@@ -4504,6 +4692,27 @@ public:
+             browser->Reload();
+         }
+     }
++
++    void reloadIgnoringCache() override {
++        OperationGuard guard;
++        if (!guard.isValid()) return;
++        std::lock_guard<std::mutex> lock(g_cefBrowserMutex);
++        if (browser) browser->ReloadIgnoreCache();
++    }
++
++    void setPageZoom(double zoomLevel) override {
++        OperationGuard guard;
++        if (!guard.isValid() || zoomLevel <= 0.0) return;
++        std::lock_guard<std::mutex> lock(g_cefBrowserMutex);
++        if (browser) browser->GetHost()->SetZoomLevel(std::log(zoomLevel) / std::log(1.2));
++    }
++
++    double getPageZoom() override {
++        OperationGuard guard;
++        if (!guard.isValid()) return 1.0;
++        std::lock_guard<std::mutex> lock(g_cefBrowserMutex);
++        return browser ? std::pow(1.2, browser->GetHost()->GetZoomLevel()) : 1.0;
++    }
+     
+     void remove() override {
+         OperationGuard guard;
+@@ -6285,10 +6494,14 @@ void runCEFEventLoop() {
+     sleep(1); // Give time for output to flush
+     gtk_main();
+     
+-    // Cleanup CEF on shutdown
+-
+-    if (g_cefInitialized) {
++    // CefShutdown requires every browser to have completed OnBeforeClose.
++    // The stop path waits for that boundary before leaving gtk_main().
++    if (g_cefInitialized && g_cefBrowserCount.load() == 0) {
+         CefShutdown();
++        g_cefInitialized = false;
++    } else if (g_cefInitialized) {
++        printf("[shutdown] Skipping CefShutdown with %d browser(s) still active\n",
++               g_cefBrowserCount.load());
+     }
+     g_shutdownComplete.store(true);
+ }
+@@ -8305,10 +8518,20 @@ ELECTROBUN_EXPORT void webviewReload(AbstractView* abstractView) {
+     }
+ }
+ 
++ELECTROBUN_EXPORT void webviewReloadIgnoringCache(AbstractView* abstractView) {
++    if (abstractView) {
++        dispatch_sync_main_void([&]() { abstractView->reloadIgnoringCache(); });
++    }
++}
++
+ ELECTROBUN_EXPORT void webviewRemove(AbstractView* abstractView) {
+     if (abstractView) {
+         // Get the webview ID before scheduling async removal
+         uint32_t webviewId = abstractView->webviewId;
++        {
++            std::lock_guard<std::mutex> lock(g_assetRedirectConfigsMutex);
++            g_assetRedirectConfigs.erase(webviewId);
++        }
+         
+         // Find the shared_ptr for this view to keep it alive during async removal
+         std::shared_ptr<AbstractView> viewPtr;
+@@ -8524,13 +8747,52 @@ ELECTROBUN_EXPORT void webviewToggleDevTools(AbstractView* abstractView) {
+ }
+ 
+ ELECTROBUN_EXPORT void webviewSetPageZoom(AbstractView* abstractView, double zoomLevel) {
+-    // pageZoom is WebKit-specific, not available on Linux CEF
+-    // TODO: implement CEF zoom if needed
++    if (abstractView) {
++        dispatch_sync_main_void([&]() { abstractView->setPageZoom(zoomLevel); });
++    }
+ }
+ 
+ ELECTROBUN_EXPORT double webviewGetPageZoom(AbstractView* abstractView) {
+-    // pageZoom is WebKit-specific, not available on Linux CEF
+-    return 1.0;
++    if (!abstractView) return 1.0;
++    double result = 1.0;
++    dispatch_sync_main_void([&]() { result = abstractView->getPageZoom(); });
++    return result;
++}
++
++ELECTROBUN_EXPORT void webviewSetAssetRedirectRules(AbstractView* abstractView, const char* rulesText) {
++    if (!abstractView) return;
++    AssetRedirectConfig config;
++    std::istringstream input(rulesText ? rulesText : "");
++    std::string line;
++    while (std::getline(input, line)) {
++        size_t first = line.find('\t');
++        if (first == std::string::npos) continue;
++        std::string kind = line.substr(0, first);
++        if (kind == "base") {
++            config.baseUrl = line.substr(first + 1);
++            continue;
++        }
++        if (kind == "root") {
++            config.rootPath = line.substr(first + 1);
++            while (config.rootPath.size() > 1 && config.rootPath.back() == '/') {
++                config.rootPath.pop_back();
++            }
++            continue;
++        }
++        size_t second = line.find('\t', first + 1);
++        if (second == std::string::npos) continue;
++        config.rules.push_back({
++            kind == "prefix",
++            line.substr(first + 1, second - first - 1),
++            line.substr(second + 1),
++        });
++    }
++    std::lock_guard<std::mutex> lock(g_assetRedirectConfigsMutex);
++    if ((config.baseUrl.empty() && config.rootPath.empty()) || config.rules.empty()) {
++        g_assetRedirectConfigs.erase(abstractView->webviewId);
++    } else {
++        g_assetRedirectConfigs[abstractView->webviewId] = std::move(config);
++    }
+ }
+ 
+ ELECTROBUN_EXPORT void updatePreloadScriptToWebView(AbstractView* abstractView, const char* scriptIdentifier, const char* scriptContent, bool forMainFrameOnly) {
+@@ -9477,14 +9739,30 @@ ELECTROBUN_EXPORT void stopEventLoop() {
+     if (g_eventLoopStopping.exchange(true)) {
+         return;
+     }
+-    g_shuttingDown.store(true);
+     printf("[stopEventLoop] Initiating clean event loop exit\n");
+ 
+-    // gtk_main_quit should be called from the GTK thread
+-    g_idle_add([](gpointer) -> gboolean {
++    // BrowserView removal is queued on this same GLib loop by the window-close
++    // callback. Keep CEF pumping until every browser reports OnBeforeClose,
++    // otherwise CefShutdown traps while renderer processes are still attached.
++    struct ShutdownWait {
++        gint64 deadline;
++    };
++    auto* wait = new ShutdownWait{g_get_monotonic_time() + 5 * G_TIME_SPAN_SECOND};
++    g_timeout_add(10, [](gpointer data) -> gboolean {
++        auto* wait = static_cast<ShutdownWait*>(data);
++        const int browsers = g_cefBrowserCount.load();
++        if (browsers > 0 && g_get_monotonic_time() < wait->deadline) {
++            return G_SOURCE_CONTINUE;
++        }
++        if (browsers > 0) {
++            printf("[stopEventLoop] Timed out waiting for %d CEF browser(s)\n", browsers);
++        }
++        g_shuttingDown.store(true);
++        electrobun::ShutdownManager::getInstance().initiateShutdown();
+         gtk_main_quit();
++        delete wait;
+         return G_SOURCE_REMOVE;
+-    }, nullptr);
++    }, wait);
+ }
+ 
+ ELECTROBUN_EXPORT void killApp() {
+diff --git a/package/scripts/gen-webgpu-ffi.mjs b/package/scripts/gen-webgpu-ffi.mjs
+index 6484d5b..c4d4090 100644
+--- a/package/scripts/gen-webgpu-ffi.mjs
++++ b/package/scripts/gen-webgpu-ffi.mjs
+@@ -157,6 +157,10 @@ while ((funcMatch = funcRegex.exec(header))) {
+ const output = `import { existsSync } from "fs";\nimport { join } from "path";\nimport { dlopen, suffix, FFIType } from "bun:ffi";\n\n// NOTE: WGPUStringView is passed by value in the C API. Bun FFI does not support\n// by-value structs, so WGPUStringView parameters are exposed as pointers for now.\n// If you need these calls, add a small C shim that accepts a pointer and\n// forwards by value. WGPUFuture is a single u64 and is mapped to FFIType.u64.\nconst WGPU_SYMBOLS = {\n${symbols.join("\n")}\n} as const;\n\nconst WGPU_LIB_NAMES: Record<string, string[]> = {\n\tdarwin: ["libwebgpu_dawn.dylib"],\n\twin32: ["webgpu_dawn.dll", "libwebgpu_dawn.dll"],\n\tlinux: ["libwebgpu_dawn.so"],\n};\n\nfunction findWgpuLibraryPath(): string | null {\n\tconst envPath = process.env.ELECTROBUN_WGPU_PATH;\n\tif (envPath && existsSync(envPath)) return envPath;\n\n\tconst names = WGPU_LIB_NAMES[process.platform] ?? ["libwebgpu_dawn." + suffix];\n\tfor (const name of names) {\n\t\tconst cwdCandidate = join(process.cwd(), name);\n\t\tif (existsSync(cwdCandidate)) return cwdCandidate;\n\t\tconst execDir = dirname(process.execPath);\n\t\tconst macCandidate = join(execDir, "..", "MacOS", name);\n\t\tif (existsSync(macCandidate)) return macCandidate;\n\t\tconst resCandidate = join(execDir, "..", "Resources", name);\n\t\tif (existsSync(resCandidate)) return resCandidate;\n\t\tconst execCandidate = join(execDir, name);\n\t\tif (existsSync(execCandidate)) return execCandidate;\n\t}\n\n\treturn null;\n}\n\nexport const native = (() => {\n\tconst libPath = findWgpuLibraryPath();\n\tif (!libPath) {\n\t\treturn {\n\t\t\tavailable: false,\n\t\t\tpath: null as string | null,\n\t\t\tsymbols: {} as Record<string, never>,\n\t\t\tclose: () => {},\n\t\t};\n\t}\n\n\ttry {\n\t\tconst lib = dlopen(libPath, WGPU_SYMBOLS);\n\t\treturn {\n\t\t\tavailable: true,\n\t\t\tpath: libPath,\n\t\t\tsymbols: lib.symbols,\n\t\t\tclose: lib.close,\n\t\t};\n\t} catch {\n\t\treturn {\n\t\t\tavailable: false,\n\t\t\tpath: libPath,\n\t\t\tsymbols: {} as Record<string, never>,\n\t\t\tclose: () => {},\n\t\t};\n\t}\n})();\n\nconst WGPU = {\n\tnative,\n};\n\nexport default WGPU;\n`;
+ 
+ const outPath = resolve(root, "src/bun/webGPU.ts");
+-writeFileSync(outPath, output, "utf8");
++const generatedOutput = output.replace(
++	'import { join } from "path";',
++	'import { join, dirname } from "path";',
++);
++writeFileSync(outPath, generatedOutput, "utf8");
+ 
+ console.log(`Generated ${outPath}`);

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TE2 Desktop</title>
+  <link rel="stylesheet" href="./index.css">
+</head>
+<body>
+  <header id="desktop-header" class="desktop-header electrobun-webkit-app-region-drag">
+    <nav class="header-group electrobun-webkit-app-region-no-drag" aria-label="Navigation">
+      <button id="back" title="Back" aria-label="Back">←</button>
+      <button id="forward" title="Forward" aria-label="Forward">→</button>
+      <button id="home" title="Home" aria-label="Home">⌂</button>
+      <button id="reload" title="Reload" aria-label="Reload">↻</button>
+    </nav>
+    <div class="header-title">
+      <span id="page-title">TE2 Desktop</span>
+      <span id="asset-version" class="asset-version">Assets unavailable</span>
+    </div>
+    <nav class="header-group app-actions electrobun-webkit-app-region-no-drag" aria-label="Application">
+      <button id="zoom-out" title="Zoom out">−</button>
+      <button id="zoom-reset" class="zoom-reset" title="Reset zoom">100%</button>
+      <button id="zoom-in" title="Zoom in">+</button>
+      <button id="recents" class="app-only">Recents</button>
+      <button id="lock" class="app-only">Lock</button>
+      <button id="quit-app" class="app-only danger">Quit</button>
+    </nav>
+    <nav class="window-controls electrobun-webkit-app-region-no-drag" aria-label="Window">
+      <button id="minimize-window" title="Minimize" aria-label="Minimize">─</button>
+      <button id="maximize-window" title="Maximize" aria-label="Maximize">□</button>
+      <button id="close-window" class="close-window" title="Close" aria-label="Close">×</button>
+    </nav>
+  </header>
+  <main id="view-stack" class="view-stack">
+    <iframe id="launcher-view" src="about:blank" title="TE2 applications"></iframe>
+  </main>
+  <div id="native-toast" class="native-toast" role="status" aria-live="polite"></div>
+  <script type="module" src="./index.js"></script>
+</body>
+</html>
