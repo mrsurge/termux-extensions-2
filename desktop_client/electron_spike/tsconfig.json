@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2024",
+    "types": ["node"]
+  },
+  "include": ["build.mjs", "src/**/*.ts"]
+}

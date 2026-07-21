@@ -1,41 +1,35 @@
 # TE2 Desktop Client
 
-The active desktop candidate is the Electrobun/CEF shell under
-`desktop_client/electrobun_spike/`. The GTK 4/WebKitGTK 6 client remains in
-`desktop_client/ui.py` as the behavioral reference for the launcher, Settings,
-asset updates, and app-scoped lifecycle controls; its renderer was rejected for
-the real Code TE2 resize/iframe workload.
+The active desktop client is the Electron shell under
+`desktop_client/electron_spike/`. It uses Electron's native Chromium/Wayland
+path while retaining the launcher, Settings, asset updates, and app-scoped
+lifecycle behavior established by the earlier desktop spikes.
 
-## Run the Electrobun client
+The Electrobun/CEF implementation under `desktop_client/electrobun_spike/` and
+the GTK 4/WebKitGTK 6 implementation in `desktop_client/ui.py` remain behavioral
+references. They are not the current desktop runtime.
 
-See `desktop_client/electrobun_spike/README.md` for its pinned native fork and
-build prerequisites. The normal commands are:
+## Run the Electron client
 
-```bash
-cd desktop_client/electrobun_spike
-bun install --frozen-lockfile
-bun run build
-bun run dev
-```
-
-## Run the GTK reference client
-
-Ubuntu/Debian development packages:
+Node 22.12 or newer is required:
 
 ```bash
-sudo apt install build-essential libwebkitgtk-6.0-dev python3-gi
+cd desktop_client/electron_spike
+npm install
+npm run dev
 ```
 
-Start the client from the repository root:
+Build a self-contained Linux directory with:
 
 ```bash
-python -m desktop_client.ui
+npm run build
+./build/TE2Desktop-linux-x64/TE2Desktop
 ```
 
-The WebKit request interceptor is compiled automatically on first run and after
-its C source or the installed WebKit version changes. Its single shared object
-is cached under `~/.cache/te2/desktop_shell/web_extensions/`; no Node or vendor
-tree is created.
+Both launch paths intentionally pass Chromium `--no-sandbox`: this development
+client runs from a user-owned tree, while Ubuntu AppArmor blocks Electron's
+unprivileged namespace sandbox and the setuid helper requires a root-owned
+install. Renderer Node integration stays off and context isolation stays on.
 
 ## Desktop assets
 
@@ -55,16 +49,14 @@ validation, backup, atomic rename, and rollback. The desktop Settings page shows
 the installed version and interceptor state and provides a force-update action.
 The client also checks for a newer bundle at startup.
 
-A loopback-only HTTP server exposes the installed tree. The GTK reference uses
-a WebKit web-process extension; Electrobun's CEF fork uses a native resource
-handler that returns local bytes without changing the framework URL or origin,
-which keeps module workers valid. Both intercept only the immutable static path
-allowlist used by the Android wrappers. Electrobun projects configured HTTP
-framework traffic through an in-process, dynamically allocated localhost TCP
-relay; changing the HTTP target retargets the same listener and closes existing
-upstream connections without restarting the client. HTTPS stays direct. Native
-app URLs use the existing `gv_native=1` shell mode so the PWA service worker
-cannot race the native asset layer.
+Electron projects every configured HTTP or HTTPS framework origin through one
+in-process server on a dynamically allocated `127.0.0.1` port. The server
+proxies ordinary HTTP, streaming SSE, Socket.IO, and raw WebSocket upgrades. It
+serves only inventory-approved installed assets itself, from that same origin,
+which keeps Monaco module workers same-origin. Changing the target retargets the
+existing listener and closes active connections without restarting the client.
+Native app URLs use `gv_native=1` so the PWA service worker cannot mask the
+desktop asset layer.
 
 ## Native shell behavior
 
@@ -72,7 +64,7 @@ cannot race the native asset layer.
   header actions.
 - Home returns to the desktop-owned launcher.
 - Quit posts only the current `/app/<app_id>` lifecycle endpoint and then
-  returns to the desktop-owned launcher; it never exits the GTK wrapper.
+  returns to the desktop-owned launcher; it never exits the Electron wrapper.
 - The framework app toolbar is hidden while its actions remain callable by the
   native header.
 - The title bar shows the installed desktop asset version. Successful automatic
@@ -80,18 +72,20 @@ cannot race the native asset layer.
   their page toast.
 - Header zoom controls range from 50% to 200%, reset at 100%, and persist in
   `~/.config/te2/desktop-shell.json`.
-- The context menu exposes Copy and Paste but omits native navigation actions.
+- Electron's native context menu exposes Copy and Paste and invokes those
+  commands directly on the focused renderer. It has no native navigation
+  actions.
+- Electron's Linux Ozone hint is `auto`, so Wayland sessions use Electron's
+  native Wayland path instead of forcing X11.
 
 ## Validation
 
 ```bash
-python -m unittest discover -s desktop_client -p 'test_*.py' -v
-python -m py_compile desktop_client/ui.py desktop_client/assets.py
 node --check desktop_client/android_shell/host.js
 node --check desktop_client/android_shell/settings.js
 
-cd desktop_client/electrobun_spike
-bun run typecheck
-bun test
-bun run build
+cd desktop_client/electron_spike
+npm run typecheck
+npm test
+npm run build
 ```

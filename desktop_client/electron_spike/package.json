@@ -1,0 +1,29 @@
+{
+  "name": "te2-desktop-electron",
+  "productName": "TE2 Desktop",
+  "private": true,
+  "version": "0.2.321",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build": "node build.mjs && node package.mjs",
+    "compile": "node build.mjs",
+    "dev": "node build.mjs && electron --no-sandbox .",
+    "test": "node --import tsx --test src/main/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.0.3",
+    "@types/node": "24.10.0",
+    "@types/yauzl": "2.10.3",
+    "electron": "43.1.1",
+    "esbuild": "0.28.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}
