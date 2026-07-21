@@ -12,6 +12,7 @@ const PRECACHE = [
   '/static/vendor/es-module-shims/dist/es-module-shims.js',
   '/static/js/ws_port.js',
   '/static/js/te_state.js',
+  '/static/js/te_dialog.mjs',
   '/static/js/te_ui.js',
   '/static/js/jobs_client.js',
   '/static/js/file_picker.js',

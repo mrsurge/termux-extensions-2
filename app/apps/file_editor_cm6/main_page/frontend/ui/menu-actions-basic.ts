@@ -109,7 +109,7 @@ export function installBasicMenuActions(deps: any) {
     deps.triggerEditorSearchPanel('menu', { replace: true });
   });
   b(e.miGoto, async () => {
-    const input = window.prompt('Go to line:');
+    const input = await window.teUI.dialog.prompt('Go to line:');
     if (!input) return;
     const line = parseInt(input, 10);
     if (isNaN(line) || line < 1) {

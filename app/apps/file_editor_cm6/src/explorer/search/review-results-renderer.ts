@@ -169,13 +169,13 @@ export function createExplorerReviewResultsRenderer(
     discardBtn.textContent = 'Discard Selected';
     discardBtn.className = 'fe-btn fe-btn-sm fe-btn-danger';
     discardBtn.style.marginLeft = '8px';
-    discardBtn.onclick = () => {
+    discardBtn.onclick = async () => {
       const selected = Array.from(selectedReviewFiles);
       if (!selected.length) {
         deps.toast('No files selected');
         return;
       }
-      if (!window.confirm(`Discard drafts for ${selected.length} file(s)?`)) {
+      if (!(await window.teUI.dialog.confirm(`Discard drafts for ${selected.length} file(s)?`))) {
         return;
       }
       if (!deps.hasExplorerRpc()) {

@@ -44,6 +44,7 @@ export interface DeclarativeFormContract {
 
 export interface DeclarativeModalContract extends DeclarativeFormContract {
   id: string;
+  surfaceId?: string;
   title: string;
   width?: string;
   maxHeight?: string;
@@ -478,6 +479,7 @@ export function createDeclarativeModalShell(
   const root = document.createElement("div");
   root.id = contract.id;
   root.className = "fe-modal declarative-modal";
+  if (contract.surfaceId) root.dataset.teDialogSurface = contract.surfaceId;
   root.setAttribute("aria-hidden", "true");
 
   const card = document.createElement("div");

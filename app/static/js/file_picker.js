@@ -259,14 +259,14 @@ const CSS = `
 `;
 
 const TEMPLATE = `
-<div id="${ROOT_ID}" class="te-fp-hidden">
+<div id="${ROOT_ID}" class="te-fp-hidden" data-te-dialog-surface="framework.file-picker">
   <div class="te-fp-overlay">
     <div class="te-fp-dialog">
       <div class="te-fp-header">
         <button class="te-fp-home" aria-label="Go to home directory" title="Home">🏠</button>
         <div class="te-fp-title">Select Item</div>
         <div class="te-fp-git-status"></div>
-        <button class="te-fp-close" aria-label="Close picker">&times;</button>
+        <button class="te-fp-close" data-te-dialog-close aria-label="Close picker">&times;</button>
       </div>
       <div class="te-fp-body">
         <div class="te-fp-breadcrumbs"></div>
@@ -897,7 +897,7 @@ function init() {
   
   if (elements.btnNewFolder) {
     elements.btnNewFolder.addEventListener('click', async () => {
-      const name = prompt('New folder name:');
+      const name = await window.teUI.dialog.prompt('New folder name:');
       if (!name || !name.trim()) return;
       
       const folderName = name.trim();

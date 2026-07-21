@@ -192,7 +192,7 @@ export function createSettingsManagerController(deps: any) {
           trash.textContent = '🗑';
           trash.title = 'Uninstall';
           trash.addEventListener('click', async () => {
-            if (!window.confirm(`Uninstall ${label}?`)) return;
+            if (!(await window.teUI.dialog.confirm(`Uninstall ${label}?`))) return;
             trash.disabled = true;
             try {
               const res = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsUninstall, {

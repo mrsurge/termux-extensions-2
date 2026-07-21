@@ -98,7 +98,7 @@ export function initBranchMenu(deps: BranchMenuDeps): BranchMenuController {
   }
 
   async function addOrigin(): Promise<void> {
-    const url = prompt('Git Origin URL:');
+    const url = await window.teUI.dialog.prompt('Git Origin URL:');
     if (!url || !url.trim()) return;
     
     try {
@@ -115,7 +115,7 @@ export function initBranchMenu(deps: BranchMenuDeps): BranchMenuController {
   }
 
   async function createBranch(): Promise<void> {
-    const proposed = prompt('New branch name');
+    const proposed = await window.teUI.dialog.prompt('New branch name');
     const name = (proposed || '').trim();
     if (!name) return;
     try {

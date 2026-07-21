@@ -733,14 +733,14 @@ export default function init(container, api, host) {
   }
 
   function confirmAction(message) {
-    return typeof window.confirm === 'function' ? window.confirm(message) : true;
+    return window.teUI.dialog.confirm(message);
   }
 
   async function handleAction(action, gids, options) {
     const opts = options || {};
     try {
       if (action === 'remove' || action === 'purge') {
-        if (!confirmAction(opts.message || (action === 'purge' ? 'Purge completed/error downloads?' : 'Remove the selected downloads?'))) return;
+        if (!(await confirmAction(opts.message || (action === 'purge' ? 'Purge completed/error downloads?' : 'Remove the selected downloads?')))) return;
       }
       await runControl(action, gids);
       notify('Done');
@@ -901,12 +901,12 @@ export default function init(container, api, host) {
   if (shellStartBtn) shellStartBtn.addEventListener('click', () => spawnShell(false));
   if (shellStopBtn) shellStopBtn.addEventListener('click', () => runShellAction('stop'));
   if (shellRestartBtn) shellRestartBtn.addEventListener('click', () => runShellAction('restart'));
-  if (shellKillBtn) shellKillBtn.addEventListener('click', () => {
-    if (!confirmAction('Force kill the aria2 service?')) return;
+  if (shellKillBtn) shellKillBtn.addEventListener('click', async () => {
+    if (!(await confirmAction('Force kill the aria2 service?'))) return;
     runShellAction('kill');
   });
-  if (shellRemoveBtn) shellRemoveBtn.addEventListener('click', () => {
-    if (!confirmAction('Remove the tracked aria2 framework shell and its logs?')) return;
+  if (shellRemoveBtn) shellRemoveBtn.addEventListener('click', async () => {
+    if (!(await confirmAction('Remove the tracked aria2 framework shell and its logs?'))) return;
     runShellAction('remove', { force: true });
   });
   if (shellRefreshBtn) shellRefreshBtn.addEventListener('click', () => {

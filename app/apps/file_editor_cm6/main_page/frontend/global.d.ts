@@ -71,6 +71,49 @@ interface TeFilePicker {
   ): Promise<TeFilePickerSaveChoice | null>;
 }
 
+interface TeDialogPromptOptions {
+  title?: string;
+  detail?: string;
+  label?: string;
+  placeholder?: string;
+  required?: boolean;
+  password?: boolean;
+}
+
+interface TeDialogMessageOptions {
+  title?: string;
+  detail?: string;
+  severity?: 'info' | 'warning' | 'danger';
+  confirmLabel?: string;
+  cancelLabel?: string;
+  surface?: Record<string, unknown>;
+}
+
+interface TeDialogOpenRequest extends Record<string, unknown> {
+  kind: 'alert' | 'confirm' | 'prompt' | 'form' | 'surface';
+  title: string;
+  message?: string;
+  actions?: Array<Record<string, unknown>>;
+  surface?: Record<string, unknown>;
+}
+
+interface TeDialogOpenResult {
+  status: 'accepted' | 'cancelled' | 'closed' | 'replaced';
+  action: string | null;
+  values: Record<string, unknown>;
+}
+
+interface TeDialogApi {
+  open(request: TeDialogOpenRequest): Promise<TeDialogOpenResult>;
+  alert(message: string, options?: TeDialogMessageOptions): Promise<void>;
+  confirm(message: string, options?: TeDialogMessageOptions): Promise<boolean>;
+  prompt(message: string, defaultValue?: string, options?: TeDialogPromptOptions): Promise<string | null>;
+}
+
+interface TeUiApi {
+  dialog: TeDialogApi;
+}
+
 type ExplorerOpenFileAbsFn = (
   path: string,
   options?: ExplorerOpenFileOptions,
@@ -131,6 +174,7 @@ declare global {
     currentPath?: string | null;
     monaco?: any;
     io?: any;
+    teUI: TeUiApi;
     teFilePicker?: TeFilePicker;
     wsPort?: any;
   }

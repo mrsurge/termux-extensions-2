@@ -36,6 +36,7 @@ function ensureProjectsDebugModal() {
   const modal = document.createElement('div');
   modal.id = 'fe-projects-debug-modal';
   modal.className = 'fe-modal';
+  modal.dataset.teDialogSurface = 'code-te2.projects-debug';
   modal.setAttribute('aria-hidden', 'true');
   modal.innerHTML = `
     <div class="fe-modal-card" style="max-width: 640px;">
@@ -163,7 +164,7 @@ async function loadProjectsDebugContent() {
               'This does not delete the project folder itself, but it will be',
               'removed from the recent projects list and its drafts will be lost.',
             ].join('\n');
-        if (!window.confirm(confirmText)) return;
+        if (!(await window.teUI.dialog.confirm(confirmText))) return;
         try {
           const respDel = await fetch('/api/app/file_editor_cm6/debug/projects', {
             method: 'DELETE',
@@ -188,7 +189,7 @@ async function loadProjectsDebugContent() {
             }
           }
         } catch (e) {
-          window.alert(
+          await window.teUI.dialog.alert(
             `Failed to delete project entry: ${errorMessage(e, 'unknown error')}`,
           );
         }
@@ -202,18 +203,18 @@ async function loadProjectsDebugContent() {
       // "open project" shortcut for non-active projects.
       if (!entry.is_active) {
         info.style.cursor = 'pointer';
-        info.addEventListener('click', () => {
+        info.addEventListener('click', async () => {
           const p = entry.path;
           if (!p) return;
           if (
-            !window.confirm(
+            !(await window.teUI.dialog.confirm(
               'Any unsaved changes in the current project will be lost. Continue?',
-            )
+            ))
           ) {
             return;
           }
           if (!notifyExplorerRpc(EXPLORER_RPC_METHODS.projectOpen, { path: p })) {
-            window.alert('Explorer connection unavailable.');
+            await window.teUI.dialog.alert('Explorer connection unavailable.');
             return;
           }
           hideProjectsDebugModal();

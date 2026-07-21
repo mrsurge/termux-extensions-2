@@ -97,7 +97,7 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
         try {
           const latest = responseRecord(await deps.apiGet(`read?path=${encodeURIComponent(targetPath)}`));
           deps.setLastSha256(stringValue(latest.sha256));
-          if (window.confirm('File was modified externally. Retry save and overwrite?')) {
+          if (await window.teUI.dialog.confirm('File was modified externally. Retry save and overwrite?')) {
             const retryPayload: Record<string, unknown> = {
               path: targetPath,
               content,
@@ -139,7 +139,7 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
         }
         if (error === 'BASE_MISMATCH') {
           if (isAutosave) { deps.setStatus(''); return false; }
-          if (window.confirm('File was modified externally. Retry save and overwrite?')) {
+          if (await window.teUI.dialog.confirm('File was modified externally. Retry save and overwrite?')) {
             const retryPayload: Record<string, unknown> = { client_id: deps.clientId, op_id: `${opId}_retry`, force: true };
             if (currentPath && currentPathExists) retryPayload.path = currentPath;
             const retryResult = responseRecord(await deps.saveFileViaEditorSocket(retryPayload));
@@ -196,7 +196,7 @@ export function createSaveFlowController(deps: SaveFlowControllerDeps) {
   async function saveAsDialog(): Promise<void> {
     const target = await deps.pickSaveTarget();
     if (!target || !target.path) return;
-    if (target.existed && !window.confirm('File exists. Overwrite?')) return;
+    if (target.existed && !(await window.teUI.dialog.confirm('File exists. Overwrite?'))) return;
     deps.setStatus('Saving...');
     const targetAbs = deps.toAbsolute(target.path, null, deps.homeDir);
     try {

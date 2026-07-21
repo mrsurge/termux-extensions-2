@@ -50,7 +50,7 @@ export interface HostChromeRuntimeDeps {
   getClientId: () => string;
   requestBackendEditorIssuesCommand: (payload: JsonObject) => Promise<unknown>;
   toast: (message: string, kind?: string) => void;
-  confirm: (message: string) => boolean;
+  confirm: (message: string) => Promise<boolean>;
 }
 
 export interface HostChromeRuntime {
@@ -351,7 +351,7 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
 
     if (await exists()) return { ok: true, dir: target };
 
-    const yes = deps.confirm('This will create a new directory called .code_cm6/diagnostics in your project root. Is this ok?');
+    const yes = await deps.confirm('This will create a new directory called .code_cm6/diagnostics in your project root. Is this ok?');
     if (!yes) return { ok: false, dir: projectRoot };
 
     try {
@@ -382,42 +382,23 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
     return res;
   }
 
-  function showExportDiagModal(): Promise<'human' | 'json' | null> {
-    return new Promise((resolve) => {
-      const modal = document.getElementById('export-diag-modal');
-      if (!modal) {
-        resolve(null);
-        return;
-      }
-      const modalEl = modal;
-      const closeBtn = document.getElementById('export-diag-modal-close');
-      const humanBtn = document.getElementById('export-diag-human');
-      const jsonBtn = document.getElementById('export-diag-json');
-
-      function cleanup(result: 'human' | 'json' | null): void {
-        modalEl.classList.remove('show');
-        modalEl.setAttribute('aria-hidden', 'true');
-        closeBtn?.removeEventListener('click', onClose);
-        humanBtn?.removeEventListener('click', onHuman);
-        jsonBtn?.removeEventListener('click', onJson);
-        modalEl.removeEventListener('click', onBackdrop);
-        resolve(result);
-      }
-      function onClose(): void { cleanup(null); }
-      function onHuman(): void { cleanup('human'); }
-      function onJson(): void { cleanup('json'); }
-      function onBackdrop(e: MouseEvent): void {
-        if (e.target === modalEl) cleanup(null);
-      }
-
-      closeBtn?.addEventListener('click', onClose);
-      humanBtn?.addEventListener('click', onHuman);
-      jsonBtn?.addEventListener('click', onJson);
-      modalEl.addEventListener('click', onBackdrop);
-
-      modalEl.setAttribute('aria-hidden', 'false');
-      modalEl.classList.add('show');
+  async function showExportDiagModal(): Promise<'human' | 'json' | null> {
+    const result = await window.teUI.dialog.open({
+      kind: 'surface',
+      title: 'Export Diagnostics',
+      message: 'Choose export format:',
+      surface: { id: 'code-te2.export-diagnostics' },
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'json', label: 'JSON', role: 'accept' },
+        { id: 'human', label: 'Human Readable', role: 'accept', primary: true },
+      ],
+      defaultAction: 'human',
+      cancelAction: 'cancel',
     });
+    return result.status === 'accepted' && (result.action === 'human' || result.action === 'json')
+      ? result.action
+      : null;
   }
 
   function formatDiagnosticsMarkdown(absPath: string, markers: DiagnosticMarker[], projectRoot: string): string {
@@ -510,7 +491,7 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
       deps.toast('Export path must be inside the project root');
       return;
     }
-    if (choice.existed && !deps.confirm('File exists. Overwrite?')) return;
+    if (choice.existed && !(await deps.confirm('File exists. Overwrite?'))) return;
 
     const text = isHuman
       ? formatDiagnosticsMarkdown(currentPath, markers, projectRoot)

@@ -208,9 +208,9 @@ export function createExplorerChromeController(
 
   async function handleOpenProject(): Promise<void> {
     if (
-      !window.confirm(
+      !(await window.teUI.dialog.confirm(
         'Any unsaved changes in the current project will be lost. Continue?',
-      )
+      ))
     ) {
       return;
     }
@@ -242,9 +242,9 @@ export function createExplorerChromeController(
 
   async function handleNewProject(): Promise<void> {
     if (
-      !window.confirm(
+      !(await window.teUI.dialog.confirm(
         'Any unsaved changes in the current project will be lost. Continue?',
-      )
+      ))
     ) {
       return;
     }
@@ -288,7 +288,7 @@ export function createExplorerChromeController(
         if (!result?.path) return;
 
         if (result.existed) {
-          const okay = window.confirm(
+          const okay = await window.teUI.dialog.confirm(
             `Directory "${result.path}" already exists. Clone might fail if not empty. Continue?`,
           );
           if (!okay) return;
@@ -322,7 +322,7 @@ export function createExplorerChromeController(
       if (!result) return;
 
       if (result.existed) {
-        const okay = window.confirm(
+        const okay = await window.teUI.dialog.confirm(
           `Directory "${result.path}" already exists. Use it anyway?`,
         );
         if (!okay) return;

@@ -1540,7 +1540,7 @@ export default function initFileExplorer(root, api, host) {
 
   async function createFolder() {
     const base = state.currentPath;
-    const name = (prompt("New folder name:") || "").trim();
+    const name = (await window.teUI.dialog.prompt("New folder name:") || "").trim();
     if (!name) return;
     if (/[\\/]/.test(name) || name === "." || name === "..") {
       toast(host, "Invalid folder name");
@@ -1561,7 +1561,7 @@ export default function initFileExplorer(root, api, host) {
       typeof window.teFilePicker.saveFile !== "function"
     ) {
       // Fallback to prompt if file picker unavailable
-      const name = (prompt("New file name:") || "").trim();
+      const name = (await window.teUI.dialog.prompt("New file name:") || "").trim();
       if (!name) return;
       if (/[\\/]/.test(name)) {
         toast(host, "Invalid file name");
@@ -1593,7 +1593,7 @@ export default function initFileExplorer(root, api, host) {
 
   async function renameSelected() {
     if (!state.selected) return;
-    const next = (prompt("Rename to:", state.selected.name) || "").trim();
+    const next = (await window.teUI.dialog.prompt("Rename to:", state.selected.name) || "").trim();
     if (!next || next === state.selected.name) return;
     try {
       await api.post("rename", { path: state.selected.path, name: next });
@@ -1608,7 +1608,7 @@ export default function initFileExplorer(root, api, host) {
     // Check if we have batch selection
     if (state.selectedPaths.size > 0) {
       const count = state.selectedPaths.size;
-      const confirmed = confirm(
+      const confirmed = await window.teUI.dialog.confirm(
         `Delete ${count} selected item${count > 1 ? "s" : ""}? This cannot be undone.`,
       );
       if (!confirmed) return;
@@ -1651,7 +1651,7 @@ export default function initFileExplorer(root, api, host) {
 
     // Single selection fallback
     if (!state.selected) return;
-    const confirmed = confirm(
+    const confirmed = await window.teUI.dialog.confirm(
       `Delete "${state.selected.name}"? This cannot be undone.`,
     );
     if (!confirmed) return;

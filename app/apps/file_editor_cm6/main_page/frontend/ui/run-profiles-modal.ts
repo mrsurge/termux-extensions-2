@@ -101,6 +101,7 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
     if (shell) return;
     shell = createDeclarativeModalShell({
       id: "run-profiles-modal",
+      surfaceId: "code-te2.run-profiles",
       title: "Run Profiles",
       width: "min(940px, 94vw)",
       maxHeight: "min(86vh, 900px)",

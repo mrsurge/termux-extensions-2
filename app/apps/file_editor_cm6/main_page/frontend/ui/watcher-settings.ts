@@ -45,6 +45,7 @@ function ensureWatcherLimitModal() {
   const modal = document.createElement('div');
   modal.id = 'fe-watcher-modal';
   modal.className = 'fe-modal';
+  modal.dataset.teDialogSurface = 'code-te2.watcher-limit';
   modal.setAttribute('aria-hidden', 'true');
   modal.innerHTML = `
     <div class="fe-modal-card" style="max-width: 520px;">

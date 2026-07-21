@@ -246,14 +246,14 @@ export function createExplorerGitFooterUtils(
       safeSend(EXPLORER_RPC_METHODS.gitUnstageAll, {});
     });
 
-    gitButtons.commit?.addEventListener('click', () => {
+    gitButtons.commit?.addEventListener('click', async () => {
       const status = deps.getGitStatus();
       const stagedCount = Array.isArray(status?.staged) ? status.staged.length : 0;
       if (!stagedCount) {
         deps.toast('No staged changes to commit.');
         return;
       }
-      const message = window.prompt('Commit message');
+      const message = await window.teUI.dialog.prompt('Commit message');
       if (!message) return;
       const trimmed = message.trim();
       if (!trimmed) {
@@ -263,22 +263,22 @@ export function createExplorerGitFooterUtils(
       safeSend(EXPLORER_RPC_METHODS.gitCommit, { message: trimmed });
     });
 
-    gitButtons.push?.addEventListener('click', () => {
-      if (!window.confirm('Are you sure you want to push changes to remote?')) {
+    gitButtons.push?.addEventListener('click', async () => {
+      if (!(await window.teUI.dialog.confirm('Are you sure you want to push changes to remote?'))) {
         return;
       }
       safeSend(EXPLORER_RPC_METHODS.gitPush, {});
     });
 
-    gitButtons.pull?.addEventListener('click', () => {
-      if (!window.confirm('Are you sure you want to pull changes from remote?')) {
+    gitButtons.pull?.addEventListener('click', async () => {
+      if (!(await window.teUI.dialog.confirm('Are you sure you want to pull changes from remote?'))) {
         return;
       }
       safeSend(EXPLORER_RPC_METHODS.gitPull, {});
     });
 
-    gitButtons.reset?.addEventListener('click', () => {
-      if (!window.confirm('⚠️ Hard reset will discard ALL uncommitted changes!\n\nReset to HEAD?')) {
+    gitButtons.reset?.addEventListener('click', async () => {
+      if (!(await window.teUI.dialog.confirm('⚠️ Hard reset will discard ALL uncommitted changes!\n\nReset to HEAD?'))) {
         return;
       }
       if (!safeSend(EXPLORER_RPC_METHODS.gitReset, { commit: 'HEAD' })) return;
@@ -289,8 +289,8 @@ export function createExplorerGitFooterUtils(
       }
     });
 
-    gitButtons.init?.addEventListener('click', () => {
-      if (!window.confirm('Initialize a Git repository in this project?')) {
+    gitButtons.init?.addEventListener('click', async () => {
+      if (!(await window.teUI.dialog.confirm('Initialize a Git repository in this project?'))) {
         return;
       }
       safeSend(EXPLORER_RPC_METHODS.gitInit, {});

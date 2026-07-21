@@ -349,7 +349,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     getClientId: () => clientId,
     requestBackendEditorIssuesCommand: (payload) => uiIpcConnections.requestBackendEditorIssuesCommand(payload),
     toast: (message, kind) => host.toast(message, kind),
-    confirm: (message) => window.confirm(message),
+    confirm: (message) => window.teUI.dialog.confirm(message),
   });
   const { formatFileNameDisplay, scheduleToolbarTitleClamp, setToolbarFileName, initToolbarTitleClampObservers, setIssuesButtonsEnabled, exportDiagnosticsToFile } = hostChromeRuntime;
   function _applyHostActivePath(filePath: unknown, options: HostActivePathOptions = {}) {

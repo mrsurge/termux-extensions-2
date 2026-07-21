@@ -15,6 +15,19 @@ interface HostBridge {
   toast?: (message: string) => void;
 }
 
+interface TeDialogApi {
+  alert(message: string): Promise<void>;
+  confirm(message: string): Promise<boolean>;
+}
+
+declare global {
+  interface Window {
+    teUI: {
+      dialog: TeDialogApi;
+    };
+  }
+}
+
 interface ShellStats {
   alive?: boolean;
   uptime?: number;
@@ -745,7 +758,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       host.toast?.('New shell started');
     } catch (error) {
       console.error(error);
-      alert(`Failed to start terminal: ${error instanceof Error ? error.message : String(error)}`);
+      await window.teUI.dialog.alert(
+        `Failed to start terminal: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -1411,13 +1426,15 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       await listShells();
     } catch (error) {
       console.error(error);
-      alert(`Action failed: ${error instanceof Error ? error.message : String(error)}`);
+      await window.teUI.dialog.alert(
+        `Action failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
   async function removeShellById(shellId: string | null): Promise<void> {
     if (!shellId) return;
-    if (!confirm('Remove this shell? It will be killed if running.')) return;
+    if (!(await window.teUI.dialog.confirm('Remove this shell? It will be killed if running.'))) return;
     try {
       await api.delete(`shells/${shellId}`);
       if (state.activeId === shellId) {
@@ -1432,7 +1449,9 @@ export default function initTerminalApp(root: HTMLElement, api: AppApi, host: Ho
       await listShells();
     } catch (error) {
       console.error(error);
-      alert(`Remove failed: ${error instanceof Error ? error.message : String(error)}`);
+      await window.teUI.dialog.alert(
+        `Remove failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 

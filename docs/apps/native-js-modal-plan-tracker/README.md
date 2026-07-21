@@ -17,8 +17,8 @@ See [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for the architecture and
 ## Approved scope
 
 The scope is every active built-in app and shared framework surface, not only
-Code TE2. Current source contains 50 blocking browser-dialog calls across six
-built-in apps plus the shared file picker:
+Code TE2. The corrected source baseline contained 52 blocking browser-dialog
+calls across six built-in apps and two shared framework surfaces:
 
 | Surface | Calls |
 | --- | ---: |
@@ -29,6 +29,7 @@ built-in apps plus the shared file picker:
 | File Editor | 2 |
 | Aria Downloader | 1 |
 | Shared file picker | 1 |
+| Shared app shell | 2 |
 
 Current custom overlays include the framework Recents view, the shared file
 picker, Code TE2 settings and operational modals, File Explorer properties and
@@ -71,8 +72,9 @@ renderer processes is therefore explicitly out of scope.
   project does not introduce platform-native select menus.
 - Toasts, notification cards, menus, drawers, and non-blocking search overlays
   are not silently reclassified as modals.
-- Emergency crash UI retains an inline fallback even after desktop modal
-  presentation exists.
+- The shared inline presenter remains the failure fallback after desktop modal
+  presentation exists. The audit removed an older unowned crash-modal markup
+  block; it was not connected to any source controller.
 - Android native source and bundled-asset publication are separate scopes and
   require their normal explicit approval. Phase 1 must nevertheless preserve
   Android browser-wrapper semantics.

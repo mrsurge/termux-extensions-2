@@ -86,6 +86,7 @@ export function showNewProjectModal(toastFn?: ToastFn): Promise<NewProjectModalR
     return new Promise((resolve, reject) => {
         const overlay = document.createElement('div');
         overlay.className = 'fe-modal-overlay';
+        overlay.dataset.teDialogSurface = 'code-te2.new-project';
         
         const box = document.createElement('div');
         box.className = 'fe-modal-box';

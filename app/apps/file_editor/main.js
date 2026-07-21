@@ -322,7 +322,7 @@ async function saveFile() {
 async function saveAsDialog() {
   const target = await pickSaveTarget();
   if (!target || !target.path) return;
-  if (target.existed && !window.confirm('File exists. Overwrite?')) return;
+  if (target.existed && !(await window.teUI.dialog.confirm('File exists. Overwrite?'))) return;
   statusEl.textContent = 'Saving...';
   try {
     const content = getText();
@@ -429,7 +429,7 @@ bindMenuToggle(miToggleWrap, () => {
   createView(getText());
 });
 bindMenuToggle(miFind, () => { if (view && openSearchPanel) openSearchPanel(view); });
-bindMenuToggle(miGoto, () => { const input = window.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
+bindMenuToggle(miGoto, async () => { const input = await window.teUI.dialog.prompt('Go to line'); const line = Number.parseInt(input || '', 10); if (!Number.isNaN(line)) { const ln = Math.max(1, line); const pos = view.state.doc.line(ln).from; view.dispatch({ selection:{anchor:pos}, scrollIntoView:true }); view.focus(); } });
 
 btnBrowse.addEventListener('click', async () => { const path = await pickFile(); if (path) await openFile(path); });
 

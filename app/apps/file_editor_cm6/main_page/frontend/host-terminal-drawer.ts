@@ -557,11 +557,14 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       edit.addEventListener('click', async (ev) => {
         ev.stopPropagation();
         const current = (s.title || '').trim();
-        const next = prompt('Terminal title (max 16 chars). Leave blank to clear.', current);
+        const next = await window.teUI.dialog.prompt(
+          'Terminal title (max 16 chars). Leave blank to clear.',
+          current,
+        );
         if (next === null) return;
         const trimmed = String(next).trim();
         if (trimmed && trimmed.length > 16) {
-          alert('Title must be 16 characters or less.');
+          await window.teUI.dialog.alert('Title must be 16 characters or less.');
           return;
         }
         try {

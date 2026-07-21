@@ -223,7 +223,7 @@ Pass 2 is complete only when:
   settle all pending sessions;
 - Electron typecheck, tests, build, packaged Wayland smoke, and zero-renderer-
   diagnostic checks pass;
-- the emergency crash fallback remains available when the child host cannot be
+- the shared inline presenter remains available when the child host cannot be
   created.
 
 ## Validation strategy

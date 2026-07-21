@@ -364,13 +364,13 @@ export function createExplorerTreeMenuController(
     deps.disableSelectMode();
   }
 
-  function batchDelete(): void {
+  async function batchDelete(): Promise<void> {
     const paths = getSelectedPaths();
     if (!paths.length) {
       deps.toast('No items selected');
       return;
     }
-    const confirmed = window.confirm(
+    const confirmed = await window.teUI.dialog.confirm(
       `⚠️ WARNING: Delete ${paths.length} items?\n\nThis action cannot be undone.`,
     );
     if (!confirmed) {
@@ -409,10 +409,10 @@ export function createExplorerTreeMenuController(
         batchUnstage();
         return;
       case 'batchDelete':
-        batchDelete();
+        await batchDelete();
         return;
       case 'createFile': {
-        const name = window.prompt('New file name:');
+        const name = await window.teUI.dialog.prompt('New file name:');
         if (!name) {
           return;
         }
@@ -433,7 +433,7 @@ export function createExplorerTreeMenuController(
         return;
       }
       case 'createDir': {
-        const name = window.prompt('New folder name:');
+        const name = await window.teUI.dialog.prompt('New folder name:');
         if (!name) {
           return;
         }
@@ -650,7 +650,7 @@ export function createExplorerTreeMenuController(
         return;
       }
       case 'rename': {
-        const newName = window.prompt('New name:', entry.name || '');
+        const newName = await window.teUI.dialog.prompt('New name:', entry.name || '');
         if (!newName || newName === entry.name) {
           return;
         }
@@ -664,7 +664,7 @@ export function createExplorerTreeMenuController(
         return;
       }
       case 'delete': {
-        const confirmed = window.confirm(
+        const confirmed = await window.teUI.dialog.confirm(
           `Delete ${entry.kind === 'dir' ? 'folder' : 'file'} "${entry.name}"?`,
         );
         if (!confirmed) {
@@ -706,7 +706,7 @@ export function createExplorerTreeMenuController(
         if (!ensureExplorerRpc()) {
           return;
         }
-        const confirmed = window.confirm(
+        const confirmed = await window.teUI.dialog.confirm(
           `Stage all changes in "${entry.name}"?\n\nThis will stage all modified and untracked files in this directory.`,
         );
         if (!confirmed) {
@@ -724,7 +724,7 @@ export function createExplorerTreeMenuController(
         if (!ensureExplorerRpc()) {
           return;
         }
-        const confirmed = window.confirm(
+        const confirmed = await window.teUI.dialog.confirm(
           `Unstage all changes in "${entry.name}"?\n\nThis will unstage all staged files in this directory.`,
         );
         if (!confirmed) {
@@ -744,7 +744,7 @@ export function createExplorerTreeMenuController(
         if (!ensureExplorerRpc()) {
           return;
         }
-        const confirmed = window.confirm(
+        const confirmed = await window.teUI.dialog.confirm(
           `⚠️ WARNING: This will discard changes to ${entry.name}\n\nRestore from HEAD?`,
         );
         if (!confirmed) {

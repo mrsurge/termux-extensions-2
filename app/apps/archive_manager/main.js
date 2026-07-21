@@ -478,7 +478,7 @@ function transformEntries(state, data) {
 
 async function promptForArchivePath(state, initialName = 'archive.7z') {
   if (!window.teFilePicker || typeof window.teFilePicker.saveFile !== 'function') {
-    const fallback = window.prompt('Enter archive destination path (relative to home)', `~/${initialName}`);
+    const fallback = await window.teUI.dialog.prompt('Enter archive destination path (relative to home)', `~/${initialName}`);
     return fallback ? { path: fallback } : null;
   }
   try {
@@ -495,7 +495,7 @@ async function promptForArchivePath(state, initialName = 'archive.7z') {
 
 async function pickExistingArchive(state) {
   if (!window.teFilePicker || typeof window.teFilePicker.openFile !== 'function') {
-    const fallback = window.prompt('Enter existing archive path', state.cwd);
+    const fallback = await window.teUI.dialog.prompt('Enter existing archive path', state.cwd);
     return fallback ? { path: fallback } : null;
   }
   try {
@@ -511,7 +511,7 @@ async function pickExistingArchive(state) {
 
 async function pickDestinationDirectory(state) {
   if (!window.teFilePicker || typeof window.teFilePicker.openDirectory !== 'function') {
-    const fallback = window.prompt('Enter destination directory', state.lastPickedTarget || state.cwd);
+    const fallback = await window.teUI.dialog.prompt('Enter destination directory', state.lastPickedTarget || state.cwd);
     return fallback ? { path: fallback } : null;
   }
   try {
@@ -1000,7 +1000,7 @@ export default async function init(root, api, host) {
     const defaultName = selected.length === 1 ? `${selected[0].name}.7z` : 'archive.7z';
     const target = await promptForArchivePath(state, defaultName);
     if (!target) return;
-    if (target.existed && !window.confirm('Archive already exists. Overwrite/append?')) {
+    if (target.existed && !(await window.teUI.dialog.confirm('Archive already exists. Overwrite/append?'))) {
       return;
     }
     const body = {
@@ -1027,7 +1027,7 @@ export default async function init(root, api, host) {
     const target = await pickExistingArchive(state);
     if (!target) return;
     const confirmMessage = `Add ${selected.length} item(s) to ${target.path}?`;
-    if (!window.confirm(confirmMessage)) {
+    if (!(await window.teUI.dialog.confirm(confirmMessage))) {
       return;
     }
     try {
