@@ -30,6 +30,7 @@ if (!nativeBridge && !parentBridge) {
 
 let nextRequestId = 0;
 let cachedSettings = null;
+let cachedBrowserFrameworkOrigin = null;
 const pendingRequests = new Map();
 
 globalThis.__te2NativeReply = (id, ok, value) => {
@@ -81,10 +82,17 @@ export async function getSettings() {
 }
 
 export async function saveSettings(settings) {
-  cachedSettings = normalizeSettings(
-    await nativeRequest("save_settings", normalizeSettings(settings)),
+  const result = await nativeRequest(
+    "save_settings",
+    normalizeSettings(settings),
   );
-  return { ...cachedSettings };
+  const nextSettings = result?.settings || result;
+  cachedSettings = normalizeSettings(nextSettings);
+  cachedBrowserFrameworkOrigin = result?.browserFrameworkOrigin || null;
+  return {
+    ...cachedSettings,
+    connectionChanged: Boolean(result?.connectionChanged),
+  };
 }
 
 function getFrameworkOrigin(settings) {
@@ -96,29 +104,64 @@ function getFrameworkOrigin(settings) {
   return url.origin;
 }
 
-function absoluteFrameworkUrl(settings, rawUrl) {
-  return new URL(String(rawUrl || ""), `${getFrameworkOrigin(settings)}/`).href;
+async function getBrowserFrameworkOrigin(settings) {
+  if (cachedBrowserFrameworkOrigin) return cachedBrowserFrameworkOrigin;
+  try {
+    const result = await nativeRequest("get_browser_framework_origin");
+    const origin = new URL(String(result?.origin || "")).origin;
+    if (!/^https?:$/i.test(new URL(origin).protocol)) {
+      throw new Error("Browser framework origin must use HTTP or HTTPS");
+    }
+    cachedBrowserFrameworkOrigin = origin;
+  } catch {
+    // The retired WebKitGTK reference shell does not expose the relay method.
+    cachedBrowserFrameworkOrigin = getFrameworkOrigin(settings);
+  }
+  return cachedBrowserFrameworkOrigin;
 }
 
-function normalizeAppAssets(app, settings) {
+function absoluteFrameworkUrl(origin, rawUrl) {
+  return new URL(String(rawUrl || ""), `${origin}/`).href;
+}
+
+function projectFrameworkUrl(configuredOrigin, browserOrigin, rawUrl) {
+  const target = new URL(String(rawUrl || ""), `${configuredOrigin}/`);
+  if (target.origin !== configuredOrigin || browserOrigin === configuredOrigin) {
+    return target.href;
+  }
+  return absoluteFrameworkUrl(
+    browserOrigin,
+    `${target.pathname}${target.search}${target.hash}`,
+  );
+}
+
+function normalizeAppAssets(app, configuredOrigin, browserOrigin) {
   const normalized = { ...app };
   const rawAssetBase = String(normalized.asset_base_url || "").trim();
   if (rawAssetBase) {
-    normalized.asset_base_url = absoluteFrameworkUrl(settings, rawAssetBase);
+    normalized.asset_base_url = projectFrameworkUrl(
+      configuredOrigin,
+      browserOrigin,
+      rawAssetBase,
+    );
   }
 
   const iconSource = String(normalized.icon_src || "").trim();
   if (iconSource) {
     if (/^https?:\/\//i.test(iconSource)) {
-      normalized.icon_src = iconSource;
+      normalized.icon_src = projectFrameworkUrl(
+        configuredOrigin,
+        browserOrigin,
+        iconSource,
+      );
     } else if (iconSource.startsWith("/")) {
-      normalized.icon_src = absoluteFrameworkUrl(settings, iconSource);
+      normalized.icon_src = absoluteFrameworkUrl(browserOrigin, iconSource);
     } else if (rawAssetBase) {
       normalized.icon_src =
-        `${absoluteFrameworkUrl(settings, rawAssetBase).replace(/\/$/, "")}/` +
+        `${String(normalized.asset_base_url).replace(/\/$/, "")}/` +
         iconSource.replace(/^\//, "");
     } else {
-      normalized.icon_src = absoluteFrameworkUrl(settings, iconSource);
+      normalized.icon_src = absoluteFrameworkUrl(browserOrigin, iconSource);
     }
   }
   return normalized;
@@ -133,13 +176,14 @@ function frameworkRequest(path, { method = "GET", body } = {}) {
 async function getApps() {
   const settings = await getSettings();
   const frameworkBaseUrl = getFrameworkOrigin(settings);
+  const browserOrigin = await getBrowserFrameworkOrigin(settings);
   const apps = [{ ...LOCAL_SETTINGS_APP }];
 
   try {
     const catalog = await frameworkRequest("/api/apps/catalog");
     for (const app of Array.isArray(catalog) ? catalog : []) {
       if (app?.id === LOCAL_SETTINGS_APP.id) continue;
-      apps.push(normalizeAppAssets(app, settings));
+      apps.push(normalizeAppAssets(app, frameworkBaseUrl, browserOrigin));
     }
     return { apps, online: true, frameworkBaseUrl };
   } catch (error) {
@@ -163,12 +207,17 @@ async function openApp(appId) {
   }
 
   const settings = await getSettings();
+  const browserOrigin = await getBrowserFrameworkOrigin(settings);
   const result = await frameworkRequest(
     `/api/apps/${encodeURIComponent(appId)}/open`,
     { method: "POST", body: { params: {} } },
   );
   const appUrl = new URL(
-    absoluteFrameworkUrl(settings, result?.url || `/app/${appId}`),
+    projectFrameworkUrl(
+      getFrameworkOrigin(settings),
+      browserOrigin,
+      result?.url || `/app/${appId}`,
+    ),
   );
   // Native wrappers own their static asset layer, so the framework's PWA
   // worker must not race or mask the desktop WebKit interceptor.

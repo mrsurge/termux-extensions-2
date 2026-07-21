@@ -113,7 +113,24 @@ export function frameworkOrigin(settings: DesktopShellSettings): string {
   return parsed.origin;
 }
 
-function openAppUrl(origin: string, appId: string, envelope: ApiEnvelope): URL {
+export function projectFrameworkUrl(
+  rawUrl: string,
+  configuredOrigin: string,
+  browserOrigin: string,
+): URL {
+  const target = new URL(rawUrl, `${configuredOrigin}/`);
+  if (target.origin !== configuredOrigin || browserOrigin === configuredOrigin) {
+    return target;
+  }
+  return new URL(`${target.pathname}${target.search}${target.hash}`, `${browserOrigin}/`);
+}
+
+function openAppUrl(
+  configuredOrigin: string,
+  browserOrigin: string,
+  appId: string,
+  envelope: ApiEnvelope,
+): URL {
   if (envelope.ok === false) {
     throw new Error(String(envelope.error || "Framework request failed"));
   }
@@ -126,7 +143,7 @@ function openAppUrl(origin: string, appId: string, envelope: ApiEnvelope): URL {
     typeof data.url === "string" && data.url.trim()
       ? data.url
       : `/app/${encodeURIComponent(appId)}`;
-  const target = new URL(rawUrl, `${origin}/`);
+  const target = projectFrameworkUrl(rawUrl, configuredOrigin, browserOrigin);
   target.searchParams.set("gv_native", "1");
   return target;
 }
@@ -139,7 +156,10 @@ function directTargetUrl(rawUrl: string): URL {
   return target;
 }
 
-export async function resolveTarget(environment = process.env): Promise<{
+export async function resolveTarget(
+  environment = process.env,
+  browserOrigin?: string,
+): Promise<{
   appId: string;
   settings: DesktopShellSettings;
   targetUrl: URL;
@@ -148,11 +168,17 @@ export async function resolveTarget(environment = process.env): Promise<{
   const appId = environment.TE2_DESKTOP_SPIKE_APP_ID?.trim() || DEFAULT_APP_ID;
   const directUrl = environment.TE2_DESKTOP_SPIKE_URL?.trim();
 
+  const origin = frameworkOrigin(settings);
+  const projectedOrigin = browserOrigin || origin;
   if (directUrl) {
-    return { appId, settings, targetUrl: directTargetUrl(directUrl) };
+    const direct = directTargetUrl(directUrl);
+    return {
+      appId,
+      settings,
+      targetUrl: projectFrameworkUrl(direct.href, origin, projectedOrigin),
+    };
   }
 
-  const origin = frameworkOrigin(settings);
   const endpoint = `${origin}/api/apps/${encodeURIComponent(appId)}/open`;
   const response = await fetch(endpoint, {
     method: "POST",
@@ -179,6 +205,6 @@ export async function resolveTarget(environment = process.env): Promise<{
   return {
     appId,
     settings,
-    targetUrl: openAppUrl(origin, appId, envelope),
+    targetUrl: openAppUrl(origin, projectedOrigin, appId, envelope),
   };
 }

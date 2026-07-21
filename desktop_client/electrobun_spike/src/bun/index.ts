@@ -1,6 +1,7 @@
 import { BrowserView, BrowserWindow } from "electrobun/bun";
 
 import { DesktopAssetManager, nativeAssetRedirectRules } from "./assets";
+import { startFrameworkRelay } from "./framework-relay";
 import {
   frameworkOrigin,
   readDesktopSettings,
@@ -17,6 +18,32 @@ await assetManager.startServer();
 
 let settings = await readDesktopSettings();
 let mainWindow: BrowserWindow;
+
+let configuredFrameworkOrigin = frameworkOrigin(settings);
+let frameworkRelay = startFrameworkRelay(configuredFrameworkOrigin);
+let browserFrameworkOrigin = frameworkRelay?.browserOrigin || configuredFrameworkOrigin;
+delete process.env.TE2_CEF_TRUSTED_HTTP_ORIGIN;
+process.env.TE2_CEF_CLIPBOARD_ORIGIN = browserFrameworkOrigin;
+
+function setFrameworkOrigin(nextOrigin: string): void {
+  const protocol = new URL(nextOrigin).protocol;
+  if (protocol === "http:") {
+    if (frameworkRelay) {
+      frameworkRelay.retarget(nextOrigin);
+    } else {
+      const nextRelay = startFrameworkRelay(nextOrigin);
+      if (!nextRelay) throw new Error("Failed to start the desktop framework relay");
+      frameworkRelay = nextRelay;
+    }
+    browserFrameworkOrigin = frameworkRelay.browserOrigin;
+  } else {
+    frameworkRelay?.stop();
+    frameworkRelay = null;
+    browserFrameworkOrigin = nextOrigin;
+  }
+  configuredFrameworkOrigin = nextOrigin;
+  process.env.TE2_CEF_CLIPBOARD_ORIGIN = browserFrameworkOrigin;
+}
 
 function apiError(envelope: unknown, fallback: string): Error {
   if (envelope && typeof envelope === "object" && "error" in envelope) {
@@ -43,7 +70,7 @@ async function frameworkRequest(params: FrameworkRequestParams): Promise<unknown
       ? ""
       : JSON.stringify(params.body);
   }
-  const response = await fetch(`${frameworkOrigin(settings)}${params.path}`, init);
+  const response = await fetch(`${configuredFrameworkOrigin}${params.path}`, init);
   let envelope: unknown;
   try {
     envelope = await response.json();
@@ -58,7 +85,7 @@ async function frameworkRequest(params: FrameworkRequestParams): Promise<unknown
 }
 
 async function frameworkStatus(): Promise<{ online: boolean; frameworkBaseUrl: string; error?: string }> {
-  const frameworkBaseUrl = frameworkOrigin(settings);
+  const frameworkBaseUrl = configuredFrameworkOrigin;
   try {
     await frameworkRequest({ path: "/api/apps/catalog" });
     return { online: true, frameworkBaseUrl };
@@ -72,9 +99,10 @@ async function frameworkStatus(): Promise<{ online: boolean; frameworkBaseUrl: s
 }
 
 async function fwsStatus(): Promise<{ available: boolean; url: string; error?: string }> {
-  const url = `${frameworkOrigin(settings)}/fws`;
+  const probeUrl = `${configuredFrameworkOrigin}/fws`;
+  const url = `${browserFrameworkOrigin}/fws`;
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    const response = await fetch(probeUrl, { signal: AbortSignal.timeout(5_000) });
     return { available: response.status >= 200 && response.status < 400, url };
   } catch (error) {
     return { available: false, url, error: error instanceof Error ? error.message : String(error) };
@@ -83,16 +111,33 @@ async function fwsStatus(): Promise<{ available: boolean; url: string; error?: s
 
 async function saveConnection(
   values: Pick<DesktopShellSettings, "frameworkHost" | "frameworkPort">,
-): Promise<DesktopShellSettings> {
+): Promise<{
+  settings: DesktopShellSettings;
+  browserFrameworkOrigin: string;
+  connectionChanged: boolean;
+}> {
   const candidate = {
     ...settings,
     frameworkHost: String(values.frameworkHost || "").trim(),
     frameworkPort: Number(values.frameworkPort),
   };
   // Validate the normalized URL before making it durable.
-  frameworkOrigin(candidate);
+  const previousOrigin = frameworkOrigin(settings);
+  const nextOrigin = frameworkOrigin(candidate);
+  if (previousOrigin === nextOrigin) {
+    settings = await writeDesktopSettings(candidate);
+    return { settings, browserFrameworkOrigin, connectionChanged: false };
+  }
+
+  const previousSettings = settings;
   settings = await writeDesktopSettings(candidate);
-  return settings;
+  try {
+    setFrameworkOrigin(nextOrigin);
+  } catch (error) {
+    settings = await writeDesktopSettings(previousSettings);
+    throw error;
+  }
+  return { settings, browserFrameworkOrigin, connectionChanged: true };
 }
 
 const rpc = BrowserView.defineRPC<DesktopShellRpc>({
@@ -100,6 +145,7 @@ const rpc = BrowserView.defineRPC<DesktopShellRpc>({
   handlers: {
     requests: {
       getSettings: () => settings,
+      getBrowserFrameworkOrigin: () => ({ origin: browserFrameworkOrigin }),
       saveSettings: saveConnection,
       saveZoom: async ({ zoomLevel }) => {
         settings = await writeDesktopSettings({ ...settings, zoomLevel: validZoom(zoomLevel) });
@@ -118,7 +164,7 @@ const rpc = BrowserView.defineRPC<DesktopShellRpc>({
       getFwsStatus: fwsStatus,
       getAssetStatus: () => assetManager.status(),
       updateAssets: async ({ force = true }) => {
-        const result = await assetManager.updateFromServer(frameworkOrigin(settings), force);
+        const result = await assetManager.updateFromServer(configuredFrameworkOrigin, force);
         if (result.updated) rpc.send.assetUpdated({ version: result.localVersion });
         return result;
       },
@@ -164,10 +210,13 @@ mainWindow = new BrowserWindow({
   frame: { x: 80, y: 50, width: 1360, height: 900 },
 });
 
-mainWindow.on("close", () => assetManager.stopServer());
+mainWindow.on("close", () => {
+  frameworkRelay?.stop();
+  assetManager.stopServer();
+});
 
 if (process.env.TE2_DESKTOP_SPIKE_AUTO_OPEN === "1") {
-  void resolveTarget().then(({ targetUrl }) => {
+  void resolveTarget(process.env, browserFrameworkOrigin).then(({ targetUrl }) => {
     setTimeout(() => {
       mainWindow.webview.executeJavascript(
         `window.__te2DesktopNavigateApp?.(${JSON.stringify(targetUrl.href)})`,
@@ -201,6 +250,6 @@ if (Number.isFinite(exitAfterSeconds) && exitAfterSeconds > 0) {
   setTimeout(() => mainWindow.close(), exitAfterSeconds * 1_000);
 }
 
-void assetManager.updateFromServer(frameworkOrigin(settings), false).then((result) => {
+void assetManager.updateFromServer(configuredFrameworkOrigin, false).then((result) => {
   if (result.updated) rpc.send.assetUpdated({ version: result.localVersion });
 });

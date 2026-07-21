@@ -32,11 +32,10 @@ android/app/build
 **/build
 .codex-scratch/
 
-# Local worktrees (not tracked)
-worktrees/monaco-editor-mobile-playground
-worktrees/vscode-te2-diff
-worktrees/monaco-vscode-api
-worktrees/
+# Local worktrees except published submodules
+worktrees/*
+!worktrees/geckoview
+!worktrees/electrobun-te2
 .repo_memory.md
 .repo_memory_old.md
 OLD/

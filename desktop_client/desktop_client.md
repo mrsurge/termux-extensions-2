@@ -59,10 +59,12 @@ A loopback-only HTTP server exposes the installed tree. The GTK reference uses
 a WebKit web-process extension; Electrobun's CEF fork uses a native resource
 handler that returns local bytes without changing the framework URL or origin,
 which keeps module workers valid. Both intercept only the immutable static path
-allowlist used by the Android wrappers. Framework documents, APIs, Socket.IO,
-raw WebSockets, and SSE stay direct. Native app URLs use the existing
-`gv_native=1` shell mode so the PWA service worker cannot race the native asset
-layer.
+allowlist used by the Android wrappers. Electrobun projects configured HTTP
+framework traffic through an in-process, dynamically allocated localhost TCP
+relay; changing the HTTP target retargets the same listener and closes existing
+upstream connections without restarting the client. HTTPS stays direct. Native
+app URLs use the existing `gv_native=1` shell mode so the PWA service worker
+cannot race the native asset layer.
 
 ## Native shell behavior
 

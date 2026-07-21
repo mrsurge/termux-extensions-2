@@ -43,6 +43,9 @@ const toastElement = document.querySelector("#native-toast") as HTMLElement;
 let appView: PatchedWebview | null = null;
 let currentUrl: URL | null = null;
 let settings: DesktopShellSettings = await electrobun.rpc!.request.getSettings({});
+let browserFrameworkOrigin = (
+  await electrobun.rpc!.request.getBrowserFrameworkOrigin({})
+).origin;
 let zoomLevel = settings.zoomLevel;
 let toastTimer = 0;
 
@@ -78,13 +81,7 @@ async function updateNavigation(): Promise<void> {
 
 function appIdFromCurrentUrl(): string | null {
   if (!currentUrl || !/^https?:$/.test(currentUrl.protocol)) return null;
-  const origin = new URL(
-    /^[a-z][a-z\d+.-]*:\/\//i.test(settings.frameworkHost)
-      ? settings.frameworkHost
-      : `http://${settings.frameworkHost}`,
-  );
-  origin.port = String(settings.frameworkPort);
-  if (currentUrl.origin !== origin.origin) return null;
+  if (currentUrl.origin !== browserFrameworkOrigin) return null;
   const match = currentUrl.pathname.match(/^\/app\/([A-Za-z0-9._-]+)(?:\/|$)/);
   const appId = match?.[1] || (currentUrl.pathname === "/app" ? currentUrl.searchParams.get("app_id") : null);
   return appId && /^[A-Za-z0-9._-]+$/.test(appId) ? appId : null;
@@ -202,12 +199,17 @@ window.__te2DesktopNavigateApp = (rawUrl) => {
 };
 window.__te2DesktopNativeRequest = async (method, params = {}) => {
   if (method === "get_settings") return electrobun.rpc!.request.getSettings({});
+  if (method === "get_browser_framework_origin") {
+    return electrobun.rpc!.request.getBrowserFrameworkOrigin({});
+  }
   if (method === "save_settings") {
-    settings = await electrobun.rpc!.request.saveSettings({
+    const result = await electrobun.rpc!.request.saveSettings({
       frameworkHost: String(params.frameworkHost || ""),
       frameworkPort: Number(params.frameworkPort),
     });
-    return settings;
+    settings = result.settings;
+    browserFrameworkOrigin = result.browserFrameworkOrigin;
+    return result;
   }
   if (method === "framework_request") {
     return electrobun.rpc!.request.frameworkRequest({

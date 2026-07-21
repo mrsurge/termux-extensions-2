@@ -1,26 +1,41 @@
-import { cp, mkdir, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, statfs } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
-const ELECTROBUN_REPOSITORY = "https://github.com/blackboardsh/electrobun.git";
-const ELECTROBUN_COMMIT = "4eba723c85b97559e1d9e13439d9a92ede0832e8";
+const ELECTROBUN_FORK_REPOSITORY = "https://github.com/mrsurge/electrobun.git";
 
 const projectRoot = resolve(import.meta.dir, "..");
-const patchPath = join(projectRoot, "patches", "electrobun-1.18.1-te2-linux.patch");
-const cacheHome = process.env.XDG_CACHE_HOME?.trim() || join(homedir(), ".cache");
-const cacheRoot = join(cacheHome, "te2", "electrobun");
-const sourceOverride = process.env.TE2_ELECTROBUN_SOURCE?.trim();
-const sourceRoot = sourceOverride
-  ? resolve(sourceOverride)
-  : join(cacheRoot, `source-${ELECTROBUN_COMMIT.slice(0, 12)}`);
+const repositoryRoot = resolve(projectRoot, "..", "..");
+const sourceRoot = join(repositoryRoot, "worktrees", "electrobun-te2");
 const packageRoot = join(sourceRoot, "package");
 const installRoot = join(projectRoot, "node_modules", "electrobun");
+const cacheHome = process.env.XDG_CACHE_HOME?.trim() || join(homedir(), ".cache");
+const cacheRoot = join(cacheHome, "te2", "electrobun");
 const platformDist = `dist-linux-${process.arch === "arm64" ? "arm64" : "x64"}`;
+const MINIMUM_BUILD_FREE_BYTES = 3 * 1024 * 1024 * 1024;
 
 async function run(command: string[], cwd = projectRoot): Promise<void> {
-  const child = Bun.spawn(command, { cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+  const child = Bun.spawn(command, {
+    cwd,
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
   const code = await child.exited;
   if (code !== 0) throw new Error(`${command.join(" ")} failed with exit code ${code}`);
+}
+
+async function output(command: string[], cwd = projectRoot): Promise<Buffer> {
+  const child = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).arrayBuffer(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  if (code !== 0) {
+    throw new Error(`${command.join(" ")} failed with exit code ${code}: ${stderr.trim()}`);
+  }
+  return Buffer.from(stdout);
 }
 
 async function succeeds(command: string[], cwd = projectRoot): Promise<boolean> {
@@ -28,17 +43,28 @@ async function succeeds(command: string[], cwd = projectRoot): Promise<boolean> 
   return (await child.exited) === 0;
 }
 
-async function digest(path: string): Promise<string> {
-  const bytes = await readFile(path);
-  return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+function normalizeRepositoryUrl(value: string): string {
+  return value.trim().replace(/\.git$/, "").replace(/^git@github\.com:/, "https://github.com/");
 }
 
-function digestText(value: string): string {
-  return new Bun.CryptoHasher("sha256").update(value).digest("hex");
+async function sourceFingerprint(): Promise<{ commit: string; fingerprint: string }> {
+  const commit = (await output(["git", "rev-parse", "HEAD"], sourceRoot)).toString().trim();
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(commit);
+  hasher.update(await output(["git", "diff", "--binary", "--no-ext-diff", "HEAD", "--"], sourceRoot));
+
+  const untracked = (
+    await output(["git", "ls-files", "--others", "--exclude-standard", "-z"], sourceRoot)
+  ).toString().split("\0").filter(Boolean).sort();
+  for (const relativePath of untracked) {
+    hasher.update(`\0${relativePath}\0`);
+    hasher.update(await readFile(join(sourceRoot, relativePath)));
+  }
+  return { commit, fingerprint: hasher.digest("hex") };
 }
 
 if (process.platform !== "linux") {
-  console.log("[electrobun-bootstrap] TE2 native patches currently target Linux; using the pinned npm package.");
+  console.log("[electrobun-bootstrap] TE2 native changes currently target Linux; using the npm package.");
   process.exit(0);
 }
 
@@ -58,75 +84,75 @@ if (
   );
 }
 
-const patchHash = await digest(patchPath);
-const sourceMarker = join(sourceRoot, ".te2-source.json");
-let sourceReady = false;
-if (sourceOverride) {
-  const head = (await Bun.$`git -C ${sourceRoot} rev-parse HEAD`.text()).trim();
-  if (head !== ELECTROBUN_COMMIT) {
-    throw new Error(`TE2_ELECTROBUN_SOURCE is at ${head}; expected ${ELECTROBUN_COMMIT}`);
-  }
-  if (!(await succeeds(["git", "apply", "--check", "--reverse", patchPath], sourceRoot))) {
-    throw new Error("TE2_ELECTROBUN_SOURCE does not contain the current TE2 Linux patch");
-  }
-  sourceReady = true;
-} else {
-  try {
-    const marker = await Bun.file(sourceMarker).json() as { commit?: string; patchHash?: string };
-    sourceReady = marker.commit === ELECTROBUN_COMMIT && marker.patchHash === patchHash;
-  } catch {}
+if (!(await succeeds(["git", "rev-parse", "--show-toplevel"], sourceRoot))) {
+  throw new Error(
+    "The Electrobun source submodule is unavailable. Run: " +
+      "git submodule update --init --recursive worktrees/electrobun-te2",
+  );
+}
+const origin = (await output(["git", "remote", "get-url", "origin"], sourceRoot)).toString();
+if (normalizeRepositoryUrl(origin) !== normalizeRepositoryUrl(ELECTROBUN_FORK_REPOSITORY)) {
+  throw new Error(
+    `Electrobun submodule origin is ${origin.trim()}; expected ${ELECTROBUN_FORK_REPOSITORY}`,
+  );
 }
 
-if (!sourceReady) {
-  await rm(sourceRoot, { recursive: true, force: true });
-  await mkdir(dirname(sourceRoot), { recursive: true });
-  await run(["git", "clone", "--filter=blob:none", "--no-checkout", ELECTROBUN_REPOSITORY, sourceRoot]);
-  await run(["git", "checkout", "--detach", ELECTROBUN_COMMIT], sourceRoot);
-  await run(["git", "apply", patchPath], sourceRoot);
-  await Bun.write(sourceMarker, `${JSON.stringify({ commit: ELECTROBUN_COMMIT, patchHash }, null, 2)}\n`);
-}
-
-const buildMarker = sourceOverride
-  ? join(cacheRoot, `override-build-${digestText(sourceRoot).slice(0, 16)}.json`)
-  : join(sourceRoot, ".te2-build.json");
+const source = await sourceFingerprint();
+const buildMarker = join(cacheRoot, `submodule-build-${process.platform}-${process.arch}.json`);
 let buildReady = false;
 try {
-  const marker = await Bun.file(buildMarker).json() as { patchHash?: string };
-  buildReady = marker.patchHash === patchHash &&
+  const marker = await Bun.file(buildMarker).json() as { fingerprint?: string };
+  buildReady = marker.fingerprint === source.fingerprint &&
     await Bun.file(join(packageRoot, platformDist, "libNativeWrapper_cef.so")).exists() &&
     await Bun.file(join(packageRoot, "dist", "api", "bun", "webGPU.ts")).exists();
 } catch {}
 
 if (!buildReady) {
+  const filesystem = await statfs(sourceRoot);
+  const availableBytes = filesystem.bavail * filesystem.bsize;
+  if (availableBytes < MINIMUM_BUILD_FREE_BYTES) {
+    throw new Error(
+      `Electrobun build requires at least 3 GB free; only ${(
+        availableBytes / (1024 * 1024 * 1024)
+      ).toFixed(1)} GB is available`,
+    );
+  }
   await run(["bun", "install", "--frozen-lockfile"], packageRoot);
   await run(["bun", "run", "build:release"], packageRoot);
-  await mkdir(dirname(buildMarker), { recursive: true });
-  await Bun.write(buildMarker, `${JSON.stringify({ patchHash }, null, 2)}\n`);
+  await mkdir(cacheRoot, { recursive: true });
+  await Bun.write(
+    buildMarker,
+    `${JSON.stringify({ commit: source.commit, fingerprint: source.fingerprint }, null, 2)}\n`,
+  );
 }
 
 const installedMarker = join(installRoot, ".te2-fork.json");
 let installedReady = false;
 try {
-  const marker = await Bun.file(installedMarker).json() as { commit?: string; patchHash?: string };
-  installedReady = marker.commit === ELECTROBUN_COMMIT && marker.patchHash === patchHash &&
+  const marker = await Bun.file(installedMarker).json() as { fingerprint?: string };
+  installedReady = marker.fingerprint === source.fingerprint &&
     await Bun.file(join(installRoot, platformDist, "libNativeWrapper_cef.so")).exists() &&
     await Bun.file(join(installRoot, "dist", "api", "bun", "webGPU.ts")).exists();
 } catch {}
 
 if (!installedReady) {
   for (const directory of ["dist", platformDist]) {
-    const source = join(packageRoot, directory);
+    const sourceDirectory = join(packageRoot, directory);
     const destination = join(installRoot, directory);
     await rm(destination, { recursive: true, force: true });
-    await cp(source, destination, { recursive: true });
+    await cp(sourceDirectory, destination, { recursive: true });
   }
-
   await Bun.write(
     installedMarker,
-    `${JSON.stringify({ upstreamVersion: "1.18.1", commit: ELECTROBUN_COMMIT, patchHash }, null, 2)}\n`,
+    `${JSON.stringify({
+      upstreamVersion: "1.18.1",
+      commit: source.commit,
+      fingerprint: source.fingerprint,
+    }, null, 2)}\n`,
   );
 }
+
 console.log(
   `[electrobun-bootstrap] ${installedReady ? "reused" : "installed"} TE2 Electrobun ` +
-    `${ELECTROBUN_COMMIT.slice(0, 12)} (${patchHash.slice(0, 12)})`,
+    `${source.commit.slice(0, 12)} (${source.fingerprint.slice(0, 12)})`,
 );

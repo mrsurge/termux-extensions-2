@@ -1,3 +1,7 @@
 [submodule "worktrees/geckoview"]
 	path = worktrees/geckoview
 	url = https://github.com/mozilla/geckoview.git
+[submodule "worktrees/electrobun-te2"]
+	path = worktrees/electrobun-te2
+	url = https://github.com/mrsurge/electrobun.git
+	branch = te2-linux

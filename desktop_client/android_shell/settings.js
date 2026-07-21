@@ -61,7 +61,7 @@ async function testFramework() {
   }
 }
 
-async function refreshFrameworkShells() {
+async function refreshFrameworkShells(forceReload = false) {
   setStatus(
     fwsStatus,
     "loading",
@@ -81,7 +81,7 @@ async function refreshFrameworkShells() {
     }
 
     setStatus(fwsStatus, "online", "Connected");
-    if (fwsFrame.src !== result.url) {
+    if (forceReload || fwsFrame.src !== result.url) {
       fwsFrame.src = result.url;
     }
 
@@ -175,12 +175,14 @@ saveButton?.addEventListener("click", async () => {
     hostInput.value = settings.frameworkHost;
     portInput.value = String(settings.frameworkPort);
     desktopShellHost.toast(
-      "Desktop settings saved",
+      settings.connectionChanged
+        ? "Desktop connection updated"
+        : "Desktop settings saved",
     );
 
     await Promise.all([
       testFramework(),
-      refreshFrameworkShells(),
+      refreshFrameworkShells(settings.connectionChanged),
     ]);
   } catch (error) {
     setStatus(
