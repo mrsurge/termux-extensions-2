@@ -44,6 +44,7 @@ function createRawSettingsJsonField(
  *   extSummaryEl: HTMLElement,
  *   customSettingsInputEl: HTMLTextAreaElement,
  *   customSettingsSaveEl: HTMLButtonElement,
+ *   extManagerModalEl: HTMLElement,
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
  *   busNotify: (event: string, payload?: any) => void,
  *   toast: (msg: string, ms?: number) => void,
@@ -53,11 +54,12 @@ function createRawSettingsJsonField(
 export function createSettingsRefreshController(deps: any) {
   // ── Scope tab switching ──
   let activeScope = "user";
+  const extManagerModalEl = deps.extManagerModalEl as HTMLElement;
   const customSettingsField = createRawSettingsJsonField(
     deps.customSettingsInputEl,
   );
-  const workspaceSettingsInputEl = document.getElementById(
-    "editor-ext-workspace-settings-input",
+  const workspaceSettingsInputEl = extManagerModalEl.querySelector(
+    "#editor-ext-workspace-settings-input",
   ) as HTMLTextAreaElement | null;
   const workspaceSettingsField: RawSettingsJsonField | null =
     workspaceSettingsInputEl
@@ -65,12 +67,12 @@ export function createSettingsRefreshController(deps: any) {
       : null;
 
   function installScopeTabs() {
-    const tabs = document.querySelectorAll<HTMLElement>(
+    const tabs = extManagerModalEl.querySelectorAll<HTMLElement>(
       "#settings-scope-tabs .settings-scope-tab",
     );
-    const userPane = document.getElementById("settings-scope-user");
-    const wsPane = document.getElementById("settings-scope-workspace");
-    const modal = document.getElementById("editor-ext-manager-modal");
+    const userPane = extManagerModalEl.querySelector<HTMLElement>("#settings-scope-user");
+    const wsPane = extManagerModalEl.querySelector<HTMLElement>("#settings-scope-workspace");
+    const modal = extManagerModalEl;
     if (!tabs.length || !userPane || !wsPane || !modal) return;
 
     tabs.forEach((tab) => {
@@ -139,8 +141,8 @@ export function createSettingsRefreshController(deps: any) {
   }
 
   function installWorkspaceSettingsSaveHandler() {
-    const saveBtn = document.getElementById(
-      "editor-ext-workspace-settings-save",
+    const saveBtn = extManagerModalEl.querySelector(
+      "#editor-ext-workspace-settings-save",
     ) as HTMLButtonElement | null;
     if (!saveBtn || !workspaceSettingsField) return;
 

@@ -120,3 +120,184 @@ test("page navigation settles generated dialogs and restores focus", async () =>
   service.surfaceRegistry.destroy();
   window.close();
 });
+
+test("desktop surface portal preserves live DOM and nests primitive dialogs", async () => {
+  const window = new Window({ url: "http://127.0.0.1/app/test" });
+  const childWindow = new Window({ url: "http://127.0.0.1/app/test" });
+  const runtimeStyle = childWindow.document.createElement("style");
+  runtimeStyle.id = "runtime-style";
+  runtimeStyle.textContent = ".runtime-preserved { color: blue; }";
+  childWindow.document.head.appendChild(runtimeStyle);
+  Object.defineProperty(window, "te2DesktopSurfaceWindows", {
+    configurable: true,
+    value: Object.freeze({ enabled: true }),
+  });
+  let openCall = null;
+  window.open = (...args) => {
+    openCall = args;
+    return childWindow;
+  };
+
+  const { document } = window;
+  const style = document.createElement("style");
+  style.textContent = ".preserved { color: rgb(1, 2, 3); }";
+  document.head.appendChild(style);
+  const opener = document.createElement("button");
+  const surface = document.createElement("div");
+  surface.className = "fe-modal";
+  surface.dataset.teDialogSurface = "test.settings";
+  surface.setAttribute("aria-hidden", "true");
+  surface.innerHTML = `
+    <section role="dialog" aria-label="Settings">
+      <button class="preserved" data-te-dialog-close>Close</button>
+    </section>
+  `;
+  document.body.append(opener, surface);
+  let clicks = 0;
+  const close = surface.querySelector("button");
+  close.addEventListener("click", () => {
+    clicks += 1;
+    surface.setAttribute("aria-hidden", "true");
+  });
+  opener.focus();
+
+  const service = createDialogService(window);
+  service.scanSurfaces(document);
+  surface.setAttribute("aria-hidden", "false");
+  await window.happyDOM.waitUntilComplete();
+  await nextTask();
+
+  assert.deepEqual(openCall, ["", "te2-modal-surface", "popup,width=1000,height=760"]);
+  assert.equal(surface.ownerDocument, childWindow.document);
+  assert.equal(childWindow.document.querySelector("[data-te-dialog-surface]"), surface);
+  assert.match(childWindow.document.head.textContent, /\.preserved/);
+  assert.equal(childWindow.document.getElementById("runtime-style"), runtimeStyle);
+
+  close.click();
+  await window.happyDOM.waitUntilComplete();
+  await nextTask();
+  assert.equal(clicks, 1);
+  assert.equal(surface.ownerDocument, document);
+  assert.equal(surface.getAttribute("aria-hidden"), "true");
+
+  const secondChild = new Window({ url: "http://127.0.0.1/app/test" });
+  window.open = () => secondChild;
+  surface.setAttribute("aria-hidden", "false");
+  await window.happyDOM.waitUntilComplete();
+  await nextTask();
+  const nested = service.confirm("Nested question");
+  await nextTask();
+  const nestedLayer = secondChild.document.querySelector(".te-dialog-layer");
+  assert.ok(nestedLayer);
+  nestedLayer.querySelector('[data-primary="true"]').click();
+  assert.equal(await nested, true);
+
+  secondChild.dispatchEvent(new secondChild.Event("beforeunload"));
+  await window.happyDOM.waitUntilComplete();
+  await nextTask();
+  assert.equal(surface.ownerDocument, document);
+  assert.equal(surface.getAttribute("aria-hidden"), "true");
+  assert.equal(clicks, 2);
+  service.surfaceRegistry.destroy();
+  window.close();
+  childWindow.close();
+  secondChild.close();
+});
+
+test("desktop surface portal cleans up a dynamically removed modal", async () => {
+  const window = new Window({ url: "http://127.0.0.1/app/test" });
+  const childWindow = new Window({ url: "http://127.0.0.1/app/test" });
+  Object.defineProperty(window, "te2DesktopSurfaceWindows", {
+    configurable: true,
+    value: Object.freeze({ enabled: true }),
+  });
+  window.open = () => childWindow;
+
+  const surface = window.document.createElement("div");
+  surface.dataset.teDialogSurface = "test.dynamic";
+  surface.innerHTML = `
+    <section role="dialog" aria-label="Dynamic modal">
+      <button id="dynamic-cancel">Cancel</button>
+    </section>
+  `;
+  surface.querySelector("button").addEventListener("click", () => surface.remove());
+  window.document.body.appendChild(surface);
+
+  const service = createDialogService(window);
+  service.scanSurfaces(window.document);
+  await window.happyDOM.waitUntilComplete();
+  await nextTask();
+  assert.equal(surface.ownerDocument, childWindow.document);
+
+  surface.querySelector("button").click();
+  await childWindow.happyDOM.waitUntilComplete();
+  await nextTask();
+  assert.equal(service.surfaceRegistry.get("test.dynamic"), null);
+  assert.equal(
+    [...window.document.body.childNodes].some((node) => node.nodeType === 8),
+    false,
+  );
+  service.surfaceRegistry.destroy();
+  window.close();
+  childWindow.close();
+});
+
+test("desktop surface portal stacks nested stateful surfaces in one child", async () => {
+  const window = new Window({ url: "http://127.0.0.1/app/test" });
+  const childWindow = new Window({ url: "http://127.0.0.1/app/test" });
+  Object.defineProperty(window, "te2DesktopSurfaceWindows", {
+    configurable: true,
+    value: Object.freeze({ enabled: true }),
+  });
+  let opens = 0;
+  window.open = () => {
+    opens += 1;
+    return childWindow;
+  };
+
+  const makeSurface = (id) => {
+    const surface = window.document.createElement("div");
+    surface.dataset.teDialogSurface = id;
+    surface.setAttribute("aria-hidden", "true");
+    surface.innerHTML = `<section role="dialog"><button data-te-dialog-close>Close</button></section>`;
+    surface.querySelector("button").addEventListener("click", () => {
+      surface.setAttribute("aria-hidden", "true");
+    });
+    window.document.body.appendChild(surface);
+    return surface;
+  };
+  const manager = makeSurface("test.manager");
+  const config = makeSurface("test.config");
+  const service = createDialogService(window);
+  service.scanSurfaces(window.document);
+
+  manager.setAttribute("aria-hidden", "false");
+  await window.happyDOM.waitUntilComplete();
+  await nextTask();
+  config.setAttribute("aria-hidden", "false");
+  await window.happyDOM.waitUntilComplete();
+  await nextTask();
+
+  assert.equal(opens, 1);
+  assert.equal(manager.ownerDocument, childWindow.document);
+  assert.equal(config.ownerDocument, childWindow.document);
+  assert.equal(childWindow.document.title, "test.config");
+  assert.equal(manager.inert, true);
+  assert.equal(config.inert, false);
+
+  config.querySelector("button").click();
+  await window.happyDOM.waitUntilComplete();
+  await nextTask();
+  assert.equal(config.ownerDocument, window.document);
+  assert.equal(manager.ownerDocument, childWindow.document);
+  assert.equal(manager.inert, false);
+  assert.equal(childWindow.document.title, "test.manager");
+
+  manager.querySelector("button").click();
+  await window.happyDOM.waitUntilComplete();
+  await nextTask();
+  assert.equal(manager.ownerDocument, window.document);
+  service.surfaceRegistry.destroy();
+  window.close();
+  childWindow.close();
+});

@@ -14,13 +14,28 @@ app controller
     <- Promise<DialogResult>
 ```
 
+Registered stateful surfaces use a second Electron path:
+
+```text
+existing app controller + live modal root
+    -> teUI.dialog surface registry
+        -> browser/Android: remain inline
+        -> Electron: adopt into controlled same-origin blank child
+    -> restore the same node to its placeholder on close
+```
+
+Electron keeps that blank child in the opener's renderer process. No DOM node,
+callback, controller, or application state crosses IPC.
+
 The existing framework shell already loads `app/static/js/te_ui.js` and
 `app/static/js/file_picker.js` for every app. `te_ui.js` is therefore the common
 frontend seam; individual apps should not acquire Electron-specific imports.
 
 ## Non-goals
 
-- Intercepting or relocating live DOM elements into another renderer.
+- Relocating live DOM elements into another renderer process or sending them
+  over IPC. Same-renderer document adoption into the controlled Electron child
+  is the stateful-surface implementation.
 - Overriding `window.alert`, `window.confirm`, or `window.prompt` globally.
 - Sending callbacks, DOM nodes, arbitrary HTML, or executable source over IPC.
 - Moving existing filesystem, Git, settings, or app-lifecycle authority into
@@ -86,9 +101,10 @@ TE2's declarative modal code:
 - read-only text, code, list, and key/value rows;
 - action groups and validation messages.
 
-The contract must remain structured-clone-safe. Rich surfaces use an explicit
-surface identifier and serializable state/action messages; they do not send a
-render callback to Electron.
+The contract must remain structured-clone-safe. Simple and newly declarative
+dialogs use it directly. Existing rich surfaces use a stable surface identifier
+for lifecycle ownership and the same-renderer DOM portal; they do not send a
+render callback, DOM node, or controller through Electron IPC.
 
 ## Dialog lifecycle
 
@@ -141,9 +157,9 @@ be interrupted by Enter handling.
 - Give every true modal a stable surface identifier and route its open/close
   lifecycle through the shared service.
 - Simple modals should immediately move to portable contracts.
-- Stateful modals may temporarily retain their existing inline renderer behind
-  a surface adapter, but the tracker must mark them `inline-only` until their
-  state and actions are serializable.
+- Stateful modals retain their existing inline renderer and register the live
+  root. Electron can portal that exact root without changing browser/Android
+  behavior.
 - Audit template-only modal markup. Remove it when source proves it orphaned;
   otherwise document its owner and fallback requirement.
 - Keep non-modal drawers, menus, toasts, and search overlays outside the service.
@@ -158,7 +174,7 @@ Pass 1 is complete only when:
   checks;
 - Code TE2 typecheck/build and proportional tests for every touched app pass;
 - Android wrapper behavior is validated without Android native-source changes;
-- inline-only stateful surfaces are explicitly identified for Pass 2.
+- stateful surface families are explicitly identified for Pass 2.
 
 ## Pass 2: Electron presenter and child-window refactor
 
@@ -187,6 +203,11 @@ Pass 1 is complete only when:
   above their parent session without opening an uncontrolled chain of OS
   windows.
 
+This validated IPC host owns portable contract dialogs. Stateful registered
+surfaces share one separate, strictly named `about:blank` child created through
+Electron's `setWindowOpenHandler`. The main process denies other child
+navigation and popups.
+
 ### 3. Route portable dialogs
 
 - Route alert, confirmation, prompt, and simple form contracts through the
@@ -197,20 +218,30 @@ Pass 1 is complete only when:
 - Closing or navigating the framework app view must close the modal child and
   settle every pending request.
 
-### 4. Refactor stateful modal families
+### 4. Portal stateful modal families without rewriting them
 
-For each `inline-only` tracker row:
+For each registered stateful family:
 
-1. Separate data loading and effects from DOM rendering.
-2. Define a serializable initial state and allowed action messages.
-3. Keep effects in the owning app controller and existing RPC lane.
-4. Render the state through the shared modal primitives.
-5. Verify browser inline parity.
-6. Enable Electron child presentation and mark the row portable.
+1. Preserve the working root, controller closure, event listeners, and backend
+   lane.
+2. Adopt the root into the same-origin Electron child and leave an exact
+   placeholder in the app document.
+3. Use `ownerDocument` for dynamic DOM, menus, focus, timers, and realm checks
+   that must follow the adopted root.
+4. Notify embedded CM6 editors of document changes with `EditorView.setRoot()`
+   and mirror their runtime token styles.
+5. Keep nested portable dialogs inside the active stateful child and stack
+   nested stateful roots in that one window.
+6. Restore the same node on close, navigation, native child close, controller
+   destruction, or app teardown.
 
-The file/folder picker is included in this progression. Its filesystem calls
-remain in the current page controller; the child receives only display state
-and returns user intent.
+The file/folder picker remains authoritative in its current page controller;
+its live root and controller move together, so filesystem traffic does not gain
+an extra protocol or renderer hop.
+
+New reusable modal UI can use the dependency-free TSX/JSX DOM component layer.
+Code TE2's declarative modal frame is the first consumer. Existing complex
+controllers should migrate incrementally only when behavior remains intact.
 
 ### 5. Pass 2 completion gate
 
@@ -251,7 +282,7 @@ Pass 2 is complete only when:
 
 ## Delivery discipline
 
-- Complete Pass 1 before enabling Electron routing by default.
+- Keep Pass 1 behavior as the baseline while enabling Electron routing.
 - Land each migration slice with its tracker updates and proportional tests.
 - Do not edit generated bundles as source.
 - Check free disk space before Electron builds and stop below 3 GB.

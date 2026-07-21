@@ -56,6 +56,7 @@ interface Cm6EditorView {
   dispatch(spec: UnknownRecord): void;
   destroy(): void;
   focus(): void;
+  setRoot?(root: Document | ShadowRoot): void;
 }
 
 interface Cm6Update {
@@ -137,6 +138,7 @@ const JSON_GRAMMAR_URL = `${TEXTMATE_UI_BASE}/grammars/json.JSON.tmLanguage.json
 const GITHUB_DARK_THEME_URL = `${TEXTMATE_UI_BASE}/themes/github-dark-default.vscode.json`;
 const ONIG_WASM_URL = `${TEXTMATE_UI_BASE}/onig.wasm`;
 const TOKEN_STYLE_ID = "cm6-json-textmate-token-styles";
+const MODAL_REPARENT_EVENT = "te2:modal-surface-reparented";
 
 let cm6Promise: Promise<Cm6Module> | null = null;
 let textmatePromise: Promise<{
@@ -146,6 +148,7 @@ let textmatePromise: Promise<{
   tokenRules: ThemeRule[];
 }> | null = null;
 const scriptPromises = new Map<string, Promise<void>>();
+let tokenStyleCss = "";
 
 function isRecord(value: unknown): value is UnknownRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -172,8 +175,10 @@ function coerceEditorText(value: unknown): string {
   return String(value);
 }
 
-function nextAnimationFrame(): Promise<void> {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+function nextAnimationFrame(targetWindow: Window = window): Promise<void> {
+  return new Promise((resolve) =>
+    targetWindow.requestAnimationFrame(() => resolve()),
+  );
 }
 
 async function waitForStableEditorRect(
@@ -184,12 +189,14 @@ async function waitForStableEditorRect(
     if (shouldStop()) return false;
     const rect = host.getBoundingClientRect();
     if (host.isConnected && rect.width > 0 && rect.height > 0) {
-      await nextAnimationFrame();
+      const targetWindow = host.ownerDocument.defaultView || window;
+      await nextAnimationFrame(targetWindow);
       if (shouldStop()) return false;
       const settled = host.getBoundingClientRect();
       return settled.width > 0 && settled.height > 0;
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 80));
+    const targetWindow = host.ownerDocument.defaultView || window;
+    await new Promise((resolve) => targetWindow.setTimeout(resolve, 80));
   }
   return false;
 }
@@ -227,13 +234,14 @@ function editorMeasurementLooksValid(view: Cm6EditorView): boolean {
 
 async function waitForValidEditorMeasurement(
   view: Cm6EditorView,
+  host: HTMLElement,
   shouldStop: () => boolean,
 ): Promise<boolean> {
   const measurableView = view as unknown as { requestMeasure?: () => void };
   for (let attempt = 0; attempt < 6; attempt += 1) {
     if (shouldStop()) return false;
     measurableView.requestMeasure?.();
-    await nextAnimationFrame();
+    await nextAnimationFrame(host.ownerDocument.defaultView || window);
     if (shouldStop()) return false;
     if (editorMeasurementLooksValid(view)) return true;
   }
@@ -364,21 +372,34 @@ function parseThemeRules(theme: UnknownRecord): ThemeRule[] {
     });
   });
 
-  ensureTokenStyle(cssRules.join("\n"));
+  tokenStyleCss = cssRules.join("\n");
+  ensureTokenStyle(tokenStyleCss);
   return rules;
 }
 
-function ensureTokenStyle(cssText: string): void {
+function ensureTokenStyle(
+  cssText: string,
+  targetDocument: Document = document,
+): void {
   if (!cssText) return;
-  let styleEl = document.getElementById(
+  let styleEl = targetDocument.getElementById(
     TOKEN_STYLE_ID,
   ) as HTMLStyleElement | null;
   if (!styleEl) {
-    styleEl = document.createElement("style");
+    styleEl = targetDocument.createElement("style");
     styleEl.id = TOKEN_STYLE_ID;
-    document.head.appendChild(styleEl);
+    targetDocument.head.appendChild(styleEl);
   }
   styleEl.textContent = cssText;
+}
+
+export function syncJsonTextmateEditorRoot(
+  view: { setRoot?: (root: Document | ShadowRoot) => void } | null,
+  host: HTMLElement,
+  cssText: string = tokenStyleCss,
+): void {
+  ensureTokenStyle(cssText, host.ownerDocument);
+  view?.setRoot?.(host.ownerDocument);
 }
 
 async function loadTextmate(): Promise<{
@@ -646,6 +667,7 @@ export function createJsonTextmateField(
   let view: Cm6EditorView | null = null;
   let destroyed = false;
   let suppressChange = false;
+  const lifecycleWindow = window;
 
   const host = document.createElement("div");
   host.className = "cm6-json-textmate-field";
@@ -659,6 +681,14 @@ export function createJsonTextmateField(
   textarea.placeholder = options.placeholder || "";
   textarea.value = currentValue;
   host.appendChild(textarea);
+
+  const handleModalReparent = (event: Event): void => {
+    const detail = (event as CustomEvent<{ element?: Element }>).detail;
+    const surface = detail?.element;
+    if (!surface || (surface !== host && !surface.contains(host))) return;
+    syncJsonTextmateEditorRoot(view, host);
+  };
+  lifecycleWindow.addEventListener(MODAL_REPARENT_EVENT, handleModalReparent);
 
   function setInvalid(invalid: boolean): void {
     host.classList.toggle("is-invalid", invalid);
@@ -695,6 +725,7 @@ export function createJsonTextmateField(
       if (!hasStableRect) return;
       const [CM, tm] = await Promise.all([loadCm6(), loadTextmate()]);
       if (destroyed) return;
+      ensureTokenStyle(tokenStyleCss, host.ownerDocument);
       const extensions: unknown[] = [
         CM.history?.(),
         CM.search?.(),
@@ -741,6 +772,7 @@ export function createJsonTextmateField(
       });
       const measurementsSettled = await waitForValidEditorMeasurement(
         view,
+        host,
         () => destroyed,
       );
       if (destroyed || !view) return;
@@ -792,6 +824,10 @@ export function createJsonTextmateField(
     },
     destroy() {
       destroyed = true;
+      lifecycleWindow.removeEventListener(
+        MODAL_REPARENT_EVENT,
+        handleModalReparent,
+      );
       view?.destroy();
       view = null;
       host.remove();

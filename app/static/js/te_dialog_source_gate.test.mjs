@@ -4,7 +4,7 @@ import { extname, relative, resolve } from "node:path";
 import { test } from "node:test";
 
 const APP_ROOT = resolve(import.meta.dirname, "../..");
-const SOURCE_EXTENSIONS = new Set([".html", ".js", ".mjs", ".ts"]);
+const SOURCE_EXTENSIONS = new Set([".html", ".js", ".mjs", ".ts", ".tsx"]);
 const SKIP_DIRECTORIES = new Set([
   "build",
   "dist",

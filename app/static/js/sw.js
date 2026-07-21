@@ -13,6 +13,7 @@ const PRECACHE = [
   '/static/js/ws_port.js',
   '/static/js/te_state.js',
   '/static/js/te_dialog.mjs',
+  '/static/js/te_modal_surface_portal.mjs',
   '/static/js/te_ui.js',
   '/static/js/jobs_client.js',
   '/static/js/file_picker.js',

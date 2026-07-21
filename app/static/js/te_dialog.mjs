@@ -1,3 +1,5 @@
+import { createSurfacePortalPresenter } from "./te_modal_surface_portal.mjs";
+
 const SCHEMA_VERSION = 1;
 const DIALOG_KINDS = new Set(["alert", "confirm", "prompt", "form", "surface"]);
 const FIELD_KINDS = new Set([
@@ -289,14 +291,15 @@ export function isDeclaredSurfaceOpen(element, targetWindow = globalThis.window)
   if (element.classList?.contains("te-fp-hidden")) return false;
   if (element.style?.display === "none") return false;
   try {
-    if (targetWindow?.getComputedStyle?.(element).display === "none") return false;
+    const elementWindow = element.ownerDocument?.defaultView || targetWindow;
+    if (elementWindow?.getComputedStyle?.(element).display === "none") return false;
   } catch (_) {
     // A detached or synthetic test document may not expose computed style.
   }
   return true;
 }
 
-export function createSurfaceRegistry(targetWindow) {
+export function createSurfaceRegistry(targetWindow, options = {}) {
   const document = targetWindow?.document;
   if (!document) throw new Error("Dialog surface registry requires a document");
   const entries = new Map();
@@ -330,18 +333,27 @@ export function createSurfaceRegistry(targetWindow) {
     const existingIndex = stack.indexOf(entry);
     if (existingIndex >= 0) stack.splice(existingIndex, 1);
     stack.push(entry);
+    entry.portaled = options.surfacePresenter?.open?.({
+      id: entry.id,
+      element: entry.element,
+      options: entry.options,
+      requestClose: () => requestClose(entry),
+      onDetached: () => entry.unregister?.(),
+    }) === true;
     const dialog = dialogElement(entry);
     dialog.setAttribute?.("aria-modal", "true");
     activateTop();
-    targetWindow.setTimeout?.(() => {
-      if (!entry.open || entry.element.contains(document.activeElement)) return;
+    const entryWindow = entry.element.ownerDocument?.defaultView || targetWindow;
+    entryWindow.setTimeout?.(() => {
+      const entryDocument = entry.element.ownerDocument || document;
+      if (!entry.open || entry.element.contains(entryDocument.activeElement)) return;
       const focusTarget = focusableElements(dialog)[0] || dialog;
       if (!focusTarget.hasAttribute?.("tabindex") && focusTarget === dialog) {
         focusTarget.setAttribute?.("tabindex", "-1");
       }
       focusTarget.focus?.();
     }, 0);
-    entry.element.dispatchEvent?.(new targetWindow.CustomEvent("te-dialog-surface-opened", {
+    entry.element.dispatchEvent?.(new entryWindow.CustomEvent("te-dialog-surface-opened", {
       detail: { id: entry.id },
     }));
   }
@@ -352,6 +364,8 @@ export function createSurfaceRegistry(targetWindow) {
     entry.element.inert = false;
     const index = stack.indexOf(entry);
     if (index >= 0) stack.splice(index, 1);
+    if (entry.portaled) options.surfacePresenter?.close?.(entry);
+    entry.portaled = false;
     activateTop();
     const restore = entry.previousFocus;
     entry.previousFocus = null;
@@ -408,6 +422,7 @@ export function createSurfaceRegistry(targetWindow) {
       open: false,
       previousFocus: null,
       observer: null,
+      portaled: false,
       unregister: null,
     };
     const onKeyDown = (event) => {
@@ -487,6 +502,7 @@ export function createSurfaceRegistry(targetWindow) {
     },
     get size() { return entries.size; },
     get openIds() { return stack.map((entry) => entry.id); },
+    get(id) { return entries.get(id) || null; },
   };
 }
 
@@ -814,19 +830,28 @@ export function createInlineDialogPresenter(targetWindow) {
 
 export function createDialogService(targetWindow, options = {}) {
   const inlinePresenter = options.inlinePresenter || createInlineDialogPresenter(targetWindow);
+  const surfacePresenter = options.surfacePresenter || createSurfacePortalPresenter(
+    targetWindow,
+    { createInlinePresenter: createInlineDialogPresenter },
+  );
   const surfaceRegistry = options.surfaceRegistry || (
-    targetWindow?.document ? createSurfaceRegistry(targetWindow) : null
+    targetWindow?.document
+      ? createSurfaceRegistry(targetWindow, { surfacePresenter })
+      : null
   );
   let registeredPresenter = null;
 
+  const externalPresenter = () => registeredPresenter || targetWindow?.te2DesktopDialogs || null;
+
   targetWindow?.addEventListener?.("pagehide", () => {
-    registeredPresenter?.closeAll?.("closed");
+    externalPresenter()?.closeAll?.("closed");
+    surfacePresenter?.closeAll?.();
     surfaceRegistry?.closeAll();
   });
 
   async function open(input) {
     const request = normalizeDialogRequest(input);
-    const presenter = registeredPresenter || targetWindow?.te2DesktopDialogs || null;
+    const presenter = surfacePresenter?.dialogPresenter || externalPresenter();
     if (presenter && typeof presenter.open === "function") {
       try {
         return normalizeDialogResult(request, await presenter.open(request));
@@ -867,12 +892,14 @@ export function createDialogService(targetWindow, options = {}) {
       surfaceRegistry?.scan(root);
     },
     closeAll(status = "closed") {
-      registeredPresenter?.closeAll?.(status);
+      externalPresenter()?.closeAll?.(status);
       inlinePresenter.closeAll?.(status);
+      surfacePresenter?.closeAll?.();
       surfaceRegistry?.closeAll();
     },
     get inlinePresenter() { return inlinePresenter; },
     get surfaceRegistry() { return surfaceRegistry; },
+    get surfacePresenter() { return surfacePresenter; },
   };
 }
 

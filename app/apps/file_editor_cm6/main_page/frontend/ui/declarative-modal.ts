@@ -2,6 +2,7 @@ import {
   createJsonTextmateField,
   type JsonTextmateFieldHandle,
 } from "./cm6-json-textmate-field.ts";
+import { createModalFrame } from "./modal-kit/modal-frame.tsx";
 
 export type DeclarativeFieldKind =
   | "text"
@@ -48,6 +49,7 @@ export interface DeclarativeModalContract extends DeclarativeFormContract {
   title: string;
   width?: string;
   maxHeight?: string;
+  ownerDocument?: Document;
 }
 
 export interface DeclarativeFormHandle {
@@ -170,17 +172,20 @@ function selectedOptionLabel(
 
 function positionSelectMenu(button: HTMLElement, menu: HTMLElement): void {
   const rect = button.getBoundingClientRect();
+  const targetWindow = button.ownerDocument.defaultView || window;
   menu.style.minWidth = `${rect.width}px`;
   menu.style.left = `${Math.max(8, rect.left)}px`;
   menu.style.top = `${rect.bottom + 4}px`;
-  menu.style.maxHeight = `${Math.max(160, window.innerHeight - rect.bottom - 16)}px`;
+  menu.style.maxHeight = `${Math.max(160, targetWindow.innerHeight - rect.bottom - 16)}px`;
 }
 
 function createSelectControl(
   field: DeclarativeFieldContract,
   current: unknown,
   onValue: (key: string, value: unknown) => void,
+  document: Document,
 ): FieldControlHandle {
+  const targetWindow = document.defaultView || window;
   const root = document.createElement("div");
   root.className = "declarative-select";
   const button = document.createElement("button");
@@ -230,9 +235,9 @@ function createSelectControl(
       });
       menu.appendChild(option);
       if (sameValue(item.value, selectedValue)) {
-        window.setTimeout(() => option.focus(), 0);
+        targetWindow.setTimeout(() => option.focus(), 0);
       } else if (index === 0 && selectedValue == null) {
-        window.setTimeout(() => option.focus(), 0);
+        targetWindow.setTimeout(() => option.focus(), 0);
       }
     });
 
@@ -243,7 +248,7 @@ function createSelectControl(
     const closeOnPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (
-        target instanceof Node &&
+        target instanceof targetWindow.Node &&
         (root.contains(target) || menu.contains(target))
       ) {
         return;
@@ -261,16 +266,16 @@ function createSelectControl(
 
     document.addEventListener("pointerdown", closeOnPointerDown, true);
     document.addEventListener("keydown", closeOnKeyDown, true);
-    window.addEventListener("resize", closeOnWindowChange, true);
-    window.addEventListener("scroll", closeOnWindowChange, true);
+    targetWindow.addEventListener("resize", closeOnWindowChange, true);
+    targetWindow.addEventListener("scroll", closeOnWindowChange, true);
 
     popup = {
       menu,
       cleanup: () => {
         document.removeEventListener("pointerdown", closeOnPointerDown, true);
         document.removeEventListener("keydown", closeOnKeyDown, true);
-        window.removeEventListener("resize", closeOnWindowChange, true);
-        window.removeEventListener("scroll", closeOnWindowChange, true);
+        targetWindow.removeEventListener("resize", closeOnWindowChange, true);
+        targetWindow.removeEventListener("scroll", closeOnWindowChange, true);
       },
     };
   }
@@ -293,7 +298,10 @@ function createSelectControl(
   };
 }
 
-function createFieldLabel(field: DeclarativeFieldContract): HTMLElement {
+function createFieldLabel(
+  field: DeclarativeFieldContract,
+  document: Document,
+): HTMLElement {
   const label = document.createElement("label");
   label.className = "declarative-field-label";
   label.textContent = field.required ? `${field.label} *` : field.label;
@@ -302,6 +310,7 @@ function createFieldLabel(field: DeclarativeFieldContract): HTMLElement {
 
 function createFieldDescription(
   field: DeclarativeFieldContract,
+  document: Document,
 ): HTMLElement | null {
   if (!field.description) return null;
   const desc = document.createElement("div");
@@ -314,6 +323,7 @@ function createFieldControl(
   field: DeclarativeFieldContract,
   values: Record<string, unknown>,
   onValue: (key: string, value: unknown) => void,
+  document: Document,
 ): FieldControlHandle {
   const current = fieldValue(field, values);
 
@@ -326,7 +336,7 @@ function createFieldControl(
   }
 
   if (field.kind === "select") {
-    return createSelectControl(field, current, onValue);
+    return createSelectControl(field, current, onValue, document);
   }
 
   if (field.kind === "jsonTextmate") {
@@ -416,6 +426,7 @@ export function createDeclarativeForm(
   initialValues: Record<string, unknown>,
   options: { onChange?: (values: Record<string, unknown>) => void } = {},
 ): DeclarativeFormHandle {
+  const document = container.ownerDocument;
   let values = cloneValues(initialValues);
   let rows: Array<{ field: DeclarativeFieldContract; row: HTMLElement }> = [];
   let controlCleanups: Array<() => void> = [];
@@ -443,10 +454,10 @@ export function createDeclarativeForm(
     fields.forEach((field) => {
       const row = document.createElement("div");
       row.className = "declarative-field-row";
-      row.appendChild(createFieldLabel(field));
-      const desc = createFieldDescription(field);
+      row.appendChild(createFieldLabel(field, document));
+      const desc = createFieldDescription(field, document);
       if (desc) row.appendChild(desc);
-      const control = createFieldControl(field, values, setValue);
+      const control = createFieldControl(field, values, setValue, document);
       row.appendChild(control.element);
       if (control.destroy) controlCleanups.push(control.destroy);
       container.appendChild(row);
@@ -476,60 +487,27 @@ export function createDeclarativeForm(
 export function createDeclarativeModalShell(
   contract: DeclarativeModalContract,
 ): DeclarativeModalShell {
-  const root = document.createElement("div");
-  root.id = contract.id;
-  root.className = "fe-modal declarative-modal";
-  if (contract.surfaceId) root.dataset.teDialogSurface = contract.surfaceId;
-  root.setAttribute("aria-hidden", "true");
-
-  const card = document.createElement("div");
-  card.className = "fe-modal-card declarative-modal-card";
-  if (contract.width) card.style.width = contract.width;
-  if (contract.maxHeight) card.style.maxHeight = contract.maxHeight;
-
-  const header = document.createElement("div");
-  header.className = "fe-modal-header declarative-modal-header";
-
-  const title = document.createElement("strong");
-  title.textContent = contract.title;
-  header.appendChild(title);
-
-  const spacer = document.createElement("span");
-  spacer.style.flex = "1";
-  header.appendChild(spacer);
-
-  const closeBtn = document.createElement("button");
-  closeBtn.className = "fe-btn";
-  closeBtn.type = "button";
-  closeBtn.setAttribute("aria-label", "Close");
-  closeBtn.textContent = "✕";
-  header.appendChild(closeBtn);
-
-  const bodyEl = document.createElement("div");
-  bodyEl.className = "fe-modal-body declarative-modal-body";
-
-  const footerEl = document.createElement("div");
-  footerEl.className = "declarative-modal-footer";
-
-  card.appendChild(header);
-  card.appendChild(bodyEl);
-  card.appendChild(footerEl);
-  root.appendChild(card);
-
-  const close = () => {
+  const document = contract.ownerDocument || globalThis.document;
+  function close(): void {
     root.classList.remove("show");
     root.setAttribute("aria-hidden", "true");
-  };
+  }
+  const frame = createModalFrame(document, {
+    id: contract.id,
+    surfaceId: contract.surfaceId,
+    title: contract.title,
+    width: contract.width,
+    maxHeight: contract.maxHeight,
+    onClose: close,
+  });
+  const root = frame.root;
+  const bodyEl = frame.body;
+  const footerEl = frame.footer;
   const open = () => {
     bodyEl.scrollTop = 0;
     root.classList.add("show");
     root.setAttribute("aria-hidden", "false");
   };
-
-  closeBtn.addEventListener("click", close);
-  root.addEventListener("click", (event) => {
-    if (event.target === root) close();
-  });
 
   document.body.appendChild(root);
 

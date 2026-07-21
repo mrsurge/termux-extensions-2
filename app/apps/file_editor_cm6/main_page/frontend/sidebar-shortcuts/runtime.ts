@@ -197,6 +197,7 @@ export function initSidebarShortcuts(
   let shortcutsListEl: HTMLElement | null = null;
   let shortcutsEditorEl: HTMLElement | null = null;
 
+  let editorSettingsModalEl: HTMLElement | null = null;
   let editorSettingsShortcutsBtn: HTMLElement | null = null;
   let setupShortcutsBtn: HTMLElement | null = null;
 
@@ -1029,7 +1030,7 @@ export function initSidebarShortcuts(
   function _applyToggleDisplay(uiPrefs: UnknownRecord) {
     const display = _normStr(uiPrefs?.[UI_PREF_KEY_TOGGLE_DISPLAY]) || "icon";
     try {
-      const radios = document.querySelectorAll<HTMLInputElement>(
+      const radios = (editorSettingsModalEl || document).querySelectorAll<HTMLInputElement>(
         'input[name="agent-toggle-display"]',
       );
       radios.forEach((r) => {
@@ -3702,6 +3703,7 @@ export function initSidebarShortcuts(
       sidebarSetupPlaceholder?.querySelector(".sidebar-setup__hint") || null;
     sidebarIframeStack = document.getElementById("sidebar-iframe-stack");
 
+    editorSettingsModalEl = document.getElementById("editor-settings-modal");
     shortcutsModal = document.getElementById("agent-shortcuts-modal");
     shortcutsCloseBtn = document.getElementById("agent-shortcuts-close");
     shortcutsAddBtn = document.getElementById("agent-shortcuts-add");
@@ -3749,7 +3751,7 @@ export function initSidebarShortcuts(
 
     // Settings radios: update prefs.
     try {
-      const radios = document.querySelectorAll<HTMLInputElement>(
+      const radios = (editorSettingsModalEl || document).querySelectorAll<HTMLInputElement>(
         'input[name="agent-toggle-display"]',
       );
       radios.forEach((r) => {
@@ -3762,7 +3764,7 @@ export function initSidebarShortcuts(
     } catch (_) {}
 
     try {
-      const headerRadios = document.querySelectorAll<HTMLInputElement>(
+      const headerRadios = (editorSettingsModalEl || document).querySelectorAll<HTMLInputElement>(
         'input[name="agent-header-display"]',
       );
       headerRadios.forEach((r) => {

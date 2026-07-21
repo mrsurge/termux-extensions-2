@@ -1,0 +1,51 @@
+:root {
+  color-scheme: dark;
+  --background: #111315;
+  --card: #1b1f23;
+  --card-foreground: #f2f4f5;
+  --foreground: #f2f4f5;
+  --secondary: #242a30;
+  --input: #11171c;
+  --border: #353c43;
+  --primary: #5b8dff;
+  --primary-foreground: #ffffff;
+  --destructive: #b94747;
+  --warning: #d98719;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+body .te-dialog-layer {
+  padding: 16px;
+  background: var(--background);
+  backdrop-filter: none;
+}
+
+body .te-dialog-card,
+body .te-dialog-card[data-width] {
+  width: 100%;
+  max-width: none;
+  max-height: calc(100vh - 24px);
+}
+
+body .te-dialog-header {
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+body .te-dialog-close,
+body .te-dialog-body,
+body .te-dialog-actions,
+body button,
+body input,
+body textarea {
+  -webkit-app-region: no-drag;
+}

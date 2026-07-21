@@ -77,3 +77,22 @@ test("prompt wrapper preserves cancellation", async () => {
   });
   assert.equal(await service.prompt("Name", "old"), null);
 });
+
+test("global desktop presenter receives service teardown", () => {
+  const statuses = [];
+  const listeners = new Map();
+  const targetWindow = {
+    te2DesktopDialogs: {
+      open: async () => ({ status: "closed", action: null, values: {} }),
+      closeAll: (status) => statuses.push(status),
+    },
+    addEventListener: (type, callback) => listeners.set(type, callback),
+  };
+  const service = createDialogService(targetWindow, {
+    inlinePresenter: { open: async () => ({}), closeAll: () => {} },
+    surfaceRegistry: { closeAll: () => {} },
+  });
+  listeners.get("pagehide")();
+  service.closeAll("replaced");
+  assert.deepEqual(statuses, ["closed", "replaced"]);
+});

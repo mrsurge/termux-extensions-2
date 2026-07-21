@@ -27,6 +27,9 @@ const shared = {
   sourcemap: isWatch,
   minify: !isWatch,
   logLevel: 'info',
+  jsx: 'transform',
+  jsxFactory: 'jsx',
+  jsxFragment: 'Fragment',
   external: [
     // Vendor scripts loaded separately via <script> tags
     '/static/vendor/*',

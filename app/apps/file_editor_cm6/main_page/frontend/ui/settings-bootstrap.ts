@@ -58,6 +58,7 @@ export function createSettingsBootstrap(deps: any) {
     extSummaryEl: deps.els.extSummary,
     customSettingsInputEl: deps.els.extCustomSettingsInput,
     customSettingsSaveEl: deps.els.extCustomSettingsSave,
+    extManagerModalEl: deps.els.extManagerModal,
     busRequest: deps.busRequest,
     busNotify: deps.busNotify,
     toast: deps.toast,

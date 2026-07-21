@@ -2,7 +2,7 @@
   "name": "File Editor",
   "id": "file_editor",
   "icon_emoji": "📝",
-  "version": "0.2.321",
+  "version": "0.2.322",
   "description": "A full-page text editor.",
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"

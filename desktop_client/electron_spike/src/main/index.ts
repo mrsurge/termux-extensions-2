@@ -12,6 +12,7 @@ import {
 } from "electron";
 
 import { DesktopAssetManager, MIME_TYPES } from "./assets";
+import { DesktopDialogHost } from "./dialog-host";
 import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
 import {
   frameworkOrigin,
@@ -68,6 +69,8 @@ let appView: WebContentsView | null = null;
 let settings: DesktopShellSettings;
 let configuredFrameworkOrigin: string;
 let relay: FrameworkRelay;
+let dialogHost: DesktopDialogHost | null = null;
+const surfaceWindows = new Set<BrowserWindow>();
 const assets = new DesktopAssetManager();
 
 function errorMessage(error: unknown): string {
@@ -209,9 +212,18 @@ function resizeAppView(): void {
   appView?.setBounds(appViewBounds());
 }
 
+function closeSurfaceWindows(): void {
+  for (const window of [...surfaceWindows]) {
+    surfaceWindows.delete(window);
+    if (!window.isDestroyed()) window.close();
+  }
+}
+
 function closeAppView(): void {
   if (!appView) return;
   const closing = appView;
+  closeSurfaceWindows();
+  dialogHost?.closeForOwner(closing.webContents);
   appView = null;
   mainWindow?.contentView.removeChildView(closing);
   if (!closing.webContents.isDestroyed()) closing.webContents.close();
@@ -237,13 +249,17 @@ function installContextMenu(contents: WebContents): void {
         click: () => contents.paste(),
       },
     ]);
-    if (mainWindow && !mainWindow.isDestroyed()) menu.popup({ window: mainWindow });
+    const ownerWindow = BrowserWindow.fromWebContents(contents) || mainWindow;
+    if (ownerWindow && !ownerWindow.isDestroyed()) {
+      menu.popup({ window: ownerWindow });
+    }
   });
 }
 
 function createAppView(): WebContentsView {
   const view = new WebContentsView({
     webPreferences: {
+      preload: resolve(app.getAppPath(), "dist", "app-view-preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -260,8 +276,16 @@ function createAppView(): WebContentsView {
   });
 
   const notify = () => sendNavigation(view.webContents);
+  view.webContents.on("will-navigate", () => {
+    closeSurfaceWindows();
+    dialogHost?.closeForOwner(view.webContents);
+  });
   view.webContents.on("did-navigate", notify);
-  view.webContents.on("did-navigate-in-page", notify);
+  view.webContents.on("did-navigate-in-page", () => {
+    closeSurfaceWindows();
+    dialogHost?.closeForOwner(view.webContents);
+    notify();
+  });
   view.webContents.on("did-finish-load", notify);
   view.webContents.on("page-title-updated", (event) => {
     event.preventDefault();
@@ -273,9 +297,44 @@ function createAppView(): WebContentsView {
     }
   });
   view.webContents.on("render-process-gone", (_event, details) => {
+    closeSurfaceWindows();
+    dialogHost?.closeForOwner(view.webContents);
     console.error(`[te2-desktop] App renderer exited: ${details.reason}`);
   });
-  view.webContents.setWindowOpenHandler(({ url }) => {
+  view.webContents.on("did-create-window", (window, details) => {
+    if (details.frameName !== "te2-modal-surface") {
+      if (!window.isDestroyed()) window.close();
+      return;
+    }
+    surfaceWindows.add(window);
+    window.setMenu(null);
+    installContextMenu(window.webContents);
+    window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    window.webContents.on("will-navigate", (event) => event.preventDefault());
+    window.on("closed", () => surfaceWindows.delete(window));
+  });
+  view.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    if (url === "about:blank" && frameName === "te2-modal-surface") {
+      const [mainWidth, mainHeight] = mainWindow?.getContentSize() || [1000, 760];
+      return {
+        action: "allow",
+        outlivesOpener: false,
+        overrideBrowserWindowOptions: {
+          parent: mainWindow || undefined,
+          modal: true,
+          frame: false,
+          show: true,
+          width: Math.max(420, Math.min(1000, mainWidth - 48)),
+          height: Math.max(320, Math.min(760, mainHeight - 48)),
+          minWidth: 360,
+          minHeight: 240,
+          backgroundColor: "#111315",
+          autoHideMenuBar: true,
+          skipTaskbar: true,
+          useContentSize: true,
+        },
+      };
+    }
     try {
       const target = new URL(url);
       if (target.origin === relay.browserOrigin) {
@@ -438,7 +497,11 @@ function createMainWindow(): BrowserWindow {
     },
   });
   window.on("resize", resizeAppView);
-  window.on("close", closeAppView);
+  window.on("close", () => {
+    closeSurfaceWindows();
+    dialogHost?.closeAll();
+    closeAppView();
+  });
   window.on("closed", () => { mainWindow = null; });
   window.webContents.on("did-finish-load", () => window.show());
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -498,6 +561,15 @@ async function main(): Promise<void> {
   relay = await startFrameworkRelay(configuredFrameworkOrigin, assets);
 
   mainWindow = createMainWindow();
+  dialogHost = new DesktopDialogHost({
+    getMainWindow: () => mainWindow,
+    getAppContents: () => appView?.webContents || null,
+    getRelayOrigin: () => relay.browserOrigin,
+    getAppPath: () => app.getAppPath(),
+    shellUrl: `${SHELL_SCHEME}://${SHELL_HOST}/dialog/index.html`,
+    installContextMenu,
+  });
+  dialogHost.registerIpc();
   ipcMain.handle(
     "te2-desktop:native-request",
     (event, method: NativeRequestMethod, params: Record<string, unknown> = {}) => {
@@ -525,6 +597,8 @@ async function main(): Promise<void> {
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => {
   closeAppView();
+  dialogHost?.dispose();
+  dialogHost = null;
   void relay?.stop();
 });
 

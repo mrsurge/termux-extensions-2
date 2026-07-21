@@ -13,6 +13,7 @@ import { EXPLORER_RPC_METHODS } from '../../../src/explorer/rpc/contract.ts';
  */
 export function createSettingsManagerController(deps: any) {
   async function refreshEditorExtManagerModal() {
+    const document = deps.extManagerListEl.ownerDocument;
     deps.extManagerListEl.textContent = 'Loading…';
     let extensions = [];
     let langSlots = {};

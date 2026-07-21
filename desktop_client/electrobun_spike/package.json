@@ -1,7 +1,7 @@
 {
   "name": "te2-desktop-electrobun",
   "private": true,
-  "version": "0.2.321",
+  "version": "0.2.322",
   "scripts": {
     "bootstrap:electrobun": "bun scripts/bootstrap-electrobun.ts",
     "build": "bun run bootstrap:electrobun && electrobun build",

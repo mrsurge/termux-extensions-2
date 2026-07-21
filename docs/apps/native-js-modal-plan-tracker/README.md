@@ -11,8 +11,22 @@ The work has two ordered passes:
    styled modal child window while browser and Android continue to render them
    inline.
 
-See [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for the architecture and
-[TRACKER.md](./TRACKER.md) for the source inventory and completion gates.
+Pass 1 is complete. Pass 2 now has two deliberately different Electron paths.
+Portable alert, confirm, prompt, and form contracts use the validated IPC child
+host. Registered stateful surfaces keep their existing DOM, controllers, and
+event listeners and are adopted into one same-origin `about:blank` child window
+that Electron keeps in the opener's renderer process. This preserves Code TE2's
+CM6 JSON editors and extension/settings DOM projection instead of flattening
+them into generic fields. Browser and Android still render every surface inline.
+
+The first reusable compiled component is a dependency-free TSX/JSX modal frame
+used by Code TE2's declarative modal shell. It is an incremental component
+foundation, not a replacement for working stateful controllers.
+
+See [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md) for the modal architecture,
+[TRACKER.md](./TRACKER.md) for the source inventory and completion gates, and
+[DESKTOP_SHELL_IMPLEMENTATION.md](./DESKTOP_SHELL_IMPLEMENTATION.md) for the
+completed Electron shell and its localhost framework relay.
 
 ## Approved scope
 
@@ -38,8 +52,9 @@ modal, and File Editor's unsaved-change modal.
 
 There are no active `HTMLDialogElement`, `<dialog>`, or `showModal()` call sites
 to intercept. Existing modals are `div`-based overlays, while the blocking
-dialogs are direct browser functions. Moving DOM nodes or callbacks between
-renderer processes is therefore explicitly out of scope.
+dialogs are direct browser functions. DOM nodes and callbacks never cross IPC
+or renderer-process boundaries. Electron's stateful portal is allowed only for
+the controlled same-origin blank child that shares the opener's renderer.
 
 ## Terminology
 
@@ -51,8 +66,8 @@ renderer processes is therefore explicitly out of scope.
 - **Presenter:** the environment-specific renderer for a dialog contract.
 - **Desktop modal host:** the Electron modal `BrowserWindow` that presents
   portable contracts.
-- **Surface adapter:** an explicit model/action adapter for a stateful existing
-  modal that cannot be represented as a simple alert, confirmation, or prompt.
+- **Stateful surface portal:** the Electron-only adoption of a registered live
+  modal root into the controlled same-origin, same-renderer child document.
 
 ## Invariants
 
@@ -65,6 +80,9 @@ renderer processes is therefore explicitly out of scope.
   default actions, cancellation, and app-navigation teardown.
 - Dialog requests contain text and declarative data, never arbitrary HTML or a
   module path supplied at runtime.
+- Stateful portal surfaces keep their original nodes, listeners, controller
+  closures, and backend lanes. They are not reconstructed from lossy field
+  schemas and are restored to their exact placeholder when closed.
 - Modal presentation does not move application authority. File operations,
   settings changes, Git actions, and other effects remain in their existing
   frontend controller and backend/RPC lane.

@@ -6,7 +6,6 @@
 - `[-]` in progress
 - `[x]` complete and validated
 - `blocked` requires a recorded decision or prerequisite
-- `inline-only` is registered in Pass 1 but not yet portable to Electron
 - `removed` was proven orphaned by a whole-repository source audit and pruned
 
 Tracker rows must be updated in the same change as their source migration.
@@ -17,15 +16,15 @@ Tracker rows must be updated in the same change as their source migration.
 | --- | --- | --- |
 | Inventory reviewed against current source | [x] | Initial plan audit, 2026-07-21 |
 | Shared async contract approved | [x] | Explicit Pass 1 approval, 2026-07-21 |
-| Inline presenter and lifecycle tests pass | [x] | 10 Node/Happy DOM tests |
+| Inline presenter and lifecycle tests pass | [x] | 16 Node/Happy DOM and JSX/CM6 tests |
 | Direct blocking-dialog source count is zero | [x] | Corrected baseline: 52; source gate: zero |
 | Every custom modal has an owner and stable surface ID | [x] | 20 active families; 2 orphaned blocks removed |
 | Pass 1 browser parity passes | [x] | Automated DOM matrix plus live headless Chromium app-shell smoke |
-| Pass 1 Android wrapper parity passes | [x] | User-validated live Android behavior, 2026-07-21; no version/publication requested |
-| Electron preload/IPC boundary passes | [ ] | |
-| Electron child host passes simple-dialog matrix | [ ] | |
-| Every non-emergency modal is Electron-portable | [ ] | |
-| Packaged Electron Wayland smoke passes | [ ] | |
+| Pass 1 Android wrapper parity passes | [x] | User-validated live Android behavior, 2026-07-21; Android source/publication remained unchanged |
+| Electron preload/IPC boundary passes | [x] | Strict schema tests plus exact-view/origin validation |
+| Electron child host passes simple-dialog matrix | [x] | Prompt, fallback, pre/post-presentation failure, and teardown smoke |
+| Every non-emergency modal is Electron-portable | [x] | Simple contracts use IPC host; registered rich roots use same-renderer portal |
+| Packaged Electron Wayland smoke passes | [x] | Rebuilt package launched Code TE2 and exited cleanly on Wayland |
 
 ## Pass 1 work items
 
@@ -75,33 +74,34 @@ active HTML as well as JavaScript and TypeScript.
 ## Custom modal family inventory
 
 `Registered` means lifecycle is owned by `teUI.dialog`. `Portable` means the
-request/state is serializable and eligible for Electron. `Electron` means live
-child-window validation is complete.
+surface has either a serializable contract or the same-renderer stateful portal
+route. `Electron` means the route is implemented and covered; representative
+live family checks are recorded below.
 
 | Proposed surface ID | Current owner/source | Classification | Registered | Portable | Electron |
 | --- | --- | --- | --- | --- | --- |
-| `framework.recents` | `app/templates/app_shell.html` | Stateful list/actions | [x] | inline-only | [ ] |
-| `framework.file-picker` | `app/static/js/file_picker.js` | Stateful filesystem picker | [x] | inline-only | [ ] |
-| `code-te2.export-diagnostics` | `host-chrome-runtime.ts` | Simple choice contract | [x] | [x] | [ ] |
-| `code-te2.autosave-enable` | `ui/autosave-modal.ts` | Confirmation contract | [x] | [x] | [ ] |
-| `code-te2.watcher-limit` | `ui/watcher-settings.ts` | Password/action form | [x] | inline-only | [ ] |
-| `code-te2.projects-debug` | `ui/projects-debug-modal.ts` | Stateful list/actions | [x] | inline-only | [ ] |
-| `code-te2.run-profiles` | `ui/run-profiles-modal.ts` | Complex declarative form | [x] | inline-only | [ ] |
-| `code-te2.new-project` | `src/explorer/chrome/new-project-modal.ts` | Choice/conditional prompt | [x] | inline-only | [ ] |
-| `code-te2.editor-settings` | `template.html`, `ui/settings-*` | Complex settings | [x] | inline-only | [ ] |
-| `code-te2.agent-shortcuts` | `template.html`, `sidebar-shortcuts/runtime.ts` | Stateful shortcut editor | [x] | inline-only | [ ] |
-| `code-te2.themes` | `template.html`, `ui/settings-themes.ts` | Stateful choice list | [x] | inline-only | [ ] |
-| `code-te2.extension-manager` | `template.html`, `ui/settings-manager.ts` | Stateful list/actions | [x] | inline-only | [ ] |
-| `code-te2.extension-config` | `template.html`, `ui/settings-config-modal.ts` | Schema-driven form | [x] | inline-only | [ ] |
+| `framework.recents` | `app/templates/app_shell.html` | Stateful list/actions | [x] | [x] | [x] |
+| `framework.file-picker` | `app/static/js/file_picker.js` | Stateful filesystem picker | [x] | [x] | [x] |
+| `code-te2.export-diagnostics` | `host-chrome-runtime.ts` | Simple choice contract | [x] | [x] | [x] |
+| `code-te2.autosave-enable` | `ui/autosave-modal.ts` | Confirmation contract | [x] | [x] | [x] |
+| `code-te2.watcher-limit` | `ui/watcher-settings.ts` | Password/action form | [x] | [x] | [x] |
+| `code-te2.projects-debug` | `ui/projects-debug-modal.ts` | Stateful list/actions | [x] | [x] | [x] |
+| `code-te2.run-profiles` | `ui/run-profiles-modal.ts` | Complex declarative form | [x] | [x] | [x] |
+| `code-te2.new-project` | `src/explorer/chrome/new-project-modal.ts` | Choice/conditional prompt | [x] | [x] | [x] |
+| `code-te2.editor-settings` | `template.html`, `ui/settings-*` | Complex settings | [x] | [x] | [x] |
+| `code-te2.agent-shortcuts` | `template.html`, `sidebar-shortcuts/runtime.ts` | Stateful shortcut editor | [x] | [x] | [x] |
+| `code-te2.themes` | `template.html`, `ui/settings-themes.ts` | Stateful choice list | [x] | [x] | [x] |
+| `code-te2.extension-manager` | `template.html`, `ui/settings-manager.ts` | Stateful list/actions | [x] | [x] | [x] |
+| `code-te2.extension-config` | `template.html`, `ui/settings-config-modal.ts` | Schema-driven form | [x] | [x] | [x] |
 | `code-te2.android-config` | former `template.html` block | Orphaned markup/CSS | removed | n/a | n/a |
 | `code-te2.crash` | former `template.html` block | Orphaned markup | removed | n/a | n/a |
-| `file-editor.unsaved` | `app/apps/file_editor/template.html`, `main.js` | Three-action confirmation | [x] | inline-only | [ ] |
-| `file-explorer.properties` | `app/apps/file_explorer/template.html`, `main.js` | Read-only/stateful details | [x] | inline-only | [ ] |
-| `file-explorer.bookmarks` | `app/apps/file_explorer/template.html`, `main.js` | Stateful list/actions | [x] | inline-only | [ ] |
-| `file-explorer.bookmark-form` | `app/apps/file_explorer/template.html`, `main.js` | Form | [x] | inline-only | [ ] |
-| `archive-manager.bookmarks` | `app/apps/archive_manager/template.html`, `main.js` | Stateful list/actions | [x] | inline-only | [ ] |
-| `archive-manager.bookmark-form` | `app/apps/archive_manager/template.html`, `main.js` | Form | [x] | inline-only | [ ] |
-| `aria-downloader.new-task` | `app/apps/aria_downloader/template.html`, `main.js` | Form | [x] | inline-only | [ ] |
+| `file-editor.unsaved` | `app/apps/file_editor/template.html`, `main.js` | Three-action confirmation | [x] | [x] | [x] |
+| `file-explorer.properties` | `app/apps/file_explorer/template.html`, `main.js` | Read-only/stateful details | [x] | [x] | [x] |
+| `file-explorer.bookmarks` | `app/apps/file_explorer/template.html`, `main.js` | Stateful list/actions | [x] | [x] | [x] |
+| `file-explorer.bookmark-form` | `app/apps/file_explorer/template.html`, `main.js` | Form | [x] | [x] | [x] |
+| `archive-manager.bookmarks` | `app/apps/archive_manager/template.html`, `main.js` | Stateful list/actions | [x] | [x] | [x] |
+| `archive-manager.bookmark-form` | `app/apps/archive_manager/template.html`, `main.js` | Form | [x] | [x] | [x] |
+| `aria-downloader.new-task` | `app/apps/aria_downloader/template.html`, `main.js` | Form | [x] | [x] | [x] |
 
 ## Overlay classification audit
 
@@ -119,18 +119,18 @@ classification before Pass 1 closes.
 
 | ID | Work item | Status | Notes |
 | --- | --- | --- | --- |
-| P2-001 | Add isolated app-view dialog preload | [ ] | Minimal API only |
-| P2-002 | Add validated app-view-to-main dialog IPC | [ ] | Exact current view and relay origin |
-| P2-003 | Add modal child `BrowserWindow` and renderer | [ ] | Parent-owned, frameless, modal |
-| P2-004 | Reuse canonical dialog renderer and styles | [ ] | No Electron-only visual fork |
-| P2-005 | Add size negotiation and display clamping | [ ] | Scroll body after clamp |
-| P2-006 | Add stack, focus, keyboard, IME, and accessibility behavior | [ ] | One reusable child host |
-| P2-007 | Add navigation/app-close/desktop-close teardown | [ ] | Resolve every pending promise |
-| P2-008 | Route simple portable contracts | [ ] | Alert, confirm, prompt, simple forms |
-| P2-009 | Add forced-failure inline fallback test | [ ] | Never display duplicate dialogs |
-| P2-010 | Refactor every stateful family to portable state/actions | [ ] | Update family table per slice |
-| P2-011 | Validate file/folder picker in child host | [ ] | Filesystem authority stays in app |
-| P2-012 | Complete packaged Wayland validation | [ ] | Check disk before build |
+| P2-001 | Add isolated app-view dialog preload | [x] | Minimal `open`/`closeAll` API only |
+| P2-002 | Add validated app-view-to-main dialog IPC | [x] | Exact current view and relay origin |
+| P2-003 | Add modal child `BrowserWindow` and renderer | [x] | Parent-owned, frameless, modal |
+| P2-004 | Reuse canonical dialog renderer and styles | [x] | Complete for simple portable contracts |
+| P2-005 | Add size negotiation and display clamping | [x] | Scroll body after clamp |
+| P2-006 | Add stack, focus, keyboard, IME, and accessibility behavior | [x] | One reusable child host |
+| P2-007 | Add navigation/app-close/desktop-close teardown | [x] | Resolves pending promises |
+| P2-008 | Route simple portable contracts | [x] | Alert, confirm, prompt, and existing simple forms |
+| P2-009 | Add forced-failure inline fallback test | [x] | Pre-show fallback once; no post-show duplicate |
+| P2-010 | Portal every stateful family without flattening its controller | [x] | Same-origin blank child preserves live nodes/listeners and restores exact roots |
+| P2-011 | Validate file/folder picker in child host | [x] | Live picker rendered 41 filesystem entries; authority stayed in app |
+| P2-012 | Complete packaged Wayland validation | [x] | Rebuilt Linux x64 package exited cleanly after timed Code TE2 smoke |
 
 ## Validation record
 
@@ -138,7 +138,7 @@ classification before Pass 1 closes.
 | --- | --- | --- | --- |
 | 2026-07-21 | Initial read-only inventory | Targeted `rg` over non-generated built-in frontend source | 50 blocking calls; custom families recorded |
 | 2026-07-21 | Corrected full source inventory | JS/TS/HTML source gate | 52-call baseline; zero remaining |
-| 2026-07-21 | Shared contract and lifecycle | `npm run test:dialogs` | 10/10 pass, including nesting, focus, declared surfaces, and page teardown |
+| 2026-07-21 | Shared contract and lifecycle | `npm run test:dialogs` | 16/16 pass, including stateful adoption/restoration, nested stacks, dynamic destruction, JSX DOM rendering, and CM6 root retargeting |
 | 2026-07-21 | Touched typed frontends | Code TE2 and Terminal `npm run typecheck` | pass |
 | 2026-07-21 | Frontend bundles | Code TE2 and Terminal `node build.mjs` after 18 GB disk check | pass |
 | 2026-07-21 | Template owner audit | Whole-repository targeted `rg` | Android-config and crash blocks unowned; removed |
@@ -146,6 +146,12 @@ classification before Pass 1 closes.
 | 2026-07-21 | Live browser smoke | Disposable headless Chromium against `/app/file_editor_cm6` | Prompt returned edited value, zero layers remained, six static surfaces registered, zero runtime exceptions |
 | 2026-07-21 | Android/PWA asset path audit | Asset inventory and Service Worker source | Android bundle already includes full static JS tree; added dialog module to PWA precache |
 | 2026-07-21 | Live Android validation | User device check | Pass 1 behavior operates correctly; version/publication intentionally deferred |
+| 2026-07-21 | Electron host foundation | Electron tests, typed build, packaged Wayland smoke, and forced renderer failures | Simple portable dialogs and the isolated child-window lifecycle pass |
+| 2026-07-21 | Stateful Pass 2 recovery | Source comparison against the working Pass 1 commit | Generic conversion removed CM6 JSON editors and extension/settings DOM behavior; all stateful app implementations restored |
+| 2026-07-21 | Same-renderer stateful portal | Code TE2 typecheck/build and Electron typecheck/tests/compile after 20 GB disk check | pass |
+| 2026-07-21 | Live Electron Wayland stateful matrix | DevTools inspection of the rebuilt app through a clean desktop asset root | Settings, nested Extensions, 33-field BasedPyright config, CM6 JSON editors, Run Profiles, stack restoration, and 41-entry file picker pass |
+| 2026-07-21 | Packaged Electron Wayland smoke | `npm run build`; timed packaged Code TE2 launch | Package built and exited 0; only Node's existing `fs.Stats` deprecation warning was emitted |
+| 2026-07-21 | Synchronized framework release | Code TE2 typecheck, 16 dialog tests/build; Electron typecheck, 10 tests/build; Cargo check; version audit | `0.2.322` passed; Android source and publication remained unchanged |
 
 ## Decisions
 
@@ -156,3 +162,6 @@ classification before Pass 1 closes.
 | 2026-07-21 | Browser/Android render inline; Electron uses a presenter adapter | Preserves existing non-desktop behavior |
 | 2026-07-21 | Do not move live DOM or callbacks between renderers | Renderer-process objects are not portable |
 | 2026-07-21 | Keep one reusable desktop child with an internal stack | Supports nested dialogs without OS-window chains |
+| 2026-07-21 | Stateful modal presentation must reuse the complete working view/controller behavior | A generic form schema cannot represent CM6 fields, live extension/settings projection, filesystem navigation, or conditional state |
+| 2026-07-21 | Use direct DOM adoption only in Electron's controlled same-origin blank child | Electron keeps it in the opener renderer, so working nodes/listeners/controllers remain intact without IPC serialization |
+| 2026-07-21 | Use a dependency-free TSX/JSX DOM layer for incremental reusable components | Existing esbuild/TypeScript can compile it without React, Babel, or a new runtime dependency |

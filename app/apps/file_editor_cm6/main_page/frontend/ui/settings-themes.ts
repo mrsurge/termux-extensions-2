@@ -26,6 +26,7 @@ export function createSettingsThemesController(deps: any) {
   }
 
   async function refreshEditorThemesModal() {
+    const document = deps.themesListEl.ownerDocument;
     deps.themesListEl.textContent = 'Loading…';
     let themes = [];
     try {

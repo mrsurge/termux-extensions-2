@@ -109,20 +109,24 @@ function parseJsonRawValue(rawValue: string): { ok: boolean; value: any } {
 
 function positionExtConfigMenu(button: HTMLElement, menu: HTMLElement): void {
   const rect = button.getBoundingClientRect();
+  const targetWindow = button.ownerDocument.defaultView || window;
   menu.style.minWidth = `${rect.width}px`;
   menu.style.left = `${Math.max(8, rect.left)}px`;
   menu.style.top = `${rect.bottom + 4}px`;
-  menu.style.maxHeight = `${Math.max(160, window.innerHeight - rect.bottom - 16)}px`;
+  menu.style.maxHeight = `${Math.max(160, targetWindow.innerHeight - rect.bottom - 16)}px`;
 }
 
 // Extension configuration lives outside the declarative modal system, but its
 // pickers still need app-owned menus because Android does not expose native
 // browser select popups.
 function createExtConfigMenu(options: {
+  document: Document;
   value: string;
   options: ExtConfigMenuOption[];
   onChange: (option: ExtConfigMenuOption) => void;
 }): ExtConfigMenuHandle {
+  const document = options.document;
+  const targetWindow = document.defaultView || window;
   const root = document.createElement("div");
   root.className = "ext-config-select";
 
@@ -177,7 +181,7 @@ function createExtConfigMenu(options: {
       });
       menu.appendChild(option);
       if (item.id === selectedId || (index === 0 && !selectedId)) {
-        window.setTimeout(() => option.focus(), 0);
+        targetWindow.setTimeout(() => option.focus(), 0);
       }
     });
 
@@ -188,7 +192,7 @@ function createExtConfigMenu(options: {
     const closeOnPointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (
-        target instanceof Node &&
+        target instanceof targetWindow.Node &&
         (root.contains(target) || menu.contains(target))
       ) {
         return;
@@ -206,16 +210,16 @@ function createExtConfigMenu(options: {
 
     document.addEventListener("pointerdown", closeOnPointerDown, true);
     document.addEventListener("keydown", closeOnKeyDown, true);
-    window.addEventListener("resize", closeOnWindowChange, true);
-    window.addEventListener("scroll", closeOnWindowChange, true);
+    targetWindow.addEventListener("resize", closeOnWindowChange, true);
+    targetWindow.addEventListener("scroll", closeOnWindowChange, true);
 
     menuState = {
       menu,
       cleanup: () => {
         document.removeEventListener("pointerdown", closeOnPointerDown, true);
         document.removeEventListener("keydown", closeOnKeyDown, true);
-        window.removeEventListener("resize", closeOnWindowChange, true);
-        window.removeEventListener("scroll", closeOnWindowChange, true);
+        targetWindow.removeEventListener("resize", closeOnWindowChange, true);
+        targetWindow.removeEventListener("scroll", closeOnWindowChange, true);
       },
     };
   }
@@ -296,6 +300,7 @@ export function createSettingsConfigModalController(deps: any) {
     currentValues: ExtConfigValues,
     scope = "user",
   ) {
+    const document: Document = (deps.formEl as HTMLElement).ownerDocument;
     cleanupFieldControls();
     extConfigExtId = extId;
     extConfigScope = scope;
@@ -418,6 +423,7 @@ export function createSettingsConfigModalController(deps: any) {
           }
 
           picker = createExtConfigMenu({
+            document,
             value: initialSelection,
             options: enumMenuOptions,
             onChange() {

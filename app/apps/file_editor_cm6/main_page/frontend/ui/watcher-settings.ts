@@ -35,6 +35,19 @@ interface WatcherRaisePayload {
 }
 
 let _toast = (_msg: string) => {};
+let watcherSettingsRoot: HTMLElement | null = null;
+
+function settingsRoot(): HTMLElement | null {
+  return watcherSettingsRoot || document.getElementById('editor-settings-modal');
+}
+
+function settingsQuery<T extends Element>(selector: string): T | null {
+  return settingsRoot()?.querySelector<T>(selector) || null;
+}
+
+function settingsQueryAll<T extends Element>(selector: string): NodeListOf<T> | T[] {
+  return settingsRoot()?.querySelectorAll<T>(selector) || [];
+}
 
 // ── Watcher limit warning modal ──
 
@@ -120,10 +133,10 @@ export function showWatcherLimitModal(message: string, limit?: number) {
 let _watcherConfig: WatcherConfig = { mode: 'ipc', storage_type: 'ssd', poll_interval_ms: 1500, watchexec_available: false };
 
 function _initWatcherSettingsUI() {
-  const modeRadios = document.querySelectorAll<HTMLInputElement>('input[name="watcher-mode"]');
-  const storageRadios = document.querySelectorAll<HTMLInputElement>('input[name="watcher-storage"]');
-  const watchexecOpts = document.getElementById('watcher-watchexec-opts');
-  const raiseBtn = document.getElementById('watcher-raise-btn');
+  const modeRadios = settingsQueryAll<HTMLInputElement>('input[name="watcher-mode"]');
+  const storageRadios = settingsQueryAll<HTMLInputElement>('input[name="watcher-storage"]');
+  const watchexecOpts = settingsQuery<HTMLElement>('#watcher-watchexec-opts');
+  const raiseBtn = settingsQuery<HTMLElement>('#watcher-raise-btn');
 
   modeRadios.forEach(r => {
     r.addEventListener('change', () => {
@@ -138,7 +151,7 @@ function _initWatcherSettingsUI() {
   storageRadios.forEach(r => {
     r.addEventListener('change', () => {
       if (r.checked) {
-        const modeEl = document.querySelector<HTMLInputElement>('input[name="watcher-mode"]:checked');
+        const modeEl = settingsQuery<HTMLInputElement>('input[name="watcher-mode"]:checked');
         if (modeEl) _sendWatcherMode(modeEl.value);
       }
     });
@@ -152,7 +165,7 @@ function _initWatcherSettingsUI() {
 }
 
 function _sendWatcherMode(mode: WatcherMode | string) {
-  const storageEl = document.querySelector<HTMLInputElement>('input[name="watcher-storage"]:checked');
+  const storageEl = settingsQuery<HTMLInputElement>('input[name="watcher-storage"]:checked');
   const storageType = storageEl ? storageEl.value : 'ssd';
   notifyExplorerRpc(EXPLORER_RPC_METHODS.watcherModeSet, { mode, storage_type: storageType });
 }
@@ -165,17 +178,17 @@ function _applyWatcherConfig(cfg: Partial<WatcherConfig> & Record<string, unknow
   _watcherConfig = { ..._watcherConfig, ...cfg };
   const mode = coerceWatcherMode(cfg.mode);
 
-  const modeRadios = document.querySelectorAll<HTMLInputElement>('input[name="watcher-mode"]');
+  const modeRadios = settingsQueryAll<HTMLInputElement>('input[name="watcher-mode"]');
   modeRadios.forEach(r => { r.checked = r.value === mode; });
 
-  const storageRadios = document.querySelectorAll<HTMLInputElement>('input[name="watcher-storage"]');
+  const storageRadios = settingsQueryAll<HTMLInputElement>('input[name="watcher-storage"]');
   storageRadios.forEach(r => { r.checked = r.value === cfg.storage_type; });
 
-  const watchexecOpts = document.getElementById('watcher-watchexec-opts');
+  const watchexecOpts = settingsQuery<HTMLElement>('#watcher-watchexec-opts');
   if (watchexecOpts) watchexecOpts.style.display = cfg.mode === 'watchexec' ? 'block' : 'none';
 
-  const watchexecRadio = document.querySelector<HTMLInputElement>('input[name="watcher-mode"][value="watchexec"]');
-  const watchexecLabel = document.getElementById('watcher-mode-watchexec-label');
+  const watchexecRadio = settingsQuery<HTMLInputElement>('input[name="watcher-mode"][value="watchexec"]');
+  const watchexecLabel = settingsQuery<HTMLElement>('#watcher-mode-watchexec-label');
   if (watchexecRadio && !cfg.watchexec_available) {
     watchexecRadio.disabled = true;
     if (watchexecLabel) watchexecLabel.style.opacity = '0.4';
@@ -188,7 +201,7 @@ function _applyWatcherConfig(cfg: Partial<WatcherConfig> & Record<string, unknow
 }
 
 function _updateWatcherStatusIndicator(mode: WatcherMode | string) {
-  const indicator = document.getElementById('watcher-status-indicator');
+  const indicator = settingsQuery<HTMLElement>('#watcher-status-indicator');
   if (indicator) {
     const labels = { ipc: 'VS Code IPC', watchexec: 'watchexec poll', none: 'None (manual)' };
     indicator.textContent = `Active: ${labels[coerceWatcherMode(mode)] || mode}`;
@@ -205,6 +218,7 @@ export function initWatcherUI(hostOrContext: any) {
     hostOrContext?.toast ||
     hostOrContext?.host?.toast ||
     _toast;
+  watcherSettingsRoot = document.getElementById('editor-settings-modal');
 
   // Wire the settings panel radios/buttons
   try { _initWatcherSettingsUI(); } catch (_) {}
@@ -232,7 +246,7 @@ export function initWatcherUI(hostOrContext: any) {
 
   window.__cm6HandleWatcherRaiseResult = (payload: WatcherRaisePayload | null) => {
     if (!payload) return;
-    const statusEl = document.getElementById('watcher-raise-status');
+    const statusEl = settingsQuery<HTMLElement>('#watcher-raise-status');
     if (payload.ok) {
       _toast(payload.stdout || 'Watcher limit updated — IPC watcher resubscribed');
       if (statusEl) statusEl.textContent = '✓ Limit raised successfully';
