@@ -33,6 +33,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import org.mozilla.geckoview.AllowOrDeny
+import org.mozilla.geckoview.BasicSelectionActionDelegate
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
@@ -150,7 +151,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createClipboardSelectionActionDelegate() =
-        object : GeckoSession.SelectionActionDelegate {
+        object : BasicSelectionActionDelegate(this) {
             override fun onShowClipboardPermissionRequest(
                 session: GeckoSession,
                 permission: GeckoSession.SelectionActionDelegate.ClipboardPermission,
