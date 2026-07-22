@@ -11,6 +11,7 @@
 // messages as the source of truth and only keeps enough transient state to draw.
 
 import { showNewProjectModal } from "../chrome/new-project-modal.ts";
+import { showProjectsDebugModal } from "../../../main_page/frontend/ui/projects-debug-modal.ts";
 import { getIcon as getSetiIcon } from "/static/vendor/seti-icons/seti-icons.js";
 import type { JsonObject } from "../../rpc/transport.ts";
 import { createExplorerStickyScopes } from "../chrome/sticky-scopes.ts";
@@ -258,6 +259,7 @@ const explorerChromeController = createExplorerChromeController({
   openSearchOverlay: () => openSearchOverlay(),
   scrollToActiveFile,
   showNewProjectModal,
+  showProjectsDebugModal,
   isCancelledError,
   getErrorMessage,
   initStickyScopes: (deps) => createExplorerStickyScopes(deps),
@@ -763,6 +765,13 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
   const drawerClose = document.getElementById("fe-drawer-close");
   const drawerOpenBtn = document.getElementById("fe-drawer-open");
   const drawerBackdrop = document.getElementById("fe-drawer-backdrop");
+  const projectMenuBtn = document.getElementById("fe-project-menu-btn");
+  const projectMenuDropdown = document.getElementById("fe-project-menu-dd");
+  const projectMenuNewItem = document.getElementById("fe-mi-project-new");
+  const projectMenuOpenItem = document.getElementById("fe-mi-project-open");
+  const projectMenuOpenRecentItem = document.getElementById(
+    "fe-mi-project-open-recent",
+  );
   const explorerMenuBtn = document.getElementById("fe-explorer-menu-btn");
   const explorerMenuDropdown = document.getElementById("fe-explorer-menu-dd");
   const explorerMenuStickyHeadersItem = document.getElementById(
@@ -771,8 +780,6 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
   const explorerMenuScrollActiveItem = document.getElementById(
     "fe-mi-explorer-scroll-active",
   );
-  const btnNewProject = document.getElementById("fe-new-project");
-  const btnOpenProject = document.getElementById("fe-open-project");
   treeElement = document.getElementById("fe-file-tree");
   const projectLabel = document.getElementById("fe-project-label");
   gitSummaryEl = document.getElementById("fe-git-summary");
@@ -812,12 +819,15 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
     drawerOpenBtn,
     searchBtn,
     projectLabel,
+    projectMenuBtn,
+    projectMenuDropdown,
+    projectMenuNewItem,
+    projectMenuOpenItem,
+    projectMenuOpenRecentItem,
     explorerMenuBtn,
     explorerMenuDropdown,
     explorerMenuStickyHeadersItem,
     explorerMenuScrollActiveItem,
-    btnOpenProject,
-    btnNewProject,
   });
 
   explorerDiffBaseController.bindGitBaseButton(

@@ -70,7 +70,10 @@
   z-index: var(--explorer-header-z);
 }
 
+#fe-project-menu-dd,
 #fe-explorer-menu-dd {
+  left: auto;
+  right: 0;
   z-index: var(--explorer-header-menu-z);
 }
 

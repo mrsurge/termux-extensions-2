@@ -143,11 +143,6 @@
     overflow: hidden;
   }
 
-  /* Desktop uses the toolbar hamburger as the Explorer toggle. */
-  .layout-desktop #fe-drawer-close {
-    display: none;
-  }
-
   /* Hide backdrop in desktop mode */
   .layout-desktop .fe-drawer-backdrop {
     display: none !important;
@@ -659,7 +654,6 @@
 
 .fe-drawer-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border #333); background: var(--card, #0b0f1a); box-shadow: none; }
   #fe-project-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
-  #fe-open-project { margin-left: auto; }
 
   /* CM6-specific styles - eliminate all gaps around iframe */
   .fe-root, .fe-grid, .fe-editor-row, .fe-editor-container {
@@ -1839,9 +1833,25 @@
 <div class="fe-root">
   <aside id="fe-drawer" class="fe-drawer">
     <header class="fe-drawer-head">
+      <button id="fe-drawer-close" class="fe-btn" title="Close Explorer" aria-label="Close Explorer">✕</button>
       <span id="fe-project-label"></span>
+      <div id="fe-project-menu" class="fe-menu">
+	        <button id="fe-project-menu-btn" class="fe-btn" title="Project actions" aria-haspopup="menu" aria-expanded="false">Project…</button>
+	        <div id="fe-project-menu-dd" class="fe-dropdown" role="menu">
+	          <div class="fe-dd-item" id="fe-mi-project-new" role="menuitem" tabindex="0">
+	            <span>New Project</span>
+	          </div>
+	          <div class="fe-dd-item" id="fe-mi-project-open" role="menuitem" tabindex="0">
+	            <span>Open Project</span>
+	          </div>
+	          <div class="fe-dd-divider"></div>
+	          <div class="fe-dd-item" id="fe-mi-project-open-recent" role="menuitem" tabindex="0">
+	            <span>Open Recent Project</span>
+	          </div>
+	        </div>
+      </div>
       <div id="fe-explorer-menu" class="fe-menu">
-	        <button id="fe-explorer-menu-btn" class="fe-btn" title="Explorer menu" style="padding: 6px 8px;">⋯</button>
+	        <button id="fe-explorer-menu-btn" class="fe-btn" title="Explorer menu" aria-haspopup="menu" aria-expanded="false" style="padding: 6px 8px;">⋯</button>
 	        <div id="fe-explorer-menu-dd" class="fe-dropdown">
 	          <div class="fe-dd-item" id="fe-mi-explorer-scroll-active" role="menuitem" tabindex="0">
 	            <span>Scroll to opened file</span>
@@ -1852,10 +1862,7 @@
 	          </div>
 	        </div>
 	      </div>
-      <button id="fe-new-project" class="fe-btn" title="New Project">New Project…</button>
-      <button id="fe-open-project" class="fe-btn" title="Open Project">Open Project…</button>
       <button id="fe-search-btn" class="fe-btn" title="Search">🔍</button>
-      <button id="fe-drawer-close" class="fe-btn">✕</button>
     </header>
     <div class="fe-drawer-body">
       <div id="fe-watcher-refresh-bar" style="display:none;padding:4px 8px;text-align:center;background:var(--bg2,#1a1a1a);border-bottom:1px solid var(--border,#333);">

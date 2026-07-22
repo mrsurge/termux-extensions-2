@@ -16,12 +16,15 @@ interface ExplorerChromeBindings {
   drawerOpenBtn: HTMLElement | null;
   searchBtn: HTMLElement | null;
   projectLabel: HTMLElement | null;
+  projectMenuBtn: HTMLElement | null;
+  projectMenuDropdown: HTMLElement | null;
+  projectMenuNewItem: HTMLElement | null;
+  projectMenuOpenItem: HTMLElement | null;
+  projectMenuOpenRecentItem: HTMLElement | null;
   explorerMenuBtn: HTMLElement | null;
   explorerMenuDropdown: HTMLElement | null;
   explorerMenuStickyHeadersItem: HTMLElement | null;
   explorerMenuScrollActiveItem: HTMLElement | null;
-  btnOpenProject: HTMLElement | null;
-  btnNewProject: HTMLElement | null;
 }
 
 interface ExplorerProjectChoice {
@@ -39,6 +42,7 @@ interface ExplorerChromeControllerDeps {
   openSearchOverlay(): void;
   scrollToActiveFile(): Promise<void>;
   showNewProjectModal(toast: (message: string) => void): Promise<unknown>;
+  showProjectsDebugModal(): Promise<void>;
   isCancelledError(error: unknown): boolean;
   getErrorMessage(error: unknown, fallback?: string): string;
   initStickyScopes(
@@ -63,6 +67,8 @@ export function createExplorerChromeController(
 ) {
   let projectLabelEl: HTMLElement | null = null;
   let drawerOpenBtn: HTMLElement | null = null;
+  let projectMenuBtn: HTMLElement | null = null;
+  let projectMenuDropdown: HTMLElement | null = null;
   let explorerMenuBtn: HTMLElement | null = null;
   let explorerMenuDropdown: HTMLElement | null = null;
   let explorerMenuStickyHeadersItem: HTMLElement | null = null;
@@ -91,6 +97,12 @@ export function createExplorerChromeController(
 
   function closeExplorerMenu(): void {
     explorerMenuDropdown?.classList.remove('show');
+    explorerMenuBtn?.setAttribute('aria-expanded', 'false');
+  }
+
+  function closeProjectMenu(): void {
+    projectMenuDropdown?.classList.remove('show');
+    projectMenuBtn?.setAttribute('aria-expanded', 'false');
   }
 
   function isDesktopLayout(root: HTMLElement): boolean {
@@ -349,6 +361,8 @@ export function createExplorerChromeController(
   function bindUi(bindings: ExplorerChromeBindings): void {
     projectLabelEl = bindings.projectLabel;
     drawerOpenBtn = bindings.drawerOpenBtn;
+    projectMenuBtn = bindings.projectMenuBtn;
+    projectMenuDropdown = bindings.projectMenuDropdown;
     explorerMenuBtn = bindings.explorerMenuBtn;
     explorerMenuDropdown = bindings.explorerMenuDropdown;
     explorerMenuStickyHeadersItem = bindings.explorerMenuStickyHeadersItem;
@@ -369,13 +383,45 @@ export function createExplorerChromeController(
     const root = document.querySelector('.fe-root');
     if (root instanceof HTMLElement) syncDrawerOpenButton(root);
 
+    if (projectMenuBtn && projectMenuDropdown) {
+      projectMenuBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        deps.closeDiffBaseMenus();
+        closeExplorerMenu();
+        const open = !projectMenuDropdown?.classList.contains('show');
+        projectMenuDropdown?.classList.toggle('show', open);
+        projectMenuBtn?.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    }
+
     if (explorerMenuBtn && explorerMenuDropdown) {
       explorerMenuBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         deps.closeDiffBaseMenus();
-        explorerMenuDropdown?.classList.toggle('show');
+        closeProjectMenu();
+        const open = !explorerMenuDropdown?.classList.contains('show');
+        explorerMenuDropdown?.classList.toggle('show', open);
+        explorerMenuBtn?.setAttribute('aria-expanded', open ? 'true' : 'false');
       });
     }
+
+    bindings.projectMenuNewItem?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      closeProjectMenu();
+      void handleNewProject();
+    });
+
+    bindings.projectMenuOpenItem?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      closeProjectMenu();
+      void handleOpenProject();
+    });
+
+    bindings.projectMenuOpenRecentItem?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      closeProjectMenu();
+      void deps.showProjectsDebugModal();
+    });
 
     explorerMenuStickyHeadersItem?.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -404,20 +450,16 @@ export function createExplorerChromeController(
       'click',
       (event) => {
         const target = event.target;
-        if (target instanceof Element && target.closest('#fe-explorer-menu')) {
+        if (!(target instanceof Element)) {
+          closeProjectMenu();
+          closeExplorerMenu();
           return;
         }
-        closeExplorerMenu();
+        if (!target.closest('#fe-project-menu')) closeProjectMenu();
+        if (!target.closest('#fe-explorer-menu')) closeExplorerMenu();
       },
       false,
     );
-
-    bindings.btnOpenProject?.addEventListener('click', () => {
-      void handleOpenProject();
-    });
-    bindings.btnNewProject?.addEventListener('click', () => {
-      void handleNewProject();
-    });
 
     stickyScopesContext.drawerBodyEl = bindings.drawerBody;
   }
