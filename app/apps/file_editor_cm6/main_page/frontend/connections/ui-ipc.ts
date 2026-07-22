@@ -15,6 +15,18 @@ interface ConsoleBridgeOptions {
   namespace?: string;
 }
 
+interface ElectronAppViewIdentityHint {
+  client?: unknown;
+  surface?: unknown;
+  consoleWorkerLabel?: unknown;
+}
+
+interface ElectronAppViewHintWindow {
+  te2Electron?: {
+    identity?: ElectronAppViewIdentityHint;
+  };
+}
+
 interface UiIpcConnectionsDeps {
   ensureSocketIoLoaded: () => Promise<IoFactory | null | undefined>;
   initConsoleBridge: (args: ConsoleBridgeOptions) => unknown;
@@ -37,6 +49,18 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
   let consoleBridgePromise: Promise<void> | null = null;
   let consoleBridgeStarted = false;
 
+  function consoleWorkerLabel(): string {
+    const identity = (window as unknown as ElectronAppViewHintWindow).te2Electron?.identity;
+    const label = typeof identity?.consoleWorkerLabel === 'string'
+      ? identity.consoleWorkerLabel.trim()
+      : '';
+    return identity?.client === 'electron' &&
+      identity?.surface === 'framework-app-view' &&
+      label
+      ? label
+      : 'main_page';
+  }
+
   function startMainPageConsoleBridge(): Promise<void> {
     if (consoleBridgeStarted) return Promise.resolve();
     if (consoleBridgePromise) return consoleBridgePromise;
@@ -45,7 +69,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
       .then((io: IoFactory | null | undefined) => {
         if (!io) throw new Error('Socket.IO client is not available');
         const bridge = deps.initConsoleBridge({
-          workerLabel: 'main_page',
+          workerLabel: consoleWorkerLabel(),
           uniquePerWindow: true,
           socketPath: SOCKET_IO_PATHS.te2Console,
           namespace: '/te2_console',

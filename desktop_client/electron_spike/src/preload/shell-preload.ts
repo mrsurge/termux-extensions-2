@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppNavigation,
   DesktopBridge,
+  DesktopSteerAction,
   NativeRequestMethod,
 } from "../shared/contracts";
 
@@ -23,6 +24,13 @@ const bridge: DesktopBridge = {
     };
     ipcRenderer.on("te2-desktop:asset-updated", listener);
     return () => ipcRenderer.off("te2-desktop:asset-updated", listener);
+  },
+  onSteer(callback: (action: DesktopSteerAction) => void) {
+    const listener = (_event: Electron.IpcRendererEvent, action: DesktopSteerAction) => {
+      callback(action);
+    };
+    ipcRenderer.on("te2-desktop:steer", listener);
+    return () => ipcRenderer.off("te2-desktop:steer", listener);
   },
 };
 

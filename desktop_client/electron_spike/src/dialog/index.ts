@@ -37,7 +37,7 @@ function desiredSize(request: DialogRequest, card: HTMLElement): DialogSize {
   const desiredWidth = request.width === "large" ? 980 : request.width === "medium" ? 740 : 500;
   return {
     width: desiredWidth,
-    height: Math.max(180, Math.ceil(card.scrollHeight + 40)),
+    height: Math.max(180, Math.ceil(card.scrollHeight)),
   };
 }
 

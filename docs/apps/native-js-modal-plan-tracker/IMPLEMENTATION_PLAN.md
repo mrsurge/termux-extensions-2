@@ -199,9 +199,11 @@ Pass 1 is complete only when:
   retain a scrollable body at the clamp.
 - Implement title-bar close, Escape, Enter, focus restoration, theme tokens,
   scale/zoom, IME input, and screen-reader labels.
-- Reuse one host window and render a modal stack inside it. Nested confirms stay
+- Reuse one host window while a modal stack is active. Nested confirms stay
   above their parent session without opening an uncontrolled chain of OS
-  windows.
+  windows. Destroy that modal child when the stack becomes empty and create a
+  fresh child for the next top-level request; Linux window managers do not
+  reliably support hiding a modal child and re-showing it later.
 
 This validated IPC host owns portable contract dialogs. Stateful registered
 surfaces share one separate, strictly named `about:blank` child created through
@@ -234,6 +236,11 @@ For each registered stateful family:
    nested stateful roots in that one window.
 6. Restore the same node on close, navigation, native child close, controller
    destruction, or app teardown.
+7. Mirror stylesheet elements from the complete source document, not only its
+   `<head>`, because framework app templates can inject modal styles into the
+   body. In the desktop child, make the adopted modal card fill the child client
+   area and keep scrolling on its existing content body rather than adding a
+   second padded backdrop.
 
 The file/folder picker remains authoritative in its current page controller;
 its live root and controller move together, so filesystem traffic does not gain

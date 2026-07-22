@@ -124,7 +124,7 @@ classification before Pass 1 closes.
 | P2-003 | Add modal child `BrowserWindow` and renderer | [x] | Parent-owned, frameless, modal |
 | P2-004 | Reuse canonical dialog renderer and styles | [x] | Complete for simple portable contracts |
 | P2-005 | Add size negotiation and display clamping | [x] | Scroll body after clamp |
-| P2-006 | Add stack, focus, keyboard, IME, and accessibility behavior | [x] | One reusable child host |
+| P2-006 | Add stack, focus, keyboard, IME, and accessibility behavior | [x] | One child per active stack; fresh child after the stack empties |
 | P2-007 | Add navigation/app-close/desktop-close teardown | [x] | Resolves pending promises |
 | P2-008 | Route simple portable contracts | [x] | Alert, confirm, prompt, and existing simple forms |
 | P2-009 | Add forced-failure inline fallback test | [x] | Pre-show fallback once; no post-show duplicate |
@@ -152,6 +152,8 @@ classification before Pass 1 closes.
 | 2026-07-21 | Live Electron Wayland stateful matrix | DevTools inspection of the rebuilt app through a clean desktop asset root | Settings, nested Extensions, 33-field BasedPyright config, CM6 JSON editors, Run Profiles, stack restoration, and 41-entry file picker pass |
 | 2026-07-21 | Packaged Electron Wayland smoke | `npm run build`; timed packaged Code TE2 launch | Package built and exited 0; only Node's existing `fs.Stats` deprecation warning was emitted |
 | 2026-07-21 | Synchronized framework release | Code TE2 typecheck, 16 dialog tests/build; Electron typecheck, 10 tests/build; Cargo check; version audit | `0.2.322` passed; Android source and publication remained unchanged |
+| 2026-07-21 | Dialog lifecycle and modal layout repair | Code TE2 typecheck, 17 dialog tests/build; clean packaged Electron Wayland profile; exact worker eval and warning/error tail | Sequential native confirm/prompt requests reopened with no inline fallback; Settings card filled the `1000×760` child at `(0,0)`, retained a scrollable body, and emitted no worker diagnostics |
+| 2026-07-21 | Electron asset activation and console diagnostics | Code TE2 typecheck/build; console bridge 6/6; Electron typecheck, 13/13 tests/build; clean packaged Wayland profile | Warm same-version resources reproduced cache hits; force update reduced the dedicated session cache from about 17.3 MB to zero, native reload transferred all checked assets, the worker registered as `electron:main_page:f9ca0919`, all steering hooks passed, and no worker diagnostics were emitted |
 
 ## Decisions
 
@@ -161,7 +163,7 @@ classification before Pass 1 closes.
 | 2026-07-21 | Use an async shared API; do not monkeypatch blocking dialogs | Electron child presentation is asynchronous |
 | 2026-07-21 | Browser/Android render inline; Electron uses a presenter adapter | Preserves existing non-desktop behavior |
 | 2026-07-21 | Do not move live DOM or callbacks between renderers | Renderer-process objects are not portable |
-| 2026-07-21 | Keep one reusable desktop child with an internal stack | Supports nested dialogs without OS-window chains |
+| 2026-07-21 | Keep one desktop child while its stack is active, then destroy it when empty | Supports nested dialogs without OS-window chains and avoids Linux's unsupported modal-window hide/re-show lifecycle |
 | 2026-07-21 | Stateful modal presentation must reuse the complete working view/controller behavior | A generic form schema cannot represent CM6 fields, live extension/settings projection, filesystem navigation, or conditional state |
 | 2026-07-21 | Use direct DOM adoption only in Electron's controlled same-origin blank child | Electron keeps it in the opener renderer, so working nodes/listeners/controllers remain intact without IPC serialization |
 | 2026-07-21 | Use a dependency-free TSX/JSX DOM layer for incremental reusable components | Existing esbuild/TypeScript can compile it without React, Babel, or a new runtime dependency |

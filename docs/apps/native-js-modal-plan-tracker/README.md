@@ -78,11 +78,17 @@ the controlled same-origin blank child that shares the opener's renderer.
   showing, the dialog falls back to the inline presenter.
 - The dialog service owns stacking, focus capture/restoration, Escape handling,
   default actions, cancellation, and app-navigation teardown.
+- Electron keeps one modal child only for the lifetime of an active portable
+  request stack. When that stack empties, the child is destroyed; a later
+  request gets a fresh child instead of attempting to hide and re-show a Linux
+  modal window.
 - Dialog requests contain text and declarative data, never arbitrary HTML or a
   module path supplied at runtime.
 - Stateful portal surfaces keep their original nodes, listeners, controller
   closures, and backend lanes. They are not reconstructed from lossy field
-  schemas and are restored to their exact placeholder when closed.
+  schemas and are restored to their exact placeholder when closed. Their
+  desktop card fills the native child client area, while the app-owned content
+  body retains its own padding and scrolling.
 - Modal presentation does not move application authority. File operations,
   settings changes, Git actions, and other effects remain in their existing
   frontend controller and backend/RPC lane.

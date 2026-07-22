@@ -171,6 +171,16 @@ proxied framework document. This is important for Monaco module workers: page,
 worker, font, editor, and dynamic framework traffic retain one browser origin
 even though selected static bytes come from disk.
 
+Local asset responses are immutable during normal operation, so a forced
+same-version install must explicitly activate the new snapshot. After any
+successful install, Electron clears both the HTTP cache and generated V8 code
+cache for the dedicated `persist:te2-framework` session. It then reloads an
+active app view with cache bypass; when Settings is visible and no app view
+exists, the next app launch necessarily reaches the relay. Restarting the
+desktop process is not part of asset activation. A restart happened to mask
+the old bug because each process allocates a new relay port and therefore a new
+browser origin.
+
 ### 8. Clipboard and security consequence
 
 Remote plain-HTTP framework pages no longer appear to Chromium as arbitrary
@@ -186,6 +196,25 @@ The relay is therefore both an origin-localization boundary and a transport
 bridge. It is not a general open proxy: it listens only on loopback, has one
 configured upstream, limits native navigation and popup routing to its browser
 origin, and serves local files only through a fixed inventory.
+
+### 9. Electron console identity and steering
+
+The app-view preload exposes a frozen `window.te2Electron` bridge. Its static
+identity marks the renderer as the Electron framework app view and supplies the
+console label `electron:main_page`. Code TE2 uses that label when registering
+its existing console bridge, so live workers appear as
+`electron:main_page:<per-window-suffix>` instead of an ambiguous generic
+`main_page` worker. Browser and Android registrations remain unchanged.
+
+The bridge exposes only `inspect()`, `reload()`, `home()`, and
+`forceAssetUpdate()`. Electron main accepts those commands only from the exact
+current app-view `WebContents` at the current relay origin. `inspect()` reports
+the native identity, URLs, versions, session partition, cache size, and asset
+status. `forceAssetUpdate()` returns after the verified install and cache
+invalidation without destroying the caller, allowing a console client to read
+the result; `reload()` then activates it in that view. Settings-driven updates
+perform both operations automatically. No arbitrary native request or
+JavaScript execution primitive crosses the preload boundary.
 
 ## Android parity boundary
 

@@ -45,8 +45,11 @@ export type AppNavigation = {
   canGoForward: boolean;
 };
 
+export type DesktopSteerAction = "home";
+
 export type DesktopBridge = {
   request(method: NativeRequestMethod, params?: Record<string, unknown>): Promise<unknown>;
   onAppNavigation(callback: (navigation: AppNavigation) => void): () => void;
   onAssetUpdated(callback: (version: string | null) => void): () => void;
+  onSteer(callback: (action: DesktopSteerAction) => void): () => void;
 };

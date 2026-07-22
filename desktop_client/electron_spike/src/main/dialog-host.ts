@@ -44,6 +44,11 @@ const CLOSE_STATUSES = new Set<DialogResultStatus>([
   "replaced",
 ]);
 const READY_TIMEOUT_MS = 10_000;
+const INITIAL_DIALOG_SIZE: Record<DialogRequest["width"], DialogSize> = {
+  small: { width: 500, height: 320 },
+  medium: { width: 740, height: 560 },
+  large: { width: 980, height: 720 },
+};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -113,14 +118,14 @@ export class DesktopDialogHost {
       this.pending.delete(sessionId);
       entry.resolve(closedDialogResult(status));
     }
-    this.hideWhenIdle();
+    this.destroyWhenIdle();
   }
 
   closeAll(status: DialogResultStatus = "closed"): void {
     this.trySendHost("te2-desktop:dialog-host-close-all", { status });
     for (const entry of this.pending.values()) entry.resolve(closedDialogResult(status));
     this.pending.clear();
-    this.hideWhenIdle();
+    this.destroyWhenIdle();
   }
 
   private readonly handleOpen = async (
@@ -130,7 +135,7 @@ export class DesktopDialogHost {
     try {
       this.assertTrustedOwner(event.sender);
       const request = validateDialogRequest(value);
-      await this.ensureWindow();
+      await this.ensureWindow(request);
 
       const sessionId = randomUUID();
       const result = new Promise<DialogResult>((resolveResult, rejectResult) => {
@@ -226,7 +231,7 @@ export class DesktopDialogHost {
       this.failEntry(sessionId, entry, error);
       return;
     }
-    this.hideWhenIdle();
+    this.destroyWhenIdle();
   };
 
   private readonly handleFailed = (
@@ -260,20 +265,31 @@ export class DesktopDialogHost {
     return Boolean(this.window && !this.window.isDestroyed() && contents === this.window.webContents);
   }
 
-  private async ensureWindow(): Promise<void> {
+  private async ensureWindow(request: DialogRequest): Promise<void> {
     if (this.window && !this.window.isDestroyed() && !this.readyPromise) return;
     if (this.readyPromise) return this.readyPromise;
 
     const parent = this.options.getMainWindow();
     if (!parent || parent.isDestroyed()) throw new Error("Desktop window is unavailable");
+    const requestedSize = INITIAL_DIALOG_SIZE[request.width];
+    const workArea = screen.getDisplayMatching(parent.getBounds()).workArea;
+    const parentBounds = parent.getBounds();
+    const width = Math.max(
+      320,
+      Math.min(requestedSize.width, Math.floor(workArea.width * 0.94), parentBounds.width - 48),
+    );
+    const height = Math.max(
+      160,
+      Math.min(requestedSize.height, Math.floor(workArea.height * 0.92), parentBounds.height - 48),
+    );
 
     const window = new BrowserWindow({
       parent,
       modal: true,
       frame: false,
       show: false,
-      width: 500,
-      height: 320,
+      width,
+      height,
       minWidth: 320,
       minHeight: 160,
       backgroundColor: "#111315",
@@ -353,7 +369,7 @@ export class DesktopDialogHost {
       console.warn(`[te2-desktop-dialog] Falling back before presentation: ${message}`);
       entry.reject(new Error(`Desktop dialog was not presented: ${message}`));
     }
-    if (hide) this.hideWhenIdle();
+    if (hide) this.destroyWhenIdle();
   }
 
   private sendHost(channel: string, ...args: unknown[]): void {
@@ -374,10 +390,17 @@ export class DesktopDialogHost {
     const window = this.window;
     const parent = this.options.getMainWindow();
     if (!window || window.isDestroyed() || !parent || parent.isDestroyed()) return;
+    if (String(process.env.XDG_SESSION_TYPE || "").toLowerCase() === "wayland") return;
     const workArea = screen.getDisplayMatching(parent.getBounds()).workArea;
-    const width = Math.min(size.width, Math.max(320, Math.floor(workArea.width * 0.94)));
-    const height = Math.min(size.height, Math.max(160, Math.floor(workArea.height * 0.92)));
     const parentBounds = parent.getBounds();
+    const width = Math.max(
+      320,
+      Math.min(size.width, Math.floor(workArea.width * 0.94), parentBounds.width - 48),
+    );
+    const height = Math.max(
+      160,
+      Math.min(size.height, Math.floor(workArea.height * 0.92), parentBounds.height - 48),
+    );
     const x = Math.max(
       workArea.x,
       Math.min(
@@ -395,9 +418,11 @@ export class DesktopDialogHost {
     window.setBounds({ x, y, width, height });
   }
 
-  private hideWhenIdle(): void {
+  private destroyWhenIdle(): void {
     if (this.pending.size || !this.window || this.window.isDestroyed()) return;
-    this.window.hide();
+    const window = this.window;
+    this.window = null;
+    window.destroy();
     this.options.getAppContents()?.focus();
   }
 

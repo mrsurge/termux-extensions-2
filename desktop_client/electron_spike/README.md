@@ -46,8 +46,16 @@ The packaged `TE2Desktop` launcher supplies `--no-sandbox` to the bundled
 - Inventory-approved installed assets are served by the same relay origin. This
   preserves the origin required by Monaco module workers while keeping dynamic
   framework traffic live.
+- A successful automatic or Settings-driven asset install clears the dedicated
+  `persist:te2-framework` HTTP and V8 code caches before reloading an active app
+  view. A force refresh therefore activates same-version bytes without
+  restarting Electron; if no app is open, the next launch reaches the relay.
 - Electron owns the Copy/Paste context menu. The actions call the focused
   renderer's native copy and paste commands directly.
+- Code TE2 console workers in the Electron app view register as
+  `electron:main_page:<suffix>`. Their frozen `window.te2Electron` bridge exposes
+  `identity`, `inspect()`, `reload()`, `home()`, and `forceAssetUpdate()` through
+  an exact-view/origin-validated native command allowlist.
 - On Linux the Ozone platform hint remains `auto`, allowing Electron to select
   native Wayland for a Wayland session.
 

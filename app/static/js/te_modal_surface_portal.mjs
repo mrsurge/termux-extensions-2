@@ -17,7 +17,7 @@ function mirrorDocumentStyles(sourceDocument, targetDocument) {
   )) {
     prior.remove();
   }
-  for (const source of sourceDocument.head.querySelectorAll('style, link[rel="stylesheet"]')) {
+  for (const source of sourceDocument.querySelectorAll('style, link[rel="stylesheet"]')) {
     const copy = source.cloneNode(true);
     copy.dataset.teModalSurfaceMirror = "true";
     if (copy.tagName === "LINK") {
@@ -30,6 +30,9 @@ function mirrorDocumentStyles(sourceDocument, targetDocument) {
   portalStyle.dataset.teModalSurfaceMirror = "true";
   portalStyle.dataset.teModalSurfacePortal = "true";
   portalStyle.textContent = `
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
     html, body {
       width: 100%;
       height: 100%;
@@ -42,13 +45,18 @@ function mirrorDocumentStyles(sourceDocument, targetDocument) {
       position: fixed;
       inset: 0;
       display: block;
+      min-width: 0;
+      min-height: 0;
       overflow: hidden;
     }
     .te-modal-surface-window-root > [data-te-dialog-surface] {
       inset: 0 !important;
       width: 100% !important;
       height: 100% !important;
-      padding: 12px !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      padding: 0 !important;
+      overflow: hidden !important;
       background: transparent !important;
     }
     .te-modal-surface-window-root > [data-te-dialog-surface].show,
@@ -56,10 +64,51 @@ function mirrorDocumentStyles(sourceDocument, targetDocument) {
       display: flex !important;
     }
     .te-modal-surface-window-root .fe-modal-card,
-    .te-modal-surface-window-root .app-modal-card,
-    .te-modal-surface-window-root .te-fp-card {
+    .te-modal-surface-window-root .app-modal-content,
+    .te-modal-surface-window-root .te-fp-dialog,
+    .te-modal-surface-window-root .fx-modal-dialog,
+    .te-modal-surface-window-root .am-modal-dialog,
+    .te-modal-surface-window-root .aria-modal {
+      width: 100% !important;
+      height: 100% !important;
       max-width: none !important;
-      max-height: calc(100vh - 24px) !important;
+      max-height: none !important;
+      min-width: 0;
+      min-height: 0;
+      border-radius: 2px !important;
+      box-shadow: none !important;
+    }
+    .te-modal-surface-window-root .fe-modal-body,
+    .te-modal-surface-window-root .app-modal-body,
+    .te-modal-surface-window-root .aria-modal-body {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      overscroll-behavior: contain;
+    }
+    .te-modal-surface-window-root .te-fp-dialog {
+      overflow: hidden;
+    }
+    .te-modal-surface-window-root .te-fp-body {
+      flex: 1 1 auto;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .te-modal-surface-window-root .te-fp-scroll {
+      flex: 1 1 auto;
+      min-height: 0;
+      max-height: none;
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+    .te-modal-surface-window-root .fx-modal-dialog,
+    .te-modal-surface-window-root .am-modal-dialog {
+      overflow-y: auto;
+      overflow-x: hidden;
+      overscroll-behavior: contain;
     }
     .te-modal-surface-window-root .fe-modal-header,
     .te-modal-surface-window-root .app-modal-header,
@@ -79,7 +128,11 @@ function mirrorDocumentStyles(sourceDocument, targetDocument) {
     .te-modal-surface-window-root .cm-editor,
     .te-modal-surface-window-root .fe-modal-body,
     .te-modal-surface-window-root .app-modal-body,
-    .te-modal-surface-window-root .te-fp-body {
+    .te-modal-surface-window-root .te-fp-body,
+    .te-modal-surface-window-root .te-fp-scroll,
+    .te-modal-surface-window-root .fx-modal-dialog,
+    .te-modal-surface-window-root .am-modal-dialog,
+    .te-modal-surface-window-root .aria-modal-body {
       -webkit-app-region: no-drag;
     }
   `;
@@ -268,8 +321,8 @@ export function createSurfacePortalPresenter(
       restored: false,
     };
     records.set(entry.element, record);
-    portalRoot.appendChild(entry.element);
     mirrorDocumentStyles(sourceDocument, modalWindow.document);
+    portalRoot.appendChild(entry.element);
     notifyReparent(entry.element);
     updatePopupTitle();
     modalWindow.focus?.();

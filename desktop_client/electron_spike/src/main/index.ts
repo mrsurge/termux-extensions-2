@@ -7,13 +7,22 @@ import {
   ipcMain,
   Menu,
   protocol,
+  session,
   WebContentsView,
+  type IpcMainInvokeEvent,
   type WebContents,
 } from "electron";
 
+import { clearFrameworkAssetCaches } from "./asset-cache";
 import { DesktopAssetManager, MIME_TYPES } from "./assets";
 import { DesktopDialogHost } from "./dialog-host";
 import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
+import {
+  ELECTRON_APP_VIEW_IDENTITY,
+  ELECTRON_FRAMEWORK_PARTITION,
+  validateElectronAppViewCommand,
+  type ElectronAppViewInspection,
+} from "../shared/app-view-contracts";
 import {
   frameworkOrigin,
   readDesktopSettings,
@@ -22,6 +31,7 @@ import {
 } from "./target";
 import type {
   AppNavigation,
+  AssetUpdateResult,
   DesktopShellSettings,
   NativeRequestMethod,
 } from "../shared/contracts";
@@ -229,6 +239,91 @@ function closeAppView(): void {
   if (!closing.webContents.isDestroyed()) closing.webContents.close();
 }
 
+function assertTrustedAppViewSender(contents: WebContents): void {
+  const current = appView?.webContents;
+  if (!current || current.isDestroyed() || contents !== current) {
+    throw new Error("Rejected Electron app-view command from a stale renderer");
+  }
+  let origin = "";
+  try {
+    origin = new URL(contents.getURL()).origin;
+  } catch {
+    // The empty origin is rejected below.
+  }
+  if (origin !== relay.browserOrigin) {
+    throw new Error("Rejected Electron app-view command from an untrusted origin");
+  }
+}
+
+async function updateDesktopAssets(
+  force: boolean,
+  reloadActiveView: boolean,
+): Promise<AssetUpdateResult> {
+  const result = await assets.updateFromServer(
+    configuredFrameworkOrigin,
+    relay.browserOrigin,
+    force,
+  );
+  await relay.refreshAssets();
+  if (!result.updated) return result;
+
+  await clearFrameworkAssetCaches(session.fromPartition(ELECTRON_FRAMEWORK_PARTITION));
+  sendToShell("te2-desktop:asset-updated", result.localVersion);
+  const contents = appView?.webContents;
+  if (reloadActiveView && contents && !contents.isDestroyed()) {
+    contents.reloadIgnoringCache();
+  }
+  return result;
+}
+
+async function handleAppViewControl(
+  event: IpcMainInvokeEvent,
+  rawCommand: unknown,
+): Promise<unknown> {
+  assertTrustedAppViewSender(event.sender);
+  const command = validateElectronAppViewCommand(rawCommand);
+  if (command === "inspect") {
+    const frameworkSession = session.fromPartition(ELECTRON_FRAMEWORK_PARTITION);
+    const [assetStatus, cacheSizeBytes] = await Promise.all([
+      assets.status(relay.browserOrigin),
+      frameworkSession.getCacheSize(),
+    ]);
+    const inspection: ElectronAppViewInspection = {
+      identity: ELECTRON_APP_VIEW_IDENTITY,
+      currentUrl: event.sender.getURL(),
+      relayOrigin: relay.browserOrigin,
+      configuredFrameworkOrigin,
+      sessionPartition: ELECTRON_FRAMEWORK_PARTITION,
+      cacheSizeBytes,
+      electronVersion: process.versions.electron,
+      chromiumVersion: process.versions.chrome,
+      assets: assetStatus,
+    };
+    return inspection;
+  }
+  if (command === "force_asset_update") {
+    // Keep this renderer alive long enough to return the install result. The
+    // paired reload hook activates the already-invalidated asset snapshot.
+    return updateDesktopAssets(true, false);
+  }
+  if (command === "reload") {
+    const contents = event.sender;
+    setImmediate(() => {
+      if (appView?.webContents === contents && !contents.isDestroyed()) {
+        contents.reloadIgnoringCache();
+      }
+    });
+    return { ok: true };
+  }
+  const contents = event.sender;
+  setImmediate(() => {
+    if (appView?.webContents === contents && !contents.isDestroyed()) {
+      sendToShell("te2-desktop:steer", "home");
+    }
+  });
+  return { ok: true };
+}
+
 function installContextMenu(contents: WebContents): void {
   contents.on("context-menu", (event, params) => {
     event.preventDefault();
@@ -263,7 +358,7 @@ function createAppView(): WebContentsView {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      partition: "persist:te2-framework",
+      partition: ELECTRON_FRAMEWORK_PARTITION,
     },
   });
   view.setBackgroundColor("#111315");
@@ -447,17 +542,7 @@ async function nativeRequest(
   if (method === "get_fws_status") return fwsStatus();
   if (method === "get_asset_status") return assets.status(relay.browserOrigin);
   if (method === "update_assets") {
-    const result = await assets.updateFromServer(
-      configuredFrameworkOrigin,
-      relay.browserOrigin,
-      true,
-    );
-    await relay.refreshAssets();
-    if (result.updated) {
-      sendToShell("te2-desktop:asset-updated", result.localVersion);
-      appView?.webContents.reloadIgnoringCache();
-    }
-    return result;
+    return updateDesktopAssets(true, true);
   }
   if (method === "navigate_app") return navigateApp(String(params.url || ""));
   if (method === "view_action") return viewAction(params);
@@ -510,17 +595,13 @@ function createMainWindow(): BrowserWindow {
 }
 
 async function automaticAssetUpdate(): Promise<void> {
-  const result = await assets.updateFromServer(
-    configuredFrameworkOrigin,
-    relay.browserOrigin,
-    false,
-  );
-  await relay.refreshAssets();
-  if (result.updated) {
-    sendToShell("te2-desktop:asset-updated", result.localVersion);
-    appView?.webContents.reloadIgnoringCache();
-  } else if (!result.ok) {
-    console.warn(`[te2-desktop-assets] ${result.error || "Asset update failed"}`);
+  try {
+    const result = await updateDesktopAssets(false, true);
+    if (!result.ok) {
+      console.warn(`[te2-desktop-assets] ${result.error || "Asset update failed"}`);
+    }
+  } catch (error) {
+    console.warn(`[te2-desktop-assets] Activation failed: ${errorMessage(error)}`);
   }
 }
 
@@ -579,6 +660,7 @@ async function main(): Promise<void> {
       return nativeRequest(method, params);
     },
   );
+  ipcMain.handle("te2-desktop:app-view-control", handleAppViewControl);
   await mainWindow.loadURL(`${SHELL_SCHEME}://${SHELL_HOST}/index.html`);
 
   console.log(
@@ -596,6 +678,7 @@ async function main(): Promise<void> {
 
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => {
+  ipcMain.removeHandler("te2-desktop:app-view-control");
   closeAppView();
   dialogHost?.dispose();
   dialogHost = null;

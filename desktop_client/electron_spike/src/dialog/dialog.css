@@ -24,16 +24,36 @@ html, body {
 }
 
 body .te-dialog-layer {
-  padding: 16px;
-  background: var(--background);
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+  background: transparent;
   backdrop-filter: none;
 }
 
 body .te-dialog-card,
 body .te-dialog-card[data-width] {
   width: 100%;
+  height: 100%;
   max-width: none;
-  max-height: calc(100vh - 24px);
+  max-height: none;
+  border-radius: 2px;
+  box-shadow: none;
+}
+
+body .te-dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+body .te-dialog-field,
+body .te-dialog-input,
+body .te-dialog-textarea,
+body .te-dialog-select,
+body .te-dialog-select-button {
+  min-width: 0;
+  max-width: 100%;
 }
 
 body .te-dialog-header {

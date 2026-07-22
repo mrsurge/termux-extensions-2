@@ -157,6 +157,9 @@ bridge.onAssetUpdated((version) => {
   setAssetBadge(version);
   toast(`Desktop assets updated to v${version || "unknown"}`);
 });
+bridge.onSteer((action) => {
+  if (action === "home") showHome();
+});
 
 document.querySelector("#home")?.addEventListener("click", showHome);
 back.addEventListener("click", () => void bridge.request("view_action", { action: "back" }));

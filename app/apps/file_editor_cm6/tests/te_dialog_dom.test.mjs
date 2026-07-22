@@ -61,6 +61,33 @@ test("inline dialogs stack, trap focus, settle, and restore focus", async () => 
   window.close();
 });
 
+test("inline dialogs reopen sequentially with compact, bounded controls", async () => {
+  const window = new Window({ url: "http://127.0.0.1/app/test" });
+  const { document } = window;
+  const service = createDialogService(window);
+
+  const first = service.confirm("First question");
+  await nextTask();
+  document.querySelector('.te-dialog-action[data-role="cancel"]').click();
+  assert.equal(await first, false);
+  assert.equal(document.querySelectorAll(".te-dialog-layer").length, 0);
+
+  const second = service.prompt("Second question", "before");
+  await nextTask();
+  const input = document.querySelector(".te-dialog-input");
+  input.value = "after";
+  document.querySelector('.te-dialog-action[data-primary="true"]').click();
+  assert.equal(await second, "after");
+  assert.equal(document.querySelectorAll(".te-dialog-layer").length, 0);
+
+  const style = document.getElementById("te-dialog-style").textContent;
+  assert.match(style, /\.te-dialog-card\{[^}]*border-radius:2px/);
+  assert.match(style, /\.te-dialog-input[^}]*box-sizing:border-box/);
+  assert.match(style, /\.te-dialog-body\{[^}]*overflow-y:auto/);
+  service.surfaceRegistry.destroy();
+  window.close();
+});
+
 test("declared surfaces have stable stack, Escape close, and focus restoration", async () => {
   const window = new Window({ url: "http://127.0.0.1/app/test" });
   const { document } = window;
@@ -142,6 +169,9 @@ test("desktop surface portal preserves live DOM and nests primitive dialogs", as
   const style = document.createElement("style");
   style.textContent = ".preserved { color: rgb(1, 2, 3); }";
   document.head.appendChild(style);
+  const appLocalStyle = document.createElement("style");
+  appLocalStyle.textContent = ".app-local-modal { display: flex; overflow-y: auto; }";
+  document.body.appendChild(appLocalStyle);
   const opener = document.createElement("button");
   const surface = document.createElement("div");
   surface.className = "fe-modal";
@@ -171,6 +201,11 @@ test("desktop surface portal preserves live DOM and nests primitive dialogs", as
   assert.equal(surface.ownerDocument, childWindow.document);
   assert.equal(childWindow.document.querySelector("[data-te-dialog-surface]"), surface);
   assert.match(childWindow.document.head.textContent, /\.preserved/);
+  assert.match(childWindow.document.head.textContent, /\.app-local-modal/);
+  assert.match(childWindow.document.head.textContent, /\.app-modal-content/);
+  assert.match(childWindow.document.head.textContent, /\.te-fp-dialog/);
+  assert.match(childWindow.document.head.textContent, /width:\s*100%\s*!important/);
+  assert.match(childWindow.document.head.textContent, /height:\s*100%\s*!important/);
   assert.equal(childWindow.document.getElementById("runtime-style"), runtimeStyle);
 
   close.click();

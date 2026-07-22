@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  ELECTRON_APP_VIEW_IDENTITY,
+  validateElectronAppViewCommand,
+} from "./app-view-contracts";
+
+test("Electron app-view identity is explicit and console-visible", () => {
+  assert.deepEqual(ELECTRON_APP_VIEW_IDENTITY, {
+    client: "electron",
+    surface: "framework-app-view",
+    consoleWorkerLabel: "electron:main_page",
+  });
+  assert.equal(Object.isFrozen(ELECTRON_APP_VIEW_IDENTITY), true);
+});
+
+test("Electron app-view commands are strictly allowlisted", () => {
+  assert.equal(validateElectronAppViewCommand("inspect"), "inspect");
+  assert.equal(validateElectronAppViewCommand("force_asset_update"), "force_asset_update");
+  assert.throws(
+    () => validateElectronAppViewCommand("execute_javascript"),
+    /Unsupported Electron app-view command/,
+  );
+});
