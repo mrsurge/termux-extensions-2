@@ -1,5 +1,11 @@
 // app/apps/file_editor_cm6/main_page/frontend/host-terminal-drawer.ts
 
+import {
+  SOCKET_IO_NAMESPACES,
+  SOCKET_IO_PATHS,
+  fileEditorSocketQuery,
+} from '../../src/rpc/socketio-topology.ts';
+
 /**
  * Terminal drawer for the code editor.
  * Embeds xterm.js with WebSocket PTY streaming.
@@ -41,7 +47,9 @@ interface TerminalSocket {
   connected: boolean;
   connect: () => void;
   disconnect: () => void;
-  emit: (event: string, payload?: unknown) => void;
+  readonly volatile: {
+    emit: (event: string, payload?: unknown) => void;
+  };
   on: (event: string, handler: (payload?: unknown) => void) => void;
 }
 
@@ -161,7 +169,6 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
   let shellHistoryPrimed = false;
   let desiredShellId: string | null = 'auto';
   let socketRegistered = false;
-  let pendingInput: string[] = [];
   let pendingOutput: string[] = [];
   let lastResizeSent: string | null = null;
   let fitRaf: number | null = null;
@@ -291,7 +298,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     const key = `${shellId}:${cols}x${rows}`;
     if (!force && lastResizeSent === key) return;
     lastResizeSent = key;
-    ws.emit('terminal:resize', { cols, rows });
+    ws.volatile.emit('terminal:resize', { cols, rows });
   }
 
   function requestFit(frames = 8): void {
@@ -630,8 +637,6 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     shellHistoryPrimed = false;
     desiredShellId = 'auto';
     socketRegistered = false;
-    pendingInput = [];
-
     if (shellToggle) {
       shellToggle.textContent = 'Terminal';
     }
@@ -719,12 +724,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
 
   function sendTerminalInput(data: string): void {
     if (hasBoundShell()) {
-      ws?.emit('terminal:input', { data });
-    } else if (socketConnected()) {
-      pendingInput.push(data);
-      if (pendingInput.length > 64) {
-        pendingInput = pendingInput.slice(-64);
-      }
+      ws?.volatile.emit('terminal:input', { data });
     }
   }
 
@@ -812,8 +812,6 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     shellHistoryPrimed = false;
     desiredShellId = 'auto';
     socketRegistered = false;
-    pendingInput = [];
-
     try {
       await fetch(`/api/app/file_editor_cm6/terminal/${encodeURIComponent(currentShellId)}`, {
         method: 'DELETE',
@@ -832,24 +830,13 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     return !!(socketConnected() && shellId && desiredShellId && shellId === desiredShellId);
   }
 
-  function flushPendingInput(): void {
-    if (!hasBoundShell() || !pendingInput.length) return;
-    const queued = pendingInput;
-    pendingInput = [];
-    queued.forEach((data) => {
-      if (typeof data === 'string' && data) {
-        ws?.emit('terminal:input', { data });
-      }
-    });
-  }
-
   function emitTerminalRegister(requestedShellId = 'auto'): void {
     desiredShellId = String(requestedShellId || 'auto').trim() || 'auto';
     if (!socketConnected()) {
       socketRegistered = false;
       return;
     }
-    ws?.emit('terminal:register', {
+    ws?.volatile.emit('terminal:register', {
       shellId: desiredShellId,
       client_id: 'terminal-drawer',
     });
@@ -864,13 +851,10 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     }
 
     const io = await ensureSocketIoClient();
-    const socket = io('/terminal', {
-      path: '/terminal_ws/socket.io',
+    const socket = io(SOCKET_IO_NAMESPACES.terminal, {
+      path: SOCKET_IO_PATHS.terminal,
       transports: ['websocket'],
-      query: {
-        app_id: 'file_editor_cm6',
-        source: 'terminal_drawer',
-      },
+      query: fileEditorSocketQuery(),
     });
 
     socket.on('connect', () => {
@@ -884,7 +868,6 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     socket.on('disconnect', (reason) => {
       console.log('Terminal Socket.IO disconnected', reason);
       socketRegistered = false;
-      pendingInput = [];
     });
 
     socket.on('terminal:shell_id', async (msg) => {
@@ -946,14 +929,12 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         if (primed) {
           shellHistoryPrimed = true;
           flushPendingOutput();
-          flushPendingInput();
           scheduleStartupResizeSync('history-prime');
         }
       }
 
       if (shellHistoryPrimed) {
         flushPendingOutput();
-        flushPendingInput();
         scheduleStartupResizeSync('shell-bind');
       }
     });
@@ -992,11 +973,9 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
         desiredShellId = 'auto';
         socketRegistered = false;
         lastResizeSent = null;
-        pendingInput = [];
         pendingOutput = [];
       } else if (!closedShellId) {
         socketRegistered = false;
-        pendingInput = [];
       }
       try {
         await refreshShellMenu();
@@ -1008,7 +987,6 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       shellHistoryPrimed = false;
       socketRegistered = false;
       lastResizeSent = null;
-      pendingInput = [];
       pendingOutput = [];
       emitTerminalRegister('auto');
     });

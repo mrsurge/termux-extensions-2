@@ -112,6 +112,11 @@ import { createEditorRpcTransport } from "./editor_rpc_transport.ts";
 import { EDITOR_RPC_METHODS } from "./editor_rpc_contract.ts";
 import { createEditorWbaRpcTransport } from "./editor_wba_rpc_transport.ts";
 import { RPC_CODEC_MSGPACK_V1 } from "../src/rpc/codec.ts";
+import {
+  SOCKET_IO_NAMESPACES,
+  SOCKET_IO_PATHS,
+  fileEditorSocketQuery,
+} from "../src/rpc/socketio-topology.ts";
 import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.ts";
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
@@ -195,7 +200,9 @@ interface MonacoRuntimeDiffEditorLike {
 interface EditorSocketLike {
   connected?: boolean;
   id?: string | null;
-  emit(eventName: string, payload: Record<string, unknown>): void;
+  readonly volatile: {
+    emit(eventName: string, payload: unknown): void;
+  };
   on?(eventName: string, handler: (payload: unknown) => void): void;
 }
 
@@ -1870,16 +1877,16 @@ interface MonacoBootWindowLike extends Window {
         return true;
       }
       if (!window.io) return false;
-      editorRpcSocket = window.io("/rpc/editor", {
-        path: "/editor_ws/socket.io",
+      editorRpcSocket = window.io(SOCKET_IO_NAMESPACES.editorRpc, {
+        path: SOCKET_IO_PATHS.editor,
         transports: ["websocket"],
-        query: { app_id: "file_editor_cm6" },
+        query: fileEditorSocketQuery(),
         auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
       }) as EditorSocketLike;
-      wbaRpcSocket = window.io("/wba", {
-        path: "/wba_ws/socket.io",
+      wbaRpcSocket = window.io(SOCKET_IO_NAMESPACES.wba, {
+        path: SOCKET_IO_PATHS.wba,
         transports: ["websocket"],
-        query: { app_id: "file_editor_cm6" },
+        query: fileEditorSocketQuery(),
         auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
       }) as EditorSocketLike;
       editorRpcTransport.attachSocket(editorRpcSocket);

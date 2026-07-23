@@ -11,8 +11,8 @@ from app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws import UIIPCNamespace
 FILE_EDITOR_CM6_SOCKETIO_MAX_HTTP_BUFFER_SIZE = 8 * 1024 * 1024
 
 # One worker-owned Socket.IO server for the Python-owned Code TE2 namespaces.
-# Domain behavior stays in the existing namespace classes; this module only owns
-# server assembly and the shared ASGI app mounted under current physical paths.
+# Its local AsyncManager delivers only to live participants; reconnect state is
+# rebuilt by namespace connect handlers instead of a disconnected-session queue.
 FILE_EDITOR_CM6_SIO = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins="*",

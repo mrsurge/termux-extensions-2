@@ -4,7 +4,7 @@ export default {
   app: {
     name: "TE2 Desktop",
     identifier: "dev.te2.desktop",
-    version: "0.2.322",
+    version: "0.2.323",
   },
   build: {
     views: {

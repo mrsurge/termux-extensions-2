@@ -53,6 +53,7 @@ export function attachEditorWbaSocket(
     path: WBA_SOCKET_PATH,
     serveClient: false,
     transports: ["websocket"],
+    // Leave connectionStateRecovery unset; explicit adapter resync owns reconnect state.
     cors: {
       origin: true,
       credentials: true,

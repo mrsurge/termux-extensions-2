@@ -59,6 +59,12 @@ html.hc-light, html.hc-light body {
   display: block;
 }
 
+/* The document owns drag tracking after touchstart; stale handles must not
+   intercept Monaco's adjusted caret hit tests at their original position. */
+.monaco-editor-touch-selections.dragging {
+  pointer-events: none;
+}
+
 .monaco-editor-touch-selections > .selector {
   position: absolute;
 }

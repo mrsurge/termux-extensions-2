@@ -29,7 +29,9 @@ interface WbaRpcNotificationEnvelope {
 interface WbaRpcSocketLike {
   connected?: boolean;
   on?(eventName: string, handler: (payload: unknown) => void): void;
-  emit?(eventName: string, payload: unknown): void;
+  readonly volatile?: {
+    emit(eventName: string, payload: unknown): void;
+  };
 }
 
 interface PendingRequestEntry {
@@ -139,6 +141,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   const notificationHandlers = new Map<string, Set<(params: Record<string, unknown>) => void>>();
   let nextId = 1;
   let attached = false;
+  let hasConnected = false;
 
   function resolveConnectWaiters(): void {
     const socket = deps.getSocket();
@@ -220,9 +223,11 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
     if (attached || !socket || typeof socket.on !== 'function') return;
     attached = true;
     socket.on(WBA_RPC_EVENT, handleMessage);
-    socket.on('connect', () => {
+    const handleConnect = () => {
+      hasConnected = true;
       resolveConnectWaiters();
-    });
+    };
+    socket.on('connect', handleConnect);
     socket.on('disconnect', () => {
       rejectConnectWaiters('wba rpc socket disconnected');
       rejectAllPending('wba rpc socket disconnected');
@@ -231,7 +236,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
       rejectConnectWaiters('wba rpc socket connect error');
       rejectAllPending('wba rpc socket connect error');
     });
-    resolveConnectWaiters();
+    if (socket.connected) handleConnect();
   }
 
   function isConnected(): boolean {
@@ -242,6 +247,9 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
   function waitForConnected(method: string, timeoutMs: number): Promise<WbaRpcSocketLike> {
     const socket = deps.getSocket();
     if (socket?.connected) return Promise.resolve(socket);
+    if (hasConnected) {
+      return Promise.reject(new Error(`wba rpc socket disconnected: ${method}`));
+    }
     return new Promise((resolve, reject) => {
       const waiter: ConnectWaiter = {
         resolve,
@@ -268,7 +276,9 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
       return Promise.reject(new Error(`wba rpc timeout: ${method}`));
     }
     const requestId: WbaRpcId = `wba_rpc_${nextId++}_${Date.now()}`;
-    const emit = socket && typeof socket.emit === 'function' ? socket.emit.bind(socket) : null;
+    const emit = socket?.volatile && typeof socket.volatile.emit === 'function'
+      ? socket.volatile.emit.bind(socket.volatile)
+      : null;
     if (!socket.connected || !emit) {
       return Promise.reject(new Error('wba rpc socket not connected'));
     }
@@ -302,7 +312,9 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
 
   function notify(method: string, params: Record<string, unknown>): boolean {
     const socket = deps.getSocket();
-    const emit = socket && typeof socket.emit === 'function' ? socket.emit.bind(socket) : null;
+    const emit = socket?.volatile && typeof socket.volatile.emit === 'function'
+      ? socket.volatile.emit.bind(socket.volatile)
+      : null;
     if (!socket || !socket.connected || !emit) return false;
     try {
       emit(

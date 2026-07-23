@@ -1,6 +1,6 @@
 [package]
 name = "te2-rust-spike-server"
-version = "0.2.322"
+version = "0.2.323"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

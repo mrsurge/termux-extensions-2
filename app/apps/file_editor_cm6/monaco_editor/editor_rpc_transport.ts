@@ -14,7 +14,9 @@ import { messagePackRpcWireCodec } from '../src/rpc/codec.ts';
 interface EditorRpcSocketLike {
   connected?: boolean;
   on?(eventName: string, handler: (payload: unknown) => void): void;
-  emit?(eventName: string, payload: unknown): void;
+  readonly volatile?: {
+    emit(eventName: string, payload: unknown): void;
+  };
 }
 
 interface PendingRequestEntry {
@@ -133,7 +135,9 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     const timeoutMs = opts && Number.isFinite(Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 12000;
     const requestId: JsonRpcId = `editor_rpc_${nextId++}_${Date.now()}`;
     const socket = deps.getSocket();
-    const emit = socket && typeof socket.emit === 'function' ? socket.emit.bind(socket) : null;
+    const emit = socket?.volatile && typeof socket.volatile.emit === 'function'
+      ? socket.volatile.emit.bind(socket.volatile)
+      : null;
     if (!socket || !socket.connected || !emit) {
       return Promise.reject(new Error('editor rpc socket not connected'));
     }
@@ -162,7 +166,9 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
 
   function notify(method: EditorRpcMethodName | EditorRpcNotificationName, params: Record<string, unknown>): boolean {
     const socket = deps.getSocket();
-    const emit = socket && typeof socket.emit === 'function' ? socket.emit.bind(socket) : null;
+    const emit = socket?.volatile && typeof socket.volatile.emit === 'function'
+      ? socket.volatile.emit.bind(socket.volatile)
+      : null;
     if (!socket || !socket.connected || !emit) return false;
     try {
       emit(EDITOR_RPC_EVENT, messagePackRpcWireCodec.encode(buildEditorRpcNotificationEnvelope(method, params || {})));

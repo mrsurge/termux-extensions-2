@@ -39,7 +39,9 @@ export interface JsonRpcErrorEnvelope {
 
 export interface SocketLike {
   connected?: boolean;
-  emit(event: string, payload: unknown, ack?: (response: unknown) => void): void;
+  readonly volatile: {
+    emit(event: string, payload: unknown, ack?: (response: unknown) => void): void;
+  };
   on(event: string, handler: (...args: unknown[]) => void): void;
   connect?(): void;
   disconnect?(): void;
@@ -65,11 +67,13 @@ export interface CreateSocketIoJsonRpcClientOptions {
   onNotification?: (notification: JsonRpcNotificationEnvelope) => void;
 }
 
-interface QueuedRequest {
+interface PendingRequest {
   envelope: JsonRpcRequestEnvelope;
   timeoutMs: number;
   resolve: (result: unknown) => void;
   reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout> | null;
+  settled: boolean;
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
@@ -127,8 +131,10 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
   let socket: SocketLike | null = null;
   let connectPromise: Promise<void> | null = null;
   let requestCounter = 0;
-  const queuedNotifications: JsonRpcNotificationEnvelope[] = [];
-  const queuedRequests: QueuedRequest[] = [];
+  let hasConnected = false;
+  const initialNotifications: JsonRpcNotificationEnvelope[] = [];
+  const initialRequests: PendingRequest[] = [];
+  const activeRequests = new Set<PendingRequest>();
 
   function nextRequestId(): string {
     requestCounter += 1;
@@ -136,53 +142,91 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
     return `${prefix}_${Date.now()}_${requestCounter}`;
   }
 
-  function failQueuedRequests(error: Error): void {
-    while (queuedRequests.length) {
-      const queued = queuedRequests.shift();
-      if (!queued) continue;
-      queued.reject(error);
+  function settleRequest(request: PendingRequest, callback: () => void): void {
+    if (request.settled) return;
+    request.settled = true;
+    if (request.timer) clearTimeout(request.timer);
+    activeRequests.delete(request);
+    callback();
+  }
+
+  function rejectRequest(request: PendingRequest, error: Error): void {
+    settleRequest(request, () => request.reject(error));
+  }
+
+  function failInitialRequests(error: Error): void {
+    initialNotifications.length = 0;
+    while (initialRequests.length) {
+      const request = initialRequests.shift();
+      if (!request) continue;
+      rejectRequest(request, error);
     }
   }
 
-  function emitQueuedRequest(queued: QueuedRequest): void {
-    if (!socket) {
-      queued.reject(new Error('Socket.IO client unavailable'));
+  function failActiveRequests(error: Error): void {
+    for (const request of Array.from(activeRequests)) {
+      rejectRequest(request, error);
+    }
+  }
+
+  function emitRequest(request: PendingRequest): void {
+    if (!socket?.connected) {
+      rejectRequest(request, new Error(`RPC socket disconnected: ${request.envelope.method}`));
       return;
     }
-    const timeoutMs = Math.max(500, Number(queued.timeoutMs) || 8000);
-    const timer = setTimeout(() => {
-      queued.reject(new Error(`RPC request timeout: ${queued.envelope.method}`));
+    let wireEnvelope: unknown;
+    try {
+      wireEnvelope = codec.encode(request.envelope);
+    } catch (error) {
+      const normalized = normalizeError(error);
+      options.onProtocolError?.(normalized);
+      rejectRequest(request, normalized);
+      return;
+    }
+    const timeoutMs = Math.max(500, Number(request.timeoutMs) || 8000);
+    request.timer = setTimeout(() => {
+      rejectRequest(request, new Error(`RPC request timeout: ${request.envelope.method}`));
     }, timeoutMs);
+    activeRequests.add(request);
 
-    socket.emit(RPC_REQUEST_EVENT, codec.encode(queued.envelope), (wireResponse: unknown) => {
-      clearTimeout(timer);
+    socket.volatile.emit(RPC_REQUEST_EVENT, wireEnvelope, (wireResponse: unknown) => {
+      if (request.settled) return;
       try {
         const response = codec.decode(wireResponse);
         if (isJsonRpcErrorEnvelope(response)) {
           const data = isJsonObject(response.error.data) ? response.error.data : undefined;
-          throw new JsonRpcCallError(response.error.code, response.error.message, data);
+          rejectRequest(
+            request,
+            new JsonRpcCallError(response.error.code, response.error.message, data),
+          );
+          return;
         }
         if (!isJsonRpcSuccessEnvelope(response)) {
-          throw new Error('Invalid JSON-RPC response envelope');
+          rejectRequest(request, new Error('Invalid JSON-RPC response envelope'));
+          return;
         }
-        queued.resolve(response.result);
+        settleRequest(request, () => request.resolve(response.result));
       } catch (error) {
-        queued.reject(normalizeError(error));
+        rejectRequest(request, normalizeError(error));
       }
     });
   }
 
-  function flushQueues(): void {
+  function flushInitialQueues(): void {
     if (!socket?.connected) return;
-    while (queuedNotifications.length) {
-      const queued = queuedNotifications.shift();
-      if (!queued) continue;
-      socket.emit(RPC_REQUEST_EVENT, codec.encode(queued));
+    while (initialNotifications.length) {
+      const notification = initialNotifications.shift();
+      if (!notification) continue;
+      try {
+        socket.volatile.emit(RPC_REQUEST_EVENT, codec.encode(notification));
+      } catch (error) {
+        options.onProtocolError?.(normalizeError(error));
+      }
     }
-    while (queuedRequests.length) {
-      const queued = queuedRequests.shift();
-      if (!queued) continue;
-      emitQueuedRequest(queued);
+    while (initialRequests.length) {
+      const request = initialRequests.shift();
+      if (!request) continue;
+      emitRequest(request);
     }
   }
 
@@ -202,13 +246,17 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
           auth: options.auth || {},
         });
         socket.on('connect', () => {
-          flushQueues();
+          const isInitialConnection = !hasConnected;
+          hasConnected = true;
+          if (isInitialConnection) flushInitialQueues();
           options.onConnect?.();
         });
         socket.on('disconnect', (reason?: unknown) => {
+          failActiveRequests(new Error('RPC socket disconnected'));
           options.onDisconnect?.(typeof reason === 'string' ? reason : undefined);
         });
         socket.on('connect_error', (error: unknown) => {
+          failActiveRequests(normalizeError(error));
           options.onConnectError?.(error);
         });
         socket.on(RPC_NOTIFICATION_EVENT, (wirePayload: unknown) => {
@@ -223,7 +271,8 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
       })
       .catch((error) => {
         const normalized = normalizeError(error);
-        failQueuedRequests(normalized);
+        failInitialRequests(normalized);
+        failActiveRequests(normalized);
         options.onConnectError?.(normalized);
         throw normalized;
       })
@@ -249,11 +298,19 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
       params,
     };
     if (socket?.connected) {
-      socket.emit(RPC_REQUEST_EVENT, codec.encode(envelope));
+      try {
+        socket.volatile.emit(RPC_REQUEST_EVENT, codec.encode(envelope));
+      } catch (error) {
+        options.onProtocolError?.(normalizeError(error));
+      }
       return;
     }
-    queuedNotifications.push(envelope);
-    void connect();
+    if (!hasConnected) {
+      initialNotifications.push(envelope);
+      void connect();
+      return;
+    }
+    reconnect();
   }
 
   function request<TResult = JsonObject>(
@@ -268,26 +325,36 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
       params,
     };
     return new Promise<TResult>((resolve, reject) => {
-      const queued: QueuedRequest = {
+      const request: PendingRequest = {
         envelope,
         timeoutMs,
         resolve: (result) => {
           resolve(result as TResult);
         },
         reject,
+        timer: null,
+        settled: false,
       };
       if (socket?.connected) {
-        emitQueuedRequest(queued);
+        emitRequest(request);
         return;
       }
-      queuedRequests.push(queued);
-      void connect();
+      if (!hasConnected) {
+        initialRequests.push(request);
+        void connect();
+        return;
+      }
+      reconnect();
+      rejectRequest(request, new Error(`RPC socket disconnected: ${method}`));
     });
   }
 
   return {
     connect,
     disconnect(): void {
+      const error = new Error('RPC socket disconnected');
+      failInitialRequests(error);
+      failActiveRequests(error);
       if (socket && typeof socket.disconnect === 'function') {
         socket.disconnect();
       }

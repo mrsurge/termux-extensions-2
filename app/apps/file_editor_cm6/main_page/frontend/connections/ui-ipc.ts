@@ -120,7 +120,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
 
   function emitSidebarRpcRequest(method: SidebarIpcRpcMethod, params: JsonObject = {}, onResult?: (result: JsonObject) => void): void {
     if (!sidebarIpcSocket || !sidebarIpcSocket.connected) return;
-    sidebarIpcSocket.emit(
+    sidebarIpcSocket.volatile.emit(
       RPC_REQUEST_EVENT,
       {
         jsonrpc: '2.0',
@@ -163,7 +163,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
 
   function emitSidebarRpcNotification(method: SidebarIpcRpcNotificationMethod, params: JsonObject = {}): void {
     if (!sidebarIpcSocket || !sidebarIpcSocket.connected) return;
-    sidebarIpcSocket.emit(RPC_REQUEST_EVENT, {
+    sidebarIpcSocket.volatile.emit(RPC_REQUEST_EVENT, {
       jsonrpc: '2.0',
       method,
       params,
@@ -229,7 +229,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         const socket = io(SOCKET_IO_NAMESPACES.sidebarIpc, {
           path: SOCKET_IO_PATHS.uiIpc,
           transports: ['websocket'],
-          query: fileEditorSocketQuery({ source: 'main_page' }),
+          query: fileEditorSocketQuery(),
         });
         sidebarIpcSocket = socket;
         socket.on('connect', () => {

@@ -7,6 +7,7 @@ import {
   type UiIpcRpcMethod,
   type UiIpcRpcNotificationMethod,
 } from '../../../src/ui_ipc/rpc_contract.ts';
+import { SOCKET_IO_PATHS, fileEditorSocketQuery } from '../../../src/rpc/socketio-topology.ts';
 
 export interface CreateUiIpcRpcConnectionOptions {
   ensureSocketIoLoaded: () => Promise<IoFactory | null | undefined>;
@@ -19,8 +20,8 @@ export interface CreateUiIpcRpcConnectionOptions {
 export function createUiIpcRpcConnection(options: CreateUiIpcRpcConnectionOptions) {
   const client = createSocketIoJsonRpcClient({
     namespace: UI_IPC_RPC_NAMESPACE,
-    path: '/ui_ipc_ws/socket.io',
-    query: { app_id: 'file_editor_cm6', source: 'main_page' },
+    path: SOCKET_IO_PATHS.uiIpc,
+    query: fileEditorSocketQuery(),
     requestIdPrefix: 'ui_ipc',
     auth: { rpcCodec: RPC_CODEC_MSGPACK_V1 },
     codec: messagePackRpcWireCodec,
