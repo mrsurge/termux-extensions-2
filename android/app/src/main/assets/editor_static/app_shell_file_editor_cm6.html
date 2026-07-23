@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta id="app-shell-viewport" name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta id="app-shell-viewport" name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <title>Termux App</title>
     <link rel="manifest" href="/static/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/static/icon.png">
@@ -310,13 +310,13 @@
         <div id="app-container"></div>
     </div>
 
-    <div id="recents-modal" class="app-modal" style="display: none;">
+    <div id="recents-modal" class="app-modal" data-te-dialog-surface="framework.recents" style="display: none;">
         <div class="app-modal-content">
             <div class="app-modal-header">
                 <h3>Recent Apps</h3>
                 <div class="app-modal-actions">
                     <button id="recents-settings-btn" class="app-btn" title="Open Settings">🎛️</button>
-                    <button id="recents-close-btn" class="app-btn">&times;</button>
+                    <button id="recents-close-btn" class="app-btn" data-te-dialog-close>&times;</button>
                 </div>
             </div>
             <div id="recents-list" class="app-modal-body"></div>
@@ -333,8 +333,8 @@
     
     <script>
     let appShellMetricsRaf = 0;
-    const DEFAULT_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0';
-    const MOBILE_TAB_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+    const DEFAULT_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, interactive-widget=resizes-content';
+    const LOCKED_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content';
 
     function resolveAppShellMode() {
         const root = document.documentElement;
@@ -350,8 +350,9 @@
     function syncViewportMetaForShellMode(shellMode) {
         const viewportMeta = document.getElementById('app-shell-viewport');
         if (!(viewportMeta instanceof HTMLMetaElement)) return;
-        const nextContent = shellMode === 'mobile-tab'
-            ? MOBILE_TAB_VIEWPORT_CONTENT
+        const nativeShell = document.documentElement.classList.contains('gv-native');
+        const nextContent = nativeShell || shellMode === 'mobile-tab'
+            ? LOCKED_VIEWPORT_CONTENT
             : DEFAULT_VIEWPORT_CONTENT;
         if (viewportMeta.getAttribute('content') !== nextContent) {
             viewportMeta.setAttribute('content', nextContent);
@@ -878,11 +879,11 @@
 
                         // Add event listeners for the new buttons
                         recentsList.querySelectorAll('.recents-card-quit-btn').forEach(btn => {
-                            btn.addEventListener('click', (e) => {
+                            btn.addEventListener('click', async (e) => {
                                 e.stopPropagation();
                                 const card = btn.closest('.recents-card');
                                 const appIdToQuit = card.dataset.appId;
-                                if (appIdToQuit && confirm(`Quit ${appIdToQuit}? This will override any lock.`)) {
+                                if (appIdToQuit && await window.teUI.dialog.confirm(`Quit ${appIdToQuit}? This will override any lock.`)) {
                                     shutdownAppGroup(appIdToQuit)
                                         .then(() => card.remove())
                                         .catch(err => host.toast(`Error: ${err.message || err}`));
@@ -912,7 +913,7 @@
                         exitAllBtn.className = 'recents-exit-all-btn';
                         exitAllBtn.innerHTML = '<span>❌</span> Exit All Apps';
                         exitAllBtn.addEventListener('click', async () => {
-                            if (!confirm('Are you sure you want to exit all unlocked apps?')) return;
+                            if (!(await window.teUI.dialog.confirm('Are you sure you want to exit all unlocked apps?'))) return;
                             try {
                                 const runningApps = await teFetch('/api/apps/running');
                                 const unlockedApps = runningApps.filter(app => !app.locked);

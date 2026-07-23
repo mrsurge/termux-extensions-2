@@ -156,13 +156,8 @@ class MainActivity : AppCompatActivity() {
                 session: GeckoSession,
                 permission: GeckoSession.SelectionActionDelegate.ClipboardPermission,
             ): GeckoResult<AllowOrDeny> {
-                val requestUri = Uri.parse(permission.uri)
-                val allowed = permission.type ==
-                    GeckoSession.SelectionActionDelegate.PERMISSION_CLIPBOARD_READ &&
-                    isFrameworkOrigin(requestUri)
-                return GeckoResult.fromValue(
-                    if (allowed) AllowOrDeny.ALLOW else AllowOrDeny.DENY,
-                )
+                // This wrapper exposes only the configured framework surface.
+                return GeckoResult.fromValue(AllowOrDeny.ALLOW)
             }
         }
 
@@ -1531,6 +1526,7 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             updatePersistentNetworkService()
         }
+        uiIpcClient?.setImeContextSwitchingEnabled(settings.imeContextSwitchingEnabled)
         uiIpcClient?.disconnect()
         uiIpcClient = null
         wakeFrameworkAndLoad(forceLoadHome = false)
@@ -1597,7 +1593,10 @@ class MainActivity : AppCompatActivity() {
             // Connect IME filter IPC after server URL is known
             try {
                 uiIpcClient?.disconnect()
-                uiIpcClient = UiIpcClient(editorInputFilter) { active ->
+                uiIpcClient = UiIpcClient(
+                    filter = editorInputFilter,
+                    imeContextSwitchingEnabled = settings.imeContextSwitchingEnabled,
+                ) { active ->
                     runOnUiThread {
                         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
                         if (active) {

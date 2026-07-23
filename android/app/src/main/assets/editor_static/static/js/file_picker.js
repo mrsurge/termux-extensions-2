@@ -259,14 +259,14 @@ const CSS = `
 `;
 
 const TEMPLATE = `
-<div id="${ROOT_ID}" class="te-fp-hidden">
+<div id="${ROOT_ID}" class="te-fp-hidden" data-te-dialog-surface="framework.file-picker">
   <div class="te-fp-overlay">
     <div class="te-fp-dialog">
       <div class="te-fp-header">
         <button class="te-fp-home" aria-label="Go to home directory" title="Home">🏠</button>
         <div class="te-fp-title">Select Item</div>
         <div class="te-fp-git-status"></div>
-        <button class="te-fp-close" aria-label="Close picker">&times;</button>
+        <button class="te-fp-close" data-te-dialog-close aria-label="Close picker">&times;</button>
       </div>
       <div class="te-fp-body">
         <div class="te-fp-breadcrumbs"></div>
@@ -384,6 +384,10 @@ function createRoot() {
   const tpl = document.createElement('div');
   tpl.innerHTML = TEMPLATE;
   document.body.appendChild(tpl.firstElementChild);
+}
+
+function modalDocument() {
+  return elements?.root?.ownerDocument || document;
 }
 
 function escapeHtml(value) {
@@ -612,16 +616,17 @@ function setFilename(name) {
 }
 
 function renderBreadcrumbs(path) {
+  const targetDocument = modalDocument();
   const crumbs = formatBreadcrumbs(path);
   elements.breadcrumbs.innerHTML = '';
   crumbs.forEach((crumb, idx) => {
     if (idx > 0) {
-      const sep = document.createElement('span');
+      const sep = targetDocument.createElement('span');
       sep.textContent = '/';
       sep.style.opacity = '0.6';
       elements.breadcrumbs.appendChild(sep);
     }
-    const span = document.createElement('span');
+    const span = targetDocument.createElement('span');
     span.className = 'te-fp-crumb' + (crumb.current ? ' current' : '');
     span.textContent = crumb.label || '/';
     if (!crumb.current) {
@@ -634,16 +639,17 @@ function renderBreadcrumbs(path) {
 }
 
 function renderEntries(entries) {
+  const targetDocument = modalDocument();
   elements.list.innerHTML = '';
   if (!entries.length) {
-    const empty = document.createElement('div');
+    const empty = targetDocument.createElement('div');
     empty.className = 'te-fp-loading';
     empty.textContent = 'This directory is empty.';
     elements.list.appendChild(empty);
     return;
   }
   entries.forEach((entry) => {
-    const li = document.createElement('li');
+    const li = targetDocument.createElement('li');
     li.className = 'te-fp-item';
     li.dataset.path = entry.path;
     li.dataset.type = entry.type;
@@ -777,7 +783,7 @@ function close() {
     if (elements.saveRow) elements.saveRow.classList.add('te-fp-hidden');
     if (elements.filenameInput) elements.filenameInput.value = '';
   }
-  const rootEl = document.getElementById(ROOT_ID);
+  const rootEl = elements?.root;
   if (rootEl) rootEl.classList.add('te-fp-hidden');
   resetState();
 }
@@ -797,10 +803,11 @@ async function getBookmarks() {
 }
 
 function renderBookmarkMenu() {
+  const targetDocument = modalDocument();
   if (!elements.bookmarkDropdown) return;
   elements.bookmarkDropdown.innerHTML = '';
   if (!state.bookmarks || !state.bookmarks.length) {
-    const empty = document.createElement('div');
+    const empty = targetDocument.createElement('div');
     empty.className = 'te-fp-menu-empty';
     empty.textContent = 'No bookmarks';
     elements.bookmarkDropdown.appendChild(empty);
@@ -808,7 +815,7 @@ function renderBookmarkMenu() {
   }
 
   state.bookmarks.forEach(bookmark => {
-    const btn = document.createElement('button');
+    const btn = targetDocument.createElement('button');
     btn.type = 'button';
     btn.textContent = bookmark.name;
     btn.title = bookmark.path;
@@ -889,7 +896,7 @@ function init() {
     });
   }
 
-  document.addEventListener('click', (e) => {
+  rootEl.addEventListener('click', (e) => {
     if (elements && elements.bookmarkMenu && !elements.bookmarkMenu.contains(e.target)) {
       elements.bookmarkMenu.dataset.open = 'false';
     }
@@ -897,7 +904,7 @@ function init() {
   
   if (elements.btnNewFolder) {
     elements.btnNewFolder.addEventListener('click', async () => {
-      const name = prompt('New folder name:');
+      const name = await window.teUI.dialog.prompt('New folder name:');
       if (!name || !name.trim()) return;
       
       const folderName = name.trim();
@@ -993,7 +1000,7 @@ function open(options = {}) {
   updateButtons();
   getBookmarks();
 
-  const rootEl = document.getElementById(ROOT_ID);
+  const rootEl = elements.root;
   rootEl.classList.remove('te-fp-hidden');
 
   return new Promise((resolve, reject) => {

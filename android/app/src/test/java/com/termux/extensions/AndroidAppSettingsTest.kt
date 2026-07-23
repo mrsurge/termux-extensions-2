@@ -10,6 +10,7 @@ class AndroidAppSettingsTest {
         val settings = AndroidAppSettings()
 
         assertEquals("http://127.0.0.1:8089", settings.frameworkBaseUrl)
+        assertEquals(true, settings.imeContextSwitchingEnabled)
     }
 
     @Test
@@ -18,11 +19,13 @@ class AndroidAppSettingsTest {
             frameworkHost = " 100.108.128.8 ",
             frameworkPort = 8081,
             persistentNetworkNotification = true,
+            imeContextSwitchingEnabled = false,
         )
 
         assertEquals("100.108.128.8", settings.frameworkHost)
         assertEquals("http://100.108.128.8:8081", settings.frameworkBaseUrl)
         assertEquals(true, settings.persistentNetworkNotification)
+        assertEquals(false, settings.imeContextSwitchingEnabled)
     }
 
     @Test

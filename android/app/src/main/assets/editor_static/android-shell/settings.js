@@ -3,6 +3,7 @@ import { androidShellHost } from "./host.js";
 const hostInput = document.querySelector("#framework-host");
 const portInput = document.querySelector("#framework-port");
 const persistentToggle = document.querySelector("#persistent-network-notification");
+const imeContextSwitchingToggle = document.querySelector("#ime-context-switching-enabled");
 const saveButton = document.querySelector("#save-settings");
 const testButton = document.querySelector("#test-framework");
 const settingsStatus = document.querySelector("#settings-status");
@@ -21,6 +22,7 @@ async function loadSettings() {
   hostInput.value = settings.frameworkHost || "127.0.0.1";
   portInput.value = String(settings.frameworkPort || 8089);
   persistentToggle.checked = !!settings.persistentNetworkNotification;
+  imeContextSwitchingToggle.checked = settings.imeContextSwitchingEnabled !== false;
   setStatus(settingsStatus, "online", "Android settings loaded");
 }
 
@@ -68,10 +70,12 @@ saveButton?.addEventListener("click", async () => {
       frameworkHost: hostInput.value,
       frameworkPort: Number(portInput.value),
       persistentNetworkNotification: persistentToggle.checked,
+      imeContextSwitchingEnabled: imeContextSwitchingToggle.checked,
     });
     hostInput.value = settings.frameworkHost;
     portInput.value = String(settings.frameworkPort);
     persistentToggle.checked = !!settings.persistentNetworkNotification;
+    imeContextSwitchingToggle.checked = settings.imeContextSwitchingEnabled !== false;
     androidShellHost.toast("Android settings saved");
     await Promise.all([testFramework(), refreshFrameworkShells()]);
   } catch (error) {

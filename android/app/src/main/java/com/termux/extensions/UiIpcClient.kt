@@ -12,6 +12,7 @@ import java.net.URI
  */
 class UiIpcClient(
     private val filter: EditorInputFilter,
+    private var imeContextSwitchingEnabled: Boolean = true,
     private val onFilterChanged: ((Boolean) -> Unit)? = null
 ) {
     companion object {
@@ -63,7 +64,12 @@ class UiIpcClient(
                 }
                 on(Socket.EVENT_DISCONNECT) {
                     Log.i(TAG, "Disconnected from UI IPC — deactivating filter")
-                    setFilterActive(false)
+                    activeImeOwner = null
+                    if (imeContextSwitchingEnabled) {
+                        setFilterActive(false)
+                    } else {
+                        filter.isActive = false
+                    }
                 }
                 on(Socket.EVENT_CONNECT_ERROR) { args ->
                     Log.w(TAG, "Connect error: ${args.firstOrNull()}")
@@ -166,6 +172,9 @@ class UiIpcClient(
 
     private fun handleUiIpcNotification(notification: UiIpcRpcNotification) {
         if (notification.jsonRpc != "2.0") return
+        if (!shouldApplyImeContextNotification(imeContextSwitchingEnabled, notification.method)) {
+            return
+        }
         when (notification.method) {
             UI_IPC_EDITOR_FOCUS -> {
                 handleImeFocus("editor")
@@ -179,6 +188,15 @@ class UiIpcClient(
             UI_IPC_IME_BLUR -> {
                 handleImeBlur(notification.source?.trim().orEmpty().ifEmpty { "ime" })
             }
+        }
+    }
+
+    fun setImeContextSwitchingEnabled(enabled: Boolean) {
+        if (imeContextSwitchingEnabled == enabled) return
+        imeContextSwitchingEnabled = enabled
+        if (!enabled) {
+            activeImeOwner = null
+            setFilterActive(false)
         }
     }
 
@@ -304,4 +322,12 @@ class UiIpcClient(
             Log.w(TAG, "Error disconnecting", e)
         }
     }
+}
+
+internal fun shouldApplyImeContextNotification(enabled: Boolean, method: String): Boolean {
+    if (!enabled) return false
+    return method == "ui.editor.focus" ||
+        method == "ui.editor.blur" ||
+        method == "ui.ime.focus" ||
+        method == "ui.ime.blur"
 }

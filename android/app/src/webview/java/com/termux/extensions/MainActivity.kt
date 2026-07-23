@@ -751,6 +751,7 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
             updatePersistentNetworkService()
         }
+        uiIpcClient?.setImeContextSwitchingEnabled(settings.imeContextSwitchingEnabled)
         uiIpcClient?.disconnect()
         uiIpcClient = null
         wakeFrameworkAndLoad(forceLoadHome = false)
@@ -817,7 +818,10 @@ class MainActivity : AppCompatActivity() {
             // Connect IME filter IPC
             try {
                 uiIpcClient?.disconnect()
-                uiIpcClient = UiIpcClient(editorInputFilter) { active ->
+                uiIpcClient = UiIpcClient(
+                    filter = editorInputFilter,
+                    imeContextSwitchingEnabled = settings.imeContextSwitchingEnabled,
+                ) { active ->
                     runOnUiThread {
                         val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
                         if (active) {

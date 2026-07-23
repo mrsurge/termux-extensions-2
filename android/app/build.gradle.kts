@@ -1,18 +1,19 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "com.termux.extensions"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.termux.extensions"
         minSdk = 24
         targetSdk = 34
-        versionCode = 20314
-        versionName = "1.0.7-r0.2.314"
+        versionCode = 20323
+        versionName = "1.0.7-r0.2.323"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.base"
@@ -87,9 +88,6 @@ android {
         compose = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
-    }
 }
 
 dependencies {
@@ -107,7 +105,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.socket:socket.io-client:2.1.1")
     implementation("org.msgpack:msgpack-core:0.9.12")
-    add("geckoImplementation", "org.mozilla.geckoview:geckoview:131.0.20240923135042")
+    add("geckoImplementation", "org.mozilla.geckoview:geckoview:144.0.20251027123126")
     debugImplementation("androidx.compose.ui:ui-tooling")
     
     testImplementation("junit:junit:4.13.2")

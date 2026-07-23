@@ -1,6 +1,9 @@
-// Shared toast & notification utilities
+import { installTeDialog } from './te_dialog.mjs';
+
+// Shared toast, notification, and dialog utilities
 // Folklore claims these toasts once convinced a grumpy cron job to take a victory lap.
 if (!window.teUI) window.teUI = {};
+installTeDialog(window);
 
 (() => {
   const STYLE_ID = 'te-notifications-style';

@@ -8,6 +8,7 @@ data class AndroidAppSettings(
     val frameworkHost: String = DEFAULT_FRAMEWORK_HOST,
     val frameworkPort: Int = DEFAULT_FRAMEWORK_PORT,
     val persistentNetworkNotification: Boolean = false,
+    val imeContextSwitchingEnabled: Boolean = true,
 ) {
     val frameworkBaseUrl: String
         get() {
@@ -24,6 +25,7 @@ data class AndroidAppSettings(
         put("frameworkPort", frameworkPort)
         put("frameworkBaseUrl", frameworkBaseUrl)
         put("persistentNetworkNotification", persistentNetworkNotification)
+        put("imeContextSwitchingEnabled", imeContextSwitchingEnabled)
     }
 
     companion object {
@@ -36,6 +38,7 @@ internal fun validatedAndroidAppSettings(
     frameworkHost: String,
     frameworkPort: Int,
     persistentNetworkNotification: Boolean,
+    imeContextSwitchingEnabled: Boolean = true,
 ): AndroidAppSettings {
     val host = frameworkHost.trim().removeSurrounding("[", "]")
     require(host.isNotEmpty()) { "Framework host is required" }
@@ -52,6 +55,7 @@ internal fun validatedAndroidAppSettings(
         frameworkHost = host,
         frameworkPort = frameworkPort,
         persistentNetworkNotification = persistentNetworkNotification,
+        imeContextSwitchingEnabled = imeContextSwitchingEnabled,
     )
 }
 
@@ -76,6 +80,10 @@ class AndroidAppSettingsStore(context: Context) {
                 persistentNetworkNotification = preferences.getBoolean(
                     KEY_PERSISTENT_NETWORK_NOTIFICATION,
                     false,
+                ),
+                imeContextSwitchingEnabled = preferences.getBoolean(
+                    KEY_IME_CONTEXT_SWITCHING_ENABLED,
+                    true,
                 ),
             )
         } catch (_: IllegalArgumentException) {
@@ -104,6 +112,14 @@ class AndroidAppSettingsStore(context: Context) {
             } else {
                 current.persistentNetworkNotification
             },
+            imeContextSwitchingEnabled = if (payload.has("imeContextSwitchingEnabled")) {
+                payload.optBoolean(
+                    "imeContextSwitchingEnabled",
+                    current.imeContextSwitchingEnabled,
+                )
+            } else {
+                current.imeContextSwitchingEnabled
+            },
         )
 
         preferences.edit()
@@ -112,6 +128,10 @@ class AndroidAppSettingsStore(context: Context) {
             .putBoolean(
                 KEY_PERSISTENT_NETWORK_NOTIFICATION,
                 updated.persistentNetworkNotification,
+            )
+            .putBoolean(
+                KEY_IME_CONTEXT_SWITCHING_ENABLED,
+                updated.imeContextSwitchingEnabled,
             )
             .apply()
         return updated
@@ -123,5 +143,7 @@ class AndroidAppSettingsStore(context: Context) {
         private const val KEY_FRAMEWORK_PORT = "framework_port"
         private const val KEY_PERSISTENT_NETWORK_NOTIFICATION =
             "persistent_network_notification"
+        private const val KEY_IME_CONTEXT_SWITCHING_ENABLED =
+            "ime_context_switching_enabled"
     }
 }

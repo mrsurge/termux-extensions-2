@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta id="app-shell-viewport" name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta id="app-shell-viewport" name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <title>Termux App</title>
     <link rel="manifest" href="/static/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/static/icon.png">
@@ -333,8 +333,8 @@
     
     <script>
     let appShellMetricsRaf = 0;
-    const DEFAULT_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0';
-    const MOBILE_TAB_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+    const DEFAULT_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, interactive-widget=resizes-content';
+    const LOCKED_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content';
 
     function resolveAppShellMode() {
         const root = document.documentElement;
@@ -350,8 +350,9 @@
     function syncViewportMetaForShellMode(shellMode) {
         const viewportMeta = document.getElementById('app-shell-viewport');
         if (!(viewportMeta instanceof HTMLMetaElement)) return;
-        const nextContent = shellMode === 'mobile-tab'
-            ? MOBILE_TAB_VIEWPORT_CONTENT
+        const nativeShell = document.documentElement.classList.contains('gv-native');
+        const nextContent = nativeShell || shellMode === 'mobile-tab'
+            ? LOCKED_VIEWPORT_CONTENT
             : DEFAULT_VIEWPORT_CONTENT;
         if (viewportMeta.getAttribute('content') !== nextContent) {
             viewportMeta.setAttribute('content', nextContent);

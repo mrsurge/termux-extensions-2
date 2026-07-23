@@ -1,9 +1,10 @@
 :root {
-  --monaco-editor_touch-selection_z-index: 100000;
+  /* Handles stay with Monaco content; the floating menu must clear host chrome. */
+  --monaco-editor_touch-selection_z-index: 40;
   --monaco-editor_touch-selector_color: #1E90FF;
   --monaco-editor_touch-selector_size: 1.2rem;
 
-  --monaco-editor_touch-selector-menu_z-index: 100001;
+  --monaco-editor_touch-selector-menu_z-index: 350;
   --monaco-editor_touch-selector-menu_bg-color: #f7f7f7;
   --monaco-editor_touch-selector-menu_height: 2.4rem;
   --monaco-editor_touch-selector-menu_border-color: #ccc;
@@ -38,6 +39,8 @@ html.hc-light, html.hc-light body {
 .monaco-editor-touch-selections,
 .monaco-editor-touch-selections > .selector > .text-cursor,
 .monaco-editor-touch-selections > .selector > .bottom-cursor,
+.monaco-editor-touch-selector-menu-stack,
+.monaco-editor-touch-selector-menu-stack > .selection-adjustment-row,
 .monaco-editor-touch-selector-menu,
 .monaco-editor-touch-selector-menu > .menu-item {
   box-sizing: border-box;
@@ -54,6 +57,12 @@ html.hc-light, html.hc-light body {
 
 .monaco-editor-touch-selections.show {
   display: block;
+}
+
+/* The document owns drag tracking after touchstart; stale handles must not
+   intercept Monaco's adjusted caret hit tests at their original position. */
+.monaco-editor-touch-selections.dragging {
+  pointer-events: none;
 }
 
 .monaco-editor-touch-selections > .selector {
@@ -94,16 +103,42 @@ html.hc-light, html.hc-light body {
   background: transparent;
 }
 
-.monaco-editor-touch-selector-menu {
+.monaco-editor-touch-selector-menu-stack {
   position: absolute;
   top: 0;
   left: 0;
   display: none;
   max-width: 90vw;
-  width: fit-content;
-  overflow-x: auto;
-  overflow-y: hidden;
+  width: max-content;
   z-index: var(--monaco-editor_touch-selector-menu_z-index);
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+}
+
+.monaco-editor-touch-selector-menu-stack.show {
+  display: flex;
+}
+
+.monaco-editor-touch-selector-menu-stack > .selection-adjustment-row {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.monaco-editor-touch-selector-menu-stack.touch-mode > .selection-adjustment-row {
+  display: flex;
+  margin-bottom: -1px;
+}
+
+.monaco-editor-touch-selector-menu {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  max-width: 90vw;
+  width: fit-content;
+  overflow: hidden;
   background: var(--monaco-editor_touch-selector-menu_bg-color);
   height: var(--monaco-editor_touch-selector-menu_height);
   line-height: var(--monaco-editor_touch-selector-menu_height);
@@ -113,12 +148,16 @@ html.hc-light, html.hc-light body {
   border-radius: calc(var(--monaco-editor_touch-selector-menu_height) / 2);
 }
 
-.monaco-editor-touch-selector-menu.show {
-  display: flex;
+.monaco-editor-touch-selector-menu.main-menu {
+  overflow-x: auto;
+  overflow-y: hidden;
   gap: 0.4rem;
 }
 
 .monaco-editor-touch-selector-menu > .menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   height: 100%;
   white-space: nowrap;
   font-size: 0.95rem;
@@ -127,12 +166,10 @@ html.hc-light, html.hc-light body {
 }
 
 .monaco-editor-touch-selector-menu > .menu-item > svg.icon {
-  display: inline-block;
+  display: block;
   user-select: none;
-  vertical-align: top;
   stroke: var(--monaco-editor_touch-selector-menu_icon-color);
   stroke-width: 1.8;
   height: 1.2rem;
-  margin-top: calc((var(--monaco-editor_touch-selector-menu_height) - 1.2rem) / 2);
+  margin: 0;
 }
-
