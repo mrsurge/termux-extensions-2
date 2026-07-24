@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.util.Log
@@ -17,7 +16,6 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -38,6 +36,7 @@ import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.GeckoView
 import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.WebExtension
 import org.mozilla.geckoview.WebExtensionController
@@ -52,12 +51,19 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var consoleOverlay: FrameLayout
     private lateinit var composeConsoleContainer: ComposeView
-    private lateinit var consoleScroll: ScrollView
-    private lateinit var consoleText: TextView
+    private lateinit var inspectorPanel: FrameLayout
+    private lateinit var inspectorGeckoView: GeckoView
+    private lateinit var inspectorStatus: TextView
+    private lateinit var btnToolsConsole: Button
+    private lateinit var btnToolsInspector: Button
 
     private val editorInputFilter = EditorInputFilter()
     private val composeConsoleState = ComposeConsoleState()
     private var uiIpcClient: UiIpcClient? = null
+    private var devToolsInspector: GeckoDevToolsInspector? = null
+    private var devToolsInspectorEnabled = false
+    private var devToolsInspectorStatus = "disabled"
+    private var toolsConsoleSelected = true
 
     private var editorAssetManager: EditorAssetManager? = null
     private var localAssetServer: LocalAssetServer? = null
@@ -70,15 +76,9 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var btnConsoleBack: Button
     private lateinit var btnConsoleStart: Button
-    private lateinit var btnConsoleStop: Button
 
     private val httpClient = OkHttpClient()
-    private val consoleLines = ArrayDeque<String>(2000)
     private val uiHandler = Handler(Looper.getMainLooper())
-    private var consoleFlushPending = false
-
-    private var consoleCaptureEnabled: Boolean = false
-    private var consoleExtension: WebExtension? = null
 
     private var frameworkBaseUrl: String = DEFAULT_FRAMEWORK_URL
     private var currentAppId: String = DEFAULT_APP_ID
@@ -443,10 +443,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun recoverSessionAfterContentDeath(reason: String) {
         if (!requireAssetInterceptor("session recovery")) return
-        try {
-            appendConsoleLine("warn", "Gecko content process $reason; recovering session...", null)
-        } catch (_: Exception) {
-        }
+        Log.w("MainActivity", "Gecko content process $reason; recovering session...")
 
         try {
             if (::geckoSession.isInitialized) {
@@ -461,6 +458,7 @@ class MainActivity : AppCompatActivity() {
         geckoSession = createGeckoSession()
         try {
             geckoSession.open(runtime)
+            devToolsInspector?.rebindTargetSession(geckoSession)
         } catch (_: Exception) {
         }
         try {
@@ -564,9 +562,11 @@ class MainActivity : AppCompatActivity() {
 
         consoleOverlay = findViewById(R.id.consoleOverlay)
         composeConsoleContainer = findViewById(R.id.composeConsoleContainer)
-        consoleScroll = findViewById(R.id.consoleScroll)
-        consoleText = findViewById(R.id.consoleText)
-        consoleText.typeface = Typeface.MONOSPACE
+        inspectorPanel = findViewById(R.id.inspectorPanel)
+        inspectorGeckoView = findViewById(R.id.inspectorGeckoView)
+        inspectorStatus = findViewById(R.id.inspectorStatus)
+        btnToolsConsole = findViewById(R.id.btnToolsConsole)
+        btnToolsInspector = findViewById(R.id.btnToolsInspector)
         composeConsoleState.bind(
             composeConsoleContainer,
             onSendEval = { code, target ->
@@ -579,7 +579,6 @@ class MainActivity : AppCompatActivity() {
 
         btnConsoleBack = findViewById(R.id.btnConsoleBack)
         btnConsoleStart = findViewById(R.id.btnConsoleStart)
-        btnConsoleStop = findViewById(R.id.btnConsoleStop)
 
         findViewById<Button>(R.id.btnHome).setOnClickListener { loadHome() }
         findViewById<Button>(R.id.btnReload).setOnClickListener {
@@ -596,12 +595,10 @@ class MainActivity : AppCompatActivity() {
 
         btnConsoleBack.setOnClickListener { hideConsoleOverlay() }
         btnConsoleStart.setOnClickListener { flushBrowserCache() }
-        btnConsoleStop.visibility = View.GONE
+        btnToolsConsole.setOnClickListener { showConsoleTools() }
+        btnToolsInspector.setOnClickListener { showInspectorTools() }
 
         findViewById<Button>(R.id.btnUpdateTe2).setOnClickListener { updateTe2Ui() }
-        consoleScroll.visibility = View.GONE
-
-        // Console transport controls are intentionally dormant; overlay is now a simple tools palette.
 
         // Clicking the dimmed backdrop closes; the panel consumes clicks.
         consoleOverlay.setOnClickListener { hideConsoleOverlay() }
@@ -894,6 +891,13 @@ class MainActivity : AppCompatActivity() {
             applicationContext,
             androidSettingsStore.load().frameworkHost,
         )
+        devToolsInspector = GeckoDevToolsInspector(
+            runtime,
+            geckoSession,
+            inspectorGeckoView,
+        ) { status ->
+            runOnUiThread { updateDevToolsInspectorStatus(status) }
+        }
 
         // A blank open session starts Gecko's extension process. Restore and
         // navigation remain locked until the local static route is confirmed.
@@ -907,7 +911,9 @@ class MainActivity : AppCompatActivity() {
                     showFatalStartupToast("Local editor assets unavailable; navigation blocked")
                     return@runOnUiThread
                 }
-                unlockGeckoNavigation()
+                devToolsInspector?.configure(devToolsInspectorEnabled) {
+                    runOnUiThread { unlockGeckoNavigation() }
+                }
             }
         }
     }
@@ -1167,9 +1173,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showConsoleOverlay() {
         consoleOverlay.visibility = View.VISIBLE
-        composeConsoleState.resetSession()
-        loadAndroidDiagnosticsIntoTools()
-        uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
+        showConsoleTools()
         // Show asset version inline with title
         try {
             val ver = editorAssetManager?.getLocalVersion() ?: "unknown"
@@ -1179,12 +1183,67 @@ class MainActivity : AppCompatActivity() {
 
     private fun hideConsoleOverlay() {
         consoleOverlay.visibility = View.GONE
+        devToolsInspector?.setVisible(false)
         uiIpcClient?.setConsoleDrawerEnabled(false)
         composeConsoleState.resetSession()
     }
 
     private fun toggleConsoleOverlay() {
         if (consoleOverlay.visibility == View.VISIBLE) hideConsoleOverlay() else showConsoleOverlay()
+    }
+
+    private fun showConsoleTools() {
+        toolsConsoleSelected = true
+        composeConsoleContainer.visibility = View.VISIBLE
+        inspectorPanel.visibility = View.GONE
+        devToolsInspector?.setVisible(false)
+        btnToolsConsole.isEnabled = false
+        btnToolsInspector.isEnabled = true
+        composeConsoleState.resetSession()
+        loadAndroidDiagnosticsIntoTools()
+        uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
+    }
+
+    private fun showInspectorTools() {
+        toolsConsoleSelected = false
+        composeConsoleContainer.visibility = View.GONE
+        inspectorPanel.visibility = View.VISIBLE
+        btnToolsConsole.isEnabled = true
+        btnToolsInspector.isEnabled = false
+        uiIpcClient?.setConsoleDrawerEnabled(false)
+        composeConsoleState.resetSession()
+        updateDevToolsInspectorSurface()
+    }
+
+    private fun updateDevToolsInspectorStatus(status: String) {
+        devToolsInspectorStatus = status
+        if (status.startsWith("error:")) {
+            Log.w("MainActivity", "Native developer tools: $status")
+        } else {
+            Log.i("MainActivity", "Native developer tools: $status")
+        }
+        if (::inspectorStatus.isInitialized) updateDevToolsInspectorSurface()
+    }
+
+    private fun updateDevToolsInspectorSurface() {
+        val inspectorSelected =
+            ::consoleOverlay.isInitialized &&
+                consoleOverlay.visibility == View.VISIBLE &&
+                !toolsConsoleSelected
+        val showClient =
+            inspectorSelected &&
+                devToolsInspectorEnabled &&
+                !devToolsInspectorStatus.startsWith("error:")
+        inspectorStatus.text = when {
+            !devToolsInspectorEnabled ->
+                "Enable native developer tools in Android Settings."
+            devToolsInspectorStatus.startsWith("error:") ->
+                "Developer tools $devToolsInspectorStatus"
+            else -> "Developer tools: $devToolsInspectorStatus"
+        }
+        inspectorStatus.visibility =
+            if (inspectorSelected && !showClient) View.VISIBLE else View.GONE
+        devToolsInspector?.setVisible(showClient)
     }
 
     private fun loadAndroidDiagnosticsIntoTools() {
@@ -1222,117 +1281,6 @@ class MainActivity : AppCompatActivity() {
     private fun showFatalStartupToast(fallback: String) {
         nativeHeader.visibility = View.VISIBLE
         Toast.makeText(this, lastStartupFailure ?: fallback, Toast.LENGTH_LONG).show()
-    }
-
-    private fun updateConsoleControls() {
-        btnConsoleStart.isEnabled = !consoleCaptureEnabled
-        btnConsoleStop.isEnabled = consoleCaptureEnabled
-    }
-
-    private fun startConsoleCapture() {
-        consoleCaptureEnabled = true
-        updateConsoleControls()
-
-        // Install lazily so console capture isn't running unless requested.
-        if (consoleExtension == null) {
-            installConsoleExtension()
-        } else {
-            try {
-                runtime.webExtensionController.enable(consoleExtension!!, 0)
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    private fun stopConsoleCapture() {
-        consoleCaptureEnabled = false
-        updateConsoleControls()
-        try {
-            if (consoleExtension != null) {
-                runtime.webExtensionController.disable(consoleExtension!!, 0)
-            }
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun scheduleConsoleFlush() {
-        if (consoleFlushPending) return
-        consoleFlushPending = true
-        uiHandler.postDelayed({
-            consoleFlushPending = false
-            consoleText.text = consoleLines.joinToString("\n\n")
-            if (consoleOverlay.visibility == View.VISIBLE) {
-                consoleScroll.post { consoleScroll.fullScroll(View.FOCUS_DOWN) }
-            }
-        }, 100)
-    }
-
-    private fun appendConsoleLine(level: String, text: String, url: String?) {
-        if (!consoleCaptureEnabled) return
-
-        val line = buildString {
-            append('[').append(level).append("] ").append(text)
-            if (!url.isNullOrBlank()) {
-                append("\n").append(url)
-            }
-        }
-        if (consoleLines.size >= 2000) {
-            consoleLines.removeFirst()
-        }
-        consoleLines.addLast(line)
-        scheduleConsoleFlush()
-    }
-
-    private fun installConsoleExtension() {
-        if (consoleExtension != null) return
-
-        val extLocation = "resource://android/assets/console_pipe/"
-        runtime.webExtensionController
-            .ensureBuiltIn(extLocation, "console_pipe@example.com")
-            .accept(
-                { extension ->
-                    val ext = extension ?: return@accept
-                    consoleExtension = ext
-
-                    val delegate = object : WebExtension.MessageDelegate {
-                        override fun onMessage(
-                            nativeApp: String,
-                            message: Any,
-                            sender: WebExtension.MessageSender
-                        ): GeckoResult<Any>? {
-                            if (!consoleCaptureEnabled) return null
-                            try {
-                                val obj = when (message) {
-                                    is JSONObject -> message
-                                    is String -> JSONObject(message)
-                                    else -> null
-                                } ?: return null
-
-                                if (obj.optString("type") == "console") {
-                                    appendConsoleLine(
-                                        obj.optString("level", "log"),
-                                        obj.optString("text", ""),
-                                        obj.optString("url", null)
-                                    )
-                                }
-                            } catch (_: Exception) {
-                            }
-                            return null
-                        }
-                    }
-                    geckoSession.webExtensionController
-                        .setMessageDelegate(ext, delegate, "browser")
-
-                    // Ensure enabled if user already pressed Start before install completed.
-                    if (consoleCaptureEnabled) {
-                        try {
-                            runtime.webExtensionController.enable(ext, 0)
-                        } catch (_: Exception) {
-                        }
-                    }
-                },
-                { e -> appendConsoleLine("error", "Extension install failed: ${e?.message ?: "unknown"}", null) }
-            )
     }
 
     /**
@@ -1519,8 +1467,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyAndroidSettings(settings: AndroidAppSettings, reconnect: Boolean) {
+        val devToolsSettingChanged =
+            devToolsInspectorEnabled != settings.devToolsInspectorEnabled
         frameworkBaseUrl = settings.frameworkBaseUrl
         persistentNetworkNotificationEnabled = settings.persistentNetworkNotification
+        devToolsInspectorEnabled = settings.devToolsInspectorEnabled
         if (!reconnect) return
 
         runOnUiThread {
@@ -1529,6 +1480,26 @@ class MainActivity : AppCompatActivity() {
         uiIpcClient?.setImeContextSwitchingEnabled(settings.imeContextSwitchingEnabled)
         uiIpcClient?.disconnect()
         uiIpcClient = null
+        if (devToolsSettingChanged) {
+            runOnUiThread {
+                updateDevToolsInspectorStatus(
+                    if (devToolsInspectorEnabled) "starting" else "stopping",
+                )
+                devToolsInspector?.configure(devToolsInspectorEnabled) { configured ->
+                    runOnUiThread {
+                        updateDevToolsInspectorSurface()
+                        if (configured && inAppShell && ::geckoSession.isInitialized) {
+                            geckoSession.reload()
+                            Toast.makeText(
+                                this,
+                                "Developer tools updated; app page reloaded",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    }
+                }
+            }
+        }
         wakeFrameworkAndLoad(forceLoadHome = false)
     }
 
@@ -1612,7 +1583,7 @@ class MainActivity : AppCompatActivity() {
                     composeConsoleState.onConsoleEvent(eventName, data)
                 }
                 uiIpcClient?.connect(frameworkUrl)
-                if (consoleOverlay.visibility == View.VISIBLE) {
+                if (consoleOverlay.visibility == View.VISIBLE && toolsConsoleSelected) {
                     uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
                 }
             } catch (e: Exception) {
@@ -1655,6 +1626,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         uiIpcClient?.disconnect()
         uiIpcClient = null
+        devToolsInspector?.release()
+        devToolsInspector = null
         releaseAssetInterceptor()
         localAssetServer?.stop()
         localAssetServer = null

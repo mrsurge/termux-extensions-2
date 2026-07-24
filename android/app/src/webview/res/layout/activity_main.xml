@@ -110,34 +110,61 @@
                     android:layout_height="wrap_content"
                     android:text="Update UI" />
 
-                <Button
-                    android:id="@+id/btnConsoleStop"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Stop" />
             </LinearLayout>
 
-            <ScrollView
-                android:id="@+id/consoleScroll"
+            <LinearLayout
+                android:id="@+id/toolsTabs"
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1">
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
 
-                <TextView
-                    android:id="@+id/consoleText"
-                    android:layout_width="match_parent"
+                <Button
+                    android:id="@+id/btnToolsConsole"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:padding="12dp"
-                    android:textColor="#FFFFFF"
-                    android:textIsSelectable="true"
-                    android:textSize="12sp" />
-            </ScrollView>
+                    android:layout_weight="1"
+                    android:text="Console" />
+
+                <Button
+                    android:id="@+id/btnToolsInspector"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Inspector" />
+            </LinearLayout>
 
             <androidx.compose.ui.platform.ComposeView
                 android:id="@+id/composeConsoleContainer"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
-                android:layout_weight="2" />
+                android:layout_weight="1" />
+
+            <FrameLayout
+                android:id="@+id/inspectorPanel"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:background="#292A2D"
+                android:visibility="gone">
+
+                <WebView
+                    android:id="@+id/inspectorWebView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/inspectorStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:padding="24dp"
+                    android:text="Enable native developer tools in Android Settings."
+                    android:textColor="#FFFFFF"
+                    android:textIsSelectable="true" />
+            </FrameLayout>
         </LinearLayout>
     </FrameLayout>
 

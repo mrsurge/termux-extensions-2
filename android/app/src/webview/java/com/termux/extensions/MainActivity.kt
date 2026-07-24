@@ -5,7 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Typeface
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -22,7 +22,7 @@ import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.ScrollView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.compose.ui.platform.ComposeView
@@ -44,12 +44,19 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var consoleOverlay: FrameLayout
     private lateinit var composeConsoleContainer: ComposeView
-    private lateinit var consoleScroll: ScrollView
-    private lateinit var consoleText: TextView
+    private lateinit var inspectorPanel: FrameLayout
+    private lateinit var inspectorWebView: WebView
+    private lateinit var inspectorStatus: TextView
+    private lateinit var btnToolsConsole: Button
+    private lateinit var btnToolsInspector: Button
 
     private val editorInputFilter = EditorInputFilter()
     private val composeConsoleState = ComposeConsoleState()
     private var uiIpcClient: UiIpcClient? = null
+    private var devToolsInspector: WebViewDevToolsInspector? = null
+    private var devToolsInspectorEnabled = false
+    private var devToolsInspectorStatus = "disabled"
+    private var toolsConsoleSelected = true
 
     private var editorAssetManager: EditorAssetManager? = null
     private var localAssetServer: LocalAssetServer? = null
@@ -59,7 +66,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var btnConsoleBack: Button
     private lateinit var btnConsoleStart: Button
-    private lateinit var btnConsoleStop: Button
 
     private val httpClient = OkHttpClient()
     private val uiHandler = Handler(Looper.getMainLooper())
@@ -259,9 +265,11 @@ class MainActivity : AppCompatActivity() {
 
         consoleOverlay = findViewById(R.id.consoleOverlay)
         composeConsoleContainer = findViewById(R.id.composeConsoleContainer)
-        consoleScroll = findViewById(R.id.consoleScroll)
-        consoleText = findViewById(R.id.consoleText)
-        consoleText.typeface = Typeface.MONOSPACE
+        inspectorPanel = findViewById(R.id.inspectorPanel)
+        inspectorWebView = findViewById(R.id.inspectorWebView)
+        inspectorStatus = findViewById(R.id.inspectorStatus)
+        btnToolsConsole = findViewById(R.id.btnToolsConsole)
+        btnToolsInspector = findViewById(R.id.btnToolsInspector)
         composeConsoleState.bind(
             composeConsoleContainer,
             onSendEval = { code, target ->
@@ -274,7 +282,6 @@ class MainActivity : AppCompatActivity() {
 
         btnConsoleBack = findViewById(R.id.btnConsoleBack)
         btnConsoleStart = findViewById(R.id.btnConsoleStart)
-        btnConsoleStop = findViewById(R.id.btnConsoleStop)
 
         findViewById<Button>(R.id.btnHome).setOnClickListener { loadHome() }
         findViewById<Button>(R.id.btnReload).setOnClickListener { webView.reload() }
@@ -285,10 +292,10 @@ class MainActivity : AppCompatActivity() {
 
         btnConsoleBack.setOnClickListener { hideConsoleOverlay() }
         btnConsoleStart.setOnClickListener { flushBrowserCache() }
-        btnConsoleStop.visibility = View.GONE
+        btnToolsConsole.setOnClickListener { showConsoleTools() }
+        btnToolsInspector.setOnClickListener { showInspectorTools() }
 
         findViewById<Button>(R.id.btnUpdateTe2).setOnClickListener { updateTe2Ui() }
-        consoleScroll.visibility = View.GONE
 
         consoleOverlay.setOnClickListener { hideConsoleOverlay() }
         findViewById<View>(R.id.consolePanel).setOnClickListener { /* consume */ }
@@ -314,6 +321,13 @@ class MainActivity : AppCompatActivity() {
         webView.addJavascriptInterface(NativeBridge(this), "Android")
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(
+                view: WebView?,
+                url: String?,
+                favicon: Bitmap?,
+            ) {
+                devToolsInspector?.onTargetNavigationStarted()
+            }
 
             override fun shouldInterceptRequest(
                 view: WebView?,
@@ -450,6 +464,15 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         }
+
+        devToolsInspector = WebViewDevToolsInspector(
+            applicationContext,
+            webView,
+            inspectorWebView,
+        ) { status ->
+            runOnUiThread { updateDevToolsInspectorStatus(status) }
+        }
+        devToolsInspector?.configure(devToolsInspectorEnabled)
 
         // Init editor assets (local server for intercept)
         initEditorAssets()
@@ -685,9 +708,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showConsoleOverlay() {
         consoleOverlay.visibility = View.VISIBLE
-        composeConsoleState.resetSession()
-        loadAndroidDiagnosticsIntoTools()
-        uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
+        showConsoleTools()
         // Show asset version inline with title
         try {
             val ver = editorAssetManager?.getLocalVersion() ?: "unknown"
@@ -697,12 +718,67 @@ class MainActivity : AppCompatActivity() {
 
     private fun hideConsoleOverlay() {
         consoleOverlay.visibility = View.GONE
+        devToolsInspector?.setVisible(false)
         uiIpcClient?.setConsoleDrawerEnabled(false)
         composeConsoleState.resetSession()
     }
 
     private fun toggleConsoleOverlay() {
         if (consoleOverlay.visibility == View.VISIBLE) hideConsoleOverlay() else showConsoleOverlay()
+    }
+
+    private fun showConsoleTools() {
+        toolsConsoleSelected = true
+        composeConsoleContainer.visibility = View.VISIBLE
+        inspectorPanel.visibility = View.GONE
+        devToolsInspector?.setVisible(false)
+        btnToolsConsole.isEnabled = false
+        btnToolsInspector.isEnabled = true
+        composeConsoleState.resetSession()
+        loadAndroidDiagnosticsIntoTools()
+        uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
+    }
+
+    private fun showInspectorTools() {
+        toolsConsoleSelected = false
+        composeConsoleContainer.visibility = View.GONE
+        inspectorPanel.visibility = View.VISIBLE
+        btnToolsConsole.isEnabled = true
+        btnToolsInspector.isEnabled = false
+        uiIpcClient?.setConsoleDrawerEnabled(false)
+        composeConsoleState.resetSession()
+        updateDevToolsInspectorSurface()
+    }
+
+    private fun updateDevToolsInspectorStatus(status: String) {
+        devToolsInspectorStatus = status
+        if (status.startsWith("error:")) {
+            Log.w("MainActivity", "Native developer tools: $status")
+        } else {
+            Log.i("MainActivity", "Native developer tools: $status")
+        }
+        if (::inspectorStatus.isInitialized) updateDevToolsInspectorSurface()
+    }
+
+    private fun updateDevToolsInspectorSurface() {
+        val inspectorSelected =
+            ::consoleOverlay.isInitialized &&
+                consoleOverlay.visibility == View.VISIBLE &&
+                !toolsConsoleSelected
+        val showClient =
+            inspectorSelected &&
+                devToolsInspectorEnabled &&
+                !devToolsInspectorStatus.startsWith("error:")
+        inspectorStatus.text = when {
+            !devToolsInspectorEnabled ->
+                "Enable native developer tools in Android Settings."
+            devToolsInspectorStatus.startsWith("error:") ->
+                "Developer tools $devToolsInspectorStatus"
+            else -> "Developer tools: $devToolsInspectorStatus"
+        }
+        inspectorStatus.visibility =
+            if (inspectorSelected && !showClient) View.VISIBLE else View.GONE
+        devToolsInspector?.setVisible(showClient)
     }
 
     private fun loadAndroidDiagnosticsIntoTools() {
@@ -744,8 +820,11 @@ class MainActivity : AppCompatActivity() {
     // ── Framework wake ──────────────────────────────────────────────
 
     private fun applyAndroidSettings(settings: AndroidAppSettings, reconnect: Boolean) {
+        val devToolsSettingChanged =
+            devToolsInspectorEnabled != settings.devToolsInspectorEnabled
         frameworkBaseUrl = settings.frameworkBaseUrl
         persistentNetworkNotificationEnabled = settings.persistentNetworkNotification
+        devToolsInspectorEnabled = settings.devToolsInspectorEnabled
         if (!reconnect) return
 
         runOnUiThread {
@@ -754,6 +833,24 @@ class MainActivity : AppCompatActivity() {
         uiIpcClient?.setImeContextSwitchingEnabled(settings.imeContextSwitchingEnabled)
         uiIpcClient?.disconnect()
         uiIpcClient = null
+        if (devToolsSettingChanged) {
+            runOnUiThread {
+                updateDevToolsInspectorStatus(
+                    if (devToolsInspectorEnabled) "starting" else "stopping",
+                )
+                val configured =
+                    devToolsInspector?.configure(devToolsInspectorEnabled) == true
+                updateDevToolsInspectorSurface()
+                if (configured && inAppShell) {
+                    webView.reload()
+                    Toast.makeText(
+                        this,
+                        "Developer tools updated; app page reloaded",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
         wakeFrameworkAndLoad(forceLoadHome = false)
     }
 
@@ -837,7 +934,7 @@ class MainActivity : AppCompatActivity() {
                     composeConsoleState.onConsoleEvent(eventName, data)
                 }
                 uiIpcClient?.connect(frameworkUrl)
-                if (consoleOverlay.visibility == View.VISIBLE) {
+                if (consoleOverlay.visibility == View.VISIBLE && toolsConsoleSelected) {
                     uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
                 }
             } catch (e: Exception) {
@@ -885,6 +982,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         uiIpcClient?.disconnect()
         uiIpcClient = null
+        devToolsInspector?.release()
+        devToolsInspector = null
         localAssetServer?.stop()
         localAssetServer = null
         webView.destroy()

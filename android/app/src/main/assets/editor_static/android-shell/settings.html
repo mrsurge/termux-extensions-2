@@ -35,10 +35,23 @@
       </header>
       <label class="toggle-row" for="ime-context-switching-enabled">
         <span>
-          <strong>Native IME context switching</strong>
-          <small>Use Code TE2 focus notifications to restart and show the Android keyboard.</small>
+          <strong>Android IME composition workaround</strong>
+          <small>Use Code TE2 focus notifications to suppress stale Gboard composition in native Android clients.</small>
         </span>
         <input id="ime-context-switching-enabled" type="checkbox">
+      </label>
+    </section>
+
+    <section class="settings-section">
+      <header class="section-header">
+        <h2>Diagnostics</h2>
+      </header>
+      <label class="toggle-row" for="devtools-inspector-enabled">
+        <span>
+          <strong>Native developer tools</strong>
+          <small>Connect inspected pages to the persistent native Tools inspector. Changing this setting reloads the active app page.</small>
+        </span>
+        <input id="devtools-inspector-enabled" type="checkbox">
       </label>
     </section>
 

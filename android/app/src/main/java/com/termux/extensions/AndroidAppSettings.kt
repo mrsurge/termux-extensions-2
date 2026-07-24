@@ -9,6 +9,7 @@ data class AndroidAppSettings(
     val frameworkPort: Int = DEFAULT_FRAMEWORK_PORT,
     val persistentNetworkNotification: Boolean = false,
     val imeContextSwitchingEnabled: Boolean = true,
+    val devToolsInspectorEnabled: Boolean = false,
 ) {
     val frameworkBaseUrl: String
         get() {
@@ -26,6 +27,7 @@ data class AndroidAppSettings(
         put("frameworkBaseUrl", frameworkBaseUrl)
         put("persistentNetworkNotification", persistentNetworkNotification)
         put("imeContextSwitchingEnabled", imeContextSwitchingEnabled)
+        put("devToolsInspectorEnabled", devToolsInspectorEnabled)
     }
 
     companion object {
@@ -39,6 +41,7 @@ internal fun validatedAndroidAppSettings(
     frameworkPort: Int,
     persistentNetworkNotification: Boolean,
     imeContextSwitchingEnabled: Boolean = true,
+    devToolsInspectorEnabled: Boolean = false,
 ): AndroidAppSettings {
     val host = frameworkHost.trim().removeSurrounding("[", "]")
     require(host.isNotEmpty()) { "Framework host is required" }
@@ -56,6 +59,7 @@ internal fun validatedAndroidAppSettings(
         frameworkPort = frameworkPort,
         persistentNetworkNotification = persistentNetworkNotification,
         imeContextSwitchingEnabled = imeContextSwitchingEnabled,
+        devToolsInspectorEnabled = devToolsInspectorEnabled,
     )
 }
 
@@ -84,6 +88,10 @@ class AndroidAppSettingsStore(context: Context) {
                 imeContextSwitchingEnabled = preferences.getBoolean(
                     KEY_IME_CONTEXT_SWITCHING_ENABLED,
                     true,
+                ),
+                devToolsInspectorEnabled = preferences.getBoolean(
+                    KEY_DEVTOOLS_INSPECTOR_ENABLED,
+                    false,
                 ),
             )
         } catch (_: IllegalArgumentException) {
@@ -120,6 +128,14 @@ class AndroidAppSettingsStore(context: Context) {
             } else {
                 current.imeContextSwitchingEnabled
             },
+            devToolsInspectorEnabled = if (payload.has("devToolsInspectorEnabled")) {
+                payload.optBoolean(
+                    "devToolsInspectorEnabled",
+                    current.devToolsInspectorEnabled,
+                )
+            } else {
+                current.devToolsInspectorEnabled
+            },
         )
 
         preferences.edit()
@@ -133,6 +149,10 @@ class AndroidAppSettingsStore(context: Context) {
                 KEY_IME_CONTEXT_SWITCHING_ENABLED,
                 updated.imeContextSwitchingEnabled,
             )
+            .putBoolean(
+                KEY_DEVTOOLS_INSPECTOR_ENABLED,
+                updated.devToolsInspectorEnabled,
+            )
             .apply()
         return updated
     }
@@ -145,5 +165,7 @@ class AndroidAppSettingsStore(context: Context) {
             "persistent_network_notification"
         private const val KEY_IME_CONTEXT_SWITCHING_ENABLED =
             "ime_context_switching_enabled"
+        private const val KEY_DEVTOOLS_INSPECTOR_ENABLED =
+            "devtools_inspector_enabled"
     }
 }
