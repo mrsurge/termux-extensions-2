@@ -39,6 +39,8 @@ export interface JsonRpcErrorEnvelope {
 
 export interface SocketLike {
   connected?: boolean;
+  sendBuffer?: unknown[];
+  emit(event: string, payload: unknown, ack?: (response: unknown) => void): void;
   readonly volatile: {
     emit(event: string, payload: unknown, ack?: (response: unknown) => void): void;
   };
@@ -112,6 +114,10 @@ function isJsonRpcErrorEnvelope(payload: unknown): payload is JsonRpcErrorEnvelo
 function normalizeError(error: unknown): Error {
   if (error instanceof Error) return error;
   return new Error(String(error ?? 'Unknown error'));
+}
+
+function clearSocketReplayBuffer(socket: SocketLike | null | undefined): void {
+  if (Array.isArray(socket?.sendBuffer)) socket.sendBuffer.length = 0;
 }
 
 export class JsonRpcCallError extends Error {
@@ -189,7 +195,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
     }, timeoutMs);
     activeRequests.add(request);
 
-    socket.volatile.emit(RPC_REQUEST_EVENT, wireEnvelope, (wireResponse: unknown) => {
+    socket.emit(RPC_REQUEST_EVENT, wireEnvelope, (wireResponse: unknown) => {
       if (request.settled) return;
       try {
         const response = codec.decode(wireResponse);
@@ -252,10 +258,12 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
           options.onConnect?.();
         });
         socket.on('disconnect', (reason?: unknown) => {
+          clearSocketReplayBuffer(socket);
           failActiveRequests(new Error('RPC socket disconnected'));
           options.onDisconnect?.(typeof reason === 'string' ? reason : undefined);
         });
         socket.on('connect_error', (error: unknown) => {
+          clearSocketReplayBuffer(socket);
           failActiveRequests(normalizeError(error));
           options.onConnectError?.(error);
         });
@@ -355,6 +363,7 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
       const error = new Error('RPC socket disconnected');
       failInitialRequests(error);
       failActiveRequests(error);
+      clearSocketReplayBuffer(socket);
       if (socket && typeof socket.disconnect === 'function') {
         socket.disconnect();
       }

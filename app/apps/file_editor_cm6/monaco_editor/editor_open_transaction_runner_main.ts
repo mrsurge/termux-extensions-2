@@ -270,16 +270,11 @@ export async function runEditorOpenTransaction(
     };
     deps.emitToHost('editor_open_complete', openCompletePayload);
     settleOpenTransaction(deps.openTransactionStore, tx);
-    if (languageOpenPromise) {
-      try {
-        await languageOpenPromise;
-      } catch (_) {}
-    }
-    try {
-      await deps.requestAgentEditDocumentState(openCompletePayload);
-    } catch (error) {
+    // WBA/model hydration is ordered separately and must not hold the next visible file open.
+    if (languageOpenPromise) void languageOpenPromise;
+    void deps.requestAgentEditDocumentState(openCompletePayload).catch((error) => {
       console.warn('[AgentEditReview] document state request failed after open', error);
-    }
+    });
   } catch (err) {
     settleOpenTransaction(deps.openTransactionStore, tx);
     throw err;

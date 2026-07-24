@@ -28,6 +28,8 @@ interface WbaRpcNotificationEnvelope {
 
 interface WbaRpcSocketLike {
   connected?: boolean;
+  sendBuffer?: unknown[];
+  emit?(eventName: string, payload: unknown): void;
   on?(eventName: string, handler: (payload: unknown) => void): void;
   readonly volatile?: {
     emit(eventName: string, payload: unknown): void;
@@ -72,6 +74,10 @@ function isNotificationEnvelope(value: unknown): value is WbaRpcNotificationEnve
 
 function idKey(id: WbaRpcId): string {
   return String(id);
+}
+
+function clearSocketReplayBuffer(socket: WbaRpcSocketLike | null | undefined): void {
+  if (Array.isArray(socket?.sendBuffer)) socket.sendBuffer.length = 0;
 }
 
 function asParamsRecord(value: unknown): Record<string, unknown> {
@@ -229,10 +235,12 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
     };
     socket.on('connect', handleConnect);
     socket.on('disconnect', () => {
+      clearSocketReplayBuffer(socket);
       rejectConnectWaiters('wba rpc socket disconnected');
       rejectAllPending('wba rpc socket disconnected');
     });
     socket.on('connect_error', () => {
+      clearSocketReplayBuffer(socket);
       rejectConnectWaiters('wba rpc socket connect error');
       rejectAllPending('wba rpc socket connect error');
     });
@@ -276,9 +284,7 @@ export function createEditorWbaRpcTransport(deps: WbaRpcTransportDeps): {
       return Promise.reject(new Error(`wba rpc timeout: ${method}`));
     }
     const requestId: WbaRpcId = `wba_rpc_${nextId++}_${Date.now()}`;
-    const emit = socket?.volatile && typeof socket.volatile.emit === 'function'
-      ? socket.volatile.emit.bind(socket.volatile)
-      : null;
+    const emit = socket && typeof socket.emit === 'function' ? socket.emit.bind(socket) : null;
     if (!socket.connected || !emit) {
       return Promise.reject(new Error('wba rpc socket not connected'));
     }

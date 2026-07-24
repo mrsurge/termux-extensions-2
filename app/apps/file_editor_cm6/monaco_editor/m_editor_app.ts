@@ -200,6 +200,8 @@ interface MonacoRuntimeDiffEditorLike {
 interface EditorSocketLike {
   connected?: boolean;
   id?: string | null;
+  sendBuffer?: unknown[];
+  emit(eventName: string, payload: unknown): void;
   readonly volatile: {
     emit(eventName: string, payload: unknown): void;
   };

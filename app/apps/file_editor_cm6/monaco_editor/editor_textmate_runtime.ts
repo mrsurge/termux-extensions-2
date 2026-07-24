@@ -177,6 +177,8 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
   let tmGrammarByLang: Record<string, unknown> = Object.create(null);
   let tmActiveThemeJson: Record<string, unknown> | null = null;
   let tmVscodeIndex: VscodeGrammarIndexLike | null = null;
+  let tmVscodeIndexInflight: Promise<VscodeGrammarIndexLike> | null = null;
+  let tmReadyInflight: Promise<unknown> | null = null;
 
   function resetTokenizationForAllModels(): void {
     try {
@@ -234,7 +236,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     }
   }
 
-  async function refreshVscodeGrammarIndex(): Promise<VscodeGrammarIndexLike> {
+  async function loadVscodeGrammarIndex(): Promise<VscodeGrammarIndexLike> {
     const idx: VscodeGrammarIndexLike = {
       byScope: Object.create(null),
       byLanguage: Object.create(null),
@@ -324,6 +326,17 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     return tmVscodeIndex || idx;
   }
 
+  async function refreshVscodeGrammarIndex(): Promise<VscodeGrammarIndexLike> {
+    if (tmVscodeIndexInflight) return tmVscodeIndexInflight;
+    const inflight = loadVscodeGrammarIndex();
+    tmVscodeIndexInflight = inflight;
+    try {
+      return await inflight;
+    } finally {
+      if (tmVscodeIndexInflight === inflight) tmVscodeIndexInflight = null;
+    }
+  }
+
   async function scopeNameForLanguage(languageId: unknown, filePath: unknown): Promise<string> {
     const lang = deps.normalizeLanguage(languageId);
     const path = asString(filePath);
@@ -395,9 +408,7 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
     return definitions;
   }
 
-  async function ensureTextmateReady(): Promise<unknown> {
-    if (tmGrammarFactory) return tmGrammarFactory;
-
+  async function loadTextmateReady(): Promise<unknown> {
     installDebugGlobals();
     if (!tmVscodeIndex) {
       await refreshVscodeGrammarIndex();
@@ -459,6 +470,18 @@ export function createEditorTextmateRuntime(deps: TextmateRuntimeDeps): {
 
     console.log('[TextMate] workbench runtime ready');
     return tmGrammarFactory;
+  }
+
+  async function ensureTextmateReady(): Promise<unknown> {
+    if (tmGrammarFactory) return tmGrammarFactory;
+    if (tmReadyInflight) return tmReadyInflight;
+    const inflight = loadTextmateReady();
+    tmReadyInflight = inflight;
+    try {
+      return await inflight;
+    } finally {
+      if (tmReadyInflight === inflight) tmReadyInflight = null;
+    }
   }
 
   async function ensureTextmateTokenization(languageId: unknown, filePath: unknown): Promise<boolean> {

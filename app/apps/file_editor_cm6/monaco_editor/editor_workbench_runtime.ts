@@ -687,7 +687,21 @@ export function createEditorWorkbenchRuntime(
     return isAdapterReady(deps.getWindow()) && deps.isWbaRpcConnected() && frameworkReady() && adapterAcceptsPath(path);
   }
 
+  function sameOpenRequest(
+    left: WorkbenchPendingOpenFilePayload | null | undefined,
+    right: WorkbenchPendingOpenFilePayload | null | undefined,
+  ): boolean {
+    return !!(
+      left
+      && right
+      && left.path === right.path
+      && left.generation === right.generation
+      && left.requestId === right.requestId
+    );
+  }
+
   function sendQueuedOpenFile(payload: WorkbenchPendingOpenFilePayload): Promise<unknown> {
+    let requestFailed = false;
     const openPromise = rawEditorWorkbenchCall('open_file', {
       path: payload.path,
       languageId: payload.languageId,
@@ -704,22 +718,31 @@ export function createEditorWorkbenchRuntime(
       schedulePostReadyStructureRefresh(payload.path, payload.generation, payload.source);
       return result;
     }).catch((error) => {
+      requestFailed = true;
       if (payload.generation === currentGeneration() && String(payload.path) === String(deps.getCurrentPath() || '')) {
-        wbFlow.pendingOpenFile = payload;
+        const pending = wbFlow.pendingOpenFile;
+        if (!pending || sameOpenRequest(pending, payload)) {
+          wbFlow.pendingOpenFile = payload;
+        }
       }
       throw error instanceof Error ? error : new Error(String(error || 'open_file_failed'));
     });
     wbFlow.openAckPromise = openPromise;
     wbFlow.openAckPromisePath = payload.path;
     wbFlow.openAckPromiseGeneration = payload.generation;
-    const clearOpenPromise = () => {
+    const settleOpenPromise = () => {
       if (wbFlow.openAckPromise === openPromise) {
         wbFlow.openAckPromise = null;
         wbFlow.openAckPromisePath = '';
         wbFlow.openAckPromiseGeneration = -1;
       }
+      const pending = wbFlow.pendingOpenFile;
+      if (!pending || (requestFailed && sameOpenRequest(pending, payload))) return;
+      void flushActiveModelOpen('queued_after_open').catch((error) => {
+        console.warn('[readiness] queued active model open failed', error);
+      });
     };
-    openPromise.then(clearOpenPromise, clearOpenPromise);
+    openPromise.then(settleOpenPromise, settleOpenPromise);
     return openPromise;
   }
 
@@ -754,11 +777,33 @@ export function createEditorWorkbenchRuntime(
   }
 
   function flushActiveModelOpen(reason: string = 'flush'): Promise<unknown> {
-    if (!wbFlow.pendingOpenFile) {
+    let pending = wbFlow.pendingOpenFile;
+    const inFlight = wbFlow.openAckPromise;
+    if (!pending) {
+      const inFlightMatchesCurrent = !!(
+        inFlight
+        && String(wbFlow.openAckPromisePath || '') === String(deps.getCurrentPath() || '')
+        && Number(wbFlow.openAckPromiseGeneration || -1) === currentGeneration()
+      );
+      if (inFlightMatchesCurrent) return inFlight;
       queueActiveModelOpen(reason);
+      pending = wbFlow.pendingOpenFile;
     }
-    const pending = wbFlow.pendingOpenFile;
     if (!pending || !pending.path) return Promise.resolve({ ok: false, deferred: true });
+    if (inFlight) {
+      const pendingMatchesInFlight = (
+        String(wbFlow.openAckPromisePath || '') === pending.path
+        && Number(wbFlow.openAckPromiseGeneration || -1) === pending.generation
+      );
+      if (pendingMatchesInFlight) {
+        wbFlow.pendingOpenFile = null;
+        return inFlight;
+      }
+      return inFlight.then(
+        () => flushActiveModelOpen(reason),
+        () => flushActiveModelOpen(reason),
+      );
+    }
     if (!canSendOpenFile(pending)) {
       console.log('[readiness] open_file held (' + String(reason || pending.source || 'open') + ') - waiting for WBA/model readiness');
       return Promise.resolve({ ok: false, deferred: true });

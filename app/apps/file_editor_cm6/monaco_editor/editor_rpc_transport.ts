@@ -13,6 +13,8 @@ import { messagePackRpcWireCodec } from '../src/rpc/codec.ts';
 
 interface EditorRpcSocketLike {
   connected?: boolean;
+  sendBuffer?: unknown[];
+  emit?(eventName: string, payload: unknown): void;
   on?(eventName: string, handler: (payload: unknown) => void): void;
   readonly volatile?: {
     emit(eventName: string, payload: unknown): void;
@@ -41,6 +43,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function idKey(id: JsonRpcId): string {
   return String(id);
+}
+
+function clearSocketReplayBuffer(socket: EditorRpcSocketLike | null | undefined): void {
+  if (Array.isArray(socket?.sendBuffer)) socket.sendBuffer.length = 0;
 }
 
 export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
@@ -118,7 +124,12 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     attached = true;
     socket.on(EDITOR_RPC_EVENT, handleMessage);
     socket.on('disconnect', () => {
+      clearSocketReplayBuffer(socket);
       rejectAllPending('editor rpc socket disconnected');
+    });
+    socket.on('connect_error', () => {
+      clearSocketReplayBuffer(socket);
+      rejectAllPending('editor rpc socket connect error');
     });
   }
 
@@ -135,9 +146,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     const timeoutMs = opts && Number.isFinite(Number(opts.timeoutMs)) ? Number(opts.timeoutMs) : 12000;
     const requestId: JsonRpcId = `editor_rpc_${nextId++}_${Date.now()}`;
     const socket = deps.getSocket();
-    const emit = socket?.volatile && typeof socket.volatile.emit === 'function'
-      ? socket.volatile.emit.bind(socket.volatile)
-      : null;
+    const emit = socket && typeof socket.emit === 'function' ? socket.emit.bind(socket) : null;
     if (!socket || !socket.connected || !emit) {
       return Promise.reject(new Error('editor rpc socket not connected'));
     }
