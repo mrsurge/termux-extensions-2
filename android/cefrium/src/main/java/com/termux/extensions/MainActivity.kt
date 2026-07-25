@@ -182,8 +182,13 @@ class MainActivity : AppCompatActivity() {
         browser.setOnUrlChangedListener { url ->
             runOnUiThread { handleUrlChanged(url) }
         }
-        browser.setOnLoadingStateChangedListener { _, canGoBack, _ ->
-            runOnUiThread { this.canNavigateBack = canGoBack }
+        browser.setOnLoadingStateChangedListener { isLoading, canGoBack, _ ->
+            runOnUiThread {
+                this.canNavigateBack = canGoBack
+                if (!isLoading) {
+                    browser.evaluateJavaScript(CefriumPagePolicy.installScript())
+                }
+            }
         }
         browser.setOnRenderProcessTerminatedListener { status, errorCode ->
             runOnUiThread { recoverRenderer(status, errorCode) }
