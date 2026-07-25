@@ -98,7 +98,7 @@
   .fe-root.layout-desktop {
     display: grid;
     grid-template-columns: var(--explorer-width-effective) minmax(0, 1fr) var(--agent-width-effective);
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto auto 1fr auto auto;
     height: 100%;
     min-height: 0;
     min-width: 0;
@@ -230,7 +230,7 @@
 
   /* Adjust grid when terminal is closed in desktop */
   .layout-desktop:has(.terminal-drawer:not(.open):not(.terminal-drawer--collapsed)) {
-    grid-template-rows: auto auto 1fr 0px;
+    grid-template-rows: auto auto 1fr 0px auto;
   }
 
   .layout-desktop .terminal-drawer.terminal-drawer--collapsed {
@@ -250,7 +250,7 @@
   }
 
   .layout-desktop:has(.terminal-drawer.terminal-drawer--collapsed) {
-    grid-template-rows: auto auto 1fr 2px;
+    grid-template-rows: auto auto 1fr 2px auto;
   }
 
   /* Fix z-index for dropdowns in desktop mode */
@@ -265,7 +265,7 @@
   .fe-root.layout-mobile {
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto auto 1fr auto auto;
     height: 100%;
     min-height: 0;
     min-width: 0;
@@ -320,7 +320,7 @@
 
   /* Adjust grid when terminal is closed */
   .layout-mobile:has(.terminal-drawer:not(.open):not(.terminal-drawer--collapsed)) {
-    grid-template-rows: auto auto 1fr 0px;
+    grid-template-rows: auto auto 1fr 0px auto;
   }
 
   .layout-mobile .terminal-drawer.terminal-drawer--collapsed {
@@ -340,7 +340,7 @@
   }
 
   .layout-mobile:has(.terminal-drawer.terminal-drawer--collapsed) {
-    grid-template-rows: auto auto 1fr 2px;
+    grid-template-rows: auto auto 1fr 2px auto;
   }
 
   .terminal-drawer.terminal-drawer--collapsed .drawer-tab-bar {
@@ -365,13 +365,15 @@
 
   .terminal-drawer.terminal-drawer--collapsed .terminal-header,
   .terminal-drawer.terminal-drawer--collapsed .console-header,
-  .terminal-drawer.terminal-drawer--collapsed .problems-header {
+  .terminal-drawer.terminal-drawer--collapsed .problems-header,
+  .terminal-drawer.terminal-drawer--collapsed .extension-log-header {
     display: none !important;
   }
 
   .terminal-drawer.terminal-drawer--collapsed #terminal-container,
   .terminal-drawer.terminal-drawer--collapsed #console-container,
-  .terminal-drawer.terminal-drawer--collapsed #problems-container {
+  .terminal-drawer.terminal-drawer--collapsed #problems-container,
+  .terminal-drawer.terminal-drawer--collapsed #extension-log-container {
     height: 1px;
     min-height: 1px;
     max-height: 1px;
@@ -1005,6 +1007,222 @@
   .problems-header .console-clear-btn:hover {
     color: var(--fg, #e6edf3);
     border-color: var(--fg-dim, #6e7681);
+  }
+  .extension-log-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    background: var(--bg, #0b0f1a);
+    border-bottom: 1px solid var(--border, #333);
+    flex-shrink: 0;
+    font-size: 12px;
+    position: relative;
+    z-index: 10;
+  }
+  .extension-log-filter-label {
+    color: var(--fg-dim, #6e7681);
+    white-space: nowrap;
+  }
+  .extension-log-filter {
+    position: relative;
+    min-width: 8rem;
+  }
+  .extension-log-filter-toggle {
+    position: relative;
+    width: 100%;
+    min-width: 8rem;
+    max-width: min(18rem, 32vw);
+    border: 1px solid var(--border, #333);
+    border-radius: 4px;
+    background: var(--bg-secondary, #161b22);
+    color: var(--fg, #e6edf3);
+    font: inherit;
+    padding: 2px 24px 2px 6px;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .extension-log-filter-toggle::after {
+    content: '▾';
+    position: absolute;
+    right: 7px;
+    color: var(--fg-dim, #6e7681);
+  }
+  .extension-log-filter-menu {
+    top: calc(100% + 2px);
+    min-width: max(100%, 12rem);
+    max-width: min(24rem, 80vw);
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 9999 !important;
+  }
+  .extension-log-filter-menu .fe-dd-item {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .extension-log-filter-menu .fe-dd-item:focus {
+    background: rgba(255, 255, 255, 0.09);
+    outline: 1px solid var(--accent, #58a6ff);
+    outline-offset: -1px;
+  }
+  .extension-log-header .console-clear-btn {
+    background: transparent;
+    border: 1px solid var(--border, #333);
+    color: var(--fg-dim, #6e7681);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .extension-log-header .extension-log-spacer {
+    flex: 1;
+  }
+  #extension-log-container {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg, #0b0f1a);
+    color: var(--fg, #e6edf3);
+    font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
+    font-size: 12px;
+  }
+  #extension-activity-list,
+  #extension-log-output {
+    position: absolute;
+    inset: 0;
+    overflow: auto;
+    margin: 0;
+  }
+  #extension-log-output {
+    padding: 8px 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 4;
+  }
+  #extension-log-output:empty::before {
+    content: attr(data-message);
+    color: var(--fg-dim, #6e7681);
+  }
+  .extension-activity-row {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border-dim, #21262d);
+    border-left: 3px solid transparent;
+  }
+  .extension-activity-row.severity-error {
+    border-left-color: #f85149;
+    background: rgba(248, 81, 73, 0.06);
+  }
+  .extension-activity-row.severity-warning {
+    border-left-color: #d29922;
+    background: rgba(210, 153, 34, 0.05);
+  }
+  .extension-activity-meta {
+    display: flex;
+    gap: 12px;
+    color: var(--fg-dim, #6e7681);
+    font-size: 10px;
+  }
+  .extension-activity-extension {
+    color: var(--accent, #58a6ff);
+    font-weight: 700;
+  }
+  .extension-activity-message {
+    margin-top: 3px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .extension-activity-detail {
+    margin: 5px 0 0;
+    max-height: 12rem;
+    overflow: auto;
+    color: var(--fg-dim, #9ca3af);
+    white-space: pre-wrap;
+  }
+  #extension-log-empty {
+    padding: 18px;
+    text-align: center;
+    color: var(--fg-dim, #6e7681);
+  }
+  .extension-statusbar {
+    grid-column: 1 / -1;
+    grid-row: 5;
+    min-width: 0;
+    min-height: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 6px;
+    background: #14324a;
+    color: #dbeafe;
+    border-top: 1px solid rgba(125, 211, 252, 0.24);
+    font-size: 11px;
+    line-height: 1;
+    z-index: 55;
+    overflow: hidden;
+  }
+  .extension-status-group {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    overflow: hidden;
+  }
+  #extension-status-right {
+    margin-left: auto;
+  }
+  .extension-status-entry,
+  .extension-status-health {
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 7px;
+    border: 0;
+    border-radius: 0;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    white-space: nowrap;
+  }
+  .extension-status-entry {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .extension-status-health {
+    cursor: pointer;
+  }
+  .extension-status-health:hover,
+  .extension-status-entry:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .extension-status-health.has-errors {
+    background: #a52a2a;
+    color: #fff;
+  }
+  .extension-status-health.has-warnings {
+    background: #805b10;
+    color: #fff8dc;
+  }
+  @media (max-width: 767px), (orientation: portrait) {
+    .extension-log-header {
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+    .extension-log-filter-label {
+      display: none;
+    }
+    .extension-log-filter,
+    .extension-log-filter-toggle {
+      min-width: 7rem;
+      max-width: 42vw;
+    }
+    .extension-status-entry {
+      max-width: 42vw;
+    }
   }
   #problems-container {
     position: relative;
@@ -2021,6 +2239,7 @@
       <button class="drawer-tab active" data-tab="terminal">Terminal</button>
       <button class="drawer-tab" data-tab="console">Console</button>
       <button class="drawer-tab" data-tab="problems">Problems</button>
+      <button class="drawer-tab" data-tab="extensions">Extensions</button>
     </div>
     <div class="terminal-header" data-drawer-panel="terminal">
       <div class="terminal-shell-dropdown">
@@ -2053,7 +2272,33 @@
       </div>
     </div>
     <div id="problems-container" data-drawer-panel="problems" style="display:none; width:100%; height:100%; overflow:auto;"></div>
+    <div id="extension-log-header" class="extension-log-header" data-drawer-panel="extensions" style="display:none;">
+      <span id="extension-log-extension-label" class="extension-log-filter-label">Extension</span>
+      <div class="extension-log-filter">
+        <button id="extension-log-extension-filter" class="fe-menu-btn extension-log-filter-toggle" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="extension-log-extension-menu" aria-labelledby="extension-log-extension-label extension-log-extension-filter">All extensions</button>
+        <div id="extension-log-extension-menu" class="fe-dropdown extension-log-filter-menu" role="listbox" aria-labelledby="extension-log-extension-label"></div>
+      </div>
+      <span id="extension-log-channel-label" class="extension-log-filter-label">Channel</span>
+      <div class="extension-log-filter">
+        <button id="extension-log-channel-filter" class="fe-menu-btn extension-log-filter-toggle" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="extension-log-channel-menu" aria-labelledby="extension-log-channel-label extension-log-channel-filter">Activity</button>
+        <div id="extension-log-channel-menu" class="fe-dropdown extension-log-filter-menu" role="listbox" aria-labelledby="extension-log-channel-label"></div>
+      </div>
+      <span class="extension-log-spacer"></span>
+      <button class="console-clear-btn" id="extension-log-clear" type="button" title="Clear displayed log">Clear</button>
+      <button class="console-clear-btn" id="extension-log-collapse" type="button" title="Collapse extension logs" aria-label="Collapse extension logs">▼</button>
+    </div>
+    <div id="extension-log-container" data-drawer-panel="extensions" style="display:none;">
+      <div id="extension-activity-list"></div>
+      <pre id="extension-log-output" hidden></pre>
+      <div id="extension-log-empty">No extension activity yet.</div>
+    </div>
   </div>
+
+  <footer id="extension-statusbar" class="extension-statusbar" aria-label="Extension status">
+    <div id="extension-status-left" class="extension-status-group"></div>
+    <div id="extension-status-right" class="extension-status-group"></div>
+    <button id="extension-status-health" class="extension-status-health" type="button">Extensions</button>
+  </footer>
 
   <!-- Resize handle for sidebar (desktop only) -->
   <div class="resize-handle resize-handle--agent" data-panel="agent"></div>

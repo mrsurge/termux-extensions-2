@@ -51,8 +51,23 @@ export interface ExtHostDispatchRuntime {
     deleteSentMeta: (req: number) => void;
   };
   rpcIds: {
+    MainThreadConsole: number;
+    MainThreadExtensionService: number;
+    MainThreadLogger: number;
     MainThreadOutputService: number;
+    MainThreadStatusBar: number;
     ExtHostWorkspace: number;
+  };
+  extensionActivity: {
+    handleRequest: (request: {
+      req: number;
+      rpcId?: number;
+      method?: string;
+      args?: unknown[];
+    }) => {
+      handledReply?: boolean;
+      replyResult?: unknown;
+    };
   };
   debug: ExtHostDispatchDebugRuntime;
   nowMs: () => number;
@@ -320,10 +335,20 @@ function sendReplyPayload(
   });
 }
 
-function requestReplyPayload(runtime: ExtHostDispatchRuntime, msg: DecodedExtHostRpc): Uint8Array | null {
+function requestReplyPayload(
+  runtime: ExtHostDispatchRuntime,
+  msg: DecodedExtHostRpc,
+  activityResult: { handledReply?: boolean; replyResult?: unknown },
+): Uint8Array | null {
   const req = Number(msg.req ?? 0);
   const method = msg.method ?? "";
 
+  if (activityResult.handledReply) {
+    runtime.log(
+      `[ext_reply] ${method} req=${req} -> ${String(activityResult.replyResult ?? "null")}`,
+    );
+    return encodeExtReplyOkJson(req, activityResult.replyResult);
+  }
   if (runtime.replyDropMethods.has(method)) {
     runtime.onEvent({ type: "ext/reply_drop", ts_ms: runtime.nowMs(), req, method });
     return null;
@@ -345,11 +370,6 @@ function requestReplyPayload(runtime: ExtHostDispatchRuntime, msg: DecodedExtHos
   if (method === "$resolveProxy") return encodeExtReplyOkJson(req, null);
   if (method === "$getPassword") return encodeExtReplyOkJson(req, null);
   if (method === "$executeCommand") return encodeExtReplyOkEmpty(req);
-  if (method === "$register" && msg.rpcId === runtime.rpcIds.MainThreadOutputService) {
-    const channelId = `te2-output-${req}`;
-    runtime.log(`[ext_reply] $register (OutputService) req=${req} -> channelId=${channelId}`);
-    return encodeExtReplyOkJson(req, channelId);
-  }
   return encodeExtReplyOkEmpty(req);
 }
 
@@ -475,6 +495,12 @@ export function handleExtHostRequest(runtime: ExtHostDispatchRuntime, msg: Decod
 
   emitRequestEvent(runtime, msg);
   logActivationLifecycle(runtime, msg);
+  const activityResult = runtime.extensionActivity.handleRequest({
+    req: msg.req,
+    rpcId: msg.rpcId,
+    method: msg.method,
+    args: msg.args,
+  });
 
   try {
     runtime.sendPayload(encodeExtAck(msg.req));
@@ -505,7 +531,7 @@ export function handleExtHostRequest(runtime: ExtHostDispatchRuntime, msg: Decod
     return true;
   }
 
-  const payload = requestReplyPayload(runtime, msg);
+  const payload = requestReplyPayload(runtime, msg, activityResult);
   if (payload) sendReplyPayload(runtime, msg.req, msg.method, payload);
   return true;
 }

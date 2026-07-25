@@ -56,6 +56,10 @@ export interface WorkbenchLike {
   resubscribeWatcher: () => Promise<void>;
   _switchWorkspace: (folder: string) => Promise<Record<string, unknown>>;
   providers?: () => Record<string, unknown>;
+  extensionActivitySnapshot: () => Record<string, unknown>;
+  selectExtensionLog: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
   openFile: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
@@ -360,6 +364,18 @@ export async function dispatchJsonRpcRequest(
       documentSymbols: [],
     };
     return success(id, { ok: true, ts_ms: runtime.nowMs(), ...result });
+  }
+
+  if (method === "extensions.activity.snapshot") {
+    return success(id, runtime.wb.extensionActivitySnapshot());
+  }
+
+  if (method === "extensions.logs.select") {
+    try {
+      return success(id, await runtime.wb.selectExtensionLog(params));
+    } catch (error) {
+      return failure(id, -32602, error);
+    }
   }
 
   if (method === "adapter.configure") {

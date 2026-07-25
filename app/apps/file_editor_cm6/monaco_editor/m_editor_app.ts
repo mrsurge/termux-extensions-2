@@ -111,6 +111,10 @@ import { createEditorWorkbenchRuntime } from "./editor_workbench_runtime.ts";
 import { createEditorRpcTransport } from "./editor_rpc_transport.ts";
 import { EDITOR_RPC_METHODS } from "./editor_rpc_contract.ts";
 import { createEditorWbaRpcTransport } from "./editor_wba_rpc_transport.ts";
+import {
+  bindExtensionActivityTransport,
+  notifyExtensionActivityBridgeReady,
+} from "../main_page/frontend/connections/extension-activity-bridge.ts";
 import { RPC_CODEC_MSGPACK_V1 } from "../src/rpc/codec.ts";
 import {
   SOCKET_IO_NAMESPACES,
@@ -629,6 +633,7 @@ interface MonacoBootWindowLike extends Window {
       console.error("[editor-wba-rpc] MessagePack protocol error", error);
     },
   });
+  bindExtensionActivityTransport(editorWbaRpcTransport);
 
   var textmateRuntime = createEditorTextmateRuntime({
     getWindow: function () {
@@ -2197,6 +2202,7 @@ interface MonacoBootWindowLike extends Window {
       if (wbaRpcSocket && typeof wbaRpcSocket.on === "function") {
         wbaRpcSocket.on("connect", () => {
           console.log("[wba] socket connected");
+          notifyExtensionActivityBridgeReady();
           handleWbaSocketReadyForEditor("wba_socket_connect");
         });
         wbaRpcSocket.on("disconnect", () => {

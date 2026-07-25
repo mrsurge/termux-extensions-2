@@ -59,6 +59,7 @@ const workbenchAdapterConfig = {
     'workbench_protocol_proxy/node_workbench_adapter/src/client/transport-session.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/client/workbench-client.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/catalog.ts',
+    'workbench_protocol_proxy/node_workbench_adapter/src/extensions/activity-runtime.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/provider-registry.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/completions.ts',
     'workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/document-colors.ts',

@@ -331,8 +331,13 @@ export interface ExtHostDispatchRuntimeDeps {
   replyDropMethods: ReadonlySet<string>;
   replyEmptyMethods: ReadonlySet<string>;
   replyNullMethods: ReadonlySet<string>;
+  mainThreadConsoleRpcId: number;
+  mainThreadExtensionServiceRpcId: number;
+  mainThreadLoggerRpcId: number;
   mainThreadOutputServiceRpcId: number;
+  mainThreadStatusBarRpcId: number;
   extHostWorkspaceRpcId: number;
+  extensionActivity: ExtHostDispatchRuntime["extensionActivity"];
   debugExtReqSeen: number;
   setDebugExtReqSeen: (value: number) => void;
   debugExtReplySeen: number;
@@ -695,9 +700,14 @@ export function createExtHostDispatchRuntime(deps: ExtHostDispatchRuntimeDeps): 
     providerRegistry: deps.providerRegistry,
     extRequests: deps.requestOwner,
     rpcIds: {
+      MainThreadConsole: deps.mainThreadConsoleRpcId,
+      MainThreadExtensionService: deps.mainThreadExtensionServiceRpcId,
+      MainThreadLogger: deps.mainThreadLoggerRpcId,
       MainThreadOutputService: deps.mainThreadOutputServiceRpcId,
+      MainThreadStatusBar: deps.mainThreadStatusBarRpcId,
       ExtHostWorkspace: deps.extHostWorkspaceRpcId,
     },
+    extensionActivity: deps.extensionActivity,
     debug: {
       shouldEmitExtRequestEvent: () => currentDebugExtReqSeen < 200,
       markExtRequestEvent: () => {

@@ -16,6 +16,7 @@ const moduleConfig = {
     "src/client/transport-session.ts",
     "src/client/workbench-client.ts",
     "src/extensions/catalog.ts",
+    "src/extensions/activity-runtime.ts",
     "src/extensions/provider-registry.ts",
     "src/extensions/intelligence/completions.ts",
     "src/extensions/intelligence/document-colors.ts",

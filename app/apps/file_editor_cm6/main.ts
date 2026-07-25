@@ -10,6 +10,7 @@ import { initSidebarShortcuts } from './main_page/frontend/sidebar-shortcuts/run
 import ReconnectingWebSocket from './main_page/frontend/connections/reconnecting-websocket.ts';
 import { createConsoleDrawer } from './main_page/frontend/host-console-drawer.ts';
 import { createProblemsPanel } from './src/diagnostics/problems-panel.ts';
+import { createExtensionActivityPanel } from './main_page/frontend/ui/extension-activity.ts';
 import { getConsoleBridgeStatus, initConsoleBridge } from './main_page/frontend/console_bridge.js';
 import { HOME_DIR, HOME_PREFIX, simplifyAbsolute, toAbsolute, parentDir, basename, formatDisplayPath, formatDisplayDirectory, detectLanguageFromFilename, setMenuChecked, FONT_SCALE_PRESETS, requireEl } from './main_page/frontend/core/utils.ts';
 import { createAppContext } from './main_page/frontend/core/app-context.ts';
@@ -1189,6 +1190,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     createTerminalDrawer,
     createConsoleDrawer,
     createProblemsPanel,
+    createExtensionActivityPanel,
     initDrawerAndShortcuts,
     bindMenuToggle,
     requireEl,

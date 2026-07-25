@@ -5,6 +5,7 @@
  *   requireEl: (selector: string) => HTMLElement,
  *   consoleDrawer: { show: Function, hide: Function },
  *   problemsPanel: { show: Function, hide: Function },
+ *   extensionActivityPanel: { show: Function, hide: Function },
  *   toggleTerminal: () => void,
  *   setFontScale: (preset: 'small'|'medium'|'large') => void,
  *   triggerEditorSearchPanel: (reason?: string, opts?: any) => Promise<any>,
@@ -23,6 +24,8 @@ export function initDrawerAndShortcuts(deps: any) {
     const consoleContainer = document.getElementById('console-container');
     const problemsContainer = document.getElementById('problems-container');
     const problemsHeader = document.getElementById('problems-header');
+    const extensionLogContainer = document.getElementById('extension-log-container');
+    const extensionLogHeader = document.getElementById('extension-log-header');
 
     if (tabBar) {
       tabBar.addEventListener('click', (e) => {
@@ -37,8 +40,11 @@ export function initDrawerAndShortcuts(deps: any) {
         if (consoleContainer) consoleContainer.style.display = 'none';
         if (problemsContainer) problemsContainer.style.display = 'none';
         if (problemsHeader) problemsHeader.style.display = 'none';
+        if (extensionLogContainer) extensionLogContainer.style.display = 'none';
+        if (extensionLogHeader) extensionLogHeader.style.display = 'none';
         deps.consoleDrawer.hide();
         deps.problemsPanel.hide();
+        deps.extensionActivityPanel.hide();
 
         if (target === 'terminal') {
           if (terminalHeader) terminalHeader.style.display = '';
@@ -47,6 +53,8 @@ export function initDrawerAndShortcuts(deps: any) {
           deps.consoleDrawer.show();
         } else if (target === 'problems') {
           deps.problemsPanel.show();
+        } else if (target === 'extensions') {
+          deps.extensionActivityPanel.show();
         }
       });
     }
