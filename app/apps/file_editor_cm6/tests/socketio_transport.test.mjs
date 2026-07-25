@@ -425,3 +425,45 @@ test('TextMate catalog and factory initialization are shared across concurrent c
   assert.equal(grammarListCalls, 1);
   assert.equal(wasmFetches, 1);
 });
+
+test('Android Gecko keyboard recovery synchronously restores focus', async () => {
+  const {
+    isAndroidGeckoRuntime,
+    recoverAndroidKeyboard,
+    resolveAndroidKeyboardRecoveryHost,
+  } = await importTypeScript(
+    'monaco_editor/editor_android_keyboard_recovery_utils.ts',
+  );
+  const calls = [];
+  const input = {
+    disabled: false,
+    readOnly: false,
+    inputMode: 'text',
+    blur: () => { calls.push('blur'); },
+    focus: () => { calls.push('focus'); },
+  };
+  const editor = {
+    getDomNode: () => ({
+      querySelector: () => input,
+    }),
+  };
+  assert.equal(recoverAndroidKeyboard(editor), true);
+  assert.deepEqual(calls, ['blur', 'focus']);
+
+  assert.equal(isAndroidGeckoRuntime('Mozilla/5.0 Android Chrome/140'), false);
+  assert.equal(
+    isAndroidGeckoRuntime(
+      'Mozilla/5.0 (Android 16; Mobile; rv:144.0) Gecko/144.0 Firefox/144.0',
+    ),
+    true,
+  );
+
+  const stableHost = {};
+  const monacoOwnedDom = {
+    closest: (selector) => selector === '#editor-frame' ? stableHost : null,
+  };
+  assert.equal(
+    resolveAndroidKeyboardRecoveryHost(monacoOwnedDom),
+    stableHost,
+  );
+});

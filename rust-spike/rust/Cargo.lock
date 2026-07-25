@@ -1969,7 +1969,7 @@ dependencies = [
 
 [[package]]
 name = "te2-rust-spike-server"
-version = "0.2.324"
+version = "0.2.326"
 dependencies = [
  "anyhow",
  "axum",
