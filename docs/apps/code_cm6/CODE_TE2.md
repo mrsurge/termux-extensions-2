@@ -40,9 +40,9 @@ Current facts:
 - The inline editor runtime language-intelligence hot path is now **direct `/wba` Socket.IO JSON-RPC**, not `editor_workbench_*` through `editor_ws.py`.
 - The host page remains **WBA-blind**. It gets boot snapshot and adapter readiness from backend-owned `/ui_ipc` flows.
 - Explorer/backend still uses the WBA stdio control plane for a few **control-plane** operations such as `adapter.switchWorkspace`, `adapter.resubscribeWatcher`, and editor-backend `te2.resync`. Those are residual control hooks, not the editor hot path.
-- Raw editor diagnostics and provider-registration notifications arrive through the WBA editor-facing event stream. `diagnostics_bridge.py` remains relevant for normalized explorer/problems diagnostics and watcher fanout, not as the primary editor diagnostics transport.
+- Raw editor diagnostics and provider-registration notifications arrive through the WBA editor-facing event stream. `diagnostics_bridge.py` remains relevant for normalized explorer/problems diagnostics, not as the primary editor diagnostics transport.
 - The workbench adapter and code-server are still started eagerly at worker boot. Code-server readiness gates adapter startup.
-- File watching still relies on code-server's native filesystem/IPC path, with the same triple-fallback watcher policy.
+- File watching still relies on code-server's native filesystem/IPC path plus optional watchexec poll fallback. Watcher fanout is owned by `wba_event_bridge.py`, `workspace_events.py`, and Explorer watcher handlers.
 - Builtin language extensions are still loaded through the WBA bootstrap/runtime path.
 
 ### Current milestone (workbench TextMate runtime on the direct-WBA path)
@@ -80,91 +80,90 @@ We will validate at least 2 deterministic features (hover + symbols + diagnostic
 
 ---
 
-## 0) High‑level map
+## 0) High-level map
 
-```
-Browser host shell (file_editor_cm6/template.html + main.js)
-  ├─ Explorer drawer (/explorer_ws/socket.io → namespace /rpc/explorer; worker-side server, main-process proxy)
-  ├─ Terminal drawer (PTY plumbing; separate)
+```text
+Browser host shell (file_editor_cm6/template.html + main.ts -> static/dist/host.js)
+  ├─ Explorer frontend: src/explorer/ rendered inside the host shell
+  │     └─ Socket.IO path /api/app/file_editor_cm6/socket.io, namespace /rpc/explorer
+  ├─ Sidebar/terminal drawers: host-owned shell surfaces
   └─ Inline editor host mount
-        ├─ Host container: `#editor-frame` in `template.html`
-        ├─ Host bootstrap: `main.js` → `bootInlineEditorHost(...)`
-        ├─ Inline host loader: `monaco_editor/inline_host.ts`
-        ├─ Monaco runtime source: `monaco_editor/m_editor_app.ts`
-        ├─ Monaco assets:   /api/app/file_editor_cm6/ui/monaco_vscode/esm/...
-        ├─ Editor SSOT/control socket: /editor_ws/socket.io namespace /editor
-        ├─ Editor WBA RPC socket:      /wba_ws/socket.io    namespace /wba
+        ├─ Host container: #editor-frame in template.html
+        ├─ Inline host loader: monaco_editor/inline_host.ts
+        ├─ Monaco runtime source: monaco_editor/m_editor_app.ts
+        ├─ Monaco assets: /api/app/file_editor_cm6/ui/monaco_vscode/esm/...
+        ├─ Editor state/control RPC: /api/app/file_editor_cm6/socket.io namespace /rpc/editor
+        ├─ WBA language RPC/events: /api/app/file_editor_cm6/services/wba/socket.io namespace /wba
         └─ Touch selection: /api/app/file_editor_cm6/static/vendor/monaco-touch-selection/...
 
 Rust/Axum framework process
-  ├─ Proxies /app/file_editor_cm6 → worker port
+  ├─ Proxies /app/file_editor_cm6 -> worker port
   ├─ Loads the app registry and shellspec metadata
   ├─ Owns app lifecycle/readiness and native Ferrous framework services
-  ├─ Explorer transport service (WS proxy): /explorer_ws/socket.io → worker
-  ├─ Editor transport service (WS proxy)  : /editor_ws/socket.io  → worker
-  ├─ WBA transport service (WS proxy)     : /wba_ws/socket.io     → workbench adapter
-  ├─ UI IPC transport service (WS proxy)  : /ui_ipc_ws/socket.io  → worker
+  ├─ Owns Rust pipe services for filesystem, Git, search, settings/state, and shell orchestration
+  ├─ Proxies app Socket.IO public path /api/app/file_editor_cm6/socket.io -> worker /socket.io/
+  ├─ Proxies WBA Socket.IO public path /api/app/file_editor_cm6/services/wba/socket.io -> Node /wba_ws/socket.io
   └─ Proxies TE2 console/FastMCP to the Python runtime sidecar
 
 App worker process (app/apps/file_editor_cm6/main.py)
   ├─ HTTP routes: /api/app/file_editor_cm6/*
   ├─ Monaco/VS Code asset routes under /ui/*
-  ├─ Worker Socket.IO: /editor_ws/socket.io (EDITOR_ASGI_APP)
-  ├─ Worker Socket.IO: /explorer_ws/socket.io (EXPLORER_ASGI_APP, namespace /rpc/explorer)
-  ├─ Worker Socket.IO: /ui_ipc_ws/socket.io (UI_IPC_ASGI_APP)
+  ├─ Shared Socket.IO server mounted at /socket.io/
+  │     ├─ /rpc/editor: editor state/control JSON-RPC
+  │     ├─ /rpc/explorer: Explorer JSON-RPC
+  │     ├─ /ui_ipc: host/main-page JSON-RPC and typed app UI facts
+  │     ├─ /sidebar_ipc: sidebar backend lane
+  │     └─ /terminal: Code TE2 terminal lane
   ├─ Backend boot/runtime priming for code-server + WBA
   └─ SSOT stores: _history_store (project sidecar), _preferences_store
 
 Framework shells (service processes owned by the framework_shells orchestrator)
   ├─ code-server (pipe backend): real VS Code-compatible backend + remote extension host
-  │     listens on the UDS path, stdout piped to Python for readiness detection
+  │     listens on the resolved UDS path, stdout piped to Python for readiness detection
   └─ workbench adapter (pipe backend, Node)
         ├─ backend control plane: stdin/stdout JSON-RPC (<<<RPC>>> / <<<PUSH>>>)
-        ├─ editor-facing RPC/event plane: Socket.IO namespace /wba on /wba_ws/socket.io
+        ├─ editor-facing RPC/event plane: Socket.IO namespace /wba
         └─ remote agent/client side: connects to code-server over UDS
 
 Editor language feature pipeline (current hot path):
   browser inline editor runtime
-    → /wba Socket.IO JSON-RPC
-    → workbench adapter
-    → code-server remote agent / extension host
-    → /wba notifications / replies
-    → browser inline editor runtime
+    -> /wba Socket.IO JSON-RPC
+    -> workbench adapter
+    -> code-server remote agent / extension host
+    -> /wba notifications / replies
+    -> browser inline editor runtime
 
-Editor SSOT pipeline (still worker-owned):
+Editor state/control pipeline:
   browser inline editor runtime
-    → /editor Socket.IO
-    → app worker SSOT / save / draft / open / cache_state flows
+    -> /rpc/editor JSON-RPC
+    -> app worker editor backend / project sidecar / save / draft / open flows
+    -> /rpc/editor notifications
 
 Host boot / readiness pipeline:
   host page
-    → /ui_ipc boot_snapshot
-    → worker boot_snapshot_backend primes code-server/WBA
-    → /ui_ipc adapter_state events back to host
+    -> /ui_ipc JSON-RPC boot snapshot
+    -> worker boot_snapshot_backend primes code-server/WBA
+    -> /ui_ipc adapter_state facts back to host
 
 Explorer/backend WBA control-plane residue:
   explorer/backend
-    → adapter_rpc(...) over stdio
-    → adapter.switchWorkspace / adapter.resubscribeWatcher / te2.resync
+    -> adapter_rpc(...) over stdio
+    -> adapter.switchWorkspace / adapter.resubscribeWatcher / te2.resync
 
-File watcher pipeline (IPC — triple fallback):
+File watcher pipeline:
   code-server parcel watcher detects disk change
-    → remoteFilesystem IPC channel fires EventFire (ResponseType 204)
-    → workbench_client.mjs onEvent({type: "watcher/fileChanges", changes: [...]})
-    → backend fanout / abs→rel path conversion
-    → explorer:event {type: "watcher:files", payload: {created, changed, deleted}}
-    → main.js dispatch → explorer.js handleExplorerEvent
-    → git:status refresh + directory re-listing + parent dir decoration propagation
-  Fallbacks: raise inotify limit → watchexec --poll -- cat → none (manual refresh)
+    -> remoteFilesystem IPC channel fires EventFire (ResponseType 204)
+    -> workbench_client.mjs onEvent({type: "watcher/fileChanges", changes: [...]})
+    -> wba_event_bridge.py / workspace_events.py normalize and fan out
+    -> Explorer watcher handlers update backend-owned tree state and emit typed Explorer notifications
+  Fallbacks: raise inotify limit -> watchexec --poll -- cat -> none (manual refresh)
 
-UI IPC pipeline (frontend-to-frontend relay via Python):
-  inline editor m_editor_app.ts ─┬─ Ctrl+S → ui_event {type:"save"}
-                          └─ editor focus → ui_event {type:"focus"}
-    → Socket.IO /ui_ipc namespace (path: /ui_ipc_ws/socket.io)
-    → ui_ipc_ws.py UIIPCNamespace (logs + rebroadcasts, skip sender)
-    → main.js receives ui_event
-      ├─ type:"save"  → synthetic Ctrl+S keydown → existing saveFile() handler
-      └─ type:"focus" → synthetic click on body → existing closeAllMenus() handler
+UI IPC pipeline:
+  host/main page
+    -> /ui_ipc msgpack-v1 JSON-RPC
+    -> ui_ipc_ws.py parses typed RPC/facts and dispatches backend hooks
+    -> target backend hook/service
+    -> target surface notification
 ```
 
 ---
@@ -173,27 +172,28 @@ UI IPC pipeline (frontend-to-frontend relay via Python):
 
 Terminology used in TE2:
 - A **framework shell** is a long-lived subprocess managed by `framework_shells` (start/adopt/terminate + readiness).
-- **Transport level** is “how bytes move” (Socket.IO/WS/HTTP proxies). It must stay proxy-only.
-- **Execution level** is “who runs logic/state” (worker SSOT, extension host, adapter decode/encode).
+- **Transport level** is "how bytes move" (Socket.IO/WS/HTTP proxies). It must stay proxy-only.
+- **Execution level** is "who runs logic/state" (worker SSOT, extension host, adapter decode/encode).
 
 For `file_editor_cm6`, we intentionally separate responsibilities:
-- **Editor SSOT transport**: `/editor_ws/socket.io` (main process proxy → worker).
-- **Editor WBA transport**: `/wba_ws/socket.io` (main process proxy → WBA shell).
-- **UI IPC transport**: `/ui_ipc_ws/socket.io` (main process proxy → worker).
+- **App worker Socket.IO transport**: canonical public path `/api/app/file_editor_cm6/socket.io`, worker mount `/socket.io/`, namespaces `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`.
+- **Legacy app Socket.IO aliases**: `/editor_ws/socket.io`, `/explorer_ws/socket.io`, `/ui_ipc_ws/socket.io`, and `/terminal_ws/socket.io` route to the same worker service declared by `sio_service.json`.
+- **Editor WBA transport**: canonical public path `/api/app/file_editor_cm6/services/wba/socket.io`, WBA namespace `/wba`, legacy alias `/wba_ws/socket.io`.
 - **Execution**:
   - Worker owns drafts/saves/versioning and host/explorer state.
+  - Rust pipe services own filesystem, Git, and search DTO production.
   - `code-server` owns extension execution and remote-agent services.
   - Node workbench adapter owns protocol translation, provider state, editor-facing WBA RPC/events, and backend stdio control hooks.
 
 Current deterministic runtime endpoints:
 - `code-server`
-  - UDS path: `~/.config/code-server/code-server.sock`
+  - resolved by `extension_registry.py` from `TE2_CODE_SERVER_BIN`, `PATH`, login shell, NVM, `$PREFIX/bin`, then `~/.local/bin`
   - launched with `--socket` and `--socket-mode 0600`
   - stdout piped to Python for readiness detection
 - workbench adapter
   - backend-owned HTTP/Socket.IO listen: `127.0.0.1:18181`
   - stdio JSON-RPC remains the backend control plane
-  - `/wba_ws/socket.io` is the browser-facing editor RPC/event path
+  - `/wba` is the browser-facing editor RPC/event namespace
 
 Discovery / control endpoints (worker, proxied via main process):
 - `GET /api/app/file_editor_cm6/code_server/discover`
@@ -208,13 +208,19 @@ Spinner / Status indicator (host UI):
 - The host UI uses a **3-state status indicator** (`#fe-lsp-spinner`) that is always visible:
   - **busy** (CSS `fe-lsp-status--busy`): animated spinner — adapter starting, readiness chain running, or diagnostics in progress.
   - **ok** (CSS `fe-lsp-status--ok`): green check — adapter connected and operational.
-  - **error** (CSS `fe-lsp-status--error`): red X — adapter not connected (default on page load).
-- State is managed by `_feUpdateLspSpinner()` which reads `window.__adapterConnected` (set by `_spinnerHide(true)` after baton completes) and `window.__feLspSpinnerUi.busyShow` to decide which class to apply.
-- To avoid competing writers, the spinner has an explicit "activity owner" (`window.__feLspSpinnerUi.busyActivity`):
-  - `workbench_adapter`: `ensureWorkbenchAdapterReady()` owns the spinner while starting/polling the adapter.
-  - `diagnostics`: the diagnostics baton owns the spinner while waiting for per-file analysis.
-- `ensureWorkbenchAdapterReady()` must not overwrite the spinner title while `busyActivity === 'diagnostics'`.
-- Long-press / right-click on the indicator opens the adapter context menu (`#fe-adapter-dd`) with a "Reload Extension Adapter" option.
+  - **error** (CSS `fe-lsp-status--error`): warning/error state.
+
+## 0.6) Current cross-cutting contracts
+
+- Explorer, editor/Python, direct editor/WBA, and UI IPC use strict `msgpack-v1` application payloads on their Socket.IO namespaces. Browser encoding is owned by `src/rpc/codec.ts`; Python encoding/decoding is owned by `frontend_rpc_codec.py`; WBA runtime encoding is owned by `workbench_protocol_proxy/node_workbench_adapter/src/protocol/messagepack-codec.ts`.
+- Sidebar IPC retains its current codec. Migrating `/ui_ipc` must not implicitly change the sibling `/sidebar_ipc` namespace.
+- Active-file authority is `ProjectSidecar.last_file`, coordinated through `open_state_backend.py` and editor open services. Frontend path variables are projections.
+- App-lane outbound traffic uses websocket-only `volatile.emit` with connected-state guards. Disconnected RPC requests fail, notifications and terminal input drop, and connect handlers rebuild authoritative state.
+- Code-server resolution prepends the resolved launcher directory to the code-server process `PATH`, so NVM launchers work even when NVM was not initialized in the app-worker shell.
+- WBA language-intelligence requests receive the resolved `ExtHostLanguageFeatures` nid through runtime adapters. Numeric `94` is only the Code OSS 1.109 fallback in `RPC_DEFAULTS`.
+- The installed WBA MessagePack codec is one self-contained bundled ESM file at `workbench_protocol_proxy/node_workbench_adapter/dist/protocol/messagepack-codec.mjs`.
+
+---
 
 ## 1) Key files (where to look)
 
@@ -227,37 +233,40 @@ Spinner / Status indicator (host UI):
   - Monaco editor bootstrap source of truth
   - Model management (plain editor vs diff editor)
   - Draft overlay decorations (blue inserts / yellow deletes)
-  - Editor Socket.IO client wiring (namespace `/editor`, path `/editor_ws/socket.io`)
-  - Direct WBA Socket.IO client wiring (namespace `/wba`, path `/wba_ws/socket.io`)
+  - Editor RPC client wiring for `/rpc/editor`
+  - Direct WBA Socket.IO client wiring for `/wba`
+- `app/apps/file_editor_cm6/monaco_editor/editor_rpc_transport.ts`
+  - Editor-facing JSON-RPC transport over `/rpc/editor`
 - `app/apps/file_editor_cm6/monaco_editor/editor_wba_rpc_transport.ts`
   - Editor-facing JSON-RPC transport over `/wba`
 - `app/apps/file_editor_cm6/monaco_editor/editor_workbench_runtime.ts`
   - Maps editor workbench calls to direct WBA RPC methods
 
-### Editor Socket.IO (worker)
-- `app/apps/file_editor_cm6/monaco_editor/editor_socketio.py`
-  - `EDITOR_SIO` (worker server) and `EDITOR_ASGI_APP` (mounted at `/editor_ws/socket.io`)
-  - `/editor` is the SSOT/editor-control lane; `/rpc/editor` remains the typed editor backend lane
+### Editor RPC (worker)
+- `app/apps/file_editor_cm6/socketio_gateway.py`
+  - Registers shared app Socket.IO namespaces on the worker server.
+- `app/apps/file_editor_cm6/monaco_editor/editor_rpc_socketio.py`
+  - Owns `EditorRpcSocketIONamespace("/rpc/editor")`.
+  - Decodes strict msgpack-v1 JSON-RPC requests and emits typed editor notifications.
+- `app/apps/file_editor_cm6/monaco_editor/editor_rpc_contract.py`
+- `app/apps/file_editor_cm6/monaco_editor/editor_rpc_contract.ts`
+  - Python and TypeScript method/notification constants.
 - `app/apps/file_editor_cm6/monaco_editor/editor_ws.py`
-  - Namespace logic (`EditorSocketIONamespace("/editor")`)
-  - SSOT snapshot on connect
-  - Open, mirror, git baselines, draft diff, save
-  - `on_editor_mirror`: persists draft, emits `editor:cache_state`, triggers `notify_draft_state_changed`
-  - `on_editor_save_request`: writes to disk, clears draft, emits clean `editor:cache_state`
-  - Residual backend control hook: `te2.resync` on model-ready still goes through stdio `adapter_rpc(...)`
+  - Backend hook/service layer for open, mirror, git baselines, draft diff, save, cache state, and target-surface notifications.
 
-### Explorer Socket.IO (worker)
-- `app/apps/file_editor_cm6/explorer/transport/socketio_app.py`
-  - `EXPLORER_SIO` (worker server) and `EXPLORER_ASGI_APP` (mounted at `/explorer_ws/socket.io`)
-  - Registers namespace `/rpc/explorer`
+### Explorer RPC (worker)
+- `app/apps/file_editor_cm6/socketio_gateway.py`
+  - Registers `/rpc/explorer` on the shared app Socket.IO server.
 - `app/apps/file_editor_cm6/explorer/transport/rpc_socketio.py`
   - `ExplorerRpcSocketIONamespace("/rpc/explorer")`
-  - Parses JSON-RPC explorer requests and adapts them onto the backend dispatcher
+  - Parses strict msgpack-v1 JSON-RPC explorer requests and adapts them onto the backend dispatcher.
+- `app/apps/file_editor_cm6/explorer/rpc_contract.py`
+  - Explorer RPC method aliases and notification constants.
 - `app/apps/file_editor_cm6/explorer_runtime.py`
-  - Runtime/composition shell for `ExplorerDispatcher`
-  - Owns explorer session lifecycle, transport-edge delegation, and handler assembly
+  - Runtime/composition shell for `ExplorerDispatcher`.
+  - Owns explorer session lifecycle, transport-edge delegation, and handler assembly.
 - `app/apps/file_editor_cm6/explorer/handlers/*` and `app/apps/file_editor_cm6/explorer/services/*`
-  - Own the extracted file-tree, git, project, watcher, review, prefs, and integration behavior
+  - Own the extracted file-tree, Rust-pipe FS/Git/search integration, project, watcher, review, prefs, and editor-integration behavior.
 
 ### Socket.IO route proxy (main process, proxy-only)
 - `app/extensions/apps/sio_service.py`
@@ -269,62 +278,37 @@ Spinner / Status indicator (host UI):
   - Keeps legacy aliases explicit: `/editor_ws/socket.io`, `/explorer_ws/socket.io`, `/ui_ipc_ws/socket.io`, `/terminal_ws/socket.io`, and `/wba_ws/socket.io`.
 - The app worker owns `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, and `/terminal`.
 - The Node WBA service owns `/wba`.
-- All Socket.IO route proxies: bidirectional WS frame forwarding, no SSOT access, no namespace dispatch, no payload parsing
+- All Socket.IO route proxies: bidirectional WS frame forwarding, no SSOT access, no namespace dispatch, no payload parsing.
 
 ### Host shell (browser, worker-served)
 - `app/apps/file_editor_cm6/template.html`
-  - Layout + inline editor placement
-- `app/apps/file_editor_cm6/main.js`
-  - Toolbar/menu logic, explorer integration, session state UI
-  - Calls backend editor API endpoints and `/ui_ipc` boot/readiness paths
-  - Emits `editor_open_request` and `editor_save_request` over editor Socket.IO
-  - `_applyEditorCacheState()`: receives `editor:cache_state`, updates draft badge + path display
-  - `_applyCacheIndicatorImpl()`: sets `#fe-file-draft-badge` color/text (orange=draft, red=crash, grey=clean)
-  - Observes backend `adapter_state`; does not call WBA directly for language intelligence
-- `app/apps/file_editor_cm6/static/js/explorer.ts`
-  - Served explorer entrypoint
-  - Boots the typed explorer source tree under `src/explorer/`
-  - `fetchReviewResults()`: sends `review:list` via explorer bus
-  - `review:setEntries` handler: stores entries, re-renders if review overlay visible
-  - `renderReviewResults()`: review toolbar, Select All, Save/Discard buttons
-  - Draft decorations: `applyDraftFlag(rel, hasDraft)` sets `data-hasDraft` attribute on tree nodes
+  - Layout + inline editor placement.
+- `app/apps/file_editor_cm6/main.ts`
+  - Host frontend bundle entrypoint.
+  - Boots `main_page/frontend/` modules and imports the Explorer frontend source.
+- `app/apps/file_editor_cm6/main_page/frontend/`
+  - Toolbar/menu logic, explorer integration, session state UI, UI IPC, readiness, settings, sidebar/terminal drawer shells, and host panels.
+- `app/apps/file_editor_cm6/src/explorer/`
+  - Explorer frontend source tree bundled into `static/dist/host.js`.
+  - Tree rendering, search overlays, review panel, project navigation, git/status presentation, and Explorer RPC client.
 
-#### Host decomposition status (Phase 2, complete)
-`main.js` has been decomposed into focused modules under `app/apps/file_editor_cm6/src/host/` and stabilized as an orchestration layer with intentional boundary wrappers.
-Current extracted modules:
+#### Host decomposition status (current)
+The old `src/host/` path has migrated to `main_page/frontend/`, and `main_page/frontend/**/*.ts` is included in the strict TypeScript lane. Representative modules:
 
 | Module | Responsibility |
 |---|---|
-| `src/host/app-context.ts` | Shared runtime context scaffold for gradual closure breakup |
-| `src/host/utils.ts` | Path/display/menu utility helpers |
-| `src/host/api/client.ts` | Normalized `apiGet`/`apiPost` wrappers |
-| `src/host/connections/vendor-loaders.ts` | Dynamic Socket.IO and vConsole script loading |
-| `src/host/connections/ui-ipc.ts` | UI IPC + sidebar IPC socket wiring |
-| `src/host/connections/file-websocket.ts` | Per-file WS connect/reconnect/keepalive lifecycle |
-| `src/host/boot/session-telemetry.ts` | Session telemetry fetch/init/flush/sync |
-| `src/host/boot/editor-state.ts` | Editor state sync + global window state hooks |
-| `src/host/boot/boot-sequence.ts` | Main boot orchestration (layout/init/connect/restore flow) |
-| `src/host/ui/adapter-ui.ts` | Adapter dropdown + LSP status spinner behavior |
-| `src/host/ui/watcher-settings.ts` | Watcher mode/raise-limit UI and handlers |
-| `src/host/ui/projects-debug-modal.ts` | Projects/sidecar debug modal |
-| `src/host/ui/edit-tracker.ts` | Agent/codex edit tracker controls |
-| `src/host/ui/font-scale.ts` | Font scale apply + menu-state behavior |
-| `src/host/ui/search-panel.ts` | Search panel trigger flow |
-| `src/host/ui/prefs-sync.ts` | Cross-client prefs sync application |
-| `src/host/ui/preferences.ts` | Preferences fetch/update/menu-apply orchestration |
-| `src/host/ui/recents.ts` | Recents menu render + broadcast handling |
-| `src/host/ui/cache-indicator.ts` | Draft/crash cache badge behavior |
-| `src/host/ui/drawer-shortcuts.ts` | Drawer tabs + terminal/console/problems/font shortcuts |
-| `src/host/ui/layout-manager.ts` | Desktop/mobile layout mode management |
-| `src/host/ui/settings-refresh.ts` | Settings load/save, scope tabs (User/Workspace), workspace settings |
-| `src/host/ui/settings-bootstrap.ts` | Settings controller assembly and wiring |
-| `src/host/ui/settings-manager.ts` | Extension card rendering (ext manager modal list) |
-| `src/host/ui/settings-modals.ts` | Settings and ext manager modal open/close lifecycle |
+| `main_page/frontend/connections/ui-ipc-rpc.ts` | Strict msgpack-v1 UI IPC JSON-RPC connection |
+| `main_page/frontend/connections/ui-ipc.ts` | UI IPC fact handling and host integration |
+| `main_page/frontend/ui/watcher-settings.ts` | Watcher mode/raise-limit UI and handlers |
+| `main_page/frontend/ui/preferences.ts` | Preferences fetch/update/menu apply orchestration |
+| `main_page/frontend/ui/layout-manager.ts` | Desktop/mobile layout mode management |
+| `main_page/frontend/ui/cache-indicator.ts` | Draft/crash cache badge behavior |
+| `main_page/frontend/ui/settings-manager.ts` | Extension card rendering and Settings modal logic |
 
 Remaining high-value decomposition targets:
-- Remaining file-ops/open-save flow partitioning
-- Final wiring reduction so `main.js` becomes mostly boot + module assembly
-- Strict TS conversion of the remaining host lane and the template-owned host contract
+- Remaining file-ops/open-save flow partitioning.
+- Final wiring reduction so `main.ts` remains mostly boot + module assembly.
+- Continued conversion of any remaining loose JS adjacent to the host lane.
 
 ### SSOT and persistence
 - `app/apps/file_editor_cm6/stores.py`
@@ -355,50 +339,58 @@ TE2 host/inline-editor frontend bundling for `file_editor_cm6` uses `esbuild` (w
 
 - Config: `app/apps/file_editor_cm6/build.mjs`
 - Scripts: `app/apps/file_editor_cm6/package.json`
-  - `npm run build` → production bundles (minified, sourcemaps)
-  - `npm run build:watch` → watch mode (non-minified)
-  - `npm run typecheck` → TypeScript checking only
+  - `npm run build` -> production bundle (minified, sourcemaps)
+  - `npm run build:watch` -> watch mode (non-minified)
+  - `npm run typecheck` -> TypeScript checking only
 
-Current build outputs:
-- Host bundle: `static/dist/host.js` (entry: `main.js`, format: ESM)
-- Editor bundle: `static/dist/editor.js` (entry: `monaco_editor/m_editor_app.ts`, format: IIFE)
+Current build output:
+- Host bundle: `static/dist/host.js` (entry: `main.ts`, format: ESM)
 
 Notes:
+- There is no separate `static/dist/editor.js` output in the current app build. The inline Monaco runtime is statically included through the `main.ts` -> `inline_host.ts` -> `m_editor_app.ts` import chain.
 - Vendor assets remain external (`/static/vendor/*`) and are still loaded separately.
-- This host/inline-editor bundle process is separate from the Monaco pinned-VSCode asset build described later in this document.
+- This host/inline-editor bundle process is separate from the Monaco pinned-VSCode asset publication described later in this document.
 
 ### Current host TS migration state (important)
-- The live host runtime served to the browser is `static/dist/host.js`, bundled from `main.js` by `build.mjs`.
-- `main.js` remains the host bundle entrypoint/orchestration shell and imports the focused modules under `src/host/`.
-- `src/host/` is still excluded from the current app strict-TS lane in `tsconfig.json`; that is planned follow-on work, not completed work.
-- The remaining host-focused target is to shrink/convert raw `main.js` and reduce how much durable UI contract still lives only in `template.html`.
+- The live host runtime served to the browser is `static/dist/host.js`, bundled from `main.ts` by `build.mjs`.
+- `main_page/frontend/**/*.ts` and `src/explorer/**/*.ts` are included in `tsconfig.json`.
+- The old `src/host/` decomposition path no longer exists; host frontend modules live under `main_page/frontend/`.
+- The remaining host-focused target is to keep shrinking raw template-owned behavior and keep durable UI contracts in typed frontend modules where possible.
 
 ---
 
-## 2) URL & mount conventions (the “prefix math”)
+## 2) URL & mount conventions (the "prefix math")
 
-### User‑facing routes
+### User-facing routes
 - App HTML: `/app/file_editor_cm6`
 - App API prefix: `/api/app/file_editor_cm6/...`
 
 ### Monaco editor runtime routes (served by the worker, under the app API prefix)
 - Monaco ESM: `/api/app/file_editor_cm6/ui/monaco_vscode/esm/vs/...`
-- Monaco “lang bundles”: `/api/app/file_editor_cm6/ui/monaco_vscode/lang/...`
+- Monaco "lang bundles": `/api/app/file_editor_cm6/ui/monaco_vscode/lang/...`
 - Inline asset CSS/JS loaded by `inline_host.ts`:
   - `/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.css`
   - `/api/app/file_editor_cm6/static/vendor/monaco-touch-selection/monaco-touch-selection.patched.umd.js`
-- TextMate runtime is bundled into `static/dist/editor.js`
-- Oniguruma WASM is served from `/api/app/file_editor_cm6/ui/monaco_editor/textmate/onig.wasm`
-- Editor-facing WBA RPC/event socket: `/wba_ws/socket.io` namespace `/wba`
+- TextMate runtime is bundled into `static/dist/host.js`.
+- Oniguruma WASM is served from `/api/app/file_editor_cm6/ui/monaco_editor/textmate/onig.wasm`.
+- Editor-facing WBA RPC/event socket: `/api/app/file_editor_cm6/services/wba/socket.io` namespace `/wba`.
 
-### Editor Socket.IO transport
-- Client path: `/editor_ws/socket.io`
-- Namespace: `/editor`
+### App Socket.IO transport
+- Canonical public path: `/api/app/file_editor_cm6/socket.io`
+- Worker mount: `/socket.io/`
+- Namespaces: `/rpc/editor`, `/rpc/explorer`, `/ui_ipc`, `/sidebar_ipc`, `/terminal`
+- Legacy aliases declared by `sio_service.json`: `/editor_ws/socket.io`, `/explorer_ws/socket.io`, `/ui_ipc_ws/socket.io`, `/terminal_ws/socket.io`
+
+### Editor RPC transport
+- Canonical path: `/api/app/file_editor_cm6/socket.io`
+- Legacy path alias: `/editor_ws/socket.io`
+- Namespace: `/rpc/editor`
+- Payload codec: strict `msgpack-v1` JSON-RPC
 
 Important:
-- The **main process** registers `/editor_ws/socket.io` and proxies it to the worker.
-- The **worker** mounts Socket.IO ASGI app at `/editor_ws/socket.io` (see `SUBAPPS` in `app/apps/file_editor_cm6/main.py`).
-- The transport is intended to be **websocket‑only** (Socket.IO transport = `websocket`).
+- The **framework** registers public app Socket.IO paths and proxies them to the worker.
+- The **worker** mounts one shared Socket.IO ASGI app at `/socket.io/` plus legacy alias mounts in `SUBAPPS`.
+- The transport is websocket-only; the route proxy is not a namespace dispatcher and does not inspect payloads.
 
 ---
 
@@ -440,10 +432,8 @@ Important current note:
 SSOT tracks a single “active project root”. The worker derives most behavior from:
 - `_history_store.get_active_project()`
 
-### Active file (single‑doc model)
-SSOT maintains a single current document concept (the editor is “one file at a time”):
-- `_history_store.get_session_state()` includes `currentPath`
-- `_history_store.update_session_state({"currentPath": abs_path})`
+### Active file (single-doc model)
+Active-file authority is backend-owned through `ProjectSidecar.last_file`, `open_state_backend.py`, and editor open services. Frontend `currentPath` values are projections, not cross-client authority.
 
 ### Drafts (project sidecar / session_cache)
 Drafts are stored in project sidecar "session_cache" entries:
@@ -479,7 +469,7 @@ Draft mutations trigger the following pipeline:
 ### Preferences (PreferencesStore)
 Editor preferences are stored per active project and used to initialize the inline editor options.
 
-Preferences changes are performed via legacy `/editor/*` endpoints (NiceGUI router), but are broadcast to the Monaco editor runtime via `EDITOR_SIO` (worker Socket.IO server).
+Preferences changes are performed through Monaco editor backend HTTP routes/backend hooks and typed editor or UI IPC notifications. `/editor/*` routes are Monaco editor backend routes in current source, not NiceGUI-owned routes.
 
 ---
 
@@ -512,314 +502,175 @@ It then fetches:
   - returns `{path, content, sha256}`
   - the endpoint enforces that `path` must remain under `$HOME`
 
-### Draft cache lookup (legacy editor router, still used)
+### Draft cache lookup (Monaco editor backend route)
 - `POST /api/app/file_editor_cm6/editor/check_cache`
   - returns `{has_draft, content, base_sha256}` when a cached draft exists
-  - implemented in `app/apps/file_editor_cm6/nicegui_editor/editor_app.py` (APIRouter prefix `/editor`)
+  - route owner: `app/apps/file_editor_cm6/monaco_editor/editor_backend.py`
+  - implementation service: `app/apps/file_editor_cm6/monaco_editor/editor_backend_services/cache_routes_service.py`
+  - frontend caller: `app/apps/file_editor_cm6/monaco_editor/editor_open_cache_fetch_utils.ts`
 
 Notes:
 - The Monaco editor runtime uses `/editor/check_cache` as a “draft wins” read path when opening/restoring a file.
-- The authoritative “open payload” for socket‑based opens comes from the editor Socket.IO server (see below).
+- The authoritative socket open payload comes through the typed editor RPC lane (see below).
 
 ---
 
-## 6) Editor SSOT Socket.IO transport (events + payloads)
+## 6) Editor RPC transport (events + payloads)
 
 ### Transport
-- path: `/editor_ws/socket.io`
-- namespace: `/editor`
-- room used by server: `"file_editor_cm6"`
+- canonical path: `/api/app/file_editor_cm6/socket.io`
+- legacy path alias: `/editor_ws/socket.io`
+- namespace: `/rpc/editor`
+- wire event: `rpc`
+- payload codec: strict `msgpack-v1` JSON-RPC
 
 Important:
-- This section describes the **worker-owned editor SSOT/control lane**.
+- This section describes the **worker-owned editor state/control lane**.
 - It is no longer the primary transport for WBA-owned language intelligence.
-- The inline editor runtime now uses `/wba_ws/socket.io` namespace `/wba` for workbench/language RPC.
+- The inline editor runtime uses `/wba` for workbench/language RPC and `/rpc/editor` for state/control requests and notifications.
 
-Clients:
-- Host shell connects with query: `{app_id:'file_editor_cm6', role:'host'}`
+### Request methods
+Representative methods from the Python/TypeScript editor RPC contracts:
 
-### Connection
-- see `connectEditorSocket()` in `app/apps/file_editor_cm6/main.js`
-- Monaco editor runtime connects with query: `{app_id:'file_editor_cm6'}`
-  - see `connectEditorSocket()` in `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts`
+| Method | Purpose |
+|---|---|
+| `editor.open` | Open a file through the backend-owned open service. |
+| `editor.jumpToLine` | Open/jump without requiring direct frontend-to-frontend focus coupling. |
+| `editor.gitBaselines.get` | Fetch HEAD/disk baselines for Git diff rendering. |
+| `editor.draftDiff.get` | Fetch draft diff hunks for editor decorations. |
+| `editor.mirror.publish` | Publish current editor buffer state to the backend. |
+| `editor.save` | Save the active draft through backend write guards. |
+| `editor.mention.request` | Request mention data. |
+| `editor.agentEdits.documentState.get` | Fetch editor document state for agent-edit surfaces. |
+| `editor.agentEdits.decide` | Accept/reject agent edit decisions. |
+| `editor.host.save` | Host-originated save bridge. |
+| `editor.focus` / `editor.blur` | Focus state publication. |
+| `editor.ready.publish` | Editor readiness publication. |
+| `editor.cacheState.publish` | Cache/draft state publication. |
+| `editor.draftState.publish` | Draft state publication. |
+| `editor.notify.publish` | Typed editor notification publication. |
+| `editor.openComplete.publish` | Open-complete publication. |
+| `editor.diagnosticsCounts.publish` | Diagnostics count publication. |
+| `editor.scrollState.publish` | Scroll state publication. |
+| `editor.modelReady` | Active Monaco model-ready hook. |
+| `editor.save.snapshot.response` | Save snapshot response. |
+| `editor.issues.dump.response` | Issues dump response. |
+| `editor.breadcrumb.navigate` | Breadcrumb navigation request. |
 
-### Naming convention
-- Client → server emits underscore events: `editor_open_request`, `editor_mirror`, `editor_save_request`, etc.
-- Server → clients broadcasts colon events: `editor:open`, `editor:mirror`, `editor:cache_state`, etc.
+### Notifications
+Representative notifications:
 
-### Server: connect snapshot (`editor:ssot`)
-Emitted to the connecting client only:
-```js
-editor:ssot {
-  project: "<abs project root>" | null,
-  session_state: { currentPath?: "<abs file>" ... },
-  preferences: { editor: { ... } ... },
-  currentPath: "<abs file>" | null,
-  file?: { ...open payload... }     // present when project+currentPath known
-}
-```
+| Notification | Purpose |
+|---|---|
+| `editor.state.ssot` | Editor/project/session snapshot. |
+| `editor.file.opened` | Authoritative file-open payload. |
+| `editor.file.jumpToLine` | Open or line-jump notification. |
+| `editor.mirror.updated` | Mirrored document content/state update. |
+| `editor.gitBaselines.updated` | Git baseline payload. |
+| `editor.draftDiff.updated` | Draft diff payload. |
+| `editor.prefs.changed` | Preference update. |
+| `editor.cache.state` | Draft/cache badge state. |
+| `editor.draft.state` | Draft state update. |
+| `editor.ready` | Editor readiness update. |
+| `editor.notify` | General editor notification. |
+| `editor.open.complete` | Open-complete update. |
+| `editor.diagnostics.updated` / `editor.diagnostics.counts` | Diagnostics updates/counts. |
+| `editor.adapter.state` | Adapter readiness/state update. |
+| `editor.semanticTokens.providerRegistered` | Provider-registration update. |
+| `editor.issues.dump.request` / `editor.issues.dump.response` | Issues dump request/response. |
+| `editor.save.snapshot.request` | Save snapshot request. |
+| `editor.issues.command` | Marker navigation command. |
+| `editor.find.command` | Find/replace command. |
+| `editor.edit.command` | Editor edit command. |
+| `editor.search.highlight` | Search-term highlight update. |
+| `editor.openState.changed` | Open-state update. |
+| `editor.project.switching` / `editor.project.switched` | Project switch lifecycle. |
+| `editor.agentEdits.changed` | Agent edit state update. |
 
-### Open flow
-Host initiates:
-```js
-emit('editor_open_request', { path: "<abs>" })
-```
+### Open/draft/save flow
+- Open requests update backend active-file authority (`ProjectSidecar.last_file`) and send authoritative file-open notifications.
+- Mirror updates persist draft state into `ProjectSidecar.session_cache` and refresh draft/decorations state.
+- Save requests write through backend guards, clear draft cache entries, invalidate dependent state, and notify Explorer/editor consumers.
 
-Worker validates and updates SSOT (`currentPath`, recents), then broadcasts:
-```js
-editor:open {
-  path: "<abs>",
-  content: "<text>",
-  has_draft: boolean,
-  base_sha256: "<sha256>",
-  content_sha256: "<sha256>",
-  state: "clean" | "mid_session" | "crashed",
-  unsaved: boolean,
-  reason: "disk" | "restore" | ...,
-  preferences: {...},
-  auto_save: boolean | null,
-  source_client: "<sid>"
-}
-```
-
-The Monaco editor runtime treats `editor:open` as authoritative content and updates its model directly.
-
-### Draft mirror flow (live buffer)
-Inline editor runtime emits full‑text mirror updates (debounced):
-```js
-emit('editor_mirror', {
-  path: "<abs>",
-  content: "<full buffer>",
-  base_sha256: "<baseline sha>"
-})
-```
-
-Worker persists draft cache into ProjectSidecar and broadcasts:
-```js
-editor:mirror {
-  path: "<abs>",
-  content: "<full buffer>",
-  base_sha256: "<baseline sha>",
-  content_sha256: "<sha>",
-  unsaved: true,
-  source_client: "<sid>"
-}
-```
-
-Other editor clients apply the remote buffer; the source client ignores self‑echo by SID.
-
-### Git baseline flow (pinned diff)
-Inline editor runtime requests:
-```js
-emit('editor_git_baselines_request', { path: "<abs>" })
-```
-
-Worker responds to requester only:
-```js
-editor:git_baselines {
-  path: "<abs>",
-  tracked: boolean,
-  base_ref: "HEAD",
-  head_content: "<text>" | null,
-  head_sha256: "<sha>" | null,
-  disk_content: "<text>",
-  disk_sha256: "<sha>",
-  source_client: "<sid>"
-}
-```
-
-Client uses this to build the “native” Git diff view. In pinned mode:
-- Git diff compares **HEAD ↔ disk baseline** (not the live buffer)
-- Draft edits do not retarget the Git diff baselines
-
-### Draft diff overlay flow (custom decorations)
-Inline editor runtime requests:
-```js
-emit('editor_draft_diff_request', { path: "<abs>", requestId, reason })
-```
-
-Worker responds:
-```js
-editor:draft_diff {
-  path: "<abs>",
-  hunks: [...],
-  summary: { added, deleted, tracked },
-  error?: "<string>",
-  disk_sha256?: "<sha>",
-  content_sha256?: "<sha>",
-  requestId?: "<id>",
-  ms?: <elapsed>,
-  source_client: "<sid>"
-}
-```
-
-Client renders draft overlay decorations (blue insertions / yellow deletions) independent of Git diff.
-
-### Preferences propagation (backend → all clients)
-Preferences are changed via HTTP:
-- `POST /api/app/file_editor_cm6/editor/update_preference { key, value, nicegui_client_id? }`
-
-The backend:
-- persists SSOT preference store
-- broadcasts to host shells via explorer bus (for menus)
-- broadcasts to Monaco editor runtimes via editor Socket.IO:
-
-```js
-editor:prefs_changed {
-  project_path: "<abs>",
-  key: "<pref key>",
-  value: <any>,
-  view_state: {...},
-  preferences: {...},
-  source_client: "<nicegui client id or similar>"
-}
-```
-
-### Save flow (draft → disk)
-Host initiates save with Socket.IO ack:
-```js
-emit('editor_save_request', {
-  path: "<abs>",
-  client_id: "<host client id>",
-  op_id: "<op id>",
-  base_sha256?: "<sha>",
-  force?: true
-}, ack)
-```
-
-Worker:
-- reads draft from ProjectSidecar cache for the file
-- writes to disk via `write_full()` with base‑sha guard (unless `force`)
-- clears draft cache entry + prunes clean drafts
-- invalidates git/draft caches and notifies explorer
-- emits `editor:cache_state { unsaved:false }` to all clients
-- returns ack:
-```js
-{ ok: true, data: { sha256, size, mtime } }
-// or
-{ ok: false, error: "BASE_MISMATCH", current_meta: {...} }
-```
-
-### Cache state flow (draft indicator + toolbar badge)
-Emitted by the server after draft mutations or save operations:
-```js
-editor:cache_state {
-  path: "<abs>",
-  state: "clean" | "mid_session" | "crashed",
-  unsaved: boolean,
-  reason: "mirror" | "save" | "clear" | "discard",
-  content_sha256?: "<sha>",
-  base_sha256?: "<sha>",
-  source_client?: "<sid>"
-}
-```
-
-Consumers:
-- **Host shell** (`main.js`): `_applyEditorCacheState()` updates `#fe-file-draft-badge` (asterisk indicator)
-- **Monaco editor runtime** (`m_editor_app.ts`): clears draft decorations on `unsaved:false`, requests fresh draft diff on `unsaved:true`
-
-Cross-transport note: when drafts are cleared via the explorer review panel (save/discard), `_notify_editor_draft_cleared()` in `explorer_ws.py` emits `editor:cache_state` via `EDITOR_SIO` (the editor Socket.IO server), not the explorer bus.
-
-### Diagnostics note
-Primary editor diagnostics no longer arrive on `/editor`.
-
-Current split:
-- raw editor diagnostics and provider-registration notifications arrive through the direct `/wba` event stream
-- normalized explorer/problems diagnostics remain backend-owned
-- `/editor` still carries SSOT/editor-state events such as `editor:open`, `editor:cache_state`, draft diff, and save-related broadcasts
-
-### didChange note
-Primary editor `didChange` no longer emits `editor_workbench_did_change` over `/editor`.
-
-Current hot path:
-```text
-Monaco change
-  -> editor_workbench_runtime.ts
-  -> /wba RPC: vscode.didChange
-  -> WBA
-  -> code-server extension host
-```
-
-The old `editor_workbench_*` stdio relay path should be treated as historical bring-up context or backend residue, not the current editor transport contract.
-
-### Relay events (UI commands)
-```js
-// Marker navigation (next/prev issue)
-emit('editor_issues_cmd', { action: "next" | "prev" }) → editor:issues_cmd
-// Find/replace
-emit('editor_find_cmd', { action: "find" | "replace" | ... }) → editor:find_cmd
-```
+### Diagnostics and language features
+Primary editor diagnostics, hovers, completions, symbols, semantic tokens, folding, inlay hints, and similar language-intelligence calls use the direct `/wba` path. The `/rpc/editor` lane carries state/control and typed editor notifications.
 
 ---
 
 ## 6.5) Explorer Socket.IO transport (events + payloads)
 
 ### Transport
+- canonical path: `/api/app/file_editor_cm6/socket.io`
 - legacy path alias: `/explorer_ws/socket.io`
-- app-scoped path: `/api/app/file_editor_cm6/socket.io`
 - namespace: `/rpc/explorer`
-- Worker-side namespace: `ExplorerRpcSocketIONamespace("/rpc/explorer")`
-- Main-process proxy: `app/extensions/apps/sio_service.py` using `app/apps/file_editor_cm6/sio_service.json`
+- worker-side namespace: `ExplorerRpcSocketIONamespace("/rpc/explorer")`
+- main-process proxy: `app/extensions/apps/sio_service.py` using `app/apps/file_editor_cm6/sio_service.json`
+- payload codec: strict `msgpack-v1` JSON-RPC
 
 ### Connection
-Client connects with query: `{app_id: 'file_editor_cm6'}`
+Client connects with app-scoped auth/codec metadata. On connect, the server creates an `ExplorerDispatcher` per client SID and sends the authoritative bootstrap state for the active project.
 
-On connect, the server creates an `ExplorerDispatcher` per client SID and sends:
-- Initial file tree for active project
-- Git status decorations
-- Draft decorations (hasDraft flags on files/folders)
+### Client -> Server RPC methods
+Explorer keeps legacy method aliases for frontend compatibility, but the contract is JSON-RPC on the `/rpc/explorer` namespace.
 
-### Client → Server events
-All sent via `explorer_send` with JSON `{type, payload}`:
-
-| Type | Purpose |
-|------|---------|
-| `tree:list` | Request directory listing |
-| `tree:expand` | Expand a directory node |
-| `search:query` | Full-text search |
-| `review:list` | Request review entries (drafts with optional diff hunks) |
-| `review:save` | Save selected drafts to disk |
-| `review:discard` | Discard selected drafts |
-| `prefs:updateUi` | Update a single global UI preference key (backend validates type) |
-| `prefs:vendorAgentIcon` | Vendor an icon asset into the SSOT cache dir (returns a stable asset name) |
+| Method | Alias | Purpose |
+|---|---|---|
+| `explorer.tree.list` | `tree:list` | Request directory listing. |
+| `explorer.tree.expand` | `tree:expand` | Expand a directory node. |
+| `explorer.search.run` | `search:run` | Start a file-name or content search. |
+| `explorer.search.more` | `search:more` | Request more cached search results from the session. |
+| `explorer.search.moreInFile` | `search:moreInFile` | Request more cached matches for one file. |
+| `explorer.search.cancel` | `search:cancel` | Cancel an active search. |
+| `explorer.review.list` | `review:list` | Request review entries. |
+| `explorer.review.save` | `review:save` | Save selected drafts to disk. |
+| `explorer.review.discard` | `review:discard` | Discard selected drafts. |
+| `explorer.prefs.updateUi` | `prefs:updateUi` | Update one global UI preference key. |
+| `explorer.prefs.vendorAgentIcon` | `prefs:vendorAgentIcon` | Vendor an icon asset into the SSOT cache dir. |
 
 ### UI Preferences (global)
-- Store: `_preferences_store` (disk-backed) in `~/.local/share/termux-extensions-2/code_oss_prefs.json` under the `ui` object
+- Store: `_preferences_store` (disk-backed) in `~/.local/share/termux-extensions-2/code_oss_prefs.json` under the `ui` object.
 - Update flow:
-  - client → server: `prefs:updateUi` payload `{key, value}`
-  - server → all clients: `prefs:setUi` payload `{ui: { ...full snapshot... }}`
+  - client -> server: `prefs:updateUi` payload `{key, value}`
+  - server -> all clients: `prefs:setUi` payload `{ui: { ...full snapshot... }}`
 - Icon vending flow (used by agent shortcuts/toggle):
-  - client → server: `prefs:vendorAgentIcon` payload `{abs_path: "/abs/to/icon.svg"}`
-  - server → requesting client: `prefs:vendorAgentIconResult` payload `{ok: true, name, url}`
+  - client -> server: `prefs:vendorAgentIcon` payload `{abs_path: "/abs/to/icon.svg"}`
+  - server -> requesting client: `prefs:vendorAgentIconResult` payload `{ok: true, name, url}`
   - asset URL is served by the worker: `GET /api/app/file_editor_cm6/agent_icons/{name}`
 
 ### Agent Toggle + Shortcuts (host shell)
-The agent toggle is owned by the **host shell** (`template.html` + `main.js`) and is configured entirely via the **Explorer Socket.IO** UI preference channel (`prefs:setUi`).
+The agent toggle is owned by the host shell and configured through the Explorer RPC/UI preference channel.
 
 Behavior:
-- The toolbar button (`#fe-agent-toggle`) is always **icon-only**.
-- The `icon/text/both` setting applies **only** to how entries render inside the agent shortcuts dropdown (`#fe-agent-dd`).
+- The toolbar button (`#fe-agent-toggle`) is always icon-only.
+- The `icon/text/both` setting applies only to how entries render inside the agent shortcuts dropdown (`#fe-agent-dd`).
 - Toolbar icon precedence:
-  1) If the active `agentDrawerIframeUrl` matches a shortcut that has an icon, that shortcut icon wins.
-  2) Otherwise use the global `agentToggleIcon` (emoji/asset).
-  3) If `agentToggleIcon.kind == "default"`, keep the default/manifest icon.
-- Dropdown open gesture:
-  - right-click (desktop) or long-press (touch) opens the shortcuts dropdown.
+  1. If the active `agentDrawerIframeUrl` matches a shortcut that has an icon, that shortcut icon wins.
+  2. Otherwise use the global `agentToggleIcon` (emoji/asset).
+  3. If `agentToggleIcon.kind == "default"`, keep the default/manifest icon.
+- Dropdown open gesture: right-click (desktop) or long-press (touch) opens the shortcuts dropdown.
 - Selecting a shortcut updates `agentDrawerIframe=true` and sets `agentDrawerIframeUrl` via `prefs:updateUi`.
 - No full page reload: mode/header changes hot-swap the agent controller in-place to preserve SSOT session/editor state.
 
-### Server → Client broadcasts
+### Server -> Client broadcasts
 
 | Type | Purpose |
-|------|---------|
-| `explorer:updateDecorations` | Draft flags `{drafts: {rel: {hasDraft: true}}}` |
-| `review:setEntries` | Review list `{entries: [{path, rel, has_draft, hunks?, timestamp}]}` |
-| `explorer:tree` | File tree data |
-| `explorer:gitStatus` | Git status decorations |
+|---|---|
+| `explorer:updateDecorations` | Draft flags `{drafts: {rel: {hasDraft: true}}}`. |
+| `review:setEntries` | Review list `{entries: [{path, rel, has_draft, hunks?, timestamp}]}`. |
+| `explorer:tree` | File tree data. |
+| `explorer:gitStatus` | Git status decorations projected as presentation state. |
+| `explorer.search.started` | Search session started. |
+| `search.job.progress` | Search progress/count update. |
+| `search.job.result` | Progressive search result payload. |
+| `search.job.done` | Terminal search completion payload. |
+| `search.job.error` | Terminal search error payload. |
+| `explorer.search.more.result` | More cached search results response. |
+| `explorer.search.moreInFile.result` | More cached matches for one file. |
+| `explorer.search.cancelled` | Search cancellation acknowledgement. |
 
 ### Draft decoration pipeline
 When a file is edited:
-1. `on_editor_mirror` → `upsert_cached_document` → `DraftIndexSidecar.update_from_abs_file`
+1. `on_editor_mirror` -> `upsert_cached_document` -> `DraftIndexSidecar.update_from_abs_file`
 2. `notify_draft_state_changed()` fires (debounced)
 3. `_broadcast_draft_decorations()` reads `DraftIndexSidecar.snapshot()` and broadcasts:
    - `explorer:updateDecorations` with `{drafts: {rel: {hasDraft: true}, ...}}`
@@ -827,22 +678,49 @@ When a file is edited:
 4. Explorer UI applies `data-hasDraft="1"` attribute to file/folder nodes (CSS handles visual indicator)
 
 ### Review panel flow
-1. User opens Review Edits tab → frontend sends `review:list`
-2. Server calls `review.list_reviews(project, lightweight=False)` → computes diff hunks per draft
+1. User opens Review Edits tab -> frontend sends `review:list`
+2. Server calls `review.list_reviews(project, lightweight=False)` -> computes diff hunks per draft
 3. Server broadcasts `review:setEntries` with entries
-4. **Live updates**: `_broadcast_draft_decorations()` also broadcasts `review:setEntries`, so the review list auto-refreshes when drafts change
+4. Live updates: `_broadcast_draft_decorations()` also broadcasts `review:setEntries`, so the review list auto-refreshes when drafts change
 5. User selects files and clicks Save/Discard:
-   - `review:save` → `handle_review_save` → writes to disk, clears caches, emits `editor:cache_state` to editor transport
-   - `review:discard` → `handle_review_discard` → clears caches, reverts editor if file open, emits `editor:cache_state`
+   - `review:save` -> `handle_review_save` -> writes to disk, clears caches, emits editor cache state through the editor backend hook
+   - `review:discard` -> `handle_review_discard` -> clears caches, reverts editor if file open, emits editor cache state through the editor backend hook
 
-### Cross-transport communication (explorer → editor)
-Both Socket.IO servers (`EXPLORER_SIO` and `EDITOR_SIO`) run in the same worker process.
-Explorer can emit to editor clients via:
-```python
-from .monaco_editor.editor_socketio import EDITOR_SIO
-await EDITOR_SIO.emit('editor:cache_state', payload, namespace='/editor')
+### Cross-surface communication (explorer -> editor)
+Explorer does not connect to the editor frontend directly. Cross-surface actions flow through backend hooks/services and then through the target surface notification lane:
+
+```text
+Explorer frontend -> /rpc/explorer -> Explorer backend -> editor backend hook/service -> /rpc/editor notification
 ```
-Used by `_notify_editor_draft_cleared()` to update the toolbar draft badge when drafts are saved/discarded from the review panel.
+
+Used by review save/discard, open/jump, search highlighting, and project-switch notifications.
+
+## 6.6) Search system (progressive Rust pipe provider)
+
+### Ownership
+- Rust framework service: `service.search`
+- Python pipe wrapper/client: `explorer/search.py`
+- Python session cache and notification projection: `explorer/services/search_sessions.py`
+- Explorer RPC methods: `explorer.search.run`, `explorer.search.more`, `explorer.search.moreInFile`, `explorer.search.cancel`
+
+### Pipe methods and notifications
+
+| Method / notification | Purpose |
+|---|---|
+| `search.files.start` | Start file-name search. |
+| `search.content.start` | Start content search. |
+| `search.job.cancel` | Cancel an active search job. |
+| `search.job.progress` | Progress/count notification from Rust to the initiating pipe lane. |
+| `search.job.result` | Progressive result notification. |
+| `search.job.done` | Terminal completion notification. |
+| `search.job.error` | Terminal error notification. |
+
+### Presentation and limits
+- Python requests a presentation window with `maxInitialMatchesTotal=50` and `maxInitialMatchesPerFile=10`.
+- Python imposes `maxMatchesTotal: 700` for broad/noisy content searches.
+- Rust reports truncation metadata with `matchLimit` and `truncatedReason: "matchLimit"` when the cap is hit.
+- Python stores compact cached result state so the frontend can request more results without rerunning the search.
+- Search worker thread count can be passed per request; when omitted, Rust uses its configured default.
 
 ---
 
@@ -851,43 +729,36 @@ Used by `_notify_editor_draft_cleared()` to update the toolbar draft badge when 
 The Monaco editor runtime uses the pinned VS Code `monaco-editor-core` ESM output:
 - mounted at `/api/app/file_editor_cm6/ui/monaco_vscode/esm/...`
 
-The harness also serves a TE2 language bundle directory:
+The harness also serves language-bundle assets when they are present:
 - `/api/app/file_editor_cm6/ui/monaco_vscode/lang/...`
 
 Because the VS Code Monaco ESM imports CSS files, the harness serves `.css` as:
 - `Content-Type: application/javascript` module shim (injects `<link>` to `?raw=1`)
 - raw CSS is available when `?raw=1` is present
 
-### Build procedure (correct)
-There are **two** build outputs that must exist, otherwise the inline Monaco boot path will not serve the editor runtime correctly:
+### Build procedure (current source)
+The current `worktrees/vscode-te2-diff` publication path produces the pinned Monaco ESM tree:
 
-1) **Pinned Monaco ESM** (VS Code fork)
 - Output dir: `worktrees/vscode-te2-diff/out-monaco-editor-core/esm/`
 - Produced by: `NODE_OPTIONS="--max-old-space-size=4096" npx gulp editor-distro` inside `worktrees/vscode-te2-diff`
 
-2) **TE2 language bundles + language-service workers**
-- Output dir: `worktrees/vscode-te2-diff/out-monaco-editor-core/te2-lang/`
-- Produced by: `scripts/build_monaco_language_workers.mjs`
+There is no current `worktrees/vscode-te2-diff/build_monaco_te2.sh` script and no current `out-monaco-editor-core/te2-lang/` output in the checked source. If language-worker publication is needed, verify the current owning script before documenting or running it.
 
-Recommended build command (does both):
-```
-cd worktrees/vscode-te2-diff && ./build_monaco_te2.sh
-```
-### Common failure mode: inline editor boot is blank but worker is “running”
+### Common failure mode: inline editor boot is blank but worker is running
 Symptom:
 - The host page loads, but `#editor-frame` stays blank or the inline Monaco boot falls back to an error panel.
 
 Cause:
-- Required Monaco build artifacts or the built inline editor bundle were missing, so the host could not complete inline editor boot.
+- Required Monaco build artifacts or the built host bundle were missing, so the host could not complete inline editor boot.
 
 Fix:
-- Run the build above, rebuild `app/apps/file_editor_cm6` (`node build.mjs`), restart the `file_editor_cm6` worker, hard refresh.
+- Rebuild the Monaco ESM output, rebuild `app/apps/file_editor_cm6` (`node build.mjs`), restart only the relevant app worker when approved, and hard refresh.
 
 ---
 
-## 8) UI “knobs” (what you can safely tune)
+## 8) UI "knobs" (what you can safely tune)
 
-### Preferences → Monaco options mapping
+### Preferences -> Monaco options mapping
 The inline editor runtime builds Monaco options from SSOT preferences (`buildMonacoOptionsFromPrefs()`):
 - line numbers
 - word wrap
@@ -895,13 +766,14 @@ The inline editor runtime builds Monaco options from SSOT preferences (`buildMon
 - indent guides
 - auto closing brackets
 - autocompletion toggles (`quickSuggestions`, `suggestOnTriggerCharacters`, etc.)
-- font scale → `fontSize`
-- font family (default JetBrains Mono)
+- font scale -> `fontSize`
+- font family (default `JetBrains Mono Nerd`)
+- font ligatures (`fontLigatures` enabled by default for the local Nerd Font)
 - theme (Monaco base: `vs` / `vs-dark`, plus official `monaco-editor-themes` ids)
   - `github-dark-default` (preferred)
   - `github-light-default` (preferred)
-  - `github-dark` (legacy alias → `github-dark-default`)
-  - `github-light` (legacy alias → `github-light-default`)
+  - `github-dark` (legacy alias -> `github-dark-default`)
+  - `github-light` (legacy alias -> `github-light-default`)
   - `atom-dark`
   - `atom-light`
   - `material-dark`
@@ -922,62 +794,71 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 - Draft diff mode is a custom overlay (decorations + view zones).
 - Minimap is forced off in diff mode to avoid layout artifacts.
 
+### Z-index policy
+- The inline Monaco editor host remains at `z-index: auto`.
+- Only Monaco's `.find-widget` is raised to `z-index: 300`, above drawers and resize handles but below framework dropdowns and modals.
+- Editor-container overflow clipping remains intentional.
+
 ---
 
 ## 9) Debugging checklist (what to verify first)
 
 ### 1) Transport is correct (no reconnect loops)
-- Confirm framework Socket.IO route proxy: `app/extensions/apps/sio_service.py`
-- Confirm file_editor route config: `app/apps/file_editor_cm6/sio_service.json`
-- Confirm worker SUBAPPS mount:
+- Confirm framework Socket.IO route proxy: `app/extensions/apps/sio_service.py`.
+- Confirm file_editor route config: `app/apps/file_editor_cm6/sio_service.json`.
+- Confirm worker `SUBAPPS` mount shape:
   ```python
   SUBAPPS = [
       ("/socket.io", FILE_EDITOR_CM6_ASGI_APP),
       ("/editor_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
       ("/explorer_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
+      ("/ui_ipc_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
+      ("/terminal_ws/socket.io", FILE_EDITOR_CM6_ASGI_APP),
   ]
   ```
-- Editor Socket.IO: namespace `/editor`, path `/editor_ws/socket.io`
-- Explorer Socket.IO: namespace `/explorer`, path `/explorer_ws/socket.io`
-- Editor WBA Socket.IO: namespace `/wba`, path `/wba_ws/socket.io`
+- Editor RPC: canonical path `/api/app/file_editor_cm6/socket.io`, alias `/editor_ws/socket.io`, namespace `/rpc/editor`.
+- Explorer RPC: canonical path `/api/app/file_editor_cm6/socket.io`, alias `/explorer_ws/socket.io`, namespace `/rpc/explorer`.
+- UI IPC: canonical path `/api/app/file_editor_cm6/socket.io`, alias `/ui_ipc_ws/socket.io`, namespace `/ui_ipc`.
+- Terminal: canonical path `/api/app/file_editor_cm6/socket.io`, alias `/terminal_ws/socket.io`, namespace `/terminal`.
+- WBA: canonical path `/api/app/file_editor_cm6/services/wba/socket.io`, alias `/wba_ws/socket.io`, namespace `/wba`.
 
 ### 2) Inline editor boot completes
-- The host boot path is `template.html` → `main.js` → `bootInlineEditorHost(...)` → `inline_host.ts` → `m_editor_app.ts`.
+- The host boot path is `template.html` -> `main.ts` -> `static/dist/host.js` -> `bootInlineEditorHost(...)` -> `inline_host.ts` -> `m_editor_app.ts`.
 - If the editor surface stays blank, inspect:
   - `static/dist/host.js` load/boot
-  - `static/dist/editor.js` build freshness
+  - Monaco ESM asset freshness under `static/vendor/monaco-editor-core/esm/`
   - worker stderr for boot-snapshot / adapter bootstrap failures
   - browser console for `[inline_monaco] boot failed`
 
-### 2) SSOT is present
+### 3) SSOT is present
 - `GET /api/app/file_editor_cm6/state` returns:
   - `activeProject`, `preferences`, `lastFile`, etc.
 
-### 3) Open path convergence
-- `editor_open_request` should lead to `editor:open` for all connected clients.
+### 4) Open path convergence
+- `editor.open` / `editor.jumpToLine` should update backend active-file authority and result in typed `/rpc/editor` file-open notifications.
 
-### 4) Draft persistence and live indicators
-- `editor_mirror` should produce a cached draft entry (project sidecar).
-- `editor_save_request` should clear the draft and write disk.
-- On save, the server broadcasts `editor:cache_state` with `unsaved:false`; the inline editor runtime must then refresh git baselines so the inline git diff view updates.
-- On edit, `on_editor_mirror` emits `editor:cache_state` with `unsaved:true` (updates toolbar badge live).
-- On edit, `notify_draft_state_changed()` broadcasts `explorer:updateDecorations` + `review:setEntries` (updates explorer hasDraft icons and review list live).
-- On review save/discard, `_notify_editor_draft_cleared()` emits `editor:cache_state` via editor SIO (clears toolbar badge).
+### 5) Draft persistence and live indicators
+- `editor.mirror.publish` should produce a cached draft entry (project sidecar).
+- `editor.save` should clear the draft and write disk.
+- On save, the server broadcasts clean cache/draft state; the inline editor runtime must refresh git baselines so the inline git diff view updates.
+- On edit, mirror publication emits dirty cache state and triggers Explorer draft decorations/review entries.
 
-### 5) Cross-process consistency
+### 6) Cross-process consistency
 - If drafts appear empty in the review panel, verify `sidecar.reload()` is called before reads.
-- If explorer shows stale hasDraft icons, verify `DraftIndexSidecar` is being updated by `upsert_cached_document`.
-- Both editor and explorer Socket.IO must run in the same worker process (not main process). Check `SUBAPPS` mount.
+- If Explorer shows stale hasDraft icons, verify `DraftIndexSidecar` is being updated by `upsert_cached_document`.
+- Editor and Explorer namespaces must run on the same shared worker Socket.IO server, not on separate main-process servers.
 
 ---
 
-## 10) Transitional state (what is still “legacy”)
+## 10) Transitional state (what is still legacy)
 
 As of now:
 - The Monaco editor surface is **not** NiceGUI.
-- However, several `/editor/*` HTTP endpoints still live in `nicegui_editor/editor_app.py` and are still used by the host/editor-runtime pair (e.g. `editor/check_cache`, `editor/update_preference`).
+- `/editor/*` HTTP endpoints used by the Monaco runtime are Monaco editor backend routes, with route ownership in `monaco_editor/editor_backend.py` and service implementations under `monaco_editor/editor_backend_services/`.
+- `nicegui_editor/editor_app.py` is not the current owner for `/editor/check_cache`.
+- Historical `/editor` Socket.IO namespace references are pre-`/rpc/editor` context. Current editor state/control traffic uses `/rpc/editor` on the shared app Socket.IO path.
 
-The long‑term direction is to migrate needed editor endpoints into a dedicated non‑NiceGUI API module, but the current system is intentionally functional during the transition.
+The current transition is not a NiceGUI migration; it is a consolidation around typed backend hooks, strict msgpack-v1 RPC lanes, and Rust pipe-owned framework services where appropriate.
 
 ---
 
@@ -1129,9 +1010,9 @@ diffModel.modifiedBaseline = monaco.editor.createModel(baselineContent, lang);
 
 Applied in both `applyGitBaselines` (~line 2716) and `prefs_changed` handler (~line 4071).
 
-### Fix: Mirror client autosave suppression (`main.js`)
+### Fix: Mirror client autosave suppression (host cache indicator path)
 
-Mirror clients no longer trigger autosave for mirrored content. `markUnsaved(flag, opts)` accepts
+Mirror clients no longer trigger autosave for mirrored content. The host cache-indicator path accepts
 `{ skipAutosave: true }`, passed when `reason === 'mirror'` in `_applyCacheIndicatorImpl`.
 
 ### Debugger note
@@ -1141,7 +1022,7 @@ If your browser keeps pausing on this, DevTools likely has "Pause on exceptions"
 
 ## 14) Historical: pre-direct-WBA removal planning for `vscode_rpc` and `vscode_api`
 
-This section is archival context from the period before the direct `/wba` editor transport and UDS code-server cutover. Do not treat it as the authoritative description of the current hot path.
+This section is archival context from the period before the direct `/wba` editor transport and UDS code-server cutover. Do not treat it as the authoritative description of the current hot path. Current source has removed the `vscode_api` and `vscode_rpc` transport/shell/service files; only legacy sidecar migration keys remain.
 
 ### Background
 Early in development, two standalone Node.js JSON-RPC harnesses were created as separate framework shells:
@@ -1157,17 +1038,15 @@ The workbench adapter (`workbench_client.mjs` + `server.mjs`) talks to the real 
 - Provider registration and handle tracking
 - Document model synchronization
 
-### What `vscode_api` still provides (to be migrated)
-The `vscode_api` harness currently handles a few things the adapter does not:
+### What `vscode_api` provided historically (removed)
+The removed `vscode_api` harness historically handled:
 - **VSIX install/registry**: `vscode.vsix.*` methods (install, list, enable/disable per-project)
 - **TextMate grammars**: `vscode.textmate.grammars.list` / `vscode.textmate.grammars.load`
 - **Theme loading**: `vscode.themes.list` / `vscode.themes.load`
 - **Language configuration**: `vscode.languages.list` (returns `configuration_raw` for bracket matching, comments, etc.)
 - **Bootstrap snapshot**: `vscode.bootstrap.snapshot` (cached grammar/theme/language index)
 
-These are all **static asset queries** (reading installed extension files) — they don't need a running extension host. They should be migrated to either:
-1. The workbench adapter (if they benefit from extension host context), or
-2. A simple Python-side utility that reads the VSIX install pool directly (preferred for static assets)
+At the time, these were considered static asset queries that did not require a running extension host. Current source no longer uses the standalone `vscode_api` harness; current integration should use the live code-server/WBA-backed services or Monaco editor backend routes instead of reviving this path.
 
 ### Files removed (`vscode_rpc`)
 | File | Purpose |
@@ -1177,7 +1056,7 @@ These are all **static asset queries** (reading installed extension files) — t
 | `shellspec/vscode_rpc.yaml` | Framework shell definition |
 | `manifest.json` (references) | Service registration |
 
-### Files to remove (`vscode_api`, after migration)
+### Files removed (`vscode_api`, after migration)
 | File | Purpose |
 |------|---------|
 | `services/vscode_api_transport.py` | Main-process WS proxy |
@@ -1188,7 +1067,7 @@ These are all **static asset queries** (reading installed extension files) — t
 | `m_editor_app.ts` (references) | Grammar/theme loading calls |
 | `inline_host.ts` (references) | Inline editor bootstrap / mount path |
 
-### Migration strategy (workbench adapter first)
+### Historical migration strategy (superseded)
 The workbench adapter already scans all extensions at startup (`_buildExtensionsSnapshot()`), so it has the full `contributes.grammars`, `contributes.themes`, and `contributes.languages` metadata in memory. The preferred migration path is to add new JSON-RPC methods to the adapter rather than building separate Python utilities.
 
 **Phase 1: Grammar/theme/language queries via adapter** (preferred path)
@@ -1206,17 +1085,17 @@ Add these methods to `server.mjs` `handleJsonRpc()`:
 These reuse the existing stdio pipe transport (browser → Socket.IO → `editor_ws.py` → adapter stdin → response). No new transport or framework shell needed.
 
 Python-side: add corresponding `editor_ws.py` handlers (same pattern as `on_editor_workbench_hover`).
-Frontend: update `m_editor_app.ts` to call these via editor Socket.IO instead of the `vscode_api` WS harness.
+Historical frontend target: update `m_editor_app.ts` away from the `vscode_api` WS harness. Current source has already moved editor language intelligence to `/wba` and editor state/control to `/rpc/editor`.
 
 **Phase 2: VSIX management via Python**
 VSIX install/registry is pure file management (download, extract, update `extensions.json`). This doesn't need the adapter or an extension host. A Python utility reading `~/.local/share/termux-extensions-2/code-te2-extensions/` directly is sufficient.
 
 **Phase 3: Bootstrap snapshot consolidation**
-Replace the `vscode.bootstrap.snapshot` call (currently via `vscode_api` harness) with a single adapter call that returns grammars + themes + languages in one response, or combine the Phase 1 calls at the Python layer.
+The old `vscode.bootstrap.snapshot` direction is superseded; do not add new boot dependencies on the removed `vscode_api` harness.
 
 ### Priority
 - `vscode_rpc`: removed; nothing depends on it in production.
-- `vscode_api`: remove after Phase 1 migrates grammar/theme/language queries to the workbench adapter. The frontend currently calls these on boot for TextMate tokenization and theme loading.
+- `vscode_api`: removed. Treat the remaining details in this section as archival context only.
 
 ---
 
@@ -1224,7 +1103,7 @@ Replace the `vscode.bootstrap.snapshot` call (currently via `vscode_api` harness
 
 This section is retained as background for legacy/secondary surfaces and migration history. It is not the current editor language-intelligence architecture.
 
-`vscode_api` is the next step after `vscode_rpc`.
+`vscode_api` was a historical follow-up to `vscode_rpc`. The live source has removed this harness; this snapshot is preserved only as archival context.
 
 Goal:
 - Provide a **single** WS JSON-RPC connection that becomes the long-lived “VS Code API harness”.
@@ -1287,12 +1166,12 @@ VSIX language configuration (per-project):
 - `vscode.languages.list` returns `contributes.languages` (only for enabled extensions) plus `configuration_raw` (jsonc).
 - Monaco editor runtime calls `monaco.languages.setLanguageConfiguration(languageId, cfg)` so bracket auto-closing, comments, etc. follow VSIX language configs.
 
-Next step:
-- Replace the placeholder server implementation with a real extension-host-backed JSON-RPC surface and keep *all* future VSIX-related integration behind this API.
+Current-source note:
+- Do not build new integration against `vscode_api`; the live source uses code-server/WBA-backed services and Monaco editor backend routes instead.
 
 Language providers (working):
 - **Stdio LSP bridge has been removed** (2026-02-07). It caused marker owner collisions with the workbench adapter path.
-- Diagnostics now flow exclusively through the **server-side diagnostics bridge** (`diagnostics_bridge.py`):
+- Diagnostics now flow through the direct WBA event path plus backend normalization/projection where needed; `diagnostics_bridge.py` is not the editor hot path:
   - Subscribes to adapter WS (`127.0.0.1:18181/ws`) for `diagnostics/update` events
   - Caches per-path (max 100 entries) and broadcasts via editor Socket.IO (`editor:diagnostics`)
   - On client connect (`on_connect`): sends cached diagnostics + nudges adapter for fresh ones
@@ -1301,11 +1180,9 @@ Language providers (working):
   - Monaco editor runtime handler converts bridge payload to `_applyDiagnosticsUpdate()` format
 - **All built-in language extensions** are loaded (filtered to language-only subset, ~30 of 95 scanned).
 - Diagnostics work for Python, TypeScript, JavaScript, CSS, HTML, JSON, and all other languages with built-in VS Code support.
-- RPC features (hover, symbols, openFile, didChange) flow through editor Socket.IO → `editor_ws.py` → adapter stdio pipe
+- RPC features (hover, symbols, openFile, didChange) flow through direct `/wba` JSON-RPC; older editor Socket.IO -> adapter stdio relay wording is historical.
 
-Socket.IO relay handlers (`editor_ws.py`):
-- `on_editor_issues_cmd` → `editor:issues_cmd` — relays marker navigation commands (next/prev) to the inline editor runtime
-- `on_editor_find_cmd` → `editor:find_cmd` — relays find/replace commands to the inline editor runtime
+Editor command notifications now live on the typed `/rpc/editor` lane; older `editor_ws.py` Socket.IO event names are historical context.
 
 Diagnostics debug overlay + logs (current):
 - Debug overlay text (lower-left): `ext=yes/no og=yes/no diag=rx/ap/np/nm/mm` plus optional `touch=reinit:*`.
@@ -1374,6 +1251,8 @@ Example (use a VSIX-bundled language server binary):
 
 ## 16) Multi-client fanout + future multi-instance (code-server pattern)
 
+Historical note: this section predates removal of the standalone `vscode_api` harness. Keep the multi-instance ideas as design context, but current implementation should be expressed in terms of code-server/WBA-backed editor instances and typed app RPC lanes.
+
 ### Goal (TE2 direction)
 Maintain **multiple clients → single backend instance** fanout as the default:
 - Many browser clients (desktop/mobile, multiple tabs, GeckoView, etc.) can attach to the same active project editor.
@@ -1403,14 +1282,14 @@ Every client→server request should carry at least `{project_root, instance_id,
 Two related but distinct problems:
 
 1) **Discover**: “Start or adopt an instance for the *current* active project.”
-   - This is what `GET /api/app/file_editor_cm6/vscode_api/discover` does today (returns `ws_url` with a `shell_id`).
+   - Historical note: the removed `vscode_api` harness used `GET /api/app/file_editor_cm6/vscode_api/discover`; do not treat that route as current source.
 
 2) **Resolve**: “Given a file path, which running instance should handle it?”
    - This is the missing piece that enables “open file from outside,” multi-tab/multi-instance, and clean attach behavior.
 
-Recommended resolve endpoint (worker-owned API, host proxy-only):
+Historical resolve endpoint shape (worker-owned API, host proxy-only):
 - `GET /api/app/file_editor_cm6/vscode_api/resolve?path=<abs>`
-  - returns `{ws_url, token, project_root, instance_id, shell_id}`
+  - returned `{ws_url, token, project_root, instance_id, shell_id}` in the old design. A future current implementation should not reuse the removed harness name.
 
 ### Reference pattern (code-server)
 The code-server project solved the “which instance should handle this file?” problem by maintaining a session registry:
@@ -1423,8 +1302,8 @@ The code-server project solved the “which instance should handle this file?”
     - “workspace folder prefix match” against the file path
     - “can connect” probing to prune dead sockets
 
-The TE2 analogue is:
-- A registry of active `vscode_api` shells keyed by `{project_root, instance_id}` (and optionally workspace folders).
+The current TE2 analogue would be:
+- A registry of active code-server/WBA-backed editor instances keyed by `{project_root, instance_id}` (and optionally workspace folders).
 - A resolve routine that selects the right backend for a given absolute path.
 
 ### Storage / collision notes (important for multi-client)
@@ -1440,12 +1319,12 @@ TE2 should apply the same principle anywhere we persist client-side state:
 ### What stays where (TE2 boundary rule)
 - **Main framework**: proxy-only (services provide WS shims, no SSOT writes).
 - **App worker**: SSOT owner (preferences/history/project sidecar).
-- **vscode_api shell**: heavy work (VSIX, TextMate, LSP / language features, indexing).
+- **code-server/WBA-backed services**: heavy work (VSIX metadata, TextMate data, language features, indexing) where current source supports it.
 - **browser editor runtime**: thin renderer (Monaco UI + provider shims that call backend).
 
 ### Immediate follow-ups (ties to your priorities)
 1) **TextMate/grammars/tokens/styling**
-   - Move grammar/theme indexing fully into `vscode_api` (already started).
+   - Keep grammar/theme indexing on current code-server/WBA-backed or Monaco editor backend paths.
    - Keep TextMate as baseline tokenization; semantic detail comes from language features.
 2) **Language servers**
    - Provide document symbols, diagnostics, semantic tokens over the same WS JSON-RPC surface.
@@ -1904,121 +1783,50 @@ Total transitive: ~54 unique .ts files from vs/base/ (all MIT licensed)
 
 ## 19) File watcher pipeline — triple fallback
 
-**Status**: working end-to-end. IPC watcher tested on small repos; ENOSPC recovery and watchexec fallback wired.
-
 ### Architecture
-
-Code-server runs VS Code's native parcel watcher (`@parcel/watcher`) internally — it manages inotify watches in a separate child process. The extension host does NOT run its own watcher; code-server feeds it `$onFileEvent` automatically. TE2 does NOT need to send file events to the extension host.
-
-Instead, TE2 subscribes to code-server's `remoteFilesystem` IPC channel (management connection) to **receive** file change events as the workbench client. This is zero-overhead — we piggyback on the watcher code-server already runs.
-
-### IPC protocol
-
-- **Channel**: `"remoteFilesystem"`
-- **Subscribe**: `listen("remoteFilesystem", "fileChange", [sessionUUID])` → sends `[102, requestId, "remoteFilesystem", "fileChange"]` (EventListen)
-- **Watch**: `call("remoteFilesystem", "watch", [sessionUUID, watchId, uri, {recursive, excludes}])`
-- **Events**: arrive as EventFire (ResponseType 204): `header=[204, requestId]`, `body=[{resource: {path, scheme, authority}, type: 0|1|2}]`
-- **FileChangeType**: 0=UPDATED, 1=ADDED, 2=DELETED (VS Code enum)
-- **ENOSPC errors**: arrive as string body (not array), e.g. `"[File Watcher ('parcel')] Inotify limit reached (ENOSPC) (path: ...)"`
-- **URI format**: `{$mid:1, path:"/abs/path", scheme:"vscode-remote", authority:"localhost:18180"}`
+Code TE2 relies primarily on code-server's native watcher/IPC path, with fallback support for inotify-limit raising, optional watchexec polling, and manual refresh.
 
 ### Pipeline
 
-```
+```text
 code-server parcel watcher detects disk change
-  → remoteFilesystem IPC EventFire (ResponseType 204)
-  → workbench_client.mjs _setupFileWatcher() onEvent callback
-    → event body is array? → emit {type: "watcher/fileChanges", changes: [...]}
-    → event body is ENOSPC string? → emit {type: "watcher/enospc", message: "..."}
-  → diagnostics_bridge.py WS handler
-    → watcher/fileChanges: parse changes, convert abs→rel paths
-      → EXPLORER_SIO.emit("explorer:event", {type: "watcher:files", payload: {created, changed, deleted}})
-      → external edit detection: if active file in changed/created → handle_external_file_change()
-        → re-read disk, compare SHA, clear draft if stale, broadcast editor:open reason="external_change"
-    → watcher/enospc: forward as watcher:error (suppressed when mode ≠ ipc)
-      → EXPLORER_SIO.emit("explorer:event", {type: "watcher:error", payload: {message}})
-  → main.js explorer:event listener → dispatch to explorer.js
-    → watcher:files: git:status refresh + directory re-listing for open dirs
-      → handle_git_status() calls broadcast_git_status() + broadcast_git_decorations()
-      → applyAggregatedGitStatusFlags() propagates decorations to parent directory DOM nodes
-    → watcher:error: showWatcherLimitModal() (standalone raise modal)
+  -> remoteFilesystem IPC channel fires EventFire (ResponseType 204)
+  -> workbench_client.mjs onEvent({type: "watcher/fileChanges", changes: [...]})
+  -> wba_event_bridge.py handles watcher/fileChanges and watcher/enospc
+  -> workspace_events.py publishes normalized file-change events
+  -> Explorer watcher handlers update backend-owned tree/decorations state
+  -> Explorer emits typed state notifications to the frontend
 ```
 
-### Triple fallback (4 modes)
-
-Watcher mode is persisted per-project in `ProjectSidecar._data.watcher`:
-
-| Mode | Description | Overhead |
-|------|-------------|----------|
-| `ipc` (default) | Subscribe to code-server's native parcel watcher via IPC | Zero — piggybacks on existing watcher |
-| raise inotify limit | On ENOSPC: modal prompts user to raise `fs.inotify.max_user_watches` via `sysctl`, then resubscribe IPC | One-time sysctl call |
-| `watchexec` | `watchexec --poll --emit-events-to json-stdio --shell=none -- cat` in a framework shell | Stat-polling: SSD=1500ms, HDD=4500ms |
-| `none` | No background watching; manual refresh button in explorer | Zero |
-
-Mode selection is in the Editor Settings modal (`Editor > Settings… > File Watcher`). The ENOSPC standalone modal appears automatically when the IPC watcher hits the limit. The user can raise the limit or switch to watchexec/none from either modal.
+### Triple fallback modes
+1. Native code-server watcher path.
+2. Raise inotify limits when the environment allows it.
+3. `watchexec --poll -- cat` framework-shell fallback.
+4. None/manual refresh when watcher support is unavailable.
 
 ### watchexec framework shell
-
-When watchexec mode is active, a framework shell runs `watchexec --poll <interval> --emit-events-to json-stdio --shell=none -- cat`:
-
-- `--emit-events-to json-stdio` pipes JSON events to the child command's stdin
-- `cat` reads stdin → stdout (thinnest possible passthrough)
-- Stdout is fanned to both the pipe (for Python reader) and stderr (for observability), same pattern as code-server's shell wrapper
-- `--ignore ".git" --ignore ".git/**"` (need both — glob only matches contents, not the dir itself)
-- `--shell=none` (not `--no-shell` — removed in watchexec v2.3.3)
-- Events are parsed by `watchexec_shell_manager._stdout_reader_loop()` and forwarded into the same `watcher:files` pipeline
-
-### Adapter RPCs for watcher lifecycle
-
-- `adapter.resubscribeWatcher` — dispose old IPC subscription, call `_setupFileWatcher()` again (used after raising inotify limit)
-- `adapter.reconnect({workspaceFolder})` — `disconnect()` + `connect()` with new workspace (used on project switch; adapter process stays alive)
+- Shellspec: `app/apps/file_editor_cm6/shellspec/watchexec.yaml`
+- Poll mode is declared as `watchexec-poll`.
+- Watchexec is a fallback watcher source; it is not the primary code-server IPC watcher path.
 
 ### Key files
+- `app/apps/file_editor_cm6/workbench_protocol_proxy/node_workbench_adapter/src/workbench_client.mjs`: receives code-server watcher events.
+- `app/apps/file_editor_cm6/wba_event_bridge.py`: handles `watcher/enospc` and `watcher/fileChanges` events from WBA.
+- `app/apps/file_editor_cm6/workspace_events.py`: publishes normalized file-change events and calls `handle_external_file_change`.
+- `app/apps/file_editor_cm6/watchexec_shell_manager.py`: fallback watchexec shell manager.
+- `app/apps/file_editor_cm6/shellspec/watchexec.yaml`: fallback shellspec.
+- `app/apps/file_editor_cm6/explorer/handlers/watcher.py`: Explorer watcher integration.
+- `app/apps/file_editor_cm6/main_page/frontend/ui/watcher-settings.ts`: watcher settings UI wiring.
 
-- `workbench_client.mjs`: `_setupFileWatcher()` (~line 2075), `resubscribeWatcher()` (~line 2126), `_fsWatcherSub` field
-- `server.mjs`: `adapter.resubscribeWatcher` and `adapter.reconnect` RPC handlers
-- `vscode_oss_runtime/.../ipc.mjs`: `EventListen` (102), `EventFire` (204), `EventDispose` (103), `listen()` method
-- `diagnostics_bridge.py`: `watcher/enospc` and `watcher/fileChanges` handlers
-- `explorer_ws.py`: `handle_watcher_setMode`, `handle_watcher_getConfig`, `handle_watcher_raiseLimit`, eager start on connect
-- `watchexec_shell_manager.py`: `ensure_watchexec_shell()`, `stop_watchexec_shell()`, `is_watchexec_available()`, `_forward_watchexec_event()`
-- `shellspec/watchexec.yaml`: framework shell spec with VS Code parity ignore patterns
-- `project_sidecar.py`: `watcher` field in `_default_data()`: `{mode, storage_type, poll_interval_ms}`
-- `main.js`: watcher settings UI wiring, ENOSPC modal, `watcher:config`/`watcher:modeStatus` handlers
-- `explorer.js`: `watcher:files` handler, `watcher:modeChanged` handler, manual refresh button
-- `template.html`: File Watcher section in editor-settings-modal, refresh bar in explorer drawer
-
-### External edit detection (watcher → editor pipeline)
-
-When a watcher event (IPC or watchexec) reports a change to the **currently active file**, the server automatically:
-1. Re-reads the file from disk and computes a fresh SHA256
-2. Suppresses the event if the SHA matches our own last save (`_LAST_SAVE_SHA` — prevents reload loops)
-3. Clears any active draft for the file (stale draft eviction via `clear_cached_document`)
-4. Broadcasts `editor:open` with `reason: "external_change"` to all editor clients
-5. The inline diff editor also updates — `requestGitBaselines()` fetches fresh HEAD + disk content
-
-**Scroll preservation**: External edits use `model.applyEdits()` (not `model.setValue()`) to update content atomically without resetting scroll position, cursor, or decorations. The diff editor skips `diffEditor.setModel()` when models are already bound — content updates on existing models trigger recomputation without scroll reset.
-
-**Editor mode transitions** (plain ↔ diff): Scroll position is captured from the active editor before disposal and restored on the new editor after creation. `applyGitBaselines()` uses deferred restore (immediate + 50ms + 300ms) to survive the async diff computation and view zone scroll sync that follows `setModel()`.
-
-**ENOSPC suppression**: When the watcher mode is not `ipc` (i.e., user has switched to watchexec, polling, or none), `watcher/enospc` events from the IPC watcher are silently suppressed — the user already knows inotify is limited.
-
-**Key files**:
-- `editor_ws.py`: `handle_external_file_change()`, `_LAST_SAVE_SHA` save-suppress dict
-- `diagnostics_bridge.py`: IPC watcher path hook (calls `handle_external_file_change` for changed/created), ENOSPC suppression
-- `watchexec_shell_manager.py`: watchexec path hook (schedules `handle_external_file_change` via `loop.create_task`)
-- `m_editor_app.ts`: `model.applyEdits()` for external changes, scroll save/restore in `ensureDiffEditorWithPrefs`/`ensurePlainEditorWithPrefs`/`applyGitBaselines`
+### External edit detection (watcher -> editor pipeline)
+- Watcher events enter through `wba_event_bridge.py` / `workspace_events.py`.
+- The backend checks whether a changed/created/deleted path affects the active file and then notifies the editor lane through backend hooks.
+- Explorer updates are model/state notifications; the frontend should render the state it receives, not rediscover filesystem or Git facts itself.
 
 ### VS Code watcher settings sync (dual-watcher suppression)
+The WBA/code-server side remains the primary watcher source. TE2 fallback watcher settings should avoid running a duplicate expensive watcher unless the native watcher path is unavailable or explicitly degraded.
 
-When the custom watcher (watchexec) is active, both it AND VS Code's built-in IPC watcher would fire simultaneously on file changes, causing double-refresh and cursor jumps. Fix: `sync_vscode_watcher_settings(watcher_mode)` writes `"files.watcherExclude": {"**": true}` to code-server's `User/settings.json` when custom watcher is active, suppressing VS Code's watcher entirely. When mode is `ipc`, the key is removed so VS Code's watcher resumes.
-
-Called from:
-1. `ensure_code_server_shell()` — before shell launch (code-server reads settings on boot)
-2. `handle_watcher_setMode()` in `explorer_ws.py` — on runtime mode changes
-3. `_ensure_workbench_json_sync()` in `main.py` — called from `_eager_start_code_server()` before shell launch
-
-**Key files**:
-- `code_server_shell_manager.py`: `sync_vscode_watcher_settings()` (~line 48-73), `_CODE_SERVER_DATA_DIR`, `_USER_SETTINGS_PATH`
+---
 
 ## 20) Cursor Stability Hardening (Autosave + Git Diff)
 
@@ -2029,10 +1837,10 @@ This section documents the stabilization work that removed full-page thrash and 
 1. **Diff mode flag drift in inline editor context**
    In `applyGitBaselines()`, `diffEditor.setModel(...)` was skipped when model refs matched, even if `te2AutosaveMode` / `te2FreezeProjection` / `modifiedBaseline` flags were stale.
 
-2. **Mirror echo/jitter under autosave**  
+2. **Mirror echo/jitter under autosave**
    `editor:mirror` applied full-buffer updates (`model.setValue(...)`) during active typing windows.
 
-3. **Git baseline recompute racing typing**  
+3. **Git baseline recompute racing typing**
    In autosave + inline diff mode, baseline updates could apply while the user was still entering text.
 
 ### Runtime fixes (inline-editor-only)
@@ -2089,7 +1897,7 @@ Correct copy pattern:
 
 Verification checks:
 - `app/static/vendor/monaco-editor-core/esm/vs/.../diffEditorViewModel.js` contains `te2AutosaveMode` logic.
-- `app/static/vendor/monaco-editor-core/te2-lang/bootstrap/monaco.bootstrap.bundle.js` contains matching logic.
+- Verify the current published Monaco ESM artifact containing the patched logic under `app/static/vendor/monaco-editor-core/esm/`.
 
 ### Key files
 
@@ -2104,65 +1912,53 @@ Verification checks:
 
 ---
 
-## 21) UI IPC — Frontend-to-Frontend Communication
+## 21) UI IPC — Backend-mediated app UI facts
 
 ### Problem
 
-The editor is mounted inline now, but TE2 still keeps host-page chrome behavior and editor-runtime behavior on separate transport seams. UI actions from the inline editor runtime (Ctrl+S, editor focus) still need to trigger host-owned behavior (save file, close menus), and the repo keeps that relay on `/ui_ipc` for observability and clear ownership.
+The editor, host/main page, Explorer, sidebar, and terminal surfaces remain separate authority domains. When one surface needs another surface to act, the request must travel through its own backend lane and then through a target backend hook/service. UI IPC is the host/main-page app lane for typed facts and low-frequency host coordination; it is not a frontend-to-frontend event bus.
 
 ### Architecture
 
-A dedicated Socket.IO namespace (`/ui_ipc`) acts as a thin relay. Python logs all traffic for observability but contains no business logic — it just rebroadcasts events to all other clients in the room (skip sender).
+`/ui_ipc` is a Socket.IO namespace on the shared app Socket.IO path. It uses strict `msgpack-v1` JSON-RPC payloads and backend dispatch in Python.
 
-```
-Inline editor runtime (m_editor_app.ts)           Main page (main.js)
-  │                                          │
-  ├─ Ctrl+S keybinding ──┐                   │
-  ├─ editor focus ────────┤                   │
-  │                       ▼                   │
-  │              ui_event {type:...}          │
-  │                       │                   │
-  │              ┌────────▼────────┐          │
-  │              │  /ui_ipc namespace │        │
-  │              │  ui_ipc_ws.py      │        │
-  │              │  (log + rebroadcast)│       │
-  │              └────────┬────────┘          │
-  │                       │                   │
-  │                       ▼                   │
-  │              ui_event {type:...}          │
-  │                       │                   │
-  │                       ├─ type:"save"  → synthetic Ctrl+S keydown
-  │                       └─ type:"focus" → synthetic click on body
+```text
+Host/main page frontend
+  -> /ui_ipc msgpack-v1 JSON-RPC
+  -> ui_ipc_ws.py decodes and validates with frontend_rpc_codec.py
+  -> ui_ipc.rpc_contract dispatch method
+  -> backend hook/service
+  -> target surface notification when needed
 ```
 
-### Event types
+### Current responsibilities
 
-| `type`   | Source         | Effect on main page                     |
-|----------|----------------|-----------------------------------------|
-| `save`   | Ctrl+S in inline editor runtime | Dispatches synthetic `Ctrl+S` keydown → existing `saveFile()` handler |
-| `focus`  | Editor widget focus | Dispatches synthetic click on `document.body` → existing `closeAllMenus()` handler |
-
-### Why synthetic DOM events?
-
-The `ui_event` handler runs in the `connectUIIPC()` closure, which is defined early in `main.js` (line ~995). Functions like `saveFile()` and `closeAllMenus()` are defined later. Rather than dealing with hoisting/scope issues in an ES module, the handler dispatches native DOM events that trigger the same `document.addEventListener` handlers those functions are already wired to.
+| Area | Contract |
+|---|---|
+| Host/main page boot/readiness | Backend-owned boot snapshots and adapter-state facts. |
+| Native/Android IME focus hints | Typed focus/blur facts on `/ui_ipc`; Android consumes strict msgpack-v1, not raw JSON `ui_event`. |
+| Cross-surface actions | Frontend -> own backend -> target backend hook/service -> target notification. |
+| Metrics | `FILE_EDITOR_CM6_RPC_CODEC_METRICS=1` enables default-off codec metadata on stdout. |
 
 ### Key files
 
-- `app/apps/file_editor_cm6/ui_ipc/__init__.py` — empty package init
-- `app/apps/file_editor_cm6/ui_ipc/ui_ipc_ws.py` — `UIIPCNamespace`: logs event type + sender sid, rebroadcasts to room (skip sender)
-- `app/apps/file_editor_cm6/ui_ipc/ui_ipc_socketio.py` — compatibility alias for the shared worker Socket.IO server/app
-- `app/apps/file_editor_cm6/sio_service.json` — main-process raw route proxy config for `/ui_ipc_ws/socket.io`
-- `app/apps/file_editor_cm6/manifest.json` — points to `sio_service.json`
-- `app/apps/file_editor_cm6/main.py` — `UI_IPC_ASGI_APP` mounted in SUBAPPS
-- `app/apps/file_editor_cm6/main.js` — `connectUIIPC()`, `ui_event` listener with synthetic event dispatch
-- `app/apps/file_editor_cm6/monaco_editor/m_editor_app.ts` — `connectUIIPC()`, `bindUIIPCEditorHooks()`, `_bindEditorSaveKey()`, `_bindEditorFocusRelay()`
+- `app/apps/file_editor_cm6/ui_ipc/ui_ipc_ws.py` — `/ui_ipc` namespace, msgpack-v1 decode, JSON-RPC parsing, dispatch.
+- `app/apps/file_editor_cm6/ui_ipc/rpc_contract.py` — Python UI IPC method/notification contract.
+- `app/apps/file_editor_cm6/src/ui_ipc/rpc_contract.ts` — TypeScript UI IPC contract.
+- `app/apps/file_editor_cm6/main_page/frontend/connections/ui-ipc-rpc.ts` — browser `/ui_ipc` JSON-RPC connection.
+- `app/apps/file_editor_cm6/main_page/frontend/connections/ui-ipc.ts` — host/main-page UI IPC fact handling.
+- `app/apps/file_editor_cm6/frontend_rpc_codec.py` — strict Python msgpack-v1 encode/decode and auth validation.
+- `app/apps/file_editor_cm6/sio_service.json` — route proxy declaration for canonical app Socket.IO path and legacy alias.
 
 ### Extending
 
-To add a new IPC event type:
-1. Emit `ui_event` with a new `type` string from either page
-2. Add a handler in the receiving page's `ui_event` listener
-3. Python relay requires no changes — it rebroadcasts all `ui_event` payloads
+To add a new UI IPC operation:
+1. Add the method/notification to `ui_ipc/rpc_contract.py` and `src/ui_ipc/rpc_contract.ts`.
+2. Add the backend dispatch/hook in `ui_ipc/ui_ipc_ws.py` or the appropriate backend service.
+3. Emit a target-surface notification from that target backend when another surface needs to react.
+4. Do not add raw `ui_event` relays or synthetic DOM-event bridges.
+
+---
 
 ## 22) Extension Configuration Auto-Extraction
 
@@ -2587,43 +2383,56 @@ The old worker-owned `/ui_ipc` console relay has been removed from the live sour
 
 ### Architecture overview
 
-```
-┌─────────────┐  console:log   ┌───────────────────────┐  console:log   ┌────────────────┐
-│ main_page   │───────────────▸│ framework TE2 console │───────────────▸│ Console drawer │
-│ bridge      │                │ /te2_console          │ replay/eval    │ vConsole UI    │
-└─────────────┘                └───────────────────────┘                └────────────────┘
-                                      ▼
-                         ~/.cache/app_server/
-                         te2_console_log.jsonl
+```text
+main_page bridge --console:log--> framework TE2 console --console:log/replay/eval--> Console drawer / MCP
+                                      |
+                                      v
+                         ~/.cache/app_server/te2_console_log.jsonl
 ```
 
 ### Files
 
 | File | Role |
-|------|------|
+|---|---|
 | `app/te2_console_runtime.py` | Framework-owned Socket.IO console runtime and transcript storage. |
 | `app/te2_runtime_mounts.py` | Mounts `/te2_console_ws/socket.io`. |
 | `app/te2_mcp/te2_console_client.py` | MCP in-process eval/list bridge to the framework console runtime. |
-| `app/apps/file_editor_cm6/main_page/frontend/console_bridge.js` | Browser console monkey-patcher; emits `console:log` and handles `console:eval` over `/te2_console`. |
+| `app/cli/console_cli.py` | `te2 console` CLI implementation. |
+| `app/apps/file_editor_cm6/main_page/frontend/console_bridge.js` | Code TE2 browser console monkey-patcher; emits `console:log` and handles `console:eval` / `console:evalCancel`. |
 | `app/apps/file_editor_cm6/main_page/frontend/host-console-drawer.ts` | vConsole drawer client; registers as `role: "drawer"` on `/te2_console`. |
-| `android/app/src/main/java/com/termux/extensions/UiIpcClient.kt` | Native Android console drawer client; connects to `/te2_console`. |
 
 ### Event protocol
 
 | Event | Direction | Payload | Notes |
-|-------|-----------|---------|-------|
+|---|---|---|---|
 | `console:register` | client -> server | `{ role: "drawer" | "worker", workerId?, workerLabel?, tail_lines? }` | Drawers join `console:drawers`; workers join `console:<workerId>`. |
 | `console:log` | worker -> server -> drawers | `{ workerId, workerLabel?, level, ts, args[] }` | Appended to the framework transcript and fanned out to drawers. |
-| `console:eval` | drawer/MCP -> server -> worker | `{ targetWorkerId, reqId, code }` | Routed only to `console:<workerId>`. |
-| `console:evalResult` | worker -> server -> drawers/MCP waiter | `{ workerId, reqId, ok, value|error }` | Resolves pending evals and fans out to drawers. |
+| `console:eval` | drawer/MCP -> server -> worker | `{ targetWorkerId, reqId, code, timeoutSeconds }` | Routed only to `console:<workerId>`. |
+| `console:evalCancel` | server -> worker | `{ reqId, targetWorkerId }` | Sent when Python-side eval times out so the Code TE2 bridge can reject the pending Promise. |
+| `console:evalResult` | worker -> server -> drawers/MCP waiter | `{ workerId, reqId, ok, value|error, errorType? }` | Resolves pending evals and fans out to drawers. |
 | `console:replay` | drawer -> server | `{ tail_lines? }` | Replays transcript entries from `~/.cache/app_server/te2_console_log.jsonl`. |
 | `console:clear` | drawer -> server -> drawers | `{}` | Clears transcript and drawer state. |
+
+### CLI
+
+```bash
+te2 console list-workers
+te2 console eval --worker <worker-id> --code 'document.title'
+te2 console eval --worker <worker-id> < debug-script.js
+te2 console tail --worker <worker-id> --limit 100
+te2 console search "query" --worker <worker-id> --limit 100
+```
+
+`list-workers` and `eval` require a running framework. `tail` and `search` can inspect the local transcript offline.
 
 ### vConsole integration notes
 
 - vConsole is drawer-only. The producer bridge just patches browser `console.*`, serializes args, and ships events.
 - The drawer writes TE2 console rows through vConsole's `model.addLog(..., { noOrig: true })` path so replayed rows do not feed back into the framework console bridge.
-- The main page bridge uses `workerLabel: "main_page"` plus `uniquePerWindow: true`; runtime inspection should target the exact generated worker id.
+- The Code TE2 main-page bridge uses `workerLabel: "main_page"` plus `uniquePerWindow: true`; runtime inspection should target the exact generated worker id.
+- The shared static bridge at `app/static/js/te2_console_bridge.js` is not necessarily at the same feature level as the Code TE2 main-page bridge. Do not document Code TE2-only timeout/cancel behavior as a shared bridge guarantee unless the shared bridge is updated too.
+
+---
 
 ## 26) Monarch Palette Corruption Fix (Universal)
 
@@ -2753,7 +2562,7 @@ Sections: **Bundled** (vendored), **From Extensions** (installed).
 | `m_editor_app.ts` + `editor_theme_*_utils.js` | Theme registry, loading, conversion, and application |
 | `editor_backend.py` | `GET /available_themes` endpoint, vendored theme serving |
 | `extension_registry.py` | `contributes.themes[]` parsing |
-| `main.js` | Theme submodal open/close/refresh logic |
+| `main_page/frontend/` | Theme submodal open/close/refresh logic |
 | `template.html` | `#editor-themes-modal` markup |
 | `themes/vendored/github/theme_index.json` | Vendored theme manifest |
 
@@ -2843,7 +2652,7 @@ handshake or discovery step.
 The workbench adapter (`workbench_client.mjs`) replaces the real renderer.
 Since it doesn't import `extHost.protocol.ts`, the rpcIds are resolved via a
 **cached config file** (`te2_rpc_config.json`) that is auto-generated by
-grepping the installed code-server bundle.
+structurally parsing the installed code-server bundle, with `extHost.protocol.ts` as a fallback/cross-check when available.
 
 **The 13 required rpcIds** shift with Code OSS declaration order:
 
@@ -2966,7 +2775,7 @@ Extension operations trigger automatic shell termination and inline editor remou
    - Re-invokes `ensureWorkbenchAdapterReady()` after 2 s (let the editor runtime reconnect)
 5. **Inline editor runtime**: boots → emits `editor_readiness_check` → backend launches new adapter → baton completes → spinner goes green
 
-The `ext:adapter_restarting` event handler in `connectExplorerSocket()` is a safety-net backup. The primary reload is triggered directly by the save/install handlers. The event handler uses `typeof` guards because those functions are defined later in main.js (not hoisted).
+The `ext:adapter_restarting` event handler is a safety-net backup. The primary reload is triggered directly by the save/install handlers in the host frontend module graph.
 
 ### 3-state status indicator
 
@@ -3004,7 +2813,7 @@ Both use the framework-shells `terminate` endpoint to kill the underlying shell.
 | `code_server_shell_manager.py` | `terminate_code_server_shell()` — code-server teardown |
 | `explorer_ws.py` | `_restart_adapter_only()`, `_restart_code_server_and_adapter()`, restart handlers |
 | `template.html` | 3-state CSS classes, `#fe-adapter-dd` dropdown, spinner default class |
-| `main.js` | `_reloadEditorIframe()`, `_feUpdateLspSpinner()`, adapter dropdown, event handlers |
+| `main_page/frontend/` | Inline editor remount, LSP spinner, adapter dropdown, and host event handlers |
 
 ## 32) Touch Selection Extension (`monaco-touch-selection`)
 
@@ -3327,39 +3136,46 @@ t+20s    user hovers → provideHover fires → editorWorkbenchCall('hover')
 | `server.mjs` | HTTP/WS route: `editor_workbench_hover` → `client.hover()` |
 | `editor_ws.py` | `on_editor_workbench_hover` → `adapter_rpc("vscode.hover", ...)` |
 
-## 35) GeckoView IME Filter (Gboard Fix)
+## 35) Android / GeckoView IME and Monaco Text Input
 
 ### Problem
 
-Gboard (and any IME-composition keyboard) causes cursor mismatch chaos in Monaco on Android. The IME composition pipeline (`setComposingText`, composition spans) conflicts with Monaco's internal cursor positioning. "Dumb" keyboards (Hacker Keyboard, physical) work fine because they send raw key events. Additionally, Monaco's built-in `Gesture.onTap` (touch→cursor positioning) is not firing in our deployment, so cursor placement relies entirely on the touch extension teardrops.
+Android IME composition, especially Gboard, can fight Monaco's desktop-oriented textarea transaction model. Cursor position, composition ranges, and visible model content can diverge when composition text is applied through the browser path as if it were desktop input.
 
-### Root cause
+### Current architecture
 
-Monaco's `PointerEventHandler._onMouseDown()` returns early for `pointerType === "touch"` — intentional, it relies on `Gesture.onTap` instead. But `Gesture.onTap` custom events are not dispatched despite `touchstart`/`touchend` reaching the document. Result: tapping content produces no `mousedown`/`mouseup`/`click` events, so Monaco never positions the cursor from touch. When Gboard starts composing at the wrong position, cursor chaos ensues.
+There are two distinct layers:
 
-### Fix: Termux-pattern InputConnection filtering
+1. **Android native focus/filter layer**
+   - `FilteredGeckoView.kt` subclasses `GeckoView` and can wrap the platform `InputConnection` with `EditorInputFilter`.
+   - `EditorInputFilter.kt` can strip composition-style calls into simpler committed text when the native workaround is enabled.
+   - `UiIpcClient.kt` connects to the complete configured framework origin and consumes strict `msgpack-v1` `/ui_ipc` focus/blur facts. It does not consume raw JSON `ui_event` messages.
+   - `InputMethodManager.restartInput(geckoView)` is called on filter state changes so `onCreateInputConnection()` re-runs with the current policy.
 
-Instead of fixing Monaco's gesture pipeline, we intercept at the Android/Kotlin layer (same approach as Termux's terminal keyboard handling):
-
-1. **`FilteredGeckoView.kt`** — Subclasses `GeckoView`, overrides `onCreateInputConnection()`. When filter active: sets `inputType = TYPE_TEXT_VARIATION_VISIBLE_PASSWORD | TYPE_TEXT_FLAG_NO_SUGGESTIONS`, wraps the `InputConnection` with `EditorInputFilter`.
-
-2. **`EditorInputFilter.kt`** — `InputConnectionWrapper` that converts `setComposingText()` → `commitText()` (strips composition) and no-ops `setComposingRegion()`. Makes Gboard send character-by-character input.
-
-3. **`UiIpcClient.kt`** — Socket.IO client connecting to `/ui_ipc` namespace (path `/ui_ipc_ws/socket.io`). Listens for `ui_event` with `type: "focus"` → activates filter, `type: "blur"` → deactivates. Default inactive on disconnect.
-
-4. **`editor_ui_ipc_focus_relay_utils.js`** — Frontend emits both `{ type: 'focus' }` on `onDidFocusEditorWidget` and `{ type: 'blur' }` on `onDidBlurEditorWidget` to the UI IPC bus.
-
-5. **`InputMethodManager.restartInput(geckoView)`** — Called on filter state change to force `onCreateInputConnection()` to re-fire with updated inputType.
+2. **Monaco browser-side Android transaction layer**
+   - Android disables Monaco native `EditContext` even when Chromium exposes it.
+   - The patched Monaco `TextAreaEditContext` / `TextAreaInput` path uses a physically detached textarea containing `⇝` + the complete model line + two trailing newlines.
+   - Native `input` events coalesce to one latest-value read per animation frame.
+   - One cumulative UTF-16 range edit is applied before a generation-guarded canonical reseed.
+   - Android composition start/update/end events do not gate input or create Monaco's visible composition textarea.
 
 ### Key files
 
 | File | Role |
-|------|------|
-| `android/.../FilteredGeckoView.kt` | GeckoView subclass, IC interception point |
-| `android/.../EditorInputFilter.kt` | InputConnection wrapper, composition stripping |
-| `android/.../UiIpcClient.kt` | Socket.IO client for focus/blur events |
-| `editor_ui_ipc_focus_relay_utils.js` | Emits focus + blur events to UI IPC |
-| `android/.../MainActivity.kt` | Wires filter, IPC client, restartInput callback |
+|---|---|
+| `android/.../FilteredGeckoView.kt` | GeckoView subclass, IC interception point. |
+| `android/.../EditorInputFilter.kt` | InputConnection wrapper, composition stripping. |
+| `android/.../UiIpcClient.kt` | Strict msgpack-v1 `/ui_ipc` native focus/blur consumer. |
+| `android/.../MainActivity.kt` | Wires filter, IPC client, restartInput callback. |
+| `worktrees/vscode-te2-diff/src/vs/editor/browser/config/editorConfiguration.ts` | Disables native `EditContext` on Android. |
+| `worktrees/vscode-te2-diff/src/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.ts` | Android detached textarea seed/prefix/suffix state. |
+| `worktrees/vscode-te2-diff/src/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.ts` | Android coalesced input transaction path. |
+
+### Publication path
+
+Publication runs `editor-distro`, overlays scoped ESM/CSS into `app/static/vendor/monaco-editor-core/esm`, regenerates the Monaco bootstrap when needed, and rebuilds Code TE2 `static/dist/host.js`. Android native source is not part of the Monaco text transaction publication unless the native filter layer itself changes.
+
+---
 
 ## 36) GeckoView Static Asset Bundling
 
