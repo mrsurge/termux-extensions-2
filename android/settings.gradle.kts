@@ -1,5 +1,6 @@
 pluginManagement {
     repositories {
+        maven("https://codeberg.org/api/packages/cefrium/maven")
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -11,6 +12,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://codeberg.org/api/packages/cefrium/maven")
         maven {
             url = uri("https://maven.mozilla.org/maven2/")
         }
@@ -19,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "TermuxExtensions"
 include(":app")
+include(":cefrium")

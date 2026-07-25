@@ -165,3 +165,8 @@ not a hidden product dependency.
 
 Android source and Android asset publication are separate work areas. They are
 not implied by ordinary framework or frontend changes.
+
+GeckoView remains the primary Android client. The isolated `android/cefrium`
+application module evaluates the Cefrium CEF runtime without adding Chromium
+resources or native libraries to Gecko builds; see
+`android/cefrium/README.md` for its build and runtime contract.

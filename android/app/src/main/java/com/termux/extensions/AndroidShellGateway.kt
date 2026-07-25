@@ -17,6 +17,7 @@ class AndroidShellGateway(
     private val httpClient: OkHttpClient,
     private val onSettingsChanged: (AndroidAppSettings) -> Unit,
     private val diagnosticsProvider: () -> JSONObject,
+    private val appUrlRewriter: (String) -> String = { it },
 ) {
     fun handle(request: LocalHttpRequest): LocalHttpResponse? {
         if (!request.path.startsWith(API_PREFIX)) return null
@@ -118,7 +119,10 @@ class AndroidShellGateway(
         val data = remote.optJSONObject("data") ?: JSONObject()
         if (action == "open") {
             val rawUrl = data.optString("url", "/app/$appId?gv_native=1")
-            data.put("url", absoluteFrameworkUrl(settings.frameworkBaseUrl, rawUrl))
+            data.put(
+                "url",
+                appUrlRewriter(absoluteFrameworkUrl(settings.frameworkBaseUrl, rawUrl)),
+            )
         }
         return jsonResponse(200, data)
     }

@@ -201,6 +201,15 @@ The app serves generated bundles from `static/dist/`, but source remains the
 authority. Android bundled-asset publication is separate and requires explicit
 approval.
 
+The primary Android application is the GeckoView `:app` module. The isolated
+`:cefrium` application module evaluates Cefrium without applying its
+resource-generating Gradle plugin to Gecko variants. It reuses shared Android
+source and packaged assets but owns its activity, layout, manifest, and stable
+loopback relay. Check for at least 3 GB of free disk before either Android
+build. Validate the new module with `:cefrium:testDebugUnitTest` and
+`:cefrium:assembleDebug`; retain `:app:testGeckoDebugUnitTest` and
+`:app:assembleGeckoDebug` as the primary-renderer comparison.
+
 For Rust framework work, preserve the target cache and validate proportionally
 with Cargo formatting/check/tests. Do not delete `rust-spike/rust/target/` as a
 routine cleanup step.
