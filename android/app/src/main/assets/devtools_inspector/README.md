@@ -6,8 +6,9 @@ visible inspector into the framework page.
 The inspected page receives only the Chobitsu target runtime and a headless
 native-messaging bridge. The separate persistent Inspector browser surface
 loads Chii's Chromium DevTools frontend in embedded mode. Kotlin forwards raw
-CDP messages between the target and inspector WebExtension/WebView endpoints;
-there is no WebSocket or framework network endpoint in this path.
+CDP messages between the target and inspector GeckoView WebExtension
+native-messaging ports; there is no WebSocket or framework network endpoint in
+this path.
 
 Vendored releases:
 
@@ -21,8 +22,7 @@ Vendored releases:
 
 `front_end/` is the unmodified Chii npm release frontend. `chobitsu.js` is the
 unmodified Chobitsu UMD release bundle. TE2-owned files are the manifest,
-target loader/runtime, Gecko and WebView native bridges, and inspector
-shell/runtime.
+target loader/runtime, Gecko native bridge, and inspector shell/runtime.
 
 Increment the final component of the WebExtension version whenever packaged
 extension behavior changes so GeckoView replaces its persisted built-in copy.

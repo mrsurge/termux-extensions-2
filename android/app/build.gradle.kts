@@ -22,12 +22,6 @@ android {
     flavorDimensions += "renderEngine"
 
     productFlavors {
-        create("webview") {
-            dimension = "renderEngine"
-            applicationIdSuffix = ".webview"
-            versionNameSuffix = "-webview"
-            manifestPlaceholders["sharedUserIdValue"] = "com.termux.extensions.webview"
-        }
         create("gecko") {
             dimension = "renderEngine"
             applicationIdSuffix = ".gecko"
@@ -105,7 +99,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.socket:socket.io-client:2.1.1")
     implementation("org.msgpack:msgpack-core:0.9.12")
-    implementation("androidx.webkit:webkit:1.16.0")
     add("geckoImplementation", "org.mozilla.geckoview:geckoview:144.0.20251027123126")
     debugImplementation("androidx.compose.ui:ui-tooling")
     

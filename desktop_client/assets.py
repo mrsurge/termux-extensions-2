@@ -37,8 +37,9 @@ WEB_EXTENSION_SOURCE = (
 )
 ASSET_INVENTORY_PATH = Path(__file__).parent / "desktop_asset_inventory.json"
 
-# WebKitGTK and Electrobun consume this same immutable-static boundary. Keep the
-# routing contract in data so the two desktop shells cannot silently drift.
+# Electron and the WebKitGTK reference consume this same immutable-static
+# boundary. Keep the routing contract in data so desktop shells cannot silently
+# drift.
 with ASSET_INVENTORY_PATH.open(encoding="utf-8") as _inventory_file:
     _asset_inventory = json.load(_inventory_file)
 

@@ -5,9 +5,8 @@ The active desktop client is the Electron shell under
 path while retaining the launcher, Settings, asset updates, and app-scoped
 lifecycle behavior established by the earlier desktop spikes.
 
-The Electrobun/CEF implementation under `desktop_client/electrobun_spike/` and
-the GTK 4/WebKitGTK 6 implementation in `desktop_client/ui.py` remain behavioral
-references. They are not the current desktop runtime.
+The GTK 4/WebKitGTK 6 implementation in `desktop_client/ui.py` remains a
+behavioral reference. It is not the current desktop runtime.
 
 ## Run the Electron client
 
