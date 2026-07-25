@@ -28,6 +28,15 @@ const zoomIn = document.querySelector("#zoom-in") as HTMLButtonElement;
 const back = document.querySelector("#back") as HTMLButtonElement;
 const forward = document.querySelector("#forward") as HTMLButtonElement;
 const toastElement = document.querySelector("#native-toast") as HTMLElement;
+const frameworkOffline = document.querySelector("#framework-offline") as HTMLButtonElement;
+
+const FRAMEWORK_STATUS_POLL_MS = 5_000;
+
+type FrameworkStatus = {
+  online: boolean;
+  frameworkBaseUrl: string;
+  error?: string;
+};
 
 let settings = await bridge.request("get_settings") as DesktopShellSettings;
 let browserFrameworkOrigin = (
@@ -36,12 +45,70 @@ let browserFrameworkOrigin = (
 let currentUrl: URL | null = null;
 let zoomLevel = settings.zoomLevel;
 let toastTimer = 0;
+let frameworkOnline: boolean | null = null;
+let frameworkStatusTimer = 0;
+let frameworkStatusGeneration = 0;
 
 function toast(message: string): void {
   toastElement.textContent = message;
   toastElement.dataset.visible = "true";
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => delete toastElement.dataset.visible, 3500);
+}
+
+function errorMessage(error: unknown, fallback = "Desktop action failed"): string {
+  return error instanceof Error ? error.message : String(error || fallback);
+}
+
+function runUiTask(task: Promise<unknown>, fallback?: string): void {
+  void task.catch((error) => toast(errorMessage(error, fallback)));
+}
+
+function syncFrameworkOfflineControl(): void {
+  frameworkOffline.hidden = !currentUrl || frameworkOnline !== false;
+}
+
+function applyFrameworkStatus(status: FrameworkStatus): void {
+  const wasOnline = frameworkOnline;
+  frameworkOnline = status.online;
+  frameworkOffline.title = status.online
+    ? ""
+    : status.error || `Framework unavailable at ${status.frameworkBaseUrl}`;
+  syncFrameworkOfflineControl();
+  if (status.online && wasOnline === false && currentUrl) {
+    toast("Framework connection restored");
+  }
+}
+
+function stopFrameworkStatusPoll(): void {
+  frameworkStatusGeneration += 1;
+  clearTimeout(frameworkStatusTimer);
+  frameworkStatusTimer = 0;
+}
+
+function startFrameworkStatusPoll(): void {
+  stopFrameworkStatusPoll();
+  const generation = frameworkStatusGeneration;
+  const poll = async (): Promise<void> => {
+    if (generation !== frameworkStatusGeneration || !currentUrl) return;
+    try {
+      const status = await bridge.request("get_framework_status") as FrameworkStatus;
+      if (generation === frameworkStatusGeneration) applyFrameworkStatus(status);
+    } catch (error) {
+      if (generation === frameworkStatusGeneration) {
+        applyFrameworkStatus({
+          online: false,
+          frameworkBaseUrl: browserFrameworkOrigin,
+          error: errorMessage(error, "Framework unavailable"),
+        });
+      }
+    } finally {
+      if (generation === frameworkStatusGeneration && currentUrl) {
+        frameworkStatusTimer = window.setTimeout(poll, FRAMEWORK_STATUS_POLL_MS);
+      }
+    }
+  };
+  void poll();
 }
 
 function setAssetBadge(version: string | null): void {
@@ -88,6 +155,7 @@ async function showApp(rawUrl: string): Promise<void> {
   launcherView.hidden = true;
   document.body.dataset.appOpen = "true";
   setNavigation(false, false);
+  startFrameworkStatusPoll();
   try {
     await bridge.request("navigate_app", { url: url.href });
   } catch (error) {
@@ -97,17 +165,21 @@ async function showApp(rawUrl: string): Promise<void> {
 }
 
 function showHome(): void {
+  stopFrameworkStatusPoll();
   currentUrl = null;
+  frameworkOnline = null;
+  syncFrameworkOfflineControl();
   launcherView.hidden = false;
   launcherView.src = "./android_shell/index.html";
   delete document.body.dataset.appOpen;
   pageTitle.textContent = "TE2 Desktop";
   setNavigation(false, false);
-  void bridge.request("view_action", { action: "home" });
-  void bridge.request("set_window_title", { title: "TE2 Desktop" });
+  runUiTask(bridge.request("view_action", { action: "home" }));
+  runUiTask(bridge.request("set_window_title", { title: "TE2 Desktop" }));
 }
 
 function handleNavigation(navigation: AppNavigation): void {
+  const hadAppOpen = currentUrl !== null;
   try {
     currentUrl = new URL(navigation.url);
     if (currentUrl.origin === browserFrameworkOrigin && currentUrl.pathname === "/") {
@@ -121,6 +193,7 @@ function handleNavigation(navigation: AppNavigation): void {
   document.body.dataset.appOpen = "true";
   pageTitle.textContent = navigation.title || "TE2 Desktop";
   setNavigation(navigation.canGoBack, navigation.canGoForward);
+  if (!hadAppOpen) startFrameworkStatusPoll();
 }
 
 window.__te2DesktopNativeRequest = async (method, params = {}) => {
@@ -161,23 +234,31 @@ bridge.onSteer((action) => {
   if (action === "home") showHome();
 });
 
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason as { code?: unknown } | undefined;
+  if (reason?.code !== "FRAMEWORK_UNAVAILABLE") return;
+  event.preventDefault();
+  toast(errorMessage(event.reason, "Framework unavailable"));
+});
+
 document.querySelector("#home")?.addEventListener("click", showHome);
-back.addEventListener("click", () => void bridge.request("view_action", { action: "back" }));
-forward.addEventListener("click", () => void bridge.request("view_action", { action: "forward" }));
+frameworkOffline.addEventListener("click", showHome);
+back.addEventListener("click", () => runUiTask(bridge.request("view_action", { action: "back" })));
+forward.addEventListener("click", () => runUiTask(bridge.request("view_action", { action: "forward" })));
 document.querySelector("#reload")?.addEventListener(
   "click",
-  () => void bridge.request("view_action", { action: "reload" }),
+  () => runUiTask(bridge.request("view_action", { action: "reload" })),
 );
-zoomOut.addEventListener("click", () => void setZoom(zoomLevel - 0.1));
-zoomReset.addEventListener("click", () => void setZoom(1));
-zoomIn.addEventListener("click", () => void setZoom(zoomLevel + 0.1));
+zoomOut.addEventListener("click", () => runUiTask(setZoom(zoomLevel - 0.1)));
+zoomReset.addEventListener("click", () => runUiTask(setZoom(1)));
+zoomIn.addEventListener("click", () => runUiTask(setZoom(zoomLevel + 0.1)));
 document.querySelector("#recents")?.addEventListener(
   "click",
-  () => void bridge.request("view_action", { action: "recents" }),
+  () => runUiTask(bridge.request("view_action", { action: "recents" })),
 );
 document.querySelector("#lock")?.addEventListener(
   "click",
-  () => void bridge.request("view_action", { action: "lock" }),
+  () => runUiTask(bridge.request("view_action", { action: "lock" })),
 );
 document.querySelector("#quit-app")?.addEventListener("click", async () => {
   const appId = appIdFromCurrentUrl();
@@ -194,15 +275,15 @@ document.querySelector("#quit-app")?.addEventListener("click", async () => {
 });
 document.querySelector("#minimize-window")?.addEventListener(
   "click",
-  () => void bridge.request("window_control", { action: "minimize" }),
+  () => runUiTask(bridge.request("window_control", { action: "minimize" })),
 );
 document.querySelector("#maximize-window")?.addEventListener(
   "click",
-  () => void bridge.request("window_control", { action: "toggle_maximize" }),
+  () => runUiTask(bridge.request("window_control", { action: "toggle_maximize" })),
 );
 document.querySelector("#close-window")?.addEventListener(
   "click",
-  () => void bridge.request("window_control", { action: "close" }),
+  () => runUiTask(bridge.request("window_control", { action: "close" })),
 );
 
 launcherView.src = "./android_shell/index.html";

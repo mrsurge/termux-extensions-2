@@ -6,10 +6,16 @@ import type {
   DesktopSteerAction,
   NativeRequestMethod,
 } from "../shared/contracts";
+import { unwrapNativeRequestResult } from "../shared/native-request-contracts";
 
 const bridge: DesktopBridge = {
-  request(method: NativeRequestMethod, params: Record<string, unknown> = {}) {
-    return ipcRenderer.invoke("te2-desktop:native-request", method, params);
+  async request(method: NativeRequestMethod, params: Record<string, unknown> = {}) {
+    const result = await ipcRenderer.invoke(
+      "te2-desktop:native-request",
+      method,
+      params,
+    );
+    return unwrapNativeRequestResult(result);
   },
   onAppNavigation(callback: (navigation: AppNavigation) => void) {
     const listener = (_event: Electron.IpcRendererEvent, navigation: AppNavigation) => {

@@ -58,12 +58,65 @@ function proxyHeaders(
 function writeUpgradeResponse(
   downstream: Duplex,
   response: http.IncomingMessage,
-): void {
+): boolean {
   const lines = [`HTTP/${response.httpVersion} ${response.statusCode} ${response.statusMessage}`];
   for (let index = 0; index < response.rawHeaders.length; index += 2) {
     lines.push(`${response.rawHeaders[index]}: ${response.rawHeaders[index + 1]}`);
   }
-  downstream.write(`${lines.join("\r\n")}\r\n\r\n`);
+  return writeSocket(downstream, `${lines.join("\r\n")}\r\n\r\n`);
+}
+
+function writeSocket(socket: Duplex, data: string | Buffer): boolean {
+  if (socket.destroyed || !socket.writable || socket.writableEnded) return false;
+  try {
+    socket.write(data, (error) => {
+      if (!error) return;
+      trace(`socket write stopped: ${error.message}`);
+      if (!socket.destroyed) socket.destroy();
+    });
+    return true;
+  } catch (error) {
+    trace(
+      `socket write stopped: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    if (!socket.destroyed) socket.destroy();
+    return false;
+  }
+}
+
+export function bridgeRelaySockets(downstream: Duplex, upstream: Duplex): void {
+  let closed = false;
+  const closePair = (): void => {
+    if (closed) return;
+    closed = true;
+    downstream.unpipe(upstream);
+    upstream.unpipe(downstream);
+    if (!downstream.destroyed) downstream.destroy();
+    if (!upstream.destroyed) upstream.destroy();
+  };
+  const closeOnError = (side: string) => (error: Error): void => {
+    trace(`${side} tunnel socket stopped: ${error.message}`);
+    closePair();
+  };
+
+  downstream.once("error", closeOnError("browser"));
+  upstream.once("error", closeOnError("framework"));
+  downstream.once("end", closePair);
+  upstream.once("end", closePair);
+  downstream.once("close", closePair);
+  upstream.once("close", closePair);
+
+  if (
+    downstream.destroyed ||
+    upstream.destroyed ||
+    !downstream.readable ||
+    !upstream.readable
+  ) {
+    closePair();
+    return;
+  }
+  downstream.pipe(upstream, { end: false });
+  upstream.pipe(downstream, { end: false });
 }
 
 export async function startFrameworkRelay(
@@ -74,6 +127,11 @@ export async function startFrameworkRelay(
   let browserOrigin = "";
   let assetsEnabled = (await assets.missingRequiredAsset()) === null;
   const activeSockets = new Set<Duplex>();
+  const trackSocket = (socket: Duplex, side: string): void => {
+    activeSockets.add(socket);
+    socket.on("error", (error) => trace(`${side} socket stopped: ${error.message}`));
+    socket.once("close", () => activeSockets.delete(socket));
+  };
 
   const server = http.createServer((request, response) => {
     void (async () => {
@@ -109,6 +167,14 @@ export async function startFrameworkRelay(
         path: request.url,
         headers: proxyHeaders(request.headers, target),
       }, (upstreamResponse) => {
+        const stopUpstreamResponse = (): void => {
+          if (!upstreamResponse.destroyed) upstreamResponse.destroy();
+        };
+        response.once("close", stopUpstreamResponse);
+        upstreamResponse.once("error", (error) => {
+          trace(`HTTP response stream stopped: ${error.message}`);
+          if (!response.destroyed) response.destroy();
+        });
         const headers = { ...upstreamResponse.headers };
         const location = headers.location;
         if (location) {
@@ -127,6 +193,11 @@ export async function startFrameworkRelay(
         response.writeHead(upstreamResponse.statusCode || 502, headers);
         upstreamResponse.pipe(response);
       });
+      const stopUpstreamRequest = (): void => {
+        if (!upstream.destroyed) upstream.destroy();
+      };
+      request.once("aborted", stopUpstreamRequest);
+      response.once("close", stopUpstreamRequest);
       upstream.on("error", (error) => {
         if (response.headersSent) response.destroy(error);
         else {
@@ -145,8 +216,7 @@ export async function startFrameworkRelay(
   });
 
   server.on("connection", (socket) => {
-    activeSockets.add(socket);
-    socket.once("close", () => activeSockets.delete(socket));
+    trackSocket(socket, "browser");
   });
 
   server.on("upgrade", (request, downstream, downstreamHead) => {
@@ -160,20 +230,32 @@ export async function startFrameworkRelay(
       headers: proxyHeaders(request.headers, target),
     });
     upstreamRequest.on("upgrade", (upstreamResponse, upstream, upstreamHead) => {
-      activeSockets.add(upstream);
-      upstream.once("close", () => activeSockets.delete(upstream));
-      writeUpgradeResponse(downstream, upstreamResponse);
-      if (upstreamHead.length) downstream.write(upstreamHead);
-      if (downstreamHead.length) upstream.write(downstreamHead);
-      downstream.pipe(upstream).pipe(downstream);
+      trackSocket(upstream, "framework");
+      const wroteResponse = writeUpgradeResponse(downstream, upstreamResponse);
+      const wroteUpstreamHead = !upstreamHead.length || writeSocket(downstream, upstreamHead);
+      const wroteDownstreamHead = !downstreamHead.length || writeSocket(upstream, downstreamHead);
+      if (!wroteResponse || !wroteUpstreamHead || !wroteDownstreamHead) {
+        if (!downstream.destroyed) downstream.destroy();
+        if (!upstream.destroyed) upstream.destroy();
+        return;
+      }
+      bridgeRelaySockets(downstream, upstream);
     });
     upstreamRequest.on("response", (upstreamResponse) => {
-      writeUpgradeResponse(downstream, upstreamResponse);
+      if (!writeUpgradeResponse(downstream, upstreamResponse)) {
+        upstreamResponse.destroy();
+        return;
+      }
+      upstreamResponse.once("error", (error) => {
+        trace(`WebSocket rejection stream stopped: ${error.message}`);
+        if (!downstream.destroyed) downstream.destroy();
+      });
+      downstream.once("close", () => upstreamResponse.destroy());
       upstreamResponse.pipe(downstream);
     });
     upstreamRequest.on("error", (error) => {
-      console.error(`[te2-desktop-relay] WebSocket upgrade failed: ${error.message}`);
-      downstream.destroy(error);
+      trace(`WebSocket upgrade failed: ${error.message}`);
+      if (!downstream.destroyed) downstream.destroy();
     });
     upstreamRequest.end();
   });

@@ -22,6 +22,8 @@ button:disabled { color: #616970; }
 .header-title { min-width: 0; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 12px; }
 #page-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .asset-version { flex: 0 0 auto; border: 1px solid var(--border); border-radius: 10px; padding: 2px 7px; color: var(--muted); font-size: 11px; }
+.framework-offline { flex: 0 1 auto; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--danger); background: rgba(185, 71, 71, 0.16); color: #ffb4b4; }
+.framework-offline:hover:not(:disabled) { background: rgba(185, 71, 71, 0.32); }
 .zoom-reset { min-width: 52px; }
 .danger:hover:not(:disabled), .close-window:hover { background: var(--danger); color: white; }
 .window-controls { height: 100%; padding-right: 4px; border-left: 1px solid var(--border); }
@@ -36,5 +38,6 @@ body:not([data-app-open="true"]) .app-only { display: none; }
 @media (max-width: 880px) {
   .desktop-header { grid-template-columns: auto minmax(80px, 1fr) auto; }
   .header-title .asset-version { display: none; }
+  .framework-offline { max-width: 170px; }
   .app-actions { position: absolute; top: var(--header-height); right: 0; border: 1px solid var(--border); background: var(--surface); }
 }

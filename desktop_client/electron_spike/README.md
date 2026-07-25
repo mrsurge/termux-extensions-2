@@ -43,6 +43,22 @@ The packaged `TE2Desktop` launcher supplies `--no-sandbox` to the bundled
 - A stable free `127.0.0.1` port relays HTTP, HTTPS, Socket.IO, raw WebSocket,
   and SSE traffic to the configured framework origin. Changing the configured
   target retargets that listener and does not restart the desktop process.
+- Trusted shell IPC uses structured request results. Expected framework
+  refusal, timeout, reset, and abort failures are reduced to concise recoverable
+  errors instead of escaping Electron's native-request handler with a main
+  process stack trace.
+- Framework control requests use a five-second timeout. Launcher refreshes are
+  coalesced, the local Settings card renders before the network probe, and the
+  launcher continues polling so recovered framework apps reappear.
+- While a framework app is open, one sequential status probe drives a native
+  header `Framework offline — Launcher` control. Transient failures leave the
+  app view in place; recovery clears the control, while the user can always
+  close the app view and return to the local launcher without network access.
+- Relay WebSocket tunnels own both socket lifetimes. Error, FIN, end, or close
+  on either peer unpipes and destroys the pair, and guarded handshake writes
+  cannot target an ended socket. HTTP and SSE proxy streams similarly cancel
+  their upstream work when the browser side closes. Expected network teardown
+  never escapes as an Electron main-process exception.
 - Inventory-approved installed assets are served by the same relay origin. This
   preserves the origin required by Monaco module workers while keeping dynamic
   framework traffic live.

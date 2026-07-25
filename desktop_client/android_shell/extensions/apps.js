@@ -103,15 +103,47 @@ function renderApps(root, host, payload) {
 let activeRoot = null;
 let activeHost = null;
 let refreshTimer = 0;
+let refreshPromise = null;
 
-async function refresh() {
-  if (!activeRoot || !activeHost) return;
+async function runRefresh(root, host) {
   try {
-    renderApps(activeRoot, activeHost, await activeHost.getApps());
+    const payload = await host.getApps();
+    if (root === activeRoot && host === activeHost) {
+      renderApps(root, host, payload);
+    }
   } catch (error) {
-    setFrameworkStatus(false, "");
-    activeRoot.innerHTML = '<div class="empty-state">Settings is temporarily unavailable.</div>';
+    if (root === activeRoot && host === activeHost) {
+      setFrameworkStatus(false, "");
+      root.innerHTML = '<div class="empty-state">Settings is temporarily unavailable.</div>';
+    }
   }
+}
+
+function refresh() {
+  if (!activeRoot || !activeHost) return Promise.resolve();
+  if (refreshPromise) return refreshPromise;
+  const root = activeRoot;
+  const host = activeHost;
+  const nextRefresh = runRefresh(root, host);
+  refreshPromise = nextRefresh;
+  void nextRefresh.finally(() => {
+    if (refreshPromise === nextRefresh) refreshPromise = null;
+  });
+  return nextRefresh;
+}
+
+async function renderLocalThenRefresh(root, host) {
+  try {
+    if (typeof host.getLocalApps === "function") {
+      const payload = await host.getLocalApps();
+      if (root === activeRoot && host === activeHost) {
+        renderApps(root, host, payload);
+      }
+    }
+  } catch {
+    // The full refresh below owns the fallback state.
+  }
+  await refresh();
 }
 
 export const appsExtension = {
@@ -119,7 +151,7 @@ export const appsExtension = {
   mount(root, host) {
     activeRoot = root;
     activeHost = host;
-    void refresh();
+    void renderLocalThenRefresh(root, host);
     refreshTimer = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
     }, 5000);
@@ -130,6 +162,7 @@ export const appsExtension = {
         refreshTimer = 0;
         activeRoot = null;
         activeHost = null;
+        refreshPromise = null;
       },
     };
   },

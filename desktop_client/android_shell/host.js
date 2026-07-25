@@ -173,11 +173,21 @@ function frameworkRequest(path, { method = "GET", body } = {}) {
   return nativeRequest("framework_request", params);
 }
 
-async function getApps() {
+async function getLocalApps() {
   const settings = await getSettings();
-  const frameworkBaseUrl = getFrameworkOrigin(settings);
+  return {
+    apps: [{ ...LOCAL_SETTINGS_APP }],
+    online: false,
+    frameworkBaseUrl: getFrameworkOrigin(settings),
+  };
+}
+
+async function getApps() {
+  const local = await getLocalApps();
+  const settings = await getSettings();
+  const frameworkBaseUrl = local.frameworkBaseUrl;
   const browserOrigin = await getBrowserFrameworkOrigin(settings);
-  const apps = [{ ...LOCAL_SETTINGS_APP }];
+  const apps = local.apps;
 
   try {
     const catalog = await frameworkRequest("/api/apps/catalog");
@@ -264,6 +274,7 @@ export function toast(message) {
 }
 
 export const desktopShellHost = {
+  getLocalApps,
   getApps,
   reloadApps,
   openApp,

@@ -16,6 +16,10 @@ import {
 import { clearFrameworkAssetCaches } from "./asset-cache";
 import { DesktopAssetManager, MIME_TYPES } from "./assets";
 import { DesktopDialogHost } from "./dialog-host";
+import {
+  FRAMEWORK_REQUEST_TIMEOUT_MS,
+  frameworkConnectionError,
+} from "./framework-errors";
 import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
 import {
   ELECTRON_APP_VIEW_IDENTITY,
@@ -35,6 +39,7 @@ import type {
   DesktopShellSettings,
   NativeRequestMethod,
 } from "../shared/contracts";
+import { settleNativeRequest } from "../shared/native-request-contracts";
 
 const SHELL_SCHEME = "te2-desktop";
 const SHELL_HOST = "shell";
@@ -143,7 +148,7 @@ async function frameworkRequest(params: FrameworkRequestParams): Promise<unknown
   const init: RequestInit = {
     method,
     headers,
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(FRAMEWORK_REQUEST_TIMEOUT_MS),
   };
   if (method === "POST") {
     headers["Content-Type"] = "application/json";
@@ -151,7 +156,12 @@ async function frameworkRequest(params: FrameworkRequestParams): Promise<unknown
       ? ""
       : JSON.stringify(params.body);
   }
-  const response = await fetch(`${configuredFrameworkOrigin}${path}`, init);
+  let response: Response;
+  try {
+    response = await fetch(`${configuredFrameworkOrigin}${path}`, init);
+  } catch (error) {
+    throw frameworkConnectionError(error);
+  }
   let envelope: unknown;
   try {
     envelope = await response.json();
@@ -188,11 +198,11 @@ async function fwsStatus(): Promise<{ available: boolean; url: string; error?: s
   const url = `${relay.browserOrigin}/fws`;
   try {
     const response = await fetch(`${configuredFrameworkOrigin}/fws`, {
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(FRAMEWORK_REQUEST_TIMEOUT_MS),
     });
     return { available: response.status >= 200 && response.status < 400, url };
   } catch (error) {
-    return { available: false, url, error: errorMessage(error) };
+    return { available: false, url, error: frameworkConnectionError(error).message };
   }
 }
 
@@ -657,7 +667,7 @@ async function main(): Promise<void> {
       if (!mainWindow || event.sender !== mainWindow.webContents) {
         throw new Error("Rejected desktop request from an untrusted renderer");
       }
-      return nativeRequest(method, params);
+      return settleNativeRequest(() => nativeRequest(method, params));
     },
   );
   ipcMain.handle("te2-desktop:app-view-control", handleAppViewControl);
