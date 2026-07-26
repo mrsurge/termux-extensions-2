@@ -199,6 +199,50 @@ test('editor RPC calls are reliable while notifications remain volatile', async 
   assert.equal(socket.volatileEmits.length, 1);
 });
 
+test('required editor publications use request-response transport without volatile replay', async () => {
+  const { createEditorRpcTransport } = await importTypeScript(
+    'monaco_editor/editor_rpc_transport.ts',
+  );
+  const socket = new FakeSocket();
+  socket.connected = true;
+  const publishErrors = [];
+  const transport = createEditorRpcTransport({
+    getSocket: () => socket,
+    setTimeoutFn: setTimeout,
+    clearTimeoutFn: clearTimeout,
+    onReliablePublishError: (method, error) => {
+      publishErrors.push({ method, error });
+    },
+  });
+  transport.attachSocket(socket);
+
+  assert.equal(
+    transport.publishReliable(
+      'editor.openComplete.publish',
+      { request_id: 'open-1', path: '/workspace/main.rs' },
+      { timeoutMs: 5000 },
+    ),
+    true,
+  );
+  assert.equal(socket.rawEmits.length, 1);
+  assert.equal(socket.volatileEmits.length, 0);
+
+  socket.trigger('disconnect', 'transport close');
+  await settlePromises();
+  assert.equal(publishErrors.length, 1);
+  assert.equal(publishErrors[0].method, 'editor.openComplete.publish');
+  assert.match(publishErrors[0].error.message, /editor rpc socket disconnected/);
+
+  const editorSource = fs.readFileSync(
+    path.join(appRoot, 'monaco_editor/m_editor_app.ts'),
+    'utf8',
+  );
+  assert.match(
+    editorSource,
+    /eventName === "editor_open_complete"[\s\S]{0,300}publishReliable\([\s\S]{0,200}openCompletePublish/,
+  );
+});
+
 test('rapid WBA model opens run single-flight and retain only the latest document', async () => {
   const { createEditorWorkbenchRuntime } = await importTypeScript(
     'monaco_editor/editor_workbench_runtime.ts',

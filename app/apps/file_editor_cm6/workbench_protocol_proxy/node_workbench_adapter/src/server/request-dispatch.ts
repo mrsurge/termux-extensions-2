@@ -60,6 +60,22 @@ export interface WorkbenchLike {
   selectExtensionLog: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
+  resolveLanguageId: (
+    path: string,
+    text: string,
+    requestedLanguageId?: unknown,
+  ) => string;
+  activateLanguage: (languageId: string) => Promise<Record<string, unknown>>;
+  activateByEvent: (
+    event: unknown,
+    activationKind?: number,
+    timeoutMs?: number,
+  ) => Promise<unknown>;
+  activateExtension: (
+    extensionId: unknown,
+    activationEvent?: unknown,
+    timeoutMs?: number,
+  ) => Promise<unknown>;
   openFile: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
@@ -165,6 +181,26 @@ function failure(
 
 function missingPathError(id: unknown): Record<string, unknown> {
   return failure(id, -32602, "Invalid params: provide path or uri");
+}
+
+const LANGUAGE_ACTIVATION_METHODS = new Set([
+  "vscode.documentSymbols",
+  "vscode.foldingRanges",
+  "vscode.hover",
+  "vscode.completions",
+  "vscode.documentColors",
+  "vscode.colorPresentations",
+  "vscode.inlayHints",
+  "vscode.inlineCompletions",
+  "vscode.semanticTokens",
+  "vscode.semanticTokensLegend",
+  "vscode.semanticTokensRange",
+]);
+
+function boundedTimeout(value: unknown, fallback = 30000): number {
+  const timeout = Number(value);
+  if (!Number.isFinite(timeout)) return fallback;
+  return Math.max(1000, Math.min(120000, timeout));
 }
 
 function resetDisconnectedSession(session: AdapterSessionState): void {
@@ -378,6 +414,39 @@ export async function dispatchJsonRpcRequest(
     }
   }
 
+  if (method === "extensions.activateByEvent") {
+    try {
+      const activationKind = Number.isFinite(Number(params.activationKind))
+        ? Number(params.activationKind)
+        : 0;
+      return success(
+        id,
+        await runtime.wb.activateByEvent(
+          params.event,
+          activationKind,
+          boundedTimeout(params.timeoutMs),
+        ),
+      );
+    } catch (error) {
+      return failure(id, -32602, error);
+    }
+  }
+
+  if (method === "extensions.activate") {
+    try {
+      return success(
+        id,
+        await runtime.wb.activateExtension(
+          params.extensionId,
+          params.activationEvent,
+          boundedTimeout(params.timeoutMs),
+        ),
+      );
+    } catch (error) {
+      return failure(id, -32602, error);
+    }
+  }
+
   if (method === "adapter.configure") {
     if (typeof params.upstreamHttp === "string")
       runtime.state.config.upstreamHttp = params.upstreamHttp;
@@ -391,6 +460,20 @@ export async function dispatchJsonRpcRequest(
       ts_ms: runtime.nowMs(),
       config: runtime.state.config,
     });
+  }
+
+  if (LANGUAGE_ACTIVATION_METHODS.has(method)) {
+    const resolvedPath = runtime.normalizePathParam(params);
+    const languageId = runtime.wb.resolveLanguageId(
+      resolvedPath,
+      String(params.text ?? ""),
+      params.languageId,
+    );
+    try {
+      await runtime.wb.activateLanguage(languageId);
+    } catch (error) {
+      return failure(id, -32000, error);
+    }
   }
 
   if (method === "vscode.openFile") {

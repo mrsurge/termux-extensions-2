@@ -1,3 +1,5 @@
+import { activationEventsForExtension } from "./activation-events.mjs";
+
 export interface ExtensionCatalogRuntime {
   env: Record<string, string | undefined>;
   readTextFile: (path: string) => Promise<string>;
@@ -55,7 +57,10 @@ function arrayOfStrings(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
-function activationEventsFrom(ext: unknown, manifest: Record<string, unknown>): unknown[] {
+function declaredActivationEventsFrom(
+  ext: unknown,
+  manifest: Record<string, unknown>,
+): unknown[] {
   const manifestEvents = manifest.activationEvents;
   if (Array.isArray(manifestEvents)) return manifestEvents;
   const extEvents = field(ext, "activationEvents");
@@ -90,7 +95,6 @@ export function sanitizeExtensionForInit(
   const engines = manifest.engines;
   const main = typeof manifest.main === "string" ? manifest.main : undefined;
   const browser = typeof manifest.browser === "string" ? manifest.browser : undefined;
-  const activationEvents = activationEventsFrom(ext, manifest);
 
   const loc =
     recordField(ext, "extensionLocation") ??
@@ -112,10 +116,17 @@ export function sanitizeExtensionForInit(
   const metadata = recordField(ext, "metadata");
   const id = field(ext, "id") || field(ext, "extensionId") || (publisher && name ? `${String(publisher)}.${String(name)}` : null) || identifier;
   const targetPlatform = field(metadata, "targetPlatform") || field(ext, "targetPlatform") || "unknown";
-  const includeContributes = String(env.TE2_EXT_INCLUDE_CONTRIB || "1") !== "0";
-  const contributes = includeContributes ? manifest.contributes : undefined;
+  const contributes = manifest.contributes;
   const extIdentifier = recordField(ext, "identifier");
   const uuid = field(extIdentifier, "uuid") ?? field(ext, "uuid") ?? undefined;
+  const activationEvents = activationEventsForExtension({
+    main,
+    browser,
+    activationEvents: declaredActivationEventsFrom(ext, manifest),
+    contributes,
+    id,
+    identifier: extIdentifier ?? identifier ?? undefined,
+  });
 
   return {
     name,
@@ -188,7 +199,9 @@ export function buildExtensionsSnapshot(scannedExtensions: unknown[], options: E
     const ident = extensionIdentifierFrom(ext);
     if (!ident) continue;
     const events = field(ext, "activationEvents");
-    activationEvents[String(ident)] = Array.isArray(events) ? events : [];
+    if (Array.isArray(events) && events.length) {
+      activationEvents[String(ident).toLowerCase()] = events;
+    }
     const eligible = includeBuiltin || field(ext, "isBuiltin") === false;
     if (eligible) {
       const dedupeKey = String(ident).toLowerCase();

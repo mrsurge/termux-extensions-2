@@ -208,7 +208,12 @@ export interface WorkspaceLifecycleRuntimeDeps {
   readTextFile: (path: string) => Promise<string>;
   uriForPath: (path: string, authority: string | null) => Record<string, unknown>;
   uriToString: (uri: unknown) => string;
-  languageIdFromPath: (path: string) => string;
+  resolveLanguageId: (
+    path: string,
+    text: string,
+    requestedLanguageId?: unknown,
+  ) => string;
+  activateLanguage: (languageId: string) => Promise<unknown>;
   sendExt: (rpcId: number, method: string, args: unknown[], cancellable?: boolean) => unknown;
   sendExtAwaitTerminalReply: (
     rpcId: number,
@@ -551,7 +556,13 @@ export function createWorkspaceLifecycleRuntime(deps: WorkspaceLifecycleRuntimeD
     readTextFile: (path: string) => deps.readTextFile(path),
     uriForPath: (path: string, authority: string | null) => deps.uriForPath(path, authority),
     uriToString: (uri: unknown) => deps.uriToString(uri),
-    languageIdFromPath: (path: string) => deps.languageIdFromPath(path),
+    resolveLanguageId: (
+      path: string,
+      text: string,
+      requestedLanguageId?: unknown,
+    ) => deps.resolveLanguageId(path, text, requestedLanguageId),
+    activateLanguage: (languageId: string) =>
+      deps.activateLanguage(languageId),
     sendExt: (rpcId: number, method: string, args: unknown[], cancellable = false) => deps.sendExt(rpcId, method, args, cancellable),
     sendExtAwaitTerminalReply: (rpcId: number, method: string, args: unknown[], cancellable = false, timeoutMs = 3000) =>
       deps.sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),

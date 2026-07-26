@@ -137,7 +137,7 @@ declare global {
     VConsole?: any;
     __adapterConnected?: any;
     __cm6CloseLspMenus?: any;
-    __cm6EditorState?: any;
+    __cm6EditorState?: unknown;
     __cm6ApplyAutosaveContent?: (payload: unknown) => void;
     __cm6ApplyRemoteDraft?: (payload: unknown) => void;
     __cm6EnsureDraftDiffs?: any;
@@ -155,7 +155,7 @@ declare global {
     __cm6PendingPrefsChanged?: any;
     __cm6PendingWatcherError?: any;
     __cm6PendingWatcherRaiseResult?: any;
-    __cm6RefreshRecents?: any;
+    __cm6RefreshRecents?: (state: unknown) => void;
     __cm6ReloadCurrentFile?: any;
     __cm6RequestGitBaselines?: any;
     __cm6SyncState?: any;

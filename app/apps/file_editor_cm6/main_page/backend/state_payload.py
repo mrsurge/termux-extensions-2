@@ -19,8 +19,6 @@ class HistoryStoreLike(Protocol):
 
     def get_last_file(self, project_path: str | None) -> str | None: ...
 
-    def list_files(self, project_path: str) -> list[JsonObject]: ...
-
 
 class PreferencesStoreLike(Protocol):
     def get_preferences(self, project_path: str | None = None) -> JsonObject: ...
@@ -112,12 +110,14 @@ def build_state_payload(deps: StatePayloadDeps) -> JsonObject:
 
     last_file: str | None = None
     open_state_payload: JsonObject | None = None
+    recents: list[JsonObject] = []
     if project_path:
         try:
             open_state = read_sidecar_open_state(project_path, reason="sidecar_replay")
             open_state_payload = dict(open_state)
             open_file = open_state.get("openFile")
             last_file = open_file if isinstance(open_file, str) else None
+            recents = [dict(entry) for entry in open_state["recents"]]
         except Exception:
             last_file = None
     last_file_exists = bool(last_file and Path(last_file).is_file())
@@ -125,20 +125,6 @@ def build_state_payload(deps: StatePayloadDeps) -> JsonObject:
     last_file_message = ""
     if last_file and not last_file_exists:
         last_file_message = f'File "{last_file_label or last_file}" not found.'
-
-    recents_raw = deps.history.list_files(project_path) if project_path else []
-    recents: list[JsonObject] = []
-    for entry in recents_raw:
-        entry_path = entry.get("path")
-        entry_path_str = entry_path if isinstance(entry_path, str) else None
-        exists = bool(entry_path_str and Path(entry_path_str).is_file())
-        recents.append({
-            "path": entry_path_str,
-            "label": entry.get("label") or deps.format_label(entry_path_str),
-            "opened_at": entry.get("opened_at"),
-            "exists": exists,
-            "scroll_line": entry.get("scroll_line"),
-        })
 
     editor_prefs = deps.preferences.get_preferences(project_path)
     runtime_meta = get_runtime_metadata()

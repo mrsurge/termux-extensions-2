@@ -870,7 +870,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       restoredSessionActive = flag;
     },
     setIndicatorInactive: () => cacheIndicatorController.setIndicatorInactive(cacheStateBadge),
-    recordFileActivity: (payload: UnknownRecord) => uiIpcConnections.requestBackendRecordFileActivity(payload),
     setCurrentPath: (path: string) => {
       _setHostCurrentPathOnly(path);
     },
@@ -897,19 +896,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       dispatchExplorerNotification(EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated, { rel });
     },
     openWebSocket: (path: string) => fileWebSocketManager.openWebSocket(path),
-    getEditorState: () => editorState,
-    setEditorState: (state: unknown) => {
-      editorState = asUnknownRecord(state) as EditorState;
-    },
-    setCachedProjectRoot: (path: string | null) => {
-      cachedProjectRoot = path;
-    },
-    broadcastRecentsUpdate: (state: unknown) => recentsController.broadcastRecentsUpdate(asUnknownRecord(state)),
-    syncEditorState: (force?: boolean) => editorStateController.syncEditorState(force),
-    getSessionStateActiveProject: () => sessionState.activeProject || null,
-    setSessionStateActiveProject: (path: string | null) => {
-      sessionState.activeProject = path;
-    },
     jumpToCurrentFileLine: (line: number, opts?: UnknownRecord) => jumpToCurrentFileLine(line, opts),
     toast: (msg: string) => host.toast(msg),
   });

@@ -622,6 +622,9 @@ interface MonacoBootWindowLike extends Window {
     onProtocolError: function (error: unknown) {
       console.error("[editor-rpc] MessagePack protocol error", error);
     },
+    onReliablePublishError: function (method: string, error: Error) {
+      console.error("[editor-rpc] reliable publish failed", method, error);
+    },
   });
   var editorWbaRpcTransport = createEditorWbaRpcTransport({
     getSocket: function () {
@@ -1471,11 +1474,17 @@ interface MonacoBootWindowLike extends Window {
     eventName: string,
     payload: Record<string, unknown>,
   ): boolean {
+    if (eventName === "editor_open_complete") {
+      return editorRpcTransport.publishReliable(
+        EDITOR_RPC_METHODS.openCompletePublish,
+        payload,
+        { timeoutMs: 10000 },
+      );
+    }
     const eventMethodMap: Record<string, string> = {
       editor_cache_state: EDITOR_RPC_METHODS.cacheStatePublish,
       editor_draft_state: EDITOR_RPC_METHODS.draftStatePublish,
       editor_notify: EDITOR_RPC_METHODS.notifyPublish,
-      editor_open_complete: EDITOR_RPC_METHODS.openCompletePublish,
       editor_ready: EDITOR_RPC_METHODS.readyPublish,
       "editor:iframe_ready": EDITOR_RPC_METHODS.readyPublish,
       editor_diagnostics_counts: EDITOR_RPC_METHODS.diagnosticsCountsPublish,

@@ -33,6 +33,7 @@ interface EditorRpcTransportDeps {
   setTimeoutFn(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
   clearTimeoutFn(timer: ReturnType<typeof setTimeout>): void;
   onProtocolError?(error: unknown): void;
+  onReliablePublishError?(method: EditorRpcMethodName, error: Error): void;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -53,6 +54,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
   attachSocket(socket: EditorRpcSocketLike): void;
   isConnected(): boolean;
   call(method: EditorRpcMethodName, params: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<unknown>;
+  publishReliable(method: EditorRpcMethodName, params: Record<string, unknown>, opts?: { timeoutMs?: number }): boolean;
   notify(method: EditorRpcMethodName | EditorRpcNotificationName, params: Record<string, unknown>): boolean;
   onNotification(method: EditorRpcNotificationName, handler: (params: Record<string, unknown>) => void): () => void;
   getPendingRequests(): Map<string, PendingRequestEntry>;
@@ -188,6 +190,19 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     return true;
   }
 
+  function publishReliable(
+    method: EditorRpcMethodName,
+    params: Record<string, unknown>,
+    opts?: { timeoutMs?: number },
+  ): boolean {
+    if (!isConnected()) return false;
+    void call(method, params, opts).catch((error: unknown) => {
+      const resolved = error instanceof Error ? error : new Error(String(error));
+      deps.onReliablePublishError?.(method, resolved);
+    });
+    return true;
+  }
+
   function onNotification(method: EditorRpcNotificationName, handler: (params: Record<string, unknown>) => void): () => void {
     let handlers = notificationHandlers.get(method);
     if (!handlers) {
@@ -207,6 +222,7 @@ export function createEditorRpcTransport(deps: EditorRpcTransportDeps): {
     attachSocket,
     isConnected,
     call,
+    publishReliable,
     notify,
     onNotification,
     getPendingRequests: () => pending,

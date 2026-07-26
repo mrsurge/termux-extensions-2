@@ -4,10 +4,6 @@ interface OpenFlowProjectState {
   activeProjectMessage?: string;
 }
 
-interface OpenFlowEditorState {
-  activeProject?: string | null;
-}
-
 export interface OpenFileOptions {
   allowOverwrite?: boolean;
   forceRefresh?: boolean;
@@ -39,7 +35,6 @@ interface OpenFlowControllerDeps {
   getCurrentPath: () => string | null;
   setRestoredSessionActive: (flag: boolean) => void;
   setIndicatorInactive: () => void;
-  recordFileActivity: (payload: Record<string, unknown>) => Promise<unknown>;
   setCurrentPath: (path: string) => void;
   setCurrentPathExists: (exists: boolean) => void;
   setLastPickerPath: (path: string) => void;
@@ -56,13 +51,6 @@ interface OpenFlowControllerDeps {
   getCachedProjectRoot: () => string | null;
   dispatchExplorerActiveFile: (rel: string | null) => void;
   openWebSocket: (path: string) => void | Promise<void>;
-  getEditorState: () => OpenFlowEditorState | null;
-  setEditorState: (state: OpenFlowEditorState) => void;
-  setCachedProjectRoot: (path: string | null) => void;
-  broadcastRecentsUpdate: (state: OpenFlowEditorState) => void;
-  syncEditorState: (force?: boolean) => Promise<OpenFlowEditorState | null | undefined>;
-  getSessionStateActiveProject: () => string | null;
-  setSessionStateActiveProject: (path: string | null) => void;
   jumpToCurrentFileLine: (line: number, opts?: Record<string, unknown>) => void | Promise<void>;
   toast: (msg: string) => void;
 }
@@ -136,35 +124,6 @@ export function createOpenFlowController(deps: OpenFlowControllerDeps) {
       deps.setStatus('');
 
       deps.openWebSocket(resolvedTarget);
-
-      try {
-        const activity = await deps.recordFileActivity({
-          path: resolvedTarget,
-          project: deps.getCachedProjectRoot() || projectState.activeProject,
-        });
-        const activityRecord = isRecord(activity) ? activity : {};
-        const dataRecord = isRecord(activityRecord.data) ? activityRecord.data : {};
-        const next = isRecord(activityRecord.state)
-          ? activityRecord.state as OpenFlowEditorState
-          : isRecord(dataRecord.state)
-            ? dataRecord.state as OpenFlowEditorState
-            : null;
-        if (next) {
-          deps.setEditorState(next);
-          deps.setCachedProjectRoot(next.activeProject || deps.getCachedProjectRoot());
-          deps.broadcastRecentsUpdate(next);
-          deps.syncSessionPath();
-        } else {
-          const refreshed = await deps.syncEditorState(true);
-          if (refreshed) {
-            deps.broadcastRecentsUpdate(refreshed);
-            deps.setSessionStateActiveProject(refreshed.activeProject || deps.getSessionStateActiveProject());
-            deps.syncSessionPath();
-          }
-        }
-      } catch (err) {
-        console.error('Failed to record file activity:', err);
-      }
     } catch (error) {
       deps.setStatus('');
       deps.toast(`Failed to open: ${errorMessage(error)}`);

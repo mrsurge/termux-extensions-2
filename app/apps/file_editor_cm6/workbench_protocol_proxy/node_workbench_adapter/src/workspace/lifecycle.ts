@@ -69,7 +69,12 @@ export interface LifecycleRuntime {
   readTextFile: (path: string) => Promise<string>;
   uriForPath: (path: string, authority: string | null) => Record<string, unknown>;
   uriToString: (uri: unknown) => string;
-  languageIdFromPath: (path: string) => string;
+  resolveLanguageId: (
+    path: string,
+    text: string,
+    requestedLanguageId?: unknown,
+  ) => string;
+  activateLanguage: (languageId: string) => Promise<unknown>;
   sendExt: (rpcId: number, method: string, args: unknown[], cancellable?: boolean) => unknown;
   sendExtAwaitTerminalReply: (
     rpcId: number,
@@ -194,7 +199,6 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
   runtime.ensureConnected();
   const input = isRecord(params) ? params : {};
   const path = String(input.path ?? "");
-  const languageId = String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
   const authority = String(input.authority ?? runtime.authority);
   const forceRefresh = input.forceRefresh === true;
   const generation = coerceOptionalGeneration(input.generation);
@@ -214,6 +218,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
 
   const rawText = await runtime.spanTraceAsync("openFile.fs.readFile", () => runtime.readTextFile(path));
   const text = normalizeDocumentText(rawText);
+  const languageId = runtime.resolveLanguageId(path, text, input.languageId);
   const lines = runtime.spanTrace("openFile.text.splitLines", () => text.split("\n"));
   let maxLineLen = 0;
   for (const line of lines) {
@@ -343,6 +348,11 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     runtime.session.activeEditorId = prevEditorId;
     runtime.session.activeUriObj = uriObj;
     runtime.session.activeTab = prevTab;
+    void runtime.activateLanguage(languageId).catch((error) => {
+      runtime.warn(
+        `[openFile] language activation failed languageId=${languageId}: ${String((error as Error)?.message ?? error)}`,
+      );
+    });
     return { ok: true, req: null };
   }
 
@@ -427,9 +437,11 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     runtime.sendExt(runtime.extRpcIds.ExtHostEditors, "$acceptEditorPositionData", [{ [editorId]: 0 }], false);
     runtime.sendExt(runtime.extRpcIds.ExtHostDocuments, "$acceptDirtyStateChanged", [uriObj, false], false);
   });
-  runtime.spanTrace("openFile.send.activateByEvent", () =>
-    runtime.sendExt(runtime.extRpcIds.ExtHostExtensionService, "$activateByEvent", [`onLanguage:${languageId}`, 0], false),
-  );
+  void runtime.activateLanguage(languageId).catch((error) => {
+    runtime.warn(
+      `[openFile] language activation failed languageId=${languageId}: ${String((error as Error)?.message ?? error)}`,
+    );
+  });
   runtime.session.activeEditorId = editorId;
   runtime.session.activeUriObj = uriObj;
   runtime.session.activeTab = tabActive;
@@ -445,7 +457,7 @@ export function didChange(
   const input = isRecord(params) ? params : {};
   const path = String(input.path ?? "");
   const text = normalizeDocumentText(String(input.text ?? ""));
-  const languageId = String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
+  const languageId = runtime.resolveLanguageId(path, text, input.languageId);
   const authority = String(input.authority ?? runtime.authority);
   const generation = coerceOptionalGeneration(input.generation);
 
@@ -492,6 +504,14 @@ export function didChange(
     runtime.sendExt(runtime.extRpcIds.ExtHostDocuments, "$acceptModelChanged", [uriObj, event, true], false);
   }
   runtime.session.docCharCount.set(path, text.length);
+  if (runtime.state.activePath === path) {
+    runtime.state.activeLanguageId = languageId;
+  }
+  void runtime.activateLanguage(languageId).catch((error) => {
+    runtime.warn(
+      `[didChange] language activation failed languageId=${languageId}: ${String((error as Error)?.message ?? error)}`,
+    );
+  });
   runtime.log(`[didChange] ts=${Date.now()} path=${path} ver=${nextVersion} bytes=${text.length} prevLines=${prevLines} prevLastLineLen=${prevLastLineLen} newLines=${newLines.length}`);
   if (ack) {
     return ack.promise.then((reply) => ({
