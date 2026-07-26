@@ -366,14 +366,16 @@
   .terminal-drawer.terminal-drawer--collapsed .terminal-header,
   .terminal-drawer.terminal-drawer--collapsed .console-header,
   .terminal-drawer.terminal-drawer--collapsed .problems-header,
-  .terminal-drawer.terminal-drawer--collapsed .extension-log-header {
+  .terminal-drawer.terminal-drawer--collapsed .extension-log-header,
+  .terminal-drawer.terminal-drawer--collapsed .code-inspector-header {
     display: none !important;
   }
 
   .terminal-drawer.terminal-drawer--collapsed #terminal-container,
   .terminal-drawer.terminal-drawer--collapsed #console-container,
   .terminal-drawer.terminal-drawer--collapsed #problems-container,
-  .terminal-drawer.terminal-drawer--collapsed #extension-log-container {
+  .terminal-drawer.terminal-drawer--collapsed #extension-log-container,
+  .terminal-drawer.terminal-drawer--collapsed #code-inspector-container {
     height: 1px;
     min-height: 1px;
     max-height: 1px;
@@ -1089,6 +1091,91 @@
     color: var(--fg, #e6edf3);
     font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
     font-size: 12px;
+  }
+  .code-inspector-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 30px;
+    padding: 4px 8px;
+    background: var(--bg, #0b0f1a);
+    border-bottom: 1px solid var(--border, #333);
+    color: var(--fg, #e6edf3);
+    font-size: 12px;
+  }
+  .code-inspector-target {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
+  }
+  .code-inspector-summary {
+    margin-left: auto;
+    color: var(--fg-dim, #8b949e);
+    white-space: nowrap;
+  }
+  #code-inspector-container {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    background:
+      linear-gradient(90deg, color-mix(in srgb, var(--accent, #58a6ff) 5%, transparent), transparent 28%),
+      var(--bg, #0b0f1a);
+    color: var(--fg, #e6edf3);
+    font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
+    font-size: 12px;
+  }
+  #code-inspector-tree {
+    padding: 5px 0 12px;
+  }
+  .code-inspector-node {
+    min-width: 0;
+  }
+  .code-inspector-row {
+    display: grid;
+    grid-template-columns: 14px 18px minmax(max-content, auto) minmax(0, 1fr);
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    min-height: 25px;
+    padding: 2px 10px 2px calc(8px + var(--code-inspector-depth, 0) * 16px);
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .code-inspector-row:hover,
+  .code-inspector-row:focus-visible {
+    background: color-mix(in srgb, var(--accent, #58a6ff) 16%, transparent);
+    outline: none;
+  }
+  .code-inspector-twisty,
+  .code-inspector-icon {
+    color: var(--fg-dim, #8b949e);
+    text-align: center;
+  }
+  .code-inspector-label,
+  .code-inspector-description {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .code-inspector-description {
+    color: var(--fg-dim, #8b949e);
+  }
+  .code-inspector-branch-state,
+  #code-inspector-empty {
+    padding: 10px 14px;
+    color: var(--fg-dim, #8b949e);
+  }
+  .code-inspector-branch-state {
+    padding-left: calc(30px + var(--code-inspector-depth, 0) * 16px);
+  }
+  .code-inspector-branch-state.is-error {
+    color: var(--danger, #f85149);
   }
   #extension-activity-list,
   #extension-log-output {
@@ -2240,6 +2327,7 @@
       <button class="drawer-tab" data-tab="console">Console</button>
       <button class="drawer-tab" data-tab="problems">Problems</button>
       <button class="drawer-tab" data-tab="extensions">Extensions</button>
+      <button class="drawer-tab" data-tab="code-inspector">Code Inspector</button>
     </div>
     <div class="terminal-header" data-drawer-panel="terminal">
       <div class="terminal-shell-dropdown">
@@ -2291,6 +2379,15 @@
       <div id="extension-activity-list"></div>
       <pre id="extension-log-output" hidden></pre>
       <div id="extension-log-empty">No extension activity yet.</div>
+    </div>
+    <div id="code-inspector-header" class="code-inspector-header" data-drawer-panel="code-inspector" style="display:none;">
+      <span id="code-inspector-target" class="code-inspector-target">No active inspection</span>
+      <span id="code-inspector-summary" class="code-inspector-summary"></span>
+      <button class="console-clear-btn" id="code-inspector-collapse" type="button" title="Collapse Code Inspector" aria-label="Collapse Code Inspector">▼</button>
+    </div>
+    <div id="code-inspector-container" data-drawer-panel="code-inspector" style="display:none;">
+      <div id="code-inspector-tree" role="tree" aria-label="Code navigation results"></div>
+      <div id="code-inspector-empty" role="status" aria-live="polite">Choose a code navigation action from the editor context menu.</div>
     </div>
   </div>
 

@@ -40,6 +40,7 @@ html.hc-light, html.hc-light body {
 .monaco-editor-touch-selections > .selector > .text-cursor,
 .monaco-editor-touch-selections > .selector > .bottom-cursor,
 .monaco-editor-touch-selector-menu-stack,
+.monaco-editor-touch-selector-menu-stack > .navigation-row,
 .monaco-editor-touch-selector-menu-stack > .selection-adjustment-row,
 .monaco-editor-touch-selector-menu,
 .monaco-editor-touch-selector-menu > .menu-item {
@@ -118,6 +119,18 @@ html.hc-light, html.hc-light body {
 
 .monaco-editor-touch-selector-menu-stack.show {
   display: flex;
+}
+
+.monaco-editor-touch-selector-menu-stack > .navigation-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-bottom: -1px;
+}
+
+.monaco-editor-touch-selector-menu-stack > .navigation-row:empty {
+  display: none;
 }
 
 .monaco-editor-touch-selector-menu-stack > .selection-adjustment-row {

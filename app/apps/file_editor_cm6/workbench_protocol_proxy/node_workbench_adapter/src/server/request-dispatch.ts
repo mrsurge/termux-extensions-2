@@ -86,6 +86,24 @@ export interface WorkbenchLike {
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
   hover: (params: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  references: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  implementations: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  prepareCallHierarchy: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  incomingCalls: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  outgoingCalls: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  releaseCallHierarchy: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown>;
   completions: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
@@ -187,6 +205,9 @@ const LANGUAGE_ACTIVATION_METHODS = new Set([
   "vscode.documentSymbols",
   "vscode.foldingRanges",
   "vscode.hover",
+  "vscode.references",
+  "vscode.implementations",
+  "vscode.callHierarchy.prepare",
   "vscode.completions",
   "vscode.documentColors",
   "vscode.colorPresentations",
@@ -564,6 +585,78 @@ export async function dispatchJsonRpcRequest(
       timeoutMs: params.timeoutMs,
     });
     return success(id, result);
+  }
+
+  if (method === "vscode.references") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
+    return success(
+      id,
+      await runtime.wb.references({
+        path: resolvedPath,
+        authority,
+        languageId: params.languageId,
+        lineNumber: params.lineNumber,
+        column: params.column,
+        timeoutMs: params.timeoutMs,
+      }),
+    );
+  }
+
+  if (method === "vscode.implementations") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
+    return success(
+      id,
+      await runtime.wb.implementations({
+        path: resolvedPath,
+        authority,
+        languageId: params.languageId,
+        lineNumber: params.lineNumber,
+        column: params.column,
+        timeoutMs: params.timeoutMs,
+      }),
+    );
+  }
+
+  if (method === "vscode.callHierarchy.prepare") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
+    return success(
+      id,
+      await runtime.wb.prepareCallHierarchy({
+        path: resolvedPath,
+        authority,
+        languageId: params.languageId,
+        lineNumber: params.lineNumber,
+        column: params.column,
+        timeoutMs: params.timeoutMs,
+      }),
+    );
+  }
+
+  if (method === "vscode.callHierarchy.incoming") {
+    return success(id, await runtime.wb.incomingCalls(params));
+  }
+
+  if (method === "vscode.callHierarchy.outgoing") {
+    return success(id, await runtime.wb.outgoingCalls(params));
+  }
+
+  if (method === "vscode.callHierarchy.release") {
+    return success(id, runtime.wb.releaseCallHierarchy(params));
   }
 
   if (method === "vscode.completions") {

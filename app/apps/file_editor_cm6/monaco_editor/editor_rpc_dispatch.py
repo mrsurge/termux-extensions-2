@@ -12,6 +12,7 @@ from .editor_rpc_contract import (
     EDITOR_RPC_METHOD_BLUR,
     EDITOR_RPC_METHOD_BREADCRUMB_NAVIGATE,
     EDITOR_RPC_METHOD_CACHE_STATE_PUBLISH,
+    EDITOR_RPC_METHOD_CODE_INSPECTOR_PUBLISH,
     EDITOR_RPC_METHOD_DIAGNOSTICS_COUNTS_PUBLISH,
     EDITOR_RPC_METHOD_DRAFT_DIFF_GET,
     EDITOR_RPC_METHOD_DRAFT_STATE_PUBLISH,
@@ -199,6 +200,14 @@ async def dispatch_editor_rpc_request(
     if method == EDITOR_RPC_METHOD_OPEN_COMPLETE_PUBLISH:
         await emit_to_room("editor:open_complete", _payload_with_source(params, source_client))
         return {"ok": True}
+
+    if method == EDITOR_RPC_METHOD_CODE_INSPECTOR_PUBLISH:
+        from ..code_inspector_backend import publish_code_inspector_projection
+
+        return await publish_code_inspector_projection(
+            params,
+            source_client=source_client,
+        )
 
     if method == EDITOR_RPC_METHOD_DIAGNOSTICS_COUNTS_PUBLISH:
         await emit_to_room("editor:diagnostics_counts", _payload_with_source(params, source_client))

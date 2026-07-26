@@ -19,6 +19,7 @@ export const UI_IPC_RPC_METHODS = {
   hostEditorIssuesCommand: 'ui.host.editor.issues.command',
   hostEditorIssuesDump: 'ui.host.editor.issues.dump',
   hostEditorCommand: 'ui.host.editor.command',
+  hostCodeInspectorCommand: 'ui.host.codeInspector.command',
   hostDiagnosticsMention: 'ui.host.diagnostics.mention',
   hostGitBranchCheckout: 'ui.host.git.branch.checkout',
   hostGitBranchCreate: 'ui.host.git.branch.create',
@@ -55,6 +56,7 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   sidebarWindowsChanged: 'ui.sidebar.windows.changed',
   sidebarWindowActivated: 'ui.sidebar.window.activated',
   sidebarWindowReadinessChanged: 'ui.sidebar.window.readiness.changed',
+  codeInspectorChanged: 'ui.codeInspector.changed',
 } as const;
 
 type ValueOf<T> = T[keyof T];

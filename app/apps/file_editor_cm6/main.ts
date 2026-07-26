@@ -11,6 +11,7 @@ import ReconnectingWebSocket from './main_page/frontend/connections/reconnecting
 import { createConsoleDrawer } from './main_page/frontend/host-console-drawer.ts';
 import { createProblemsPanel } from './src/diagnostics/problems-panel.ts';
 import { createExtensionActivityPanel } from './main_page/frontend/ui/extension-activity.ts';
+import { createCodeInspectorPanel } from './main_page/frontend/ui/code-inspector.ts';
 import { getConsoleBridgeStatus, initConsoleBridge } from './main_page/frontend/console_bridge.js';
 import { HOME_DIR, HOME_PREFIX, simplifyAbsolute, toAbsolute, parentDir, basename, formatDisplayPath, formatDisplayDirectory, detectLanguageFromFilename, setMenuChecked, FONT_SCALE_PRESETS, requireEl } from './main_page/frontend/core/utils.ts';
 import { createAppContext } from './main_page/frontend/core/app-context.ts';
@@ -1177,6 +1178,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     createConsoleDrawer,
     createProblemsPanel,
     createExtensionActivityPanel,
+    createCodeInspectorPanel,
     initDrawerAndShortcuts,
     bindMenuToggle,
     requireEl,
@@ -1186,6 +1188,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     openFile: (path: string, opts?: OpenFileOptions) => openFile(path, opts),
     jumpToCurrentFileLine: (line: number | string) => jumpToCurrentFileLine(line),
     requestDiagnosticsMention: (payload: UnknownRecord) => uiIpcConnections.requestBackendDiagnosticsMention(payload),
+    requestCodeInspectorCommand: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostCodeInspectorCommand, payload),
     emitImeIntent: (active: boolean, params: UnknownRecord = {}) => {
       uiIpcConnections.emitUiIpcNotification(active ? 'imeFocus' : 'imeBlur', params);
     },

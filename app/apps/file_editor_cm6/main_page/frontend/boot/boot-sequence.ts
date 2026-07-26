@@ -1,5 +1,6 @@
 import {
   getBootSnapshotHostState,
+  getBootSnapshotCodeInspector,
   getBootSnapshotSessionState,
   getBootSnapshotUiPrefs,
   requestHostBootSnapshot,
@@ -88,6 +89,11 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   if (snapshotServerState) {
     deps.hydrateEditorState(snapshotServerState);
   }
+  window.dispatchEvent(
+    new CustomEvent('cm6:code-inspector-hydrate', {
+      detail: { projection: getBootSnapshotCodeInspector(bootSnapshot) },
+    }),
+  );
 
   deps.setBranchMenuHandle(deps.initBranchMenu());
 

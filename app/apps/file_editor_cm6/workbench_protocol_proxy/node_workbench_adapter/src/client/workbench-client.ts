@@ -60,6 +60,7 @@ import {
 } from "./document-content.mjs";
 import {
   createCompletionRuntime,
+  createCodeNavigationRuntime,
   createConfigurationRuntime,
   createDocumentColorRuntime,
   createDocumentContentRuntime,
@@ -118,6 +119,15 @@ import { ProviderRegistry } from "../extensions/provider-registry.mjs";
 import { ExtensionActivityRuntime } from "../extensions/activity-runtime.mjs";
 import { ExtensionActivationRuntime } from "../extensions/activation-runtime.mjs";
 import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
+import {
+  CallHierarchySessionStore,
+  prepareCallHierarchy,
+  provideImplementations,
+  provideIncomingCalls,
+  provideOutgoingCalls,
+  provideReferences,
+  releaseCallHierarchy,
+} from "../extensions/intelligence/code-navigation.mjs";
 import {
   inflateCompletionItems,
   provideCompletions,
@@ -230,8 +240,9 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$registerSignatureHelpProvider",
   "$registerDefinitionProvider",
   "$registerTypeDefinitionProvider",
-  "$registerImplementationProvider",
-  "$registerReferenceProvider",
+  "$registerImplementationSupport",
+  "$registerReferenceSupport",
+  "$registerCallHierarchyProvider",
   "$registerWorkspaceSymbolProvider",
   "$registerRenameProvider",
   "$registerDocumentFormattingSupport",
@@ -662,6 +673,7 @@ export class WorkbenchClient {
   _extensionActivation: ExtensionActivationRuntime;
   _languageResolver: ExtensionLanguageResolver;
   _providerRegistry: ProviderRegistry;
+  _callHierarchySessions: CallHierarchySessionStore;
   _useRemote: boolean;
   _authority: string;
   _productVersion: string | null;
@@ -739,6 +751,7 @@ export class WorkbenchClient {
       log: (...args) => console.log(...args),
     });
     this._providerRegistry = new ProviderRegistry();
+    this._callHierarchySessions = new CallHierarchySessionStore();
     this._useRemote = true;
     this._authority = DEFAULT_REMOTE_AUTHORITY;
     this._productVersion = null;
@@ -1027,6 +1040,37 @@ export class WorkbenchClient {
       sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
         this._sendExtPending(rpcId, method, args, cancellable, pendingOptions),
       sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      log: (...args) => console.log(...args),
+    });
+  }
+
+  _codeNavigationRuntime() {
+    return createCodeNavigationRuntime({
+      extProtocol: this.ext?.protocol ?? null,
+      languageFeaturesRpcId: _rpcIds.ExtHostLanguageFeatures,
+      authority: this._authority,
+      defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
+      useRemote: this._useRemote,
+      languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
+      findAllProviderHandles: (kind, document) =>
+        this._providerRegistry.findAllProviderHandlesForDocument(
+          kind,
+          document,
+        ),
+      waitFor: (condition, options) => waitFor(condition, options),
+      uriForPath: (filePath, authority) =>
+        this._uriForPath(filePath, authority),
+      sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
+        this._sendExtPending(
+          rpcId,
+          method,
+          args,
+          cancellable,
+          pendingOptions,
+        ),
+      sendExt: (rpcId, method, args, cancellable = false) =>
+        this._sendExt(rpcId, method, args, cancellable),
+      sessions: this._callHierarchySessions,
       log: (...args) => console.log(...args),
     });
   }
@@ -1572,6 +1616,15 @@ export class WorkbenchClient {
   }
 
   _resetSessionCaches(reason: string): void {
+    this._callHierarchySessions.releaseAll((providerHandle, sessionId) => {
+      if (!this.ext?.protocol) return;
+      this._sendExt(
+        _rpcIds.ExtHostLanguageFeatures,
+        "$releaseCallHierarchy",
+        [providerHandle, sessionId],
+        false,
+      );
+    });
     try {
       this._extRequests.rejectAll(new Error(reason || "session_reset"));
     } catch {}
@@ -1822,6 +1875,38 @@ export class WorkbenchClient {
 
   async hover(params: unknown = {}): Promise<Record<string, unknown>> {
     return provideHover(this._documentFeatureRuntime(), params);
+  }
+
+  async references(params: unknown = {}): Promise<Record<string, unknown>> {
+    return provideReferences(this._codeNavigationRuntime(), params);
+  }
+
+  async implementations(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
+    return provideImplementations(this._codeNavigationRuntime(), params);
+  }
+
+  async prepareCallHierarchy(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
+    return prepareCallHierarchy(this._codeNavigationRuntime(), params);
+  }
+
+  async incomingCalls(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
+    return provideIncomingCalls(this._codeNavigationRuntime(), params);
+  }
+
+  async outgoingCalls(
+    params: unknown = {},
+  ): Promise<Record<string, unknown>> {
+    return provideOutgoingCalls(this._codeNavigationRuntime(), params);
+  }
+
+  releaseCallHierarchy(params: unknown = {}): Record<string, unknown> {
+    return releaseCallHierarchy(this._codeNavigationRuntime(), params);
   }
 
   async _hoverSingle(

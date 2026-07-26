@@ -1,6 +1,7 @@
 import { installMarkerNavBindings, jumpToMarker } from './editor_marker_nav_utils.ts';
 import { applyLineNumberSizingForEditors } from './editor_line_number_utils.ts';
 import { ensureTouchSelection as ensureTouchSelectionUtil } from './editor_touch_menu_utils.ts';
+import type { CodeInspectorMode } from './editor_touch_menu_utils.ts';
 import { syncReadOnlyInputMode } from './editor_readonly_input_mode_utils.ts';
 import { onEditorConfigChanged } from './editor_config_change_utils.ts';
 
@@ -15,6 +16,7 @@ interface EditorUiEditorRuntimeDeps {
   getGitDiskModel(): unknown;
   getCurrentPath(): string | null;
   sendEditorMentionRequest(payload: Record<string, unknown>): boolean;
+  inspectCode?(mode: CodeInspectorMode): void;
   updateDebug(extra?: string): void;
 }
 
@@ -117,6 +119,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
       getDiffEditor: () => deps.getDiffEditor() as MonacoRuntimeDiffEditorLike | null,
       getCurrentPath: deps.getCurrentPath,
       sendEditorMentionRequest: deps.sendEditorMentionRequest,
+      inspectCode: (mode) => deps.inspectCode?.(mode),
       updateDebug: deps.updateDebug,
     });
   }

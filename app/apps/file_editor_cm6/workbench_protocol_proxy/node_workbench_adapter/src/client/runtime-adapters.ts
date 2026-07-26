@@ -6,6 +6,7 @@ import type { ConfigurationRuntime } from "./configuration";
 import type { ExtHostDispatchRuntime } from "../protocol/ext-host-dispatch";
 import type { ExtensionCatalogRuntime } from "../extensions/catalog";
 import type { CompletionRuntime } from "../extensions/intelligence/completions";
+import type { CodeNavigationRuntime } from "../extensions/intelligence/code-navigation";
 import type { DocumentColorRuntime } from "../extensions/intelligence/document-colors";
 import type { HoverRuntime } from "../extensions/intelligence/hover";
 import type { InlayHintsRuntime } from "../extensions/intelligence/inlay-hints";
@@ -179,6 +180,25 @@ export interface DocumentFeatureRuntimeDeps {
     pendingOptions: TransportPendingOptions,
   ) => { req: number; promise: Promise<unknown> };
   sleep: (ms: number) => Promise<void>;
+  log: (...args: unknown[]) => void;
+}
+
+export interface CodeNavigationRuntimeDeps {
+  extProtocol: unknown;
+  languageFeaturesRpcId: number;
+  authority: string;
+  defaultRemoteAuthority: string;
+  useRemote: boolean;
+  languageIdFromPath: (filePath: string) => string;
+  findAllProviderHandles: CodeNavigationRuntime["findAllProviderHandles"];
+  waitFor: (
+    condition: () => boolean,
+    options: { timeoutMs: number; intervalMs: number },
+  ) => Promise<boolean>;
+  uriForPath: (filePath: string, authority: string) => unknown;
+  sendExtPending: CodeNavigationRuntime["sendExtPending"];
+  sendExt: CodeNavigationRuntime["sendExt"];
+  sessions: CodeNavigationRuntime["sessions"];
   log: (...args: unknown[]) => void;
 }
 
@@ -516,6 +536,37 @@ export function createDocumentFeatureRuntime(deps: DocumentFeatureRuntimeDeps): 
       deps.sendExtPending(rpcId, method, args, cancellable, pendingOptions),
     sleep: (ms: number) => deps.sleep(ms),
     log: (...args: unknown[]) => deps.log(...args),
+  };
+}
+
+export function createCodeNavigationRuntime(
+  deps: CodeNavigationRuntimeDeps,
+): CodeNavigationRuntime {
+  return {
+    ensureConnected: () => ensureConnected(deps.extProtocol),
+    languageFeaturesRpcId: deps.languageFeaturesRpcId,
+    defaultAuthority: () =>
+      String(deps.authority ?? deps.defaultRemoteAuthority),
+    documentScheme: () => deps.useRemote ? "vscode-remote" : "file",
+    languageIdFromPath: (filePath: string) =>
+      deps.languageIdFromPath(filePath),
+    findAllProviderHandles: (kind, document) =>
+      deps.findAllProviderHandles(kind, document),
+    waitFor: (condition, options) => deps.waitFor(condition, options),
+    uriForPath: (filePath, authority) =>
+      deps.uriForPath(filePath, authority),
+    sendExtPending: (rpcId, method, args, cancellable, pendingOptions) =>
+      deps.sendExtPending(
+        rpcId,
+        method,
+        args,
+        cancellable,
+        pendingOptions,
+      ),
+    sendExt: (rpcId, method, args, cancellable = false) =>
+      deps.sendExt(rpcId, method, args, cancellable),
+    sessions: deps.sessions,
+    log: (...args) => deps.log(...args),
   };
 }
 

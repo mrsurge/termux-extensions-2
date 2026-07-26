@@ -52,6 +52,7 @@ export const EDITOR_RPC_METHODS = {
   draftStatePublish: "editor.draftState.publish",
   notifyPublish: "editor.notify.publish",
   openCompletePublish: "editor.openComplete.publish",
+  codeInspectorPublish: "editor.codeInspector.publish",
   diagnosticsCountsPublish: "editor.diagnosticsCounts.publish",
   scrollStatePublish: "editor.scrollState.publish",
   modelReady: "editor.modelReady",
@@ -91,6 +92,7 @@ export const EDITOR_RPC_NOTIFICATIONS = {
   projectSwitching: "editor.project.switching",
   projectSwitched: "editor.project.switched",
   agentEditsChanged: "editor.agentEdits.changed",
+  codeInspectorCommand: "editor.codeInspector.command",
 } as const;
 
 export type EditorRpcNotificationName =

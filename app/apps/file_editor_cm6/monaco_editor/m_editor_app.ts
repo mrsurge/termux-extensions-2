@@ -109,7 +109,10 @@ import { registerEditorSocketConnectionHandlers } from "./editor_socket_connecti
 import { createEditorWorkbenchLanguageCatalogRuntime } from "./editor_workbench_language_catalog_runtime.ts";
 import { createEditorWorkbenchRuntime } from "./editor_workbench_runtime.ts";
 import { createEditorRpcTransport } from "./editor_rpc_transport.ts";
-import { EDITOR_RPC_METHODS } from "./editor_rpc_contract.ts";
+import {
+  EDITOR_RPC_METHODS,
+  EDITOR_RPC_NOTIFICATIONS,
+} from "./editor_rpc_contract.ts";
 import { createEditorWbaRpcTransport } from "./editor_wba_rpc_transport.ts";
 import {
   bindExtensionActivityTransport,
@@ -124,6 +127,10 @@ import {
 import { registerEditorWbaRuntimeHandlers } from "./editor_wba_runtime_handlers.ts";
 import { createEditorDebugRuntime } from "./editor_debug_runtime.ts";
 import { createEditorUiEditorRuntime } from "./editor_ui_editor_runtime.ts";
+import {
+  createEditorCodeInspectorRuntime,
+  type CodeInspectorRuntime,
+} from "./editor_code_inspector_runtime.ts";
 import { installTextmateDebugHooks } from "./editor_textmate_debug_runtime.ts";
 import { createEditorPrefRuntime } from "./editor_pref_runtime.ts";
 import { createEditorMirrorRuntime } from "./editor_mirror_runtime.ts";
@@ -379,6 +386,7 @@ interface MonacoBootWindowLike extends Window {
   let _reapplyDraftZonesScheduled = false;
   let scrollPublisherInstalled = false;
   let diffThemeInstalled = false;
+  let codeInspectorRuntime: CodeInspectorRuntime | null = null;
   var debugRuntime = createEditorDebugRuntime({
     getDocument: function () {
       return document;
@@ -417,6 +425,9 @@ interface MonacoBootWindowLike extends Window {
     },
     sendEditorMentionRequest: function (payload) {
       return editorRpcNotify(EDITOR_RPC_METHODS.mentionRequest, payload);
+    },
+    inspectCode: function (mode) {
+      codeInspectorRuntime?.start(mode);
     },
     updateDebug: function (extra) {
       return debugRuntime.updateDebug(extra);
@@ -940,6 +951,43 @@ interface MonacoBootWindowLike extends Window {
     clearTimeoutFn: _clearTimeoutBound,
     setTimeoutFn: _setTimeoutBound,
   } as Parameters<typeof createEditorWorkbenchRuntime>[0]);
+  codeInspectorRuntime = createEditorCodeInspectorRuntime({
+    getEditor: function () {
+      return (
+        diffEditor?.getModifiedEditor?.() ??
+        editor
+      ) as never;
+    },
+    getCurrentPath: function () {
+      return currentPath;
+    },
+    editorWorkbenchCall: function (method, params, opts) {
+      return editorWorkbenchCall(method, params, opts);
+    },
+    publishProjection: function (projection) {
+      return editorRpcTransport.publishReliable(
+        EDITOR_RPC_METHODS.codeInspectorPublish,
+        { projection },
+        { timeoutMs: 12000 },
+      );
+    },
+    logError: function (message, error) {
+      console.error("[code-inspector]", message, error);
+    },
+  });
+  editorRpcTransport.onNotification(
+    EDITOR_RPC_NOTIFICATIONS.codeInspectorCommand,
+    function (params) {
+      codeInspectorRuntime?.handleCommand(params);
+    },
+  );
+  window.addEventListener(
+    "pagehide",
+    function () {
+      codeInspectorRuntime?.dispose();
+    },
+    { once: true },
+  );
   let workbenchLanguageCatalogRuntime: ReturnType<
     typeof createEditorWorkbenchLanguageCatalogRuntime
   > | null = null;

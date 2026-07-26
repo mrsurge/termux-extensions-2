@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
+    UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND,
     UI_IPC_RPC_METHOD_HOST_DRAFT_DISCARD,
     UI_IPC_RPC_METHOD_HOST_EDITOR_FIND,
     UI_IPC_RPC_METHOD_HOST_EDITOR_COMMAND,
@@ -122,6 +123,14 @@ async def dispatch_ui_ipc_rpc_request(
 
     if method == UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET:
         return await handle_boot_snapshot_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND:
+        from ..code_inspector_backend import handle_code_inspector_command
+
+        return await handle_code_inspector_command(
             params,
             source_name=source_name,
         )

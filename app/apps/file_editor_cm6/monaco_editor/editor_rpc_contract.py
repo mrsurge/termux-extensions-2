@@ -45,6 +45,7 @@ EDITOR_RPC_METHOD_MODEL_READY: Final = "editor.modelReady"
 EDITOR_RPC_METHOD_SAVE_SNAPSHOT_RESPONSE: Final = "editor.save.snapshot.response"
 EDITOR_RPC_METHOD_ISSUES_DUMP_RESPONSE: Final = "editor.issues.dump.response"
 EDITOR_RPC_METHOD_BREADCRUMB_NAVIGATE: Final = "editor.breadcrumb.navigate"
+EDITOR_RPC_METHOD_CODE_INSPECTOR_PUBLISH: Final = "editor.codeInspector.publish"
 
 EditorRpcMethod = Literal[
     "editor.open",
@@ -70,6 +71,7 @@ EditorRpcMethod = Literal[
     "editor.save.snapshot.response",
     "editor.issues.dump.response",
     "editor.breadcrumb.navigate",
+    "editor.codeInspector.publish",
 ]
 
 EDITOR_RPC_NOTIFICATION_STATE_SSOT: Final = "editor.state.ssot"
@@ -99,6 +101,7 @@ EDITOR_RPC_NOTIFICATION_OPEN_STATE_CHANGED: Final = "editor.openState.changed"
 EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHING: Final = "editor.project.switching"
 EDITOR_RPC_NOTIFICATION_PROJECT_SWITCHED: Final = "editor.project.switched"
 EDITOR_RPC_NOTIFICATION_AGENT_EDITS_CHANGED: Final = "editor.agentEdits.changed"
+EDITOR_RPC_NOTIFICATION_CODE_INSPECTOR_COMMAND: Final = "editor.codeInspector.command"
 
 EditorRpcNotification = Literal[
     "editor.state.ssot",
@@ -128,6 +131,7 @@ EditorRpcNotification = Literal[
     "editor.project.switching",
     "editor.project.switched",
     "editor.agentEdits.changed",
+    "editor.codeInspector.command",
 ]
 
 

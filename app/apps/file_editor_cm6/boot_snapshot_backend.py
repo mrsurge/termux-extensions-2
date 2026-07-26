@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, TypedDict, cast
 
 from .explorer.contracts.watcher import WatcherConfigPayload, build_watcher_config_payload
+from .code_inspector_backend import CodeInspectorProjection, get_code_inspector_projection
 from .explorer.transport.connection_manager import abs_to_rel
 from .monaco_editor.editor_backend_services.contracts import JsonMap
 from .monaco_editor.editor_ws import editor_runtime_build_connect_snapshot
@@ -40,6 +41,7 @@ class BootSnapshotPayload(TypedDict):
     editor_ssot: JsonMap
     ui_prefs: JsonMap
     explorer_bootstrap: ExplorerBootstrapPayload | None
+    code_inspector: CodeInspectorProjection | None
 
 
 async def _prime_backend_runtime(project_root: str) -> None:
@@ -220,6 +222,7 @@ async def handle_boot_snapshot_request(
         "editor_ssot": editor_ssot,
         "ui_prefs": ui_prefs,
         "explorer_bootstrap": explorer_bootstrap,
+        "code_inspector": get_code_inspector_projection(),
     }
     return {
         "ok": True,

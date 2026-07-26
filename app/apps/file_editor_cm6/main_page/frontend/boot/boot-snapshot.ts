@@ -6,6 +6,7 @@ export interface HostBootSnapshot {
   editor_ssot?: JsonRecord;
   ui_prefs?: JsonRecord;
   explorer_bootstrap?: JsonRecord | null;
+  code_inspector?: JsonRecord | null;
 }
 
 interface HostBootSnapshotReply {
@@ -42,4 +43,8 @@ export function getBootSnapshotSessionState(snapshot: HostBootSnapshot | null): 
 export function getBootSnapshotUiPrefs(snapshot: HostBootSnapshot | null): JsonRecord {
   const uiPrefs = asRecord(snapshot?.ui_prefs);
   return uiPrefs || {};
+}
+
+export function getBootSnapshotCodeInspector(snapshot: HostBootSnapshot | null): JsonRecord | null {
+  return asRecord(snapshot?.code_inspector);
 }

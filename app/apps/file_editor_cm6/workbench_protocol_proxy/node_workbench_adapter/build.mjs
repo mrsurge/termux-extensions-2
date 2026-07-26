@@ -22,6 +22,7 @@ const moduleConfig = {
     "src/extensions/language-resolver.ts",
     "src/extensions/provider-registry.ts",
     "src/extensions/intelligence/completions.ts",
+    "src/extensions/intelligence/code-navigation.ts",
     "src/extensions/intelligence/document-colors.ts",
     "src/extensions/intelligence/hover.ts",
     "src/extensions/intelligence/inlay-hints.ts",

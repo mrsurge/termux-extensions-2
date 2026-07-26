@@ -35,6 +35,7 @@ UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CREATE: Final = "ui.host.git.branch.create"
 UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST: Final = "ui.host.git.branches.list"
 UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD: Final = "ui.host.git.remote.add"
 UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE: Final = "ui.host.state.fileScroll.update"
+UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND: Final = "ui.host.codeInspector.command"
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE: Final = "ui.sidebar.window.create"
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE: Final = "ui.sidebar.window.activate"
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE: Final = "ui.sidebar.window.close"
@@ -63,6 +64,7 @@ UiIpcRpcMethod = Literal[
     "ui.host.git.branches.list",
     "ui.host.git.remote.add",
     "ui.host.state.fileScroll.update",
+    "ui.host.codeInspector.command",
     "ui.sidebar.window.create",
     "ui.sidebar.window.activate",
     "ui.sidebar.window.close",
@@ -92,6 +94,7 @@ UI_IPC_RPC_NOTIFICATION_TERMINAL_OPEN: Final = "ui.terminal.open"
 UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED: Final = "ui.sidebar.windows.changed"
 UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED: Final = "ui.sidebar.window.activated"
 UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED: Final = "ui.sidebar.window.readiness.changed"
+UI_IPC_RPC_NOTIFICATION_CODE_INSPECTOR_CHANGED: Final = "ui.codeInspector.changed"
 
 UiIpcRpcNotification = Literal[
     "ui.editor.save",
@@ -116,6 +119,7 @@ UiIpcRpcNotification = Literal[
     "ui.sidebar.windows.changed",
     "ui.sidebar.window.activated",
     "ui.sidebar.window.readiness.changed",
+    "ui.codeInspector.changed",
 ]
 
 ALLOWED_REQUEST_METHODS: Final[set[str]] = {
@@ -140,6 +144,7 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST,
     UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
+    UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE,
@@ -170,6 +175,7 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
     UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED,
     UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_CODE_INSPECTOR_CHANGED,
 }
 
 JsonObject = dict[str, object]

@@ -90,6 +90,18 @@ export function editorWorkbenchMethodToWbaMethod(method: string): string | null 
       return 'vscode.openFile';
     case 'hover':
       return 'vscode.hover';
+    case 'references':
+      return 'vscode.references';
+    case 'implementations':
+      return 'vscode.implementations';
+    case 'call_hierarchy_prepare':
+      return 'vscode.callHierarchy.prepare';
+    case 'call_hierarchy_incoming':
+      return 'vscode.callHierarchy.incoming';
+    case 'call_hierarchy_outgoing':
+      return 'vscode.callHierarchy.outgoing';
+    case 'call_hierarchy_release':
+      return 'vscode.callHierarchy.release';
     case 'completions':
       return 'vscode.completions';
     case 'document_colors':

@@ -7,11 +7,14 @@ interface MentionPayload {
   content?: string;
 }
 
+export type CodeInspectorMode = 'callHierarchy' | 'references' | 'implementations';
+
 interface MentionRequestDeps {
   getEditor(): MonacoRuntimeEditorLike | null;
   getDiffEditor?(): MonacoRuntimeDiffEditorLike | null;
   getCurrentPath(): string | null;
   sendEditorMentionRequest(payload: Record<string, unknown>): boolean;
+  inspectCode?(mode: CodeInspectorMode): void;
   updateDebug(extra?: string): void;
 }
 
@@ -80,7 +83,36 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
     if (!dom) return;
     const hasUi = !!dom.querySelector('.monaco-editor-touch-selections');
     if (!hasUi) {
-      lib.editorTouchSelectionHelp(target);
+      lib.editorTouchSelectionHelp(target, {
+        navigationTools: deps.inspectCode
+          ? ({ closeMenu }) => [
+              {
+                name: 'call hierarchy',
+                innerHTML: '<span class="icon" aria-hidden="true">☎️</span>',
+                action: () => {
+                  closeMenu();
+                  deps.inspectCode?.('callHierarchy');
+                },
+              },
+              {
+                name: 'find all references',
+                innerHTML: '<span class="icon" aria-hidden="true">📑</span>',
+                action: () => {
+                  closeMenu();
+                  deps.inspectCode?.('references');
+                },
+              },
+              {
+                name: 'find all implementations',
+                innerHTML: '<span class="icon" aria-hidden="true">🎯</span>',
+                action: () => {
+                  closeMenu();
+                  deps.inspectCode?.('implementations');
+                },
+              },
+            ]
+          : undefined,
+      });
       deps.updateDebug('touch=reinit' + (reason ? ':' + reason : ''));
     }
     if (mentionBoundDoms && !mentionBoundDoms.has(dom)) {

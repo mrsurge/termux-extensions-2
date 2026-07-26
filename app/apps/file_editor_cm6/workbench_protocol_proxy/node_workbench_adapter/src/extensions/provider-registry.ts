@@ -1,3 +1,5 @@
+import picomatch from "picomatch";
+
 export const PROVIDER_KINDS = [
   "hover",
   "documentSymbols",
@@ -7,6 +9,9 @@ export const PROVIDER_KINDS = [
   "inlineCompletions",
   "semanticTokens",
   "documentColors",
+  "references",
+  "implementations",
+  "callHierarchy",
 ] as const;
 
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
@@ -47,8 +52,18 @@ export interface ProviderResyncOutcome {
     documentSymbols: number;
     foldingRanges: number;
     documentColors: number;
+    references: number;
+    implementations: number;
+    callHierarchy: number;
   };
   events: Record<string, unknown>[];
+}
+
+export interface ProviderDocument {
+  languageId: string;
+  scheme: string;
+  authority: string;
+  path: string;
 }
 
 function emptyOutcome(handled = false): ProviderRegistrationOutcome {
@@ -60,9 +75,118 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function selectorLanguage(selector: unknown): string | null {
+  if (typeof selector === "string") return selector || null;
   if (!isRecord(selector)) return null;
   const language = selector.language;
   return typeof language === "string" && language ? language : null;
+}
+
+interface SelectorPattern {
+  pattern: string;
+  basePath: string | null;
+}
+
+function pathFromUri(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+  const path = typeof value.fsPath === "string"
+    ? value.fsPath
+    : typeof value.path === "string"
+      ? value.path
+      : "";
+  return path || null;
+}
+
+function selectorPattern(
+  selector: Record<string, unknown>,
+): SelectorPattern | null {
+  const pattern = selector.pattern;
+  if (typeof pattern === "string") {
+    return { pattern, basePath: null };
+  }
+  if (isRecord(pattern) && typeof pattern.pattern === "string") {
+    const basePath =
+      pathFromUri(pattern.baseUri) ||
+      (typeof pattern.base === "string" ? pattern.base : null);
+    return { pattern: pattern.pattern, basePath };
+  }
+  return null;
+}
+
+function normalizePath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/\/+/g, "/");
+}
+
+function patternCandidate(
+  pattern: SelectorPattern,
+  documentPath: string,
+): string | null {
+  const candidate = normalizePath(documentPath);
+  if (!pattern.basePath) return candidate;
+  const base = normalizePath(pattern.basePath).replace(/\/+$/, "");
+  if (candidate === base) return "";
+  const prefix = `${base}/`;
+  return candidate.startsWith(prefix) ? candidate.slice(prefix.length) : null;
+}
+
+function selectorPatternMatches(
+  pattern: SelectorPattern,
+  documentPath: string,
+): boolean {
+  const candidate = patternCandidate(pattern, documentPath);
+  if (candidate === null) return false;
+  return candidate === pattern.pattern || picomatch(pattern.pattern, {
+    dot: true,
+  })(candidate);
+}
+
+function selectorScore(
+  selector: unknown,
+  document: ProviderDocument,
+): number {
+  if (typeof selector === "string") {
+    if (selector === document.languageId) return 10;
+    return selector === "*" ? 5 : 0;
+  }
+  if (!isRecord(selector)) return 0;
+  if (selector.notebookType) return 0;
+  let score = 0;
+  const language =
+    typeof selector.language === "string" ? selector.language : "";
+  if (language && language !== "*" && language !== document.languageId) {
+    return 0;
+  }
+  if (language === document.languageId) score = 10;
+  else if (language === "*") score = 5;
+  const scheme = typeof selector.scheme === "string" ? selector.scheme : "";
+  if (scheme && scheme !== "*" && scheme !== document.scheme) return 0;
+  if (scheme === document.scheme) score = 10;
+  else if (scheme === "*") score = Math.max(score, 5);
+  const pattern = selectorPattern(selector);
+  if (pattern && !selectorPatternMatches(pattern, document.path)) return 0;
+  if (pattern) score = 10;
+  return score;
+}
+
+function selectorListScore(
+  selectors: unknown[],
+  document: ProviderDocument,
+): number {
+  return selectors.reduce<number>(
+    (score, selector) => Math.max(score, selectorScore(selector, document)),
+    0,
+  );
+}
+
+function selectorsAreExclusive(selectors: unknown[]): boolean {
+  return selectors.length > 0 && selectors.every(
+    (selector) => isRecord(selector) && selector.exclusive === true,
+  );
+}
+
+function selectorsAreBuiltin(selectors: unknown[]): boolean {
+  return selectors.some(
+    (selector) => isRecord(selector) && selector.isBuiltin === true,
+  );
 }
 
 function selectorLanguages(selector: unknown[]): string[] {
@@ -132,6 +256,9 @@ export class ProviderRegistry {
       inlineCompletions: new Map<number, ProviderEntry>(),
       semanticTokens: new Map<number, ProviderEntry>(),
       documentColors: new Map<number, ProviderEntry>(),
+      references: new Map<number, ProviderEntry>(),
+      implementations: new Map<number, ProviderEntry>(),
+      callHierarchy: new Map<number, ProviderEntry>(),
     };
 
   private readonly textContentProviders = new Map<string, number>();
@@ -178,6 +305,15 @@ export class ProviderRegistry {
     if (methodMatches(method, "$registerDocumentColorProvider")) {
       return this.registerDocumentColorProvider(args);
     }
+    if (methodMatches(method, "$registerReferenceSupport")) {
+      return this.registerNavigationProvider("references", args);
+    }
+    if (methodMatches(method, "$registerImplementationSupport")) {
+      return this.registerNavigationProvider("implementations", args);
+    }
+    if (methodMatches(method, "$registerCallHierarchyProvider")) {
+      return this.registerNavigationProvider("callHierarchy", args);
+    }
     return emptyOutcome(false);
   }
 
@@ -203,6 +339,9 @@ export class ProviderRegistry {
       inlineCompletions: this.list("inlineCompletions"),
       semanticTokens: this.list("semanticTokens"),
       documentColors: this.list("documentColors"),
+      references: this.list("references"),
+      implementations: this.list("implementations"),
+      callHierarchy: this.list("callHierarchy"),
     };
   }
 
@@ -237,6 +376,30 @@ export class ProviderRegistry {
     return handles;
   }
 
+  findAllProviderHandlesForDocument(
+    kind: ProviderKind,
+    document: ProviderDocument,
+  ): number[] {
+    if (!document.languageId || !document.path) return [];
+    const matches = Array.from(this.providers[kind].values())
+      .map((entry, registrationOrder) => ({
+        entry,
+        registrationOrder,
+        score: selectorListScore(entry.selector, document),
+        exclusive: selectorsAreExclusive(entry.selector),
+        builtin: selectorsAreBuiltin(entry.selector),
+      }))
+      .filter((match) => match.score > 0);
+    const exclusive = matches.filter((match) => match.exclusive);
+    const ordered = exclusive.length ? exclusive : matches;
+    ordered.sort((left, right) =>
+      right.score - left.score ||
+      Number(left.builtin) - Number(right.builtin) ||
+      right.registrationOrder - left.registrationOrder
+    );
+    return ordered.map((match) => match.entry.handle);
+  }
+
   findSemanticRangeHandles(languageId: string): number[] {
     if (!languageId) return [];
     const handles: number[] = [];
@@ -259,6 +422,9 @@ export class ProviderRegistry {
       documentSymbols: 0,
       foldingRanges: 0,
       documentColors: 0,
+      references: 0,
+      implementations: 0,
+      callHierarchy: 0,
     };
     const events: Record<string, unknown>[] = [];
 
@@ -342,6 +508,24 @@ export class ProviderRegistry {
           resync: true,
         });
         replayed.documentColors += 1;
+      }
+    }
+
+    for (const kind of [
+      "references",
+      "implementations",
+      "callHierarchy",
+    ] as const) {
+      for (const entry of this.providers[kind].values()) {
+        for (const language of selectorLanguages(entry.selector)) {
+          events.push({
+            type: `provider/${kind}`,
+            handle: entry.handle,
+            language,
+            resync: true,
+          });
+          replayed[kind] += 1;
+        }
       }
     }
 
@@ -691,6 +875,29 @@ export class ProviderRegistry {
     }
     outcome.logs.push(
       `[providers] documentColors map size=${this.providers.documentColors.size} languages=[${this.languageSummary("documentColors")}]`,
+    );
+    return outcome;
+  }
+
+  private registerNavigationProvider(
+    kind: "references" | "implementations" | "callHierarchy",
+    args: unknown[],
+  ): ProviderRegistrationOutcome {
+    const outcome = emptyOutcome(true);
+    if (args.length < 2) return outcome;
+    const handle = finiteHandle(args[0]);
+    const selector = normalizeSelector(args[1]);
+    if (handle === null || !selector) return outcome;
+    this.providers[kind].set(handle, { handle, selector });
+    for (const language of selectorLanguages(selector)) {
+      outcome.events.push({
+        type: `provider/${kind}`,
+        handle,
+        language,
+      });
+    }
+    outcome.logs.push(
+      `[providers] ${kind} map size=${this.providers[kind].size} languages=[${this.languageSummary(kind)}]`,
     );
     return outcome;
   }

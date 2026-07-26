@@ -142,7 +142,24 @@ interface MonacoSocketIoLike {
 }
 
 interface MonacoTouchSelectionGlobal {
-  editorTouchSelectionHelp?(editor: MonacoRuntimeEditorLike): void;
+  editorTouchSelectionHelp?(
+    editor: MonacoRuntimeEditorLike,
+    options?: {
+      navigationTools?: (options: {
+        editor: MonacoRuntimeEditorLike;
+        selectorMenu: HTMLDivElement;
+        defaultTools: Map<string, MonacoTouchSelectionTool>;
+        openMenu(): void;
+        closeMenu(): void;
+      }) => Iterable<MonacoTouchSelectionTool> | undefined;
+    },
+  ): void;
+}
+
+interface MonacoTouchSelectionTool {
+  name: string;
+  innerHTML: string | Element | (() => string | Element);
+  action(): Promise<void> | void;
 }
 
 interface MonacoRuntimeTermShim {

@@ -177,6 +177,9 @@ export function createEditorWorkbenchRuntime(
     switch (method) {
       case 'completions':
       case 'hover':
+      case 'references':
+      case 'implementations':
+      case 'call_hierarchy_prepare':
       case 'symbols':
       case 'folding_ranges':
       case 'semantic_tokens':
@@ -195,6 +198,12 @@ export function createEditorWorkbenchRuntime(
     switch (method) {
       case 'completions':
       case 'hover':
+      case 'references':
+      case 'implementations':
+      case 'call_hierarchy_prepare':
+      case 'call_hierarchy_incoming':
+      case 'call_hierarchy_outgoing':
+      case 'call_hierarchy_release':
       case 'symbols':
       case 'folding_ranges':
       case 'semantic_tokens':

@@ -6,6 +6,7 @@
  *   consoleDrawer: { show: Function, hide: Function },
  *   problemsPanel: { show: Function, hide: Function },
  *   extensionActivityPanel: { show: Function, hide: Function },
+ *   codeInspectorPanel: { show: Function, hide: Function },
  *   toggleTerminal: () => void,
  *   setFontScale: (preset: 'small'|'medium'|'large') => void,
  *   triggerEditorSearchPanel: (reason?: string, opts?: any) => Promise<any>,
@@ -26,6 +27,8 @@ export function initDrawerAndShortcuts(deps: any) {
     const problemsHeader = document.getElementById('problems-header');
     const extensionLogContainer = document.getElementById('extension-log-container');
     const extensionLogHeader = document.getElementById('extension-log-header');
+    const codeInspectorContainer = document.getElementById('code-inspector-container');
+    const codeInspectorHeader = document.getElementById('code-inspector-header');
 
     if (tabBar) {
       tabBar.addEventListener('click', (e) => {
@@ -42,9 +45,12 @@ export function initDrawerAndShortcuts(deps: any) {
         if (problemsHeader) problemsHeader.style.display = 'none';
         if (extensionLogContainer) extensionLogContainer.style.display = 'none';
         if (extensionLogHeader) extensionLogHeader.style.display = 'none';
+        if (codeInspectorContainer) codeInspectorContainer.style.display = 'none';
+        if (codeInspectorHeader) codeInspectorHeader.style.display = 'none';
         deps.consoleDrawer.hide();
         deps.problemsPanel.hide();
         deps.extensionActivityPanel.hide();
+        deps.codeInspectorPanel.hide();
 
         if (target === 'terminal') {
           if (terminalHeader) terminalHeader.style.display = '';
@@ -55,6 +61,8 @@ export function initDrawerAndShortcuts(deps: any) {
           deps.problemsPanel.show();
         } else if (target === 'extensions') {
           deps.extensionActivityPanel.show();
+        } else if (target === 'code-inspector') {
+          deps.codeInspectorPanel.show();
         }
       });
     }
