@@ -2,7 +2,7 @@
   "id": "terminal",
   "name": "Terminal",
   "icon_emoji": ">_",
-  "version": "0.2.326",
+  "version": "0.2.327",
   "description": "Checkpointed Node PTY terminals for TE2.",
   "shellspec": {
     "app_worker": "shellspec/app_worker.yaml#app-worker"
@@ -10,7 +10,7 @@
   "entrypoints": {
     "backend_blueprint": "backend.py",
     "frontend_template": "template.html",
-    "frontend_script": "static/dist/main.js?v=0.2.326"
+    "frontend_script": "static/dist/main.js?v=0.2.327"
   },
   "readiness_support": true,
   "sidebar_state": {
