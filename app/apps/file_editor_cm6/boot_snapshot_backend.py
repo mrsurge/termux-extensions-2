@@ -98,11 +98,13 @@ def _build_host_state_payload() -> JsonMap:
 
     last_file: str | None = None
     open_state: JsonMap | None = None
+    recents: list[JsonMap] = []
     if project_path:
         try:
             sidecar_state = read_sidecar_open_state(project_path, reason="reconnect")
             open_state = dict(sidecar_state)
             last_file = sidecar_state["openFile"]
+            recents = [dict(entry) for entry in sidecar_state["recents"]]
         except Exception:
             last_file = None
     last_file_exists = bool(last_file and Path(last_file).is_file())
@@ -110,20 +112,6 @@ def _build_host_state_payload() -> JsonMap:
     last_file_message = ""
     if last_file and not last_file_exists:
         last_file_message = f'File "{last_file_label or last_file}" not found.'
-
-    recents_raw = history.list_files(project_path) if project_path else []
-    recents: list[JsonMap] = []
-    for entry in recents_raw:
-        entry_path = entry.get("path")
-        entry_path_str = entry_path if isinstance(entry_path, str) else None
-        exists = bool(entry_path_str and Path(entry_path_str).is_file())
-        recents.append({
-            "path": entry_path_str,
-            "label": entry.get("label") or HistoryStore.format_label(entry_path_str),
-            "opened_at": entry.get("opened_at"),
-            "exists": exists,
-            "scroll_line": entry.get("scroll_line"),
-        })
 
     session_state = history.get_session_state()
     return {

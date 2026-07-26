@@ -316,7 +316,11 @@ def _find_builtin_extensions_dir() -> str:
 # code-server bundle and cache in te2_rpc_config.json.
 
 _ADAPTER_REQUIRED_NIDS = frozenset({
+    "MainThreadConsole",
+    "MainThreadLogger",
     "MainThreadOutputService",
+    "MainThreadStatusBar",
+    "MainThreadExtensionService",
     "ExtHostConfiguration",
     "ExtHostDocumentsAndEditors",
     "ExtHostDocuments",

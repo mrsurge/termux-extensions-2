@@ -5,6 +5,7 @@ import { handleCompletionProviderRegistered } from "./editor_socket_completion_r
 import { handleDocumentColorProviderRegistered } from "./editor_socket_document_colors_registered_handler_utils.ts";
 import { handleInlayHintsProviderRegistered } from "./editor_socket_inlay_hints_registered_handler_utils.ts";
 import { handleInlineCompletionProviderRegistered } from "./editor_socket_inline_completions_registered_handler_utils.ts";
+import { emitExtensionActivityEvent } from "../main_page/frontend/connections/extension-activity-bridge.ts";
 
 interface WbaNotificationTransportLike {
   onNotification(
@@ -83,6 +84,10 @@ export function registerEditorWbaRuntimeHandlers(
   transport.onNotification("te2.event", (event: Record<string, unknown>) => {
     try {
       const type = eventType(event);
+      if (type.startsWith("extension/")) {
+        emitExtensionActivityEvent(event);
+        return;
+      }
       if (type === "adapter/sessionReset") {
         deps.resetDynamicProviderCaches?.(
           typeof event.reason === "string" ? event.reason : "session_reset",

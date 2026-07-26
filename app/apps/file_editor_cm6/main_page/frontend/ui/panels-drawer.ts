@@ -5,6 +5,7 @@
  *   createTerminalDrawer: (opts?: any) => any,
  *   createConsoleDrawer: () => any,
  *   createProblemsPanel: (opts: any) => any,
+ *   createExtensionActivityPanel: (opts: any) => any,
  *   initDrawerAndShortcuts: (opts: any) => any,
  *   bindMenuToggle: (el: HTMLElement, action: () => any) => void,
  *   requireEl: (selector: string) => any,
@@ -49,6 +50,10 @@ export function initPanelsAndDrawer(deps: any) {
       }
     },
   });
+  const extensionActivityPanel = deps.createExtensionActivityPanel({
+    openDrawer: () => terminal.open(),
+    closeDrawer: () => terminal.close(),
+  });
 
   const consoleCollapseBtn = document.getElementById('console-collapse-btn');
   if (consoleCollapseBtn) consoleCollapseBtn.addEventListener('click', () => terminal.close());
@@ -60,6 +65,7 @@ export function initPanelsAndDrawer(deps: any) {
     requireEl: deps.requireEl,
     consoleDrawer,
     problemsPanel,
+    extensionActivityPanel,
     toggleTerminal: () => terminal.toggle(),
     setFontScale: (preset: string) => deps.setFontScale(preset),
     triggerEditorSearchPanel: (reason: string, opts: any) => deps.triggerEditorSearchPanel(reason, opts),
@@ -70,5 +76,5 @@ export function initPanelsAndDrawer(deps: any) {
     openPickedFile: () => deps.openPickedFile(),
   });
 
-  return { terminal, consoleDrawer, problemsPanel };
+  return { terminal, consoleDrawer, problemsPanel, extensionActivityPanel };
 }

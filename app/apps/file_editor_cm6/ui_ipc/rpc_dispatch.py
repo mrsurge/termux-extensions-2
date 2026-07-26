@@ -27,7 +27,6 @@ from .rpc_contract import (
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ORDER_UPDATE,
-    UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
     UiIpcRpcMethod,
     build_jsonrpc_error,
@@ -51,10 +50,7 @@ from ..host.git_backend import (
     handle_host_git_branches_list_request,
     handle_host_git_remote_add_request,
 )
-from ..host.state_backend import (
-    handle_host_file_activity_record_request,
-    handle_host_file_scroll_update_request,
-)
+from ..host.state_backend import handle_host_file_scroll_update_request
 from ..host.terminal_actions_backend import handle_host_run_active_file_request
 from ..host.page_preview_backend import handle_host_page_preview_template_install_request
 from ..host.run_profiles_config_backend import (
@@ -186,12 +182,6 @@ async def dispatch_ui_ipc_rpc_request(
 
     if method == UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD:
         return await handle_host_git_remote_add_request(
-            params,
-            source_name=source_name,
-        )
-
-    if method == UI_IPC_RPC_METHOD_HOST_STATE_FILE_ACTIVITY_RECORD:
-        return await handle_host_file_activity_record_request(
             params,
             source_name=source_name,
         )

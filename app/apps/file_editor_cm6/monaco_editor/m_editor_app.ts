@@ -111,6 +111,10 @@ import { createEditorWorkbenchRuntime } from "./editor_workbench_runtime.ts";
 import { createEditorRpcTransport } from "./editor_rpc_transport.ts";
 import { EDITOR_RPC_METHODS } from "./editor_rpc_contract.ts";
 import { createEditorWbaRpcTransport } from "./editor_wba_rpc_transport.ts";
+import {
+  bindExtensionActivityTransport,
+  notifyExtensionActivityBridgeReady,
+} from "../main_page/frontend/connections/extension-activity-bridge.ts";
 import { RPC_CODEC_MSGPACK_V1 } from "../src/rpc/codec.ts";
 import {
   SOCKET_IO_NAMESPACES,
@@ -618,6 +622,9 @@ interface MonacoBootWindowLike extends Window {
     onProtocolError: function (error: unknown) {
       console.error("[editor-rpc] MessagePack protocol error", error);
     },
+    onReliablePublishError: function (method: string, error: Error) {
+      console.error("[editor-rpc] reliable publish failed", method, error);
+    },
   });
   var editorWbaRpcTransport = createEditorWbaRpcTransport({
     getSocket: function () {
@@ -629,6 +636,7 @@ interface MonacoBootWindowLike extends Window {
       console.error("[editor-wba-rpc] MessagePack protocol error", error);
     },
   });
+  bindExtensionActivityTransport(editorWbaRpcTransport);
 
   var textmateRuntime = createEditorTextmateRuntime({
     getWindow: function () {
@@ -1466,11 +1474,17 @@ interface MonacoBootWindowLike extends Window {
     eventName: string,
     payload: Record<string, unknown>,
   ): boolean {
+    if (eventName === "editor_open_complete") {
+      return editorRpcTransport.publishReliable(
+        EDITOR_RPC_METHODS.openCompletePublish,
+        payload,
+        { timeoutMs: 10000 },
+      );
+    }
     const eventMethodMap: Record<string, string> = {
       editor_cache_state: EDITOR_RPC_METHODS.cacheStatePublish,
       editor_draft_state: EDITOR_RPC_METHODS.draftStatePublish,
       editor_notify: EDITOR_RPC_METHODS.notifyPublish,
-      editor_open_complete: EDITOR_RPC_METHODS.openCompletePublish,
       editor_ready: EDITOR_RPC_METHODS.readyPublish,
       "editor:iframe_ready": EDITOR_RPC_METHODS.readyPublish,
       editor_diagnostics_counts: EDITOR_RPC_METHODS.diagnosticsCountsPublish,
@@ -2197,6 +2211,7 @@ interface MonacoBootWindowLike extends Window {
       if (wbaRpcSocket && typeof wbaRpcSocket.on === "function") {
         wbaRpcSocket.on("connect", () => {
           console.log("[wba] socket connected");
+          notifyExtensionActivityBridgeReady();
           handleWbaSocketReadyForEditor("wba_socket_connect");
         });
         wbaRpcSocket.on("disconnect", () => {

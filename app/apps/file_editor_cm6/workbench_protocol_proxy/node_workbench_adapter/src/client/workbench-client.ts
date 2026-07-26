@@ -115,6 +115,9 @@ import {
   workspaceFromFolder,
 } from "../extensions/catalog.mjs";
 import { ProviderRegistry } from "../extensions/provider-registry.mjs";
+import { ExtensionActivityRuntime } from "../extensions/activity-runtime.mjs";
+import { ExtensionActivationRuntime } from "../extensions/activation-runtime.mjs";
+import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
 import {
   inflateCompletionItems,
   provideCompletions,
@@ -240,6 +243,10 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$requestWorkspaceTrust",
   "$initializeExtensionStorage",
   "$registerLogger",
+  "$deregisterLogger",
+  "$setVisibility",
+  "$log",
+  "$flush",
   "$ensureActivation",
   "$onWillActivateExtension",
   "$onDidActivateExtension",
@@ -248,6 +255,12 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$logExtensionHostMessage",
   "$onExtensionRuntimeError",
   "$register",
+  "$update",
+  "$reveal",
+  "$close",
+  "$dispose",
+  "$setEntry",
+  "$disposeEntry",
 
   // Keep diagnostics/hover requests parseable when we need them later.
   "$changeMany",
@@ -645,6 +658,9 @@ export class WorkbenchClient {
   _docLastLineLength: Map<string, number>;
   _docOpenGeneration: Map<string, number | string | null>;
   _extensions: unknown[];
+  _extensionActivity: ExtensionActivityRuntime;
+  _extensionActivation: ExtensionActivationRuntime;
+  _languageResolver: ExtensionLanguageResolver;
   _providerRegistry: ProviderRegistry;
   _useRemote: boolean;
   _authority: string;
@@ -685,6 +701,43 @@ export class WorkbenchClient {
     this._docLastLineLength = new Map(); // path -> length of last line (for valid endColumn)
     this._docOpenGeneration = new Map(); // path -> generation token from open_file flow
     this._extensions = []; // sanitized extensions (populated after connect)
+    this._languageResolver = new ExtensionLanguageResolver();
+    this._extensionActivity = new ExtensionActivityRuntime({
+      rpcIds: {
+        MainThreadConsole: _rpcIds.MainThreadConsole,
+        MainThreadExtensionService: _rpcIds.MainThreadExtensionService,
+        MainThreadLogger: _rpcIds.MainThreadLogger,
+        MainThreadOutputService: _rpcIds.MainThreadOutputService,
+        MainThreadStatusBar: _rpcIds.MainThreadStatusBar,
+      },
+      onEvent: (payload) => this.onEvent(payload),
+      resolveFsPath: (uri) => this._fsPathFromUri(uri),
+    });
+    this._extensionActivation = new ExtensionActivationRuntime({
+      extensionServiceRpcId: _rpcIds.ExtHostExtensionService,
+      sendAwaitingReply: (
+        rpcId,
+        method,
+        args,
+        cancellable,
+        timeoutMs,
+      ) =>
+        this._sendExtAwaitTerminalReply(
+          rpcId,
+          method,
+          args,
+          cancellable,
+          timeoutMs,
+        ),
+      hasExtension: (extensionId) =>
+        this._extensions.some(
+          (extension) =>
+            String(extensionIdentifierFrom(extension) ?? "").toLowerCase() ===
+            extensionId,
+        ),
+      onEvent: (payload) => this.onEvent(payload),
+      log: (...args) => console.log(...args),
+    });
     this._providerRegistry = new ProviderRegistry();
     this._useRemote = true;
     this._authority = DEFAULT_REMOTE_AUTHORITY;
@@ -1024,7 +1077,10 @@ export class WorkbenchClient {
       readTextFile: (path) => fs.readFile(path, "utf8"),
       uriForPath: (path, authority) => this._uriForPath(path, authority),
       uriToString: (uri) => this._uriObjToStringSafe(uri),
-      languageIdFromPath: (path) => _languageIdFromPath(path),
+      resolveLanguageId: (path, text, requestedLanguageId) =>
+        this.resolveLanguageId(path, text, requestedLanguageId),
+      activateLanguage: (languageId) =>
+        this.activateLanguage(languageId),
       sendExt: (rpcId, method, args, cancellable = false) =>
         this._sendExt(rpcId, method, args, cancellable),
       sendExtAwaitTerminalReply: (
@@ -1141,6 +1197,59 @@ export class WorkbenchClient {
     return { ...this.state };
   }
 
+  resolveLanguageId(
+    filePath: string,
+    text = "",
+    requestedLanguageId?: unknown,
+  ): string {
+    const requested =
+      typeof requestedLanguageId === "string"
+        ? requestedLanguageId.trim().toLowerCase()
+        : "";
+    if (requested && requested !== "plaintext" && requested !== "text") {
+      return requested;
+    }
+    return (
+      this._languageResolver.resolve(filePath, text) ||
+      _languageIdFromPath(filePath) ||
+      (requested === "text" ? "plaintext" : requested) ||
+      "plaintext"
+    );
+  }
+
+  async activateLanguage(languageId: string): Promise<Record<string, unknown>> {
+    const normalized = String(languageId || "plaintext").trim() || "plaintext";
+    const [specific, generic] = await Promise.all([
+      this._extensionActivation.activateByEvent(`onLanguage:${normalized}`),
+      this._extensionActivation.activateByEvent("onLanguage"),
+    ]);
+    return { ok: true, languageId: normalized, specific, generic };
+  }
+
+  activateByEvent(
+    event: unknown,
+    activationKind = 0,
+    timeoutMs = 30000,
+  ) {
+    return this._extensionActivation.activateByEvent(
+      event,
+      activationKind,
+      timeoutMs,
+    );
+  }
+
+  activateExtension(
+    extensionId: unknown,
+    activationEvent?: unknown,
+    timeoutMs = 30000,
+  ) {
+    return this._extensionActivation.activateExtension(
+      extensionId,
+      activationEvent,
+      timeoutMs,
+    );
+  }
+
   getExtensions() {
     return this._extensions;
   }
@@ -1215,6 +1324,9 @@ export class WorkbenchClient {
       extensions: this._extensions,
       setExtensions: (value) => {
         this._extensions = value;
+        this._languageResolver.setExtensions(value);
+        this._languageCatalogCache = null;
+        this._extensionActivity.setExtensions(value);
       },
       state: this.state,
       defaults: {
@@ -1357,8 +1469,13 @@ export class WorkbenchClient {
       replyDropMethods: REPLY_DROP_METHODS,
       replyEmptyMethods: REPLY_EMPTY_METHODS,
       replyNullMethods: REPLY_NULL_METHODS,
+      mainThreadConsoleRpcId: _rpcIds.MainThreadConsole,
+      mainThreadExtensionServiceRpcId: _rpcIds.MainThreadExtensionService,
+      mainThreadLoggerRpcId: _rpcIds.MainThreadLogger,
       mainThreadOutputServiceRpcId: _rpcIds.MainThreadOutputService,
+      mainThreadStatusBarRpcId: _rpcIds.MainThreadStatusBar,
       extHostWorkspaceRpcId: _rpcIds.ExtHostWorkspace,
+      extensionActivity: this._extensionActivity,
       debugExtReqSeen: this._debugExtReqSeen,
       setDebugExtReqSeen: (value) => {
         this._debugExtReqSeen = value;
@@ -1472,7 +1589,10 @@ export class WorkbenchClient {
     this._docLastLineLength.clear();
     this._docOpenGeneration.clear();
     this._providerRegistry.clear();
+    this._extensionActivation.reset(reason);
+    this._extensionActivity.reset(reason);
     this._extensions = [];
+    this._languageResolver.clear();
     this._rawExtensionConfigs = null;
     this._languageCatalogCache = null;
     this._extHandshake = {
@@ -1918,6 +2038,19 @@ export class WorkbenchClient {
 
   providers(): Record<string, unknown> {
     return this._providerRegistry.snapshot();
+  }
+
+  extensionActivitySnapshot(): Record<string, unknown> {
+    return this._extensionActivity.snapshot();
+  }
+
+  async selectExtensionLog(
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const channelId =
+      typeof params.channelId === "string" ? params.channelId.trim() : "";
+    if (!channelId) throw new Error("Missing required param: channelId");
+    return this._extensionActivity.selectLog(channelId);
   }
 
   /** Find provider handle matching a languageId by scanning selector arrays. */

@@ -1,5 +1,9 @@
 export const RPC_DEFAULTS = {
+  MainThreadConsole: 12,
+  MainThreadLogger: 27,
   MainThreadOutputService: 29,
+  MainThreadStatusBar: 33,
+  MainThreadExtensionService: 50,
   MainThreadDocumentContentProviders: 18,
   ExtHostConfiguration: 80,
   ExtHostDocumentsAndEditors: 84,

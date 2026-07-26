@@ -29,6 +29,15 @@ class SidecarOpenStatePayload(TypedDict):
     revision: int
     reason: str
     ts: int
+    recents: list[RecentFilePayload]
+
+
+class RecentFilePayload(TypedDict):
+    path: str
+    label: str
+    opened_at: object
+    exists: bool
+    scroll_line: object
 
 
 def _normalize_path(path: str) -> str:
@@ -57,6 +66,31 @@ def _rel_to_project(project_path: str, abs_path: str) -> str | None:
         return rel or "."
     except Exception:
         return None
+
+
+def _recent_files_from_sidecar(sidecar: ProjectSidecar) -> list[RecentFilePayload]:
+    recents: list[RecentFilePayload] = []
+    for entry in sidecar.list_recent_files():
+        raw_path = entry.get("path")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            continue
+        path = _normalize_path(raw_path)
+        raw_label = entry.get("label")
+        label = (
+            raw_label
+            if isinstance(raw_label, str) and raw_label
+            else Path(path).name or path
+        )
+        recents.append(
+            {
+                "path": path,
+                "label": label,
+                "opened_at": entry.get("opened_at"),
+                "exists": Path(path).is_file(),
+                "scroll_line": entry.get("scroll_line"),
+            }
+        )
+    return recents[:12]
 
 
 def _payload_from_sidecar(
@@ -91,6 +125,7 @@ def _payload_from_sidecar(
         "revision": sidecar.get_open_state_revision(),
         "reason": reason,
         "ts": int(time.time() * 1000),
+        "recents": _recent_files_from_sidecar(sidecar),
     }
 
 

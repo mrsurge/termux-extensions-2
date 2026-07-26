@@ -10,6 +10,7 @@ import { initSidebarShortcuts } from './main_page/frontend/sidebar-shortcuts/run
 import ReconnectingWebSocket from './main_page/frontend/connections/reconnecting-websocket.ts';
 import { createConsoleDrawer } from './main_page/frontend/host-console-drawer.ts';
 import { createProblemsPanel } from './src/diagnostics/problems-panel.ts';
+import { createExtensionActivityPanel } from './main_page/frontend/ui/extension-activity.ts';
 import { getConsoleBridgeStatus, initConsoleBridge } from './main_page/frontend/console_bridge.js';
 import { HOME_DIR, HOME_PREFIX, simplifyAbsolute, toAbsolute, parentDir, basename, formatDisplayPath, formatDisplayDirectory, detectLanguageFromFilename, setMenuChecked, FONT_SCALE_PRESETS, requireEl } from './main_page/frontend/core/utils.ts';
 import { createAppContext } from './main_page/frontend/core/app-context.ts';
@@ -869,7 +870,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       restoredSessionActive = flag;
     },
     setIndicatorInactive: () => cacheIndicatorController.setIndicatorInactive(cacheStateBadge),
-    recordFileActivity: (payload: UnknownRecord) => uiIpcConnections.requestBackendRecordFileActivity(payload),
     setCurrentPath: (path: string) => {
       _setHostCurrentPathOnly(path);
     },
@@ -896,19 +896,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       dispatchExplorerNotification(EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated, { rel });
     },
     openWebSocket: (path: string) => fileWebSocketManager.openWebSocket(path),
-    getEditorState: () => editorState,
-    setEditorState: (state: unknown) => {
-      editorState = asUnknownRecord(state) as EditorState;
-    },
-    setCachedProjectRoot: (path: string | null) => {
-      cachedProjectRoot = path;
-    },
-    broadcastRecentsUpdate: (state: unknown) => recentsController.broadcastRecentsUpdate(asUnknownRecord(state)),
-    syncEditorState: (force?: boolean) => editorStateController.syncEditorState(force),
-    getSessionStateActiveProject: () => sessionState.activeProject || null,
-    setSessionStateActiveProject: (path: string | null) => {
-      sessionState.activeProject = path;
-    },
     jumpToCurrentFileLine: (line: number, opts?: UnknownRecord) => jumpToCurrentFileLine(line, opts),
     toast: (msg: string) => host.toast(msg),
   });
@@ -1189,6 +1176,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     createTerminalDrawer,
     createConsoleDrawer,
     createProblemsPanel,
+    createExtensionActivityPanel,
     initDrawerAndShortcuts,
     bindMenuToggle,
     requireEl,

@@ -24,7 +24,6 @@ export const UI_IPC_RPC_METHODS = {
   hostGitBranchCreate: 'ui.host.git.branch.create',
   hostGitBranchesList: 'ui.host.git.branches.list',
   hostGitRemoteAdd: 'ui.host.git.remote.add',
-  hostStateFileActivityRecord: 'ui.host.state.fileActivity.record',
   hostStateFileScrollUpdate: 'ui.host.state.fileScroll.update',
   sidebarWindowCreate: 'ui.sidebar.window.create',
   sidebarWindowActivate: 'ui.sidebar.window.activate',
