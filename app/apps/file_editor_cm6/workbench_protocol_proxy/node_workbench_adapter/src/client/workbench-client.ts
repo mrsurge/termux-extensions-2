@@ -1070,6 +1070,7 @@ export class WorkbenchClient {
         ),
       sendExt: (rpcId, method, args, cancellable = false) =>
         this._sendExt(rpcId, method, args, cancellable),
+      readTextFile: (filePath) => fs.readFile(filePath, "utf8"),
       sessions: this._callHierarchySessions,
       log: (...args) => console.log(...args),
     });

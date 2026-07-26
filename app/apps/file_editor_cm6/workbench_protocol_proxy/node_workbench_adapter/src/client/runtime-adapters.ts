@@ -198,6 +198,7 @@ export interface CodeNavigationRuntimeDeps {
   uriForPath: (filePath: string, authority: string) => unknown;
   sendExtPending: CodeNavigationRuntime["sendExtPending"];
   sendExt: CodeNavigationRuntime["sendExt"];
+  readTextFile: CodeNavigationRuntime["readTextFile"];
   sessions: CodeNavigationRuntime["sessions"];
   log: (...args: unknown[]) => void;
 }
@@ -565,6 +566,7 @@ export function createCodeNavigationRuntime(
       ),
     sendExt: (rpcId, method, args, cancellable = false) =>
       deps.sendExt(rpcId, method, args, cancellable),
+    readTextFile: (path) => deps.readTextFile(path),
     sessions: deps.sessions,
     log: (...args) => deps.log(...args),
   };

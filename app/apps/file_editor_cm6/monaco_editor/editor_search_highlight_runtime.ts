@@ -57,6 +57,12 @@ interface MonacoDecorationLike {
   options: Record<string, unknown>;
 }
 
+interface DecorationChannelState {
+  editor: MonacoEditorLike | null;
+  collection: MonacoDecorationCollectionLike | null;
+  decorationIds: unknown[];
+}
+
 interface SearchHighlightDeps {
   getCurrentPath(): string | null;
   getEditor(): unknown;
@@ -72,8 +78,16 @@ const APPLY_RETRY_DELAY_MS = 25;
 const MINIMAP_POSITION_INLINE = 1;
 const OVERVIEW_RULER_LANE_CENTER = 2;
 
-let activeCollection: MonacoDecorationCollectionLike | null = null;
-let activeDecorationIds: unknown[] = [];
+const searchDecorationState: DecorationChannelState = {
+  editor: null,
+  collection: null,
+  decorationIds: [],
+};
+const codeInspectorDecorationState: DecorationChannelState = {
+  editor: null,
+  collection: null,
+  decorationIds: [],
+};
 let activeHighlight: SearchHighlightPayload | null = null;
 let activeApplyToken = 0;
 
@@ -175,35 +189,94 @@ function matchDecoration(range: MonacoRangeLike): MonacoDecorationLike {
 function setDecorations(
   editor: MonacoEditorLike,
   decorations: MonacoDecorationLike[],
+  state: DecorationChannelState,
 ): void {
+  if (state.editor && state.editor !== editor) {
+    clearDecorationChannel(state);
+  }
+  state.editor = editor;
   if (editor.createDecorationsCollection) {
-    if (!activeCollection) {
-      activeCollection = editor.createDecorationsCollection();
+    if (!state.collection) {
+      state.collection = editor.createDecorationsCollection();
     }
-    activeCollection?.set?.(decorations);
+    state.collection?.set?.(decorations);
     return;
   }
   if (editor.deltaDecorations) {
-    activeDecorationIds = editor.deltaDecorations(
-      activeDecorationIds,
+    state.decorationIds = editor.deltaDecorations(
+      state.decorationIds,
       decorations,
     );
   }
 }
 
-export function clearSearchHighlight(editorValue: unknown): void {
+function clearDecorationChannel(state: DecorationChannelState): void {
+  if (state.collection?.clear) {
+    state.collection.clear();
+  }
+  state.collection = null;
+  if (state.editor?.deltaDecorations && state.decorationIds.length > 0) {
+    state.decorationIds = state.editor.deltaDecorations(
+      state.decorationIds,
+      [],
+    );
+  } else {
+    state.decorationIds = [];
+  }
+  state.editor = null;
+}
+
+function normalizeDecorationRange(value: unknown): MonacoRangeLike | null {
+  const range = asRecord(value);
+  if (!range) return null;
+  const startLineNumber = Number(range.startLineNumber);
+  const startColumn = Number(range.startColumn);
+  const endLineNumber = Number(range.endLineNumber);
+  const endColumn = Number(range.endColumn);
+  if (
+    !Number.isFinite(startLineNumber) ||
+    !Number.isFinite(startColumn) ||
+    !Number.isFinite(endLineNumber) ||
+    !Number.isFinite(endColumn) ||
+    startLineNumber <= 0 ||
+    startColumn <= 0 ||
+    endLineNumber <= 0 ||
+    endColumn <= 0
+  ) {
+    return null;
+  }
+  return { startLineNumber, startColumn, endLineNumber, endColumn };
+}
+
+export function replaceCodeInspectorHighlights(
+  editorValue: unknown,
+  rangesValue: unknown,
+): void {
+  const ranges = Array.isArray(rangesValue)
+    ? rangesValue
+        .map(normalizeDecorationRange)
+        .filter((range): range is MonacoRangeLike => range !== null)
+    : [];
+  const editor = asEditor(editorValue);
+  if (!editor) {
+    if (!ranges.length) clearDecorationChannel(codeInspectorDecorationState);
+    return;
+  }
+  setDecorations(
+    editor,
+    ranges.map(matchDecoration),
+    codeInspectorDecorationState,
+  );
+}
+
+export function clearCodeInspectorHighlights(): void {
+  clearDecorationChannel(codeInspectorDecorationState);
+}
+
+export function clearSearchHighlight(_editorValue: unknown): void {
   activeApplyToken += 1;
   activeHighlight = null;
-  const editor = asEditor(editorValue);
-  if (activeCollection?.clear) {
-    activeCollection.clear();
-  }
-  activeCollection = null;
-  if (editor?.deltaDecorations && activeDecorationIds.length > 0) {
-    activeDecorationIds = editor.deltaDecorations(activeDecorationIds, []);
-  } else {
-    activeDecorationIds = [];
-  }
+  clearDecorationChannel(searchDecorationState);
 }
 
 function applySearchHighlight(
@@ -220,12 +293,12 @@ function applySearchHighlight(
     return false;
   }
   if (!isPathInProject(currentPath, request.projectPath)) {
-    setDecorations(editor, []);
+    setDecorations(editor, [], searchDecorationState);
     return true;
   }
 
   const decorations = findRanges(editor, model, request).map(matchDecoration);
-  setDecorations(editor, decorations);
+  setDecorations(editor, decorations, searchDecorationState);
   return true;
 }
 

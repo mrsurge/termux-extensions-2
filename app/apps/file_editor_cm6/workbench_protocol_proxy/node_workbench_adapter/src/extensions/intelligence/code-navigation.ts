@@ -42,6 +42,7 @@ export interface CodeNavigationRuntime {
     args: unknown[],
     cancellable?: boolean,
   ) => unknown;
+  readTextFile: (path: string) => Promise<string>;
   sessions: CallHierarchySessions;
   log: (...args: unknown[]) => void;
 }
@@ -129,7 +130,12 @@ interface NormalizedLocation {
   range: NormalizedRange | null;
   selectionRange: NormalizedRange | null;
   originRange: NormalizedRange | null;
+  preview?: string;
 }
+
+const LOCATION_PREVIEW_MAX_CHARS = 240;
+const LOCATION_PREVIEW_LEADING_CONTEXT = 40;
+const LOCATION_PREVIEW_READ_CONCURRENCY = 4;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -238,6 +244,88 @@ function compareLocations(
     (leftRange?.endLineNumber ?? 0) - (rightRange?.endLineNumber ?? 0) ||
     (leftRange?.endColumn ?? 0) - (rightRange?.endColumn ?? 0)
   );
+}
+
+function lineTextAt(text: string, lineNumber: number): string {
+  if (lineNumber <= 0) return "";
+  let offset = 0;
+  for (let currentLine = 1; currentLine < lineNumber; currentLine += 1) {
+    const newline = text.indexOf("\n", offset);
+    if (newline < 0) return "";
+    offset = newline + 1;
+  }
+  const newline = text.indexOf("\n", offset);
+  const end = newline < 0 ? text.length : newline;
+  const line = text.slice(offset, end);
+  return line.endsWith("\r") ? line.slice(0, -1) : line;
+}
+
+function locationPreview(
+  text: string,
+  range: NormalizedRange | null,
+): string {
+  if (!range) return "";
+  const line = lineTextAt(text, range.startLineNumber);
+  if (!line) return "";
+  const hitOffset = Math.max(0, range.startColumn - 1);
+  const windowStart = Math.max(0, hitOffset - LOCATION_PREVIEW_LEADING_CONTEXT);
+  const rawWindow = line.slice(
+    windowStart,
+    windowStart + LOCATION_PREVIEW_MAX_CHARS * 2,
+  );
+  const prefix = windowStart > 0 ? "..." : "";
+  const suffix =
+    windowStart + rawWindow.length < line.length ? "..." : "";
+  const budget = Math.max(
+    0,
+    LOCATION_PREVIEW_MAX_CHARS - prefix.length - suffix.length,
+  );
+  const compact = rawWindow.replace(/\s+/g, " ").trim();
+  return `${prefix}${compact.slice(0, budget)}${suffix}`;
+}
+
+async function attachLocationPreviews(
+  runtime: CodeNavigationRuntime,
+  locations: NormalizedLocation[],
+): Promise<number> {
+  const grouped = new Map<string, NormalizedLocation[]>();
+  for (const location of locations) {
+    if (!location.path) continue;
+    const entries = grouped.get(location.path);
+    if (entries) entries.push(location);
+    else grouped.set(location.path, [location]);
+  }
+  const groups = Array.from(grouped.entries());
+  let nextGroup = 0;
+  let previewCount = 0;
+  const workerCount = Math.min(
+    LOCATION_PREVIEW_READ_CONCURRENCY,
+    groups.length,
+  );
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextGroup < groups.length) {
+        const groupIndex = nextGroup;
+        nextGroup += 1;
+        const [filePath, entries] = groups[groupIndex];
+        try {
+          const text = await runtime.readTextFile(filePath);
+          for (const location of entries) {
+            const preview = locationPreview(
+              text,
+              location.selectionRange ?? location.range,
+            );
+            if (!preview) continue;
+            location.preview = preview;
+            previewCount += 1;
+          }
+        } catch {
+          // Missing or unreadable source leaves the semantic location usable.
+        }
+      }
+    }),
+  );
+  return previewCount;
 }
 
 function mergeLocations(replies: unknown[]): {
@@ -364,8 +452,12 @@ async function provideLocations(
     }),
   );
   const merged = mergeLocations(replies);
+  const previewCount = await attachLocationPreviews(
+    runtime,
+    merged.locations,
+  );
   runtime.log(
-    `[code-navigation] ${config.kind} path=${request.path} providers=${handles.length} locations=${merged.locations.length}`,
+    `[code-navigation] ${config.kind} path=${request.path} providers=${handles.length} locations=${merged.locations.length} previews=${previewCount}`,
   );
   if (!merged.locations.length && merged.error) {
     return { ok: false, error: merged.error };

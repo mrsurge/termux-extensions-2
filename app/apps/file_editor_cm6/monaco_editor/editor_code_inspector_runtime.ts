@@ -20,6 +20,7 @@ interface ModelLike {
   getLanguageId?(): string;
   getVersionId?(): number;
   getWordAtPosition?(position: PositionLike): { word?: string } | null;
+  getLineContent?(lineNumber: number): string;
 }
 
 interface EditorLike {
@@ -52,12 +53,15 @@ interface CodeInspectorRuntimeDeps {
     opts?: { timeoutMs?: number },
   ): Promise<unknown>;
   publishProjection(projection: CodeInspectorProjection): boolean;
+  replaceHighlights(ranges: JsonObject[]): void;
   logError(message: string, error: unknown): void;
 }
 
 export interface CodeInspectorRuntime {
   start(mode: CodeInspectorMode): void;
   handleCommand(params: JsonObject): void;
+  reapplyHighlights(): void;
+  clearHighlights(): void;
   dispose(): void;
 }
 
@@ -66,6 +70,8 @@ const MODE_LABELS: Record<CodeInspectorMode, string> = {
   references: 'References',
   implementations: 'Implementations',
 };
+const LOCATION_PREVIEW_MAX_CHARS = 240;
+const LOCATION_PREVIEW_LEADING_CONTEXT = 40;
 
 function isRecord(value: unknown): value is JsonObject {
   return value != null && typeof value === 'object' && !Array.isArray(value);
@@ -92,12 +98,59 @@ function basename(path: string): string {
   return index >= 0 ? normalized.slice(index + 1) : normalized;
 }
 
+function normalizedPath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function pathsEqual(left: string, right: string): boolean {
+  return Boolean(left) && normalizedPath(left) === normalizedPath(right);
+}
+
 function rangeStart(value: unknown): { line: number; column: number } {
   const range = isRecord(value) ? value as RangeLike : {};
   return {
     line: finitePositive(range.startLineNumber),
     column: finitePositive(range.startColumn),
   };
+}
+
+function oneLinePreview(line: string, column: number): string {
+  const hitOffset = Math.max(0, column - 1);
+  const windowStart = Math.max(0, hitOffset - LOCATION_PREVIEW_LEADING_CONTEXT);
+  const rawWindow = line.slice(
+    windowStart,
+    windowStart + LOCATION_PREVIEW_MAX_CHARS * 2,
+  );
+  const prefix = windowStart > 0 ? '...' : '';
+  const suffix =
+    windowStart + rawWindow.length < line.length ? '...' : '';
+  const budget = Math.max(
+    0,
+    LOCATION_PREVIEW_MAX_CHARS - prefix.length - suffix.length,
+  );
+  const compact = rawWindow.replace(/\s+/g, ' ').trim();
+  return `${prefix}${compact.slice(0, budget)}${suffix}`;
+}
+
+function locationPreview(
+  location: JsonObject,
+  currentPath: string,
+  model: ModelLike | null,
+): string {
+  const path = asString(location.path);
+  const position = rangeStart(location.selectionRange ?? location.range);
+  if (model?.getLineContent && pathsEqual(path, currentPath)) {
+    try {
+      const preview = oneLinePreview(
+        model.getLineContent(position.line),
+        position.column,
+      );
+      if (preview) return preview;
+    } catch {
+      // Retain the WBA preview if the live model is between transitions.
+    }
+  }
+  return oneLinePreview(asString(location.preview), 1);
 }
 
 function targetPosition(editor: EditorLike): PositionLike | null {
@@ -152,6 +205,8 @@ function locationNode(
   location: JsonObject,
   fileIndex: number,
   locationIndex: number,
+  currentPath: string,
+  model: ModelLike | null,
 ): JsonObject {
   const path = asString(location.path);
   const position = rangeStart(location.selectionRange ?? location.range);
@@ -159,7 +214,7 @@ function locationNode(
     id: `location:${fileIndex}:${locationIndex}:${path}:${position.line}:${position.column}`,
     type: 'location',
     label: `${position.line}:${position.column}`,
-    description: basename(path),
+    description: locationPreview(location, currentPath, model),
     path,
     uri: asString(location.uri),
     range: location.range ?? null,
@@ -169,7 +224,11 @@ function locationNode(
   };
 }
 
-function locationTree(locations: JsonObject[]): JsonObject[] {
+function locationTree(
+  locations: JsonObject[],
+  currentPath: string,
+  model: ModelLike | null,
+): JsonObject[] {
   const grouped = new Map<string, JsonObject[]>();
   for (const location of locations) {
     const path = asString(location.path) || asString(location.uri);
@@ -186,7 +245,7 @@ function locationTree(locations: JsonObject[]): JsonObject[] {
     path,
     uri: asString(entries[0]?.uri),
     children: entries.map((entry, locationIndex) =>
-      locationNode(entry, fileIndex, locationIndex)
+      locationNode(entry, fileIndex, locationIndex, currentPath, model)
     ),
   }));
 }
@@ -255,6 +314,25 @@ function collectSessions(nodes: JsonObject[], sessions = new Set<string>()): Set
   return sessions;
 }
 
+function collectHighlightRanges(
+  nodes: JsonObject[],
+  currentPath: string,
+  ranges: JsonObject[] = [],
+): JsonObject[] {
+  for (const node of nodes) {
+    if (node.type === 'location' && pathsEqual(asString(node.path), currentPath)) {
+      const range = isRecord(node.selectionRange)
+        ? node.selectionRange
+        : isRecord(node.range)
+          ? node.range
+          : null;
+      if (range) ranges.push(range);
+    }
+    collectHighlightRanges(asArray(node.children), currentPath, ranges);
+  }
+  return ranges;
+}
+
 export function createEditorCodeInspectorRuntime(
   deps: CodeInspectorRuntimeDeps,
 ): CodeInspectorRuntime {
@@ -263,8 +341,26 @@ export function createEditorCodeInspectorRuntime(
   let disposed = false;
   const expanding = new Set<string>();
 
+  function syncHighlights(): void {
+    const currentPath = deps.getCurrentPath();
+    const current = projection;
+    if (
+      !currentPath ||
+      !current ||
+      current.status !== 'ready' ||
+      (current.mode !== 'references' && current.mode !== 'implementations')
+    ) {
+      deps.replaceHighlights([]);
+      return;
+    }
+    deps.replaceHighlights(
+      collectHighlightRanges(current.tree, currentPath),
+    );
+  }
+
   function publish(next: CodeInspectorProjection): void {
     projection = next;
+    syncHighlights();
     if (!deps.publishProjection(next)) {
       deps.logError('Code Inspector projection publish failed', new Error('editor_rpc_disconnected'));
     }
@@ -356,7 +452,7 @@ export function createEditorCodeInspectorRuntime(
       const unsupported = reply.unsupported === true;
       const tree = mode === 'callHierarchy'
         ? items.map((item, index) => callNode(item, `root:${index}`))
-        : locationTree(items);
+        : locationTree(items, path, editor.getModel?.() ?? null);
       const summary: JsonObject = {
         label: MODE_LABELS[mode],
         count: items.length,
@@ -459,11 +555,26 @@ export function createEditorCodeInspectorRuntime(
     }
   }
 
+  function reapplyHighlights(): void {
+    syncHighlights();
+  }
+
+  function clearHighlights(): void {
+    deps.replaceHighlights([]);
+  }
+
   function dispose(): void {
     disposed = true;
     expanding.clear();
+    clearHighlights();
     projection = null;
   }
 
-  return { start, handleCommand, dispose };
+  return {
+    start,
+    handleCommand,
+    reapplyHighlights,
+    clearHighlights,
+    dispose,
+  };
 }

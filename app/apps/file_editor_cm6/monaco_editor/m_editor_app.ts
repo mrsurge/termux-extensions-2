@@ -131,6 +131,9 @@ import {
   createEditorCodeInspectorRuntime,
   type CodeInspectorRuntime,
 } from "./editor_code_inspector_runtime.ts";
+import {
+  replaceCodeInspectorHighlights,
+} from "./editor_search_highlight_runtime.ts";
 import { installTextmateDebugHooks } from "./editor_textmate_debug_runtime.ts";
 import { createEditorPrefRuntime } from "./editor_pref_runtime.ts";
 import { createEditorMirrorRuntime } from "./editor_mirror_runtime.ts";
@@ -969,6 +972,12 @@ interface MonacoBootWindowLike extends Window {
         EDITOR_RPC_METHODS.codeInspectorPublish,
         { projection },
         { timeoutMs: 12000 },
+      );
+    },
+    replaceHighlights: function (ranges) {
+      replaceCodeInspectorHighlights(
+        diffEditor?.getModifiedEditor?.() ?? editor,
+        ranges,
       );
     },
     logError: function (message, error) {
@@ -2197,6 +2206,12 @@ interface MonacoBootWindowLike extends Window {
           rpcCall: editorRpcCall,
           schedule: function (callback, delayMs) {
             return window.setTimeout(callback, delayMs);
+          },
+          reapplyCodeInspectorHighlights: function () {
+            codeInspectorRuntime?.reapplyHighlights();
+          },
+          clearCodeInspectorHighlights: function () {
+            codeInspectorRuntime?.clearHighlights();
           },
           runIssuesCommand: runIssuesCommand,
           runFindCommand: runFindCommand,

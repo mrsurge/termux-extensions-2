@@ -43,6 +43,8 @@ interface EditorRuntimeSocketHandlerDeps {
     opts?: { timeoutMs?: number },
   ): Promise<unknown>;
   schedule(callback: () => void, delayMs: number): unknown;
+  reapplyCodeInspectorHighlights(): void;
+  clearCodeInspectorHighlights(): void;
   runIssuesCommand(editor: unknown, action: string): void;
   runFindCommand(
     editor: unknown,
@@ -185,6 +187,7 @@ export function registerEditorRuntimeSocketHandlers(
           getModel: deps.getModel,
           schedule: deps.schedule,
         });
+        deps.reapplyCodeInspectorHighlights();
       },
     );
     deps.rpcNotifications.onNotification(
@@ -196,12 +199,14 @@ export function registerEditorRuntimeSocketHandlers(
           getModel: deps.getModel,
           schedule: deps.schedule,
         });
+        deps.reapplyCodeInspectorHighlights();
       },
     );
     deps.rpcNotifications.onNotification(
       EDITOR_RPC_NOTIFICATIONS.projectSwitching,
       () => {
         clearSearchHighlight(deps.getEditor());
+        deps.clearCodeInspectorHighlights();
       },
     );
     deps.rpcNotifications.onNotification(

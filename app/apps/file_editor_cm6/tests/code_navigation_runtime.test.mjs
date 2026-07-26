@@ -24,7 +24,15 @@ function location(path, line, column) {
   };
 }
 
-function createRuntime(replies, calls = []) {
+function createRuntime(
+  replies,
+  calls = [],
+  readTextFile = async (filePath) =>
+    Array.from(
+      { length: 32 },
+      (_value, index) => `line ${index + 1} from ${filePath}`,
+    ).join("\n"),
+) {
   const sessions = new CallHierarchySessionStore();
   return {
     ensureConnected() {},
@@ -47,6 +55,7 @@ function createRuntime(replies, calls = []) {
     sendExt: (_rpcId, method, args) => {
       calls.push({ method, args });
     },
+    readTextFile,
     sessions,
     log() {},
   };
@@ -146,6 +155,7 @@ test("matching exclusive document selectors suppress ordinary providers", () => 
 
 test("merges, sorts, and deduplicates references from every provider", async () => {
   const calls = [];
+  const reads = [];
   const duplicate = location("/workspace/b.rs", 9, 4);
   const runtime = createRuntime([
     {
@@ -156,7 +166,13 @@ test("merges, sorts, and deduplicates references from every provider", async () 
       type: 9,
       result: [duplicate, location("/workspace/b.rs", 3, 2)],
     },
-  ], calls);
+  ], calls, async (filePath) => {
+    reads.push(filePath);
+    return Array.from(
+      { length: 12 },
+      (_value, index) => `preview line ${index + 1} from ${filePath}`,
+    ).join("\n");
+  });
 
   const result = await provideReferences(runtime, {
     path: "/workspace/main.rs",
@@ -187,6 +203,34 @@ test("merges, sorts, and deduplicates references from every provider", async () 
     assert.equal(call.args.length, 4);
     assert.deepEqual(call.args.at(-1), { includeDeclaration: true });
   }
+  assert.deepEqual(reads.sort(), ["/workspace/a.rs", "/workspace/b.rs"]);
+  assert.equal(
+    result.result[0].preview,
+    "preview line 2 from /workspace/a.rs",
+  );
+});
+
+test("bounds location previews around the semantic hit", async () => {
+  const runtime = createRuntime(
+    [{
+      type: 9,
+      result: [location("/workspace/minified.js", 1, 321)],
+    }],
+    [],
+    async () => `${"a".repeat(320)}target${"b".repeat(400)}`,
+  );
+  runtime.findAllProviderHandles = () => [12];
+
+  const result = await provideReferences(runtime, {
+    path: "/workspace/main.js",
+    languageId: "javascript",
+    lineNumber: 1,
+    column: 1,
+  });
+
+  assert.ok(result.result[0].preview.includes("target"));
+  assert.ok(result.result[0].preview.length <= 240);
+  assert.doesNotMatch(result.result[0].preview, /[\r\n]/);
 });
 
 test("retains call hierarchy sessions for lazy expansion and releases them", async () => {

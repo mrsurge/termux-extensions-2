@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
@@ -34,6 +35,8 @@ function createEditorState() {
     getLanguageId: () => "rust",
     getVersionId: () => version,
     getWordAtPosition: () => ({ word: "target_symbol" }),
+    getLineContent: (lineNumber) =>
+      lineNumber === 8 ? "pub fn target_symbol() {}" : `line ${lineNumber}`,
   };
   return {
     editor: {
@@ -68,6 +71,7 @@ test("publishes loading then grouped reference results", async () => {
             endLineNumber: 12,
             endColumn: 7,
           },
+          preview: "first reference preview",
         },
         {
           path: "/workspace/lib.rs",
@@ -78,6 +82,7 @@ test("publishes loading then grouped reference results", async () => {
             endLineNumber: 20,
             endColumn: 5,
           },
+          preview: "second reference preview",
         },
       ],
     }),
@@ -85,6 +90,7 @@ test("publishes loading then grouped reference results", async () => {
       projections.push(structuredClone(projection));
       return true;
     },
+    replaceHighlights() {},
     logError() {},
   });
 
@@ -96,6 +102,87 @@ test("publishes loading then grouped reference results", async () => {
   assert.equal(projections.at(-1).target.symbol, "target_symbol");
   assert.equal(projections.at(-1).tree.length, 1);
   assert.equal(projections.at(-1).tree[0].children.length, 2);
+  assert.equal(
+    projections.at(-1).tree[0].children[0].description,
+    "first reference preview",
+  );
+});
+
+test("uses the live model preview and highlights only the open file", async () => {
+  const { createEditorCodeInspectorRuntime } = await importTypeScript(
+    "monaco_editor/editor_code_inspector_runtime.ts",
+  );
+  const state = createEditorState();
+  const projections = [];
+  const highlights = [];
+  let currentPath = "/workspace/main.rs";
+  const runtime = createEditorCodeInspectorRuntime({
+    getEditor: () => state.editor,
+    getCurrentPath: () => currentPath,
+    editorWorkbenchCall: async () => ({
+      ok: true,
+      result: [
+        {
+          path: "/workspace/main.rs",
+          uri: "file:///workspace/main.rs",
+          range: {
+            startLineNumber: 8,
+            startColumn: 8,
+            endLineNumber: 8,
+            endColumn: 21,
+          },
+          preview: "stale on-disk preview",
+        },
+        {
+          path: "/workspace/lib.rs",
+          uri: "file:///workspace/lib.rs",
+          range: {
+            startLineNumber: 2,
+            startColumn: 1,
+            endLineNumber: 2,
+            endColumn: 5,
+          },
+          preview: "other file preview",
+        },
+      ],
+    }),
+    publishProjection: (projection) => {
+      projections.push(structuredClone(projection));
+      return true;
+    },
+    replaceHighlights: (ranges) => {
+      highlights.push(structuredClone(ranges));
+    },
+    logError() {},
+  });
+
+  runtime.start("references");
+  await settle();
+
+  const currentFile = projections.at(-1).tree.find(
+    (node) => node.path === "/workspace/main.rs",
+  );
+  assert.equal(
+    currentFile.children[0].description,
+    "pub fn target_symbol() {}",
+  );
+  assert.deepEqual(highlights.at(-1), [{
+    startLineNumber: 8,
+    startColumn: 8,
+    endLineNumber: 8,
+    endColumn: 21,
+  }]);
+
+  currentPath = "/workspace/lib.rs";
+  runtime.reapplyHighlights();
+  assert.deepEqual(highlights.at(-1), [{
+    startLineNumber: 2,
+    startColumn: 1,
+    endLineNumber: 2,
+    endColumn: 5,
+  }]);
+  runtime.clearHighlights();
+  assert.deepEqual(highlights.at(-1), []);
 });
 
 test("expands call hierarchy branches against the retained request", async () => {
@@ -149,6 +236,7 @@ test("expands call hierarchy branches against the retained request", async () =>
       projections.push(structuredClone(projection));
       return true;
     },
+    replaceHighlights() {},
     logError() {},
   });
 
@@ -186,6 +274,7 @@ test("drops a provider result after the model version changes", async () => {
       projections.push(structuredClone(projection));
       return true;
     },
+    replaceHighlights() {},
     logError() {},
   });
 
@@ -216,6 +305,7 @@ test("rehydrates a retained hierarchy projection before lazy expansion", async (
       projections.push(structuredClone(projection));
       return true;
     },
+    replaceHighlights() {},
     logError() {},
   });
   const direction = {
@@ -256,5 +346,87 @@ test("rehydrates a retained hierarchy projection before lazy expansion", async (
   assert.equal(
     projections.at(-1).tree[0].children[0].childrenState,
     "loaded",
+  );
+});
+
+test("keeps Code Inspector and contents-search decorations independent", async () => {
+  const {
+    clearCodeInspectorHighlights,
+    clearSearchHighlight,
+    handleSearchHighlight,
+    replaceCodeInspectorHighlights,
+  } = await importTypeScript(
+    "monaco_editor/editor_search_highlight_runtime.ts",
+  );
+  const collections = [];
+  const editor = {
+    createDecorationsCollection() {
+      const collection = {
+        decorations: [],
+        set(decorations) {
+          this.decorations = decorations;
+        },
+        clear() {
+          this.decorations = [];
+        },
+      };
+      collections.push(collection);
+      return collection;
+    },
+    getOption() {
+      return null;
+    },
+  };
+  const searchRange = {
+    startLineNumber: 3,
+    startColumn: 2,
+    endLineNumber: 3,
+    endColumn: 8,
+  };
+  const inspectorRange = {
+    startLineNumber: 7,
+    startColumn: 4,
+    endLineNumber: 7,
+    endColumn: 10,
+  };
+  handleSearchHighlight(
+    {
+      active: true,
+      projectPath: "/workspace",
+      query: "target",
+      isRegex: false,
+      isCaseSensitive: false,
+      isWholeWords: false,
+    },
+    {
+      getCurrentPath: () => "/workspace/main.rs",
+      getEditor: () => editor,
+      getModel: () => ({
+        findMatches: () => [{ range: searchRange }],
+      }),
+      schedule: (callback) => callback(),
+    },
+  );
+  replaceCodeInspectorHighlights(editor, [inspectorRange]);
+
+  assert.equal(collections.length, 2);
+  assert.deepEqual(collections[0].decorations[0].range, searchRange);
+  assert.deepEqual(collections[1].decorations[0].range, inspectorRange);
+  assert.equal(collections[1].decorations[0].options.className, "findMatch");
+
+  clearCodeInspectorHighlights();
+  assert.equal(collections[1].decorations.length, 0);
+  assert.equal(collections[0].decorations.length, 1);
+  clearSearchHighlight(editor);
+});
+
+test("styles the Code Inspector collapse control with the drawer controls", async () => {
+  const template = await readFile(
+    path.join(appRoot, "template.html"),
+    "utf8",
+  );
+  assert.match(
+    template,
+    /\.extension-log-header \.console-clear-btn,\s*\.code-inspector-header \.console-clear-btn/,
   );
 });

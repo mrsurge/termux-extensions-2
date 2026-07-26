@@ -1070,7 +1070,8 @@
     outline: 1px solid var(--accent, #58a6ff);
     outline-offset: -1px;
   }
-  .extension-log-header .console-clear-btn {
+  .extension-log-header .console-clear-btn,
+  .code-inspector-header .console-clear-btn {
     background: transparent;
     border: 1px solid var(--border, #333);
     color: var(--fg-dim, #6e7681);
@@ -1078,6 +1079,11 @@
     padding: 2px 8px;
     font-size: 11px;
     cursor: pointer;
+  }
+  .extension-log-header .console-clear-btn:hover,
+  .code-inspector-header .console-clear-btn:hover {
+    color: var(--fg, #e6edf3);
+    border-color: var(--fg-dim, #6e7681);
   }
   .extension-log-header .extension-log-spacer {
     flex: 1;
