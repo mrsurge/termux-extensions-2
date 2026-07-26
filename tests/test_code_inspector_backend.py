@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+# pyright: reportPrivateUsage=false
 import unittest
-from typing import cast
+from typing import cast, override
 from unittest.mock import AsyncMock, patch
 
 from app.apps.file_editor_cm6 import code_inspector_backend
@@ -27,6 +28,7 @@ def projection(
 
 
 class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
+    @override
     def setUp(self) -> None:
         code_inspector_backend._current_projection = None
 
@@ -119,3 +121,42 @@ class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
         assert release_args is not None
         released = cast(dict[str, object], release_args.args[0])
         self.assertEqual(released["requestId"], "request-1")
+
+    async def test_routes_validated_direction_commands(self) -> None:
+        hierarchy = projection(revision=1)
+        hierarchy["mode"] = "callHierarchy"
+        hierarchy["status"] = "ready"
+        hierarchy["summary"] = {"count": 1, "direction": "incoming"}
+        code_inspector_backend._current_projection = (
+            code_inspector_backend._coerce_projection(hierarchy)
+        )
+        emit = AsyncMock()
+        with patch.object(code_inspector_backend, "_emit_editor_command", emit):
+            result = await code_inspector_backend.handle_code_inspector_command(
+                {
+                    "action": "direction",
+                    "requestId": "request-1",
+                    "direction": "outgoing",
+                },
+                source_name="host",
+            )
+
+        self.assertEqual(result["action"], "direction")
+        emit.assert_awaited_once()
+        awaited = emit.await_args
+        self.assertIsNotNone(awaited)
+        assert awaited is not None
+        emitted = cast(dict[str, object], awaited.args[0])
+        self.assertEqual(emitted["direction"], "outgoing")
+        self.assertEqual(emitted["projection"], hierarchy)
+
+    async def test_rejects_invalid_direction_commands(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid_code_inspector_direction"):
+            _ = await code_inspector_backend.handle_code_inspector_command(
+                {
+                    "action": "direction",
+                    "requestId": "request-1",
+                    "direction": "sideways",
+                },
+                source_name="host",
+            )

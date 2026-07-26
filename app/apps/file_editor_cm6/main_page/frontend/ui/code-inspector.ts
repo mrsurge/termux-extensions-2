@@ -46,6 +46,15 @@ function asPositiveInt(value: unknown, fallback = 1): number {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
+function renderTailPath(
+  target: HTMLElement,
+  path: string,
+  line?: number,
+): void {
+  target.title = line ? `${path}:${line}` : path;
+  target.textContent = path ? `${path}${line ? `:${line}` : ''}` : '';
+}
+
 function requireElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
   if (!(element instanceof HTMLElement)) {
@@ -101,6 +110,10 @@ export function createCodeInspectorPanel(
   const panel = requireElement<HTMLElement>('code-inspector-container');
   const header = requireElement<HTMLElement>('code-inspector-header');
   const target = requireElement<HTMLElement>('code-inspector-target');
+  const targetSymbol = requireElement<HTMLElement>('code-inspector-target-symbol');
+  const targetPath = requireElement<HTMLElement>('code-inspector-target-path');
+  const targetSeparator = requireElement<HTMLElement>('code-inspector-target-separator');
+  const directionButton = requireElement<HTMLButtonElement>('code-inspector-direction');
   const summary = requireElement<HTMLElement>('code-inspector-summary');
   const tree = requireElement<HTMLElement>('code-inspector-tree');
   const empty = requireElement<HTMLElement>('code-inspector-empty');
@@ -108,6 +121,7 @@ export function createCodeInspectorPanel(
   const expanded = new Set<string>();
   const pendingExpansions = new Set<string>();
   let projection: JsonObject | null = null;
+  let pendingDirection = false;
 
   function setPanelVisible(visible: boolean): void {
     header.style.display = visible ? '' : 'none';
@@ -143,7 +157,9 @@ export function createCodeInspectorPanel(
     const id = asString(node.id);
     const children = asArray(node.children);
     const nodeType = asString(node.type);
-    const expandable = nodeType === 'direction' || children.length > 0;
+    const expandable = nodeType === 'call'
+      ? typeof node.childrenState === 'string'
+      : children.length > 0;
     const isExpanded = expanded.has(id);
 
     const twisty = document.createElement('span');
@@ -158,7 +174,7 @@ export function createCodeInspectorPanel(
       } else {
         expanded.add(id);
         const state = asString(node.childrenState);
-        if (nodeType === 'direction' && (state === 'unloaded' || state === 'error')) {
+        if (nodeType === 'call' && (state === 'unloaded' || state === 'error')) {
           void requestExpansion(node);
         }
       }
@@ -170,11 +186,9 @@ export function createCodeInspectorPanel(
     icon.setAttribute('aria-hidden', 'true');
     icon.textContent = nodeType === 'file'
       ? '▤'
-      : nodeType === 'direction'
-        ? node.direction === 'incoming' ? '←' : '→'
-        : nodeType === 'call'
-          ? '☎'
-          : '·';
+      : nodeType === 'call'
+        ? '☎'
+        : '·';
 
     const label = document.createElement('span');
     label.className = 'code-inspector-label';
@@ -182,30 +196,21 @@ export function createCodeInspectorPanel(
 
     const description = document.createElement('span');
     description.className = 'code-inspector-description';
-    description.textContent = asString(node.description);
+    const descriptionText = asString(node.description);
+    if (node.descriptionKind === 'path') {
+      description.classList.add('code-inspector-path');
+      renderTailPath(description, descriptionText);
+    } else {
+      description.textContent = descriptionText;
+    }
 
     row.append(twisty, icon, label, description);
-    row.title = [label.textContent, description.textContent]
+    row.title = [label.textContent, asString(node.detail), descriptionText]
       .filter(Boolean)
       .join(' — ');
     row.setAttribute('aria-expanded', expandable ? String(isExpanded) : 'false');
 
     row.addEventListener('click', () => {
-      if (nodeType === 'direction') {
-        if (!id) return;
-        if (isExpanded) {
-          expanded.delete(id);
-          render();
-          return;
-        }
-        expanded.add(id);
-        const state = asString(node.childrenState);
-        if (state === 'unloaded' || state === 'error') {
-          void requestExpansion(node);
-        }
-        render();
-        return;
-      }
       if (nodeType === 'file' && children.length && id) {
         if (isExpanded) expanded.delete(id);
         else expanded.add(id);
@@ -218,7 +223,7 @@ export function createCodeInspectorPanel(
         forceRefresh: true,
         line: location.line,
         column: location.column,
-        focus: true,
+        focus: false,
         scrollY: 'center',
       });
     });
@@ -227,17 +232,17 @@ export function createCodeInspectorPanel(
     if (isExpanded) {
       const childContainer = document.createElement('div');
       childContainer.className = 'code-inspector-children';
-      if (nodeType === 'direction' && node.childrenState === 'loading') {
+      if (nodeType === 'call' && node.childrenState === 'loading') {
         const loading = document.createElement('div');
         loading.className = 'code-inspector-branch-state';
         loading.textContent = 'Loading…';
         childContainer.append(loading);
-      } else if (nodeType === 'direction' && node.childrenState === 'error') {
+      } else if (nodeType === 'call' && node.childrenState === 'error') {
         const error = document.createElement('div');
         error.className = 'code-inspector-branch-state is-error';
         error.textContent = errorMessage(node.error) || 'Failed to load calls.';
         childContainer.append(error);
-      } else if (nodeType === 'direction' && node.childrenState === 'loaded' && !children.length) {
+      } else if (nodeType === 'call' && node.childrenState === 'loaded' && !children.length) {
         const noCalls = document.createElement('div');
         noCalls.className = 'code-inspector-branch-state';
         noCalls.textContent = 'No calls.';
@@ -279,8 +284,20 @@ export function createCodeInspectorPanel(
     const symbol = asString(targetData.symbol);
     const path = asString(targetData.path);
     const line = asPositiveInt(targetData.line);
-    target.textContent = current
-      ? `${symbol || 'symbol'} · ${path}${path ? `:${line}` : ''}`
+    const mode = asString(current?.mode);
+    const direction = summaryData.direction === 'outgoing' ? 'outgoing' : 'incoming';
+    targetSymbol.textContent = current ? symbol || 'symbol' : 'No active inspection';
+    targetSymbol.title = targetSymbol.textContent;
+    targetSeparator.hidden = !current || !path;
+    renderTailPath(targetPath, current ? path : '', current && path ? line : undefined);
+    directionButton.hidden = mode !== 'callHierarchy';
+    directionButton.disabled = pendingDirection || current?.status !== 'ready';
+    directionButton.title = direction === 'incoming'
+      ? 'Show outgoing calls'
+      : 'Show incoming calls';
+    directionButton.setAttribute('aria-label', directionButton.title);
+    target.title = current
+      ? [symbol || 'symbol', path ? `${path}:${line}` : ''].filter(Boolean).join(' · ')
       : 'No active inspection';
     const count = Number(summaryData.count);
     const label = asString(summaryData.label);
@@ -298,14 +315,26 @@ export function createCodeInspectorPanel(
 
   function hydrate(value: unknown, shouldOpen = false): void {
     const previousRequestId = asString(projection?.requestId);
+    const previousSummary = isRecord(projection?.summary) ? projection.summary : {};
+    const previousDirection = asString(previousSummary.direction);
     projection = isRecord(value) ? value : null;
+    const nextSummary = isRecord(projection?.summary) ? projection.summary : {};
+    const nextDirection = asString(nextSummary.direction);
     pendingExpansions.clear();
-    if (asString(projection?.requestId) !== previousRequestId) {
+    if (
+      asString(projection?.requestId) !== previousRequestId ||
+      nextDirection !== previousDirection
+    ) {
       expanded.clear();
     }
     if (projection) {
-      for (const node of asArray(projection.tree)) {
-        if (node.type === 'file' || node.type === 'call') {
+      const nodes = asArray(projection.tree);
+      if (projection.mode === 'callHierarchy') {
+        const firstId = asString(nodes[0]?.id);
+        if (firstId) expanded.add(firstId);
+      } else {
+        for (const node of nodes) {
+          if (node.type !== 'file') continue;
           const id = asString(node.id);
           if (id) expanded.add(id);
         }
@@ -330,9 +359,28 @@ export function createCodeInspectorPanel(
     hydrate(projectionFromEvent(event), false);
   };
   const collapseHandler = () => deps.closeDrawer();
+  const directionHandler = () => {
+    const current = projection;
+    if (!current || current.mode !== 'callHierarchy' || pendingDirection) return;
+    const summaryData = isRecord(current.summary) ? current.summary : {};
+    const direction = summaryData.direction === 'outgoing' ? 'incoming' : 'outgoing';
+    pendingDirection = true;
+    render();
+    void deps.requestCommand({
+      action: 'direction',
+      requestId: current.requestId,
+      direction,
+    }).catch((error) => {
+      console.warn('[CodeInspector] direction request failed', error);
+    }).finally(() => {
+      pendingDirection = false;
+      render();
+    });
+  };
   window.addEventListener('cm6:code-inspector-changed', changedHandler);
   window.addEventListener('cm6:code-inspector-hydrate', bootHydrateHandler);
   collapse.addEventListener('click', collapseHandler);
+  directionButton.addEventListener('click', directionHandler);
   render();
 
   return {
@@ -344,6 +392,7 @@ export function createCodeInspectorPanel(
       window.removeEventListener('cm6:code-inspector-changed', changedHandler);
       window.removeEventListener('cm6:code-inspector-hydrate', bootHydrateHandler);
       collapse.removeEventListener('click', collapseHandler);
+      directionButton.removeEventListener('click', directionHandler);
     },
   };
 }

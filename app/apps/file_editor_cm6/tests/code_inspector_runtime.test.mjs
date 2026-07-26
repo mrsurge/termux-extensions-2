@@ -185,7 +185,7 @@ test("uses the live model preview and highlights only the open file", async () =
   assert.deepEqual(highlights.at(-1), []);
 });
 
-test("expands call hierarchy branches against the retained request", async () => {
+test("loads the first incoming call scope and switches to outgoing calls", async () => {
   const { createEditorCodeInspectorRuntime } = await importTypeScript(
     "monaco_editor/editor_code_inspector_runtime.ts",
   );
@@ -215,18 +215,36 @@ test("expands call hierarchy branches against the retained request", async () =>
           }],
         };
       }
+      if (method === "call_hierarchy_incoming") {
+        return {
+          ok: true,
+          result: [{
+            sessionId: "session-1",
+            itemId: "caller-1",
+            name: "caller",
+            path: "/workspace/lib.rs",
+            uri: "file:///workspace/lib.rs",
+            range: {
+              startLineNumber: 10,
+              startColumn: 1,
+              endLineNumber: 11,
+              endColumn: 2,
+            },
+          }],
+        };
+      }
       return {
         ok: true,
         result: [{
           sessionId: "session-1",
-          itemId: "caller-1",
-          name: "caller",
-          path: "/workspace/lib.rs",
-          uri: "file:///workspace/lib.rs",
+          itemId: "callee-1",
+          name: "callee",
+          path: "/workspace/callee.rs",
+          uri: "file:///workspace/callee.rs",
           range: {
-            startLineNumber: 10,
+            startLineNumber: 20,
             startColumn: 1,
-            endLineNumber: 11,
+            endLineNumber: 21,
             endColumn: 2,
           },
         }],
@@ -242,19 +260,105 @@ test("expands call hierarchy branches against the retained request", async () =>
 
   runtime.start("callHierarchy");
   await settle();
-  const ready = projections.at(-1);
-  const direction = ready.tree[0].children[0];
+  const incoming = projections.at(-1);
+
+  assert.deepEqual(methods, [
+    "call_hierarchy_prepare",
+    "call_hierarchy_incoming",
+  ]);
+  assert.equal(incoming.summary.direction, "incoming");
+  assert.equal(incoming.tree[0].childrenState, "loaded");
+  assert.equal(incoming.tree[0].children[0].label, "caller");
+  assert.equal(incoming.tree[0].children[0].description, "/workspace/lib.rs");
+  assert.equal(incoming.tree[0].children[0].descriptionKind, "path");
+
   runtime.handleCommand({
-    action: "expand",
-    requestId: ready.requestId,
-    nodeId: direction.id,
+    action: "direction",
+    requestId: incoming.requestId,
+    direction: "outgoing",
   });
   await settle();
 
-  assert.ok(methods.includes("call_hierarchy_incoming"));
-  const expanded = projections.at(-1).tree[0].children[0];
-  assert.equal(expanded.childrenState, "loaded");
-  assert.equal(expanded.children[0].label, "caller");
+  assert.equal(methods.at(-1), "call_hierarchy_outgoing");
+  const outgoing = projections.at(-1);
+  assert.equal(outgoing.summary.direction, "outgoing");
+  assert.equal(outgoing.tree[0].childrenState, "loaded");
+  assert.equal(outgoing.tree[0].children[0].label, "callee");
+});
+
+test("drops an incoming expansion that completes after an outgoing switch", async () => {
+  const { createEditorCodeInspectorRuntime } = await importTypeScript(
+    "monaco_editor/editor_code_inspector_runtime.ts",
+  );
+  const state = createEditorState();
+  const projections = [];
+  let resolveIncoming;
+  const runtime = createEditorCodeInspectorRuntime({
+    getEditor: () => state.editor,
+    getCurrentPath: () => "/workspace/main.rs",
+    editorWorkbenchCall: async (method) => {
+      if (method === "call_hierarchy_prepare") {
+        return {
+          ok: true,
+          result: [{
+            sessionId: "session-1",
+            itemId: "root-1",
+            name: "main",
+            path: "/workspace/main.rs",
+          }],
+        };
+      }
+      if (method === "call_hierarchy_incoming") {
+        return new Promise((resolve) => {
+          resolveIncoming = resolve;
+        });
+      }
+      return {
+        ok: true,
+        result: [{
+          sessionId: "session-1",
+          itemId: "callee-1",
+          name: "callee",
+          path: "/workspace/callee.rs",
+        }],
+      };
+    },
+    publishProjection: (projection) => {
+      projections.push(structuredClone(projection));
+      return true;
+    },
+    replaceHighlights() {},
+    logError() {},
+  });
+
+  runtime.start("callHierarchy");
+  await settle();
+  const incoming = projections.at(-1);
+  assert.equal(incoming.summary.direction, "incoming");
+  assert.equal(incoming.tree[0].childrenState, "loading");
+
+  runtime.handleCommand({
+    action: "direction",
+    requestId: incoming.requestId,
+    direction: "outgoing",
+  });
+  await settle();
+  assert.equal(projections.at(-1).summary.direction, "outgoing");
+  assert.equal(projections.at(-1).tree[0].children[0].label, "callee");
+
+  resolveIncoming({
+    ok: true,
+    result: [{
+      sessionId: "session-1",
+      itemId: "caller-1",
+      name: "stale-caller",
+      path: "/workspace/stale.rs",
+    }],
+  });
+  await settle();
+
+  assert.equal(projections.at(-1).summary.direction, "outgoing");
+  assert.equal(projections.at(-1).tree[0].children[0].label, "callee");
 });
 
 test("drops a provider result after the model version changes", async () => {
@@ -308,9 +412,9 @@ test("rehydrates a retained hierarchy projection before lazy expansion", async (
     replaceHighlights() {},
     logError() {},
   });
-  const direction = {
-    id: "call:root:session-1:root-1:incoming",
-    type: "direction",
+  const root = {
+    id: "call:root:session-1:root-1",
+    type: "call",
     direction: "incoming",
     sessionId: "session-1",
     itemId: "root-1",
@@ -320,7 +424,7 @@ test("rehydrates a retained hierarchy projection before lazy expansion", async (
   runtime.handleCommand({
     action: "expand",
     requestId: "retained-request",
-    nodeId: direction.id,
+    nodeId: root.id,
     projection: {
       revision: 1,
       requestId: "retained-request",
@@ -328,14 +432,8 @@ test("rehydrates a retained hierarchy projection before lazy expansion", async (
       status: "ready",
       mode: "callHierarchy",
       target: { path: "/workspace/main.rs" },
-      summary: { count: 1 },
-      tree: [{
-        id: "call:root:session-1:root-1",
-        type: "call",
-        sessionId: "session-1",
-        itemId: "root-1",
-        children: [direction],
-      }],
+      summary: { count: 1, direction: "incoming" },
+      tree: [root],
       error: null,
     },
   });
@@ -344,7 +442,7 @@ test("rehydrates a retained hierarchy projection before lazy expansion", async (
   assert.deepEqual(methods, ["call_hierarchy_incoming"]);
   assert.equal(projections.at(-1).requestId, "retained-request");
   assert.equal(
-    projections.at(-1).tree[0].children[0].childrenState,
+    projections.at(-1).tree[0].childrenState,
     "loaded",
   );
 });
@@ -429,4 +527,21 @@ test("styles the Code Inspector collapse control with the drawer controls", asyn
     template,
     /\.extension-log-header \.console-clear-btn,\s*\.code-inspector-header \.console-clear-btn/,
   );
+});
+
+test("uses no-focus result jumps and tail-preserving path markup", async () => {
+  const [source, template] = await Promise.all([
+    readFile(
+      path.join(appRoot, "main_page/frontend/ui/code-inspector.ts"),
+      "utf8",
+    ),
+    readFile(path.join(appRoot, "template.html"), "utf8"),
+  ]);
+
+  assert.match(source, /focus:\s*false,\s*scrollY:\s*'center'/);
+  assert.doesNotMatch(source, /splitPathForDisplay/);
+  assert.match(template, /\.code-inspector-path\s*\{[^}]*text-overflow:\s*ellipsis[^}]*direction:\s*rtl/s);
+  assert.match(template, /\.code-inspector-direction\s*\{[^}]*display:\s*inline-flex/s);
+  assert.match(template, /id="code-inspector-direction"[^>]*hidden/);
+  assert.match(source, /directionButton\.hidden = mode !== 'callHierarchy'/);
 });

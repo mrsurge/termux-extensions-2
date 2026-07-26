@@ -2,6 +2,7 @@ import type { CodeInspectorMode } from './editor_touch_menu_utils.ts';
 
 type JsonObject = Record<string, unknown>;
 type CodeInspectorStatus = 'loading' | 'ready' | 'empty' | 'unsupported' | 'error';
+type CallHierarchyDirection = 'incoming' | 'outgoing';
 
 interface PositionLike {
   lineNumber: number;
@@ -242,6 +243,7 @@ function locationTree(
     type: 'file',
     label: basename(path),
     description: path,
+    descriptionKind: 'path',
     path,
     uri: asString(entries[0]?.uri),
     children: entries.map((entry, locationIndex) =>
@@ -250,7 +252,11 @@ function locationTree(
   }));
 }
 
-function callNode(item: JsonObject, branch = 'root'): JsonObject {
+function callNode(
+  item: JsonObject,
+  branch = 'root',
+  direction: CallHierarchyDirection = 'incoming',
+): JsonObject {
   const sessionId = asString(item.sessionId);
   const itemId = asString(item.itemId);
   const path = asString(item.path);
@@ -259,7 +265,9 @@ function callNode(item: JsonObject, branch = 'root'): JsonObject {
     id,
     type: 'call',
     label: asString(item.name) || basename(path) || 'Call',
-    description: asString(item.detail) || path,
+    description: path,
+    descriptionKind: 'path',
+    detail: asString(item.detail),
     path,
     uri: asString(item.uri),
     range: item.range ?? null,
@@ -267,26 +275,7 @@ function callNode(item: JsonObject, branch = 'root'): JsonObject {
     sessionId,
     itemId,
     providerHandle: item.providerHandle ?? null,
-    children: [
-      directionNode(id, sessionId, itemId, 'incoming'),
-      directionNode(id, sessionId, itemId, 'outgoing'),
-    ],
-  };
-}
-
-function directionNode(
-  parentId: string,
-  sessionId: string,
-  itemId: string,
-  direction: 'incoming' | 'outgoing',
-): JsonObject {
-  return {
-    id: `${parentId}:${direction}`,
-    type: 'direction',
-    label: direction === 'incoming' ? 'Incoming calls' : 'Outgoing calls',
     direction,
-    sessionId,
-    itemId,
     childrenState: 'unloaded',
     children: [],
   };
@@ -451,13 +440,14 @@ export function createEditorCodeInspectorRuntime(
       const items = asArray(reply.result);
       const unsupported = reply.unsupported === true;
       const tree = mode === 'callHierarchy'
-        ? items.map((item, index) => callNode(item, `root:${index}`))
+        ? items.map((item, index) => callNode(item, `root:${index}`, 'incoming'))
         : locationTree(items, path, editor.getModel?.() ?? null);
       const summary: JsonObject = {
         label: MODE_LABELS[mode],
         count: items.length,
       };
-      if (mode !== 'callHierarchy') summary.fileCount = tree.length;
+      if (mode === 'callHierarchy') summary.direction = 'incoming';
+      else summary.fileCount = tree.length;
       publishRevision({
         status: unsupported
           ? 'unsupported'
@@ -470,6 +460,17 @@ export function createEditorCodeInspectorRuntime(
         tree,
         error: reply.ok === false ? reply.error ?? 'Code navigation failed' : null,
       });
+      if (
+        mode === 'callHierarchy' &&
+        !unsupported &&
+        reply.ok !== false &&
+        tree.length
+      ) {
+        await expand({
+          requestId,
+          nodeId: tree[0].id,
+        });
+      }
     } catch (error) {
       if (!isCurrent(requestId, target)) return;
       publishRevision({
@@ -487,8 +488,7 @@ export function createEditorCodeInspectorRuntime(
       !current ||
       current.mode !== 'callHierarchy' ||
       current.requestId !== requestId ||
-      !nodeId ||
-      expanding.has(nodeId)
+      !nodeId
     ) {
       return;
     }
@@ -496,12 +496,21 @@ export function createEditorCodeInspectorRuntime(
     const direction = node?.direction === 'incoming' || node?.direction === 'outgoing'
       ? node.direction
       : null;
-    if (!node || !direction || node.childrenState === 'loaded') return;
+    if (
+      !node ||
+      node.type !== 'call' ||
+      !direction ||
+      node.childrenState === 'loaded'
+    ) {
+      return;
+    }
+    const expansionKey = `${nodeId}:${direction}`;
+    if (expanding.has(expansionKey)) return;
     const sessionId = asString(node.sessionId);
     const itemId = asString(node.itemId);
     if (!sessionId || !itemId) return;
 
-    expanding.add(nodeId);
+    expanding.add(expansionKey);
     node.childrenState = 'loading';
     node.children = [];
     publishRevision({ tree: current.tree });
@@ -515,10 +524,10 @@ export function createEditorCodeInspectorRuntime(
       ));
       if (projection?.requestId !== requestId) return;
       const activeNode = visitNodes(projection.tree, (candidate) => candidate.id === nodeId);
-      if (!activeNode) return;
+      if (!activeNode || activeNode.direction !== direction) return;
       const items = asArray(reply.result);
       activeNode.children = items.map((item, index) =>
-        callNode(item, `${nodeId}:${index}`)
+        callNode(item, `${nodeId}:${index}`, direction)
       );
       activeNode.childrenState = reply.ok === false ? 'error' : 'loaded';
       activeNode.error = reply.ok === false ? reply.error ?? 'Call hierarchy failed' : null;
@@ -526,12 +535,49 @@ export function createEditorCodeInspectorRuntime(
     } catch (error) {
       if (projection?.requestId !== requestId) return;
       const activeNode = visitNodes(projection.tree, (candidate) => candidate.id === nodeId);
-      if (!activeNode) return;
+      if (!activeNode || activeNode.direction !== direction) return;
       activeNode.childrenState = 'error';
       activeNode.error = error instanceof Error ? error.message : String(error);
       publishRevision({ tree: projection.tree });
     } finally {
-      expanding.delete(nodeId);
+      expanding.delete(expansionKey);
+    }
+  }
+
+  async function switchDirection(params: JsonObject): Promise<void> {
+    const current = projection;
+    const requestId = asString(params.requestId);
+    const direction = params.direction === 'incoming' || params.direction === 'outgoing'
+      ? params.direction
+      : null;
+    if (
+      !current ||
+      current.mode !== 'callHierarchy' ||
+      current.requestId !== requestId ||
+      !direction
+    ) {
+      return;
+    }
+    if (current.summary.direction === direction) return;
+
+    const tree: JsonObject[] = current.tree.map((node) => ({
+      ...node,
+      direction,
+      childrenState: 'unloaded',
+      children: [],
+    }));
+    publishRevision({
+      summary: {
+        ...current.summary,
+        direction,
+      },
+      tree,
+    });
+    if (tree.length) {
+      await expand({
+        requestId,
+        nodeId: tree[0].id,
+      });
     }
   }
 
@@ -541,7 +587,7 @@ export function createEditorCodeInspectorRuntime(
 
   function handleCommand(params: JsonObject): void {
     const retained = projectionFromValue(params.projection);
-    if (params.action === 'expand') {
+    if (params.action === 'expand' || params.action === 'direction') {
       if (
         retained &&
         (!projection || retained.requestId !== projection.requestId)
@@ -549,7 +595,11 @@ export function createEditorCodeInspectorRuntime(
         projection = retained;
         requestSequence = Math.max(requestSequence, retained.requestSequence);
       }
-      void expand(params);
+      if (params.action === 'direction') {
+        void switchDirection(params);
+      } else {
+        void expand(params);
+      }
     } else if (params.action === 'release') {
       void releaseSessions(retained ?? projection);
     }

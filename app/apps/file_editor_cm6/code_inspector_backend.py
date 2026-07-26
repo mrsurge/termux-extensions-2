@@ -117,8 +117,13 @@ async def handle_code_inspector_command(
     source_name: str,
 ) -> JsonObject:
     action = str(params.get("action") or "")
-    if action not in {"expand", "release"}:
+    if action not in {"direction", "expand", "release"}:
         raise ValueError("unsupported_code_inspector_action")
+    if action == "direction" and params.get("direction") not in {
+        "incoming",
+        "outgoing",
+    }:
+        raise ValueError("invalid_code_inspector_direction")
 
     projection = _current_projection
     request_id = str(params.get("requestId") or "")

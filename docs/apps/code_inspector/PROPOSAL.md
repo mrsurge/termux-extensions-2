@@ -41,10 +41,13 @@ The drawer renders:
 - active operation
 - explicit loading, empty, unsupported, and error states
 - references and implementations grouped by file
-- call hierarchy as a lazily expanded incoming/outgoing tree
+- call hierarchy with one active incoming or outgoing direction
 
 Selecting a result opens the target file and range without closing or replacing
-the Inspector.
+the Inspector. Result navigation uses a centered line reveal with editor focus
+disabled, so it does not move the Monaco cursor or summon the mobile keyboard.
+Displayed paths remain one text value and truncate from the root side, keeping
+the deepest path segments visible without split-span overlap.
 
 ## Ownership
 
@@ -56,7 +59,8 @@ The editor frontend owns:
 - issuing direct WBA language-intelligence requests
 - rejecting stale results by request and model generation
 - publishing normalized Inspector projections through `/rpc/editor`
-- receiving backend-mediated hierarchy expansion and release commands
+- receiving backend-mediated hierarchy direction, expansion, and release
+  commands
 
 The editor frontend must not notify the host frontend directly.
 
@@ -110,7 +114,7 @@ It:
 - accepts reliable editor publications over `/rpc/editor`
 - applies latest-request and revision guards
 - retains one current top-level inspection
-- updates that inspection as hierarchy nodes are expanded
+- updates that inspection as hierarchy direction changes and nodes are expanded
 - publishes a backend Code Inspector fact
 - projects that fact to the host through `/ui_ipc`
 - includes the current snapshot in the host boot snapshot
@@ -125,6 +129,7 @@ The host frontend owns:
 
 - the `Code Inspector` drawer tab
 - rendering the current projection
+- requesting backend-mediated hierarchy direction changes
 - requesting backend-mediated hierarchy expansion
 - opening result locations through existing host file-open behavior
 - preserving Inspector state while the active editor file changes
@@ -153,6 +158,12 @@ Code Inspector row expansion
   -> reliable editor.codeInspector.publish request
   -> updated backend fact and host projection
 ```
+
+Hierarchy direction changes use the same command path. A prepared hierarchy
+starts in the incoming direction, immediately resolves and expands its first
+root, and retains all other roots for explicit expansion. The header direction
+action resets direction-specific children and resolves the first root in the
+new direction. Descendant calls remain lazy.
 
 Top-level replacement or drawer disposal may request hierarchy release through
 the same backend-mediated command path.
@@ -256,17 +267,17 @@ file
 Call hierarchy uses:
 
 ```text
-target symbol
-  Incoming Calls
+target symbol  [switch direction]
+  first prepared root
     caller
       caller
-  Outgoing Calls
-    callee
-      callee
 ```
 
-Children resolve only when their branch is expanded. Loading and failed nodes
-remain visible and retryable.
+Incoming calls are the default. Only the active direction is displayed; the
+header telephone action switches between incoming and outgoing calls. The first
+prepared root is always displayed and resolved immediately. Other roots and
+descendant calls resolve only when expanded. Loading and failed nodes remain
+visible and retryable.
 
 ## Accessibility
 

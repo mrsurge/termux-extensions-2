@@ -18,6 +18,11 @@ Current phase: implementation complete; live validation pending
 - [x] Preserve Inspector state when result navigation opens another file.
 - [x] Present code navigation on touch and desktop context menus.
 - [x] Keep selection-adjustment controls touch-only.
+- [x] Use one active call direction with incoming as the default.
+- [x] Match VS Code by resolving and expanding the first prepared call root.
+- [x] Navigate results without moving the cursor or focusing Monaco.
+- [x] Render paths as one value with root-side ellipsis, preserving the deepest
+      path segments without split-span overlap.
 
 ## Phase 1: WBA Provider Support
 
@@ -52,6 +57,7 @@ Current phase: implementation complete; live validation pending
 - [x] Project changes to `ui.codeInspector.changed`.
 - [x] Add `ui.host.codeInspector.command` expansion routing.
 - [x] Add `editor.codeInspector.command` backend notification.
+- [x] Add hierarchy direction command routing.
 - [x] Add hierarchy release command routing.
 - [x] Include `code_inspector` in the host boot snapshot.
 - [x] Preserve the local projection across transient UI IPC reconnects and
@@ -69,6 +75,8 @@ Current phase: implementation complete; live validation pending
 - [x] Prepare direct call-hierarchy sessions.
 - [x] Handle backend-mediated hierarchy expansion commands.
 - [x] Handle backend-mediated hierarchy release commands.
+- [x] Handle backend-mediated hierarchy direction commands.
+- [x] Resolve the first prepared root in the incoming direction.
 - [x] Normalize WBA responses for publication.
 - [x] Reject stale top-level and expansion results.
 - [x] Publish results through reliable editor RPC requests.
@@ -87,10 +95,14 @@ Current phase: implementation complete; live validation pending
 - [x] Render loading, empty, unsupported, and error states.
 - [x] Group references by file.
 - [x] Group implementations by file.
-- [x] Render incoming and outgoing hierarchy branches.
+- [x] Render only the active hierarchy direction.
+- [x] Add an accessible header action to switch call direction.
+- [x] Keep the first prepared call root expanded.
 - [x] Resolve hierarchy children progressively on expansion.
 - [x] Keep loaded and failed node state visible.
 - [x] Open locations through existing host file-open behavior.
+- [x] Use no-focus centered line reveal for every navigable result.
+- [x] Use one-value, root-truncated path display in the header and result rows.
 - [x] Preserve the current Inspector projection after navigation.
 - [x] Add accessible tree and live-region semantics.
 - [x] Cover the editor-side projection and expansion controller with focused
@@ -127,7 +139,8 @@ Current phase: implementation complete; live validation pending
 - [ ] Perform live mobile context-menu validation.
 - [ ] Validate references with an LSP-backed extension.
 - [ ] Validate implementations with a supported provider.
-- [ ] Validate incoming and outgoing lazy call hierarchy.
+- [ ] Validate incoming default, outgoing switching, first-root expansion, and
+      lazy descendant calls.
 - [ ] Validate browser reload rehydration while the app worker remains alive.
 - [ ] Validate explicit empty/unsupported behavior without fallback.
 

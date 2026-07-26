@@ -1110,11 +1110,66 @@
     font-size: 12px;
   }
   .code-inspector-target {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 6px;
+    font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
+  }
+  .code-inspector-target-symbol,
+  .code-inspector-target-separator {
+    flex: 0 0 auto;
+  }
+  .code-inspector-target-symbol {
+    max-width: 34%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .code-inspector-target-separator {
+    color: var(--fg-dim, #8b949e);
+  }
+  .code-inspector-direction {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--fg-dim, #8b949e);
+    font: inherit;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .code-inspector-direction[hidden] {
+    display: none;
+  }
+  .code-inspector-direction:hover,
+  .code-inspector-direction:focus-visible {
+    border-color: var(--border, #333);
+    color: var(--fg, #e6edf3);
+    outline: none;
+  }
+  .code-inspector-direction:disabled {
+    cursor: progress;
+    opacity: 0.55;
+  }
+  .code-inspector-path {
+    display: block;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: var(--font-mono, 'JetBrains Mono Nerd', monospace);
+    direction: rtl;
+    text-align: left;
+  }
+  .code-inspector-target > .code-inspector-path {
+    flex: 1 1 auto;
   }
   .code-inspector-summary {
     margin-left: auto;
@@ -1140,7 +1195,7 @@
   }
   .code-inspector-row {
     display: grid;
-    grid-template-columns: 14px 18px minmax(max-content, auto) minmax(0, 1fr);
+    grid-template-columns: 14px 18px minmax(0, auto) minmax(0, 1fr);
     align-items: center;
     gap: 4px;
     width: 100%;
@@ -1171,6 +1226,9 @@
   }
   .code-inspector-description {
     color: var(--fg-dim, #8b949e);
+  }
+  .code-inspector-description.code-inspector-path {
+    width: 100%;
   }
   .code-inspector-branch-state,
   #code-inspector-empty {
@@ -2387,7 +2445,12 @@
       <div id="extension-log-empty">No extension activity yet.</div>
     </div>
     <div id="code-inspector-header" class="code-inspector-header" data-drawer-panel="code-inspector" style="display:none;">
-      <span id="code-inspector-target" class="code-inspector-target">No active inspection</span>
+      <span id="code-inspector-target" class="code-inspector-target">
+        <span id="code-inspector-target-symbol" class="code-inspector-target-symbol">No active inspection</span>
+        <button id="code-inspector-direction" class="code-inspector-direction" type="button" aria-label="Switch call hierarchy direction" hidden>☎</button>
+        <span id="code-inspector-target-separator" class="code-inspector-target-separator" hidden>·</span>
+        <span id="code-inspector-target-path" class="code-inspector-path"></span>
+      </span>
       <span id="code-inspector-summary" class="code-inspector-summary"></span>
       <button class="console-clear-btn" id="code-inspector-collapse" type="button" title="Collapse Code Inspector" aria-label="Collapse Code Inspector">▼</button>
     </div>
