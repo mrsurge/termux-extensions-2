@@ -60,6 +60,7 @@ class MainActivity : AppCompatActivity() {
     private val editorInputFilter = EditorInputFilter()
     private val composeConsoleState = ComposeConsoleState()
     private var uiIpcClient: UiIpcClient? = null
+    private var nativeConsoleWorker: AndroidNativeConsoleWorker? = null
     private var devToolsInspector: GeckoDevToolsInspector? = null
     private var devToolsInspectorEnabled = false
     private var devToolsInspectorStatus = "disabled"
@@ -79,6 +80,7 @@ class MainActivity : AppCompatActivity() {
 
     private val httpClient = OkHttpClient()
     private val uiHandler = Handler(Looper.getMainLooper())
+    private val assetUpdateInFlight = AtomicBoolean(false)
 
     private var frameworkBaseUrl: String = DEFAULT_FRAMEWORK_URL
     private var currentAppId: String = DEFAULT_APP_ID
@@ -991,63 +993,160 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun flushBrowserCache() {
-        if (!::runtime.isInitialized) return
+        clearBrowserCachesAndReload(hideToolsAfter = true) { result ->
+            Toast.makeText(
+                this,
+                if (result.isSuccess) "Browser cache flushed" else "Cache flush failed",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
+    private fun updateTe2Ui() {
+        Toast.makeText(this, "Force-updating assets…", Toast.LENGTH_SHORT).show()
+        forceUpdateAssetsAndReload(showFeedback = true) { result ->
+            if (result.isFailure) {
+                Toast.makeText(
+                    this,
+                    "Asset update failed: ${result.exceptionOrNull()?.message}",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
+
+    private fun forceUpdateAssetsAndReload(
+        showFeedback: Boolean,
+        completion: (Result<JSONObject>) -> Unit,
+    ) {
+        if (!assetUpdateInFlight.compareAndSet(false, true)) {
+            runOnUiThread {
+                completion(Result.failure(IllegalStateException("asset update already running")))
+            }
+            return
+        }
+        val manager = editorAssetManager
+        if (manager == null) {
+            assetUpdateInFlight.set(false)
+            runOnUiThread {
+                completion(Result.failure(IllegalStateException("asset manager unavailable")))
+            }
+            return
+        }
+        val previousVersion = manager.getLocalVersion()
+        Thread {
+            try {
+                if (!manager.forceUpdateFromServer(frameworkBaseUrl)) {
+                    throw IllegalStateException("asset download or installation failed")
+                }
+                val installedVersion = manager.getLocalVersion()
+                    ?: throw IllegalStateException("installed asset version unavailable")
+                runOnUiThread {
+                    findViewById<TextView>(R.id.consoleTitle)?.let {
+                        if (consoleOverlay.visibility == View.VISIBLE) {
+                            it.text = "Tools · v$installedVersion"
+                        }
+                    }
+                    clearBrowserCachesAndReload(hideToolsAfter = showFeedback) { cacheResult ->
+                        assetUpdateInFlight.set(false)
+                        cacheResult.fold(
+                            onSuccess = { reloadRequested ->
+                                if (showFeedback) {
+                                    Toast.makeText(
+                                        this,
+                                        "Assets updated to v$installedVersion",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                                completion(
+                                    Result.success(
+                                        JSONObject().apply {
+                                            put("method", ANDROID_ASSET_FORCE_UPDATE_METHOD)
+                                            put(
+                                                "previousVersion",
+                                                previousVersion ?: JSONObject.NULL,
+                                            )
+                                            put("installedVersion", installedVersion)
+                                            put("updated", true)
+                                            put("cacheCleared", true)
+                                            put("reloadRequested", reloadRequested)
+                                        },
+                                    ),
+                                )
+                            },
+                            onFailure = { error ->
+                                completion(Result.failure(error))
+                            },
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                assetUpdateInFlight.set(false)
+                runOnUiThread {
+                    completion(Result.failure(e))
+                }
+            }
+        }.start()
+    }
+
+    private fun clearBrowserCachesAndReload(
+        hideToolsAfter: Boolean,
+        completion: (Result<Boolean>) -> Unit,
+    ) {
+        if (!::runtime.isInitialized) {
+            completion(Result.failure(IllegalStateException("Gecko runtime unavailable")))
+            return
+        }
         try {
             runtime.storageController
                 .clearData(StorageController.ClearFlags.ALL_CACHES)
                 .accept(
                     {
                         runOnUiThread {
-                            Toast.makeText(this, "Browser cache flushed", Toast.LENGTH_SHORT).show()
                             try {
-                                if (::geckoSession.isInitialized) geckoSession.reload()
-                            } catch (_: Exception) {
+                                val reloadRequested = ::geckoSession.isInitialized
+                                if (reloadRequested) geckoSession.reload()
+                                if (hideToolsAfter) hideConsoleOverlay()
+                                completion(Result.success(reloadRequested))
+                            } catch (error: Exception) {
+                                completion(Result.failure(error))
                             }
-                            hideConsoleOverlay()
                         }
                     },
-                    {
+                    { error ->
                         runOnUiThread {
-                            Toast.makeText(this, "Cache flush failed", Toast.LENGTH_SHORT).show()
+                            completion(
+                                Result.failure(
+                                    IllegalStateException(
+                                        "Gecko cache clear failed",
+                                        error,
+                                    ),
+                                ),
+                            )
                         }
-                    }
+                    },
                 )
-        } catch (_: Exception) {
-            Toast.makeText(this, "Cache flush failed", Toast.LENGTH_SHORT).show()
+        } catch (error: Exception) {
+            completion(Result.failure(error))
         }
     }
 
-    /**
-     * Disable the asset_intercept extension (so GeckoView fetches fresh assets
-     * from the Python server), flush the browser cache, and reload.
-     */
-    private fun updateTe2Ui() {
-        Toast.makeText(this, "Force-updating assets…", Toast.LENGTH_SHORT).show()
-        Thread {
-            try {
-                val mgr = editorAssetManager
-                if (mgr != null) {
-                    val ok = mgr.forceUpdateFromServer(frameworkBaseUrl)
-                    runOnUiThread {
-                        if (ok) {
-                            val ver = mgr.getLocalVersion() ?: "?"
-                            Toast.makeText(this, "Assets updated to v$ver — reloading", Toast.LENGTH_SHORT).show()
-                            findViewById<TextView>(R.id.consoleTitle)?.let {
-                                if (consoleOverlay.visibility == View.VISIBLE)
-                                    it.text = "Tools · v$ver"
-                            }
-                            flushBrowserCache()
-                        } else {
-                            Toast.makeText(this, "Asset update failed", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this, "Update failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                }
+    private fun connectNativeConsoleWorker(frameworkUrl: String) {
+        val worker = nativeConsoleWorker ?: AndroidNativeConsoleWorker(
+            workerId = androidNativeConsoleWorkerId(this, "gecko"),
+            workerLabel = "android-gecko",
+        ) { command, completion ->
+            when (command) {
+                AndroidNativeConsoleCommand.FORCE_UPDATE_AND_RELOAD ->
+                    forceUpdateAssetsAndReload(
+                        showFeedback = false,
+                        completion = completion,
+                    )
             }
-        }.start()
+        }.also {
+            nativeConsoleWorker = it
+        }
+        worker.connect(frameworkUrl)
     }
 
     private fun loadHome() {
@@ -1480,6 +1579,7 @@ class MainActivity : AppCompatActivity() {
         uiIpcClient?.setImeContextSwitchingEnabled(settings.imeContextSwitchingEnabled)
         uiIpcClient?.disconnect()
         uiIpcClient = null
+        nativeConsoleWorker?.disconnect()
         if (devToolsSettingChanged) {
             runOnUiThread {
                 updateDevToolsInspectorStatus(
@@ -1561,6 +1661,8 @@ class MainActivity : AppCompatActivity() {
                 android.util.Log.w("MainActivity", "Asset server check failed", e)
             }
 
+            connectNativeConsoleWorker(frameworkUrl)
+
             // Connect IME filter IPC after server URL is known
             try {
                 uiIpcClient?.disconnect()
@@ -1626,6 +1728,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         uiIpcClient?.disconnect()
         uiIpcClient = null
+        nativeConsoleWorker?.disconnect()
+        nativeConsoleWorker = null
         devToolsInspector?.release()
         devToolsInspector = null
         releaseAssetInterceptor()
