@@ -13,10 +13,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from importlib import import_module
 from pathlib import Path
-from typing import Awaitable, Callable, cast
+from typing import cast
 from urllib.parse import urlparse
+
+from .diagnostics_latency_metrics import (
+    diagnostics_latency_metrics_enabled,
+    elapsed_ms,
+    record_latency_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +31,6 @@ JsonObject = dict[str, object]
 Marker = JsonObject
 DiagEntry = JsonObject
 DiagCacheKey = tuple[str, str]
-AdapterRpc = Callable[[str, JsonObject | None, float], Awaitable[JsonObject]]
 
 
 def _json_object(value: object) -> JsonObject:
@@ -121,8 +125,10 @@ def _is_under_project(abs_path: str, project_root: str) -> bool:
     if not abs_path or not project_root:
         return False
     try:
-        path = Path(abs_path).expanduser().resolve(strict=False)
-        root = Path(project_root).expanduser().resolve(strict=False)
+        # Cache keys and project roots are canonicalized before this hot-path
+        # comparison, so containment must not repeat filesystem resolution.
+        path = Path(abs_path)
+        root = Path(project_root)
         if path == root:
             return True
         path.relative_to(root)
@@ -176,32 +182,6 @@ async def _publish_diagnostics_detail_changed(
     )
 
 
-async def nudge_diagnostics_for_file(abs_path: str, language_id: str = "") -> bool:
-    """Ask the adapter to re-open a file, forcing the extension host to re-emit diagnostics."""
-    try:
-        from .stores import get_history_store
-
-        module = import_module("app.apps.file_editor_cm6.workbench_adapter_shell_manager")
-        adapter_rpc = cast(AdapterRpc, module.__dict__["adapter_rpc"])
-        project = get_history_store().get_active_project()
-        request_id = f"diag_{int(time.time() * 1000)}_nudge"
-        await adapter_rpc(
-            "vscode.openFile",
-            {
-                "path": abs_path,
-                "languageId": language_id or "",
-                "requestId": request_id,
-                "forceRefresh": True,
-                "workspaceFolder": project or "",
-            },
-            30,
-        )
-        return True
-    except Exception as exc:
-        logger.debug("[diag_bridge] nudge failed: %s", exc)
-        return False
-
-
 def _process_diagnostics_update(
     params: JsonObject,
     *,
@@ -219,10 +199,11 @@ def _process_diagnostics_update(
 
     for item in items:
         uri = item.get("uri", "")
-        abs_path = _abs_path_from_vscode_uri(uri)
-        if not abs_path:
+        raw_abs_path = _abs_path_from_vscode_uri(uri)
+        if not raw_abs_path:
             ignored += 1
             continue
+        abs_path = _normalize_project_path(raw_abs_path)
         if not _is_under_project(abs_path, project_root):
             ignored += 1
             continue
@@ -279,13 +260,17 @@ async def _emit_diagnostics_debounced() -> None:
         print("[diag_bridge] no active project for diagnostics emit", flush=True)
         return
 
+    metrics_enabled = diagnostics_latency_metrics_enabled()
+    prune_started_ns = time.perf_counter_ns() if metrics_enabled else 0
     pruned = _prune_cache_to_project(proj)
+    prune_ms = elapsed_ms(prune_started_ns)
     if pruned:
         print(
             f"[diag_bridge] pruned {pruned} out-of-project diagnostics for {proj}",
             flush=True,
         )
 
+    build_started_ns = time.perf_counter_ns() if metrics_enabled else 0
     # Build per-file summary (rel paths) and detail (abs paths) from cache.
     summary_rel: dict[str, dict[str, int]] = {}   # rel_path -> {errors, warnings}
     detail_abs: dict[str, list[object]] = {}      # abs_path -> [marker, ...]
@@ -319,6 +304,8 @@ async def _emit_diagnostics_debounced() -> None:
     # Prune entries with zero counts
     summary_rel = {k: v for k, v in summary_rel.items() if v["errors"] > 0 or v["warnings"] > 0}
 
+    build_ms = elapsed_ms(build_started_ns)
+    publish_started_ns = time.perf_counter_ns() if metrics_enabled else 0
     try:
         await _publish_diagnostics_detail_changed(
             proj,
@@ -326,6 +313,18 @@ async def _emit_diagnostics_debounced() -> None:
             reason="wba_update",
         )
         total_markers = sum(len(v) for v in detail_abs.values())
+        record_latency_event(
+            "diagnostics_aggregate",
+            {
+                "cache_entries": len(_diag_cache),
+                "files": len(detail_abs),
+                "markers": total_markers,
+                "pruned": pruned,
+                "prune_ms": prune_ms,
+                "build_ms": build_ms,
+                "bus_publish_ms": elapsed_ms(publish_started_ns),
+            },
+        )
         print(f"[diag_bridge] emitted explorer diagnostics: {len(summary_rel)} files, {total_markers} markers", flush=True)
     except Exception as exc:
         print(f"[diag_bridge] explorer/problems emit error: {exc}", flush=True)
@@ -337,8 +336,35 @@ async def handle_wba_diagnostics_update(ev: JsonObject) -> None:
     if not project_root:
         print("[diag_bridge] diagnostics/update ignored: no active project", flush=True)
         return
-    _prune_cache_to_project(project_root)
+    metrics_enabled = diagnostics_latency_metrics_enabled()
+    items = _json_object_list(ev.get("items")) if metrics_enabled else []
+    input_markers = (
+        sum(len(_marker_list(item.get("markers", []))) for item in items)
+        if metrics_enabled
+        else 0
+    )
+    process_started_ns = time.perf_counter_ns() if metrics_enabled else 0
     entries, ignored = _process_diagnostics_update(ev, project_root=project_root)
+    process_ms = elapsed_ms(process_started_ns)
+    if metrics_enabled:
+        accepted_markers = sum(
+            len(_marker_list(entry.get("markers", [])))
+            for entry in entries
+        )
+        record_latency_event(
+            "diagnostics_update",
+            {
+                "items": len(items),
+                "input_markers": input_markers,
+                "accepted_items": len(entries),
+                "accepted_markers": accepted_markers,
+                "ignored_items": ignored,
+                "cache_entries": len(_diag_cache),
+                "pruned": 0,
+                "prune_ms": 0.0,
+                "process_ms": process_ms,
+            },
+        )
     print(
         f"[diag_bridge] diagnostics/update rx accepted={len(entries)} ignored={ignored} project={project_root} paths={[entry.get('path', '?') for entry in entries]}",
         flush=True,
@@ -392,28 +418,6 @@ async def reset_diagnostics_projection_for_project(
     except Exception as exc:
         logger.warning(
             "[diag_bridge] failed to publish empty diagnostics for %s: %s",
-            normalized_project,
-            exc,
-        )
-
-    try:
-        from .monaco_editor.editor_ws import editor_runtime_emit_room_event
-
-        await editor_runtime_emit_room_event(
-            "editor:diagnostics_counts",
-            {
-                "errors": 0,
-                "warnings": 0,
-                "hints": 0,
-                "total": 0,
-                "path": "",
-                "projectPath": normalized_project,
-                "reason": "project_switch",
-            },
-        )
-    except Exception as exc:
-        logger.debug(
-            "[diag_bridge] failed to publish empty diagnostics counts for %s: %s",
             normalized_project,
             exc,
         )

@@ -76,7 +76,6 @@ class WorkbenchRoutesDeps:
     ensure_code_server_shell: EnsureCodeServerShellFn
     ensure_workbench_adapter_shell: EnsureWorkbenchAdapterShellFn
     code_server_connection_target: CodeServerConnectionTargetFn
-    nudge_diagnostics_for_file: Callable[[str], Awaitable[bool]]
     get_shell_by_id: Callable[[str], Awaitable[ShellRecordLike | None]] | None = None
     boot_record: WorkbenchAdapterBootRecord = field(default_factory=WorkbenchAdapterBootRecord)
 
@@ -358,42 +357,6 @@ def create_workbench_router(deps: WorkbenchRoutesDeps) -> APIRouter:
                 "port": port,
                 "shell_id": record.id,
                 "cmd_url": "/api/app/file_editor_cm6/workbench_adapter/cmd",
-            },
-        }
-
-    @router.get("/workbench_adapter/nudge", response_model=None)
-    async def workbench_adapter_nudge(path: str = "") -> JsonObject | JSONResponse:
-        """Request a diagnostics nudge for the active file path."""
-        project_root = _active_project_root(deps)
-        abs_path = str(path or "").strip()
-        if not abs_path:
-            try:
-                current_path = deps.history.get_last_file(project_root)
-                abs_path = current_path.strip() if isinstance(current_path, str) else ""
-            except Exception:
-                abs_path = ""
-        if not abs_path:
-            return JSONResponse({"ok": False, "error": "missing_path"}, status_code=400)
-
-        try:
-            project_root_path = Path(project_root).expanduser().resolve(strict=False)
-            abs_path_resolved = Path(abs_path).expanduser().resolve(strict=False)
-        except Exception:
-            return JSONResponse({"ok": False, "error": "invalid_path"}, status_code=400)
-
-        if not str(abs_path_resolved).startswith(str(project_root_path)):
-            return JSONResponse({"ok": False, "error": "outside_project"}, status_code=400)
-
-        try:
-            ok = await deps.nudge_diagnostics_for_file(str(abs_path_resolved))
-        except Exception as exc:
-            return JSONResponse({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500)
-
-        return {
-            "ok": True,
-            "data": {
-                "path": str(abs_path_resolved),
-                "requested": bool(ok),
             },
         }
 

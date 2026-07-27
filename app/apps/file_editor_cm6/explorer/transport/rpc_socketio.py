@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -12,6 +13,12 @@ from ...frontend_rpc_codec import (
     decode_frontend_rpc_message,
     encode_frontend_rpc_message,
     require_msgpack_v1_auth,
+)
+from ...diagnostics_latency_metrics import (
+    diagnostics_latency_metrics_enabled,
+    elapsed_ms,
+    record_latency_event,
+    sample_engineio_queues,
 )
 from .rpc_contract import (
     ExplorerRpcProtocolError,
@@ -113,6 +120,8 @@ class ExplorerRpcSocketShim:
             future.set_exception(error)
 
     async def send_text(self, data: str) -> None:
+        metrics_enabled = diagnostics_latency_metrics_enabled()
+        parse_started_ns = time.perf_counter_ns() if metrics_enabled else 0
         try:
             loaded = cast(object, json.loads(data))
         except json.JSONDecodeError:
@@ -134,10 +143,40 @@ class ExplorerRpcSocketShim:
                     return
             method = payload.get("method")
             if isinstance(method, str) and method:
+                if method != "explorer.diagnostics.detail" or not metrics_enabled:
+                    await self.namespace.emit(
+                        "rpc.notify",
+                        encode_frontend_rpc_message(payload, lane="explorer", method=method),
+                        room=self.sid,
+                    )
+                    return
+
+                parse_ms = elapsed_ms(parse_started_ns)
+                encode_started_ns = time.perf_counter_ns()
+                encoded = encode_frontend_rpc_message(
+                    payload,
+                    lane="explorer",
+                    method=method,
+                )
+                encode_ms = elapsed_ms(encode_started_ns)
+                queue_before = sample_engineio_queues(self.namespace)
+                emit_started_ns = time.perf_counter_ns()
                 await self.namespace.emit(
                     "rpc.notify",
-                    encode_frontend_rpc_message(payload, lane="explorer", method=method),
+                    encoded,
                     room=self.sid,
+                )
+                record_latency_event(
+                    "diagnostics_socketio_emit",
+                    {
+                        "json_bytes": len(data.encode("utf-8")),
+                        "wire_bytes": len(encoded),
+                        "json_parse_ms": parse_ms,
+                        "msgpack_encode_ms": encode_ms,
+                        "emit_ms": elapsed_ms(emit_started_ns),
+                        "queue_before": queue_before,
+                        "queue_after": sample_engineio_queues(self.namespace),
+                    },
                 )
 
 

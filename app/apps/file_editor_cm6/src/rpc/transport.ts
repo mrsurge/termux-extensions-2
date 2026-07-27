@@ -2,6 +2,11 @@ import {
   identityRpcWireCodec,
   type RpcWireCodec,
 } from './codec.ts';
+import {
+  diagnosticsLatencyProbeEnabled,
+  recordDiagnosticsLatency,
+  rpcWireByteLength,
+} from '../diagnostics/latency-probe.ts';
 
 export const RPC_REQUEST_EVENT = 'rpc' as const;
 export const RPC_NOTIFICATION_EVENT = 'rpc.notify' as const;
@@ -269,8 +274,21 @@ export function createSocketIoJsonRpcClient(options: CreateSocketIoJsonRpcClient
         });
         socket.on(RPC_NOTIFICATION_EVENT, (wirePayload: unknown) => {
           try {
+            const decodeStartedAt = diagnosticsLatencyProbeEnabled()
+              ? performance.now()
+              : null;
             const payload = codec.decode(wirePayload);
             if (!isJsonRpcNotificationEnvelope(payload)) return;
+            if (
+              decodeStartedAt !== null
+              && payload.method === 'explorer.diagnostics.detail'
+            ) {
+              recordDiagnosticsLatency('diagnostics_transport_decode', {
+                method: payload.method,
+                wireBytes: rpcWireByteLength(wirePayload),
+                durationMs: performance.now() - decodeStartedAt,
+              });
+            }
             options.onNotification?.(payload);
           } catch (error) {
             options.onProtocolError?.(normalizeError(error));

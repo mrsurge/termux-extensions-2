@@ -5,6 +5,10 @@ import {
   type ExplorerRpcNotificationMethod,
 } from "./contract.ts";
 import {
+  diagnosticsPayloadStats,
+  measureDiagnosticsLatency,
+} from "../../diagnostics/latency-probe.ts";
+import {
   getActualSearchBenchmarkObserver,
   handleSearchBenchmarkNotification,
 } from "../search/benchmark.ts";
@@ -419,7 +423,12 @@ export function createExplorerNotificationHandler(
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.diagnosticsDetail: {
-        deps.treeDecorations.setDiagnosticsDetail(payload);
+        const stats = diagnosticsPayloadStats(payload);
+        measureDiagnosticsLatency(
+          "diagnostics_tree_detail_store",
+          stats,
+          () => deps.treeDecorations.setDiagnosticsDetail(payload),
+        );
         const livePanel = deps.getDiagnosticsPanel();
         const projectPath = (deps.runtimeState.getProjectPath() || "").replace(
           /\/+$/,
@@ -434,23 +443,42 @@ export function createExplorerNotificationHandler(
           if (activeAbs) {
             livePanel.setActiveFile(activeAbs);
           }
-          livePanel.update(deps.treeDecorations.getDiagnosticsDetail());
-          deps.treeDecorations.setDiagnosticsSummary(
-            livePanel.getSummary(projectPath),
+          measureDiagnosticsLatency(
+            "diagnostics_explorer_overlay_update",
+            stats,
+            () => livePanel.update(deps.treeDecorations.getDiagnosticsDetail()),
           );
-          deps.treeDecorations.applyAggregatedDiagnosticFlags();
+          measureDiagnosticsLatency(
+            "diagnostics_explorer_summary",
+            stats,
+            () => deps.treeDecorations.setDiagnosticsSummary(
+              livePanel.getSummary(projectPath),
+            ),
+          );
         } else {
-          deps.treeDecorations.setDiagnosticsSummary(
-            deps.treeDecorations.deriveSummaryFromDetail(projectPath),
+          measureDiagnosticsLatency(
+            "diagnostics_explorer_summary",
+            stats,
+            () => deps.treeDecorations.setDiagnosticsSummary(
+              deps.treeDecorations.deriveSummaryFromDetail(projectPath),
+            ),
           );
-          deps.treeDecorations.applyAggregatedDiagnosticFlags();
         }
+        measureDiagnosticsLatency(
+          "diagnostics_tree_flags",
+          stats,
+          () => deps.treeDecorations.applyAggregatedDiagnosticFlags(),
+        );
 
         if (
           deps.searchOverlayController.isVisible() &&
           deps.searchOverlayController.getSearchMode() === "diagnostics"
         ) {
-          deps.renderSearchOverlay();
+          measureDiagnosticsLatency(
+            "diagnostics_search_overlay_render",
+            stats,
+            () => deps.renderSearchOverlay(),
+          );
         }
         break;
       }

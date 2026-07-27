@@ -3,11 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, TypedDict, cast
 
 from ...project_sidecar import ProjectSidecar
+from ...diagnostics_latency_metrics import (
+    diagnostics_latency_metrics_enabled,
+    elapsed_ms,
+    record_latency_event,
+)
 from ...open_state_events import open_state_payload_from_event
 from ...worker_services.event_bus import (
     WorkerEvent,
@@ -191,10 +197,26 @@ async def _handle_diagnostics_detail_changed_event(event: WorkerEvent) -> None:
             current_project_generation(project),
         )
         return
+    diagnostics_detail = _diagnostics_detail_from_event(event)
+    detail = cast(JsonObject, diagnostics_detail)
+    marker_count = sum(len(markers) for markers in diagnostics_detail.values())
+    publish_started_ns = (
+        time.perf_counter_ns()
+        if diagnostics_latency_metrics_enabled()
+        else 0
+    )
     await emit_project_explorer_rpc_notification(
         project,
         "explorer.diagnostics.detail",
-        cast(JsonObject, _diagnostics_detail_from_event(event)),
+        detail,
+    )
+    record_latency_event(
+        "diagnostics_explorer_publish",
+        {
+            "files": len(detail),
+            "markers": marker_count,
+            "duration_ms": elapsed_ms(publish_started_ns),
+        },
     )
 
 

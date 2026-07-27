@@ -2,8 +2,16 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
+import time
 from typing import Protocol
 
+from ...diagnostics_latency_metrics import (
+    begin_open_trace,
+    diagnostics_latency_metrics_enabled,
+    elapsed_ms,
+    finish_open_trace,
+    record_open_stage,
+)
 from .contracts import EditorOpenFields, EditorOpenPayload
 from .payload_utils import get_opt_int, get_opt_str, get_str
 from ...open_state_backend import SidecarOpenStatePayload
@@ -99,36 +107,70 @@ async def emit_editor_open_from_backend(
     )
     project = fields["project"]
     path = fields["path"]
+    begin_open_trace(request_id, path, source_client)
+    metrics_enabled = diagnostics_latency_metrics_enabled()
 
-    open_state = record_sidecar_open_file(project, path, reason="file_open")
-    update_session_state({"currentPath": path})
+    try:
+        state_started_ns = time.perf_counter_ns() if metrics_enabled else 0
+        open_state = record_sidecar_open_file(project, path, reason="file_open")
+        update_session_state({"currentPath": path})
+        record_open_stage(
+            request_id,
+            "backend_state_recorded",
+            duration_ms=elapsed_ms(state_started_ns),
+        )
 
-    payload = read_file_payload(project, path)
-    payload["source_client"] = source_client
-    payload["request_id"] = request_id
-    explicit_reason = get_str(normalized, "reason", "")
-    if explicit_reason:
-        payload["reason"] = explicit_reason
+        read_started_ns = time.perf_counter_ns() if metrics_enabled else 0
+        payload = read_file_payload(project, path)
+        record_open_stage(
+            request_id,
+            "backend_file_read",
+            duration_ms=elapsed_ms(read_started_ns),
+        )
+        payload["source_client"] = source_client
+        payload["request_id"] = request_id
+        explicit_reason = get_str(normalized, "reason", "")
+        if explicit_reason:
+            payload["reason"] = explicit_reason
 
-    line = fields["line"]
-    column = fields["column"]
-    scroll_y = fields["scroll_y"]
-    focus = fields["focus"]
-    scroll_to_top = fields["scroll_to_top"]
+        line = fields["line"]
+        column = fields["column"]
+        scroll_y = fields["scroll_y"]
+        focus = fields["focus"]
+        scroll_to_top = fields["scroll_to_top"]
 
-    if line is not None:
-        payload.pop("scroll_line", None)
-        payload["line"] = line
-    if column is not None:
-        payload["column"] = column
-    if scroll_y is not None:
-        payload["scroll_y"] = scroll_y
-    if focus is not None:
-        payload["focus"] = focus
-    if scroll_to_top is not None:
-        payload["scroll_to_top"] = scroll_to_top
+        if line is not None:
+            payload.pop("scroll_line", None)
+            payload["line"] = line
+        if column is not None:
+            payload["column"] = column
+        if scroll_y is not None:
+            payload["scroll_y"] = scroll_y
+        if focus is not None:
+            payload["focus"] = focus
+        if scroll_to_top is not None:
+            payload["scroll_to_top"] = scroll_to_top
 
-    await emit_editor_open(payload)
-    source = get_str(normalized, "source", source_client)
-    await emit_open_state_changed(open_state, source=source, request_id=request_id)
-    return payload
+        emit_started_ns = time.perf_counter_ns() if metrics_enabled else 0
+        await emit_editor_open(payload)
+        record_open_stage(
+            request_id,
+            "backend_editor_notification_enqueued",
+            duration_ms=elapsed_ms(emit_started_ns),
+        )
+        source = get_str(normalized, "source", source_client)
+        state_emit_started_ns = time.perf_counter_ns() if metrics_enabled else 0
+        await emit_open_state_changed(open_state, source=source, request_id=request_id)
+        record_open_stage(
+            request_id,
+            "backend_open_state_enqueued",
+            duration_ms=elapsed_ms(state_emit_started_ns),
+        )
+        return payload
+    except Exception as exc:
+        finish_open_trace(
+            request_id,
+            "backend_open_failed",
+            fields={"error": type(exc).__name__},
+        )
+        raise

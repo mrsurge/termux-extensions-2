@@ -1,3 +1,7 @@
+import {
+  recordDiagnosticsOpenStage,
+} from '../../src/diagnostics/latency-probe.ts';
+
 type JsonObject = Record<string, unknown>;
 
 export interface CacheIndicatorPayload {
@@ -134,6 +138,9 @@ export function createHostEditorEventsRuntime(deps: HostEditorEventsRuntimeDeps)
     const requestId = openRequestId(payload);
     if (!requestId) return;
     const waiter = editorOpenWaiters.get(requestId);
+    recordDiagnosticsOpenStage(requestId, 'host_open_complete_arrived', {
+      waiterPresent: Boolean(waiter),
+    });
     if (!waiter) {
       rememberEditorOpenCompletion(requestId, payload);
       return;

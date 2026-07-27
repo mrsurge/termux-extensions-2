@@ -345,19 +345,12 @@ def _code_server_connection_target_for_routes(record: ShellRecordLike) -> tuple[
     return code_server_connection_target(cast(CodeServerShellRecord, record))
 
 
-async def _nudge_diagnostics_for_file_for_routes(path: str) -> bool:
-    from .diagnostics_bridge import nudge_diagnostics_for_file
-
-    return await nudge_diagnostics_for_file(path)
-
-
 _WORKBENCH_ROUTES_DEPS = WorkbenchRoutesDeps(
     history=cast(WorkbenchHistoryStoreLike, _history_store),
     get_project_root=get_project_root,
     ensure_code_server_shell=cast(EnsureCodeServerShellFn, ensure_code_server_shell),
     ensure_workbench_adapter_shell=cast(EnsureWorkbenchAdapterShellFn, _ensure_workbench_adapter_shell_for_routes),
     code_server_connection_target=cast(CodeServerConnectionTargetFn, _code_server_connection_target_for_routes),
-    nudge_diagnostics_for_file=_nudge_diagnostics_for_file_for_routes,
     get_shell_by_id=_get_framework_shell_by_id,
 )
 file_editor_cm6_bp.include_router(create_workbench_router(_WORKBENCH_ROUTES_DEPS))

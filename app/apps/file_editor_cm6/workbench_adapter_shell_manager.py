@@ -1,13 +1,21 @@
 import hashlib
+from collections import deque
 from pathlib import Path
-from typing import Optional, cast
+from typing import Optional, TypedDict, cast
 import asyncio
 import json
 import logging
+import time
 
 from framework_shells import get_manager
 from framework_shells.orchestrator import Orchestrator
 from framework_shells.record import ShellRecord
+
+from .diagnostics_latency_metrics import (
+    diagnostics_latency_metrics_enabled,
+    elapsed_ms,
+    record_latency_event,
+)
 
 JsonObject = dict[str, object]
 
@@ -26,6 +34,19 @@ _stdout_reader_task: asyncio.Task[None] | None = None
 _stdout_bytes_queue: Optional[asyncio.Queue[bytes]] = None
 _stdout_subscription_shell_id: Optional[str] = None
 _rpc_write_lock: Optional[asyncio.Lock] = None
+_push_drain_task: asyncio.Task[None] | None = None
+
+
+class PendingPush(TypedDict):
+    obj: JsonObject
+    diagnostics_owner: str | None
+    items_by_uri: dict[str, JsonObject]
+    event_count: int
+    payload_bytes: int
+    queued_ns: int | None
+
+
+_pending_pushes: deque[PendingPush] = deque()
 
 # Adapter lifecycle state — authoritative store for fact projection.
 _adapter_state: dict[str, object] = {"status": "idle", "project": None, "error": None}
@@ -155,6 +176,8 @@ async def _clear_stdout_subscription() -> None:
         except Exception:
             pass
 
+    await _clear_pending_pushes()
+
     if queue is not None and shell_id:
         try:
             mgr = await get_manager()
@@ -249,7 +272,10 @@ async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> Non
                     payload = line_bytes[len(PUSH_PREFIX):].decode("utf-8", errors="replace")
                     try:
                         obj = _decode_json_object(payload)
-                        asyncio.create_task(_handle_push_event(obj))
+                        _queue_push(
+                            obj,
+                            payload_bytes=len(line_bytes) - len(PUSH_PREFIX),
+                        )
                     except json.JSONDecodeError:
                         log.warning("[adapter_stdio] bad PUSH JSON: %s", payload[:200])
                 else:
@@ -267,22 +293,162 @@ async def _stdout_reader_loop(shell_id: str, queue: asyncio.Queue[bytes]) -> Non
             _stdout_reader_task = None
 
 
-async def _handle_push_event(obj: JsonObject) -> None:
-    """Consume adapter control-plane push frames from the existing FWS pipe."""
+def _te2_push_event(obj: JsonObject) -> JsonObject | None:
     event_name = obj.get("event")
     method_name = obj.get("method")
-    if event_name == "te2.event" or method_name == "te2.event":
-        raw_params = obj.get("params", obj.get("payload"))
-        event = _json_object(raw_params)
+    if event_name != "te2.event" and method_name != "te2.event":
+        return None
+    return _json_object(obj.get("params", obj.get("payload")))
+
+
+def _queue_push(obj: JsonObject, *, payload_bytes: int) -> None:
+    """Preserve push order while coalescing contiguous diagnostics updates."""
+    global _push_drain_task
+
+    event = _te2_push_event(obj)
+    is_diagnostics = (
+        event is not None
+        and str(event.get("type") or "") == "diagnostics/update"
+    )
+    owner = str(event.get("owner") or "unknown") if is_diagnostics and event else None
+    batch: PendingPush | None = None
+    if (
+        owner is not None
+        and _pending_pushes
+        and _pending_pushes[-1]["diagnostics_owner"] == owner
+    ):
+        batch = _pending_pushes[-1]
+    if batch is None:
+        batch = PendingPush(
+            obj=dict(obj),
+            diagnostics_owner=owner,
+            items_by_uri={},
+            event_count=0,
+            payload_bytes=0,
+            queued_ns=(
+                time.perf_counter_ns()
+                if owner is not None and diagnostics_latency_metrics_enabled()
+                else None
+            ),
+        )
+        _pending_pushes.append(batch)
+
+    batch["event_count"] += 1
+    batch["payload_bytes"] += payload_bytes
+    if owner is not None and event is not None:
+        queued_obj: JsonObject = {
+            "event": "te2.event",
+            "params": dict(event),
+        }
+        batch["obj"] = queued_obj
+        raw_items = event.get("items")
+        if isinstance(raw_items, list):
+            items = cast(list[object], raw_items)
+            for index, raw_item in enumerate(items):
+                item = _json_object(raw_item)
+                if not item:
+                    continue
+                uri = str(item.get("uri") or "")
+                item_key = uri or f"__missing_uri__:{batch['event_count']}:{index}"
+                batch["items_by_uri"][item_key] = item
+
+    if _push_drain_task is None or _push_drain_task.done():
+        _push_drain_task = asyncio.create_task(
+            _drain_pushes(),
+            name="adapter_push_drain",
+        )
+
+
+async def _drain_pushes() -> None:
+    global _push_drain_task
+
+    try:
+        while _pending_pushes:
+            batch = _pending_pushes.popleft()
+            obj = batch["obj"]
+            if batch["diagnostics_owner"] is not None:
+                event = _te2_push_event(obj)
+                if event is None:
+                    continue
+                event["items"] = list(batch["items_by_uri"].values())
+                obj = {"event": "te2.event", "params": event}
+            await _handle_push_event(
+                obj,
+                queued_ns=batch["queued_ns"],
+                payload_bytes=batch["payload_bytes"],
+                backlog_at_schedule=batch["event_count"],
+                coalesced_events=batch["event_count"],
+                coalesced_items=len(batch["items_by_uri"]),
+            )
+    except asyncio.CancelledError:
+        pass
+    finally:
+        if _push_drain_task is asyncio.current_task():
+            _push_drain_task = None
+
+
+async def _clear_pending_pushes() -> None:
+    global _push_drain_task
+
+    task = _push_drain_task
+    _push_drain_task = None
+    _pending_pushes.clear()
+    if task is not None and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+async def _handle_push_event(
+    obj: JsonObject,
+    *,
+    queued_ns: int | None = None,
+    payload_bytes: int = 0,
+    backlog_at_schedule: int = 0,
+    coalesced_events: int = 1,
+    coalesced_items: int = 0,
+) -> None:
+    """Consume adapter control-plane push frames from the existing FWS pipe."""
+    event = _te2_push_event(obj)
+    if event is not None:
         if not event:
             log.debug("[adapter_stdio] ignored empty te2.event push")
             return
+        event_type = str(event.get("type") or "")
+        dispatch_started_ns = time.perf_counter_ns()
+        if event_type == "diagnostics/update":
+            record_latency_event(
+                "diagnostics_push_started",
+                {
+                    "payload_bytes": payload_bytes,
+                    "backlog_at_schedule": backlog_at_schedule,
+                    "active_push_tasks": 1,
+                    "coalesced_events": coalesced_events,
+                    "coalesced_items": coalesced_items,
+                    "schedule_delay_ms": elapsed_ms(queued_ns) if queued_ns is not None else 0.0,
+                },
+            )
         try:
             from .wba_event_bridge import dispatch_wba_pipe_event
 
             await dispatch_wba_pipe_event(event)
         except Exception as exc:
             log.warning("[adapter_stdio] te2.event push handling failed: %s", exc)
+        finally:
+            if event_type == "diagnostics/update":
+                record_latency_event(
+                    "diagnostics_push_finished",
+                    {
+                        "payload_bytes": payload_bytes,
+                        "backlog_at_schedule": backlog_at_schedule,
+                        "active_push_tasks": 1,
+                        "coalesced_events": coalesced_events,
+                        "coalesced_items": coalesced_items,
+                        "dispatch_ms": elapsed_ms(dispatch_started_ns),
+                    },
+                )
         return
 
     if obj and log.isEnabledFor(logging.DEBUG):

@@ -1,3 +1,10 @@
+import {
+  beginDiagnosticsOpenTrace,
+  diagnosticsLatencyProbeEnabled,
+  finishDiagnosticsOpenTrace,
+  recordDiagnosticsOpenStage,
+} from '../../../src/diagnostics/latency-probe.ts';
+
 interface OpenFlowProjectState {
   activeProject?: string | null;
   activeProjectExists?: boolean;
@@ -92,10 +99,16 @@ export function createOpenFlowController(deps: OpenFlowControllerDeps) {
       openRequestOptions.scroll_to_top = Boolean(options.scrollToTop);
     }
     if (!path) throw new Error('Path is empty');
+    beginDiagnosticsOpenTrace(openRequestId, path);
     deps.setStatus('Opening...');
 
+    const projectStartedAt = diagnosticsLatencyProbeEnabled() ? performance.now() : null;
     const projectState = await deps.ensureProjectContext();
+    recordDiagnosticsOpenStage(openRequestId, 'host_project_context', {
+      durationMs: projectStartedAt !== null ? performance.now() - projectStartedAt : undefined,
+    });
     if (!projectState || !projectState.activeProject || !projectState.activeProjectExists) {
+      finishDiagnosticsOpenTrace(openRequestId, 'host_project_unavailable');
       deps.setStatus('');
       deps.toast(projectState?.activeProjectMessage || 'Select a project before opening files.');
       return;
@@ -104,6 +117,7 @@ export function createOpenFlowController(deps: OpenFlowControllerDeps) {
     try {
       const resolvedTarget = deps.toAbsolute(path, null, deps.homeDir);
       if (!forceRefresh && !allowOverwrite && deps.getRestoredSessionActive() && deps.getCurrentPath() && resolvedTarget === deps.getCurrentPath()) {
+        finishDiagnosticsOpenTrace(openRequestId, 'host_restored_open_skipped');
         console.log('[Editor] Skipping host-side open; restored session buffer already loaded');
         deps.setStatus('');
         return;
@@ -112,11 +126,19 @@ export function createOpenFlowController(deps: OpenFlowControllerDeps) {
       deps.setRestoredSessionActive(false);
       deps.setIndicatorInactive();
 
+      const backendStartedAt = diagnosticsLatencyProbeEnabled() ? performance.now() : null;
       await deps.requestBackendOpen({
         ...openRequestOptions,
         path: resolvedTarget,
       });
+      recordDiagnosticsOpenStage(openRequestId, 'host_backend_open_resolved', {
+        durationMs: backendStartedAt !== null ? performance.now() - backendStartedAt : undefined,
+      });
+      const completionStartedAt = diagnosticsLatencyProbeEnabled() ? performance.now() : null;
       await deps.awaitEditorOpen(openRequestId, resolvedTarget, 10000);
+      recordDiagnosticsOpenStage(openRequestId, 'host_open_complete_resolved', {
+        durationMs: completionStartedAt !== null ? performance.now() - completionStartedAt : undefined,
+      });
 
       deps.setLastSavedContent('');
       deps.markUnsaved(false);
@@ -124,7 +146,11 @@ export function createOpenFlowController(deps: OpenFlowControllerDeps) {
       deps.setStatus('');
 
       deps.openWebSocket(resolvedTarget);
+      finishDiagnosticsOpenTrace(openRequestId, 'host_open_finished');
     } catch (error) {
+      finishDiagnosticsOpenTrace(openRequestId, 'host_open_failed', {
+        error: error instanceof Error ? error.name : typeof error,
+      });
       deps.setStatus('');
       deps.toast(`Failed to open: ${errorMessage(error)}`);
       throw error;

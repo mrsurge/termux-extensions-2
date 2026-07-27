@@ -10,6 +10,10 @@ import {
   type ExplorerRpcNotificationMethod,
 } from './contract.ts';
 import type { IoFactory, JsonObject } from '../../rpc/transport.ts';
+import {
+  diagnosticsPayloadStats,
+  measureDiagnosticsLatency,
+} from '../../diagnostics/latency-probe.ts';
 
 type ExplorerRpcConnection = ReturnType<typeof createExplorerRpcConnection>;
 
@@ -153,12 +157,25 @@ export function createExplorerRpcRuntime(deps: ExplorerRpcRuntimeDeps): Explorer
           'files, sample:',
           JSON.stringify(sampleMarkers).slice(0, 300),
         );
-        deps.updateProblemsPanel(payload);
+        const stats = diagnosticsPayloadStats(payload);
+        measureDiagnosticsLatency(
+          'diagnostics_host_problems_update',
+          stats,
+          () => deps.updateProblemsPanel(payload),
+        );
       } catch (err) {
         error('[Problems] update error:', err);
       }
     }
-    dispatchExplorerNotification(method, payload);
+    if (method === EXPLORER_RPC_NOTIFICATIONS.diagnosticsDetail) {
+      measureDiagnosticsLatency(
+        'diagnostics_explorer_dispatch',
+        diagnosticsPayloadStats(payload),
+        () => dispatchExplorerNotification(method, payload),
+      );
+    } else {
+      dispatchExplorerNotification(method, payload);
+    }
   }
 
   function installVisibilityReconnect(): void {

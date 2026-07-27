@@ -6,6 +6,10 @@ from collections.abc import Awaitable, Callable
 from typing import cast
 
 from .editor_host_actions_backend import handle_editor_host_action
+from ..diagnostics_latency_metrics import (
+    finish_open_trace,
+    record_open_stage,
+)
 from .editor_rpc_contract import (
     EDITOR_RPC_METHOD_AGENT_EDITS_DECIDE,
     EDITOR_RPC_METHOD_AGENT_EDITS_DOCUMENT_STATE_GET,
@@ -198,7 +202,10 @@ async def dispatch_editor_rpc_request(
         return {"ok": True}
 
     if method == EDITOR_RPC_METHOD_OPEN_COMPLETE_PUBLISH:
+        request_id = str(params.get("request_id") or params.get("requestId") or "")
+        record_open_stage(request_id, "backend_open_complete_received")
         await emit_to_room("editor:open_complete", _payload_with_source(params, source_client))
+        finish_open_trace(request_id, "backend_open_complete_published")
         return {"ok": True}
 
     if method == EDITOR_RPC_METHOD_CODE_INSPECTOR_PUBLISH:

@@ -10,6 +10,7 @@ import { initSidebarShortcuts } from './main_page/frontend/sidebar-shortcuts/run
 import ReconnectingWebSocket from './main_page/frontend/connections/reconnecting-websocket.ts';
 import { createConsoleDrawer } from './main_page/frontend/host-console-drawer.ts';
 import { createProblemsPanel } from './src/diagnostics/problems-panel.ts';
+import { installDiagnosticsLatencyProbe } from './src/diagnostics/latency-probe.ts';
 import { createExtensionActivityPanel } from './main_page/frontend/ui/extension-activity.ts';
 import { createCodeInspectorPanel } from './main_page/frontend/ui/code-inspector.ts';
 import { getConsoleBridgeStatus, initConsoleBridge } from './main_page/frontend/console_bridge.js';
@@ -71,6 +72,8 @@ import { UI_IPC_RPC_METHODS, type UiIpcRpcMethod } from './src/ui_ipc/rpc_contra
 import type { SidebarIpcRpcNotificationMethod } from './src/sidebar_ipc/rpc_contract.ts';
 
 type UnknownRecord = Record<string, unknown>;
+
+installDiagnosticsLatencyProbe();
 
 interface HostApi {
   get: (path: string) => Promise<unknown>;
