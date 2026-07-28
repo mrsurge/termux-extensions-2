@@ -1,3 +1,5 @@
+import type { WorkbenchDocumentRegistry } from "./document-registry";
+
 export interface LifecycleExtRpcIds {
   ExtHostDocumentsAndEditors: number;
   ExtHostDocuments: number;
@@ -20,11 +22,7 @@ export interface WorkspaceSessionState {
   activeUriObj: unknown;
   activeTab: unknown;
   nextModelNumber: number;
-  docVersions: Map<string, number>;
-  docLineCount: Map<string, number>;
-  docCharCount: Map<string, number>;
-  docLastLineLength: Map<string, number>;
-  docOpenGeneration: Map<string, number | string | null>;
+  documentRegistry: WorkbenchDocumentRegistry;
 }
 
 export interface WatchSubscriptionLike {
@@ -76,13 +74,6 @@ export interface LifecycleRuntime {
   ) => string;
   activateLanguage: (languageId: string) => Promise<unknown>;
   sendExt: (rpcId: number, method: string, args: unknown[], cancellable?: boolean) => unknown;
-  sendExtAwaitTerminalReply: (
-    rpcId: number,
-    method: string,
-    args: unknown[],
-    cancellable?: boolean,
-    timeoutMs?: number,
-  ) => { req: number; promise: Promise<unknown> };
   spanTrace: <T>(name: string, fn: () => T) => T;
   spanTraceAsync: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
   logMetrics: (type: string, data: Record<string, unknown>) => void;
@@ -126,10 +117,6 @@ function normalizeDocumentText(text: string): string {
   return text.replace(/\r\n/g, "\n");
 }
 
-function lastLineLength(lines: string[]): number {
-  return (lines[lines.length - 1] ?? "").length;
-}
-
 function updateActiveState(runtime: LifecycleRuntime, path: string, uriObj: Record<string, unknown>, languageId: string): void {
   try {
     runtime.state.activePath = path;
@@ -141,20 +128,12 @@ function updateActiveState(runtime: LifecycleRuntime, path: string, uriObj: Reco
   }
 }
 
-function currentDocVersion(runtime: LifecycleRuntime, path: string): number | null {
-  return runtime.session.docVersions.get(path) ?? null;
-}
-
 function currentOpenGeneration(runtime: LifecycleRuntime, path: string): number | string | null | undefined {
-  return runtime.session.docOpenGeneration.get(path);
+  return runtime.session.documentRegistry.getOpenGeneration(path);
 }
 
 function openGuard(runtime: LifecycleRuntime, path: string, generation: number | string | null): Record<string, unknown> | null {
-  if (
-    !runtime.session.docVersions.has(path) ||
-    !runtime.session.docLineCount.has(path) ||
-    !runtime.session.docCharCount.has(path)
-  ) {
+  if (!runtime.session.documentRegistry.getByPath(path)) {
     runtime.warn(`[didChange] drop path=${path} reason=document_not_open`);
     return { ok: false, error: "document_not_open" };
   }
@@ -182,15 +161,6 @@ function previousPath(prevUriObj: unknown): string {
   return optionalString(prevUriObj.fsPath) ?? optionalString(prevUriObj.path) ?? "";
 }
 
-function clearTrackedDocumentState(runtime: LifecycleRuntime, path: string): void {
-  if (!path) return;
-  runtime.session.docVersions.delete(path);
-  runtime.session.docLineCount.delete(path);
-  runtime.session.docCharCount.delete(path);
-  runtime.session.docLastLineLength.delete(path);
-  runtime.session.docOpenGeneration.delete(path);
-}
-
 function isRangeArray(value: unknown): value is unknown[] {
   return Array.isArray(value);
 }
@@ -216,36 +186,64 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
   const prevUriObj = runtime.session.activeUriObj;
   const prevTab = runtime.session.activeTab;
 
-  const rawText = await runtime.spanTraceAsync("openFile.fs.readFile", () => runtime.readTextFile(path));
-  const text = normalizeDocumentText(rawText);
-  const languageId = runtime.resolveLanguageId(path, text, input.languageId);
-  const lines = runtime.spanTrace("openFile.text.splitLines", () => text.split("\n"));
-  let maxLineLen = 0;
-  for (const line of lines) {
-    if (line.length > maxLineLen) maxLineLen = line.length;
-  }
-  runtime.logMetrics("metrics/open_file", {
-    path,
-    text_bytes: lineByteLength(text),
-    lines: lines.length,
-    max_line_len: maxLineLen,
-  });
-  const uriObj = runtime.spanTrace("openFile.uriForPath", () => runtime.uriForPath(path, authority));
-  updateActiveState(runtime, path, uriObj, languageId);
-
   const prevAbs = previousPath(prevUriObj);
   const isSameFileReopen = shouldTreatAsSameFile(prevUriObj, path);
-  const shouldClosePrev = !!(
+  const shouldReplaceEditor = !!(
     prevUriObj &&
     prevAbs &&
     !isSameFileReopen &&
     (forceRefresh || prevAbs !== path)
   );
+  const generatedUri = runtime.spanTrace(
+    "openFile.uriForPath",
+    () => runtime.uriForPath(path, authority),
+  );
+  const existingEntry = runtime.session.documentRegistry.getByPath(path);
+  let text: string | null = null;
+  let lines: string[] | null = null;
+  let languageId: string;
+  if (existingEntry && !isSameFileReopen) {
+    languageId =
+      typeof input.languageId === "string" && input.languageId
+        ? runtime.resolveLanguageId(path, "", input.languageId)
+        : existingEntry.languageId;
+  } else {
+    const rawText = await runtime.spanTraceAsync(
+      "openFile.fs.readFile",
+      () => runtime.readTextFile(path),
+    );
+    text = normalizeDocumentText(rawText);
+    languageId = runtime.resolveLanguageId(path, text, input.languageId);
+    lines = runtime.spanTrace(
+      "openFile.text.splitLines",
+      () => text!.split("\n"),
+    );
+    let maxLineLen = 0;
+    for (const line of lines) {
+      if (line.length > maxLineLen) maxLineLen = line.length;
+    }
+    runtime.logMetrics("metrics/open_file", {
+      path,
+      text_bytes: lineByteLength(text),
+      lines: lines.length,
+      max_line_len: maxLineLen,
+    });
+  }
+  const uriObj = existingEntry?.uri ?? generatedUri;
+  const lineCount = existingEntry?.lineCount ?? lines?.length ?? 1;
+  const visibleLastLineLength =
+    lineCount <= 31
+      ? existingEntry?.lastLineLength ?? (lines?.[lineCount - 1] ?? "").length
+      : 0;
+  updateActiveState(runtime, path, uriObj, languageId);
 
   const modelN = runtime.session.nextModelNumber++;
   const editorId = `vs.editor.ICodeEditor:2,$model${modelN}`;
-  const visibleEndLineNumber = Math.min(lines.length || 1, 31);
-  const visibleEndColumn = Math.max(1, Math.min((lines[visibleEndLineNumber - 1] ?? "").length + 1, 1000));
+  const visibleEndLineNumber = Math.min(lineCount || 1, 31);
+  const visibleEndColumn = Math.max(
+    1,
+    Math.min(visibleLastLineLength + 1, 1000),
+  );
 
   const tabId = `0~default-workbench.editors.files.fileEditorInput-${String(field(uriObj, "external") ?? runtime.uriToString(uriObj))} `;
   const tab = {
@@ -256,95 +254,34 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
     isPinned: false,
     isPreview: true,
     isActive: true,
-    isDirty: false,
+    isDirty: existingEntry?.dirty ?? false,
   };
   const tabInactive = { ...tab, isActive: false };
   const tabActive = { ...tab, isActive: true };
-  const tabModel = [
-    {
-      groupId: 0,
-      isActive: true,
-      viewColumn: 0,
-      tabs: [tab],
-    },
-  ];
-
-  try {
-    if (shouldClosePrev && prevTab) {
-      runtime.spanTrace("openFile.send.tabOp.closePrev", () =>
-        runtime.sendExt(runtime.extRpcIds.ExtHostEditorTabs, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: prevTab, kind: 1 }], false),
-      );
-      runtime.log(`[openFile] ts=${Date.now()} tabOp kind=1 closePrev tab=${String(field(prevTab, "label") || "")}`);
-    }
-  } catch {
-    // Keep current behavior: do not abort on tab prelude failures.
-  }
-  try {
-    runtime.spanTrace("openFile.send.tabOp.addInactive", () =>
-      runtime.sendExt(runtime.extRpcIds.ExtHostEditorTabs, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: tabInactive, kind: 0 }], false),
-    );
-    runtime.log(`[openFile] ts=${Date.now()} tabOp kind=0 addInactive tab=${String(field(tabInactive, "label") || "")}`);
-  } catch {}
-  try {
-    runtime.spanTrace("openFile.send.tabOp.activate", () =>
-      runtime.sendExt(runtime.extRpcIds.ExtHostEditorTabs, "$acceptTabOperation", [{ groupId: 0, index: 0, tabDto: tabActive, kind: 2 }], false),
-    );
-    runtime.log(`[openFile] ts=${Date.now()} tabOp kind=2 activate tab=${String(field(tabActive, "label") || "")}`);
-  } catch {}
-
-  runtime.spanTrace("openFile.send.tabModel", () =>
-    runtime.sendExt(runtime.extRpcIds.ExtHostEditorTabs, "$acceptEditorTabModel", [tabModel], false),
-  );
   try {
     runtime.log(
-      `[openFile] ts=${Date.now()} path=${path} lang=${languageId} editorId=${editorId} forceRefresh=${forceRefresh ? 1 : 0} shouldClosePrev=${shouldClosePrev} prevEditorId=${prevEditorId || ""} prevPath=${prevAbs}`,
+      `[openFile] ts=${Date.now()} path=${path} lang=${languageId} editorId=${editorId} forceRefresh=${forceRefresh ? 1 : 0} shouldReplaceEditor=${shouldReplaceEditor} prevEditorId=${prevEditorId || ""} prevPath=${prevAbs}`,
     );
   } catch {}
 
-  if (shouldClosePrev) {
-    try {
-      runtime.spanTrace("openFile.send.delta.removedDocuments", () =>
-        runtime.sendExt(runtime.extRpcIds.ExtHostDocumentsAndEditors, "$acceptDocumentsAndEditorsDelta", [{ removedDocuments: [prevUriObj] }], false),
-      );
-      runtime.log(`[openFile] ts=${Date.now()} removedDocuments=[${prevAbs || "?"}]`);
-    } catch {}
-    clearTrackedDocumentState(runtime, prevAbs);
-  }
-
   if (isSameFileReopen) {
-    const prevVersion = runtime.session.docVersions.get(path) || 1;
-    const newVersion = prevVersion + 1;
-    const prevLineCount = runtime.session.docLineCount.get(path) || 1;
-    const prevCharCount = runtime.session.docCharCount.get(path) || 0;
-    const prevLastLineLen = runtime.session.docLastLineLength.get(path) ?? 10000;
-    runtime.log(`[openFile] ts=${Date.now()} same-file reopen, sending $didChange instead of remove+add (v${prevVersion}→v${newVersion})`);
-    runtime.sendExt(
-      runtime.extRpcIds.ExtHostDocuments,
-      "$acceptModelChanged",
-      [
-        uriObj,
-        {
-          changes: [{
-            range: { startLineNumber: 1, startColumn: 1, endLineNumber: prevLineCount, endColumn: prevLastLineLen + 1 },
-            rangeOffset: 0,
-            rangeLength: prevCharCount,
-            text,
-          }],
-          eol: "\n",
-          versionId: newVersion,
-          isUndoing: false,
-          isRedoing: false,
-          isFlush: true,
-        },
-        false,
-      ],
-      false,
+    if (text === null) throw new Error(`missing reopen text for ${path}`);
+    const replaced = runtime.session.documentRegistry.replaceFullText(
+      {
+        path,
+        text,
+        languageId,
+        openGeneration: generation,
+        dirty: false,
+      },
+      { isDirtyEvent: false },
     );
-    runtime.session.docVersions.set(path, newVersion);
-    runtime.session.docLineCount.set(path, lines.length);
-    runtime.session.docCharCount.set(path, text.length);
-    runtime.session.docLastLineLength.set(path, lastLineLength(lines));
-    runtime.session.docOpenGeneration.set(path, generation);
+    if (!replaced.ok) {
+      throw new Error(`${replaced.error}: ${path}`);
+    }
+    runtime.log(
+      `[openFile] ts=${Date.now()} same-file reopen, sending $didChange instead of remove+add (v${replaced.previousVersionId}→v${replaced.versionId})`,
+    );
     runtime.session.activeEditorId = prevEditorId;
     runtime.session.activeUriObj = uriObj;
     runtime.session.activeTab = prevTab;
@@ -353,31 +290,46 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
         `[openFile] language activation failed languageId=${languageId}: ${String((error as Error)?.message ?? error)}`,
       );
     });
+    runtime.onEvent({
+      type: "document/activeChanged",
+      ts_ms: Date.now(),
+      path,
+      activeEpoch: runtime.session.documentRegistry.activeEpoch,
+      generation,
+      workspaceFolder: runtime.state.workspaceFolder,
+    });
     return { ok: true, req: null };
   }
 
-  const docDelta = runtime.spanTrace("openFile.buildDelta.addedDocuments", () => ({
-    addedDocuments: [{ uri: uriObj, versionId: 1, lines, EOL: "\n", languageId, isDirty: false, encoding: "utf8" }],
-  }));
-  runtime.spanTrace("openFile.send.delta.addedDocuments", () =>
-    runtime.sendExt(runtime.extRpcIds.ExtHostDocumentsAndEditors, "$acceptDocumentsAndEditorsDelta", [docDelta], false),
+  const retained = existingEntry
+    ? { entry: existingEntry, added: false }
+    : runtime.spanTrace("openFile.registry.retain", () => {
+        if (text === null) throw new Error(`missing initial text for ${path}`);
+        return runtime.session.documentRegistry.retain({
+          path,
+          uri: uriObj,
+          text,
+          languageId,
+          role: "background",
+          openGeneration: generation,
+          dirty: false,
+        });
+      });
+  const promoted = runtime.session.documentRegistry.promote(path, generation);
+  if (promoted.demoted) {
+    runtime.log(
+      `[openFile] ts=${Date.now()} demotedDocument=[${promoted.demoted.path}] role=provisional-background`,
+    );
+  }
+  runtime.log(
+    `[openFile] ts=${Date.now()} ${retained.added ? "addedDocuments" : "promotedDocument"}=[${path}] lineCount=${retained.entry.lineCount}`,
   );
-  runtime.log(`[openFile] ts=${Date.now()} addedDocuments=[${path}] lineCount=${lines.length}`);
-  runtime.session.docVersions.set(path, 1);
-  runtime.session.docLineCount.set(path, lines.length);
-  runtime.session.docCharCount.set(path, text.length);
-  runtime.session.docLastLineLength.set(path, lastLineLength(lines));
-  runtime.session.docOpenGeneration.set(path, generation);
-  try {
-    const addedDocuments = (docDelta as { addedDocuments?: Array<{ lines?: unknown }> }).addedDocuments;
-    const firstAddedDocument = Array.isArray(addedDocuments) ? addedDocuments[0] : undefined;
-    if (firstAddedDocument) {
-      firstAddedDocument.lines = null;
-    }
-  } catch {}
 
   const editorDelta = runtime.spanTrace("openFile.buildDelta.addedEditors", () => ({
     newActiveEditor: editorId,
+    ...(shouldReplaceEditor && prevEditorId
+      ? { removedEditors: [prevEditorId] }
+      : {}),
     addedEditors: [
       {
         id: editorId,
@@ -403,7 +355,9 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
   const reqDocs = runtime.spanTrace("openFile.send.delta.addedEditors", () =>
     runtime.sendExt(runtime.extRpcIds.ExtHostDocumentsAndEditors, "$acceptDocumentsAndEditorsDelta", [editorDelta], false),
   );
-  runtime.log(`[openFile] ts=${Date.now()} addedEditors=[${editorId}] newActiveEditor=${editorId}`);
+  runtime.log(
+    `[openFile] ts=${Date.now()} addedEditors=[${editorId}] removedEditors=[${shouldReplaceEditor ? prevEditorId || "" : ""}] newActiveEditor=${editorId}`,
+  );
 
   runtime.spanTrace("openFile.send.editorState", () => {
     runtime.sendExt(runtime.extRpcIds.ExtHostEditors, "$acceptEditorDiffInformation", [editorId, []], false);
@@ -435,7 +389,12 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
       false,
     );
     runtime.sendExt(runtime.extRpcIds.ExtHostEditors, "$acceptEditorPositionData", [{ [editorId]: 0 }], false);
-    runtime.sendExt(runtime.extRpcIds.ExtHostDocuments, "$acceptDirtyStateChanged", [uriObj, false], false);
+    runtime.sendExt(
+      runtime.extRpcIds.ExtHostDocuments,
+      "$acceptDirtyStateChanged",
+      [uriObj, retained.entry.dirty],
+      false,
+    );
   });
   void runtime.activateLanguage(languageId).catch((error) => {
     runtime.warn(
@@ -445,6 +404,14 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
   runtime.session.activeEditorId = editorId;
   runtime.session.activeUriObj = uriObj;
   runtime.session.activeTab = tabActive;
+  runtime.onEvent({
+    type: "document/activeChanged",
+    ts_ms: Date.now(),
+    path,
+    activeEpoch: promoted.entry.activeEpoch,
+    generation,
+    workspaceFolder: runtime.state.workspaceFolder,
+  });
   return { ok: true, req: reqDocs };
 }
 
@@ -458,52 +425,31 @@ export function didChange(
   const path = String(input.path ?? "");
   const text = normalizeDocumentText(String(input.text ?? ""));
   const languageId = runtime.resolveLanguageId(path, text, input.languageId);
-  const authority = String(input.authority ?? runtime.authority);
   const generation = coerceOptionalGeneration(input.generation);
 
   const guard = openGuard(runtime, path, generation);
   if (guard) return guard;
 
-  const prevVersion = runtime.session.docVersions.get(path) ?? 1;
-  const nextVersion = prevVersion + 1;
-  runtime.session.docVersions.set(path, nextVersion);
-
-  const uriObj = runtime.uriForPath(path, authority);
-  const prevLines = runtime.session.docLineCount.get(path) ?? 1;
-  const prevLastLineLen = runtime.session.docLastLineLength.get(path) ?? 10000;
-  const newLines = text.split("\n");
-  runtime.session.docLineCount.set(path, newLines.length);
-  runtime.session.docLastLineLength.set(path, lastLineLength(newLines));
-
-  const event = {
-    changes: [{
-      range: { startLineNumber: 1, startColumn: 1, endLineNumber: prevLines, endColumn: prevLastLineLen + 1 },
-      rangeOffset: 0,
-      rangeLength: runtime.session.docCharCount.get(path) ?? 0,
-      text,
-    }],
-    eol: "\n",
-    versionId: nextVersion,
-    isUndoing: false,
-    isRedoing: false,
-    isFlush: true,
-    isEolChange: false,
-  };
-
   const waitForAck = opts.waitForAck === true;
-  const ack = waitForAck
-    ? runtime.sendExtAwaitTerminalReply(
-        runtime.extRpcIds.ExtHostDocuments,
-        "$acceptModelChanged",
-        [uriObj, event, true],
-        false,
-        Number(opts.timeoutMs ?? 3000),
-      )
-    : null;
-  if (!ack) {
-    runtime.sendExt(runtime.extRpcIds.ExtHostDocuments, "$acceptModelChanged", [uriObj, event, true], false);
+  const replaced = runtime.session.documentRegistry.replaceFullText(
+    {
+      path,
+      text,
+      languageId,
+      openGeneration: generation,
+      dirty: true,
+    },
+    {
+      waitForAck,
+      timeoutMs: Number(opts.timeoutMs ?? 3000),
+      isDirtyEvent: true,
+    },
+  );
+  if (!replaced.ok) {
+    runtime.warn(`[didChange] drop path=${path} reason=${replaced.error}`);
+    return { ok: false, error: replaced.error };
   }
-  runtime.session.docCharCount.set(path, text.length);
+  const nextVersion = replaced.versionId;
   if (runtime.state.activePath === path) {
     runtime.state.activeLanguageId = languageId;
   }
@@ -512,12 +458,14 @@ export function didChange(
       `[didChange] language activation failed languageId=${languageId}: ${String((error as Error)?.message ?? error)}`,
     );
   });
-  runtime.log(`[didChange] ts=${Date.now()} path=${path} ver=${nextVersion} bytes=${text.length} prevLines=${prevLines} prevLastLineLen=${prevLastLineLen} newLines=${newLines.length}`);
-  if (ack) {
-    return ack.promise.then((reply) => ({
+  runtime.log(
+    `[didChange] ts=${Date.now()} path=${path} ver=${nextVersion} bytes=${text.length} prevLines=${replaced.previousLineCount} prevLastLineLen=${replaced.previousLastLineLength} newLines=${replaced.entry.lineCount}`,
+  );
+  if (replaced.ack) {
+    return replaced.ack.promise.then((reply) => ({
       ok: true,
       versionId: nextVersion,
-      ackReq: ack.req,
+      ackReq: replaced.ack!.req,
       ackType: isRecord(reply) ? reply.type : undefined,
     }));
   }
@@ -538,22 +486,31 @@ export async function switchWorkspace(runtime: LifecycleRuntime, newFolder: stri
       runtime.sendExt(
         runtime.extRpcIds.ExtHostDocumentsAndEditors,
         "$acceptDocumentsAndEditorsDelta",
-        [{ removedDocuments: [runtime.session.activeUriObj], removedEditors: [runtime.session.activeEditorId].filter(Boolean), newActiveEditor: null }],
+        [{
+          removedEditors: [runtime.session.activeEditorId].filter(Boolean),
+          newActiveEditor: null,
+        }],
         false,
       );
-      runtime.log("[switchWorkspace] closed active document before workspace switch");
+      runtime.log(
+        "[switchWorkspace] removed active editor facade before workspace switch",
+      );
     } catch (error) {
-      runtime.log(`[switchWorkspace] warn: failed to close active doc: ${String((error as Error)?.message ?? error)}`);
+      runtime.log(
+        `[switchWorkspace] warn: failed to remove active editor: ${String((error as Error)?.message ?? error)}`,
+      );
     }
     runtime.session.activeUriObj = null;
     runtime.session.activeEditorId = null;
     runtime.session.activeTab = null;
   }
-  runtime.session.docVersions.clear();
-  runtime.session.docLineCount.clear();
-  runtime.session.docCharCount.clear();
-  runtime.session.docLastLineLength.clear();
-  runtime.session.docOpenGeneration.clear();
+  try {
+    runtime.session.documentRegistry.releaseAll();
+  } catch (error) {
+    runtime.log(
+      `[switchWorkspace] warn: failed to release retained documents: ${String((error as Error)?.message ?? error)}`,
+    );
+  }
 
   const workspace = {
     isUntitled: false,

@@ -79,6 +79,12 @@ export interface WorkbenchLike {
   openFile: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
+  reconcileLogicalDocuments: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown>;
+  hydrateLogicalDocument: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
   documentSymbols: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
@@ -492,6 +498,18 @@ export async function dispatchJsonRpcRequest(
     );
     try {
       await runtime.wb.activateLanguage(languageId);
+    } catch (error) {
+      return failure(id, -32000, error);
+    }
+  }
+
+  if (method === "vscode.logicalDocuments.reconcile") {
+    return success(id, runtime.wb.reconcileLogicalDocuments(params));
+  }
+
+  if (method === "vscode.logicalDocuments.hydrate") {
+    try {
+      return success(id, await runtime.wb.hydrateLogicalDocument(params));
     } catch (error) {
       return failure(id, -32000, error);
     }

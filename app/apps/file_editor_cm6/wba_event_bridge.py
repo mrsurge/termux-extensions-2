@@ -153,6 +153,9 @@ async def _dispatch_wba_event(ev: JsonObject) -> None:
     if ev_type == "adapter/sessionReset":
         await _handle_adapter_session_reset(ev)
         return
+    if ev_type == "document/activeChanged":
+        await _handle_active_document_changed(ev)
+        return
     if ev_type == "workspace/switched":
         await _handle_workspace_switched(ev)
         return
@@ -189,6 +192,25 @@ async def _handle_adapter_session_reset(ev: JsonObject) -> None:
         )
     except Exception as exc:
         print(f"[wba_event_bridge] adapter/sessionReset emit FAIL: {exc}", flush=True)
+
+
+async def _handle_active_document_changed(ev: JsonObject) -> None:
+    project_root = _event_workspace_root(ev)
+    if project_root is None:
+        return
+    try:
+        from .adapter_lifecycle_events import publish_adapter_active_document_changed
+
+        await publish_adapter_active_document_changed(
+            dict(ev),
+            project_root=project_root,
+            source="wba_event_bridge:active_document_changed",
+        )
+    except Exception as exc:
+        print(
+            f"[wba_event_bridge] document/activeChanged emit FAIL: {exc}",
+            flush=True,
+        )
 
 
 async def _handle_workspace_switched(ev: JsonObject) -> None:

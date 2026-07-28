@@ -9,6 +9,7 @@ from ..code_inspector_events import register_code_inspector_event_bus_handlers
 from ..explorer.services.runtime_notifications import set_explorer_event_loop
 from ..explorer.services.render_state import register_explorer_render_state_bus_handlers
 from ..file_tabs_projection import register_file_tabs_projection_handlers
+from ..logical_document_reconciler import register_logical_document_reconciler_handlers
 from ..open_state_events import register_open_state_event_bus_handlers
 from ..project_switch_events import register_project_switch_event_bus_handlers
 from ..search_highlight_events import register_search_highlight_event_bus_handlers
@@ -35,6 +36,7 @@ def bootstrap_worker_runtime(loop: asyncio.AbstractEventLoop | None = None) -> N
     register_adapter_lifecycle_event_bus_handlers()
     register_code_inspector_event_bus_handlers()
     register_file_tabs_projection_handlers()
+    register_logical_document_reconciler_handlers()
     register_open_state_event_bus_handlers()
     register_project_switch_event_bus_handlers()
     register_search_highlight_event_bus_handlers()

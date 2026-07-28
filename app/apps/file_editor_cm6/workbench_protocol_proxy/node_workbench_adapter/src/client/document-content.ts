@@ -1,3 +1,5 @@
+import type { WorkbenchDocumentRegistry } from "../workspace/document-registry";
+
 export interface LocalFsStatsLike {
   size?: unknown;
   mtimeMs?: unknown;
@@ -18,9 +20,8 @@ export interface DocumentContentRuntime {
   defaultAuthority: string;
   extRpcIds: {
     ExtHostDocumentContentProviders: number;
-    ExtHostDocumentsAndEditors: number;
   };
-  backgroundDocuments: Set<string>;
+  documentRegistry: WorkbenchDocumentRegistry;
   readTextFile: (path: string) => Promise<string>;
   readBinaryFile: (path: string) => Promise<Uint8Array>;
   statPath: (path: string) => Promise<LocalFsStatsLike>;
@@ -34,16 +35,6 @@ export interface DocumentContentRuntime {
     pendingOptions: DocumentContentPendingOptions,
   ) => { promise: Promise<unknown> };
   log: (...args: unknown[]) => void;
-}
-
-interface AddedBackgroundDocument {
-  uri: Record<string, unknown>;
-  versionId: number;
-  lines: string[] | null;
-  EOL: string;
-  languageId: string;
-  isDirty: boolean;
-  encoding: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -183,25 +174,26 @@ export async function tryOpenDocument(
   const fsPath = fsPathFromUri(uriObj);
   if (!fsPath) throw new Error(`unsupported document uri: ${uriStr}`);
 
-  if (!runtime.backgroundDocuments.has(uriStr)) {
+  const existing =
+    runtime.documentRegistry.getByPath(fsPath) ??
+    runtime.documentRegistry.getByUri(uriObj);
+  if (!existing) {
     const text = await runtime.readTextFile(fsPath);
-    const lines = text.split(/\r?\n/);
+    const normalizedText = text.replace(/\r\n/g, "\n");
     const languageId = runtime.languageIdFromPath(fsPath) || "plaintext";
     const encoding = typeof options?.encoding === "string" && options.encoding ? options.encoding : "utf8";
-    const addedDocument: AddedBackgroundDocument = {
+    const retained = runtime.documentRegistry.retain({
+      path: fsPath,
       uri: uriObj,
-      versionId: 1,
-      lines,
-      EOL: "\n",
+      text: normalizedText,
       languageId,
-      isDirty: false,
+      role: "background",
+      dirty: false,
       encoding,
-    };
-    const docDelta = { addedDocuments: [addedDocument] };
-    runtime.sendExt(runtime.extRpcIds.ExtHostDocumentsAndEditors, "$acceptDocumentsAndEditorsDelta", [docDelta], false);
-    runtime.backgroundDocuments.add(uriStr);
-    runtime.log(`[schema_doc] opened background document uri=${uriStr} lines=${lines.length} lang=${languageId}`);
-    addedDocument.lines = null;
+    });
+    runtime.log(
+      `[schema_doc] opened background document uri=${uriStr} lines=${retained.entry.lineCount} lang=${languageId}`,
+    );
   }
   return uriObj;
 }

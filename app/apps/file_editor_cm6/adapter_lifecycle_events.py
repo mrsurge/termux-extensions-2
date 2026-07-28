@@ -77,6 +77,28 @@ async def publish_adapter_session_reset(
     )
 
 
+async def publish_adapter_active_document_changed(
+    payload: JsonObject,
+    *,
+    project_root: str | Path,
+    source: str,
+    correlation_id: str | None = None,
+) -> None:
+    normalized_project = _normalize_project_root(project_root)
+    if normalized_project is None:
+        return
+    await publish_worker_event(
+        build_event(
+            "AdapterActiveDocumentChanged",
+            project_root=normalized_project,
+            project_generation=current_project_generation(normalized_project),
+            source=source,
+            correlation_id=correlation_id,
+            payload=dict(payload),
+        )
+    )
+
+
 async def publish_adapter_workspace_ready(
     payload: JsonObject,
     *,
