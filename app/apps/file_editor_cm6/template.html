@@ -801,7 +801,7 @@
   }
 
 .fe-drawer-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border #333); background: var(--card, #0b0f1a); box-shadow: none; }
-  #fe-project-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  #fe-branch-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 
   /* CM6-specific styles - eliminate all gaps around iframe */
   .fe-root, .fe-grid, .fe-editor-row, .fe-editor-container {
@@ -2369,7 +2369,7 @@
   <aside id="fe-drawer" class="fe-drawer">
     <header class="fe-drawer-head">
       <button id="fe-drawer-close" class="fe-btn" title="Close Explorer" aria-label="Close Explorer">✕</button>
-      <span id="fe-project-label"></span>
+      <span id="fe-branch-label"></span>
       <div id="fe-project-menu" class="fe-menu">
 	        <button id="fe-project-menu-btn" class="fe-btn" title="Project actions" aria-haspopup="menu" aria-expanded="false">Project…</button>
 	        <div id="fe-project-menu-dd" class="fe-dropdown" role="menu">
@@ -2396,8 +2396,9 @@
 	            <span>experimental sticky headers</span>
 	          </div>
 	        </div>
-	      </div>
+      </div>
       <button id="fe-search-btn" class="fe-btn" title="Search">🔍</button>
+      <button id="fe-extension-marketplace-btn" class="fe-btn" type="button" title="Extensions" aria-label="Open Extension Marketplace" aria-expanded="false">🧩</button>
     </header>
     <div class="fe-drawer-body">
       <div id="fe-watcher-refresh-bar" style="display:none;padding:4px 8px;text-align:center;background:var(--bg2,#1a1a1a);border-bottom:1px solid var(--border,#333);">
@@ -2406,6 +2407,7 @@
       </div>
       <ul id="fe-file-tree" class="fe-tree" data-project=""></ul>
       <div id="fe-search-overlay" class="fe-search-overlay"></div>
+      <div id="fe-extension-marketplace-overlay" class="fe-marketplace-overlay" aria-hidden="true"></div>
       <footer class="fe-git-footer">
         <div class="fe-git-row fe-git-meta">
           <div id="fe-git-summary" class="fe-git-summary">Git status unavailable.</div>

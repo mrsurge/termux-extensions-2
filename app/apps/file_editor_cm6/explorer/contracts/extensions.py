@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import TypedDict, cast
 
 JsonObject = dict[str, object]
@@ -27,6 +28,17 @@ class ExplorerExtensionExtIdParams(TypedDict):
     ext_id: str
 
 
+class ExplorerExtensionMarketplaceSearchParams(TypedDict):
+    query: str
+    offset: int
+    size: int
+
+
+class ExplorerExtensionMarketplaceInstallParams(TypedDict):
+    ext_id: str
+    version: str
+
+
 class ExplorerExtensionConfigureParams(TypedDict):
     ext_id: str
     values: JsonObject
@@ -40,6 +52,16 @@ class ExplorerExtensionToggleParams(TypedDict, total=False):
     ext_id: str
     lang_id: str
     active: bool
+
+
+_EXTENSION_ID_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+)
+_EXTENSION_VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,127}$")
+_MARKETPLACE_QUERY_MAX_LENGTH = 100
+_MARKETPLACE_PAGE_SIZE_DEFAULT = 20
+_MARKETPLACE_PAGE_SIZE_MAX = 50
+_MARKETPLACE_OFFSET_MAX = 100_000
 
 
 def parse_list_params(payload: object) -> ExplorerExtensionsNoParams:
@@ -60,10 +82,63 @@ def parse_install_params(payload: object) -> ExplorerExtensionInstallParams:
 def parse_uninstall_params(payload: object) -> ExplorerExtensionExtIdParams:
     envelope = _as_object(payload)
     return {
-        "ext_id": _require_string(
-            envelope.get("ext_id"),
-            missing_message="ext_id is required",
+        "ext_id": _parse_extension_id(envelope.get("ext_id")),
+    }
+
+
+def parse_marketplace_search_params(
+    payload: object,
+) -> ExplorerExtensionMarketplaceSearchParams:
+    envelope = _as_object(payload)
+    query = _require_string(
+        envelope.get("query"),
+        missing_message="query is required",
+    ).strip()
+    if len(query) < 2:
+        raise ExplorerExtensionsContractError("query must contain at least 2 characters")
+    if len(query) > _MARKETPLACE_QUERY_MAX_LENGTH:
+        raise ExplorerExtensionsContractError(
+            f"query must not exceed {_MARKETPLACE_QUERY_MAX_LENGTH} characters"
+        )
+    return {
+        "query": query,
+        "offset": _parse_bounded_int(
+            envelope.get("offset"),
+            default=0,
+            minimum=0,
+            maximum=_MARKETPLACE_OFFSET_MAX,
+            field="offset",
         ),
+        "size": _parse_bounded_int(
+            envelope.get("size"),
+            default=_MARKETPLACE_PAGE_SIZE_DEFAULT,
+            minimum=1,
+            maximum=_MARKETPLACE_PAGE_SIZE_MAX,
+            field="size",
+        ),
+    }
+
+
+def parse_marketplace_detail_params(
+    payload: object,
+) -> ExplorerExtensionExtIdParams:
+    envelope = _as_object(payload)
+    return {"ext_id": _parse_extension_id(envelope.get("ext_id"))}
+
+
+def parse_marketplace_install_params(
+    payload: object,
+) -> ExplorerExtensionMarketplaceInstallParams:
+    envelope = _as_object(payload)
+    raw_version = _require_string(
+        envelope.get("version"),
+        missing_message="version is required",
+    ).strip()
+    if not _EXTENSION_VERSION_RE.fullmatch(raw_version):
+        raise ExplorerExtensionsContractError("version is invalid")
+    return {
+        "ext_id": _parse_extension_id(envelope.get("ext_id")),
+        "version": raw_version,
     }
 
 
@@ -145,6 +220,34 @@ def _require_string(value: object, *, missing_message: str) -> str:
     if isinstance(value, str) and value:
         return value
     raise ExplorerExtensionsContractError(missing_message)
+
+
+def _parse_extension_id(value: object) -> str:
+    ext_id = _require_string(value, missing_message="ext_id is required").strip()
+    if not _EXTENSION_ID_RE.fullmatch(ext_id):
+        raise ExplorerExtensionsContractError(
+            "ext_id must be a publisher.name extension identifier"
+        )
+    return ext_id
+
+
+def _parse_bounded_int(
+    value: object,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+    field: str,
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ExplorerExtensionsContractError(f"{field} must be an integer")
+    if value < minimum or value > maximum:
+        raise ExplorerExtensionsContractError(
+            f"{field} must be between {minimum} and {maximum}"
+        )
+    return value
 
 
 def _parse_optional_string(value: object) -> str | None:

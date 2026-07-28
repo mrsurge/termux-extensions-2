@@ -1211,6 +1211,13 @@ def ensure_registry_and_gate() -> Registry:
 
 # ── Install / Uninstall ───────────────────────────────────────────────
 
+_MARKETPLACE_EXTENSION_ID_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+)
+_MARKETPLACE_EXTENSION_VERSION_RE = re.compile(
+    r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,127}$"
+)
+
 
 def _require_code_server_installation() -> CodeServerInstallation:
     installation = resolve_code_server_installation()
@@ -1220,6 +1227,78 @@ def _require_code_server_installation() -> CodeServerInstallation:
             "the login shell, NVM, PREFIX, or ~/.local/bin"
         )
     return installation
+
+
+def _run_code_server_extension_install(extension_spec: str) -> None:
+    installation = _require_code_server_installation()
+    cmd = [
+        str(installation.executable),
+        "--install-extension", extension_spec,
+        "--extensions-dir", str(_EXTENSIONS_DIR),
+        "--force",
+    ]
+
+    print(f"[ext_registry] installing: {' '.join(cmd)}", flush=True)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=_code_server_subprocess_env(installation),
+    )
+
+    if result.returncode != 0:
+        err = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(f"code-server install failed (rc={result.returncode}): {err}")
+
+    print(f"[ext_registry] install stdout: {result.stdout.strip()}", flush=True)
+
+
+def _post_install_result(
+    *,
+    expected_ext_id: str | None = None,
+    vsix_stem: str | None = None,
+) -> dict[str, object]:
+    registry = scan_and_rebuild()
+    rebuild_settings_gate(registry)
+
+    user_extensions = _scan_user_extensions()
+    registry_extensions = _extension_map(registry.get("extensions", {}))
+    installed: ExtensionEntry | None = None
+
+    if expected_ext_id:
+        expected_lower = expected_ext_id.lower()
+        for ext_id, candidate in registry_extensions.items():
+            if (
+                ext_id.lower() == expected_lower
+                and _entry_string(candidate, "source") == "user"
+            ):
+                installed = candidate
+                break
+        if installed is None:
+            raise RuntimeError(
+                f"code-server reported success but {expected_ext_id} was not installed"
+            )
+    else:
+        normalized_stem = (vsix_stem or "").lower()
+        for ext_id in user_extensions:
+            if ext_id not in registry_extensions:
+                continue
+            candidate = registry_extensions[ext_id]
+            if _entry_string(candidate, "source") != "user":
+                continue
+            installed = candidate
+            if normalized_stem and normalized_stem in _entry_string(candidate, "path").lower():
+                break
+
+    return {
+        "ok": True,
+        "extension": installed,
+        "registry_summary": {
+            "total_extensions": _registry_extension_count(registry),
+            "total_slots": _registry_slot_count(registry),
+        },
+    }
 
 
 def install_extension(vsix_path: str) -> dict[str, object]:
@@ -1241,56 +1320,23 @@ def install_extension(vsix_path: str) -> dict[str, object]:
     if not vsix.name.endswith(".vsix"):
         raise ValueError(f"Not a .vsix file: {vsix_path}")
 
-    installation = _require_code_server_installation()
-    cmd = [
-        str(installation.executable),
-        "--install-extension", str(vsix.resolve()),
-        "--extensions-dir", str(_EXTENSIONS_DIR),
-        "--force",
-    ]
+    _run_code_server_extension_install(str(vsix.resolve()))
+    return _post_install_result(vsix_stem=vsix.stem)
 
-    print(f"[ext_registry] installing: {' '.join(cmd)}", flush=True)
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=_code_server_subprocess_env(installation),
+
+def install_extension_by_id(ext_id: str, version: str) -> dict[str, object]:
+    """Install one exact Open VSX/code-server extension identifier and version."""
+    normalized_ext_id = ext_id.strip()
+    normalized_version = version.strip()
+    if not _MARKETPLACE_EXTENSION_ID_RE.fullmatch(normalized_ext_id):
+        raise ValueError("Extension ID must be a publisher.name identifier")
+    if not _MARKETPLACE_EXTENSION_VERSION_RE.fullmatch(normalized_version):
+        raise ValueError("Extension version is invalid")
+
+    _run_code_server_extension_install(
+        f"{normalized_ext_id}@{normalized_version}"
     )
-
-    if result.returncode != 0:
-        err = result.stderr.strip() or result.stdout.strip()
-        raise RuntimeError(f"code-server install failed (rc={result.returncode}): {err}")
-
-    print(f"[ext_registry] install stdout: {result.stdout.strip()}", flush=True)
-
-    # Re-scan to pick up the new extension
-    registry = scan_and_rebuild()
-    rebuild_settings_gate(registry)
-
-    # Try to identify what was just installed by comparing with manifest
-    user_exts = _scan_user_extensions()
-    # The newest entry is likely the one just installed
-    new_ext = None
-    registry_exts = _extension_map(registry.get("extensions", {}))
-    for ext_id in user_exts:
-        if ext_id in registry_exts:
-            candidate = registry_exts[ext_id]
-            if _entry_string(candidate, "source") == "user":
-                new_ext = candidate
-                # If the path contains the vsix stem, it's likely the one
-                vsix_stem = vsix.stem.lower()
-                if vsix_stem in _entry_string(candidate, "path").lower():
-                    break
-
-    return {
-        "ok": True,
-        "extension": new_ext,
-        "registry_summary": {
-            "total_extensions": _registry_extension_count(registry),
-            "total_slots": _registry_slot_count(registry),
-        },
-    }
+    return _post_install_result(expected_ext_id=normalized_ext_id)
 
 
 def uninstall_extension(ext_id: str) -> dict[str, object]:

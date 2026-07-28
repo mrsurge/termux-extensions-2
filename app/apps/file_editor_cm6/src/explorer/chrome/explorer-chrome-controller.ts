@@ -4,6 +4,7 @@ import {
 } from '../rpc/contract.ts';
 import type { JsonObject } from '../../rpc/transport.ts';
 import type { ExplorerTreeMenuEntry } from '../tree/types.ts';
+import type { ExplorerGitStatus } from '../git/footer-utils.ts';
 import type {
   ExplorerStickyScopesApi,
   ExplorerStickyScopesDeps,
@@ -15,7 +16,8 @@ interface ExplorerChromeBindings {
   drawerBackdrop: HTMLElement | null;
   drawerOpenBtn: HTMLElement | null;
   searchBtn: HTMLElement | null;
-  projectLabel: HTMLElement | null;
+  marketplaceBtn: HTMLElement | null;
+  branchLabel: HTMLElement | null;
   projectMenuBtn: HTMLElement | null;
   projectMenuDropdown: HTMLElement | null;
   projectMenuNewItem: HTMLElement | null;
@@ -33,13 +35,13 @@ interface ExplorerProjectChoice {
 }
 
 interface ExplorerChromeControllerDeps {
-  getProjectPath(): string | null;
-  basename(path: string): string;
+  getGitStatus(): ExplorerGitStatus | null;
   toast(message: string): void;
   hasExplorerRpc(): boolean;
   notifyExplorer(method: ExplorerRpcMethod, payload: JsonObject): void;
   closeDiffBaseMenus(): void;
   openSearchOverlay(): void;
+  openMarketplaceOverlay(): void;
   scrollToActiveFile(): Promise<void>;
   showNewProjectModal(toast: (message: string) => void): Promise<unknown>;
   showProjectsDebugModal(): Promise<void>;
@@ -62,10 +64,35 @@ function isProjectChoice(value: unknown): value is ExplorerProjectChoice {
   );
 }
 
+export function formatExplorerBranchLabel(
+  status: ExplorerGitStatus | null,
+): { text: string; title: string } {
+  if (!status) {
+    return { text: '…', title: 'Git status pending' };
+  }
+  if (status.isRepository === false) {
+    return { text: '(no branch)', title: 'Not a Git repository' };
+  }
+  if (status.hasHead === false) {
+    return { text: '(no commits)', title: 'Git repository has no commits' };
+  }
+  if (status.detached === true) {
+    const short = status.head?.short || status.head?.full?.slice(0, 7) || '?';
+    return {
+      text: `HEAD @ ${short}`,
+      title: status.head?.full || 'Detached HEAD',
+    };
+  }
+  if (status.branch) {
+    return { text: status.branch, title: status.branch };
+  }
+  return { text: '(no branch)', title: 'Git branch unavailable' };
+}
+
 export function createExplorerChromeController(
   deps: ExplorerChromeControllerDeps,
 ) {
-  let projectLabelEl: HTMLElement | null = null;
+  let branchLabelEl: HTMLElement | null = null;
   let drawerOpenBtn: HTMLElement | null = null;
   let projectMenuBtn: HTMLElement | null = null;
   let projectMenuDropdown: HTMLElement | null = null;
@@ -143,18 +170,12 @@ export function createExplorerChromeController(
     syncDrawerOpenButton(root);
   }
 
-  function renderProjectLabel(): void {
-    if (!projectLabelEl) return;
-    const projectPath = deps.getProjectPath();
-    if (!projectPath) {
-      projectLabelEl.textContent = '(none)';
-      projectLabelEl.title = '';
-      projectLabelEl.classList.remove('fe-label-missing');
-      return;
-    }
-    projectLabelEl.textContent = deps.basename(projectPath);
-    projectLabelEl.title = projectPath;
-    projectLabelEl.classList.remove('fe-label-missing');
+  function renderBranchLabel(): void {
+    if (!branchLabelEl) return;
+    const label = formatExplorerBranchLabel(deps.getGitStatus());
+    branchLabelEl.textContent = label.text;
+    branchLabelEl.title = label.title;
+    branchLabelEl.classList.remove('fe-label-missing');
   }
 
   function setStickyHeadersEnabled(next: boolean | null): void {
@@ -359,7 +380,7 @@ export function createExplorerChromeController(
   }
 
   function bindUi(bindings: ExplorerChromeBindings): void {
-    projectLabelEl = bindings.projectLabel;
+    branchLabelEl = bindings.branchLabel;
     drawerOpenBtn = bindings.drawerOpenBtn;
     projectMenuBtn = bindings.projectMenuBtn;
     projectMenuDropdown = bindings.projectMenuDropdown;
@@ -379,6 +400,9 @@ export function createExplorerChromeController(
       }
     });
     bindings.searchBtn?.addEventListener('click', () => deps.openSearchOverlay());
+    bindings.marketplaceBtn?.addEventListener('click', () =>
+      deps.openMarketplaceOverlay()
+    );
 
     const root = document.querySelector('.fe-root');
     if (root instanceof HTMLElement) syncDrawerOpenButton(root);
@@ -466,7 +490,7 @@ export function createExplorerChromeController(
 
   return {
     bindUi,
-    renderProjectLabel,
+    renderBranchLabel,
     toggleDrawer,
     setStickyHeadersEnabled,
     syncExplorerPrefsUI,

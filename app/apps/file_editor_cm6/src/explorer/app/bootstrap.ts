@@ -31,6 +31,7 @@ import {
   type ExplorerJumpOptions,
 } from "../host/file-open-bridge.ts";
 import { createExplorerSearchOverlayController } from "../search/overlay-controller.ts";
+import { createExplorerMarketplaceController } from "../extensions/marketplace-controller.ts";
 import { getErrorMessage } from "../utils/errors.ts";
 import { createExplorerRefreshController } from "./refresh-controller.ts";
 import {
@@ -89,6 +90,9 @@ type ExplorerGitButtons = {
 
 type ExplorerSearchOverlayControllerApi = ReturnType<
   typeof createExplorerSearchOverlayController
+>;
+type ExplorerMarketplaceControllerApi = ReturnType<
+  typeof createExplorerMarketplaceController
 >;
 type ExplorerTimer = ReturnType<typeof setTimeout> | null;
 
@@ -237,6 +241,7 @@ const explorerGitFooterUtils = createExplorerGitFooterUtils({
   reloadCurrentFile: () => window.__cm6ReloadCurrentFile?.(),
 });
 let explorerSearchOverlayController: ExplorerSearchOverlayControllerApi;
+let explorerMarketplaceController: ExplorerMarketplaceControllerApi;
 const explorerDiffBaseController = createExplorerDiffBaseController({
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),
@@ -250,13 +255,14 @@ const explorerDiffBaseController = createExplorerDiffBaseController({
   getEditorState: () => window.__cm6EditorState || null,
 });
 const explorerChromeController = createExplorerChromeController({
-  getProjectPath: () => explorerRuntimeState.getProjectPath(),
-  basename,
+  getGitStatus: () => explorerRuntimeState.getGitStatus(),
   toast,
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),
   closeDiffBaseMenus: () => explorerDiffBaseController.closeMenus(),
   openSearchOverlay: () => openSearchOverlay(),
+  openMarketplaceOverlay: () =>
+    explorerMarketplaceController.openMarketplace(),
   scrollToActiveFile,
   showNewProjectModal,
   showProjectsDebugModal,
@@ -321,6 +327,13 @@ explorerSearchOverlayController = createExplorerSearchOverlayController({
   onGitDiffBaseChanged: () => explorerDiffBaseController.updateButtons(),
   toggleDiffBaseMenu: (button, dropdown) =>
     explorerDiffBaseController.toggleMenu(button, dropdown),
+});
+explorerMarketplaceController = createExplorerMarketplaceController({
+  requestExplorer: (method, payload, timeoutMs) =>
+    requestExplorerRpc(method, payload, timeoutMs),
+  closeSearchOverlay: (reason) =>
+    explorerSearchOverlayController.closeSearchOverlay(reason),
+  confirm: (message) => window.teUI.dialog.confirm(message),
 });
 const explorerTreeDecorationsController =
   createExplorerTreeDecorationsController({
@@ -715,7 +728,7 @@ const explorerNotificationHandler = createExplorerNotificationHandler({
   setActiveFileRel,
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),
-  renderProjectLabel: () => explorerChromeController.renderProjectLabel(),
+  renderBranchLabel: () => explorerChromeController.renderBranchLabel(),
   initDiffBaseFromBackend,
   renderExplorerTree,
   renderEntriesInto,
@@ -732,6 +745,7 @@ const explorerNotificationHandler = createExplorerNotificationHandler({
   treeDecorations: explorerTreeDecorationsController,
   getDiagnosticsPanel: () => getExplorerDiagnosticsPanel(),
   searchOverlayController: explorerSearchOverlayController,
+  marketplaceController: explorerMarketplaceController,
   renderSearchOverlay,
   dispatchRemoteDraft,
   dispatchAutosaveContent,
@@ -781,9 +795,15 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
     "fe-mi-explorer-scroll-active",
   );
   treeElement = document.getElementById("fe-file-tree");
-  const projectLabel = document.getElementById("fe-project-label");
+  const branchLabel = document.getElementById("fe-branch-label");
   gitSummaryEl = document.getElementById("fe-git-summary");
   const searchBtn = document.getElementById("fe-search-btn");
+  const marketplaceBtn = document.getElementById(
+    "fe-extension-marketplace-btn",
+  );
+  const marketplaceOverlay = document.getElementById(
+    "fe-extension-marketplace-overlay",
+  );
   const gitBaseBtn = document.getElementById("fe-git-base-btn");
   const gitBaseDropdown = document.getElementById("fe-git-base-dd");
 
@@ -818,7 +838,8 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
     drawerBackdrop,
     drawerOpenBtn,
     searchBtn,
-    projectLabel,
+    marketplaceBtn,
+    branchLabel,
     projectMenuBtn,
     projectMenuDropdown,
     projectMenuNewItem,
@@ -828,6 +849,12 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
     explorerMenuDropdown,
     explorerMenuStickyHeadersItem,
     explorerMenuScrollActiveItem,
+  });
+  explorerMarketplaceController.bindUi({
+    button:
+      marketplaceBtn instanceof HTMLButtonElement ? marketplaceBtn : null,
+    overlay:
+      marketplaceOverlay instanceof HTMLElement ? marketplaceOverlay : null,
   });
 
   explorerDiffBaseController.bindGitBaseButton(
@@ -896,7 +923,7 @@ export async function initExplorerUI(options: ExplorerUiInitOptions) {
   explorerRefreshController.bindManualRefreshButton(refreshBtn);
 
   // Initial render placeholders until first snapshot arrives
-  explorerChromeController.renderProjectLabel();
+  explorerChromeController.renderBranchLabel();
   if (treeElement) {
     const empty = document.createElement("li");
     empty.className = "fe-tree-empty";
@@ -931,6 +958,7 @@ async function openFileAndMaybeJump(
 // --- Search / Review overlay wiring ---
 
 function openSearchOverlay(): void {
+  explorerMarketplaceController.closeMarketplace("searchOpened");
   explorerSearchOverlayController.openSearchOverlay();
 }
 
