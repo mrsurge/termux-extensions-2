@@ -11,6 +11,8 @@ from ..contracts.extensions import (
     ExplorerExtensionConfigureParams,
     ExplorerExtensionExtIdParams,
     ExplorerExtensionInstallParams,
+    ExplorerExtensionMarketplaceInstallParams,
+    ExplorerExtensionMarketplaceSearchParams,
     ExplorerExtensionSettingsParams,
     ExplorerExtensionToggleParams,
     ExplorerExtensionsNoParams,
@@ -83,6 +85,96 @@ async def handle_ext_install(
         msg_id,
     )
     await restart_code_server_and_adapter(context.emit_personal, "ext_install")
+
+
+async def handle_ext_marketplace_search(
+    context: ExplorerExtensionHandlerContext,
+    params: ExplorerExtensionMarketplaceSearchParams,
+    msg_id: str | None,
+) -> None:
+    from ... import extension_registry as extension_registry
+    from ..services.openvsx_marketplace import search_openvsx
+
+    get_extension_list = extension_registry.get_extension_list
+    installed_extensions = await asyncio.to_thread(get_extension_list)
+    result = await search_openvsx(
+        query=params["query"],
+        offset=params["offset"],
+        size=params["size"],
+        installed_extensions=installed_extensions,
+    )
+    await context.emit_personal("ext:marketplace_search", result, msg_id)
+
+
+async def handle_ext_marketplace_detail(
+    context: ExplorerExtensionHandlerContext,
+    params: ExplorerExtensionExtIdParams,
+    msg_id: str | None,
+) -> None:
+    from ... import extension_registry as extension_registry
+    from ..services.openvsx_marketplace import get_openvsx_detail
+
+    get_extension_list = extension_registry.get_extension_list
+    installed_extensions = await asyncio.to_thread(get_extension_list)
+    result = await get_openvsx_detail(
+        ext_id=params["ext_id"],
+        installed_extensions=installed_extensions,
+    )
+    await context.emit_personal("ext:marketplace_detail", result, msg_id)
+
+
+async def handle_ext_marketplace_install(
+    context: ExplorerExtensionHandlerContext,
+    params: ExplorerExtensionMarketplaceInstallParams,
+    msg_id: str | None,
+) -> None:
+    from ... import extension_registry as extension_registry
+    from ..services.openvsx_marketplace import get_openvsx_detail
+
+    get_extension_list = extension_registry.get_extension_list
+    install_extension_by_id = cast(
+        Callable[[str, str], JsonObject],
+        extension_registry.install_extension_by_id,
+    )
+
+    installed_extensions = await asyncio.to_thread(get_extension_list)
+    detail_result = await get_openvsx_detail(
+        ext_id=params["ext_id"],
+        installed_extensions=installed_extensions,
+    )
+    detail = _as_object(detail_result.get("extension")) or {}
+    current_version = detail.get("version")
+    if current_version != params["version"]:
+        raise RuntimeError(
+            "The Open VSX version changed; reopen the extension details and retry"
+        )
+    if detail.get("installSupported") is not True:
+        reason = detail.get("unsupportedReason")
+        raise RuntimeError(
+            reason if isinstance(reason, str) and reason
+            else "This extension is not supported"
+        )
+
+    result = await asyncio.to_thread(
+        install_extension_by_id,
+        params["ext_id"],
+        params["version"],
+    )
+    extension = _as_object(result.get("extension")) or {}
+    registry_summary = _as_object(result.get("registry_summary")) or {}
+    await context.emit_personal(
+        "ext:marketplace_installed",
+        {
+            "ok": True,
+            "extension": extension,
+            "registry_summary": registry_summary,
+        },
+        msg_id,
+    )
+    await restart_code_server_and_adapter(
+        context.emit_personal,
+        "ext_marketplace_install",
+    )
 
 
 async def handle_ext_uninstall(

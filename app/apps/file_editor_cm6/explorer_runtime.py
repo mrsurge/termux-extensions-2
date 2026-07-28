@@ -1230,6 +1230,72 @@ class ExplorerDispatcher:
 
         await handle_ext_install(self._build_extension_context(), params, msg_id)
 
+    async def handle_ext_marketplace_search(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_marketplace_search_params,
+        )
+        from .explorer.handlers.extensions import handle_ext_marketplace_search
+
+        try:
+            params = parse_marketplace_search_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_marketplace_search(
+            self._build_extension_context(),
+            params,
+            msg_id,
+        )
+
+    async def handle_ext_marketplace_detail(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_marketplace_detail_params,
+        )
+        from .explorer.handlers.extensions import handle_ext_marketplace_detail
+
+        try:
+            params = parse_marketplace_detail_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_marketplace_detail(
+            self._build_extension_context(),
+            params,
+            msg_id,
+        )
+
+    async def handle_ext_marketplace_install(
+        self,
+        payload: JsonObject,
+        msg_id: str | None,
+    ) -> None:
+        from .explorer.contracts.extensions import (
+            ExplorerExtensionsContractError,
+            parse_marketplace_install_params,
+        )
+        from .explorer.handlers.extensions import handle_ext_marketplace_install
+
+        try:
+            params = parse_marketplace_install_params(payload)
+        except ExplorerExtensionsContractError as exc:
+            return await self.send_error(exc.message, msg_id)
+
+        await handle_ext_marketplace_install(
+            self._build_extension_context(),
+            params,
+            msg_id,
+        )
+
     async def handle_ext_uninstall(self, payload: JsonObject, msg_id: str | None) -> None:
         from .explorer.contracts.extensions import (
             ExplorerExtensionsContractError,

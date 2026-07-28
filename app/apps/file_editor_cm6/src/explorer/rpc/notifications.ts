@@ -28,6 +28,10 @@ interface ExplorerSearchOverlayController {
   getSearchMode(): string;
 }
 
+interface ExplorerMarketplaceController {
+  closeMarketplace(reason?: string): void;
+}
+
 interface ExplorerNotificationHandlerDeps {
   runtimeState: ExplorerRuntimeState;
   getTreeElement(): HTMLElement | null;
@@ -38,7 +42,7 @@ interface ExplorerNotificationHandlerDeps {
   setActiveFileRel(next: string | null): void;
   hasExplorerRpc(): boolean;
   notifyExplorer(method: ExplorerRpcMethod, payload: JsonObject): void;
-  renderProjectLabel(): void;
+  renderBranchLabel(): void;
   initDiffBaseFromBackend(): Promise<void>;
   renderExplorerTree(): void;
   renderEntriesInto(
@@ -57,6 +61,7 @@ interface ExplorerNotificationHandlerDeps {
   treeDecorations: ExplorerTreeDecorationsController;
   getDiagnosticsPanel(): ProblemsPanelApi | null;
   searchOverlayController: ExplorerSearchOverlayController;
+  marketplaceController: ExplorerMarketplaceController;
   renderSearchOverlay(): void;
   dispatchRemoteDraft(payload: JsonObject): void;
   dispatchAutosaveContent(payload: JsonObject): void;
@@ -115,6 +120,21 @@ function coerceGitStatus(payload: JsonObject): ExplorerGitStatus {
   const status: ExplorerGitStatus = {};
   if (typeof payload.branch === "string") status.branch = payload.branch;
   if (payload.detached === true) status.detached = true;
+  if (typeof payload.isRepository === "boolean") {
+    status.isRepository = payload.isRepository;
+  }
+  if (typeof payload.hasHead === "boolean") status.hasHead = payload.hasHead;
+  if (isRecord(payload.head) && typeof payload.head.full === "string") {
+    status.head = {
+      full: payload.head.full,
+      short:
+        typeof payload.head.short === "string"
+          ? payload.head.short
+          : payload.head.full.slice(0, 7),
+    };
+  } else if (payload.head === null) {
+    status.head = null;
+  }
   if (typeof payload.ahead === "number") status.ahead = payload.ahead;
   if (typeof payload.behind === "number") status.behind = payload.behind;
   if (Array.isArray(payload.staged)) status.staged = payload.staged;
@@ -134,13 +154,17 @@ function applyProjectRootProjection(
     options.forceReset === true ||
     (!!prevProjectPath && prevProjectPath !== nextProjectPath);
   deps.runtimeState.setProjectPath(nextProjectPath);
-  deps.renderProjectLabel();
-  if (!projectChanged) return false;
+  if (!projectChanged) {
+    deps.renderBranchLabel();
+    return false;
+  }
 
   deps.setActiveFileRel(null);
   deps.getOpenDirectories().clear();
   deps.setOpenDirsInitialized(false);
   deps.runtimeState.setGitStatus(null);
+  deps.renderBranchLabel();
+  deps.marketplaceController.closeMarketplace("projectChanged");
   deps.renderExplorerTree();
   deps.renderGitSummary();
   deps.setGitControlsEnabled(false, false);
@@ -386,7 +410,7 @@ export function createExplorerNotificationHandler(
         if (nextProjectPath) {
           deps.runtimeState.setProjectPath(nextProjectPath);
         }
-        deps.renderProjectLabel();
+        deps.renderBranchLabel();
         deps.renderExplorerTree();
         const treeElement = deps.getTreeElement();
         if (treeElement) {
@@ -479,6 +503,7 @@ export function createExplorerNotificationHandler(
       case EXPLORER_RPC_NOTIFICATIONS.gitStatusUpdated: {
         console.log("[GIT_STATUS_DEBUG] Received:", payload);
         deps.runtimeState.setGitStatus(coerceGitStatus(payload));
+        deps.renderBranchLabel();
         deps.renderGitSummary();
         deps.setGitControlsEnabled(true, false);
         break;
@@ -544,6 +569,7 @@ export function createExplorerNotificationHandler(
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchReset: {
         deps.searchOverlayController.closeSearchOverlay("projectChanged");
+        deps.marketplaceController.closeMarketplace("projectChanged");
         break;
       }
       case EXPLORER_RPC_NOTIFICATIONS.searchResultsUpdated: {

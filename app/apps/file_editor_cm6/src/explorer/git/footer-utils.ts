@@ -18,6 +18,12 @@ type ExplorerGitButtons = Partial<
 export interface ExplorerGitStatus {
   branch?: string;
   detached?: boolean;
+  head?: {
+    full: string;
+    short: string;
+  } | null;
+  isRepository?: boolean;
+  hasHead?: boolean;
   ahead?: number;
   behind?: number;
   staged?: unknown[];
