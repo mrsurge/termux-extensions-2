@@ -15,12 +15,15 @@ import {
 
 import { clearFrameworkAssetCaches } from "./asset-cache";
 import { DesktopAssetManager, MIME_TYPES } from "./assets";
+import { installCloseOnBlur } from "./blur-close-policy";
+import { installChromiumScrollbars } from "./chromium-scrollbars";
 import { DesktopDialogHost } from "./dialog-host";
 import {
   FRAMEWORK_REQUEST_TIMEOUT_MS,
   frameworkConnectionError,
 } from "./framework-errors";
 import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
+import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
 import {
   ELECTRON_APP_VIEW_IDENTITY,
   ELECTRON_FRAMEWORK_PARTITION,
@@ -60,12 +63,6 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
-
-if (process.platform === "linux") {
-  // Electron 38+ selects native Wayland when the session supports it. Keeping
-  // the hint at auto avoids the X11-only path that constrained the CEF spike.
-  app.commandLine.appendSwitch("ozone-platform-hint", "auto");
-}
 
 type FrameworkRequestParams = {
   path: string;
@@ -378,6 +375,7 @@ function createAppView(): WebContentsView {
     void view.webContents.insertCSS(APP_NATIVE_STYLE, { cssOrigin: "user" }).catch((error) => {
       console.error(`[te2-desktop] Failed to install app chrome CSS: ${errorMessage(error)}`);
     });
+    void installChromiumScrollbars(view.webContents, "app-view");
   });
 
   const notify = () => sendNavigation(view.webContents);
@@ -413,7 +411,11 @@ function createAppView(): WebContentsView {
     }
     surfaceWindows.add(window);
     window.setMenu(null);
+    void installChromiumScrollbars(window.webContents, "modal");
     installContextMenu(window.webContents);
+    installCloseOnBlur(window, () => {
+      if (surfaceWindows.has(window) && !window.isDestroyed()) window.close();
+    });
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (event) => event.preventDefault());
     window.on("closed", () => surfaceWindows.delete(window));
@@ -426,7 +428,7 @@ function createAppView(): WebContentsView {
         outlivesOpener: false,
         overrideBrowserWindowOptions: {
           parent: mainWindow || undefined,
-          modal: true,
+          ...DESKTOP_MODAL_WINDOW_POLICY,
           frame: false,
           show: true,
           width: Math.max(420, Math.min(1000, mainWidth - 48)),
@@ -675,7 +677,8 @@ async function main(): Promise<void> {
 
   console.log(
     `[te2-desktop] Electron ${process.versions.electron}; Chromium ${process.versions.chrome}; ` +
-    `session=${process.env.XDG_SESSION_TYPE || "unknown"}; relay=${relay.browserOrigin}`,
+    `ozone=${app.commandLine.getSwitchValue("ozone-platform") || "default"}; ` +
+    `desktop-session=${process.env.XDG_SESSION_TYPE || "unknown"}; relay=${relay.browserOrigin}`,
   );
   void automaticAssetUpdate();
   void autoOpenConfiguredApp();

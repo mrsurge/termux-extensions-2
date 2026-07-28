@@ -6,6 +6,7 @@ import type {
   NativeRequestMethod,
 } from "../shared/contracts";
 import { MAX_ZOOM_LEVEL, MIN_ZOOM_LEVEL } from "../shared/contracts";
+import { installChromiumScrollbarStyle } from "../shared/chromium-scrollbars";
 
 declare global {
   interface Window {
@@ -48,6 +49,19 @@ let toastTimer = 0;
 let frameworkOnline: boolean | null = null;
 let frameworkStatusTimer = 0;
 let frameworkStatusGeneration = 0;
+
+installChromiumScrollbarStyle(document);
+launcherView.addEventListener("load", () => {
+  try {
+    if (launcherView.contentDocument) {
+      installChromiumScrollbarStyle(launcherView.contentDocument);
+    }
+  } catch (error) {
+    console.warn(
+      `[te2-desktop] Failed to install launcher scrollbar CSS: ${errorMessage(error)}`,
+    );
+  }
+});
 
 function toast(message: string): void {
   toastElement.textContent = message;

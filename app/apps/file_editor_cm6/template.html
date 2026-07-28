@@ -416,12 +416,12 @@
   /* Explorer resize handle (vertical, desktop only) */
   .layout-desktop .resize-handle--explorer {
     display: block;
-    width: 10px;
+    width: 6px;
     cursor: col-resize;
     grid-column: 1;
     grid-row: 1 / 5;
     justify-self: end;
-    margin-left: -10px;
+    transform: translateX(100%);
     z-index: 260;
     touch-action: none;
   }
@@ -433,12 +433,12 @@
   /* Agent resize handle (vertical, desktop only) */
   .layout-desktop .resize-handle--agent {
     display: block;
-    width: 10px;
+    width: 6px;
     cursor: col-resize;
     grid-column: 3;
     grid-row: 1 / 5;
     justify-self: start;
-    margin-right: -10px;
+    transform: translateX(-100%);
     z-index: 220;
     touch-action: none;
   }

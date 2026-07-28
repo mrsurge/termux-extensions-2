@@ -20,6 +20,9 @@ import {
   type DialogResultStatus,
   type DialogSize,
 } from "../shared/dialog-contracts";
+import { installCloseOnBlur } from "./blur-close-policy";
+import { installChromiumScrollbars } from "./chromium-scrollbars";
+import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
 
 type PendingDialog = {
   owner: WebContents;
@@ -285,7 +288,7 @@ export class DesktopDialogHost {
 
     const window = new BrowserWindow({
       parent,
-      modal: true,
+      ...DESKTOP_MODAL_WINDOW_POLICY,
       frame: false,
       show: false,
       width,
@@ -305,7 +308,13 @@ export class DesktopDialogHost {
     });
     this.window = window;
     window.setMenu(null);
+    window.webContents.on("dom-ready", () => {
+      void installChromiumScrollbars(window.webContents, "dialog");
+    });
     this.options.installContextMenu(window.webContents);
+    installCloseOnBlur(window, () => {
+      if (this.window === window) this.closeAll("closed");
+    });
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (event) => event.preventDefault());
     window.webContents.on("render-process-gone", (_event, details) => {

@@ -1,9 +1,9 @@
 # TE2 Electron desktop client
 
-This is the active TE2 Linux desktop client. It uses Electron's native
-Chromium/Wayland path and keeps the desktop-owned launcher, Settings, persistent
-header, asset updates, and app-scoped lifecycle controls from the earlier
-desktop spikes.
+This is the active TE2 Linux desktop client. It uses Electron's Chromium
+renderer and keeps the desktop-owned launcher, Settings, persistent header,
+asset updates, and app-scoped lifecycle controls from the earlier desktop
+clients.
 
 ## Run from source
 
@@ -14,11 +14,12 @@ npm install
 npm run dev
 ```
 
-`npm run dev` passes `--no-sandbox`. This is intentional: the client is run from
-a user-owned tree, while Ubuntu's AppArmor policy prevents Electron's
+`npm run dev` passes `--no-sandbox`. This is intentional because the client is
+run from a user-owned tree, while Ubuntu's AppArmor policy prevents Electron's
 unprivileged namespace sandbox and the setuid helper requires a root-owned
-installation. Node integration remains disabled and context isolation remains
-enabled in both renderer surfaces.
+installation. Electron retains its automatic native Ozone backend selection.
+Node integration remains disabled and context isolation remains enabled in both
+renderer surfaces.
 
 ## Build the packaged directory
 
@@ -72,8 +73,11 @@ The packaged `TE2Desktop` launcher supplies `--no-sandbox` to the bundled
   `electron:main_page:<suffix>`. Their frozen `window.te2Electron` bridge exposes
   `identity`, `inspect()`, `reload()`, `home()`, and `forceAssetUpdate()` through
   an exact-view/origin-validated native command allowlist.
-- On Linux the Ozone platform hint remains `auto`, allowing Electron to select
-  native Wayland for a Wayland session.
+- On Linux, Electron automatically selects native Wayland when the desktop
+  session supports it. Detached modal/dialog windows retain parent-modal
+  ownership but do not request global always-on-top status. After a child has
+  held native focus, losing that focus closes it through its normal lifecycle;
+  a same-turn focus recovery cancels the pending close.
 
 Settings persist in `~/.config/te2/desktop-shell.json`; shared installed assets
 live in `~/.local/share/te2/desktop_assets` unless their XDG roots are changed.
