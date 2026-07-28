@@ -61,12 +61,24 @@ class FakeElement extends EventTarget {
   children = [];
   classList = new FakeClassList();
   className = '';
+  clientWidth = 0;
   dataset = {};
   disabled = false;
   innerHTML = '';
   isConnected = true;
   parentElement = null;
+  rect = {
+    bottom: 0,
+    height: 0,
+    left: 0,
+    right: 0,
+    top: 0,
+    width: 0,
+    x: 0,
+    y: 0,
+  };
   scrollLeft = 0;
+  scrollWidth = 0;
   style = {};
   tabIndex = 0;
   textContent = '';
@@ -101,6 +113,10 @@ class FakeElement extends EventTarget {
       current = current.parentElement;
     }
     return null;
+  }
+
+  getBoundingClientRect() {
+    return this.rect;
   }
 
   replaceChildren(...children) {
@@ -171,7 +187,11 @@ function installDom() {
 }
 
 test('file tab order retains local members and appends new backend entries', async () => {
-  const { mergeFileTabOrder, chooseFileTabCloseSuccessor } = await importFileTabs();
+  const {
+    mergeFileTabOrder,
+    chooseFileTabCloseSuccessor,
+    fileTabEdgeScrollDelta,
+  } = await importFileTabs();
   assert.deepEqual(
     mergeFileTabOrder(['/a', '/b', '/c'], ['/c', '/missing', '/a']),
     ['/c', '/a', '/b'],
@@ -179,6 +199,25 @@ test('file tab order retains local members and appends new backend entries', asy
   assert.equal(chooseFileTabCloseSuccessor(['/a', '/b', '/c'], '/b'), '/c');
   assert.equal(chooseFileTabCloseSuccessor(['/a', '/b'], '/b'), '/a');
   assert.equal(chooseFileTabCloseSuccessor(['/a'], '/a'), null);
+
+  const viewport = new FakeElement();
+  viewport.clientWidth = 300;
+  viewport.scrollWidth = 900;
+  viewport.rect = {
+    bottom: 36,
+    height: 36,
+    left: 0,
+    right: 300,
+    top: 0,
+    width: 300,
+    x: 0,
+    y: 0,
+  };
+  assert.equal(fileTabEdgeScrollDelta(viewport, 8) < 0, true);
+  assert.equal(fileTabEdgeScrollDelta(viewport, 150), 0);
+  assert.equal(fileTabEdgeScrollDelta(viewport, 292) > 0, true);
+  viewport.scrollWidth = 300;
+  assert.equal(fileTabEdgeScrollDelta(viewport, 8), 0);
 });
 
 test('file tabs render bounded decorations and active close opens its successor', async () => {
@@ -260,6 +299,126 @@ test('wheel input scrolls the file tab viewport horizontally', async () => {
     viewport.dispatchEvent(wheel);
     assert.equal(viewport.scrollLeft, 48);
     assert.equal(wheel.defaultPrevented, true);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('open-state changes reveal an active tab outside the horizontal viewport', async () => {
+  const dom = installDom();
+  try {
+    const { createFileTabsController } = await importFileTabs();
+    const viewport = new FakeElement();
+    const track = new FakeElement();
+    viewport.clientWidth = 100;
+    viewport.scrollWidth = 300;
+    viewport.rect = {
+      bottom: 36,
+      height: 36,
+      left: 0,
+      right: 100,
+      top: 0,
+      width: 100,
+      x: 0,
+      y: 0,
+    };
+    const controller = createFileTabsController({
+      viewport,
+      track,
+      formatFileNameDisplay: (value) => value,
+      openFile: async () => {},
+      closeRecentFile: async () => {},
+      resetToNewFile: () => {},
+    });
+    controller.broadcastOpenState({
+      projectPath: '/workspace',
+      openFile: '/workspace/b.go',
+      recents: [
+        { path: '/workspace/a.rs', label: 'a.rs', exists: true },
+        { path: '/workspace/b.go', label: 'b.go', exists: true },
+      ],
+    });
+    track.children[0].rect = {
+      bottom: 36,
+      height: 36,
+      left: 0,
+      right: 90,
+      top: 0,
+      width: 90,
+      x: 0,
+      y: 0,
+    };
+    track.children[1].rect = {
+      bottom: 36,
+      height: 36,
+      left: 100,
+      right: 190,
+      top: 0,
+      width: 90,
+      x: 100,
+      y: 0,
+    };
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(viewport.scrollLeft, 90);
+  } finally {
+    dom.restore();
+  }
+});
+
+test('touch long press locks scrolling only while reorder is active', async () => {
+  const dom = installDom();
+  try {
+    const { createFileTabsController } = await importFileTabs();
+    const viewport = new FakeElement();
+    const track = new FakeElement();
+    const controller = createFileTabsController({
+      viewport,
+      track,
+      formatFileNameDisplay: (value) => value,
+      openFile: async () => {},
+      closeRecentFile: async () => {},
+      resetToNewFile: () => {},
+    });
+    controller.broadcastOpenState({
+      projectPath: '/workspace',
+      openFile: '/workspace/a.rs',
+      recents: [
+        { path: '/workspace/a.rs', label: 'a.rs', exists: true },
+      ],
+    });
+    controller.installWindowHooks();
+
+    const tab = track.children[0];
+    const pointerDown = new Event('pointerdown');
+    Object.defineProperties(pointerDown, {
+      target: { configurable: true, get: () => tab },
+      pointerId: { value: 17 },
+      pointerType: { value: 'touch' },
+      clientX: { value: 50 },
+      clientY: { value: 12 },
+    });
+    track.dispatchEvent(pointerDown);
+    await new Promise((resolve) => setTimeout(resolve, 440));
+
+    assert.equal(tab.classList.values.has('is-reordering'), true);
+    assert.equal(viewport.classList.values.has('is-reordering'), true);
+    const lockedMove = new Event('touchmove', { cancelable: true });
+    globalThis.document.dispatchEvent(lockedMove);
+    assert.equal(lockedMove.defaultPrevented, true);
+
+    const pointerUp = new Event('pointerup');
+    Object.defineProperties(pointerUp, {
+      pointerId: { value: 17 },
+      pointerType: { value: 'touch' },
+      clientX: { value: 50 },
+      clientY: { value: 12 },
+    });
+    globalThis.document.dispatchEvent(pointerUp);
+    assert.equal(tab.classList.values.has('is-reordering'), false);
+    assert.equal(viewport.classList.values.has('is-reordering'), false);
+    const unlockedMove = new Event('touchmove', { cancelable: true });
+    globalThis.document.dispatchEvent(unlockedMove);
+    assert.equal(unlockedMove.defaultPrevented, false);
   } finally {
     dom.restore();
   }

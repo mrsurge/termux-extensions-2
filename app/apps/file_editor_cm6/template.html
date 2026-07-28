@@ -576,12 +576,22 @@
     overflow-y: hidden;
     background: var(--card, #0b0f1a);
     border-bottom: 1px solid var(--border, #333);
-    scrollbar-width: thin;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
     touch-action: pan-x;
     overscroll-behavior-x: contain;
     z-index: 30;
   }
-  .fe-file-tabs.is-reordering { touch-action: none; }
+  .fe-file-tabs::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  .fe-file-tabs.is-reordering {
+    overflow-x: hidden;
+    touch-action: none;
+  }
   .fe-file-tabs-track {
     display: flex;
     align-items: stretch;

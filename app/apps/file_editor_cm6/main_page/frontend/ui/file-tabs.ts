@@ -43,6 +43,40 @@ const GIT_STATUS_CLASSES = new Set([
   'ignored',
   'conflict',
 ]);
+const TOUCH_REORDER_LONG_PRESS_MS = 420;
+const TOUCH_REORDER_MOVE_CANCEL_PX = 8;
+const REORDER_EDGE_SCROLL_ZONE_PX = 52;
+const REORDER_EDGE_SCROLL_MAX_PX = 18;
+
+interface UiFrameHandle {
+  kind: 'animation-frame' | 'timeout';
+  id: number | ReturnType<typeof setTimeout>;
+}
+
+function requestUiFrame(callback: FrameRequestCallback): UiFrameHandle {
+  if (typeof window.requestAnimationFrame === 'function') {
+    return {
+      kind: 'animation-frame',
+      id: window.requestAnimationFrame(callback),
+    };
+  }
+  return {
+    kind: 'timeout',
+    id: setTimeout(() => callback(Date.now()), 16),
+  };
+}
+
+function cancelUiFrame(handle: UiFrameHandle | null): void {
+  if (!handle) return;
+  if (
+    handle.kind === 'animation-frame'
+    && typeof window.cancelAnimationFrame === 'function'
+  ) {
+    window.cancelAnimationFrame(handle.id as number);
+    return;
+  }
+  clearTimeout(handle.id);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -132,6 +166,45 @@ export function chooseFileTabCloseSuccessor(
   return visualPaths[index + 1] || visualPaths[index - 1] || null;
 }
 
+export function fileTabEdgeScrollDelta(
+  viewport: HTMLElement,
+  pointerX: number,
+): number {
+  const rect = viewport.getBoundingClientRect();
+  if (!rect.width || viewport.scrollWidth <= viewport.clientWidth) return 0;
+  const leftDistance = pointerX - rect.left;
+  const rightDistance = rect.right - pointerX;
+  if (leftDistance >= 0 && leftDistance < REORDER_EDGE_SCROLL_ZONE_PX) {
+    const ratio = 1 - (leftDistance / REORDER_EDGE_SCROLL_ZONE_PX);
+    return -Math.ceil(ratio * REORDER_EDGE_SCROLL_MAX_PX);
+  }
+  if (rightDistance >= 0 && rightDistance < REORDER_EDGE_SCROLL_ZONE_PX) {
+    const ratio = 1 - (rightDistance / REORDER_EDGE_SCROLL_ZONE_PX);
+    return Math.ceil(ratio * REORDER_EDGE_SCROLL_MAX_PX);
+  }
+  return 0;
+}
+
+export function revealFileTabInViewport(
+  viewport: HTMLElement,
+  tab: HTMLElement,
+): void {
+  const viewportRect = viewport.getBoundingClientRect();
+  const tabRect = tab.getBoundingClientRect();
+  const maxScrollLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+  if (tabRect.left < viewportRect.left) {
+    viewport.scrollLeft = Math.max(
+      0,
+      viewport.scrollLeft - (viewportRect.left - tabRect.left),
+    );
+  } else if (tabRect.right > viewportRect.right) {
+    viewport.scrollLeft = Math.min(
+      maxScrollLeft,
+      viewport.scrollLeft + (tabRect.right - viewportRect.right),
+    );
+  }
+}
+
 function storedOrder(projectPath: string): string[] {
   if (!projectPath) return [];
   try {
@@ -174,6 +247,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   let installed = false;
   let pendingClosePath = '';
   let suppressClickPath = '';
+  let activeTabRevealFrame: UiFrameHandle | null = null;
 
   function visualEntries(): RecentFileEntry[] {
     const byPath = new Map(recents.map((entry) => [entry.path, entry]));
@@ -192,6 +266,21 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       (tab) => tab.dataset.path || '',
     ).filter(Boolean);
     persistOrder(projectPath, paths);
+  }
+
+  function scheduleActiveTabReveal(): void {
+    cancelUiFrame(activeTabRevealFrame);
+    activeTabRevealFrame = null;
+    const expectedPath = activePath;
+    if (!expectedPath) return;
+    activeTabRevealFrame = requestUiFrame(() => {
+      activeTabRevealFrame = null;
+      if (activePath !== expectedPath) return;
+      const activeTab = Array.from(
+        deps.track.querySelectorAll<HTMLElement>('.fe-file-tab[data-path]'),
+      ).find((tab) => tab.dataset.path === expectedPath);
+      if (activeTab) revealFileTabInViewport(deps.viewport, activeTab);
+    });
   }
 
   async function openEntry(entry: RecentFileEntry): Promise<void> {
@@ -322,6 +411,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     );
     persistOrder(projectPath, order);
     render();
+    scheduleActiveTabReveal();
   }
 
   function refreshDecorations(payload: unknown): void {
@@ -354,6 +444,10 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     let startY = 0;
     let reordering = false;
     let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+    let scrollLockCleanup: (() => void) | null = null;
+    let edgeScrollFrame: UiFrameHandle | null = null;
+    let edgePointerX = 0;
+    let edgePointerY = 0;
 
     const clearLongPress = () => {
       if (longPressTimer !== null) {
@@ -362,25 +456,96 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       }
     };
 
+    const stopEdgeScroll = () => {
+      cancelUiFrame(edgeScrollFrame);
+      edgeScrollFrame = null;
+    };
+
+    const reorderCandidateAtPoint = (clientX: number, clientY: number) => {
+      if (!candidate || !reordering) return;
+      const hit = document.elementFromPoint(clientX, clientY);
+      const target = hit instanceof Element
+        ? hit.closest<HTMLElement>('.fe-file-tab')
+        : null;
+      if (!target || target === candidate || target.parentElement !== deps.track) return;
+      const rect = target.getBoundingClientRect();
+      deps.track.insertBefore(
+        candidate,
+        clientX < rect.left + rect.width / 2
+          ? target
+          : target.nextSibling,
+      );
+    };
+
+    const scheduleEdgeScroll = () => {
+      if (!reordering || edgeScrollFrame) return;
+      edgeScrollFrame = requestUiFrame(() => {
+        edgeScrollFrame = null;
+        if (!reordering) return;
+        const delta = fileTabEdgeScrollDelta(deps.viewport, edgePointerX);
+        if (!delta) return;
+        const previousScrollLeft = deps.viewport.scrollLeft;
+        const maxScrollLeft = Math.max(
+          0,
+          deps.viewport.scrollWidth - deps.viewport.clientWidth,
+        );
+        deps.viewport.scrollLeft = Math.min(
+          maxScrollLeft,
+          Math.max(0, previousScrollLeft + delta),
+        );
+        if (deps.viewport.scrollLeft === previousScrollLeft) return;
+        reorderCandidateAtPoint(edgePointerX, edgePointerY);
+        scheduleEdgeScroll();
+      });
+    };
+
+    const updateEdgeScroll = (clientX: number, clientY: number) => {
+      edgePointerX = clientX;
+      edgePointerY = clientY;
+      scheduleEdgeScroll();
+    };
+
+    const installTouchScrollLock = (): (() => void) => {
+      const preventTouchScroll = (event: TouchEvent) => {
+        if (reordering) event.preventDefault();
+      };
+      document.addEventListener('touchmove', preventTouchScroll, {
+        capture: true,
+        passive: false,
+      });
+      return () => {
+        document.removeEventListener('touchmove', preventTouchScroll, {
+          capture: true,
+        });
+      };
+    };
+
     const beginReorder = () => {
-      if (!candidate || pointerId < 0) return;
+      if (!candidate || pointerId < 0 || reordering) return;
       clearLongPress();
       reordering = true;
       candidate.classList.add('is-reordering');
       deps.viewport.classList.add('is-reordering');
+      if (pointerType === 'touch') {
+        scrollLockCleanup = installTouchScrollLock();
+      }
       try {
         candidate.setPointerCapture(pointerId);
       } catch {}
+      updateEdgeScroll(startX, startY);
     };
 
     const finishReorder = () => {
       clearLongPress();
+      stopEdgeScroll();
       if (candidate && reordering) {
         suppressClickPath = candidate.dataset.path || '';
-        candidate.classList.remove('is-reordering');
-        deps.viewport.classList.remove('is-reordering');
         persistTrackOrder();
       }
+      candidate?.classList.remove('is-reordering');
+      deps.viewport.classList.remove('is-reordering');
+      scrollLockCleanup?.();
+      scrollLockCleanup = null;
       candidate = null;
       pointerId = -1;
       pointerType = '';
@@ -397,7 +562,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       startX = event.clientX;
       startY = event.clientY;
       if (pointerType === 'touch') {
-        longPressTimer = setTimeout(beginReorder, 320);
+        longPressTimer = setTimeout(beginReorder, TOUCH_REORDER_LONG_PRESS_MS);
       }
     });
 
@@ -406,25 +571,15 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       if (!reordering) {
         const distance = Math.hypot(event.clientX - startX, event.clientY - startY);
         if (pointerType === 'touch') {
-          if (distance > 8) clearLongPress();
+          if (distance > TOUCH_REORDER_MOVE_CANCEL_PX) clearLongPress();
           return;
         }
         if (distance <= 4) return;
         beginReorder();
       }
       event.preventDefault();
-      const hit = document.elementFromPoint(event.clientX, event.clientY);
-      const target = hit instanceof Element
-        ? hit.closest<HTMLElement>('.fe-file-tab')
-        : null;
-      if (!target || target === candidate || target.parentElement !== deps.track) return;
-      const rect = target.getBoundingClientRect();
-      deps.track.insertBefore(
-        candidate,
-        event.clientX < rect.left + rect.width / 2
-          ? target
-          : target.nextSibling,
-      );
+      updateEdgeScroll(event.clientX, event.clientY);
+      reorderCandidateAtPoint(event.clientX, event.clientY);
     }, { passive: false });
 
     document.addEventListener('pointerup', (event) => {
