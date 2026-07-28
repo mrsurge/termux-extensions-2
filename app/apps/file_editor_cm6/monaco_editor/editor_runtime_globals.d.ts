@@ -10,6 +10,11 @@ interface MonacoRuntimePositionLike {
   column?: number;
 }
 
+interface MonacoRuntimeRangeLike {
+  startLineNumber?: number;
+  endLineNumber?: number;
+}
+
 interface MonacoRuntimeSelectionLike extends MonacoRuntimePositionLike {
   startLineNumber?: number;
   startColumn?: number;
@@ -49,7 +54,11 @@ interface MonacoRuntimeEditorLike {
   onDidScrollChange?(handler: () => void): MonacoRuntimeDisposableLike;
   onDidChangeCursorPosition?(handler: () => void): MonacoRuntimeDisposableLike;
   getPosition?(): MonacoRuntimePositionLike | null;
+  getVisibleRanges?(): MonacoRuntimeRangeLike[];
+  getScrollTop?(): number;
+  getTopForLineNumber?(lineNumber: number): number;
   getSelection?(): MonacoRuntimeSelectionLike | null;
+  setScrollTop?(scrollTop: number): void;
   setPosition?(position: { lineNumber: number; column: number }): void;
   revealLineInCenter?(lineNumber: number, scrollType?: number): void;
   focus?(): void;

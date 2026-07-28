@@ -33,7 +33,7 @@ export interface ExplorerRpcRuntimeDeps {
   toAbsolute: (path: string, base?: string | null, homeDir?: string) => string;
   getActiveProjectPath: () => string | null;
   getSessionActiveProject: () => string | null;
-  applyHostActivePath: (path: string, options?: { forceToolbar?: boolean }) => void;
+  applyHostActivePath: (path: string) => void;
   updateProblemsPanel: (payload: JsonObject) => void;
   reloadEditorFrame: () => void | Promise<void>;
   requestAdapterRestart: () => void | Promise<void>;
@@ -143,7 +143,7 @@ export function createExplorerRpcRuntime(deps: ExplorerRpcRuntimeDeps): Explorer
         abs = projectRoot ? deps.toAbsolute(rel, projectRoot, deps.homeDir) : '';
       }
       if (abs) {
-        try { deps.applyHostActivePath(abs, { forceToolbar: true }); } catch {}
+        try { deps.applyHostActivePath(abs); } catch {}
       }
     }
     if (method === EXPLORER_RPC_NOTIFICATIONS.diagnosticsDetail) {

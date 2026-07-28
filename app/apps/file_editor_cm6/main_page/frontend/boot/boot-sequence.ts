@@ -15,7 +15,6 @@ interface RestoredPathStateArgs {
 
 interface BootSequenceDeps {
   initResponsiveLayout(): void;
-  initToolbarTitleClampObservers(): void;
   loadLayoutPreferences(): void;
   initResizeManager(): void;
   initExplorerUI(): Promise<unknown>;
@@ -43,7 +42,6 @@ interface BootSequenceDeps {
   HOME_DIR: string;
   applyRestoredPathState(args: RestoredPathStateArgs): void;
   openWebSocket(path: string): void;
-  updatePathDisplayFallbackLater(): void;
   openFile(path: string): Promise<unknown>;
   onOpenFileFailure(err: Error): void;
   onNoRestoredPath(serverState: Record<string, unknown>): void;
@@ -58,7 +56,6 @@ function asString(value: unknown): string {
 
 export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   deps.initResponsiveLayout();
-  deps.initToolbarTitleClampObservers();
   deps.loadLayoutPreferences();
   deps.initResizeManager();
 
@@ -135,7 +132,6 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
     deps.applyRestoredPathState({ restoredPath, serverState, restoredSha });
     deps.openWebSocket(restoredPath);
     console.log('[BOOT] Synced with backend SSOT:', restoredPath);
-    deps.updatePathDisplayFallbackLater();
   }
 
   if (fileFromUrl) {

@@ -2,8 +2,6 @@ import {
   recordDiagnosticsOpenStage,
 } from '../../src/diagnostics/latency-probe.ts';
 
-type JsonObject = Record<string, unknown>;
-
 export interface CacheIndicatorPayload {
   state?: unknown;
   unsaved?: unknown;
@@ -19,9 +17,6 @@ export interface HostEditorEventsRuntimeDeps {
   getRestoredSessionActive: () => boolean;
   setRestoredSessionActive: (flag: boolean) => void;
   setRestoredSessionPath: (path: string) => void;
-  getCurrentPath: () => string;
-  queueSessionStateUpdate: (partial: { scrollLine: number; scrollTop: number | null }) => void;
-  updateFileScroll: (payload: JsonObject) => Promise<unknown>;
   issuesBadgesEl: HTMLElement;
   setIssuesButtonsEnabled: (enabled: boolean) => void;
   toast: (message: string, timeoutMs?: number) => void;
@@ -51,8 +46,6 @@ interface ScrollState {
 
 interface HostEditorEventsWindow extends Window {
   __feLastScrollState?: ScrollState | null;
-  __feScrollStateTimer?: number | null;
-  __feCursorStateDebounceMs?: number;
   __cm6CacheState?: unknown;
 }
 
@@ -230,35 +223,11 @@ export function createHostEditorEventsRuntime(deps: HostEditorEventsRuntimeDeps)
 
     const win = hostWindow();
     win.__feLastScrollState = {
-      path: deps.getCurrentPath() || null,
+      path: typeof data.path === 'string' && data.path ? data.path : null,
       line,
       column: (typeof data.column === 'number' && data.column >= 0) ? data.column : null,
       top: (typeof data.top === 'number' && data.top >= 0) ? data.top : null,
     };
-
-    if (win.__feScrollStateTimer) clearTimeout(win.__feScrollStateTimer);
-    win.__feScrollStateTimer = setTimeout(async () => {
-      win.__feScrollStateTimer = null;
-      const lastScrollState = win.__feLastScrollState || null;
-      if (!lastScrollState || !lastScrollState.path) return;
-      try {
-        try {
-          deps.queueSessionStateUpdate({
-            scrollLine: lastScrollState.line,
-            scrollTop: lastScrollState.top != null ? lastScrollState.top : null,
-          });
-        } catch {}
-
-        if (lastScrollState.line && lastScrollState.line > 0) {
-          await deps.updateFileScroll({
-            path: lastScrollState.path,
-            scroll_line: lastScrollState.line,
-          });
-        }
-      } catch (err) {
-        warn('Failed to persist scroll state:', err);
-      }
-    }, typeof win.__feCursorStateDebounceMs === 'number' ? win.__feCursorStateDebounceMs : 1000);
   }
 
   function applyDiagnosticsCounts(payload: unknown): void {

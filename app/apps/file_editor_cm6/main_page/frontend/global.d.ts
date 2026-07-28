@@ -162,13 +162,11 @@ declare global {
     __explorerStickyScopes?: ExplorerStickyScopesApi | null;
     __feAdapterUi?: RuntimeAdapterUi;
     __feAppContext?: unknown;
-    __feCursorStateDebounceMs?: number;
     __feLspSpinnerState?: any;
     __feLspSpinnerUi?: any;
     __fePendingCacheIndicator?: any;
     appOpenFile?: ExplorerOpenFileAbsFn;
     appOpenFileRel?: ExplorerOpenFileRelFn;
-    fileNameEl?: HTMLElement;
     jumpToCurrentFileLine?: ExplorerJumpToLineFn;
     applyCacheIndicator?: any;
     currentPath?: string | null;

@@ -540,7 +540,7 @@ class ProjectSidecar:
         
         Args:
             file_path: The file being opened/accessed.
-            scroll_line: Optional scroll position (line number) to persist for this file.
+            scroll_line: Optional top visible line to persist for this file.
         """
         normalized = _normalize_file_path(file_path)
         timestamp = _utc_timestamp()
@@ -583,7 +583,7 @@ class ProjectSidecar:
         return entry
 
     def update_file_scroll_line(self, file_path: str, scroll_line: float) -> bool:
-        """Update the scroll_line for a specific file in recent_files.
+        """Update the top visible line for a specific file in recent_files.
         
         Returns True if the file was found and updated.
         """
@@ -601,7 +601,7 @@ class ProjectSidecar:
         return False
 
     def get_file_scroll_line(self, file_path: str) -> float | None:
-        """Get the stored scroll_line for a specific file.
+        """Get the stored top visible line for a specific file.
         
         Returns None if file not found or no scroll_line stored.
         """

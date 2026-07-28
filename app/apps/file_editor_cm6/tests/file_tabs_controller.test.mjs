@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -6,6 +7,19 @@ import { build } from 'esbuild';
 
 const appRoot = path.resolve(import.meta.dirname, '..');
 let moduleSequence = 0;
+
+test('host chrome uses file tabs without a duplicate filename projection', async () => {
+  const template = await readFile(path.join(appRoot, 'template.html'), 'utf8');
+
+  assert.doesNotMatch(template, /id="fe-file-name"/);
+  assert.doesNotMatch(template, /class="fe-title-block"/);
+  assert.equal(
+    template.match(/static\/icons\/show\.png/g)?.length,
+    2,
+    'Explorer and Sidebar should share the fixed panel glyph',
+  );
+  assert.match(template, /fe-panel-toggle-icon--right/);
+});
 
 async function importFileTabs() {
   const result = await build({

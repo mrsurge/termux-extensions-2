@@ -32,6 +32,7 @@ interface RunEditorOpenTransactionDeps {
   createFileModel(content: string, lang: string, absPath: string): OpenModelLike;
   installMirrorPublisher(): void;
   installScrollPublisher(): void;
+  flushScrollState(): boolean;
   applyLineNumberSizing(): void;
   ensureTouchSelection(reason: string): void;
   syncDiagnosticsForCurrentModel(reason: string): void;
@@ -109,6 +110,7 @@ export async function runEditorOpenTransaction(
 
   deps.setBaseSha256(payload.base_sha256 || deps.getBaseSha256());
   if (!sameFileNavigationOnly) {
+    try { deps.flushScrollState(); } catch (_) {}
     try { deps.clearDiagnosticsForLeavingModel('file_switch'); } catch (_) {}
   }
   deps.setCurrentPath(incomingPath);

@@ -12,11 +12,6 @@ export interface SaveFileOptions {
   selectLabel: string;
 }
 
-export interface ScheduleToolbarTitleClampOptions {
-  doubleRaf?: boolean;
-  resetBaseline?: boolean;
-}
-
 export interface DiagnosticMarker {
   severity?: number;
   startLineNumber?: number;
@@ -27,17 +22,8 @@ export interface DiagnosticMarker {
 }
 
 export interface HostChromeRuntimeDeps {
-  root: HTMLElement;
-  toolbarEl: HTMLElement;
-  titleBlockEl: HTMLElement;
-  leftToolbarControlEl: HTMLElement;
-  rightToolbarControlEl: HTMLElement;
-  sidebarDrawerEl: HTMLElement;
-  fileNameEl: HTMLElement;
-  fileNameScrollEl: HTMLElement;
   issuesToggleBtn: HTMLButtonElement;
   issuesBadgesEl: HTMLElement;
-  isMobileLayout: () => boolean;
   basename: (path: string) => string;
   toAbsolute: (path: string, baseDir: string | null, homeDir: string) => string;
   homeDir: string;
@@ -55,9 +41,6 @@ export interface HostChromeRuntimeDeps {
 
 export interface HostChromeRuntime {
   formatFileNameDisplay: (name: string) => string;
-  scheduleToolbarTitleClamp: (options?: ScheduleToolbarTitleClampOptions) => void;
-  setToolbarFileName: (rawName: string) => void;
-  initToolbarTitleClampObservers: () => void;
   setIssuesButtonsEnabled: (enabled: boolean) => void;
   exportDiagnosticsToFile: () => Promise<void>;
   install: () => void;
@@ -103,13 +86,6 @@ function safeFilePart(value: string): string {
 }
 
 export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChromeRuntime {
-  let toolbarTitleBootBaselinePx: number | null = null;
-  let toolbarClampRaf1 = 0;
-  let toolbarClampRaf2 = 0;
-  let toolbarClampObserversReady = false;
-  let toolbarClampRO: ResizeObserver | null = null;
-  let toolbarClampMO: MutationObserver | null = null;
-  let toolbarLastLayoutSig = '';
   let installed = false;
 
   function formatFileNameDisplay(name: string): string {
@@ -118,183 +94,6 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
     const keepStart = Math.max(6, Math.floor((MAX_FILENAME_DISPLAY - 1) * 0.6));
     const keepEnd = Math.max(4, MAX_FILENAME_DISPLAY - keepStart - 1);
     return `${name.slice(0, keepStart)}…${name.slice(-keepEnd)}`;
-  }
-
-  function syncToolbarTitleBlockWidth(): void {
-    if (!deps.isMobileLayout()) {
-      try { deps.titleBlockEl.style.removeProperty('max-width'); } catch {}
-      toolbarTitleBootBaselinePx = null;
-      return;
-    }
-    try {
-      const leftRect = deps.leftToolbarControlEl.getBoundingClientRect();
-      const rightRect = deps.rightToolbarControlEl.getBoundingClientRect();
-      const toolbarRect = deps.toolbarEl.getBoundingClientRect();
-      const leftEdge = Math.max(toolbarRect.left, leftRect.right);
-      const rightEdge = Math.min(toolbarRect.right, rightRect.left);
-      const available = Math.floor(rightEdge - leftEdge - 12);
-      const currentPx = Number.isFinite(available) ? Math.max(0, available) : 0;
-      if (toolbarTitleBootBaselinePx == null && currentPx > 0) {
-        toolbarTitleBootBaselinePx = currentPx;
-      }
-      const baseline = toolbarTitleBootBaselinePx == null ? currentPx : toolbarTitleBootBaselinePx;
-      const clampedPx = Math.max(0, Math.min(currentPx, baseline));
-      deps.titleBlockEl.style.maxWidth = `${clampedPx}px`;
-    } catch {}
-  }
-
-  function scheduleToolbarTitleClamp(options: ScheduleToolbarTitleClampOptions = {}): void {
-    const { doubleRaf = false, resetBaseline = false } = options;
-    if (resetBaseline) {
-      toolbarTitleBootBaselinePx = null;
-    }
-    if (toolbarClampRaf1) {
-      try { cancelAnimationFrame(toolbarClampRaf1); } catch {}
-      toolbarClampRaf1 = 0;
-    }
-    if (toolbarClampRaf2) {
-      try { cancelAnimationFrame(toolbarClampRaf2); } catch {}
-      toolbarClampRaf2 = 0;
-    }
-    toolbarClampRaf1 = requestAnimationFrame(() => {
-      toolbarClampRaf1 = 0;
-      syncToolbarTitleBlockWidth();
-      if (doubleRaf) {
-        toolbarClampRaf2 = requestAnimationFrame(() => {
-          toolbarClampRaf2 = 0;
-          syncToolbarTitleBlockWidth();
-        });
-      }
-    });
-  }
-
-  function setToolbarFileName(rawName: string): void {
-    const safe = rawName || '';
-    deps.fileNameEl.textContent = safe;
-    deps.fileNameEl.title = safe;
-    if (deps.isMobileLayout()) {
-      deps.fileNameScrollEl.scrollLeft = 0;
-    }
-    scheduleToolbarTitleClamp({ doubleRaf: true });
-  }
-
-  function initToolbarTitleClampObservers(): void {
-    if (toolbarClampObserversReady) return;
-    toolbarClampObserversReady = true;
-
-    const schedule = (opts?: ScheduleToolbarTitleClampOptions) => {
-      scheduleToolbarTitleClamp(opts || { doubleRaf: true });
-    };
-    schedule({ doubleRaf: true, resetBaseline: true });
-    toolbarLastLayoutSig = deps.root.classList.contains('layout-desktop')
-      ? 'desktop'
-      : (deps.root.classList.contains('layout-mobile') ? 'mobile' : 'unknown');
-
-    window.addEventListener('resize', () => schedule({ doubleRaf: true }));
-    window.addEventListener('orientationchange', () => schedule({ doubleRaf: true, resetBaseline: true }));
-
-    if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
-      window.visualViewport.addEventListener('resize', () => schedule({ doubleRaf: true }));
-    }
-
-    if (typeof ResizeObserver === 'function') {
-      toolbarClampRO = new ResizeObserver(() => {
-        schedule({ doubleRaf: true });
-      });
-      [
-        deps.toolbarEl,
-        deps.leftToolbarControlEl,
-        deps.rightToolbarControlEl,
-        deps.titleBlockEl,
-        deps.fileNameScrollEl,
-        deps.sidebarDrawerEl,
-      ].forEach((el) => {
-        try { toolbarClampRO?.observe(el); } catch {}
-      });
-    }
-
-    if (typeof MutationObserver === 'function') {
-      toolbarClampMO = new MutationObserver((mutations) => {
-        let resetBaseline = false;
-        for (const mutation of mutations || []) {
-          if (mutation.type !== 'attributes') continue;
-          if (mutation.target === deps.root && mutation.attributeName === 'class') {
-            const nextSig = deps.root.classList.contains('layout-desktop')
-              ? 'desktop'
-              : (deps.root.classList.contains('layout-mobile') ? 'mobile' : 'unknown');
-            if (nextSig !== toolbarLastLayoutSig) {
-              toolbarLastLayoutSig = nextSig;
-              resetBaseline = true;
-              break;
-            }
-          }
-        }
-        schedule({ doubleRaf: true, resetBaseline });
-      });
-      try {
-        toolbarClampMO.observe(deps.root, { attributes: true, attributeFilter: ['class', 'style'] });
-        toolbarClampMO.observe(deps.sidebarDrawerEl, { attributes: true, attributeFilter: ['class', 'style'] });
-      } catch {}
-    }
-
-    try {
-      deps.sidebarDrawerEl.addEventListener('transitionend', () => schedule({ doubleRaf: true }));
-    } catch {}
-  }
-
-  function initToolbarFileNameDrag(el: HTMLElement): void {
-    let pointerId: number | null = null;
-    let dragging = false;
-    let moved = false;
-    let startX = 0;
-    let startScrollLeft = 0;
-
-    const canDrag = () => deps.isMobileLayout() && el.scrollWidth > el.clientWidth + 1;
-
-    const endDrag = () => {
-      if (!dragging) return;
-      dragging = false;
-      pointerId = null;
-      el.classList.remove('is-dragging');
-    };
-
-    el.addEventListener('pointerdown', (ev) => {
-      if (ev.pointerType === 'mouse') return;
-      if (!canDrag()) return;
-      dragging = true;
-      moved = false;
-      pointerId = ev.pointerId;
-      startX = ev.clientX;
-      startScrollLeft = el.scrollLeft;
-      el.classList.add('is-dragging');
-      try { el.setPointerCapture(ev.pointerId); } catch {}
-    });
-
-    el.addEventListener('pointermove', (ev) => {
-      if (!dragging || ev.pointerId !== pointerId) return;
-      const dx = ev.clientX - startX;
-      if (Math.abs(dx) > 2) moved = true;
-      el.scrollLeft = startScrollLeft - dx;
-      ev.preventDefault();
-    }, { passive: false });
-
-    el.addEventListener('pointerup', (ev) => {
-      if (ev.pointerId !== pointerId) return;
-      endDrag();
-    });
-    el.addEventListener('pointercancel', endDrag);
-    el.addEventListener('lostpointercapture', endDrag);
-    el.addEventListener('pointerleave', (ev) => {
-      if (ev.pointerId !== pointerId) return;
-      endDrag();
-    });
-
-    el.addEventListener('click', (ev) => {
-      if (!moved) return;
-      moved = false;
-      ev.preventDefault();
-      ev.stopPropagation();
-    }, true);
   }
 
   function setIssuesButtonsEnabled(enabled: boolean): void {
@@ -515,14 +314,10 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
     if (installed) return;
     installed = true;
     deps.issuesToggleBtn.addEventListener('click', () => { void sendIssuesCmd('next'); });
-    initToolbarFileNameDrag(deps.fileNameScrollEl);
   }
 
   return {
     formatFileNameDisplay,
-    scheduleToolbarTitleClamp,
-    setToolbarFileName,
-    initToolbarTitleClampObservers,
     setIssuesButtonsEnabled,
     exportDiagnosticsToFile,
     install,

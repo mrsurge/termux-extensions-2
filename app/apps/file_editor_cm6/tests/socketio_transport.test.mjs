@@ -326,6 +326,108 @@ test('rapid WBA model opens run single-flight and retain only the latest documen
   assert.equal(latestSettled, true);
 });
 
+test('editor scroll state publishes the top visible line separately from the cursor', async () => {
+  const { buildScrollStatePayload } = await importTypeScript(
+    'monaco_editor/editor_scroll_publisher_payload_utils.ts',
+  );
+  const payload = buildScrollStatePayload({
+    getPosition: () => ({ lineNumber: 47, column: 9 }),
+    getVisibleRanges: () => [{
+      startLineNumber: 31,
+      endLineNumber: 55,
+    }],
+    getScrollTop: () => 620.5,
+  }, '/workspace/active.rs');
+
+  assert.deepEqual(payload, {
+    path: '/workspace/active.rs',
+    line: 31,
+    top: 620.5,
+    column: 9,
+    cursorLine: 47,
+  });
+});
+
+test('editor scroll publisher flushes the outgoing viewport before a path switch', async () => {
+  const { installScrollPublisherRuntime } = await importTypeScript(
+    'monaco_editor/editor_scroll_publisher_runtime.ts',
+  );
+  let scrollListener = null;
+  let currentPath = '/workspace/old.rs';
+  let topLine = 18;
+  const sent = [];
+
+  const runtime = installScrollPublisherRuntime({
+    getEditor: () => ({
+      onDidScrollChange: (listener) => {
+        scrollListener = listener;
+      },
+      onDidChangeCursorPosition: () => {},
+    }),
+    getCurrentPath: () => currentPath,
+    getModel: () => ({}),
+    canInstall: () => true,
+    setInstalled: () => {},
+    buildScrollStatePayload: () => ({
+      path: currentPath,
+      line: topLine,
+      top: topLine * 20,
+      column: 1,
+      cursorLine: topLine + 4,
+    }),
+    updateBreadcrumbCursor: () => {},
+    notifyEditorRpc: (_method, payload) => {
+      sent.push(payload);
+      return true;
+    },
+    shouldSendImmediately: () => false,
+    scheduleSend: (callback) => setTimeout(callback, 20),
+  });
+
+  scrollListener();
+  assert.equal(runtime.flush(), true);
+  currentPath = '/workspace/new.rs';
+  topLine = 1;
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].path, '/workspace/old.rs');
+  assert.equal(sent[0].line, 18);
+});
+
+test('stored top-line restoration does not move the cursor or focus Monaco', async () => {
+  const { applyJumpToLine } = await importTypeScript(
+    'monaco_editor/editor_jump_utils.ts',
+  );
+  let scrollTop = null;
+  let positionCalls = 0;
+  let focusCalls = 0;
+
+  applyJumpToLine({
+    getTopForLineNumber: (line) => line * 24,
+    setScrollTop: (value) => {
+      scrollTop = value;
+    },
+    setPosition: () => {
+      positionCalls += 1;
+    },
+    focus: () => {
+      focusCalls += 1;
+    },
+  }, {
+    getLineCount: () => 200,
+    getLineMaxColumn: () => 80,
+  }, {
+    line: 73,
+    focus: false,
+    scroll_to_top: true,
+  });
+
+  assert.equal(scrollTop, 1752);
+  assert.equal(positionCalls, 0);
+  assert.equal(focusCalls, 0);
+});
+
 test('visible editor open completion does not await WBA or agent hydration', async () => {
   const { runEditorOpenTransaction } = await importTypeScript(
     'monaco_editor/editor_open_transaction_runner_main.ts',
@@ -345,11 +447,13 @@ test('visible editor open completion does not await WBA or agent hydration', asy
   const agentHydration = deferred();
   let wbaOpenCalls = 0;
   let agentHydrationCalls = 0;
+  const switchOrder = [];
 
   const openPromise = runEditorOpenTransaction({
     getWindow: () => ({ monaco: {} }),
     getCurrentPath: () => currentPath,
     setCurrentPath: (pathValue) => {
+      switchOrder.push(`path:${pathValue}`);
       currentPath = pathValue;
     },
     getBaseSha256: () => null,
@@ -373,6 +477,10 @@ test('visible editor open completion does not await WBA or agent hydration', asy
     }),
     installMirrorPublisher: () => {},
     installScrollPublisher: () => {},
+    flushScrollState: () => {
+      switchOrder.push('flush');
+      return true;
+    },
     applyLineNumberSizing: () => {},
     ensureTouchSelection: () => {},
     syncDiagnosticsForCurrentModel: () => {},
@@ -416,6 +524,7 @@ test('visible editor open completion does not await WBA or agent hydration', asy
   ]);
   assert.equal(outcome, 'resolved');
   assert.equal(currentPath, '/workspace/fast.py');
+  assert.deepEqual(switchOrder.slice(0, 2), ['flush', 'path:/workspace/fast.py']);
   assert.equal(wbaOpenCalls, 1);
   assert.equal(agentHydrationCalls, 1);
 

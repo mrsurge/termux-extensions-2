@@ -789,7 +789,7 @@ class HistoryStore:
         Args:
             project_path: The project containing the file.
             file_path: The file being opened/accessed.
-            scroll_line: Optional scroll position (line number) to persist for this file.
+            scroll_line: Optional top visible line to persist for this file.
         """
         normalized_project = self._normalize_project_path(project_path)
         normalized_file = self._normalize_file_path(file_path)
@@ -803,7 +803,7 @@ class HistoryStore:
             return entry
 
     def update_file_scroll_line(self, project_path: str, file_path: str, scroll_line: float) -> bool:
-        """Update just the scroll_line for a file in the project's recent files.
+        """Update the top visible line for a file in the project's recent files.
         
         Returns True if the file was found and updated.
         """
@@ -818,7 +818,7 @@ class HistoryStore:
             return False
 
     def get_file_scroll_line(self, project_path: str, file_path: str) -> float | None:
-        """Get the stored scroll_line for a specific file in a project."""
+        """Get the stored top visible line for a specific file in a project."""
         normalized_project = self._normalize_project_path(project_path)
         try:
             sidecar = ProjectSidecar.load_or_create(normalized_project)

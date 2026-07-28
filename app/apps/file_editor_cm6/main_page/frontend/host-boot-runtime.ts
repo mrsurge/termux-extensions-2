@@ -4,7 +4,6 @@ import {
   applyNoProjectState,
   applyNoRestoredPathState,
   applyRestoredPathState,
-  schedulePathDisplayFallback,
 } from './boot/path-state.ts';
 import type { ExplorerUiInitOptions } from '../../src/explorer/app/bootstrap.ts';
 import type { IoFactory } from '../../src/rpc/transport.ts';
@@ -26,9 +25,7 @@ interface BootStatusElementLike {
 }
 
 interface HostBootRuntimeDeps {
-  initResponsiveLayout: (deps: { scheduleToolbarTitleClamp: (opts?: unknown) => void }) => void;
-  scheduleToolbarTitleClamp: (opts?: unknown) => void;
-  initToolbarTitleClampObservers: () => void;
+  initResponsiveLayout: () => void;
   loadLayoutPreferences: () => void;
   initResizeManager: () => void;
   initExplorerUI: (deps: ExplorerUiInitOptions) => Promise<unknown>;
@@ -37,7 +34,7 @@ interface HostBootRuntimeDeps {
   toAbsolute: (path: string, base?: string | null, homeDir?: string) => string;
   getActiveProjectPath: () => string | null;
   getSessionActiveProject: () => string | null;
-  applyHostActivePath: (path: string, options?: UnknownRecord) => void;
+  applyHostActivePath: (path: string) => void;
   problemsPanel: BootProblemsPanelLike;
   reloadEditorFrame: () => void | Promise<void>;
   requestAdapterRestart: () => void | Promise<void>;
@@ -63,7 +60,6 @@ interface HostBootRuntimeDeps {
   resetSavedState: () => void;
   markUnsaved: (flag: boolean) => void;
   statusEl: BootStatusElementLike;
-  setToolbarFileName: (name: string) => void;
   setIssuesButtonsEnabled: (enabled: boolean) => void;
   getUrlSearch: () => string;
   parentDir: (path: string | null | undefined) => string;
@@ -74,8 +70,6 @@ interface HostBootRuntimeDeps {
   setLastSha256: (sha: string | null) => void;
   setCurrentModeLanguage: (lang: string | null) => void;
   openWebSocket: (path: string) => void;
-  getCurrentPath: () => string | null;
-  updatePathDisplay: () => void;
   openFile: (path: string) => Promise<unknown>;
   setOpenFilePickerDir: (path: string) => void;
   resetActiveFileState: () => void;
@@ -124,10 +118,7 @@ function runPostBootSidebarHydration(deps: HostBootRuntimeDeps): void {
 export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
   function start(): void {
     void runBootSequence({
-      initResponsiveLayout: () => deps.initResponsiveLayout({
-        scheduleToolbarTitleClamp: (opts) => deps.scheduleToolbarTitleClamp(opts),
-      }),
-      initToolbarTitleClampObservers: () => deps.initToolbarTitleClampObservers(),
+      initResponsiveLayout: () => deps.initResponsiveLayout(),
       loadLayoutPreferences: () => deps.loadLayoutPreferences(),
       initResizeManager: () => deps.initResizeManager(),
       initExplorerUI: () => deps.initExplorerUI({
@@ -136,7 +127,7 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
         toAbsolute: deps.toAbsolute,
         getActiveProjectPath: () => deps.getActiveProjectPath(),
         getSessionActiveProject: () => deps.getSessionActiveProject(),
-        applyHostActivePath: (path, options) => deps.applyHostActivePath(path, options),
+        applyHostActivePath: (path) => deps.applyHostActivePath(path),
         updateProblemsPanel: (payload) => deps.problemsPanel.update(payload),
         reloadEditorFrame: () => deps.reloadEditorFrame(),
         requestAdapterRestart: () => deps.requestAdapterRestart(),
@@ -163,7 +154,6 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
       markUnsaved: (flag) => deps.markUnsaved(flag),
       setNoProjectState: (message) => applyNoProjectState({
         statusEl: deps.statusEl,
-        setToolbarFileName: (name) => deps.setToolbarFileName(name),
         setIssuesButtonsEnabled: (enabled) => deps.setIssuesButtonsEnabled(enabled),
         message,
       }),
@@ -184,11 +174,6 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
         setCurrentModeLanguage: (lang) => deps.setCurrentModeLanguage(lang),
       }),
       openWebSocket: (path) => deps.openWebSocket(path),
-      updatePathDisplayFallbackLater: () => schedulePathDisplayFallback({
-        getCurrentPath: () => deps.getCurrentPath(),
-        updatePathDisplay: () => deps.updatePathDisplay(),
-        delayMs: 2000,
-      }),
       openFile: (path) => {
         deps.setOpenFilePickerDir(deps.parentDir(path));
         return deps.openFile(path);

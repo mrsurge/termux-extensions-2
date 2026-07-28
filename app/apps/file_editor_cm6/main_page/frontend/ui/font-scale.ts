@@ -4,7 +4,6 @@
  * @param {{
  *   presets: Record<string, number>,
  *   updatePreference: (key: string, value: any) => Promise<boolean>,
- *   scheduleToolbarTitleClamp: (opts?: any) => void,
  *   toast: (msg: string, kind?: string) => void
  * }} deps
  */
@@ -41,9 +40,7 @@ export function createFontScaleController(deps: any) {
 
     try {
       applyFontScale(scale);
-      deps.scheduleToolbarTitleClamp({ doubleRaf: true });
       await deps.updatePreference('fontScale', scale);
-      deps.scheduleToolbarTitleClamp({ doubleRaf: true });
     } catch (error) {
       console.error('[FontScale] Failed to update:', error);
       deps.toast('Failed to update font scale', 'error');

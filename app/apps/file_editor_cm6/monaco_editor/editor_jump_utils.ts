@@ -15,6 +15,8 @@ interface EditorInstanceLike {
   revealLine?(line: number, scrollType?: number): void;
   revealLineInCenter?(line: number, scrollType?: number): void;
   revealLineNearTop?(line: number, scrollType?: number): void;
+  getTopForLineNumber?(line: number): number;
+  setScrollTop?(scrollTop: number): void;
   setPosition?(position: { lineNumber: number; column: number }): void;
   focus?(): void;
 }
@@ -63,7 +65,14 @@ export function applyJumpToLine(
     const scrollToTop = typedPayload.scroll_to_top;
 
     if (scrollToTop) {
-      try { typedEditor.revealLine?.(line, 0); } catch (_) {}
+      try {
+        if (
+          typeof typedEditor.getTopForLineNumber === 'function'
+          && typeof typedEditor.setScrollTop === 'function'
+        ) {
+          typedEditor.setScrollTop(typedEditor.getTopForLineNumber(line));
+        }
+      } catch (_) {}
     } else if (typeof scrollY === 'string' && String(scrollY).toLowerCase() === 'center') {
       try { typedEditor.revealLineInCenter?.(line, 0); } catch (_) {}
     } else {

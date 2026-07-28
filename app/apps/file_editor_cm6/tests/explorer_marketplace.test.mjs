@@ -314,10 +314,11 @@ test("branch label formatter covers repository lifecycle states", async () => {
       isRepository: true,
       hasHead: true,
       branch: "feature/open-vsx",
+      head: { full: "fedcba9876543210", short: "fedcba9" },
     }),
     {
-      text: "feature/open-vsx",
-      title: "feature/open-vsx",
+      text: "feature/open-vsx @ fedcba9",
+      title: "feature/open-vsx @ fedcba9876543210",
     },
   );
 });

@@ -189,7 +189,6 @@ export function initSidebarShortcuts(
 
   // --- DOM elements (resolved on init) ---
   let agentToggleBtn: HTMLElement | null = null;
-  let agentToggleIconEl: HTMLElement | null = null;
 
   let shortcutsModal: HTMLElement | null = null;
   let shortcutsCloseBtn: HTMLElement | null = null;
@@ -622,7 +621,7 @@ export function initSidebarShortcuts(
     const iconPath = _normStr(manifest?.icon);
     const iconEmoji = _normStr(manifest?.icon_emoji);
 
-    const targets = [agentToggleIconEl, sidebarHeaderIconEl].filter(
+    const targets = [sidebarHeaderIconEl].filter(
       (el): el is HTMLElement => !!el,
     );
     if (!targets.length) return;
@@ -1071,7 +1070,6 @@ export function initSidebarShortcuts(
   function _refreshShortcutChrome() {
     const normalized = _collectVisibleShortcuts(_latestUiPrefs || {});
     const active = _resolveActive(_latestUiPrefs || {}, normalized);
-    _applyToggleIcon(_latestUiPrefs || {}, normalized, active);
     _applyHeaderLabelAndIcon(_latestUiPrefs || {}, normalized, active);
     _renderHeaderIconGrid(_latestUiPrefs || {}, normalized, active);
     try {
@@ -1082,24 +1080,6 @@ export function initSidebarShortcuts(
       if (shortcutsModal && shortcutsModal.classList.contains("show"))
         _renderShortcutsList();
     } catch (_) {}
-  }
-
-  function _applyToggleIcon(
-    uiPrefs: UnknownRecord,
-    shortcuts: SidebarShortcut[] | null,
-    active: SidebarShortcut | null,
-  ) {
-    if (!agentToggleIconEl) return;
-    const resolvedShortcuts = Array.isArray(shortcuts)
-      ? shortcuts
-      : _collectVisibleShortcuts(uiPrefs);
-    const resolvedActive = active || _resolveActive(uiPrefs, resolvedShortcuts);
-    const icon = _effectiveShortcutIcon(resolvedActive);
-    if (icon) {
-      _renderIconInto(agentToggleIconEl, icon, null);
-      return;
-    }
-    _restoreManifestIcon(agentToggleIconEl);
   }
 
   function _applyHeaderLabelAndIcon(
@@ -1288,7 +1268,6 @@ export function initSidebarShortcuts(
       if (!_hydrated) return;
       const normalized = _collectVisibleShortcuts(_latestUiPrefs || {});
       const ensured = _ensureActiveSelection(_latestUiPrefs || {}, normalized);
-      _applyToggleIcon(_latestUiPrefs || {}, normalized, ensured.active);
       _applyHeaderLabelAndIcon(
         _latestUiPrefs || {},
         normalized,
@@ -1322,7 +1301,6 @@ export function initSidebarShortcuts(
 
     const normalized = _collectVisibleShortcuts(_latestUiPrefs || {});
     const ensured = _ensureActiveSelection(_latestUiPrefs || {}, normalized);
-    _applyToggleIcon(_latestUiPrefs || {}, normalized, ensured.active);
     _applyHeaderLabelAndIcon(_latestUiPrefs || {}, normalized, ensured.active);
     _renderHeaderIconGrid(_latestUiPrefs || {}, normalized, ensured.active);
     void _syncIframesAndActivate(
@@ -3562,7 +3540,6 @@ export function initSidebarShortcuts(
 
     const normalized = _collectVisibleShortcuts(_latestUiPrefs);
     const ensured = _ensureActiveSelection(_latestUiPrefs, normalized);
-    _applyToggleIcon(_latestUiPrefs, normalized, ensured.active);
     _applyHeaderLabelAndIcon(_latestUiPrefs, normalized, ensured.active);
     _renderHeaderIconGrid(_latestUiPrefs, normalized, ensured.active);
     void _syncIframesAndActivate(_latestUiPrefs, normalized, ensured.active);
@@ -3686,7 +3663,6 @@ export function initSidebarShortcuts(
   async function init() {
     // Resolve core DOM.
     agentToggleBtn = document.getElementById("fe-agent-toggle");
-    agentToggleIconEl = agentToggleBtn?.querySelector(".fe-agent-icon") || null;
 
     sidebarHeaderIconEl = document.getElementById("agent-drawer-icon");
     sidebarHeaderTitleEl = document.getElementById("agent-drawer-title-text");

@@ -5,13 +5,7 @@ export interface HostElements {
   container: HTMLElement;
   editorFrameEl: HTMLElement;
   root: HTMLElement;
-  toolbarEl: HTMLElement;
-  titleBlockEl: HTMLElement;
-  leftToolbarControlEl: HTMLElement;
-  rightToolbarControlEl: HTMLElement;
   sidebarDrawerEl: HTMLElement;
-  fileNameEl: HTMLElement;
-  fileNameScrollEl: HTMLElement;
   issuesToggleBtn: HTMLButtonElement;
   issuesBadgesEl: HTMLElement;
   statusEl: HTMLElement;
@@ -90,13 +84,7 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     container: requireEl('#editor-container'),
     editorFrameEl: requireEl('#editor-frame'),
     root: requireEl('.fe-root'),
-    toolbarEl: requireEl('.fe-toolbar'),
-    titleBlockEl: requireEl('.fe-title-block'),
-    leftToolbarControlEl: requireEl('#fe-drawer-open'),
-    rightToolbarControlEl: requireEl('.fe-toolbar > .fe-menu'),
     sidebarDrawerEl: requireEl('#agent-drawer'),
-    fileNameEl: requireEl('#fe-file-name'),
-    fileNameScrollEl: requireEl('#fe-file-name-scroll'),
     issuesToggleBtn: requireEl('#fe-issues-toggle') as HTMLButtonElement,
     issuesBadgesEl: requireEl('#fe-issues-badges'),
     statusEl: requireEl('#fe-status'),

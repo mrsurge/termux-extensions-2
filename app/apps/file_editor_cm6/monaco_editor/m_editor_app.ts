@@ -74,7 +74,10 @@ import { canInstallScrollPublisher } from "./editor_scroll_publisher_guard_utils
 import { buildScrollStatePayload } from "./editor_scroll_publisher_payload_utils.ts";
 import { shouldSendScrollImmediately } from "./editor_scroll_publisher_throttle_utils.ts";
 import { scheduleScrollSend } from "./editor_scroll_publisher_schedule_utils.ts";
-import { installScrollPublisherRuntime } from "./editor_scroll_publisher_runtime.ts";
+import {
+  installScrollPublisherRuntime,
+  type EditorScrollPublisherRuntime,
+} from "./editor_scroll_publisher_runtime.ts";
 import { shouldApplyMirrorPath } from "./editor_apply_mirror_path_utils.ts";
 import { applyMirrorContent } from "./editor_apply_mirror_content_utils.ts";
 import { collectBootLanguageIds } from "./editor_boot_language_ids_utils.ts";
@@ -388,6 +391,7 @@ interface MonacoBootWindowLike extends Window {
   let _ignoreNextModifiedViewZonesEvent = false;
   let _reapplyDraftZonesScheduled = false;
   let scrollPublisherInstalled = false;
+  let scrollPublisherRuntime: EditorScrollPublisherRuntime | null = null;
   let diffThemeInstalled = false;
   let codeInspectorRuntime: CodeInspectorRuntime | null = null;
   var debugRuntime = createEditorDebugRuntime({
@@ -1331,6 +1335,10 @@ interface MonacoBootWindowLike extends Window {
 
   function _setScrollPublisherInstalled(value: boolean): void {
     scrollPublisherInstalled = !!value;
+    if (!value) {
+      scrollPublisherRuntime?.dispose();
+      scrollPublisherRuntime = null;
+    }
   }
 
   function disposeDiffEditorOnly() {
@@ -1872,6 +1880,9 @@ interface MonacoBootWindowLike extends Window {
     createFileModel: createFileModel,
     installMirrorPublisher: installMirrorPublisher,
     installScrollPublisher: installScrollPublisher,
+    flushScrollState: function () {
+      return scrollPublisherRuntime?.flush() || false;
+    },
     applyLineNumberSizing: applyLineNumberSizing,
     ensureTouchSelection: ensureTouchSelection,
     syncDiagnosticsForCurrentModel: function (reason: string) {
@@ -2291,7 +2302,8 @@ interface MonacoBootWindowLike extends Window {
 
   function installScrollPublisher(): void {
     breadcrumbRuntime.bindEditor();
-    installScrollPublisherRuntime({
+    if (scrollPublisherRuntime) return;
+    scrollPublisherRuntime = installScrollPublisherRuntime({
       getEditor: function () {
         return editor;
       },
@@ -2308,7 +2320,13 @@ interface MonacoBootWindowLike extends Window {
         scrollPublisherInstalled = !!value;
       },
       buildScrollStatePayload: function () {
-        return buildScrollStatePayload(editor, currentPath);
+        let activePath: string | null = null;
+        try {
+          const activeModel = editor?.getModel?.() || model;
+          const uri = activeModel?.uri?.toString?.();
+          activePath = uri ? _absPathFromVscodeUri(String(uri)) : null;
+        } catch (_) {}
+        return buildScrollStatePayload(editor, activePath);
       },
       updateBreadcrumbCursor: bcUpdateCursor,
       notifyEditorRpc: function (method, payload) {

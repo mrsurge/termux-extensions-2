@@ -67,7 +67,6 @@ import { createHostBootRuntime } from './main_page/frontend/host-boot-runtime.ts
 import { initResizeManager, loadLayoutPreferences } from './main_page/frontend/host-resize-manager.ts';
 import type { ProblemsPanelController } from './src/diagnostics/problems-panel.ts';
 import type { OpenFileOptions } from './main_page/frontend/file-ops/open-flow.ts';
-import type { ScheduleToolbarTitleClampOptions } from './main_page/frontend/host-chrome-runtime.ts';
 import { UI_IPC_RPC_METHODS, type UiIpcRpcMethod } from './src/ui_ipc/rpc_contract.ts';
 import type { SidebarIpcRpcNotificationMethod } from './src/sidebar_ipc/rpc_contract.ts';
 
@@ -102,10 +101,6 @@ interface SessionState extends UnknownRecord {
   unsaved: boolean;
   lastSha256: string | null;
   updatedAt: string | null;
-}
-
-interface HostActivePathOptions {
-  forceToolbar?: boolean;
 }
 
 interface SaveFileOptions {
@@ -242,13 +237,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     container,
     editorFrameEl,
     root,
-    toolbarEl,
-    titleBlockEl,
-    leftToolbarControlEl,
-    rightToolbarControlEl,
     sidebarDrawerEl,
-    fileNameEl,
-    fileNameScrollEl,
     issuesToggleBtn,
     issuesBadgesEl,
     statusEl,
@@ -328,20 +317,9 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     sidebarDrawerEl,
   });
 
-  // Title/status & chrome
-  window.fileNameEl = fileNameEl;
   const hostChromeRuntime = createHostChromeRuntime({
-    root,
-    toolbarEl,
-    titleBlockEl,
-    leftToolbarControlEl,
-    rightToolbarControlEl,
-    sidebarDrawerEl,
-    fileNameEl,
-    fileNameScrollEl,
     issuesToggleBtn,
     issuesBadgesEl,
-    isMobileLayout: () => _isMobileLayout(),
     basename,
     toAbsolute,
     homeDir: HOME_DIR,
@@ -356,8 +334,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     toast: (message, kind) => host.toast(message, kind),
     confirm: (message) => window.teUI.dialog.confirm(message),
   });
-  const { formatFileNameDisplay, scheduleToolbarTitleClamp, setToolbarFileName, initToolbarTitleClampObservers, setIssuesButtonsEnabled, exportDiagnosticsToFile } = hostChromeRuntime;
-  function _applyHostActivePath(filePath: unknown, options: HostActivePathOptions = {}) {
+  const { formatFileNameDisplay, setIssuesButtonsEnabled, exportDiagnosticsToFile } = hostChromeRuntime;
+  function _applyHostActivePath(filePath: unknown) {
     const normalizedPath = typeof filePath === 'string' && filePath ? filePath : '';
     if (!normalizedPath) return;
 
@@ -376,20 +354,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       if (problemsPanel.setActiveFile) problemsPanel.setActiveFile(normalizedPath);
     } catch (_) {}
 
-    const trimmed = normalizedPath.replace(/\/+$/, '');
-    const idx = trimmed.lastIndexOf('/');
-    const expectedName = idx >= 0 ? trimmed.slice(idx + 1) : trimmed;
-    const nameEl = fileNameEl || null;
-    const forceToolbar = !!(options && options.forceToolbar);
-    const toolbarStale = !!(nameEl && (nameEl.textContent !== expectedName || nameEl.title !== expectedName));
-
-    try {
-      updatePathDisplay();
-    } catch (_) {
-      try {
-        if (forceToolbar || toolbarStale || !nameEl) setToolbarFileName(expectedName);
-      } catch (_) {}
-    }
+    updatePathDisplay();
   }
 
   function _setHostCurrentPathOnly(path: unknown) {
@@ -409,12 +374,11 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
         ui.updateLspSpinner();
       }
     },
-    applyActiveFilePath: (filePath) => _applyHostActivePath(filePath, { forceToolbar: true }),
+    applyActiveFilePath: (filePath) => _applyHostActivePath(filePath),
     clearActiveFilePath: () => {
       currentPath = '';
       currentPathExists = false;
       lastSha256 = null;
-      setToolbarFileName('No file');
       setIssuesButtonsEnabled(false);
       if (runActiveBtn) {
         runActiveBtn.disabled = true;
@@ -440,9 +404,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       restoredSessionActive = !!flag;
     },
     setRestoredSessionPath: () => {},
-    getCurrentPath: () => currentPath || '',
-    queueSessionStateUpdate: (partial) => queueSessionStateUpdate(partial),
-    updateFileScroll: (payload) => uiIpcConnections.requestBackendUpdateFileScroll(payload),
     issuesBadgesEl,
     setIssuesButtonsEnabled: (enabled) => setIssuesButtonsEnabled(enabled),
     toast: (message, timeoutMs) => host.toast(message, timeoutMs),
@@ -545,7 +506,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   const fontScaleController = createFontScaleController({
     presets: FONT_SCALE_PRESETS,
     updatePreference: (key: string, value: unknown) => preferencesController.updatePreference(key, value),
-    scheduleToolbarTitleClamp: (opts?: ScheduleToolbarTitleClampOptions) => scheduleToolbarTitleClamp(opts),
     toast: (msg: string, kind?: unknown) => host.toast(msg, kind),
   });
   function applyFontScale(scale: number): void {
@@ -601,10 +561,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   hostUiPrefsRuntime.drainPendingUiPrefs();
 
   // WebSocket and autosave state
-  // Host editor-event runtime reads this global when debouncing scroll persistence.
-  try {
-    if (typeof window.__feCursorStateDebounceMs !== 'number') window.__feCursorStateDebounceMs = 1000;
-  } catch (_) {}
   let inflightOpId: string | null = null;
   const AUTOSAVE_IDLE_DELAY = 1200; // manual saves / disabled autosave
   const AUTOSAVE_ACTIVE_DELAY = 450; // faster loop while autosave is ON
@@ -666,7 +622,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     const next = !!flag;
     cacheStateBadge.dataset.state = next ? cacheStateBadge.dataset.state || '' : '';
     unsaved = next;
-    fileNameEl.classList.toggle('fe-unsaved', unsaved);
     syncSessionPath();
     if (!unsaved) autosaveRuntimeController.cancelAutosave();
     if (unsaved && editorViewState?.autoSave) {
@@ -782,7 +737,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       _setHostCurrentPathOnly(path);
     },
     reconcileCurrentPath: (path: string) => {
-      _applyHostActivePath(path, { forceToolbar: true });
+      _applyHostActivePath(path);
     },
     requestBackendBootSnapshot: (payload?: UnknownRecord) => uiIpcConnections.requestBackendBootSnapshot(payload),
     requestBackendEditorGitBaselines: (payload: UnknownRecord) => uiIpcConnections.requestBackendEditorGitBaselines(payload),
@@ -838,10 +793,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   const fileStatusController = createFileStatusController({
     runActiveBtn,
     getCurrentPath: () => currentPath,
-    toAbsolute,
-    HOME_DIR,
-    basename,
-    setToolbarFileName: (name: string) => setToolbarFileName(name),
     setIndicatorInactive: (badge: HTMLElement) => cacheIndicatorController.setIndicatorInactive(badge),
     setIssuesButtonsEnabled: (enabled: boolean) => setIssuesButtonsEnabled(enabled),
   });
@@ -1234,8 +1185,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
 
   createHostBootRuntime({
     initResponsiveLayout,
-    scheduleToolbarTitleClamp: (opts?: unknown) => scheduleToolbarTitleClamp(opts as ScheduleToolbarTitleClampOptions | undefined),
-    initToolbarTitleClampObservers,
     loadLayoutPreferences,
     initResizeManager,
     initExplorerUI,
@@ -1244,7 +1193,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     toAbsolute,
     getActiveProjectPath: () => sessionTelemetry.activeProjectPath() || null,
     getSessionActiveProject: () => sessionState.activeProject || null,
-    applyHostActivePath: (path: string, options?: UnknownRecord) => _applyHostActivePath(path, options),
+    applyHostActivePath: (path: string) => _applyHostActivePath(path),
     problemsPanel,
     reloadEditorFrame: () => _reloadEditorFrame(),
     requestAdapterRestart: () => _requestAdapterRestart(),
@@ -1272,7 +1221,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     resetSavedState: () => {},
     markUnsaved: (flag: boolean) => markUnsaved(flag),
     statusEl,
-    setToolbarFileName,
     setIssuesButtonsEnabled,
     getUrlSearch: () => window.location.search,
     parentDir,
@@ -1291,8 +1239,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     },
     setCurrentModeLanguage: () => {},
     openWebSocket: (path: string) => fileWebSocketManager.openWebSocket(path),
-    getCurrentPath: () => currentPath,
-    updatePathDisplay: () => updatePathDisplay(),
     openFile: (path: string) => openFile(path),
     setOpenFilePickerDir: (path: string) => {
       lastPickerPath = path;

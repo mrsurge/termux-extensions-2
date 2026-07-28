@@ -84,7 +84,12 @@ export function formatExplorerBranchLabel(
     };
   }
   if (status.branch) {
-    return { text: status.branch, title: status.branch };
+    const short = status.head?.short || status.head?.full?.slice(0, 7) || '';
+    const text = short ? `${status.branch} @ ${short}` : status.branch;
+    const title = status.head?.full
+      ? `${status.branch} @ ${status.head.full}`
+      : status.branch;
+    return { text, title };
   }
   return { text: '(no branch)', title: 'Git branch unavailable' };
 }

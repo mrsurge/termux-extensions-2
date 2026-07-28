@@ -729,7 +729,7 @@ def _read_file_payload(project: str, abs_path: str) -> EditorOpenPayload:
         auto_save = None
     payload["auto_save"] = auto_save
 
-    # Scroll restore (project sidecar / HistoryStore).
+    # Top-visible-line restore (project sidecar / HistoryStore).
     try:
         scroll_line = _history_store.get_file_scroll_line(project, abs_path)
     except Exception:

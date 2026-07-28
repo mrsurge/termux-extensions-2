@@ -488,7 +488,25 @@
   .fe-toolbar { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); min-width: 0; overflow: visible; position: relative; z-index: 60; }
   #fe-drawer-open,
   .fe-toolbar > .fe-menu { flex: 0 0 auto; }
-  #fe-drawer-open { order: 0; }
+  #fe-drawer-open {
+    order: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 37.6px;
+    height: 33.6px;
+    padding: 0;
+  }
+  .fe-panel-toggle-icon {
+    display: block;
+    width: 2.2rem;
+    height: 2.2rem;
+    object-fit: contain;
+    pointer-events: none;
+  }
+  .fe-panel-toggle-icon--right {
+    transform: scaleX(-1);
+  }
   #menu-file { order: 1; }
   #menu-edit { order: 2; }
   #menu-editor { order: 3; }
@@ -497,47 +515,13 @@
   .fe-toolbar-issues { order: 6; }
   .fe-toolbar-actions { order: 7; display: flex; gap: 0.35rem; align-items: center; }
   .fe-status { order: 8; }
-  .fe-file-name { display: flex; align-items: center; gap: 10px; }
   .fe-issues { display: inline-flex; align-items: center; gap: 6px; }
   .fe-issues-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.9; }
   .fe-issues-dot { display: inline-flex; min-width: 16px; padding: 2px 6px; border-radius: 999px; font-weight: 700; line-height: 1; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); }
   .fe-issues-dot.error { color: #ef4444; border-color: rgba(239,68,68,0.45); }
   .fe-issues-dot.warning { color: #eab308; border-color: rgba(234,179,8,0.40); }
   .fe-btn.fe-icon-btn[disabled] { opacity: 0.45; }
-  .fe-title-block { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
-  .fe-file-name { font-size: 0.70rem; font-weight: 600; color: var(--foreground, #e5e7eb); white-space: nowrap; display: flex; align-items: center; gap: 0.35rem; width: 100%; min-width: 0; }
-  .fe-file-name-scroll {
-    display: block;
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-  }
-  #fe-file-name { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .layout-mobile .fe-file-name-scroll {
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-x;
-    scrollbar-width: none;
-    cursor: grab;
-  }
-  .layout-mobile .fe-file-name-scroll::-webkit-scrollbar { display: none; }
-  .layout-mobile .fe-file-name-scroll.is-dragging {
-    cursor: grabbing;
-    user-select: none;
-    -webkit-user-select: none;
-  }
-  .layout-mobile #fe-file-name {
-    display: inline-block;
-    min-width: 100%;
-    max-width: none;
-    width: max-content;
-    overflow: visible;
-    text-overflow: clip;
-  }
   #fe-file-draft-badge { flex: 0 0 auto; }
-  .fe-file-name.fe-unsaved::after { content: ' *'; color: var(--primary, #3b82f6); }
   .fe-file-draft-indicator { font-size: 0.75rem; font-weight: 600; min-width: 0.85rem; text-align: center; }
   .fe-file-draft-indicator[data-state='cached'] { color: #facc15; }
   .fe-file-draft-indicator[data-state='crashed'] { color: #f87171; }
@@ -801,7 +785,16 @@
   }
 
 .fe-drawer-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--border #333); background: var(--card, #0b0f1a); box-shadow: none; }
-  #fe-branch-label { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  #fe-branch-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 700;
+    color: #67d8ef;
+    letter-spacing: 0.01em;
+  }
 
   /* CM6-specific styles - eliminate all gaps around iframe */
   .fe-root, .fe-grid, .fe-editor-row, .fe-editor-container {
@@ -1933,11 +1926,7 @@
     height: 1.35rem;
     line-height: 0;
   }
-  .fe-agent-toggle .fe-agent-icon img {
-    width: 2.2rem;
-    height: 2.2rem;
-    display: block;
-  }
+  .fe-agent-toggle .fe-agent-icon img { display: block; }
   .fe-git-actions .fe-btn {
     flex: 0 0 auto;
     font-size: 0.8rem;
@@ -2433,16 +2422,10 @@
   <!-- Resize handle for explorer (desktop only) -->
   <div class="resize-handle resize-handle--explorer" data-panel="explorer"></div>
 
-  <div class="fe-title-block" hidden aria-hidden="true">
-    <div class="fe-file-name">
-      <div id="fe-file-name-scroll" class="fe-file-name-scroll">
-        <span id="fe-file-name" title="Current file">No file</span>
-      </div>
-    </div>
-  </div>
-
   <div class="fe-toolbar">
-	    <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
+	    <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer" aria-label="Open Explorer">
+        <img class="fe-panel-toggle-icon" src="/apps/file_editor_cm6/static/icons/show.png" alt="" aria-hidden="true">
+      </button>
       <span class="fe-issues fe-toolbar-issues">
         <button id="fe-issues-toggle" class="fe-btn fe-icon-btn" title="Next issue (Alt+F8)" aria-label="Next issue" disabled>💡</button>
         <span id="fe-issues-badges" class="fe-issues-badge" aria-live="polite"></span>
@@ -2454,7 +2437,9 @@
       <span id="fe-lsp-spinner" class="fe-lsp-status--error" title="Adapter not started" aria-label="Adapter status"></span>
       <div id="fe-adapter-dd" class="fe-dropdown" style="right: 0; left: auto;"></div>
       <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Sidebar drawer">
-        <span class="fe-agent-icon" data-default-icon=""></span>
+        <span class="fe-agent-icon">
+          <img class="fe-panel-toggle-icon fe-panel-toggle-icon--right" src="/apps/file_editor_cm6/static/icons/show.png" alt="" aria-hidden="true">
+        </span>
       </button>
       <div id="fe-agent-dd" class="fe-dropdown"></div>
     </div>

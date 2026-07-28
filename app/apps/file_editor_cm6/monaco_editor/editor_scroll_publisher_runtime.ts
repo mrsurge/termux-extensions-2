@@ -18,31 +18,59 @@ interface EditorScrollPublisherRuntimeDeps {
   scheduleSend(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
 }
 
-export function installScrollPublisherRuntime(deps: EditorScrollPublisherRuntimeDeps): void {
+export interface EditorScrollPublisherRuntime {
+  flush(): boolean;
+  dispose(): void;
+}
+
+const INERT_SCROLL_PUBLISHER: EditorScrollPublisherRuntime = {
+  flush: () => false,
+  dispose: () => {},
+};
+
+export function installScrollPublisherRuntime(
+  deps: EditorScrollPublisherRuntimeDeps,
+): EditorScrollPublisherRuntime {
   try {
     const editor = deps.getEditor();
-    if (!editor || !deps.canInstall()) return;
+    if (!editor || !deps.canInstall()) return INERT_SCROLL_PUBLISHER;
     deps.setInstalled(true);
 
     let lastSentAt = 0;
     let pendingT: ReturnType<typeof setTimeout> | null = null;
+    let pendingPayload: Record<string, unknown> | null = null;
 
-    const send = () => {
+    const send = (): boolean => {
       pendingT = null;
       try {
-        if (!deps.getCurrentPath() || !deps.getModel()) return;
-        const payload = deps.buildScrollStatePayload();
-        if (!payload) return;
-        if (!deps.notifyEditorRpc(EDITOR_RPC_METHODS.scrollStatePublish, payload)) return;
+        const payload = pendingPayload;
+        pendingPayload = null;
+        if (!payload || !deps.getCurrentPath() || !deps.getModel()) return false;
+        if (!deps.notifyEditorRpc(EDITOR_RPC_METHODS.scrollStatePublish, payload)) return false;
         lastSentAt = Date.now();
         deps.updateBreadcrumbCursor(typeof payload.cursorLine === 'number' ? payload.cursorLine : undefined);
-      } catch (_) {}
+        return true;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    const capture = (): boolean => {
+      try {
+        pendingPayload = deps.buildScrollStatePayload();
+        return pendingPayload != null;
+      } catch (_) {
+        pendingPayload = null;
+        return false;
+      }
     };
 
     const schedule = () => {
       try {
+        if (!capture()) return;
         const now = Date.now();
         if (deps.shouldSendImmediately(now, lastSentAt, 400)) {
+          if (pendingT) clearTimeout(pendingT);
           send();
           return;
         }
@@ -53,5 +81,23 @@ export function installScrollPublisherRuntime(deps: EditorScrollPublisherRuntime
 
     if (typeof editor.onDidScrollChange === 'function') editor.onDidScrollChange(schedule);
     if (typeof editor.onDidChangeCursorPosition === 'function') editor.onDidChangeCursorPosition(schedule);
-  } catch (_) {}
+
+    return {
+      flush(): boolean {
+        if (!capture()) return false;
+        if (pendingT) {
+          clearTimeout(pendingT);
+          pendingT = null;
+        }
+        return send();
+      },
+      dispose(): void {
+        if (pendingT) clearTimeout(pendingT);
+        pendingT = null;
+        pendingPayload = null;
+      },
+    };
+  } catch (_) {
+    return INERT_SCROLL_PUBLISHER;
+  }
 }
