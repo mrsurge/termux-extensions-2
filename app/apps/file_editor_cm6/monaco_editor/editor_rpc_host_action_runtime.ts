@@ -2,6 +2,7 @@ import { bindSaveKeyCommand } from './editor_rpc_save_key_utils.ts';
 import { bindFocusRelay } from './editor_rpc_focus_relay_utils.ts';
 import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.ts';
 import { bindAndroidKeyboardRecovery } from './editor_android_keyboard_recovery_utils.ts';
+import { bindMobileEditorSpecialKeys } from './editor_mobile_special_keys_utils.ts';
 import {
   EDITOR_RPC_NOTIFICATIONS,
   type EditorRpcMethodName,
@@ -56,6 +57,7 @@ export function createEditorRpcHostActionRuntime(
   let focusDisposable: DisposableLike | null = null;
   let mobileCtrlDisposable: DisposableLike | null = null;
   let androidKeyboardRecoveryDisposable: DisposableLike | null = null;
+  let mobileSpecialKeysDisposable: DisposableLike | null = null;
 
   function resolveActiveEditor(): EditorLike | null {
     const diffEditor = deps.getDiffEditor();
@@ -175,11 +177,28 @@ export function createEditorRpcHostActionRuntime(
     }
   }
 
+  function bindMobileSpecialKeys(): void {
+    try {
+      mobileSpecialKeysDisposable?.dispose?.();
+      mobileSpecialKeysDisposable = null;
+
+      const editor = resolveActiveEditor();
+      if (!editor) return;
+      mobileSpecialKeysDisposable = bindMobileEditorSpecialKeys(
+        editor,
+        deps.getWindow(),
+      );
+    } catch (error) {
+      console.warn('[mobile_special_keys] bind failed', error);
+    }
+  }
+
   function bindEditorHooks(): void {
     bindSaveKey();
     bindFocus();
     bindMobileCtrlHelper();
     bindKeyboardRecovery();
+    bindMobileSpecialKeys();
   }
 
   return {

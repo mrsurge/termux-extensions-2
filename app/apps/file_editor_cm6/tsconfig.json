@@ -21,7 +21,6 @@
     "types": [],
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "rootDir": "../..",
-    "baseUrl": ".",
     "outDir": "static/dist",
     "paths": {
       "/static/vendor/*": ["../../static/vendor/*"]

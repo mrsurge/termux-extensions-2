@@ -29,7 +29,7 @@ import { createRunProfilesModalController } from './main_page/frontend/ui/run-pr
 import { installSimplePreferenceMenuActions } from './main_page/frontend/ui/menu-actions-preferences.ts';
 import { installAdvancedMenuActions } from './main_page/frontend/ui/menu-actions-advanced.ts';
 import { installPrefsSync } from './main_page/frontend/ui/prefs-sync.ts';
-import { createRecentsController } from './main_page/frontend/ui/recents.ts';
+import { createFileTabsController } from './main_page/frontend/ui/file-tabs.ts';
 import { createPreferencesController } from './main_page/frontend/ui/preferences.ts';
 import { createProjectSwitchController } from './main_page/frontend/ui/project-switch.ts';
 import { createCacheIndicatorController } from './main_page/frontend/ui/cache-indicator.ts';
@@ -219,7 +219,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     onHostStateResync: async () => {
       const state = await editorStateController.syncEditorState(true);
       if (state) dispatchHostOpenStateProjection(state, 'ui_ipc_host_state_resync');
-      recentsController.broadcastRecentsUpdate(state);
+      fileTabsController.broadcastOpenState(state);
     },
   });
   function _requestSidebarUiControl(method: UiIpcRpcMethod, payload?: unknown) {
@@ -260,8 +260,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     menuEditorDD,
     menuViewBtn,
     menuViewDD,
-    recentFilesBtn,
-    recentFilesDD,
+    fileTabsViewport,
+    fileTabsTrack,
     runActiveBtn,
     miNew,
     miOpen,
@@ -728,13 +728,18 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     applyStateToMenus: (state: EditorViewState | null) => preferencesController.applyStateToMenus(state),
   });
 
-  const recentsController = createRecentsController({
-    recentFilesDD,
-    recentFilesBtn,
+  const fileTabsController = createFileTabsController({
+    viewport: fileTabsViewport,
+    track: fileTabsTrack,
     formatFileNameDisplay: (name: string) => formatFileNameDisplay(name),
     openFile: (path: string) => openFile(path),
+    closeRecentFile: (path: string) => uiIpcConnections.requestUiIpc(
+      UI_IPC_RPC_METHODS.hostRecentFileClose,
+      { path },
+    ),
+    resetToNewFile: () => resetActiveFileState({ resetPicker: false }),
   });
-  recentsController.installWindowHook();
+  fileTabsController.installWindowHooks();
 
   // Synchronize host + inline editor when a project is opened over project RPC.
   // Called from Explorer runtime via window.__cm6HandleProjectOpened(path, payload).
@@ -752,7 +757,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     syncEditorState: (forceRefresh?: boolean) => editorStateController.syncEditorState(forceRefresh),
     hydrateEditorState: (state: UnknownRecord | null) => editorStateController.hydrateEditorState(state),
     applyStateProjection: (state: UnknownRecord, source: string) => dispatchHostOpenStateProjection(state, source),
-    broadcastRecentsUpdate: (state: EditorState | null) => recentsController.broadcastRecentsUpdate(state),
+    broadcastRecentsUpdate: (state: EditorState | null) => fileTabsController.broadcastOpenState(state),
     getBranchMenuHandle: () => branchMenuHandle,
   });
 
@@ -1040,7 +1045,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     menuEditDD,
     menuEditorDD,
     menuViewDD,
-    recentFilesDD,
     getAgentShortcutLoadDD: () => hostSidebarRuntime.getShortcutLoadDropdown(),
     getAgentShortcutLoadBtn: () => hostSidebarRuntime.getShortcutLoadButton(),
     getBranchMenuHandle: () => branchMenuHandle,
@@ -1048,7 +1052,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     menuEditBtn,
     menuEditorBtn,
     menuViewBtn,
-    recentFilesBtn,
     runActiveBtn,
     runCurrentFile: () => runFileController.runCurrentFile(),
   });
@@ -1258,7 +1261,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     applySidebarUiPrefs: (prefs: UnknownRecord) => hostUiPrefsRuntime.applySidebarUiPrefs(prefs || {}),
     syncEditorState: (force?: boolean) => editorStateController.syncEditorState(force),
     hydrateEditorState: (state: UnknownRecord | null) => editorStateController.hydrateEditorState(state),
-    broadcastRecentsUpdate: (state: UnknownRecord | null) => recentsController.broadcastRecentsUpdate(state),
+    broadcastRecentsUpdate: (state: UnknownRecord | null) => fileTabsController.broadcastOpenState(state),
     refreshMenuState: () => preferencesController.refreshMenuState(),
     apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
     fetchPersistedSessionState: () => fetchPersistedSessionState(),

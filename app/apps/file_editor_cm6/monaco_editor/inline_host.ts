@@ -38,6 +38,66 @@ const INLINE_EDITOR_HOST_STYLE = `
 #editor-frame .monaco-editor .find-widget {
   z-index: 300;
 }
+#editor-frame .te2-mobile-special-key.te2-mobile-special-key-trigger {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+  background: rgba(24, 28, 34, 0.34);
+  color: rgba(255, 255, 255, 0.58);
+  font: 600 0.72rem/1 'JetBrains Mono Nerd', 'JetBrains Mono', monospace;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  z-index: 35;
+}
+.fe-root:not(.layout-mobile) #editor-frame .te2-mobile-special-key-trigger {
+  display: none;
+}
+.fe-root.layout-mobile > .te2-mobile-special-key-panel {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-column: 1;
+  grid-row: 6;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--card, #111827);
+  z-index: 55;
+}
+.fe-root > .te2-mobile-special-key-panel[hidden],
+.fe-root:not(.layout-mobile) > .te2-mobile-special-key-panel {
+  display: none;
+}
+#editor-frame .te2-mobile-special-key,
+.fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 2px calc(env(safe-area-inset-bottom, 0px) + 8px);
+  border: 0;
+  border-radius: 0;
+  background: var(--secondary, #252a34);
+  color: var(--foreground, #e5e7eb);
+  font: 500 0.85rem/1 'JetBrains Mono Nerd', 'JetBrains Mono', monospace;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#editor-frame .te2-mobile-special-key.toggle,
+.fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key.toggle {
+  background: var(--accent, #2563eb);
+  color: var(--primary-foreground, #fff);
+}
+#editor-frame .te2-mobile-special-key:focus,
+.fe-root.layout-mobile > .te2-mobile-special-key-panel .te2-mobile-special-key:focus {
+  outline: none;
+}
 #editor-frame .monaco-editor .te2-draft-add-line,
 #editor-frame .monaco-editor .te2-draft-add-line.line-insert,
 #editor-frame .monaco-editor .line-insert.te2-draft-add-line,

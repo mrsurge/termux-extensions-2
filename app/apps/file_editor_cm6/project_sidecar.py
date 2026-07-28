@@ -648,6 +648,21 @@ class ProjectSidecar:
         recent = _as_dict_list(self._data.get("recent_files"))
         return [dict(e) for e in recent]
 
+    def remove_recent_file(self, file_path: str) -> bool:
+        """Remove one recent file and clear last_file when it was active."""
+        normalized = _normalize_file_path(file_path)
+        recent = _as_dict_list(self._data.get("recent_files"))
+        remaining = [
+            entry for entry in recent
+            if entry.get("path") != normalized
+        ]
+        if len(remaining) == len(recent):
+            return False
+        self._data["recent_files"] = remaining
+        if self.get_last_file() == normalized:
+            self._data["last_file"] = None
+        return True
+
     def clear_recent_files(self) -> None:
         """Clear the recent files list and last_file."""
         self._data["recent_files"] = []

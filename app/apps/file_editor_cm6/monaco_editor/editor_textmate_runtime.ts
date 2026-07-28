@@ -6,8 +6,8 @@
  */
 
 import { URI } from '../../../static/vendor/monaco-editor-core/esm/vs/base/common/uri.js';
-import * as vscodeTextmate from '../vendor/vscode-textmate/release/main.js';
-import * as vscodeOniguruma from '../vendor/vscode-oniguruma/release/main.js';
+import * as vscodeTextmate from '../vendor/vscode-textmate';
+import * as vscodeOniguruma from '../vendor/vscode-oniguruma';
 import { TMGrammarFactory, missingTMGrammarErrorMessage } from './vscode_workbench_textmate_vendor/TMGrammarFactory.js';
 import {
   IValidEmbeddedLanguagesMap,

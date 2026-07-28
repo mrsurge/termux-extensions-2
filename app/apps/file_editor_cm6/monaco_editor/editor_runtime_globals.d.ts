@@ -145,6 +145,14 @@ interface MonacoTouchSelectionGlobal {
   editorTouchSelectionHelp?(
     editor: MonacoRuntimeEditorLike,
     options?: {
+      mobile?: boolean;
+      leadingTools?: (options: {
+        editor: MonacoRuntimeEditorLike;
+        selectorMenu: HTMLDivElement;
+        defaultTools: Map<string, MonacoTouchSelectionTool>;
+        openMenu(): void;
+        closeMenu(): void;
+      }) => Iterable<MonacoTouchSelectionTool> | undefined;
       navigationTools?: (options: {
         editor: MonacoRuntimeEditorLike;
         selectorMenu: HTMLDivElement;

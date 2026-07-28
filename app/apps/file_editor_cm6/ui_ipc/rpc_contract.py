@@ -35,6 +35,7 @@ UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CREATE: Final = "ui.host.git.branch.create"
 UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST: Final = "ui.host.git.branches.list"
 UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD: Final = "ui.host.git.remote.add"
 UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE: Final = "ui.host.state.fileScroll.update"
+UI_IPC_RPC_METHOD_HOST_RECENT_FILE_CLOSE: Final = "ui.host.recentFile.close"
 UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND: Final = "ui.host.codeInspector.command"
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE: Final = "ui.sidebar.window.create"
 UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE: Final = "ui.sidebar.window.activate"
@@ -64,6 +65,7 @@ UiIpcRpcMethod = Literal[
     "ui.host.git.branches.list",
     "ui.host.git.remote.add",
     "ui.host.state.fileScroll.update",
+    "ui.host.recentFile.close",
     "ui.host.codeInspector.command",
     "ui.sidebar.window.create",
     "ui.sidebar.window.activate",
@@ -87,6 +89,9 @@ UI_IPC_RPC_NOTIFICATION_EDITOR_DIAGNOSTICS_COUNTS: Final = "ui.editor.diagnostic
 UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE: Final = "ui.adapter.state"
 UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED: Final = "ui.host.activeFile.changed"
 UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED: Final = "ui.openState.changed"
+UI_IPC_RPC_NOTIFICATION_FILE_TABS_DECORATIONS_CHANGED: Final = (
+    "ui.fileTabs.decorations.changed"
+)
 UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHING: Final = "ui.project.switching"
 UI_IPC_RPC_NOTIFICATION_PROJECT_SWITCHED: Final = "ui.project.switched"
 UI_IPC_RPC_NOTIFICATION_PREFERENCES_CHANGED: Final = "ui.preferences.changed"
@@ -112,6 +117,7 @@ UiIpcRpcNotification = Literal[
     "ui.adapter.state",
     "ui.host.activeFile.changed",
     "ui.openState.changed",
+    "ui.fileTabs.decorations.changed",
     "ui.project.switching",
     "ui.project.switched",
     "ui.preferences.changed",
@@ -144,6 +150,7 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST,
     UI_IPC_RPC_METHOD_HOST_GIT_REMOTE_ADD,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
+    UI_IPC_RPC_METHOD_HOST_RECENT_FILE_CLOSE,
     UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE,

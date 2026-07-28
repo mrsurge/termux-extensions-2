@@ -23,8 +23,8 @@ export interface HostElements {
   menuEditorDD: HTMLElement;
   menuViewBtn: HTMLElement;
   menuViewDD: HTMLElement;
-  recentFilesBtn: HTMLButtonElement;
-  recentFilesDD: HTMLElement;
+  fileTabsViewport: HTMLElement;
+  fileTabsTrack: HTMLElement;
   runActiveBtn: HTMLButtonElement;
   miNew: HTMLElement;
   miOpen: HTMLElement;
@@ -108,8 +108,8 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     menuEditorDD: requireEl('#menu-editor-dd'),
     menuViewBtn: requireEl('#menu-view-btn'),
     menuViewDD: requireEl('#menu-view-dd'),
-    recentFilesBtn: requireEl('#recent-files-btn') as HTMLButtonElement,
-    recentFilesDD: requireEl('#recent-files-dd'),
+    fileTabsViewport: requireEl('#recent-file-tabs'),
+    fileTabsTrack: requireEl('#recent-file-tabs-track'),
     runActiveBtn: requireEl('#run-active-file-btn') as HTMLButtonElement,
     miNew: requireEl('#mi-new'),
     miOpen: requireEl('#mi-open'),

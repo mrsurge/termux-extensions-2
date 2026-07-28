@@ -56,17 +56,23 @@ function toast(message: string): void {
 export function initBranchMenu(deps: BranchMenuDeps): BranchMenuController {
   const btn = document.getElementById('menu-branch-btn');
   const dropdown = document.getElementById('menu-branch-dd');
-  if (!btn || !dropdown) return { close: () => {}, refresh: () => Promise.resolve() };
+  const branchLabel = document.getElementById('menu-branch-label');
+  if (!btn || !dropdown || !branchLabel) {
+    return { close: () => {}, refresh: () => Promise.resolve() };
+  }
   const btnEl = btn;
   const dropdownEl = dropdown;
+  const branchLabelEl = branchLabel;
 
   function closeDropdown(): void {
     dropdownEl.classList.remove('show');
   }
 
   function setLabel(current?: string): void {
-    const label = current ? `Branch: ${current}` : 'Branch';
-    btnEl.textContent = `${label} ▾`;
+    const label = current ? `Git branch: ${current}` : 'Git branches';
+    branchLabelEl.textContent = label;
+    btnEl.title = label;
+    btnEl.setAttribute('aria-label', label);
   }
 
   async function loadBranches(showDropdown = false): Promise<void> {

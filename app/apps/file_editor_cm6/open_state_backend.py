@@ -15,6 +15,7 @@ OpenStateReason = Literal[
     "reconnect",
     "sidecar_replay",
     "no_file",
+    "recent_file_closed",
     "tracked_edit",
 ]
 
@@ -192,6 +193,34 @@ def clear_sidecar_open_file(
     sidecar.bump_open_state_revision()
     sidecar.save()
     return _payload_from_sidecar(
+        project_path=normalized_project,
+        sidecar=sidecar,
+        reason=str(reason),
+    )
+
+
+def remove_sidecar_recent_file(
+    project_path: str,
+    file_path: str,
+    *,
+    reason: OpenStateReason | str = "recent_file_closed",
+    require_existing_sidecar: bool = True,
+) -> tuple[bool, SidecarOpenStatePayload]:
+    """Remove one sidecar recent entry and return its new open-state projection."""
+    normalized_project = _normalize_path(project_path)
+    normalized_file = _normalize_path(file_path)
+    if require_existing_sidecar and not ProjectSidecar.sidecar_exists(normalized_project):
+        raise FileNotFoundError("project_sidecar_missing")
+    if not _is_under_project(normalized_project, normalized_file):
+        raise PermissionError("outside_project")
+
+    sidecar = ProjectSidecar.load_or_create(normalized_project)
+    sidecar.reload()
+    removed = sidecar.remove_recent_file(normalized_file)
+    if removed:
+        sidecar.bump_open_state_revision()
+        sidecar.save()
+    return removed, _payload_from_sidecar(
         project_path=normalized_project,
         sidecar=sidecar,
         reason=str(reason),

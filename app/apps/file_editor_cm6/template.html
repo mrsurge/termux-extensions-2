@@ -115,11 +115,10 @@
     grid-row: 1;
   }
 
-  /* Menubar stays with the editor column; side rails own columns 1 and 3. */
-  .layout-desktop .fe-menubar {
+  /* Recent-file tabs stay with the editor column; side rails own columns 1 and 3. */
+  .layout-desktop .fe-file-tabs {
     grid-column: 2;
     grid-row: 2;
-    z-index: 60; /* Higher than the sidebar drawer so dropdowns can overlay */
   }
 
   /* Explorer becomes left sidebar - extends from row 2 to bottom */
@@ -275,9 +274,11 @@
   .layout-mobile .fe-toolbar {
     grid-column: 1;
     grid-row: 1;
+    flex-wrap: wrap;
+    row-gap: 2px;
   }
 
-  .layout-mobile .fe-menubar {
+  .layout-mobile .fe-file-tabs {
     grid-column: 1;
     grid-row: 2;
   }
@@ -307,6 +308,10 @@
     border-top: 2px solid var(--border);
     transition: opacity 0.2s ease, visibility 0.2s ease, height 0.2s ease;
     z-index: 50;
+  }
+
+  .layout-mobile .terminal-drawer:not(.fullscreen) {
+    max-height: 397px;
   }
 
   /* When terminal is "closed" (open class NOT present) */
@@ -480,9 +485,18 @@
     display: none;
   }
 
-  .fe-toolbar { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); min-width: 0; overflow-x: hidden; }
+  .fe-toolbar { display: flex; flex-wrap: nowrap; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border, #333); background: var(--card, #0b0f1a); min-width: 0; overflow: visible; position: relative; z-index: 60; }
   #fe-drawer-open,
   .fe-toolbar > .fe-menu { flex: 0 0 auto; }
+  #fe-drawer-open { order: 0; }
+  #menu-file { order: 1; }
+  #menu-edit { order: 2; }
+  #menu-editor { order: 3; }
+  #menu-view { order: 4; }
+  #menu-branch { order: 5; margin-left: auto; }
+  .fe-toolbar-issues { order: 6; }
+  .fe-toolbar-actions { order: 7; display: flex; gap: 0.35rem; align-items: center; }
+  .fe-status { order: 8; }
   .fe-file-name { display: flex; align-items: center; gap: 10px; }
   .fe-issues { display: inline-flex; align-items: center; gap: 6px; }
   .fe-issues-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.9; }
@@ -534,20 +548,19 @@
 	  .fe-btn-danger { border-color: #ef4444; color: #ef4444; }
 	  #run-active-file-btn { width: 28px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; line-height: 1; }
 	  #run-active-file-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
-	  #recent-files-btn { font-size: 0.85rem; padding: 4px 8px; white-space: nowrap; }
 	  .fe-btn:hover { border-color: var(--primary, #3b82f6); }
   .fe-status { font-size: calc(0.85rem * var(--chrome-font-scale)); color: var(--muted-foreground, #9ca3af); white-space: nowrap; margin-left: auto; padding-left: 4px; flex-shrink: 0; align-self: center; }
-  .fe-menubar { display: flex; gap: 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--border, #333); border-left: 1px solid var(--border, #333); border-right: 1px solid var(--border, #333); background: var(--card, #0b0f1a); font-size: var(--chrome-base-font); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5); position: sticky; top: 0; z-index: 20; }
   .fe-menu { position: relative; }
   .fe-menu-btn { background: transparent; border: none; color: var(--foreground, #e5e7eb); cursor: pointer; padding: 6px 8px; border-radius: 6px; font-size: var(--chrome-base-font); }
+  .fe-menu-btn--icon { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
   .fe-menu-btn:hover { background: rgba(255,255,255,0.05); }
   .fe-dropdown { position: absolute; top: calc(100% + 4px); left: 0; min-width: 180px; background: var(--card, #0b0f1a); border: 1px solid var(--border, #333); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; z-index: 400 !important; }
   .fe-dropdown.show { display: block; }
   /* Dropdowns inside modals need to stack above modal content. */
   .fe-dropdown--modal { z-index: 500; }
-  #recent-files-dd { left: auto; right: 0; }
   #menu-branch-dd { left: auto; right: 0; max-height: calc(80vh - 60px); overflow-y: auto; }
-  #menu-branch-btn { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #menu-branch-btn { overflow: hidden; white-space: nowrap; }
+  .fe-visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
   .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: calc(0.9rem * var(--chrome-font-scale)); align-items: center; }
   .fe-dd-item[data-checkable="true"] { position: relative; padding-left: 32px; }
   .fe-dd-item[data-checkable="true"]::before { content: ''; position: absolute; left: 12px; width: 1em; text-align: center; color: var(--primary, #3b82f6); }
@@ -555,6 +568,127 @@
   .fe-dd-item.fe-menu-item-checked { color: var(--primary, #3b82f6); }
   .fe-dd-item:hover { background: rgba(255,255,255,0.06); }
   .fe-kbd { opacity: .6; font-size: 12px; }
+
+  .fe-file-tabs {
+    display: block;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: var(--card, #0b0f1a);
+    border-bottom: 1px solid var(--border, #333);
+    scrollbar-width: thin;
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
+    z-index: 30;
+  }
+  .fe-file-tabs.is-reordering { touch-action: none; }
+  .fe-file-tabs-track {
+    display: flex;
+    align-items: stretch;
+    width: max-content;
+    min-width: 100%;
+    height: 36px;
+  }
+  .fe-file-tabs-empty {
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    color: var(--muted-foreground, #9ca3af);
+    font-size: calc(0.78rem * var(--chrome-font-scale));
+  }
+  .fe-file-tab {
+    position: relative;
+    display: grid;
+    grid-template-columns: 18px minmax(46px, 1fr) auto 30px;
+    align-items: stretch;
+    min-width: 108px;
+    max-width: 210px;
+    height: 36px;
+    color: var(--foreground, #e5e7eb);
+    background: var(--explorer-card-bg, #111827);
+    border: 1px solid var(--explorer-card-border, #30363d);
+    border-top: 0;
+    border-radius: 0;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .fe-file-tab + .fe-file-tab { border-left: 0; }
+  .fe-file-tab:hover { background: rgba(255, 255, 255, 0.06); }
+  .fe-file-tab.active {
+    box-shadow: inset 0 -2px 0 var(--explorer-active-file-accent, #60a5fa);
+    background: rgba(59, 130, 246, 0.12);
+  }
+  .fe-file-tab.is-reordering {
+    opacity: 0.78;
+    z-index: 2;
+    cursor: grabbing;
+  }
+  .fe-file-tab--missing {
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+  .fe-file-tab-icon {
+    align-self: center;
+    justify-self: center;
+    width: 16px;
+    height: 16px;
+    line-height: 16px;
+    overflow: hidden;
+  }
+  .fe-file-tab-icon svg {
+    display: block;
+    width: 16px;
+    height: 16px;
+    fill: currentColor;
+  }
+  .fe-file-tab-label {
+    align-self: center;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0 5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: calc(0.78rem * var(--chrome-font-scale));
+  }
+  .fe-file-tab-diagnostic {
+    align-self: center;
+    font-size: 0.52rem;
+    line-height: 1;
+    pointer-events: none;
+  }
+  .fe-file-tab-close {
+    align-self: stretch;
+    width: 30px;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid rgba(255,255,255,0.08);
+    border-radius: 0;
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
+  }
+  .fe-file-tab-close:hover { background: rgba(239, 68, 68, 0.22); color: #fecaca; }
+  .fe-file-tab.fe-draft::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 3px;
+    background: #facc15;
+    pointer-events: none;
+  }
+  .fe-file-tab.fe-git-modified { border-left: 3px solid #f97316; background: rgba(155, 90, 22, 0.75); }
+  .fe-file-tab.fe-git-staged,
+  .fe-file-tab.fe-git-added { border-left: 3px solid #34d399; background: rgba(32, 111, 82, 0.7); }
+  .fe-file-tab.fe-git-staged_modified { border-left: 3px solid #22d3ee; background: rgba(249, 115, 22, 0.15); }
+  .fe-file-tab.fe-git-deleted { border-left: 3px solid #f87171; }
+  .fe-file-tab.fe-git-renamed { border-left: 3px solid #facc15; }
+  .fe-file-tab.fe-git-untracked { border-left: 3px solid #00aaff; background: rgb(19, 61, 128); }
+  .fe-file-tab.fe-git-ignored { border-left: 3px solid #6b7280; }
+  .fe-file-tab.fe-git-conflict { border-left: 3px solid #ef4444; }
   .fe-modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 1000; }
   .fe-modal.show { display: flex; }
   .fe-modal-card { width: min(800px, 92vw); max-height: 80vh; background: var(--card, #0b0f1a); color: var(--foreground, #e5e7eb); border: 1px solid var(--border, #333); border-radius: 10px; display: flex; flex-direction: column; overflow: hidden; }
@@ -882,6 +1016,7 @@
   /* Drawer tab bar (Terminal | Console) */
   .drawer-tab-bar {
     display: flex;
+    align-items: stretch;
     gap: 0;
     background: var(--bg, #0b0f1a);
     border-bottom: 1px solid var(--border, #333);
@@ -902,6 +1037,27 @@
   .drawer-tab.active {
     color: var(--fg, #e6edf3);
     border-bottom-color: var(--accent, #58a6ff);
+  }
+  .drawer-tab-actions {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    padding: 2px 6px;
+  }
+  .drawer-tab-actions button {
+    width: 28px;
+    min-width: 28px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    background: transparent;
+    color: var(--fg-dim, #6e7681);
+    cursor: pointer;
+  }
+  .drawer-tab-actions button:hover {
+    color: var(--fg, #e6edf3);
+    background: rgba(255, 255, 255, 0.06);
   }
 
   /* Console container */
@@ -2265,21 +2421,22 @@
   <!-- Resize handle for explorer (desktop only) -->
   <div class="resize-handle resize-handle--explorer" data-panel="explorer"></div>
 
+  <div class="fe-title-block" hidden aria-hidden="true">
+    <div class="fe-file-name">
+      <div id="fe-file-name-scroll" class="fe-file-name-scroll">
+        <span id="fe-file-name" title="Current file">No file</span>
+      </div>
+    </div>
+  </div>
+
   <div class="fe-toolbar">
 	    <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer">☰</button>
-	    <div class="fe-title-block">
-	      <div class="fe-file-name">
-          <div id="fe-file-name-scroll" class="fe-file-name-scroll">
-            <span id="fe-file-name" title="Current file">No file</span>
-          </div>
-	        <span class="fe-issues">
-	          <button id="fe-issues-toggle" class="fe-btn fe-icon-btn" title="Next issue (Alt+F8)" aria-label="Next issue" disabled>💡</button>
-	          <span id="fe-issues-badges" class="fe-issues-badge" aria-live="polite"></span>
-	        </span>
-	      </div>
-	    </div>
+      <span class="fe-issues fe-toolbar-issues">
+        <button id="fe-issues-toggle" class="fe-btn fe-icon-btn" title="Next issue (Alt+F8)" aria-label="Next issue" disabled>💡</button>
+        <span id="fe-issues-badges" class="fe-issues-badge" aria-live="polite"></span>
+      </span>
 
-    <div class="fe-menu" style="position: relative; margin-left: auto; display: flex; gap: 0.35rem; align-items: center;">
+    <div class="fe-menu fe-toolbar-actions">
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
       <span id="fe-lsp-spinner" class="fe-lsp-status--error" title="Adapter not started" aria-label="Adapter status"></span>
@@ -2290,9 +2447,7 @@
       <div id="fe-agent-dd" class="fe-dropdown"></div>
     </div>
     <span id="fe-status" class="fe-status" style="display: none;"></span>
-  </div>
 
-  <div class="fe-menubar">
     <div class="fe-menu" id="menu-file">
       <button class="fe-menu-btn" id="menu-file-btn">File</button>
       <div class="fe-dropdown" id="menu-file-dd">
@@ -2367,14 +2522,17 @@
         <div class="fe-dd-item" id="mi-goto"><span>Go To Line…</span><span class="fe-kbd">Ctrl/Cmd+G</span></div>
       </div>
     </div>
-    <div class="fe-menu" id="menu-branch" style="margin-left: auto;">
-      <button class="fe-menu-btn" id="menu-branch-btn">Branch ▾</button>
+    <div class="fe-menu" id="menu-branch">
+      <button class="fe-menu-btn fe-menu-btn--icon" id="menu-branch-btn" aria-label="Git branches" title="Git branches">
+        <span class="codicon codicon-git-branch" aria-hidden="true"></span>
+        <span id="menu-branch-label" class="fe-visually-hidden">Branch</span>
+      </button>
       <div class="fe-dropdown" id="menu-branch-dd"></div>
     </div>
-    <div style="position: relative;">
-      <button id="recent-files-btn" class="fe-menu-btn" style="margin: 0;" disabled>Recents ▾</button>
-      <div id="recent-files-dd" class="fe-dropdown"></div>
-    </div>
+  </div>
+
+  <div id="recent-file-tabs" class="fe-file-tabs" role="tablist" aria-label="Recent files">
+    <div id="recent-file-tabs-track" class="fe-file-tabs-track"></div>
   </div>
 
 	  <div class="fe-editor-container" id="editor-container">
@@ -2392,6 +2550,9 @@
       <button class="drawer-tab" data-tab="problems">Problems</button>
       <button class="drawer-tab" data-tab="extensions">Extensions</button>
       <button class="drawer-tab" data-tab="code-inspector">Code Inspector</button>
+      <span class="drawer-tab-actions">
+        <button id="terminal-fullscreen" title="Toggle drawer fullscreen" aria-label="Toggle drawer fullscreen">⛶</button>
+      </span>
     </div>
     <div class="terminal-header" data-drawer-panel="terminal">
       <div class="terminal-shell-dropdown">
@@ -2401,7 +2562,6 @@
       <button id="terminal-zoom-out" title="Zoom out" aria-label="Zoom out">A−</button>
       <button id="terminal-zoom-in" title="Zoom in" aria-label="Zoom in">A+</button>
       <button id="terminal-copy" title="Copy selection" aria-label="Copy selection" disabled>📋</button>
-      <button id="terminal-fullscreen" title="Toggle fullscreen" aria-label="Fullscreen">⛶</button>
       <button id="terminal-collapse" title="Collapse terminal" aria-label="Collapse">▼</button>
       <button id="terminal-new" title="New terminal" aria-label="New terminal">＋</button>
     </div>

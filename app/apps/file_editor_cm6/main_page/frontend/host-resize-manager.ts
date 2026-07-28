@@ -1,5 +1,7 @@
 // Host resize manager - handle main-page panel resizing with drag handles.
 
+import { clampTerminalDrawerHeight } from './ui/drawer-sizing.ts';
+
 type ResizePanel = 'explorer' | 'agent' | 'terminal' | null;
 
 interface LayoutPreferences {
@@ -222,7 +224,14 @@ export function initResizeManager(): void {
           return;
         }
         const delta = startPos - clientY;
-        const newHeight = clamp(startSize + delta, 150, 800);
+        const mobileLayout = document.querySelector('.fe-root')
+          ?.classList.contains('layout-mobile') === true;
+        const newHeight = clampTerminalDrawerHeight(
+          startSize + delta,
+          150,
+          mobileLayout,
+          800,
+        );
         document.documentElement.style.setProperty('--terminal-height', `${newHeight}px`);
       }
       

@@ -15,7 +15,8 @@ namespace.
 
 from __future__ import annotations
 
-from typing import Awaitable, Protocol, cast
+from collections.abc import Awaitable
+from typing import Protocol, cast
 
 import socketio
 
@@ -30,6 +31,7 @@ from .rpc_contract import (
     UI_IPC_RPC_NAMESPACE,
     UI_IPC_RPC_NOTIFICATION_ADAPTER_STATE,
     UI_IPC_RPC_NOTIFICATION_EVENT,
+    UI_IPC_RPC_NOTIFICATION_FILE_TABS_DECORATIONS_CHANGED,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
     UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
     UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
@@ -45,6 +47,10 @@ from .sidebar_rpc_contract import SIDEBAR_IPC_RPC_NAMESPACE
 from ..stores import get_history_store
 from ..explorer.services.file_ops import get_project_root
 from ..open_state_backend import read_sidecar_open_state
+from ..file_tabs_projection import (
+    build_file_tabs_projection,
+    set_file_tabs_projection_emitter,
+)
 
 JsonObject = dict[str, object]
 
@@ -140,6 +146,9 @@ async def emit_ui_ipc_rpc_notification(
         )
 
 
+set_file_tabs_projection_emitter(emit_ui_ipc_rpc_notification)
+
+
 class UIIPCNamespace(socketio.AsyncNamespace):
 
     # python-socketio dispatches via 'on_' + event_name. Translate colons to
@@ -201,6 +210,15 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                                 "openState": dict(open_state),
                                 "source": "ui_ipc_connect",
                             },
+                        ),
+                        to=sid_text,
+                    )
+                    file_tabs = await build_file_tabs_projection(project)
+                    await ns.emit(
+                        UI_IPC_RPC_NOTIFICATION_EVENT,
+                        _encode_ui_ipc_notification(
+                            UI_IPC_RPC_NOTIFICATION_FILE_TABS_DECORATIONS_CHANGED,
+                            file_tabs,
                         ),
                         to=sid_text,
                     )

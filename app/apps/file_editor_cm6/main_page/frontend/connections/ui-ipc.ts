@@ -318,6 +318,8 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.openStateChanged) {
             dispatchWindowCustomEvent('cm6:open-state-changed', params);
             dispatchWindowCustomEvent('cm6:active-file-changed', activeFilePayloadFromOpenState(params));
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.fileTabsDecorationsChanged) {
+            dispatchWindowCustomEvent('cm6:file-tabs-decorations-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitching) {
             dispatchWindowCustomEvent('cm6:project-switching', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.projectSwitched) {

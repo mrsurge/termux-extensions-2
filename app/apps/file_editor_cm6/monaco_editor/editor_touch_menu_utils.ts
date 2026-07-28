@@ -1,3 +1,8 @@
+import {
+  dispatchMobileEditorKey,
+  isMobileUserAgent,
+} from './editor_mobile_special_keys_utils.ts';
+
 interface MentionPayload {
   path: string;
   lineNo?: number;
@@ -83,7 +88,38 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
     if (!dom) return;
     const hasUi = !!dom.querySelector('.monaco-editor-touch-selections');
     if (!hasUi) {
+      const mobile = isMobileUserAgent(window.navigator);
       lib.editorTouchSelectionHelp(target, {
+        mobile,
+        leadingTools: mobile
+          ? ({ openMenu }) => [
+              {
+                name: 'tab left',
+                innerHTML: '<span class="icon" aria-hidden="true">\u21e4</span>',
+                action: () => {
+                  dispatchMobileEditorKey(target, {
+                    key: 'Tab',
+                    code: 'Tab',
+                    keyCode: 9,
+                    shiftKey: true,
+                  }, window, { useStickyModifiers: false });
+                  openMenu();
+                },
+              },
+              {
+                name: 'tab right',
+                innerHTML: '<span class="icon" aria-hidden="true">\u21e5</span>',
+                action: () => {
+                  dispatchMobileEditorKey(target, {
+                    key: 'Tab',
+                    code: 'Tab',
+                    keyCode: 9,
+                  }, window, { useStickyModifiers: false });
+                  openMenu();
+                },
+              },
+            ]
+          : undefined,
         navigationTools: deps.inspectCode
           ? ({ closeMenu }) => [
               {

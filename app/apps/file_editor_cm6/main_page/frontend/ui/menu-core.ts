@@ -6,7 +6,6 @@
  *   menuEditDD: HTMLElement,
  *   menuEditorDD: HTMLElement,
  *   menuViewDD: HTMLElement,
- *   recentFilesDD: HTMLElement,
  *   getAgentShortcutLoadDD: () => HTMLElement | null,
  *   getAgentShortcutLoadBtn: () => HTMLElement | null,
  *   getBranchMenuHandle: () => any,
@@ -14,7 +13,6 @@
  *   menuEditBtn: HTMLElement,
  *   menuEditorBtn: HTMLElement,
  *   menuViewBtn: HTMLElement,
- *   recentFilesBtn: HTMLElement,
  *   runActiveBtn: HTMLElement,
  *   runCurrentFile: () => void,
  * }} deps
@@ -25,7 +23,6 @@ export function createMenuCoreController(deps: any) {
     deps.menuEditDD.classList.remove('show');
     deps.menuEditorDD.classList.remove('show');
     deps.menuViewDD.classList.remove('show');
-    deps.recentFilesDD.classList.remove('show');
     const agentShortcutLoadDD = deps.getAgentShortcutLoadDD();
     if (agentShortcutLoadDD) agentShortcutLoadDD.classList.remove('show');
     const agentShortcutLoadBtn = deps.getAgentShortcutLoadBtn();
@@ -51,7 +48,7 @@ export function createMenuCoreController(deps: any) {
 
   function installPrimaryMenuButtons() {
     const closeOthers = (except: HTMLElement) => {
-      [deps.menuFileDD, deps.menuEditDD, deps.menuEditorDD, deps.menuViewDD, deps.recentFilesDD].forEach((dd) => {
+      [deps.menuFileDD, deps.menuEditDD, deps.menuEditorDD, deps.menuViewDD].forEach((dd) => {
         if (dd !== except) dd.classList.remove('show');
       });
       const branchMenuHandle = deps.getBranchMenuHandle();
@@ -62,7 +59,6 @@ export function createMenuCoreController(deps: any) {
     deps.menuEditBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.menuEditDD.classList.toggle('show'); if (open) closeOthers(deps.menuEditDD); });
     deps.menuEditorBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.menuEditorDD.classList.toggle('show'); if (open) closeOthers(deps.menuEditorDD); });
     deps.menuViewBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.menuViewDD.classList.toggle('show'); if (open) closeOthers(deps.menuViewDD); });
-    deps.recentFilesBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.recentFilesDD.classList.toggle('show'); if (open) closeOthers(deps.recentFilesDD); });
     deps.runActiveBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); deps.runCurrentFile(); });
     document.addEventListener('click', () => closeAllMenus());
   }

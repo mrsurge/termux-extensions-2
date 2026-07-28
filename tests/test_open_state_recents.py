@@ -8,6 +8,7 @@ from unittest.mock import patch
 from app.apps.file_editor_cm6 import project_sidecar
 from app.apps.file_editor_cm6.open_state_backend import (
     read_sidecar_open_state,
+    remove_sidecar_recent_file,
     write_sidecar_open_file,
 )
 
@@ -51,6 +52,44 @@ class OpenStateRecentsTests(unittest.TestCase):
                     entry for entry in replay["recents"] if entry["path"] == str(first)
                 )
                 self.assertFalse(missing["exists"])
+
+    def test_remove_recent_file_clears_active_and_bumps_revision_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            sidecars = root / "sidecars"
+            project.mkdir()
+            first = project / "first.py"
+            second = project / "second.rs"
+            first.write_text("first\n", encoding="utf-8")
+            second.write_text("second\n", encoding="utf-8")
+
+            with patch.object(project_sidecar, "_sidecar_root", return_value=sidecars):
+                write_sidecar_open_file(
+                    str(project),
+                    str(first),
+                    require_existing_sidecar=False,
+                )
+                before = write_sidecar_open_file(str(project), str(second))
+                removed, after = remove_sidecar_recent_file(
+                    str(project),
+                    str(second),
+                )
+
+                self.assertTrue(removed)
+                self.assertIsNone(after["openFile"])
+                self.assertEqual(after["revision"], before["revision"] + 1)
+                self.assertEqual(
+                    [entry["path"] for entry in after["recents"]],
+                    [str(first)],
+                )
+
+                removed_again, unchanged = remove_sidecar_recent_file(
+                    str(project),
+                    str(second),
+                )
+                self.assertFalse(removed_again)
+                self.assertEqual(unchanged["revision"], after["revision"])
 
 
 if __name__ == "__main__":

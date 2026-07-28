@@ -5,6 +5,11 @@ import {
   SOCKET_IO_PATHS,
   fileEditorSocketQuery,
 } from '../../src/rpc/socketio-topology.ts';
+import { clampTerminalDrawerHeight } from './ui/drawer-sizing.ts';
+import {
+  bindTerminalSpecialKeyTarget,
+  publishTerminalSpecialKeyFocus,
+} from '../../src/mobile-input/terminal-special-key-bridge.ts';
 
 /**
  * Terminal drawer for the code editor.
@@ -742,12 +747,14 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     const textarea = getTermTextarea(currentTerm);
     if (!textarea || !currentTerm) return;
     const handleFocus = () => {
+      publishTerminalSpecialKeyFocus(window, true);
       emitTerminalImeIntent(true, 'textarea_focus');
       void bindDrawerVendoredCtrlHandler(currentTerm).catch((err) => {
         console.warn('Failed to rebind vendored ctrl helper:', err);
       });
     };
     const handleBlur = () => {
+      publishTerminalSpecialKeyFocus(window, false);
       emitTerminalImeIntent(false, 'textarea_blur');
     };
     textarea.addEventListener('focus', handleFocus, true);
@@ -757,6 +764,14 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       textarea.removeEventListener('blur', handleBlur, true);
     };
   }
+
+  const disposeTerminalSpecialKeyTarget = bindTerminalSpecialKeyTarget(
+    window,
+    () => isOpen ? getTermTextarea(term) : null,
+  );
+  window.addEventListener('pagehide', disposeTerminalSpecialKeyTarget, {
+    once: true,
+  });
 
   function setDrawerHelperFocusActive(active: boolean): void {
     const runtimeWindow = getRuntimeWindow();
@@ -1276,6 +1291,7 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     setDrawerCollapsedState(true);
     setTerminalResizeHandleActive(true);
     isOpen = false;
+    publishTerminalSpecialKeyFocus(window, false);
     emitTerminalImeIntent(false, 'drawer_close');
     setDrawerHelperFocusActive(false);
     startupSizing = false;
@@ -1350,8 +1366,14 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
     // Update button icon
     if (fullscreenBtn) {
       fullscreenBtn.textContent = isFullscreen ? '⛶' : '⛶';
-      fullscreenBtn.title = isFullscreen ? 'Exit fullscreen' : 'Toggle fullscreen';
+      fullscreenBtn.title = isFullscreen ? 'Exit drawer fullscreen' : 'Toggle drawer fullscreen';
+      fullscreenBtn.setAttribute(
+        'aria-label',
+        isFullscreen ? 'Exit drawer fullscreen' : 'Toggle drawer fullscreen',
+      );
     }
+
+    window.dispatchEvent(new Event('resize'));
     
     // Refit terminal after resize
     if (fitAddon && isOpen) {
@@ -1388,7 +1410,14 @@ export function createTerminalDrawer(options: TerminalDrawerOptions = {}): Termi
       if (!isResizing) return;
       
       const deltaY = startY - e.clientY;
-      const newHeight = Math.max(100, Math.min(window.innerHeight - 40, startHeight + deltaY));
+      const mobileLayout = document.querySelector('.fe-root')
+        ?.classList.contains('layout-mobile') === true;
+      const newHeight = clampTerminalDrawerHeight(
+        startHeight + deltaY,
+        100,
+        mobileLayout,
+        window.innerHeight - 40,
+      );
       
       drawer.style.height = `${newHeight}px`;
       

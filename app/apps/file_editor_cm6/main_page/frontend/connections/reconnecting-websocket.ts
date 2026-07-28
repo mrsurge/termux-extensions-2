@@ -37,7 +37,7 @@ interface ReconnectingWebSocketOptions {
   protocols?: string | string[];
 }
 
-type SendableData = string | ArrayBufferLike | Blob | ArrayBufferView;
+type SendableData = Parameters<WebSocket['send']>[0];
 
 export class ReconnectingWebSocket {
   readonly url: string;
