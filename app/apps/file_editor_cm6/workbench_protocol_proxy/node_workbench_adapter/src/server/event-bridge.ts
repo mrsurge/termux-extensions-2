@@ -49,6 +49,7 @@ export interface DiagnosticsUpdate {
 
 const BACKEND_PIPE_EVENT_TYPES = new Set([
   "adapter/sessionReset",
+  "document/activeChanged",
   "workspace/switched",
   "watcher/enospc",
   "watcher/fileChanges",

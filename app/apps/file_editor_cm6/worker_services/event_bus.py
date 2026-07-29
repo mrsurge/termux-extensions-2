@@ -13,6 +13,7 @@ from typing import Literal, TypedDict, cast
 logger = logging.getLogger(__name__)
 
 EventType = Literal[
+    "AdapterActiveDocumentChanged",
     "AdapterSessionReset",
     "AdapterStateChanged",
     "AdapterWorkspaceReady",
@@ -180,7 +181,7 @@ def publish_threadsafe(event: WorkerEvent) -> bool:
         if _metrics_enabled:
             _metrics_record_enqueued(event, queue.qsize())
 
-    loop.call_soon_threadsafe(_enqueue)
+    _ = loop.call_soon_threadsafe(_enqueue)
     return True
 
 

@@ -136,8 +136,9 @@ def _build_projection_sync(
     git_statuses: dict[str, str] | None,
 ) -> FileTabsDecorationProjection:
     normalized_project = _normalized_path(project)
-    sidecar = ProjectSidecar.load_or_create(normalized_project)
-    sidecar.reload()
+    # This projection runs in asyncio.to_thread(). Use an isolated snapshot so
+    # a background reload cannot replace the shared sidecar instance mid-write.
+    sidecar = ProjectSidecar(normalized_project)
     resolved_drafts = (
         set(draft_paths)
         if draft_paths is not None

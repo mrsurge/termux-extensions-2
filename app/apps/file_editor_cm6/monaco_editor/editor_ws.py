@@ -30,6 +30,9 @@ from .editor_open_backend import (
     emit_editor_open_from_backend as _emit_editor_open_from_backend_impl,
 )
 from .editor_backend_services.contracts import RuntimeMeta
+from .editor_backend_services.document_materialization_service import (
+    materialize_document_payload,
+)
 from .editor_save_backend import resolve_editor_save_snapshot_response
 from .editor_rpc_contract import (
     EDITOR_RPC_NOTIFICATION_AGENT_EDITS_CHANGED,
@@ -738,34 +741,16 @@ def _read_file_payload(project: str, abs_path: str) -> EditorOpenPayload:
         payload["scroll_line"] = float(scroll_line)
 
     cached = _history_store.get_cached_document(project, abs_path)
-    if cached and cached.get("unsaved"):
-        cached_content = cached.get("content", "")
-        cached_base_sha = cached.get("base_sha256")
-        cached_content_sha = cached.get("content_sha256")
-        payload["has_draft"] = True
-        payload["content"] = cached_content if isinstance(cached_content, str) else ""
-        if isinstance(cached_base_sha, str):
-            payload["base_sha256"] = cached_base_sha
-        if isinstance(cached_content_sha, str):
-            payload["content_sha256"] = cached_content_sha
-        payload["state"] = "mid_session"
-        payload["unsaved"] = True
-        payload["reason"] = "restore"
-        return payload
-
-    try:
-        content_bytes = Path(abs_path).read_bytes()
-        content = content_bytes.decode("utf-8", errors="replace")
-    except Exception:
-        content = ""
-    sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    payload["has_draft"] = False
-    payload["content"] = content
-    payload["base_sha256"] = sha256
-    payload["content_sha256"] = sha256
-    payload["state"] = "clean"
-    payload["unsaved"] = False
-    payload["reason"] = "disk"
+    materialized = materialize_document_payload(abs_path, cached)
+    payload["content"] = materialized["content"]
+    payload["has_draft"] = materialized["has_draft"]
+    payload["state"] = materialized["state"]
+    payload["unsaved"] = materialized["unsaved"]
+    payload["reason"] = materialized["reason"]
+    if "base_sha256" in materialized:
+        payload["base_sha256"] = materialized["base_sha256"]
+    if "content_sha256" in materialized:
+        payload["content_sha256"] = materialized["content_sha256"]
     return payload
 
 

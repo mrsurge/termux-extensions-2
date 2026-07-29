@@ -50,6 +50,85 @@ function createEditorState() {
   };
 }
 
+test("goes directly to the first definition without replacing the drawer projection", async () => {
+  const { createEditorCodeInspectorRuntime } = await importTypeScript(
+    "monaco_editor/editor_code_inspector_runtime.ts",
+  );
+  const state = createEditorState();
+  const calls = [];
+  const opens = [];
+  const projections = [];
+  const notifications = [];
+  const runtime = createEditorCodeInspectorRuntime({
+    getEditor: () => state.editor,
+    getCurrentPath: () => "/workspace/main.rs",
+    editorWorkbenchCall: async (method, params) => {
+      calls.push({ method, params });
+      return {
+        ok: true,
+        result: [{
+          path: "/workspace/definition.rs",
+          uri: "file:///workspace/definition.rs",
+          selectionRange: {
+            startLineNumber: 17,
+            startColumn: 9,
+            endLineNumber: 17,
+            endColumn: 22,
+          },
+        }],
+      };
+    },
+    publishProjection: (projection) => {
+      projections.push(structuredClone(projection));
+      return true;
+    },
+    replaceHighlights() {},
+    openLocation: async (location) => {
+      opens.push(structuredClone(location));
+      return { ok: true };
+    },
+    notify: (message) => {
+      notifications.push(message);
+      return true;
+    },
+    logError() {},
+  });
+
+  runtime.goToDefinition();
+  await settle();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "definition");
+  assert.deepEqual(calls[0].params, {
+    path: "/workspace/main.rs",
+    languageId: "rust",
+    lineNumber: 8,
+    column: 5,
+  });
+  assert.equal(projections.length, 0);
+  assert.equal(notifications.length, 0);
+  assert.equal(opens.length, 1);
+  assert.deepEqual(
+    {
+      path: opens[0].path,
+      line: opens[0].line,
+      column: opens[0].column,
+      focus: opens[0].focus,
+      scroll_y: opens[0].scroll_y,
+      reason: opens[0].reason,
+    },
+    {
+      path: "/workspace/definition.rs",
+      line: 17,
+      column: 9,
+      focus: false,
+      scroll_y: "center",
+      reason: "code_inspector_definition",
+    },
+  );
+  assert.match(opens[0].request_id, /^definition_\d+_1$/);
+});
+
 test("publishes loading then grouped reference results", async () => {
   const { createEditorCodeInspectorRuntime } = await importTypeScript(
     "monaco_editor/editor_code_inspector_runtime.ts",
@@ -530,12 +609,16 @@ test("styles the Code Inspector collapse control with the drawer controls", asyn
 });
 
 test("uses no-focus result jumps and tail-preserving path markup", async () => {
-  const [source, template] = await Promise.all([
+  const [source, template, touchMenuSource] = await Promise.all([
     readFile(
       path.join(appRoot, "main_page/frontend/ui/code-inspector.ts"),
       "utf8",
     ),
     readFile(path.join(appRoot, "template.html"), "utf8"),
+    readFile(
+      path.join(appRoot, "monaco_editor/editor_touch_menu_utils.ts"),
+      "utf8",
+    ),
   ]);
 
   assert.match(source, /focus:\s*false,\s*scrollY:\s*'center'/);
@@ -544,4 +627,6 @@ test("uses no-focus result jumps and tail-preserving path markup", async () => {
   assert.match(template, /\.code-inspector-direction\s*\{[^}]*display:\s*inline-flex/s);
   assert.match(template, /id="code-inspector-direction"[^>]*hidden/);
   assert.match(source, /directionButton\.hidden = mode !== 'callHierarchy'/);
+  assert.match(touchMenuSource, /name:\s*'go to definition'/);
+  assert.match(touchMenuSource, /stroke="#4ec97a"/);
 });

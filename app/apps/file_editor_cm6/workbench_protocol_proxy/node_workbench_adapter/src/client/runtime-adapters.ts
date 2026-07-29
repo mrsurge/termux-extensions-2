@@ -14,6 +14,7 @@ import type { InlineCompletionRuntime } from "../extensions/intelligence/inline-
 import type { SemanticRuntime } from "../extensions/intelligence/semantic-tokens";
 import type { StructureRuntime } from "../extensions/intelligence/structure";
 import type { LifecycleRuntime } from "../workspace/lifecycle";
+import type { WorkbenchDocumentRegistry } from "../workspace/document-registry";
 
 export interface RuntimeBuilderState {
   connected: boolean;
@@ -214,11 +215,7 @@ export interface WorkspaceLifecycleRuntimeDeps {
   setActiveTab: (value: unknown) => void;
   nextModelNumber: number;
   setNextModelNumber: (value: number) => void;
-  docVersions: Map<string, number>;
-  docLineCount: Map<string, number>;
-  docCharCount: Map<string, number>;
-  docLastLineLength: Map<string, number>;
-  docOpenGeneration: Map<string, number | string | null>;
+  documentRegistry: WorkbenchDocumentRegistry;
   mgmtIpc: LifecycleRuntime["watcher"]["mgmtIpc"];
   setMgmtIpc: (value: LifecycleRuntime["watcher"]["mgmtIpc"]) => void;
   fsWatcherSub: LifecycleRuntime["watcher"]["fsWatcherSub"];
@@ -236,13 +233,6 @@ export interface WorkspaceLifecycleRuntimeDeps {
   ) => string;
   activateLanguage: (languageId: string) => Promise<unknown>;
   sendExt: (rpcId: number, method: string, args: unknown[], cancellable?: boolean) => unknown;
-  sendExtAwaitTerminalReply: (
-    rpcId: number,
-    method: string,
-    args: unknown[],
-    cancellable?: boolean,
-    timeoutMs?: number,
-  ) => { req: number; promise: Promise<unknown> };
   spanTrace: <T>(name: string, fn: () => T) => T;
   spanTraceAsync: <T>(name: string, fn: () => Promise<T>) => Promise<T>;
   logMetrics: (type: string, data: Record<string, unknown>) => void;
@@ -412,8 +402,7 @@ export interface DocumentContentRuntimeDeps {
   authority: string;
   defaultRemoteAuthority: string;
   extHostDocumentContentProvidersRpcId: number;
-  extHostDocumentsAndEditorsRpcId: number;
-  backgroundDocuments: Set<string>;
+  documentRegistry: WorkbenchDocumentRegistry;
   readTextFile: (path: string) => Promise<string>;
   readBinaryFile: (path: string) => Promise<Uint8Array>;
   statPath: (path: string) => Promise<LocalFsStatsLike>;
@@ -591,11 +580,7 @@ export function createWorkspaceLifecycleRuntime(deps: WorkspaceLifecycleRuntimeD
       set activeTab(value: unknown) { currentActiveTab = value; deps.setActiveTab(value); },
       get nextModelNumber() { return currentNextModelNumber; },
       set nextModelNumber(value: number) { currentNextModelNumber = value; deps.setNextModelNumber(value); },
-      docVersions: deps.docVersions,
-      docLineCount: deps.docLineCount,
-      docCharCount: deps.docCharCount,
-      docLastLineLength: deps.docLastLineLength,
-      docOpenGeneration: deps.docOpenGeneration,
+      documentRegistry: deps.documentRegistry,
     },
     watcher: {
       get mgmtIpc() { return currentMgmtIpc; },
@@ -617,8 +602,6 @@ export function createWorkspaceLifecycleRuntime(deps: WorkspaceLifecycleRuntimeD
     activateLanguage: (languageId: string) =>
       deps.activateLanguage(languageId),
     sendExt: (rpcId: number, method: string, args: unknown[], cancellable = false) => deps.sendExt(rpcId, method, args, cancellable),
-    sendExtAwaitTerminalReply: (rpcId: number, method: string, args: unknown[], cancellable = false, timeoutMs = 3000) =>
-      deps.sendExtAwaitTerminalReply(rpcId, method, args, cancellable, timeoutMs),
     spanTrace: <T>(name: string, fn: () => T) => deps.spanTrace(name, fn),
     spanTraceAsync: <T>(name: string, fn: () => Promise<T>) => deps.spanTraceAsync(name, fn),
     logMetrics: (type: string, data: Record<string, unknown>) => deps.logMetrics(type, data),
@@ -846,9 +829,8 @@ export function createDocumentContentRuntime(deps: DocumentContentRuntimeDeps): 
     defaultAuthority: deps.defaultRemoteAuthority,
     extRpcIds: {
       ExtHostDocumentContentProviders: deps.extHostDocumentContentProvidersRpcId,
-      ExtHostDocumentsAndEditors: deps.extHostDocumentsAndEditorsRpcId,
     },
-    backgroundDocuments: deps.backgroundDocuments,
+    documentRegistry: deps.documentRegistry,
     readTextFile: (path: string) => deps.readTextFile(path),
     readBinaryFile: (path: string) => deps.readBinaryFile(path),
     statPath: (path: string) => deps.statPath(path),

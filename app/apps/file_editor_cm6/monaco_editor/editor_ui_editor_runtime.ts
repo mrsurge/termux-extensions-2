@@ -16,6 +16,7 @@ interface EditorUiEditorRuntimeDeps {
   getGitDiskModel(): unknown;
   getCurrentPath(): string | null;
   sendEditorMentionRequest(payload: Record<string, unknown>): boolean;
+  goToDefinition?(): void;
   inspectCode?(mode: CodeInspectorMode): void;
   updateDebug(extra?: string): void;
 }
@@ -119,6 +120,7 @@ export function createEditorUiEditorRuntime(deps: EditorUiEditorRuntimeDeps) {
       getDiffEditor: () => deps.getDiffEditor() as MonacoRuntimeDiffEditorLike | null,
       getCurrentPath: deps.getCurrentPath,
       sendEditorMentionRequest: deps.sendEditorMentionRequest,
+      goToDefinition: deps.goToDefinition,
       inspectCode: (mode) => deps.inspectCode?.(mode),
       updateDebug: deps.updateDebug,
     });

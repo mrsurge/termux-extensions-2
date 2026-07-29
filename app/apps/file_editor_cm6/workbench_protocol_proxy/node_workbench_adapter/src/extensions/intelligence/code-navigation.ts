@@ -15,7 +15,7 @@ export interface CodeNavigationRuntime {
   findAllProviderHandles: (
     kind: Extract<
       ProviderKind,
-      "references" | "implementations" | "callHierarchy"
+      "definitions" | "references" | "implementations" | "callHierarchy"
     >,
     document: {
       languageId: string;
@@ -394,7 +394,7 @@ function providerDocument(
 
 async function findProviders(
   runtime: CodeNavigationRuntime,
-  kind: "references" | "implementations" | "callHierarchy",
+  kind: "definitions" | "references" | "implementations" | "callHierarchy",
   request: NavigationRequest,
 ): Promise<number[]> {
   const document = providerDocument(runtime, request);
@@ -412,9 +412,13 @@ async function provideLocations(
   runtime: CodeNavigationRuntime,
   params: unknown,
   config: {
-    kind: "references" | "implementations";
-    method: "$provideReferences" | "$provideImplementation";
+    kind: "definitions" | "references" | "implementations";
+    method:
+      | "$provideDefinition"
+      | "$provideReferences"
+      | "$provideImplementation";
     extraArgs: unknown[];
+    includePreviews?: boolean;
   },
 ): Promise<Record<string, unknown>> {
   runtime.ensureConnected();
@@ -452,10 +456,9 @@ async function provideLocations(
     }),
   );
   const merged = mergeLocations(replies);
-  const previewCount = await attachLocationPreviews(
-    runtime,
-    merged.locations,
-  );
+  const previewCount = config.includePreviews === false
+    ? 0
+    : await attachLocationPreviews(runtime, merged.locations);
   runtime.log(
     `[code-navigation] ${config.kind} path=${request.path} providers=${handles.length} locations=${merged.locations.length} previews=${previewCount}`,
   );
@@ -467,6 +470,18 @@ async function provideLocations(
     result: merged.locations,
     providerHandles: handles,
   };
+}
+
+export function provideDefinitions(
+  runtime: CodeNavigationRuntime,
+  params: unknown = {},
+): Promise<Record<string, unknown>> {
+  return provideLocations(runtime, params, {
+    kind: "definitions",
+    method: "$provideDefinition",
+    extraArgs: [],
+    includePreviews: false,
+  });
 }
 
 export function provideReferences(

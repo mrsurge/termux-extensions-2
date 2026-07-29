@@ -79,6 +79,12 @@ export interface WorkbenchLike {
   openFile: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
+  reconcileLogicalDocuments: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown>;
+  hydrateLogicalDocument: (
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
   documentSymbols: (
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
@@ -205,6 +211,7 @@ const LANGUAGE_ACTIVATION_METHODS = new Set([
   "vscode.documentSymbols",
   "vscode.foldingRanges",
   "vscode.hover",
+  "vscode.definition",
   "vscode.references",
   "vscode.implementations",
   "vscode.callHierarchy.prepare",
@@ -497,6 +504,18 @@ export async function dispatchJsonRpcRequest(
     }
   }
 
+  if (method === "vscode.logicalDocuments.reconcile") {
+    return success(id, runtime.wb.reconcileLogicalDocuments(params));
+  }
+
+  if (method === "vscode.logicalDocuments.hydrate") {
+    try {
+      return success(id, await runtime.wb.hydrateLogicalDocument(params));
+    } catch (error) {
+      return failure(id, -32000, error);
+    }
+  }
+
   if (method === "vscode.openFile") {
     const resolvedPath = runtime.normalizePathParam(params);
     const requestId = stringValue(params.requestId);
@@ -597,6 +616,26 @@ export async function dispatchJsonRpcRequest(
     return success(
       id,
       await runtime.wb.references({
+        path: resolvedPath,
+        authority,
+        languageId: params.languageId,
+        lineNumber: params.lineNumber,
+        column: params.column,
+        timeoutMs: params.timeoutMs,
+      }),
+    );
+  }
+
+  if (method === "vscode.definition") {
+    const resolvedPath = runtime.normalizePathParam(params);
+    if (!resolvedPath) return missingPathError(id);
+    const authority = runtime.normalizeAuthorityParam(
+      params,
+      runtime.defaultRemoteAuthority,
+    );
+    return success(
+      id,
+      await runtime.wb.definitions({
         path: resolvedPath,
         authority,
         languageId: params.languageId,

@@ -59,6 +59,7 @@ interface ExplorerNotificationHandlerDeps {
   expandToFile(rel: string): Promise<void>;
   expandToPath(rel: string): Promise<void>;
   applyActiveFileMarker(): void;
+  scrollToActiveFile(options?: { silent?: boolean }): Promise<void>;
   setExplorerStickyHeadersEnabled(next: boolean | null): void;
   syncExplorerPrefsUI(): void;
   applyExplorerStickyScopesPreference(): void;
@@ -186,17 +187,10 @@ function applyBackendOpenStateProjection(
   const nextRel = openState
     ? getStringValue(openState.openFileRel) || getStringValue(openState.rel)
     : null;
+  const previousRel = deps.getActiveFileRel();
   deps.setActiveFileRel(nextRel);
-  if (nextRel) {
-    Promise.resolve(deps.expandToFile(nextRel))
-      .then(() => {
-        try {
-          deps.applyActiveFileMarker();
-        } catch {
-          // Ignore marker races after project reset.
-        }
-      })
-      .catch(() => {});
+  if (nextRel && nextRel !== previousRel) {
+    void deps.scrollToActiveFile({ silent: true });
   } else {
     try {
       deps.applyActiveFileMarker();
@@ -291,17 +285,10 @@ export function createExplorerNotificationHandler(
       }
       case EXPLORER_RPC_NOTIFICATIONS.activeFileUpdated: {
         const nextRel = getStringValue(payload.rel);
+        const previousRel = deps.getActiveFileRel();
         deps.setActiveFileRel(nextRel);
-        if (nextRel) {
-          Promise.resolve(deps.expandToFile(nextRel))
-            .then(() => {
-              try {
-                deps.applyActiveFileMarker();
-              } catch {
-                // Ignore marker races during open.
-              }
-            })
-            .catch(() => {});
+        if (nextRel && nextRel !== previousRel) {
+          void deps.scrollToActiveFile({ silent: true });
         } else {
           try {
             deps.applyActiveFileMarker();

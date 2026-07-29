@@ -263,22 +263,6 @@ export function createExplorerReviewResultsRenderer(
       };
       header.appendChild(title);
 
-      const meta = document.createElement('div');
-      meta.className = 'fe-search-change-meta';
-
-      if (entry.has_draft) {
-        const badge = document.createElement('span');
-        badge.className = 'fe-badge fe-badge-draft';
-        badge.textContent = 'Draft';
-        badge.style.background = '#facc15';
-        badge.style.color = '#000';
-        badge.style.padding = '2px 6px';
-        badge.style.borderRadius = '4px';
-        badge.style.fontSize = '0.75rem';
-        meta.appendChild(badge);
-      }
-
-      header.appendChild(meta);
       group.appendChild(header);
 
       const hunks = Array.isArray(entry.hunks) ? entry.hunks : [];

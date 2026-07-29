@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CallHierarchySessionStore,
   prepareCallHierarchy,
+  provideDefinitions,
   provideImplementations,
   provideIncomingCalls,
   provideOutgoingCalls,
@@ -11,6 +12,9 @@ import {
   releaseCallHierarchy,
 } from "../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/intelligence/code-navigation.mjs";
 import { ProviderRegistry } from "../workbench_protocol_proxy/node_workbench_adapter/dist/extensions/provider-registry.mjs";
+import {
+  dispatchJsonRpcRequest,
+} from "../workbench_protocol_proxy/node_workbench_adapter/dist/server/request-dispatch.mjs";
 
 function location(path, line, column) {
   return {
@@ -64,6 +68,13 @@ function createRuntime(
 test("registers exact navigation methods and filters document selectors", () => {
   const registry = new ProviderRegistry();
   assert.equal(
+    registry.registerFromRequest("$registerDefinitionSupport", [
+      20,
+      [{ language: "rust", scheme: "file", pattern: "**/*.rs" }],
+    ]).handled,
+    true,
+  );
+  assert.equal(
     registry.registerFromRequest("$registerReferenceSupport", [
       21,
       [{ language: "rust", scheme: "file", pattern: "**/*.rs" }],
@@ -94,6 +105,15 @@ test("registers exact navigation methods and filters document selectors", () => 
     [{ language: "rust", scheme: "file", isBuiltin: true }],
   ]);
 
+  assert.deepEqual(
+    registry.findAllProviderHandlesForDocument("definitions", {
+      languageId: "rust",
+      scheme: "file",
+      authority: "",
+      path: "/workspace/src/main.rs",
+    }),
+    [20],
+  );
   assert.deepEqual(
     registry.findAllProviderHandlesForDocument("references", {
       languageId: "rust",
@@ -130,6 +150,99 @@ test("registers exact navigation methods and filters document selectors", () => 
     }),
     [21, 26],
   );
+});
+
+test("resolves definitions without reading source previews", async () => {
+  const calls = [];
+  const reads = [];
+  const runtime = createRuntime([
+    {
+      type: 9,
+      result: [location("/workspace/z.rs", 14, 3)],
+    },
+    {
+      type: 9,
+      result: [location("/workspace/a.rs", 2, 7)],
+    },
+  ], calls, async (filePath) => {
+    reads.push(filePath);
+    return "unused";
+  });
+
+  const result = await provideDefinitions(runtime, {
+    path: "/workspace/main.rs",
+    languageId: "rust",
+    lineNumber: 4,
+    column: 3,
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    result.result.map((entry) => [
+      entry.path,
+      entry.range.startLineNumber,
+      entry.range.startColumn,
+    ]),
+    [
+      ["/workspace/a.rs", 2, 7],
+      ["/workspace/z.rs", 14, 3],
+    ],
+  );
+  assert.deepEqual(reads, []);
+  for (const call of calls) {
+    assert.equal(call.method, "$provideDefinition");
+    assert.equal(call.cancellable, true);
+    assert.equal(call.args.length, 3);
+  }
+});
+
+test("dispatches definition requests after activating the document language", async () => {
+  const calls = [];
+  const runtime = {
+    defaultRemoteAuthority: "remote",
+    normalizePathParam: (params) => params.path || "",
+    normalizeAuthorityParam: (params, fallback) =>
+      params.authority || fallback,
+    wb: {
+      resolveLanguageId: (_path, _text, languageId) =>
+        languageId || "rust",
+      async activateLanguage(languageId) {
+        calls.push(["activate", languageId]);
+      },
+      async definitions(params) {
+        calls.push(["definitions", params]);
+        return { ok: true, result: [] };
+      },
+    },
+  };
+
+  const response = await dispatchJsonRpcRequest(runtime, {
+    id: 55,
+    method: "vscode.definition",
+    params: {
+      path: "/workspace/main.rs",
+      languageId: "rust",
+      lineNumber: 4,
+      column: 3,
+    },
+  });
+
+  assert.deepEqual(response, {
+    jsonrpc: "2.0",
+    id: 55,
+    result: { ok: true, result: [] },
+  });
+  assert.deepEqual(calls, [
+    ["activate", "rust"],
+    ["definitions", {
+      path: "/workspace/main.rs",
+      authority: "remote",
+      languageId: "rust",
+      lineNumber: 4,
+      column: 3,
+      timeoutMs: undefined,
+    }],
+  ]);
 });
 
 test("matching exclusive document selectors suppress ordinary providers", () => {

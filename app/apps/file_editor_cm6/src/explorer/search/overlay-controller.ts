@@ -74,7 +74,7 @@ const SEARCH_MODE_OPTIONS: readonly SearchModeOption[] = [
   { id: "name", label: "By name" },
   { id: "content", label: "By contents" },
   { id: "changes", label: "By changes" },
-  { id: "review", label: "Review edits" },
+  { id: "review", label: "Drafts" },
   { id: "diagnostics", label: "Diagnostics" },
 ];
 

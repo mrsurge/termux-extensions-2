@@ -23,6 +23,7 @@ interface FileTabsControllerDeps {
   openFile: (path: string) => Promise<unknown>;
   closeRecentFile: (path: string) => Promise<unknown>;
   resetToNewFile: () => void;
+  onActiveDraftChanged?: (path: string, hasDraft: boolean) => void;
 }
 
 interface FileTabsOpenState {
@@ -97,15 +98,27 @@ function recentFileEntry(value: unknown): RecentFileEntry | null {
 
 function normalizedOpenState(state: unknown): FileTabsOpenState {
   const record = isRecord(state) ? state : {};
-  const recents = Array.isArray(record.recents)
-    ? record.recents
+  const nestedOpenState = isRecord(record.openState) ? record.openState : null;
+  const projection = nestedOpenState || record;
+  const recents = Array.isArray(projection.recents)
+    ? projection.recents
       .map((entry) => recentFileEntry(entry))
       .filter((entry): entry is RecentFileEntry => entry !== null)
       .slice(0, 12)
     : [];
   return {
-    projectPath: typeof record.projectPath === 'string' ? record.projectPath : '',
-    openFile: typeof record.openFile === 'string' ? record.openFile : '',
+    projectPath: typeof projection.projectPath === 'string'
+      ? projection.projectPath
+      : !nestedOpenState && typeof record.activeProject === 'string'
+        ? record.activeProject
+        : '',
+    openFile: typeof projection.openFile === 'string'
+      ? projection.openFile
+      : !nestedOpenState && typeof record.currentPath === 'string'
+        ? record.currentPath
+        : !nestedOpenState && typeof record.lastFile === 'string'
+          ? record.lastFile
+          : '',
     recents,
   };
 }
@@ -248,6 +261,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
   let pendingClosePath = '';
   let suppressClickPath = '';
   let activeTabRevealFrame: UiFrameHandle | null = null;
+  let projectedDraftKey = '';
 
   function visualEntries(): RecentFileEntry[] {
     const byPath = new Map(recents.map((entry) => [entry.path, entry]));
@@ -281,6 +295,22 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
       ).find((tab) => tab.dataset.path === expectedPath);
       if (activeTab) revealFileTabInViewport(deps.viewport, activeTab);
     });
+  }
+
+  function projectActiveDraftState(): void {
+    if (!activePath) {
+      if (projectedDraftKey) {
+        projectedDraftKey = '';
+        deps.onActiveDraftChanged?.('', false);
+      }
+      return;
+    }
+    const decoration = decorations.get(activePath);
+    if (!decoration) return;
+    const nextKey = `${activePath}\0${decoration.hasDraft ? '1' : '0'}`;
+    if (nextKey === projectedDraftKey) return;
+    projectedDraftKey = nextKey;
+    deps.onActiveDraftChanged?.(activePath, decoration.hasDraft);
   }
 
   async function openEntry(entry: RecentFileEntry): Promise<void> {
@@ -411,6 +441,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     );
     persistOrder(projectPath, order);
     render();
+    projectActiveDraftState();
     scheduleActiveTabReveal();
   }
 
@@ -425,6 +456,7 @@ export function createFileTabsController(deps: FileTabsControllerDeps) {
     }
     decorations = normalizedDecorations(payload);
     render();
+    projectActiveDraftState();
   }
 
   function installReorderAndScroll(): void {

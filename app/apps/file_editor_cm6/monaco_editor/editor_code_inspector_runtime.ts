@@ -55,11 +55,14 @@ interface CodeInspectorRuntimeDeps {
   ): Promise<unknown>;
   publishProjection(projection: CodeInspectorProjection): boolean;
   replaceHighlights(ranges: JsonObject[]): void;
+  openLocation?(location: JsonObject): Promise<unknown>;
+  notify?(message: string): boolean;
   logError(message: string, error: unknown): void;
 }
 
 export interface CodeInspectorRuntime {
   start(mode: CodeInspectorMode): void;
+  goToDefinition(): void;
   handleCommand(params: JsonObject): void;
   reapplyHighlights(): void;
   clearHighlights(): void;
@@ -328,6 +331,7 @@ export function createEditorCodeInspectorRuntime(
   let requestSequence = 0;
   let projection: CodeInspectorProjection | null = null;
   let disposed = false;
+  let definitionRequestSequence = 0;
   const expanding = new Set<string>();
 
   function syncHighlights(): void {
@@ -397,6 +401,97 @@ export function createEditorCodeInspectorRuntime(
       deps.getCurrentPath() === target.path &&
       (model?.getVersionId?.() ?? 0) === target.modelVersion
     );
+  }
+
+  function isDefinitionCurrent(sequence: number, target: JsonObject): boolean {
+    if (disposed || sequence !== definitionRequestSequence) return false;
+    const editor = deps.getEditor();
+    const model = editor?.getModel?.();
+    return (
+      deps.getCurrentPath() === target.path &&
+      (model?.getVersionId?.() ?? 0) === target.modelVersion
+    );
+  }
+
+  function notify(message: string): void {
+    if (deps.notify?.(message) === false) {
+      deps.logError(
+        'Code Inspector notification publish failed',
+        new Error('editor_rpc_disconnected'),
+      );
+    }
+  }
+
+  async function runGoToDefinition(): Promise<void> {
+    const editor = deps.getEditor();
+    const path = deps.getCurrentPath();
+    const position = editor ? targetPosition(editor) : null;
+    if (!editor || !path || !position) return;
+
+    definitionRequestSequence += 1;
+    const sequence = definitionRequestSequence;
+    const target = buildTarget(editor, path, position);
+    try {
+      const reply = resultPayload(await deps.editorWorkbenchCall(
+        'definition',
+        {
+          path,
+          languageId: target.languageId,
+          lineNumber: position.lineNumber,
+          column: position.column,
+        },
+        { timeoutMs: 20000 },
+      ));
+      if (!isDefinitionCurrent(sequence, target)) return;
+      const location = asArray(reply.result)[0];
+      if (!location) {
+        if (reply.ok === false && reply.unsupported !== true) {
+          deps.logError(
+            'Go to Definition request failed',
+            reply.error ?? 'definition_failed',
+          );
+          notify('Go to Definition failed.');
+        } else if (reply.unsupported === true) {
+          notify('No definition provider supports this file.');
+        } else {
+          notify('No definition found.');
+        }
+        return;
+      }
+
+      const destinationPath = asString(location.path);
+      if (!destinationPath) {
+        deps.logError(
+          'Go to Definition returned a location without a path',
+          location,
+        );
+        notify('Definition target has no file path.');
+        return;
+      }
+      if (!deps.openLocation) {
+        deps.logError(
+          'Go to Definition navigation is unavailable',
+          new Error('open_location_unavailable'),
+        );
+        return;
+      }
+      const destination = rangeStart(
+        location.selectionRange ?? location.range,
+      );
+      await deps.openLocation({
+        path: destinationPath,
+        line: destination.line,
+        column: destination.column,
+        focus: false,
+        scroll_y: 'center',
+        reason: 'code_inspector_definition',
+        request_id: `definition_${Date.now()}_${sequence}`,
+      });
+    } catch (error) {
+      if (!isDefinitionCurrent(sequence, target)) return;
+      deps.logError('Go to Definition request failed', error);
+      notify('Go to Definition failed.');
+    }
   }
 
   async function run(mode: CodeInspectorMode): Promise<void> {
@@ -585,6 +680,10 @@ export function createEditorCodeInspectorRuntime(
     void run(mode);
   }
 
+  function goToDefinition(): void {
+    void runGoToDefinition();
+  }
+
   function handleCommand(params: JsonObject): void {
     const retained = projectionFromValue(params.projection);
     if (params.action === 'expand' || params.action === 'direction') {
@@ -622,6 +721,7 @@ export function createEditorCodeInspectorRuntime(
 
   return {
     start,
+    goToDefinition,
     handleCommand,
     reapplyHighlights,
     clearHighlights,

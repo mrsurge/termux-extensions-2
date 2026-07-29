@@ -6,8 +6,7 @@ export interface HostElements {
   editorFrameEl: HTMLElement;
   root: HTMLElement;
   sidebarDrawerEl: HTMLElement;
-  issuesToggleBtn: HTMLButtonElement;
-  issuesBadgesEl: HTMLElement;
+  issuesBadgesEl: HTMLButtonElement;
   statusEl: HTMLElement;
   menuFileBtn: HTMLElement;
   menuFileDD: HTMLElement;
@@ -85,8 +84,7 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     editorFrameEl: requireEl('#editor-frame'),
     root: requireEl('.fe-root'),
     sidebarDrawerEl: requireEl('#agent-drawer'),
-    issuesToggleBtn: requireEl('#fe-issues-toggle') as HTMLButtonElement,
-    issuesBadgesEl: requireEl('#fe-issues-badges'),
+    issuesBadgesEl: requireEl('#fe-issues-badges') as HTMLButtonElement,
     statusEl: requireEl('#fe-status'),
     menuFileBtn: requireEl('#menu-file-btn'),
     menuFileDD: requireEl('#menu-file-dd'),

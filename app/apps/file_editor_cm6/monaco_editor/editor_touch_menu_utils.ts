@@ -19,9 +19,22 @@ interface MentionRequestDeps {
   getDiffEditor?(): MonacoRuntimeDiffEditorLike | null;
   getCurrentPath(): string | null;
   sendEditorMentionRequest(payload: Record<string, unknown>): boolean;
+  goToDefinition?(): void;
   inspectCode?(mode: CodeInspectorMode): void;
   updateDebug(extra?: string): void;
 }
+
+const GO_TO_DEFINITION_ICON = [
+  '<span class="icon" aria-hidden="true">',
+  '<svg viewBox="0 0 24 24" width="20" height="20" fill="none"',
+  ' xmlns="http://www.w3.org/2000/svg">',
+  '<path d="M19 5v6h-6" stroke="#4ec97a" stroke-width="2"',
+  ' stroke-linecap="round" stroke-linejoin="round"/>',
+  '<path d="M18.5 10.5C16.8 7.8 13.8 6 10.5 6',
+  ' 6.4 6 3 9.1 3 13s3.4 7 7.5 7H13" stroke="#4ec97a"',
+  ' stroke-width="2" stroke-linecap="round"/>',
+  '</svg></span>',
+].join('');
 
 function buildMentionPayload(
   editorInstance: MonacoRuntimeEditorLike | null,
@@ -120,8 +133,18 @@ export function ensureTouchSelection(reason: string, deps: MentionRequestDeps): 
               },
             ]
           : undefined,
-        navigationTools: deps.inspectCode
+        navigationTools: deps.inspectCode || deps.goToDefinition
           ? ({ closeMenu }) => [
+              ...(deps.goToDefinition
+                ? [{
+                    name: 'go to definition',
+                    innerHTML: GO_TO_DEFINITION_ICON,
+                    action: () => {
+                      closeMenu();
+                      deps.goToDefinition?.();
+                    },
+                  }]
+                : []),
               {
                 name: 'call hierarchy',
                 innerHTML: '<span class="icon" aria-hidden="true">☎️</span>',

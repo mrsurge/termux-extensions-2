@@ -122,6 +122,7 @@ import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
 import {
   CallHierarchySessionStore,
   prepareCallHierarchy,
+  provideDefinitions,
   provideImplementations,
   provideIncomingCalls,
   provideOutgoingCalls,
@@ -172,6 +173,7 @@ import {
   setupFileWatcher as setupWorkbenchWatcher,
   switchWorkspace as switchWorkbenchWorkspace,
 } from "../workspace/lifecycle.mjs";
+import { WorkbenchDocumentRegistry } from "../workspace/document-registry.mjs";
 import { checkWorkspaceContains } from "../workspace/workspace-contains.mjs";
 
 type WorkbenchEventSink = (payload: Record<string, unknown>) => void;
@@ -238,7 +240,7 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$registerCodeLensesProvider",
   "$registerFoldingRangeProvider",
   "$registerSignatureHelpProvider",
-  "$registerDefinitionProvider",
+  "$registerDefinitionSupport",
   "$registerTypeDefinitionProvider",
   "$registerImplementationSupport",
   "$registerReferenceSupport",
@@ -662,12 +664,7 @@ export class WorkbenchClient {
   _activeEditorId: string | null;
   _activeUriObj: unknown;
   _activeTab: unknown;
-  _backgroundDocuments: Set<string>;
-  _docVersions: Map<string, number>;
-  _docLineCount: Map<string, number>;
-  _docCharCount: Map<string, number>;
-  _docLastLineLength: Map<string, number>;
-  _docOpenGeneration: Map<string, number | string | null>;
+  _documentRegistry: WorkbenchDocumentRegistry;
   _extensions: unknown[];
   _extensionActivity: ExtensionActivityRuntime;
   _extensionActivation: ExtensionActivationRuntime;
@@ -706,12 +703,37 @@ export class WorkbenchClient {
     this._nextModelNumber = 1;
     this._activeEditorId = null; // track current editor for close-before-open
     this._activeUriObj = null; // track current URI object for close-before-open
-    this._backgroundDocuments = new Set(); // uri string -> addedDocuments sent without active editor churn
-    this._docVersions = new Map(); // path -> versionId for didChange tracking
-    this._docLineCount = new Map(); // path -> line count for didChange range
-    this._docCharCount = new Map(); // path -> char count for didChange rangeLength
-    this._docLastLineLength = new Map(); // path -> length of last line (for valid endColumn)
-    this._docOpenGeneration = new Map(); // path -> generation token from open_file flow
+    this._activeTab = null;
+    this._documentRegistry = new WorkbenchDocumentRegistry({
+      extRpcIds: {
+        ExtHostDocumentsAndEditors: _rpcIds.ExtHostDocumentsAndEditors,
+        ExtHostDocuments: _rpcIds.ExtHostDocuments,
+        ExtHostEditorTabs: _rpcIds.ExtHostEditorTabs,
+      },
+      uriToString: (uri) => this._uriObjToStringSafe(uri),
+      sendExt: (rpcId, method, args, cancellable = false) =>
+        this._sendExt(rpcId, method, args, cancellable),
+      sendExtAwaitTerminalReply: (
+        rpcId,
+        method,
+        args,
+        cancellable = false,
+        timeoutMs = 3000,
+      ) =>
+        this._sendExtAwaitTerminalReply(
+          rpcId,
+          method,
+          args,
+          cancellable,
+          timeoutMs,
+        ),
+      uriForPath: (path) => this._uriForPath(path),
+      workspacePath: () => this.state.workspaceFolder,
+      resolveLanguageId: (path, text, requestedLanguageId) =>
+        this.resolveLanguageId(path, text, requestedLanguageId),
+      activateLanguage: (languageId) => this.activateLanguage(languageId),
+      log: (...args) => console.log(...args),
+    });
     this._extensions = []; // sanitized extensions (populated after connect)
     this._languageResolver = new ExtensionLanguageResolver();
     this._extensionActivity = new ExtensionActivityRuntime({
@@ -1025,8 +1047,10 @@ export class WorkbenchClient {
       authority: this._authority,
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       languageIdFromPath: (filePath) => _languageIdFromPath(filePath),
-      getDocumentVersion: (path) => this._docVersions.get(path) ?? null,
-      getOpenGeneration: (path) => this._docOpenGeneration.get(path),
+      getDocumentVersion: (path) =>
+        this._documentRegistry.getVersion(path),
+      getOpenGeneration: (path) =>
+        this._documentRegistry.getOpenGeneration(path),
       // Provider calls are consumers of the active-document lifecycle, not owners.
       // Let openFile()/didChange() remain the only state writers for activePath/Uri.
       updateActiveDocument: () => {},
@@ -1096,11 +1120,7 @@ export class WorkbenchClient {
       setNextModelNumber: (value) => {
         this._nextModelNumber = value;
       },
-      docVersions: this._docVersions,
-      docLineCount: this._docLineCount,
-      docCharCount: this._docCharCount,
-      docLastLineLength: this._docLastLineLength,
-      docOpenGeneration: this._docOpenGeneration,
+      documentRegistry: this._documentRegistry,
       mgmtIpc: this._mgmtIpc,
       setMgmtIpc: (value) => {
         this._mgmtIpc = value === null ? null : this._mgmtIpc;
@@ -1128,20 +1148,6 @@ export class WorkbenchClient {
         this.activateLanguage(languageId),
       sendExt: (rpcId, method, args, cancellable = false) =>
         this._sendExt(rpcId, method, args, cancellable),
-      sendExtAwaitTerminalReply: (
-        rpcId,
-        method,
-        args,
-        cancellable = false,
-        timeoutMs = 3000,
-      ) =>
-        this._sendExtAwaitTerminalReply(
-          rpcId,
-          method,
-          args,
-          cancellable,
-          timeoutMs,
-        ),
       spanTrace: (name, fn) => spanTrace(name, fn),
       spanTraceAsync: (name, fn) => spanTraceAsync(name, fn),
       logMetrics: (type, data) => logMetrics(type, data),
@@ -1209,8 +1215,7 @@ export class WorkbenchClient {
       defaultRemoteAuthority: DEFAULT_REMOTE_AUTHORITY,
       extHostDocumentContentProvidersRpcId:
         _rpcIds.ExtHostDocumentContentProviders,
-      extHostDocumentsAndEditorsRpcId: _rpcIds.ExtHostDocumentsAndEditors,
-      backgroundDocuments: this._backgroundDocuments,
+      documentRegistry: this._documentRegistry,
       readTextFile: (path) => fs.readFile(path, "utf8"),
       readBinaryFile: (path) => fs.readFile(path),
       statPath: (path) => fs.lstat(path),
@@ -1636,12 +1641,7 @@ export class WorkbenchClient {
     this._activeEditorId = null;
     this._activeUriObj = null;
     this._activeTab = null;
-    this._backgroundDocuments.clear();
-    this._docVersions.clear();
-    this._docLineCount.clear();
-    this._docCharCount.clear();
-    this._docLastLineLength.clear();
-    this._docOpenGeneration.clear();
+    this._documentRegistry.clearLocal();
     this._providerRegistry.clear();
     this._extensionActivation.reset(reason);
     this._extensionActivity.reset(reason);
@@ -1816,6 +1816,18 @@ export class WorkbenchClient {
     }
   }
 
+  reconcileLogicalDocuments(
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return this._documentRegistry.reconcileLogicalDocuments(params);
+  }
+
+  async hydrateLogicalDocument(
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return await this._documentRegistry.hydrateLogicalDocument(params);
+  }
+
   /**
    * Push a full-text buffer update to the extension host for live diagnostics.
    * Uses $acceptModelChanged on ExtHostDocuments with isFlush:true.
@@ -1880,6 +1892,10 @@ export class WorkbenchClient {
 
   async references(params: unknown = {}): Promise<Record<string, unknown>> {
     return provideReferences(this._codeNavigationRuntime(), params);
+  }
+
+  async definitions(params: unknown = {}): Promise<Record<string, unknown>> {
+    return provideDefinitions(this._codeNavigationRuntime(), params);
   }
 
   async implementations(
@@ -2080,8 +2096,8 @@ export class WorkbenchClient {
     rejectedPendingRequests: number;
     clearedBackgroundDocuments: number;
   } {
-    const clearedBackgroundDocuments = this._backgroundDocuments.size;
-    this._backgroundDocuments.clear();
+    const clearedBackgroundDocuments =
+      this._documentRegistry.countBackground();
     const rejectedPendingRequests = this._extRequests.rejectAll(
       new Error(reason || "workspace_switch"),
     );

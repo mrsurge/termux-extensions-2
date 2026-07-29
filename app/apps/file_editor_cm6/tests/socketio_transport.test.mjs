@@ -170,6 +170,16 @@ test('WBA delivers connected calls reliably and never queues reconnect calls', a
   assert.equal(socket.volatileEmits.length, 1);
 });
 
+test('maps the editor definition action onto the WBA definition method', async () => {
+  const { editorWorkbenchMethodToWbaMethod } = await importTypeScript(
+    'monaco_editor/editor_wba_rpc_transport.ts',
+  );
+  assert.equal(
+    editorWorkbenchMethodToWbaMethod('definition'),
+    'vscode.definition',
+  );
+});
+
 test('editor RPC calls are reliable while notifications remain volatile', async () => {
   const { createEditorRpcTransport } = await importTypeScript(
     'monaco_editor/editor_rpc_transport.ts',

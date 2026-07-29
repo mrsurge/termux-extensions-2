@@ -37,9 +37,15 @@ from .cache_runtime_service import (
     get_combined_diffs_async,
     schedule_diff_refresh,
 )
+from .document_materialization_service import (
+    MaterializedDocumentPayload,
+    materialize_document_payload,
+    materialize_document_payload_async,
+)
 __all__ = [
     "EditorOpenFields",
     "EditorOpenPayload",
+    "MaterializedDocumentPayload",
     "RuntimeMeta",
     "coerce_editor_open_request_fields",
     "emit_editor_open_from_backend",
@@ -69,6 +75,8 @@ __all__ = [
     "build_cache_state_payload",
     "get_combined_diffs",
     "get_combined_diffs_async",
+    "materialize_document_payload",
+    "materialize_document_payload_async",
     "schedule_diff_refresh",
     "handle_update_preference",
 ]
