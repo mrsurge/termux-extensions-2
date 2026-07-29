@@ -3261,3 +3261,16 @@ cd android && ./gradlew :app:assembleGeckoDebug
 | `android/.../assets/asset_intercept/manifest.json` | WebExtension manifest |
 | `android/.../assets/asset_intercept/background.js` | URL pattern matching + redirect logic |
 | `android/.../MainActivity.kt` | `initEditorAssets()`, `installAssetExtension()`, lifecycle cleanup |
+
+## 37) Run Profile Draft-Save Transaction
+
+Run Profile execution is backend-owned through `ui.host.file.run`. The project-local `.code_te2/run_profiles.json` schema adds:
+
+- `saveDrafts`: `included`, `opened`, `all`, or `none`.
+- `showSaveWarning`: boolean, with JSON `0`/`1` accepted for compatibility.
+
+Profiles that omit these fields default to `saveDrafts: "included"` and `showSaveWarning: true`. `included` intersects the profile's existing `include` matchers with unsaved sidecar drafts; it does not scan and rewrite clean matching files. `opened` uses the canonical bounded sidecar open-file set, `all` uses every unsaved project draft, and `none` performs no pre-run writes. A file with no matching profile retains the default runner and active-file-only save behavior. Its warning preference is stored project-locally under `fallback.showSaveWarning` because no profile object exists.
+
+When a warning is enabled, the first Run request returns a confirmation projection and does not save or launch. The portable `teUI.dialog` warning can persist suppression. A confirmed request re-resolves the profile and verifies the returned confirmation key against the current target, save policy, and include set. It then obtains a fresh snapshot for the expected active Monaco model and writes selected background drafts from the sidecar through guarded threaded file writes. A tab switch or stale confirmation fails before writing or launching. Launch is fail-closed: a required save error prevents the runner shell or fallback terminal command from starting. Concurrent Run requests for one project are serialized.
+
+The Run Profiles modal exposes both profile fields and preserves top-level config such as `fallback` while editing profile forms or raw JSON.

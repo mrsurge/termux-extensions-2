@@ -27,7 +27,11 @@ function asRecord(value: unknown): UnknownRecord {
 
 function asProfiles(value: unknown): UnknownRecord[] {
   if (!Array.isArray(value)) return [];
-  return value.filter(isRecord).map((item) => ({ ...item }));
+  return value.filter(isRecord).map((item) => ({
+    saveDrafts: "included",
+    showSaveWarning: true,
+    ...item,
+  }));
 }
 
 function profileId(profile: UnknownRecord, fallback: string): string {
@@ -47,19 +51,34 @@ function defaultProfile(index: number): UnknownRecord {
     env: {},
     sidebarUrl: "",
     runningBehavior: "just save",
+    saveDrafts: "included",
+    showSaveWarning: true,
   };
 }
 
-function extractProfilesFromJson(value: unknown): UnknownRecord[] {
-  if (Array.isArray(value)) return asProfiles(value);
-  if (!isRecord(value)) return [];
-  if (Array.isArray(value.profiles)) return asProfiles(value.profiles);
-  if (value.profileId || value.profile_id) return [{ ...value }];
-  return [];
+function configFromJson(value: unknown): UnknownRecord {
+  if (Array.isArray(value)) {
+    return { version: 1, profiles: asProfiles(value) };
+  }
+  if (!isRecord(value)) {
+    return { version: 1, profiles: [] };
+  }
+  if (value.profileId || value.profile_id) {
+    return { version: 1, profiles: [{ ...value }] };
+  }
+  return {
+    ...value,
+    version: typeof value.version === "number" ? value.version : 1,
+    profiles: asProfiles(value.profiles),
+  };
 }
 
-function configFromProfiles(profiles: UnknownRecord[]): UnknownRecord {
+function configFromProfiles(
+  baseConfig: UnknownRecord,
+  profiles: UnknownRecord[],
+): UnknownRecord {
   return {
+    ...baseConfig,
     version: 1,
     profiles: profiles.map((profile) => ({ ...profile })),
   };
@@ -94,6 +113,7 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
   let saveBtn: HTMLButtonElement | null = null;
   let formHandle: DeclarativeFormHandle | null = null;
   let contract: DeclarativeFormContract = { fields: [] };
+  let config: UnknownRecord = { version: 1, profiles: [] };
   let profiles: UnknownRecord[] = [];
   let selectedIndex = -1;
 
@@ -236,7 +256,8 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
   }
 
   function syncRawJson(): void {
-    rawJsonEditor?.setValue(formatJson(configFromProfiles(profiles)));
+    config = configFromProfiles(config, profiles);
+    rawJsonEditor?.setValue(formatJson(config));
   }
 
   function selectProfile(index: number): void {
@@ -262,7 +283,8 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
     if (!rawJsonEditor) return;
     try {
       const decoded = JSON.parse(rawJsonEditor.getValue() || "[]") as unknown;
-      profiles = extractProfilesFromJson(decoded);
+      config = configFromJson(decoded);
+      profiles = asProfiles(config.profiles);
       selectProfile(profiles.length ? 0 : -1);
       syncRawJson();
     } catch (error) {
@@ -290,6 +312,14 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
       const error = data.validationError;
       contract = contractFromResponse(data);
       profiles = asProfiles(data.profiles);
+      try {
+        const rawConfig = typeof data.rawJson === "string"
+          ? JSON.parse(data.rawJson) as unknown
+          : { version: 1, profiles };
+        config = configFromProfiles(configFromJson(rawConfig), profiles);
+      } catch {
+        config = configFromProfiles({ version: 1, profiles: [] }, profiles);
+      }
       selectedIndex = profiles.length ? 0 : -1;
       if (pathEl) {
         const configPath =
@@ -304,7 +334,7 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
         rawJsonEditor.setValue(
           typeof data.rawJson === "string"
             ? data.rawJson
-            : formatJson(configFromProfiles(profiles)),
+            : formatJson(config),
         );
       renderProfileList();
       renderForm();
@@ -336,6 +366,14 @@ export function createRunProfilesModalController(deps: RunProfilesModalDeps) {
       const data = normalizeResponse(result);
       contract = contractFromResponse(data);
       profiles = asProfiles(data.profiles);
+      try {
+        const rawConfig = typeof data.rawJson === "string"
+          ? JSON.parse(data.rawJson) as unknown
+          : { version: 1, profiles };
+        config = configFromProfiles(configFromJson(rawConfig), profiles);
+      } catch {
+        config = configFromProfiles({ version: 1, profiles: [] }, profiles);
+      }
       selectedIndex = profiles.length
         ? Math.min(Math.max(selectedIndex, 0), profiles.length - 1)
         : -1;

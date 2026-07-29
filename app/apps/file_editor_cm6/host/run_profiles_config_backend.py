@@ -107,7 +107,22 @@ def _empty_config() -> JsonMap:
 
 def _profiles(config: JsonMap) -> list[object]:
     profiles = config.get("profiles")
-    return list(cast(list[object], profiles)) if isinstance(profiles, list) else []
+    if not isinstance(profiles, list):
+        return []
+    normalized: list[object] = []
+    for item_obj in cast(list[object], profiles):
+        if not isinstance(item_obj, dict):
+            normalized.append(item_obj)
+            continue
+        item = {
+            str(key): value
+            for key, value in cast(dict[object, object], item_obj).items()
+            if isinstance(key, str)
+        }
+        _ = item.setdefault("saveDrafts", "included")
+        _ = item.setdefault("showSaveWarning", True)
+        normalized.append(item)
+    return normalized
 
 
 def _option(value: str, label: str) -> JsonMap:
@@ -163,6 +178,24 @@ def _run_profile_contract() -> JsonMap:
             rows=7,
             description="One project-relative path or glob per line. Clicking Play on any included file uses this profile.",
             placeholder="index.html\nsrc/**",
+        ),
+        _field(
+            "saveDrafts",
+            "Draft Save Policy",
+            "select",
+            description="Select which unsaved drafts are written before this profile runs.",
+            options=[
+                _option("included", "Save included drafts"),
+                _option("opened", "Save opened drafts"),
+                _option("all", "Save all drafts"),
+                _option("none", "Do not save drafts"),
+            ],
+        ),
+        _field(
+            "showSaveWarning",
+            "Show save warning before Run",
+            "checkbox",
+            description="Uncheck to run this profile without the confirmation dialog.",
         ),
         _field(
             "exec",

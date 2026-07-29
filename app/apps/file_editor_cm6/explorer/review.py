@@ -99,7 +99,13 @@ async def list_reviews(project_root: Path, lightweight: bool = False) -> list[di
         
     return results
 
-async def save_reviews(project_root: Path, files: list[str]) -> dict[str, object]:
+async def save_reviews(
+    project_root: Path,
+    files: list[str],
+    *,
+    client_id: str = "review_panel",
+    op_prefix: str = "review_save",
+) -> dict[str, object]:
     """Save selected files from drafts to disk."""
     if not files:
         return {"saved_count": 0}
@@ -132,8 +138,8 @@ async def save_reviews(project_root: Path, files: list[str]) -> dict[str, object
             )
             
             file_meta = _get_file_meta(abs_path)
-            op_id = f"review_save_{int(time.time())}"
-            push_save_ack(str(rel_path), op_id, "review_panel", _file_meta_json(file_meta))
+            op_id = f"{op_prefix}_{int(time.time())}"
+            push_save_ack(str(rel_path), op_id, client_id, _file_meta_json(file_meta))
             emit_diff_changed(str(rel_path), _meta_sha256(file_meta))
             invalidate_diff_cache(root_path, str(rel_path))
             

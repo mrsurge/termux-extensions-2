@@ -39,6 +39,52 @@ function resultMessage(payload: RunFileResponse): string {
 }
 
 export function createRunFileController(deps: RunFileControllerDeps) {
+  async function requestRun(payload: Record<string, unknown>): Promise<RunFileResponse> {
+    const response = deps.requestBackendRunActiveFile
+      ? await deps.requestBackendRunActiveFile(payload)
+      : await deps.apiPost('terminal/run_active_file', payload);
+    return asRunFileResponse(response);
+  }
+
+  async function confirmDraftSave(data: Record<string, unknown>): Promise<{
+    confirmed: boolean;
+    suppressWarning: boolean;
+    confirmationKey: string;
+  }> {
+    const profileId = typeof data.profileId === 'string' ? data.profileId : '';
+    const confirmationKey = typeof data.confirmationKey === 'string'
+      ? data.confirmationKey
+      : '';
+    const result = await window.teUI.dialog.open({
+      kind: 'confirm',
+      title: 'Run and save drafts',
+      message: typeof data.message === 'string'
+        ? data.message
+        : 'Save drafts before running?',
+      detail: typeof data.detail === 'string' ? data.detail : '',
+      severity: 'warning',
+      fields: [{
+        key: 'suppressWarning',
+        kind: 'checkbox',
+        label: profileId
+          ? 'Don’t show this warning for this run profile again'
+          : 'Don’t show this warning for files without a run profile again',
+        value: false,
+      }],
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel', validate: false },
+        { id: 'run', label: 'Save and Run', role: 'accept', primary: true },
+      ],
+      defaultAction: 'run',
+      cancelAction: 'cancel',
+    });
+    return {
+      confirmed: result.status === 'accepted' && result.action === 'run',
+      suppressWarning: result.values.suppressWarning === true,
+      confirmationKey,
+    };
+  }
+
   async function runCurrentFile(): Promise<void> {
     const currentPath = deps.getCurrentPath();
     if (!currentPath) {
@@ -47,8 +93,18 @@ export function createRunFileController(deps: RunFileControllerDeps) {
     }
     deps.setRunButtonDisabled(true);
     try {
-      const response = deps.requestBackendRunActiveFile ? await deps.requestBackendRunActiveFile({ path: currentPath }) : await deps.apiPost('terminal/run_active_file', { path: currentPath });
-      const responseRecord = asRunFileResponse(response);
+      let responseRecord = await requestRun({ path: currentPath });
+      const firstData = asRunFileResponse(responseRecord.data);
+      if (firstData.action === 'confirmDraftSave') {
+        const confirmation = await confirmDraftSave(firstData);
+        if (!confirmation.confirmed) return;
+        responseRecord = await requestRun({
+          path: currentPath,
+          confirmDraftSave: true,
+          draftSaveConfirmationKey: confirmation.confirmationKey,
+          suppressSaveWarning: confirmation.suppressWarning,
+        });
+      }
       const isWrapped = Object.prototype.hasOwnProperty.call(responseRecord, 'ok');
       if (isWrapped && responseRecord.ok === false) {
         deps.toast(responseRecord.error || 'Failed to run file');

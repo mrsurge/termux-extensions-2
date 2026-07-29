@@ -392,7 +392,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
 
   async function requestBackendRunActiveFile(payload: JsonObject = {}): Promise<unknown> {
     const connection = await connectUIIPC();
-    return await connection.request(UI_IPC_RPC_METHODS.hostFileRun, payload || {}, 8000);
+    return await connection.request(UI_IPC_RPC_METHODS.hostFileRun, payload || {}, 60000);
   }
 
   async function requestBackendBootSnapshot(payload: JsonObject = {}): Promise<unknown> {

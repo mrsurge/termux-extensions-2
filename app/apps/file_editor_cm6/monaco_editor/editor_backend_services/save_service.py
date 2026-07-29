@@ -217,9 +217,31 @@ async def handle_editor_save_request(
     if snapshot_error:
         return {"ok": False, "error": snapshot_error}
 
+    snapshot_path = get_opt_str(snapshot, "path")
+    expected_path = get_opt_str(payload, "expected_path")
+    if expected_path:
+        expected_abs_path = normalize_abs_path(expected_path)
+        snapshot_abs_path = normalize_abs_path(snapshot_path or "")
+        if (
+            not expected_abs_path
+            or not snapshot_abs_path
+            or expected_abs_path != snapshot_abs_path
+        ):
+            return {
+                "ok": False,
+                "error": "active_file_changed",
+                "data": {
+                    "expected_path": expected_abs_path or expected_path,
+                    "snapshot_path": snapshot_abs_path or snapshot_path,
+                },
+            }
+    else:
+        expected_abs_path = None
+
     raw_path = (
-        get_opt_str(payload, "target_path")
-        or get_opt_str(snapshot, "path")
+        expected_abs_path
+        or get_opt_str(payload, "target_path")
+        or snapshot_path
         or get_opt_str(payload, "path")
     )
     if not raw_path:
@@ -264,7 +286,7 @@ async def handle_editor_save_request(
             orig_mode = None
 
     try:
-        await asyncio.to_thread(
+        _ = await asyncio.to_thread(
             _typed_write_full,
             root_path,
             str(rel_path),
@@ -283,8 +305,8 @@ async def handle_editor_save_request(
     if isinstance(save_sha, str) and save_sha:
         record_save_sha(abs_path, save_sha)
 
-    _history_store.clear_cached_document(project, abs_path)
-    _history_store.prune_clean_drafts(project)
+    _ = _history_store.clear_cached_document(project, abs_path)
+    _ = _history_store.prune_clean_drafts(project)
 
     mark_git_cache_dirty(root_path)
     mark_draft_cache_dirty(root_path)

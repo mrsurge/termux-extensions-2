@@ -6,6 +6,7 @@ import fnmatch
 import json
 from pathlib import Path
 import re
+from threading import RLock
 from typing import Literal, cast
 
 # Project-local run profiles are the backend authority for the play button.
@@ -14,14 +15,19 @@ from typing import Literal, cast
 JsonObject = dict[str, object]
 RunnerName = Literal["pagePreview", "node", "python", "custom"]
 RunningBehavior = Literal["just save", "relaunch"]
+DraftSaveMode = Literal["included", "opened", "all", "none"]
 
 CONFIG_DIR_NAME = ".code_te2"
 CONFIG_FILE_NAME = "run_profiles.json"
 KNOWN_RUNNERS: frozenset[str] = frozenset({"pagePreview", "node", "python", "custom"})
 KNOWN_RUNNING_BEHAVIORS: frozenset[str] = frozenset({"just save", "relaunch"})
+KNOWN_DRAFT_SAVE_MODES: frozenset[str] = frozenset(
+    {"included", "opened", "all", "none"}
+)
 DEFAULT_PAGE_PREVIEW_PROFILE_ID = "page-preview"
 DEFAULT_PAGE_PREVIEW_URL = "http://127.0.0.1:3000/"
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_config_lock = RLock()
 
 
 @dataclass(frozen=True)
@@ -36,6 +42,8 @@ class RunProfile:
     cwd: str
     args: tuple[str, ...]
     env: dict[str, str]
+    save_drafts: DraftSaveMode
+    show_save_warning: bool
 
 
 @dataclass(frozen=True)
@@ -47,6 +55,9 @@ class RunProfileMatch:
 
 
 class RunProfileConflictError(ValueError):
+    relative_path: str
+    profile_ids: list[str]
+
     def __init__(self, *, relative_path: str, profile_ids: list[str]) -> None:
         super().__init__(
             f"Run profile conflict for {relative_path}: {', '.join(profile_ids)}"
@@ -82,7 +93,7 @@ def parse_run_profiles_config_json(raw_text: str) -> JsonObject:
 
 def parse_run_profiles_config(decoded: object) -> JsonObject:
     config = _config_object(decoded)
-    _profiles_from_config(config)
+    _ = _profiles_from_config(config)
     return config
 
 
@@ -90,9 +101,59 @@ def save_run_profiles_config(project_root: str | Path, raw_text: str) -> JsonObj
     root = _project_root_path(project_root)
     config = parse_run_profiles_config_json(raw_text)
     config_path = run_profiles_config_path(root)
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json(config_path, config)
+    with _config_lock:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(config_path, config)
     return config
+
+
+def fallback_show_save_warning(project_root: str | Path) -> bool:
+    return _fallback_show_save_warning(load_run_profiles_config(project_root))
+
+
+def set_run_save_warning(
+    project_root: str | Path,
+    *,
+    profile_id: str | None,
+    enabled: bool,
+) -> JsonObject:
+    root = _project_root_path(project_root)
+    config_path = run_profiles_config_path(root)
+    with _config_lock:
+        config = load_run_profiles_config(root)
+        if profile_id:
+            profiles_obj = config.get("profiles")
+            profiles = (
+                cast(list[object], profiles_obj)
+                if isinstance(profiles_obj, list)
+                else []
+            )
+            updated = False
+            for item_obj in profiles:
+                if not isinstance(item_obj, dict):
+                    continue
+                item = cast(dict[object, object], item_obj)
+                current_id = _text(item.get("profileId") or item.get("profile_id"))
+                if current_id == profile_id:
+                    item["showSaveWarning"] = enabled
+                    updated = True
+                    break
+            if not updated:
+                raise ValueError(f"Run profile '{profile_id}' no longer exists")
+        else:
+            fallback_obj = config.get("fallback")
+            fallback = (
+                _json_object(cast(object, fallback_obj))
+                if isinstance(fallback_obj, dict)
+                else {}
+            )
+            fallback["showSaveWarning"] = enabled
+            config["fallback"] = fallback
+
+        config = parse_run_profiles_config(config)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_json(config_path, config)
+        return config
 
 
 def _profiles_from_config(config: JsonObject) -> list[RunProfile]:
@@ -119,7 +180,7 @@ def match_run_profile(project_root: str | Path, active_file: str | Path) -> RunP
     matches = [
         profile
         for profile in load_run_profiles(root)
-        if _profile_matches(profile, rel_path, root=root)
+        if run_profile_matches_path(profile, rel_path, project_root=root)
     ]
     if not matches:
         return None
@@ -134,6 +195,20 @@ def match_run_profile(project_root: str | Path, active_file: str | Path) -> RunP
         active_file=file_path,
         relative_path=rel_path,
     )
+
+
+def run_profile_matches_path(
+    profile: RunProfile,
+    relative_path: str,
+    *,
+    project_root: str | Path,
+) -> bool:
+    root = _project_root_path(project_root)
+    normalized = _normalize_rel_pattern(relative_path)
+    for pattern in profile.include:
+        if _matches_pattern(pattern, normalized, root=root):
+            return True
+    return False
 
 
 def install_default_page_preview_profile(
@@ -208,6 +283,19 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
             f"Run profile {profile_id} has unknown runningBehavior '{running_behavior_value}'"
         )
 
+    save_drafts_value = _text(data.get("saveDrafts") or data.get("save_drafts"))
+    if not save_drafts_value:
+        save_drafts_value = "included"
+    if save_drafts_value not in KNOWN_DRAFT_SAVE_MODES:
+        raise ValueError(
+            f"Run profile {profile_id} has unknown saveDrafts '{save_drafts_value}'"
+        )
+    show_save_warning = _bool_setting(
+        data.get("showSaveWarning", data.get("show_save_warning")),
+        default=True,
+        field_name=f"Run profile {profile_id} showSaveWarning",
+    )
+
     sidebar_url = _text(data.get("sidebarUrl") or data.get("sidebar_url"))
     if not sidebar_url and runner == "pagePreview":
         sidebar_url = DEFAULT_PAGE_PREVIEW_URL
@@ -226,19 +314,13 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
         cwd=_text(data.get("cwd")),
         args=_string_tuple(data.get("args")),
         env=_env_map(data.get("env"), profile_id=profile_id),
+        save_drafts=cast(DraftSaveMode, save_drafts_value),
+        show_save_warning=show_save_warning,
     )
 
 
 def _is_single_profile_object(data: JsonObject) -> bool:
     return bool(_text(data.get("profileId") or data.get("profile_id")))
-
-
-def _profile_matches(profile: RunProfile, rel_path: str, *, root: Path) -> bool:
-    normalized = _normalize_rel_pattern(rel_path)
-    for pattern in profile.include:
-        if _matches_pattern(pattern, normalized, root=root):
-            return True
-    return False
 
 
 def _matches_pattern(pattern: str, rel_path: str, *, root: Path) -> bool:
@@ -297,6 +379,8 @@ def _default_page_preview_profile(entry: str) -> JsonObject:
         "include": include,
         "sidebarUrl": DEFAULT_PAGE_PREVIEW_URL,
         "runningBehavior": "just save",
+        "saveDrafts": "included",
+        "showSaveWarning": True,
     }
 
 
@@ -310,6 +394,7 @@ def _config_object(decoded: object) -> JsonObject:
             config["profiles"] = []
         elif not isinstance(profiles_obj, list):
             raise ValueError("Run profile config field 'profiles' must be a list")
+        _ = _fallback_show_save_warning(config)
         return config
     if isinstance(decoded, list):
         decoded_profiles: list[object] = list(cast(list[object], decoded))
@@ -324,7 +409,10 @@ def _empty_config() -> JsonObject:
 
 
 def _write_json(path: Path, data: JsonObject) -> None:
-    path.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n", "utf-8")
+    _ = path.write_text(
+        json.dumps(data, indent=2, sort_keys=False) + "\n",
+        "utf-8",
+    )
 
 
 def _project_root_path(project_root: str | Path) -> Path:
@@ -353,6 +441,30 @@ def _json_object(value: object) -> JsonObject:
 
 def _text(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def _bool_setting(value: object, *, default: bool, field_name: str) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    raise ValueError(f"{field_name} must be true, false, 1, or 0")
+
+
+def _fallback_show_save_warning(config: JsonObject) -> bool:
+    fallback_obj = config.get("fallback")
+    if fallback_obj is None:
+        return True
+    if not isinstance(fallback_obj, dict):
+        raise ValueError("Run profile config field 'fallback' must be an object")
+    fallback = _json_object(cast(object, fallback_obj))
+    return _bool_setting(
+        fallback.get("showSaveWarning"),
+        default=True,
+        field_name="Run profile fallback showSaveWarning",
+    )
 
 
 def _string_tuple(value: object) -> tuple[str, ...]:

@@ -1,8 +1,8 @@
 # pyright: strict
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from ..monaco_editor.editor_backend_services.contracts import JsonMap
 from ..page_preview_shell_manager import ensure_page_preview_shell
@@ -10,44 +10,32 @@ from ..runner_profile_shell_manager import ensure_runner_profile_shell
 from ..runner_profiles import (
     DEFAULT_PAGE_PREVIEW_URL,
     RunProfileConflictError,
+    RunProfileMatch,
     match_run_profile,
 )
 from ..stores import get_history_store
 from ..ui_ipc.sidebar_ws import handle_ui_sidebar_window_create_request
 
 
-# Play dispatch is backend-owned: the UI sends intent, then this hook resolves
-# the active project/file profile and chooses the runner implementation.
-async def maybe_handle_runner_profile_run_request(
+def resolve_runner_profile_run_request(
     data: Mapping[str, object] | None,
-    *,
-    source_name: str,
-) -> JsonMap | None:
+) -> RunProfileMatch | None:
     project_root = _active_project()
     if not project_root:
         return None
     current_file = _request_path(data) or _last_file(project_root)
     if not current_file:
         return None
+    return match_run_profile(project_root, current_file)
 
-    try:
-        match = match_run_profile(project_root, current_file)
-    except RunProfileConflictError as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "data": {
-                "conflict": True,
-                "path": exc.relative_path,
-                "profileIds": list(exc.profile_ids),
-            },
-        }
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
 
-    if match is None:
-        return None
-
+# Play dispatch is backend-owned: the UI sends intent, then this hook chooses
+# the runner implementation for an already-resolved profile.
+async def handle_runner_profile_run_request(
+    match: RunProfileMatch,
+    *,
+    source_name: str,
+) -> JsonMap:
     profile = match.profile
     if profile.runner == "pagePreview":
         shell = await ensure_page_preview_shell(
@@ -127,6 +115,31 @@ async def maybe_handle_runner_profile_run_request(
             "message": message,
         },
     }
+
+
+async def maybe_handle_runner_profile_run_request(
+    data: Mapping[str, object] | None,
+    *,
+    source_name: str,
+) -> JsonMap | None:
+    try:
+        match = resolve_runner_profile_run_request(data)
+    except RunProfileConflictError as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            "data": {
+                "conflict": True,
+                "path": exc.relative_path,
+                "profileIds": list(exc.profile_ids),
+            },
+        }
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    if match is None:
+        return None
+    return await handle_runner_profile_run_request(match, source_name=source_name)
 
 
 async def _open_sidebar_url(
