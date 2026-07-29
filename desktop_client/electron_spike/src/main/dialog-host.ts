@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import {
+  app,
   BrowserWindow,
   ipcMain,
   screen,
@@ -20,7 +21,7 @@ import {
   type DialogResultStatus,
   type DialogSize,
 } from "../shared/dialog-contracts";
-import { installCloseOnBlur } from "./blur-close-policy";
+import { installCloseOnFocusHandoff } from "./focus-handoff-close-policy";
 import { installChromiumScrollbars } from "./chromium-scrollbars";
 import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
 
@@ -312,7 +313,7 @@ export class DesktopDialogHost {
       void installChromiumScrollbars(window.webContents, "dialog");
     });
     this.options.installContextMenu(window.webContents);
-    installCloseOnBlur(window, () => {
+    installCloseOnFocusHandoff(window, app, () => {
       if (this.window === window) this.closeAll("closed");
     });
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));

@@ -15,7 +15,7 @@ import {
 
 import { clearFrameworkAssetCaches } from "./asset-cache";
 import { DesktopAssetManager, MIME_TYPES } from "./assets";
-import { installCloseOnBlur } from "./blur-close-policy";
+import { installCloseOnFocusHandoff } from "./focus-handoff-close-policy";
 import { installChromiumScrollbars } from "./chromium-scrollbars";
 import { DesktopDialogHost } from "./dialog-host";
 import {
@@ -413,7 +413,7 @@ function createAppView(): WebContentsView {
     window.setMenu(null);
     void installChromiumScrollbars(window.webContents, "modal");
     installContextMenu(window.webContents);
-    installCloseOnBlur(window, () => {
+    installCloseOnFocusHandoff(window, app, () => {
       if (surfaceWindows.has(window) && !window.isDestroyed()) window.close();
     });
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
