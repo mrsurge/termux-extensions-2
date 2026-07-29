@@ -238,7 +238,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     editorFrameEl,
     root,
     sidebarDrawerEl,
-    issuesToggleBtn,
     issuesBadgesEl,
     statusEl,
     menuFileBtn,
@@ -318,7 +317,6 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   });
 
   const hostChromeRuntime = createHostChromeRuntime({
-    issuesToggleBtn,
     issuesBadgesEl,
     basename,
     toAbsolute,

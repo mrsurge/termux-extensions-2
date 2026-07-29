@@ -22,8 +22,7 @@ export interface DiagnosticMarker {
 }
 
 export interface HostChromeRuntimeDeps {
-  issuesToggleBtn: HTMLButtonElement;
-  issuesBadgesEl: HTMLElement;
+  issuesBadgesEl: HTMLButtonElement;
   basename: (path: string) => string;
   toAbsolute: (path: string, baseDir: string | null, homeDir: string) => string;
   homeDir: string;
@@ -97,7 +96,7 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
   }
 
   function setIssuesButtonsEnabled(enabled: boolean): void {
-    deps.issuesToggleBtn.disabled = !enabled;
+    deps.issuesBadgesEl.disabled = !enabled;
     if (!enabled) {
       deps.issuesBadgesEl.textContent = '';
     }
@@ -313,7 +312,7 @@ export function createHostChromeRuntime(deps: HostChromeRuntimeDeps): HostChrome
   function install(): void {
     if (installed) return;
     installed = true;
-    deps.issuesToggleBtn.addEventListener('click', () => { void sendIssuesCmd('next'); });
+    deps.issuesBadgesEl.addEventListener('click', () => { void sendIssuesCmd('next'); });
   }
 
   return {

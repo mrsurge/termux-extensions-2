@@ -490,12 +490,6 @@
   .fe-toolbar > .fe-menu { flex: 0 0 auto; }
   #fe-drawer-open {
     order: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 37.6px;
-    height: 33.6px;
-    padding: 0;
   }
   .fe-panel-toggle-icon {
     display: block;
@@ -516,7 +510,21 @@
   .fe-toolbar-actions { order: 7; display: flex; gap: 0.35rem; align-items: center; }
   .fe-status { order: 8; }
   .fe-issues { display: inline-flex; align-items: center; gap: 6px; }
-  .fe-issues-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; opacity: 0.9; }
+  .fe-issues-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    opacity: 0.9;
+    cursor: pointer;
+  }
+  .fe-issues-badge:disabled { cursor: default; }
   .fe-issues-dot { display: inline-flex; min-width: 16px; padding: 2px 6px; border-radius: 999px; font-weight: 700; line-height: 1; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.06); }
   .fe-issues-dot.error { color: #ef4444; border-color: rgba(239,68,68,0.45); }
   .fe-issues-dot.warning { color: #eab308; border-color: rgba(234,179,8,0.40); }
@@ -542,7 +550,7 @@
   .fe-dropdown.show { display: block; }
   /* Dropdowns inside modals need to stack above modal content. */
   .fe-dropdown--modal { z-index: 500; }
-  #menu-branch-dd { left: auto; right: 0; max-height: calc(80vh - 60px); overflow-y: auto; }
+  #menu-branch-dd { left: auto; right: -45px; max-height: calc(80vh - 60px); overflow-y: auto; }
   #menu-branch-btn { overflow: hidden; white-space: nowrap; }
   .fe-visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
   .fe-dd-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; cursor: pointer; font-size: calc(0.9rem * var(--chrome-font-scale)); align-items: center; }
@@ -2423,12 +2431,13 @@
   <div class="resize-handle resize-handle--explorer" data-panel="explorer"></div>
 
   <div class="fe-toolbar">
-	    <button id="fe-drawer-open" class="fe-btn fe-icon-btn" title="Open Explorer" aria-label="Open Explorer">
-        <img class="fe-panel-toggle-icon" src="/apps/file_editor_cm6/static/icons/show.png" alt="" aria-hidden="true">
+	    <button id="fe-drawer-open" class="fe-menu-btn fe-agent-toggle" title="Open Explorer" aria-label="Open Explorer">
+        <span class="fe-agent-icon">
+          <img class="fe-panel-toggle-icon" src="/apps/file_editor_cm6/static/icons/show.png" alt="" aria-hidden="true">
+        </span>
       </button>
       <span class="fe-issues fe-toolbar-issues">
-        <button id="fe-issues-toggle" class="fe-btn fe-icon-btn" title="Next issue (Alt+F8)" aria-label="Next issue" disabled>💡</button>
-        <span id="fe-issues-badges" class="fe-issues-badge" aria-live="polite"></span>
+        <button id="fe-issues-badges" class="fe-issues-badge" type="button" title="Next issue (Alt+F8)" aria-label="Next issue" aria-live="polite" disabled></button>
       </span>
 
     <div class="fe-menu fe-toolbar-actions">
