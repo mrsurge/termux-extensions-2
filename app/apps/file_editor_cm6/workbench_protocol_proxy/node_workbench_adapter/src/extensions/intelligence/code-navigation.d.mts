@@ -36,6 +36,11 @@ export declare function provideReferences(
   params?: unknown,
 ): Promise<Record<string, unknown>>;
 
+export declare function provideDefinitions(
+  runtime: unknown,
+  params?: unknown,
+): Promise<Record<string, unknown>>;
+
 export declare function provideImplementations(
   runtime: unknown,
   params?: unknown,

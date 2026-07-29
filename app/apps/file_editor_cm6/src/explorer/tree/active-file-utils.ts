@@ -8,6 +8,10 @@ interface ExplorerActiveFileUtilsDeps {
   toast(message: string): void;
 }
 
+interface ScrollToActiveFileOptions {
+  silent?: boolean;
+}
+
 function queryFileNode(root: ParentNode, rel: string): HTMLLIElement | null {
   try {
     const escaped = window.CSS?.escape ? window.CSS.escape(rel) : null;
@@ -121,10 +125,12 @@ export function createExplorerActiveFileUtils(
     }
   }
 
-  async function scrollToActiveFile(): Promise<void> {
+  async function scrollToActiveFile(
+    options: ScrollToActiveFileOptions = {},
+  ): Promise<void> {
     const activeRel = deps.getActiveFileRel();
     if (!activeRel) {
-      deps.toast('No opened file to reveal');
+      if (!options.silent) deps.toast('No opened file to reveal');
       return;
     }
     const root = getTreeRoot();
@@ -132,13 +138,14 @@ export function createExplorerActiveFileUtils(
     try {
       await deps.expandToFile(activeRel);
     } catch {
-      deps.toast('Failed to expand tree');
+      if (!options.silent) deps.toast('Failed to expand tree');
       return;
     }
+    if (deps.getActiveFileRel() !== activeRel) return;
     applyActiveFileMarker();
     const node = queryFileNode(root, activeRel);
     if (!node) {
-      deps.toast('Opened file is not visible in the tree');
+      if (!options.silent) deps.toast('Opened file is not visible in the tree');
       return;
     }
     node.scrollIntoView({ block: 'center', behavior: 'smooth' });

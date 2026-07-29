@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from app.apps.file_editor_cm6 import project_sidecar
+from app.apps.file_editor_cm6.file_tabs_projection import (
+    build_file_tabs_projection,
+)
 from app.apps.file_editor_cm6.open_state_backend import (
     read_sidecar_open_state,
     remove_sidecar_recent_file,
@@ -113,6 +117,35 @@ class OpenStateRecentsTests(unittest.TestCase):
                 by_path = {entry["path"]: entry for entry in state["recents"]}
                 self.assertEqual(by_path[str(first)]["scroll_line"], 37)
                 self.assertEqual(by_path[str(second)]["scroll_line"], 12)
+
+    def test_file_tabs_projection_does_not_reload_shared_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            project = root / "project"
+            sidecars = root / "sidecars"
+            project.mkdir()
+            opened = project / "opened.py"
+            opened.write_text("value = 1\n", encoding="utf-8")
+
+            with patch.object(project_sidecar, "_sidecar_root", return_value=sidecars):
+                write_sidecar_open_file(
+                    str(project),
+                    str(opened),
+                    require_existing_sidecar=False,
+                )
+                shared = project_sidecar.ProjectSidecar.load_or_create(str(project))
+
+                with patch.object(
+                    shared,
+                    "reload",
+                    side_effect=AssertionError("threaded projection reloaded shared sidecar"),
+                ):
+                    projection = asyncio.run(build_file_tabs_projection(str(project)))
+
+                self.assertEqual(
+                    [item["path"] for item in projection["items"]],
+                    [str(opened)],
+                )
 
 
 if __name__ == "__main__":

@@ -90,6 +90,8 @@ export function editorWorkbenchMethodToWbaMethod(method: string): string | null 
       return 'vscode.openFile';
     case 'hover':
       return 'vscode.hover';
+    case 'definition':
+      return 'vscode.definition';
     case 'references':
       return 'vscode.references';
     case 'implementations':

@@ -138,8 +138,10 @@ function applyDraftFlag(
   explorerActiveFileUtils.applyDraftFlag(rel, hasDraft);
 }
 
-async function scrollToActiveFile(): Promise<void> {
-  return explorerActiveFileUtils.scrollToActiveFile();
+async function scrollToActiveFile(
+  options: { silent?: boolean } = {},
+): Promise<void> {
+  return explorerActiveFileUtils.scrollToActiveFile(options);
 }
 
 // --- Seti-UI file icons (files only; dirs keep emoji) ---
@@ -737,6 +739,7 @@ const explorerNotificationHandler = createExplorerNotificationHandler({
   expandToFile,
   expandToPath,
   applyActiveFileMarker,
+  scrollToActiveFile,
   setExplorerStickyHeadersEnabled: (next) =>
     explorerChromeController.setStickyHeadersEnabled(next),
   syncExplorerPrefsUI: () => explorerChromeController.syncExplorerPrefsUI(),

@@ -9,6 +9,7 @@ export const PROVIDER_KINDS = [
   "inlineCompletions",
   "semanticTokens",
   "documentColors",
+  "definitions",
   "references",
   "implementations",
   "callHierarchy",
@@ -52,6 +53,7 @@ export interface ProviderResyncOutcome {
     documentSymbols: number;
     foldingRanges: number;
     documentColors: number;
+    definitions: number;
     references: number;
     implementations: number;
     callHierarchy: number;
@@ -256,6 +258,7 @@ export class ProviderRegistry {
       inlineCompletions: new Map<number, ProviderEntry>(),
       semanticTokens: new Map<number, ProviderEntry>(),
       documentColors: new Map<number, ProviderEntry>(),
+      definitions: new Map<number, ProviderEntry>(),
       references: new Map<number, ProviderEntry>(),
       implementations: new Map<number, ProviderEntry>(),
       callHierarchy: new Map<number, ProviderEntry>(),
@@ -305,6 +308,9 @@ export class ProviderRegistry {
     if (methodMatches(method, "$registerDocumentColorProvider")) {
       return this.registerDocumentColorProvider(args);
     }
+    if (methodMatches(method, "$registerDefinitionSupport")) {
+      return this.registerNavigationProvider("definitions", args);
+    }
     if (methodMatches(method, "$registerReferenceSupport")) {
       return this.registerNavigationProvider("references", args);
     }
@@ -339,6 +345,7 @@ export class ProviderRegistry {
       inlineCompletions: this.list("inlineCompletions"),
       semanticTokens: this.list("semanticTokens"),
       documentColors: this.list("documentColors"),
+      definitions: this.list("definitions"),
       references: this.list("references"),
       implementations: this.list("implementations"),
       callHierarchy: this.list("callHierarchy"),
@@ -422,6 +429,7 @@ export class ProviderRegistry {
       documentSymbols: 0,
       foldingRanges: 0,
       documentColors: 0,
+      definitions: 0,
       references: 0,
       implementations: 0,
       callHierarchy: 0,
@@ -512,6 +520,7 @@ export class ProviderRegistry {
     }
 
     for (const kind of [
+      "definitions",
       "references",
       "implementations",
       "callHierarchy",
@@ -880,7 +889,7 @@ export class ProviderRegistry {
   }
 
   private registerNavigationProvider(
-    kind: "references" | "implementations" | "callHierarchy",
+    kind: "definitions" | "references" | "implementations" | "callHierarchy",
     args: unknown[],
   ): ProviderRegistrationOutcome {
     const outcome = emptyOutcome(true);

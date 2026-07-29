@@ -122,6 +122,7 @@ import { ExtensionLanguageResolver } from "../extensions/language-resolver.mjs";
 import {
   CallHierarchySessionStore,
   prepareCallHierarchy,
+  provideDefinitions,
   provideImplementations,
   provideIncomingCalls,
   provideOutgoingCalls,
@@ -239,7 +240,7 @@ const PARSE_ARGS_ONLY_METHODS = new Set<string>([
   "$registerCodeLensesProvider",
   "$registerFoldingRangeProvider",
   "$registerSignatureHelpProvider",
-  "$registerDefinitionProvider",
+  "$registerDefinitionSupport",
   "$registerTypeDefinitionProvider",
   "$registerImplementationSupport",
   "$registerReferenceSupport",
@@ -1891,6 +1892,10 @@ export class WorkbenchClient {
 
   async references(params: unknown = {}): Promise<Record<string, unknown>> {
     return provideReferences(this._codeNavigationRuntime(), params);
+  }
+
+  async definitions(params: unknown = {}): Promise<Record<string, unknown>> {
+    return provideDefinitions(this._codeNavigationRuntime(), params);
   }
 
   async implementations(

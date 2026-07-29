@@ -291,6 +291,109 @@ test('file tabs render bounded decorations and active close opens its successor'
   }
 });
 
+test('file tabs preserve nested authoritative open state during host resync', async () => {
+  const dom = installDom();
+  try {
+    const { createFileTabsController } = await importFileTabs();
+    const viewport = new FakeElement();
+    const track = new FakeElement();
+    const controller = createFileTabsController({
+      viewport,
+      track,
+      formatFileNameDisplay: (value) => value,
+      openFile: async () => {},
+      closeRecentFile: async () => {},
+      resetToNewFile: () => {},
+    });
+    const recents = [
+      { path: '/workspace/a.rs', label: 'a.rs', exists: true },
+      { path: '/workspace/b.go', label: 'b.go', exists: true },
+    ];
+
+    controller.broadcastOpenState({
+      activeProject: '/workspace',
+      currentPath: '/workspace/a.rs',
+      recents,
+      openState: {
+        projectPath: '/workspace',
+        openFile: '/workspace/b.go',
+        recents,
+      },
+    });
+
+    assert.equal(track.children[0].attributes.get('aria-selected'), 'false');
+    assert.equal(track.children[1].attributes.get('aria-selected'), 'true');
+
+    controller.broadcastOpenState({
+      activeProject: '/workspace',
+      currentPath: '/workspace/a.rs',
+      recents,
+      openState: {
+        projectPath: '/workspace',
+        openFile: null,
+        recents,
+      },
+    });
+
+    assert.equal(track.children[0].attributes.get('aria-selected'), 'false');
+    assert.equal(track.children[1].attributes.get('aria-selected'), 'false');
+  } finally {
+    dom.restore();
+  }
+});
+
+test('file tabs project the active draft after decoration hydration and tab switches', async () => {
+  const dom = installDom();
+  try {
+    const { createFileTabsController } = await importFileTabs();
+    const viewport = new FakeElement();
+    const track = new FakeElement();
+    const activeDrafts = [];
+    const controller = createFileTabsController({
+      viewport,
+      track,
+      formatFileNameDisplay: (value) => value,
+      openFile: async () => {},
+      closeRecentFile: async () => {},
+      resetToNewFile: () => {},
+      onActiveDraftChanged: (filePath, hasDraft) => {
+        activeDrafts.push([filePath, hasDraft]);
+      },
+    });
+    const recents = [
+      { path: '/workspace/draft.py', label: 'draft.py', exists: true },
+      { path: '/workspace/clean.py', label: 'clean.py', exists: true },
+    ];
+
+    controller.broadcastOpenState({
+      projectPath: '/workspace',
+      openFile: '/workspace/draft.py',
+      recents,
+    });
+    assert.deepEqual(activeDrafts, [], 'missing decorations are not assumed clean');
+
+    controller.refreshDecorations({
+      projectPath: '/workspace',
+      items: [
+        { path: '/workspace/draft.py', hasDraft: true },
+        { path: '/workspace/clean.py', hasDraft: false },
+      ],
+    });
+    controller.broadcastOpenState({
+      projectPath: '/workspace',
+      openFile: '/workspace/clean.py',
+      recents,
+    });
+
+    assert.deepEqual(activeDrafts, [
+      ['/workspace/draft.py', true],
+      ['/workspace/clean.py', false],
+    ]);
+  } finally {
+    dom.restore();
+  }
+});
+
 test('wheel input scrolls the file tab viewport horizontally', async () => {
   const dom = installDom();
   try {

@@ -693,6 +693,15 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       { path },
     ),
     resetToNewFile: () => resetActiveFileState({ resetPicker: false }),
+    onActiveDraftChanged: (_path, hasDraft) => {
+      restoredSessionActive = hasDraft;
+      applyCacheIndicator({
+        state: hasDraft ? 'mid_session' : 'clean',
+        unsaved: hasDraft,
+        reason: 'file_tabs_projection',
+        restoredActive: hasDraft,
+      });
+    },
   });
   fileTabsController.installWindowHooks();
 

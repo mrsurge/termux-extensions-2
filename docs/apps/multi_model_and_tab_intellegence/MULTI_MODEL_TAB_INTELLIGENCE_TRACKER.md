@@ -9,7 +9,7 @@
 - Runtime behavior changed: WBA retains the Python-materialized sidecar open
   set across active tab switches and projects the complete set as synthetic
   extension-host tabs
-- Frontend bundle changed: rebuilt with no frontend source changes
+- Frontend bundle changed: rebuilt with active-tab draft-state rehydration
 - Android scope: none
 - Live acceptance: inactive `checker.py` produced 51 BasedPyright markers while
   `.repo_memory.md` remained the active file
@@ -23,7 +23,11 @@
 - [x] Python uses the existing Framework-Shells pipe for WBA control.
 - [x] Sidecar recents remain the 12-entry logical open-set authority.
 - [x] Sidecar `last_file` remains active-file authority.
+- [x] Off-loop projections read isolated sidecar snapshots and never reload the
+      process-wide mutable sidecar instance.
 - [x] Frontend localStorage remains visual-order authority only.
+- [x] The active toolbar draft indicator rehydrates from authoritative
+      file-tab decorations when editor cache state has not been published.
 - [x] Normal tab switching does not emit document close/open churn.
 - [x] Canonical tab close is the ordinary per-document release trigger.
 - [x] Project/session generation rejects stale reconciliation.
@@ -260,6 +264,10 @@
 - [x] Python retained the background projection as one file with 51 markers.
 - [x] The host Problems drawer rendered `checker.py` with a 51-error badge
       while its file tab remained `aria-selected="false"`.
+- [x] A regression test proves threaded file-tab projection cannot reload the
+      shared sidecar and collapse its revision or recent-file membership.
+- [x] A frontend regression test proves initial active-file draft hydration and
+      clean/drafted state changes across tab switches.
 
 ## Phase 7: Semantic Acceptance Matrix
 

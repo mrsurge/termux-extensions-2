@@ -433,6 +433,9 @@ interface MonacoBootWindowLike extends Window {
     sendEditorMentionRequest: function (payload) {
       return editorRpcNotify(EDITOR_RPC_METHODS.mentionRequest, payload);
     },
+    goToDefinition: function () {
+      codeInspectorRuntime?.goToDefinition();
+    },
     inspectCode: function (mode) {
       codeInspectorRuntime?.start(mode);
     },
@@ -983,6 +986,16 @@ interface MonacoBootWindowLike extends Window {
         diffEditor?.getModifiedEditor?.() ?? editor,
         ranges,
       );
+    },
+    openLocation: function (location) {
+      return editorRpcCall(
+        EDITOR_RPC_METHODS.open,
+        location,
+        { timeoutMs: 20000 },
+      );
+    },
+    notify: function (message) {
+      return editorRpcNotify(EDITOR_RPC_METHODS.notifyPublish, { message });
     },
     logError: function (message, error) {
       console.error("[code-inspector]", message, error);
