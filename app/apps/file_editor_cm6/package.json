@@ -8,6 +8,7 @@
     "test:dialogs": "node --test ../../static/js/te_dialog.test.mjs ../../static/js/te_dialog_source_gate.test.mjs tests/te_dialog_dom.test.mjs tests/modal_kit.test.mjs",
     "test:extension-activation": "node --test tests/extension_activation_runtime.test.mjs",
     "test:extension-activity": "node --test tests/extension_activity_runtime.test.mjs tests/extension_activity_ui.test.mjs",
+    "test:explorer-tree": "node --test tests/explorer_tree_chrome.test.mjs",
     "test:file-tabs": "node --test tests/file_tabs_controller.test.mjs",
     "test:editor-preferences": "node --test tests/editor_inlay_hints_preference.test.mjs",
     "test:run-profiles": "node --test tests/run_file.test.mjs",

@@ -6,6 +6,53 @@
 // - Sticky rows are non-interactive except for the ⋮ menu button.
 
 import type { ExplorerTreeMenuEntry } from '../tree/types.ts';
+import {
+  getCanonicalTreeNodeName,
+  renderExplorerTreeLabel,
+} from '../tree/label.ts';
+
+const PADDING_TOP = 8;
+const BOTTOM_SHADOW_PAD_PX = 8;
+const STICKY_MAX_VIEW_RATIO = 0.4;
+const MIN_VISIBLE_TREE_ROWS = 4;
+
+export function computeStickyScopeSlotLimit(
+  viewportHeight: number,
+  rowHeight: number,
+  chainLength: number,
+): number {
+  if (viewportHeight <= 0 || rowHeight <= 0 || chainLength <= 0) {
+    return 0;
+  }
+
+  const chromeHeight = PADDING_TOP + BOTTOM_SHADOW_PAD_PX;
+  const ratioBudget = viewportHeight * STICKY_MAX_VIEW_RATIO - chromeHeight;
+  const reservedRowsBudget =
+    viewportHeight - MIN_VISIBLE_TREE_ROWS * rowHeight - chromeHeight;
+  const rowBudget = Math.max(
+    rowHeight,
+    Math.min(ratioBudget, reservedRowsBudget),
+  );
+  return Math.min(chainLength, Math.max(1, Math.floor(rowBudget / rowHeight)));
+}
+
+export function constrainStickyScopeChain<T>(
+  chain: readonly T[],
+  slotLimit: number,
+): T[][] {
+  if (!chain.length || slotLimit <= 0) {
+    return [];
+  }
+  if (chain.length <= slotLimit) {
+    return chain.map((item) => [item]);
+  }
+
+  const individualCount = Math.max(0, slotLimit - 1);
+  return [
+    ...chain.slice(0, individualCount).map((item) => [item]),
+    chain.slice(individualCount),
+  ];
+}
 
 export interface ExplorerStickyScopesDeps {
   treeElement: HTMLElement;
@@ -107,7 +154,7 @@ function findNextTreeNodeAfterSubtree(
 function buildEntryFromLi(li: HTMLLIElement): ExplorerTreeMenuEntry {
   return {
     rel: li.dataset.rel || '',
-    name: li.dataset.name || li.querySelector('.fe-tree-text')?.textContent || '',
+    name: getCanonicalTreeNodeName(li),
     kind: li.dataset.kind || 'dir',
     gitStatus: li.dataset.gitStatus || '',
   };
@@ -152,7 +199,7 @@ export function createExplorerStickyScopes({
   let stickySlots: HTMLUListElement[] = [];
   let stickyUnderlays: HTMLDivElement[] = [];
   let stickyRows: HTMLLIElement[] = [];
-  let stickySourceLis: HTMLLIElement[] = [];
+  let stickySourceGroups: HTMLLIElement[][] = [];
   let rowStepPx = 0;
   let lastBottomTranslateY = 0;
   let lastScrollTop = 0;
@@ -161,8 +208,6 @@ export function createExplorerStickyScopes({
   let pendingKeyFrames = 0;
   let stabilityResampleBudget = 0;
 
-  // Mirrors `.fe-tree` padding: 8px 12px 8px 7px
-  const PADDING_TOP = 8;
   // Extra early capture rows. For the explorer we want the scope to "dock"
   // exactly as it reaches the sticky stack, so keep this at 0.
   const EARLY_ROWS = 0;
@@ -180,10 +225,6 @@ export function createExplorerStickyScopes({
   const CROSS_SCOPE_GAP_PX = 10;
   // Small hysteresis to prevent rapid "scope-flapping" during push transitions.
   const KEY_STABILITY_FRAMES = 2;
-  // Extra space so the bottom-most slot can render a subtle downward shadow
-  // without being clipped by the sticky overlay container.
-  const BOTTOM_SHADOW_PAD_PX = 8;
-
   function scheduleUpdate(): void {
     if (disposed) return;
     if (rafId) return;
@@ -245,9 +286,10 @@ export function createExplorerStickyScopes({
     if (!rootLi) return [];
 
     // Start from previous chain length so we converge quickly.
-    let assumedCount = Math.max(1, stickySourceLis.length || 1);
+    let assumedCount = Math.max(1, stickySourceGroups.length || 1);
     let chain: HTMLLIElement[] = [];
     let lastIterKey = '';
+    const viewportHeight = treeElement.getBoundingClientRect().height;
 
     for (let i = 0; i < 5; i++) {
       const dirAdj = scrollDirection === 'up' ? -UP_RELEASE_ROWS : 0;
@@ -264,7 +306,10 @@ export function createExplorerStickyScopes({
       const key = chain.map((li) => li.dataset.rel || '').join('|');
       if (key && key === lastIterKey) break;
       lastIterKey = key;
-      assumedCount = Math.max(1, chain.length);
+      assumedCount = Math.max(
+        1,
+        computeStickyScopeSlotLimit(viewportHeight, rowStepPx, chain.length),
+      );
     }
 
     // Root is always slot 0.
@@ -301,12 +346,101 @@ export function createExplorerStickyScopes({
     }
   }
 
-  function fillRowFromSource(
-    srcLi: HTMLLIElement,
+  function scrollScopeToHead(srcLi: HTMLLIElement): void {
+    const treeRect = treeElement.getBoundingClientRect();
+    const srcRect = srcLi.getBoundingClientRect();
+    if (!isElementVisibleRect(treeRect) || !isElementVisibleRect(srcRect)) {
+      return;
+    }
+
+    const stickyHeight = PADDING_TOP + stickySourceGroups.length * rowStepPx;
+    const delta = srcRect.top - (treeRect.top + stickyHeight);
+    const maxScroll = Math.max(
+      0,
+      treeElement.scrollHeight - treeElement.clientHeight,
+    );
+    treeElement.scrollTop = Math.min(
+      maxScroll,
+      Math.max(0, treeElement.scrollTop + delta),
+    );
+    scheduleUpdate();
+  }
+
+  function appendDiagnosticMarker(containerEl: HTMLElement): void {
+    const diagnostic = document.createElement('span');
+    diagnostic.className = 'fe-diag-mark';
+    diagnostic.setAttribute('aria-hidden', 'true');
+    containerEl.appendChild(diagnostic);
+  }
+
+  function renderStickyRowContent(
+    group: HTMLLIElement[],
+    rowEl: HTMLLIElement,
+  ): void {
+    const menuSource = group[group.length - 1];
+    if (!menuSource) return;
+
+    rowEl.replaceChildren();
+
+    const icon = document.createElement('span');
+    icon.className = 'fe-entry-icon fe-entry-icon-dir';
+
+    const text = document.createElement('span');
+    text.className = 'fe-tree-text';
+    if (group.length === 1) {
+      renderExplorerTreeLabel(text, getCanonicalTreeNodeName(menuSource));
+    } else {
+      text.classList.add('fe-sticky-scope-path');
+      group.forEach((source, index) => {
+        if (index > 0) {
+          const separator = document.createElement('span');
+          separator.className = 'fe-sticky-scope-separator';
+          separator.textContent = '/';
+          text.appendChild(separator);
+        }
+
+        const segment = document.createElement('button');
+        segment.type = 'button';
+        segment.className = 'fe-sticky-scope-segment';
+        segment.dataset.rel = source.dataset.rel || '';
+        segment.textContent = getCanonicalTreeNodeName(source);
+        segment.setAttribute(
+          'aria-label',
+          `Navigate to ${getCanonicalTreeNodeName(source)}`,
+        );
+        segment.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          scrollScopeToHead(source);
+        });
+        text.appendChild(segment);
+      });
+      appendDiagnosticMarker(text);
+    }
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'fe-card-menu-btn';
+    menuBtn.textContent = '⋮';
+    menuBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (typeof openCardMenuForEntry === 'function') {
+        openCardMenuForEntry(buildEntryFromLi(menuSource), menuBtn);
+      }
+    });
+
+    rowEl.append(icon, text, menuBtn);
+  }
+
+  function fillRowFromSources(
+    group: HTMLLIElement[],
     depth: number,
     rebuild = true,
   ): void {
-    const rel = srcLi.dataset.rel || '';
+    const srcLi = group[0];
+    const menuSource = group[group.length - 1];
+    const rel = menuSource?.dataset.rel || '';
+    if (!srcLi || !menuSource) return;
     if (!rel) return;
     const underlayEl = stickyUnderlays[depth];
     const slotEl = stickySlots[depth];
@@ -356,7 +490,7 @@ export function createExplorerStickyScopes({
 
     // Underlay background should match the *parent* scope's background so
     // nested sticky cards reveal the same color as the real nested tree.
-    const parentLi = depth > 0 ? stickySourceLis[depth - 1] : null;
+    const parentLi = depth > 0 ? stickySourceGroups[depth - 1]?.[0] : null;
     try {
       if (parentLi) {
         const cs = window.getComputedStyle(parentLi);
@@ -371,25 +505,22 @@ export function createExplorerStickyScopes({
       underlayEl.style.backgroundImage = '';
     }
 
-    copyExplorerVisualClasses(srcLi, rowEl);
+    copyExplorerVisualClasses(menuSource, rowEl);
     rowEl.dataset.kind = 'dir';
     rowEl.dataset.rel = rel;
-    rowEl.dataset.name =
-      srcLi.dataset.name ||
-      srcLi.querySelector('.fe-tree-text')?.textContent ||
-      '';
-    if (srcLi.dataset.gitStatus) {
-      rowEl.dataset.gitStatus = srcLi.dataset.gitStatus;
+    rowEl.dataset.name = getCanonicalTreeNodeName(menuSource);
+    if (menuSource.dataset.gitStatus) {
+      rowEl.dataset.gitStatus = menuSource.dataset.gitStatus;
     } else {
       delete rowEl.dataset.gitStatus;
     }
-    if (srcLi.dataset.gitFlags) {
-      rowEl.dataset.gitFlags = srcLi.dataset.gitFlags;
+    if (menuSource.dataset.gitFlags) {
+      rowEl.dataset.gitFlags = menuSource.dataset.gitFlags;
     } else {
       delete rowEl.dataset.gitFlags;
     }
-    if (srcLi.dataset.hasDraft) {
-      rowEl.dataset.hasDraft = srcLi.dataset.hasDraft;
+    if (menuSource.dataset.hasDraft) {
+      rowEl.dataset.hasDraft = menuSource.dataset.hasDraft;
     } else {
       delete rowEl.dataset.hasDraft;
     }
@@ -397,62 +528,41 @@ export function createExplorerStickyScopes({
     // Let CSS control padding; indentation comes from the slot geometry above.
     rowEl.style.paddingLeft = '';
 
-    if (!rebuild) return;
-
-    rowEl.innerHTML = '';
-
-    const icon = document.createElement('span');
-    icon.className = 'fe-entry-icon fe-entry-icon-dir';
-
-    const text = document.createElement('span');
-    text.className = 'fe-tree-text';
-    const srcTextEl = srcLi.querySelector('.fe-tree-text');
-    if (srcTextEl) {
-      // Preserve inline markers (e.g. diagnostics emoji span) so they keep their CSS sizing.
-      text.innerHTML = srcTextEl.innerHTML;
-    } else {
-      text.textContent = srcLi.dataset.name || '';
+    const contentKey = group
+      .map(
+        (source) =>
+          `${source.dataset.rel || ''}\u0000${getCanonicalTreeNodeName(source)}`,
+      )
+      .join('\u0001');
+    if (rebuild || rowEl.dataset.stickyContentKey !== contentKey) {
+      rowEl.dataset.stickyContentKey = contentKey;
+      renderStickyRowContent(group, rowEl);
     }
-
-    const menuBtn = document.createElement('button');
-    menuBtn.className = 'fe-card-menu-btn';
-    menuBtn.textContent = '⋮';
-    menuBtn.addEventListener('click', (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      if (typeof openCardMenuForEntry === 'function') {
-        openCardMenuForEntry(buildEntryFromLi(srcLi), menuBtn);
-      }
-    });
-
-    rowEl.appendChild(icon);
-    rowEl.appendChild(text);
-    rowEl.appendChild(menuBtn);
   }
 
-  function renderChain(chain: HTMLLIElement[]): void {
-    stickySourceLis = chain.slice();
-    ensureSlotCount(chain.length);
-    chain.forEach((srcLi, depth) => {
-      fillRowFromSource(srcLi, depth, true);
+  function renderChain(groups: HTMLLIElement[][]): void {
+    stickySourceGroups = groups.map((group) => group.slice());
+    ensureSlotCount(groups.length);
+    groups.forEach((group, depth) => {
+      fillRowFromSources(group, depth, true);
     });
   }
 
   function applyPushTransforms(): void {
-    if (!stickySlots.length || !stickySourceLis.length) return;
+    if (!stickySlots.length || !stickySourceGroups.length) return;
     const containerRect = container!.getBoundingClientRect();
     if (!isElementVisibleRect(containerRect)) return;
     const listTop = containerRect.top + PADDING_TOP;
 
     let cumulativePush = 0;
     let bottomTranslateY = 0;
-    for (let depth = 0; depth < stickySourceLis.length; depth++) {
+    for (let depth = 0; depth < stickySourceGroups.length; depth++) {
       const underlayEl = stickyUnderlays[depth];
       const slotEl = stickySlots[depth];
-      const srcLi = stickySourceLis[depth];
+      const srcLi = stickySourceGroups[depth]?.[0];
       if (!slotEl || !srcLi || !underlayEl) continue;
 
-      const isBottomSlot = depth === stickySourceLis.length - 1;
+      const isBottomSlot = depth === stickySourceGroups.length - 1;
       slotEl.classList.toggle('fe-sticky-scope-slot-bottom', isBottomSlot);
       // Slight overlap to hide 1px seams between the docked overlay and the
       // scrolling tree border outline.
@@ -479,7 +589,9 @@ export function createExplorerStickyScopes({
 
       const translateY = cumulativePush + push;
       slotEl.style.transform = `translateY(${translateY}px)`;
-      if (depth === stickySourceLis.length - 1) bottomTranslateY = translateY;
+      if (depth === stickySourceGroups.length - 1) {
+        bottomTranslateY = translateY;
+      }
 
       // Per-scope background underlay: anchored at the top of the sticky region,
       // with its "bottom edge" landing around halfway down this scope row.
@@ -516,7 +628,7 @@ export function createExplorerStickyScopes({
     if (!step) {
       container!.style.height = '0px';
       ensureSlotCount(0);
-      stickySourceLis = [];
+      stickySourceGroups = [];
       return;
     }
     rowStepPx = step;
@@ -529,7 +641,7 @@ export function createExplorerStickyScopes({
     let chain = rawChain;
     let key = rawKey;
     let needsStabilityResample = false;
-    if (rawKey && lastKey && rawKey !== lastKey && stickySourceLis.length) {
+    if (rawKey && lastKey && rawKey !== lastKey && stickySourceGroups.length) {
       if (rawKey === pendingKey) {
         pendingKeyFrames += 1;
       } else {
@@ -538,7 +650,7 @@ export function createExplorerStickyScopes({
       }
 
       if (pendingKeyFrames < KEY_STABILITY_FRAMES) {
-        chain = stickySourceLis;
+        chain = stickySourceGroups.flat();
         key = lastKey;
         needsStabilityResample = true;
         stabilityResampleBudget = Math.max(
@@ -560,33 +672,48 @@ export function createExplorerStickyScopes({
       lastKey = '';
       container!.style.height = '0px';
       ensureSlotCount(0);
-      stickySourceLis = [];
+      stickySourceGroups = [];
+      lastBottomTranslateY = 0;
+      return;
+    }
+
+    const slotLimit = computeStickyScopeSlotLimit(
+      treeRect.height,
+      rowStepPx,
+      chain.length,
+    );
+    const groups = constrainStickyScopeChain(chain, slotLimit);
+    if (!groups.length) {
+      container!.style.height = '0px';
+      ensureSlotCount(0);
+      stickySourceGroups = [];
       lastBottomTranslateY = 0;
       return;
     }
 
     // Set fixed geometry first; render can rely on rowStepPx.
-    const contentHeight = chain.length * rowStepPx;
+    const contentHeight = groups.length * rowStepPx;
     container!.style.height = `${PADDING_TOP + contentHeight + BOTTOM_SHADOW_PAD_PX}px`;
 
     const sameIdentityChain =
       key === lastKey &&
-      chain.length === stickySourceLis.length &&
-      chain.every((li, idx) => li === stickySourceLis[idx]);
+      groups.length === stickySourceGroups.length &&
+      groups.every(
+        (group, groupIndex) =>
+          group.length === stickySourceGroups[groupIndex]?.length &&
+          group.every(
+            (source, sourceIndex) =>
+              source === stickySourceGroups[groupIndex]?.[sourceIndex],
+          ),
+      );
 
     if (!sameIdentityChain) {
       lastKey = key;
-      renderChain(chain);
+      renderChain(groups);
     } else {
-      // Keep menu positioning / labels fresh (git classes can change).
-      chain.forEach((srcLi, depth) => {
-        fillRowFromSource(srcLi, depth, false);
-        const rowEl = stickyRows[depth];
-        const text = rowEl?.querySelector('.fe-tree-text');
-        const srcTextEl = srcLi.querySelector('.fe-tree-text');
-        if (text && srcTextEl) {
-          text.innerHTML = srcTextEl.innerHTML;
-        }
+      // Keep geometry, labels, and visual classes fresh without cloning source DOM.
+      groups.forEach((group, depth) => {
+        fillRowFromSources(group, depth, false);
       });
     }
 
@@ -616,6 +743,11 @@ export function createExplorerStickyScopes({
       'data-has-draft',
     ],
   });
+  const resizeObserver =
+    typeof ResizeObserver === 'function'
+      ? new ResizeObserver(scheduleUpdate)
+      : null;
+  resizeObserver?.observe(treeElement);
 
   lastScrollTop = treeElement.scrollTop || 0;
   function onScroll(): void {
@@ -638,6 +770,7 @@ export function createExplorerStickyScopes({
     destroy(): void {
       disposed = true;
       observer.disconnect();
+      resizeObserver?.disconnect();
       treeElement.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', scheduleUpdate);
       if (rafId) {

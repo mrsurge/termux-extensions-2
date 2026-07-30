@@ -1,4 +1,5 @@
 import type { ExplorerTreeEntry } from './types.ts';
+import { renderExplorerTreeLabel } from './label.ts';
 
 interface ExplorerTreeRendererDeps {
   getTreeElement(): HTMLElement | null;
@@ -78,7 +79,8 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
     const text = document.createElement('span');
     text.className = 'fe-tree-text';
     const baseName = deps.basename(deps.getProjectPath() || '') || 'Project';
-    text.textContent = baseName;
+    rootLi.dataset.name = baseName;
+    renderExplorerTreeLabel(text, baseName);
 
     const menuBtn = document.createElement('button');
     menuBtn.className = 'fe-card-menu-btn';
@@ -252,7 +254,7 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
 
         const nextTextSpan = document.createElement('span');
         nextTextSpan.className = 'fe-tree-text';
-        nextTextSpan.textContent = name;
+        renderExplorerTreeLabel(nextTextSpan, name);
         li.insertBefore(nextTextSpan, childUl);
         textSpan = nextTextSpan;
 
@@ -268,7 +270,7 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
           deps.applySetiIconToSpan(iconSpan, name, kind);
         }
         if (textSpan) {
-          textSpan.textContent = name;
+          renderExplorerTreeLabel(textSpan, name);
         }
         if (checkbox) {
           checkbox.dataset.rel = rel;

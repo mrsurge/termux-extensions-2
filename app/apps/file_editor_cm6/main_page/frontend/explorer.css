@@ -228,12 +228,52 @@
 }
 
 .fe-tree-text {
+  display: flex;
+  align-items: center;
   flex: 1;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   min-width: 0; /* Add this if not present - critical for ellipsis to
     work */
+}
+
+.fe-tree-label-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fe-sticky-scope-path {
+  gap: 0;
+}
+
+.fe-sticky-scope-segment {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.fe-sticky-scope-segment:hover,
+.fe-sticky-scope-segment:focus-visible {
+  color: #7dd3fc;
+  text-decoration: underline;
+  outline: none;
+}
+
+.fe-sticky-scope-separator {
+  flex: none;
+  margin: 0 2px;
+  opacity: 0.5;
 }
 
 /* Nested tree indentation */
@@ -1698,17 +1738,27 @@
   pointer-events: none;
 }
 
-/* Diagnostic indicator marker (Sprint C) */
-/* Inline right after the filename text (no floating / no overlap with menu button). */
-
 .fe-tree-node .fe-diag-mark {
-  display: inline-block;
+  display: none;
+  flex: 0 0 auto;
+  width: 0.45em;
+  height: 0.45em;
   margin-left: 4px;
-  font-size: 0.5em; /* 50% of filename text size */
-  line-height: 1;
-  vertical-align: middle;
+  border-radius: 50%;
   opacity: 0.9;
   pointer-events: none;
+}
+
+.fe-tree-node.fe-diag-warning > .fe-tree-text > .fe-diag-mark,
+.fe-tree-node.fe-dir-has-diag-warning > .fe-tree-text > .fe-diag-mark {
+  display: inline-block;
+  background: #facc15;
+}
+
+.fe-tree-node.fe-diag-error > .fe-tree-text > .fe-diag-mark,
+.fe-tree-node.fe-dir-has-diag-error > .fe-tree-text > .fe-diag-mark {
+  display: inline-block;
+  background: #ef4444;
 }
 
 /* Review Diff Styles */

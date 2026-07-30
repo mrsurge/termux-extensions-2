@@ -3,6 +3,7 @@ import type {
   ExplorerTreeEntryKind,
   ExplorerTreeMenuEntry,
 } from './types.ts';
+import { getCanonicalTreeNodeName } from './label.ts';
 
 interface ExplorerTreeClickHandlerDeps {
   getTreeElement(): HTMLElement | null;
@@ -18,11 +19,7 @@ interface ExplorerTreeClickHandlerDeps {
 }
 
 function getNodeName(node: HTMLLIElement): string {
-  const datasetName = node.dataset.name;
-  if (datasetName) {
-    return datasetName;
-  }
-  return node.querySelector<HTMLElement>('.fe-tree-text')?.textContent || '';
+  return getCanonicalTreeNodeName(node);
 }
 
 function getNodeKind(node: HTMLLIElement): ExplorerTreeEntryKind | string {

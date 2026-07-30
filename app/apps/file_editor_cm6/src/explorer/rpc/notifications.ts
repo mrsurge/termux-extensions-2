@@ -17,6 +17,7 @@ import type { ExplorerRuntimeState } from "../state/runtime-state.ts";
 import type { ExplorerTreeDecorationsController } from "../tree/decorations.ts";
 import type { ExplorerGitStatus } from "../git/footer-utils.ts";
 import type { ProblemsPanelApi } from "../search/diagnostics-renderer.ts";
+import { renderExplorerTreeLabel } from "../tree/label.ts";
 
 interface ExplorerSearchOverlayController {
   handleSearchResultsUpdated(payload: JsonObject): void;
@@ -348,8 +349,9 @@ export function createExplorerNotificationHandler(
               ":scope > .fe-tree-text",
             );
             if (label) {
-              label.textContent =
-                deps.basename(currentProjectPath || "") || "Project";
+              const name = deps.basename(currentProjectPath || "") || "Project";
+              rootLi.dataset.name = name;
+              renderExplorerTreeLabel(label, name);
             }
           }
           if (!rootLi) break;

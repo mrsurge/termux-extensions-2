@@ -205,31 +205,6 @@ export function createExplorerTreeDecorationsController(
       if (diagHasWarnings) rootLi.classList.add('fe-dir-has-diag-warning');
     }
 
-    root.querySelectorAll<HTMLLIElement>('li.fe-tree-node').forEach((li) => {
-      const textSpan = li.querySelector<HTMLElement>('.fe-tree-text');
-      if (!textSpan) return;
-
-      let mark = textSpan.querySelector<HTMLSpanElement>('.fe-diag-mark');
-      if (!mark) {
-        mark = document.createElement('span');
-        mark.className = 'fe-diag-mark';
-        textSpan.appendChild(mark);
-      }
-
-      if (
-        li.classList.contains('fe-diag-error') ||
-        li.classList.contains('fe-dir-has-diag-error')
-      ) {
-        mark.textContent = ' 🔴';
-      } else if (
-        li.classList.contains('fe-diag-warning') ||
-        li.classList.contains('fe-dir-has-diag-warning')
-      ) {
-        mark.textContent = ' 🟡';
-      } else {
-        mark.textContent = '';
-      }
-    });
   }
 
   function applyDraftDecorations(payload: unknown): void {
