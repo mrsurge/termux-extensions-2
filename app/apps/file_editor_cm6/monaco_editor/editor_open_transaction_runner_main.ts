@@ -40,7 +40,7 @@ interface RunEditorOpenTransactionDeps {
   emitModelReady(payload: { path: string; languageId: string; generation?: number; request_id?: string; source?: string }): boolean;
   requestDraftDiff(reason: string): void;
   clearDraftDiffDecorations(): void;
-  requestGitBaselines(payload: { reason: string }): void;
+  requestGitBaselines(payload: { immediate?: boolean; reason: string }): void;
   clearDiagnosticsForLeavingModel(reason: string): void;
   wbCurrentGeneration(): number;
   wbBumpGeneration(path: string, source: string): number;
@@ -261,7 +261,7 @@ export async function runEditorOpenTransaction(
     }
 
     if (!sameFileNavigationOnly && payload.reason !== 'external_change') {
-      deps.requestGitBaselines({ reason: 'open' });
+      deps.requestGitBaselines({ immediate: true, reason: 'open' });
     }
     const openCompletePayload = {
       path: currentPath,

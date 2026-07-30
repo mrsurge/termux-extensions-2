@@ -419,6 +419,18 @@ export class ProviderRegistry {
     return handles;
   }
 
+  findSemanticFullHandles(languageId: string): number[] {
+    if (!languageId) return [];
+    const handles: number[] = [];
+    for (const entry of this.providers.semanticTokens.values()) {
+      if (entry.range) continue;
+      if (selectorLanguages(entry.selector).includes(languageId)) {
+        handles.push(entry.handle);
+      }
+    }
+    return handles;
+  }
+
   buildResyncEvents(): ProviderResyncOutcome {
     const replayed = {
       semanticTokens: 0,

@@ -282,6 +282,52 @@ test("registry retains once, replaces without close/open, and releases once", as
   assert.deepEqual(removals[0].removedDocuments, [uri]);
 });
 
+test("byte-identical replacement updates metadata without model churn", () => {
+  const calls = [];
+  const registry = createRegistry(calls);
+  const path = "/workspace/steady.rs";
+  const text = "fn steady() {}\n";
+  const retained = registry.retain({
+    path,
+    uri: uriForPath(path),
+    text,
+    languageId: "rust",
+    role: "background",
+    contentIdentity: "before",
+    openGeneration: 1,
+    dirty: false,
+  });
+
+  const replaced = registry.replaceFullText(
+    {
+      path,
+      text,
+      languageId: "rust",
+      openGeneration: 2,
+      contentIdentity: "after",
+      dirty: true,
+    },
+    { waitForAck: true, isDirtyEvent: true },
+  );
+
+  assert.equal(replaced.ok, true);
+  assert.equal(replaced.contentChanged, false);
+  assert.equal(replaced.previousVersionId, retained.entry.versionId);
+  assert.equal(replaced.versionId, retained.entry.versionId);
+  assert.equal(replaced.ack, null);
+  assert.equal(registry.getByPath(path)?.openGeneration, 2);
+  assert.equal(registry.getByPath(path)?.contentIdentity, "after");
+  assert.equal(registry.getByPath(path)?.dirty, true);
+  assert.equal(
+    calls.filter((call) => call.method === "$acceptModelChanged").length,
+    0,
+  );
+  assert.equal(
+    calls.filter((call) => call.method === "$acceptDirtyStateChanged").length,
+    1,
+  );
+});
+
 test("active A to B to A transfers editor role without document churn", async () => {
   const fixture = createLifecycleRuntime({
     "/workspace/a.rs": "fn a() {}\n",

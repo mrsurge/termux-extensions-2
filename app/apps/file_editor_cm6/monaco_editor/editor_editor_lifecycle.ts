@@ -1,3 +1,5 @@
+import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
+
 interface MonacoPositionLike {
   [key: string]: unknown;
 }
@@ -289,7 +291,7 @@ export function ensureDiffEditorWithPrefs(deps: EditorLifecycleDeps): MonacoDiff
     delete diffOptions.theme;
     const originalOptions = Object.assign({}, options, { readOnly: true, contextmenu: false, minimap: { enabled: false } });
     delete originalOptions.theme;
-    const scrollOptions = { scrollbar: { vertical: 'hidden', verticalScrollbarSize: 0, horizontal: 'hidden', horizontalScrollbarSize: 0 } };
+    const scrollOptions = buildInlineDiffScrollbarOptions();
 
     const modifiedEditor = typeof diffEditor.getModifiedEditor === 'function' ? diffEditor.getModifiedEditor() : null;
     const originalEditor = typeof diffEditor.getOriginalEditor === 'function' ? diffEditor.getOriginalEditor() : null;

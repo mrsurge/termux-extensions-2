@@ -1,4 +1,5 @@
 import { EDITOR_RPC_NOTIFICATIONS } from './editor_rpc_contract.ts';
+import { buildInlineDiffScrollbarOptions } from './editor_diff_scrollbar_options.ts';
 
 interface EditorSocketLike {
   id?: string | null;
@@ -343,7 +344,7 @@ export function registerEditorSocketConnectionHandlers(
             }
           } catch (_) {}
           try {
-            const scrollOpts = { scrollbar: { vertical: 'hidden', verticalScrollbarSize: 0, horizontal: 'hidden', horizontalScrollbarSize: 0 } };
+            const scrollOpts = buildInlineDiffScrollbarOptions();
             const modifiedEditor = diffEditor.getModifiedEditor ? diffEditor.getModifiedEditor() : null;
             const originalEditor = diffEditor.getOriginalEditor ? diffEditor.getOriginalEditor() : null;
             if (modifiedEditor && typeof modifiedEditor.updateOptions === 'function') {

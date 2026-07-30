@@ -54,6 +54,41 @@ function getEntryGitFlags(entry: ExplorerTreeEntry): string[] {
     : [];
 }
 
+function getChildTreeDepth(containerUl: HTMLElement): number {
+  const parent = containerUl.closest<HTMLLIElement>(
+    'li.fe-tree-node[data-kind="dir"]',
+  );
+  const parentDepth = Number.parseInt(parent?.dataset.treeDepth || '', 10);
+  if (Number.isFinite(parentDepth)) {
+    return parentDepth + 1;
+  }
+
+  let depth = 0;
+  let cursor = parent;
+  while (cursor) {
+    depth += 1;
+    cursor =
+      cursor.parentElement?.closest<HTMLLIElement>(
+        'li.fe-tree-node[data-kind="dir"]',
+      ) || null;
+  }
+  return depth;
+}
+
+function applyTreeDepthMetadata(
+  node: HTMLLIElement,
+  kind: string,
+  depth: number,
+): void {
+  if (kind !== 'dir') {
+    delete node.dataset.treeDepth;
+    delete node.dataset.depthParity;
+    return;
+  }
+  node.dataset.treeDepth = String(depth);
+  node.dataset.depthParity = depth % 2 === 0 ? 'even' : 'odd';
+}
+
 export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
   function renderExplorerTree(): void {
     let treeElement = deps.getTreeElement();
@@ -72,6 +107,7 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
     rootLi.dataset.kind = 'dir';
     rootLi.dataset.rel = '.';
     rootLi.dataset.open = 'true';
+    applyTreeDepthMetadata(rootLi, 'dir', 0);
 
     const icon = document.createElement('span');
     icon.className = 'fe-entry-icon fe-entry-icon-dir';
@@ -114,6 +150,7 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
 
     const inSelectMode = deps.isInSelectMode(resolvedParentRel);
     containerUl.classList.toggle('fe-tree-select-mode', inSelectMode);
+    const childTreeDepth = getChildTreeDepth(containerUl);
 
     const list = normalizeEntries(entries);
     const newRels = new Set(list.map((entry) => getEntryRel(entry)));
@@ -162,6 +199,7 @@ export function createExplorerTreeRenderer(deps: ExplorerTreeRendererDeps) {
       const name = getEntryName(entry);
       li.dataset.kind = kind;
       li.dataset.name = name;
+      applyTreeDepthMetadata(li, kind, childTreeDepth);
 
       if (typeof entry.gitStatus === 'string' && entry.gitStatus) {
         li.dataset.gitStatus = entry.gitStatus;

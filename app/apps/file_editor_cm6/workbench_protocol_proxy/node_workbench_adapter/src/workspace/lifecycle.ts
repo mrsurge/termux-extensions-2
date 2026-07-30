@@ -280,7 +280,7 @@ export async function openFile(runtime: LifecycleRuntime, params: unknown = {}):
       throw new Error(`${replaced.error}: ${path}`);
     }
     runtime.log(
-      `[openFile] ts=${Date.now()} same-file reopen, sending $didChange instead of remove+add (v${replaced.previousVersionId}→v${replaced.versionId})`,
+      `[openFile] ts=${Date.now()} same-file reopen contentChanged=${replaced.contentChanged ? 1 : 0} (v${replaced.previousVersionId}→v${replaced.versionId})`,
     );
     runtime.session.activeEditorId = prevEditorId;
     runtime.session.activeUriObj = uriObj;
@@ -459,17 +459,22 @@ export function didChange(
     );
   });
   runtime.log(
-    `[didChange] ts=${Date.now()} path=${path} ver=${nextVersion} bytes=${text.length} prevLines=${replaced.previousLineCount} prevLastLineLen=${replaced.previousLastLineLength} newLines=${replaced.entry.lineCount}`,
+    `[didChange] ts=${Date.now()} path=${path} ver=${nextVersion} contentChanged=${replaced.contentChanged ? 1 : 0} bytes=${text.length} prevLines=${replaced.previousLineCount} prevLastLineLen=${replaced.previousLastLineLength} newLines=${replaced.entry.lineCount}`,
   );
   if (replaced.ack) {
     return replaced.ack.promise.then((reply) => ({
       ok: true,
       versionId: nextVersion,
+      contentChanged: replaced.contentChanged,
       ackReq: replaced.ack!.req,
       ackType: isRecord(reply) ? reply.type : undefined,
     }));
   }
-  return { ok: true, versionId: nextVersion };
+  return {
+    ok: true,
+    versionId: nextVersion,
+    contentChanged: replaced.contentChanged,
+  };
 }
 
 export async function switchWorkspace(runtime: LifecycleRuntime, newFolder: string): Promise<WorkspaceSwitchResult> {

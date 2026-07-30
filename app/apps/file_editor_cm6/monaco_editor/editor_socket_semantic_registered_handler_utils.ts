@@ -5,6 +5,7 @@ interface SemanticTokensLegendLike {
 
 interface SemanticTokensBridgeLike {
   registeredSemanticTokens: Set<string>;
+  semanticTokensProviderKeysByLanguage: Record<string, Set<string>>;
   semanticTokensLegendCache: Record<string, unknown>;
   semanticTokensRangeFlag: Record<string, unknown>;
   semanticTokensLanguagesByEventHandle: Record<string, string[]>;
@@ -16,6 +17,7 @@ export interface SemanticTokensRegisteredPayload {
   legend?: SemanticTokensLegendLike;
   range?: boolean;
   eventHandle?: unknown;
+  resync?: boolean;
 }
 
 function asSemanticTokensRegisteredPayload(value: unknown): SemanticTokensRegisteredPayload | null {
@@ -27,7 +29,15 @@ function asSemanticTokensRegisteredPayload(value: unknown): SemanticTokensRegist
 export function handleSemanticTokensProviderRegistered(
   data: unknown,
   languageBridge: SemanticTokensBridgeLike,
-  registerSemanticTokensFn: (lang: string, legend: SemanticTokensLegendLike, isRange: boolean) => void,
+  registerSemanticTokensFn: (
+    lang: string,
+    legend: SemanticTokensLegendLike,
+    isRange: boolean,
+    options?: {
+      providerKey?: string;
+      replay?: boolean;
+    },
+  ) => void,
 ): void {
   const typedData = asSemanticTokensRegisteredPayload(data);
   const lang = typedData?.language;
@@ -46,7 +56,13 @@ export function handleSemanticTokensProviderRegistered(
     + ' mods=' + legend.tokenModifiers.length
     + ' range=' + !!typedData?.range,
   );
-  languageBridge.semanticTokensLegendCache[lang] = legend;
-  if (typedData?.range) languageBridge.semanticTokensRangeFlag[lang] = true;
-  registerSemanticTokensFn(lang, legend, !!typedData?.range);
+  const handle = typedData?.handle == null
+    ? ""
+    : String(typedData.handle).trim();
+  registerSemanticTokensFn(lang, legend, !!typedData?.range, {
+    providerKey: handle
+      ? `${handle}:${typedData?.range ? "range" : "full"}`
+      : undefined,
+    replay: typedData?.resync === true,
+  });
 }

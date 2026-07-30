@@ -68,6 +68,19 @@ test('toolbar and Drafts overlay keep the intended source structure', async () =
     /id="fe-drawer-open" class="fe-menu-btn fe-agent-toggle"/,
   );
   assert.match(template, /#menu-branch-dd\s*\{[^}]*right:\s*-45px/);
+  const desktopToolbarZ = Number(
+    template.match(
+      /\.layout-desktop \.fe-toolbar\s*\{[\s\S]*?z-index:\s*(\d+)/,
+    )?.[1],
+  );
+  const desktopSidebarZ = Number(
+    template.match(
+      /\.layout-desktop \.agent-drawer\s*\{[\s\S]*?z-index:\s*(\d+)/,
+    )?.[1],
+  );
+  assert.equal(desktopToolbarZ, 40);
+  assert.equal(desktopSidebarZ, 50);
+  assert.ok(desktopToolbarZ < desktopSidebarZ);
   assert.match(overlay, /\{ id: "review", label: "Drafts" \}/);
   assert.doesNotMatch(reviewRenderer, /badge\.textContent = 'Draft'/);
 });

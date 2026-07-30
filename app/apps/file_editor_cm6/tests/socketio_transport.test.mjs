@@ -458,6 +458,7 @@ test('visible editor open completion does not await WBA or agent hydration', asy
   let wbaOpenCalls = 0;
   let agentHydrationCalls = 0;
   const switchOrder = [];
+  const baselineRequests = [];
 
   const openPromise = runEditorOpenTransaction({
     getWindow: () => ({ monaco: {} }),
@@ -498,7 +499,7 @@ test('visible editor open completion does not await WBA or agent hydration', asy
     emitModelReady: () => true,
     requestDraftDiff: () => {},
     clearDraftDiffDecorations: () => {},
-    requestGitBaselines: () => {},
+    requestGitBaselines: (payload) => baselineRequests.push(payload),
     clearDiagnosticsForLeavingModel: () => {},
     wbCurrentGeneration: () => 0,
     wbBumpGeneration: () => 1,
@@ -537,6 +538,7 @@ test('visible editor open completion does not await WBA or agent hydration', asy
   assert.deepEqual(switchOrder.slice(0, 2), ['flush', 'path:/workspace/fast.py']);
   assert.equal(wbaOpenCalls, 1);
   assert.equal(agentHydrationCalls, 1);
+  assert.deepEqual(baselineRequests, [{ immediate: true, reason: 'open' }]);
 
   wbaOpen.resolve({ ok: true });
   agentHydration.resolve({ ok: true });

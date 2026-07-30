@@ -793,6 +793,12 @@ theme registration is skipped (by design) to avoid caching a no-op run.
 - Git diff mode uses Monaco DiffEditor in inline mode (not side-by-side).
 - Draft diff mode is a custom overlay (decorations + view zones).
 - Minimap is forced off in diff mode to avoid layout artifacts.
+- File switches clear the previous diff pair, complete the visible Monaco open,
+  then issue a non-blocking `editor.gitBaselines.get` request. Its returned
+  disk/HEAD payload is applied only while its path is still active; original
+  models are not retained as per-tab authority.
+- Diff editor children hide vertical scrollbar chrome but retain automatic
+  10-pixel horizontal scrollbars for long lines.
 
 ### Z-index policy
 - The inline Monaco editor host remains at `z-index: auto`.
@@ -2290,6 +2296,38 @@ Properties:
 - **Python semantic tokens**: Pyright (open-source) does not register a semantic token provider. Only TypeScript/JavaScript get semantic tokens from the ext host. Python semantic tokens require Pylance (proprietary, unavailable for code-server). Python coloring is purely TextMate-based.
 - **Palette patch timing**: `_patchSemanticTokenColorIndices()` must run after editor creation + tmRegistry initialization + setColorMap. Multiple call sites ensure at least one hits the right timing window.
 
+### Background full-token projections
+
+The retained WBA logical-document set also owns background full-document
+semantic-token prewarming.
+
+- Only real full-document semantic token providers participate. Range providers
+  remain foreground, range-bound requests; WBA never fabricates ranges.
+- Hydrated background documents are queued in logical/MRU order and computed
+  with concurrency one. The queue pauses while a visible `openFile`
+  transaction is in flight.
+- The cache key includes WBA document version, content identity, language,
+  SHA-256 text fingerprint, project generation, and full-provider generation.
+- A foreground Monaco full-token request uses the existing
+  `vscode.semanticTokens` path. When its text fingerprint matches, WBA returns
+  the compact cached map without an extension-host provider round trip.
+- The draft-safe foreground synchronization barrier remains in place, but a
+  byte-identical full-text update changes only document metadata. It does not
+  advance the WBA model version, emit `$acceptModelChanged`, or invalidate the
+  prewarmed token map. A real text mutation performs all three.
+- The editor keeps one stable semantic-token provider registration per language.
+  Replayed selector snapshots are reconciled by provider handle, full providers
+  win over range providers when both exist, and duplicate registrations are
+  no-ops. Real provider or legend changes produce one microtask-coalesced,
+  language-scoped invalidation; reconnect hydration finishes with one active
+  language refresh instead of per-selector invalidation bursts.
+- Real text mutation, logical close, workspace/session reset, or a full-provider
+  change invalidates the complete entry. Range-provider changes do not invalidate
+  it.
+- Cached arrays are retained as `Uint32Array` with a 32 MiB whole-entry LRU
+  budget. Entries are never truncated; eviction releases the corresponding
+  extension-host semantic-token result ID.
+
 ## 24) Completions Pipeline (End-to-End)
 
 ### Overview
@@ -2830,7 +2868,7 @@ The extension hooks into a Monaco `ICodeEditor` and adds:
 - **Teardrop cursor indicator** — a draggable handle below the cursor.
 - **Selection handle bars** — left/right draggable handles around a selection range.
 - **Touch context menu** — a floating toolbar with clipboard, selection, hover, and undo/redo tools.
-- **Selection adjustment island** — a second matching toolbar with one-character grow-left and grow-right controls.
+- **Centered utility islands** — separate mobile tab and code-inspector toolbars centered by their combined width.
 - **Drag-to-reveal** — while dragging a handle, the editor auto-scrolls to keep the cursor visible.
 - **Touch offset** — during drag, the target position is shifted up by 1.5 line-heights so the user's finger doesn't occlude the text.
 - **Rendered-column hit testing** — horizontal touch coordinates are resolved against Monaco's rendered column offsets, including tabs and variable-width glyph advances.
@@ -2846,7 +2884,7 @@ The extension hooks into a Monaco `ICodeEditor` and adds:
 | **Precise horizontal targeting** | Uses `getOffsetForColumn()` with a binary search bounded to the touched visual row, choosing the nearest rendered column without crossing Monaco wrap boundaries |
 | **Fixed-rate drag sampling** | `touchmove` records only the latest touch; one 50 ms loop resolves rendered columns, performs edge scrolling, and writes changed Monaco positions without accumulating per-event work |
 | **Touch menu activation** | Handle taps and completed handle drags open the menu islands automatically; desktop remains explicit right-click behavior |
-| **Selection grow tools** | A separate menu island grows the selection one model position left or right, crossing line boundaries when needed |
+| **Selection adjustment primitives** | Grow/shrink tools remain available to custom integrations, but the default mobile menu no longer mounts their island |
 | **Select Word tool** | Built-in tool that selects the word at the cursor position |
 | **Hover tool** | Built-in tool (🚁) that closes the menu and triggers `editor.action.showHover` at the cursor |
 
@@ -2885,7 +2923,7 @@ do not patch them independently from the worktree source.
 |---------|--------|--------|
 | **Tap** | Editor surface | Set cursor position |
 | **Double-tap** | Editor surface | Select word at tap position |
-| **Tap** | Teardrop (cursor handle) | Open both touch-menu islands |
+| **Tap** | Teardrop (cursor handle) | Open the touch-menu stack |
 | **Drag** | Teardrop (cursor handle) | Reposition the cursor through the fixed-rate rendered-column sampler with calibrated 1.5-line finger clearance; open menus on release |
 | **Drag** | Selection handle bar | Adjust the range boundary through the fixed-rate sampler; open menus on release |
 | **Tap** | Line number gutter | Select entire line above the tapped line |
@@ -2907,12 +2945,9 @@ Tools appear in the context menu in the order listed below.
 | 8 | **Hover** | 🚁 (helicopter emoji) | Close menu, show hover info at cursor position | Closes |
 | 9 | **Close** | ✕ (X SVG) | Dismiss the touch menu | Closes |
 
-The second menu island contains two halves of the Select All icon:
-
-| Tool | Action |
-|------|--------|
-| **Grow selection left** | Move the normalized range start one model position left, crossing to the previous line when needed |
-| **Grow selection right** | Move the normalized range end one model position right, crossing to the next line when needed |
+The mobile utility row keeps the tab-navigation and code-inspector controls in
+separate islands, centered as one combined group. Grow/shrink selection tools
+remain available to custom integrations but are not mounted by default.
 
 ### Initialization
 

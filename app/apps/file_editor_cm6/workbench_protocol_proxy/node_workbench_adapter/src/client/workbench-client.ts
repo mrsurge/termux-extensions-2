@@ -161,6 +161,10 @@ import {
   provideSemanticTokensSingle,
 } from "../extensions/intelligence/semantic-tokens.mjs";
 import {
+  SemanticTokenProjectionManager,
+  type SemanticProjectionDocument,
+} from "../extensions/intelligence/semantic-token-projections.mjs";
+import {
   provideDocumentSymbols,
   provideDocumentSymbolsSingle,
   provideFoldingRanges,
@@ -670,6 +674,8 @@ export class WorkbenchClient {
   _extensionActivation: ExtensionActivationRuntime;
   _languageResolver: ExtensionLanguageResolver;
   _providerRegistry: ProviderRegistry;
+  _semanticTokenProjections: SemanticTokenProjectionManager;
+  _semanticTokenProviderSignatures: Map<string, string>;
   _callHierarchySessions: CallHierarchySessionStore;
   _useRemote: boolean;
   _authority: string;
@@ -690,6 +696,7 @@ export class WorkbenchClient {
     this._connecting = false;
     this._openFileQueue = Promise.resolve();
     this._openFilePending = 0;
+    this._semanticTokenProviderSignatures = new Map<string, string>();
     this._extRequests = new PendingExtRequestOwner();
     this._signService = createNoopSignService();
     this._debugExtReqSeen = 0;
@@ -805,6 +812,22 @@ export class WorkbenchClient {
       docSymbolsProviderHandle: null,
       hoverProviderHandle: null,
     };
+    this._semanticTokenProjections = new SemanticTokenProjectionManager({
+      getDocument: (documentPath) =>
+        this._semanticProjectionDocument(documentPath),
+      listBackgroundPaths: () =>
+        this._documentRegistry
+          .values()
+          .filter((entry) => entry.role !== "active")
+          .map((entry) => entry.path),
+      compute: async (documentPath) => {
+        await this._prewarmSemanticTokens(documentPath);
+      },
+      releaseResult: (providerHandle, resultId) =>
+        this._releaseSemanticTokenResult(providerHandle, resultId),
+      canRun: () => this._openFilePending === 0 && !!this.ext?.protocol,
+      log: (message) => console.log(message),
+    });
 
     if (DEBUG_METRICS) {
       try {
@@ -1025,8 +1048,28 @@ export class WorkbenchClient {
       didChange: (params, opts) => this.didChange(params, opts),
       findAllProviderHandles: (kind, languageId) =>
         this._findAllProviderHandles(kind, languageId),
+      findSemanticFullHandles: (languageId) =>
+        this._providerRegistry.findSemanticFullHandles(languageId),
       findSemanticRangeHandles: (languageId) =>
         this._providerRegistry.findSemanticRangeHandles(languageId),
+      getProjectionDocument: (documentPath) =>
+        this._semanticProjectionDocument(documentPath),
+      getProjection: (documentPath, languageId, textFingerprint) =>
+        this._semanticTokenProjections.get(
+          documentPath,
+          languageId,
+          textFingerprint,
+        ),
+      getProjectionGeneration: () =>
+        this._semanticTokenProjections.generation,
+      storeProjection: (document, result, expectedProviderGeneration) =>
+        this._semanticTokenProjections.store(
+          document,
+          result,
+          expectedProviderGeneration,
+        ),
+      releaseResult: (providerHandle, resultId) =>
+        this._releaseSemanticTokenResult(providerHandle, resultId),
       waitFor: (condition, options) => waitFor(condition, options),
       uriForPath: (filePath, authority) =>
         this._uriForPath(filePath, authority),
@@ -1038,6 +1081,56 @@ export class WorkbenchClient {
       warn: (message) => console.warn(message),
       timeLabel: () => _hts(),
     });
+  }
+
+  _semanticProjectionDocument(
+    documentPath: string,
+  ): SemanticProjectionDocument | null {
+    const entry = this._documentRegistry.getByPath(documentPath);
+    if (!entry) return null;
+    return {
+      path: entry.path,
+      versionId: entry.versionId,
+      contentIdentity: entry.contentIdentity,
+      languageId: entry.languageId,
+      textFingerprint: entry.textFingerprint,
+      projectGeneration: entry.projectGeneration,
+      role: entry.role,
+    };
+  }
+
+  async _prewarmSemanticTokens(documentPath: string): Promise<void> {
+    const entry = this._documentRegistry.getByPath(documentPath);
+    if (
+      !entry ||
+      entry.role === "active" ||
+      this._providerRegistry.findSemanticFullHandles(entry.languageId).length ===
+        0
+    ) {
+      return;
+    }
+    await provideSemanticTokens(this._semanticTokensRuntime(), {
+      path: entry.path,
+      authority: this._authority,
+      languageId: entry.languageId,
+      previousResultId: "0",
+      timeoutMs: 10000,
+      prewarm: true,
+    });
+  }
+
+  _releaseSemanticTokenResult(
+    providerHandle: number,
+    resultId: string,
+  ): void {
+    const numericResultId = Number(resultId);
+    if (!this.ext?.protocol || !Number.isFinite(numericResultId)) return;
+    this._sendExt(
+      _rpcIds.ExtHostLanguageFeatures,
+      "$releaseDocumentSemanticTokens",
+      [providerHandle, numericResultId],
+      false,
+    );
   }
 
   _documentFeatureRuntime() {
@@ -1538,7 +1631,10 @@ export class WorkbenchClient {
       setDebugMainThreadReplySeen: (value) => {
         this._debugMainThreadReplySeen = value;
       },
-      onEvent: (payload) => this.onEvent(payload),
+      onEvent: (payload) => {
+        this._handleWorkbenchEvent(payload);
+        this.onEvent(payload);
+      },
       sendPayload: (payload) => {
         try {
           this.ext?.protocol.send(VSBuffer.wrap(payload));
@@ -1563,6 +1659,26 @@ export class WorkbenchClient {
       uriObjToStringSafe: (uri) => this._uriObjToStringSafe(uri),
       log: (...args) => console.log(...args),
     });
+  }
+
+  _handleWorkbenchEvent(payload: Record<string, unknown>): void {
+    if (payload.type === "provider/semanticTokens") {
+      const handle = Number(payload.handle);
+      const mode = payload.range === true ? "range" : "full";
+      if (Number.isFinite(handle)) {
+        const key = `${handle}:${mode}`;
+        const signature = JSON.stringify(payload.legend ?? null);
+        if (this._semanticTokenProviderSignatures.get(key) === signature) {
+          return;
+        }
+        this._semanticTokenProviderSignatures.set(key, signature);
+      }
+      this._semanticTokenProjections.providerChanged(payload.range === true);
+      return;
+    }
+    if (payload.type === "provider/semanticTokens/didChange") {
+      this._semanticTokenProjections.providerChanged(payload.range === true);
+    }
   }
 
   /**
@@ -1641,6 +1757,8 @@ export class WorkbenchClient {
     this._activeEditorId = null;
     this._activeUriObj = null;
     this._activeTab = null;
+    this._semanticTokenProviderSignatures.clear();
+    this._semanticTokenProjections.clear(reason || "session_reset");
     this._documentRegistry.clearLocal();
     this._providerRegistry.clear();
     this._extensionActivation.reset(reason);
@@ -1796,6 +1914,10 @@ export class WorkbenchClient {
   }
 
   async openFile(params: unknown = {}): Promise<Record<string, unknown>> {
+    const requestedPath = isRecord(params) ? String(params.path ?? "") : "";
+    const previousVersion = requestedPath
+      ? this._documentRegistry.getVersion(requestedPath)
+      : null;
     const queuedBehindAnotherOpen = this._openFilePending > 0;
     const previous = this._openFileQueue.catch(() => undefined);
     let release: () => void = () => {};
@@ -1809,7 +1931,21 @@ export class WorkbenchClient {
     }
     await previous;
     try {
-      return await openWorkbenchFile(this._workspaceLifecycleRuntime(), params);
+      const result = await openWorkbenchFile(
+        this._workspaceLifecycleRuntime(),
+        params,
+      );
+      const nextVersion = requestedPath
+        ? this._documentRegistry.getVersion(requestedPath)
+        : null;
+      if (
+        previousVersion !== null &&
+        nextVersion !== null &&
+        previousVersion !== nextVersion
+      ) {
+        this._semanticTokenProjections.invalidatePath(requestedPath);
+      }
+      return result;
     } finally {
       this._openFilePending = Math.max(0, this._openFilePending - 1);
       release();
@@ -1819,13 +1955,24 @@ export class WorkbenchClient {
   reconcileLogicalDocuments(
     params: Record<string, unknown>,
   ): Record<string, unknown> {
-    return this._documentRegistry.reconcileLogicalDocuments(params);
+    const result = this._documentRegistry.reconcileLogicalDocuments(params);
+    if (Array.isArray(result.released)) {
+      for (const releasedPath of result.released) {
+        this._semanticTokenProjections.invalidatePath(String(releasedPath));
+      }
+    }
+    return result;
   }
 
   async hydrateLogicalDocument(
     params: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return await this._documentRegistry.hydrateLogicalDocument(params);
+    const result = await this._documentRegistry.hydrateLogicalDocument(params);
+    if (result.ok === true && typeof result.path === "string") {
+      this._semanticTokenProjections.invalidatePath(result.path);
+      this._semanticTokenProjections.schedule(result.path);
+    }
+    return result;
   }
 
   /**
@@ -1836,7 +1983,32 @@ export class WorkbenchClient {
     params: unknown = {},
     opts: DidChangeOptions = {},
   ): Record<string, unknown> | Promise<Record<string, unknown>> {
-    return applyDidChange(this._workspaceLifecycleRuntime(), params, opts);
+    const documentPath = isRecord(params) ? String(params.path ?? "") : "";
+    const result = applyDidChange(
+      this._workspaceLifecycleRuntime(),
+      params,
+      opts,
+    );
+    if (result instanceof Promise) {
+      return result.then((resolved) => {
+        if (
+          resolved.ok === true &&
+          resolved.contentChanged === true &&
+          documentPath
+        ) {
+          this._semanticTokenProjections.invalidatePath(documentPath);
+        }
+        return resolved;
+      });
+    }
+    if (
+      result.ok === true &&
+      result.contentChanged === true &&
+      documentPath
+    ) {
+      this._semanticTokenProjections.invalidatePath(documentPath);
+    }
+    return result;
   }
 
   async documentSymbols(
@@ -2098,6 +2270,7 @@ export class WorkbenchClient {
   } {
     const clearedBackgroundDocuments =
       this._documentRegistry.countBackground();
+    this._semanticTokenProjections.clear(reason || "workspace_switch");
     const rejectedPendingRequests = this._extRequests.rejectAll(
       new Error(reason || "workspace_switch"),
     );

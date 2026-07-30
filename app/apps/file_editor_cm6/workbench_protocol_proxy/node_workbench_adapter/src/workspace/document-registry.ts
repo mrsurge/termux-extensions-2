@@ -1,5 +1,7 @@
 import * as nodePath from "node:path";
 
+import { semanticTextFingerprint } from "../extensions/intelligence/semantic-token-projections.mjs";
+
 export type WorkbenchDocumentRole =
   | "active"
   | "background"
@@ -16,6 +18,7 @@ export interface WorkbenchDocumentEntry {
   lastLineLength: number;
   openGeneration: number | string | null;
   languageId: string;
+  textFingerprint: string;
   contentIdentity: string | null;
   baseSha256: string | null;
   openStateRevision: number;
@@ -100,6 +103,7 @@ export interface ReplaceDocumentOptions {
 export interface DocumentReplaceSuccess {
   ok: true;
   entry: WorkbenchDocumentEntry;
+  contentChanged: boolean;
   versionId: number;
   previousVersionId: number;
   previousLineCount: number;
@@ -285,6 +289,7 @@ export class WorkbenchDocumentRegistry {
       lastLineLength: lastLineLength(lines),
       openGeneration: input.openGeneration ?? null,
       languageId: input.languageId || "plaintext",
+      textFingerprint: semanticTextFingerprint(input.text),
       contentIdentity: input.contentIdentity ?? null,
       baseSha256: input.baseSha256 ?? null,
       openStateRevision: input.openStateRevision ?? 0,
@@ -364,32 +369,22 @@ export class WorkbenchDocumentRegistry {
     const previousLineCount = entry.lineCount;
     const previousCharCount = entry.charCount;
     const previousLastLineLength = entry.lastLineLength;
-    const lines = input.text.split("\n");
-    const versionId = previousVersionId + 1;
-    const event = {
-      changes: [{
-        range: {
-          startLineNumber: 1,
-          startColumn: 1,
-          endLineNumber: previousLineCount,
-          endColumn: previousLastLineLength + 1,
-        },
-        rangeOffset: 0,
-        rangeLength: previousCharCount,
-        text: input.text,
-      }],
-      eol: "\n",
-      versionId,
-      isUndoing: false,
-      isRedoing: false,
-      isFlush: true,
-      isEolChange: false,
-    };
+    const textFingerprint = semanticTextFingerprint(input.text);
+    const contentChanged =
+      previousCharCount !== input.text.length ||
+      entry.textFingerprint !== textFingerprint;
+    const lines = contentChanged ? input.text.split("\n") : null;
+    const versionId = contentChanged
+      ? previousVersionId + 1
+      : previousVersionId;
 
     entry.versionId = versionId;
-    entry.lineCount = lines.length;
-    entry.charCount = input.text.length;
-    entry.lastLineLength = lastLineLength(lines);
+    if (lines) {
+      entry.lineCount = lines.length;
+      entry.charCount = input.text.length;
+      entry.lastLineLength = lastLineLength(lines);
+    }
+    entry.textFingerprint = textFingerprint;
     const previousLanguageId = entry.languageId;
     const previousDirty = entry.dirty;
     if (input.languageId) entry.languageId = input.languageId;
@@ -410,12 +405,35 @@ export class WorkbenchDocumentRegistry {
     }
     if (hasOwn(input, "dirty")) entry.dirty = input.dirty === true;
 
-    const args = [
-      entry.uri,
-      event,
-      options.isDirtyEvent ?? entry.dirty,
-    ];
-    const ack = options.waitForAck === true
+    const event = contentChanged
+      ? {
+          changes: [{
+            range: {
+              startLineNumber: 1,
+              startColumn: 1,
+              endLineNumber: previousLineCount,
+              endColumn: previousLastLineLength + 1,
+            },
+            rangeOffset: 0,
+            rangeLength: previousCharCount,
+            text: input.text,
+          }],
+          eol: "\n",
+          versionId,
+          isUndoing: false,
+          isRedoing: false,
+          isFlush: true,
+          isEolChange: false,
+        }
+      : null;
+    const args = event
+      ? [
+          entry.uri,
+          event,
+          options.isDirtyEvent ?? entry.dirty,
+        ]
+      : null;
+    const ack = args && options.waitForAck === true
       ? this.runtime.sendExtAwaitTerminalReply(
           this.runtime.extRpcIds.ExtHostDocuments,
           "$acceptModelChanged",
@@ -424,7 +442,7 @@ export class WorkbenchDocumentRegistry {
           Number(options.timeoutMs ?? 3000),
         )
       : null;
-    if (!ack) {
+    if (args && !ack) {
       this.runtime.sendExt(
         this.runtime.extRpcIds.ExtHostDocuments,
         "$acceptModelChanged",
@@ -452,6 +470,7 @@ export class WorkbenchDocumentRegistry {
     return {
       ok: true,
       entry,
+      contentChanged,
       versionId,
       previousVersionId,
       previousLineCount,

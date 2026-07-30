@@ -235,6 +235,11 @@ interface SemanticTokensLegendLike {
   tokenModifiers: string[];
 }
 
+interface SemanticTokensRegistrationOptionsLike {
+  providerKey?: string;
+  replay?: boolean;
+}
+
 interface LanguageBridgeStateLike {
   hoverSeq: number;
   symbolsSeq: number;
@@ -243,6 +248,13 @@ interface LanguageBridgeStateLike {
   registeredSymbols: Set<string>;
   registeredFolding: Set<string>;
   registeredSemanticTokens: Set<string>;
+  semanticTokensProviderKeysByLanguage: Record<string, Set<string>>;
+  semanticTokensProviderModeByLanguage: Record<string, "full" | "range">;
+  semanticTokensRegistrationSignatureByLanguage: Record<string, string>;
+  semanticTokensProviderDisposablesByLanguage: Record<
+    string,
+    { dispose(): void } | null
+  >;
   semanticTokensChangeEmittersByLanguage: Record<
     string,
     { event(listener: () => void): { dispose(): void }; fire(): void }
@@ -908,6 +920,10 @@ interface MonacoBootWindowLike extends Window {
     registeredSymbols: new Set<string>(),
     registeredFolding: new Set<string>(),
     registeredSemanticTokens: new Set<string>(),
+    semanticTokensProviderKeysByLanguage: {},
+    semanticTokensProviderModeByLanguage: {},
+    semanticTokensRegistrationSignatureByLanguage: {},
+    semanticTokensProviderDisposablesByLanguage: {},
     semanticTokensChangeEmittersByLanguage: {},
     semanticTokensLanguagesByEventHandle: {},
     completionProvidersByLanguage: {},
@@ -1190,11 +1206,13 @@ interface MonacoBootWindowLike extends Window {
     langId: string,
     legend: unknown,
     isRange: boolean,
+    options?: SemanticTokensRegistrationOptionsLike,
   ): void {
     languageBridgeProviders.registerSemanticTokensWithLegend(
       langId,
       legend as SemanticTokensLegendLike,
       !!isRange,
+      options,
     );
   }
 

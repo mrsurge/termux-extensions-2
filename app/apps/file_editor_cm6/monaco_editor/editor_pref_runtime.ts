@@ -85,9 +85,22 @@ export function createEditorPrefRuntime(deps: EditorPrefRuntimeDeps) {
       return false;
     }
 
-    void deps.rpcCall(EDITOR_RPC_METHODS.gitBaselinesGet, { path: currentPath }, { timeoutMs: 12000 }).catch((error) => {
-      console.warn('[Monaco] editor.gitBaselines.get failed', error);
-    });
+    void deps.rpcCall(
+      EDITOR_RPC_METHODS.gitBaselinesGet,
+      { path: currentPath },
+      { timeoutMs: 12000 },
+    ).then(
+      (payload) => {
+        try {
+          deps.applyGitBaselines(payload);
+        } catch (error) {
+          console.warn('[Monaco] editor.gitBaselines.get apply failed', error);
+        }
+      },
+      (error) => {
+        console.warn('[Monaco] editor.gitBaselines.get failed', error);
+      },
+    );
     return true;
   }
 

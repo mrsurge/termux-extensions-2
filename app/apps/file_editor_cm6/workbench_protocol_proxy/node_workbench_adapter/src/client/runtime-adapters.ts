@@ -144,7 +144,13 @@ export interface SemanticTokensRuntimeDeps {
     opts: { waitForAck: true; timeoutMs: number },
   ) => Promise<unknown> | unknown;
   findAllProviderHandles: (kind: "semanticTokens", languageId: string) => number[];
+  findSemanticFullHandles: SemanticRuntime["findSemanticFullHandles"];
   findSemanticRangeHandles: (languageId: string) => number[];
+  getProjectionDocument: SemanticRuntime["getProjectionDocument"];
+  getProjection: SemanticRuntime["getProjection"];
+  getProjectionGeneration: SemanticRuntime["getProjectionGeneration"];
+  storeProjection: SemanticRuntime["storeProjection"];
+  releaseResult: SemanticRuntime["releaseResult"];
   waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => Promise<boolean>;
   uriForPath: (filePath: string, authority: string) => unknown;
   sendExtPending: (
@@ -497,7 +503,16 @@ export function createSemanticTokensRuntime(deps: SemanticTokensRuntimeDeps): Se
     languageIdFromPath: (filePath: string) => deps.languageIdFromPath(filePath),
     didChange: (params: Record<string, unknown>, opts: { waitForAck: true; timeoutMs: number }) => deps.didChange(params, opts),
     findAllProviderHandles: (kind: "semanticTokens", languageId: string) => deps.findAllProviderHandles(kind, languageId),
+    findSemanticFullHandles: (languageId: string) => deps.findSemanticFullHandles(languageId),
     findSemanticRangeHandles: (languageId: string) => deps.findSemanticRangeHandles(languageId),
+    getProjectionDocument: (path: string) => deps.getProjectionDocument(path),
+    getProjection: (path: string, languageId: string, textFingerprint?: string | null) =>
+      deps.getProjection(path, languageId, textFingerprint),
+    getProjectionGeneration: () => deps.getProjectionGeneration(),
+    storeProjection: (document, result, expectedProviderGeneration) =>
+      deps.storeProjection(document, result, expectedProviderGeneration),
+    releaseResult: (providerHandle, resultId) =>
+      deps.releaseResult(providerHandle, resultId),
     waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => deps.waitFor(condition, options),
     uriForPath: (filePath: string, authority: string) => deps.uriForPath(filePath, authority),
     sendExtPending: (rpcId: number, method: string, args: unknown[], cancellable: boolean, pendingOptions: TransportPendingOptions) =>

@@ -25,11 +25,23 @@ interface SemanticTokensLegendLike {
   tokenModifiers: string[];
 }
 
+interface SemanticTokensRegistrationOptions {
+  providerKey?: string;
+  replay?: boolean;
+}
+
 interface LanguageBridgeState {
   registeredHover: Set<string>;
   registeredSymbols: Set<string>;
   registeredFolding: Set<string>;
   registeredSemanticTokens: Set<string>;
+  semanticTokensProviderKeysByLanguage: Record<string, Set<string>>;
+  semanticTokensProviderModeByLanguage: Record<string, "full" | "range">;
+  semanticTokensRegistrationSignatureByLanguage: Record<string, string>;
+  semanticTokensProviderDisposablesByLanguage: Record<
+    string,
+    MonacoDisposableLike | null
+  >;
   semanticTokensChangeEmittersByLanguage: Record<
     string,
     SemanticTokensChangeEmitterLike
@@ -720,6 +732,7 @@ export function createEditorLanguageBridgeProviders(
     langId: string,
     legend: SemanticTokensLegendLike,
     isRange?: boolean,
+    options?: SemanticTokensRegistrationOptions,
   ): void;
   fireSemanticTokensChanged(langId?: string | null): void;
   resetDynamicProviderCaches(reason?: string): void;
@@ -733,6 +746,8 @@ export function createEditorLanguageBridgeProviders(
   };
 } {
   let semanticTokensDisableLogged = false;
+  const pendingSemanticTokenInvalidations = new Set<string>();
+  let semanticTokenInvalidationScheduled = false;
 
   function logSemanticTokensDisabledOnce(): void {
     if (semanticTokensDisableLogged) return;
@@ -778,31 +793,65 @@ export function createEditorLanguageBridgeProviders(
 
   function fireSemanticTokensChanged(langId?: string | null): void {
     if (langId) {
-      const emitter =
-        deps.languageBridge.semanticTokensChangeEmittersByLanguage[
-          String(langId)
-        ];
-      if (emitter) {
+      pendingSemanticTokenInvalidations.add(String(langId));
+    } else {
+      for (const key of Object.keys(
+        deps.languageBridge.semanticTokensChangeEmittersByLanguage,
+      )) {
+        pendingSemanticTokenInvalidations.add(key);
+      }
+    }
+    if (semanticTokenInvalidationScheduled) return;
+    semanticTokenInvalidationScheduled = true;
+    void Promise.resolve().then(() => {
+      semanticTokenInvalidationScheduled = false;
+      const languages = Array.from(pendingSemanticTokenInvalidations);
+      pendingSemanticTokenInvalidations.clear();
+      for (const language of languages) {
+        const emitter =
+          deps.languageBridge.semanticTokensChangeEmittersByLanguage[language];
+        if (!emitter) continue;
         try {
           console.log(
-            "[semanticTokens] invalidating provider for " + String(langId),
+            "[semanticTokens] invalidating provider for " + language,
           );
         } catch (_) {}
         emitter.fire();
       }
-      return;
+    });
+  }
+
+  function semanticTokensRegistrationSignature(
+    legend: SemanticTokensLegendLike,
+    mode: "full" | "range",
+  ): string {
+    return JSON.stringify([
+      mode,
+      legend.tokenTypes.map(String),
+      legend.tokenModifiers.map(String),
+    ]);
+  }
+
+  function semanticTokensProviderKeys(langId: string): Set<string> {
+    let keys =
+      deps.languageBridge.semanticTokensProviderKeysByLanguage[langId];
+    if (!keys) {
+      keys = new Set<string>();
+      deps.languageBridge.semanticTokensProviderKeysByLanguage[langId] = keys;
     }
-    for (const key of Object.keys(
-      deps.languageBridge.semanticTokensChangeEmittersByLanguage,
-    )) {
-      const emitter =
-        deps.languageBridge.semanticTokensChangeEmittersByLanguage[key];
-      if (!emitter) continue;
+    return keys;
+  }
+
+  function disposeSemanticTokensProvider(langId: string): void {
+    const disposable =
+      deps.languageBridge.semanticTokensProviderDisposablesByLanguage[langId];
+    if (disposable && typeof disposable.dispose === "function") {
       try {
-        console.log("[semanticTokens] invalidating provider for " + key);
+        disposable.dispose();
       } catch (_) {}
-      emitter.fire();
     }
+    deps.languageBridge.semanticTokensProviderDisposablesByLanguage[langId] =
+      null;
   }
 
   function selectorLanguagesFromSnapshot(selectorRaw: unknown): string[] {
@@ -1791,6 +1840,8 @@ export function createEditorLanguageBridgeProviders(
     if (!disableSemanticTokens) {
       for (const rawEntry of semanticTokenEntries) {
         const entry = asRecord(rawEntry);
+        const handle =
+          entry && entry.handle != null ? String(entry.handle).trim() : "";
         const legend = asRecord(entry && entry.legend);
         if (!legend) continue;
         const tokenTypes = (asArray(legend.tokenTypes) || [])
@@ -1807,6 +1858,12 @@ export function createEditorLanguageBridgeProviders(
             langId,
             { tokenTypes, tokenModifiers },
             !!(entry && entry.range),
+            {
+              providerKey: handle
+                ? `${handle}:${entry && entry.range ? "range" : "full"}`
+                : undefined,
+              replay: true,
+            },
           );
           semanticTokensCount += 1;
         }
@@ -1828,6 +1885,7 @@ export function createEditorLanguageBridgeProviders(
     langId: string,
     legend: SemanticTokensLegendLike,
     isRange?: boolean,
+    options: SemanticTokensRegistrationOptions = {},
   ): void {
     if (deps.getDisableSemanticTokens()) {
       logSemanticTokensDisabledOnce();
@@ -1835,20 +1893,53 @@ export function createEditorLanguageBridgeProviders(
     }
     const monacoRef = deps.getMonaco();
     if (!monacoRef || !monacoRef.languages) return;
+    const registerRange =
+      monacoRef.languages.registerDocumentRangeSemanticTokensProvider;
+    const registerFull =
+      monacoRef.languages.registerDocumentSemanticTokensProvider;
+    const canRegisterRange =
+      !!isRange && typeof registerRange === "function";
+    const mode: "full" | "range" = canRegisterRange ? "range" : "full";
+    const providerKey = String(options.providerKey || "").trim();
+    const providerKeys = semanticTokensProviderKeys(langId);
+    const providerAdded = !!providerKey && !providerKeys.has(providerKey);
+    if (providerKey) providerKeys.add(providerKey);
+    const previousMode =
+      deps.languageBridge.semanticTokensProviderModeByLanguage[langId];
+    const nextSignature = semanticTokensRegistrationSignature(legend, mode);
+    const previousSignature =
+      deps.languageBridge.semanticTokensRegistrationSignatureByLanguage[
+        langId
+      ];
+
+    // Full-document providers are projection-capable and remain authoritative
+    // when the extension host also advertises a range provider.
+    if (previousMode === "full" && mode === "range") return;
+
     deps.languageBridge.semanticTokensLegendCache[langId] = legend;
-    deps.languageBridge.semanticTokensRangeFlag[langId] = !!isRange;
+    deps.languageBridge.semanticTokensRangeFlag[langId] = mode === "range";
     const changeEmitter = semanticTokensChangeEmitterForLanguage(langId);
-    if (deps.languageBridge.registeredSemanticTokens.has(langId)) {
-      fireSemanticTokensChanged(langId);
+    if (previousMode === mode) {
+      deps.languageBridge.semanticTokensRegistrationSignatureByLanguage[
+        langId
+      ] = nextSignature;
+      if (
+        options.replay !== true &&
+        (providerAdded || previousSignature !== nextSignature)
+      ) {
+        fireSemanticTokensChanged(langId);
+      }
       return;
     }
-    deps.languageBridge.registeredSemanticTokens.add(langId);
+    if (previousMode) disposeSemanticTokensProvider(langId);
 
-    if (
-      isRange &&
-      monacoRef.languages.registerDocumentRangeSemanticTokensProvider
-    ) {
-      monacoRef.languages.registerDocumentRangeSemanticTokensProvider(langId, {
+    deps.languageBridge.registeredSemanticTokens.add(langId);
+    deps.languageBridge.semanticTokensProviderModeByLanguage[langId] = mode;
+    deps.languageBridge.semanticTokensRegistrationSignatureByLanguage[langId] =
+      nextSignature;
+
+    if (mode === "range") {
+      const registrationDisposable = registerRange!(langId, {
         onDidChange: changeEmitter.event,
         getLegend() {
           return (
@@ -1880,6 +1971,15 @@ export function createEditorLanguageBridgeProviders(
           }
         },
       });
+      deps.languageBridge.semanticTokensProviderDisposablesByLanguage[langId] =
+        registrationDisposable &&
+        typeof (registrationDisposable as MonacoDisposableLike).dispose ===
+          "function"
+          ? (registrationDisposable as MonacoDisposableLike)
+          : null;
+      if (previousMode && options.replay !== true) {
+        fireSemanticTokensChanged(langId);
+      }
       return;
     }
 
@@ -1891,8 +1991,8 @@ export function createEditorLanguageBridgeProviders(
         " mods=" +
         legend.tokenModifiers.length,
     );
-    if (!monacoRef.languages.registerDocumentSemanticTokensProvider) return;
-    monacoRef.languages.registerDocumentSemanticTokensProvider(langId, {
+    if (!registerFull) return;
+    const registrationDisposable = registerFull(langId, {
       onDidChange: changeEmitter.event,
       getLegend() {
         return deps.languageBridge.semanticTokensLegendCache[langId] || legend;
@@ -1929,6 +2029,15 @@ export function createEditorLanguageBridgeProviders(
       },
       releaseDocumentSemanticTokens() {},
     });
+    deps.languageBridge.semanticTokensProviderDisposablesByLanguage[langId] =
+      registrationDisposable &&
+      typeof (registrationDisposable as MonacoDisposableLike).dispose ===
+        "function"
+        ? (registrationDisposable as MonacoDisposableLike)
+        : null;
+    if (previousMode && options.replay !== true) {
+      fireSemanticTokensChanged(langId);
+    }
   }
 
   function registerSemanticTokensForLanguage(langId: string): void {
@@ -2248,11 +2357,7 @@ export function createEditorLanguageBridgeProviders(
       deps.languageBridge.inlineCompletionProviderDisposablesByKey = {};
       deps.languageBridge.inlineCompletionProviderSignatureByKey = {};
       deps.languageBridge.semanticTokensLanguagesByEventHandle = {};
-      deps.languageBridge.semanticTokensLegendCache = {};
-      deps.languageBridge.semanticTokensRangeFlag = {};
-      deps.languageBridge.registeredSemanticTokens.forEach((langId) =>
-        fireSemanticTokensChanged(langId),
-      );
+      deps.languageBridge.semanticTokensProviderKeysByLanguage = {};
       console.log(
         "[providers] reset dynamic WBA provider caches reason=" +
           String(reason || "session_reset"),

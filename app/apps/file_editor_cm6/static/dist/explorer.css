@@ -519,6 +519,21 @@
   border-color: rgba(96, 165, 250, 0.35);
 }
 
+/*
+ * Clean expanded scopes alternate by stable tree depth. Git-decorated
+ * directories keep their existing visual language, while drafts and
+ * diagnostics continue to layer over this neutral structural cue.
+ */
+.fe-tree-node[data-kind="dir"][data-open="true"][data-depth-parity="odd"]:not(
+    [data-git-flags]
+  ):where(:not([data-git-status]), [data-git-status="clean"]) {
+  background: color-mix(
+    in srgb,
+    var(--explorer-card-bg) 96%,
+    currentColor 4%
+  );
+}
+
 /* Preserve legacy directory styling based directly on gitStatus so
    collapsed parents still show the orange/blue cues from the backend. */
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -119,15 +120,63 @@ test('tree renderer gives root and entries canonical names with structural label
   ]);
 
   assert.equal(root.dataset.name, 'project');
+  assert.equal(root.dataset.treeDepth, '0');
+  assert.equal(root.dataset.depthParity, 'even');
   assert.equal(root.querySelector('.fe-tree-text')?.textContent, 'project');
+  const src = tree.querySelector('[data-rel="src"]');
+  assert.equal(src?.dataset.treeDepth, '1');
+  assert.equal(src?.dataset.depthParity, 'odd');
+  const nestedList = document.createElement('ul');
+  nestedList.className = 'fe-tree';
+  src?.appendChild(nestedList);
+  renderer.renderEntriesInto(nestedList, [
+    { rel: 'src/explorer', name: 'explorer', kind: 'dir' },
+  ]);
+  const nestedDirectory = tree.querySelector('[data-rel="src/explorer"]');
+  assert.equal(nestedDirectory?.dataset.treeDepth, '2');
+  assert.equal(nestedDirectory?.dataset.depthParity, 'even');
   assert.equal(
     tree.querySelector('[data-rel="README.md"]')?.dataset.name,
     'README.md',
   );
   assert.equal(
+    tree.querySelector('[data-rel="README.md"]')?.dataset.treeDepth,
+    undefined,
+  );
+  assert.equal(
     tree.querySelector('[data-rel="README.md"] .fe-tree-text')?.textContent,
     'README.md',
   );
+});
+
+test('clean expanded directory bands exclude every Git decoration', () => {
+  installDom();
+  const css = fs.readFileSync(
+    path.join(appRoot, 'main_page/frontend/explorer.css'),
+    'utf8',
+  );
+  assert.match(
+    css,
+    /data-open="true"\]\[data-depth-parity="odd"\]:not\(\s*\[data-git-flags\]\s*\):where\(:not\(\[data-git-status\]\), \[data-git-status="clean"\]\)/,
+  );
+
+  const directory = document.createElement('li');
+  directory.dataset.kind = 'dir';
+  directory.dataset.open = 'true';
+  directory.dataset.depthParity = 'odd';
+  const eligibleSelector =
+    '[data-kind="dir"][data-open="true"][data-depth-parity="odd"]' +
+    ':not([data-git-flags])' +
+    ':where(:not([data-git-status]), [data-git-status="clean"])';
+
+  assert.equal(directory.matches(eligibleSelector), true);
+  directory.classList.add('fe-dir-has-draft', 'fe-dir-has-diag-error');
+  assert.equal(directory.matches(eligibleSelector), true);
+  directory.dataset.gitStatus = 'modified';
+  assert.equal(directory.matches(eligibleSelector), false);
+  directory.dataset.gitStatus = 'clean';
+  directory.dataset.gitFlags = 'modified';
+  assert.equal(directory.matches(eligibleSelector), false);
 });
 
 test('sticky scope constraints reserve normal rows and compress inner scopes', async () => {
@@ -179,9 +228,17 @@ test('compressed sticky scope renders canonical clickable path segments', async 
 
   const root = createNode('.', 'project');
   root.classList.add('fe-tree-root', 'fe-dir-has-diag-error');
+  root.dataset.treeDepth = '0';
+  root.dataset.depthParity = 'even';
   const src = createNode('src', 'src');
+  src.dataset.treeDepth = '1';
+  src.dataset.depthParity = 'odd';
   const feature = createNode('src/feature', 'feature');
+  feature.dataset.treeDepth = '2';
+  feature.dataset.depthParity = 'even';
   const deep = createNode('src/feature/deep', 'deep');
+  deep.dataset.treeDepth = '3';
+  deep.dataset.depthParity = 'odd';
   const file = createNode('src/feature/deep/file.ts', 'file.ts', 'file');
   file.getBoundingClientRect = () => rect(80, 40, 8, 300);
 
@@ -229,6 +286,9 @@ test('compressed sticky scope renders canonical clickable path segments', async 
   );
   assert.equal(slots[0].querySelector('.fe-tree-text')?.textContent, 'project/src/feature/deep');
   assert.equal(slots[0].querySelector('li')?.dataset.name, 'deep');
+  assert.equal(slots[0].querySelector('li')?.dataset.open, 'true');
+  assert.equal(slots[0].querySelector('li')?.dataset.treeDepth, '3');
+  assert.equal(slots[0].querySelector('li')?.dataset.depthParity, 'odd');
 
   slots[0]
     .querySelector('[data-rel="src/feature"]')

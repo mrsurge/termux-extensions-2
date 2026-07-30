@@ -509,6 +509,17 @@ export function createExplorerStickyScopes({
     rowEl.dataset.kind = 'dir';
     rowEl.dataset.rel = rel;
     rowEl.dataset.name = getCanonicalTreeNodeName(menuSource);
+    rowEl.dataset.open = menuSource.dataset.open || 'true';
+    if (menuSource.dataset.treeDepth) {
+      rowEl.dataset.treeDepth = menuSource.dataset.treeDepth;
+    } else {
+      delete rowEl.dataset.treeDepth;
+    }
+    if (menuSource.dataset.depthParity) {
+      rowEl.dataset.depthParity = menuSource.dataset.depthParity;
+    } else {
+      delete rowEl.dataset.depthParity;
+    }
     if (menuSource.dataset.gitStatus) {
       rowEl.dataset.gitStatus = menuSource.dataset.gitStatus;
     } else {
@@ -738,6 +749,8 @@ export function createExplorerStickyScopes({
       'data-kind',
       'data-rel',
       'data-name',
+      'data-tree-depth',
+      'data-depth-parity',
       'data-git-status',
       'data-git-flags',
       'data-has-draft',

@@ -21,6 +21,7 @@ interface EditorWbaRuntimeHandlerDeps {
   applyDiagnosticsUpdate(payload: unknown): void;
   languageBridge: {
     registeredSemanticTokens: Set<string>;
+    semanticTokensProviderKeysByLanguage: Record<string, Set<string>>;
     semanticTokensLegendCache: Record<string, unknown>;
     semanticTokensRangeFlag: Record<string, unknown>;
     semanticTokensLanguagesByEventHandle: Record<string, string[]>;
@@ -29,6 +30,10 @@ interface EditorWbaRuntimeHandlerDeps {
     lang: string,
     legend: unknown,
     isRange: boolean,
+    options?: {
+      providerKey?: string;
+      replay?: boolean;
+    },
   ): void;
   fireSemanticTokensChanged(lang?: string | null): void;
   cacheCompletionProviderRegistration(

@@ -848,6 +848,7 @@ export async function dispatchJsonRpcRequest(
       languageId: params.languageId,
       previousResultId: params.previousResultId,
       text: params.text,
+      modelVersionId: params.modelVersionId,
       timeoutMs: params.timeoutMs,
     });
     return success(id, result);
@@ -873,6 +874,7 @@ export async function dispatchJsonRpcRequest(
       languageId: params.languageId,
       range: params.range,
       text: params.text,
+      modelVersionId: params.modelVersionId,
       timeoutMs: params.timeoutMs,
     });
     runtime.log(

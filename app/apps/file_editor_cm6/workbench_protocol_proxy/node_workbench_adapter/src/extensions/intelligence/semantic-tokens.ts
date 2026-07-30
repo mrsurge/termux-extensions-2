@@ -1,3 +1,9 @@
+import {
+  semanticTextFingerprint,
+  type SemanticProjectionDocument,
+  type SemanticProjectionFullResult,
+} from "./semantic-token-projections.mjs";
+
 export interface SemanticPendingOptions {
   timeoutMs: number;
   timeoutMessage: string;
@@ -22,7 +28,21 @@ export interface SemanticRuntime {
     opts: { waitForAck: true; timeoutMs: number },
   ) => Promise<unknown> | unknown;
   findAllProviderHandles: (kind: "semanticTokens", languageId: string) => number[];
+  findSemanticFullHandles: (languageId: string) => number[];
   findSemanticRangeHandles: (languageId: string) => number[];
+  getProjectionDocument: (path: string) => SemanticProjectionDocument | null;
+  getProjection: (
+    path: string,
+    languageId: string,
+    textFingerprint?: string | null,
+  ) => SemanticProjectionFullResult | null;
+  getProjectionGeneration: () => number;
+  storeProjection: (
+    document: SemanticProjectionDocument,
+    result: SemanticProjectionFullResult,
+    expectedProviderGeneration: number,
+  ) => boolean;
+  releaseResult: (providerHandle: number, resultId: string) => void;
   waitFor: (condition: () => boolean, options: { timeoutMs: number; intervalMs: number }) => Promise<boolean>;
   uriForPath: (filePath: string, authority: string) => unknown;
   sendExtPending: (
@@ -138,15 +158,6 @@ function numberFrom(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function textHash(text: string): string {
-  let hash = 2166136261;
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 16777619) >>> 0;
-  }
-  return hash.toString(16);
-}
-
 function semanticSyncSignature(input: Record<string, unknown>, text: string, languageId: string, authority: string): string {
   const modelVersionId = input.modelVersionId;
   const versionPart = modelVersionId == null ? "no-version" : String(modelVersionId);
@@ -154,8 +165,7 @@ function semanticSyncSignature(input: Record<string, unknown>, text: string, lan
     authority,
     languageId,
     versionPart,
-    String(text.length),
-    textHash(text),
+    semanticTextFingerprint(text),
   ].join("|");
 }
 
@@ -170,6 +180,15 @@ async function syncTextIfProvided(
 ): Promise<Record<string, unknown> | null> {
   if (input.text == null || !path) return null;
   const text = String(input.text);
+  const document = runtime.getProjectionDocument(path);
+  if (
+    document &&
+    document.languageId === languageId &&
+    document.textFingerprint === semanticTextFingerprint(text)
+  ) {
+    runtime.log(`[${label}] pre-flight didChange skipped path=${path} reason=document_current`);
+    return null;
+  }
   const signature = semanticSyncSignature(input, text, languageId, authority);
   const cached = semanticSyncByPath.get(path);
   if (cached && cached.signature === signature) {
@@ -351,8 +370,25 @@ export async function provideSemanticTokens(runtime: SemanticRuntime, params: un
   const timeoutMs = Number(input.timeoutMs ?? 10000);
   const languageId = String(input.languageId || "") || runtime.languageIdFromPath(path) || "plaintext";
   const previousResultId = String(input.previousResultId ?? "0");
+  const prewarm = input.prewarm === true;
+  const requestedFingerprint =
+    input.text == null ? null : semanticTextFingerprint(String(input.text));
 
   runtime.log(`[semanticTokens] path=${path} lang=${languageId} prevResultId=${previousResultId}`);
+
+  if (!prewarm && typeof input.providerHandle !== "number") {
+    const projection = runtime.getProjection(
+      path,
+      languageId,
+      requestedFingerprint,
+    );
+    if (projection) {
+      runtime.log(
+        `[semanticTokens] projection hit path=${path} tokens=${projection.data.length / 5}`,
+      );
+      return { ok: true, result: projection, projected: true };
+    }
+  }
 
   const syncError = await syncTextIfProvided(runtime, input, path, languageId, authority, timeoutMs, "semanticTokens");
   if (syncError) return syncError;
@@ -367,18 +403,20 @@ export async function provideSemanticTokens(runtime: SemanticRuntime, params: un
     });
   }
 
-  let handles = runtime.findAllProviderHandles("semanticTokens", languageId);
+  let handles = runtime.findSemanticFullHandles(languageId);
   if (handles.length === 0) {
     await runtime.waitFor(
-      () => runtime.findAllProviderHandles("semanticTokens", languageId).length > 0,
+      () => runtime.findSemanticFullHandles(languageId).length > 0,
       { timeoutMs: Math.min(timeoutMs, 5000), intervalMs: 50 },
     );
-    handles = runtime.findAllProviderHandles("semanticTokens", languageId);
+    handles = runtime.findSemanticFullHandles(languageId);
   }
   if (handles.length === 0) return { ok: false, error: `no semanticTokens provider for language '${languageId}'` };
 
   runtime.log(`[semanticTokens] multi-provider handles=[${handles.join(",")}] for lang=${languageId}`);
 
+  const projectionDocument = runtime.getProjectionDocument(path);
+  const projectionGeneration = runtime.getProjectionGeneration();
   const uriObj = runtime.uriForPath(path, authority);
   const results = await Promise.all(handles.map((handle) => {
     const legend = runtime.getProvider("semanticTokens", handle)?.legend ?? null;
@@ -393,23 +431,55 @@ export async function provideSemanticTokens(runtime: SemanticRuntime, params: un
         timeoutResult: null,
       },
     );
-    return promise.then((reply) => ({ reply, legend })).catch(() => null);
+    return promise
+      .then((reply) => ({ reply, legend, handle }))
+      .catch(() => null);
   }));
 
   let best: SemanticParsedResult | null = null;
   let bestScore = -1;
-  for (const result of results) {
+  let bestIndex = -1;
+  let bestProviderHandle: number | undefined;
+  const parsedResults: Array<SemanticParsedResult | null> = [];
+  for (let index = 0; index < results.length; index += 1) {
+    const result = results[index];
     if (!result || result.reply == null) continue;
     const parsed = parseSemanticTokensReply(result.reply, result.legend, runtime.log, runtime.warn);
+    parsedResults[index] = parsed;
     const score = semanticScore(parsed);
     if (score > bestScore) {
       bestScore = score;
+      bestIndex = index;
+      bestProviderHandle = result.handle;
       best = parsed;
     }
   }
 
   if (best) {
+    for (let index = 0; index < parsedResults.length; index += 1) {
+      if (index === bestIndex) continue;
+      const parsed = parsedResults[index];
+      const result = results[index];
+      if (parsed?.resultId && result) {
+        runtime.releaseResult(result.handle, parsed.resultId);
+      }
+    }
     runtime.log(`[semanticTokens] picked best from ${results.filter((result) => result?.reply != null).length}/${handles.length} providers, score=${bestScore}`);
+    if (best.type === "full") {
+      const stored = projectionDocument
+        ? runtime.storeProjection(
+            projectionDocument,
+            {
+              ...best,
+              providerHandle: bestProviderHandle,
+            },
+            projectionGeneration,
+          )
+        : false;
+      if (!stored && prewarm && bestProviderHandle != null && best.resultId) {
+        runtime.releaseResult(bestProviderHandle, best.resultId);
+      }
+    }
     return { ok: true, result: best };
   }
 
