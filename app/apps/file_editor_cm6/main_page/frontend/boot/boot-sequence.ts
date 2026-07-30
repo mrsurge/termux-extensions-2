@@ -22,7 +22,7 @@ interface BootSequenceDeps {
   connectUIIPC(): void | Promise<unknown>;
   connectSidebarIPC(): void;
   ensureWorkbenchAdapterReady(): Promise<unknown>;
-  requestBackendCodeServerInstall(payload?: Record<string, unknown>): Promise<unknown>;
+  requestBackendLanguageBackendSet(payload?: Record<string, unknown>): Promise<unknown>;
   spinnerSetStep(title: string, failed?: boolean): void;
   initBranchMenu(): unknown;
   waitForInitialUiPrefs(ms?: number): Promise<Record<string, unknown>>;
@@ -68,22 +68,15 @@ async function prepareCodeServer(
   uiPrefs: Record<string, unknown>,
   deps: BootSequenceDeps,
 ): Promise<boolean> {
-  const prerequisite = getBootSnapshotCodeServer(snapshot);
-  if (!prerequisite || prerequisite.compatible === true) return true;
+  if (uiPrefs.webWorkersEnabled === true) return false;
 
-  const foundPackage = asString(prerequisite.code_server_version);
-  const foundCode = asString(prerequisite.code_version);
-  const foundExecutable = asString(prerequisite.executable);
-  const installVersion = asString(prerequisite.install_version) || '4.130.0';
-  const installPrefix = asString(prerequisite.install_prefix);
-  const reason = asString(prerequisite.reason) || 'A compatible Code Server installation was not found.';
-  const found = foundExecutable
-    ? `\n\nDetected: ${foundPackage ? `Code Server ${foundPackage}` : 'Code Server'}${foundCode ? ` / Code ${foundCode}` : ''}\n${foundExecutable}`
-    : '';
-  const workers = uiPrefs.webWorkersEnabled === true
-    ? 'Monaco language web workers are already enabled.'
-    : 'You can enable the bundled Monaco language web workers later in Settings.';
-  const androidNote = prerequisite.android === true
+  const prerequisite = getBootSnapshotCodeServer(snapshot);
+  if (prerequisite?.compatible === true) return true;
+
+  const installVersion = asString(prerequisite?.install_version) || '4.130.0';
+  const installPrefix = asString(prerequisite?.install_prefix);
+  const reason = asString(prerequisite?.reason) || "TE2's managed Code Server is not installed.";
+  const androidNote = prerequisite?.android === true
     ? '\n\nOn Android this downloads about 165 MiB, installs about 709 MiB under TE2 data, and may install its Termux runtime dependencies.'
     : '';
 
@@ -91,14 +84,14 @@ async function prepareCodeServer(
   try {
     result = await window.teUI.dialog.open({
       kind: 'confirm',
-      title: 'Enable VS Code Extensions',
-      message: `${reason}${found}`,
+      title: 'Choose Language Backend',
+      message: reason,
       detail: [
         `Install Code Server ${installVersion} into TE2's private runtime?`,
         installPrefix,
         '',
-        'This does not replace your normal Code Server installation.',
-        `If you continue without it, VS Code extensions stay disabled. ${workers}${androidNote}`,
+        'Code TE2 always uses this managed runtime for extension execution, VSIX management, built-in extensions, and protocol discovery.',
+        `Continue without it to use Monaco's built-in JSON, CSS, HTML, and TypeScript language workers.${androidNote}`,
       ].filter(Boolean).join('\n'),
       severity: 'warning',
       actions: [
@@ -115,17 +108,42 @@ async function prepareCodeServer(
   }
 
   if (result.status !== 'accepted' || result.action !== 'install') {
-    console.info('[code-server] continuing without the VS Code extension host');
-    return false;
+    deps.spinnerSetStep('Enabling Monaco language workers\u2026');
+    try {
+      const response = asRecord(await deps.requestBackendLanguageBackendSet({ mode: 'web-workers' }));
+      if (!response || response.ok === false) {
+        throw new Error(asString(response?.error) || 'The Monaco language-worker preference was not saved.');
+      }
+      uiPrefs.webWorkersEnabled = true;
+      if (snapshot) snapshot.ui_prefs = uiPrefs;
+      deps.seedUiPrefsSnapshot(uiPrefs);
+      console.info('[code-server] using Monaco language workers');
+      return false;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      deps.spinnerSetStep('Language backend update failed', true);
+      await window.teUI.dialog.alert(message, {
+        title: 'Language Backend Update Failed',
+        severity: 'danger',
+      });
+      return false;
+    }
   }
 
   deps.spinnerSetStep(`Installing Code Server ${installVersion}\u2026`);
   try {
-    const response = asRecord(await deps.requestBackendCodeServerInstall({ confirmed: true }));
+    const response = asRecord(await deps.requestBackendLanguageBackendSet({ mode: 'code-server' }));
     const data = asRecord(response?.data);
-    if (!response || response.ok === false || data?.compatible !== true) {
+    const installedCodeServer = asRecord(data?.code_server);
+    if (!response || response.ok === false || installedCodeServer?.compatible !== true) {
       throw new Error(asString(response?.error) || 'The private Code Server installation did not become ready.');
     }
+    uiPrefs.webWorkersEnabled = false;
+    if (snapshot) {
+      snapshot.ui_prefs = uiPrefs;
+      snapshot.code_server = installedCodeServer || undefined;
+    }
+    deps.seedUiPrefsSnapshot(uiPrefs);
     deps.spinnerSetStep('Starting extension host\u2026');
     return true;
   } catch (error) {

@@ -461,6 +461,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       return typeof status.workerId === 'string' ? status.workerId : null;
     },
     toast: (msg: string, ms?: number) => host.toast(msg, ms),
+    requestLanguageBackendSet: (mode: 'code-server' | 'web-workers') =>
+      uiIpcConnections.requestBackendLanguageBackendSet({ mode }),
   });
 
   function shouldUseLocalKeyboardViewportAdjustments() {
@@ -1209,7 +1211,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     requestUiIpc: (method: UiIpcRpcMethod, params?: UnknownRecord, timeoutMs?: number) => uiIpcConnections.requestUiIpc(method, params || {}, timeoutMs),
     connectSidebarIPC: () => connectSidebarIPC(),
     ensureWorkbenchAdapterReady: () => hostStateRuntime.ensureWorkbenchAdapterReady(),
-    requestBackendCodeServerInstall: (payload?: UnknownRecord) => uiIpcConnections.requestBackendCodeServerInstall(payload),
+    requestBackendLanguageBackendSet: (payload?: UnknownRecord) => uiIpcConnections.requestBackendLanguageBackendSet(payload),
     spinnerSetStep: (title: string, failed?: boolean) => hostStateRuntime.spinnerSetStep(title, failed),
     initBranchMenu,
     setBranchMenuHandle: (handle: unknown) => {

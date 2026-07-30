@@ -49,6 +49,7 @@ function createRawSettingsJsonField(
  *   extManagerModalEl: HTMLElement,
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
  *   busNotify: (event: string, payload?: any) => void,
+ *   requestLanguageBackendSet: (mode: "code-server" | "web-workers") => Promise<any>,
  *   toast: (msg: string, ms?: number) => void,
  *   reloadEditorFrame: () => void
  * }} deps
@@ -189,11 +190,25 @@ export function createSettingsRefreshController(deps: any) {
   }
 
   async function refreshEditorSettingsModal() {
-    const webWorkersCheckbox = deps.settingsModalEl.querySelector(
-      "#editor-settings-webworkers",
-    ) as HTMLInputElement | null;
-    if (webWorkersCheckbox) {
-      webWorkersCheckbox.checked = deps.getUiPrefs()?.webWorkersEnabled === true;
+    const languageBackendSummary = deps.settingsModalEl.querySelector(
+      "#editor-settings-language-backend-summary",
+    ) as HTMLElement | null;
+    const languageBackendAction = deps.settingsModalEl.querySelector(
+      "#editor-settings-language-backend-action",
+    ) as HTMLButtonElement | null;
+    const webWorkersEnabled = deps.getUiPrefs()?.webWorkersEnabled === true;
+    if (languageBackendSummary) {
+      languageBackendSummary.textContent = webWorkersEnabled
+        ? "Active: Monaco language web workers"
+        : "Active: TE2-managed Code Server 4.130.0";
+    }
+    if (languageBackendAction) {
+      languageBackendAction.textContent = webWorkersEnabled
+        ? "Switch to Code Server"
+        : "Switch to Monaco Web Workers";
+      languageBackendAction.dataset.targetMode = webWorkersEnabled
+        ? "code-server"
+        : "web-workers";
     }
 
     const currentTheme =
@@ -280,21 +295,39 @@ export function createSettingsRefreshController(deps: any) {
     });
   }
 
-  function installWebWorkersPreference() {
-    const checkbox = deps.settingsModalEl.querySelector(
-      "#editor-settings-webworkers",
-    ) as HTMLInputElement | null;
-    if (!checkbox) return;
-    checkbox.addEventListener("change", () => {
-      deps.busNotify(EXPLORER_RPC_METHODS.prefsUiUpdate, {
-        key: "webWorkersEnabled",
-        value: checkbox.checked,
-      });
-      deps.toast(
-        checkbox.checked
-          ? "Monaco language web workers enabled — reload Code TE2 to activate them."
-          : "Monaco language web workers disabled — reload Code TE2 to apply.",
-      );
+  function installLanguageBackendPreference() {
+    const action = deps.settingsModalEl.querySelector(
+      "#editor-settings-language-backend-action",
+    ) as HTMLButtonElement | null;
+    if (!action) return;
+    action.addEventListener("click", async () => {
+      const targetMode = action.dataset.targetMode === "code-server"
+        ? "code-server"
+        : "web-workers";
+      const idleLabel = action.textContent || "Switch Language Backend";
+      action.disabled = true;
+      action.textContent = targetMode === "code-server"
+        ? "Installing Code Server…"
+        : "Removing Code Server…";
+      try {
+        const response = await deps.requestLanguageBackendSet(targetMode);
+        if (!response || response.ok === false) {
+          throw new Error(response?.error || "Language backend switch failed");
+        }
+        deps.toast(
+          targetMode === "code-server"
+            ? "TE2-managed Code Server enabled — reloading Code TE2."
+            : "Monaco language web workers enabled — reloading Code TE2.",
+        );
+        deps.reloadEditorFrame();
+      } catch (error) {
+        deps.toast(
+          (error as { message?: string })?.message || "Language backend switch failed",
+          5000,
+        );
+        action.disabled = false;
+        action.textContent = idleLabel;
+      }
     });
   }
 
@@ -305,7 +338,7 @@ export function createSettingsRefreshController(deps: any) {
     installCustomSettingsSaveHandler,
     installWorkspaceSettingsSaveHandler,
     installScopeTabs,
-    installWebWorkersPreference,
+    installLanguageBackendPreference,
     getActiveScope: () => activeScope,
   };
 }

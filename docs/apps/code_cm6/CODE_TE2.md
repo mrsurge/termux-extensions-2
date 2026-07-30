@@ -187,7 +187,7 @@ For `file_editor_cm6`, we intentionally separate responsibilities:
 
 Current deterministic runtime endpoints:
 - `code-server`
-  - resolved by `extension_registry.py` from `TE2_CODE_SERVER_BIN`, `PATH`, login shell, NVM, `$PREFIX/bin`, then `~/.local/bin`
+  - resolved only from TE2's pinned private runtime at `$XDG_DATA_HOME/te2/code_server/4.130.0`
   - launched with `--socket` and `--socket-mode 0600`
   - stdout piped to Python for readiness detection
 - workbench adapter
@@ -216,7 +216,7 @@ Spinner / Status indicator (host UI):
 - Sidebar IPC retains its current codec. Migrating `/ui_ipc` must not implicitly change the sibling `/sidebar_ipc` namespace.
 - Active-file authority is `ProjectSidecar.last_file`, coordinated through `open_state_backend.py` and editor open services. Frontend path variables are projections.
 - App-lane outbound traffic uses websocket-only `volatile.emit` with connected-state guards. Disconnected RPC requests fail, notifications and terminal input drop, and connect handlers rebuild authoritative state.
-- Code-server resolution prepends the resolved launcher directory to the code-server process `PATH`, so NVM launchers work even when NVM was not initialized in the app-worker shell.
+- Code Server launch, VSIX/Open VSX commands, builtin-extension discovery, and WBA nid extraction all use the same pinned TE2-managed installation. System, `PATH`, NVM, and executable environment overrides are not runtime authorities.
 - WBA language-intelligence requests receive the resolved `ExtHostLanguageFeatures` nid through runtime adapters. Numeric `94` is only the Code OSS 1.109 fallback in `RPC_DEFAULTS`.
 - The installed WBA MessagePack codec is one self-contained bundled ESM file at `workbench_protocol_proxy/node_workbench_adapter/dist/protocol/messagepack-codec.mjs`.
 
@@ -2674,18 +2674,17 @@ structurally parsing the installed code-server bundle, with `extHost.protocol.ts
 
 ### Auto-discovery pipeline
 
-The nid extraction is **version-gated** and runs automatically at boot:
+The nid extraction is **managed-runtime keyed** and runs automatically at boot:
 
 1. **Python helper** (`extension_registry.py: ensure_rpc_config()`) runs before
    the adapter launches (called from `workbench_adapter_shell_manager.py`).
 
-2. **Installation resolution and version check** — resolves one code-server
-   executable from `TE2_CODE_SERVER_BIN`, `PATH`, the login shell, NVM
-   installations, `$PREFIX/bin`, or `~/.local/bin`; runs that exact executable
-   with `--version`; and compares it against cached `te2_rpc_config.json`.
-   If version + commit match → cache hit, skip. The same absolute executable
-   and its `bin` directory are passed to the code-server shell, so WBA nid
-   discovery and process launch cannot select different installations.
+2. **Pinned installation resolution and cache check** — resolves only TE2's
+   managed Code Server 4.130.0 executable, reads that exact runtime's version
+   and commit, and compares them against cached `te2_rpc_config.json`. If
+   version + commit match → cache hit, skip. The same absolute executable and
+   bundled Code tree are used by the code-server shell, extension management,
+   builtin discovery, and WBA nid extraction.
 
 3. **Structural extraction** — reads the installed minified bundle
    (`extensionHostProcess.js`), locates and balances the `MainContext` and

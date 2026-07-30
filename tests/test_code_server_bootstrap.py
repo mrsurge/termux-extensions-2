@@ -44,59 +44,25 @@ class CodeServerBootstrapTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_supported_code_version_range_is_1_127_through_1_130(self) -> None:
-        self.assertFalse(code_server_bootstrap.is_supported_code_version("1.126.9"))
-        self.assertTrue(code_server_bootstrap.is_supported_code_version("1.127.0"))
-        self.assertTrue(code_server_bootstrap.is_supported_code_version("1.130.99"))
-        self.assertFalse(code_server_bootstrap.is_supported_code_version("1.131.0"))
-        self.assertFalse(code_server_bootstrap.is_supported_code_version("unknown"))
-
-    def test_compatible_existing_installation_is_used_without_installing(self) -> None:
-        existing = _installation(self.root / "existing")
+    def test_managed_installation_is_ready_without_command_version_gate(self) -> None:
+        managed = _installation(self.root / "managed", source="te2-managed")
         with (
             patch.object(
                 code_server_bootstrap,
-                "resolve_code_server_installation",
-                return_value=existing,
-            ),
-            patch.object(
-                code_server_bootstrap,
-                "get_code_server_version",
-                return_value={
-                    "version": "4.127.0",
-                    "commit": "abc1234",
-                    "code_version": "1.127.0",
-                },
-            ),
-            patch.object(
-                code_server_bootstrap,
                 "te2_managed_code_server_installation",
-            ) as managed,
+                return_value=managed,
+            ),
+            patch.object(code_server_bootstrap, "get_code_server_version") as version,
         ):
             prerequisite = code_server_bootstrap.inspect_code_server_prerequisite()
             resolved = code_server_bootstrap.ensure_code_server_installation()
 
         self.assertTrue(prerequisite.compatible)
-        self.assertIs(existing, resolved)
-        managed.assert_not_called()
+        self.assertIs(managed, resolved)
+        version.assert_not_called()
 
-    def test_incompatible_installation_never_bootstraps_without_consent(self) -> None:
-        existing = _installation(self.root / "old")
+    def test_missing_managed_installation_never_bootstraps_without_consent(self) -> None:
         with (
-            patch.object(
-                code_server_bootstrap,
-                "resolve_code_server_installation",
-                return_value=existing,
-            ),
-            patch.object(
-                code_server_bootstrap,
-                "get_code_server_version",
-                return_value={
-                    "version": "4.126.0",
-                    "commit": "abc1234",
-                    "code_version": "1.126.0",
-                },
-            ),
             patch.object(
                 code_server_bootstrap,
                 "te2_managed_code_server_installation",
@@ -112,53 +78,54 @@ class CodeServerBootstrapTests(unittest.TestCase):
             ):
                 code_server_bootstrap.ensure_code_server_installation()
 
-        self.assertEqual("incompatible", prerequisite.state)
+        self.assertEqual("missing", prerequisite.state)
         linux_install.assert_not_called()
         android_install.assert_not_called()
 
-    def test_verified_private_installation_replaces_incompatible_external_selection(self) -> None:
-        external = _installation(self.root / "external", source="PATH")
+    def test_managed_installation_requires_the_bundled_code_tree(self) -> None:
         managed = _installation(self.root / "managed", source="te2-managed")
-
-        def version(installation: CodeServerInstallation) -> dict[str, object]:
-            if installation is managed:
-                return {
-                    "version": "4.130.0",
-                    "commit": "managed1",
-                    "code_version": "1.130.0",
-                }
-            return {
-                "version": "4.126.0",
-                "commit": "external1",
-                "code_version": "1.126.0",
-            }
-
+        managed = CodeServerInstallation(managed.executable, None, managed.source)
         with (
-            patch.object(
-                code_server_bootstrap,
-                "resolve_code_server_installation",
-                return_value=external,
-            ),
             patch.object(
                 code_server_bootstrap,
                 "te2_managed_code_server_installation",
                 return_value=managed,
             ),
-            patch.object(
-                code_server_bootstrap,
-                "get_code_server_version",
-                side_effect=version,
-            ),
-            patch.object(
-                code_server_bootstrap,
-                "select_code_server_runtime_installation",
-            ) as select,
         ):
             prerequisite = code_server_bootstrap.inspect_code_server_prerequisite()
 
-        self.assertTrue(prerequisite.compatible)
+        self.assertFalse(prerequisite.compatible)
+        self.assertEqual("incompatible", prerequisite.state)
         self.assertIs(managed, prerequisite.installation)
-        select.assert_called_once_with(managed)
+        self.assertIn("bundled Code/extension-host tree", prerequisite.reason)
+
+    def test_remove_managed_runtime_preserves_sibling_extension_data(self) -> None:
+        self.install_prefix.mkdir(parents=True)
+        (self.install_prefix / "runtime.txt").write_text("runtime", encoding="utf-8")
+        extensions = self.root / "config" / "code-server" / "extensions"
+        extensions.mkdir(parents=True)
+        (extensions / "keep.txt").write_text("extension", encoding="utf-8")
+
+        with (
+            patch.object(
+                code_server_bootstrap,
+                "code_server_install_prefix",
+                return_value=self.install_prefix,
+            ),
+            patch.object(
+                code_server_bootstrap,
+                "code_server_bootstrap_cache_dir",
+                return_value=self.cache_dir,
+            ),
+        ):
+            removed = code_server_bootstrap.remove_code_server_installation()
+
+        self.assertTrue(removed)
+        self.assertFalse(self.install_prefix.exists())
+        self.assertEqual(
+            "extension",
+            (extensions / "keep.txt").read_text(encoding="utf-8"),
+        )
 
     def test_official_installer_uses_standalone_private_prefix(self) -> None:
         script = b"#!/usr/bin/env sh\n"

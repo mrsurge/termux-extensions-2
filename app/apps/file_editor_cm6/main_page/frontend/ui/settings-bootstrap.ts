@@ -44,6 +44,7 @@ import { createSettingsModalsController } from './settings-modals.ts';
  *   getStartPath: () => string,
  *   busRequest: (event: string, payload?: any, timeoutMs?: number) => Promise<any>,
  *   busNotify: (event: string, payload?: any) => void,
+ *   requestLanguageBackendSet: (mode: "code-server" | "web-workers") => Promise<any>,
  *   reloadEditorFrame: () => void,
  *   getConsoleWorkerId: () => string | null,
  *   toast: (msg: string, ms?: number) => void,
@@ -64,6 +65,7 @@ export function createSettingsBootstrap(deps: any) {
     extManagerModalEl: deps.els.extManagerModal,
     busRequest: deps.busRequest,
     busNotify: deps.busNotify,
+    requestLanguageBackendSet: deps.requestLanguageBackendSet,
     toast: deps.toast,
     reloadEditorFrame: deps.reloadEditorFrame,
   });
@@ -140,7 +142,7 @@ export function createSettingsBootstrap(deps: any) {
   settingsRefreshController.installCustomSettingsSaveHandler();
   settingsRefreshController.installWorkspaceSettingsSaveHandler();
   settingsRefreshController.installScopeTabs();
-  settingsRefreshController.installWebWorkersPreference();
+  settingsRefreshController.installLanguageBackendPreference();
 
   const settingsInstallController = createSettingsInstallController({
     installBtn: deps.els.extManagerInstallBtn,

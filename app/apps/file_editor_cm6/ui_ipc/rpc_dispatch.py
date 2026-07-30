@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
-    UI_IPC_RPC_METHOD_HOST_CODE_SERVER_INSTALL,
+    UI_IPC_RPC_METHOD_HOST_LANGUAGE_BACKEND_SET,
     UI_IPC_RPC_METHOD_HOST_CODE_INSPECTOR_COMMAND,
     UI_IPC_RPC_METHOD_HOST_DRAFT_DISCARD,
     UI_IPC_RPC_METHOD_HOST_EDITOR_FIND,
@@ -35,7 +35,7 @@ from .rpc_contract import (
     build_jsonrpc_error,
 )
 from ..boot_snapshot_backend import handle_boot_snapshot_request
-from ..host.code_server_backend import handle_host_code_server_install_request
+from ..host.code_server_backend import handle_host_language_backend_set_request
 from ..host.draft_backend import handle_host_draft_discard_request
 from ..host.editor_actions_backend import (
     handle_host_diagnostics_mention_request,
@@ -131,8 +131,8 @@ async def dispatch_ui_ipc_rpc_request(
             source_name=source_name,
         )
 
-    if method == UI_IPC_RPC_METHOD_HOST_CODE_SERVER_INSTALL:
-        return await handle_host_code_server_install_request(
+    if method == UI_IPC_RPC_METHOD_HOST_LANGUAGE_BACKEND_SET:
+        return await handle_host_language_backend_set_request(
             params,
             source_name=source_name,
         )

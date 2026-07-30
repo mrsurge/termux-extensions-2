@@ -12,14 +12,12 @@ settings.json is an OUTPUT of the registry (one-way flow, never read back).
 import json
 import os
 import re
-import shlex
-import shutil
 import subprocess
 import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import TypeAlias, cast
+from typing import Final, TypeAlias, cast
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 JsonObject: TypeAlias = dict[str, JsonValue]
@@ -36,6 +34,7 @@ _EXTENSIONS_DIR = _CODE_SERVER_DATA_DIR / "extensions"
 _USER_SETTINGS_PATH = _CODE_SERVER_DATA_DIR / "User" / "settings.json"
 _REGISTRY_PATH = _CODE_SERVER_DATA_DIR / "te2_extension_registry.json"
 _RPC_CONFIG_PATH = _CODE_SERVER_DATA_DIR / "te2_rpc_config.json"
+PINNED_CODE_SERVER_VERSION: Final = "4.130.0"
 
 
 def _json_object_from_text(text: str) -> JsonObject | None:
@@ -122,106 +121,12 @@ class CodeServerInstallation:
     source: str
 
 
-_runtime_code_server_override: CodeServerInstallation | None = None
-
-
 def _path_is_executable(path: Path) -> bool:
     return path.is_file() and os.access(path, os.X_OK)
 
 
-def _node_version_key(path: Path) -> tuple[int, ...]:
-    matches = cast(list[str], re.findall(r"\d+", path.name))
-    values = tuple(int(value) for value in matches)
-    return values or (0,)
-
-
-def _nvm_code_server_candidates() -> list[Path]:
-    candidates: list[Path] = []
-    nvm_bin = os.environ.get("NVM_BIN", "").strip()
-    if nvm_bin:
-        candidates.append(Path(nvm_bin).expanduser() / "code-server")
-
-    roots: list[Path] = []
-    configured_root = os.environ.get("NVM_DIR", "").strip()
-    if configured_root:
-        roots.append(Path(configured_root).expanduser())
-    default_root = Path.home() / ".nvm"
-    if default_root not in roots:
-        roots.append(default_root)
-
-    for root in roots:
-        version_bins = sorted(
-            (root / "versions" / "node").glob("*/bin/code-server"),
-            key=lambda path: _node_version_key(path.parent.parent),
-            reverse=True,
-        )
-        alias_path = root / "alias" / "default"
-        alias = ""
-        try:
-            alias = alias_path.read_text(encoding="utf-8").strip().lstrip("v")
-        except OSError:
-            pass
-        if alias and alias[0].isdigit():
-            preferred = [
-                path
-                for path in version_bins
-                if path.parent.parent.name.lstrip("v") == alias
-                or path.parent.parent.name.lstrip("v").startswith(f"{alias}.")
-            ]
-            candidates.extend(preferred)
-            candidates.extend(path for path in version_bins if path not in preferred)
-        else:
-            candidates.extend(version_bins)
-    return candidates
-
-
-def _login_shell_code_server() -> Path | None:
-    try:
-        output = subprocess.check_output(
-            ["sh", "-lc", "command -v code-server"],
-            text=True,
-            timeout=5,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception:
-        return None
-    resolved = output.strip().splitlines()
-    return Path(resolved[-1]).expanduser() if resolved else None
-
-
-def _wrapper_exec_target(launcher: Path) -> Path | None:
-    try:
-        if launcher.stat().st_size > 256 * 1024:
-            return None
-        text = launcher.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return None
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line.startswith("exec "):
-            continue
-        try:
-            parts = shlex.split(line)
-        except ValueError:
-            continue
-        if len(parts) < 2:
-            continue
-        target_text = os.path.expandvars(parts[1])
-        if not target_text or target_text.startswith("-"):
-            continue
-        target = Path(target_text).expanduser()
-        if not target.is_absolute():
-            target = launcher.parent / target
-        if target.exists():
-            return target.resolve()
-    return None
-
-
 def _vscode_root_from_anchors(anchors: list[Path]) -> Path | None:
-    configured_root = os.environ.get("TE2_CODE_SERVER_ROOT", "").strip()
     roots: list[Path] = []
-    if configured_root:
-        roots.append(Path(configured_root).expanduser())
     for anchor in anchors:
         current = anchor if anchor.is_dir() else anchor.parent
         roots.extend([current, *list(current.parents)[:8]])
@@ -230,6 +135,7 @@ def _vscode_root_from_anchors(anchors: list[Path]) -> Path | None:
         for candidate in (
             root / "lib" / "vscode",
             root / "vscode",
+            root / "lib" / "code-server" / "lib" / "vscode",
             root / "lib" / "node_modules" / "code-server" / "lib" / "vscode",
         ):
             normalized = candidate.resolve(strict=False)
@@ -249,9 +155,6 @@ def _installation_from_executable(executable: Path, source: str) -> CodeServerIn
     if not _path_is_executable(launcher):
         return None
     anchors = [launcher, launcher.resolve(strict=False)]
-    wrapper_target = _wrapper_exec_target(launcher)
-    if wrapper_target is not None:
-        anchors.append(wrapper_target)
     return CodeServerInstallation(
         executable=launcher,
         vscode_root=_vscode_root_from_anchors(anchors),
@@ -285,60 +188,23 @@ def te2_managed_code_server_installation(
 def select_code_server_runtime_installation(
     installation: CodeServerInstallation | None,
 ) -> None:
-    """Select the verified installation used by all Code TE2 consumers."""
-    global _runtime_code_server_override
-    _runtime_code_server_override = installation
+    """Invalidate the managed installation cache after install or removal."""
+    if installation is not None:
+        expected = (
+            te2_managed_code_server_root()
+            / PINNED_CODE_SERVER_VERSION
+            / "bin"
+            / "code-server"
+        ).resolve(strict=False)
+        actual = installation.executable.resolve(strict=False)
+        if actual != expected:
+            raise ValueError(f"Code TE2 only accepts its managed Code Server: {actual}")
     resolve_code_server_installation.cache_clear()
 
 
 @lru_cache(maxsize=1)
 def resolve_code_server_installation() -> CodeServerInstallation | None:
-    if _runtime_code_server_override is not None:
-        refreshed = _installation_from_executable(
-            _runtime_code_server_override.executable,
-            _runtime_code_server_override.source,
-        )
-        if refreshed is not None:
-            return refreshed
-
-    candidates: list[tuple[Path, str]] = []
-    configured_bin = os.environ.get("TE2_CODE_SERVER_BIN", "").strip()
-    if configured_bin:
-        candidates.append((Path(configured_bin), "TE2_CODE_SERVER_BIN"))
-    managed_root = te2_managed_code_server_root()
-    managed_versions = sorted(
-        (path for path in managed_root.iterdir() if path.is_dir())
-        if managed_root.is_dir()
-        else (),
-        key=lambda path: _node_version_key(path),
-        reverse=True,
-    )
-    candidates.extend(
-        (path / "bin" / "code-server", "te2-managed")
-        for path in managed_versions
-    )
-    path_bin = shutil.which("code-server")
-    if path_bin:
-        candidates.append((Path(path_bin), "PATH"))
-    login_bin = _login_shell_code_server()
-    if login_bin is not None:
-        candidates.append((login_bin, "login-shell"))
-    candidates.extend((path, "nvm") for path in _nvm_code_server_candidates())
-    prefix = os.environ.get("PREFIX", "").strip()
-    if prefix:
-        candidates.append((Path(prefix) / "bin" / "code-server", "PREFIX"))
-    candidates.append((Path.home() / ".local" / "bin" / "code-server", "user-local"))
-
-    seen: set[Path] = set()
-    for candidate, source in candidates:
-        normalized = candidate.expanduser().resolve(strict=False)
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        installation = _installation_from_executable(candidate, source)
-        if installation is not None:
-            return installation
-    return None
+    return te2_managed_code_server_installation(PINNED_CODE_SERVER_VERSION)
 
 
 def resolve_code_server_executable() -> str | None:
@@ -355,13 +221,15 @@ def _code_server_subprocess_env(installation: CodeServerInstallation) -> dict[st
 
 
 def _find_builtin_extensions_dir() -> str:
-    configured = os.environ.get("TE2_BUILTIN_EXTENSIONS_DIR", "").strip()
-    if configured:
-        return str(Path(configured).expanduser())
     installation = resolve_code_server_installation()
     if installation is not None and installation.vscode_root is not None:
         return str(installation.vscode_root / "extensions")
-    return str(Path.home() / ".local" / "lib" / "code-server" / "lib" / "vscode" / "extensions")
+    return str(
+        te2_managed_code_server_root()
+        / PINNED_CODE_SERVER_VERSION
+        / ".missing"
+        / "extensions"
+    )
 
 # ── RPC Config (nid auto-discovery) ───────────────────────────────────
 #
@@ -406,10 +274,6 @@ class NidExtractionResult:
 
 def _find_ext_host_bundle(installation: CodeServerInstallation | None = None) -> str | None:
     """Locate extensionHostProcess.js from the installed code-server."""
-    configured = os.environ.get("TE2_EXTENSION_HOST_BUNDLE", "").strip()
-    if configured:
-        bundle = Path(configured).expanduser()
-        return str(bundle) if bundle.is_file() else None
     installation = installation or resolve_code_server_installation()
     if installation is None or installation.vscode_root is None:
         return None
@@ -423,10 +287,6 @@ def _find_ext_host_bundle(installation: CodeServerInstallation | None = None) ->
 def _find_ext_host_protocol_source(
     installation: CodeServerInstallation | None = None,
 ) -> str | None:
-    configured = os.environ.get("TE2_EXT_HOST_PROTOCOL_SOURCE", "").strip()
-    if configured:
-        source = Path(configured).expanduser()
-        return str(source) if source.is_file() else None
     installation = installation or resolve_code_server_installation()
     if installation is None or installation.vscode_root is None:
         return None
@@ -1293,8 +1153,8 @@ def _require_code_server_installation() -> CodeServerInstallation:
     installation = resolve_code_server_installation()
     if installation is None:
         raise RuntimeError(
-            "code-server executable was not found in TE2_CODE_SERVER_BIN, PATH, "
-            + "the login shell, NVM, PREFIX, or ~/.local/bin"
+            "TE2's managed Code Server is not installed. "
+            "Select Code Server in Languages & Extensions first."
         )
     return installation
 

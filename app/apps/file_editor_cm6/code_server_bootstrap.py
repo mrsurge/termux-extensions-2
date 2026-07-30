@@ -16,18 +16,16 @@ import uuid
 
 from .extension_registry import (
     CodeServerInstallation,
+    PINNED_CODE_SERVER_VERSION,
     code_server_installation_from_executable,
     get_code_server_version,
-    resolve_code_server_installation,
     select_code_server_runtime_installation,
     te2_managed_code_server_installation,
     te2_managed_code_server_root,
 )
 
 
-REQUIRED_CODE_SERVER_VERSION: Final = "4.130.0"
-MINIMUM_CODE_VERSION: Final = "1.127.0"
-MAXIMUM_CODE_VERSION_EXCLUSIVE: Final = "1.131.0"
+REQUIRED_CODE_SERVER_VERSION: Final = PINNED_CODE_SERVER_VERSION
 OFFICIAL_INSTALL_SCRIPT_URL: Final = "https://code-server.dev/install.sh"
 ANDROID_RELEASE_TAG: Final = "0.2.327"
 ANDROID_PACKAGE_NAME: Final = "code-server_4.130.0_aarch64.deb"
@@ -61,7 +59,6 @@ class CodeServerPrerequisitePayload(TypedDict):
     executable: str
     install_version: str
     install_prefix: str
-    required_code_range: str
     android: bool
 
 
@@ -91,9 +88,6 @@ class CodeServerPrerequisite:
             ),
             "install_version": REQUIRED_CODE_SERVER_VERSION,
             "install_prefix": str(code_server_install_prefix()),
-            "required_code_range": (
-                f">={MINIMUM_CODE_VERSION}, <{MAXIMUM_CODE_VERSION_EXCLUSIVE}"
-            ),
             "android": _is_termux_android(),
         }
 
@@ -125,26 +119,6 @@ def _is_termux_android() -> bool:
     )
 
 
-def _numeric_version(value: object) -> tuple[int, int, int] | None:
-    text = str(value or "").strip()
-    parts = text.split(".")
-    if len(parts) not in {2, 3} or any(not part.isdigit() for part in parts):
-        return None
-    numbers = [int(part) for part in parts]
-    while len(numbers) < 3:
-        numbers.append(0)
-    return numbers[0], numbers[1], numbers[2]
-
-
-def is_supported_code_version(value: object) -> bool:
-    parsed = _numeric_version(value)
-    minimum = _numeric_version(MINIMUM_CODE_VERSION)
-    maximum = _numeric_version(MAXIMUM_CODE_VERSION_EXCLUSIVE)
-    assert minimum is not None
-    assert maximum is not None
-    return parsed is not None and minimum <= parsed < maximum
-
-
 def _assess_installation(
     installation: CodeServerInstallation | None,
 ) -> CodeServerPrerequisite:
@@ -156,57 +130,25 @@ def _assess_installation(
             reason="Code Server was not found.",
         )
 
-    version_info = get_code_server_version(installation)
-    if version_info is None:
-        return CodeServerPrerequisite(
-            state="incompatible",
-            installation=installation,
-            version_info=None,
-            reason="Code Server did not report a readable version.",
-        )
-
-    code_version = version_info.get("code_version")
-    if not is_supported_code_version(code_version):
-        reported = str(code_version or "unknown")
-        return CodeServerPrerequisite(
-            state="incompatible",
-            installation=installation,
-            version_info=version_info,
-            reason=(
-                f"Code Server embeds Code {reported}; Code TE2 supports "
-                f"{MINIMUM_CODE_VERSION} through 1.130.x."
-            ),
-        )
-
     if installation.vscode_root is None:
         return CodeServerPrerequisite(
             state="incompatible",
             installation=installation,
-            version_info=version_info,
+            version_info={"version": REQUIRED_CODE_SERVER_VERSION},
             reason="Code Server's bundled Code/extension-host tree was not found.",
         )
 
     return CodeServerPrerequisite(
         state="ready",
         installation=installation,
-        version_info=version_info,
-        reason="A compatible Code Server extension host is available.",
+        version_info={"version": REQUIRED_CODE_SERVER_VERSION},
+        reason="TE2's managed Code Server extension host is available.",
     )
 
 
 def inspect_code_server_prerequisite() -> CodeServerPrerequisite:
-    selected = _assess_installation(resolve_code_server_installation())
-    if selected.compatible:
-        return selected
-
     managed = te2_managed_code_server_installation(REQUIRED_CODE_SERVER_VERSION)
-    if managed is None:
-        return selected
-    managed_status = _assess_installation(managed)
-    if managed_status.compatible:
-        select_code_server_runtime_installation(managed)
-        return managed_status
-    return selected
+    return _assess_installation(managed)
 
 
 def require_compatible_code_server_installation() -> CodeServerInstallation:
@@ -537,13 +479,13 @@ def _install_android_code_server(cache_dir: Path, install_prefix: Path) -> None:
 def _verify_bootstrapped_installation(
     installation: CodeServerInstallation,
 ) -> CodeServerInstallation:
-    prerequisite = _assess_installation(installation)
-    version_info = prerequisite.version_info or {}
+    version_info = get_code_server_version(installation) or {}
     package_version = str(version_info.get("version") or "")
     if package_version != REQUIRED_CODE_SERVER_VERSION:
         reported = package_version or "unknown"
         message = f"The private Code Server executable reported package version {reported} instead of {REQUIRED_CODE_SERVER_VERSION}: {installation.executable}"
         raise CodeServerBootstrapError(message)
+    prerequisite = _assess_installation(installation)
     if not prerequisite.compatible:
         message = f"The private Code Server installation is not compatible: {prerequisite.reason}"
         raise CodeServerBootstrapError(message)
@@ -585,3 +527,19 @@ def install_code_server_installation() -> CodeServerInstallation:
         verified = _verify_bootstrapped_installation(installed)
         select_code_server_runtime_installation(verified)
         return verified
+
+
+def remove_code_server_installation() -> bool:
+    """Remove only the pinned TE2-managed runtime, preserving user extensions."""
+    cache_dir = code_server_bootstrap_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    install_prefix = code_server_install_prefix()
+    lock_path = cache_dir / ".bootstrap.lock"
+
+    with lock_path.open("a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        existed = install_prefix.exists() or install_prefix.is_symlink()
+        select_code_server_runtime_installation(None)
+        _remove_path(install_prefix)
+        select_code_server_runtime_installation(None)
+        return existed

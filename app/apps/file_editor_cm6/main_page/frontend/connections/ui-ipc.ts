@@ -400,10 +400,10 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     return await connection.request(UI_IPC_RPC_METHODS.hostBootSnapshotGet, payload || {}, 8000);
   }
 
-  async function requestBackendCodeServerInstall(payload: JsonObject = {}): Promise<unknown> {
+  async function requestBackendLanguageBackendSet(payload: JsonObject = {}): Promise<unknown> {
     const connection = await connectUIIPC();
     return await connection.request(
-      UI_IPC_RPC_METHODS.hostCodeServerInstall,
+      UI_IPC_RPC_METHODS.hostLanguageBackendSet,
       payload || {},
       20 * 60 * 1000,
     );
@@ -478,7 +478,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     requestBackendEditorPreferenceUpdate,
     requestBackendRunActiveFile,
     requestBackendBootSnapshot,
-    requestBackendCodeServerInstall,
+    requestBackendLanguageBackendSet,
     requestBackendEditorJumpToLine,
     requestBackendEditorGitBaselines,
     requestBackendEditorFind,

@@ -42,7 +42,7 @@ interface HostBootRuntimeDeps {
   requestUiIpc: (method: UiIpcRpcMethod, params?: UnknownRecord, timeoutMs?: number) => Promise<unknown>;
   connectSidebarIPC: () => void;
   ensureWorkbenchAdapterReady: () => Promise<unknown>;
-  requestBackendCodeServerInstall: (payload?: UnknownRecord) => Promise<unknown>;
+  requestBackendLanguageBackendSet: (payload?: UnknownRecord) => Promise<unknown>;
   spinnerSetStep: (title: string, failed?: boolean) => void;
   initBranchMenu: (deps: { requestUiIpc: (method: UiIpcRpcMethod, params?: UnknownRecord, timeoutMs?: number) => Promise<unknown> }) => unknown;
   setBranchMenuHandle: (handle: unknown) => void;
@@ -137,7 +137,7 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
       connectUIIPC: () => deps.connectUIIPC(),
       connectSidebarIPC: () => deps.connectSidebarIPC(),
       ensureWorkbenchAdapterReady: () => deps.ensureWorkbenchAdapterReady(),
-      requestBackendCodeServerInstall: (payload) => deps.requestBackendCodeServerInstall(payload),
+      requestBackendLanguageBackendSet: (payload) => deps.requestBackendLanguageBackendSet(payload),
       spinnerSetStep: (title, failed) => deps.spinnerSetStep(title, failed),
       initBranchMenu: () => deps.initBranchMenu({
         requestUiIpc: (method, params, timeoutMs) => deps.requestUiIpc(method, params || {}, timeoutMs),

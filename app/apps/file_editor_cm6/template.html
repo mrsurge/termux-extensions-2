@@ -2806,14 +2806,12 @@
 
       <hr style="border:0; border-top:1px solid var(--fe-border, #333); margin:14px 0 10px;" />
 
-      <div style="font-weight: 600; margin-bottom: 6px;">Monaco Web Workers</div>
-      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:0.88rem;">
-        <input type="checkbox" id="editor-settings-webworkers" />
-        <span>Enable language web workers <span style="opacity:0.55; font-size:0.82rem;">(requires reload)</span></span>
-      </label>
-      <div style="font-size:0.78rem; opacity:0.5; margin-top:4px; line-height:1.4;">
-        JSON, CSS, HTML &amp; TypeScript built-in language services.<br/>
-        Usually redundant — the extension host provides the same features.
+      <div style="font-weight: 600; margin-bottom: 6px;">Language Intelligence Backend</div>
+      <div id="editor-settings-language-backend-summary" style="font-size:0.82rem; opacity:0.72; margin-bottom:8px; line-height:1.4;"></div>
+      <button class="fe-btn" id="editor-settings-language-backend-action" type="button"></button>
+      <div style="font-size:0.78rem; opacity:0.5; margin-top:6px; line-height:1.4;">
+        Code Server uses TE2's pinned private runtime and enables VS Code extensions.
+        Monaco workers provide the built-in JSON, CSS, HTML &amp; TypeScript language services without Code Server.
       </div>
     </div>
   </div>

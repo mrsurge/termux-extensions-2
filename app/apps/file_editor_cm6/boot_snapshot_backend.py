@@ -66,6 +66,8 @@ class BootSnapshotPayload(TypedDict):
 
 async def _prime_backend_runtime(project_root: str) -> None:
     try:
+        if _web_workers_enabled():
+            return
         await prime_code_server_runtime(project_root)
     except Exception as exc:
         log.warning("[boot_snapshot] backend runtime prime failed: %s", exc)
@@ -83,6 +85,22 @@ def _ensure_backend_runtime_task(project_root: str | None) -> None:
         _prime_backend_runtime(project_root),
         name="file_editor_cm6_boot_prepare",
     )
+
+
+async def cancel_backend_runtime_prepare_tasks() -> None:
+    tasks = [task for task in _boot_prepare_tasks.values() if not task.done()]
+    for task in tasks:
+        _ = task.cancel()
+    if tasks:
+        _ = await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _web_workers_enabled() -> bool:
+    raw_ui = get_preferences_store().get_preferences().get("ui")
+    if not isinstance(raw_ui, dict):
+        return False
+    ui = cast(dict[object, object], raw_ui)
+    return ui.get("webWorkersEnabled") is True
 
 
 def _build_host_state_payload() -> JsonMap:
@@ -194,9 +212,6 @@ async def handle_boot_snapshot_request(
     history = get_history_store()
     prefs_store = get_preferences_store()
     active_project = history.get_active_project()
-    code_server = await asyncio.to_thread(inspect_code_server_prerequisite)
-    if code_server.compatible:
-        _ensure_backend_runtime_task(active_project)
     session_state = history.get_session_state()
     host_state = _build_host_state_payload()
     editor_snapshot_builder = _editor_snapshot_builder
@@ -212,6 +227,10 @@ async def handle_boot_snapshot_request(
             if isinstance(key, str):
                 normalized_ui_prefs[key] = value
         ui_prefs = normalized_ui_prefs
+
+    code_server = await asyncio.to_thread(inspect_code_server_prerequisite)
+    if code_server.compatible and ui_prefs.get("webWorkersEnabled") is not True:
+        _ensure_backend_runtime_task(active_project)
 
     explorer_bootstrap = _build_explorer_bootstrap_payload(
         project_root=active_project,
