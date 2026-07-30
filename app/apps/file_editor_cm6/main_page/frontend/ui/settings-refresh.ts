@@ -40,6 +40,8 @@ function createRawSettingsJsonField(
 /**
  * @param {{
  *   getEditorViewState: () => any,
+ *   getUiPrefs: () => Record<string, unknown>,
+ *   settingsModalEl: HTMLElement,
  *   themeSummaryEl: HTMLElement,
  *   extSummaryEl: HTMLElement,
  *   customSettingsInputEl: HTMLTextAreaElement,
@@ -187,6 +189,13 @@ export function createSettingsRefreshController(deps: any) {
   }
 
   async function refreshEditorSettingsModal() {
+    const webWorkersCheckbox = deps.settingsModalEl.querySelector(
+      "#editor-settings-webworkers",
+    ) as HTMLInputElement | null;
+    if (webWorkersCheckbox) {
+      webWorkersCheckbox.checked = deps.getUiPrefs()?.webWorkersEnabled === true;
+    }
+
     const currentTheme =
       deps.getEditorViewState()?.theme || "github-dark-default";
     try {
@@ -271,6 +280,24 @@ export function createSettingsRefreshController(deps: any) {
     });
   }
 
+  function installWebWorkersPreference() {
+    const checkbox = deps.settingsModalEl.querySelector(
+      "#editor-settings-webworkers",
+    ) as HTMLInputElement | null;
+    if (!checkbox) return;
+    checkbox.addEventListener("change", () => {
+      deps.busNotify(EXPLORER_RPC_METHODS.prefsUiUpdate, {
+        key: "webWorkersEnabled",
+        value: checkbox.checked,
+      });
+      deps.toast(
+        checkbox.checked
+          ? "Monaco language web workers enabled — reload Code TE2 to activate them."
+          : "Monaco language web workers disabled — reload Code TE2 to apply.",
+      );
+    });
+  }
+
   return {
     loadCustomSettings,
     loadWorkspaceSettings,
@@ -278,6 +305,7 @@ export function createSettingsRefreshController(deps: any) {
     installCustomSettingsSaveHandler,
     installWorkspaceSettingsSaveHandler,
     installScopeTabs,
+    installWebWorkersPreference,
     getActiveScope: () => activeScope,
   };
 }

@@ -444,6 +444,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     },
     closeAllMenus,
     getEditorViewState: () => editorViewState,
+    getUiPrefs: () => hostUiPrefsRuntime.latestSnapshot(),
     setEditorTheme: (themeId: string) => {
       editorViewState = editorViewState || {};
       editorViewState.theme = themeId;
@@ -1208,6 +1209,8 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     requestUiIpc: (method: UiIpcRpcMethod, params?: UnknownRecord, timeoutMs?: number) => uiIpcConnections.requestUiIpc(method, params || {}, timeoutMs),
     connectSidebarIPC: () => connectSidebarIPC(),
     ensureWorkbenchAdapterReady: () => hostStateRuntime.ensureWorkbenchAdapterReady(),
+    requestBackendCodeServerInstall: (payload?: UnknownRecord) => uiIpcConnections.requestBackendCodeServerInstall(payload),
+    spinnerSetStep: (title: string, failed?: boolean) => hostStateRuntime.spinnerSetStep(title, failed),
     initBranchMenu,
     setBranchMenuHandle: (handle: unknown) => {
       branchMenuHandle = handle;

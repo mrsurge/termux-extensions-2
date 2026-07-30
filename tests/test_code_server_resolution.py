@@ -18,6 +18,7 @@ RESOLUTION_ENV_KEYS = (
     "TE2_CODE_SERVER_BIN",
     "TE2_CODE_SERVER_ROOT",
     "TE2_EXTENSION_HOST_BUNDLE",
+    "XDG_DATA_HOME",
 )
 
 
@@ -46,10 +47,13 @@ class CodeServerResolutionTests(unittest.TestCase):
         self.saved_env = {key: os.environ.get(key) for key in RESOLUTION_ENV_KEYS}
         for key in RESOLUTION_ENV_KEYS:
             os.environ.pop(key, None)
+        os.environ["XDG_DATA_HOME"] = str(self.root / "data")
+        extension_registry.select_code_server_runtime_installation(None)
         extension_registry.resolve_code_server_installation.cache_clear()
 
     def tearDown(self) -> None:
         extension_registry.resolve_code_server_installation.cache_clear()
+        extension_registry.select_code_server_runtime_installation(None)
         for key, value in self.saved_env.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -94,7 +98,11 @@ class CodeServerResolutionTests(unittest.TestCase):
         subprocess_path = extension_registry._code_server_subprocess_env(installation)["PATH"]
         self.assertEqual(str(launcher.parent), subprocess_path.split(os.pathsep)[0])
         self.assertEqual(
-            {"version": "4.109.2", "commit": "abc123"},
+            {
+                "version": "4.109.2",
+                "commit": "abc123",
+                "code_version": "1.109.2",
+            },
             extension_registry._get_code_server_version(installation),
         )
 

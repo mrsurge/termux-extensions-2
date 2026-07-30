@@ -2,15 +2,23 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import logging
 from pathlib import Path
-from typing import Awaitable, Callable, TypedDict, cast
+from typing import TypedDict, cast
 
+from .code_server_bootstrap import (
+    CodeServerPrerequisitePayload,
+    inspect_code_server_prerequisite,
+)
+from .code_inspector_projection import (
+    CodeInspectorProjection,
+    get_code_inspector_projection,
+)
+from .code_server_runtime_hooks import prime_code_server_runtime
 from .explorer.contracts.watcher import WatcherConfigPayload, build_watcher_config_payload
-from .code_inspector_backend import CodeInspectorProjection, get_code_inspector_projection
 from .explorer.transport.connection_manager import abs_to_rel
 from .monaco_editor.editor_backend_services.contracts import JsonMap
-from .monaco_editor.editor_ws import editor_runtime_build_connect_snapshot
 from .open_state_backend import read_sidecar_open_state
 from .project_sidecar import ProjectSidecar
 from .history_store import HistoryStore
@@ -18,9 +26,20 @@ from .stores import get_history_store, get_preferences_store
 
 log = logging.getLogger(__name__)
 _boot_prepare_tasks: dict[str, asyncio.Task[None]] = {}
-EnsureCodeServerShellFn = Callable[[str], Awaitable[object]]
-EnsureWorkbenchAdapterShellFn = Callable[..., Awaitable[object]]
-CodeServerConnectionTargetFn = Callable[[object], tuple[str, str | None]]
+EditorSnapshotBuilder = Callable[[], JsonMap]
+WatcherAvailabilityFn = Callable[[], bool]
+_editor_snapshot_builder: EditorSnapshotBuilder | None = None
+_watcher_availability: WatcherAvailabilityFn | None = None
+
+
+def configure_boot_snapshot_dependencies(
+    *,
+    editor_snapshot_builder: EditorSnapshotBuilder,
+    watcher_availability: WatcherAvailabilityFn,
+) -> None:
+    global _editor_snapshot_builder, _watcher_availability
+    _editor_snapshot_builder = editor_snapshot_builder
+    _watcher_availability = watcher_availability
 
 
 class ExplorerActiveFilePayload(TypedDict):
@@ -42,36 +61,16 @@ class BootSnapshotPayload(TypedDict):
     ui_prefs: JsonMap
     explorer_bootstrap: ExplorerBootstrapPayload | None
     code_inspector: CodeInspectorProjection | None
+    code_server: CodeServerPrerequisitePayload
 
 
 async def _prime_backend_runtime(project_root: str) -> None:
     try:
-        from . import code_server_shell_manager, workbench_adapter_shell_manager
-
-        ensure_code_server_shell = cast(
-            EnsureCodeServerShellFn,
-            code_server_shell_manager.ensure_code_server_shell,
-        )
-        ensure_workbench_adapter_shell = cast(
-            EnsureWorkbenchAdapterShellFn,
-            workbench_adapter_shell_manager.ensure_workbench_adapter_shell,
-        )
-        code_server_connection_target = cast(
-            CodeServerConnectionTargetFn,
-            code_server_shell_manager.code_server_connection_target,
-        )
-
-        code_server_shell = await ensure_code_server_shell(project_root)
-        code_server_http, code_server_socket_path = code_server_connection_target(code_server_shell)
-        await ensure_workbench_adapter_shell(
-            project_root,
-            code_server_http=code_server_http,
-            code_server_socket_path=code_server_socket_path,
-        )
+        await prime_code_server_runtime(project_root)
     except Exception as exc:
         log.warning("[boot_snapshot] backend runtime prime failed: %s", exc)
     finally:
-        _boot_prepare_tasks.pop(project_root, None)
+        _ = _boot_prepare_tasks.pop(project_root, None)
 
 
 def _ensure_backend_runtime_task(project_root: str | None) -> None:
@@ -166,12 +165,10 @@ def _build_explorer_bootstrap_payload(
 
     sidecar = ProjectSidecar.load_or_create(resolved_project_root)
 
-    try:
-        from .watchexec_shell_manager import is_watchexec_available
-
-        watchexec_available = bool(is_watchexec_available())
-    except Exception:
-        watchexec_available = False
+    watcher_availability = _watcher_availability
+    if watcher_availability is None:
+        raise RuntimeError("boot snapshot watcher availability is not configured")
+    watchexec_available = watcher_availability()
 
     watcher_config = build_watcher_config_payload(
         getattr(sidecar, "_data", {}).get("watcher"),
@@ -197,10 +194,15 @@ async def handle_boot_snapshot_request(
     history = get_history_store()
     prefs_store = get_preferences_store()
     active_project = history.get_active_project()
-    _ensure_backend_runtime_task(active_project)
+    code_server = await asyncio.to_thread(inspect_code_server_prerequisite)
+    if code_server.compatible:
+        _ensure_backend_runtime_task(active_project)
     session_state = history.get_session_state()
     host_state = _build_host_state_payload()
-    editor_ssot = editor_runtime_build_connect_snapshot()
+    editor_snapshot_builder = _editor_snapshot_builder
+    if editor_snapshot_builder is None:
+        raise RuntimeError("boot snapshot editor state builder is not configured")
+    editor_ssot = editor_snapshot_builder()
 
     ui_prefs_raw = prefs_store.get_preferences(active_project).get("ui")
     ui_prefs: JsonMap = {}
@@ -223,6 +225,7 @@ async def handle_boot_snapshot_request(
         "ui_prefs": ui_prefs,
         "explorer_bootstrap": explorer_bootstrap,
         "code_inspector": get_code_inspector_projection(),
+        "code_server": code_server.payload(),
     }
     return {
         "ok": True,

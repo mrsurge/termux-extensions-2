@@ -368,14 +368,10 @@ async def ensure_code_server_shell(project_root: str) -> ShellRecord:
 
     global _active_shell_id, _ready_event
 
-    from .extension_registry import resolve_code_server_executable
+    from .code_server_bootstrap import ensure_code_server_installation
 
-    code_server_bin = resolve_code_server_executable()
-    if code_server_bin is None:
-        raise RuntimeError(
-            "code-server executable was not found in TE2_CODE_SERVER_BIN, PATH, "
-            "the login shell, NVM, PREFIX, or ~/.local/bin"
-        )
+    installation = await asyncio.to_thread(ensure_code_server_installation)
+    code_server_bin = str(installation.executable)
 
     # Fast path: if a previous spawn already completed, check cached shell
     if _ready_event is not None and _ready_event.is_set() and _active_shell_id:
