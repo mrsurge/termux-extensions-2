@@ -302,6 +302,76 @@ def _activate_staged_prefix(stage: Path, destination: Path) -> None:
         _remove_path(backup)
 
 
+def _official_launcher_payload(prefix: Path) -> Path:
+    return (
+        prefix
+        / "lib"
+        / f"code-server-{REQUIRED_CODE_SERVER_VERSION}"
+        / "bin"
+        / "code-server"
+    )
+
+
+def _replace_launcher_with_relative_symlink(
+    launcher: Path,
+    payload: Path,
+) -> None:
+    relative_payload = os.path.relpath(payload, start=launcher.parent)
+    launcher.unlink()
+    launcher.symlink_to(relative_payload)
+    if not launcher.is_file():
+        raise CodeServerBootstrapError(
+            f"The Code Server launcher symlink could not be normalized: {launcher}"
+        )
+
+
+def _normalize_staged_official_launcher(stage: Path) -> None:
+    launcher = stage / "bin" / "code-server"
+    if not launcher.is_file():
+        raise CodeServerBootstrapError(
+            f"The Code Server installer did not create {launcher}."
+        )
+    if not launcher.is_symlink():
+        return
+
+    payload = launcher.resolve(strict=True)
+    try:
+        _ = payload.relative_to(stage)
+    except ValueError as exc:
+        raise CodeServerBootstrapError(
+            f"The Code Server installer created an out-of-prefix launcher: {launcher}"
+        ) from exc
+    _replace_launcher_with_relative_symlink(launcher, payload)
+
+
+def _repair_relocated_official_launcher(prefix: Path) -> bool:
+    """Repair the absolute staging symlink emitted by the standalone installer."""
+    launcher = prefix / "bin" / "code-server"
+    payload = _official_launcher_payload(prefix)
+    if launcher.is_file() or not launcher.is_symlink() or not payload.is_file():
+        return False
+
+    raw_target = Path(os.readlink(launcher))
+    if not raw_target.is_absolute():
+        return False
+    expected_suffix = payload.relative_to(prefix)
+    stage_root = raw_target
+    for _part in expected_suffix.parts:
+        stage_root = stage_root.parent
+    if raw_target != stage_root / expected_suffix:
+        return False
+    if stage_root.parent != prefix.parent:
+        return False
+    if not (
+        stage_root.name.startswith(f".{prefix.name}.")
+        and stage_root.name.endswith(".stage")
+    ):
+        return False
+
+    _replace_launcher_with_relative_symlink(launcher, payload)
+    return True
+
+
 def _install_official_code_server(
     install_prefix: Path,
     cache_dir: Path,
@@ -331,11 +401,7 @@ def _install_official_code_server(
             timeout_s=1200,
             env=install_env,
         )
-        staged_launcher = stage / "bin" / "code-server"
-        if not staged_launcher.is_file():
-            raise CodeServerBootstrapError(
-                f"The Code Server installer did not create {staged_launcher}."
-            )
+        _normalize_staged_official_launcher(stage)
         _activate_staged_prefix(stage, install_prefix)
     finally:
         _remove_path(stage)
@@ -504,7 +570,9 @@ def install_code_server_installation() -> CodeServerInstallation:
         if _is_termux_android():
             _install_android_code_server(cache_dir, install_prefix)
         else:
-            _install_official_code_server(install_prefix, cache_dir)
+            repaired = _repair_relocated_official_launcher(install_prefix)
+            if not repaired:
+                _install_official_code_server(install_prefix, cache_dir)
 
         installed = code_server_installation_from_executable(
             install_prefix / "bin" / "code-server",

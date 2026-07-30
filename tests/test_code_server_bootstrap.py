@@ -201,6 +201,82 @@ class CodeServerBootstrapTests(unittest.TestCase):
         self.assertEqual(str(self.cache_dir), observed_env["XDG_CACHE_HOME"])
         self.assertTrue((self.install_prefix / "bin" / "code-server").is_file())
 
+    def test_official_installer_rewrites_absolute_stage_launcher(self) -> None:
+        def run_checked(command: list[str], **_kwargs: object) -> None:
+            prefix_arg = next(part for part in command if part.startswith("--prefix="))
+            stage = Path(prefix_arg.split("=", 1)[1])
+            payload = (
+                stage
+                / "lib"
+                / "code-server-4.130.0"
+                / "bin"
+                / "code-server"
+            )
+            payload.parent.mkdir(parents=True)
+            payload.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
+            payload.chmod(0o755)
+            launcher = stage / "bin" / "code-server"
+            launcher.parent.mkdir(parents=True)
+            launcher.symlink_to(payload)
+
+        with (
+            patch.object(code_server_bootstrap.shutil, "which", return_value="/bin/sh"),
+            patch.object(
+                code_server_bootstrap,
+                "_fetch_install_script",
+                return_value=b"#!/usr/bin/env sh\n",
+            ),
+            patch.object(
+                code_server_bootstrap,
+                "_run_checked",
+                side_effect=run_checked,
+            ),
+        ):
+            code_server_bootstrap._install_official_code_server(
+                self.install_prefix,
+                self.cache_dir,
+            )
+
+        launcher = self.install_prefix / "bin" / "code-server"
+        self.assertTrue(launcher.is_file())
+        self.assertTrue(launcher.is_symlink())
+        self.assertEqual(
+            os.readlink(launcher),
+            "../lib/code-server-4.130.0/bin/code-server",
+        )
+
+    def test_existing_broken_stage_launcher_is_repaired_without_download(self) -> None:
+        payload = (
+            self.install_prefix
+            / "lib"
+            / "code-server-4.130.0"
+            / "bin"
+            / "code-server"
+        )
+        payload.parent.mkdir(parents=True)
+        payload.write_text("#!/usr/bin/env sh\n", encoding="utf-8")
+        payload.chmod(0o755)
+        launcher = self.install_prefix / "bin" / "code-server"
+        launcher.parent.mkdir(parents=True)
+        stale_stage = (
+            self.install_prefix.parent
+            / ".4.130.0.1234.deadbeef.stage"
+        )
+        launcher.symlink_to(
+            stale_stage / payload.relative_to(self.install_prefix)
+        )
+
+        repaired = code_server_bootstrap._repair_relocated_official_launcher(
+            self.install_prefix
+        )
+
+        self.assertTrue(repaired)
+        self.assertTrue(launcher.is_file())
+        self.assertEqual(
+            os.readlink(launcher),
+            "../lib/code-server-4.130.0/bin/code-server",
+        )
+
     def test_android_installs_only_runtime_dependencies_with_apt(self) -> None:
         with (
             patch.object(
