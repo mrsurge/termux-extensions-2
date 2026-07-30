@@ -22,6 +22,7 @@ DEFAULT_EDITOR_PREFS: JsonDict = {
     "wordWrap": False,
     "autoCloseBrackets": True,
     "autocompletion": True,
+    "showInlayHints": True,
     "theme": "cm6-dark",
     "autoSave": True,
     "showInlineDiffs": True,

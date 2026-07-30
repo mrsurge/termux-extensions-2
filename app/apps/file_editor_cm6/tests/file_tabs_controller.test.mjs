@@ -19,6 +19,11 @@ test('host chrome uses file tabs without a duplicate filename projection', async
     'Explorer and Sidebar should share the fixed panel glyph',
   );
   assert.match(template, /fe-panel-toggle-icon--right/);
+  assert.match(
+    template,
+    /\.fe-file-tab\.fe-draft \.fe-file-tab-label::before\s*\{[^}]*content:\s*"\*"/s,
+  );
+  assert.doesNotMatch(template, /\.fe-file-tab\.fe-draft::after/);
 });
 
 async function importFileTabs() {

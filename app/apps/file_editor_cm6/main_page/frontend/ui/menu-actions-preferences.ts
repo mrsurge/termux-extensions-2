@@ -10,6 +10,7 @@
  *     miToggleSyntax: HTMLElement,
  *     miToggleCloseBrackets: HTMLElement,
  *     miToggleAutocomplete: HTMLElement,
+ *     miToggleInlayHints: HTMLElement,
  *     miToggleWrap: HTMLElement,
  *     miToggleColorPicker: HTMLElement,
  *     miToggleMinimap: HTMLElement,
@@ -47,6 +48,10 @@ export function installSimplePreferenceMenuActions(deps: any) {
   t(deps.els.miToggleAutocomplete, async () => {
     const ok = await deps.updatePreference('autocompletion', !(s()?.autocompletion));
     if (!ok) deps.toast('Failed to update preference');
+  });
+  t(deps.els.miToggleInlayHints, async () => {
+    const ok = await deps.updatePreference('showInlayHints', !(s()?.showInlayHints));
+    if (!ok) deps.toast('Failed to update inlay hints preference');
   });
   t(deps.els.miToggleWrap, async () => {
     const ok = await deps.updatePreference('wordWrap', !(s()?.wordWrap));

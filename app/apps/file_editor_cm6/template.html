@@ -672,14 +672,11 @@
     cursor: pointer;
   }
   .fe-file-tab-close:hover { background: rgba(239, 68, 68, 0.22); color: #fecaca; }
-  .fe-file-tab.fe-draft::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 3px;
-    background: #facc15;
+  .fe-file-tab.fe-draft .fe-file-tab-label::before {
+    content: "*";
+    margin-right: 3px;
+    color: #ef4444;
+    font-weight: 700;
     pointer-events: none;
   }
   .fe-file-tab.fe-git-modified { border-left: 3px solid #f97316; background: rgba(155, 90, 22, 0.75); }
@@ -2487,6 +2484,7 @@
         <div class="fe-dd-item" id="mi-toggle-syntax" data-checkable="true" role="menuitemcheckbox" aria-checked="false" tabindex="0"><span>Syntax Highlighting</span></div>
         <div class="fe-dd-item" id="mi-toggle-closebrackets" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Auto Close Brackets</span></div>
         <div class="fe-dd-item" id="mi-toggle-autocomplete" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Autocompletion</span></div>
+        <div class="fe-dd-item" id="mi-toggle-inlay-hints" data-checkable="true" role="menuitemcheckbox" aria-checked="true" tabindex="0"><span>Inlay Hints</span></div>
         <div class="fe-dd-separator"></div>
         <div class="fe-dd-item" id="mi-toggle-autosave" role="menuitem" tabindex="0"><span>Auto Save</span></div>
 

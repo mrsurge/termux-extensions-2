@@ -38,6 +38,7 @@ export interface HostElements {
   miToggleSyntax: HTMLElement;
   miToggleCloseBrackets: HTMLElement;
   miToggleAutocomplete: HTMLElement;
+  miToggleInlayHints: HTMLElement;
   miToggleShading: HTMLElement;
   miToggleIndentGuides: HTMLElement;
   miToggleWrap: HTMLElement;
@@ -116,6 +117,7 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     miToggleSyntax: requireEl('#mi-toggle-syntax'),
     miToggleCloseBrackets: requireEl('#mi-toggle-closebrackets'),
     miToggleAutocomplete: requireEl('#mi-toggle-autocomplete'),
+    miToggleInlayHints: requireEl('#mi-toggle-inlay-hints'),
     miToggleShading: requireEl('#mi-toggle-shading'),
     miToggleIndentGuides: requireEl('#mi-toggle-indent-guides'),
     miToggleWrap: requireEl('#mi-toggle-wrap'),

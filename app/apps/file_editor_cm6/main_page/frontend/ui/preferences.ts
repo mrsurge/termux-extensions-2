@@ -52,6 +52,7 @@ export function createPreferencesController(deps: any) {
     deps.setMenuChecked(m.miToggleSyntax, state.showSyntax);
     deps.setMenuChecked(m.miToggleCloseBrackets, state.autoCloseBrackets);
     deps.setMenuChecked(m.miToggleAutocomplete, state.autocompletion);
+    deps.setMenuChecked(m.miToggleInlayHints, state.showInlayHints !== false);
     deps.setMenuChecked(m.miToggleShading, state.showShading);
     deps.setMenuChecked(m.miToggleIndentGuides, state.showIndentGuides);
     deps.setMenuChecked(m.miToggleWrap, state.wordWrap);

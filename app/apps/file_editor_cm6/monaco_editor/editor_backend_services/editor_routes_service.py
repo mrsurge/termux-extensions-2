@@ -124,6 +124,7 @@ def build_view_state_dict(
         "wordWrap": editor_prefs.get("wordWrap"),
         "autoCloseBrackets": editor_prefs.get("autoCloseBrackets"),
         "autocompletion": editor_prefs.get("autocompletion"),
+        "showInlayHints": editor_prefs.get("showInlayHints"),
         "theme": editor_prefs.get("theme"),
         "autoSave": editor_prefs.get("autoSave"),
         "showInlineDiffs": editor_prefs.get("showInlineDiffs"),

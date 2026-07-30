@@ -8,6 +8,7 @@ interface EditorPreferenceBag {
   showIndentGuides?: boolean;
   autoCloseBrackets?: boolean;
   autocompletion?: boolean;
+  showInlayHints?: boolean;
   fontScale?: number;
   fontFamily?: string;
   theme?: string;
@@ -23,6 +24,7 @@ interface EditorPrefsStateLike {
   showIndentGuides?: boolean;
   autoCloseBrackets?: boolean;
   autocompletion?: boolean;
+  showInlayHints?: boolean;
   fontScale?: number;
   fontFamily?: string;
   theme?: string;
@@ -61,6 +63,8 @@ export function buildMonacoOptionsFromPrefsState(
   try { if (typeof editorPrefs.autoCloseBrackets === 'boolean') autoCloseBrackets = editorPrefs.autoCloseBrackets; } catch (_) {}
   let autocompletion = true;
   try { if (typeof editorPrefs.autocompletion === 'boolean') autocompletion = editorPrefs.autocompletion; } catch (_) {}
+  let showInlayHints = true;
+  try { if (typeof editorPrefs.showInlayHints === 'boolean') showInlayHints = editorPrefs.showInlayHints; } catch (_) {}
 
   let fontSize = 14;
   try {
@@ -106,6 +110,7 @@ export function buildMonacoOptionsFromPrefsState(
     suggestOnTriggerCharacters: !!autocompletion,
     wordBasedSuggestions: 'off',
     parameterHints: { enabled: !!autocompletion },
+    inlayHints: { enabled: showInlayHints ? 'on' : 'off' },
     tabCompletion: autocompletion ? 'on' : 'off',
     fontSize,
     fontFamily,
