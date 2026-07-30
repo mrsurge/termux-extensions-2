@@ -25,6 +25,7 @@ from .explorer.services.file_ops import (
     set_project_root,
 )
 from .code_server_shell_manager import ensure_code_server_shell
+from .code_server_runtime_hooks import set_code_server_runtime_primer
 from . import edit_tracker
 from .diff_helper import invalidate_diff_cache
 from .worker_services import git_service as worker_git_service
@@ -343,6 +344,31 @@ def _code_server_connection_target_for_routes(record: ShellRecordLike) -> tuple[
     from .code_server_shell_manager import code_server_connection_target
 
     return code_server_connection_target(cast(CodeServerShellRecord, record))
+
+
+async def _prime_code_server_runtime(project_root: str) -> None:
+    code_server_shell = await ensure_code_server_shell(project_root)
+    code_server_http, code_server_socket_path = _code_server_connection_target_for_routes(
+        cast(ShellRecordLike, cast(object, code_server_shell))
+    )
+    _ = await _ensure_workbench_adapter_shell_for_routes(
+        project_root,
+        code_server_http=code_server_http,
+        code_server_socket_path=code_server_socket_path,
+    )
+
+
+set_code_server_runtime_primer(_prime_code_server_runtime)
+
+
+from .boot_snapshot_backend import configure_boot_snapshot_dependencies
+from .monaco_editor.editor_ws import editor_runtime_build_connect_snapshot
+from .watchexec_shell_manager import is_watchexec_available
+
+configure_boot_snapshot_dependencies(
+    editor_snapshot_builder=editor_runtime_build_connect_snapshot,
+    watcher_availability=is_watchexec_available,
+)
 
 
 _WORKBENCH_ROUTES_DEPS = WorkbenchRoutesDeps(

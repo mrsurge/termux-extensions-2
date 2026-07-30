@@ -13,6 +13,7 @@ export const UI_IPC_RPC_METHODS = {
   hostRunProfilesGet: 'ui.host.runProfiles.get',
   hostRunProfilesSave: 'ui.host.runProfiles.save',
   hostBootSnapshotGet: 'ui.host.bootSnapshot.get',
+  hostCodeServerInstall: 'ui.host.codeServer.install',
   hostEditorJumpToLine: 'ui.host.editor.jumpToLine',
   hostEditorGitBaselinesGet: 'ui.host.editor.gitBaselines.get',
   hostEditorFind: 'ui.host.editor.find',

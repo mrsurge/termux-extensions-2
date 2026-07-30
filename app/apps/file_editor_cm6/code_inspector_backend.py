@@ -1,10 +1,19 @@
 # pyright: strict
 from __future__ import annotations
 
-from copy import deepcopy
 import logging
-from typing import Literal, TypedDict, cast
+from typing import cast
 
+from .code_inspector_projection import (
+    CodeInspectorMode,
+    CodeInspectorProjection,
+    CodeInspectorStatus,
+    clear_code_inspector_projection_state,
+    copy_code_inspector_projection,
+    get_code_inspector_projection,
+    peek_code_inspector_projection,
+    replace_code_inspector_projection,
+)
 from .monaco_editor.editor_rpc_contract import EDITOR_RPC_NOTIFICATION_CODE_INSPECTOR_COMMAND
 from .monaco_editor.editor_rpc_emit import emit_editor_rpc_notification
 from .stores import get_history_store
@@ -14,30 +23,8 @@ from .worker_services.event_bus import (
     publish as publish_worker_event,
 )
 
-CodeInspectorStatus = Literal["loading", "ready", "empty", "unsupported", "error"]
-CodeInspectorMode = Literal["references", "implementations", "callHierarchy"]
 JsonObject = dict[str, object]
 logger = logging.getLogger(__name__)
-
-
-class CodeInspectorProjection(TypedDict):
-    revision: int
-    requestId: str
-    requestSequence: int
-    status: CodeInspectorStatus
-    mode: CodeInspectorMode
-    target: JsonObject
-    summary: JsonObject
-    tree: list[object]
-    error: object | None
-
-
-_current_projection: CodeInspectorProjection | None = None
-
-
-def get_code_inspector_projection() -> CodeInspectorProjection | None:
-    projection = _current_projection
-    return _copy_projection(projection) if projection is not None else None
 
 
 async def publish_code_inspector_projection(
@@ -54,9 +41,7 @@ async def publish_code_inspector_projection(
             "current": get_code_inspector_projection(),
         }
 
-    global _current_projection
-    previous = _current_projection
-    _current_projection = projection
+    previous = replace_code_inspector_projection(projection)
     if (
         previous is not None
         and previous["mode"] == "callHierarchy"
@@ -74,7 +59,7 @@ async def publish_code_inspector_projection(
             payload={
                 "projection": cast(
                     JsonObject,
-                    cast(object, _copy_projection(projection)),
+                    cast(object, copy_code_inspector_projection(projection)),
                 ),
                 "sourceClient": source_client,
             },
@@ -93,11 +78,9 @@ async def clear_code_inspector_projection(
     reason: str,
     source: str,
 ) -> None:
-    global _current_projection
-    if _current_projection is None:
+    previous = clear_code_inspector_projection_state()
+    if previous is None:
         return
-    previous = _current_projection
-    _current_projection = None
     await _release_projection(previous, reason=reason)
     project_root = _active_project()
     await publish_worker_event(
@@ -125,7 +108,7 @@ async def handle_code_inspector_command(
     }:
         raise ValueError("invalid_code_inspector_direction")
 
-    projection = _current_projection
+    projection = peek_code_inspector_projection()
     request_id = str(params.get("requestId") or "")
     if projection is None or not request_id:
         raise ValueError("code_inspector_projection_missing")
@@ -136,14 +119,14 @@ async def handle_code_inspector_command(
     payload["source"] = source_name
     payload["projection"] = cast(
         JsonObject,
-        cast(object, _copy_projection(projection)),
+        cast(object, copy_code_inspector_projection(projection)),
     )
     await _emit_editor_command(payload)
     return {"ok": True, "requestId": request_id, "action": action}
 
 
 def _accept_projection(projection: CodeInspectorProjection) -> bool:
-    current = _current_projection
+    current = peek_code_inspector_projection()
     if current is None:
         return True
     incoming_sequence = projection["requestSequence"]
@@ -185,10 +168,6 @@ def _coerce_projection(value: object) -> CodeInspectorProjection:
         "tree": tree,
         "error": raw.get("error"),
     }
-
-
-def _copy_projection(projection: CodeInspectorProjection) -> CodeInspectorProjection:
-    return deepcopy(projection)
 
 
 def _required_text(value: object, field: str) -> str:
@@ -258,7 +237,7 @@ async def _release_projection(
                 "reason": reason,
                 "projection": cast(
                     JsonObject,
-                    cast(object, _copy_projection(projection)),
+                    cast(object, copy_code_inspector_projection(projection)),
                 ),
             }
         )

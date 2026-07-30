@@ -1,6 +1,7 @@
 import {
   getBootSnapshotHostState,
   getBootSnapshotCodeInspector,
+  getBootSnapshotCodeServer,
   getBootSnapshotSessionState,
   getBootSnapshotUiPrefs,
   requestHostBootSnapshot,
@@ -21,6 +22,8 @@ interface BootSequenceDeps {
   connectUIIPC(): void | Promise<unknown>;
   connectSidebarIPC(): void;
   ensureWorkbenchAdapterReady(): Promise<unknown>;
+  requestBackendCodeServerInstall(payload?: Record<string, unknown>): Promise<unknown>;
+  spinnerSetStep(title: string, failed?: boolean): void;
   initBranchMenu(): unknown;
   waitForInitialUiPrefs(ms?: number): Promise<Record<string, unknown>>;
   seedUiPrefsSnapshot(prefs: Record<string, unknown>): void;
@@ -52,6 +55,88 @@ interface BootSequenceDeps {
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value != null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+async function prepareCodeServer(
+  snapshot: HostBootSnapshot | null,
+  uiPrefs: Record<string, unknown>,
+  deps: BootSequenceDeps,
+): Promise<boolean> {
+  const prerequisite = getBootSnapshotCodeServer(snapshot);
+  if (!prerequisite || prerequisite.compatible === true) return true;
+
+  const foundPackage = asString(prerequisite.code_server_version);
+  const foundCode = asString(prerequisite.code_version);
+  const foundExecutable = asString(prerequisite.executable);
+  const installVersion = asString(prerequisite.install_version) || '4.130.0';
+  const installPrefix = asString(prerequisite.install_prefix);
+  const reason = asString(prerequisite.reason) || 'A compatible Code Server installation was not found.';
+  const found = foundExecutable
+    ? `\n\nDetected: ${foundPackage ? `Code Server ${foundPackage}` : 'Code Server'}${foundCode ? ` / Code ${foundCode}` : ''}\n${foundExecutable}`
+    : '';
+  const workers = uiPrefs.webWorkersEnabled === true
+    ? 'Monaco language web workers are already enabled.'
+    : 'You can enable the bundled Monaco language web workers later in Settings.';
+  const androidNote = prerequisite.android === true
+    ? '\n\nOn Android this downloads about 165 MiB, installs about 709 MiB under TE2 data, and may install its Termux runtime dependencies.'
+    : '';
+
+  let result: Awaited<ReturnType<typeof window.teUI.dialog.open>>;
+  try {
+    result = await window.teUI.dialog.open({
+      kind: 'confirm',
+      title: 'Enable VS Code Extensions',
+      message: `${reason}${found}`,
+      detail: [
+        `Install Code Server ${installVersion} into TE2's private runtime?`,
+        installPrefix,
+        '',
+        'This does not replace your normal Code Server installation.',
+        `If you continue without it, VS Code extensions stay disabled. ${workers}${androidNote}`,
+      ].filter(Boolean).join('\n'),
+      severity: 'warning',
+      actions: [
+        { id: 'continue', label: 'Continue Without Extensions', role: 'cancel' },
+        { id: 'install', label: `Install ${installVersion}`, role: 'accept', primary: true },
+      ],
+      defaultAction: 'install',
+      cancelAction: 'continue',
+      width: 'medium',
+    });
+  } catch (error) {
+    console.warn('[code-server] prerequisite dialog failed:', error);
+    return false;
+  }
+
+  if (result.status !== 'accepted' || result.action !== 'install') {
+    console.info('[code-server] continuing without the VS Code extension host');
+    return false;
+  }
+
+  deps.spinnerSetStep(`Installing Code Server ${installVersion}\u2026`);
+  try {
+    const response = asRecord(await deps.requestBackendCodeServerInstall({ confirmed: true }));
+    const data = asRecord(response?.data);
+    if (!response || response.ok === false || data?.compatible !== true) {
+      throw new Error(asString(response?.error) || 'The private Code Server installation did not become ready.');
+    }
+    deps.spinnerSetStep('Starting extension host\u2026');
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    deps.spinnerSetStep('Code Server installation failed', true);
+    await window.teUI.dialog.alert(message, {
+      title: 'Code Server Installation Failed',
+      severity: 'danger',
+    });
+    return false;
+  }
 }
 
 export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
@@ -94,7 +179,10 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
 
   deps.setBranchMenuHandle(deps.initBranchMenu());
 
-  try { await deps.ensureWorkbenchAdapterReady(); } catch (error) { console.warn('Workbench adapter readiness failed:', error); }
+  const useWorkbenchAdapter = await prepareCodeServer(bootSnapshot, snapshotUiPrefs, deps);
+  if (useWorkbenchAdapter) {
+    try { await deps.ensureWorkbenchAdapterReady(); } catch (error) { console.warn('Workbench adapter readiness failed:', error); }
+  }
   try { await deps.connectUIIPC(); } catch (error) { console.warn('Failed to connect UI IPC channel:', error); }
   try { await deps.mountInlineEditorHost(bootSnapshot); } catch (error) { console.error('Inline editor boot failed:', error); }
 

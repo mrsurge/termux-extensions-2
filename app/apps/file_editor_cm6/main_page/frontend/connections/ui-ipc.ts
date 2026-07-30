@@ -400,6 +400,15 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     return await connection.request(UI_IPC_RPC_METHODS.hostBootSnapshotGet, payload || {}, 8000);
   }
 
+  async function requestBackendCodeServerInstall(payload: JsonObject = {}): Promise<unknown> {
+    const connection = await connectUIIPC();
+    return await connection.request(
+      UI_IPC_RPC_METHODS.hostCodeServerInstall,
+      payload || {},
+      20 * 60 * 1000,
+    );
+  }
+
   async function requestBackendEditorJumpToLine(payload: JsonObject = {}): Promise<unknown> {
     const connection = await connectUIIPC();
     return await connection.request(UI_IPC_RPC_METHODS.hostEditorJumpToLine, payload || {}, 8000);
@@ -469,6 +478,7 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     requestBackendEditorPreferenceUpdate,
     requestBackendRunActiveFile,
     requestBackendBootSnapshot,
+    requestBackendCodeServerInstall,
     requestBackendEditorJumpToLine,
     requestBackendEditorGitBaselines,
     requestBackendEditorFind,

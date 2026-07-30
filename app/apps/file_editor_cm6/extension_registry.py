@@ -122,6 +122,9 @@ class CodeServerInstallation:
     source: str
 
 
+_runtime_code_server_override: CodeServerInstallation | None = None
+
+
 def _path_is_executable(path: Path) -> bool:
     return path.is_file() and os.access(path, os.X_OK)
 
@@ -256,12 +259,64 @@ def _installation_from_executable(executable: Path, source: str) -> CodeServerIn
     )
 
 
+def code_server_installation_from_executable(
+    executable: Path,
+    source: str,
+) -> CodeServerInstallation | None:
+    return _installation_from_executable(executable, source)
+
+
+def te2_managed_code_server_root() -> Path:
+    data_home = Path(
+        os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
+    ).expanduser()
+    return (data_home / "te2" / "code_server").resolve()
+
+
+def te2_managed_code_server_installation(
+    version: str,
+) -> CodeServerInstallation | None:
+    return _installation_from_executable(
+        te2_managed_code_server_root() / version / "bin" / "code-server",
+        "te2-managed",
+    )
+
+
+def select_code_server_runtime_installation(
+    installation: CodeServerInstallation | None,
+) -> None:
+    """Select the verified installation used by all Code TE2 consumers."""
+    global _runtime_code_server_override
+    _runtime_code_server_override = installation
+    resolve_code_server_installation.cache_clear()
+
+
 @lru_cache(maxsize=1)
 def resolve_code_server_installation() -> CodeServerInstallation | None:
+    if _runtime_code_server_override is not None:
+        refreshed = _installation_from_executable(
+            _runtime_code_server_override.executable,
+            _runtime_code_server_override.source,
+        )
+        if refreshed is not None:
+            return refreshed
+
     candidates: list[tuple[Path, str]] = []
     configured_bin = os.environ.get("TE2_CODE_SERVER_BIN", "").strip()
     if configured_bin:
         candidates.append((Path(configured_bin), "TE2_CODE_SERVER_BIN"))
+    managed_root = te2_managed_code_server_root()
+    managed_versions = sorted(
+        (path for path in managed_root.iterdir() if path.is_dir())
+        if managed_root.is_dir()
+        else (),
+        key=lambda path: _node_version_key(path),
+        reverse=True,
+    )
+    candidates.extend(
+        (path / "bin" / "code-server", "te2-managed")
+        for path in managed_versions
+    )
     path_bin = shutil.which("code-server")
     if path_bin:
         candidates.append((Path(path_bin), "PATH"))
@@ -382,8 +437,8 @@ def _find_ext_host_protocol_source(
     return str(source) if source.is_file() else None
 
 
-def _get_code_server_version(installation: CodeServerInstallation | None = None) -> JsonObject | None:
-    """Run ``code-server --version`` and return version + commit."""
+def get_code_server_version(installation: CodeServerInstallation | None = None) -> JsonObject | None:
+    """Run ``code-server --version`` and return package, commit, and Code versions."""
     installation = installation or resolve_code_server_installation()
     if installation is None:
         return None
@@ -399,12 +454,27 @@ def _get_code_server_version(installation: CodeServerInstallation | None = None)
         #   "4.109.2\n9184b645...\nwith Code 1.109.2"      (multi-line)
         #   "4.109.2 9184b645... with Code 1.109.2"        (single-line)
         text = out.strip()
-        parts = text.split()
-        if len(parts) >= 2:
-            return {"version": parts[0], "commit": parts[1]}
+        package_match = re.search(r"(?m)^\s*(\d+\.\d+\.\d+)\b", text)
+        commit_match = re.search(r"\b([0-9a-f]{6,64})\b", text, re.IGNORECASE)
+        code_match = re.search(
+            r"\bwith\s+Code\s+(\d+\.\d+(?:\.\d+)?)\b",
+            text,
+            re.IGNORECASE,
+        )
+        if package_match and commit_match:
+            result: JsonObject = {
+                "version": package_match.group(1),
+                "commit": commit_match.group(1),
+            }
+            if code_match:
+                result["code_version"] = code_match.group(1)
+            return result
     except Exception:
         pass
     return None
+
+
+_get_code_server_version = get_code_server_version
 
 
 def _balanced_js_object(content: str, open_brace: int, label: str) -> tuple[str, int]:
@@ -442,8 +512,8 @@ def _minified_proxy_object(
 ) -> tuple[str, str, int]:
     pattern = re.compile(
         rf"(?P<object>{_JS_IDENTIFIER})\s*=\s*\{{\s*"
-        rf"{re.escape(anchor)}\s*:\s*(?P<factory>{_JS_IDENTIFIER})\s*\(\s*"
-        rf"(?P<quote>['\"]){re.escape(anchor)}(?P=quote)"
+        + rf"{re.escape(anchor)}\s*:\s*(?P<factory>{_JS_IDENTIFIER})\s*\(\s*"
+        + rf"(?P<quote>['\"]){re.escape(anchor)}(?P=quote)"
     )
     match = pattern.search(content, pos=start)
     if match is None:
@@ -463,7 +533,7 @@ def _minified_proxy_object(
 def _minified_proxy_entries(body: str, factory: str, label: str) -> list[str]:
     pattern = re.compile(
         rf"(?P<key>{_JS_IDENTIFIER})\s*:\s*{re.escape(factory)}\s*\(\s*"
-        rf"(?P<quote>['\"])(?P<sid>{_JS_IDENTIFIER})(?P=quote)\s*\)"
+        + rf"(?P<quote>['\"])(?P<sid>{_JS_IDENTIFIER})(?P=quote)\s*\)"
     )
     entries = [match.group("key") for match in pattern.finditer(body)]
     if not entries:
@@ -517,8 +587,8 @@ def _source_proxy_entries(content: str, object_name: str) -> list[str]:
     body, _ = _balanced_js_object(content, open_brace, f"source {object_name}")
     pattern = re.compile(
         rf"(?m)^\s*(?P<key>{_JS_IDENTIFIER})\s*:\s*createProxyIdentifier"
-        rf"(?:<[^\n]*?>)?\s*\(\s*(?P<quote>['\"])(?P<sid>{_JS_IDENTIFIER})"
-        rf"(?P=quote)\s*\)"
+        + rf"(?:<[^\n]*?>)?\s*\(\s*(?P<quote>['\"])(?P<sid>{_JS_IDENTIFIER})"
+        + rf"(?P=quote)\s*\)"
     )
     entries = [match.group("key") for match in pattern.finditer(body)]
     if not entries:
@@ -548,15 +618,15 @@ def ensure_rpc_config() -> dict[str, int]:
     Returns empty dict on failure (adapter falls back to hardcoded defaults).
     """
     installation = resolve_code_server_installation()
-    version_info = _get_code_server_version(installation)
+    version_info = get_code_server_version(installation)
     if not version_info:
         print("[rpc-config] code-server not found, skipping", flush=True)
         return {}
     assert installation is not None
     print(
         "[rpc-config] resolved code-server "
-        f"source={installation.source} executable={installation.executable} "
-        f"vscode_root={installation.vscode_root or 'unresolved'}",
+        + f"source={installation.source} executable={installation.executable} "
+        + f"vscode_root={installation.vscode_root or 'unresolved'}",
         flush=True,
     )
 
@@ -578,7 +648,7 @@ def ensure_rpc_config() -> dict[str, int]:
                     return nids
                 print(
                     "[rpc-config] cache is incomplete "
-                    f"count={len(nids)} missing={sorted(missing)} — regenerating",
+                    + f"count={len(nids)} missing={sorted(missing)} — regenerating",
                     flush=True,
                 )
             print(
@@ -602,7 +672,7 @@ def ensure_rpc_config() -> dict[str, int]:
     else:
         print(
             "[rpc-config] extensionHostProcess.js not found for "
-            f"{installation.executable}",
+            + f"{installation.executable}",
             flush=True,
         )
 
@@ -622,7 +692,7 @@ def ensure_rpc_config() -> dict[str, int]:
         if extraction.nids != source_extraction.nids:
             print(
                 "[rpc-config] ABORT — minified bundle nid order disagrees with "
-                f"protocol source {protocol_source}",
+                + f"protocol source {protocol_source}",
                 flush=True,
             )
             return _load_stale_nids()
@@ -634,7 +704,7 @@ def ensure_rpc_config() -> dict[str, int]:
     nids = extraction.nids
     print(
         f"[rpc-config] extracted {len(nids)} nids "
-        f"strategy={extraction.strategy} source={extraction.source_path}",
+        + f"strategy={extraction.strategy} source={extraction.source_path}",
         flush=True,
     )
 
@@ -1046,7 +1116,7 @@ def save_registry(registry: Registry) -> None:
     _REGISTRY_PATH.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
     print(
         f"[ext_registry] registry saved: {_registry_extension_count(registry)} extensions, "
-        f"{_registry_slot_count(registry)} slots",
+        + f"{_registry_slot_count(registry)} slots",
         flush=True,
     )
 
@@ -1224,7 +1294,7 @@ def _require_code_server_installation() -> CodeServerInstallation:
     if installation is None:
         raise RuntimeError(
             "code-server executable was not found in TE2_CODE_SERVER_BIN, PATH, "
-            "the login shell, NVM, PREFIX, or ~/.local/bin"
+            + "the login shell, NVM, PREFIX, or ~/.local/bin"
         )
     return installation
 

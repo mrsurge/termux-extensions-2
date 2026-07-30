@@ -36,6 +36,7 @@ import { createSettingsModalsController } from './settings-modals.ts';
  *   },
  *   closeAllMenus: () => void,
  *   getEditorViewState: () => any,
+ *   getUiPrefs: () => Record<string, unknown>,
  *   setEditorTheme: (themeId: string) => void,
  *   updatePreference: (key: string, value: any) => Promise<boolean>,
  *   pickerAvailable: () => boolean,
@@ -54,6 +55,8 @@ export function createSettingsBootstrap(deps: any) {
 
   const settingsRefreshController = createSettingsRefreshController({
     getEditorViewState: deps.getEditorViewState,
+    getUiPrefs: deps.getUiPrefs,
+    settingsModalEl: deps.els.settingsModal,
     themeSummaryEl: deps.els.settingsThemeSummary,
     extSummaryEl: deps.els.extSummary,
     customSettingsInputEl: deps.els.extCustomSettingsInput,
@@ -137,6 +140,7 @@ export function createSettingsBootstrap(deps: any) {
   settingsRefreshController.installCustomSettingsSaveHandler();
   settingsRefreshController.installWorkspaceSettingsSaveHandler();
   settingsRefreshController.installScopeTabs();
+  settingsRefreshController.installWebWorkersPreference();
 
   const settingsInstallController = createSettingsInstallController({
     installBtn: deps.els.extManagerInstallBtn,

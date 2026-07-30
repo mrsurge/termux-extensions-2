@@ -5,7 +5,7 @@ import unittest
 from typing import cast, override
 from unittest.mock import AsyncMock, patch
 
-from app.apps.file_editor_cm6 import code_inspector_backend
+from app.apps.file_editor_cm6 import code_inspector_backend, code_inspector_projection
 
 
 def projection(
@@ -30,7 +30,7 @@ def projection(
 class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
     @override
     def setUp(self) -> None:
-        code_inspector_backend._current_projection = None
+        _ = code_inspector_projection.clear_code_inspector_projection_state()
 
     async def test_rejects_stale_sequences_and_revisions(self) -> None:
         publish = AsyncMock()
@@ -60,7 +60,7 @@ class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(stale_revision["accepted"])
         self.assertFalse(stale_sequence["accepted"])
         self.assertTrue(latest["accepted"])
-        current = code_inspector_backend.get_code_inspector_projection()
+        current = code_inspector_projection.get_code_inspector_projection()
         self.assertIsNotNone(current)
         assert current is not None
         self.assertEqual(current["requestId"], "request-2")
@@ -68,7 +68,7 @@ class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_clear_emits_an_empty_projection_fact(self) -> None:
         publish = AsyncMock()
-        code_inspector_backend._current_projection = (
+        _ = code_inspector_projection.replace_code_inspector_projection(
             code_inspector_backend._coerce_projection(projection(revision=1))
         )
         with (
@@ -81,7 +81,7 @@ class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
                 source="test",
             )
 
-        self.assertIsNone(code_inspector_backend.get_code_inspector_projection())
+        self.assertIsNone(code_inspector_projection.get_code_inspector_projection())
         awaited = publish.await_args
         self.assertIsNotNone(awaited)
         assert awaited is not None
@@ -95,7 +95,7 @@ class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
         release = AsyncMock()
         hierarchy = projection(revision=1)
         hierarchy["mode"] = "callHierarchy"
-        code_inspector_backend._current_projection = (
+        _ = code_inspector_projection.replace_code_inspector_projection(
             code_inspector_backend._coerce_projection(hierarchy)
         )
         with (
@@ -127,7 +127,7 @@ class CodeInspectorProjectionTests(unittest.IsolatedAsyncioTestCase):
         hierarchy["mode"] = "callHierarchy"
         hierarchy["status"] = "ready"
         hierarchy["summary"] = {"count": 1, "direction": "incoming"}
-        code_inspector_backend._current_projection = (
+        _ = code_inspector_projection.replace_code_inspector_projection(
             code_inspector_backend._coerce_projection(hierarchy)
         )
         emit = AsyncMock()
