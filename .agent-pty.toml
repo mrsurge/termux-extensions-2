@@ -1,0 +1,5 @@
+# Agent PTY project configuration
+# Auto-managed by kb tools.
+
+[knowledge]
+files = [ "TE2_DEPENDENCY_AUDIT.md", "TE2_NICEGUI_REMOVAL_PLAN.md", "worktrees/framework-shells/.repo_memory.md", ".repo_memory.md", "docs/planning/FWS_STRUCTURED_LOG_INSPECTION.md", "docs/planning/FWS_STRUCTURED_LOG_INSPECTION_SUPPLEMENT.md", "docs/apps/code_cm6/CODE_TE2.md" ]

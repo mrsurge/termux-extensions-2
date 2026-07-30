@@ -3261,15 +3261,300 @@ cd android && ./gradlew :app:assembleGeckoDebug
 | `android/.../assets/asset_intercept/background.js` | URL pattern matching + redirect logic |
 | `android/.../MainActivity.kt` | `initEditorAssets()`, `installAssetExtension()`, lifecycle cleanup |
 
-## 37) Run Profile Draft-Save Transaction
+## 37) Run Profiles, Runtime Launchers, And Draft-Save Transaction
 
-Run Profile execution is backend-owned through `ui.host.file.run`. The project-local `.code_te2/run_profiles.json` schema adds:
+Run Profile execution is backend-owned through `ui.host.file.run`. The frontend sends run intent; backend hooks resolve the active project/file, select a profile, decide what must be saved, and only then launch a runner shell or the default terminal fallback.
 
-- `saveDrafts`: `included`, `opened`, `all`, or `none`.
-- `showSaveWarning`: boolean, with JSON `0`/`1` accepted for compatibility.
+### Config and schema
 
-Profiles that omit these fields default to `saveDrafts: "included"` and `showSaveWarning: true`. `included` intersects the profile's existing `include` matchers with unsaved sidecar drafts; it does not scan and rewrite clean matching files. `opened` uses the canonical bounded sidecar open-file set, `all` uses every unsaved project draft, and `none` performs no pre-run writes. A file with no matching profile retains the default runner and active-file-only save behavior. Its warning preference is stored project-locally under `fallback.showSaveWarning` because no profile object exists.
+Project-local config lives at `.code_te2/run_profiles.json`, owned by `runner_profiles.py`.
 
-When a warning is enabled, the first Run request returns a confirmation projection and does not save or launch. The portable `teUI.dialog` warning can persist suppression. A confirmed request re-resolves the profile and verifies the returned confirmation key against the current target, save policy, and include set. It then obtains a fresh snapshot for the expected active Monaco model and writes selected background drafts from the sidecar through guarded threaded file writes. A tab switch or stale confirmation fails before writing or launching. Launch is fail-closed: a required save error prevents the runner shell or fallback terminal command from starting. Concurrent Run requests for one project are serialized.
+A config may be an object with `profiles`, a single profile object, or a profile list. The normalized object shape is:
 
-The Run Profiles modal exposes both profile fields and preserves top-level config such as `fallback` while editing profile forms or raw JSON.
+```json
+{
+  "version": 1,
+  "fallback": { "showSaveWarning": true },
+  "profiles": [
+    {
+      "profileId": "page-preview",
+      "runner": "pagePreview",
+      "entry": "index.html",
+      "include": ["index.html"],
+      "runningBehavior": "just save",
+      "saveDrafts": "included",
+      "showSaveWarning": true
+    }
+  ]
+}
+```
+
+Current profile fields:
+
+| Field | Purpose |
+|---|---|
+| `profileId` / `profile_id` | Stable profile id. Required. |
+| `runner` | `pagePreview`, `node`, `python`, or `custom`; defaults to `custom`. |
+| `entry` | Page Preview entry, defaulting to `index.html` for `pagePreview`. |
+| `include` | Relative path/glob matchers. Required, except `pagePreview` can derive it from `entry`. |
+| `sidebarUrl` / `sidebar_url` | Optional sidebar URL to open after launch. `pagePreview` defaults to `http://127.0.0.1:3000/`. |
+| `runningBehavior` / `running_behavior` | `just save` or `relaunch`; defaults to `just save`. |
+| `exec` | Runner command or project-relative executable path. Required for non-`pagePreview` runners. |
+| `cwd` | Optional project-relative or absolute cwd; must resolve inside the project. |
+| `args` | Extra argv list. |
+| `env` | Extra environment, validated as shell-safe names with string values. |
+| `saveDrafts` / `save_drafts` | `included`, `opened`, `all`, or `none`; defaults to `included`. |
+| `showSaveWarning` / `show_save_warning` | Boolean warning setting; JSON `0`/`1` are accepted for compatibility. |
+
+### Runner dispatch
+
+- `host/terminal_actions_backend.py` owns the `ui.host.file.run` flow, draft-save confirmation, save-before-play, and terminal fallback.
+- `host/runner_profiles_backend.py` resolves the current profile through `match_run_profile()` and dispatches already-resolved profiles.
+- `runner_profile_shell_manager.py` launches `node`, `python`, and `custom` runners via `shellspec/runner_profile.yaml#runner-profile`.
+- `page_preview_shell_manager.py` launches page previews via `shellspec/page_preview.yaml#page-preview` and one deterministic `page-preview:<app>:<project>:<profile>` label.
+- `host/page_preview_backend.py` installs the default Page Preview profile into the project config.
+
+`pagePreview` profiles start a project-local preview shell and open its URL through the backend sidebar-window hook. Non-preview profiles can also open `sidebarUrl`; otherwise they just launch/reuse the runner shell and report the result.
+
+### Draft-save transaction
+
+Profiles that omit `saveDrafts` default to `included`, and profiles that omit `showSaveWarning` default to warning enabled.
+
+Save policies:
+
+| Policy | Meaning |
+|---|---|
+| `included` | Intersect the profile `include` matchers with unsaved sidecar drafts. Clean matching files are not rewritten. |
+| `opened` | Save the canonical bounded sidecar open-file set. |
+| `all` | Save every unsaved project draft. |
+| `none` | Perform no pre-run writes. |
+
+For a file with no matching profile, the fallback runner keeps active-file-only save behavior, and its warning suppression is stored under `fallback.showSaveWarning` because there is no profile object.
+
+When warning is enabled, the first Run request returns a confirmation projection and performs no save or launch. A confirmed request re-resolves the target/profile, verifies the confirmation key against the current target, save policy, and include set, then obtains a fresh active Monaco snapshot for the expected active path. Stale confirmation, a tab switch, or any required save error prevents launch. Concurrent Run requests for one project are serialized.
+
+The Run Profiles modal is `main_page/frontend/ui/run-profiles-modal.ts`. It uses CM6 JSON fields and preserves top-level config such as `fallback` while editing profile forms or raw JSON.
+
+---
+
+## 38) Desktop Client Integration
+
+The active Linux desktop client is the Electron shell under `desktop_client/electron_spike/`. `desktop_client/ui.py` remains a GTK/WebKit behavioral reference, not the current runtime.
+
+### Runtime shape
+
+- A local `te2-desktop://shell/` renderer owns the desktop launcher, Settings, persistent header, asset version/toasts, zoom, app-scoped Quit, and window controls.
+- Framework apps run in a separate `WebContentsView` with Node integration disabled and context isolation enabled.
+- The app view uses the `persist:te2-framework` partition.
+- Electron keeps Chromium's automatic native Ozone backend selection; Wayland sessions are not forced through X11.
+- Development and packaged launch paths intentionally pass `--no-sandbox` because the client runs from a user-owned tree and Ubuntu AppArmor blocks the unprivileged namespace sandbox.
+
+### Relay and assets
+
+Electron binds one dynamically allocated `127.0.0.1` HTTP origin for each configured HTTP or HTTPS framework target. The in-process relay:
+
+- proxies ordinary HTTP, streaming SSE, Socket.IO, and raw WebSocket upgrades;
+- serves only inventory-approved installed assets from the same browser origin, preserving Monaco module-worker same-origin requirements;
+- retargets the existing listener when the framework target changes, closing active connections without restarting Electron;
+- appends `gv_native=1` to app URLs so the PWA Service Worker cannot mask the desktop asset layer.
+
+Shared desktop assets reuse `/api/editor_version` and `/api/editor_assets_bundle`. They install under `$XDG_DATA_HOME/te2/desktop_assets` through monotonic staged validation, backup, atomic rename, and rollback. The desktop asset inventory is `desktop_client/desktop_asset_inventory.json`; Android's `android-shell/` launcher is intentionally omitted because desktop owns a separate launcher and Settings surface.
+
+Successful asset installs clear the `persist:te2-framework` HTTP cache and generated V8 code cache, then reload an active app view with cache bypass. Forced same-version updates must activate without requiring an Electron restart.
+
+### Native app-view bridge
+
+Code TE2 app views in Electron expose frozen `window.te2Electron` from `desktop_client/electron_spike/src/preload/app-view-preload.ts`. The shared contract is `desktop_client/electron_spike/src/shared/app-view-contracts.ts`.
+
+Allowed app-view commands are:
+
+| Command | Purpose |
+|---|---|
+| `inspect` | Return current URL, relay origin, configured framework origin, cache size, Electron/Chromium versions, and asset status. |
+| `reload` | Reload the exact app view. |
+| `home` | Return to the desktop launcher. |
+| `force_asset_update` | Run the desktop asset updater. |
+
+The command allowlist is exact-view and origin validated in Electron main. Code TE2 console workers in Electron app views register as `electron:main_page:<suffix>`; browser and Android retain generic `main_page` labels.
+
+### Desktop shell behavior
+
+- Native Quit validates the current `/app/<app_id>` URL, posts only that app's quit endpoint, and returns to the desktop launcher without terminating Electron.
+- The native context menu contains only Copy and Paste and invokes the focused renderer's native commands directly.
+- Offline framework state leaves the app view intact and exposes a native-header route back to the local launcher. Recovery clears that control without restarting Electron.
+- Electron modal/dialog windows use the shared modal presenter and retain parent-modal ownership without global always-on-top behavior.
+
+Validation owner docs live in `desktop_client/desktop_client.md` and `desktop_client/electron_spike/README.md`.
+
+---
+
+## 39) WBA Logical Documents And Multi-File Extension Handling
+
+Code TE2 now separates visible editor open from semantic working-set hydration. The browser still renders one active Monaco model, but WBA retains a bounded extension-host document set for active and background files so language servers can see more than the currently visible file.
+
+### Authority split
+
+- `ProjectSidecar.last_file` and `open_state_backend.py` remain the active-file authority.
+- `ProjectSidecar` recents provide the bounded background open set.
+- Python owns sidecar-to-WBA projection in `logical_document_reconciler.py`.
+- WBA owns extension-host document lifetime in `workbench_protocol_proxy/node_workbench_adapter/src/workspace/document-registry.ts`.
+- Draft-aware materialization is centralized in `monaco_editor/editor_backend_services/document_materialization_service.py`.
+
+### Metadata-first reconcile
+
+`logical_document_reconciler.py` builds a metadata-only snapshot:
+
+- `projectPath`
+- `projectGeneration`
+- `openStateRevision`
+- `activePath`
+- bounded `background` descriptors
+
+Background descriptors carry only identity first: path, `contentIdentity`, `baseSha256`, and dirty state. For unsaved drafts, identity is the draft content SHA. For clean files, identity is a stat tuple. This lets WBA decide what it already has without Python materializing every background file.
+
+WBA exposes two stdio JSON-RPC methods through the existing adapter control plane:
+
+| Method | Purpose |
+|---|---|
+| `vscode.logicalDocuments.reconcile` | Accept sidecar metadata and return only missing or content-stale hydration requests. |
+| `vscode.logicalDocuments.hydrate` | Accept exact materialized text for one requested background document. |
+
+Hydration carries exact content, language, content/base identities, dirty state, and reconcile-time active epoch. Stale project generations, open-state revisions, active epochs, and active-document replacement are rejected.
+
+### Document registry roles
+
+WBA document registry roles:
+
+| Role | Meaning |
+|---|---|
+| `active` | The current visible editor model and synthetic active editor facade. |
+| `background` | Retained extension-host document without the active editor facade. |
+| `provisional-background` | Temporary background state used while resolving/hydrating. |
+
+A normal tab switch demotes the previous document and promotes the target without duplicate `addedDocuments`, avoiding LSP close/open churn. Workspace switches release all retained documents. Extension-host reset clears WBA-local registry state.
+
+After active promotion, WBA publishes `document/activeChanged` over the existing framework-shell pipe so Python schedules latest-wins reconciliation. Draft changes, workspace-file changes, adapter-ready/reset, and project-switch facts also drive reconciliation. There is no timer, polling path, new socket, or Python editor-intelligence hop.
+
+### Extension activation and language resolution
+
+WBA extension activation is extension-agnostic:
+
+- `extensions/activation-events.ts` derives declared activation events and Code OSS implicit activation events from each executable extension manifest's `contributes` map.
+- Missing or `plaintext` document language IDs are resolved from extension-contributed filenames, extensions, filename patterns, and first-line expressions.
+- File open starts non-blocking language activation.
+- Language-provider RPCs await both `onLanguage:<id>` and generic `onLanguage` before dispatch.
+- Missing background documents must be published before `onLanguage` activation so newly-started language clients discover the complete open set.
+
+The visible frontend open path does not wait for WBA background hydration. `editor.openComplete.publish` is the control-plane acknowledgement that visible open completed; WBA and agent hydration remain outside that critical path.
+
+---
+
+## 40) Code Inspector And Navigation
+
+Code Inspector is a backend-retained bottom-drawer projection for References, Implementations, and Call Hierarchy. It is not a direct frontend-to-frontend channel and does not add a new socket or HTTP endpoint.
+
+### Flow
+
+```text
+editor context action
+  -> direct /wba request
+  -> WBA provider dispatch and normalization
+  -> editor publishes normalized projection through /rpc/editor
+  -> Python retains revision-guarded projection
+  -> worker event bus publishes CodeInspectorChanged
+  -> /ui_ipc projects host bottom-drawer state
+```
+
+Key backend files:
+
+- `code_inspector_backend.py`
+- `code_inspector_projection.py`
+- `code_inspector_events.py`
+- `monaco_editor/editor_code_inspector_runtime.ts`
+- `workbench_protocol_proxy/node_workbench_adapter/src/extensions/intelligence/code-navigation.ts`
+
+WBA performs Code OSS document-selector scoring/order, semantic provider dispatch, reference/implementation merge-sort-deduplication, and lazy call-hierarchy session management. Reference and implementation locations are enriched with source previews capped at 240 characters; preview reads are deduplicated per file with bounded concurrency. The editor replaces the active file preview from Monaco's live model so unsaved text remains authoritative.
+
+Lazy call-hierarchy expansion and release return through backend-mediated editor commands. Browser reload does not release a WBA call-hierarchy session; project switch, adapter reset, replacement, or worker teardown invalidates it.
+
+Go to Definition is intentionally separate from the retained Code Inspector drawer mode. It is a direct editor-to-WBA action that invokes selector-ordered definition providers, returns the first canonical target, and navigates through backend-owned `editor.open` with `focus: false` and centered reveal.
+
+---
+
+## 41) Code-Server Installer
+
+The private Code Server installer is pinned to Code Server 4.130.0 and serialized by a cache-scoped filesystem lock. Startup and readiness inspection must not download or mutate anything; installation only runs after the frontend obtains user confirmation through the existing UI IPC path.
+
+### Linux
+
+Linux uses the official standalone Code Server installer:
+
+- `code_server_bootstrap.py` downloads `https://code-server.dev/install.sh` with a bounded 1 MiB script limit.
+- The installer runs with `--method=standalone`, `--prefix=<stage>`, and `--version 4.130.0`.
+- Installation happens in a staged TE2 data prefix, then atomically activates the staged prefix.
+- The official installer emits an absolute launcher symlink into the staging prefix. TE2 verifies that the target remains inside the staged tree and rewrites it as a relative in-prefix symlink before activation.
+- Prefixes created by the former broken relocation are repaired without downloading the payload again when possible.
+
+### Termux / Android aarch64
+
+Termux uses a TE2-published package instead of the official installer:
+
+- Installs only the package's declared runtime dependencies with `apt`.
+- Downloads the TE2 `0.2.327` `code-server_4.130.0_aarch64.deb` release asset.
+- Verifies the published SHA-256 before extraction.
+- Manually extracts `lib/code-server` into the staged TE2 prefix.
+- Creates a private relocatable shell launcher under the TE2-managed prefix.
+- Resolver discovery recognizes that launcher's adjacent `lib/code-server/lib/vscode` tree directly rather than evaluating its shell-local `$ROOT`; existing managed prefixes do not require reinstallation.
+
+The bootstrap does not register the Code Server package with `apt` and does not vendor the 709 MiB Code Server tree in the repository.
+
+---
+
+## 42) Android Cefrium Client
+
+The isolated `:cefrium` Android application module evaluates Cefrium 0.6.3 while reusing the shared Android source and packaged assets. GeckoView in `android/app` remains the primary Android renderer.
+
+### Module boundary
+
+The Cefrium module is intentionally isolated:
+
+- `:cefrium` owns its activity, layout, manifest, and loopback relay.
+- It applies the `com.cefrium` Gradle plugin only inside the Cefrium module.
+- The plugin must not be applied to Gecko variants because it generates Chromium resource classes and carries the large CEF runtime.
+- The module shares the packaged asset model and common Android source, but remains an evaluation path until the primary-renderer decision changes.
+- Keep at least 3 GB free before Android builds.
+
+### Runtime behavior
+
+Cefrium always loads TE2 through one dynamically allocated `127.0.0.1` relay origin owned by `CefriumFrameworkRelay`, even when a configured framework host is reachable directly.
+
+The relay behavior is:
+
+- `/android-shell` and `/android-api` are handled locally.
+- Declared installed editor assets are served locally.
+- Other HTTP and SSE traffic streams to the configured TE2 target.
+- WebSocket upgrades tunnel byte-for-byte to TE2.
+- Changing the framework address retargets the relay without changing the browser origin; existing connections close so Socket.IO and other clients reconnect against the new target.
+- Redirects pointing back to the configured TE2 origin are rewritten to the relay origin.
+
+Only paths declared by Cefrium asset routing are served from installed assets. Dynamic API, Socket.IO, terminal, and app-worker traffic pass through the relay.
+
+The activity provides shared launcher and Settings behavior, native controls, app-scoped quit, native context menus, trusted-localhost clipboard permission, file-picker forwarding, renderer recovery, lifecycle pause/resume, native diagnostics, and TE2 console access. The public Cefrium SDK does not expose the CDP transport required by TE2's native Inspector, so that gap must be reported rather than faked.
+
+After each completed document load, an idempotent page policy wraps Monaco's exact `textarea.inputarea.android-ime-input` focus path and forces `preventScroll: true`. Do not replace this with a broad page-wide input workaround.
+
+### Validation
+
+Validate the Cefrium module with:
+
+```bash
+./gradlew :cefrium:testDebugUnitTest
+./gradlew :cefrium:assembleDebug
+```
+
+Keep primary-renderer comparison coverage with:
+
+```bash
+./gradlew :app:testGeckoDebugUnitTest
+./gradlew :app:assembleGeckoDebug
+```
