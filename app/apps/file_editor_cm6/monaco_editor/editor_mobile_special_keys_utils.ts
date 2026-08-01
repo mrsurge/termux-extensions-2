@@ -121,6 +121,7 @@ function bindPointerAction(
 export function bindMobileEditorSpecialKeys(
   editor: MobileSpecialKeyEditor,
   win: Window = window,
+  onSave: (() => void) | null = null,
 ): { dispose(): void } | null {
   const editorDom = editor.getDomNode?.();
   if (!editorDom || !isMobileUserAgent(win.navigator)) return null;
@@ -131,8 +132,18 @@ export function bindMobileEditorSpecialKeys(
 
   const doc = editorDom.ownerDocument;
   const trigger = createButton(doc, 'Ctrl', 'Show editor special keys');
-  trigger.classList.add('te2-mobile-special-key-trigger');
+  trigger.classList.add(
+    'te2-mobile-special-key-overlay-trigger',
+    'te2-mobile-special-key-trigger',
+  );
   trigger.setAttribute('aria-expanded', 'false');
+
+  const saveTrigger = createButton(doc, 'Save', 'Save current file');
+  saveTrigger.classList.add(
+    'te2-mobile-special-key-overlay-trigger',
+    'te2-mobile-special-key-save-trigger',
+  );
+  saveTrigger.hidden = true;
 
   const panel = doc.createElement('div');
   panel.className = 'te2-mobile-special-key-panel';
@@ -226,8 +237,13 @@ export function bindMobileEditorSpecialKeys(
     bindPointerAction(trigger, () => {
       const open = panel.hidden !== false;
       panel.hidden = !open;
+      saveTrigger.hidden = !open;
       appRoot.classList.toggle('te2-mobile-special-keys-open', open);
       trigger.setAttribute('aria-expanded', String(open));
+    }),
+    bindPointerAction(saveTrigger, () => {
+      state.consume();
+      onSave?.();
     }),
     bindPointerAction(ctrl, () => state.setCtrl(!state.ctrl)),
     bindPointerAction(alt, () => state.setAlt(!state.alt)),
@@ -273,7 +289,7 @@ export function bindMobileEditorSpecialKeys(
   ];
 
   appRoot.append(panel);
-  host.append(trigger);
+  host.append(trigger, saveTrigger);
 
   return {
     dispose() {
@@ -289,6 +305,7 @@ export function bindMobileEditorSpecialKeys(
       }
       appRoot.classList.remove('te2-mobile-special-keys-open');
       panel.remove();
+      saveTrigger.remove();
       trigger.remove();
     },
   };

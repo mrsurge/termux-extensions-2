@@ -44,6 +44,7 @@ class RunProfile:
     env: dict[str, str]
     save_drafts: DraftSaveMode
     show_save_warning: bool
+    dev_tools: bool = False
 
 
 @dataclass(frozen=True)
@@ -295,6 +296,11 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
         default=True,
         field_name=f"Run profile {profile_id} showSaveWarning",
     )
+    dev_tools = _bool_setting(
+        data.get("devTools"),
+        default=False,
+        field_name=f"Run profile {profile_id} devTools",
+    )
 
     sidebar_url = _text(data.get("sidebarUrl") or data.get("sidebar_url"))
     if not sidebar_url and runner == "pagePreview":
@@ -316,6 +322,7 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
         env=_env_map(data.get("env"), profile_id=profile_id),
         save_drafts=cast(DraftSaveMode, save_drafts_value),
         show_save_warning=show_save_warning,
+        dev_tools=dev_tools,
     )
 
 
@@ -381,6 +388,7 @@ def _default_page_preview_profile(entry: str) -> JsonObject:
         "runningBehavior": "just save",
         "saveDrafts": "included",
         "showSaveWarning": True,
+        "devTools": False,
     }
 
 

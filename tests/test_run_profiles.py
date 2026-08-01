@@ -14,6 +14,7 @@ from app.apps.file_editor_cm6 import runner_profiles
 from app.apps.file_editor_cm6.monaco_editor.editor_backend_services import save_service
 from app.apps.file_editor_cm6.host import terminal_actions_backend
 from app.apps.file_editor_cm6.host import runner_profiles_backend
+from app.apps.file_editor_cm6.ui_ipc import sidebar_window_state
 
 
 class _FakeHistoryStore:
@@ -59,6 +60,7 @@ class RunProfileContractTests(unittest.TestCase):
 
             self.assertEqual(profile.save_drafts, "included")
             self.assertTrue(profile.show_save_warning)
+            self.assertFalse(profile.dev_tools)
             self.assertTrue(
                 runner_profiles.run_profile_matches_path(
                     profile,
@@ -81,6 +83,33 @@ class RunProfileContractTests(unittest.TestCase):
                     index=0,
                 )
                 self.assertEqual(profile.show_save_warning, expected)
+
+    def test_dev_tools_is_an_explicit_opt_in(self) -> None:
+        base_profile = {
+            "profileId": "preview",
+            "runner": "pagePreview",
+            "entry": "index.html",
+        }
+        disabled = runner_profiles._profile_from_json(base_profile, index=0)
+        enabled = runner_profiles._profile_from_json(
+            {**base_profile, "devTools": True},
+            index=0,
+        )
+
+        self.assertFalse(disabled.dev_tools)
+        self.assertTrue(enabled.dev_tools)
+
+    def test_dev_tools_rejects_non_boolean_values(self) -> None:
+        with self.assertRaisesRegex(ValueError, "devTools must be true"):
+            _ = runner_profiles._profile_from_json(
+                {
+                    "profileId": "preview",
+                    "runner": "pagePreview",
+                    "entry": "index.html",
+                    "devTools": "yes",
+                },
+                index=0,
+            )
 
     def test_invalid_save_mode_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown saveDrafts"):
@@ -444,6 +473,85 @@ class RunRequestTransactionTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result["ok"])
             self.assertEqual(result["error"], "active_file_changed")
             write.assert_not_awaited()
+
+
+class RunProfileSidebarDevToolsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sidebar_url_projects_stable_native_target_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            create = AsyncMock(return_value={"ok": True})
+            with patch.object(
+                runner_profiles_backend,
+                "handle_ui_sidebar_window_create_request",
+                create,
+            ):
+                result = await runner_profiles_backend._open_sidebar_url(
+                    url="http://127.0.0.1:3000/",
+                    profile_id="preview",
+                    title="Page Preview",
+                    label="Page Preview",
+                    host_prefix="page-preview",
+                    source_name="test",
+                    project_root=root,
+                    dev_tools=True,
+                )
+
+            self.assertTrue(result["ok"])
+            payload = cast(dict[str, object], create.await_args.args[0])
+            expected_id = runner_profiles_backend._devtools_target_id(root, "preview")
+            self.assertIs(payload["devTools"], True)
+            self.assertEqual(payload["devToolsTargetId"], expected_id)
+            self.assertEqual(payload["devToolsTargetLabel"], "Page Preview")
+            self.assertEqual(
+                expected_id,
+                runner_profiles_backend._devtools_target_id(root, "preview"),
+            )
+
+    def test_target_id_is_project_scoped(self) -> None:
+        first = runner_profiles_backend._devtools_target_id(
+            Path("/project/one"),
+            "preview",
+        )
+        second = runner_profiles_backend._devtools_target_id(
+            Path("/project/two"),
+            "preview",
+        )
+
+        self.assertNotEqual(first, second)
+
+    def test_disabled_projection_clears_previous_target_metadata(self) -> None:
+        enabled = sidebar_window_state._normalize_url_slot(
+            {
+                "kind": "url",
+                "host_id": "runner-profile:preview",
+                "url": "http://127.0.0.1:3000/",
+                "devTools": True,
+                "devToolsTargetId": "run-profile:abc:preview",
+            }
+        )
+        disabled = sidebar_window_state._normalize_url_slot(
+            {
+                "kind": "url",
+                "host_id": "runner-profile:preview",
+                "url": "http://127.0.0.1:3000/",
+                "devTools": False,
+            }
+        )
+        merged = sidebar_window_state._upsert_slot(
+            {
+                "slots": {"runner-profile:preview": enabled},
+                "order": ["launcher", "runner-profile:preview"],
+            },
+            disabled,
+            activate=True,
+        )
+        slot = cast(
+            dict[str, object],
+            cast(dict[str, object], merged["slots"])["runner-profile:preview"],
+        )
+
+        self.assertIs(slot["devTools"], False)
+        self.assertNotIn("devToolsTargetId", slot)
 
 
 if __name__ == "__main__":

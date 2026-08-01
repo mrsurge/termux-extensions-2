@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
 from pathlib import Path
 
 from ..monaco_editor.editor_backend_services.contracts import JsonMap
@@ -51,6 +52,8 @@ async def handle_runner_profile_run_request(
             label="Page Preview",
             host_prefix="page-preview",
             source_name=source_name,
+            project_root=match.project_root,
+            dev_tools=profile.dev_tools,
         )
         return {
             "ok": True,
@@ -89,6 +92,8 @@ async def handle_runner_profile_run_request(
             label=f"Run {profile.profile_id}",
             host_prefix="runner-profile",
             source_name=source_name,
+            project_root=match.project_root,
+            dev_tools=profile.dev_tools,
         )
 
     message = (
@@ -150,7 +155,10 @@ async def _open_sidebar_url(
     label: str,
     host_prefix: str,
     source_name: str,
+    project_root: Path,
+    dev_tools: bool,
 ) -> JsonMap:
+    target_id = _devtools_target_id(project_root, profile_id) if dev_tools else ""
     result = await handle_ui_sidebar_window_create_request(
         {
             "kind": "url",
@@ -163,9 +171,17 @@ async def _open_sidebar_url(
             "activate": True,
             "client_id": "main_page",
             "source": f"{source_name}:runner_profile",
+            "devTools": dev_tools,
+            "devToolsTargetId": target_id,
+            "devToolsTargetLabel": label,
         }
     )
     return dict(result)
+
+
+def _devtools_target_id(project_root: Path, profile_id: str) -> str:
+    project_hash = hashlib.sha256(str(project_root).encode("utf-8")).hexdigest()[:12]
+    return f"run-profile:{project_hash}:{profile_id}"
 
 
 def _active_project() -> str | None:

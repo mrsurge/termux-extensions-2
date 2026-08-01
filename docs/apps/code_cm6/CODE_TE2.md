@@ -453,6 +453,12 @@ Draft mutations trigger the following pipeline:
 3. `editor:cache_state` is emitted to all editor clients (updates toolbar badge)
 4. `notify_draft_state_changed()` broadcasts `explorer:updateDecorations` + `review:setEntries` to explorer clients
 
+The active-file draft badge is a destructive affordance. Its click path must
+show the shared `teUI` danger confirmation before issuing
+`ui.host.draft.discard`, and the confirmation/request sequence is single-flight
+so rapid taps cannot submit duplicate draft clears. Cancelling is silent and
+does not contact the backend.
+
 ### DraftIndexSidecar (fast hasDraft lookups)
 - Lightweight per-project index separate from ProjectSidecar
 - Stores only relative paths of unsaved files (no content)
@@ -3190,8 +3196,22 @@ There are two distinct layers:
    - Android disables Monaco native `EditContext` even when Chromium exposes it.
    - The patched Monaco `TextAreaEditContext` / `TextAreaInput` path uses a physically detached textarea containing `⇝` + the complete model line + two trailing newlines.
    - Native `input` events coalesce to one latest-value read per animation frame.
+   - The coalesced transaction retains the latest `InputEvent.inputType`.
    - One cumulative UTF-16 range edit is applied before a generation-guarded canonical reseed.
    - Android composition start/update/end events do not gate input or create Monaco's visible composition textarea.
+   - Aligned ordinary insertion remains on Monaco's typing path. An aligned
+     `insertLineBreak` or `insertParagraph` newline is also routed through
+     typing so `EnterOperation` applies language indentation; multiline paste,
+     replacement, and recomposition newlines remain raw Android range edits.
+   - The legacy rapid raw-key paste classifier cannot suppress `\n`, so a real
+     Enter remains a command boundary even immediately after a fast text burst.
+   - The mobile Ctrl latch reuses the terminal helper's Gboard keycode-229
+     conversion. Monaco's adapter replays the resulting control byte as one
+     synthetic Ctrl chord while bypassing helper re-entry, allowing Monaco's
+     normal keybinding service to resolve commands such as Ctrl+S.
+   - Opening the mobile special-key row also reveals a translucent Save control
+     beside the Ctrl trigger. It preserves editor focus and publishes the same
+     `editor.host.save` action used by the Ctrl+S command.
 
 ### Key files
 
@@ -3201,6 +3221,8 @@ There are two distinct layers:
 | `android/.../EditorInputFilter.kt` | InputConnection wrapper, composition stripping. |
 | `android/.../UiIpcClient.kt` | Strict msgpack-v1 `/ui_ipc` native focus/blur consumer. |
 | `android/.../MainActivity.kt` | Wires filter, IPC client, restartInput callback. |
+| `monaco_editor/editor_mobile_ctrl_helper_utils.ts` | Adapts vendored Gboard Ctrl control bytes into Monaco keybinding chords. |
+| `monaco_editor/editor_mobile_special_keys_utils.ts` | Owns the mobile special-key row and fallback Save overlay. |
 | `worktrees/vscode-te2-diff/src/vs/editor/browser/config/editorConfiguration.ts` | Disables native `EditContext` on Android. |
 | `worktrees/vscode-te2-diff/src/vs/editor/browser/controller/editContext/textArea/textAreaEditContextState.ts` | Android detached textarea seed/prefix/suffix state. |
 | `worktrees/vscode-te2-diff/src/vs/editor/browser/controller/editContext/textArea/textAreaEditContextInput.ts` | Android coalesced input transaction path. |
@@ -3318,7 +3340,8 @@ A config may be an object with `profiles`, a single profile object, or a profile
       "include": ["index.html"],
       "runningBehavior": "just save",
       "saveDrafts": "included",
-      "showSaveWarning": true
+      "showSaveWarning": true,
+      "devTools": false
     }
   ]
 }
@@ -3340,6 +3363,7 @@ Current profile fields:
 | `env` | Extra environment, validated as shell-safe names with string values. |
 | `saveDrafts` / `save_drafts` | `included`, `opened`, `all`, or `none`; defaults to `included`. |
 | `showSaveWarning` / `show_save_warning` | Boolean warning setting; JSON `0`/`1` are accepted for compatibility. |
+| `devTools` | Boolean, default `false`. On GeckoView, expose this profile's Sidebar URL iframe as a selectable native Inspector target. |
 
 ### Runner dispatch
 
@@ -3349,7 +3373,7 @@ Current profile fields:
 - `page_preview_shell_manager.py` launches page previews via `shellspec/page_preview.yaml#page-preview` and one deterministic `page-preview:<app>:<project>:<profile>` label.
 - `host/page_preview_backend.py` installs the default Page Preview profile into the project config.
 
-`pagePreview` profiles start a project-local preview shell and open its URL through the backend sidebar-window hook. Non-preview profiles can also open `sidebarUrl`; otherwise they just launch/reuse the runner shell and report the result.
+`pagePreview` profiles start a project-local preview shell and open its URL through the backend sidebar-window hook. Non-preview profiles can also open `sidebarUrl`; otherwise they just launch/reuse the runner shell and report the result. When `devTools` is enabled, the backend projects a stable project/profile target id with that URL slot. The Sidebar places the id in a namespaced iframe `window.name` marker before navigation; it does not append target metadata to the application URL.
 
 ### Draft-save transaction
 
@@ -3593,3 +3617,61 @@ Keep primary-renderer comparison coverage with:
 ./gradlew :app:testGeckoDebugUnitTest
 ./gradlew :app:assembleGeckoDebug
 ```
+
+---
+
+## 43) GeckoView Native Inspector Targets
+
+The GeckoView Inspector is a separate persistent `GeckoSession` and
+`GeckoView`, not an element injected into the inspected page. Its frontend is
+Chii 1.15.5; eligible inspected documents host Chobitsu 1.8.6 as the page-local
+CDP target.
+
+The transport is direct WebExtension native messaging:
+
+```text
+inspected document Chobitsu
+  -> te2_devtools_target native port
+  -> GeckoDevToolsInspector Kotlin target registry and CDP broker
+  -> te2_devtools_client native port
+  -> persistent Inspector GeckoView / Chii frontend
+```
+
+There is no Socket.IO, raw WebSocket, framework RPC, shared-memory, or FD
+negotiation in this path. The WebExtension content scripts run at document
+start in all frames, but `target-config.js` only enables the top-level framework
+document and child frames carrying the Sidebar's `te2-devtools:` `window.name`
+marker. This keeps ordinary framework and application iframes unmodified.
+
+Kotlin stores live targets by stable target id, renders the authoritative native
+target picker above the Inspector `GeckoView`, and attaches the existing bounded
+`DevToolsProtocolBroker` only to the selected target. The Inspector document's
+HTML selector is hidden and retains target snapshots only for client routing and
+debug telemetry; GeckoView HTML selector projection is not part of selection.
+The framework page is the initial target. A selected Run Profile iframe retains
+its selection while navigation recreates the WebExtension port, so the same id
+reattaches without a second transport or framework lifecycle dependency.
+
+The source contract is split across:
+
+- `android/app/src/main/assets/devtools_inspector/` for Chii/Chobitsu assets,
+  frame eligibility, and target/client native-port bridges.
+- `android/app/src/gecko/java/com/termux/extensions/GeckoDevToolsInspector.kt`
+  for the persistent Inspector session, target registry, native picker
+  projection, selection, and raw CDP routing.
+- `android/app/src/gecko/java/com/termux/extensions/MainActivity.kt` and
+  `android/app/src/gecko/res/layout/activity_main.xml` for the native picker
+  controls and Inspector surface layout.
+- `main_page/frontend/sidebar-shortcuts/devtools-target.ts` for the opt-in
+  iframe marker.
+- `host/runner_profiles_backend.py` and `ui_ipc/sidebar_window_state.py` for
+  backend-owned Run Profile target metadata and sidebar-state projection.
+
+Target registration is readiness-gated rather than inferred from a native-port
+connection. `target-loader.js` evaluates Chobitsu and the target runtime in
+Firefox's page world, verifies both page globals, and only then allows
+`target-native-bridge.js` to emit `target_ready`. The native
+`android.devTools.state.get` console command exposes bounded frame probes,
+target lifecycle events, the Inspector client's target snapshot, and active
+Kotlin selection. Opening the Inspector surface republishes the authoritative
+target snapshot so a hidden client cannot retain stale routing state.

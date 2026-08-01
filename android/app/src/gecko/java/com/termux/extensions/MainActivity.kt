@@ -15,6 +15,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -54,6 +55,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var inspectorPanel: FrameLayout
     private lateinit var inspectorGeckoView: GeckoView
     private lateinit var inspectorStatus: TextView
+    private lateinit var inspectorTargetPickerScroll: HorizontalScrollView
+    private lateinit var inspectorTargetPicker: LinearLayout
     private lateinit var btnToolsConsole: Button
     private lateinit var btnToolsInspector: Button
 
@@ -567,6 +570,8 @@ class MainActivity : AppCompatActivity() {
         inspectorPanel = findViewById(R.id.inspectorPanel)
         inspectorGeckoView = findViewById(R.id.inspectorGeckoView)
         inspectorStatus = findViewById(R.id.inspectorStatus)
+        inspectorTargetPickerScroll = findViewById(R.id.inspectorTargetPickerScroll)
+        inspectorTargetPicker = findViewById(R.id.inspectorTargetPicker)
         btnToolsConsole = findViewById(R.id.btnToolsConsole)
         btnToolsInspector = findViewById(R.id.btnToolsInspector)
         composeConsoleState.bind(
@@ -894,12 +899,16 @@ class MainActivity : AppCompatActivity() {
             androidSettingsStore.load().frameworkHost,
         )
         devToolsInspector = GeckoDevToolsInspector(
-            runtime,
-            geckoSession,
-            inspectorGeckoView,
-        ) { status ->
-            runOnUiThread { updateDevToolsInspectorStatus(status) }
-        }
+            runtime = runtime,
+            targetSession = geckoSession,
+            inspectorView = inspectorGeckoView,
+            onStatusChanged = { status ->
+                runOnUiThread { updateDevToolsInspectorStatus(status) }
+            },
+            onTargetsChanged = { targets, activeTargetId ->
+                runOnUiThread { updateDevToolsTargetPicker(targets, activeTargetId) }
+            },
+        )
 
         // A blank open session starts Gecko's extension process. Restore and
         // navigation remain locked until the local static route is confirmed.
@@ -1142,6 +1151,26 @@ class MainActivity : AppCompatActivity() {
                         showFeedback = false,
                         completion = completion,
                     )
+                AndroidNativeConsoleCommand.DEVTOOLS_STATE_GET ->
+                    runOnUiThread {
+                        val snapshot = devToolsInspector?.debugSnapshot()
+                            ?: JSONObject().put("available", false)
+                        snapshot
+                            .put("available", devToolsInspector != null)
+                            .put("configuredEnabled", devToolsInspectorEnabled)
+                            .put("status", devToolsInspectorStatus)
+                        completion(Result.success(snapshot))
+                    }
+                AndroidNativeConsoleCommand.DEVTOOLS_TELEMETRY_CLEAR ->
+                    runOnUiThread {
+                        val snapshot = devToolsInspector?.clearDebugTelemetry()
+                            ?: JSONObject().put("available", false)
+                        snapshot
+                            .put("available", devToolsInspector != null)
+                            .put("configuredEnabled", devToolsInspectorEnabled)
+                            .put("status", devToolsInspectorStatus)
+                        completion(Result.success(snapshot))
+                    }
             }
         }.also {
             nativeConsoleWorker = it
@@ -1324,6 +1353,67 @@ class MainActivity : AppCompatActivity() {
         if (::inspectorStatus.isInitialized) updateDevToolsInspectorSurface()
     }
 
+    private fun updateDevToolsTargetPicker(
+        targets: List<GeckoDevToolsInspector.TargetSummary>,
+        activeTargetId: String?,
+    ) {
+        if (!::inspectorTargetPicker.isInitialized) return
+        inspectorTargetPicker.removeAllViews()
+
+        if (targets.isEmpty()) {
+            inspectorTargetPicker.addView(
+                TextView(this).apply {
+                    text = "Waiting for inspected page..."
+                    setTextColor(Color.LTGRAY)
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dpToPx(10), 0, dpToPx(10), 0)
+                    minHeight = dpToPx(42)
+                },
+            )
+            return
+        }
+
+        var activeButton: View? = null
+        targets.forEach { target ->
+            val button = Button(this).apply {
+                isAllCaps = false
+                text = if (target.title.isBlank()) {
+                    target.targetLabel
+                } else {
+                    "${target.targetLabel} - ${target.title}"
+                }
+                contentDescription = "Inspect ${target.targetLabel}"
+                minWidth = 0
+                minimumWidth = 0
+                minHeight = dpToPx(42)
+                setPadding(dpToPx(12), 0, dpToPx(12), 0)
+                isEnabled = target.targetId != activeTargetId
+                setOnClickListener {
+                    devToolsInspector?.selectTarget(target.targetId)
+                }
+            }
+            inspectorTargetPicker.addView(
+                button,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply {
+                    marginEnd = dpToPx(4)
+                },
+            )
+            if (target.targetId == activeTargetId) activeButton = button
+        }
+
+        activeButton?.let { selected ->
+            inspectorTargetPickerScroll.post {
+                inspectorTargetPickerScroll.smoothScrollTo(
+                    (selected.left - dpToPx(8)).coerceAtLeast(0),
+                    0,
+                )
+            }
+        }
+    }
+
     private fun updateDevToolsInspectorSurface() {
         val inspectorSelected =
             ::consoleOverlay.isInitialized &&
@@ -1342,6 +1432,8 @@ class MainActivity : AppCompatActivity() {
         }
         inspectorStatus.visibility =
             if (inspectorSelected && !showClient) View.VISIBLE else View.GONE
+        inspectorTargetPickerScroll.visibility =
+            if (showClient) View.VISIBLE else View.GONE
         devToolsInspector?.setVisible(showClient)
     }
 

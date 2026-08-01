@@ -38,7 +38,7 @@ const INLINE_EDITOR_HOST_STYLE = `
 #editor-frame .monaco-editor .find-widget {
   z-index: 300;
 }
-#editor-frame .te2-mobile-special-key.te2-mobile-special-key-trigger {
+#editor-frame .te2-mobile-special-key.te2-mobile-special-key-overlay-trigger {
   position: absolute;
   left: 14px;
   bottom: 14px;
@@ -54,7 +54,11 @@ const INLINE_EDITOR_HOST_STYLE = `
   -webkit-tap-highlight-color: transparent;
   z-index: 35;
 }
-.fe-root:not(.layout-mobile) #editor-frame .te2-mobile-special-key-trigger {
+#editor-frame .te2-mobile-special-key.te2-mobile-special-key-save-trigger {
+  left: 66px;
+}
+#editor-frame .te2-mobile-special-key.te2-mobile-special-key-save-trigger[hidden],
+.fe-root:not(.layout-mobile) #editor-frame .te2-mobile-special-key-overlay-trigger {
   display: none;
 }
 .fe-root.layout-mobile > .te2-mobile-special-key-panel {

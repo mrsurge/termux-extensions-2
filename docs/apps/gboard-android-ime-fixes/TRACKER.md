@@ -27,11 +27,10 @@ Status values:
 | done | Derive unconstrained full-line text deltas | A capped common-prefix/common-suffix delta produces one explicit line-relative replacement independent of cached cursor offsets. |
 | done | Apply explicit line-range replacements | Divergent and replacement mutations use an Android-specific explicit-range editor command instead of first moving Monaco's cursor. |
 | done | Ignore selection-only native movement | Value-stable native movement updates only the pending native cursor and emits no Monaco edit or immediate cursor command. |
-| done | Project cursor after ordinary text input | Non-rapid input projects the native result immediately; aligned insertion retains Monaco's normal typing path. |
-| done | Debounce rapid cursor projection | A second mutation within 35 ms defers intermediate cursor projection while every edit still applies. |
-| done | Gate Monaco-to-textarea feedback | Render- and cursor-driven writes return before changing cached state while Android owns the textarea. |
-| done | Preserve actual cached textarea state | The cached state is updated from actual native reads during ownership, never from blocked writes. |
-| done | Settle once after quiet | After 140 ms of quiet, the latest native cursor is projected and canonical textarea state is written once. |
+| done | Project aligned typing through Monaco | Ordinary aligned insertion retains Monaco's normal typing path; replacement and divergent deltas remain explicit range edits. |
+| done | Preserve native Enter semantics | Coalesced input retains `inputType`; aligned `insertLineBreak`/`insertParagraph` newlines use Monaco Enter and language indentation. |
+| done | Keep paste/recomposition raw | Multiline and replacement deltas bypass typing interceptors and remain one explicit Android range edit. |
+| done | Reseed after each accepted frame | The generation-guarded reseed projects canonical model text, including indentation added by Monaco Enter. |
 | done | Reset stale composition on pointer-event taps | Android pointer-event taps now dispatch the same synthetic textarea tap as the legacy touch path before moving Monaco's cursor. The reset writes a true empty textarea state before the destination line is reseeded. |
 | active | Preserve paste workaround behavior | The normal aligned-insertion path still uses Monaco typing and the paste classifier remains separate; device and browser regression validation remain. |
 
@@ -42,7 +41,7 @@ Status values:
 | pending | Full-line state tests | Line corpus and selection offsets are correct at start, middle, end, punctuation, and empty-line positions. |
 | active | Value-delta tests | Insert, repeated-character delete, and cursor-divergent deltas are covered; broader replacement and suggestion fixtures remain. |
 | done | Selection-only tests | The pure line-delta contract verifies that value-stable native cursor movement produces no edit. |
-| active | Rapid replacement tests | A focused Android recomposition test is authored and typechecks; Playwright cannot execute on the Android Node platform used by this checkout. |
+| active | Android transaction tests | Recomposition coalescing, native line-break metadata, selection-only movement, and synthetic-tap teardown have focused fixtures; browser execution still requires a supported Playwright platform. |
 | done | Synthetic-tap teardown test | A focused Firefox/Android fixture verifies that synthetic tap ends stale composition and writes an empty textarea even when the normal Android host state still contains the old line. |
 | pending | Write-gate tests | Blocked writes preserve the actual DOM baseline and settling writes exactly once. |
 | pending | Paste regression tests | Existing multi-character and serialized single-character burst behavior remains intact. |
@@ -56,7 +55,7 @@ Status values:
 | pending | Space and punctuation traversal | Gboard can move through the complete logical line without Monaco rebuilding a word buffer. |
 | pending | Repeated voice-input trigger | Later recomposition does not produce suffix replay, recursive echo, or cursor oscillation. |
 | pending | Voice typing side effect | Voice text can be accepted without corruption; this remains secondary to fixing latent recomposition. |
-| pending | Normal typing responsiveness | Ordinary text input moves the visible cursor without waiting for the rapid-input debounce. |
+| pending | Normal typing responsiveness | Ordinary text input and native Enter update immediately without a textarea correctness debounce. |
 | pending | Mobile Chrome validation | Verify the corrected Monaco web path without TE2's native Android input filter. |
 | pending | Gecko validation | Verify browser-specific composition and selection event ordering. |
 | pending | GeckoView/WebView wrapper audit | Determine whether the native input filter masks or conflicts with the corrected web path before proposing Android changes. |
@@ -76,9 +75,8 @@ Status values:
 
 | Status | Decision | Evidence needed |
 | --- | --- | --- |
-| active | Rapid-mutation threshold | The initial threshold is 35 ms between mutations; device traces must confirm it distinguishes ordinary input from recomposition without dropping text. |
-| active | Trailing quiet duration | The initial settle delay is 140 ms; device testing must confirm a stable release without making ordinary cursor movement feel delayed. |
-| active | Ownership triggers | Input/composition value activity acquires ownership and value-stable selection movement extends pending cursor state; device event ordering still needs validation. |
+| done | Remove correctness thresholds | The 35 ms/140 ms textarea transaction timers were removed; frame coalescing and canonical reseeding own correctness. |
+| active | Legacy serialized-paste classifier | Ordinary rapid raw-key text remains protected, but newline is a command boundary and cannot suppress Enter indentation. |
 | pending | Undo grouping boundary | Confirm whether one recomposition lease or browser composition boundaries provide the least surprising undo behavior. |
 | pending | Shared burst utility | Consider only after paste and recomposition classifiers have independent tests. |
 | pending | Native Android filter policy | Decide separately after the corrected browser path is validated; Android is outside the current implementation scope. |

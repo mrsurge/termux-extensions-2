@@ -11,9 +11,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val ANDROID_ASSET_FORCE_UPDATE_METHOD =
     "android.assets.forceUpdateAndReload"
+internal const val ANDROID_DEVTOOLS_STATE_GET_METHOD =
+    "android.devTools.state.get"
+internal const val ANDROID_DEVTOOLS_TELEMETRY_CLEAR_METHOD =
+    "android.devTools.telemetry.clear"
 
 internal enum class AndroidNativeConsoleCommand {
     FORCE_UPDATE_AND_RELOAD,
+    DEVTOOLS_STATE_GET,
+    DEVTOOLS_TELEMETRY_CLEAR,
 }
 
 internal fun parseAndroidNativeConsoleCommand(code: String): AndroidNativeConsoleCommand {
@@ -32,6 +38,10 @@ internal fun parseAndroidNativeConsoleCommand(code: String): AndroidNativeConsol
     return when (payload.optString("method")) {
         ANDROID_ASSET_FORCE_UPDATE_METHOD ->
             AndroidNativeConsoleCommand.FORCE_UPDATE_AND_RELOAD
+        ANDROID_DEVTOOLS_STATE_GET_METHOD ->
+            AndroidNativeConsoleCommand.DEVTOOLS_STATE_GET
+        ANDROID_DEVTOOLS_TELEMETRY_CLEAR_METHOD ->
+            AndroidNativeConsoleCommand.DEVTOOLS_TELEMETRY_CLEAR
         else -> throw IllegalArgumentException("unsupported native console command")
     }
 }

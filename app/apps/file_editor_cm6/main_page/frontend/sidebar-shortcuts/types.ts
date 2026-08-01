@@ -37,6 +37,12 @@ export interface SidebarShortcut extends UnknownRecord {
   restore_url?: string;
   restoreUrl?: string;
   readiness?: SidebarWindowReadiness | null;
+  dev_tools?: boolean;
+  devTools?: boolean;
+  devtools_target_id?: string;
+  devToolsTargetId?: string;
+  devtools_target_label?: string;
+  devToolsTargetLabel?: string;
 }
 
 export interface SidebarShortcutPreference extends UnknownRecord {
@@ -107,6 +113,12 @@ export interface SidebarAppDockSlot extends UnknownRecord {
   load?: ShortcutLoad | string;
   icon?: ShortcutIcon | null;
   readiness?: SidebarWindowReadiness | null;
+  dev_tools?: boolean;
+  devTools?: boolean;
+  devtools_target_id?: string;
+  devToolsTargetId?: string;
+  devtools_target_label?: string;
+  devToolsTargetLabel?: string;
   updated_at?: number;
   updatedAt?: number;
   version?: string | number;
@@ -142,6 +154,7 @@ export interface IframeEntry {
   iframe: HTMLIFrameElement;
   url: string;
   loaded: boolean;
+  devToolsName: string;
 }
 
 export interface JsonFetchResult<TBody = unknown> {

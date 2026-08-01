@@ -193,6 +193,8 @@ interface Window {
   __debugDisableTextmate?: boolean;
   __debugDisableSemanticTokens?: boolean;
   ['monaco-touch-selection']?: MonacoTouchSelectionGlobal;
+  __androidTerminalCtrlDesired?: boolean;
+  __androidTerminalSetCtrl?: (active: boolean) => void;
   term?: MonacoRuntimeTermShim;
   ctrl?: boolean;
 }

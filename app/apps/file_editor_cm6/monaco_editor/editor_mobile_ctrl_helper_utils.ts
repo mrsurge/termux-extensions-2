@@ -6,6 +6,7 @@ interface MonacoTermShimState {
   input: HTMLTextAreaElement | null;
   handler: ((event: KeyboardEvent) => boolean | void) | null;
   disposeHandler: (() => void) | null;
+  replayingControlChord: boolean;
 }
 
 interface ControlChordLike {
@@ -21,6 +22,7 @@ const state: MonacoTermShimState = {
   input: null,
   handler: null,
   disposeHandler: null,
+  replayingControlChord: false,
 };
 
 const monacoTermShim: MonacoRuntimeTermShim = {
@@ -80,6 +82,10 @@ function installHandlerOnCurrentInput(): void {
   if (!input || typeof handler !== 'function') return;
 
   const forwardEvent = (event: KeyboardEvent): void => {
+    // Replayed Ctrl chords must reach Monaco instead of re-entering the
+    // vendored Gboard interceptor that produced them.
+    if (state.replayingControlChord) return;
+
     let keepDefault = true;
     try {
       keepDefault = handler(event) !== false;
@@ -143,11 +149,22 @@ function dispatchControlInput(data: string): void {
 
   try { state.editor?.focus?.(); } catch (_) {}
 
-  for (let index = 0; index < text.length; index += 1) {
-    const chord = controlCharToChord(text.charAt(index));
-    if (!chord) continue;
-    try { input.dispatchEvent(buildKeyboardEvent('keydown', chord)); } catch (_) {}
-    try { input.dispatchEvent(buildKeyboardEvent('keyup', chord)); } catch (_) {}
+  state.replayingControlChord = true;
+  try {
+    for (let index = 0; index < text.length; index += 1) {
+      const chord = controlCharToChord(text.charAt(index));
+      if (!chord) continue;
+      try { input.dispatchEvent(buildKeyboardEvent('keydown', chord)); } catch (_) {}
+      try { input.dispatchEvent(buildKeyboardEvent('keyup', chord)); } catch (_) {}
+    }
+  } finally {
+    state.replayingControlChord = false;
+    if (typeof window.__androidTerminalSetCtrl === 'function') {
+      window.__androidTerminalSetCtrl(false);
+    } else {
+      window.__androidTerminalCtrlDesired = false;
+      window.ctrl = false;
+    }
   }
 }
 

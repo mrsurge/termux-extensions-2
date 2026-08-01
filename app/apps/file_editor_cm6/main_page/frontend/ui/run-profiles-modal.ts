@@ -30,6 +30,7 @@ function asProfiles(value: unknown): UnknownRecord[] {
   return value.filter(isRecord).map((item) => ({
     saveDrafts: "included",
     showSaveWarning: true,
+    devTools: false,
     ...item,
   }));
 }
@@ -53,6 +54,7 @@ function defaultProfile(index: number): UnknownRecord {
     runningBehavior: "just save",
     saveDrafts: "included",
     showSaveWarning: true,
+    devTools: false,
   };
 }
 

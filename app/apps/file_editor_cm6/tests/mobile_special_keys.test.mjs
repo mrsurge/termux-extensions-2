@@ -161,7 +161,14 @@ class FakeElement extends EventTarget {
 class FakeDocument {
   constructor() {
     this.activeElement = null;
+    this.head = new FakeElement("head", this);
     this.body = new FakeElement("body", this);
+    const appendToHead = this.head.append.bind(this.head);
+    this.head.appendChild = (child) => {
+      appendToHead(child);
+      if (child.tagName === "SCRIPT") queueMicrotask(() => child.onload?.());
+      return child;
+    };
   }
 
   createElement(tagName) {
@@ -338,6 +345,61 @@ test("dispatches editor keys without moving focus", async () => {
   assert.equal(fixture.win.document.activeElement, fixture.input);
 });
 
+test("replays vendored Gboard control bytes into Monaco without recursion", async () => {
+  const { rebindVendoredCtrlHelper, clearVendoredCtrlHelper } =
+    await importTypeScript(
+      "monaco_editor/editor_mobile_ctrl_helper_utils.ts",
+    );
+  const fixture = createEditorFixture(
+    "Mozilla/5.0 (Linux; Android 16) Gecko/144 Firefox/144 Mobile",
+  );
+  globalThis.window = fixture.win;
+  globalThis.document = fixture.win.document;
+  fixture.input.focus();
+
+  await rebindVendoredCtrlHelper(fixture.editor, {});
+  const intercepted = [];
+  const delivered = [];
+  fixture.win.term.attachCustomKeyEventHandler((event) => {
+    intercepted.push(event.type);
+    return false;
+  });
+  fixture.input.addEventListener("keydown", (event) => {
+    delivered.push({
+      type: event.type,
+      key: event.key,
+      code: event.code,
+      ctrlKey: event.ctrlKey,
+    });
+  });
+  fixture.input.addEventListener("keyup", (event) => {
+    delivered.push({
+      type: event.type,
+      key: event.key,
+      code: event.code,
+      ctrlKey: event.ctrlKey,
+    });
+  });
+  let ctrlReleased = false;
+  fixture.win.__androidTerminalSetCtrl = (active) => {
+    ctrlReleased = active === false;
+  };
+
+  fixture.win.term.input("\u0013");
+
+  assert.deepEqual(intercepted, []);
+  assert.deepEqual(delivered, [
+    { type: "keydown", key: "s", code: "KeyS", ctrlKey: true },
+    { type: "keyup", key: "s", code: "KeyS", ctrlKey: true },
+  ]);
+  assert.equal(ctrlReleased, true);
+  assert.equal(fixture.win.document.activeElement, fixture.input);
+
+  clearVendoredCtrlHelper(fixture.editor);
+  delete globalThis.window;
+  delete globalThis.document;
+});
+
 test("keeps modifiers sticky until one dock key consumes them", async () => {
   const { bindMobileEditorSpecialKeys } = await importTypeScript(
     "monaco_editor/editor_mobile_special_keys_utils.ts",
@@ -383,10 +445,20 @@ test("keeps modifiers sticky until one dock key consumes them", async () => {
     fixture.win,
     () => fixture.terminalInput,
   );
-  const binding = bindMobileEditorSpecialKeys(fixture.editor, fixture.win);
+  let saveRequests = 0;
+  const binding = bindMobileEditorSpecialKeys(
+    fixture.editor,
+    fixture.win,
+    () => {
+      saveRequests += 1;
+    },
+  );
   assert.ok(binding);
   const trigger = fixture.host.querySelector(
     ".te2-mobile-special-key-trigger",
+  );
+  const saveTrigger = fixture.host.querySelector(
+    ".te2-mobile-special-key-save-trigger",
   );
   const panel = fixture.appRoot.querySelector(".te2-mobile-special-key-panel");
   const buttons = [...panel.querySelectorAll(".te2-mobile-special-key")];
@@ -394,11 +466,16 @@ test("keeps modifiers sticky until one dock key consumes them", async () => {
 
   pointerDown(fixture.win, trigger);
   assert.equal(panel.hidden, false);
+  assert.equal(saveTrigger.hidden, false);
   assert.equal(panel.parentElement, fixture.appRoot);
   assert.equal(
     fixture.appRoot.classList.contains("te2-mobile-special-keys-open"),
     true,
   );
+  assert.equal(fixture.win.document.activeElement, fixture.input);
+
+  pointerDown(fixture.win, saveTrigger);
+  assert.equal(saveRequests, 1);
   assert.equal(fixture.win.document.activeElement, fixture.input);
 
   pointerDown(fixture.win, ctrl);
@@ -458,6 +535,7 @@ test("keeps modifiers sticky until one dock key consumes them", async () => {
 
   pointerDown(fixture.win, trigger);
   assert.equal(panel.hidden, true);
+  assert.equal(saveTrigger.hidden, true);
   assert.equal(
     fixture.appRoot.classList.contains("te2-mobile-special-keys-open"),
     false,

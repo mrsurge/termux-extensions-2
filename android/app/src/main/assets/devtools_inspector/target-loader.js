@@ -1,6 +1,8 @@
 (function loadTe2DevToolsTarget() {
   "use strict";
 
+  if (!globalThis.__te2DevToolsTargetConfig) return;
+
   const statusEvent = "te2-devtools-target-status";
 
   function errorText(error) {
@@ -37,10 +39,27 @@
     window.eval(`${script.source}\n//# sourceURL=${script.url}`);
   }
 
+  function verifyPageRuntime() {
+    const serialized = window.eval(`JSON.stringify({
+      hasChobitsu: Boolean(
+        window.chobitsu && typeof window.chobitsu.sendRawMessage === "function"
+      ),
+      hasTargetRuntime: Boolean(
+        window.__te2DevToolsTarget &&
+          window.__te2DevToolsTarget.protocolVersion === 1
+      )
+    })`);
+    const verification = JSON.parse(String(serialized || "{}"));
+    if (!verification.hasChobitsu || !verification.hasTargetRuntime) {
+      throw new Error("Page-world Chobitsu target verification failed");
+    }
+    return verification;
+  }
+
   try {
     evaluatePackagedScript("chobitsu.js");
     evaluatePackagedScript("target-runtime.js");
-    report("ready");
+    report("ready", verifyPageRuntime());
   } catch (error) {
     report("error", errorText(error));
   }

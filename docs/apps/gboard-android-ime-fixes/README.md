@@ -61,14 +61,12 @@ recomposition into one classifier without evidence that doing so is safe.
 2. Locate edits from the previous and current line values, not from a history
    of inferred invisible-cursor positions.
 3. Ignore native selection movement when the textarea value did not change.
-4. For ordinary text input, project the textarea's resulting cursor into
-   Monaco's visible cursor.
-5. During very rapid replacement or recomposition, apply every text mutation
-   but debounce visual-cursor projection.
-6. While Gboard owns the textarea, do not rewrite its value or selection from
-   Monaco cursor/render feedback.
-7. After a quiet interval, project the latest native cursor and reconcile the
-   textarea once.
+4. Coalesce native input to one latest-value read per animation frame.
+5. Route aligned ordinary insertion through Monaco's normal typing path.
+6. Treat a native `insertLineBreak` or `insertParagraph` newline as Enter so
+   Monaco's language-aware indentation runs.
+7. Keep replacement, multiline paste, and recomposition deltas on the explicit
+   Android range-edit path, then reseed the textarea from canonical model state.
 
 The invisible cursor is not a second cursor Monaco should continuously track.
 It is temporary IME state. The full-line text delta determines what changed,
@@ -83,19 +81,23 @@ The pinned Monaco fork now:
 - derives one explicit line-relative replacement from the previous and current
   textarea values;
 - keeps value-stable native selection movement out of Monaco's visible cursor;
-- applies every text mutation while deferring only cursor projection after a
-  second mutation arrives within 35 ms;
-- keeps Monaco render/cursor writes out of the native textarea while Gboard
-  owns it;
+- coalesces native mutations to one latest-value read per animation frame;
+- carries the coalesced `InputEvent.inputType` into the model transaction so a
+  real native line break can be distinguished from pasted multiline text;
+- routes aligned ordinary insertion and native Enter through Monaco typing,
+  preserving language indentation and other typing interceptors;
+- keeps replacement, multiline paste, and recomposition deltas on one explicit
+  line-relative range edit;
 - gives pointer-event touch taps the same stale-composition reset as Monaco's
   legacy touch path, with an explicit empty textarea teardown before reseeding
   the destination line; and
-- projects the latest native cursor and rewrites canonical textarea state once
-  after 140 ms of quiet.
+- rewrites canonical textarea state after the accepted frame transaction.
 
-The rapid-input state belongs to each `TextAreaInput` instance. Event cadence
-uses the DOM event timestamps, so a delayed JavaScript handler does not change
-whether Gboard's input was classified as rapid.
+The older rapid raw-key classifier remains separate from the Android textarea
+transaction and still protects ordinary serialized paste text. Newlines are a
+hard command boundary for that classifier and always retain Monaco's Enter
+interceptor. The removed 35 ms/140 ms textarea correctness timers must not be
+restored.
 
 ## Documents
 

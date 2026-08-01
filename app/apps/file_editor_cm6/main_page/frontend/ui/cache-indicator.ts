@@ -11,6 +11,7 @@ interface CacheIndicatorControllerDeps {
   getCurrentPath: () => string | null;
   getCachedProjectRoot: () => string | null;
   getCurrentProjectRoot: () => Promise<string | null>;
+  confirmDiscard: (path: string) => Promise<boolean>;
   discardDraft: (payload: Record<string, unknown>) => Promise<unknown>;
   toast: (msg: string) => void;
   markUnsaved: (flag: boolean) => void;
@@ -23,22 +24,27 @@ function asCacheIndicatorInfo(value: unknown): CacheIndicatorInfo | null {
 }
 
 export function createCacheIndicatorController(deps: CacheIndicatorControllerDeps) {
+  let discardPending = false;
+
   async function handleDiscardClick(e: MouseEvent) {
     e.stopPropagation();
     e.preventDefault();
+    if (discardPending) return;
 
-    const currentPath = deps.getCurrentPath();
-    if (!currentPath) {
-      deps.toast('Cannot discard: No active file');
-      return;
-    }
-    const project = deps.getCachedProjectRoot() || (await deps.getCurrentProjectRoot());
-    if (!project) {
-      deps.toast('Cannot discard: Project root unknown');
-      return;
-    }
-
+    discardPending = true;
     try {
+      const currentPath = deps.getCurrentPath();
+      if (!currentPath) {
+        deps.toast('Cannot discard: No active file');
+        return;
+      }
+      const project = deps.getCachedProjectRoot() || (await deps.getCurrentProjectRoot());
+      if (!project) {
+        deps.toast('Cannot discard: Project root unknown');
+        return;
+      }
+      if (!(await deps.confirmDiscard(currentPath))) return;
+
       await deps.discardDraft({
         project,
         path: currentPath,
@@ -48,6 +54,8 @@ export function createCacheIndicatorController(deps: CacheIndicatorControllerDep
     } catch (err) {
       deps.toast('Failed to discard draft');
       console.error(err);
+    } finally {
+      discardPending = false;
     }
   }
 

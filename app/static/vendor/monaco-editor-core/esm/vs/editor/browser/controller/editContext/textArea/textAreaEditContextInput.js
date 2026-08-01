@@ -112,6 +112,7 @@ let TextAreaInput = class TextAreaInput extends Disposable {
         this._androidImeInputGeneration = 0;
         this._androidImeReseedGeneration = 0;
         this._androidImeTransactionPending = false;
+        this._androidImeInputType = '';
         let lastKeyDown = null;
         this._register(this._textArea.onKeyDown((_e) => {
             const e = new StandardKeyboardEvent(_e);
@@ -210,7 +211,7 @@ let TextAreaInput = class TextAreaInput extends Disposable {
             // result in a `selectionchange` event which we want to ignore
             this._textArea.setIgnoreSelectionChangeTime('received input event');
             if (this._browser.isAndroid && this._textAreaState.androidModelLineNumber !== undefined) {
-                this._scheduleAndroidImeInput();
+                this._scheduleAndroidImeInput(e.inputType);
                 return;
             }
             if (this._currentComposition) {
@@ -319,9 +320,10 @@ let TextAreaInput = class TextAreaInput extends Disposable {
             }
         }));
     }
-    _scheduleAndroidImeInput() {
+    _scheduleAndroidImeInput(inputType) {
         this._androidImeInputGeneration++;
         this._androidImeTransactionPending = true;
+        this._androidImeInputType = inputType;
         if (this._androidImeFrame.value) {
             return;
         }
@@ -345,7 +347,7 @@ let TextAreaInput = class TextAreaInput extends Disposable {
         const lineEdit = TextAreaState.deduceAndroidImeLineEdit(previousState, currentState);
         this._textAreaState = currentState;
         if (lineEdit) {
-            this._onAndroidImeType.fire(lineEdit);
+            this._onAndroidImeType.fire({ ...lineEdit, inputType: this._androidImeInputType });
         }
         this._androidImeReseedGeneration = generation;
         this._androidImeReseed.schedule();
@@ -361,6 +363,7 @@ let TextAreaInput = class TextAreaInput extends Disposable {
         this._androidImeFrame.clear();
         this._androidImeReseed.cancel();
         this._androidImeTransactionPending = false;
+        this._androidImeInputType = '';
     }
     _installSelectionChangeListener() {
         // See https://github.com/microsoft/vscode/issues/27216 and https://github.com/microsoft/vscode/issues/98256

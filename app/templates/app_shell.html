@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta id="app-shell-viewport" name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
-    <title>Termux App</title>
+    <title>TE2 App</title>
     <link rel="manifest" href="/static/manifest.webmanifest">
     <link rel="apple-touch-icon" href="/static/icon.png">
     <meta name="theme-color" content="#4caf50">
@@ -595,7 +595,7 @@
                         reject(new Error(`Lifecycle bootstrap for app "${appId}" has no frontend entrypoint.`));
                         return;
                     }
-                    host.setTitle(appDef.name || 'Termux App');
+                    host.setTitle(appDef.name || 'TE2 App');
                     if (!appRequiresBackend(appDef) || !appSupportsReadiness(appDef)) {
                         resolveApp();
                         return;
@@ -697,7 +697,7 @@
                 stateCache.delete(stateKey);
                 persistStateRemove(stateKey);
             },
-            setTitle: (title) => { document.title = title || 'Termux App'; appTitleEl.textContent = title || 'App'; },
+            setTitle: (title) => { document.title = title || 'TE2 App'; appTitleEl.textContent = title || 'App'; },
             onBeforeExit: (handler) => { window.__appBeforeExitHandler = handler; },
             toast: (msg) => { try { if (window.teUI && window.teUI.toast) window.teUI.toast(msg); } catch (_) {} },
         };

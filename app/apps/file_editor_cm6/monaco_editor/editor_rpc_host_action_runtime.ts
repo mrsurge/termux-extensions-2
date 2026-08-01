@@ -4,6 +4,7 @@ import { bindVendoredCtrlHelperFocus } from './editor_mobile_ctrl_helper_utils.t
 import { bindAndroidKeyboardRecovery } from './editor_android_keyboard_recovery_utils.ts';
 import { bindMobileEditorSpecialKeys } from './editor_mobile_special_keys_utils.ts';
 import {
+  EDITOR_RPC_METHODS,
   EDITOR_RPC_NOTIFICATIONS,
   type EditorRpcMethodName,
   type EditorRpcNotificationName,
@@ -187,6 +188,9 @@ export function createEditorRpcHostActionRuntime(
       mobileSpecialKeysDisposable = bindMobileEditorSpecialKeys(
         editor,
         deps.getWindow(),
+        () => {
+          deps.notifyEditorRpc(EDITOR_RPC_METHODS.hostSave, {});
+        },
       );
     } catch (error) {
       console.warn('[mobile_special_keys] bind failed', error);

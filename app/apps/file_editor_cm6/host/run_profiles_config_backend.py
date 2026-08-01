@@ -198,6 +198,15 @@ def _run_profile_contract() -> JsonMap:
             description="Uncheck to run this profile without the confirmation dialog.",
         ),
         _field(
+            "devTools",
+            "Enable native developer tools for Sidebar URL",
+            "checkbox",
+            description=(
+                "Expose this profile's Sidebar URL as a selectable GeckoView "
+                "Inspector target."
+            ),
+        ),
+        _field(
             "exec",
             "Exec",
             "text",

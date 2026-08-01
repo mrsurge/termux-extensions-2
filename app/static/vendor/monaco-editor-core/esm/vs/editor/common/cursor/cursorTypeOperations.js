@@ -20,6 +20,10 @@ function te2ShouldBypassTypingInterceptors(ch, isDoingComposition) {
     if (isDoingComposition || !ch) {
         return false;
     }
+    if (ch === '\n') {
+        // Enter is a command boundary, not paste payload. Preserve language indentation.
+        return false;
+    }
     const now = te2Now();
     if (ch.length > 1) {
         te2SyntheticTypeEvents = [];

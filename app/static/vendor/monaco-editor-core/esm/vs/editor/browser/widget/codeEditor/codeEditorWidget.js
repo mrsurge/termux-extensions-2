@@ -69,6 +69,9 @@ function te2ShouldSuppressDidType(source, text) {
     if (source !== 'keyboard' || !text) {
         return false;
     }
+    if (text === '\n') {
+        return false;
+    }
     const now = te2Now();
     if (text.length > 1) {
         te2SyntheticDidTypeEvents = [];

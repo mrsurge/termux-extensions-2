@@ -33,6 +33,11 @@ import {
   UI_PREF_KEY_TOGGLE_DISPLAY,
 } from "./constants.ts";
 import {
+  configureDevToolsTargetNavigation,
+  devToolsTargetWindowName,
+  shouldRecreateDevToolsTargetFrame,
+} from "./devtools-target.ts";
+import {
   deriveAppIdFromShellEvent as _deriveAppIdFromShellEvent,
   frameworkEventsUrl as _frameworkEventsUrl,
   parseShellEvent,
@@ -835,6 +840,20 @@ export function initSidebarShortcuts(
         restore_url: restoreUrl || url,
         restoreUrl: restoreUrl || url,
         readiness: win.readiness || null,
+        dev_tools: win.dev_tools === true || win.devTools === true,
+        devTools: win.dev_tools === true || win.devTools === true,
+        devtools_target_id: _normStr(
+          win.devtools_target_id || win.devToolsTargetId,
+        ),
+        devToolsTargetId: _normStr(
+          win.devtools_target_id || win.devToolsTargetId,
+        ),
+        devtools_target_label: _normStr(
+          win.devtools_target_label || win.devToolsTargetLabel,
+        ),
+        devToolsTargetLabel: _normStr(
+          win.devtools_target_label || win.devToolsTargetLabel,
+        ),
       };
     }
     if (!appId) return null;
@@ -2319,8 +2338,9 @@ export function initSidebarShortcuts(
   function _configureShortcutIframeElement(
     iframe: HTMLIFrameElement,
     sc: SidebarShortcut,
-  ) {
-    if (!iframe || !sc) return;
+    initialUrl = "",
+  ): string {
+    if (!iframe || !sc) return "";
     iframe.className = "sidebar-iframe";
     iframe.setAttribute("data-shortcut-id", sc.key);
     iframe.setAttribute("data-shortcut-load", sc.load);
@@ -2328,12 +2348,21 @@ export function initSidebarShortcuts(
       "loading",
       sc.load === SHORTCUT_LOAD_EAGER ? "eager" : "lazy",
     );
+    return configureDevToolsTargetNavigation(iframe, sc, initialUrl);
   }
 
-  function _replaceShortcutIframe(sc: SidebarShortcut, entry: IframeEntry) {
+  function _replaceShortcutIframe(
+    sc: SidebarShortcut,
+    entry: IframeEntry,
+    initialUrl = "",
+  ) {
     if (!sidebarIframeStack || !sc || !entry || !entry.iframe) return entry;
     const nextIframe = document.createElement("iframe");
-    _configureShortcutIframeElement(nextIframe, sc);
+    const devToolsName = _configureShortcutIframeElement(
+      nextIframe,
+      sc,
+      initialUrl,
+    );
     if (entry.iframe.classList.contains("is-active")) {
       nextIframe.classList.add("is-active");
     }
@@ -2342,13 +2371,29 @@ export function initSidebarShortcuts(
     } catch (_) {
       return entry;
     }
-    const nextEntry = {
-      iframe: nextIframe,
-      url: _shortcutFrameUrl(sc, null, { forceReload: true }),
-      loaded: false,
-    };
-    _iframeMap.set(sc.key, nextEntry);
-    return nextEntry;
+    entry.iframe = nextIframe;
+    entry.url = initialUrl || _shortcutFrameUrl(sc, null, { forceReload: true });
+    entry.loaded = !!initialUrl;
+    entry.devToolsName = devToolsName;
+    _iframeMap.set(sc.key, entry);
+    return entry;
+  }
+
+  function _loadShortcutIframe(
+    sc: SidebarShortcut,
+    entry: IframeEntry,
+    loadUrl: string,
+    replace: boolean,
+  ) {
+    if (entry.devToolsName && replace) {
+      // Gecko must see the target marker and final URL when it creates the
+      // child browsing context; append-blank-then-navigate can skip injection.
+      _replaceShortcutIframe(sc, entry, loadUrl);
+      return;
+    }
+    entry.url = loadUrl;
+    entry.iframe.src = loadUrl;
+    entry.loaded = true;
   }
 
   function _shortcutRestoreUrl(sc: SidebarShortcut | null): string {
@@ -2425,17 +2470,13 @@ export function initSidebarShortcuts(
       }
 
       if (forceReload || !entry.loaded || startedNow) {
-        entry.url = loadUrl;
-        entry.iframe.src = loadUrl;
-        entry.loaded = true;
+        _loadShortcutIframe(sc, entry, loadUrl, forceReload || !entry.loaded);
       }
       return true;
     }
 
     if (!forceReload && entry.loaded) return true;
-    entry.url = loadUrl;
-    entry.iframe.src = loadUrl;
-    entry.loaded = true;
+    _loadShortcutIframe(sc, entry, loadUrl, forceReload || !entry.loaded);
     return true;
   }
 
@@ -2564,18 +2605,36 @@ export function initSidebarShortcuts(
       let entry = _iframeMap.get(sc.key);
       if (!entry) {
         const iframe = document.createElement("iframe");
-        _configureShortcutIframeElement(iframe, sc);
+        const devToolsName = _configureShortcutIframeElement(iframe, sc);
         stack.appendChild(iframe);
-        entry = { iframe, url: _shortcutFrameUrl(sc, null), loaded: false };
+        entry = {
+          iframe,
+          url: _shortcutFrameUrl(sc, null),
+          loaded: false,
+          devToolsName,
+        };
         _iframeMap.set(sc.key, entry);
+      } else if (
+        shouldRecreateDevToolsTargetFrame(
+          entry.devToolsName,
+          entry.loaded,
+          sc,
+        )
+      ) {
+        const wasLoaded = entry.loaded;
+        const initialUrl = wasLoaded
+          ? _shortcutFrameUrl(sc, null, { forceReload: true })
+          : "";
+        entry = _replaceShortcutIframe(sc, entry, initialUrl);
       }
       const loadUrl = _shortcutFrameUrl(sc, entry);
       const prevUrl = entry.url;
       entry.url = loadUrl;
-      _configureShortcutIframeElement(entry.iframe, sc);
+      entry.devToolsName = _configureShortcutIframeElement(entry.iframe, sc);
 
       if (entry.loaded && prevUrl && prevUrl !== loadUrl) {
-        entry.iframe.src = loadUrl;
+        if (entry.devToolsName) _replaceShortcutIframe(sc, entry, loadUrl);
+        else entry.iframe.src = loadUrl;
       }
     });
 

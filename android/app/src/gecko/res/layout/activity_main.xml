@@ -149,21 +149,52 @@
                 android:background="#292A2D"
                 android:visibility="gone">
 
-                <org.mozilla.geckoview.GeckoView
-                    android:id="@+id/inspectorGeckoView"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:visibility="gone" />
+                    android:orientation="vertical">
 
-                <TextView
-                    android:id="@+id/inspectorStatus"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:gravity="center"
-                    android:padding="24dp"
-                    android:text="Enable native developer tools in Android Settings."
-                    android:textColor="#FFFFFF"
-                    android:textIsSelectable="true" />
+                    <HorizontalScrollView
+                        android:id="@+id/inspectorTargetPickerScroll"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="#202124"
+                        android:fillViewport="false"
+                        android:scrollbars="none">
+
+                        <LinearLayout
+                            android:id="@+id/inspectorTargetPicker"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:paddingStart="6dp"
+                            android:paddingTop="3dp"
+                            android:paddingEnd="6dp"
+                            android:paddingBottom="3dp" />
+                    </HorizontalScrollView>
+
+                    <FrameLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1">
+
+                        <org.mozilla.geckoview.GeckoView
+                            android:id="@+id/inspectorGeckoView"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:visibility="gone" />
+
+                        <TextView
+                            android:id="@+id/inspectorStatus"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:gravity="center"
+                            android:padding="24dp"
+                            android:text="Enable native developer tools in Android Settings."
+                            android:textColor="#FFFFFF"
+                            android:textIsSelectable="true" />
+                    </FrameLayout>
+                </LinearLayout>
             </FrameLayout>
         </LinearLayout>
     </FrameLayout>

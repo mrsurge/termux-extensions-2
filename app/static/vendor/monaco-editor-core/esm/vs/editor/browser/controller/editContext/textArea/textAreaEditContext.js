@@ -247,15 +247,16 @@ let TextAreaEditContext = class TextAreaEditContext extends AbstractEditContext 
             const lineContent = model.getLineContent(e.modelLineNumber);
             const resultingValue = lineContent.substring(0, rangeStartOffset) + e.text + lineContent.substring(rangeEndOffset);
             const currentSelection = this._modelSelections[0];
-            const isAlignedInsertion = (e.text.length > 0
-                && !e.text.includes('\n')
+            const isNativeLineBreak = (e.text === '\n'
+                && (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph'));
+            const isAlignedTyping = (((e.text.length > 0 && !e.text.includes('\n')) || isNativeLineBreak)
                 && range.isEmpty()
                 && currentSelection.isEmpty()
                 && currentSelection.positionLineNumber === e.modelLineNumber
                 && currentSelection.positionColumn === range.startColumn
                 && e.selectionStartOffset === rangeStartOffset + e.text.length
                 && e.selectionEndOffset === e.selectionStartOffset);
-            if (isAlignedInsertion) {
+            if (isAlignedTyping) {
                 this._viewController.type(e.text);
                 return;
             }

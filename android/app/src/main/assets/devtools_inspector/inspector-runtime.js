@@ -4,6 +4,7 @@
   const nativeAppId = "te2_devtools_client";
   const root = document.querySelector("#devtools-root");
   const status = document.querySelector("#devtools-status");
+  const targetSelect = document.querySelector("#devtools-target");
   const parentOrigin = location.origin;
   const inboundQueue = [];
   let inboundBytes = 0;
@@ -13,6 +14,8 @@
   let reconnectTimer = 0;
   let targetReady = false;
   let targetGeneration = 0;
+  let activeTargetId = "";
+  let targets = [];
 
   function setStatus(message) {
     status.textContent = message;
@@ -68,6 +71,47 @@
     window.Te2DevToolsInspectorNative?.postMessage(JSON.stringify(message));
   }
 
+  function publishClientState(reason) {
+    postNative({
+      type: "client_state",
+      reason,
+      activeTargetId,
+      targetCount: targets.length,
+      targets: targets.map((target) => ({ ...target })),
+      selectedValue: targetSelect.value,
+      disabled: targetSelect.disabled,
+      options: [...targetSelect.options].map((option) => ({
+        value: option.value,
+        text: option.textContent || "",
+      })),
+    });
+  }
+
+  function renderTargets() {
+    targetSelect.replaceChildren();
+    if (!targets.length) {
+      const option = document.createElement("option");
+      option.textContent = "Waiting for inspected page...";
+      targetSelect.appendChild(option);
+      targetSelect.disabled = true;
+      publishClientState("render_empty");
+      return;
+    }
+
+    for (const target of targets) {
+      const option = document.createElement("option");
+      option.value = target.targetId;
+      option.textContent = target.title
+        ? `${target.targetLabel} — ${target.title}`
+        : target.targetLabel;
+      option.title = target.url || target.targetId;
+      targetSelect.appendChild(option);
+    }
+    targetSelect.disabled = false;
+    targetSelect.value = activeTargetId;
+    publishClientState("render_targets");
+  }
+
   function handleNativeMessage(message) {
     if (message?.type === "protocol" && typeof message.payload === "string") {
       queueInbound(message.payload);
@@ -78,6 +122,17 @@
       targetReady = true;
       setStatus("Connecting developer tools...");
       createFrontend();
+      return;
+    }
+    if (message?.type === "targets_changed") {
+      targets = Array.isArray(message.targets) ? message.targets : [];
+      activeTargetId =
+        typeof message.activeTargetId === "string" ? message.activeTargetId : "";
+      renderTargets();
+      return;
+    }
+    if (message?.type === "debug_state_request") {
+      publishClientState("native_request");
       return;
     }
     if (message?.type === "target_waiting") {
@@ -110,6 +165,7 @@
         scheduleReconnect();
       });
       postNative({ type: "client_ready" });
+      publishClientState("native_connected");
     } catch (_error) {
       nativePort = null;
       scheduleReconnect();
@@ -127,6 +183,15 @@
     postNative({ type: "protocol", payload: event.data });
   });
 
+  targetSelect.addEventListener("change", () => {
+    const targetId = targetSelect.value;
+    if (!targetId || targetId === activeTargetId) return;
+    postNative({ type: "target_select", targetId });
+    publishClientState("target_change");
+  });
+
+  window.addEventListener("pageshow", () => publishClientState("pageshow"));
+
   window.__te2DevToolsInspector = Object.freeze({
     receiveNativeMessage(payload) {
       if (typeof payload !== "string") return;
@@ -140,6 +205,13 @@
       return {
         targetReady,
         targetGeneration,
+        activeTargetId,
+        targets: targets.map((target) => ({ ...target })),
+        selectedValue: targetSelect.value,
+        options: [...targetSelect.options].map((option) => ({
+          value: option.value,
+          text: option.textContent || "",
+        })),
         frameReady,
         queuedMessages: inboundQueue.length,
         queuedBytes: inboundBytes,

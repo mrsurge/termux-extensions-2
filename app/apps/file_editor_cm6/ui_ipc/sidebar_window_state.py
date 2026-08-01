@@ -402,6 +402,18 @@ def _normalize_url_slot(raw: JsonObject) -> JsonObject:
         raw.get("query_state") or raw.get("queryState") or raw.get("state")
     )
     query_state["url"] = url
+    raw_dev_tools = (
+        raw.get("dev_tools") if "dev_tools" in raw else raw.get("devTools")
+    )
+    dev_tools = _as_bool(raw_dev_tools, False)
+    devtools_target_id = _norm(
+        raw.get("devtools_target_id") or raw.get("devToolsTargetId")
+    )
+    devtools_target_label = _norm(
+        raw.get("devtools_target_label") or raw.get("devToolsTargetLabel")
+    )
+    if dev_tools and not devtools_target_id:
+        raise ValueError("devTools URL slots require devToolsTargetId")
     slot: JsonObject = {
         "kind": "url",
         "host_id": host_id,
@@ -423,7 +435,20 @@ def _normalize_url_slot(raw: JsonObject) -> JsonObject:
         "updated_at": updated_at,
         "updatedAt": updated_at,
         "version": _norm(raw.get("version")),
+        "dev_tools": dev_tools,
+        "devTools": dev_tools,
     }
+    if dev_tools:
+        slot.update(
+            {
+                "dev_tools": True,
+                "devTools": True,
+                "devtools_target_id": devtools_target_id,
+                "devToolsTargetId": devtools_target_id,
+                "devtools_target_label": devtools_target_label or title,
+                "devToolsTargetLabel": devtools_target_label or title,
+            }
+        )
     return slot
 
 
@@ -664,6 +689,29 @@ def create_sidebar_window(params: JsonObject) -> JsonObject:
             "created_at": now,
             "updated_at": now,
         }
+        raw_dev_tools = (
+            params.get("dev_tools")
+            if "dev_tools" in params
+            else params.get("devTools")
+        )
+        dev_tools = _as_bool(raw_dev_tools, False)
+        url_slot.update({"dev_tools": dev_tools, "devTools": dev_tools})
+        if dev_tools:
+            target_id = _norm(
+                params.get("devtools_target_id") or params.get("devToolsTargetId")
+            )
+            target_label = _norm(
+                params.get("devtools_target_label")
+                or params.get("devToolsTargetLabel")
+            ) or label
+            url_slot.update(
+                {
+                    "devtools_target_id": target_id,
+                    "devToolsTargetId": target_id,
+                    "devtools_target_label": target_label,
+                    "devToolsTargetLabel": target_label,
+                }
+            )
         state = _upsert_slot(
             _load_pref_state(),
             url_slot,

@@ -53,6 +53,22 @@ class DevToolsProtocolBrokerTest {
     }
 
     @Test
+    fun switchingTargetsRoutesCommandsOnlyToTheCurrentEndpoint() {
+        val firstTargetMessages = mutableListOf<String>()
+        val secondTargetMessages = mutableListOf<String>()
+        val broker = DevToolsProtocolBroker()
+
+        broker.attachClient { true }
+        broker.attachTarget { firstTargetMessages.add(it) }
+        broker.routeFromClient("first")
+        broker.attachTarget { secondTargetMessages.add(it) }
+        broker.routeFromClient("second")
+
+        assertEquals(listOf("first"), firstTargetMessages)
+        assertEquals(listOf("second"), secondTargetMessages)
+    }
+
+    @Test
     fun queueOverflowIsExplicitAndBounded() {
         val overflows = mutableListOf<DevToolsProtocolBroker.Direction>()
         val broker = DevToolsProtocolBroker(
