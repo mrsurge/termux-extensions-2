@@ -133,6 +133,13 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:text="Inspector" />
+
+                <Button
+                    android:id="@+id/btnToolsProcesses"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Processes" />
             </LinearLayout>
 
             <androidx.compose.ui.platform.ComposeView
@@ -195,6 +202,20 @@
                             android:textIsSelectable="true" />
                     </FrameLayout>
                 </LinearLayout>
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/processesPanel"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:background="#292A2D"
+                android:visibility="gone">
+
+                <org.mozilla.geckoview.GeckoView
+                    android:id="@+id/processesGeckoView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent" />
             </FrameLayout>
         </LinearLayout>
     </FrameLayout>

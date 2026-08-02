@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import NotRequired, TypedDict
 
+from .document_open_policy import validate_editor_document
+
 
 class MaterializedDocumentPayload(TypedDict):
     content: str
@@ -25,6 +27,8 @@ def materialize_document_payload(
     strict_disk_errors: bool = False,
 ) -> MaterializedDocumentPayload:
     """Materialize one document using the sidecar draft as the first authority."""
+    validate_editor_document(abs_path, cached_document)
+
     if cached_document and cached_document.get("unsaved"):
         cached_content = cached_document.get("content", "")
         cached_base_sha = cached_document.get("base_sha256")

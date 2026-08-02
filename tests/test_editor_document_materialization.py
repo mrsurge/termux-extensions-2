@@ -1,16 +1,31 @@
 from __future__ import annotations
 
+# pyright: reportUnannotatedClassAttribute=false, reportUnusedCallResult=false
+
 import asyncio
 import hashlib
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from app.apps.file_editor_cm6.monaco_editor import editor_ws
+from app.apps.file_editor_cm6.monaco_editor.editor_backend_services.contracts import (
+    EditorOpenPayload,
+)
 from app.apps.file_editor_cm6.monaco_editor.editor_backend_services.document_materialization_service import (
     materialize_document_payload,
     materialize_document_payload_async,
 )
+from app.apps.file_editor_cm6.monaco_editor.editor_backend_services.document_open_policy import (
+    DocumentOpenRejectedError,
+    MAX_EDITOR_DOCUMENT_BYTES,
+)
+from app.apps.file_editor_cm6.monaco_editor.editor_backend_services.open_service import (
+    emit_editor_open_from_backend,
+)
+from app.apps.file_editor_cm6.open_state_backend import SidecarOpenStatePayload
 
 
 class _HistoryStore:
@@ -48,6 +63,61 @@ class _PreferencesStore:
 
 
 class DocumentMaterializationTests(unittest.TestCase):
+    def test_shell_script_extension_remains_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            script = Path(temp_dir) / "build.sh"
+            script.write_text("#!/bin/sh\nprintf 'ok\\n'\n", encoding="utf-8")
+
+            payload = materialize_document_payload(str(script), None)
+
+        self.assertEqual(payload["content"], "#!/bin/sh\nprintf 'ok\\n'\n")
+
+    def test_known_binary_extension_is_rejected_before_read(self) -> None:
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("disk read")):
+            with self.assertRaisesRegex(
+                DocumentOpenRejectedError,
+                r"binary_extension:\.png",
+            ):
+                materialize_document_payload("/project/image.png", None)
+
+    def test_extensionless_executable_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            executable = Path(temp_dir) / "runner"
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            os.chmod(executable, 0o755)
+
+            with self.assertRaisesRegex(
+                DocumentOpenRejectedError,
+                "extensionless_executable",
+            ):
+                materialize_document_payload(str(executable), None)
+
+    def test_oversized_disk_document_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            document = Path(temp_dir) / "large.txt"
+            document.write_bytes(b"x" * (MAX_EDITOR_DOCUMENT_BYTES + 1))
+
+            with self.assertRaisesRegex(DocumentOpenRejectedError, "file_too_large"):
+                materialize_document_payload(str(document), None)
+
+    def test_document_at_size_limit_is_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            document = Path(temp_dir) / "limit.txt"
+            document.write_bytes(b"x" * MAX_EDITOR_DOCUMENT_BYTES)
+
+            payload = materialize_document_payload(str(document), None)
+
+        self.assertEqual(len(payload["content"]), MAX_EDITOR_DOCUMENT_BYTES)
+
+    def test_oversized_draft_is_rejected_without_reading_disk(self) -> None:
+        cached = {
+            "unsaved": True,
+            "content": "x" * (MAX_EDITOR_DOCUMENT_BYTES + 1),
+        }
+        with patch.object(Path, "read_bytes", side_effect=AssertionError("disk read")):
+            with self.assertRaisesRegex(DocumentOpenRejectedError, "draft_too_large"):
+                materialize_document_payload("/project/large.txt", cached)
+
     def test_unsaved_draft_wins_without_reading_disk(self) -> None:
         cached = {
             "unsaved": True,
@@ -157,6 +227,65 @@ class DocumentMaterializationTests(unittest.TestCase):
 
 
 class AsyncDocumentMaterializationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rejected_document_does_not_mutate_open_state(self) -> None:
+        mutations: list[str] = []
+
+        def reject_read(project: str, path: str) -> EditorOpenPayload:
+            del project
+            raise DocumentOpenRejectedError(path, "binary_extension:.png")
+
+        async def emit_open(payload: EditorOpenPayload) -> None:
+            del payload
+            mutations.append("emit_open")
+
+        async def emit_state(
+            open_state: SidecarOpenStatePayload,
+            *,
+            source: str | None = None,
+            request_id: str | None = None,
+        ) -> None:
+            del open_state, source, request_id
+            mutations.append("emit_state")
+
+        def record_sidecar(
+            project: str,
+            abs_path: str,
+            *,
+            reason: str,
+        ) -> SidecarOpenStatePayload:
+            del project, abs_path, reason
+            mutations.append("sidecar")
+            return {
+                "projectPath": "/project",
+                "sidecarPath": "/sidecar",
+                "openFile": None,
+                "openFileRel": None,
+                "openFileExists": False,
+                "invalidOpenFile": None,
+                "revision": 0,
+                "reason": "test",
+                "ts": 0,
+                "recents": [],
+            }
+
+        with self.assertRaises(DocumentOpenRejectedError):
+            await emit_editor_open_from_backend(
+                {"path": "/project/image.png"},
+                source_client="test",
+                request_id="open_rejected",
+                active_project=lambda: "/project",
+                normalize_abs_path=lambda path: path,
+                is_under_project=lambda project, path: path.startswith(project + "/"),
+                read_file_payload=reject_read,
+                update_session_state=lambda state: mutations.append("session"),
+                set_last_file=lambda project, path: None,
+                emit_editor_open=emit_open,
+                record_sidecar_open_file=record_sidecar,
+                emit_open_state_changed=emit_state,
+            )
+
+        self.assertEqual(mutations, [])
+
     async def test_async_materializer_runs_sync_work_through_to_thread(self) -> None:
         expected = {
             "has_draft": True,

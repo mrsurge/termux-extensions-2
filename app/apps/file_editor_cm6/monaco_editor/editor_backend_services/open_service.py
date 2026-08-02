@@ -111,15 +111,6 @@ async def emit_editor_open_from_backend(
     metrics_enabled = diagnostics_latency_metrics_enabled()
 
     try:
-        state_started_ns = time.perf_counter_ns() if metrics_enabled else 0
-        open_state = record_sidecar_open_file(project, path, reason="file_open")
-        update_session_state({"currentPath": path})
-        record_open_stage(
-            request_id,
-            "backend_state_recorded",
-            duration_ms=elapsed_ms(state_started_ns),
-        )
-
         read_started_ns = time.perf_counter_ns() if metrics_enabled else 0
         payload = read_file_payload(project, path)
         record_open_stage(
@@ -127,6 +118,17 @@ async def emit_editor_open_from_backend(
             "backend_file_read",
             duration_ms=elapsed_ms(read_started_ns),
         )
+
+        # Materialization validates the document before it becomes active or recent.
+        state_started_ns = time.perf_counter_ns() if metrics_enabled else 0
+        open_state = record_sidecar_open_file(project, path, reason="file_open")
+        _ = update_session_state({"currentPath": path})
+        record_open_stage(
+            request_id,
+            "backend_state_recorded",
+            duration_ms=elapsed_ms(state_started_ns),
+        )
+
         payload["source_client"] = source_client
         payload["request_id"] = request_id
         explicit_reason = get_str(normalized, "reason", "")
@@ -140,7 +142,7 @@ async def emit_editor_open_from_backend(
         scroll_to_top = fields["scroll_to_top"]
 
         if line is not None:
-            payload.pop("scroll_line", None)
+            _ = payload.pop("scroll_line", None)
             payload["line"] = line
         if column is not None:
             payload["column"] = column

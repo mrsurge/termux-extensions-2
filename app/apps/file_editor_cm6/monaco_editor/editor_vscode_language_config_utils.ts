@@ -149,6 +149,36 @@ function reviveFoldingRules(
   return Object.keys(result).length ? result : undefined;
 }
 
+function reviveAutoClosingPairs(value: unknown): JsonRecord[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const result: JsonRecord[] = [];
+  for (const entry of value) {
+    if (
+      Array.isArray(entry) &&
+      typeof entry[0] === "string" &&
+      typeof entry[1] === "string"
+    ) {
+      result.push({ open: entry[0], close: entry[1] });
+      continue;
+    }
+    if (
+      isRecord(entry) &&
+      typeof entry.open === "string" &&
+      typeof entry.close === "string"
+    ) {
+      const pair: JsonRecord = { open: entry.open, close: entry.close };
+      if (
+        Array.isArray(entry.notIn) &&
+        entry.notIn.every((item) => typeof item === "string")
+      ) {
+        pair.notIn = entry.notIn;
+      }
+      result.push(pair);
+    }
+  }
+  return result.length ? result : undefined;
+}
+
 function reviveVscodeLanguageConfiguration(
   languageId: string,
   rawConfig: JsonRecord,
@@ -157,8 +187,6 @@ function reviveVscodeLanguageConfiguration(
   for (const key of [
     "comments",
     "brackets",
-    "autoClosingPairs",
-    "surroundingPairs",
     "colorizedBracketPairs",
     "autoCloseBefore",
     "__electricCharacterSupport",
@@ -176,10 +204,14 @@ function reviveVscodeLanguageConfiguration(
   );
   const onEnterRules = reviveOnEnterRules(languageId, rawConfig.onEnterRules);
   const folding = reviveFoldingRules(languageId, rawConfig.folding);
+  const autoClosingPairs = reviveAutoClosingPairs(rawConfig.autoClosingPairs);
+  const surroundingPairs = reviveAutoClosingPairs(rawConfig.surroundingPairs);
   if (wordPattern) config.wordPattern = wordPattern;
   if (indentationRules) config.indentationRules = indentationRules;
   if (onEnterRules) config.onEnterRules = onEnterRules;
   if (folding) config.folding = folding;
+  if (autoClosingPairs) config.autoClosingPairs = autoClosingPairs;
+  if (surroundingPairs) config.surroundingPairs = surroundingPairs;
   return config;
 }
 

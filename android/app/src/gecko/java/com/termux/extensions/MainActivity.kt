@@ -42,6 +42,7 @@ import org.mozilla.geckoview.StorageController
 import org.mozilla.geckoview.WebExtension
 import org.mozilla.geckoview.WebExtensionController
 import android.view.inputmethod.InputMethodManager
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : AppCompatActivity() {
@@ -57,8 +58,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var inspectorStatus: TextView
     private lateinit var inspectorTargetPickerScroll: HorizontalScrollView
     private lateinit var inspectorTargetPicker: LinearLayout
+    private lateinit var processesPanel: FrameLayout
+    private lateinit var processesGeckoView: GeckoView
     private lateinit var btnToolsConsole: Button
     private lateinit var btnToolsInspector: Button
+    private lateinit var btnToolsProcesses: Button
 
     private val editorInputFilter = EditorInputFilter()
     private val composeConsoleState = ComposeConsoleState()
@@ -67,7 +71,12 @@ class MainActivity : AppCompatActivity() {
     private var devToolsInspector: GeckoDevToolsInspector? = null
     private var devToolsInspectorEnabled = false
     private var devToolsInspectorStatus = "disabled"
-    private var toolsConsoleSelected = true
+    private var processesSession: GeckoSession? = null
+    private var processesLoadedUrl: String? = null
+    private lateinit var toolsStateStore: AndroidToolsStateStore
+    private var toolsState = AndroidToolsState()
+    private var toolsSelectedTab = NativeToolsTab.CONSOLE
+    private var androidDiagnosticsLoadedForTools = false
 
     private var editorAssetManager: EditorAssetManager? = null
     private var localAssetServer: LocalAssetServer? = null
@@ -82,8 +91,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnConsoleStart: Button
 
     private val httpClient = OkHttpClient()
+    private val appHealthHttpClient = OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(2, TimeUnit.SECONDS)
+        .writeTimeout(2, TimeUnit.SECONDS)
+        .build()
     private val uiHandler = Handler(Looper.getMainLooper())
     private val assetUpdateInFlight = AtomicBoolean(false)
+    private val appHealthProbeInFlight = AtomicBoolean(false)
+    private var appHealthFailureCount = 0
+    private var activityResumed = false
+    private val appHealthCheckRunnable = Runnable { runAppHealthProbe() }
 
     private var frameworkBaseUrl: String = DEFAULT_FRAMEWORK_URL
     private var currentAppId: String = DEFAULT_APP_ID
@@ -133,14 +151,21 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun shouldRestoreRemoteAppSession(): Boolean {
-        val lastUrl = loadLastUrl() ?: return false
-        return try {
-            val path = Uri.parse(lastUrl).path.orEmpty()
-            path == "/app" || path.startsWith("/app/")
-        } catch (_: Exception) {
-            false
-        }
+    private fun appIdFromRemoteAppUri(uri: Uri): String? {
+        if (!isFrameworkOrigin(uri)) return null
+        val segments = uri.pathSegments
+        if (segments.size < 2 || segments[0] != "app") return null
+        return segments[1].takeIf { it.isNotBlank() }
+    }
+
+    private fun applyNavigationState(uri: Uri) {
+        val appId = appIdFromRemoteAppUri(uri)
+        if (appId != null && appId != currentAppId) appHealthFailureCount = 0
+        inAppShell = appId != null
+        if (appId != null) currentAppId = appId
+        nativeHeader.visibility = if (inAppShell) View.VISIBLE else View.GONE
+        updatePersistentNetworkService()
+        updateAppHealthMonitoring(immediate = true)
     }
 
     private fun effectivePort(uri: Uri): Int {
@@ -421,9 +446,7 @@ class MainActivity : AppCompatActivity() {
 
                     val isAppShell = isAppShellUrl(uri)
                     runOnUiThread {
-                        inAppShell = isAppShell
-                        nativeHeader.visibility = if (inAppShell) View.VISIBLE else View.GONE
-                        updatePersistentNetworkService()
+                        applyNavigationState(uri)
                     }
 
                     if (!isAppShell) {
@@ -471,34 +494,11 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) {
         }
 
-        val restored = try {
-            val st = loadSavedSessionState()
-            if (st != null && shouldRestoreRemoteAppSession()) {
-                geckoSession.restoreState(st)
-                true
-            } else {
-                false
-            }
-        } catch (_: Exception) {
-            false
-        }
-
         try {
             geckoSession.setActive(true)
         } catch (_: Exception) {
         }
-
-        if (!restored) {
-            val last = loadLastUrl()
-            if (!last.isNullOrBlank() && shouldRestoreRemoteAppSession()) {
-                try {
-                    geckoSession.loadUri(last)
-                } catch (_: Exception) {
-                }
-            } else {
-                loadHome()
-            }
-        }
+        restoreRemoteSessionAfterHealthCheck()
     }
 
     private fun dpToPx(dp: Int): Int {
@@ -558,6 +558,9 @@ class MainActivity : AppCompatActivity() {
         androidDiagnostics = AndroidDiagnostics(applicationContext)
         androidDiagnostics.beginSession()
         androidSettingsStore = AndroidAppSettingsStore(applicationContext)
+        toolsStateStore = AndroidToolsStateStore(applicationContext)
+        toolsState = toolsStateStore.load()
+        toolsSelectedTab = toolsState.selectedTab
         applyAndroidSettings(androidSettingsStore.load(), reconnect = false)
         setContentView(R.layout.activity_main)
 
@@ -572,8 +575,11 @@ class MainActivity : AppCompatActivity() {
         inspectorStatus = findViewById(R.id.inspectorStatus)
         inspectorTargetPickerScroll = findViewById(R.id.inspectorTargetPickerScroll)
         inspectorTargetPicker = findViewById(R.id.inspectorTargetPicker)
+        processesPanel = findViewById(R.id.processesPanel)
+        processesGeckoView = findViewById(R.id.processesGeckoView)
         btnToolsConsole = findViewById(R.id.btnToolsConsole)
         btnToolsInspector = findViewById(R.id.btnToolsInspector)
+        btnToolsProcesses = findViewById(R.id.btnToolsProcesses)
         composeConsoleState.bind(
             composeConsoleContainer,
             onSendEval = { code, target ->
@@ -604,6 +610,7 @@ class MainActivity : AppCompatActivity() {
         btnConsoleStart.setOnClickListener { flushBrowserCache() }
         btnToolsConsole.setOnClickListener { showConsoleTools() }
         btnToolsInspector.setOnClickListener { showInspectorTools() }
+        btnToolsProcesses.setOnClickListener { showProcessesTools() }
 
         findViewById<Button>(R.id.btnUpdateTe2).setOnClickListener { updateTe2Ui() }
 
@@ -870,9 +877,7 @@ class MainActivity : AppCompatActivity() {
 
                     val isAppShell = isAppShellUrl(uri)
                     runOnUiThread {
-                        inAppShell = isAppShell
-                        nativeHeader.visibility = if (inAppShell) View.VISIBLE else View.GONE
-                        updatePersistentNetworkService()
+                        applyNavigationState(uri)
                     }
 
                     if (!isAppShell) {
@@ -909,6 +914,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread { updateDevToolsTargetPicker(targets, activeTargetId) }
             },
         )
+        restoreToolsSurfaceState()
 
         // A blank open session starts Gecko's extension process. Restore and
         // navigation remain locked until the local static route is confirmed.
@@ -932,25 +938,13 @@ class MainActivity : AppCompatActivity() {
     private fun unlockGeckoNavigation() {
         if (!assetInterceptorReady) return
 
-        val restored = try {
-            val state = loadSavedSessionState()
-            if (state != null && shouldRestoreRemoteAppSession()) {
-                geckoSession.restoreState(state)
-                true
-            } else {
-                false
-            }
-        } catch (_: Exception) {
-            false
-        }
-
         Log.i("MainActivity", "Asset interceptor ready; Gecko navigation unlocked")
-        if (!restored) loadHome()
-        wakeFrameworkAndLoad(forceLoadHome = false)
+        wakeFrameworkAndLoad(forceLoadHome = false, restoreRemoteSession = true)
     }
 
     override fun onResume() {
         super.onResume()
+        activityResumed = true
         persistentNetworkPermissionDenied = false
         persistentNetworkStartFailed = false
         try {
@@ -973,9 +967,19 @@ class MainActivity : AppCompatActivity() {
                 }
             }, 300)
         }
+        if (
+            toolsSelectedTab == NativeToolsTab.PROCESSES &&
+            consoleOverlay.visibility == View.VISIBLE
+        ) {
+            try { processesSession?.setActive(true) } catch (_: Exception) {}
+        }
+        updateAppHealthMonitoring(immediate = true)
     }
 
     override fun onPause() {
+        activityResumed = false
+        uiHandler.removeCallbacks(appHealthCheckRunnable)
+        try { processesSession?.setActive(false) } catch (_: Exception) {}
         try {
             if (::geckoSession.isInitialized) geckoSession.setActive(false)
         } catch (_: Exception) {
@@ -1182,6 +1186,8 @@ class MainActivity : AppCompatActivity() {
         if (!::geckoSession.isInitialized) return
         if (!requireAssetInterceptor("home navigation")) return
         inAppShell = false
+        appHealthFailureCount = 0
+        uiHandler.removeCallbacks(appHealthCheckRunnable)
         nativeHeader.visibility = View.GONE
         updatePersistentNetworkService()
         val server = localAssetServer
@@ -1201,9 +1207,11 @@ class MainActivity : AppCompatActivity() {
         nativeHeader.visibility = View.VISIBLE
         updatePersistentNetworkService()
         currentAppId = appId
+        appHealthFailureCount = 0
         isLocked = false
         findViewById<Button>(R.id.btnLock).text = "Lock"
         geckoSession.loadUri(frameworkBaseUrl.trimEnd('/') + "/app/" + appId + "?gv_native=1")
+        updateAppHealthMonitoring(immediate = true)
     }
 
     private fun showRecents() {
@@ -1301,7 +1309,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun showConsoleOverlay() {
         consoleOverlay.visibility = View.VISIBLE
-        showConsoleTools()
+        persistToolsState(overlayVisible = true)
+        showToolsTab(toolsSelectedTab)
         // Show asset version inline with title
         try {
             val ver = editorAssetManager?.getLocalVersion() ?: "unknown"
@@ -1311,9 +1320,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun hideConsoleOverlay() {
         consoleOverlay.visibility = View.GONE
+        persistToolsState(overlayVisible = false)
         devToolsInspector?.setVisible(false)
+        try { processesSession?.setActive(false) } catch (_: Exception) {}
         uiIpcClient?.setConsoleDrawerEnabled(false)
-        composeConsoleState.resetSession()
     }
 
     private fun toggleConsoleOverlay() {
@@ -1321,26 +1331,103 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showConsoleTools() {
-        toolsConsoleSelected = true
-        composeConsoleContainer.visibility = View.VISIBLE
-        inspectorPanel.visibility = View.GONE
-        devToolsInspector?.setVisible(false)
-        btnToolsConsole.isEnabled = false
-        btnToolsInspector.isEnabled = true
-        composeConsoleState.resetSession()
-        loadAndroidDiagnosticsIntoTools()
-        uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
+        showToolsTab(NativeToolsTab.CONSOLE)
     }
 
     private fun showInspectorTools() {
-        toolsConsoleSelected = false
-        composeConsoleContainer.visibility = View.GONE
-        inspectorPanel.visibility = View.VISIBLE
-        btnToolsConsole.isEnabled = true
-        btnToolsInspector.isEnabled = false
-        uiIpcClient?.setConsoleDrawerEnabled(false)
-        composeConsoleState.resetSession()
+        showToolsTab(NativeToolsTab.INSPECTOR)
+    }
+
+    private fun showProcessesTools() {
+        showToolsTab(NativeToolsTab.PROCESSES)
+    }
+
+    private fun showToolsTab(tab: NativeToolsTab) {
+        toolsSelectedTab = tab
+        persistToolsState(selectedTab = tab)
+        val consoleSelected = tab == NativeToolsTab.CONSOLE
+        val inspectorSelected = tab == NativeToolsTab.INSPECTOR
+        val processesSelected = tab == NativeToolsTab.PROCESSES
+
+        composeConsoleContainer.visibility = if (consoleSelected) View.VISIBLE else View.GONE
+        inspectorPanel.visibility = if (inspectorSelected) View.VISIBLE else View.GONE
+        processesPanel.visibility = if (processesSelected) View.VISIBLE else View.GONE
+        btnToolsConsole.isEnabled = !consoleSelected
+        btnToolsInspector.isEnabled = !inspectorSelected
+        btnToolsProcesses.isEnabled = !processesSelected
+
+        uiIpcClient?.setConsoleDrawerEnabled(
+            consoleOverlay.visibility == View.VISIBLE && consoleSelected,
+            CONSOLE_TAIL_LINES,
+        )
+        if (
+            consoleSelected &&
+            consoleOverlay.visibility == View.VISIBLE &&
+            !androidDiagnosticsLoadedForTools
+        ) {
+            androidDiagnosticsLoadedForTools = true
+            loadAndroidDiagnosticsIntoTools()
+        }
+
         updateDevToolsInspectorSurface()
+        if (processesSelected) {
+            ensureProcessesSession()
+        } else {
+            try { processesSession?.setActive(false) } catch (_: Exception) {}
+        }
+    }
+
+    private fun persistToolsState(
+        overlayVisible: Boolean = toolsState.overlayVisible,
+        selectedTab: NativeToolsTab = toolsState.selectedTab,
+        inspectorTargetId: String? = toolsState.inspectorTargetId,
+    ) {
+        toolsState = AndroidToolsState(
+            overlayVisible = overlayVisible,
+            selectedTab = selectedTab,
+            inspectorTargetId = inspectorTargetId,
+        )
+        toolsStateStore.save(toolsState)
+    }
+
+    private fun restoreToolsSurfaceState() {
+        consoleOverlay.visibility = if (toolsState.overlayVisible) View.VISIBLE else View.GONE
+        toolsSelectedTab = toolsState.selectedTab
+        showToolsTab(toolsSelectedTab)
+        if (!toolsState.overlayVisible) {
+            devToolsInspector?.setVisible(false)
+            try { processesSession?.setActive(false) } catch (_: Exception) {}
+            uiIpcClient?.setConsoleDrawerEnabled(false)
+        }
+    }
+
+    private fun ensureProcessesSession() {
+        val session = processesSession ?: GeckoSession(
+            GeckoSessionSettings.Builder().usePrivateMode(false).build(),
+        ).also { created ->
+            created.open(runtime)
+            processesGeckoView.setSession(created)
+            processesSession = created
+        }
+        val url = frameworkBaseUrl.trimEnd('/') + "/fws"
+        if (processesLoadedUrl != url) {
+            processesLoadedUrl = url
+            session.loadUri(url)
+        }
+        try {
+            session.setActive(
+                activityResumed &&
+                    consoleOverlay.visibility == View.VISIBLE &&
+                    toolsSelectedTab == NativeToolsTab.PROCESSES,
+            )
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun reloadProcessesSessionForSettings() {
+        if (processesLoadedUrl == frameworkBaseUrl.trimEnd('/') + "/fws") return
+        processesLoadedUrl = null
+        if (toolsSelectedTab == NativeToolsTab.PROCESSES) ensureProcessesSession()
     }
 
     private fun updateDevToolsInspectorStatus(status: String) {
@@ -1358,6 +1445,15 @@ class MainActivity : AppCompatActivity() {
         activeTargetId: String?,
     ) {
         if (!::inspectorTargetPicker.isInitialized) return
+        val persistedTargetId = toolsState.inspectorTargetId
+        if (
+            !persistedTargetId.isNullOrBlank() &&
+            activeTargetId != persistedTargetId &&
+            targets.any { it.targetId == persistedTargetId } &&
+            devToolsInspector?.selectTarget(persistedTargetId) == true
+        ) {
+            return
+        }
         inspectorTargetPicker.removeAllViews()
 
         if (targets.isEmpty()) {
@@ -1389,7 +1485,11 @@ class MainActivity : AppCompatActivity() {
                 setPadding(dpToPx(12), 0, dpToPx(12), 0)
                 isEnabled = target.targetId != activeTargetId
                 setOnClickListener {
-                    devToolsInspector?.selectTarget(target.targetId)
+                    val previousTargetId = toolsState.inspectorTargetId
+                    persistToolsState(inspectorTargetId = target.targetId)
+                    if (devToolsInspector?.selectTarget(target.targetId) != true) {
+                        persistToolsState(inspectorTargetId = previousTargetId)
+                    }
                 }
             }
             inspectorTargetPicker.addView(
@@ -1418,7 +1518,7 @@ class MainActivity : AppCompatActivity() {
         val inspectorSelected =
             ::consoleOverlay.isInitialized &&
                 consoleOverlay.visibility == View.VISIBLE &&
-                !toolsConsoleSelected
+                toolsSelectedTab == NativeToolsTab.INSPECTOR
         val showClient =
             inspectorSelected &&
                 devToolsInspectorEnabled &&
@@ -1667,6 +1767,8 @@ class MainActivity : AppCompatActivity() {
 
         runOnUiThread {
             updatePersistentNetworkService()
+            reloadProcessesSessionForSettings()
+            updateAppHealthMonitoring(immediate = true)
         }
         uiIpcClient?.setImeContextSwitchingEnabled(settings.imeContextSwitchingEnabled)
         uiIpcClient?.disconnect()
@@ -1695,7 +1797,116 @@ class MainActivity : AppCompatActivity() {
         wakeFrameworkAndLoad(forceLoadHome = false)
     }
 
-    private fun wakeFrameworkAndLoad(forceLoadHome: Boolean = true) {
+    private fun savedRemoteAppId(): String? {
+        val lastUrl = loadLastUrl() ?: return null
+        return try {
+            appIdFromRemoteAppUri(Uri.parse(lastUrl))
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun probeRemoteAppHealth(
+        frameworkUrl: String,
+        appId: String?,
+    ): AndroidRemoteAppHealth {
+        if (appId.isNullOrBlank()) return AndroidRemoteAppHealth.UNHEALTHY
+        val url = frameworkUrl.trimEnd('/') + "/api/apps/running"
+        return try {
+            val request = Request.Builder().url(url).get().build()
+            appHealthHttpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return AndroidRemoteAppHealth.UNREACHABLE
+                evaluateRunningAppsPayload(response.body?.string().orEmpty(), appId)
+            }
+        } catch (_: Exception) {
+            AndroidRemoteAppHealth.UNREACHABLE
+        }
+    }
+
+    private fun restoreSavedRemoteSession(health: AndroidRemoteAppHealth) {
+        val appId = savedRemoteAppId()
+        if (health != AndroidRemoteAppHealth.HEALTHY || appId == null) {
+            loadHome()
+            return
+        }
+
+        val restored = try {
+            val state = loadSavedSessionState()
+            if (state != null) {
+                geckoSession.restoreState(state)
+                true
+            } else {
+                false
+            }
+        } catch (_: Exception) {
+            false
+        }
+        if (!restored) {
+            val lastUrl = loadLastUrl()
+            if (lastUrl.isNullOrBlank()) {
+                loadHome()
+                return
+            }
+            geckoSession.loadUri(lastUrl)
+        }
+        currentAppId = appId
+        inAppShell = true
+        nativeHeader.visibility = View.VISIBLE
+        updatePersistentNetworkService()
+        updateAppHealthMonitoring(immediate = true)
+    }
+
+    private fun restoreRemoteSessionAfterHealthCheck() {
+        val frameworkUrl = frameworkBaseUrl
+        val appId = savedRemoteAppId()
+        Thread {
+            val health = probeRemoteAppHealth(frameworkUrl, appId)
+            runOnUiThread { restoreSavedRemoteSession(health) }
+        }.start()
+    }
+
+    private fun updateAppHealthMonitoring(immediate: Boolean = false) {
+        uiHandler.removeCallbacks(appHealthCheckRunnable)
+        if (!activityResumed || !inAppShell || !assetInterceptorReady) return
+        uiHandler.postDelayed(
+            appHealthCheckRunnable,
+            if (immediate) 0L else APP_HEALTH_INTERVAL_MS,
+        )
+    }
+
+    private fun runAppHealthProbe() {
+        if (!activityResumed || !inAppShell || !assetInterceptorReady) return
+        if (!appHealthProbeInFlight.compareAndSet(false, true)) return
+        val appId = currentAppId
+        val frameworkUrl = frameworkBaseUrl
+        Thread {
+            val health = probeRemoteAppHealth(frameworkUrl, appId)
+            runOnUiThread {
+                appHealthProbeInFlight.set(false)
+                if (!activityResumed || !inAppShell || currentAppId != appId) return@runOnUiThread
+                if (health == AndroidRemoteAppHealth.HEALTHY) {
+                    appHealthFailureCount = 0
+                } else {
+                    appHealthFailureCount += 1
+                    Log.w(
+                        "MainActivity",
+                        "Remote app health failure $appHealthFailureCount/" +
+                            "$APP_HEALTH_FAILURE_LIMIT app=$appId state=$health",
+                    )
+                }
+                if (appHealthFailureCount >= APP_HEALTH_FAILURE_LIMIT) {
+                    loadHome()
+                } else {
+                    updateAppHealthMonitoring()
+                }
+            }
+        }.start()
+    }
+
+    private fun wakeFrameworkAndLoad(
+        forceLoadHome: Boolean = true,
+        restoreRemoteSession: Boolean = false,
+    ) {
         Thread {
             val base = IPC_SLEEP_BASE_URL.trimEnd('/')
             val settings = androidSettingsStore.load()
@@ -1777,15 +1988,27 @@ class MainActivity : AppCompatActivity() {
                     composeConsoleState.onConsoleEvent(eventName, data)
                 }
                 uiIpcClient?.connect(frameworkUrl)
-                if (consoleOverlay.visibility == View.VISIBLE && toolsConsoleSelected) {
+                if (
+                    consoleOverlay.visibility == View.VISIBLE &&
+                    toolsSelectedTab == NativeToolsTab.CONSOLE
+                ) {
                     uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
                 }
             } catch (e: Exception) {
                 android.util.Log.w("MainActivity", "UiIpcClient setup failed", e)
             }
 
+            val restoreHealth = if (restoreRemoteSession) {
+                probeRemoteAppHealth(frameworkUrl, savedRemoteAppId())
+            } else {
+                null
+            }
             runOnUiThread {
-                if (forceLoadHome) {
+                if (restoreRemoteSession) {
+                    restoreSavedRemoteSession(
+                        restoreHealth ?: AndroidRemoteAppHealth.UNREACHABLE,
+                    )
+                } else if (forceLoadHome) {
                     loadHome()
                 } else {
                     // If we restored session state, don't clobber it by forcing a fresh home load.
@@ -1818,12 +2041,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        uiHandler.removeCallbacks(appHealthCheckRunnable)
         uiIpcClient?.disconnect()
         uiIpcClient = null
         nativeConsoleWorker?.disconnect()
         nativeConsoleWorker = null
         devToolsInspector?.release()
         devToolsInspector = null
+        try { processesGeckoView.releaseSession() } catch (_: Exception) {}
+        try { processesSession?.close() } catch (_: Exception) {}
+        processesSession = null
         releaseAssetInterceptor()
         localAssetServer?.stop()
         localAssetServer = null
@@ -1837,6 +2064,8 @@ class MainActivity : AppCompatActivity() {
         private const val CONSOLE_TAIL_LINES = 500
         private const val DEFAULT_FRAMEWORK_URL = "http://127.0.0.1:8089"
         private const val ASSET_INTERCEPT_READY_TIMEOUT_MS = 10_000L
+        private const val APP_HEALTH_INTERVAL_MS = 2_000L
+        private const val APP_HEALTH_FAILURE_LIMIT = 3
         private const val IPC_SLEEP_BASE_URL = "http://127.0.0.1:9100"
         private const val DEFAULT_APP_ID = "file_editor_cm6"
     }
