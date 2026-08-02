@@ -24,6 +24,7 @@ import {
 } from "./framework-errors";
 import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
 import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
+import { RunTargetRelayManager } from "./run-target-relay";
 import {
   ELECTRON_APP_VIEW_IDENTITY,
   ELECTRON_FRAMEWORK_PARTITION,
@@ -81,6 +82,7 @@ let appView: WebContentsView | null = null;
 let settings: DesktopShellSettings;
 let configuredFrameworkOrigin: string;
 let relay: FrameworkRelay;
+let runTargetRelays: RunTargetRelayManager | null = null;
 let dialogHost: DesktopDialogHost | null = null;
 const surfaceWindows = new Set<BrowserWindow>();
 const assets = new DesktopAssetManager();
@@ -286,6 +288,7 @@ async function updateDesktopAssets(
 async function handleAppViewControl(
   event: IpcMainInvokeEvent,
   rawCommand: unknown,
+  payload?: unknown,
 ): Promise<unknown> {
   assertTrustedAppViewSender(event.sender);
   const command = validateElectronAppViewCommand(rawCommand);
@@ -312,6 +315,10 @@ async function handleAppViewControl(
     // Keep this renderer alive long enough to return the install result. The
     // paired reload hook activates the already-invalidated asset snapshot.
     return updateDesktopAssets(true, false);
+  }
+  if (command === "resolve_run_target") {
+    if (!runTargetRelays) throw new Error("Run target relay is not initialized");
+    return runTargetRelays.resolve(payload);
   }
   if (command === "reload") {
     const contents = event.sender;
@@ -497,6 +504,7 @@ async function saveConnection(params: Record<string, unknown>): Promise<{
   settings = await writeDesktopSettings(candidate);
   configuredFrameworkOrigin = nextOrigin;
   if (nextOrigin !== previousOrigin) {
+    await runTargetRelays?.stopAll();
     relay.retarget(nextOrigin);
     closeAppView();
   }
@@ -652,6 +660,7 @@ async function main(): Promise<void> {
   settings = await readDesktopSettings();
   configuredFrameworkOrigin = frameworkOrigin(settings);
   relay = await startFrameworkRelay(configuredFrameworkOrigin, assets);
+  runTargetRelays = new RunTargetRelayManager(() => configuredFrameworkOrigin);
 
   mainWindow = createMainWindow();
   dialogHost = new DesktopDialogHost({
@@ -695,6 +704,8 @@ app.on("before-quit", () => {
   closeAppView();
   dialogHost?.dispose();
   dialogHost = null;
+  void runTargetRelays?.stopAll();
+  runTargetRelays = null;
   void relay?.stop();
 });
 

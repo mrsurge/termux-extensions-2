@@ -5,6 +5,8 @@ import {
   type ElectronAppViewBridge,
   type ElectronAppViewCommand,
   type ElectronAppViewInspection,
+  type ElectronRunTargetResolution,
+  type ElectronRunTargetRoute,
 } from "../shared/app-view-contracts";
 import type { AssetUpdateResult } from "../shared/contracts";
 
@@ -36,8 +38,12 @@ const presenter: DesktopDialogPresenter = {
   },
 };
 
-function invokeElectron<T>(command: ElectronAppViewCommand): Promise<T> {
-  return ipcRenderer.invoke("te2-desktop:app-view-control", command) as Promise<T>;
+function invokeElectron<T>(command: ElectronAppViewCommand, payload?: unknown): Promise<T> {
+  return ipcRenderer.invoke(
+    "te2-desktop:app-view-control",
+    command,
+    payload,
+  ) as Promise<T>;
 }
 
 const electronBridge: ElectronAppViewBridge = Object.freeze({
@@ -53,6 +59,9 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   },
   forceAssetUpdate(): Promise<AssetUpdateResult> {
     return invokeElectron("force_asset_update");
+  },
+  resolveRunTarget(route: ElectronRunTargetRoute): Promise<ElectronRunTargetResolution> {
+    return invokeElectron("resolve_run_target", route);
   },
 });
 

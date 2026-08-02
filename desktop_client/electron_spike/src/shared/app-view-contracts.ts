@@ -14,6 +14,7 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "reload",
   "home",
   "force_asset_update",
+  "resolve_run_target",
 ] as const;
 
 export type ElectronAppViewCommand = typeof ELECTRON_APP_VIEW_COMMANDS[number];
@@ -30,12 +31,29 @@ export type ElectronAppViewInspection = {
   assets: AssetStatus;
 };
 
+export type ElectronRunTargetRoute = {
+  dto?: "RunTargetRoute";
+  version?: 1;
+  ticket: string;
+  tunnelPath: string;
+  preferredPort: number;
+  originalUrl: string;
+  expiresAt?: number;
+};
+
+export type ElectronRunTargetResolution = {
+  ok: true;
+  mode: "direct" | "tunnel";
+  url: string;
+};
+
 export type ElectronAppViewBridge = {
   readonly identity: typeof ELECTRON_APP_VIEW_IDENTITY;
   inspect(): Promise<ElectronAppViewInspection>;
   reload(): Promise<{ ok: true }>;
   home(): Promise<{ ok: true }>;
   forceAssetUpdate(): Promise<AssetUpdateResult>;
+  resolveRunTarget(route: ElectronRunTargetRoute): Promise<ElectronRunTargetResolution>;
 };
 
 export function validateElectronAppViewCommand(value: unknown): ElectronAppViewCommand {
