@@ -1422,6 +1422,46 @@ mod tests {
             Some(expected_tunnel.as_str())
         );
 
+        let registered_set = dispatch_request(
+            targeted_request(
+                "runTarget.routes.register",
+                json!({
+                    "ownerId": "runner-profile:file_editor_cm6:project:web",
+                    "shellId": "shell-4173",
+                    "primaryPort": 4173,
+                    "additionalPorts": [{"port": 5173, "label": "Vite / HMR"}]
+                }),
+                &root,
+                2400,
+                "service.runTarget",
+            ),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
+        let route_set = registered_set.result.expect("run target route set");
+        assert_eq!(
+            route_set.get("dto").and_then(|value| value.as_str()),
+            Some("RunTargetRouteSet")
+        );
+        assert_eq!(
+            route_set
+                .get("primary")
+                .and_then(|value| value.get("preferredPort"))
+                .and_then(|value| value.as_u64()),
+            Some(4173)
+        );
+        assert_eq!(
+            route_set
+                .get("additional")
+                .and_then(|value| value.as_array())
+                .and_then(|value| value.first())
+                .and_then(|value| value.get("preferredPort"))
+                .and_then(|value| value.as_u64()),
+            Some(5173)
+        );
+
         let released = dispatch_request(
             targeted_request(
                 "runTarget.route.release",

@@ -24,6 +24,13 @@ internal data class AndroidRunTargetRoute(
     val tunnelPath: String,
     val preferredPort: Int,
     val originalUrl: String,
+    val label: String? = null,
+)
+
+internal data class AndroidRunTargetRouteSet(
+    val relayGroupId: String,
+    val primary: AndroidRunTargetRoute,
+    val additional: List<AndroidRunTargetRoute>,
 )
 
 internal data class AndroidRunTargetResolution(
@@ -39,7 +46,10 @@ internal data class AndroidRunTargetResolution(
     }
 }
 
-internal fun normalizeAndroidRunTargetRoute(raw: JSONObject): AndroidRunTargetRoute {
+internal fun normalizeAndroidRunTargetRoute(
+    raw: JSONObject,
+    requireLabel: Boolean = false,
+): AndroidRunTargetRoute {
     val ticket = raw.optString("ticket").trim()
     val tunnelPath = raw.optString("tunnelPath").trim()
     val preferredPort = raw.optInt("preferredPort", -1)
@@ -59,7 +69,39 @@ internal fun normalizeAndroidRunTargetRoute(raw: JSONObject): AndroidRunTargetRo
     require((if (uri.port >= 0) uri.port else 80) == preferredPort) {
         "Run target URL port does not match preferredPort"
     }
-    return AndroidRunTargetRoute(ticket, tunnelPath, preferredPort, originalUrl)
+    val label = raw.optString("label").trim().ifEmpty { null }
+    require(!requireLabel || label != null) { "Run target auxiliary route label is required" }
+    return AndroidRunTargetRoute(ticket, tunnelPath, preferredPort, originalUrl, label)
+}
+
+internal fun normalizeAndroidRunTargetRouteSet(raw: JSONObject): AndroidRunTargetRouteSet {
+    if (!raw.has("primary")) {
+        val primary = normalizeAndroidRunTargetRoute(raw)
+        return AndroidRunTargetRouteSet(primary.ticket, primary, emptyList())
+    }
+    val relayGroupId = raw.optString("relayGroupId").trim()
+    require(relayGroupId.matches(Regex("^[0-9a-f]{64}$"))) {
+        "Run target relay group is invalid"
+    }
+    val primaryRaw = raw.optJSONObject("primary")
+        ?: throw IllegalArgumentException("Run target primary route is required")
+    val primary = normalizeAndroidRunTargetRoute(primaryRaw)
+    val additionalRaw = raw.optJSONArray("additional")
+        ?: throw IllegalArgumentException("Run target auxiliary routes are invalid")
+    require(additionalRaw.length() <= 8) { "Run target supports at most 8 auxiliary routes" }
+    val seenPorts = mutableSetOf(primary.preferredPort)
+    val additional = buildList {
+        for (index in 0 until additionalRaw.length()) {
+            val routeRaw = additionalRaw.optJSONObject(index)
+                ?: throw IllegalArgumentException("Run target auxiliary route is invalid")
+            val route = normalizeAndroidRunTargetRoute(routeRaw, requireLabel = true)
+            require(seenPorts.add(route.preferredPort)) {
+                "Run target contains duplicate port ${route.preferredPort}"
+            }
+            add(route)
+        }
+    }
+    return AndroidRunTargetRouteSet(relayGroupId, primary, additional)
 }
 
 internal fun localAndroidRunTargetUrl(route: AndroidRunTargetRoute): String {
@@ -102,6 +144,7 @@ internal class RunTargetRelayManager(
     private val executor: ExecutorService = Executors.newCachedThreadPool(),
 ) {
     private data class Entry(
+        val groupId: String,
         val route: AndroidRunTargetRoute,
         val frameworkBaseUrl: String,
         val server: ServerSocket,
@@ -120,42 +163,69 @@ internal class RunTargetRelayManager(
     ) {
         executor.execute {
             val result = runCatching {
-                val route = normalizeAndroidRunTargetRoute(rawRoute)
+                val legacy = !rawRoute.has("primary")
+                val routeSet = normalizeAndroidRunTargetRouteSet(rawRoute)
                 synchronized(lock) {
-                    val existing = entries[route.preferredPort]
-                    if (existing?.route?.ticket == route.ticket) {
+                    val existing = entries[routeSet.primary.preferredPort]
+                    if (existing != null && existing.groupId != routeSet.relayGroupId) {
+                        if (legacy) {
+                            stopGroupLocked(existing.groupId)
+                        } else {
+                            throw IllegalStateException(
+                                "Run target port ${routeSet.primary.preferredPort} " +
+                                    "is owned by another profile",
+                            )
+                        }
+                    }
+                    if (groupMatchesLocked(routeSet)) {
                         return@synchronized AndroidRunTargetResolution(
                             mode = "tunnel",
-                            url = localAndroidRunTargetUrl(route),
+                            url = localAndroidRunTargetUrl(routeSet.primary),
                         )
                     }
-                    if (existing != null) stopEntryLocked(existing)
+                    stopGroupLocked(routeSet.relayGroupId)
 
-                    val server = ServerSocket()
-                    server.reuseAddress = false
                     try {
-                        server.bind(
-                            InetSocketAddress(
-                                InetAddress.getByName("127.0.0.1"),
-                                route.preferredPort,
-                            ),
+                        startEntryLocked(
+                            routeSet.relayGroupId,
+                            routeSet.primary,
+                            frameworkBaseUrl,
                         )
                     } catch (error: BindException) {
-                        server.close()
                         return@synchronized AndroidRunTargetResolution(
                             mode = "direct",
-                            url = route.originalUrl,
+                            url = routeSet.primary.originalUrl,
                         )
+                    }
+                    try {
+                        routeSet.additional.forEach { route ->
+                            val occupied = entries[route.preferredPort]
+                            if (occupied != null && occupied.groupId != routeSet.relayGroupId) {
+                                throw IllegalStateException(
+                                    "${route.label} port ${route.preferredPort} " +
+                                        "is owned by another run profile",
+                                )
+                            }
+                            try {
+                                startEntryLocked(
+                                    routeSet.relayGroupId,
+                                    route,
+                                    frameworkBaseUrl,
+                                )
+                            } catch (error: BindException) {
+                                throw IllegalStateException(
+                                    "${route.label} port ${route.preferredPort} is already in use",
+                                    error,
+                                )
+                            }
+                        }
                     } catch (error: Exception) {
-                        server.close()
+                        stopGroupLocked(routeSet.relayGroupId)
                         throw error
                     }
-                    val entry = Entry(route, frameworkBaseUrl, server)
-                    entries[route.preferredPort] = entry
-                    executor.execute { acceptLoop(entry) }
                     AndroidRunTargetResolution(
                         mode = "tunnel",
-                        url = localAndroidRunTargetUrl(route),
+                        url = localAndroidRunTargetUrl(routeSet.primary),
                     )
                 }
             }
@@ -189,6 +259,43 @@ internal class RunTargetRelayManager(
             entry.sockets.add(socket)
             executor.execute { bridge(entry, socket) }
         }
+    }
+
+    private fun startEntryLocked(
+        groupId: String,
+        route: AndroidRunTargetRoute,
+        frameworkBaseUrl: String,
+    ) {
+        val server = ServerSocket()
+        server.reuseAddress = false
+        try {
+            server.bind(
+                InetSocketAddress(
+                    InetAddress.getByName("127.0.0.1"),
+                    route.preferredPort,
+                ),
+            )
+        } catch (error: Exception) {
+            server.close()
+            throw error
+        }
+        val entry = Entry(groupId, route, frameworkBaseUrl, server)
+        entries[route.preferredPort] = entry
+        executor.execute { acceptLoop(entry) }
+    }
+
+    private fun groupMatchesLocked(routeSet: AndroidRunTargetRouteSet): Boolean {
+        val expected = listOf(routeSet.primary) + routeSet.additional
+        val current = entries.values.filter { it.groupId == routeSet.relayGroupId }
+        return current.size == expected.size && expected.all { route ->
+            entries[route.preferredPort]?.let { entry ->
+                entry.groupId == routeSet.relayGroupId && entry.route.ticket == route.ticket
+            } == true
+        }
+    }
+
+    private fun stopGroupLocked(groupId: String) {
+        entries.values.filter { it.groupId == groupId }.toList().forEach(::stopEntryLocked)
     }
 
     private fun bridge(entry: Entry, socket: Socket) {

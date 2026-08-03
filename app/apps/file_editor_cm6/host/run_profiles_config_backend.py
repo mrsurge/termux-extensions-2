@@ -148,6 +148,8 @@ def _field(
     required: bool = False,
     rows: int | None = None,
     options: list[JsonMap] | None = None,
+    secondary_placeholder: str = "",
+    max_items: int | None = None,
 ) -> JsonMap:
     data: JsonMap = {
         "key": key,
@@ -161,6 +163,10 @@ def _field(
         data["rows"] = rows
     if options is not None:
         data["options"] = options
+    if secondary_placeholder:
+        data["secondaryPlaceholder"] = secondary_placeholder
+    if max_items is not None:
+        data["maxItems"] = max_items
     return data
 
 
@@ -269,6 +275,18 @@ def _run_profile_contract() -> JsonMap:
                 "Not used by Page Preview."
             ),
             placeholder="3000",
+        ),
+        _field(
+            "additionalPorts",
+            "Additional Service Ports",
+            "labeledPortList",
+            description=(
+                "Optional auxiliary services such as Vite/HMR. Native remote clients "
+                "relay each declared port alongside the primary Sidebar URL port."
+            ),
+            placeholder="5173",
+            secondary_placeholder="Vite / HMR",
+            max_items=8,
         ),
         _field(
             "runningBehavior",

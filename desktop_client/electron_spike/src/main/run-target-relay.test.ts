@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   localRunTargetUrl,
   normalizeRunTargetRoute,
+  normalizeRunTargetRouteSet,
   RunTargetRelayManager,
 } from "./run-target-relay";
 
@@ -17,6 +18,16 @@ function route(port: number) {
     tunnelPath: `/api/run-targets/${TICKET}/tunnel`,
     preferredPort: port,
     originalUrl: `http://localhost:${port}/health?full=1#status`,
+  };
+}
+
+function routeSet(primaryPort: number, additionalPort: number) {
+  return {
+    dto: "RunTargetRouteSet",
+    version: 1,
+    relayGroupId: "d".repeat(64),
+    primary: route(primaryPort),
+    additional: [{ ...route(additionalPort), ticket: "b".repeat(64), tunnelPath: `/api/run-targets/${"b".repeat(64)}/tunnel`, label: "Vite / HMR" }],
   };
 }
 
@@ -44,6 +55,16 @@ test("run target route requires a ticket-bound tunnel and matching loopback port
   assert.throws(
     () => normalizeRunTargetRoute({ ...route(43123), tunnelPath: "/wrong" }),
     /tunnel path/,
+  );
+});
+
+test("route sets require unique labeled auxiliary ports", () => {
+  const value = normalizeRunTargetRouteSet(routeSet(43123, 43124));
+  assert.equal(value.primary.preferredPort, 43123);
+  assert.equal(value.additional[0]?.label, "Vite / HMR");
+  assert.throws(
+    () => normalizeRunTargetRouteSet(routeSet(43123, 43123)),
+    /duplicate port/,
   );
 });
 
@@ -82,5 +103,50 @@ test("free preferred port creates a reusable client tunnel", async () => {
     assert.deepEqual(second, expected);
   } finally {
     await manager.stopAll();
+  }
+});
+
+test("route set binds primary and auxiliary ports as one reusable group", async () => {
+  const primaryReservation = net.createServer();
+  const primaryPort = await listen(primaryReservation);
+  await close(primaryReservation);
+  const auxiliaryReservation = net.createServer();
+  const auxiliaryPort = await listen(auxiliaryReservation);
+  await close(auxiliaryReservation);
+  const manager = new RunTargetRelayManager(() => "http://framework.example:8089");
+  try {
+    const expected = {
+      ok: true,
+      mode: "tunnel",
+      url: `http://127.0.0.1:${primaryPort}/health?full=1#status`,
+    };
+    assert.deepEqual(await manager.resolve(routeSet(primaryPort, auxiliaryPort)), expected);
+    assert.deepEqual(await manager.resolve(routeSet(primaryPort, auxiliaryPort)), expected);
+  } finally {
+    await manager.stopAll();
+  }
+});
+
+test("occupied auxiliary port rolls back the primary listener", async () => {
+  const primaryReservation = net.createServer();
+  const primaryPort = await listen(primaryReservation);
+  await close(primaryReservation);
+  const occupied = net.createServer();
+  const auxiliaryPort = await listen(occupied);
+  const manager = new RunTargetRelayManager(() => "http://framework.example:8089");
+  try {
+    await assert.rejects(
+      manager.resolve(routeSet(primaryPort, auxiliaryPort)),
+      /Vite \/ HMR port .* already in use/,
+    );
+    const rebound = net.createServer();
+    try {
+      await listen(rebound, primaryPort);
+    } finally {
+      await close(rebound);
+    }
+  } finally {
+    await manager.stopAll();
+    await close(occupied);
   }
 });

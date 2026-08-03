@@ -12,7 +12,8 @@ export type DeclarativeFieldKind =
   | "number"
   | "json"
   | "jsonTextmate"
-  | "stringList";
+  | "stringList"
+  | "labeledPortList";
 
 export interface DeclarativeFieldOption {
   value: unknown;
@@ -37,6 +38,8 @@ export interface DeclarativeFieldContract {
   options?: DeclarativeFieldOption[];
   defaultValue?: unknown;
   visibleWhen?: DeclarativeFieldVisibility;
+  secondaryPlaceholder?: string;
+  maxItems?: number;
 }
 
 export interface DeclarativeFormContract {
@@ -337,6 +340,95 @@ function createFieldControl(
 
   if (field.kind === "select") {
     return createSelectControl(field, current, onValue, document);
+  }
+
+  if (field.kind === "labeledPortList") {
+    const root = document.createElement("div");
+    root.className = "declarative-labeled-port-list";
+    const rows = document.createElement("div");
+    rows.className = "declarative-labeled-port-rows";
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "fe-btn declarative-labeled-port-add";
+    add.textContent = "Add service port";
+    const maxItems = Number.isInteger(field.maxItems) && Number(field.maxItems) > 0
+      ? Number(field.maxItems)
+      : 8;
+    let items: Array<{ port: number | null; label: string }> = Array.isArray(current)
+      ? current.filter(isRecord).map((item) => {
+        const rawPort = item.port;
+        const parsedPort = typeof rawPort === "number"
+          ? rawPort
+          : typeof rawPort === "string" && rawPort.trim()
+            ? Number(rawPort)
+            : Number.NaN;
+        return {
+          port: Number.isInteger(parsedPort) ? parsedPort : null,
+          label: typeof item.label === "string" ? item.label : "",
+        };
+      })
+      : [];
+
+    const publish = (): void => {
+      onValue(
+        field.key,
+        items.map((item) => ({ port: item.port, label: item.label })),
+      );
+    };
+    const renderRows = (): void => {
+      rows.innerHTML = "";
+      items.forEach((item, index) => {
+        const row = document.createElement("div");
+        row.className = "declarative-labeled-port-row";
+        const portInput = document.createElement("input");
+        portInput.className = "declarative-input";
+        portInput.type = "number";
+        portInput.min = "1";
+        portInput.max = "65535";
+        portInput.inputMode = "numeric";
+        portInput.placeholder = field.placeholder || "5173";
+        portInput.value = item.port == null ? "" : String(item.port);
+        portInput.setAttribute("aria-label", `${field.label} port ${index + 1}`);
+        portInput.addEventListener("input", () => {
+          const parsed = Number(portInput.value);
+          item.port = portInput.value && Number.isInteger(parsed) ? parsed : null;
+          publish();
+        });
+        const labelInput = document.createElement("input");
+        labelInput.className = "declarative-input";
+        labelInput.type = "text";
+        labelInput.placeholder = field.secondaryPlaceholder || "Service label";
+        labelInput.value = item.label;
+        labelInput.setAttribute("aria-label", `${field.label} label ${index + 1}`);
+        labelInput.addEventListener("input", () => {
+          item.label = labelInput.value;
+          publish();
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "fe-btn declarative-labeled-port-remove";
+        remove.textContent = "Remove";
+        remove.setAttribute("aria-label", `Remove ${field.label} ${index + 1}`);
+        remove.addEventListener("click", () => {
+          items.splice(index, 1);
+          renderRows();
+          publish();
+        });
+        row.append(portInput, labelInput, remove);
+        rows.appendChild(row);
+      });
+      add.disabled = items.length >= maxItems;
+    };
+    add.addEventListener("click", () => {
+      if (items.length >= maxItems) return;
+      items = [...items, { port: null, label: "" }];
+      renderRows();
+      publish();
+      rows.querySelector<HTMLInputElement>("input")?.focus();
+    });
+    root.append(rows, add);
+    renderRows();
+    return { element: root };
   }
 
   if (field.kind === "jsonTextmate") {

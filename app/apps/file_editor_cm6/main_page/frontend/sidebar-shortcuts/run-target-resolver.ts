@@ -1,4 +1,7 @@
-import type { RunTargetRouteDescriptor } from './types.ts';
+import type {
+  RunTargetDescriptor,
+  RunTargetRouteSetDescriptor,
+} from './types.ts';
 
 interface RunTargetResolution {
   ok: boolean;
@@ -9,7 +12,7 @@ interface RunTargetResolution {
 
 interface NativeRunTargetWindow extends Window {
   te2Electron?: {
-    resolveRunTarget?: (route: RunTargetRouteDescriptor) => Promise<RunTargetResolution>;
+    resolveRunTarget?: (route: RunTargetDescriptor) => Promise<RunTargetResolution>;
   };
 }
 
@@ -22,8 +25,18 @@ function nativeBridgeAvailable(): boolean {
   return document.documentElement?.dataset.te2RunTargetBridge === '1';
 }
 
+function originalRouteUrl(route: RunTargetDescriptor): string {
+  if (route.dto === 'RunTargetRouteSet') {
+    const routeSet = route as RunTargetRouteSetDescriptor;
+    return typeof routeSet.primary?.originalUrl === 'string'
+      ? routeSet.primary.originalUrl
+      : '';
+  }
+  return typeof route.originalUrl === 'string' ? route.originalUrl : '';
+}
+
 function resolveThroughGecko(
-  route: RunTargetRouteDescriptor,
+  route: RunTargetDescriptor,
 ): Promise<RunTargetResolution> {
   const requestId = `run-target-${Date.now()}-${++requestSequence}`;
   return new Promise((resolve, reject) => {
@@ -50,7 +63,7 @@ function resolveThroughGecko(
 }
 
 export async function resolveRunTargetUrl(
-  route: RunTargetRouteDescriptor | null | undefined,
+  route: RunTargetDescriptor | null | undefined,
   fallbackUrl: string,
 ): Promise<string> {
   if (!route) return fallbackUrl;
@@ -61,7 +74,7 @@ export async function resolveRunTargetUrl(
   } else if (nativeBridgeAvailable()) {
     result = await resolveThroughGecko(route);
   } else {
-    return route.originalUrl || fallbackUrl;
+    return originalRouteUrl(route) || fallbackUrl;
   }
   if (!result?.ok || typeof result.url !== 'string' || !result.url) {
     throw new Error(result?.error || 'Native run-target relay failed');

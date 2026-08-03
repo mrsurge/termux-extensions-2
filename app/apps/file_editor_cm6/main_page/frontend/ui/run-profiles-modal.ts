@@ -31,6 +31,7 @@ function asProfiles(value: unknown): UnknownRecord[] {
     saveDrafts: "included",
     showSaveWarning: true,
     devTools: false,
+    additionalPorts: [],
     ...item,
   }));
 }
@@ -55,6 +56,7 @@ function defaultProfile(index: number): UnknownRecord {
     saveDrafts: "included",
     showSaveWarning: true,
     devTools: false,
+    additionalPorts: [],
   };
 }
 

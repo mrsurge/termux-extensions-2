@@ -3,7 +3,9 @@ use serde_json::json;
 
 use super::protocol::{PipeEnvelope, PipeError, PipeIdentity};
 use crate::framework_services::{
-    run_target_ops::{RunTargetRegisterRequest, RunTargetReleaseRequest},
+    run_target_ops::{
+        RunTargetRegisterRequest, RunTargetReleaseRequest, RunTargetRouteSetRegisterRequest,
+    },
     scheduler::FrameworkServiceScheduler,
 };
 
@@ -14,9 +16,27 @@ pub(super) async fn dispatch_run_target_request(
 ) -> Option<PipeEnvelope> {
     match request.method.as_deref()? {
         "runTarget.route.register" => Some(register(request, responder, scheduler).await),
+        "runTarget.routes.register" => Some(register_set(request, responder, scheduler).await),
         "runTarget.route.release" => Some(release(request, responder, scheduler).await),
         _ => None,
     }
+}
+
+async fn register_set(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+) -> PipeEnvelope {
+    let params = request.params.clone().unwrap_or_else(|| json!({}));
+    let params = match serde_json::from_value::<RunTargetRouteSetRegisterRequest>(params) {
+        Ok(params) => params,
+        Err(error) => return invalid_params(request, responder, "routes.register", error),
+    };
+    encode_result(
+        request,
+        responder,
+        scheduler.run_targets().register_set(params).await,
+    )
 }
 
 async fn register(
@@ -27,7 +47,7 @@ async fn register(
     let params = request.params.clone().unwrap_or_else(|| json!({}));
     let params = match serde_json::from_value::<RunTargetRegisterRequest>(params) {
         Ok(params) => params,
-        Err(error) => return invalid_params(request, responder, "register", error),
+        Err(error) => return invalid_params(request, responder, "route.register", error),
     };
     encode_result(
         request,
@@ -44,7 +64,7 @@ async fn release(
     let params = request.params.clone().unwrap_or_else(|| json!({}));
     let params = match serde_json::from_value::<RunTargetReleaseRequest>(params) {
         Ok(params) => params,
-        Err(error) => return invalid_params(request, responder, "release", error),
+        Err(error) => return invalid_params(request, responder, "route.release", error),
     };
     encode_result(
         request,
@@ -79,7 +99,7 @@ fn invalid_params(
         responder,
         PipeError::new(
             "protocol.invalidParams",
-            format!("invalid runTarget.route.{operation} params: {error}"),
+            format!("invalid runTarget.{operation} params: {error}"),
             false,
             None,
         ),

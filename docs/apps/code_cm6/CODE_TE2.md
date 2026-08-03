@@ -3293,13 +3293,16 @@ A config may be an object with `profiles`, a single profile object, or a profile
       "devTools": false
     },
     {
-      "profileId": "vite",
+      "profileId": "express-vite",
       "runner": "custom",
-      "include": ["src/**"],
-      "exec": "npm",
-      "args": ["run", "dev"],
-      "sidebarUrl": "http://127.0.0.1:4173/",
-      "port": 4173
+      "include": ["server.js", "src/**"],
+      "exec": "node",
+      "args": ["server.js"],
+      "sidebarUrl": "http://127.0.0.1:8000/",
+      "port": 8000,
+      "additionalPorts": [
+        { "port": 5173, "label": "Vite / HMR" }
+      ]
     }
   ]
 }
@@ -3315,6 +3318,7 @@ Current profile fields:
 | `include` | Relative path/glob matchers. Required, except `pagePreview` can derive it from `entry`. |
 | `sidebarUrl` / `sidebar_url` | Optional sidebar URL to open after launch. `pagePreview` defaults to `http://127.0.0.1:3000/`. |
 | `port` | Optional preferred native-client loopback port for a non-`pagePreview` runner. It requires a credential-free loopback HTTP `sidebarUrl` whose effective port matches this integer in `1..65535`. |
+| `additionalPorts` / `additional_ports` | Up to eight labeled auxiliary ports, such as Vite/HMR. Requires `port`; ports must be unique and cannot duplicate the primary port. Unsupported for Page Preview. |
 | `runningBehavior` / `running_behavior` | `just save` or `relaunch`; defaults to `just save`. |
 | `exec` | Runner command or project-relative executable path. Required for non-`pagePreview` runners. |
 | `cwd` | Optional project-relative or absolute cwd; must resolve inside the project. |
@@ -3323,6 +3327,8 @@ Current profile fields:
 | `saveDrafts` / `save_drafts` | `included`, `opened`, `all`, or `none`; defaults to `included`. |
 | `showSaveWarning` / `show_save_warning` | Boolean warning setting; JSON `0`/`1` are accepted for compatibility. |
 | `devTools` | Boolean, default `false`. On GeckoView, expose this profile's Sidebar URL iframe as a selectable native Inspector target. |
+
+The generated Run Profiles form renders `additionalPorts` as repeatable Port and Label rows. `5173` and `Vite / HMR` are placeholders, not implicit configuration.
 
 ### Runner dispatch
 
@@ -3353,40 +3359,27 @@ stopping a routed profile also releases its route ticket.
 
 ### Native preferred-port routing
 
-The optional `port` field solves remote native-client access to a server process
-that listens only on the framework host's loopback interface. It is deliberately
-unsupported for `pagePreview`, whose static preview has no independent server
-port to tunnel.
+The optional `port` and `additionalPorts` fields solve remote native-client access to server processes that listen only on the framework host's loopback interface. They are deliberately unsupported for `pagePreview`, whose static preview has no independent server ports to tunnel.
 
-After a non-preview shell starts, Python registers its deterministic owner label,
-exact Framework-Shell id, and loopback port through Rust pipe target `2400`
-(`service.runTarget`) using `runTarget.route.register`. Rust returns an
-unguessable 256-bit bearer ticket and a 24-hour renewable tunnel path:
+After a non-preview shell starts, Python registers its deterministic owner label, exact Framework-Shell id, primary port, and bounded auxiliary list through Rust pipe target `2400` (`service.runTarget`) using `runTarget.routes.register`. Rust returns an atomic `RunTargetRouteSet`: one primary descriptor plus one labeled descriptor per auxiliary port. Every port receives an independent unguessable 256-bit bearer ticket and 24-hour renewable tunnel path:
 
 ```text
 /api/run-targets/<ticket>/tunnel
 ```
 
-That Axum WebSocket route connects only to `127.0.0.1:<port>` on the framework
-host and bridges binary WebSocket frames to raw TCP. One profile owner has one
-live route: relaunch replaces and invalidates its previous ticket. Stop and dead
-shell reconciliation release the route through `runTarget.route.release`.
+Each Axum WebSocket route connects only to its registered `127.0.0.1:<port>` destination on the framework host and bridges binary WebSocket frames to raw TCP. Registration validates the complete owner/shell route set before replacing live state. An exact repeated registration reuses and renews the group; relaunch replaces every prior ticket; owner/shell release removes the complete group. The singular `runTarget.route.register` operation remains compatible by delegating to a one-port route set.
 
-The Sidebar preserves both the original loopback URL and this route descriptor.
-Ordinary browsers use the original URL. Electron and GeckoView first attempt an
-exclusive bind of `127.0.0.1:<port>` on the client device:
+The Sidebar preserves the original primary URL and the complete route set. Ordinary browsers use the original URL. Electron and GeckoView resolve native route sets in this order:
 
-- bind success means the client is remote; the native client opens the local URL
-  and relays accepted TCP streams through the Rust ticketed WebSocket;
-- `EADDRINUSE` / `BindException` means the server is already local, so the native
-  client opens the original URL directly;
-- framework retarget, profile relaunch, Stop, or native-client teardown closes
-  owned listeners and active streams.
+1. Exclusively bind the primary preferred port on `127.0.0.1`.
+2. Primary `EADDRINUSE` / `BindException` means the server is already local, so bind no auxiliary ports and open the original primary URL.
+3. Primary bind success means the framework is remote; bind every declared auxiliary port before navigating.
+4. Any auxiliary collision is a labeled fatal error and rolls back all listeners created for that group.
+5. Once the group is complete, open the primary local URL. Requests and WebSocket upgrades to auxiliary ports, including Vite HMR on 5173, traverse their own ticketed raw-TCP tunnels.
 
-Port-busy detection is intentionally authoritative for same-device behavior:
-the profiled server itself already treats a busy configured port as a fatal
-launch condition. Native negotiation never changes the URL path, query, or
-fragment and never exposes an arbitrary framework-host TCP destination.
+Relay groups use a stable owner-derived id so one profile cannot silently replace another profile's local listeners. Framework retarget, route-set replacement, and native-client teardown close grouped listeners and streams. Stop and dead-shell reconciliation invalidate the complete Rust ticket group; exact profile-stop Sidebar/listener teardown is tracked separately in `docs/apps/run_profile_refinements/IMPLEMENTATION_TRACKER.md`.
+
+Native negotiation never changes URL paths, queries, or fragments, never dynamically remaps ports, and never exposes an arbitrary framework-host TCP destination.
 
 ### Draft-save transaction
 

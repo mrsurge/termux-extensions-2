@@ -27,8 +27,15 @@ KNOWN_DRAFT_SAVE_MODES: frozenset[str] = frozenset(
 )
 DEFAULT_PAGE_PREVIEW_PROFILE_ID = "page-preview"
 DEFAULT_PAGE_PREVIEW_URL = "http://127.0.0.1:3000/"
+MAX_ADDITIONAL_PORTS = 8
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _config_lock = RLock()
+
+
+@dataclass(frozen=True)
+class RunProfileAdditionalPort:
+    port: int
+    label: str
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,7 @@ class RunProfile:
     show_save_warning: bool
     dev_tools: bool = False
     port: int | None = None
+    additional_ports: tuple[RunProfileAdditionalPort, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -308,11 +316,17 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
     if not sidebar_url and runner == "pagePreview":
         sidebar_url = DEFAULT_PAGE_PREVIEW_URL
     port = _optional_port(data.get("port"), profile_id=profile_id)
+    additional_ports = _additional_ports(
+        data.get("additionalPorts", data.get("additional_ports")),
+        profile_id=profile_id,
+        primary_port=port,
+    )
     _validate_routed_sidebar_url(
         profile_id=profile_id,
         runner=runner,
         sidebar_url=sidebar_url,
         port=port,
+        additional_ports=additional_ports,
     )
     exec_command = _text(data.get("exec"))
     if runner != "pagePreview" and not exec_command:
@@ -333,6 +347,7 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
         show_save_warning=show_save_warning,
         dev_tools=dev_tools,
         port=port,
+        additional_ports=additional_ports,
     )
 
 
@@ -485,17 +500,70 @@ def _optional_port(value: object, *, profile_id: str) -> int | None:
     return port
 
 
+def _additional_ports(
+    value: object,
+    *,
+    profile_id: str,
+    primary_port: int | None,
+) -> tuple[RunProfileAdditionalPort, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError(f"Run profile {profile_id} additionalPorts must be a list")
+    raw_items = cast(list[object], value)
+    if len(raw_items) > MAX_ADDITIONAL_PORTS:
+        raise ValueError(
+            f"Run profile {profile_id} additionalPorts supports at most "
+            f"{MAX_ADDITIONAL_PORTS} entries"
+        )
+    if raw_items and primary_port is None:
+        raise ValueError(
+            f"Run profile {profile_id} additionalPorts requires a primary port"
+        )
+
+    seen_ports = {primary_port} if primary_port is not None else set()
+    additional: list[RunProfileAdditionalPort] = []
+    for index, item_obj in enumerate(raw_items):
+        item = _json_object(item_obj)
+        if not item:
+            raise ValueError(
+                f"Run profile {profile_id} additionalPorts entry {index} must be an object"
+            )
+        port = _optional_port(item.get("port"), profile_id=profile_id)
+        if port is None:
+            raise ValueError(
+                f"Run profile {profile_id} additionalPorts entry {index} requires port"
+            )
+        label = _text(item.get("label"))
+        if not label:
+            raise ValueError(
+                f"Run profile {profile_id} additionalPorts entry {index} requires label"
+            )
+        if port in seen_ports:
+            raise ValueError(
+                f"Run profile {profile_id} additionalPorts contains duplicate port {port}"
+            )
+        seen_ports.add(port)
+        additional.append(RunProfileAdditionalPort(port=port, label=label))
+    return tuple(additional)
+
+
 def _validate_routed_sidebar_url(
     *,
     profile_id: str,
     runner: RunnerName,
     sidebar_url: str,
     port: int | None,
+    additional_ports: tuple[RunProfileAdditionalPort, ...],
 ) -> None:
-    if port is None:
+    if port is None and not additional_ports:
         return
     if runner == "pagePreview":
-        raise ValueError(f"Run profile {profile_id} port is not supported for Page Preview")
+        raise ValueError(
+            f"Run profile {profile_id} routed ports are not supported for Page Preview"
+        )
+    if port is None:
+        raise ValueError(f"Run profile {profile_id} additionalPorts requires a primary port")
     if not sidebar_url:
         raise ValueError(f"Run profile {profile_id} port requires sidebarUrl")
     try:

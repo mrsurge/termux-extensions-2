@@ -43,8 +43,8 @@ export interface SidebarShortcut extends UnknownRecord {
   devToolsTargetId?: string;
   devtools_target_label?: string;
   devToolsTargetLabel?: string;
-  run_target_route?: RunTargetRouteDescriptor;
-  runTargetRoute?: RunTargetRouteDescriptor;
+  run_target_route?: RunTargetDescriptor;
+  runTargetRoute?: RunTargetDescriptor;
 }
 
 export interface RunTargetRouteDescriptor extends UnknownRecord {
@@ -56,6 +56,20 @@ export interface RunTargetRouteDescriptor extends UnknownRecord {
   originalUrl: string;
   expiresAt?: number;
 }
+
+export interface RunTargetAuxiliaryRouteDescriptor extends RunTargetRouteDescriptor {
+  label: string;
+}
+
+export interface RunTargetRouteSetDescriptor extends UnknownRecord {
+  dto: "RunTargetRouteSet";
+  version: 1;
+  relayGroupId: string;
+  primary: RunTargetRouteDescriptor;
+  additional: RunTargetAuxiliaryRouteDescriptor[];
+}
+
+export type RunTargetDescriptor = RunTargetRouteDescriptor | RunTargetRouteSetDescriptor;
 
 export interface SidebarShortcutPreference extends UnknownRecord {
   id?: string;
@@ -131,8 +145,8 @@ export interface SidebarAppDockSlot extends UnknownRecord {
   devToolsTargetId?: string;
   devtools_target_label?: string;
   devToolsTargetLabel?: string;
-  run_target_route?: RunTargetRouteDescriptor;
-  runTargetRoute?: RunTargetRouteDescriptor;
+  run_target_route?: RunTargetDescriptor;
+  runTargetRoute?: RunTargetDescriptor;
   updated_at?: number;
   updatedAt?: number;
   version?: string | number;

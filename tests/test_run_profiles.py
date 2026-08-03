@@ -16,6 +16,7 @@ from app.apps.file_editor_cm6 import run_profile_events, run_profile_state
 from app.apps.file_editor_cm6.monaco_editor.editor_backend_services import save_service
 from app.apps.file_editor_cm6.host import terminal_actions_backend
 from app.apps.file_editor_cm6.host import runner_profiles_backend
+from app.apps.file_editor_cm6.host import run_target_service
 from app.apps.file_editor_cm6.ui_ipc import sidebar_window_state
 from app.apps.file_editor_cm6.worker_services import run_profile_fws_bridge
 
@@ -64,6 +65,7 @@ class RunProfileContractTests(unittest.TestCase):
             self.assertEqual(profile.save_drafts, "included")
             self.assertTrue(profile.show_save_warning)
             self.assertFalse(profile.dev_tools)
+            self.assertEqual(profile.additional_ports, ())
             self.assertTrue(
                 runner_profiles.run_profile_matches_path(
                     profile,
@@ -142,6 +144,66 @@ class RunProfileContractTests(unittest.TestCase):
 
         self.assertEqual(profile.port, 4173)
         self.assertEqual(profile.sidebar_url, "http://127.0.0.1:4173/app")
+
+    def test_non_preview_profile_accepts_labeled_additional_ports(self) -> None:
+        profile = runner_profiles._profile_from_json(
+            {
+                "profileId": "web",
+                "runner": "custom",
+                "include": ["src/**"],
+                "exec": "npm run dev",
+                "sidebarUrl": "http://127.0.0.1:4173/app",
+                "port": 4173,
+                "additionalPorts": [
+                    {"port": 5173, "label": "Vite / HMR"},
+                    {"port": 9229, "label": "Node inspector"},
+                ],
+            },
+            index=0,
+        )
+
+        self.assertEqual(
+            profile.additional_ports,
+            (
+                runner_profiles.RunProfileAdditionalPort(5173, "Vite / HMR"),
+                runner_profiles.RunProfileAdditionalPort(9229, "Node inspector"),
+            ),
+        )
+
+    def test_additional_ports_reject_missing_primary_duplicates_and_excess(self) -> None:
+        base = {
+            "profileId": "web",
+            "runner": "custom",
+            "include": ["src/**"],
+            "exec": "npm run dev",
+            "sidebarUrl": "http://127.0.0.1:4173/app",
+        }
+        with self.assertRaisesRegex(ValueError, "requires a primary port"):
+            _ = runner_profiles._profile_from_json(
+                {**base, "additionalPorts": [{"port": 5173, "label": "Vite"}]},
+                index=0,
+            )
+        with self.assertRaisesRegex(ValueError, "duplicate port 4173"):
+            _ = runner_profiles._profile_from_json(
+                {
+                    **base,
+                    "port": 4173,
+                    "additionalPorts": [{"port": 4173, "label": "Duplicate"}],
+                },
+                index=0,
+            )
+        with self.assertRaisesRegex(ValueError, "at most 8"):
+            _ = runner_profiles._profile_from_json(
+                {
+                    **base,
+                    "port": 4173,
+                    "additionalPorts": [
+                        {"port": 5100 + index, "label": f"Service {index}"}
+                        for index in range(9)
+                    ],
+                },
+                index=0,
+            )
 
     def test_routed_port_rejects_page_preview_and_unsafe_urls(self) -> None:
         with self.assertRaisesRegex(ValueError, "not supported for Page Preview"):
@@ -637,6 +699,90 @@ class RunProfileSidebarDevToolsTests(unittest.IsolatedAsyncioTestCase):
         slot = sidebar_window_state._normalize_url_slot(payload)
         self.assertEqual(slot["runTargetRoute"], route)
 
+    async def test_sidebar_url_projects_labeled_run_target_route_set(self) -> None:
+        primary_ticket = "a" * 64
+        auxiliary_ticket = "b" * 64
+        route_set = {
+            "dto": "RunTargetRouteSet",
+            "version": 1,
+            "relayGroupId": "c" * 64,
+            "primary": {
+                "dto": "RunTargetRoute",
+                "version": 1,
+                "ticket": primary_ticket,
+                "tunnelPath": f"/api/run-targets/{primary_ticket}/tunnel",
+                "preferredPort": 4173,
+                "originalUrl": "http://127.0.0.1:4173/app",
+                "expiresAt": 999,
+            },
+            "additional": [
+                {
+                    "dto": "RunTargetRoute",
+                    "version": 1,
+                    "ticket": auxiliary_ticket,
+                    "tunnelPath": f"/api/run-targets/{auxiliary_ticket}/tunnel",
+                    "preferredPort": 5173,
+                    "originalUrl": "http://127.0.0.1:5173/",
+                    "expiresAt": 999,
+                    "label": "Vite / HMR",
+                }
+            ],
+        }
+        slot = sidebar_window_state._normalize_url_slot(
+            {
+                "kind": "url",
+                "host_id": "runner-profile:web",
+                "url": "http://127.0.0.1:4173/app",
+                "runTargetRoute": route_set,
+            }
+        )
+
+        self.assertEqual(slot["runTargetRoute"], route_set)
+
+
+class RunTargetServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_route_set_registration_validates_and_groups_rust_routes(self) -> None:
+        primary_ticket = "a" * 64
+        auxiliary_ticket = "b" * 64
+        rust_result = {
+            "dto": "RunTargetRouteSet",
+            "version": 1,
+            "primary": {
+                "dto": "RunTargetRoute",
+                "version": 1,
+                "ticket": primary_ticket,
+                "tunnelPath": f"/api/run-targets/{primary_ticket}/tunnel",
+                "preferredPort": 4173,
+                "expiresAt": 999,
+            },
+            "additional": [
+                {
+                    "dto": "RunTargetRoute",
+                    "version": 1,
+                    "ticket": auxiliary_ticket,
+                    "tunnelPath": f"/api/run-targets/{auxiliary_ticket}/tunnel",
+                    "preferredPort": 5173,
+                    "expiresAt": 999,
+                    "label": "Vite / HMR",
+                }
+            ],
+        }
+        call = AsyncMock(return_value=rust_result)
+        with patch.object(run_target_service, "call_async", call):
+            result = await run_target_service.register_run_target_routes(
+                owner_id="runner-profile:test:web",
+                shell_id="shell-web",
+                primary_port=4173,
+                additional_ports=(
+                    runner_profiles.RunProfileAdditionalPort(5173, "Vite / HMR"),
+                ),
+            )
+
+        self.assertEqual(result["dto"], "RunTargetRouteSet")
+        self.assertEqual(len(cast(str, result["relayGroupId"])), 64)
+        call.assert_awaited_once()
+        self.assertEqual(call.await_args.args[0], "runTarget.routes.register")
+
 
 class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
     def _match(self, root: Path) -> runner_profiles.RunProfileMatch:
@@ -657,6 +803,9 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
             save_drafts="included",
             show_save_warning=False,
             port=4173,
+            additional_ports=(
+                runner_profiles.RunProfileAdditionalPort(5173, "Vite / HMR"),
+            ),
         )
         return runner_profiles.RunProfileMatch(
             profile=profile,
@@ -675,13 +824,30 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
                 command_preview="npm run dev",
             )
             ticket = "b" * 64
+            auxiliary_ticket = "c" * 64
             route = {
-                "dto": "RunTargetRoute",
+                "dto": "RunTargetRouteSet",
                 "version": 1,
-                "ticket": ticket,
-                "tunnelPath": f"/api/run-targets/{ticket}/tunnel",
-                "preferredPort": 4173,
-                "expiresAt": 999,
+                "relayGroupId": "d" * 64,
+                "primary": {
+                    "dto": "RunTargetRoute",
+                    "version": 1,
+                    "ticket": ticket,
+                    "tunnelPath": f"/api/run-targets/{ticket}/tunnel",
+                    "preferredPort": 4173,
+                    "expiresAt": 999,
+                },
+                "additional": [
+                    {
+                        "dto": "RunTargetRoute",
+                        "version": 1,
+                        "ticket": auxiliary_ticket,
+                        "tunnelPath": f"/api/run-targets/{auxiliary_ticket}/tunnel",
+                        "preferredPort": 5173,
+                        "expiresAt": 999,
+                        "label": "Vite / HMR",
+                    }
+                ],
             }
             ensure = AsyncMock(return_value=shell)
             register = AsyncMock(return_value=route)
@@ -694,7 +860,7 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch.object(
                     runner_profiles_backend,
-                    "register_run_target_route",
+                    "register_run_target_routes",
                     register,
                 ),
                 patch.object(
@@ -712,11 +878,21 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
             register.assert_awaited_once_with(
                 owner_id=shell.label,
                 shell_id=shell.shell_id,
-                port=4173,
+                primary_port=4173,
+                additional_ports=match.profile.additional_ports,
             )
-            projected = open_sidebar.await_args.kwargs["run_target_route"]
-            self.assertEqual(projected["ticket"], ticket)
-            self.assertEqual(projected["originalUrl"], match.profile.sidebar_url)
+            projected = cast(
+                dict[str, object], open_sidebar.await_args.kwargs["run_target_route"]
+            )
+            projected_primary = cast(dict[str, object], projected["primary"])
+            self.assertEqual(projected_primary["ticket"], ticket)
+            self.assertEqual(projected_primary["originalUrl"], match.profile.sidebar_url)
+            projected_additional = cast(list[dict[str, object]], projected["additional"])
+            self.assertEqual(projected_additional[0]["ticket"], auxiliary_ticket)
+            self.assertEqual(
+                projected_additional[0]["originalUrl"],
+                "http://127.0.0.1:5173/",
+            )
 
     async def test_stop_terminates_exact_profile_and_releases_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

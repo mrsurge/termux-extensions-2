@@ -24,7 +24,7 @@ from ..run_profile_state import (
     resolve_run_profile_match,
 )
 from ..ui_ipc.sidebar_ws import handle_ui_sidebar_window_create_request
-from .run_target_service import register_run_target_route, release_run_target_route
+from .run_target_service import register_run_target_routes, release_run_target_route
 
 
 def resolve_runner_profile_run_request(
@@ -96,12 +96,25 @@ async def handle_runner_profile_run_request(
     run_target_route: JsonMap | None = None
     if profile.port is not None:
         try:
-            run_target_route = await register_run_target_route(
+            run_target_route = await register_run_target_routes(
                 owner_id=shell.label,
                 shell_id=shell.shell_id,
-                port=profile.port,
+                primary_port=profile.port,
+                additional_ports=profile.additional_ports,
             )
-            run_target_route["originalUrl"] = profile.sidebar_url
+            primary = _json_object(run_target_route.get("primary"))
+            primary["originalUrl"] = profile.sidebar_url
+            run_target_route["primary"] = primary
+            additional_routes = run_target_route.get("additional")
+            if isinstance(additional_routes, list):
+                for item in additional_routes:
+                    route = _json_object(item)
+                    preferred_port = route.get("preferredPort")
+                    if isinstance(preferred_port, int):
+                        route["originalUrl"] = f"http://127.0.0.1:{preferred_port}/"
+                    if isinstance(item, dict):
+                        item.clear()
+                        item.update(route)
         except Exception as exc:
             stopped_suffix = ""
             if not shell.reused:
@@ -314,3 +327,9 @@ async def _open_sidebar_url(
 def _devtools_target_id(project_root: Path, profile_id: str) -> str:
     project_hash = hashlib.sha256(str(project_root).encode("utf-8")).hexdigest()[:12]
     return f"run-profile:{project_hash}:{profile_id}"
+
+
+def _json_object(value: object) -> JsonMap:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): item for key, item in value.items()}

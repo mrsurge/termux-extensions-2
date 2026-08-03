@@ -1,15 +1,20 @@
 import * as net from "node:net";
 
 import type {
+  ElectronRunTargetAuxiliaryRoute,
+  ElectronRunTargetDescriptor,
   ElectronRunTargetResolution,
   ElectronRunTargetRoute,
+  ElectronRunTargetRouteSet,
 } from "../shared/app-view-contracts";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const TICKET_RE = /^[0-9a-f]{64}$/;
+const MAX_AUXILIARY_PORTS = 8;
 const MAX_WEBSOCKET_BACKLOG_BYTES = 4 * 1024 * 1024;
 
 type RelayEntry = {
+  groupId: string;
   route: ElectronRunTargetRoute;
   server: net.Server;
   sockets: Set<net.Socket>;
@@ -65,6 +70,51 @@ export function normalizeRunTargetRoute(raw: unknown): ElectronRunTargetRoute {
   };
 }
 
+export function normalizeRunTargetRouteSet(raw: unknown): ElectronRunTargetRouteSet {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Run target route set is invalid");
+  }
+  const value = raw as Record<string, unknown>;
+  if (!("primary" in value)) {
+    const primary = normalizeRunTargetRoute(value);
+    return {
+      dto: "RunTargetRouteSet",
+      version: 1,
+      relayGroupId: primary.ticket,
+      primary,
+      additional: [],
+    };
+  }
+  const relayGroupId = String(value.relayGroupId || "").trim();
+  if (!TICKET_RE.test(relayGroupId)) {
+    throw new Error("Run target relay group is invalid");
+  }
+  const primary = normalizeRunTargetRoute(value.primary);
+  if (!Array.isArray(value.additional) || value.additional.length > MAX_AUXILIARY_PORTS) {
+    throw new Error("Run target auxiliary routes are invalid");
+  }
+  const seenPorts = new Set([primary.preferredPort]);
+  const additional = value.additional.map((rawRoute): ElectronRunTargetAuxiliaryRoute => {
+    const route = normalizeRunTargetRoute(rawRoute);
+    const label = rawRoute && typeof rawRoute === "object" && !Array.isArray(rawRoute)
+      ? String((rawRoute as Record<string, unknown>).label || "").trim()
+      : "";
+    if (!label) throw new Error("Run target auxiliary route label is required");
+    if (seenPorts.has(route.preferredPort)) {
+      throw new Error(`Run target contains duplicate port ${route.preferredPort}`);
+    }
+    seenPorts.add(route.preferredPort);
+    return { ...route, label };
+  });
+  return {
+    dto: "RunTargetRouteSet",
+    version: 1,
+    relayGroupId,
+    primary,
+    additional,
+  };
+}
+
 export function localRunTargetUrl(route: ElectronRunTargetRoute): string {
   const url = loopbackUrl(route.originalUrl, route.preferredPort);
   url.hostname = LOOPBACK_HOST;
@@ -102,43 +152,64 @@ export class RunTargetRelayManager {
 
   constructor(private readonly frameworkOrigin: () => string) {}
 
-  resolve(rawRoute: unknown): Promise<ElectronRunTargetResolution> {
+  resolve(rawRoute: ElectronRunTargetDescriptor | unknown): Promise<ElectronRunTargetResolution> {
     const operation = this.#mutationQueue.then(() => this.#resolveNow(rawRoute));
     this.#mutationQueue = operation.then(() => undefined, () => undefined);
     return operation;
   }
 
   async #resolveNow(rawRoute: unknown): Promise<ElectronRunTargetResolution> {
-    const route = normalizeRunTargetRoute(rawRoute);
-    const existing = this.#entries.get(route.preferredPort);
-    if (existing?.route.ticket === route.ticket) {
-      return { ok: true, mode: "tunnel", url: localRunTargetUrl(route) };
+    const legacy = Boolean(rawRoute && typeof rawRoute === "object" && !("primary" in rawRoute));
+    const routeSet = normalizeRunTargetRouteSet(rawRoute);
+    const existingPrimary = this.#entries.get(routeSet.primary.preferredPort);
+    if (existingPrimary && existingPrimary.groupId !== routeSet.relayGroupId) {
+      if (legacy) await this.#stopGroup(existingPrimary.groupId);
+      else {
+        throw new Error(
+          `Run target port ${routeSet.primary.preferredPort} is owned by another profile`,
+        );
+      }
     }
-    if (existing) await this.#stopEntry(existing);
+    if (this.#groupMatches(routeSet)) {
+      return { ok: true, mode: "tunnel", url: localRunTargetUrl(routeSet.primary) };
+    }
+    await this.#stopGroup(routeSet.relayGroupId);
 
-    const entry: RelayEntry = {
-      route,
-      server: net.createServer(),
-      sockets: new Set(),
-      websockets: new Set(),
-    };
-    entry.server.on("connection", (socket) => this.#accept(entry, socket));
+    const primary = this.#createEntry(routeSet.relayGroupId, routeSet.primary);
     try {
-      await listen(entry.server, route.preferredPort);
+      await this.#startEntry(primary);
     } catch (error) {
-      entry.server.close();
+      primary.server.close();
       if (errorCode(error) === "EADDRINUSE") {
-        return { ok: true, mode: "direct", url: route.originalUrl };
+        return { ok: true, mode: "direct", url: routeSet.primary.originalUrl };
       }
       throw error;
     }
-    entry.server.unref();
-    entry.server.on("error", (error) => {
-      console.error(`[te2-run-target] listener failed: ${error.message}`);
-      void this.#stopEntry(entry);
-    });
-    this.#entries.set(route.preferredPort, entry);
-    return { ok: true, mode: "tunnel", url: localRunTargetUrl(route) };
+
+    try {
+      for (const route of routeSet.additional) {
+        const existing = this.#entries.get(route.preferredPort);
+        if (existing && existing.groupId !== routeSet.relayGroupId) {
+          throw new Error(
+            `${route.label} port ${route.preferredPort} is owned by another run profile`,
+          );
+        }
+        const entry = this.#createEntry(routeSet.relayGroupId, route);
+        try {
+          await this.#startEntry(entry);
+        } catch (error) {
+          entry.server.close();
+          if (errorCode(error) === "EADDRINUSE") {
+            throw new Error(`${route.label} port ${route.preferredPort} is already in use`);
+          }
+          throw error;
+        }
+      }
+    } catch (error) {
+      await this.#stopGroup(routeSet.relayGroupId);
+      throw error;
+    }
+    return { ok: true, mode: "tunnel", url: localRunTargetUrl(routeSet.primary) };
   }
 
   stopAll(): Promise<void> {
@@ -147,8 +218,46 @@ export class RunTargetRelayManager {
     return operation;
   }
 
+  #createEntry(groupId: string, route: ElectronRunTargetRoute): RelayEntry {
+    const entry: RelayEntry = {
+      groupId,
+      route,
+      server: net.createServer(),
+      sockets: new Set(),
+      websockets: new Set(),
+    };
+    entry.server.on("connection", (socket) => this.#accept(entry, socket));
+    return entry;
+  }
+
+  async #startEntry(entry: RelayEntry): Promise<void> {
+    await listen(entry.server, entry.route.preferredPort);
+    entry.server.unref();
+    this.#entries.set(entry.route.preferredPort, entry);
+    entry.server.on("error", (error) => {
+      console.error(`[te2-run-target] listener failed: ${error.message}`);
+      void this.#stopGroup(entry.groupId);
+    });
+  }
+
+  #groupMatches(routeSet: ElectronRunTargetRouteSet): boolean {
+    const expected = [routeSet.primary, ...routeSet.additional];
+    const current = [...this.#entries.values()].filter(
+      (entry) => entry.groupId === routeSet.relayGroupId,
+    );
+    return current.length === expected.length && expected.every((route) => {
+      const entry = this.#entries.get(route.preferredPort);
+      return entry?.groupId === routeSet.relayGroupId && entry.route.ticket === route.ticket;
+    });
+  }
+
   async #stopAllNow(): Promise<void> {
     await Promise.all([...this.#entries.values()].map((entry) => this.#stopEntry(entry)));
+  }
+
+  async #stopGroup(groupId: string): Promise<void> {
+    const entries = [...this.#entries.values()].filter((entry) => entry.groupId === groupId);
+    await Promise.all(entries.map((entry) => this.#stopEntry(entry)));
   }
 
   #accept(entry: RelayEntry, socket: net.Socket): void {

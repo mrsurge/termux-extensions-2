@@ -5,6 +5,7 @@ import hashlib
 import re
 import secrets
 import time
+from typing import cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.extensions.apps.registry import AppRegistry
@@ -272,7 +273,12 @@ def _validate_url_slot_url(raw_url: str) -> str:
     return urlunsplit(("", "", split.path, split.query, split.fragment))
 
 
-def _normalize_run_target_route(value: object, *, canonical_url: str) -> JsonObject:
+def _normalize_run_target_descriptor(
+    value: object,
+    *,
+    canonical_url: str | None,
+    require_label: bool,
+) -> JsonObject:
     raw = _as_object(value)
     if not raw:
         return {}
@@ -289,9 +295,9 @@ def _normalize_run_target_route(value: object, *, canonical_url: str) -> JsonObj
         raise ValueError("runTargetRoute tunnelPath is invalid")
     if preferred_port < 1 or preferred_port > 65535:
         raise ValueError("runTargetRoute preferredPort is invalid")
-    if original_url != canonical_url:
+    if canonical_url is not None and original_url != canonical_url:
         raise ValueError("runTargetRoute originalUrl must match the Sidebar URL")
-    return {
+    route: JsonObject = {
         "dto": "RunTargetRoute",
         "version": 1,
         "ticket": ticket,
@@ -299,6 +305,59 @@ def _normalize_run_target_route(value: object, *, canonical_url: str) -> JsonObj
         "preferredPort": preferred_port,
         "originalUrl": original_url,
         "expiresAt": expires_at,
+    }
+    if require_label:
+        label = _norm(raw.get("label"))
+        if not label:
+            raise ValueError("runTargetRoute auxiliary label is required")
+        route["label"] = label
+    return route
+
+
+def _normalize_run_target_route(value: object, *, canonical_url: str) -> JsonObject:
+    raw = _as_object(value)
+    if not raw:
+        return {}
+    if _norm(raw.get("dto")) != "RunTargetRouteSet" and "primary" not in raw:
+        return _normalize_run_target_descriptor(
+            raw,
+            canonical_url=canonical_url,
+            require_label=False,
+        )
+
+    relay_group_id = _norm(raw.get("relayGroupId") or raw.get("relay_group_id"))
+    if not RUN_TARGET_TICKET_RE.fullmatch(relay_group_id):
+        raise ValueError("runTargetRoute relayGroupId is invalid")
+    primary = _normalize_run_target_descriptor(
+        raw.get("primary"),
+        canonical_url=canonical_url,
+        require_label=False,
+    )
+    additional_obj = raw.get("additional")
+    additional_values = (
+        cast(list[object], additional_obj) if isinstance(additional_obj, list) else []
+    )
+    if len(additional_values) > 8:
+        raise ValueError("runTargetRoute supports at most 8 auxiliary routes")
+    seen_ports = {_as_int(primary.get("preferredPort"))}
+    additional: list[object] = []
+    for item in additional_values:
+        route = _normalize_run_target_descriptor(
+            item,
+            canonical_url=None,
+            require_label=True,
+        )
+        port = _as_int(route.get("preferredPort"))
+        if port in seen_ports:
+            raise ValueError(f"runTargetRoute contains duplicate port {port}")
+        seen_ports.add(port)
+        additional.append(route)
+    return {
+        "dto": "RunTargetRouteSet",
+        "version": 1,
+        "relayGroupId": relay_group_id,
+        "primary": primary,
+        "additional": additional,
     }
 
 

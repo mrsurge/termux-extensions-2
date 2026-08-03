@@ -701,6 +701,10 @@
   .declarative-field-label { font-size: 0.88rem; font-weight: 600; }
   .declarative-field-description { font-size: 12px; opacity: 0.65; line-height: 1.35; }
   .declarative-input { width: 100%; max-width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border, #333); background: rgba(0, 0, 0, 0.25); color: var(--foreground, #e5e7eb); font-size: 0.82rem; }
+  .declarative-labeled-port-list, .declarative-labeled-port-rows { display: flex; flex-direction: column; gap: 7px; }
+  .declarative-labeled-port-row { display: grid; grid-template-columns: minmax(86px, 0.35fr) minmax(130px, 1fr) auto; gap: 7px; align-items: stretch; }
+  .declarative-labeled-port-add { align-self: flex-start; }
+  .declarative-labeled-port-remove { min-width: 72px; }
   .declarative-select { width: 100%; }
   .declarative-select-button { display: flex; align-items: center; justify-content: space-between; min-height: 30px; text-align: left; cursor: pointer; }
   .declarative-select-button::after { content: ""; width: 0; height: 0; margin-left: 10px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid var(--muted, #8b949e); }
@@ -727,6 +731,8 @@
   .run-profiles-json { width: 100%; min-height: 180px; font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace; font-size: 12px; }
   .run-profiles-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   @media (max-width: 720px) {
+    .declarative-labeled-port-row { grid-template-columns: minmax(74px, 0.42fr) minmax(0, 1fr); }
+    .declarative-labeled-port-remove { grid-column: 1 / -1; justify-self: end; }
     .run-profiles-layout { grid-template-columns: 1fr; }
   }
   .settings-console-worker-id {

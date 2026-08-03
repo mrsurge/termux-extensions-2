@@ -6,7 +6,7 @@ import {
   type ElectronAppViewCommand,
   type ElectronAppViewInspection,
   type ElectronRunTargetResolution,
-  type ElectronRunTargetRoute,
+  type ElectronRunTargetDescriptor,
 } from "../shared/app-view-contracts";
 import type { AssetUpdateResult } from "../shared/contracts";
 
@@ -60,7 +60,7 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   forceAssetUpdate(): Promise<AssetUpdateResult> {
     return invokeElectron("force_asset_update");
   },
-  resolveRunTarget(route: ElectronRunTargetRoute): Promise<ElectronRunTargetResolution> {
+  resolveRunTarget(route: ElectronRunTargetDescriptor): Promise<ElectronRunTargetResolution> {
     return invokeElectron("resolve_run_target", route);
   },
 });

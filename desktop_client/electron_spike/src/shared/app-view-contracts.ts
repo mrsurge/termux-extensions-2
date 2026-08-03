@@ -41,6 +41,22 @@ export type ElectronRunTargetRoute = {
   expiresAt?: number;
 };
 
+export type ElectronRunTargetAuxiliaryRoute = ElectronRunTargetRoute & {
+  label: string;
+};
+
+export type ElectronRunTargetRouteSet = {
+  dto: "RunTargetRouteSet";
+  version: 1;
+  relayGroupId: string;
+  primary: ElectronRunTargetRoute;
+  additional: ElectronRunTargetAuxiliaryRoute[];
+};
+
+export type ElectronRunTargetDescriptor =
+  | ElectronRunTargetRoute
+  | ElectronRunTargetRouteSet;
+
 export type ElectronRunTargetResolution = {
   ok: true;
   mode: "direct" | "tunnel";
@@ -53,7 +69,7 @@ export type ElectronAppViewBridge = {
   reload(): Promise<{ ok: true }>;
   home(): Promise<{ ok: true }>;
   forceAssetUpdate(): Promise<AssetUpdateResult>;
-  resolveRunTarget(route: ElectronRunTargetRoute): Promise<ElectronRunTargetResolution>;
+  resolveRunTarget(route: ElectronRunTargetDescriptor): Promise<ElectronRunTargetResolution>;
 };
 
 export function validateElectronAppViewCommand(value: unknown): ElectronAppViewCommand {
