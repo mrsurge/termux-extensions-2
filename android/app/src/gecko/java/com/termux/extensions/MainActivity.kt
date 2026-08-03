@@ -91,6 +91,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnConsoleStart: Button
 
     private val httpClient = OkHttpClient()
+    private val runTargetRelays = RunTargetRelayManager(httpClient)
     private val appHealthHttpClient = OkHttpClient.Builder()
         .connectTimeout(2, TimeUnit.SECONDS)
         .readTimeout(2, TimeUnit.SECONDS)
@@ -1685,6 +1686,8 @@ class MainActivity : AppCompatActivity() {
                                             "Asset interceptor acknowledged local port $assetPort",
                                         )
                                         completeReady()
+                                    } else if (payload.optString("type") == "run_target_resolve") {
+                                        handleRunTargetResolve(payload, source)
                                     }
                                 }
 
@@ -1697,6 +1700,7 @@ class MainActivity : AppCompatActivity() {
                             val msg = JSONObject().apply {
                                 put("type", "set_asset_port")
                                 put("port", assetPort)
+                                put("frameworkBaseUrl", frameworkBaseUrl)
                             }
                             port.postMessage(msg)
                             Log.i("MainActivity", "Sent asset port $assetPort to extension")
@@ -1757,10 +1761,55 @@ class MainActivity : AppCompatActivity() {
         Log.i("MainActivity", "Released asset interceptor for activity teardown")
     }
 
+    private fun handleRunTargetResolve(payload: JSONObject, source: WebExtension.Port) {
+        val requestId = payload.optString("requestId").trim()
+        val route = payload.optJSONObject("route")
+        val pageOrigin = payload.optString("pageOrigin").trim()
+        val expectedOrigin = runCatching { Uri.parse(frameworkBaseUrl) }.getOrNull()
+        val suppliedOrigin = runCatching { Uri.parse(pageOrigin) }.getOrNull()
+        val trusted = expectedOrigin != null && suppliedOrigin != null &&
+            expectedOrigin.scheme.equals(suppliedOrigin.scheme, ignoreCase = true) &&
+            expectedOrigin.host.equals(suppliedOrigin.host, ignoreCase = true) &&
+            effectivePort(expectedOrigin) == effectivePort(suppliedOrigin)
+        if (requestId.isEmpty() || route == null || !trusted) {
+            source.postMessage(JSONObject().apply {
+                put("type", "run_target_resolve_result")
+                put("requestId", requestId)
+                put("ok", false)
+                put("error", "Run target request origin is not trusted")
+            })
+            return
+        }
+        runTargetRelays.resolve(route, frameworkBaseUrl) { result ->
+            runOnUiThread {
+                if (assetExtensionPort !== source) return@runOnUiThread
+                val response = result.fold(
+                    onSuccess = { it.toJson(requestId) },
+                    onFailure = { error -> JSONObject().apply {
+                        put("type", "run_target_resolve_result")
+                        put("requestId", requestId)
+                        put("ok", false)
+                        put("error", error.message ?: "Run target relay failed")
+                    } },
+                )
+                source.postMessage(response)
+            }
+        }
+    }
+
     private fun applyAndroidSettings(settings: AndroidAppSettings, reconnect: Boolean) {
         val devToolsSettingChanged =
             devToolsInspectorEnabled != settings.devToolsInspectorEnabled
+        val frameworkChanged = frameworkBaseUrl != settings.frameworkBaseUrl
         frameworkBaseUrl = settings.frameworkBaseUrl
+        if (frameworkChanged) {
+            runTargetRelays.stopAll()
+            assetExtensionPort?.postMessage(JSONObject().apply {
+                put("type", "set_asset_port")
+                put("port", localAssetServer?.port ?: 0)
+                put("frameworkBaseUrl", frameworkBaseUrl)
+            })
+        }
         persistentNetworkNotificationEnabled = settings.persistentNetworkNotification
         devToolsInspectorEnabled = settings.devToolsInspectorEnabled
         if (!reconnect) return
@@ -2046,6 +2095,7 @@ class MainActivity : AppCompatActivity() {
         uiIpcClient = null
         nativeConsoleWorker?.disconnect()
         nativeConsoleWorker = null
+        runTargetRelays.close()
         devToolsInspector?.release()
         devToolsInspector = null
         try { processesGeckoView.releaseSession() } catch (_: Exception) {}

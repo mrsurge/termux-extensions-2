@@ -3,6 +3,7 @@
 mod fs_pipe_ops;
 mod git_pipe_ops;
 pub(crate) mod protocol;
+mod run_target_pipe_ops;
 mod search_pipe_ops;
 
 use std::sync::Arc;
@@ -45,6 +46,11 @@ pub(crate) async fn dispatch_request(
     // call framework-owned search exactly like fs/git services.
     if let Some(response) =
         search_pipe_ops::dispatch_search_request(&request, responder, scheduler, event_sink).await
+    {
+        return response;
+    }
+    if let Some(response) =
+        run_target_pipe_ops::dispatch_run_target_request(&request, responder, scheduler).await
     {
         return response;
     }
@@ -1372,5 +1378,75 @@ mod tests {
 
         let _ = fs::remove_dir_all(source);
         let _ = fs::remove_dir_all(destination_root);
+    }
+
+    #[tokio::test]
+    async fn dispatches_run_target_registration_and_release() {
+        let root = test_root("run-target-route");
+        let scheduler = FrameworkServiceScheduler::default();
+        let responder = PipeIdentity {
+            nid: 2400,
+            name: "service.runTarget".to_owned(),
+        };
+        let registered = dispatch_request(
+            targeted_request(
+                "runTarget.route.register",
+                json!({
+                    "ownerId": "runner-profile:file_editor_cm6:project:web",
+                    "shellId": "shell-4173",
+                    "port": 4173
+                }),
+                &root,
+                2400,
+                "service.runTarget",
+            ),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
+        assert_eq!(registered.kind, PipeMessageKind::Response);
+        let route = registered.result.expect("run target route");
+        let ticket = route
+            .get("ticket")
+            .and_then(|value| value.as_str())
+            .expect("route ticket");
+        assert_eq!(ticket.len(), 64);
+        assert_eq!(
+            route.get("preferredPort").and_then(|value| value.as_u64()),
+            Some(4173)
+        );
+        let expected_tunnel = format!("/api/run-targets/{ticket}/tunnel");
+        assert_eq!(
+            route.get("tunnelPath").and_then(|value| value.as_str()),
+            Some(expected_tunnel.as_str())
+        );
+
+        let released = dispatch_request(
+            targeted_request(
+                "runTarget.route.release",
+                json!({
+                    "ownerId": "runner-profile:file_editor_cm6:project:web",
+                    "shellId": "shell-4173"
+                }),
+                &root,
+                2400,
+                "service.runTarget",
+            ),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
+        assert_eq!(released.kind, PipeMessageKind::Response);
+        assert_eq!(
+            released
+                .result
+                .as_ref()
+                .and_then(|value| value.get("released"))
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

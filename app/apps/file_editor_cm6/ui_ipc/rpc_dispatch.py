@@ -21,6 +21,8 @@ from .rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_RECENT_FILE_CLOSE,
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_GET,
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_SAVE,
+    UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STATE_GET,
+    UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STOP,
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CHECKOUT,
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCH_CREATE,
     UI_IPC_RPC_METHOD_HOST_GIT_BRANCHES_LIST,
@@ -61,6 +63,10 @@ from ..host.recent_files_backend import handle_host_recent_file_close_request
 from ..host.run_profiles_config_backend import (
     handle_host_run_profiles_get_request,
     handle_host_run_profiles_save_request,
+)
+from ..host.runner_profiles_backend import (
+    handle_run_profile_state_get_request,
+    handle_run_profile_stop_request,
 )
 
 
@@ -121,6 +127,18 @@ async def dispatch_ui_ipc_rpc_request(
 
     if method == UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_SAVE:
         return await handle_host_run_profiles_save_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STATE_GET:
+        return await handle_run_profile_state_get_request(
+            params,
+            source_name=source_name,
+        )
+
+    if method == UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STOP:
+        return await handle_run_profile_stop_request(
             params,
             source_name=source_name,
         )

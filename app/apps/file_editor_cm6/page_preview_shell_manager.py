@@ -37,6 +37,8 @@ class ShellManager(Protocol):
 
     def list_shells(self) -> Awaitable[list[ShellRecord]]: ...
 
+    def terminate_shell(self, shell_id: str, *, force: bool = False) -> Awaitable[object]: ...
+
 
 class OrchestratorInstance(Protocol):
     def start_from_ref(
@@ -65,6 +67,13 @@ class PagePreviewShell:
     label: str
     url: str
     reused: bool
+
+
+@dataclass(frozen=True)
+class PagePreviewShellState:
+    shell_id: str
+    label: str
+    running: bool
 
 
 def _framework_get_manager() -> ManagerGetter:
@@ -126,6 +135,36 @@ async def ensure_page_preview_shell(
             wait_ready=True,
         )
         return PagePreviewShell(shell_id=shell.id, label=label, url=_url(port), reused=False)
+
+
+async def page_preview_shell_state(
+    *, project_root: str, profile_id: str
+) -> PagePreviewShellState:
+    root = str(Path(project_root).expanduser().resolve(strict=False))
+    label = _label(root, profile_id)
+    mgr = await _framework_get_manager()()
+    shell = await mgr.find_shell_by_label(label, status="running")
+    return PagePreviewShellState(
+        shell_id=shell.id if _is_running(shell) else "",
+        label=label,
+        running=_is_running(shell),
+    )
+
+
+async def stop_page_preview_shell(
+    *, project_root: str, profile_id: str
+) -> PagePreviewShellState:
+    root = str(Path(project_root).expanduser().resolve(strict=False))
+    label = _label(root, profile_id)
+    lock = _spawn_locks.setdefault(label, asyncio.Lock())
+    async with lock:
+        mgr = await _framework_get_manager()()
+        shell = await mgr.find_shell_by_label(label, status="running")
+        if not _is_running(shell):
+            return PagePreviewShellState(shell_id="", label=label, running=False)
+        shell_id = shell.id
+        await mgr.terminate_shell(shell_id, force=True)
+        return PagePreviewShellState(shell_id=shell_id, label=label, running=False)
 
 
 async def _find_preview_port_conflict(

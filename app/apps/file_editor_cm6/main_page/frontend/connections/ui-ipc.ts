@@ -332,6 +332,8 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
             dispatchWindowCustomEvent('cm6:terminal-open', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.codeInspectorChanged) {
             dispatchWindowCustomEvent('cm6:code-inspector-changed', params);
+          } else if (method === UI_IPC_RPC_NOTIFICATIONS.runProfileStateChanged) {
+            dispatchWindowCustomEvent('cm6:run-profile-state-changed', params);
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.sidebarWindowsChanged) {
             dispatchSidebarEvent({
               type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowsChanged,

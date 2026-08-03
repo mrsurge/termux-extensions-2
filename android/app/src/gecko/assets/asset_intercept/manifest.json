@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Editor Asset Intercept",
-  "version": "1.5",
+  "version": "1.6",
   "description": "Redirects editor static asset requests to a local file server",
   "permissions": [
     "webRequest",
@@ -14,6 +14,14 @@
     "scripts": ["background.js"],
     "persistent": true
   },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["run_target_bridge.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
   "applications": {
     "gecko": {
       "id": "asset_intercept@mrselect6"

@@ -34,6 +34,7 @@ from .rpc_contract import (
     UI_IPC_RPC_NOTIFICATION_FILE_TABS_DECORATIONS_CHANGED,
     UI_IPC_RPC_NOTIFICATION_HOST_ACTIVE_FILE_CHANGED,
     UI_IPC_RPC_NOTIFICATION_OPEN_STATE_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED,
     UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
     UiIpcRpcProtocolError,
     build_jsonrpc_error,
@@ -232,6 +233,20 @@ class UIIPCNamespace(socketio.AsyncNamespace):
                     _encode_ui_ipc_notification(
                         UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED,
                         _json_object(get_sidebar_window_state()),
+                    ),
+                    to=sid_text,
+                )
+            except Exception:
+                pass
+            try:
+                from ..run_profile_state import build_run_profile_state_projection
+
+                run_profile_state = await build_run_profile_state_projection()
+                await ns.emit(
+                    UI_IPC_RPC_NOTIFICATION_EVENT,
+                    _encode_ui_ipc_notification(
+                        UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED,
+                        run_profile_state,
                     ),
                     to=sid_text,
                 )

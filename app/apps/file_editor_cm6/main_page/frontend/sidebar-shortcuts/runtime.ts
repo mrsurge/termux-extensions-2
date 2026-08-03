@@ -52,6 +52,7 @@ import {
   collectShortcuts as collectShortcutsFromPrefs,
   pickMruShortcut as pickMruShortcutFromModel,
 } from "./shortcut-model.ts";
+import { resolveRunTargetUrl } from './run-target-resolver.ts';
 import type {
   FrameworkAppManifest,
   IframeEntry,
@@ -854,6 +855,8 @@ export function initSidebarShortcuts(
         devToolsTargetLabel: _normStr(
           win.devtools_target_label || win.devToolsTargetLabel,
         ),
+        run_target_route: win.run_target_route || win.runTargetRoute,
+        runTargetRoute: win.run_target_route || win.runTargetRoute,
       };
     }
     if (!appId) return null;
@@ -2423,7 +2426,20 @@ export function initSidebarShortcuts(
     const url = _shortcutFrameUrl(sc, entry, options);
     if (!url) return false;
     const forceReload = !!options.forceReload;
-    const loadUrl = url;
+    let loadUrl = url;
+    if (sc.kind === SHORTCUT_KIND_URL && (sc.run_target_route || sc.runTargetRoute)) {
+      try {
+        loadUrl = await resolveRunTargetUrl(
+          sc.run_target_route || sc.runTargetRoute,
+          url,
+        );
+      } catch (error) {
+        entry.loaded = false;
+        options.onBeforeStart?.();
+        toast(errorMessage(error, 'Run target relay failed'));
+        return false;
+      }
+    }
 
     if (sc.kind === SHORTCUT_KIND_FRAMEWORK_APP) {
       const onBeforeStart =
@@ -2475,8 +2491,13 @@ export function initSidebarShortcuts(
       return true;
     }
 
-    if (!forceReload && entry.loaded) return true;
-    _loadShortcutIframe(sc, entry, loadUrl, forceReload || !entry.loaded);
+    if (!forceReload && entry.loaded && entry.url === loadUrl) return true;
+    _loadShortcutIframe(
+      sc,
+      entry,
+      loadUrl,
+      forceReload || !entry.loaded || entry.url !== loadUrl,
+    );
     return true;
   }
 

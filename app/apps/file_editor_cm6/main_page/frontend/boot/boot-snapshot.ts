@@ -8,6 +8,7 @@ export interface HostBootSnapshot {
   explorer_bootstrap?: JsonRecord | null;
   code_inspector?: JsonRecord | null;
   code_server?: JsonRecord;
+  run_profile_state?: JsonRecord;
 }
 
 interface HostBootSnapshotReply {
@@ -52,4 +53,8 @@ export function getBootSnapshotCodeInspector(snapshot: HostBootSnapshot | null):
 
 export function getBootSnapshotCodeServer(snapshot: HostBootSnapshot | null): JsonRecord | null {
   return asRecord(snapshot?.code_server);
+}
+
+export function getBootSnapshotRunProfileState(snapshot: HostBootSnapshot | null): JsonRecord | null {
+  return asRecord(snapshot?.run_profile_state);
 }

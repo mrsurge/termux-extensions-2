@@ -20,6 +20,7 @@ from .explorer.contracts.watcher import WatcherConfigPayload, build_watcher_conf
 from .explorer.transport.connection_manager import abs_to_rel
 from .monaco_editor.editor_backend_services.contracts import JsonMap
 from .open_state_backend import read_sidecar_open_state
+from .run_profile_state import build_run_profile_state_projection
 from .project_sidecar import ProjectSidecar
 from .history_store import HistoryStore
 from .stores import get_history_store, get_preferences_store
@@ -62,6 +63,7 @@ class BootSnapshotPayload(TypedDict):
     explorer_bootstrap: ExplorerBootstrapPayload | None
     code_inspector: CodeInspectorProjection | None
     code_server: CodeServerPrerequisitePayload
+    run_profile_state: JsonMap
 
 
 async def _prime_backend_runtime(project_root: str) -> None:
@@ -236,6 +238,7 @@ async def handle_boot_snapshot_request(
         project_root=active_project,
         session_state=session_state,
     )
+    run_profile_state = await build_run_profile_state_projection()
 
     snapshot: BootSnapshotPayload = {
         "host_state": host_state,
@@ -245,6 +248,7 @@ async def handle_boot_snapshot_request(
         "explorer_bootstrap": explorer_bootstrap,
         "code_inspector": get_code_inspector_projection(),
         "code_server": code_server.payload(),
+        "run_profile_state": run_profile_state,
     }
     return {
         "ok": True,

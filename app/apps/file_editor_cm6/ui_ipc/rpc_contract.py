@@ -22,6 +22,8 @@ UI_IPC_RPC_METHOD_HOST_FILE_RUN: Final = "ui.host.file.run"
 UI_IPC_RPC_METHOD_HOST_PAGE_PREVIEW_TEMPLATE_INSTALL: Final = "ui.host.pagePreview.template.install"
 UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_GET: Final = "ui.host.runProfiles.get"
 UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_SAVE: Final = "ui.host.runProfiles.save"
+UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STATE_GET: Final = "ui.host.runProfile.state.get"
+UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STOP: Final = "ui.host.runProfile.stop"
 UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET: Final = "ui.host.bootSnapshot.get"
 UI_IPC_RPC_METHOD_HOST_LANGUAGE_BACKEND_SET: Final = "ui.host.languageBackend.set"
 UI_IPC_RPC_METHOD_HOST_EDITOR_JUMP_TO_LINE: Final = "ui.host.editor.jumpToLine"
@@ -53,6 +55,8 @@ UiIpcRpcMethod = Literal[
     "ui.host.pagePreview.template.install",
     "ui.host.runProfiles.get",
     "ui.host.runProfiles.save",
+    "ui.host.runProfile.state.get",
+    "ui.host.runProfile.stop",
     "ui.host.bootSnapshot.get",
     "ui.host.languageBackend.set",
     "ui.host.editor.jumpToLine",
@@ -102,6 +106,9 @@ UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOWS_CHANGED: Final = "ui.sidebar.windows.cha
 UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED: Final = "ui.sidebar.window.activated"
 UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED: Final = "ui.sidebar.window.readiness.changed"
 UI_IPC_RPC_NOTIFICATION_CODE_INSPECTOR_CHANGED: Final = "ui.codeInspector.changed"
+UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED: Final = (
+    "ui.runProfile.state.changed"
+)
 
 UiIpcRpcNotification = Literal[
     "ui.editor.save",
@@ -128,6 +135,7 @@ UiIpcRpcNotification = Literal[
     "ui.sidebar.window.activated",
     "ui.sidebar.window.readiness.changed",
     "ui.codeInspector.changed",
+    "ui.runProfile.state.changed",
 ]
 
 ALLOWED_REQUEST_METHODS: Final[set[str]] = {
@@ -139,6 +147,8 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     UI_IPC_RPC_METHOD_HOST_PAGE_PREVIEW_TEMPLATE_INSTALL,
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_GET,
     UI_IPC_RPC_METHOD_HOST_RUN_PROFILES_SAVE,
+    UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STATE_GET,
+    UI_IPC_RPC_METHOD_HOST_RUN_PROFILE_STOP,
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
     UI_IPC_RPC_METHOD_HOST_LANGUAGE_BACKEND_SET,
     UI_IPC_RPC_METHOD_HOST_EDITOR_JUMP_TO_LINE,
@@ -186,6 +196,7 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_ACTIVATED,
     UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED,
     UI_IPC_RPC_NOTIFICATION_CODE_INSPECTOR_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED,
 }
 
 JsonObject = dict[str, object]

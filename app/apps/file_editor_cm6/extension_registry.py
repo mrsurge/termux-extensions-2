@@ -6,13 +6,15 @@ builds a unified registry with language slot mapping, and generates the
 settings.json gate for code-server.
 
 Registry is persisted at ~/.config/code-server/te2_extension_registry.json.
-settings.json is an OUTPUT of the registry (one-way flow, never read back).
+The registry retains one user-owned global settings map, which is materialized
+with TE2's generated language gates into code-server User/settings.json.
 """
 
 import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -113,6 +115,29 @@ def _registry_extension_count(registry: Registry) -> int:
 
 def _registry_slot_count(registry: Registry) -> int:
     return len(_slot_map(registry.get("language_slots", {})))
+
+
+def _write_json_object_atomic(path: Path, value: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as file_obj:
+            json.dump(value, file_obj, indent=2)
+            file_obj.write("\n")
+            temp_path = Path(file_obj.name)
+        os.replace(temp_path, path)
+        temp_path = None
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
 
 @dataclass(frozen=True)
 class CodeServerInstallation:
@@ -797,7 +822,6 @@ def _scan_builtin_extensions() -> ExtensionMap:
             "display_name": parsed["display_name"],
             "description": parsed["description"],
             "configuration_schema": parsed["configuration_schema"],
-            "configuration_values": {},
             "path": str(d),
         }
         results[ext_id] = entry
@@ -856,7 +880,6 @@ def _scan_user_extensions() -> ExtensionMap:
             "display_name": parsed["display_name"] if parsed else ext_id,
             "description": parsed["description"] if parsed else "",
             "configuration_schema": parsed["configuration_schema"] if parsed else {},
-            "configuration_values": {},
             "path": ext_path,
         }
         results[ext_id] = result_entry
@@ -950,30 +973,80 @@ def _build_language_slots(extensions: ExtensionMap) -> LanguageSlotMap:
 
 def _empty_registry() -> Registry:
     return {
-        "version": 1,
+        "version": 2,
         "updated_at": 0,
         "extensions": {},
         "language_slots": {},
+        "user_settings": {},
     }
+
+
+def _read_user_settings_file() -> dict[str, object]:
+    if not _USER_SETTINGS_PATH.is_file():
+        return {}
+    try:
+        return _object_dict(
+            _json_object_from_text(_USER_SETTINGS_PATH.read_text("utf-8")) or {}
+        )
+    except Exception:
+        return {}
+
+
+def _legacy_user_settings_from_file() -> dict[str, object]:
+    """Extract user-owned values from the old generated settings file."""
+    settings: dict[str, object] = {}
+    for key, value in _read_user_settings_file().items():
+        if key in _MANAGED_GLOBAL_KEYS or key == "files.watcherExclude":
+            continue
+        if key.startswith("[") and key.endswith("]"):
+            continue
+        settings[key] = value
+    return settings
+
+
+def _migrate_registry_user_settings(registry: Registry) -> bool:
+    version = registry.get("version")
+    if version == 2 and isinstance(registry.get("user_settings"), dict):
+        return False
+
+    # Preserve the effective file first, then old schema-form values, and let
+    # the explicit User JSON map win any historical conflict.
+    user_settings = _legacy_user_settings_from_file()
+    extensions = _extension_map(registry.get("extensions", {}))
+    for extension in extensions.values():
+        user_settings.update(_entry_object_dict(extension, "configuration_values"))
+        extension.pop("configuration_values", None)
+    user_settings.update(_object_dict(registry.get("custom_settings", {})))
+
+    registry["version"] = 2
+    registry["extensions"] = extensions
+    registry["user_settings"] = user_settings
+    registry.pop("custom_settings", None)
+    return True
 
 
 def load_registry() -> Registry:
     """Load persisted registry, or return empty."""
-    if _REGISTRY_PATH.is_file():
-        try:
-            data = _json_object_from_text(_REGISTRY_PATH.read_text("utf-8"))
-            if isinstance(data, dict) and "extensions" in data:
-                return dict(data)
-        except Exception:
-            pass
+    if not _REGISTRY_PATH.is_file():
+        return _empty_registry()
+    try:
+        data = _json_object_from_text(_REGISTRY_PATH.read_text("utf-8"))
+    except OSError:
+        return _empty_registry()
+    if isinstance(data, dict) and "extensions" in data:
+        registry = dict(data)
+        if _migrate_registry_user_settings(registry):
+            # A failed migration write must remain visible instead of silently
+            # presenting an empty registry and risking a destructive rebuild.
+            save_registry(registry)
+        return registry
     return _empty_registry()
 
 
 def save_registry(registry: Registry) -> None:
     """Persist registry to disk."""
     registry["updated_at"] = int(time.time() * 1000)
-    _REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _REGISTRY_PATH.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8")
+    _write_json_object_atomic(_REGISTRY_PATH, registry)
     print(
         f"[ext_registry] registry saved: {_registry_extension_count(registry)} extensions, "
         + f"{_registry_slot_count(registry)} slots",
@@ -986,8 +1059,8 @@ def save_registry(registry: Registry) -> None:
 def scan_and_rebuild() -> Registry:
     """Full scan of builtin + user extensions → rebuild registry + language slots.
 
-    Preserves user configuration_values and active toggles from the
-    existing registry when an extension is still installed.
+    Preserves user settings and active toggles from the existing registry when
+    an extension is still installed.
     """
     old_registry = load_registry()
     old_exts = _extension_map(old_registry.get("extensions", {}))
@@ -1000,11 +1073,11 @@ def scan_and_rebuild() -> Registry:
     # Merge: user extensions override builtins with same ID
     all_exts = {**builtins, **user_exts}
 
-    # Preserve user config values and active toggles from previous registry
+    # Preserve active toggles from the previous registry. Extension settings
+    # are global user settings, not extension-entry state.
     for ext_id, ext in all_exts.items():
         if ext_id in old_exts:
             old = old_exts[ext_id]
-            ext["configuration_values"] = _entry_object_dict(old, "configuration_values")
             ext["active"] = _entry_bool(old, "active", True)
 
     # Build slots
@@ -1015,36 +1088,35 @@ def scan_and_rebuild() -> Registry:
         if lang in old_slots:
             slot["active"] = _entry_bool(old_slots[lang], "active", True)
 
-    # Preserve custom_settings from old registry
-    custom = _object_dict(old_registry.get("custom_settings", {}))
+    user_settings = _object_dict(old_registry.get("user_settings", {}))
 
     registry: Registry = {
-        "version": 1,
+        "version": 2,
         "updated_at": 0,
         "extensions": all_exts,
         "language_slots": slots,
-        "custom_settings": custom,
+        "user_settings": user_settings,
     }
 
     save_registry(registry)
     return registry
 
 
-# ── Custom settings (user-defined JSON overrides) ─────────────────────
+# ── Global user settings ──────────────────────────────────────────────
 
 def get_custom_settings() -> dict[str, object]:
-    """Return user-defined custom settings dict."""
+    """Return the user-owned global settings map."""
     registry = load_registry()
-    return _object_dict(registry.get("custom_settings", {}))
+    return _object_dict(registry.get("user_settings", {}))
 
 
 def set_custom_settings(settings: dict[str, object]) -> None:
-    """Persist user-defined custom settings and rebuild the gate."""
+    """Replace global user settings and rebuild the materialized file."""
     registry = load_registry()
-    registry["custom_settings"] = settings
+    registry["user_settings"] = settings
     save_registry(registry)
     rebuild_settings_gate(registry)
-    print(f"[ext_registry] custom settings saved: {len(settings)} keys", flush=True)
+    print(f"[ext_registry] user settings saved: {len(settings)} keys", flush=True)
 
 
 # ── Settings gate generation ──────────────────────────────────────────
@@ -1052,40 +1124,27 @@ def set_custom_settings(settings: dict[str, object]) -> None:
 def rebuild_settings_gate(registry: Registry | None = None) -> dict[str, object]:
     """Generate and write the settings.json gate from registry state.
 
-    Merges our managed keys with any existing non-managed keys
-    (e.g. files.watcherExclude set by watcher sync).
+    Materializes the registry's User map with TE2's generated gates. The watcher
+    synchronizer owns its existing files.watcherExclude value independently.
 
     Returns the final settings dict.
     """
     if registry is None:
         registry = load_registry()
 
-    # Load existing settings to preserve non-managed keys
-    existing: dict[str, object] = {}
-    if _USER_SETTINGS_PATH.is_file():
-        try:
-            existing = _object_dict(_json_object_from_text(_USER_SETTINGS_PATH.read_text("utf-8")) or {})
-        except Exception:
-            existing = {}
+    existing = _read_user_settings_file()
+    preserved_framework_settings = {
+        key: value
+        for key, value in existing.items()
+        if key == "files.watcherExclude"
+    }
 
-    # Remove old managed keys and old per-language overrides
-    cleaned: dict[str, object] = {}
-    for key, val in existing.items():
-        if key in _MANAGED_GLOBAL_KEYS:
-            continue
-        if key.startswith("[") and key.endswith("]"):
-            # Only remove language overrides we'd regenerate
-            continue
-        cleaned[key] = val
-
-    # Apply global gate
-    settings: dict[str, object] = {**cleaned, **_GLOBAL_GATE}
+    # Apply the generated gate first. Explicit User settings are merged last
+    # so the User scope remains the global workbench authority.
+    settings: dict[str, object] = dict(_GLOBAL_GATE)
 
     # Apply per-language overrides for active slots
     slots = _slot_map(registry.get("language_slots", {}))
-    extensions = _extension_map(registry.get("extensions", {}))
-    ext_managed_keys: set[str] = set()  # keys written by extension config UI
-
     for lang_id, slot in slots.items():
         if not _entry_bool(slot, "active", True):
             continue
@@ -1096,32 +1155,12 @@ def rebuild_settings_gate(registry: Registry | None = None) -> dict[str, object]
         lang_key = f"[{lang_id}]"
         overrides = dict(_LANGUAGE_SLOT_OVERRIDES)
 
-        # Merge extension-specific configuration values
-        # editor.* keys go into the language override; extension-namespaced
-        # keys (e.g. basedpyright.*, python.*) go top-level.
-        ext_id = _entry_string(slot, "extension")
-        ext = extensions.get(ext_id, {})
-        for cfg_key, cfg_val in _entry_object_dict(ext, "configuration_values").items():
-            ext_managed_keys.add(cfg_key)
-            if cfg_key.startswith("editor."):
-                overrides[cfg_key] = cfg_val
-            else:
-                settings[cfg_key] = cfg_val
-
         settings[lang_key] = overrides
 
-    # Merge custom user settings — skip keys already managed by the
-    # extension config UI so that per-extension settings always win.
-    custom = _object_dict(registry.get("custom_settings", {}))
-    for k, v in custom.items():
-        if k not in ext_managed_keys:
-            settings[k] = v
+    settings.update(preserved_framework_settings)
+    settings.update(_object_dict(registry.get("user_settings", {})))
 
-    # Write
-    _USER_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _USER_SETTINGS_PATH.write_text(
-        json.dumps(settings, indent=2) + "\n", encoding="utf-8"
-    )
+    _write_json_object_atomic(_USER_SETTINGS_PATH, settings)
     print(f"[ext_registry] settings gate written: {sum(1 for k in settings if k.startswith('['))} language overrides", flush=True)
     return settings
 
@@ -1330,6 +1369,7 @@ def uninstall_extension(ext_id: str) -> dict[str, object]:
 def get_extension_list() -> list[dict[str, object]]:
     """Return a UI-friendly list of all extensions."""
     registry = load_registry()
+    user_settings = _object_dict(registry.get("user_settings", {}))
     result: list[dict[str, object]] = []
     for ext_id, ext in _extension_map(registry.get("extensions", {})).items():
         entry: dict[str, object] = {
@@ -1342,7 +1382,12 @@ def get_extension_list() -> list[dict[str, object]]:
             "has_config": bool(_entry_object_dict(ext, "configuration_schema")),
         }
         if entry["has_config"]:
-            entry["configuration_values"] = _entry_object_dict(ext, "configuration_values")
+            schema_keys = _entry_object_dict(ext, "configuration_schema").keys()
+            entry["configuration_values"] = {
+                key: user_settings[key]
+                for key in schema_keys
+                if key in user_settings
+            }
         result.append(entry)
     return result
 
@@ -1361,12 +1406,19 @@ def get_extension_config_schema(ext_id: str) -> dict[str, object]:
 
 
 def set_extension_config(ext_id: str, values: dict[str, object]) -> dict[str, object]:
-    """Update configuration values for an extension and rebuild gate."""
+    """Merge one extension's schema values into global User settings."""
     registry = load_registry()
     ext = _extension_map(registry.get("extensions", {})).get(ext_id)
     if not ext:
         raise ValueError(f"Extension not found: {ext_id}")
-    ext["configuration_values"] = values
+    schema_keys = set(_entry_object_dict(ext, "configuration_schema"))
+    user_settings = _object_dict(registry.get("user_settings", {}))
+    for key in schema_keys:
+        user_settings.pop(key, None)
+    for key, value in values.items():
+        if key in schema_keys:
+            user_settings[key] = value
+    registry["user_settings"] = user_settings
     save_registry(registry)
     return rebuild_settings_gate(registry)
 

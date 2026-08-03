@@ -2041,159 +2041,108 @@ data and the full key list so extensions that listen for config changes pick up 
 
 ### TE2 overrides (applied after scan)
 
-No hardcoded overrides remain in `_buildConfigurationInitData()`. All extension
-settings now flow from three external sources:
+No hardcoded extension overrides remain in the WBA configuration builder. The Languages & Extensions modal exposes only two effective scopes:
 
-1. **Extension config UI** → `configuration_values` in the registry
-2. **Custom Settings textarea (User scope)** → `custom_settings` in the registry
-3. **Workspace settings** → `<projectRoot>/.vscode/settings.json`
+1. **User** is the global remote-workbench scope. Both the extension schema form and the User JSON editor read and write the same registry v2 `user_settings` map.
+2. **Workspace** is the active repository scope and reads/writes `<projectRoot>/.vscode/settings.json` directly.
 
-Sources 1 and 2 are written to `User/settings.json` by `rebuild_settings_gate()`,
-and the adapter reads that file into `userRemote` at boot. Source 3 is read
-directly by the adapter into the `workspace` and `folders[0]` config sections.
-VS Code precedence applies: workspace settings override userRemote.
+`rebuild_settings_gate()` atomically materializes the User map together with TE2's generated global and language gates into `~/.config/code-server/User/settings.json`. The WBA reads that one file into `userRemote`; TE2 intentionally leaves `userLocal` and profile-specific settings empty. Workspace settings are sent through `workspace` and `folders[0]`, so normal VS Code precedence makes repository values override global User values.
 
-To add a forced override, use the Custom Settings UI in the extension manager
-or set keys directly in `User/settings.json` (non-managed keys are preserved).
+Registry v1 data is migrated once. Legacy per-extension `configuration_values`, effective non-generated values from the existing User file, and legacy `custom_settings` are folded into `user_settings`; explicit legacy User JSON values win historical conflicts.
 
 ### Key file
 
 `workbench_client.mjs` → `_buildConfigurationInitData()` (~line 1120)
 
 
-## 29) Settings Pipeline — Extension Config, Custom Settings, Workspace Settings, and Adapter Relay
+## 29) Settings Pipeline - User and Workspace Settings
 
 ### Overview
 
-TE2 has four layers that produce the final configuration the workbench adapter
-sends to the ExtHost:
+The settings UI and WBA expose two scopes, not VS Code's full local/remote/profile matrix:
 
-```
-┌──────────────────────┐   ┌──────────────────────────┐   ┌──────────────────────────┐
-│  Extension Config UI │   │  Custom Settings (User)   │   │  Workspace Settings      │
-│  (per-extension)     │   │  (global JSON textarea)   │   │  (.vscode/settings.json) │
-└──────────┬───────────┘   └─────────┬────────────────┘   └─────────┬────────────────┘
-           │ configuration_values     │ custom_settings              │ per-project JSON
-           ▼                          ▼                              │
-┌─────────────────────────────────────────────────────┐              │
-│              te2_extension_registry.json             │              │
-└──────────────────────┬──────────────────────────────┘              │
-                       │ rebuild_settings_gate()                     │
-                       ▼                                             │
-┌─────────────────────────────────────────────────────┐              │
-│              User/settings.json                      │              │
-│  (global gate + per-language overrides + ext config  │              │
-│   + custom settings)                                 │              │
-└──────────────────────┬──────────────────────────────┘              │
-                       │ readFileSync() at boot                      │ readFileSync() at boot
-                       ▼                                             ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│  workbench_client.mjs  _buildConfigurationInitData()                            │
-│  → User/settings.json  → userRemote                                             │
-│  → .vscode/settings.json → workspace + folders[0]   (workspace overrides user)  │
-│  → $initializeConfiguration (rpcId=80)                                          │
-└─────────────────────────────────────────────────────────────────────────────────┘
+```text
+Extension schema form -+
+                       +-> registry v2 user_settings
+User Settings JSON ----+           |
+                                   | rebuild_settings_gate()
+                                   v
+                     User/settings.json -> userRemote
+
+Workspace schema form -+
+                       +-> <projectRoot>/.vscode/settings.json
+Workspace JSON --------+              -> workspace + folders[0]
 ```
 
-### Merge priority in `rebuild_settings_gate()`
+The extension schema form is only a typed view over keys in the same User or Workspace object. It is not a third settings authority and does not store values on extension registry entries.
 
-Applied in this order (later wins, with one exception):
+### Materialization priority in `rebuild_settings_gate()`
 
-1. **Preserved keys** — non-managed keys from the existing `settings.json`
-   (e.g. `files.watcherExclude` set by watcher sync)
-2. **Global gate** — `_GLOBAL_GATE` dict (disables smart features globally)
-3. **Per-language overrides** — `_LANGUAGE_SLOT_OVERRIDES` for active slots
-   (re-enables smart features per language)
-4. **Extension `configuration_values`** — keys set via the per-extension config
-   modal. `editor.*` keys go into the `[lang]` override block; all others go
-   top-level.
-5. **Custom settings** — keys from the "Custom Settings (JSON)" textarea.
-   **Exception:** keys already managed by extension `configuration_values` are
-   skipped. This ensures the extension config UI always wins over the raw
-   JSON escape hatch.
+The global User file is generated atomically in this order, with later values winning:
+
+1. `_GLOBAL_GATE`, which disables smart editor features globally.
+2. `_LANGUAGE_SLOT_OVERRIDES` for active language-feature slots.
+3. The existing framework-owned `files.watcherExclude` value.
+4. Registry `user_settings`, which is the user-owned global map.
+
+This allows an explicit User value to override a generated gate. Removing a schema key removes it from `user_settings` and therefore from the next materialized User file.
 
 ### VS Code configuration precedence (adapter-level)
 
-The adapter builds `IConfigurationInitData` with these sections, low to high:
+The adapter builds `IConfigurationInitData` with these effective sections, low to high:
 
-1. `defaults` — extension `contributes.configuration` defaults
-2. `userRemote` — from `User/settings.json` (global gate + custom settings)
-3. `workspace` — from `<projectRoot>/.vscode/settings.json` (project overrides)
-4. `folders[0]` — mirrors `workspace` for single-root workspaces
+1. `defaults` from extension `contributes.configuration` defaults.
+2. `userRemote` from `User/settings.json`.
+3. `workspace` from `<projectRoot>/.vscode/settings.json`.
+4. `folders[0]`, which mirrors `workspace` for the single-root project.
 
-Workspace settings override user settings for any key they both define. This
-matches VS Code's standard precedence model.
+`application`, `policy`, `userLocal`, and profile-specific settings are intentionally empty in TE2. Workspace settings override User settings for overlapping keys.
 
-### Adapter relay (`workbench_client.mjs`)
+### Adapter relay
 
-`_buildConfigurationInitData()` (~line 1120) reads both settings files:
+The WBA configuration builder reads both settings files:
 
-**User settings** (`User/settings.json` → `userRemote`):
-- Flat keys like `basedpyright.analysis.typeCheckingMode` are split at dots and
-  nested: `{ basedpyright: { analysis: { typeCheckingMode: "off" } } }`
-- Language-scoped overrides like `[python]` become `IOverrides` entries with
-  `identifiers: ["python"]`
+- Flat dotted User keys are nested and sent in `userRemote`.
+- User language blocks such as `[python]` become configuration overrides.
+- Workspace keys and language blocks use the same conversion and are sent in `workspace` plus `folders[0]`.
+- After `$initializeConfiguration`, `$acceptConfigurationChanged` republishes the effective configuration and key list.
 
-**Workspace settings** (`<folder>/.vscode/settings.json` → `workspace` + `folders[0]`):
-- Same flat-key-to-nested and language-scope parsing as user settings
-- Only read when `folder` parameter is provided to the adapter
-- ENOENT silently ignored (missing `.vscode/settings.json` is normal)
+A settings save restarts only the adapter path required to rebuild extension-host configuration; it does not introduce another persistent settings tier.
 
-Both are sent via `$initializeConfiguration` (rpcId=80), then immediately followed
-by `$acceptConfigurationChanged` (including workspace keys) so extensions
-listening for config changes pick up the values.
+### Project config files override editor settings
 
-### Project config files override everything
+Extensions such as basedpyright may read project config files directly from disk, including `pyrightconfig.json` and `pyproject.toml`. Their own precedence rules can override both User and Workspace editor settings. This is extension behavior, not another TE2 settings scope.
 
-Extensions like basedpyright read their own project config files directly from
-disk (e.g. `pyrightconfig.json`, `pyproject.toml [tool.basedpyright]`). These
-**always take priority** over VS Code settings. If a `pyrightconfig.json` sets
-`typeCheckingMode: "strict"`, it overrides `settings.json`'s `"off"` regardless
-of what the UI shows. If the project config has an invalid value, the extension
-falls back to its **compiled-in default** (not `settings.json`).
+### User Settings UI
 
-### Custom Settings UI (User scope)
+The User tab offers two synchronized views of one global map:
 
-The extension manager modal header contains **User / Workspace** scope tabs.
-The **User** tab shows the global custom settings textarea. Accepts arbitrary
-JSON key-value pairs:
+- extension schema forms edit only the keys declared by that extension;
+- the User Settings JSON editor can edit arbitrary global keys.
 
-```json
-{
-  "editor.semanticHighlighting.enabled": true,
-  "basedpyright.analysis.diagnosticMode": "workspace"
-}
-```
-
-Values are persisted in the registry under `custom_settings` and merged into
-`User/settings.json` on save. Requires adapter restart to take effect.
+Both persist to registry `user_settings` and materialize to `User/settings.json`. Saving one view is immediately reflected when the other view is reopened.
 
 ### Workspace Settings UI
 
-The **Workspace** tab in the extension manager modal reads/writes the active
-project's `.vscode/settings.json` directly. These settings override user
-settings for any overlapping keys.
+The Workspace tab reads and writes the active project's `.vscode/settings.json`. Schema forms merge only the selected extension's keys, while the Workspace JSON editor exposes the complete object. Saving creates the `.vscode` directory when needed and restarts the adapter.
 
-When workspace scope is active, extension cards hide their toggle (●/○) and
-uninstall (🗑) buttons — only the ⚙ configure button remains visible. Extension
-enable/disable is global only; workspace scope is settings-only.
+Extension enable/disable and uninstall remain global operations, so those controls are hidden while Workspace scope is active.
 
-The workspace textarea lazy-loads on first tab click via `ext:workspace_settings_get`.
-Save writes to `.vscode/settings.json` (creating the `.vscode/` directory if
-needed) and triggers an adapter restart.
+### Legacy migration
+
+Loading a registry older than version 2 performs a one-time migration into `user_settings`. The migration combines effective non-generated User file values and legacy per-extension values, then applies legacy `custom_settings` last so explicit User JSON wins conflicts. Legacy `configuration_values` and `custom_settings` fields are removed.
 
 ### Key files
 
 | File | Role |
 |------|------|
-| `extension_registry.py` | `rebuild_settings_gate()`, `get/set_custom_settings()` |
-| `explorer_ws.py` | `handle_ext_configure`, `handle_ext_custom_settings_get/set`, `handle_ext_workspace_settings_get/set` |
-| `workbench_client.mjs` | `_buildConfigurationInitData()` reads both `User/settings.json` and `.vscode/settings.json` |
-| `src/host/ui/settings-refresh.ts` | `installScopeTabs()`, `loadWorkspaceSettings()`, save handlers |
-| `src/host/ui/settings-bootstrap.ts` | Wires settings controllers together |
-| `src/host/ui/settings-manager.ts` | Extension card rendering (toggle, configure, uninstall buttons with CSS classes) |
-| `template.html` | Modal markup with User/Workspace scope tabs in header + CSS for workspace button hiding |
-
+| `extension_registry.py` | User settings authority, legacy migration, schema-key merge, and atomic User file materialization |
+| `explorer/handlers/extensions.py` | User and Workspace settings RPC handlers |
+| `workbench_protocol_proxy/node_workbench_adapter/src/client/configuration.ts` | Maps User to `userRemote` and repository settings to `workspace` / `folders[0]` |
+| `main_page/frontend/ui/settings-refresh.ts` | User and Workspace JSON loading/saving |
+| `main_page/frontend/ui/settings-manager.ts` | Scope-aware extension schema configuration |
+| `main_page/frontend/ui/settings-config-modal.ts` | Typed schema form save behavior |
+| `template.html` | Languages & Extensions modal and User/Workspace tabs |
 
 ## 23) Semantic Tokens Pipeline (End-to-End)
 
@@ -2803,7 +2752,7 @@ Extension operations trigger automatic shell termination and inline editor remou
 | Operation | Shells killed | Handler |
 |-----------|--------------|---------|
 | Install / Uninstall | code-server + adapter | `_restart_code_server_and_adapter()` |
-| Toggle / Configure / Custom Settings | adapter only | `_restart_adapter_only()` |
+| Toggle / Configure / User Settings | adapter only | `_restart_adapter_only()` |
 | Manual restart (UI menu) | adapter only | `handle_ext_restart_adapter()` |
 
 ### Restart flow
@@ -3342,6 +3291,15 @@ A config may be an object with `profiles`, a single profile object, or a profile
       "saveDrafts": "included",
       "showSaveWarning": true,
       "devTools": false
+    },
+    {
+      "profileId": "vite",
+      "runner": "custom",
+      "include": ["src/**"],
+      "exec": "npm",
+      "args": ["run", "dev"],
+      "sidebarUrl": "http://127.0.0.1:4173/",
+      "port": 4173
     }
   ]
 }
@@ -3356,6 +3314,7 @@ Current profile fields:
 | `entry` | Page Preview entry, defaulting to `index.html` for `pagePreview`. |
 | `include` | Relative path/glob matchers. Required, except `pagePreview` can derive it from `entry`. |
 | `sidebarUrl` / `sidebar_url` | Optional sidebar URL to open after launch. `pagePreview` defaults to `http://127.0.0.1:3000/`. |
+| `port` | Optional preferred native-client loopback port for a non-`pagePreview` runner. It requires a credential-free loopback HTTP `sidebarUrl` whose effective port matches this integer in `1..65535`. |
 | `runningBehavior` / `running_behavior` | `just save` or `relaunch`; defaults to `just save`. |
 | `exec` | Runner command or project-relative executable path. Required for non-`pagePreview` runners. |
 | `cwd` | Optional project-relative or absolute cwd; must resolve inside the project. |
@@ -3374,6 +3333,60 @@ Current profile fields:
 - `host/page_preview_backend.py` installs the default Page Preview profile into the project config.
 
 `pagePreview` profiles start a project-local preview shell and open its URL through the backend sidebar-window hook. Non-preview profiles can also open `sidebarUrl`; otherwise they just launch/reuse the runner shell and report the result. When `devTools` is enabled, the backend projects a stable project/profile target id with that URL slot. The Sidebar places the id in a namespaced iframe `window.name` marker before navigation; it does not append target metadata to the application URL.
+
+Run Profile process lifecycle is not fire-and-forget. The app worker opens one
+Socket.IO subscription to Framework-Shells `/fws`, requests
+`fws.dashboard.open` once after each transport connection for the authoritative
+snapshot, and then consumes `fws.shell.*` lifecycle notifications. It filters
+those facts to the deterministic `runner-profile:file_editor_cm6:*` and
+`page-preview:file_editor_cm6:*` labels and republishes the resolved state as a
+backend `RunProfileStateChanged` fact.
+
+Boot snapshots, UI IPC reconnect snapshots, active-file/project changes,
+profile-config saves, Run/Stop actions, and natural shell exits all converge on
+`ui.runProfile.state.changed`. Every client therefore renders the same Run or
+Stop state without a frontend or backend polling timer. The one-shot
+`ui.host.runProfile.state.get` method remains available only for explicit repair
+or debugging, while `ui.host.runProfile.stop` terminates only the exact matched
+shell. Page Preview and ordinary runner profiles share this state contract;
+stopping a routed profile also releases its route ticket.
+
+### Native preferred-port routing
+
+The optional `port` field solves remote native-client access to a server process
+that listens only on the framework host's loopback interface. It is deliberately
+unsupported for `pagePreview`, whose static preview has no independent server
+port to tunnel.
+
+After a non-preview shell starts, Python registers its deterministic owner label,
+exact Framework-Shell id, and loopback port through Rust pipe target `2400`
+(`service.runTarget`) using `runTarget.route.register`. Rust returns an
+unguessable 256-bit bearer ticket and a 24-hour renewable tunnel path:
+
+```text
+/api/run-targets/<ticket>/tunnel
+```
+
+That Axum WebSocket route connects only to `127.0.0.1:<port>` on the framework
+host and bridges binary WebSocket frames to raw TCP. One profile owner has one
+live route: relaunch replaces and invalidates its previous ticket. Stop and dead
+shell reconciliation release the route through `runTarget.route.release`.
+
+The Sidebar preserves both the original loopback URL and this route descriptor.
+Ordinary browsers use the original URL. Electron and GeckoView first attempt an
+exclusive bind of `127.0.0.1:<port>` on the client device:
+
+- bind success means the client is remote; the native client opens the local URL
+  and relays accepted TCP streams through the Rust ticketed WebSocket;
+- `EADDRINUSE` / `BindException` means the server is already local, so the native
+  client opens the original URL directly;
+- framework retarget, profile relaunch, Stop, or native-client teardown closes
+  owned listeners and active streams.
+
+Port-busy detection is intentionally authoritative for same-device behavior:
+the profiled server itself already treats a busy configured port as a fatal
+launch condition. Native negotiation never changes the URL path, query, or
+fragment and never exposes an arbitrary framework-host TCP destination.
 
 ### Draft-save transaction
 
@@ -3433,8 +3446,14 @@ Allowed app-view commands are:
 | `reload` | Reload the exact app view. |
 | `home` | Return to the desktop launcher. |
 | `force_asset_update` | Run the desktop asset updater. |
+| `resolve_run_target` | Resolve a validated Run Profile route by binding the preferred local port or returning the original same-device URL. |
 
 The command allowlist is exact-view and origin validated in Electron main. Code TE2 console workers in Electron app views register as `electron:main_page:<suffix>`; browser and Android retain generic `main_page` labels.
+
+Run-target listeners are owned by Electron main, not the renderer. The app-view
+preload exposes only the validated `resolveRunTarget` operation; Electron closes
+all relay listeners and active streams when the framework connection changes or
+the desktop process exits.
 
 ### Desktop shell behavior
 
@@ -3675,3 +3694,12 @@ Firefox's page world, verifies both page globals, and only then allows
 target lifecycle events, the Inspector client's target snapshot, and active
 Kotlin selection. Opening the Inspector surface republishes the authoritative
 target snapshot so a hidden client cannot retain stale routing state.
+
+Run-target routing is a separate WebExtension native-message path, not part of
+the Inspector CDP broker. A top-frame content bridge marks availability and
+forwards a bounded resolve request over the existing `browser` native port.
+Both the extension background and Kotlin revalidate the configured framework
+origin before `RunTargetRelay` binds the preferred client loopback port. The
+relay preserves the original path/query/fragment, falls back to the original
+URL only on `BindException`, and is torn down when the configured framework
+target changes or the Activity is destroyed.

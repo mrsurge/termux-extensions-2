@@ -72,6 +72,13 @@ class RunnerProfileShell:
     command_preview: str
 
 
+@dataclass(frozen=True)
+class RunnerProfileShellState:
+    shell_id: str
+    label: str
+    running: bool
+
+
 def _framework_get_manager() -> ManagerGetter:
     module = import_module("framework_shells")
     value = cast(object, module.__dict__["get_manager"])
@@ -145,6 +152,36 @@ async def ensure_runner_profile_shell(
             reused=False,
             command_preview=command_preview,
         )
+
+
+async def runner_profile_shell_state(
+    *, project_root: str, profile_id: str
+) -> RunnerProfileShellState:
+    root = str(Path(project_root).expanduser().resolve(strict=False))
+    label = _label(root, profile_id)
+    mgr = await _framework_get_manager()()
+    shell = await mgr.find_shell_by_label(label, status="running")
+    return RunnerProfileShellState(
+        shell_id=shell.id if _is_running(shell) else "",
+        label=label,
+        running=_is_running(shell),
+    )
+
+
+async def stop_runner_profile_shell(
+    *, project_root: str, profile_id: str
+) -> RunnerProfileShellState:
+    root = str(Path(project_root).expanduser().resolve(strict=False))
+    label = _label(root, profile_id)
+    lock = _spawn_locks.setdefault(label, asyncio.Lock())
+    async with lock:
+        mgr = await _framework_get_manager()()
+        shell = await mgr.find_shell_by_label(label, status="running")
+        if not _is_running(shell):
+            return RunnerProfileShellState(shell_id="", label=label, running=False)
+        shell_id = shell.id
+        await mgr.terminate_shell(shell_id, force=True)
+        return RunnerProfileShellState(shell_id=shell_id, label=label, running=False)
 
 
 def _runner_argv(root: Path, cwd: Path, profile: RunProfile) -> list[str]:

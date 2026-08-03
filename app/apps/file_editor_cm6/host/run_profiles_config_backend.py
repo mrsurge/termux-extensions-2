@@ -69,6 +69,15 @@ async def handle_host_run_profiles_save_request(
         return {"ok": False, "error": f"Invalid run profile config: {exc}"}
 
     config_path = run_profiles_config_path(project_root)
+    try:
+        from ..run_profile_events import refresh_run_profile_state
+
+        _ = await refresh_run_profile_state(
+            source="run_profiles_config_saved",
+            force=True,
+        )
+    except Exception:
+        pass
     return {
         "ok": True,
         "data": {
@@ -249,6 +258,17 @@ def _run_profile_contract() -> JsonMap:
             "text",
             description="Optional URL opened in a sidebar slot. Page Preview defaults to port 3000.",
             placeholder=DEFAULT_PAGE_PREVIEW_URL,
+        ),
+        _field(
+            "port",
+            "Preferred Client Port",
+            "number",
+            description=(
+                "Optional for node/python/custom profiles with a loopback HTTP Sidebar URL. "
+                "Native remote clients bind this port locally and tunnel it to the runner. "
+                "Not used by Page Preview."
+            ),
+            placeholder="3000",
         ),
         _field(
             "runningBehavior",

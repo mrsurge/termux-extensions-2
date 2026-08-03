@@ -280,7 +280,7 @@ export function createSettingsRefreshController(deps: any) {
         );
         if (res?.ok) {
           deps.toast(
-            `Custom settings saved (${res.count} keys) — reloading adapter…`,
+            `User settings saved (${res.count} keys) — reloading adapter…`,
           );
           deps.reloadEditorFrame();
         } else {

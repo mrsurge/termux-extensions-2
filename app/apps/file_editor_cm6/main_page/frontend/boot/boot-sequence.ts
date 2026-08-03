@@ -2,6 +2,7 @@ import {
   getBootSnapshotHostState,
   getBootSnapshotCodeInspector,
   getBootSnapshotCodeServer,
+  getBootSnapshotRunProfileState,
   getBootSnapshotSessionState,
   getBootSnapshotUiPrefs,
   requestHostBootSnapshot,
@@ -192,6 +193,11 @@ export async function runBootSequence(deps: BootSequenceDeps): Promise<void> {
   window.dispatchEvent(
     new CustomEvent('cm6:code-inspector-hydrate', {
       detail: { projection: getBootSnapshotCodeInspector(bootSnapshot) },
+    }),
+  );
+  window.dispatchEvent(
+    new CustomEvent('cm6:run-profile-state-changed', {
+      detail: getBootSnapshotRunProfileState(bootSnapshot) || {},
     }),
   );
 

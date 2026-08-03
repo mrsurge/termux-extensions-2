@@ -169,7 +169,7 @@ export function createSettingsManagerController(deps: any) {
                   }
                 } catch (_) {}
               } else {
-                // Load from global extension config
+                // Load this schema's keys from the shared User settings map.
                 try {
                   const listRes = await deps.busRequest(EXPLORER_RPC_METHODS.extensionsList, {}, 5000);
                   const fullExt = (listRes?.extensions || []).find((e: any) => e.id === extId);

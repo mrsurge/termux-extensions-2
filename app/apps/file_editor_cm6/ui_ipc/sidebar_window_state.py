@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -13,6 +14,7 @@ from ..stores import get_preferences_store
 SIDEBAR_WINDOW_STATE_PREF_KEY = "sidebarWindowState"
 SIDEBAR_WINDOW_STATE_VERSION = 1
 ALLOWED_READINESS_STATUSES = {"starting", "ready", "error", "stopped"}
+RUN_TARGET_TICKET_RE = re.compile(r"^[0-9a-f]{64}$")
 
 JsonObject = dict[str, object]
 
@@ -270,6 +272,36 @@ def _validate_url_slot_url(raw_url: str) -> str:
     return urlunsplit(("", "", split.path, split.query, split.fragment))
 
 
+def _normalize_run_target_route(value: object, *, canonical_url: str) -> JsonObject:
+    raw = _as_object(value)
+    if not raw:
+        return {}
+    ticket = _norm(raw.get("ticket"))
+    tunnel_path = _norm(raw.get("tunnelPath") or raw.get("tunnel_path"))
+    preferred_port = _as_int(raw.get("preferredPort") or raw.get("preferred_port"))
+    original_url = _validate_url_slot_url(
+        _norm(raw.get("originalUrl") or raw.get("original_url"))
+    )
+    expires_at = _as_int(raw.get("expiresAt") or raw.get("expires_at"))
+    if not RUN_TARGET_TICKET_RE.fullmatch(ticket):
+        raise ValueError("runTargetRoute ticket is invalid")
+    if tunnel_path != f"/api/run-targets/{ticket}/tunnel":
+        raise ValueError("runTargetRoute tunnelPath is invalid")
+    if preferred_port < 1 or preferred_port > 65535:
+        raise ValueError("runTargetRoute preferredPort is invalid")
+    if original_url != canonical_url:
+        raise ValueError("runTargetRoute originalUrl must match the Sidebar URL")
+    return {
+        "dto": "RunTargetRoute",
+        "version": 1,
+        "ticket": ticket,
+        "tunnelPath": tunnel_path,
+        "preferredPort": preferred_port,
+        "originalUrl": original_url,
+        "expiresAt": expires_at,
+    }
+
+
 def _with_url_params(raw_url: str, params: dict[str, str]) -> str:
     split = urlsplit(raw_url or "/")
     query = dict(parse_qsl(split.query, keep_blank_values=True))
@@ -449,6 +481,11 @@ def _normalize_url_slot(raw: JsonObject) -> JsonObject:
                 "devToolsTargetLabel": devtools_target_label or title,
             }
         )
+    route_value = raw.get("run_target_route") or raw.get("runTargetRoute")
+    if route_value is not None:
+        route = _normalize_run_target_route(route_value, canonical_url=url)
+        slot["run_target_route"] = route
+        slot["runTargetRoute"] = route
     return slot
 
 
@@ -712,6 +749,11 @@ def create_sidebar_window(params: JsonObject) -> JsonObject:
                     "devToolsTargetLabel": target_label,
                 }
             )
+        route_value = params.get("run_target_route") or params.get("runTargetRoute")
+        if route_value is not None:
+            route = _normalize_run_target_route(route_value, canonical_url=url)
+            url_slot["run_target_route"] = route
+            url_slot["runTargetRoute"] = route
         state = _upsert_slot(
             _load_pref_state(),
             url_slot,

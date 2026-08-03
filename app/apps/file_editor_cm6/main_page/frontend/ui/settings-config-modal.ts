@@ -784,7 +784,7 @@ export function createSettingsConfigModalController(deps: any) {
             deps.toast(res?.error || "Save failed");
           }
         } else {
-          // User scope: existing global config flow
+          // User scope: write schema values into the shared User settings map.
           const res = await deps.busRequest(
             EXPLORER_RPC_METHODS.extensionsConfigure,
             {

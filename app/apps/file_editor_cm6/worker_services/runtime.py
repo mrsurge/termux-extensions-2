@@ -12,10 +12,12 @@ from ..file_tabs_projection import register_file_tabs_projection_handlers
 from ..logical_document_reconciler import register_logical_document_reconciler_handlers
 from ..open_state_events import register_open_state_event_bus_handlers
 from ..project_switch_events import register_project_switch_event_bus_handlers
+from ..run_profile_events import register_run_profile_event_bus_handlers
 from ..search_highlight_events import register_search_highlight_event_bus_handlers
 from ..sidebar_window_events import register_sidebar_window_event_bus_handlers
 from ..workspace_events import register_workspace_event_bus_handlers
 from .event_bus import set_worker_event_loop
+from .run_profile_fws_bridge import start_run_profile_fws_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +41,11 @@ def bootstrap_worker_runtime(loop: asyncio.AbstractEventLoop | None = None) -> N
     register_logical_document_reconciler_handlers()
     register_open_state_event_bus_handlers()
     register_project_switch_event_bus_handlers()
+    register_run_profile_event_bus_handlers()
     register_search_highlight_event_bus_handlers()
     register_sidebar_window_event_bus_handlers()
     register_workspace_event_bus_handlers()
     register_explorer_render_state_bus_handlers()
+    start_run_profile_fws_bridge()
     _registered_loop = runtime_loop
     logger.info("[file_editor_cm6] worker runtime loop registered")

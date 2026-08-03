@@ -6,11 +6,26 @@ interface RunFileResponse extends Record<string, unknown> {
 
 interface RunFileControllerDeps {
   getCurrentPath: () => string | null;
-  setRunButtonDisabled: (flag: boolean) => void;
   apiPost: (path: string, body: Record<string, unknown>) => Promise<unknown>;
   requestBackendRunActiveFile?: (payload: Record<string, unknown>) => Promise<unknown>;
+  requestBackendRunProfileState: (payload: Record<string, unknown>) => Promise<unknown>;
+  requestBackendRunProfileStop: (payload: Record<string, unknown>) => Promise<unknown>;
+  setRunButtonState: (state: RunButtonState) => void;
   toast: (msg: string) => void;
-  updateRunButtonState: () => void;
+}
+
+interface RunButtonState {
+  disabled: boolean;
+  running: boolean;
+  busy: boolean;
+  profileId: string;
+}
+
+interface RunProfileState {
+  path: string;
+  matched: boolean;
+  running: boolean;
+  profileId: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -39,6 +54,70 @@ function resultMessage(payload: RunFileResponse): string {
 }
 
 export function createRunFileController(deps: RunFileControllerDeps) {
+  let state: RunProfileState = {
+    path: '',
+    matched: false,
+    running: false,
+    profileId: '',
+  };
+  let busy = false;
+  let refreshSequence = 0;
+
+  function render(): void {
+    const path = deps.getCurrentPath() || '';
+    deps.setRunButtonState({
+      disabled: !path || busy,
+      running: !!path && state.path === path && state.running,
+      busy,
+      profileId: state.path === path ? state.profileId : '',
+    });
+  }
+
+  function applyProjection(value: unknown): void {
+    const data = asRunFileResponse(value);
+    state = {
+      path: typeof data.path === 'string' ? data.path : '',
+      matched: data.matched === true,
+      running: data.running === true,
+      profileId: typeof data.profileId === 'string' ? data.profileId : '',
+    };
+    render();
+  }
+
+  async function refreshState(options: { quiet?: boolean } = {}): Promise<void> {
+    const path = deps.getCurrentPath() || '';
+    const sequence = ++refreshSequence;
+    if (!path) {
+      state = { path: '', matched: false, running: false, profileId: '' };
+      render();
+      return;
+    }
+    try {
+      const response = asRunFileResponse(
+        await deps.requestBackendRunProfileState({ path }),
+      );
+      if (sequence !== refreshSequence || path !== (deps.getCurrentPath() || '')) return;
+      const data = asRunFileResponse(response.data);
+      state = {
+        path,
+        matched: data.matched === true,
+        running: data.running === true,
+        profileId: typeof data.profileId === 'string' ? data.profileId : '',
+      };
+      if (response.ok === false && !options.quiet) {
+        deps.toast(response.error || 'Failed to inspect run profile');
+      }
+    } catch (error) {
+      if (sequence !== refreshSequence || path !== (deps.getCurrentPath() || '')) return;
+      state = { path, matched: false, running: false, profileId: '' };
+      if (!options.quiet) deps.toast(errorMessage(error));
+    } finally {
+      if (sequence === refreshSequence) {
+        render();
+      }
+    }
+  }
+
   async function requestRun(payload: Record<string, unknown>): Promise<RunFileResponse> {
     const response = deps.requestBackendRunActiveFile
       ? await deps.requestBackendRunActiveFile(payload)
@@ -91,7 +170,8 @@ export function createRunFileController(deps: RunFileControllerDeps) {
       deps.toast('Open a file first');
       return;
     }
-    deps.setRunButtonDisabled(true);
+    busy = true;
+    render();
     try {
       let responseRecord = await requestRun({ path: currentPath });
       const firstData = asRunFileResponse(responseRecord.data);
@@ -109,15 +189,61 @@ export function createRunFileController(deps: RunFileControllerDeps) {
       if (isWrapped && responseRecord.ok === false) {
         deps.toast(responseRecord.error || 'Failed to run file');
       } else {
+        const data = asRunFileResponse(responseRecord.data);
+        if (typeof data.path === 'string' && typeof data.running === 'boolean') {
+          applyProjection(data);
+        }
         deps.toast(resultMessage(responseRecord));
       }
     } catch (err) {
       console.error('[RUN] Failed to execute file:', err);
       deps.toast(errorMessage(err));
     } finally {
-      deps.updateRunButtonState();
+      busy = false;
+      render();
     }
   }
 
-  return { runCurrentFile };
+  async function stopCurrentProfile(): Promise<void> {
+    const path = deps.getCurrentPath();
+    if (!path) return;
+    busy = true;
+    render();
+    try {
+      const response = asRunFileResponse(
+        await deps.requestBackendRunProfileStop({ path }),
+      );
+      const data = asRunFileResponse(response.data);
+      if (response.ok === false) deps.toast(response.error || 'Failed to stop run profile');
+      else {
+        applyProjection(data);
+        deps.toast(
+          typeof data.message === 'string' ? data.message : 'Run profile stopped',
+        );
+      }
+    } catch (error) {
+      deps.toast(errorMessage(error));
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  async function runOrStop(): Promise<void> {
+    const path = deps.getCurrentPath() || '';
+    if (state.running && state.path === path) {
+      await stopCurrentProfile();
+      return;
+    }
+    await runCurrentFile();
+  }
+
+  return {
+    applyProjection,
+    refreshState,
+    render,
+    runCurrentFile,
+    runOrStop,
+    stopCurrentProfile,
+  };
 }

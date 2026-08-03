@@ -1,4 +1,4 @@
-use super::{fs_ops, git_ops, search_ops};
+use super::{fs_ops, git_ops, run_target_ops, search_ops};
 use crate::framework_services::pipe::{
     PipeEventSink,
     protocol::{JSONRPC_VERSION, PROTOCOL_VERSION, PipeEnvelope, PipeMessageKind},
@@ -40,6 +40,7 @@ struct SchedulerInner {
     repo_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     git_jobs: Mutex<HashMap<String, Arc<GitJobEntry>>>,
     search_jobs: Mutex<HashMap<String, Arc<SearchJobEntry>>>,
+    run_targets: run_target_ops::RunTargetRegistry,
     job_sequence: AtomicU64,
 }
 
@@ -151,6 +152,7 @@ impl Default for FrameworkServiceScheduler {
                 repo_locks: Mutex::new(HashMap::new()),
                 git_jobs: Mutex::new(HashMap::new()),
                 search_jobs: Mutex::new(HashMap::new()),
+                run_targets: run_target_ops::RunTargetRegistry::default(),
                 job_sequence: AtomicU64::new(1),
             }),
         }
@@ -158,6 +160,10 @@ impl Default for FrameworkServiceScheduler {
 }
 
 impl FrameworkServiceScheduler {
+    pub(crate) fn run_targets(&self) -> &run_target_ops::RunTargetRegistry {
+        &self.inner.run_targets
+    }
+
     pub(crate) async fn fs_list_directory(
         &self,
         request: fs_ops::FsListDirectoryRequest,

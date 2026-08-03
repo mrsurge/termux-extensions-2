@@ -9,6 +9,8 @@ let assetServerPort = 0;
 let enabled = false;
 let nativePort = null;
 let reconnectTimer = 0;
+let frameworkBaseUrl = "";
+const pendingRunTargets = new Map();
 
 // Prefixes backed by complete OTA directory entries. Keep API prefixes limited
 // to immutable static trees so dynamic backend routes always stay on TE2.
@@ -123,6 +125,58 @@ function scheduleNativeReconnect() {
   }, 250);
 }
 
+function frameworkOrigin() {
+  try {
+    return new URL(frameworkBaseUrl).origin;
+  } catch (_) {
+    return "";
+  }
+}
+
+browser.runtime.onMessage.addListener((message, sender) => {
+  if (!message || message.type !== "run_target_resolve") return undefined;
+  const senderOrigin = (() => {
+    try { return new URL(sender.url || "").origin; } catch (_) { return ""; }
+  })();
+  if (!nativePort || sender.frameId !== 0 || senderOrigin !== frameworkOrigin()) {
+    return Promise.resolve({ ok: false, error: "Run target request origin is not trusted" });
+  }
+  const requestId = String(message.requestId || "");
+  if (!requestId || pendingRunTargets.has(requestId)) {
+    return Promise.resolve({ ok: false, error: "Run target request id is invalid" });
+  }
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingRunTargets.delete(requestId);
+      resolve({ ok: false, error: "Native run target request timed out" });
+    }, 5000);
+    pendingRunTargets.set(requestId, { resolve, timeout });
+    try {
+      nativePort.postMessage({
+        type: "run_target_resolve",
+        requestId,
+        route: message.route,
+        pageOrigin: message.pageOrigin,
+      });
+    } catch (error) {
+      pendingRunTargets.delete(requestId);
+      clearTimeout(timeout);
+      resolve({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+});
+
+function rejectPendingRunTargets(error) {
+  for (const pending of pendingRunTargets.values()) {
+    clearTimeout(pending.timeout);
+    pending.resolve({ ok: false, error });
+  }
+  pendingRunTargets.clear();
+}
+
 // Static interception stays disabled until Kotlin confirms the local server port.
 function connectNativeBridge() {
   try {
@@ -131,23 +185,36 @@ function connectNativeBridge() {
     port.onMessage.addListener((message) => {
       if (message && message.type === "set_asset_port") {
         assetServerPort = message.port;
+        frameworkBaseUrl = String(message.frameworkBaseUrl || "");
         enabled = message.port > 0;
         console.log(`[asset_intercept] Port set to ${assetServerPort}, enabled=${enabled}`);
         port.postMessage({
           type: "asset_intercept_ready",
           port: assetServerPort,
         });
+      } else if (message && message.type === "run_target_resolve_result") {
+        const requestId = String(message.requestId || "");
+        const pending = pendingRunTargets.get(requestId);
+        if (pending) {
+          pendingRunTargets.delete(requestId);
+          clearTimeout(pending.timeout);
+          pending.resolve(message);
+        }
       }
     });
     port.onDisconnect.addListener(() => {
       if (nativePort === port) nativePort = null;
       assetServerPort = 0;
       enabled = false;
+      frameworkBaseUrl = "";
+      rejectPendingRunTargets("Native run target bridge disconnected");
       scheduleNativeReconnect();
     });
   } catch (error) {
     assetServerPort = 0;
     enabled = false;
+    frameworkBaseUrl = "";
+    rejectPendingRunTargets("Native run target bridge is unavailable");
     scheduleNativeReconnect();
   }
 }

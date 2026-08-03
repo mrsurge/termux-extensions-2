@@ -12,6 +12,8 @@ export const UI_IPC_RPC_METHODS = {
   hostPagePreviewTemplateInstall: 'ui.host.pagePreview.template.install',
   hostRunProfilesGet: 'ui.host.runProfiles.get',
   hostRunProfilesSave: 'ui.host.runProfiles.save',
+  hostRunProfileStateGet: 'ui.host.runProfile.state.get',
+  hostRunProfileStop: 'ui.host.runProfile.stop',
   hostBootSnapshotGet: 'ui.host.bootSnapshot.get',
   hostLanguageBackendSet: 'ui.host.languageBackend.set',
   hostEditorJumpToLine: 'ui.host.editor.jumpToLine',
@@ -60,6 +62,7 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   sidebarWindowActivated: 'ui.sidebar.window.activated',
   sidebarWindowReadinessChanged: 'ui.sidebar.window.readiness.changed',
   codeInspectorChanged: 'ui.codeInspector.changed',
+  runProfileStateChanged: 'ui.runProfile.state.changed',
 } as const;
 
 type ValueOf<T> = T[keyof T];

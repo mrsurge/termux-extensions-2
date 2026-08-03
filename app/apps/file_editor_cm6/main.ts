@@ -168,6 +168,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
   let restoredSessionActive = false;
   let lastPickerPath = HOME_DIR;
   let lastSha256: string | null = null;
+  let renderRunProfileState = (): void => {};
   // `explorer:event` may arrive before helper functions are defined; keep a stable symbol.
   // This is NOT a suppression: we queue the latest indicator payload and replay it once
   // the real implementation is installed.
@@ -354,6 +355,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     } catch (_) {}
 
     updatePathDisplay();
+    renderRunProfileState();
   }
 
   function _setHostCurrentPathOnly(path: unknown) {
@@ -383,6 +385,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
         runActiveBtn.disabled = true;
         runActiveBtn.title = 'Open a file to enable play';
       }
+      renderRunProfileState();
     },
     log: (...args) => console.log(...args),
   });
@@ -949,13 +952,33 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
 
   const runFileController = createRunFileController({
     getCurrentPath: () => currentPath,
-    setRunButtonDisabled: (flag: boolean) => {
-      runActiveBtn.disabled = !!flag;
-    },
     apiPost: (path: string, body: UnknownRecord) => apiPost(path, body),
     requestBackendRunActiveFile: (payload: UnknownRecord) => uiIpcConnections.requestBackendRunActiveFile(payload),
+    requestBackendRunProfileState: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostRunProfileStateGet, payload),
+    requestBackendRunProfileStop: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostRunProfileStop, payload),
+    setRunButtonState: ({ disabled, running, busy, profileId }) => {
+      runActiveBtn.disabled = disabled;
+      runActiveBtn.textContent = running ? '■' : '▶';
+      runActiveBtn.dataset.running = running ? 'true' : 'false';
+      runActiveBtn.title = busy
+        ? 'Run profile action in progress'
+        : running
+          ? `Stop run profile${profileId ? ` ${profileId}` : ''}`
+          : currentPath
+            ? 'Run active file'
+            : 'Open a file to enable play';
+      runActiveBtn.setAttribute('aria-label', runActiveBtn.title);
+    },
     toast: (msg: string) => host.toast(msg),
-    updateRunButtonState: () => fileStatusController.updateRunButtonState(),
+  });
+  renderRunProfileState = () => {
+    runFileController.render();
+  };
+  renderRunProfileState();
+  window.addEventListener('cm6:run-profile-state-changed', (event) => {
+    runFileController.applyProjection(
+      (event as CustomEvent<unknown>).detail,
+    );
   });
 
   // Autosave confirmation modal (constructed lazily)
@@ -1026,7 +1049,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     menuEditorBtn,
     menuViewBtn,
     runActiveBtn,
-    runCurrentFile: () => runFileController.runCurrentFile(),
+    runCurrentFile: () => runFileController.runOrStop(),
   });
   menuCoreController.installPrimaryMenuButtons();
 

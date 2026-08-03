@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from threading import RLock
 from typing import Literal, cast
+from urllib.parse import urlsplit
 
 # Project-local run profiles are the backend authority for the play button.
 # This resolver owns include matches and conflict rejection before any shell
@@ -45,6 +46,7 @@ class RunProfile:
     save_drafts: DraftSaveMode
     show_save_warning: bool
     dev_tools: bool = False
+    port: int | None = None
 
 
 @dataclass(frozen=True)
@@ -305,6 +307,13 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
     sidebar_url = _text(data.get("sidebarUrl") or data.get("sidebar_url"))
     if not sidebar_url and runner == "pagePreview":
         sidebar_url = DEFAULT_PAGE_PREVIEW_URL
+    port = _optional_port(data.get("port"), profile_id=profile_id)
+    _validate_routed_sidebar_url(
+        profile_id=profile_id,
+        runner=runner,
+        sidebar_url=sidebar_url,
+        port=port,
+    )
     exec_command = _text(data.get("exec"))
     if runner != "pagePreview" and not exec_command:
         raise ValueError(f"Run profile {profile_id} must define exec")
@@ -323,6 +332,7 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
         save_drafts=cast(DraftSaveMode, save_drafts_value),
         show_save_warning=show_save_warning,
         dev_tools=dev_tools,
+        port=port,
     )
 
 
@@ -459,6 +469,50 @@ def _bool_setting(value: object, *, default: bool, field_name: str) -> bool:
     if isinstance(value, int) and value in (0, 1):
         return bool(value)
     raise ValueError(f"{field_name} must be true, false, 1, or 0")
+
+
+def _optional_port(value: object, *, profile_id: str) -> int | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"Run profile {profile_id} port must be an integer")
+    try:
+        port = int(value) if isinstance(value, (int, str)) else 0
+    except ValueError:
+        port = 0
+    if port < 1 or port > 65535:
+        raise ValueError(f"Run profile {profile_id} port must be between 1 and 65535")
+    return port
+
+
+def _validate_routed_sidebar_url(
+    *,
+    profile_id: str,
+    runner: RunnerName,
+    sidebar_url: str,
+    port: int | None,
+) -> None:
+    if port is None:
+        return
+    if runner == "pagePreview":
+        raise ValueError(f"Run profile {profile_id} port is not supported for Page Preview")
+    if not sidebar_url:
+        raise ValueError(f"Run profile {profile_id} port requires sidebarUrl")
+    try:
+        parsed = urlsplit(sidebar_url)
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"Run profile {profile_id} sidebarUrl is invalid: {exc}") from exc
+    if parsed.scheme.lower() != "http":
+        raise ValueError(f"Run profile {profile_id} routed sidebarUrl must use http://")
+    if (parsed.hostname or "").lower() not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError(f"Run profile {profile_id} routed sidebarUrl must use loopback")
+    if parsed.username or parsed.password:
+        raise ValueError(f"Run profile {profile_id} routed sidebarUrl cannot include credentials")
+    if parsed_port != port:
+        raise ValueError(
+            f"Run profile {profile_id} sidebarUrl port must match port {port}"
+        )
 
 
 def _fallback_show_save_warning(config: JsonObject) -> bool:
