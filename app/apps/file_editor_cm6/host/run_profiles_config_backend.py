@@ -282,7 +282,9 @@ def _run_profile_contract() -> JsonMap:
             "labeledPortList",
             description=(
                 "Optional auxiliary services such as Vite/HMR. Native remote clients "
-                "relay each declared port alongside the primary Sidebar URL port."
+                "relay each declared port alongside the primary Sidebar URL port. Vite "
+                "commonly uses port 5173; middleware-based setups may additionally use port "
+                "24678 for HMR. Declare every port reported by the development runtime."
             ),
             placeholder="5173",
             secondary_placeholder="Vite / HMR",

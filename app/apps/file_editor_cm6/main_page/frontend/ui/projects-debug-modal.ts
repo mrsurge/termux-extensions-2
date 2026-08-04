@@ -208,7 +208,7 @@ async function loadProjectsDebugContent() {
           if (!p) return;
           if (
             !(await window.teUI.dialog.confirm(
-              'Any unsaved changes in the current project will be lost. Continue?',
+              'Any unsaved changes in the current project could be lost. Continue?',
             ))
           ) {
             return;

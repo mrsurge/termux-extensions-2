@@ -281,7 +281,7 @@ export function createExplorerChromeController(
   async function handleNewProject(): Promise<void> {
     if (
       !(await window.teUI.dialog.confirm(
-        'Any unsaved changes in the current project will be lost. Continue?',
+        'Any unsaved changes in the current project could be lost. Continue?',
       ))
     ) {
       return;
