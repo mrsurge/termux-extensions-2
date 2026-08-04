@@ -130,6 +130,7 @@ def _profiles(config: JsonMap) -> list[object]:
         }
         _ = item.setdefault("saveDrafts", "included")
         _ = item.setdefault("showSaveWarning", True)
+        _ = item.setdefault("devRuntime", False)
         normalized.append(item)
     return normalized
 
@@ -150,6 +151,7 @@ def _field(
     options: list[JsonMap] | None = None,
     secondary_placeholder: str = "",
     max_items: int | None = None,
+    visible_when: JsonMap | None = None,
 ) -> JsonMap:
     data: JsonMap = {
         "key": key,
@@ -167,6 +169,8 @@ def _field(
         data["secondaryPlaceholder"] = secondary_placeholder
     if max_items is not None:
         data["maxItems"] = max_items
+    if visible_when is not None:
+        data["visibleWhen"] = visible_when
     return data
 
 
@@ -227,6 +231,7 @@ def _run_profile_contract() -> JsonMap:
             "text",
             description="Required for node/python/custom. Ignored for Page Preview.",
             placeholder="server.js",
+            visible_when={"field": "runner", "notEquals": "pagePreview"},
         ),
         _field(
             "entry",
@@ -234,6 +239,7 @@ def _run_profile_contract() -> JsonMap:
             "text",
             description="Used by Page Preview. Ignored for node/python/custom.",
             placeholder="index.html",
+            visible_when={"field": "runner", "equals": "pagePreview"},
         ),
         _field(
             "args",
@@ -242,6 +248,7 @@ def _run_profile_contract() -> JsonMap:
             rows=4,
             description="One process argument per line.",
             placeholder="--port\n3000",
+            visible_when={"field": "runner", "notEquals": "pagePreview"},
         ),
         _field(
             "cwd",
@@ -249,6 +256,7 @@ def _run_profile_contract() -> JsonMap:
             "text",
             description="Optional project-relative working directory for node/python/custom profiles.",
             placeholder=".",
+            visible_when={"field": "runner", "notEquals": "pagePreview"},
         ),
         _field(
             "env",
@@ -257,6 +265,7 @@ def _run_profile_contract() -> JsonMap:
             rows=5,
             description="JSON object of environment variables. Keys must be valid shell environment names.",
             placeholder='{ "PORT": "3000" }',
+            visible_when={"field": "runner", "notEquals": "pagePreview"},
         ),
         _field(
             "sidebarUrl",
@@ -264,6 +273,7 @@ def _run_profile_contract() -> JsonMap:
             "text",
             description="Optional URL opened in a sidebar slot. Page Preview defaults to port 3000.",
             placeholder=DEFAULT_PAGE_PREVIEW_URL,
+            visible_when={"field": "runner", "notEquals": "pagePreview"},
         ),
         _field(
             "port",
@@ -275,6 +285,7 @@ def _run_profile_contract() -> JsonMap:
                 "Not used by Page Preview."
             ),
             placeholder="3000",
+            visible_when={"field": "runner", "notEquals": "pagePreview"},
         ),
         _field(
             "additionalPorts",
@@ -289,6 +300,18 @@ def _run_profile_contract() -> JsonMap:
             placeholder="5173",
             secondary_placeholder="Vite / HMR",
             max_items=8,
+            visible_when={"field": "runner", "notEquals": "pagePreview"},
+        ),
+        _field(
+            "devRuntime",
+            "Enable development runtime for Sidebar URL",
+            "checkbox",
+            description=(
+                "Refresh after included files are saved and, in native clients, "
+                "enable console inspection plus no-cache HTTP handling. Page Preview "
+                "provides this behavior automatically."
+            ),
+            visible_when={"field": "runner", "notEquals": "pagePreview"},
         ),
         _field(
             "runningBehavior",
@@ -298,6 +321,7 @@ def _run_profile_contract() -> JsonMap:
                 _option("just save", "Just save"),
                 _option("relaunch", "Relaunch"),
             ],
+            visible_when={"field": "runner", "notEquals": "pagePreview"},
         ),
     ]
     return {

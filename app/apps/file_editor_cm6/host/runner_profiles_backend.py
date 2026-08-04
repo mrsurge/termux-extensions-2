@@ -2,29 +2,42 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-import hashlib
 from pathlib import Path
 
 from ..monaco_editor.editor_backend_services.contracts import JsonMap
 from ..page_preview_shell_manager import (
+    DEFAULT_PORT as PAGE_PREVIEW_PORT,
     ensure_page_preview_shell,
+    page_preview_shell_state,
     stop_page_preview_shell,
 )
 from ..runner_profile_shell_manager import (
     ensure_runner_profile_shell,
+    runner_profile_shell_state,
     stop_runner_profile_shell,
 )
 from ..runner_profiles import (
     DEFAULT_PAGE_PREVIEW_URL,
+    RunProfileAdditionalPort,
     RunProfileConflictError,
     RunProfileMatch,
+    load_run_profiles,
 )
 from ..run_profile_state import (
     build_run_profile_state_projection,
     resolve_run_profile_match,
+    run_profile_request_context,
 )
-from ..ui_ipc.sidebar_ws import handle_ui_sidebar_window_create_request
+from ..run_profile_surfaces import (
+    cancel_run_profile_url_readiness,
+    close_run_profile_surface,
+    open_run_profile_surface,
+    run_profile_surface_id,
+    wait_for_run_profile_url,
+)
 from .run_target_service import register_run_target_routes, release_run_target_route
+
+PAGE_PREVIEW_HMR_PORT = 24678
 
 
 def resolve_runner_profile_run_request(
@@ -43,7 +56,15 @@ async def build_run_profile_selection_response(
         request["includeAllProfiles"] = True
     projection = await build_run_profile_state_projection(request)
     candidates = projection.get("candidates")
-    candidate_list = candidates if isinstance(candidates, list) else []
+    candidate_list = (
+        [
+            item
+            for item in candidates
+            if isinstance(item, Mapping) and item.get("running") is not True
+        ]
+        if isinstance(candidates, list)
+        else []
+    )
     return {
         "ok": True,
         "data": {
@@ -75,16 +96,45 @@ async def handle_runner_profile_run_request(
             entry=profile.entry,
         )
         url = profile.sidebar_url or shell.url or DEFAULT_PAGE_PREVIEW_URL
-        sidebar_result = await _open_sidebar_url(
-            url=url,
-            profile_id=profile.profile_id,
-            title="Page Preview",
-            label="Page Preview",
-            host_prefix="page-preview",
-            source_name=source_name,
-            project_root=match.project_root,
-            dev_tools=profile.dev_tools,
-        )
+        try:
+            run_target_route = await register_run_target_routes(
+                owner_id=shell.label,
+                shell_id=shell.shell_id,
+                primary_port=PAGE_PREVIEW_PORT,
+                additional_ports=(
+                    RunProfileAdditionalPort(PAGE_PREVIEW_HMR_PORT, "Vite / HMR"),
+                ),
+            )
+            _decorate_route_urls(run_target_route, primary_url=url)
+            await wait_for_run_profile_url(
+                project_root=match.project_root,
+                profile_id=profile.profile_id,
+                shell_id=shell.shell_id,
+                url=url,
+            )
+            sidebar_result = await open_run_profile_surface(
+                project_root=match.project_root,
+                profile=profile,
+                shell_id=shell.shell_id,
+                shell_label=shell.label,
+                url=url,
+                title="Page Preview",
+                label="Page Preview",
+                source_name=source_name,
+                run_target_route=run_target_route,
+            )
+        except Exception as exc:
+            await _cleanup_failed_launch(
+                match=match,
+                shell_id=shell.shell_id,
+                shell_label=shell.label,
+                reused=shell.reused,
+            )
+            return {
+                "ok": False,
+                "error": f"Page Preview URL setup failed: {exc}",
+                "data": {"profileId": profile.profile_id, "runner": profile.runner},
+            }
         await _publish_run_profile_state_best_effort(
             path=str(match.active_file),
             source=f"{source_name}:page_preview_started",
@@ -129,19 +179,10 @@ async def handle_runner_profile_run_request(
                 primary_port=profile.port,
                 additional_ports=profile.additional_ports,
             )
-            primary = _json_object(run_target_route.get("primary"))
-            primary["originalUrl"] = profile.sidebar_url
-            run_target_route["primary"] = primary
-            additional_routes = run_target_route.get("additional")
-            if isinstance(additional_routes, list):
-                for item in additional_routes:
-                    route = _json_object(item)
-                    preferred_port = route.get("preferredPort")
-                    if isinstance(preferred_port, int):
-                        route["originalUrl"] = f"http://127.0.0.1:{preferred_port}/"
-                    if isinstance(item, dict):
-                        item.clear()
-                        item.update(route)
+            _decorate_route_urls(
+                run_target_route,
+                primary_url=profile.sidebar_url,
+            )
         except Exception as exc:
             stopped_suffix = ""
             if not shell.reused:
@@ -161,17 +202,36 @@ async def handle_runner_profile_run_request(
             }
     sidebar_result: JsonMap | None = None
     if profile.sidebar_url:
-        sidebar_result = await _open_sidebar_url(
-            url=profile.sidebar_url,
-            profile_id=profile.profile_id,
-            title=f"Run {profile.profile_id}",
-            label=f"Run {profile.profile_id}",
-            host_prefix="runner-profile",
-            source_name=source_name,
-            project_root=match.project_root,
-            dev_tools=profile.dev_tools,
-            run_target_route=run_target_route,
-        )
+        try:
+            await wait_for_run_profile_url(
+                project_root=match.project_root,
+                profile_id=profile.profile_id,
+                shell_id=shell.shell_id,
+                url=profile.sidebar_url,
+            )
+            sidebar_result = await open_run_profile_surface(
+                project_root=match.project_root,
+                profile=profile,
+                shell_id=shell.shell_id,
+                shell_label=shell.label,
+                url=profile.sidebar_url,
+                title=f"Run {profile.profile_id}",
+                label=f"Run {profile.profile_id}",
+                source_name=source_name,
+                run_target_route=run_target_route,
+            )
+        except Exception as exc:
+            await _cleanup_failed_launch(
+                match=match,
+                shell_id=shell.shell_id,
+                shell_label=shell.label,
+                reused=shell.reused,
+            )
+            return {
+                "ok": False,
+                "error": f"Run profile URL setup failed: {exc}",
+                "data": {"profileId": profile.profile_id, "runner": profile.runner},
+            }
 
     message = (
         f"Run profile '{profile.profile_id}' already running"
@@ -245,49 +305,91 @@ async def handle_run_profile_stop_request(
     *,
     source_name: str,
 ) -> JsonMap:
-    del source_name
+    request = dict(data) if isinstance(data, Mapping) else {}
+    requested_project = _text(request.get("projectPath") or request.get("project_path"))
+    active_project, current_file = run_profile_request_context(request)
+    if not active_project:
+        return {"ok": False, "error": "No active project selected"}
+    active_root = Path(active_project).expanduser().resolve(strict=False)
+    if requested_project and Path(requested_project).expanduser().resolve(strict=False) != active_root:
+        return {"ok": False, "error": "Run profile project changed before Stop"}
+    requested_profile_id = _text(request.get("profileId") or request.get("profile_id"))
     try:
-        match = resolve_runner_profile_run_request(data)
+        if requested_profile_id:
+            profile = next(
+                (
+                    item
+                    for item in load_run_profiles(active_root)
+                    if item.profile_id == requested_profile_id
+                ),
+                None,
+            )
+            if profile is None:
+                raise ValueError(f"Run profile '{requested_profile_id}' no longer exists")
+            match = None
+        else:
+            match = resolve_runner_profile_run_request(request)
+            profile = match.profile if match is not None else None
     except (RunProfileConflictError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
-    if match is None:
+    if profile is None:
         return {"ok": False, "error": "Active file has no matching run profile"}
 
-    profile = match.profile
+    state_before = (
+        await page_preview_shell_state(
+            project_root=str(active_root), profile_id=profile.profile_id
+        )
+        if profile.runner == "pagePreview"
+        else await runner_profile_shell_state(
+            project_root=str(active_root), profile_id=profile.profile_id
+        )
+    )
+    requested_shell_id = _text(request.get("shellId") or request.get("shell_id"))
+    if requested_shell_id and state_before.shell_id and requested_shell_id != state_before.shell_id:
+        return {"ok": False, "error": "Run profile shell changed before Stop"}
+
+    cancel_run_profile_url_readiness(active_root, profile.profile_id)
     state = (
         await stop_page_preview_shell(
-            project_root=str(match.project_root), profile_id=profile.profile_id
+            project_root=str(active_root), profile_id=profile.profile_id
         )
         if profile.runner == "pagePreview"
         else await stop_runner_profile_shell(
-            project_root=str(match.project_root), profile_id=profile.profile_id
+            project_root=str(active_root), profile_id=profile.profile_id
         )
     )
-    if profile.port is not None:
+    if profile.runner == "pagePreview" or profile.port is not None:
         await _release_route_best_effort(
-            owner_id=state.label,
-            shell_id=state.shell_id or None,
+            owner_id=state.label or state_before.label,
+            shell_id=state.shell_id or state_before.shell_id or None,
         )
-    await _publish_run_profile_state_best_effort(
-        path=str(match.active_file),
+    _ = await close_run_profile_surface(
+        project_root=active_root,
+        profile_id=profile.profile_id,
+        source=f"{source_name}:run_profile_stopped",
+    )
+    projection = await _publish_run_profile_state_best_effort(
+        path=current_file or (str(match.active_file) if match is not None else ""),
         source="run_profile_stopped",
+    )
+    shell_id = state.shell_id or state_before.shell_id
+    response_data = dict(projection)
+    response_data.update(
+        {
+            "stopped": bool(shell_id),
+            "stoppedProfileId": profile.profile_id,
+            "stoppedRunner": profile.runner,
+            "stoppedShellId": shell_id,
+            "message": (
+                f"Run profile '{profile.profile_id}' stopped"
+                if shell_id
+                else f"Run profile '{profile.profile_id}' is not running"
+            ),
+        }
     )
     return {
         "ok": True,
-        "data": {
-            "matched": True,
-            "running": False,
-            "stopped": bool(state.shell_id),
-            "profileId": profile.profile_id,
-            "runner": profile.runner,
-            "shellId": state.shell_id,
-            "path": str(match.active_file),
-            "message": (
-                f"Run profile '{profile.profile_id}' stopped"
-                if state.shell_id
-                else f"Run profile '{profile.profile_id}' is not running"
-            ),
-        },
+        "data": response_data,
     }
 
 
@@ -300,55 +402,74 @@ async def _release_route_best_effort(
         pass
 
 
-async def _publish_run_profile_state_best_effort(*, path: str, source: str) -> None:
+async def _publish_run_profile_state_best_effort(*, path: str, source: str) -> JsonMap:
     try:
         from ..run_profile_events import refresh_run_profile_state
 
-        _ = await refresh_run_profile_state({"path": path}, source=source)
+        return await refresh_run_profile_state(
+            {"path": path} if path else {},
+            source=source,
+        )
     except Exception:
-        pass
-
-
-async def _open_sidebar_url(
-    *,
-    url: str,
-    profile_id: str,
-    title: str,
-    label: str,
-    host_prefix: str,
-    source_name: str,
-    project_root: Path,
-    dev_tools: bool,
-    run_target_route: JsonMap | None = None,
-) -> JsonMap:
-    target_id = _devtools_target_id(project_root, profile_id) if dev_tools else ""
-    payload: JsonMap = {
-        "kind": "url",
-        "host_id": f"{host_prefix}:{profile_id}",
-        "title": title,
-        "label": label,
-        "url": url,
-        "restore_url": url,
-        "load": "eager",
-        "activate": True,
-        "client_id": "main_page",
-        "source": f"{source_name}:runner_profile",
-        "devTools": dev_tools,
-        "devToolsTargetId": target_id,
-        "devToolsTargetLabel": label,
-    }
-    if run_target_route:
-        payload["runTargetRoute"] = dict(run_target_route)
-    result = await handle_ui_sidebar_window_create_request(payload)
-    return dict(result)
+        return {}
 
 
 def _devtools_target_id(project_root: Path, profile_id: str) -> str:
-    project_hash = hashlib.sha256(str(project_root).encode("utf-8")).hexdigest()[:12]
-    return f"run-profile:{project_hash}:{profile_id}"
+    return run_profile_surface_id(project_root, profile_id)
+
+
+def _decorate_route_urls(route_set: JsonMap, *, primary_url: str) -> None:
+    primary = _json_object(route_set.get("primary"))
+    primary["originalUrl"] = primary_url
+    route_set["primary"] = primary
+    additional_routes = route_set.get("additional")
+    if not isinstance(additional_routes, list):
+        return
+    for item in additional_routes:
+        route = _json_object(item)
+        preferred_port = route.get("preferredPort")
+        if isinstance(preferred_port, int):
+            route["originalUrl"] = f"http://127.0.0.1:{preferred_port}/"
+        if isinstance(item, dict):
+            item.clear()
+            item.update(route)
+
+
+async def _cleanup_failed_launch(
+    *,
+    match: RunProfileMatch,
+    shell_id: str,
+    shell_label: str,
+    reused: bool,
+) -> None:
+    await _release_route_best_effort(owner_id=shell_label, shell_id=shell_id)
+    if not reused:
+        if match.profile.runner == "pagePreview":
+            _ = await stop_page_preview_shell(
+                project_root=str(match.project_root),
+                profile_id=match.profile.profile_id,
+            )
+        else:
+            _ = await stop_runner_profile_shell(
+                project_root=str(match.project_root),
+                profile_id=match.profile.profile_id,
+            )
+    _ = await close_run_profile_surface(
+        project_root=match.project_root,
+        profile_id=match.profile.profile_id,
+        source="run_profile_launch_failed",
+    )
+    _ = await _publish_run_profile_state_best_effort(
+        path=str(match.active_file),
+        source="run_profile_launch_failed",
+    )
 
 
 def _json_object(value: object) -> JsonMap:
     if not isinstance(value, Mapping):
         return {}
     return {str(key): item for key, item in value.items()}
+
+
+def _text(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""

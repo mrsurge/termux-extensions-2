@@ -1,7 +1,7 @@
 (function loadTe2DevToolsTarget() {
   "use strict";
 
-  if (!globalThis.__te2DevToolsTargetConfig) return;
+  if (globalThis.__te2DevToolsTargetConfig?.devTools !== true) return;
 
   const statusEvent = "te2-devtools-target-status";
 

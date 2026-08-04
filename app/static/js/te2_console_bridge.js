@@ -74,6 +74,14 @@ function _sanitizeWorkerLabel(value) {
   return normalized || 'worker';
 }
 
+function _socketEndpoint(baseUrl, namespace) {
+  const normalizedNamespace = String(namespace || '/te2_console').startsWith('/')
+    ? String(namespace || '/te2_console')
+    : `/${String(namespace || '/te2_console')}`;
+  const normalizedBase = String(baseUrl || '').trim().replace(/\/+$/, '');
+  return normalizedBase ? `${normalizedBase}${normalizedNamespace}` : normalizedNamespace;
+}
+
 function _perWindowWorkerId(label) {
   const base = _sanitizeWorkerLabel(label);
   const storageKey = `te2.consoleBridge.workerId:${base}`;
@@ -157,6 +165,7 @@ function _hookEval() {
  * @param {string} [opts.workerLabel] Human-readable label/grouping for this frontend.
  * @param {string} [opts.appId] App id reported to the TE2 console namespace.
  * @param {boolean} [opts.uniquePerWindow] Generate a stable unique ID per browser window/tab from workerLabel. Recommended for multi-client hosted frontends.
+ * @param {string} [opts.baseUrl] Explicit framework origin for cross-origin hosted pages.
  * @param {string} [opts.socketPath] Socket.IO path (default '/te2_console_ws/socket.io').
  * @param {string} [opts.namespace] Socket.IO namespace (default '/te2_console').
  * @returns {{ socket, workerId, destroy }}
@@ -183,7 +192,7 @@ export function initConsoleBridge(opts = {}) {
       console.warn('[console_bridge] window.io not available — bridge not started');
       return null;
     }
-    _bridgeSocket = io(opts.namespace || '/te2_console', {
+    _bridgeSocket = io(_socketEndpoint(opts.baseUrl, opts.namespace), {
       path: opts.socketPath || '/te2_console_ws/socket.io',
       transports: ['websocket'],
       query: {

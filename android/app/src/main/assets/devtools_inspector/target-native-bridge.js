@@ -2,7 +2,7 @@
   "use strict";
 
   const targetConfig = globalThis.__te2DevToolsTargetConfig;
-  if (!targetConfig) return;
+  if (!targetConfig || targetConfig.devTools !== true) return;
 
   const nativeAppId = "te2_devtools_target";
   const inboundEvent = "te2-devtools-target-inbound";

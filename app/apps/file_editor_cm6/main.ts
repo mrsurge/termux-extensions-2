@@ -252,6 +252,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     fileTabsViewport,
     fileTabsTrack,
     runActiveBtn,
+    stopRunProfilesBtn,
     miNew,
     miOpen,
     miSave,
@@ -956,18 +957,24 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     requestBackendRunActiveFile: (payload: UnknownRecord) => uiIpcConnections.requestBackendRunActiveFile(payload),
     requestBackendRunProfileState: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostRunProfileStateGet, payload),
     requestBackendRunProfileStop: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostRunProfileStop, payload),
-    setRunButtonState: ({ disabled, running, busy, profileId }) => {
+    setRunButtonState: ({ disabled, busy, runningProfiles }) => {
       runActiveBtn.disabled = disabled;
-      runActiveBtn.textContent = running ? '■' : '▶';
-      runActiveBtn.dataset.running = running ? 'true' : 'false';
+      runActiveBtn.textContent = '▶';
+      runActiveBtn.dataset.running = 'false';
       runActiveBtn.title = busy
         ? 'Run profile action in progress'
-        : running
-          ? `Stop run profile${profileId ? ` ${profileId}` : ''}`
-          : currentPath
-            ? 'Run active file'
-            : 'Open a file to enable play';
+        : currentPath
+          ? 'Run active file'
+          : 'Open a file to enable play';
       runActiveBtn.setAttribute('aria-label', runActiveBtn.title);
+      stopRunProfilesBtn.hidden = runningProfiles.length === 0;
+      stopRunProfilesBtn.disabled = busy || runningProfiles.length === 0;
+      stopRunProfilesBtn.title = busy
+        ? 'Run profile action in progress'
+        : runningProfiles.length === 1
+          ? `Stop run profile ${runningProfiles[0].profileId}`
+          : `Choose among ${runningProfiles.length} running profiles to stop`;
+      stopRunProfilesBtn.setAttribute('aria-label', stopRunProfilesBtn.title);
     },
     toast: (msg: string) => host.toast(msg),
   });
@@ -1049,7 +1056,9 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     menuEditorBtn,
     menuViewBtn,
     runActiveBtn,
-    runCurrentFile: () => runFileController.runOrStop(),
+    stopRunProfilesBtn,
+    runCurrentFile: () => runFileController.runCurrentFile(),
+    stopRunningProfiles: () => runFileController.stopRunningProfiles(),
     showRunProfileSelector: () => runFileController.showProfileSelector(),
   });
   menuCoreController.installPrimaryMenuButtons();

@@ -11,6 +11,7 @@ from .run_profile_state import (
     build_run_profile_state_projection,
     run_profile_request_context,
 )
+from .run_profile_surfaces import cancel_all_run_profile_url_readiness
 from .ui_ipc.rpc_contract import UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED
 from .worker_services.event_bus import (
     WorkerEvent,
@@ -61,6 +62,7 @@ async def refresh_run_profile_state(
                 "selectionRequired": False,
                 "candidateScope": "owners",
                 "candidates": [],
+                "runningProfiles": [],
                 "error": str(exc),
             }
 
@@ -129,6 +131,7 @@ async def _refresh_after_open_state(event: WorkerEvent) -> None:
 
 
 async def _refresh_after_project_switch(event: WorkerEvent) -> None:
+    cancel_all_run_profile_url_readiness()
     open_state = event_payload_object(event, "openState")
     path = _text(open_state.get("openFile"))
     data: JsonMap = {"path": path} if path else {}
@@ -150,6 +153,7 @@ def _projection_signature(projection: JsonMap) -> str:
             "selectionRequired",
             "candidateScope",
             "candidates",
+            "runningProfiles",
             "error",
         )
     }

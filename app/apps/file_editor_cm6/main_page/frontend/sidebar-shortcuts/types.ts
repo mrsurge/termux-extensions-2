@@ -45,6 +45,31 @@ export interface SidebarShortcut extends UnknownRecord {
   devToolsTargetLabel?: string;
   run_target_route?: RunTargetDescriptor;
   runTargetRoute?: RunTargetDescriptor;
+  run_profile_surface?: RunProfileSurfaceDescriptor;
+  runProfileSurface?: RunProfileSurfaceDescriptor;
+}
+
+export interface RunProfileSurfaceDescriptor extends UnknownRecord {
+  dto: "RunProfileSurface";
+  version: 1;
+  surfaceId: string;
+  projectPath: string;
+  profileId: string;
+  runner: string;
+  shellId: string;
+  shellLabel: string;
+  url: string;
+  devRuntime: boolean;
+  refreshRevision: number;
+}
+
+export interface RunProfileRuntimeMetadata extends UnknownRecord {
+  surfaceId: string;
+  profileId: string;
+  devRuntime: boolean;
+  devTools: boolean;
+  workerLabel: string;
+  frameworkOrigin: string;
 }
 
 export interface RunTargetRouteDescriptor extends UnknownRecord {
@@ -147,6 +172,8 @@ export interface SidebarAppDockSlot extends UnknownRecord {
   devToolsTargetLabel?: string;
   run_target_route?: RunTargetDescriptor;
   runTargetRoute?: RunTargetDescriptor;
+  run_profile_surface?: RunProfileSurfaceDescriptor;
+  runProfileSurface?: RunProfileSurfaceDescriptor;
   updated_at?: number;
   updatedAt?: number;
   version?: string | number;
@@ -183,6 +210,8 @@ export interface IframeEntry {
   url: string;
   loaded: boolean;
   devToolsName: string;
+  runProfileSurfaceId: string;
+  version: string;
 }
 
 export interface JsonFetchResult<TBody = unknown> {

@@ -54,3 +54,74 @@ test("labeled port list edits and removes auxiliary service routes", async () =>
   form.destroy();
   window.close();
 });
+
+test("runner visibility updates when Page Preview is selected", async () => {
+  const { createDeclarativeForm } = await loadDeclarativeForm();
+  const window = new Window({ url: "http://127.0.0.1/app/test" });
+  const host = window.document.createElement("div");
+  window.document.body.appendChild(host);
+  const form = createDeclarativeForm(host, {
+    fields: [
+      {
+        key: "runner",
+        label: "Runner",
+        kind: "select",
+        options: [
+          { value: "custom", label: "Custom" },
+          { value: "pagePreview", label: "Page Preview" },
+        ],
+      },
+      {
+        key: "exec",
+        label: "Exec",
+        kind: "text",
+        visibleWhen: { field: "runner", notEquals: "pagePreview" },
+      },
+      {
+        key: "entry",
+        label: "Entry",
+        kind: "text",
+        visibleWhen: { field: "runner", equals: "pagePreview" },
+      },
+    ],
+  }, { runner: "custom", exec: "node", entry: "index.html" });
+  const rowsByLabel = new Map(
+    [...host.querySelectorAll(".declarative-field-row")].map((row) => [
+      row.querySelector(".declarative-field-label")?.textContent,
+      row,
+    ]),
+  );
+  assert.equal(rowsByLabel.get("Exec")?.style.display, "");
+  assert.equal(rowsByLabel.get("Entry")?.style.display, "none");
+
+  host.querySelector(".declarative-select-button")?.click();
+  [...window.document.querySelectorAll(".declarative-select-option")]
+    .find((option) => option.textContent === "Page Preview")
+    ?.click();
+  assert.equal(rowsByLabel.get("Exec")?.style.display, "none");
+  assert.equal(rowsByLabel.get("Entry")?.style.display, "");
+
+  form.destroy();
+  window.close();
+});
+
+test("boolean controls use the left-aligned checkbox class", async () => {
+  const { createDeclarativeForm } = await loadDeclarativeForm();
+  const window = new Window({ url: "http://127.0.0.1/app/test" });
+  const host = window.document.createElement("div");
+  window.document.body.appendChild(host);
+  const form = createDeclarativeForm(host, {
+    fields: [{
+      key: "devRuntime",
+      label: "Development runtime",
+      kind: "checkbox",
+    }],
+  }, { devRuntime: true });
+
+  const checkbox = host.querySelector('input[type="checkbox"]');
+  assert.ok(checkbox?.classList.contains("declarative-checkbox"));
+  assert.equal(checkbox?.checked, true);
+
+  form.destroy();
+  window.close();
+});

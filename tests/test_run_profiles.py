@@ -12,10 +12,15 @@ from typing import cast, override
 from unittest.mock import AsyncMock, patch
 
 from app.apps.file_editor_cm6 import runner_profiles
-from app.apps.file_editor_cm6 import run_profile_events, run_profile_state
+from app.apps.file_editor_cm6 import (
+    run_profile_events,
+    run_profile_state,
+    run_profile_surfaces,
+)
 from app.apps.file_editor_cm6.monaco_editor.editor_backend_services import save_service
 from app.apps.file_editor_cm6.host import terminal_actions_backend
 from app.apps.file_editor_cm6.host import runner_profiles_backend
+from app.apps.file_editor_cm6.host import run_profiles_config_backend
 from app.apps.file_editor_cm6.host import run_target_service
 from app.apps.file_editor_cm6.ui_ipc import sidebar_window_state
 from app.apps.file_editor_cm6.worker_services import run_profile_fws_bridge
@@ -266,17 +271,7 @@ class RunProfileContractTests(unittest.TestCase):
                 index=0,
             )
 
-    def test_routed_port_rejects_page_preview_and_unsafe_urls(self) -> None:
-        with self.assertRaisesRegex(ValueError, "not supported for Page Preview"):
-            _ = runner_profiles._profile_from_json(
-                {
-                    "profileId": "preview",
-                    "runner": "pagePreview",
-                    "entry": "index.html",
-                    "port": 3000,
-                },
-                index=0,
-            )
+    def test_routed_port_rejects_unsafe_urls(self) -> None:
         for sidebar_url, message in [
             ("https://127.0.0.1:4173/", "must use http"),
             ("http://example.com:4173/", "must use loopback"),
@@ -757,21 +752,36 @@ class RunProfileSidebarDevToolsTests(unittest.IsolatedAsyncioTestCase):
     async def test_sidebar_url_projects_stable_native_target_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
+            profile = runner_profiles.RunProfile(
+                profile_id="preview",
+                runner="pagePreview",
+                entry="index.html",
+                include=("index.html",),
+                sidebar_url="http://127.0.0.1:3000/",
+                running_behavior="just save",
+                exec_command="",
+                cwd="",
+                args=(),
+                env={},
+                save_drafts="included",
+                show_save_warning=False,
+                dev_tools=True,
+            )
             create = AsyncMock(return_value={"ok": True})
             with patch.object(
-                runner_profiles_backend,
+                run_profile_surfaces,
                 "handle_ui_sidebar_window_create_request",
                 create,
             ):
-                result = await runner_profiles_backend._open_sidebar_url(
+                result = await run_profile_surfaces.open_run_profile_surface(
+                    project_root=root,
+                    profile=profile,
+                    shell_id="shell-preview",
+                    shell_label="page-preview:test:preview",
                     url="http://127.0.0.1:3000/",
-                    profile_id="preview",
                     title="Page Preview",
                     label="Page Preview",
-                    host_prefix="page-preview",
                     source_name="test",
-                    project_root=root,
-                    dev_tools=True,
                 )
 
             self.assertTrue(result["ok"])
@@ -780,6 +790,11 @@ class RunProfileSidebarDevToolsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(payload["devTools"], True)
             self.assertEqual(payload["devToolsTargetId"], expected_id)
             self.assertEqual(payload["devToolsTargetLabel"], "Page Preview")
+            slot = sidebar_window_state._normalize_url_slot(payload)
+            surface = cast(dict[str, object], slot["runProfileSurface"])
+            self.assertEqual(surface["profileId"], "preview")
+            self.assertEqual(surface["shellId"], "shell-preview")
+            self.assertTrue(surface["devRuntime"])
             self.assertEqual(
                 expected_id,
                 runner_profiles_backend._devtools_target_id(root, "preview"),
@@ -842,21 +857,36 @@ class RunProfileSidebarDevToolsTests(unittest.IsolatedAsyncioTestCase):
             "originalUrl": "http://127.0.0.1:4173/app",
             "expiresAt": 999,
         }
+        profile = runner_profiles.RunProfile(
+            profile_id="web",
+            runner="custom",
+            entry="",
+            include=("src/**",),
+            sidebar_url="http://127.0.0.1:4173/app",
+            running_behavior="just save",
+            exec_command="npm run dev",
+            cwd="",
+            args=(),
+            env={},
+            save_drafts="included",
+            show_save_warning=False,
+            port=4173,
+        )
         create = AsyncMock(return_value={"ok": True})
         with patch.object(
-            runner_profiles_backend,
+            run_profile_surfaces,
             "handle_ui_sidebar_window_create_request",
             create,
         ):
-            result = await runner_profiles_backend._open_sidebar_url(
+            result = await run_profile_surfaces.open_run_profile_surface(
+                project_root=Path("/project"),
+                profile=profile,
+                shell_id="shell-web",
+                shell_label="runner-profile:test:web",
                 url="http://127.0.0.1:4173/app",
-                profile_id="web",
                 title="Run web",
                 label="Run web",
-                host_prefix="runner-profile",
                 source_name="test",
-                project_root=Path("/project"),
-                dev_tools=False,
                 run_target_route=route,
             )
 
@@ -1019,6 +1049,7 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
             ensure = AsyncMock(return_value=shell)
             register = AsyncMock(return_value=route)
             open_sidebar = AsyncMock(return_value={"ok": True})
+            wait_ready = AsyncMock()
             with (
                 patch.object(
                     runner_profiles_backend,
@@ -1032,8 +1063,18 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch.object(
                     runner_profiles_backend,
-                    "_open_sidebar_url",
+                    "open_run_profile_surface",
                     open_sidebar,
+                ),
+                patch.object(
+                    runner_profiles_backend,
+                    "wait_for_run_profile_url",
+                    wait_ready,
+                ),
+                patch.object(
+                    runner_profiles_backend,
+                    "_publish_run_profile_state_best_effort",
+                    AsyncMock(return_value={}),
                 ),
             ):
                 result = await runner_profiles_backend.handle_runner_profile_run_request(
@@ -1061,6 +1102,108 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
                 "http://127.0.0.1:5173/",
             )
 
+    async def test_page_preview_registers_primary_and_hmr_routes_after_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            active = root / "index.html"
+            _ = active.write_text("<main></main>\n", encoding="utf-8")
+            profile = runner_profiles.RunProfile(
+                profile_id="preview",
+                runner="pagePreview",
+                entry="index.html",
+                include=("index.html",),
+                sidebar_url="http://127.0.0.1:3000/",
+                running_behavior="just save",
+                exec_command="",
+                cwd="",
+                args=(),
+                env={},
+                save_drafts="included",
+                show_save_warning=False,
+            )
+            match = runner_profiles.RunProfileMatch(
+                profile=profile,
+                project_root=root,
+                active_file=active,
+                relative_path="index.html",
+            )
+            shell = SimpleNamespace(
+                shell_id="shell-preview",
+                label="page-preview:test:preview",
+                url="http://127.0.0.1:3000/",
+                reused=False,
+            )
+            route = {
+                "dto": "RunTargetRouteSet",
+                "version": 1,
+                "relayGroupId": "d" * 64,
+                "primary": {"preferredPort": 3000},
+                "additional": [{"preferredPort": 24678, "label": "Vite / HMR"}],
+            }
+            register = AsyncMock(return_value=route)
+            wait_ready = AsyncMock()
+            open_surface = AsyncMock(return_value={"ok": True})
+            with (
+                patch.object(
+                    runner_profiles_backend,
+                    "ensure_page_preview_shell",
+                    AsyncMock(return_value=shell),
+                ),
+                patch.object(
+                    runner_profiles_backend,
+                    "register_run_target_routes",
+                    register,
+                ),
+                patch.object(
+                    runner_profiles_backend,
+                    "wait_for_run_profile_url",
+                    wait_ready,
+                ),
+                patch.object(
+                    runner_profiles_backend,
+                    "open_run_profile_surface",
+                    open_surface,
+                ),
+                patch.object(
+                    runner_profiles_backend,
+                    "_publish_run_profile_state_best_effort",
+                    AsyncMock(return_value={}),
+                ),
+            ):
+                result = await runner_profiles_backend.handle_runner_profile_run_request(
+                    match,
+                    source_name="test",
+                )
+
+            self.assertTrue(result["ok"])
+            register.assert_awaited_once_with(
+                owner_id=shell.label,
+                shell_id=shell.shell_id,
+                primary_port=3000,
+                additional_ports=(
+                    runner_profiles.RunProfileAdditionalPort(24678, "Vite / HMR"),
+                ),
+            )
+            wait_ready.assert_awaited_once_with(
+                project_root=root,
+                profile_id="preview",
+                shell_id="shell-preview",
+                url="http://127.0.0.1:3000/",
+            )
+            projected = cast(
+                dict[str, object], open_surface.await_args.kwargs["run_target_route"]
+            )
+            self.assertEqual(
+                cast(dict[str, object], projected["primary"])["originalUrl"],
+                "http://127.0.0.1:3000/",
+            )
+            self.assertEqual(
+                cast(list[dict[str, object]], projected["additional"])[0][
+                    "originalUrl"
+                ],
+                "http://127.0.0.1:24678/",
+            )
+
     async def test_stop_terminates_exact_profile_and_releases_route(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             match = self._match(Path(temp_dir).resolve())
@@ -1074,8 +1217,18 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
             with (
                 patch.object(
                     runner_profiles_backend,
+                    "run_profile_request_context",
+                    return_value=(str(match.project_root), str(match.active_file)),
+                ),
+                patch.object(
+                    runner_profiles_backend,
                     "resolve_runner_profile_run_request",
                     return_value=match,
+                ),
+                patch.object(
+                    runner_profiles_backend,
+                    "runner_profile_shell_state",
+                    AsyncMock(return_value=stopped),
                 ),
                 patch.object(
                     runner_profiles_backend,
@@ -1086,6 +1239,16 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
                     runner_profiles_backend,
                     "release_run_target_route",
                     release,
+                ),
+                patch.object(
+                    runner_profiles_backend,
+                    "close_run_profile_surface",
+                    AsyncMock(return_value=True),
+                ),
+                patch.object(
+                    runner_profiles_backend,
+                    "_publish_run_profile_state_best_effort",
+                    AsyncMock(return_value={"runningProfiles": []}),
                 ),
             ):
                 result = await runner_profiles_backend.handle_run_profile_stop_request(
@@ -1102,7 +1265,10 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
                 owner_id=stopped.label,
                 shell_id=stopped.shell_id,
             )
-            self.assertFalse(cast(dict[str, object], result["data"])["running"])
+            self.assertEqual(
+                cast(dict[str, object], result["data"])["runningProfiles"],
+                [],
+            )
 
 
 class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
@@ -1125,6 +1291,11 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
                     run_profile_state,
                     "list_run_profile_candidates",
                     return_value=[match],
+                ),
+                patch.object(
+                    run_profile_state,
+                    "load_run_profiles",
+                    return_value=[match.profile],
                 ),
                 patch.object(
                     run_profile_state,
@@ -1195,6 +1366,11 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch.object(
                     run_profile_state,
+                    "load_run_profiles",
+                    return_value=[match.profile for match in matches],
+                ),
+                patch.object(
+                    run_profile_state,
                     "runner_profile_shell_state",
                     AsyncMock(side_effect=shell_state),
                 ),
@@ -1210,6 +1386,39 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
             [candidate["profileId"] for candidate in candidates],
             ["backend-a", "backend-b"],
         )
+
+    async def test_state_projection_keeps_global_running_profiles_without_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            profile = RunProfileProcessStateTests()._match(root).profile
+            shell_state = SimpleNamespace(
+                shell_id="shell-web",
+                label="runner:web",
+                running=True,
+            )
+            with (
+                patch.object(
+                    run_profile_state,
+                    "run_profile_request_context",
+                    return_value=(str(root), None),
+                ),
+                patch.object(
+                    run_profile_state,
+                    "load_run_profiles",
+                    return_value=[profile],
+                ),
+                patch.object(
+                    run_profile_state,
+                    "runner_profile_shell_state",
+                    AsyncMock(return_value=shell_state),
+                ),
+            ):
+                projection = await run_profile_state.build_run_profile_state_projection()
+
+        self.assertEqual(projection["path"], "")
+        self.assertFalse(projection["running"])
+        running = cast(list[dict[str, object]], projection["runningProfiles"])
+        self.assertEqual([item["profileId"] for item in running], ["web"])
 
     async def test_unchanged_event_projection_is_deduplicated(self) -> None:
         projection = {
@@ -1241,6 +1450,7 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
     async def test_fws_lifecycle_filters_to_run_profile_shells(self) -> None:
         refresh = AsyncMock()
         release = AsyncMock(return_value=True)
+        close_surface = AsyncMock(return_value=1)
         run_profile_fws_bridge._relevant_shell_labels.clear()
         unrelated = {
             "method": "fws.shell.updated",
@@ -1262,6 +1472,11 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(run_profile_fws_bridge, "refresh_run_profile_state", refresh),
             patch.object(run_profile_fws_bridge, "release_run_target_route", release),
+            patch.object(
+                run_profile_fws_bridge,
+                "close_run_profile_surface_for_shell",
+                close_surface,
+            ),
         ):
             await run_profile_fws_bridge._on_notification(unrelated)
             await run_profile_fws_bridge._on_notification(relevant)
@@ -1272,9 +1487,137 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
             owner_id="runner-profile:file_editor_cm6:project:python",
             shell_id="run-shell",
         )
+        close_surface.assert_awaited_once_with(
+            shell_id="run-shell",
+            shell_label="runner-profile:file_editor_cm6:project:python",
+            source="fws.shell.removed",
+        )
         self.assertEqual(
             [call.kwargs["source"] for call in refresh.await_args_list],
             ["fws.shell.updated", "fws.shell.removed"],
+        )
+
+
+class RunProfileRefinementContractTests(unittest.IsolatedAsyncioTestCase):
+    def test_page_preview_hides_process_fields_and_dev_runtime_is_exposed(self) -> None:
+        fields = cast(
+            list[dict[str, object]],
+            run_profiles_config_backend._run_profile_contract()["fields"],
+        )
+        by_key = {cast(str, field["key"]): field for field in fields}
+        self.assertEqual(
+            by_key["entry"]["visibleWhen"],
+            {"field": "runner", "equals": "pagePreview"},
+        )
+        for key in (
+            "exec",
+            "args",
+            "cwd",
+            "env",
+            "sidebarUrl",
+            "port",
+            "additionalPorts",
+            "devRuntime",
+            "runningBehavior",
+        ):
+            self.assertEqual(
+                by_key[key]["visibleWhen"],
+                {"field": "runner", "notEquals": "pagePreview"},
+            )
+
+    def test_page_preview_ignores_incompatible_raw_keys(self) -> None:
+        raw_profile: dict[str, object] = {
+            "profileId": "preview",
+            "runner": "pagePreview",
+            "entry": "index.html",
+            "runningBehavior": "invalid",
+            "exec": 42,
+            "args": {"invalid": True},
+            "cwd": ["invalid"],
+            "env": ["invalid"],
+            "sidebarUrl": "https://invalid.example/",
+            "port": "invalid",
+            "additionalPorts": "invalid",
+            "devRuntime": "invalid",
+        }
+        config = runner_profiles.parse_run_profiles_config(
+            {"version": 1, "profiles": [raw_profile]}
+        )
+        self.assertEqual(cast(list[object], config["profiles"])[0], raw_profile)
+
+        profile = runner_profiles._profiles_from_config(config)[0]
+        self.assertEqual(profile.running_behavior, "just save")
+        self.assertEqual(profile.exec_command, "")
+        self.assertEqual(profile.args, ())
+        self.assertEqual(profile.cwd, "")
+        self.assertEqual(profile.env, {})
+        self.assertEqual(profile.sidebar_url, runner_profiles.DEFAULT_PAGE_PREVIEW_URL)
+        self.assertIsNone(profile.port)
+        self.assertEqual(profile.additional_ports, ())
+        self.assertFalse(profile.dev_runtime)
+
+    async def test_saved_included_file_refreshes_running_dev_surface(self) -> None:
+        profile = runner_profiles.RunProfile(
+            profile_id="api",
+            runner="python",
+            entry="",
+            include=("src/**",),
+            sidebar_url="http://127.0.0.1:8000/",
+            running_behavior="just save",
+            exec_command="src/main.py",
+            cwd="",
+            args=(),
+            env={},
+            save_drafts="included",
+            show_save_warning=False,
+            dev_runtime=True,
+        )
+        refresh = AsyncMock(return_value=True)
+        with (
+            patch.object(
+                run_profile_surfaces,
+                "current_project_generation",
+                return_value=7,
+            ),
+            patch.object(
+                run_profile_surfaces,
+                "load_run_profiles",
+                return_value=[profile],
+            ),
+            patch.object(
+                run_profile_surfaces,
+                "runner_profile_shell_state",
+                AsyncMock(
+                    return_value=SimpleNamespace(
+                        shell_id="shell-api",
+                        label="runner:api",
+                        running=True,
+                    )
+                ),
+            ),
+            patch.object(run_profile_surfaces, "_refresh_surface_slot", refresh),
+        ):
+            await run_profile_surfaces._handle_file_saved(
+                cast(
+                    object,
+                    {
+                        "type": "FileSaved",
+                        "project_root": "/project",
+                        "project_generation": 7,
+                        "source": "test",
+                        "payload": {
+                            "fileSaved": {
+                                "relativePath": "src/main.py",
+                            }
+                        },
+                    },
+                )
+            )
+
+        refresh.assert_awaited_once_with(
+            project_root="/project",
+            profile=profile,
+            shell_id="shell-api",
         )
 
 

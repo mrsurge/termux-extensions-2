@@ -53,6 +53,7 @@ class RunProfile:
     save_drafts: DraftSaveMode
     show_save_warning: bool
     dev_tools: bool = False
+    dev_runtime: bool = False
     port: int | None = None
     additional_ports: tuple[RunProfileAdditionalPort, ...] = ()
 
@@ -330,13 +331,19 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
     if not include:
         raise ValueError(f"Run profile {profile_id} must define include paths")
 
-    running_behavior_value = _text(data.get("runningBehavior") or data.get("running_behavior"))
-    if not running_behavior_value:
+    if runner == "pagePreview":
         running_behavior_value = "just save"
-    if running_behavior_value not in KNOWN_RUNNING_BEHAVIORS:
-        raise ValueError(
-            f"Run profile {profile_id} has unknown runningBehavior '{running_behavior_value}'"
+    else:
+        running_behavior_value = _text(
+            data.get("runningBehavior") or data.get("running_behavior")
         )
+        if not running_behavior_value:
+            running_behavior_value = "just save"
+        if running_behavior_value not in KNOWN_RUNNING_BEHAVIORS:
+            raise ValueError(
+                f"Run profile {profile_id} has unknown runningBehavior "
+                f"'{running_behavior_value}'"
+            )
 
     save_drafts_value = _text(data.get("saveDrafts") or data.get("save_drafts"))
     if not save_drafts_value:
@@ -355,26 +362,42 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
         default=False,
         field_name=f"Run profile {profile_id} devTools",
     )
-
-    sidebar_url = _text(data.get("sidebarUrl") or data.get("sidebar_url"))
-    if not sidebar_url and runner == "pagePreview":
+    if runner == "pagePreview":
+        # Preserve stale raw JSON, but keep Page Preview runtime behavior backend-owned.
+        dev_runtime = False
         sidebar_url = DEFAULT_PAGE_PREVIEW_URL
-    port = _optional_port(data.get("port"), profile_id=profile_id)
-    additional_ports = _additional_ports(
-        data.get("additionalPorts", data.get("additional_ports")),
-        profile_id=profile_id,
-        primary_port=port,
-    )
-    _validate_routed_sidebar_url(
-        profile_id=profile_id,
-        runner=runner,
-        sidebar_url=sidebar_url,
-        port=port,
-        additional_ports=additional_ports,
-    )
-    exec_command = _text(data.get("exec"))
-    if runner != "pagePreview" and not exec_command:
-        raise ValueError(f"Run profile {profile_id} must define exec")
+        port = None
+        additional_ports: tuple[RunProfileAdditionalPort, ...] = ()
+        exec_command = ""
+        cwd = ""
+        args: tuple[str, ...] = ()
+        env: dict[str, str] = {}
+    else:
+        dev_runtime = _bool_setting(
+            data.get("devRuntime", data.get("dev_runtime")),
+            default=False,
+            field_name=f"Run profile {profile_id} devRuntime",
+        )
+        sidebar_url = _text(data.get("sidebarUrl") or data.get("sidebar_url"))
+        port = _optional_port(data.get("port"), profile_id=profile_id)
+        additional_ports = _additional_ports(
+            data.get("additionalPorts", data.get("additional_ports")),
+            profile_id=profile_id,
+            primary_port=port,
+        )
+        _validate_routed_sidebar_url(
+            profile_id=profile_id,
+            runner=runner,
+            sidebar_url=sidebar_url,
+            port=port,
+            additional_ports=additional_ports,
+        )
+        exec_command = _text(data.get("exec"))
+        if not exec_command:
+            raise ValueError(f"Run profile {profile_id} must define exec")
+        cwd = _text(data.get("cwd"))
+        args = _string_tuple(data.get("args"))
+        env = _env_map(data.get("env"), profile_id=profile_id)
 
     return RunProfile(
         profile_id=profile_id,
@@ -384,12 +407,13 @@ def _profile_from_json(data: JsonObject, *, index: int) -> RunProfile:
         sidebar_url=sidebar_url,
         running_behavior=cast(RunningBehavior, running_behavior_value),
         exec_command=exec_command,
-        cwd=_text(data.get("cwd")),
-        args=_string_tuple(data.get("args")),
-        env=_env_map(data.get("env"), profile_id=profile_id),
+        cwd=cwd,
+        args=args,
+        env=env,
         save_drafts=cast(DraftSaveMode, save_drafts_value),
         show_save_warning=show_save_warning,
         dev_tools=dev_tools,
+        dev_runtime=dev_runtime,
         port=port,
         additional_ports=additional_ports,
     )

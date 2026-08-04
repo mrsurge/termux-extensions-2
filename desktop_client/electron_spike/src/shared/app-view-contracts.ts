@@ -15,6 +15,8 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "home",
   "force_asset_update",
   "resolve_run_target",
+  "register_run_target_surface",
+  "release_run_target_surface",
 ] as const;
 
 export type ElectronAppViewCommand = typeof ELECTRON_APP_VIEW_COMMANDS[number];
@@ -39,6 +41,16 @@ export type ElectronRunTargetRoute = {
   preferredPort: number;
   originalUrl: string;
   expiresAt?: number;
+  te2Runtime?: ElectronRunProfileRuntimeMetadata;
+};
+
+export type ElectronRunProfileRuntimeMetadata = {
+  surfaceId: string;
+  profileId: string;
+  devRuntime: boolean;
+  devTools: boolean;
+  workerLabel: string;
+  frameworkOrigin: string;
 };
 
 export type ElectronRunTargetAuxiliaryRoute = ElectronRunTargetRoute & {
@@ -51,6 +63,7 @@ export type ElectronRunTargetRouteSet = {
   relayGroupId: string;
   primary: ElectronRunTargetRoute;
   additional: ElectronRunTargetAuxiliaryRoute[];
+  te2Runtime?: ElectronRunProfileRuntimeMetadata;
 };
 
 export type ElectronRunTargetDescriptor =
@@ -70,6 +83,11 @@ export type ElectronAppViewBridge = {
   home(): Promise<{ ok: true }>;
   forceAssetUpdate(): Promise<AssetUpdateResult>;
   resolveRunTarget(route: ElectronRunTargetDescriptor): Promise<ElectronRunTargetResolution>;
+  registerRunTargetSurface(
+    runtime: ElectronRunProfileRuntimeMetadata,
+    url: string,
+  ): Promise<{ ok: true }>;
+  releaseRunTargetSurface(surfaceId: string): Promise<{ ok: true }>;
 };
 
 export function validateElectronAppViewCommand(value: unknown): ElectronAppViewCommand {

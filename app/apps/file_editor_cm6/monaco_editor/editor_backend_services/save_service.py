@@ -15,6 +15,7 @@ from ...core_read import emit_diff_changed
 from ...core_write import BaseMismatchError
 from ...diff_helper import invalidate_diff_cache
 from ...explorer.services.file_ops import mark_draft_cache_dirty, mark_git_cache_dirty
+from ...file_save_events import publish_file_saved
 from ...stores import get_history_store
 from .contracts import EmitToRoomFn, JsonMap, RuntimeMeta
 from .payload_utils import as_payload_dict, get_opt_str, get_str
@@ -333,6 +334,13 @@ async def handle_editor_save_request(
             "base_sha256": file_meta.get("sha256"),
             "source_client": sid,
         },
+    )
+
+    publish_file_saved(
+        project_root=root_path,
+        path=abs_path,
+        source="editor_save",
+        sha256=save_sha if isinstance(save_sha, str) else "",
     )
 
     return {"ok": True, "data": file_meta}

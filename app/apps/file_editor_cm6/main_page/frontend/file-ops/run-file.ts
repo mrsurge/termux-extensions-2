@@ -16,23 +16,25 @@ interface RunFileControllerDeps {
 
 interface RunButtonState {
   disabled: boolean;
-  running: boolean;
   busy: boolean;
-  profileId: string;
+  runningProfiles: RunProfileCandidate[];
 }
 
 interface RunProfileState {
+  projectPath: string;
   path: string;
   matched: boolean;
   running: boolean;
   profileId: string;
   candidates: RunProfileCandidate[];
+  runningProfiles: RunProfileCandidate[];
 }
 
 interface RunProfileCandidate {
   profileId: string;
   runner: string;
   entry: string;
+  shellId: string;
   ownsActiveFile: boolean;
   running: boolean;
 }
@@ -45,7 +47,6 @@ interface RunIntent extends Record<string, unknown> {
 interface RunSelection {
   kind: 'profile' | 'currentFile';
   profileId?: string;
-  running?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -72,6 +73,7 @@ function runProfileCandidates(value: unknown): RunProfileCandidate[] {
       profileId: item.profileId,
       runner: typeof item.runner === 'string' ? item.runner : '',
       entry: typeof item.entry === 'string' ? item.entry : '',
+      shellId: typeof item.shellId === 'string' ? item.shellId : '',
       ownsActiveFile: item.ownsActiveFile === true,
       running: item.running === true,
     }];
@@ -91,11 +93,13 @@ function resultMessage(payload: RunFileResponse): string {
 
 export function createRunFileController(deps: RunFileControllerDeps) {
   let state: RunProfileState = {
+    projectPath: '',
     path: '',
     matched: false,
     running: false,
     profileId: '',
     candidates: [],
+    runningProfiles: [],
   };
   let busy = false;
   let refreshSequence = 0;
@@ -104,20 +108,21 @@ export function createRunFileController(deps: RunFileControllerDeps) {
     const path = deps.getCurrentPath() || '';
     deps.setRunButtonState({
       disabled: !path || busy,
-      running: !!path && state.path === path && state.running,
       busy,
-      profileId: state.path === path ? state.profileId : '',
+      runningProfiles: state.runningProfiles,
     });
   }
 
   function applyProjection(value: unknown): void {
     const data = asRunFileResponse(value);
     state = {
+      projectPath: typeof data.projectPath === 'string' ? data.projectPath : '',
       path: typeof data.path === 'string' ? data.path : '',
       matched: data.matched === true,
       running: data.running === true,
       profileId: typeof data.profileId === 'string' ? data.profileId : '',
       candidates: runProfileCandidates(data.candidates),
+      runningProfiles: runProfileCandidates(data.runningProfiles),
     };
     render();
   }
@@ -125,41 +130,26 @@ export function createRunFileController(deps: RunFileControllerDeps) {
   async function refreshState(options: { quiet?: boolean } = {}): Promise<void> {
     const path = deps.getCurrentPath() || '';
     const sequence = ++refreshSequence;
-    if (!path) {
-      state = {
-        path: '',
-        matched: false,
-        running: false,
-        profileId: '',
-        candidates: [],
-      };
-      render();
-      return;
-    }
     try {
       const response = asRunFileResponse(
-        await deps.requestBackendRunProfileState({ path }),
+        await deps.requestBackendRunProfileState(path ? { path } : {}),
       );
       if (sequence !== refreshSequence || path !== (deps.getCurrentPath() || '')) return;
       const data = asRunFileResponse(response.data);
-      state = {
-        path,
-        matched: data.matched === true,
-        running: data.running === true,
-        profileId: typeof data.profileId === 'string' ? data.profileId : '',
-        candidates: runProfileCandidates(data.candidates),
-      };
+      applyProjection(data);
       if (response.ok === false && !options.quiet) {
         deps.toast(response.error || 'Failed to inspect run profile');
       }
     } catch (error) {
       if (sequence !== refreshSequence || path !== (deps.getCurrentPath() || '')) return;
       state = {
+        projectPath: '',
         path,
         matched: false,
         running: false,
         profileId: '',
         candidates: [],
+        runningProfiles: [],
       };
       if (!options.quiet) deps.toast(errorMessage(error));
     } finally {
@@ -218,7 +208,8 @@ export function createRunFileController(deps: RunFileControllerDeps) {
   async function chooseRunSelection(
     data: Record<string, unknown>,
   ): Promise<RunSelection | null> {
-    const candidates = runProfileCandidates(data.candidates);
+    const candidates = runProfileCandidates(data.candidates)
+      .filter((candidate) => !candidate.running);
     const includeRunCurrentFile = data.includeRunCurrentFile === true;
     const options: Array<{ value: RunSelection; label: string }> = candidates.map(
       (candidate) => {
@@ -227,9 +218,8 @@ export function createRunFileController(deps: RunFileControllerDeps) {
           value: {
             kind: 'profile',
             profileId: candidate.profileId,
-            running: candidate.running,
           },
-          label: `${candidate.running ? 'Stop' : 'Run'} ${candidate.profileId}${
+          label: `Run ${candidate.profileId}${
             detail ? ` · ${detail}` : ''
           }`,
         };
@@ -250,7 +240,7 @@ export function createRunFileController(deps: RunFileControllerDeps) {
       title: 'Run Profile',
       message: typeof data.message === 'string'
         ? data.message
-        : 'Choose what to run or stop',
+        : 'Choose what to run',
       fields: [{
         key: 'selection',
         kind: 'select',
@@ -275,8 +265,40 @@ export function createRunFileController(deps: RunFileControllerDeps) {
     return {
       kind: 'profile',
       profileId: selection.profileId,
-      running: selection.running === true,
     };
+  }
+
+  async function chooseStopSelection(
+    candidates: RunProfileCandidate[],
+  ): Promise<RunProfileCandidate | null> {
+    const options = candidates.map((candidate) => ({
+      value: candidate.profileId,
+      label: `Stop ${candidate.profileId}${candidate.runner ? ` · ${candidate.runner}` : ''}`,
+    }));
+    if (!options.length) return null;
+    const result = await window.teUI.dialog.open({
+      kind: 'form',
+      title: 'Stop Run Profile',
+      message: 'Choose which running profile to stop',
+      fields: [{
+        key: 'profileId',
+        kind: 'select',
+        label: 'Running profile',
+        value: options[0].value,
+        options,
+      }],
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel', validate: false },
+        { id: 'stop', label: 'Stop', role: 'accept', primary: true },
+      ],
+      defaultAction: 'stop',
+      cancelAction: 'cancel',
+    });
+    if (result.status !== 'accepted' || result.action !== 'stop') return null;
+    const profileId = typeof result.values.profileId === 'string'
+      ? result.values.profileId
+      : '';
+    return candidates.find((candidate) => candidate.profileId === profileId) || null;
   }
 
   function handleRunResult(response: RunFileResponse): void {
@@ -286,15 +308,21 @@ export function createRunFileController(deps: RunFileControllerDeps) {
       return;
     }
     const data = asRunFileResponse(response.data);
-    if (typeof data.path === 'string' && typeof data.running === 'boolean') {
+    if (Array.isArray(data.runningProfiles) || Array.isArray(data.candidates)) {
       applyProjection(data);
     }
     deps.toast(resultMessage(response));
   }
 
-  async function stopProfile(path: string, profileId: string): Promise<void> {
+  async function stopProfile(candidate: RunProfileCandidate): Promise<void> {
+    const path = deps.getCurrentPath() || state.path;
     const response = asRunFileResponse(
-      await deps.requestBackendRunProfileStop({ path, profileId }),
+      await deps.requestBackendRunProfileStop({
+        ...(path ? { path } : {}),
+        projectPath: state.projectPath,
+        profileId: candidate.profileId,
+        shellId: candidate.shellId,
+      }),
     );
     const data = asRunFileResponse(response.data);
     if (response.ok === false) {
@@ -308,10 +336,6 @@ export function createRunFileController(deps: RunFileControllerDeps) {
   }
 
   async function performSelection(path: string, selection: RunSelection): Promise<void> {
-    if (selection.kind === 'profile' && selection.running && selection.profileId) {
-      await stopProfile(path, selection.profileId);
-      return;
-    }
     const intent: RunIntent = selection.kind === 'currentFile'
       ? { runCurrentFile: true }
       : { profileId: selection.profileId };
@@ -359,13 +383,16 @@ export function createRunFileController(deps: RunFileControllerDeps) {
     }
   }
 
-  async function stopCurrentProfile(profileId = state.profileId): Promise<void> {
-    const path = deps.getCurrentPath();
-    if (!path || !profileId) return;
+  async function stopRunningProfiles(): Promise<void> {
+    const runningProfiles = state.runningProfiles;
+    if (!runningProfiles.length) return;
     busy = true;
     render();
     try {
-      await stopProfile(path, profileId);
+      const selected = runningProfiles.length === 1
+        ? runningProfiles[0]
+        : await chooseStopSelection(runningProfiles);
+      if (selected) await stopProfile(selected);
     } catch (error) {
       deps.toast(errorMessage(error));
     } finally {
@@ -406,47 +433,12 @@ export function createRunFileController(deps: RunFileControllerDeps) {
     }
   }
 
-  async function runOrStop(): Promise<void> {
-    const path = deps.getCurrentPath() || '';
-    const runningCandidates = state.path === path
-      ? state.candidates.filter((candidate) => candidate.running)
-      : [];
-    if (runningCandidates.length === 1) {
-      await stopCurrentProfile(runningCandidates[0].profileId);
-      return;
-    }
-    if (runningCandidates.length > 1) {
-      busy = true;
-      render();
-      try {
-        const selection = await chooseRunSelection({
-          candidates: runningCandidates,
-          includeRunCurrentFile: false,
-          message: 'Choose which running profile to stop',
-        });
-        if (selection) await performSelection(path, selection);
-      } catch (error) {
-        deps.toast(errorMessage(error));
-      } finally {
-        busy = false;
-        render();
-      }
-      return;
-    }
-    if (state.running && state.path === path && state.profileId) {
-      await stopCurrentProfile(state.profileId);
-      return;
-    }
-    await runCurrentFile();
-  }
-
   return {
     applyProjection,
     refreshState,
     render,
     runCurrentFile,
-    runOrStop,
     showProfileSelector,
-    stopCurrentProfile,
+    stopRunningProfiles,
   };
 }

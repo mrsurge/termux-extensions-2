@@ -14,7 +14,9 @@
  *   menuEditorBtn: HTMLElement,
  *   menuViewBtn: HTMLElement,
  *   runActiveBtn: HTMLElement,
+ *   stopRunProfilesBtn: HTMLElement,
  *   runCurrentFile: () => void,
+ *   stopRunningProfiles: () => void,
  *   showRunProfileSelector: () => void,
  * }} deps
  */
@@ -65,6 +67,10 @@ export function createMenuCoreController(deps: any) {
       deps.runCurrentFile,
       deps.showRunProfileSelector,
     );
+    deps.stopRunProfilesBtn.addEventListener('click', (event: MouseEvent) => {
+      event.stopPropagation();
+      deps.stopRunningProfiles();
+    });
     document.addEventListener('click', () => closeAllMenus());
   }
 

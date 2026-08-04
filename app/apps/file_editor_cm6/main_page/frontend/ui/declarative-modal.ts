@@ -333,6 +333,7 @@ function createFieldControl(
   if (field.kind === "checkbox") {
     const input = document.createElement("input");
     input.type = "checkbox";
+    input.className = "declarative-checkbox";
     input.checked = Boolean(current);
     input.addEventListener("change", () => onValue(field.key, input.checked));
     return { element: input };

@@ -700,6 +700,7 @@
   .declarative-field-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
   .declarative-field-label { font-size: 0.88rem; font-weight: 600; }
   .declarative-field-description { font-size: 12px; opacity: 0.65; line-height: 1.35; }
+  .declarative-checkbox { align-self: flex-start; margin: 2px 0 0; }
   .declarative-input { width: 100%; max-width: 100%; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border, #333); background: rgba(0, 0, 0, 0.25); color: var(--foreground, #e5e7eb); font-size: 0.82rem; }
   .declarative-labeled-port-list, .declarative-labeled-port-rows { display: flex; flex-direction: column; gap: 7px; }
   .declarative-labeled-port-row { display: grid; grid-template-columns: minmax(86px, 0.35fr) minmax(130px, 1fr) auto; gap: 7px; align-items: stretch; }
@@ -2447,6 +2448,7 @@
     <div class="fe-menu fe-toolbar-actions">
       <span id="fe-file-draft-badge" class="fe-file-draft-indicator" style="margin-right: 4px;"></span>
       <button id="run-active-file-btn" class="fe-btn fe-icon-btn" title="Run active file in terminal" aria-label="Run active file" disabled>▶</button>
+      <button id="stop-run-profiles-btn" class="fe-btn fe-icon-btn" title="Stop running profile" aria-label="Stop running profile" hidden>■</button>
       <span id="fe-lsp-spinner" class="fe-lsp-status--error" title="Adapter not started" aria-label="Adapter status"></span>
       <div id="fe-adapter-dd" class="fe-dropdown" style="right: 0; left: auto;"></div>
       <button class="fe-menu-btn fe-agent-toggle" id="fe-agent-toggle" title="Sidebar drawer">

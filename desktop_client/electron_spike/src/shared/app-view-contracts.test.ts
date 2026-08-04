@@ -19,6 +19,14 @@ test("Electron app-view commands are strictly allowlisted", () => {
   assert.equal(validateElectronAppViewCommand("inspect"), "inspect");
   assert.equal(validateElectronAppViewCommand("force_asset_update"), "force_asset_update");
   assert.equal(validateElectronAppViewCommand("resolve_run_target"), "resolve_run_target");
+  assert.equal(
+    validateElectronAppViewCommand("register_run_target_surface"),
+    "register_run_target_surface",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("release_run_target_surface"),
+    "release_run_target_surface",
+  );
   assert.throws(
     () => validateElectronAppViewCommand("execute_javascript"),
     /Unsupported Electron app-view command/,

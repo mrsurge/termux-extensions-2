@@ -8,6 +8,7 @@ import {
   Menu,
   protocol,
   session,
+  webFrameMain,
   WebContentsView,
   type IpcMainInvokeEvent,
   type WebContents,
@@ -25,11 +26,13 @@ import {
 import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
 import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
 import { RunTargetRelayManager } from "./run-target-relay";
+import { ElectronRunProfileRuntime } from "./run-profile-runtime";
 import {
   ELECTRON_APP_VIEW_IDENTITY,
   ELECTRON_FRAMEWORK_PARTITION,
   validateElectronAppViewCommand,
   type ElectronAppViewInspection,
+  type ElectronRunTargetDescriptor,
 } from "../shared/app-view-contracts";
 import {
   frameworkOrigin,
@@ -83,6 +86,7 @@ let settings: DesktopShellSettings;
 let configuredFrameworkOrigin: string;
 let relay: FrameworkRelay;
 let runTargetRelays: RunTargetRelayManager | null = null;
+let runProfileRuntime: ElectronRunProfileRuntime | null = null;
 let dialogHost: DesktopDialogHost | null = null;
 const surfaceWindows = new Set<BrowserWindow>();
 const assets = new DesktopAssetManager();
@@ -239,6 +243,7 @@ function closeSurfaceWindows(): void {
 }
 
 function closeAppView(): void {
+  runProfileRuntime?.clear();
   if (!appView) return;
   const closing = appView;
   closeSurfaceWindows();
@@ -318,7 +323,25 @@ async function handleAppViewControl(
   }
   if (command === "resolve_run_target") {
     if (!runTargetRelays) throw new Error("Run target relay is not initialized");
-    return runTargetRelays.resolve(payload);
+    const route = payload as ElectronRunTargetDescriptor;
+    const result = await runTargetRelays.resolve(route);
+    runProfileRuntime?.register(route, result);
+    return result;
+  }
+  if (command === "release_run_target_surface") {
+    runProfileRuntime?.release(String(payload || ""));
+    return { ok: true };
+  }
+  if (command === "register_run_target_surface") {
+    if (!payload || typeof payload !== "object") {
+      throw new Error("Run Profile runtime registration payload is invalid");
+    }
+    const registration = payload as {
+      runtime: Parameters<ElectronRunProfileRuntime["registerDirect"]>[0];
+      url: string;
+    };
+    runProfileRuntime?.registerDirect(registration.runtime, registration.url);
+    return { ok: true };
   }
   if (command === "reload") {
     const contents = event.sender;
@@ -397,6 +420,19 @@ function createAppView(): WebContentsView {
     notify();
   });
   view.webContents.on("did-finish-load", notify);
+  view.webContents.on(
+    "did-frame-finish-load",
+    (_event, isMainFrame, frameProcessId, frameRoutingId) => {
+      if (isMainFrame) return;
+      const frame = webFrameMain.fromId(frameProcessId, frameRoutingId);
+      if (!frame || frame.isDestroyed()) return;
+      void runProfileRuntime?.injectFrame(frame).catch((error) => {
+        console.error(
+          `[te2-desktop] Run Profile console injection failed: ${errorMessage(error)}`,
+        );
+      });
+    },
+  );
   view.webContents.on("page-title-updated", (event) => {
     event.preventDefault();
     notify();
@@ -505,6 +541,7 @@ async function saveConnection(params: Record<string, unknown>): Promise<{
   configuredFrameworkOrigin = nextOrigin;
   if (nextOrigin !== previousOrigin) {
     await runTargetRelays?.stopAll();
+    runProfileRuntime?.clear();
     relay.retarget(nextOrigin);
     closeAppView();
   }
@@ -661,6 +698,10 @@ async function main(): Promise<void> {
   configuredFrameworkOrigin = frameworkOrigin(settings);
   relay = await startFrameworkRelay(configuredFrameworkOrigin, assets);
   runTargetRelays = new RunTargetRelayManager(() => configuredFrameworkOrigin);
+  runProfileRuntime = new ElectronRunProfileRuntime(
+    session.fromPartition(ELECTRON_FRAMEWORK_PARTITION),
+    () => relay.browserOrigin,
+  );
 
   mainWindow = createMainWindow();
   dialogHost = new DesktopDialogHost({
@@ -706,6 +747,8 @@ app.on("before-quit", () => {
   dialogHost = null;
   void runTargetRelays?.stopAll();
   runTargetRelays = null;
+  runProfileRuntime?.clear();
+  runProfileRuntime = null;
   void relay?.stop();
 });
 

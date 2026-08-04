@@ -13,6 +13,7 @@ from ..logical_document_reconciler import register_logical_document_reconciler_h
 from ..open_state_events import register_open_state_event_bus_handlers
 from ..project_switch_events import register_project_switch_event_bus_handlers
 from ..run_profile_events import register_run_profile_event_bus_handlers
+from ..run_profile_surfaces import register_run_profile_surface_event_handlers
 from ..search_highlight_events import register_search_highlight_event_bus_handlers
 from ..sidebar_window_events import register_sidebar_window_event_bus_handlers
 from ..workspace_events import register_workspace_event_bus_handlers
@@ -42,6 +43,7 @@ def bootstrap_worker_runtime(loop: asyncio.AbstractEventLoop | None = None) -> N
     register_open_state_event_bus_handlers()
     register_project_switch_event_bus_handlers()
     register_run_profile_event_bus_handlers()
+    register_run_profile_surface_event_handlers()
     register_search_highlight_event_bus_handlers()
     register_sidebar_window_event_bus_handlers()
     register_workspace_event_bus_handlers()

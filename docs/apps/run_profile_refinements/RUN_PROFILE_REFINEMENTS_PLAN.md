@@ -3,9 +3,10 @@
 ## Objective
 
 Extend Run Profiles so remote native clients can relay auxiliary development
-ports, overlapping file ownership is explicit, running profile Sidebar surfaces
-have deterministic lifecycles, and opt-in development runtimes refresh after
-relevant saves.
+ports, overlapping file ownership is explicit, URL-backed running profiles have
+deterministic Sidebar lifecycles, and development runtimes refresh after
+relevant saves. Page Preview participates as a TE2-owned URL runtime whose
+ports and refresh behavior are supplied by the backend rather than user JSON.
 
 The implementation is divided into independent slices so auxiliary Vite/HMR
 routing can be proven before selection, refresh, or instrumentation work is
@@ -15,48 +16,69 @@ introduced.
 
 - Slice A is implemented, covered by Python, frontend, Rust, Electron, and
   GeckoView unit/type/build checks, and live remote Vite/HMR has been validated.
-- Slices B through E remain deferred. In particular, exact profile-stop Sidebar
-  slot closure and native listener teardown are Slice C lifecycle work, not an
-  implied part of Slice A.
+- Slice B is implemented, covered by Python and frontend tests, and live overlap
+  selection has been validated.
+- Slice C is implemented and covered by Python/frontend unit tests plus the
+  Code TE2 TypeScript check and production bundle build. Live validation of
+  URL readiness, exact Stop/exit teardown, and save-driven refresh is pending.
+- Slice D is implemented and covered by focused frontend, Electron, Gecko
+  syntax/unit/APK packaging, and build checks. Live native console registration,
+  reconnect, and teardown validation is pending.
+- Slice E remains deferred.
 
 ## Confirmed Current Architecture
 
 - Python owns profile parsing, active project/file state, draft-save policy,
   run selection, and Sidebar state projection.
 - Framework-Shells shell identity and lifecycle events own running/stopped
-  state. The current projection is event-driven and must remain free of polling.
-- Rust exposes one ticketed raw-TCP tunnel per registered port. The registry
-  currently replaces the previous route for an owner, so repeated registration
-  cannot implement auxiliary ports safely.
-- Electron and GeckoView can already hold multiple loopback listeners, but they
-  resolve one route descriptor at a time and do not group listeners by profile.
-- Run Profile Sidebar slots are named only by profile id. They are not
-  project-scoped, carry insufficient owner metadata, and are not closed when a
-  run stops.
-- The active-file save path uses the canonical save service. Background draft
-  saves performed before Run use `save_reviews` and only emit a coarse draft
-  state change. There is no typed post-commit file-save event shared by both
-  paths.
-- The relay is a byte tunnel, not an HTTP reverse proxy. HTTP response-header
-  rewriting there would duplicate a complete HTTP parser across Rust, Electron,
-  and Kotlin and would endanger WebSocket upgrades.
+  state. The current projection is event-driven and must remain free of
+  periodic polling.
+- Rust exposes one ticketed raw-TCP tunnel per registered port and atomically
+  groups primary and auxiliary routes by exact owner and shell.
+- Electron and GeckoView resolve each route set as one primary-first listener
+  group with rollback on auxiliary failure.
+- URL-backed Run Profiles are represented by project/profile-scoped
+  `RunProfileSurface` slots. The slot retains exact project, profile, and shell
+  identity and is removed on Stop, terminal lifecycle, or stale-shell
+  reconciliation.
+- A non-Page-Preview profile creates a Sidebar URL slot only when `sidebarUrl`
+  is non-empty. A process without a URL has running state but no URL surface.
+- Page Preview always resolves a backend-supplied URL on port 3000. Its Vite 7
+  middleware server owns HMR port 24678; it does not bind the ordinary Vite
+  development-server default port 5173.
+- Page Preview Framework-Shell readiness is an output marker emitted when
+  Express begins listening. It does not prove that the requested document URL
+  has stopped returning a transient 404.
+- The generated Run Profile field contract uses the declarative `visibleWhen`
+  support to hide Page Preview-inapplicable process, URL, routing,
+  running-behavior, and explicit dev-runtime fields.
+- The canonical active-file save path and `save_reviews` background-draft path
+  publish a typed post-commit `FileSaved` event. Matching `devRuntime`
+  custom/node/python surfaces refresh asynchronously; Page Preview remains
+  Vite/HMR-owned.
+- The relay is a byte tunnel, not an HTTP reverse proxy. Exact-origin header
+  mutation lives in Gecko WebExtension and Electron session request APIs above
+  the tunnel; WebSocket upgrades are excluded.
 - GeckoView can inject packaged code at document start through its WebExtension.
   Electron can target a loaded subframe through `did-frame-finish-load`,
   `WebFrameMain.fromId`, and `WebFrameMain.executeJavaScript`.
 
 ## Required Invariants
 
-- No polling.
+- No periodic lifecycle or running-state polling. A bounded, cancellable HTTP
+  readiness retry during URL-surface launch is permitted and required.
 - Python remains the Run Profile orchestration authority.
 - Framework-Shells remains running-state authority.
 - Rust registers only declared ports for the exact profile owner and running
   shell. There is no arbitrary TCP-proxy endpoint.
-- Native clients own their loopback listeners. Slice A closes groups on
-  framework retarget, app teardown, or route-set replacement; Slice C adds the
-  exact profile-stop lifecycle signal and Sidebar-slot closure.
+- Native clients own their loopback listeners. Groups close on framework
+  retarget, app teardown, route-set replacement, exact profile Stop, or dead
+  shell reconciliation.
 - The primary route determines same-device behavior before auxiliary listeners
   are bound.
-- Page Preview remains outside auxiliary-port and dev-runtime behavior.
+- Page Preview participates in owned URL-surface lifecycle. Its active route
+  set and Vite/HMR refresh behavior are backend-defined and are not exposed as
+  user-configurable port or `devRuntime` fields.
 - Browser-only clients keep using original URLs. Native-only instrumentation is
   optional and must not become a standalone application dependency.
 - Existing profile JSON remains valid.
@@ -75,15 +97,15 @@ introduced.
       "label": "Vite / HMR"
     }
   ],
-  "devRuntime": true,
-  "consoleBridge": true
+  "devRuntime": true
 }
 ```
 
 Rules:
 
-- `additionalPorts` defaults to an empty array and is not accepted for Page
-  Preview.
+- `additionalPorts` defaults to an empty array and is not accepted as user
+  configuration for Page Preview. Page Preview receives a backend-generated
+  route set for its active primary and HMR ports.
 - Each entry has an integer `port` in `1..65535` and a trimmed, non-empty
   `label`.
 - Ports are unique within a profile and cannot duplicate the primary `port`.
@@ -91,9 +113,11 @@ Rules:
   listeners, tickets, and UI size without constraining normal dev-server use.
 - The Run Profiles modal uses a repeatable `port` plus `label` control. Its help
   text identifies Vite/HMR as the use case, with `5173` as placeholder text only.
-- `devRuntime` defaults to `false`.
-- `consoleBridge` defaults to `false` and is independent of native Inspector
-  `devTools`.
+- `devRuntime` defaults to `false`. For a URL-backed profile it is one umbrella
+  for save-triggered refresh, native-client console instrumentation, and an
+  exact-origin no-cache/no-store HTTP policy.
+- Native Inspector `devTools` remains independent. It opts GeckoView into the
+  heavier Chobitsu target runtime and is not required for the console bridge.
 
 ## Slice A: Auxiliary Port Routing
 
@@ -164,18 +188,58 @@ while the active file keeps its existing explicit save behavior.
 
 ### Running-State Projection
 
-The current singular state projection must become candidate-aware:
+Slice B makes the singular state projection candidate-aware:
 
 - each profile candidate carries its current running state;
-- one relevant running profile can retain the direct Stop affordance;
-- multiple relevant running profiles open the selector so the user chooses what
-  to stop;
-- the forced selector shows running state for every configured profile.
+- exact profile ids remain available to backend Run and Stop transactions;
+- forced projection can inspect every configured profile rather than only
+  active-file owners.
 
-This prevents overlapping include sets from making the event-driven Run button
-state undefined.
+This prevents overlapping include sets from making the event-driven state
+undefined. Slice C uses that foundation to separate Play choices from the
+project-wide `runningProfiles` Stop view; it does not retain the combined
+Run-or-Stop selector presentation.
 
 ## Slice C: Sidebar Ownership And Development Refresh
+
+### Surface Eligibility
+
+Create an owned surface only after a launched profile resolves a non-empty URL.
+Profiles without a URL retain their event-driven running-state projection but
+receive no Sidebar host id, URL-readiness task, route surface, or iframe.
+
+Page Preview is included because it always resolves a TE2-supplied URL. It uses
+the same surface identity, Sidebar ledger, Stop/exit teardown, and native route
+projection as any custom URL profile.
+
+### Separate Run And Stop Controls
+
+Running state must not mutate the Play control into Stop. Keep Play visible and
+semantically stable, then render a separate Stop control beside it whenever at
+least one profile is running in the active project.
+
+The event-driven backend projection therefore carries two independent views:
+
+- active-file candidates for Play and ownership selection;
+- `runningProfiles`, containing every configured running profile in the active
+  project regardless of whether it owns the active file.
+
+The Stop control represents the complete `runningProfiles` set:
+
+- one running profile stops that exact profile directly;
+- more than one opens a shared-modal selector containing only running profiles;
+- no running profiles hides the Stop control;
+- stopping remains an exact backend transaction and never becomes a direct
+  frontend Framework-Shells kill.
+
+Play remains a Run transaction. A sole active-file owner may still execute its
+configured `runningBehavior` when it is already running. When Play opens a
+selector because ownership overlaps, because it was right-clicked or
+long-pressed, or because forced selection was requested, omit every currently
+running profile from the Run choices. The forced selector retains `Run current
+file`; Stop choices never appear in a Run selector. If filtering leaves no
+runnable profile and no current-file override, report that no additional
+matching profile is available rather than silently stopping anything.
 
 ### Owned Surface Projection
 
@@ -183,31 +247,30 @@ Define the lifecycle object before changing how any client renders it. The
 backend-owned object is a Run Profile surface projection; an iframe is only the
 current browser presentation of that object.
 
-The proposed bounded projection is:
+The implemented bounded projection is:
 
 ```ts
 interface RunProfileSurfaceProjection {
   dto: "RunProfileSurface";
   version: 1;
   surfaceId: string;       // Stable project/profile identity.
-  projectId: string;
+  projectPath: string;
   profileId: string;
+  runner: string;
   shellId: string;         // Current process generation.
-  hostId: string;          // Exact Sidebar ledger slot.
-  originalUrl: string;
-  runTargetRouteSet?: RunTargetRouteSet;
+  shellLabel: string;
+  url: string;
   refreshRevision: number;
   devRuntime: boolean;
-  devTools: boolean;
-  consoleBridge: boolean;
 }
 ```
 
-The projection defines runtime identity, navigation input, routing,
-instrumentation flags, and refresh generation. It does not attempt to serialize
-the document heap, browsing history, scroll position, or arbitrary iframe DOM
-state. A client can destroy and reconstruct a presentation from this object
-without becoming Run Profile lifecycle authority.
+The surface defines runtime identity, navigation input, and refresh generation.
+The owning Sidebar slot retains its deterministic host id, route set, and
+Inspector metadata beside the surface. It does not attempt to serialize the
+document heap, browsing history, scroll position, or arbitrary iframe DOM state.
+A client can destroy and reconstruct a presentation from this state without
+becoming Run Profile lifecycle authority.
 
 Python and the Sidebar ledger own projection creation, replacement, and
 removal. Each client owns only presentation state such as embedded, hidden, or
@@ -215,6 +278,27 @@ detached. Presentation state is client-local and must not be mirrored across
 other browser, GeckoView, or Electron clients. `surfaceId` remains stable across
 presentation changes; `shellId` and route tickets change when the process is
 relaunched.
+
+### Page Preview Implied Runtime Contract
+
+Page Preview does not serialize manual routing or generic process settings into
+project JSON. The backend supplies its active route set from the implementation
+it launches:
+
+- primary Page Preview HTTP: `3000`;
+- Vite middleware HMR: `24678`.
+
+Port 5173 is not reserved because the current middleware server does not bind
+it. If the backend later changes Vite modes, the backend-owned port declaration
+changes with that implementation without exposing a migration burden to users.
+
+Use the existing declarative `visibleWhen` contract to hide Page Preview fields
+that its backend ignores: `exec`, `args`, `cwd`, `env`, `sidebarUrl`, `port`,
+`additionalPorts`, `runningBehavior`, and explicit `devRuntime`. Keep profile
+identity, `runner`, `entry`, `include`, draft-save policy/warning, and applicable
+instrumentation controls visible. Preserve hidden keys in raw JSON so runner
+changes remain reversible, but normalize Page Preview before parsing or
+validating those keys so stale values cannot affect runtime behavior.
 
 ### Slot Ownership
 
@@ -234,6 +318,34 @@ Stop success and Framework-Shells terminal lifecycle events close the exact
 owned slot through the existing Sidebar state ledger. Ledger removal tears down
 the iframe on every client without a frontend-only ownership map.
 
+Every owned Run Profile URL surface adds `Stop run profile` to its Sidebar dock
+icon context menu, reached through desktop right-click or the existing mobile
+long-press path. This applies to Page Preview and custom/node/python profiles
+with a URL surface. The action sends the surface's project/profile/shell
+identity through the host UI IPC backend Stop path; it does not infer ownership
+from the currently active editor file and does not terminate Framework-Shells
+directly. Successful Stop then removes the exact surface through the same
+backend lifecycle transaction.
+
+### Initial URL Readiness
+
+After the shell reaches Framework-Shell readiness, but before the URL surface
+is created or activated, Python runs one bounded asynchronous HTTP readiness
+retry against the resolved URL.
+
+- Connection failures and HTTP 404 retry with bounded backoff.
+- Any non-404 HTTP response proves that the configured route is being served;
+  the probe reads no response body.
+- Stop, relaunch, project switch, or shell-generation replacement cancels the
+  pending probe.
+- Success or timeout permanently ends that launch's probe. No periodic health
+  polling is introduced.
+- A newly launched shell that never becomes URL-ready is stopped and its route
+  set is released. A reused shell is left running but receives no new surface.
+
+The same rule applies to Page Preview and custom/node/python URL profiles. A
+profile without a URL bypasses this work entirely.
+
 ### Post-Commit Save Event
 
 Introduce a typed `FileSaved` worker event after a successful disk commit. Both
@@ -247,21 +359,26 @@ saves publish it with project/path/source metadata.
 
 ### Dev Runtime Refresh
 
-For each saved path, Python finds every running `devRuntime` profile whose
-include rules own that path and advances the exact surface projection's refresh
-revision.
+For each saved path, Python finds every running custom/node/python
+`devRuntime` profile whose include rules own that path and advances the exact
+surface projection's refresh revision.
 
 - Overlapping running profiles refresh independently.
 - A loaded iframe navigates with an incremented cache-busting revision.
 - A hidden/unloaded slot stores the new revision and loads fresh on activation.
 - Relay groups and Inspector target identity remain associated with the same
   slot and are reconciled rather than leaked.
-- Page Preview is excluded.
+- Page Preview is an implicit development runtime, but Vite owns its save watch,
+  cache invalidation, HMR, and full reload behavior through the backend-generated
+  route set. Do not add a second hard-refresh transaction for each Page Preview
+  save.
 
-## Slice D: Console Instrumentation
+## Slice D: Native Dev Runtime Instrumentation
 
-`consoleBridge: true` opts a native Run Profile iframe into the TE2 console
-bridge independently of native Inspector `devTools`.
+`devRuntime: true` opts a native Run Profile iframe into the TE2 console bridge
+and an exact-origin no-cache/no-store HTTP policy. This is the native-client
+part of the same option that owns save-triggered refresh; it is not a second
+schema switch. Native Inspector `devTools` remains independent.
 
 The injection target is resolved from the owned surface projection. The current
 iframe is not treated as durable identity.
@@ -328,16 +445,23 @@ a DOM iframe between renderer processes, and neither changes backend ownership.
 
 ## Cache Policy
 
-The initial implementation does not rewrite HTTP headers. The Rust and native
-relays remain transport-only.
+The Rust and native run-target relays remain transport-only. Native browser
+engines apply the HTTP policy above that byte tunnel for every exact origin in
+the owned profile route set.
 
-- New profile launches and explicit dev-runtime refreshes append a profile-owned
-  revision nonce to the iframe document URL.
-- This reliably refreshes document navigation without parsing HTTP streams or
-  interfering with WebSocket upgrades.
-- Subresources still follow the target server's cache headers.
-- A true `Cache-Control: no-store` policy requires a future shared HTTP-aware L7
-  proxy and is explicitly deferred.
+- GeckoView uses its Run Target WebExtension `webRequest` listeners.
+- Electron uses the app partition's `session.webRequest` listeners.
+- Matching requests receive `Cache-Control: no-cache` and `Pragma: no-cache`.
+- Matching responses receive `Cache-Control: no-store, no-cache,
+  must-revalidate`, `Pragma: no-cache`, and `Expires: 0`.
+- WebSocket requests are excluded, so Vite/HMR upgrades remain untouched.
+- Direct same-device URLs and unrouted dev-runtime surfaces register their exact
+  origin through the native bridge before iframe navigation.
+- Surface removal, framework retarget, and native teardown release the policy.
+- Ordinary browsers retain profile-owned revision reloads but cannot receive
+  cross-origin header mutation or bridge injection without app cooperation.
+- Initial surface creation still waits for the bounded URL-readiness result so
+  the first navigation does not race a transient 404.
 
 ## Validation
 
@@ -348,7 +472,10 @@ relays remain transport-only.
 - Candidate enumeration, explicit selection, stale selection rejection, and
   multiple running candidates.
 - Project-scoped slot identity, terminal cleanup, typed save events, overlap
-  fanout, and hidden-slot refresh revisions.
+  fanout, hidden-slot refresh revisions, URL-only surface eligibility, and
+  bounded readiness cancellation.
+- Page Preview backend-generated primary/HMR routes and rejection of manual
+  Page Preview port fields.
 
 ### Rust
 
@@ -372,7 +499,13 @@ relays remain transport-only.
 - Profile selector fast/ambiguous/forced/no-owner paths.
 - Long-press/context-menu click suppression.
 - Candidate-aware Run/Stop state.
+- Stable Play plus a separate aggregate Stop control.
+- Run selectors exclude running profiles; Stop selectors contain only running
+  profiles.
+- Owned Run Profile dock menus stop their exact backend profile on right-click
+  or touch long press.
 - Exact slot cleanup and dev-runtime reload without duplicate requests.
+- Runner-dependent field visibility and no slot creation for URL-less profiles.
 
 ### Live Acceptance
 
@@ -382,15 +515,20 @@ routing, and HMR through a remote native client. Subsequent slices must prove:
 1. Stop closes the shell, relay group, and owned Sidebar surface.
 2. A saved included file refreshes a running `devRuntime` surface.
 3. Overlapping profiles require explicit selection and refresh independently.
-4. Opt-in console workers appear with profile-aware unique identities.
-5. Electron can reconstruct, detach, reattach, inspect, and remove an owned
+4. Page Preview automatically relays primary HTTP and middleware HMR, waits for
+   URL readiness, and tears down its owned surface on Stop.
+5. Play remains available while profiles run; the adjacent Stop control and
+   dock-menu Stop action target only explicitly selected running profiles.
+6. Opt-in console workers appear with profile-aware unique identities.
+7. Electron can reconstruct, detach, reattach, inspect, and remove an owned
    surface without altering another client's presentation.
 
 ## Delivery Order
 
 1. Slice A: auxiliary route sets and Vite/HMR proof.
 2. Slice B: profile selection and candidate-aware state.
-3. Slice C: owned Sidebar lifecycle and dev-runtime refresh.
+3. Slice C: owned Sidebar lifecycle and dev-runtime refresh. Implemented;
+   live acceptance pending.
 4. Slice D: native console instrumentation.
 5. Slice E: Electron surface presentation and built-in DevTools.
 6. Update the main Code TE2 contract and repo memory after each validated

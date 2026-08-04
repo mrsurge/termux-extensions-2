@@ -19,6 +19,7 @@ export interface HostElements {
   fileTabsViewport: HTMLElement;
   fileTabsTrack: HTMLElement;
   runActiveBtn: HTMLButtonElement;
+  stopRunProfilesBtn: HTMLButtonElement;
   miNew: HTMLElement;
   miOpen: HTMLElement;
   miSave: HTMLElement;
@@ -98,6 +99,7 @@ export function captureHostElements(requireEl: RequireElement): HostElements {
     fileTabsViewport: requireEl('#recent-file-tabs'),
     fileTabsTrack: requireEl('#recent-file-tabs-track'),
     runActiveBtn: requireEl('#run-active-file-btn') as HTMLButtonElement,
+    stopRunProfilesBtn: requireEl('#stop-run-profiles-btn') as HTMLButtonElement,
     miNew: requireEl('#mi-new'),
     miOpen: requireEl('#mi-open'),
     miSave: requireEl('#mi-save'),

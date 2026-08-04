@@ -9,6 +9,7 @@ from .services.file_ops import mark_git_cache_dirty
 from ..core_read import push_save_ack, emit_diff_changed
 from ..core_write import FileMeta, write_full
 from ..diff_helper import invalidate_diff_cache
+from ..file_save_events import publish_file_saved
 from ..stores import get_history_store
 
 JsonDict = dict[str, object]
@@ -145,6 +146,12 @@ async def save_reviews(
             
             _ = _history_store.clear_cached_document(str(project_root), str(abs_path))
             saved_count += 1
+            publish_file_saved(
+                project_root=root_path,
+                path=abs_path,
+                source=op_prefix,
+                sha256=_meta_sha256(file_meta),
+            )
             
         except Exception as e:
             errors.append(f"{rel_path}: {str(e)}")

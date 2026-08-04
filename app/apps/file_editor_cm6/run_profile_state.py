@@ -10,8 +10,10 @@ from .monaco_editor.editor_backend_services.contracts import JsonMap
 from .page_preview_shell_manager import page_preview_shell_state
 from .runner_profile_shell_manager import runner_profile_shell_state
 from .runner_profiles import (
+    RunProfile,
     RunProfileMatch,
     list_run_profile_candidates,
+    load_run_profiles,
     match_run_profile,
     resolve_run_profile_by_id,
     run_profile_matches_path,
@@ -48,9 +50,9 @@ async def build_run_profile_state_projection(
     reconcile_stale_route: bool = False,
 ) -> JsonMap:
     project_root, current_file = run_profile_request_context(data)
-    if not project_root or not current_file:
+    if not project_root:
         return {
-            "projectPath": project_root or "",
+            "projectPath": "",
             "path": current_file or "",
             "matched": False,
             "running": False,
@@ -61,12 +63,34 @@ async def build_run_profile_state_projection(
             "selectionRequired": False,
             "candidateScope": "owners",
             "candidates": [],
+            "runningProfiles": [],
         }
 
+    root = Path(project_root).expanduser().resolve(strict=False)
+    profiles = load_run_profiles(root)
+    profile_states = await asyncio.gather(
+        *(
+            _build_profile_state_projection(
+                profile,
+                project_root=root,
+                reconcile_stale_route=reconcile_stale_route,
+            )
+            for profile in profiles
+        )
+    )
+    states_by_id = {
+        _text(item.get("profileId")): item
+        for item in profile_states
+        if _text(item.get("profileId"))
+    }
+    running_profiles = [
+        dict(item) for item in profile_states if item.get("running") is True
+    ]
+
     include_all = _request_include_all_profiles(data)
-    if include_all:
+    if current_file and include_all:
         candidates = list_run_profile_candidates(
-            project_root,
+            root,
             current_file,
             include_all=True,
         )
@@ -79,20 +103,20 @@ async def build_run_profile_state_projection(
                 project_root=match.project_root,
             )
         ]
-    else:
-        owners = list_run_profile_candidates(project_root, current_file)
+    elif current_file:
+        owners = list_run_profile_candidates(root, current_file)
         candidates = owners
+    else:
+        owners = []
+        candidates = []
     owner_ids = {match.profile.profile_id for match in owners}
-    projected = await asyncio.gather(
-        *(
-            _build_candidate_projection(
-                match,
-                owns_active_file=match.profile.profile_id in owner_ids,
-                reconcile_stale_route=reconcile_stale_route,
-            )
-            for match in candidates
-        )
-    )
+    projected: list[JsonMap] = []
+    for match in candidates:
+        item = dict(states_by_id.get(match.profile.profile_id, {}))
+        if not item:
+            continue
+        item["ownsActiveFile"] = match.profile.profile_id in owner_ids
+        projected.append(item)
     relevant_running = [
         item
         for item in projected
@@ -108,8 +132,12 @@ async def build_run_profile_state_projection(
             None,
         )
     return {
-        "projectPath": str(Path(project_root).expanduser().resolve(strict=False)),
-        "path": str(Path(current_file).expanduser().resolve(strict=False)),
+        "projectPath": str(root),
+        "path": (
+            str(Path(current_file).expanduser().resolve(strict=False))
+            if current_file
+            else ""
+        ),
         "matched": bool(owners),
         "running": bool(relevant_running),
         "profileId": _text(primary.get("profileId")) if primary else "",
@@ -119,34 +147,37 @@ async def build_run_profile_state_projection(
         "selectionRequired": len(owners) > 1 or len(relevant_running) > 1,
         "candidateScope": "all" if include_all else "owners",
         "candidates": projected,
+        "runningProfiles": running_profiles,
     }
 
 
-async def _build_candidate_projection(
-    match: RunProfileMatch,
+async def _build_profile_state_projection(
+    profile: RunProfile,
     *,
-    owns_active_file: bool,
+    project_root: Path,
     reconcile_stale_route: bool,
 ) -> JsonMap:
-    profile = match.profile
     state = (
         await page_preview_shell_state(
-            project_root=str(match.project_root),
+            project_root=str(project_root),
             profile_id=profile.profile_id,
         )
         if profile.runner == "pagePreview"
         else await runner_profile_shell_state(
-            project_root=str(match.project_root),
+            project_root=str(project_root),
             profile_id=profile.profile_id,
         )
     )
-    if reconcile_stale_route and not state.running and profile.port is not None:
+    if (
+        reconcile_stale_route
+        and not state.running
+        and (profile.runner == "pagePreview" or profile.port is not None)
+    ):
         await _release_route_best_effort(owner_id=state.label)
     return {
         "profileId": profile.profile_id,
         "runner": profile.runner,
         "entry": profile.entry,
-        "ownsActiveFile": owns_active_file,
         "running": state.running,
         "shellId": state.shell_id,
         "shellLabel": state.label,

@@ -34,7 +34,7 @@ import {
 } from "./constants.ts";
 import {
   configureDevToolsTargetNavigation,
-  devToolsTargetWindowName,
+  runProfileRuntimeMetadata,
   shouldRecreateDevToolsTargetFrame,
 } from "./devtools-target.ts";
 import {
@@ -52,7 +52,10 @@ import {
   collectShortcuts as collectShortcutsFromPrefs,
   pickMruShortcut as pickMruShortcutFromModel,
 } from "./shortcut-model.ts";
-import { resolveRunTargetUrl } from './run-target-resolver.ts';
+import {
+  releaseRunTargetSurface,
+  resolveRunTargetUrl,
+} from './run-target-resolver.ts';
 import type {
   FrameworkAppManifest,
   IframeEntry,
@@ -857,6 +860,10 @@ export function initSidebarShortcuts(
         ),
         run_target_route: win.run_target_route || win.runTargetRoute,
         runTargetRoute: win.run_target_route || win.runTargetRoute,
+        run_profile_surface:
+          win.run_profile_surface || win.runProfileSurface,
+        runProfileSurface:
+          win.run_profile_surface || win.runProfileSurface,
       };
     }
     if (!appId) return null;
@@ -1611,6 +1618,10 @@ export function initSidebarShortcuts(
       ? _normStr((sc as SidebarShortcut).host_id)
       : "";
     const isUrlSlot = _isUrlSlotEntry(sc);
+    const runProfileSurface = asRecord(
+      (sc as SidebarShortcut).run_profile_surface ||
+        (sc as SidebarShortcut).runProfileSurface,
+    );
     if (appId) {
       addSeparator();
       const kill = document.createElement("div");
@@ -1627,6 +1638,25 @@ export function initSidebarShortcuts(
     addSeparator();
     if (isUrlSlot) {
       const urlHostId = _normStr((sc as SidebarShortcut).host_id);
+      const runProfileId = _normStr(runProfileSurface.profileId);
+      const runProfileProject = _normStr(runProfileSurface.projectPath);
+      const runProfileShellId = _normStr(runProfileSurface.shellId);
+      if (runProfileId && runProfileProject) {
+        const stopProfile = document.createElement("div");
+        stopProfile.className = "fe-dd-item";
+        stopProfile.textContent = `Stop ${runProfileId}`;
+        stopProfile.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          _closeHeaderIconMenu();
+          _requestSidebarControl(UI_IPC_RPC_METHODS.hostRunProfileStop, {
+            projectPath: runProfileProject,
+            profileId: runProfileId,
+            shellId: runProfileShellId,
+            source: "sidebar_run_profile_surface",
+          });
+        });
+        menu.appendChild(stopProfile);
+      }
       const changeUrl = document.createElement("div");
       changeUrl.className = "fe-dd-item";
       changeUrl.textContent = "Change URL";
@@ -2354,6 +2384,16 @@ export function initSidebarShortcuts(
     return configureDevToolsTargetNavigation(iframe, sc, initialUrl);
   }
 
+  function _runProfileSurfaceId(sc: SidebarShortcut): string {
+    const surface = asRecord(sc.run_profile_surface || sc.runProfileSurface);
+    return _normStr(surface.surfaceId);
+  }
+
+  function _releaseRunProfileSurface(surfaceId: string): void {
+    if (!surfaceId) return;
+    void releaseRunTargetSurface(surfaceId).catch(() => {});
+  }
+
   function _replaceShortcutIframe(
     sc: SidebarShortcut,
     entry: IframeEntry,
@@ -2378,6 +2418,8 @@ export function initSidebarShortcuts(
     entry.url = initialUrl || _shortcutFrameUrl(sc, null, { forceReload: true });
     entry.loaded = !!initialUrl;
     entry.devToolsName = devToolsName;
+    entry.runProfileSurfaceId = _runProfileSurfaceId(sc);
+    entry.version = shortcutVersion(sc.version);
     _iframeMap.set(sc.key, entry);
     return entry;
   }
@@ -2395,6 +2437,7 @@ export function initSidebarShortcuts(
       return;
     }
     entry.url = loadUrl;
+    entry.version = shortcutVersion(sc.version);
     entry.iframe.src = loadUrl;
     entry.loaded = true;
   }
@@ -2427,11 +2470,16 @@ export function initSidebarShortcuts(
     if (!url) return false;
     const forceReload = !!options.forceReload;
     let loadUrl = url;
-    if (sc.kind === SHORTCUT_KIND_URL && (sc.run_target_route || sc.runTargetRoute)) {
+    const runtimeMetadata = runProfileRuntimeMetadata(sc);
+    if (
+      sc.kind === SHORTCUT_KIND_URL &&
+      ((sc.run_target_route || sc.runTargetRoute) || runtimeMetadata?.devRuntime === true)
+    ) {
       try {
         loadUrl = await resolveRunTargetUrl(
           sc.run_target_route || sc.runTargetRoute,
           url,
+          runtimeMetadata,
         );
       } catch (error) {
         entry.loaded = false;
@@ -2611,6 +2659,7 @@ export function initSidebarShortcuts(
 
     _iframeMap.forEach((entry, key) => {
       if (!desiredKeys.has(key)) {
+        _releaseRunProfileSurface(entry.runProfileSurfaceId);
         try {
           entry.iframe.remove();
         } catch (_) {}
@@ -2633,6 +2682,8 @@ export function initSidebarShortcuts(
           url: _shortcutFrameUrl(sc, null),
           loaded: false,
           devToolsName,
+          runProfileSurfaceId: _runProfileSurfaceId(sc),
+          version: shortcutVersion(sc.version),
         };
         _iframeMap.set(sc.key, entry);
       } else if (
@@ -2643,19 +2694,31 @@ export function initSidebarShortcuts(
         )
       ) {
         const wasLoaded = entry.loaded;
-        const initialUrl = wasLoaded
-          ? _shortcutFrameUrl(sc, null, { forceReload: true })
-          : "";
-        entry = _replaceShortcutIframe(sc, entry, initialUrl);
+        entry = _replaceShortcutIframe(sc, entry);
+        if (wasLoaded) {
+          void _ensureIframeLoadedForShortcut(sc, entry, { forceReload: true });
+        }
       }
       const loadUrl = _shortcutFrameUrl(sc, entry);
       const prevUrl = entry.url;
+      const nextSurfaceId = _runProfileSurfaceId(sc);
+      if (
+        entry.runProfileSurfaceId &&
+        entry.runProfileSurfaceId !== nextSurfaceId
+      ) {
+        _releaseRunProfileSurface(entry.runProfileSurfaceId);
+      }
+      entry.runProfileSurfaceId = nextSurfaceId;
+      const nextVersion = shortcutVersion(sc.version);
+      const versionChanged = entry.version !== nextVersion;
+      entry.version = nextVersion;
       entry.url = loadUrl;
       entry.devToolsName = _configureShortcutIframeElement(entry.iframe, sc);
 
-      if (entry.loaded && prevUrl && prevUrl !== loadUrl) {
-        if (entry.devToolsName) _replaceShortcutIframe(sc, entry, loadUrl);
-        else entry.iframe.src = loadUrl;
+      if (entry.loaded && versionChanged) {
+        void _ensureIframeLoadedForShortcut(sc, entry, { forceReload: true });
+      } else if (entry.loaded && prevUrl && prevUrl !== loadUrl) {
+        void _ensureIframeLoadedForShortcut(sc, entry, { forceReload: true });
       }
     });
 

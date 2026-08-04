@@ -33,6 +33,7 @@ EventType = Literal[
     "SearchHighlightChanged",
     "SidebarWindowStateChanged",
     "ExplorerRenderStateChanged",
+    "FileSaved",
     "WatcherConfigChanged",
     "WatcherErrorRaised",
     "WorkspaceFilesChanged",

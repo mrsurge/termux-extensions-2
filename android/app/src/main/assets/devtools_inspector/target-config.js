@@ -1,30 +1,52 @@
 (function resolveTe2DevToolsTargetConfig() {
   "use strict";
 
-  const markerPrefix = "te2-devtools:";
+  const devToolsMarkerPrefix = "te2-devtools:";
   let config = null;
+
+  function decodeMarker() {
+    const prefix = devToolsMarkerPrefix;
+    if (typeof window.name !== "string" || !window.name.startsWith(prefix)) {
+      return null;
+    }
+    const decoded = JSON.parse(
+      decodeURIComponent(window.name.slice(prefix.length)),
+    );
+    const targetId = String(decoded?.targetId || decoded?.surfaceId || "").trim();
+    const surfaceId = String(decoded?.surfaceId || targetId).trim();
+    const devTools = decoded?.devTools !== false;
+    if (!surfaceId || !devTools) return null;
+    return {
+      targetId,
+      targetLabel:
+        typeof decoded?.targetLabel === "string" && decoded.targetLabel.trim()
+          ? decoded.targetLabel.trim()
+          : targetId,
+      surfaceId,
+      profileId: String(decoded?.profileId || "").trim(),
+      workerLabel: String(decoded?.workerLabel || surfaceId).trim(),
+      frameworkOrigin: String(decoded?.frameworkOrigin || "").trim(),
+      devTools: true,
+      devRuntime: decoded?.devRuntime === true,
+      isTopLevel: false,
+    };
+  }
 
   if (window.top === window) {
     config = {
       targetId: "framework:main",
       targetLabel: "Code TE2",
+      surfaceId: "framework:main",
+      profileId: "",
+      workerLabel: "framework:main",
+      frameworkOrigin: location.origin,
+      devTools: true,
+      devRuntime: false,
       isTopLevel: true,
     };
-  } else if (typeof window.name === "string" && window.name.startsWith(markerPrefix)) {
+  } else {
     try {
-      const decoded = JSON.parse(
-        decodeURIComponent(window.name.slice(markerPrefix.length)),
-      );
-      if (typeof decoded?.targetId === "string" && decoded.targetId.trim()) {
-        config = {
-          targetId: decoded.targetId.trim(),
-          targetLabel:
-            typeof decoded.targetLabel === "string" && decoded.targetLabel.trim()
-              ? decoded.targetLabel.trim()
-              : decoded.targetId.trim(),
-          isTopLevel: false,
-        };
-      }
+      config = decodeMarker();
     } catch (_error) {
       config = null;
     }
@@ -48,6 +70,9 @@
         readyState: document.readyState,
         targetId: config?.targetId || "",
         targetLabel: config?.targetLabel || "",
+        surfaceId: config?.surfaceId || "",
+        devTools: config?.devTools === true,
+        devRuntime: config?.devRuntime === true,
       })
       .catch(() => {});
   } catch (_error) {

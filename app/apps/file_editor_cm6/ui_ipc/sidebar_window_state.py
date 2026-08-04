@@ -361,6 +361,43 @@ def _normalize_run_target_route(value: object, *, canonical_url: str) -> JsonObj
     }
 
 
+def _normalize_run_profile_surface(value: object, *, canonical_url: str) -> JsonObject:
+    raw = _as_object(value)
+    if not raw:
+        return {}
+    if _norm(raw.get("dto")) != "RunProfileSurface" or _as_int(raw.get("version")) != 1:
+        raise ValueError("runProfileSurface contract is invalid")
+    surface_id = _norm(raw.get("surfaceId") or raw.get("surface_id"))
+    project_path = _norm(raw.get("projectPath") or raw.get("project_path"))
+    profile_id = _norm(raw.get("profileId") or raw.get("profile_id"))
+    runner = _norm(raw.get("runner"))
+    shell_id = _norm(raw.get("shellId") or raw.get("shell_id"))
+    shell_label = _norm(raw.get("shellLabel") or raw.get("shell_label"))
+    url = _validate_url_slot_url(_norm(raw.get("url")))
+    if not all((surface_id, project_path, profile_id, runner, shell_id, shell_label)):
+        raise ValueError("runProfileSurface identity is incomplete")
+    if runner not in {"pagePreview", "node", "python", "custom"}:
+        raise ValueError("runProfileSurface runner is invalid")
+    if url != canonical_url:
+        raise ValueError("runProfileSurface URL must match the Sidebar URL")
+    return {
+        "dto": "RunProfileSurface",
+        "version": 1,
+        "surfaceId": surface_id,
+        "projectPath": project_path,
+        "profileId": profile_id,
+        "runner": runner,
+        "shellId": shell_id,
+        "shellLabel": shell_label,
+        "url": url,
+        "devRuntime": _as_bool(raw.get("devRuntime") or raw.get("dev_runtime")),
+        "refreshRevision": max(
+            0,
+            _as_int(raw.get("refreshRevision") or raw.get("refresh_revision")),
+        ),
+    }
+
+
 def _with_url_params(raw_url: str, params: dict[str, str]) -> str:
     split = urlsplit(raw_url or "/")
     query = dict(parse_qsl(split.query, keep_blank_values=True))
@@ -545,6 +582,11 @@ def _normalize_url_slot(raw: JsonObject) -> JsonObject:
         route = _normalize_run_target_route(route_value, canonical_url=url)
         slot["run_target_route"] = route
         slot["runTargetRoute"] = route
+    surface_value = raw.get("run_profile_surface") or raw.get("runProfileSurface")
+    if surface_value is not None:
+        surface = _normalize_run_profile_surface(surface_value, canonical_url=url)
+        slot["run_profile_surface"] = surface
+        slot["runProfileSurface"] = surface
     return slot
 
 
@@ -784,6 +826,7 @@ def create_sidebar_window(params: JsonObject) -> JsonObject:
             "state": {"url": url},
             "created_at": now,
             "updated_at": now,
+            "version": _norm(params.get("version")),
         }
         raw_dev_tools = (
             params.get("dev_tools")
@@ -813,6 +856,11 @@ def create_sidebar_window(params: JsonObject) -> JsonObject:
             route = _normalize_run_target_route(route_value, canonical_url=url)
             url_slot["run_target_route"] = route
             url_slot["runTargetRoute"] = route
+        surface_value = params.get("run_profile_surface") or params.get("runProfileSurface")
+        if surface_value is not None:
+            surface = _normalize_run_profile_surface(surface_value, canonical_url=url)
+            url_slot["run_profile_surface"] = surface
+            url_slot["runProfileSurface"] = surface
         state = _upsert_slot(
             _load_pref_state(),
             url_slot,

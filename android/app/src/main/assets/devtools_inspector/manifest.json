@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "TE2 Native Developer Tools",
-  "version": "1.15.5.4",
+  "version": "1.15.5.5",
   "description": "Connects a page-local Chobitsu target to the native Android developer-tools surface.",
   "browser_specific_settings": {
     "gecko": {
@@ -17,7 +17,11 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["target-config.js", "target-native-bridge.js", "target-loader.js"],
+      "js": [
+        "target-config.js",
+        "target-native-bridge.js",
+        "target-loader.js"
+      ],
       "all_frames": true,
       "run_at": "document_start"
     }

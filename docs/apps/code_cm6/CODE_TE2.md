@@ -3302,7 +3302,8 @@ A config may be an object with `profiles`, a single profile object, or a profile
       "port": 8000,
       "additionalPorts": [
         { "port": 5173, "label": "Vite / HMR" }
-      ]
+      ],
+      "devRuntime": true
     }
   ]
 }
@@ -3326,9 +3327,10 @@ Current profile fields:
 | `env` | Extra environment, validated as shell-safe names with string values. |
 | `saveDrafts` / `save_drafts` | `included`, `opened`, `all`, or `none`; defaults to `included`. |
 | `showSaveWarning` / `show_save_warning` | Boolean warning setting; JSON `0`/`1` are accepted for compatibility. |
+| `devRuntime` / `dev_runtime` | Boolean, default `false`. For custom/node/python URL profiles, one umbrella enabling save-triggered refresh plus native-client console instrumentation and exact-origin no-cache/no-store HTTP policy. Page Preview receives the native runtime behavior implicitly while Vite owns its save/HMR refresh. |
 | `devTools` | Boolean, default `false`. On GeckoView, expose this profile's Sidebar URL iframe as a selectable native Inspector target. |
 
-The generated Run Profiles form renders `additionalPorts` as repeatable Port and Label rows. `5173` and `Vite / HMR` are placeholders, not implicit configuration.
+The generated Run Profiles form renders `additionalPorts` as repeatable Port and Label rows. `5173` and `Vite / HMR` are placeholders, not implicit configuration. Its declarative `visibleWhen` rules hide Page Preview-inapplicable process, URL, routing, running-behavior, and explicit `devRuntime` controls. Page Preview keeps its identity, entry/include, save policy/warning, and applicable instrumentation controls. Hidden incompatible keys remain round-trippable in raw JSON so changing the runner is reversible, but the Page Preview parser ignores them and supplies canonical backend-owned runtime values before validation.
 
 ### Runner dispatch
 
@@ -3338,7 +3340,7 @@ The generated Run Profiles form renders `additionalPorts` as repeatable Port and
 - `page_preview_shell_manager.py` launches page previews via `shellspec/page_preview.yaml#page-preview` and one deterministic `page-preview:<app>:<project>:<profile>` label.
 - `host/page_preview_backend.py` installs the default Page Preview profile into the project config.
 
-`pagePreview` profiles start a project-local preview shell and open its URL through the backend sidebar-window hook. Non-preview profiles can also open `sidebarUrl`; otherwise they just launch/reuse the runner shell and report the result. When `devTools` is enabled, the backend projects a stable project/profile target id with that URL slot. The Sidebar places the id in a namespaced iframe `window.name` marker before navigation; it does not append target metadata to the application URL.
+`pagePreview` profiles start a project-local preview shell and create an owned URL surface after the URL becomes ready. Non-preview profiles do the same only when `sidebarUrl` is non-empty; URL-less profiles retain process state without a Sidebar surface. When `devTools` is enabled, the backend projects a stable project/profile target id with that URL slot. The Sidebar places the id in a namespaced iframe `window.name` marker before navigation; it does not append target metadata to the application URL.
 
 Ordinary Play keeps the one-owner fast path. If more than one profile owns the
 active file, Python returns a candidate-selection projection instead of treating
@@ -3361,21 +3363,27 @@ backend `RunProfileStateChanged` fact.
 
 Boot snapshots, UI IPC reconnect snapshots, active-file/project changes,
 profile-config saves, Run/Stop actions, and natural shell exits all converge on
-`ui.runProfile.state.changed`. Every client therefore renders the same Run or
-Stop state without a frontend or backend polling timer. The one-shot
+`ui.runProfile.state.changed`. Every client therefore renders the same state
+without a frontend or backend polling timer. The one-shot
 `ui.host.runProfile.state.get` method remains available for explicit repair,
-debugging, and the user-triggered forced selector. The projection carries every
-relevant candidate's running state. One running owner retains direct Stop;
-multiple running owners require exact selection. `ui.host.runProfile.stop`
-accepts that exact `profileId` and terminates only its shell. Page Preview and
-ordinary runner profiles share this state contract; stopping a routed profile
-also releases its route ticket.
+debugging, and the user-triggered forced selector. The projection separates
+active-file `candidates` from project-wide `runningProfiles`, so running state
+does not depend on the currently active file.
+
+Play remains a stable Run action while an adjacent Stop control appears whenever
+`runningProfiles` is non-empty. One running profile stops directly; multiple
+running profiles require exact selection from a running-only modal. Ambiguous
+and forced Run selectors omit profiles that are already running, while the
+forced selector retains `Run current file`. A sole owner already running can
+still apply its configured `runningBehavior`. `ui.host.runProfile.stop` accepts
+the exact project/profile/shell identity and terminates only that shell. Page
+Preview and ordinary runner profiles share this state contract.
 
 ### Native preferred-port routing
 
-The optional `port` and `additionalPorts` fields solve remote native-client access to server processes that listen only on the framework host's loopback interface. They are deliberately unsupported for `pagePreview`, whose static preview has no independent server ports to tunnel.
+The optional `port` and `additionalPorts` fields solve remote native-client access to server processes that listen only on the framework host's loopback interface. They are deliberately unsupported as user configuration for `pagePreview`; its backend always registers the active primary HTTP port `3000` and Vite middleware HMR port `24678`.
 
-After a non-preview shell starts, Python registers its deterministic owner label, exact Framework-Shell id, primary port, and bounded auxiliary list through Rust pipe target `2400` (`service.runTarget`) using `runTarget.routes.register`. Rust returns an atomic `RunTargetRouteSet`: one primary descriptor plus one labeled descriptor per auxiliary port. Every port receives an independent unguessable 256-bit bearer ticket and 24-hour renewable tunnel path:
+After a routed shell starts, Python registers its deterministic owner label, exact Framework-Shell id, primary port, and bounded auxiliary list through Rust pipe target `2400` (`service.runTarget`) using `runTarget.routes.register`. For non-preview profiles those ports come from the profile; for Page Preview they come from the backend implementation. Rust returns an atomic `RunTargetRouteSet`: one primary descriptor plus one labeled descriptor per auxiliary port. Every port receives an independent unguessable 256-bit bearer ticket and 24-hour renewable tunnel path:
 
 ```text
 /api/run-targets/<ticket>/tunnel
@@ -3389,11 +3397,54 @@ The Sidebar preserves the original primary URL and the complete route set. Ordin
 2. Primary `EADDRINUSE` / `BindException` means the server is already local, so bind no auxiliary ports and open the original primary URL.
 3. Primary bind success means the framework is remote; bind every declared auxiliary port before navigating.
 4. Any auxiliary collision is a labeled fatal error and rolls back all listeners created for that group.
-5. Once the group is complete, open the primary local URL. Requests and WebSocket upgrades to auxiliary ports, including Vite HMR on 5173, traverse their own ticketed raw-TCP tunnels.
+5. Once the group is complete, open the primary local URL. Requests and WebSocket upgrades to auxiliary ports, including declared Vite port 5173 or Page Preview HMR port 24678, traverse their own ticketed raw-TCP tunnels.
 
-Relay groups use a stable owner-derived id so one profile cannot silently replace another profile's local listeners. Framework retarget, route-set replacement, and native-client teardown close grouped listeners and streams. Stop and dead-shell reconciliation invalidate the complete Rust ticket group; exact profile-stop Sidebar/listener teardown is tracked separately in `docs/apps/run_profile_refinements/IMPLEMENTATION_TRACKER.md`.
+Relay groups use a stable owner-derived id so one profile cannot silently replace another profile's local listeners. Framework retarget, route-set replacement, native-client teardown, exact profile Stop, and dead-shell reconciliation close grouped listeners and streams and invalidate the complete Rust ticket group.
 
 Native negotiation never changes URL paths, queries, or fragments, never dynamically remaps ports, and never exposes an arbitrary framework-host TCP destination.
+
+### Owned URL surfaces and development refresh
+
+Python creates a project/profile-scoped `RunProfileSurface` only for a profile
+with a resolved URL. Its stable `surfaceId` is independent of the current
+Framework-Shell generation and client presentation. The surface records project,
+profile, runner, exact shell id/label, source URL, `devRuntime`, and
+`refreshRevision`; the Sidebar slot additionally retains the route set and
+Inspector metadata. Browser iframe, GeckoView target, and future Electron window
+identifiers are presentations, not lifecycle authority.
+
+After Framework-Shell readiness and before creating the surface, Python performs
+one bounded, cancellable HTTP readiness transaction. Connection failures and
+HTTP 404 retry with bounded backoff; any non-404 response succeeds without
+reading the body. Stop, relaunch, project switch, or shell-generation replacement
+cancels the transaction. A newly launched shell that times out is stopped and
+its route set is released; a reused shell remains running without creating a
+new surface. This is launch readiness, not periodic health polling.
+
+Exact Stop, terminal lifecycle, and stale-shell reconciliation remove the owned
+Sidebar slot. The dock icon's right-click/touch-long-press menu routes Stop
+through Python with the surface's project/profile/shell identity rather than
+inferring ownership from the active editor file.
+
+The canonical active-file save path and bulk `save_reviews` path publish typed
+post-commit `FileSaved` worker events. Publication is scheduled outside the save
+response path. Each running custom/node/python profile with `devRuntime: true`,
+a URL surface, and an include match advances that exact surface's
+`refreshRevision`; the Sidebar reloads the presentation while retaining its
+surface and route identity. Page Preview is implicitly a development runtime,
+but Vite owns its watch, cache invalidation, HMR, and full reload behavior, so
+TE2 does not add a duplicate hard refresh.
+
+For GeckoView and Electron, the same `devRuntime` surface metadata is registered
+before navigation. Gecko's Run Target WebExtension and Electron's framework
+session apply request `no-cache` and response `no-store` headers only to the
+surface's exact primary and auxiliary origins, excluding WebSocket upgrades.
+They also inject the shared TE2 console bridge into the marked Run Profile frame
+with an explicit framework origin and a profile-aware unique worker label.
+Surface removal, framework retarget, and native teardown release this policy.
+The separate `devTools` option still controls only GeckoView's full Chobitsu
+Inspector target runtime. Ordinary browsers keep refresh behavior but cannot
+receive native cross-origin header mutation or bridge injection.
 
 ### Draft-save transaction
 

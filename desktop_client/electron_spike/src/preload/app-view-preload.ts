@@ -7,6 +7,7 @@ import {
   type ElectronAppViewInspection,
   type ElectronRunTargetResolution,
   type ElectronRunTargetDescriptor,
+  type ElectronRunProfileRuntimeMetadata,
 } from "../shared/app-view-contracts";
 import type { AssetUpdateResult } from "../shared/contracts";
 
@@ -62,6 +63,15 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   },
   resolveRunTarget(route: ElectronRunTargetDescriptor): Promise<ElectronRunTargetResolution> {
     return invokeElectron("resolve_run_target", route);
+  },
+  registerRunTargetSurface(
+    runtime: ElectronRunProfileRuntimeMetadata,
+    url: string,
+  ): Promise<{ ok: true }> {
+    return invokeElectron("register_run_target_surface", { runtime, url });
+  },
+  releaseRunTargetSurface(surfaceId: string): Promise<{ ok: true }> {
+    return invokeElectron("release_run_target_surface", surfaceId);
   },
 });
 

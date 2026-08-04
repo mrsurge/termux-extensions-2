@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Editor Asset Intercept",
-  "version": "1.6",
+  "version": "1.8",
   "description": "Redirects editor static asset requests to a local file server",
   "permissions": [
     "webRequest",
@@ -20,6 +20,12 @@
       "js": ["run_target_bridge.js"],
       "run_at": "document_start",
       "all_frames": false
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["runtime_console_loader.js"],
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
   "applications": {

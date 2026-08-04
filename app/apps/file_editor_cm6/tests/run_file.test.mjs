@@ -49,15 +49,23 @@ test('Run state is projection-driven without a scheduled query loop', async () =
   const state = controllerDeps([]);
   const controller = createRunFileController(state.deps);
   controller.applyProjection({
+    projectPath: '/project',
     path: '/project/main.py',
     matched: true,
     running: true,
     profileId: 'python',
+    runningProfiles: [{
+      profileId: 'python',
+      runner: 'python',
+      shellId: 'shell-python',
+      running: true,
+    }],
   });
 
   assert.equal(state.stateCalls.length, 0);
-  assert.equal(state.buttonStates.at(-1).running, true);
-  assert.equal(state.buttonStates.at(-1).profileId, 'python');
+  assert.equal(state.buttonStates.at(-1).disabled, false);
+  assert.equal(state.buttonStates.at(-1).runningProfiles.length, 1);
+  assert.equal(state.buttonStates.at(-1).runningProfiles[0].profileId, 'python');
 });
 
 function installDialog(result) {
@@ -154,7 +162,7 @@ test('Run confirmation resubmits with warning suppression intent', async () => {
   assert.deepEqual(state.toasts, ["Run profile 'python' started"]);
   assert.equal(state.buttonStates[0].busy, true);
   assert.equal(state.buttonStates.at(-1).disabled, false);
-  assert.equal(state.buttonStates.at(-1).running, false);
+  assert.equal(state.buttonStates.at(-1).runningProfiles.length, 0);
 });
 
 test('explicit profile selection survives draft confirmation', async () => {
@@ -346,7 +354,7 @@ test('suppressed warnings keep Run on one backend request', async () => {
   assert.deepEqual(state.toasts, ['Running active file in terminal']);
 });
 
-test('running profile changes Play to Stop and terminates the exact profile', async () => {
+test('running profile keeps Play stable and the separate Stop uses exact identity', async () => {
   installDialog({ status: 'closed', action: null, values: {} });
   const { createRunFileController } = await importRunFileController();
   const state = controllerDeps([], {
@@ -354,15 +362,31 @@ test('running profile changes Play to Stop and terminates the exact profile', as
       {
         ok: true,
         data: {
+          projectPath: '/project',
+          path: '/project/main.py',
           matched: true,
           running: true,
           profileId: 'python',
           shellId: 'shell-123',
+          runningProfiles: [{
+            profileId: 'python',
+            runner: 'python',
+            shellId: 'shell-123',
+            running: true,
+          }],
         },
       },
       {
         ok: true,
-        data: { matched: true, running: false, profileId: 'python' },
+        data: {
+          projectPath: '/project',
+          path: '/project/main.py',
+          matched: true,
+          running: false,
+          profileId: 'python',
+          candidates: [],
+          runningProfiles: [],
+        },
       },
     ],
     stopResponses: [{
@@ -370,6 +394,10 @@ test('running profile changes Play to Stop and terminates the exact profile', as
       data: {
         stopped: true,
         running: false,
+        projectPath: '/project',
+        path: '/project/main.py',
+        candidates: [],
+        runningProfiles: [],
         message: "Run profile 'python' stopped",
       },
     }],
@@ -377,27 +405,28 @@ test('running profile changes Play to Stop and terminates the exact profile', as
   const controller = createRunFileController(state.deps);
 
   await controller.refreshState();
-  assert.equal(state.buttonStates.at(-1).running, true);
-  assert.equal(state.buttonStates.at(-1).profileId, 'python');
+  assert.equal(state.buttonStates.at(-1).runningProfiles.length, 1);
 
-  await controller.runOrStop();
+  await controller.stopRunningProfiles();
 
   assert.deepEqual(state.calls, []);
   assert.deepEqual(state.stopCalls, [{
     path: '/project/main.py',
+    projectPath: '/project',
     profileId: 'python',
+    shellId: 'shell-123',
   }]);
   assert.equal(state.stateCalls.length, 1);
-  assert.equal(state.buttonStates.at(-1).running, false);
+  assert.equal(state.buttonStates.at(-1).runningProfiles.length, 0);
   assert.deepEqual(state.toasts, ["Run profile 'python' stopped"]);
 });
 
 test('multiple running owners require an exact Stop selection', async () => {
   installDialog({
     status: 'accepted',
-    action: 'continue',
+    action: 'stop',
     values: {
-      selection: { kind: 'profile', profileId: 'backend-b', running: true },
+      profileId: 'backend-b',
     },
   });
   const { createRunFileController } = await importRunFileController();
@@ -414,6 +443,7 @@ test('multiple running owners require an exact Stop selection', async () => {
   });
   const controller = createRunFileController(state.deps);
   controller.applyProjection({
+    projectPath: '/project',
     path: '/project/main.py',
     matched: true,
     running: true,
@@ -422,14 +452,61 @@ test('multiple running owners require an exact Stop selection', async () => {
       { profileId: 'backend-a', runner: 'python', running: true },
       { profileId: 'backend-b', runner: 'python', running: true },
     ],
+    runningProfiles: [
+      {
+        profileId: 'backend-a',
+        runner: 'python',
+        shellId: 'shell-a',
+        running: true,
+      },
+      {
+        profileId: 'backend-b',
+        runner: 'python',
+        shellId: 'shell-b',
+        running: true,
+      },
+    ],
   });
 
-  await controller.runOrStop();
+  await controller.stopRunningProfiles();
 
   assert.deepEqual(state.calls, []);
   assert.deepEqual(state.stopCalls, [{
     path: '/project/main.py',
+    projectPath: '/project',
     profileId: 'backend-b',
+    shellId: 'shell-b',
+  }]);
+});
+
+test('Run selector omits profiles that are already running', async () => {
+  installDialog({
+    status: 'accepted',
+    action: 'continue',
+    values: {
+      selection: { kind: 'profile', profileId: 'available' },
+    },
+  });
+  const { createRunFileController } = await importRunFileController();
+  const state = controllerDeps([
+    { ok: true, data: { action: 'runProfile', message: 'available started' } },
+  ], {
+    stateResponses: [{
+      ok: true,
+      data: {
+        candidates: [
+          { profileId: 'running', runner: 'custom', running: true },
+          { profileId: 'available', runner: 'custom', running: false },
+        ],
+      },
+    }],
+  });
+
+  await createRunFileController(state.deps).showProfileSelector();
+
+  assert.deepEqual(state.calls, [{
+    path: '/project/main.py',
+    profileId: 'available',
   }]);
 });
 

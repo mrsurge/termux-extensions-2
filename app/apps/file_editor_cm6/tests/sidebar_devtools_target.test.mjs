@@ -46,6 +46,49 @@ test("enabled Run Profile iframe receives an encoded native target marker", asyn
       decodeURIComponent(marker.slice(DEVTOOLS_TARGET_WINDOW_NAME_PREFIX.length)),
     ),
     {
+      surfaceId: "run-profile:abc123:preview",
+      profileId: "",
+      devRuntime: false,
+      devTools: true,
+      workerLabel: "run-profile:abc123:preview",
+      frameworkOrigin: "",
+      targetId: "run-profile:abc123:preview",
+      targetLabel: "Run preview",
+    },
+  );
+});
+
+test("dev runtime iframe receives a runtime marker without enabling Inspector", async () => {
+  const {
+    RUN_PROFILE_RUNTIME_WINDOW_NAME_PREFIX,
+    devToolsTargetWindowName,
+  } = await importTargetMarker();
+  const marker = devToolsTargetWindowName({
+    key: "url:preview",
+    label: "Run preview",
+    url: "http://127.0.0.1:3000/",
+    load: "lazy",
+    runProfileSurface: {
+      surfaceId: "run-profile:abc123:preview",
+      profileId: "preview",
+      devRuntime: true,
+    },
+  }, "http://framework.example:8089");
+
+  assert.ok(marker.startsWith(RUN_PROFILE_RUNTIME_WINDOW_NAME_PREFIX));
+  assert.deepEqual(
+    JSON.parse(
+      decodeURIComponent(
+        marker.slice(RUN_PROFILE_RUNTIME_WINDOW_NAME_PREFIX.length),
+      ),
+    ),
+    {
+      surfaceId: "run-profile:abc123:preview",
+      profileId: "preview",
+      devRuntime: true,
+      devTools: false,
+      workerLabel: "run-profile:abc123:preview",
+      frameworkOrigin: "http://framework.example:8089",
       targetId: "run-profile:abc123:preview",
       targetLabel: "Run preview",
     },
@@ -104,6 +147,9 @@ test("target marker and final URL are assigned before frame insertion", async ()
   const { configureDevToolsTargetNavigation } = await importTargetMarker();
   const assignments = [];
   const iframe = {
+    ownerDocument: {
+      defaultView: { location: { origin: "http://framework.example:8089" } },
+    },
     set name(value) {
       assignments.push(["name", value]);
     },

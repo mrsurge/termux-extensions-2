@@ -11,6 +11,110 @@ let nativePort = null;
 let reconnectTimer = 0;
 let frameworkBaseUrl = "";
 const pendingRunTargets = new Map();
+const devRuntimeOriginsBySurface = new Map();
+const devRuntimeLabelsBySurface = new Map();
+let devRuntimeOrigins = new Set();
+
+function runtimeMetadata(route) {
+  const runtime = route && typeof route.te2Runtime === "object"
+    ? route.te2Runtime
+    : null;
+  const surfaceId = String(runtime?.surfaceId || "").trim();
+  if (!surfaceId || runtime?.devRuntime !== true) return null;
+  return {
+    surfaceId,
+    workerLabel: String(runtime.workerLabel || surfaceId).trim() || surfaceId,
+  };
+}
+
+function routeEntries(route) {
+  if (route?.dto === "RunTargetRouteSet") {
+    return [route.primary, ...(Array.isArray(route.additional) ? route.additional : [])]
+      .filter((entry) => entry && typeof entry === "object");
+  }
+  return route && typeof route === "object" ? [route] : [];
+}
+
+function routeOrigin(entry, mode) {
+  const original = new URL(String(entry.originalUrl || ""));
+  if (mode === "tunnel") {
+    original.hostname = "127.0.0.1";
+    original.port = String(Number(entry.preferredPort));
+  }
+  return original.origin;
+}
+
+function rebuildDevRuntimeOrigins() {
+  const next = new Set();
+  for (const origins of devRuntimeOriginsBySurface.values()) {
+    for (const origin of origins) next.add(origin);
+  }
+  devRuntimeOrigins = next;
+}
+
+function registerDevRuntimePolicy(route, result) {
+  const runtime = runtimeMetadata(route);
+  if (!runtime || result?.ok !== true) return;
+  const origins = new Set();
+  for (const entry of routeEntries(route)) {
+    try {
+      origins.add(routeOrigin(entry, result.mode));
+    } catch (_) {}
+  }
+  try {
+    origins.add(new URL(String(result.url || "")).origin);
+  } catch (_) {}
+  if (origins.size === 0) return;
+  devRuntimeOriginsBySurface.set(runtime.surfaceId, origins);
+  devRuntimeLabelsBySurface.set(runtime.surfaceId, runtime.workerLabel);
+  rebuildDevRuntimeOrigins();
+}
+
+function registerDirectDevRuntimePolicy(runtime, url) {
+  const surfaceId = String(runtime?.surfaceId || "").trim();
+  if (!surfaceId || runtime?.devRuntime !== true) return false;
+  try {
+    devRuntimeOriginsBySurface.set(surfaceId, new Set([new URL(String(url || "")).origin]));
+    devRuntimeLabelsBySurface.set(
+      surfaceId,
+      String(runtime.workerLabel || surfaceId).trim() || surfaceId,
+    );
+    rebuildDevRuntimeOrigins();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function releaseDevRuntimePolicy(surfaceId) {
+  const normalized = String(surfaceId || "").trim();
+  devRuntimeLabelsBySurface.delete(normalized);
+  if (!devRuntimeOriginsBySurface.delete(normalized)) return;
+  rebuildDevRuntimeOrigins();
+}
+
+function clearDevRuntimePolicies() {
+  devRuntimeOriginsBySurface.clear();
+  devRuntimeLabelsBySurface.clear();
+  devRuntimeOrigins = new Set();
+}
+
+function isDevRuntimeRequest(details) {
+  if (String(details.type || "").toLowerCase() === "websocket") return false;
+  try {
+    return devRuntimeOrigins.has(new URL(details.url).origin);
+  } catch (_) {
+    return false;
+  }
+}
+
+function replaceHeader(headers, name, value) {
+  const lower = name.toLowerCase();
+  const filtered = (Array.isArray(headers) ? headers : [])
+    .filter((header) => String(header?.name || "").toLowerCase() !== lower);
+  filtered.push({ name, value });
+  return filtered;
+}
 
 // Prefixes backed by complete OTA directory entries. Keep API prefixes limited
 // to immutable static trees so dynamic backend routes always stay on TE2.
@@ -117,6 +221,33 @@ browser.webRequest.onBeforeRequest.addListener(
   ["blocking"]
 );
 
+browser.webRequest.onBeforeSendHeaders.addListener(
+  (details) => {
+    if (!isDevRuntimeRequest(details)) return {};
+    let requestHeaders = replaceHeader(details.requestHeaders, "Cache-Control", "no-cache");
+    requestHeaders = replaceHeader(requestHeaders, "Pragma", "no-cache");
+    return { requestHeaders };
+  },
+  { urls: ["<all_urls>"] },
+  ["blocking", "requestHeaders"],
+);
+
+browser.webRequest.onHeadersReceived.addListener(
+  (details) => {
+    if (!isDevRuntimeRequest(details)) return {};
+    let responseHeaders = replaceHeader(
+      details.responseHeaders,
+      "Cache-Control",
+      "no-store, no-cache, must-revalidate",
+    );
+    responseHeaders = replaceHeader(responseHeaders, "Pragma", "no-cache");
+    responseHeaders = replaceHeader(responseHeaders, "Expires", "0");
+    return { responseHeaders };
+  },
+  { urls: ["<all_urls>"] },
+  ["blocking", "responseHeaders"],
+);
+
 function scheduleNativeReconnect() {
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
@@ -134,12 +265,55 @@ function frameworkOrigin() {
 }
 
 browser.runtime.onMessage.addListener((message, sender) => {
-  if (!message || message.type !== "run_target_resolve") return undefined;
+  if (message?.type === "run_runtime_config") {
+    const surfaceId = String(message.surfaceId || "").trim();
+    const senderOrigin = (() => {
+      try { return new URL(sender.url || "").origin; } catch (_) { return ""; }
+    })();
+    const configuredFrameworkOrigin = frameworkOrigin();
+    const requestedFrameworkOrigin = (() => {
+      try { return new URL(String(message.frameworkOrigin || "")).origin; } catch (_) { return ""; }
+    })();
+    const origins = devRuntimeOriginsBySurface.get(surfaceId);
+    if (
+      !surfaceId ||
+      !origins?.has(senderOrigin) ||
+      !configuredFrameworkOrigin ||
+      requestedFrameworkOrigin !== configuredFrameworkOrigin
+    ) {
+      return Promise.resolve({ ok: false, error: "Run Profile runtime marker is not trusted" });
+    }
+    return Promise.resolve({
+      ok: true,
+      frameworkOrigin: configuredFrameworkOrigin,
+      workerLabel: devRuntimeLabelsBySurface.get(surfaceId) || surfaceId,
+    });
+  }
+  if (
+    !message ||
+    !["run_target_resolve", "run_target_register", "run_target_release"].includes(message.type)
+  ) {
+    return undefined;
+  }
   const senderOrigin = (() => {
     try { return new URL(sender.url || "").origin; } catch (_) { return ""; }
   })();
-  if (!nativePort || sender.frameId !== 0 || senderOrigin !== frameworkOrigin()) {
+  if (sender.frameId !== 0 || senderOrigin !== frameworkOrigin()) {
     return Promise.resolve({ ok: false, error: "Run target request origin is not trusted" });
+  }
+  if (message.type === "run_target_release") {
+    releaseDevRuntimePolicy(message.surfaceId);
+    return Promise.resolve({ ok: true });
+  }
+  if (message.type === "run_target_register") {
+    return Promise.resolve(
+      registerDirectDevRuntimePolicy(message.runtime, message.url)
+        ? { ok: true }
+        : { ok: false, error: "Run Profile runtime registration is invalid" },
+    );
+  }
+  if (!nativePort) {
+    return Promise.resolve({ ok: false, error: "Native run target bridge is unavailable" });
   }
   const requestId = String(message.requestId || "");
   if (!requestId || pendingRunTargets.has(requestId)) {
@@ -150,7 +324,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
       pendingRunTargets.delete(requestId);
       resolve({ ok: false, error: "Native run target request timed out" });
     }, 5000);
-    pendingRunTargets.set(requestId, { resolve, timeout });
+    pendingRunTargets.set(requestId, { resolve, timeout, route: message.route });
     try {
       nativePort.postMessage({
         type: "run_target_resolve",
@@ -184,8 +358,12 @@ function connectNativeBridge() {
     nativePort = port;
     port.onMessage.addListener((message) => {
       if (message && message.type === "set_asset_port") {
+        const previousFrameworkBaseUrl = frameworkBaseUrl;
         assetServerPort = message.port;
         frameworkBaseUrl = String(message.frameworkBaseUrl || "");
+        if (previousFrameworkBaseUrl && previousFrameworkBaseUrl !== frameworkBaseUrl) {
+          clearDevRuntimePolicies();
+        }
         enabled = message.port > 0;
         console.log(`[asset_intercept] Port set to ${assetServerPort}, enabled=${enabled}`);
         port.postMessage({
@@ -198,6 +376,7 @@ function connectNativeBridge() {
         if (pending) {
           pendingRunTargets.delete(requestId);
           clearTimeout(pending.timeout);
+          registerDevRuntimePolicy(pending.route, message);
           pending.resolve(message);
         }
       }
@@ -207,6 +386,7 @@ function connectNativeBridge() {
       assetServerPort = 0;
       enabled = false;
       frameworkBaseUrl = "";
+      clearDevRuntimePolicies();
       rejectPendingRunTargets("Native run target bridge disconnected");
       scheduleNativeReconnect();
     });
@@ -214,6 +394,7 @@ function connectNativeBridge() {
     assetServerPort = 0;
     enabled = false;
     frameworkBaseUrl = "";
+    clearDevRuntimePolicies();
     rejectPendingRunTargets("Native run target bridge is unavailable");
     scheduleNativeReconnect();
   }

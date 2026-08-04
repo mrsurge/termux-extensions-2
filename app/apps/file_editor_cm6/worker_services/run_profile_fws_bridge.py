@@ -11,6 +11,10 @@ import socketio
 
 from ..host.run_target_service import release_run_target_route
 from ..run_profile_events import refresh_run_profile_state
+from ..run_profile_surfaces import (
+    close_run_profile_surface_for_shell,
+    reconcile_run_profile_surfaces,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +150,7 @@ async def _open_dashboard_snapshot() -> None:
             timeout=10,
         )
         _replace_relevant_shell_ids(response)
+        _ = await reconcile_run_profile_surfaces(set(_relevant_shell_labels))
         _ = await refresh_run_profile_state(
             source="fws_snapshot",
             reconcile_stale_route=True,
@@ -189,6 +194,11 @@ async def _on_notification(payload: object) -> None:
 
     if method in {"fws.shell.exited", "fws.shell.removed"} and label:
         await _release_route_best_effort(owner_id=label, shell_id=shell_id)
+        _ = await close_run_profile_surface_for_shell(
+            shell_id=shell_id,
+            shell_label=label,
+            source=method,
+        )
     _ = await refresh_run_profile_state(source=method)
 
 
