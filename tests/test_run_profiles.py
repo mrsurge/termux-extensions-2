@@ -89,6 +89,67 @@ class RunProfileContractTests(unittest.TestCase):
                 )
                 self.assertEqual(profile.show_save_warning, expected)
 
+    def test_profile_ids_are_unique(self) -> None:
+        duplicate = {
+            "profileId": "backend",
+            "runner": "custom",
+            "include": ["src/**"],
+            "exec": "server.py",
+        }
+        with self.assertRaisesRegex(ValueError, "Duplicate run profile id"):
+            _ = runner_profiles.parse_run_profiles_config(
+                {"version": 1, "profiles": [duplicate, dict(duplicate)]}
+            )
+
+    def test_candidates_preserve_all_owners_and_explicit_non_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            active = root / "src" / "main.py"
+            active.parent.mkdir(parents=True)
+            _ = active.write_text("print('ok')\n", encoding="utf-8")
+            _ = runner_profiles.save_run_profiles_config(
+                root,
+                json.dumps(
+                    {
+                        "version": 1,
+                        "profiles": [
+                            {
+                                "profileId": "backend-a",
+                                "runner": "custom",
+                                "include": ["src/**"],
+                                "exec": "server_a.py",
+                            },
+                            {
+                                "profileId": "backend-b",
+                                "runner": "custom",
+                                "include": ["src/*.py"],
+                                "exec": "server_b.py",
+                            },
+                            {
+                                "profileId": "test-backend",
+                                "runner": "custom",
+                                "include": ["tests/**"],
+                                "exec": "test_server.py",
+                            },
+                        ],
+                    }
+                ),
+            )
+
+            owners = runner_profiles.list_run_profile_candidates(root, active)
+            selected = runner_profiles.resolve_run_profile_by_id(
+                root,
+                active,
+                "test-backend",
+            )
+
+        self.assertEqual(
+            [match.profile.profile_id for match in owners],
+            ["backend-a", "backend-b"],
+        )
+        self.assertEqual(selected.profile.profile_id, "test-backend")
+        self.assertEqual(selected.relative_path, "src/main.py")
+
     def test_dev_tools_is_an_explicit_opt_in(self) -> None:
         base_profile = {
             "profileId": "preview",
@@ -364,6 +425,55 @@ class RunDraftSelectionTests(unittest.TestCase):
 
 
 class RunRequestTransactionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_overlapping_owners_return_selection_before_save_or_launch(
+        self,
+    ) -> None:
+        conflict = runner_profiles.RunProfileConflictError(
+            relative_path="main.py",
+            profile_ids=["backend-a", "backend-b"],
+        )
+        selection = {
+            "ok": True,
+            "data": {
+                "action": "selectRunProfile",
+                "candidates": [
+                    {"profileId": "backend-a"},
+                    {"profileId": "backend-b"},
+                ],
+            },
+        }
+        save = AsyncMock()
+        launch = AsyncMock()
+        build_selection = AsyncMock(return_value=selection)
+        with (
+            patch.object(
+                runner_profiles_backend,
+                "resolve_runner_profile_run_request",
+                side_effect=conflict,
+            ),
+            patch.object(
+                runner_profiles_backend,
+                "build_run_profile_selection_response",
+                build_selection,
+            ),
+            patch.object(terminal_actions_backend, "_save_before_play", save),
+            patch.object(
+                runner_profiles_backend,
+                "handle_runner_profile_run_request",
+                launch,
+            ),
+        ):
+            result = await terminal_actions_backend._handle_host_run_active_file_request(
+                {"path": "/project/main.py"},
+                project_root=Path("/project"),
+                source_name="test",
+            )
+
+        self.assertEqual(result, selection)
+        build_selection.assert_awaited_once_with({"path": "/project/main.py"})
+        save.assert_not_awaited()
+        launch.assert_not_awaited()
+
     async def test_warning_stops_before_save_and_launch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
@@ -484,6 +594,63 @@ class RunRequestTransactionTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result["ok"])
             save.assert_awaited_once()
             launch.assert_awaited_once_with(match, source_name="test")
+
+    async def test_active_context_is_revalidated_after_save_before_launch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            active = root / "main.py"
+            _ = active.write_text("print('ok')\n", encoding="utf-8")
+            profile = runner_profiles.RunProfile(
+                profile_id="python",
+                runner="python",
+                entry="",
+                include=("*.py",),
+                sidebar_url="",
+                running_behavior="just save",
+                exec_command="main.py",
+                cwd="",
+                args=(),
+                env={},
+                save_drafts="included",
+                show_save_warning=False,
+            )
+            match = runner_profiles.RunProfileMatch(
+                profile=profile,
+                project_root=root,
+                active_file=active,
+                relative_path="main.py",
+            )
+            save = AsyncMock(return_value=None)
+            launch = AsyncMock()
+            with (
+                patch.object(
+                    runner_profiles_backend,
+                    "resolve_runner_profile_run_request",
+                    return_value=match,
+                ),
+                patch.object(terminal_actions_backend, "_save_before_play", save),
+                patch.object(
+                    terminal_actions_backend,
+                    "_run_context_is_current",
+                    side_effect=[True, False],
+                ),
+                patch.object(
+                    runner_profiles_backend,
+                    "handle_runner_profile_run_request",
+                    launch,
+                ),
+            ):
+                result = await terminal_actions_backend._handle_host_run_active_file_request(
+                    {"path": str(active)},
+                    project_root=root,
+                    source_name="test",
+                    enforce_current_context=True,
+                )
+
+        self.assertFalse(result["ok"])
+        self.assertTrue(cast(dict[str, object], result["data"])["staleRunIntent"])
+        save.assert_awaited_once()
+        launch.assert_not_awaited()
 
     async def test_stale_confirmation_does_not_save_or_launch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -956,8 +1123,8 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch.object(
                     run_profile_state,
-                    "resolve_run_profile_match",
-                    return_value=match,
+                    "list_run_profile_candidates",
+                    return_value=[match],
                 ),
                 patch.object(
                     run_profile_state,
@@ -972,6 +1139,77 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(projection["matched"])
         self.assertTrue(projection["running"])
         self.assertEqual(projection["shellId"], "shell-4173")
+        candidates = cast(list[dict[str, object]], projection["candidates"])
+        self.assertEqual(candidates[0]["profileId"], "web")
+        self.assertTrue(candidates[0]["ownsActiveFile"])
+
+    async def test_state_projection_keeps_multiple_running_owners_explicit(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            active = root / "main.py"
+            _ = active.write_text("print('ok')\n", encoding="utf-8")
+            base = runner_profiles.RunProfile(
+                profile_id="backend-a",
+                runner="custom",
+                entry="",
+                include=("*.py",),
+                sidebar_url="",
+                running_behavior="just save",
+                exec_command="server.py",
+                cwd="",
+                args=(),
+                env={},
+                save_drafts="included",
+                show_save_warning=False,
+            )
+            matches = [
+                runner_profiles.RunProfileMatch(
+                    profile=profile,
+                    project_root=root,
+                    active_file=active,
+                    relative_path="main.py",
+                )
+                for profile in (base, replace(base, profile_id="backend-b"))
+            ]
+
+            def shell_state(*, project_root: str, profile_id: str) -> object:
+                del project_root
+                return SimpleNamespace(
+                    shell_id=f"shell-{profile_id}",
+                    label=f"runner:{profile_id}",
+                    running=True,
+                )
+
+            with (
+                patch.object(
+                    run_profile_state,
+                    "run_profile_request_context",
+                    return_value=(str(root), str(active)),
+                ),
+                patch.object(
+                    run_profile_state,
+                    "list_run_profile_candidates",
+                    return_value=matches,
+                ),
+                patch.object(
+                    run_profile_state,
+                    "runner_profile_shell_state",
+                    AsyncMock(side_effect=shell_state),
+                ),
+            ):
+                projection = await run_profile_state.build_run_profile_state_projection()
+
+        self.assertTrue(projection["matched"])
+        self.assertTrue(projection["running"])
+        self.assertTrue(projection["selectionRequired"])
+        self.assertEqual(projection["profileId"], "")
+        candidates = cast(list[dict[str, object]], projection["candidates"])
+        self.assertEqual(
+            [candidate["profileId"] for candidate in candidates],
+            ["backend-a", "backend-b"],
+        )
 
     async def test_unchanged_event_projection_is_deduplicated(self) -> None:
         projection = {

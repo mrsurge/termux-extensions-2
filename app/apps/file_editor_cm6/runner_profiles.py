@@ -173,39 +173,83 @@ def _profiles_from_config(config: JsonObject) -> list[RunProfile]:
         raise ValueError("Run profile config field 'profiles' must be a list")
     raw_profiles = list(cast(list[object], profiles_value))
     profiles: list[RunProfile] = []
+    profile_ids: set[str] = set()
     for index, item_obj in enumerate(raw_profiles):
         if not isinstance(item_obj, dict):
             raise ValueError(f"Run profile at index {index} must be an object")
-        profiles.append(_profile_from_json(_json_object(cast(object, item_obj)), index=index))
+        profile = _profile_from_json(
+            _json_object(cast(object, item_obj)), index=index
+        )
+        if profile.profile_id in profile_ids:
+            raise ValueError(f"Duplicate run profile id '{profile.profile_id}'")
+        profile_ids.add(profile.profile_id)
+        profiles.append(profile)
     return profiles
 
 
-def match_run_profile(project_root: str | Path, active_file: str | Path) -> RunProfileMatch | None:
+def list_run_profile_candidates(
+    project_root: str | Path,
+    active_file: str | Path,
+    *,
+    include_all: bool = False,
+) -> list[RunProfileMatch]:
+    root, file_path, rel_path = _run_profile_context(project_root, active_file)
+    return [
+        RunProfileMatch(
+            profile=profile,
+            project_root=root,
+            active_file=file_path,
+            relative_path=rel_path,
+        )
+        for profile in load_run_profiles(root)
+        if include_all
+        or run_profile_matches_path(profile, rel_path, project_root=root)
+    ]
+
+
+def resolve_run_profile_by_id(
+    project_root: str | Path,
+    active_file: str | Path,
+    profile_id: str,
+) -> RunProfileMatch:
+    selected_id = profile_id.strip()
+    if not selected_id:
+        raise ValueError("Run profile id is required")
+    for match in list_run_profile_candidates(
+        project_root,
+        active_file,
+        include_all=True,
+    ):
+        if match.profile.profile_id == selected_id:
+            return match
+    raise ValueError(f"Run profile '{selected_id}' no longer exists")
+
+
+def match_run_profile(
+    project_root: str | Path, active_file: str | Path
+) -> RunProfileMatch | None:
+    matches = list_run_profile_candidates(project_root, active_file)
+    if not matches:
+        return None
+    if len(matches) > 1:
+        raise RunProfileConflictError(
+            relative_path=matches[0].relative_path,
+            profile_ids=[profile.profile.profile_id for profile in matches],
+        )
+    return matches[0]
+
+
+def _run_profile_context(
+    project_root: str | Path,
+    active_file: str | Path,
+) -> tuple[Path, Path, str]:
     root = _project_root_path(project_root)
     file_path = Path(active_file).expanduser().resolve(strict=False)
     try:
         rel_path = _relative_posix(file_path, root)
     except ValueError:
         raise ValueError("Active file is outside the project") from None
-
-    matches = [
-        profile
-        for profile in load_run_profiles(root)
-        if run_profile_matches_path(profile, rel_path, project_root=root)
-    ]
-    if not matches:
-        return None
-    if len(matches) > 1:
-        raise RunProfileConflictError(
-            relative_path=rel_path,
-            profile_ids=[profile.profile_id for profile in matches],
-        )
-    return RunProfileMatch(
-        profile=matches[0],
-        project_root=root,
-        active_file=file_path,
-        relative_path=rel_path,
-    )
+    return root, file_path, rel_path
 
 
 def run_profile_matches_path(

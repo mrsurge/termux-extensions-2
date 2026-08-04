@@ -3312,7 +3312,7 @@ Current profile fields:
 
 | Field | Purpose |
 |---|---|
-| `profileId` / `profile_id` | Stable profile id. Required. |
+| `profileId` / `profile_id` | Stable profile id. Required and unique within the project config. |
 | `runner` | `pagePreview`, `node`, `python`, or `custom`; defaults to `custom`. |
 | `entry` | Page Preview entry, defaulting to `index.html` for `pagePreview`. |
 | `include` | Relative path/glob matchers. Required, except `pagePreview` can derive it from `entry`. |
@@ -3333,12 +3333,23 @@ The generated Run Profiles form renders `additionalPorts` as repeatable Port and
 ### Runner dispatch
 
 - `host/terminal_actions_backend.py` owns the `ui.host.file.run` flow, draft-save confirmation, save-before-play, and terminal fallback.
-- `host/runner_profiles_backend.py` resolves the current profile through `match_run_profile()` and dispatches already-resolved profiles.
+- `host/runner_profiles_backend.py` resolves ordinary owner candidates or an explicit profile id and dispatches already-resolved profiles.
 - `runner_profile_shell_manager.py` launches `node`, `python`, and `custom` runners via `shellspec/runner_profile.yaml#runner-profile`.
 - `page_preview_shell_manager.py` launches page previews via `shellspec/page_preview.yaml#page-preview` and one deterministic `page-preview:<app>:<project>:<profile>` label.
 - `host/page_preview_backend.py` installs the default Page Preview profile into the project config.
 
 `pagePreview` profiles start a project-local preview shell and open its URL through the backend sidebar-window hook. Non-preview profiles can also open `sidebarUrl`; otherwise they just launch/reuse the runner shell and report the result. When `devTools` is enabled, the backend projects a stable project/profile target id with that URL slot. The Sidebar places the id in a namespaced iframe `window.name` marker before navigation; it does not append target metadata to the application URL.
+
+Ordinary Play keeps the one-owner fast path. If more than one profile owns the
+active file, Python returns a candidate-selection projection instead of treating
+the overlap as a launch error. The shared `teUI.dialog` selector then sends the
+chosen `profileId` back through the same backend Run transaction. Right-click or
+touch long-press on Play opens the forced selector with every configured profile
+plus `Run current file`; an explicit profile may therefore intentionally run
+even when its `include` patterns do not own the active file. `Run current file`
+is an explicit bypass and cannot fall back into profile matching on confirmation.
+Profile selection is independent of `saveDrafts`; only after selection does the
+chosen profile's existing save policy run.
 
 Run Profile process lifecycle is not fire-and-forget. The app worker opens one
 Socket.IO subscription to Framework-Shells `/fws`, requests
@@ -3352,10 +3363,13 @@ Boot snapshots, UI IPC reconnect snapshots, active-file/project changes,
 profile-config saves, Run/Stop actions, and natural shell exits all converge on
 `ui.runProfile.state.changed`. Every client therefore renders the same Run or
 Stop state without a frontend or backend polling timer. The one-shot
-`ui.host.runProfile.state.get` method remains available only for explicit repair
-or debugging, while `ui.host.runProfile.stop` terminates only the exact matched
-shell. Page Preview and ordinary runner profiles share this state contract;
-stopping a routed profile also releases its route ticket.
+`ui.host.runProfile.state.get` method remains available for explicit repair,
+debugging, and the user-triggered forced selector. The projection carries every
+relevant candidate's running state. One running owner retains direct Stop;
+multiple running owners require exact selection. `ui.host.runProfile.stop`
+accepts that exact `profileId` and terminates only its shell. Page Preview and
+ordinary runner profiles share this state contract; stopping a routed profile
+also releases its route ticket.
 
 ### Native preferred-port routing
 
@@ -3396,7 +3410,7 @@ Save policies:
 
 For a file with no matching profile, the fallback runner keeps active-file-only save behavior, and its warning suppression is stored under `fallback.showSaveWarning` because there is no profile object.
 
-When warning is enabled, the first Run request returns a confirmation projection and performs no save or launch. A confirmed request re-resolves the target/profile, verifies the confirmation key against the current target, save policy, and include set, then obtains a fresh active Monaco snapshot for the expected active path. Stale confirmation, a tab switch, or any required save error prevents launch. Concurrent Run requests for one project are serialized.
+When warning is enabled, the first Run request returns a confirmation projection and performs no save or launch. A confirmed request preserves the explicit profile/current-file intent, re-resolves the target and current profile config, verifies the confirmation key against the current target, save policy, and include set, then obtains a fresh active Monaco snapshot for the expected active path. The active project/file is checked before the save transaction and again before launch. Stale confirmation, a tab/project switch, or any required save error prevents launch. Concurrent Run requests for one project are serialized.
 
 The Run Profiles modal is `main_page/frontend/ui/run-profiles-modal.ts`. It uses CM6 JSON fields and preserves top-level config such as `fallback` while editing profile forms or raw JSON.
 

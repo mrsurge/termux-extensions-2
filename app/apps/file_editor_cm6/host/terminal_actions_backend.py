@@ -165,6 +165,7 @@ async def handle_host_run_active_file_request(
             payload,
             project_root=project_root,
             source_name=source_name,
+            enforce_current_context=True,
         )
 
 
@@ -173,30 +174,33 @@ async def _handle_host_run_active_file_request(
     *,
     project_root: Path,
     source_name: str,
+    enforce_current_context: bool = False,
 ) -> JsonMap:
     from .runner_profiles_backend import (
+        build_run_profile_selection_response,
         handle_runner_profile_run_request,
         resolve_runner_profile_run_request,
     )
 
     try:
         match = resolve_runner_profile_run_request(payload)
-    except RunProfileConflictError as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "data": {
-                "conflict": True,
-                "path": exc.relative_path,
-                "profileIds": list(exc.profile_ids),
-            },
-        }
+    except RunProfileConflictError:
+        return await build_run_profile_selection_response(payload)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 
     active_file = match.active_file if match is not None else _active_file(payload, project_root)
     if active_file is None:
         return {"ok": False, "error": "No active file selected"}
+    if enforce_current_context and not _run_context_is_current(
+        project_root=project_root,
+        active_file=active_file,
+    ):
+        return {
+            "ok": False,
+            "error": "Active project or file changed before Run could continue",
+            "data": {"action": "none", "staleRunIntent": True},
+        }
 
     save_mode: DraftSaveMode | str = (
         match.profile.save_drafts if match is not None else "active"
@@ -247,6 +251,15 @@ async def _handle_host_run_active_file_request(
     )
     if save_failure is not None:
         return save_failure
+    if enforce_current_context and not _run_context_is_current(
+        project_root=project_root,
+        active_file=active_file,
+    ):
+        return {
+            "ok": False,
+            "error": "Active project or file changed while drafts were being saved",
+            "data": {"action": "none", "staleRunIntent": True},
+        }
 
     if match is not None:
         return await handle_runner_profile_run_request(match, source_name=source_name)
@@ -295,6 +308,16 @@ def _active_file(payload: JsonMap, project_root: Path) -> Path | None:
     except ValueError:
         return None
     return resolved
+
+
+def _run_context_is_current(*, project_root: Path, active_file: Path) -> bool:
+    current_project = _active_project()
+    if current_project != project_root:
+        return False
+    current_file = get_history_store().get_last_file(str(project_root))
+    if not isinstance(current_file, str) or not current_file.strip():
+        return False
+    return Path(current_file).expanduser().resolve(strict=False) == active_file
 
 
 def _background_draft_paths(

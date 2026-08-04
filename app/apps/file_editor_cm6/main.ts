@@ -1050,6 +1050,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     menuViewBtn,
     runActiveBtn,
     runCurrentFile: () => runFileController.runOrStop(),
+    showRunProfileSelector: () => runFileController.showProfileSelector(),
   });
   menuCoreController.installPrimaryMenuButtons();
 

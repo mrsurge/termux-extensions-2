@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Mapping
 
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 _event_bus_handlers_registered = False
 _projection_lock = asyncio.Lock()
 _projection_revision = 0
-_last_projection_signature: tuple[tuple[str, object], ...] | None = None
+_last_projection_signature: str | None = None
 
 
 async def refresh_run_profile_state(
@@ -57,6 +58,9 @@ async def refresh_run_profile_state(
                 "runner": "",
                 "shellId": "",
                 "label": "",
+                "selectionRequired": False,
+                "candidateScope": "owners",
+                "candidates": [],
                 "error": str(exc),
             }
 
@@ -131,9 +135,9 @@ async def _refresh_after_project_switch(event: WorkerEvent) -> None:
     _ = await refresh_run_profile_state(data, source="project_switch")
 
 
-def _projection_signature(projection: JsonMap) -> tuple[tuple[str, object], ...]:
-    return tuple(
-        (key, projection.get(key))
+def _projection_signature(projection: JsonMap) -> str:
+    stable = {
+        key: projection.get(key)
         for key in (
             "projectPath",
             "path",
@@ -143,8 +147,17 @@ def _projection_signature(projection: JsonMap) -> tuple[tuple[str, object], ...]
             "runner",
             "shellId",
             "label",
+            "selectionRequired",
+            "candidateScope",
+            "candidates",
             "error",
         )
+    }
+    return json.dumps(
+        stable,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
     )
 
 

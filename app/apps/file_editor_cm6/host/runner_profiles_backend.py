@@ -33,6 +33,33 @@ def resolve_runner_profile_run_request(
     return resolve_run_profile_match(data)
 
 
+async def build_run_profile_selection_response(
+    data: Mapping[str, object] | None,
+    *,
+    include_all_profiles: bool = False,
+) -> JsonMap:
+    request = dict(data) if isinstance(data, Mapping) else {}
+    if include_all_profiles:
+        request["includeAllProfiles"] = True
+    projection = await build_run_profile_state_projection(request)
+    candidates = projection.get("candidates")
+    candidate_list = candidates if isinstance(candidates, list) else []
+    return {
+        "ok": True,
+        "data": {
+            "action": "selectRunProfile",
+            "path": projection.get("path", ""),
+            "candidates": candidate_list,
+            "includeRunCurrentFile": include_all_profiles,
+            "message": (
+                "Choose a Run Profile or run the active file"
+                if include_all_profiles
+                else "Choose which Run Profile owns this file"
+            ),
+        },
+    }
+
+
 # Play dispatch is backend-owned: the UI sends intent, then this hook chooses
 # the runner implementation for an already-resolved profile.
 async def handle_runner_profile_run_request(
@@ -187,16 +214,8 @@ async def maybe_handle_runner_profile_run_request(
 ) -> JsonMap | None:
     try:
         match = resolve_runner_profile_run_request(data)
-    except RunProfileConflictError as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "data": {
-                "conflict": True,
-                "path": exc.relative_path,
-                "profileIds": list(exc.profile_ids),
-            },
-        }
+    except RunProfileConflictError:
+        return await build_run_profile_selection_response(data)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -216,7 +235,7 @@ async def handle_run_profile_state_get_request(
             data,
             reconcile_stale_route=True,
         )
-    except (RunProfileConflictError, ValueError) as exc:
+    except ValueError as exc:
         return {"ok": False, "error": str(exc)}
     return {"ok": True, "data": projection}
 

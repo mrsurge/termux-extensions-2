@@ -88,6 +88,59 @@ test("inline dialogs reopen sequentially with compact, bounded controls", async 
   window.close();
 });
 
+test("inline select menus escape the scrollable dialog body and clean up", async () => {
+  const window = new Window({ url: "http://127.0.0.1/app/test" });
+  const { document } = window;
+  const service = createDialogService(window);
+  const resultPromise = service.open({
+    kind: "form",
+    title: "Run Profile",
+    fields: [{
+      key: "selection",
+      kind: "select",
+      label: "Action",
+      value: { profileId: "first" },
+      options: [
+        { label: "First", value: { profileId: "first" } },
+        { label: "Second", value: { profileId: "second" } },
+      ],
+    }],
+    actions: [
+      { id: "cancel", label: "Cancel", role: "cancel", validate: false },
+      { id: "continue", label: "Continue", role: "accept", primary: true },
+    ],
+    defaultAction: "continue",
+    cancelAction: "cancel",
+  });
+  await nextTask();
+
+  const layer = document.querySelector(".te-dialog-layer");
+  const body = layer.querySelector(".te-dialog-body");
+  const selectButton = layer.querySelector(".te-dialog-select-button");
+  selectButton.click();
+
+  let menu = layer.querySelector(".te-dialog-select-menu");
+  assert.ok(menu);
+  assert.equal(menu.parentElement, layer);
+  assert.equal(body.contains(menu), false);
+  assert.equal(selectButton.getAttribute("aria-expanded"), "true");
+
+  window.dispatchEvent(new window.Event("scroll"));
+  assert.equal(layer.querySelector(".te-dialog-select-menu"), null);
+  assert.equal(selectButton.getAttribute("aria-expanded"), "false");
+
+  selectButton.click();
+  menu = layer.querySelector(".te-dialog-select-menu");
+  menu.querySelectorAll(".te-dialog-select-option")[1].click();
+  assert.equal(layer.querySelector(".te-dialog-select-menu"), null);
+  layer.querySelector('.te-dialog-action[data-primary="true"]').click();
+  assert.deepEqual((await resultPromise).values.selection, { profileId: "second" });
+  assert.equal(document.querySelector(".te-dialog-select-menu"), null);
+
+  service.surfaceRegistry.destroy();
+  window.close();
+});
+
 test("declared surfaces have stable stack, Escape close, and focus restoration", async () => {
   const window = new Window({ url: "http://127.0.0.1/app/test" });
   const { document } = window;

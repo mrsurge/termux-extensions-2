@@ -26,6 +26,26 @@ interface RunProfileState {
   matched: boolean;
   running: boolean;
   profileId: string;
+  candidates: RunProfileCandidate[];
+}
+
+interface RunProfileCandidate {
+  profileId: string;
+  runner: string;
+  entry: string;
+  ownsActiveFile: boolean;
+  running: boolean;
+}
+
+interface RunIntent extends Record<string, unknown> {
+  profileId?: string;
+  runCurrentFile?: true;
+}
+
+interface RunSelection {
+  kind: 'profile' | 'currentFile';
+  profileId?: string;
+  running?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -40,6 +60,22 @@ function errorMessage(error: unknown): string {
 
 function asRunFileResponse(value: unknown): RunFileResponse {
   return isRecord(value) ? value : {};
+}
+
+function runProfileCandidates(value: unknown): RunProfileCandidate[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!isRecord(item) || typeof item.profileId !== 'string' || !item.profileId) {
+      return [];
+    }
+    return [{
+      profileId: item.profileId,
+      runner: typeof item.runner === 'string' ? item.runner : '',
+      entry: typeof item.entry === 'string' ? item.entry : '',
+      ownsActiveFile: item.ownsActiveFile === true,
+      running: item.running === true,
+    }];
+  });
 }
 
 function resultMessage(payload: RunFileResponse): string {
@@ -59,6 +95,7 @@ export function createRunFileController(deps: RunFileControllerDeps) {
     matched: false,
     running: false,
     profileId: '',
+    candidates: [],
   };
   let busy = false;
   let refreshSequence = 0;
@@ -80,6 +117,7 @@ export function createRunFileController(deps: RunFileControllerDeps) {
       matched: data.matched === true,
       running: data.running === true,
       profileId: typeof data.profileId === 'string' ? data.profileId : '',
+      candidates: runProfileCandidates(data.candidates),
     };
     render();
   }
@@ -88,7 +126,13 @@ export function createRunFileController(deps: RunFileControllerDeps) {
     const path = deps.getCurrentPath() || '';
     const sequence = ++refreshSequence;
     if (!path) {
-      state = { path: '', matched: false, running: false, profileId: '' };
+      state = {
+        path: '',
+        matched: false,
+        running: false,
+        profileId: '',
+        candidates: [],
+      };
       render();
       return;
     }
@@ -103,13 +147,20 @@ export function createRunFileController(deps: RunFileControllerDeps) {
         matched: data.matched === true,
         running: data.running === true,
         profileId: typeof data.profileId === 'string' ? data.profileId : '',
+        candidates: runProfileCandidates(data.candidates),
       };
       if (response.ok === false && !options.quiet) {
         deps.toast(response.error || 'Failed to inspect run profile');
       }
     } catch (error) {
       if (sequence !== refreshSequence || path !== (deps.getCurrentPath() || '')) return;
-      state = { path, matched: false, running: false, profileId: '' };
+      state = {
+        path,
+        matched: false,
+        running: false,
+        profileId: '',
+        candidates: [],
+      };
       if (!options.quiet) deps.toast(errorMessage(error));
     } finally {
       if (sequence === refreshSequence) {
@@ -164,63 +215,189 @@ export function createRunFileController(deps: RunFileControllerDeps) {
     };
   }
 
-  async function runCurrentFile(): Promise<void> {
-    const currentPath = deps.getCurrentPath();
-    if (!currentPath) {
+  async function chooseRunSelection(
+    data: Record<string, unknown>,
+  ): Promise<RunSelection | null> {
+    const candidates = runProfileCandidates(data.candidates);
+    const includeRunCurrentFile = data.includeRunCurrentFile === true;
+    const options: Array<{ value: RunSelection; label: string }> = candidates.map(
+      (candidate) => {
+        const detail = [candidate.runner, candidate.entry].filter(Boolean).join(' · ');
+        return {
+          value: {
+            kind: 'profile',
+            profileId: candidate.profileId,
+            running: candidate.running,
+          },
+          label: `${candidate.running ? 'Stop' : 'Run'} ${candidate.profileId}${
+            detail ? ` · ${detail}` : ''
+          }`,
+        };
+      },
+    );
+    if (includeRunCurrentFile) {
+      options.push({
+        value: { kind: 'currentFile' },
+        label: 'Run current file',
+      });
+    }
+    if (!options.length) {
+      deps.toast('No Run Profiles are available');
+      return null;
+    }
+    const result = await window.teUI.dialog.open({
+      kind: 'form',
+      title: 'Run Profile',
+      message: typeof data.message === 'string'
+        ? data.message
+        : 'Choose what to run or stop',
+      fields: [{
+        key: 'selection',
+        kind: 'select',
+        label: 'Action',
+        value: options[0].value,
+        options,
+      }],
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel', validate: false },
+        { id: 'continue', label: 'Continue', role: 'accept', primary: true },
+      ],
+      defaultAction: 'continue',
+      cancelAction: 'cancel',
+    });
+    if (result.status !== 'accepted' || result.action !== 'continue') return null;
+    const selection = result.values.selection;
+    if (!isRecord(selection)) return null;
+    if (selection.kind === 'currentFile') return { kind: 'currentFile' };
+    if (selection.kind !== 'profile' || typeof selection.profileId !== 'string') {
+      return null;
+    }
+    return {
+      kind: 'profile',
+      profileId: selection.profileId,
+      running: selection.running === true,
+    };
+  }
+
+  function handleRunResult(response: RunFileResponse): void {
+    const isWrapped = Object.prototype.hasOwnProperty.call(response, 'ok');
+    if (isWrapped && response.ok === false) {
+      deps.toast(response.error || 'Failed to run file');
+      return;
+    }
+    const data = asRunFileResponse(response.data);
+    if (typeof data.path === 'string' && typeof data.running === 'boolean') {
+      applyProjection(data);
+    }
+    deps.toast(resultMessage(response));
+  }
+
+  async function stopProfile(path: string, profileId: string): Promise<void> {
+    const response = asRunFileResponse(
+      await deps.requestBackendRunProfileStop({ path, profileId }),
+    );
+    const data = asRunFileResponse(response.data);
+    if (response.ok === false) {
+      deps.toast(response.error || 'Failed to stop run profile');
+      return;
+    }
+    applyProjection(data);
+    deps.toast(
+      typeof data.message === 'string' ? data.message : 'Run profile stopped',
+    );
+  }
+
+  async function performSelection(path: string, selection: RunSelection): Promise<void> {
+    if (selection.kind === 'profile' && selection.running && selection.profileId) {
+      await stopProfile(path, selection.profileId);
+      return;
+    }
+    const intent: RunIntent = selection.kind === 'currentFile'
+      ? { runCurrentFile: true }
+      : { profileId: selection.profileId };
+    await executeRunIntent(path, intent);
+  }
+
+  async function executeRunIntent(path: string, intent: RunIntent): Promise<void> {
+    let response = await requestRun({ path, ...intent });
+    const data = asRunFileResponse(response.data);
+    if (data.action === 'selectRunProfile') {
+      const selection = await chooseRunSelection(data);
+      if (selection) await performSelection(path, selection);
+      return;
+    }
+    if (data.action === 'confirmDraftSave') {
+      const confirmation = await confirmDraftSave(data);
+      if (!confirmation.confirmed) return;
+      response = await requestRun({
+        path,
+        ...intent,
+        confirmDraftSave: true,
+        draftSaveConfirmationKey: confirmation.confirmationKey,
+        suppressSaveWarning: confirmation.suppressWarning,
+      });
+    }
+    handleRunResult(response);
+  }
+
+  async function runCurrentFile(intent: RunIntent = {}): Promise<void> {
+    const path = deps.getCurrentPath();
+    if (!path) {
       deps.toast('Open a file first');
       return;
     }
     busy = true;
     render();
     try {
-      let responseRecord = await requestRun({ path: currentPath });
-      const firstData = asRunFileResponse(responseRecord.data);
-      if (firstData.action === 'confirmDraftSave') {
-        const confirmation = await confirmDraftSave(firstData);
-        if (!confirmation.confirmed) return;
-        responseRecord = await requestRun({
-          path: currentPath,
-          confirmDraftSave: true,
-          draftSaveConfirmationKey: confirmation.confirmationKey,
-          suppressSaveWarning: confirmation.suppressWarning,
-        });
-      }
-      const isWrapped = Object.prototype.hasOwnProperty.call(responseRecord, 'ok');
-      if (isWrapped && responseRecord.ok === false) {
-        deps.toast(responseRecord.error || 'Failed to run file');
-      } else {
-        const data = asRunFileResponse(responseRecord.data);
-        if (typeof data.path === 'string' && typeof data.running === 'boolean') {
-          applyProjection(data);
-        }
-        deps.toast(resultMessage(responseRecord));
-      }
-    } catch (err) {
-      console.error('[RUN] Failed to execute file:', err);
-      deps.toast(errorMessage(err));
+      await executeRunIntent(path, intent);
+    } catch (error) {
+      console.error('[RUN] Failed to execute file:', error);
+      deps.toast(errorMessage(error));
     } finally {
       busy = false;
       render();
     }
   }
 
-  async function stopCurrentProfile(): Promise<void> {
+  async function stopCurrentProfile(profileId = state.profileId): Promise<void> {
     const path = deps.getCurrentPath();
-    if (!path) return;
+    if (!path || !profileId) return;
+    busy = true;
+    render();
+    try {
+      await stopProfile(path, profileId);
+    } catch (error) {
+      deps.toast(errorMessage(error));
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  async function showProfileSelector(): Promise<void> {
+    const path = deps.getCurrentPath();
+    if (!path) {
+      deps.toast('Open a file first');
+      return;
+    }
     busy = true;
     render();
     try {
       const response = asRunFileResponse(
-        await deps.requestBackendRunProfileStop({ path }),
+        await deps.requestBackendRunProfileState({
+          path,
+          includeAllProfiles: true,
+        }),
       );
-      const data = asRunFileResponse(response.data);
-      if (response.ok === false) deps.toast(response.error || 'Failed to stop run profile');
-      else {
-        applyProjection(data);
-        deps.toast(
-          typeof data.message === 'string' ? data.message : 'Run profile stopped',
-        );
+      if (response.ok === false) {
+        deps.toast(response.error || 'Failed to inspect Run Profiles');
+        return;
       }
+      const data = asRunFileResponse(response.data);
+      data.includeRunCurrentFile = true;
+      data.message = 'Choose a Run Profile or run the active file';
+      const selection = await chooseRunSelection(data);
+      if (selection) await performSelection(path, selection);
     } catch (error) {
       deps.toast(errorMessage(error));
     } finally {
@@ -231,8 +408,33 @@ export function createRunFileController(deps: RunFileControllerDeps) {
 
   async function runOrStop(): Promise<void> {
     const path = deps.getCurrentPath() || '';
-    if (state.running && state.path === path) {
-      await stopCurrentProfile();
+    const runningCandidates = state.path === path
+      ? state.candidates.filter((candidate) => candidate.running)
+      : [];
+    if (runningCandidates.length === 1) {
+      await stopCurrentProfile(runningCandidates[0].profileId);
+      return;
+    }
+    if (runningCandidates.length > 1) {
+      busy = true;
+      render();
+      try {
+        const selection = await chooseRunSelection({
+          candidates: runningCandidates,
+          includeRunCurrentFile: false,
+          message: 'Choose which running profile to stop',
+        });
+        if (selection) await performSelection(path, selection);
+      } catch (error) {
+        deps.toast(errorMessage(error));
+      } finally {
+        busy = false;
+        render();
+      }
+      return;
+    }
+    if (state.running && state.path === path && state.profileId) {
+      await stopCurrentProfile(state.profileId);
       return;
     }
     await runCurrentFile();
@@ -244,6 +446,7 @@ export function createRunFileController(deps: RunFileControllerDeps) {
     render,
     runCurrentFile,
     runOrStop,
+    showProfileSelector,
     stopCurrentProfile,
   };
 }

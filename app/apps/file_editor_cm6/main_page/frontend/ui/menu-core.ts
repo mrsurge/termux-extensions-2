@@ -15,6 +15,7 @@
  *   menuViewBtn: HTMLElement,
  *   runActiveBtn: HTMLElement,
  *   runCurrentFile: () => void,
+ *   showRunProfileSelector: () => void,
  * }} deps
  */
 export function createMenuCoreController(deps: any) {
@@ -59,9 +60,90 @@ export function createMenuCoreController(deps: any) {
     deps.menuEditBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.menuEditDD.classList.toggle('show'); if (open) closeOthers(deps.menuEditDD); });
     deps.menuEditorBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.menuEditorDD.classList.toggle('show'); if (open) closeOthers(deps.menuEditorDD); });
     deps.menuViewBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); const open = deps.menuViewDD.classList.toggle('show'); if (open) closeOthers(deps.menuViewDD); });
-    deps.runActiveBtn.addEventListener('click', (e: MouseEvent) => { e.stopPropagation(); deps.runCurrentFile(); });
+    installRunButtonInteractions(
+      deps.runActiveBtn,
+      deps.runCurrentFile,
+      deps.showRunProfileSelector,
+    );
     document.addEventListener('click', () => closeAllMenus());
   }
 
   return { closeAllMenus, bindMenuToggle, installPrimaryMenuButtons };
+}
+
+interface RunButtonInteractionOptions {
+  longPressMs?: number;
+  moveCancelPx?: number;
+  suppressClickMs?: number;
+}
+
+export function installRunButtonInteractions(
+  button: HTMLElement,
+  runPrimaryAction: () => void,
+  showProfileSelector: () => void,
+  options: RunButtonInteractionOptions = {},
+): void {
+  const longPressMs = options.longPressMs ?? 520;
+  const moveCancelPx = options.moveCancelPx ?? 8;
+  const suppressClickMs = options.suppressClickMs ?? 900;
+  let pointerId: number | null = null;
+  let startX = 0;
+  let startY = 0;
+  let suppressClickUntil = 0;
+  let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const clearLongPress = () => {
+    if (longPressTimer !== null) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  };
+
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (Date.now() < suppressClickUntil) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      suppressClickUntil = 0;
+      return;
+    }
+    runPrimaryAction();
+  });
+
+  button.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    clearLongPress();
+    showProfileSelector();
+  });
+
+  button.addEventListener('pointerdown', (event) => {
+    if (event.pointerType !== 'touch' || event.button !== 0) return;
+    pointerId = event.pointerId;
+    startX = event.clientX;
+    startY = event.clientY;
+    clearLongPress();
+    longPressTimer = setTimeout(() => {
+      if (pointerId !== event.pointerId) return;
+      longPressTimer = null;
+      suppressClickUntil = Date.now() + suppressClickMs;
+      showProfileSelector();
+    }, longPressMs);
+  });
+
+  button.addEventListener('pointermove', (event) => {
+    if (pointerId !== event.pointerId) return;
+    if (Math.hypot(event.clientX - startX, event.clientY - startY) > moveCancelPx) {
+      clearLongPress();
+    }
+  });
+
+  const finishPointer = (event: PointerEvent) => {
+    if (pointerId !== event.pointerId) return;
+    clearLongPress();
+    pointerId = null;
+  };
+  button.addEventListener('pointerup', finishPointer);
+  button.addEventListener('pointercancel', finishPointer);
+  button.addEventListener('lostpointercapture', finishPointer);
 }

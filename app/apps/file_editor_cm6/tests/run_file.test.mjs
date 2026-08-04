@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { build } from 'esbuild';
+import { Window } from 'happy-dom';
 
 const appRoot = path.resolve(import.meta.dirname, '..');
 let moduleSequence = 0;
@@ -11,6 +12,20 @@ let moduleSequence = 0;
 async function importRunFileController() {
   const result = await build({
     entryPoints: [path.join(appRoot, 'main_page/frontend/file-ops/run-file.ts')],
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    target: 'es2022',
+    write: false,
+  });
+  const source = result.outputFiles[0].text;
+  const url = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}#${moduleSequence++}`;
+  return import(url);
+}
+
+async function importMenuCore() {
+  const result = await build({
+    entryPoints: [path.join(appRoot, 'main_page/frontend/ui/menu-core.ts')],
     bundle: true,
     format: 'esm',
     platform: 'node',
@@ -142,6 +157,147 @@ test('Run confirmation resubmits with warning suppression intent', async () => {
   assert.equal(state.buttonStates.at(-1).running, false);
 });
 
+test('explicit profile selection survives draft confirmation', async () => {
+  installDialog({
+    status: 'accepted',
+    action: 'run',
+    values: { suppressWarning: false },
+  });
+  const { createRunFileController } = await importRunFileController();
+  const state = controllerDeps([
+    {
+      ok: true,
+      data: {
+        action: 'confirmDraftSave',
+        profileId: 'backend-b',
+        confirmationKey: 'confirm-backend-b',
+      },
+    },
+    { ok: true, data: { action: 'runProfile', message: 'backend-b started' } },
+  ]);
+
+  await createRunFileController(state.deps).runCurrentFile({ profileId: 'backend-b' });
+
+  assert.deepEqual(state.calls, [
+    { path: '/project/main.py', profileId: 'backend-b' },
+    {
+      path: '/project/main.py',
+      profileId: 'backend-b',
+      confirmDraftSave: true,
+      draftSaveConfirmationKey: 'confirm-backend-b',
+      suppressSaveWarning: false,
+    },
+  ]);
+});
+
+test('overlapping owners open the selector and run the chosen profile', async () => {
+  installDialog({
+    status: 'accepted',
+    action: 'continue',
+    values: {
+      selection: { kind: 'profile', profileId: 'backend-b', running: false },
+    },
+  });
+  const { createRunFileController } = await importRunFileController();
+  const state = controllerDeps([
+    {
+      ok: true,
+      data: {
+        action: 'selectRunProfile',
+        candidates: [
+          { profileId: 'backend-a', runner: 'python', running: false },
+          { profileId: 'backend-b', runner: 'python', running: false },
+        ],
+      },
+    },
+    { ok: true, data: { action: 'runProfile', message: 'backend-b started' } },
+  ]);
+
+  await createRunFileController(state.deps).runCurrentFile();
+
+  assert.deepEqual(state.calls, [
+    { path: '/project/main.py' },
+    { path: '/project/main.py', profileId: 'backend-b' },
+  ]);
+});
+
+test('forced selector can run a non-owning profile', async () => {
+  installDialog({
+    status: 'accepted',
+    action: 'continue',
+    values: {
+      selection: { kind: 'profile', profileId: 'test-backend', running: false },
+    },
+  });
+  const { createRunFileController } = await importRunFileController();
+  const state = controllerDeps([
+    { ok: true, data: { action: 'runProfile', message: 'test-backend started' } },
+  ], {
+    stateResponses: [{
+      ok: true,
+      data: {
+        candidates: [{
+          profileId: 'test-backend',
+          runner: 'custom',
+          ownsActiveFile: false,
+          running: false,
+        }],
+      },
+    }],
+  });
+
+  await createRunFileController(state.deps).showProfileSelector();
+
+  assert.deepEqual(state.stateCalls, [{
+    path: '/project/main.py',
+    includeAllProfiles: true,
+  }]);
+  assert.deepEqual(state.calls, [{
+    path: '/project/main.py',
+    profileId: 'test-backend',
+  }]);
+});
+
+test('forced selector can explicitly bypass profiles and run the current file', async () => {
+  installDialog({
+    status: 'accepted',
+    action: 'continue',
+    values: { selection: { kind: 'currentFile' } },
+  });
+  const { createRunFileController } = await importRunFileController();
+  const state = controllerDeps([
+    { ok: true, data: { action: 'terminal', message: 'current file started' } },
+  ], {
+    stateResponses: [{ ok: true, data: { candidates: [] } }],
+  });
+
+  await createRunFileController(state.deps).showProfileSelector();
+
+  assert.deepEqual(state.calls, [{
+    path: '/project/main.py',
+    runCurrentFile: true,
+  }]);
+});
+
+test('cancelling profile selection sends no selected run request', async () => {
+  installDialog({ status: 'cancelled', action: 'cancel', values: {} });
+  const { createRunFileController } = await importRunFileController();
+  const state = controllerDeps([{
+    ok: true,
+    data: {
+      action: 'selectRunProfile',
+      candidates: [
+        { profileId: 'backend-a', runner: 'python', running: false },
+        { profileId: 'backend-b', runner: 'python', running: false },
+      ],
+    },
+  }]);
+
+  await createRunFileController(state.deps).runCurrentFile();
+
+  assert.deepEqual(state.calls, [{ path: '/project/main.py' }]);
+});
+
 test('cancelling the warning does not issue an execution request', async () => {
   installDialog({
     status: 'cancelled',
@@ -227,8 +383,93 @@ test('running profile changes Play to Stop and terminates the exact profile', as
   await controller.runOrStop();
 
   assert.deepEqual(state.calls, []);
-  assert.deepEqual(state.stopCalls, [{ path: '/project/main.py' }]);
+  assert.deepEqual(state.stopCalls, [{
+    path: '/project/main.py',
+    profileId: 'python',
+  }]);
   assert.equal(state.stateCalls.length, 1);
   assert.equal(state.buttonStates.at(-1).running, false);
   assert.deepEqual(state.toasts, ["Run profile 'python' stopped"]);
+});
+
+test('multiple running owners require an exact Stop selection', async () => {
+  installDialog({
+    status: 'accepted',
+    action: 'continue',
+    values: {
+      selection: { kind: 'profile', profileId: 'backend-b', running: true },
+    },
+  });
+  const { createRunFileController } = await importRunFileController();
+  const state = controllerDeps([], {
+    stopResponses: [{
+      ok: true,
+      data: {
+        stopped: true,
+        running: false,
+        profileId: 'backend-b',
+        message: 'backend-b stopped',
+      },
+    }],
+  });
+  const controller = createRunFileController(state.deps);
+  controller.applyProjection({
+    path: '/project/main.py',
+    matched: true,
+    running: true,
+    profileId: '',
+    candidates: [
+      { profileId: 'backend-a', runner: 'python', running: true },
+      { profileId: 'backend-b', runner: 'python', running: true },
+    ],
+  });
+
+  await controller.runOrStop();
+
+  assert.deepEqual(state.calls, []);
+  assert.deepEqual(state.stopCalls, [{
+    path: '/project/main.py',
+    profileId: 'backend-b',
+  }]);
+});
+
+test('Play context-menu and touch long-press open forced profile selection', async () => {
+  const window = new Window({ url: 'http://127.0.0.1/app' });
+  const button = window.document.createElement('button');
+  window.document.body.appendChild(button);
+  const { installRunButtonInteractions } = await importMenuCore();
+  let primaryCalls = 0;
+  let selectorCalls = 0;
+  installRunButtonInteractions(
+    button,
+    () => { primaryCalls += 1; },
+    () => { selectorCalls += 1; },
+    { longPressMs: 10, suppressClickMs: 50 },
+  );
+
+  button.dispatchEvent(new window.MouseEvent('contextmenu', {
+    bubbles: true,
+    cancelable: true,
+  }));
+  assert.equal(selectorCalls, 1);
+
+  button.dispatchEvent(new window.PointerEvent('pointerdown', {
+    pointerId: 7,
+    pointerType: 'touch',
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+    bubbles: true,
+  }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  button.dispatchEvent(new window.PointerEvent('pointerup', {
+    pointerId: 7,
+    pointerType: 'touch',
+    bubbles: true,
+  }));
+  button.click();
+
+  assert.equal(selectorCalls, 2);
+  assert.equal(primaryCalls, 0);
+  window.close();
 });
