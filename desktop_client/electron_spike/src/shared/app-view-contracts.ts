@@ -49,6 +49,7 @@ export type ElectronRunProfileRuntimeMetadata = {
   profileId: string;
   devRuntime: boolean;
   devTools: boolean;
+  workerIdBase: string;
   workerLabel: string;
   frameworkOrigin: string;
 };

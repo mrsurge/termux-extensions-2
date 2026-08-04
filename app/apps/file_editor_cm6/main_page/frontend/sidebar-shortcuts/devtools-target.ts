@@ -11,6 +11,12 @@ function normalized(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+export function runProfileWorkerIdBase(profileId: string): string {
+  const segment = normalized(profileId).toLowerCase().replace(/[^a-z0-9]+/g, "")
+    .slice(0, 4) || "prof";
+  return `rp-${segment}`;
+}
+
 function runProfileSurface(sc: SidebarShortcut): RunProfileSurfaceDescriptor | null {
   const candidate = sc.run_profile_surface || sc.runProfileSurface;
   return candidate && typeof candidate === "object"
@@ -44,6 +50,7 @@ export function runProfileRuntimeMetadata(
     profileId,
     devRuntime,
     devTools,
+    workerIdBase: runProfileWorkerIdBase(profileId || surfaceId),
     workerLabel: surfaceId,
     frameworkOrigin: normalized(frameworkOrigin),
   };

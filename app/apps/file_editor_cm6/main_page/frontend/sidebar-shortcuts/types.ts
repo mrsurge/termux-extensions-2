@@ -68,6 +68,7 @@ export interface RunProfileRuntimeMetadata extends UnknownRecord {
   profileId: string;
   devRuntime: boolean;
   devTools: boolean;
+  workerIdBase: string;
   workerLabel: string;
   frameworkOrigin: string;
 }

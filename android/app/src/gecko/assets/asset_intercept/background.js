@@ -13,6 +13,7 @@ let frameworkBaseUrl = "";
 const pendingRunTargets = new Map();
 const devRuntimeOriginsBySurface = new Map();
 const devRuntimeLabelsBySurface = new Map();
+const devRuntimeWorkerIdBasesBySurface = new Map();
 let devRuntimeOrigins = new Set();
 
 function runtimeMetadata(route) {
@@ -23,6 +24,7 @@ function runtimeMetadata(route) {
   if (!surfaceId || runtime?.devRuntime !== true) return null;
   return {
     surfaceId,
+    workerIdBase: String(runtime.workerIdBase || "rp-prof").trim() || "rp-prof",
     workerLabel: String(runtime.workerLabel || surfaceId).trim() || surfaceId,
   };
 }
@@ -67,6 +69,7 @@ function registerDevRuntimePolicy(route, result) {
   if (origins.size === 0) return;
   devRuntimeOriginsBySurface.set(runtime.surfaceId, origins);
   devRuntimeLabelsBySurface.set(runtime.surfaceId, runtime.workerLabel);
+  devRuntimeWorkerIdBasesBySurface.set(runtime.surfaceId, runtime.workerIdBase);
   rebuildDevRuntimeOrigins();
 }
 
@@ -79,6 +82,10 @@ function registerDirectDevRuntimePolicy(runtime, url) {
       surfaceId,
       String(runtime.workerLabel || surfaceId).trim() || surfaceId,
     );
+    devRuntimeWorkerIdBasesBySurface.set(
+      surfaceId,
+      String(runtime.workerIdBase || "rp-prof").trim() || "rp-prof",
+    );
     rebuildDevRuntimeOrigins();
     return true;
   } catch (_) {
@@ -89,6 +96,7 @@ function registerDirectDevRuntimePolicy(runtime, url) {
 function releaseDevRuntimePolicy(surfaceId) {
   const normalized = String(surfaceId || "").trim();
   devRuntimeLabelsBySurface.delete(normalized);
+  devRuntimeWorkerIdBasesBySurface.delete(normalized);
   if (!devRuntimeOriginsBySurface.delete(normalized)) return;
   rebuildDevRuntimeOrigins();
 }
@@ -96,6 +104,7 @@ function releaseDevRuntimePolicy(surfaceId) {
 function clearDevRuntimePolicies() {
   devRuntimeOriginsBySurface.clear();
   devRuntimeLabelsBySurface.clear();
+  devRuntimeWorkerIdBasesBySurface.clear();
   devRuntimeOrigins = new Set();
 }
 
@@ -286,6 +295,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
     return Promise.resolve({
       ok: true,
       frameworkOrigin: configuredFrameworkOrigin,
+      workerIdBase: devRuntimeWorkerIdBasesBySurface.get(surfaceId) || "rp-prof",
       workerLabel: devRuntimeLabelsBySurface.get(surfaceId) || surfaceId,
     });
   }

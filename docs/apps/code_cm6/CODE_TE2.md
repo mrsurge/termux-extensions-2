@@ -3441,6 +3441,12 @@ session apply request `no-cache` and response `no-store` headers only to the
 surface's exact primary and auxiliary origins, excluding WebSocket upgrades.
 They also inject the shared TE2 console bridge into the marked Run Profile frame
 with an explicit framework origin and a profile-aware unique worker label.
+Run Profile selectors use the compact
+`rp-<profile4>-<injector4>-<owner4>` worker-id form: the profile segment is the
+first four normalized alphanumeric characters (or `prof`), the injector is
+`gkvw` or `elct`, and the four-character base62 owner remains stable in session
+storage for that page/window. The full surface-aware label remains registered as
+worker metadata and is not repeated in the selector id.
 Surface removal, framework retarget, and native teardown release this policy.
 The separate `devTools` option still controls only GeckoView's full Chobitsu
 Inspector target runtime. Ordinary browsers keep refresh behavior but cannot

@@ -51,6 +51,7 @@ function runtimeMetadata() {
     profileId: "preview",
     devRuntime: true,
     devTools: false,
+    workerIdBase: "rp-prev",
     workerLabel: "run-profile:abc123:preview",
     frameworkOrigin: "http://framework.example:8089",
   };
@@ -154,6 +155,8 @@ test("dev runtime injects the shared console bridge into its exact marked frame"
     assert.equal(injected.length, 1);
     assert.match(injected[0], /initConsoleBridge/);
     assert.match(injected[0], /run-profile:abc123:preview/);
+    assert.match(injected[0], /rp-prev-elct/);
+    assert.match(injected[0], /workerOwnerLength[^\n]*4/);
     assert.match(injected[0], /http:\/\/framework\.example:8089/);
     assert.doesNotMatch(injected[0], /export function/);
 

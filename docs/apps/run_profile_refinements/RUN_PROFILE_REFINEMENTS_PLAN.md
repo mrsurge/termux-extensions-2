@@ -385,14 +385,17 @@ iframe is not treated as durable identity.
 
 ### Worker Identity
 
-Use a stable label such as:
+Keep the full surface-aware value as the stable worker label, but use a compact
+selector id:
 
 ```text
-run-profile:<project-hash>:<profile-id>
+rp-<profile4>-<injector4>-<owner4>
 ```
 
-and initialize the bridge with `uniquePerWindow: true` so each client/window
-gets a distinct suffix.
+The profile segment is its first four normalized alphanumeric characters, with
+`prof` as the fallback. Native injectors use `gkvw` and `elct`; the final four
+characters are a base62 owner stored per page/window in session storage. This
+keeps selectors concise without discarding the full label used for diagnostics.
 
 ### GeckoView
 

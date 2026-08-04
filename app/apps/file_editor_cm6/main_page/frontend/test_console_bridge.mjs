@@ -143,3 +143,30 @@ describe('console bridge eval', () => {
     assert.equal(result.data.value, null);
   });
 });
+
+describe('console bridge worker identity', () => {
+  test('short prefix keeps a stable four-character per-window owner', async () => {
+    const mockSocket = createMockSocket();
+    const mockWindow = createMockWindow();
+    globalThis.window = mockWindow;
+    if (!_moduleCache) _moduleCache = await import(BRIDGE_PATH.href);
+    _moduleCache.destroyConsoleBridge();
+
+    const options = {
+      socket: mockSocket,
+      workerLabel: 'run-profile:full-project-hash:full-profile-hash',
+      workerIdPrefix: 'rp-prev-gkvw',
+      workerOwnerLength: 4,
+      uniquePerWindow: true,
+    };
+    const first = _moduleCache.initConsoleBridge(options);
+    assert.match(first.workerId, /^rp-prev-gkvw-[A-Za-z0-9]{4}$/);
+    assert.equal(_moduleCache.getConsoleBridgeStatus().workerLabel,
+      'run-profile:full-project-hash:full-profile-hash');
+
+    first.destroy();
+    const second = _moduleCache.initConsoleBridge(options);
+    assert.equal(second.workerId, first.workerId);
+    second.destroy();
+  });
+});

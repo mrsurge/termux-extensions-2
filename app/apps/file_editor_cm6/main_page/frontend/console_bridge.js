@@ -63,11 +63,18 @@ function _serializeArg(a) {
   catch { return String(a); }
 }
 
-function _randomWorkerSuffix() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID().split('-')[0];
+function _randomWorkerSuffix(length = 8) {
+  const size = Math.max(1, Math.min(32, Number(length) || 8));
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const values = crypto.getRandomValues(new Uint8Array(size));
+    return Array.from(values, value => alphabet[value % alphabet.length]).join('');
   }
-  return Math.random().toString(36).slice(2, 10);
+  let suffix = '';
+  while (suffix.length < size) {
+    suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return suffix;
 }
 
 function _sanitizeWorkerLabel(value) {
@@ -84,19 +91,24 @@ function _socketEndpoint(baseUrl, namespace) {
   return normalizedBase ? `${normalizedBase}${normalizedNamespace}` : normalizedNamespace;
 }
 
-function _perWindowWorkerId(label) {
-  const base = _sanitizeWorkerLabel(label);
-  const storageKey = `te2.consoleBridge.workerId:${base}`;
+function _perWindowWorkerId(label, prefix = '', ownerLength = 8) {
+  const configuredPrefix = String(prefix || '').trim();
+  const base = _sanitizeWorkerLabel(configuredPrefix || label);
+  const size = Math.max(1, Math.min(32, Number(ownerLength) || 8));
+  const separator = configuredPrefix ? '-' : ':';
+  const storageKey = configuredPrefix
+    ? `te2.consoleBridge.workerId:${base}:${size}`
+    : `te2.consoleBridge.workerId:${base}`;
   try {
     const existing = window.sessionStorage.getItem(storageKey);
     if (existing && typeof existing === 'string' && existing.trim()) {
       return existing.trim();
     }
-    const created = `${base}:${_randomWorkerSuffix()}`;
+    const created = `${base}${separator}${_randomWorkerSuffix(size)}`;
     window.sessionStorage.setItem(storageKey, created);
     return created;
   } catch {
-    return `${base}:${_randomWorkerSuffix()}`;
+    return `${base}${separator}${_randomWorkerSuffix(size)}`;
   }
 }
 
@@ -199,6 +211,8 @@ function _hookEval() {
  * @param {string} [opts.workerId] Exact identifier for this frontend. Prefer this only when you intentionally want a fixed ID.
  * @param {string} [opts.workerLabel] Human-readable label/grouping for this frontend.
  * @param {boolean} [opts.uniquePerWindow] Generate a stable unique ID per browser window/tab from workerLabel. Recommended for multi-client hosted frontends.
+ * @param {string} [opts.workerIdPrefix] Optional short prefix for a per-window worker ID. Does not replace workerLabel.
+ * @param {number} [opts.workerOwnerLength] Random owner suffix length when workerIdPrefix is provided (default 8).
  * @param {string} [opts.baseUrl] Explicit framework origin for cross-origin hosted pages.
  * @param {string} [opts.socketPath] Socket.IO path (default '/te2_console_ws/socket.io').
  * @param {string} [opts.namespace] Socket.IO namespace (default '/te2_console').
@@ -209,7 +223,11 @@ export function initConsoleBridge(opts = {}) {
 
   _workerLabel = _sanitizeWorkerLabel(opts.workerLabel || opts.workerId || 'worker');
   if (opts.uniquePerWindow) {
-    _workerId = _perWindowWorkerId(_workerLabel);
+    _workerId = _perWindowWorkerId(
+      _workerLabel,
+      opts.workerIdPrefix,
+      opts.workerOwnerLength,
+    );
   } else if (typeof opts.workerId === 'string' && opts.workerId.trim()) {
     _workerId = opts.workerId.trim();
   } else if (typeof crypto !== 'undefined' && crypto.randomUUID) {

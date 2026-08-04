@@ -129,7 +129,7 @@
 
 - [x] Keep console instrumentation under the existing `devRuntime` schema/form option.
 - [x] Package explicit-origin bridge bootstrap for foreign pages.
-- [x] Add profile-aware unique worker labels.
+- [x] Add compact profile/injector/owner worker ids while retaining full labels.
 - [x] Inject marked GeckoView frames at document start.
 - [x] Inject exact marked Electron subframes after load.
 - [x] Apply exact-origin request/response cache policy without touching WebSockets.

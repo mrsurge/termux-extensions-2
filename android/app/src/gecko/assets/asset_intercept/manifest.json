@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Editor Asset Intercept",
-  "version": "1.8",
+  "version": "1.9",
   "description": "Redirects editor static asset requests to a local file server",
   "permissions": [
     "webRequest",

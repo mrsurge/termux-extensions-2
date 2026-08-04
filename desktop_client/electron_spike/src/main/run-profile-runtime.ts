@@ -82,6 +82,7 @@ function decodeFrameRuntime(name: string): RuntimeConfig | null {
       profileId: String(parsed.profileId || "").trim(),
       devRuntime: true,
       devTools: parsed.devTools === true,
+      workerIdBase: String(parsed.workerIdBase || "rp-prof").trim() || "rp-prof",
       workerLabel: String(parsed.workerLabel || surfaceId).trim(),
       frameworkOrigin: String(parsed.frameworkOrigin || "").trim(),
       targetId: String(parsed.targetId || "").trim(),
@@ -183,6 +184,8 @@ export class ElectronRunProfileRuntime {
       appId: "file_editor_cm6",
       baseUrl: trustedOrigin,
       workerLabel: runtime.workerLabel,
+      workerIdPrefix: `${runtime.workerIdBase}-elct`,
+      workerOwnerLength: 4,
       uniquePerWindow: true,
     });
     await frame.executeJavaScript(`

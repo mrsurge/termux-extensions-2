@@ -61,6 +61,8 @@
       appId: "file_editor_cm6",
       baseUrl: origin,
       workerLabel: String(config.workerLabel || marker.surfaceId),
+      workerIdPrefix: `${String(config.workerIdBase || "rp-prof")}-gkvw`,
+      workerOwnerLength: 4,
       uniquePerWindow: true,
     })});`);
   }).catch((error) => {

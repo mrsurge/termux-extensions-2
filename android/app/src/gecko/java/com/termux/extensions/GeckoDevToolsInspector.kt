@@ -755,7 +755,7 @@ class GeckoDevToolsInspector(
         private const val EXTENSION_LOCATION =
             "resource://android/assets/devtools_inspector/"
         private const val EXTENSION_ID = "devtools_inspector@mrselect6"
-        private const val EXTENSION_VERSION = "1.15.5.4"
+        internal const val EXTENSION_VERSION = "1.15.5.5"
         private const val TARGET_NATIVE_APP_ID = "te2_devtools_target"
         private const val PROBE_NATIVE_APP_ID = "te2_devtools_probe"
         private const val CLIENT_NATIVE_APP_ID = "te2_devtools_client"

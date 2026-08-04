@@ -50,6 +50,7 @@ test("enabled Run Profile iframe receives an encoded native target marker", asyn
       profileId: "",
       devRuntime: false,
       devTools: true,
+      workerIdBase: "rp-runp",
       workerLabel: "run-profile:abc123:preview",
       frameworkOrigin: "",
       targetId: "run-profile:abc123:preview",
@@ -87,12 +88,20 @@ test("dev runtime iframe receives a runtime marker without enabling Inspector", 
       profileId: "preview",
       devRuntime: true,
       devTools: false,
+      workerIdBase: "rp-prev",
       workerLabel: "run-profile:abc123:preview",
       frameworkOrigin: "http://framework.example:8089",
       targetId: "run-profile:abc123:preview",
       targetLabel: "Run preview",
     },
   );
+});
+
+test("Run Profile worker IDs use a normalized four-character profile segment", async () => {
+  const { runProfileWorkerIdBase } = await importTargetMarker();
+  assert.equal(runProfileWorkerIdBase("Express Server"), "rp-expr");
+  assert.equal(runProfileWorkerIdBase("x"), "rp-x");
+  assert.equal(runProfileWorkerIdBase("---"), "rp-prof");
 });
 
 test("disabled or unidentified iframe is not exposed to native Inspector", async () => {
