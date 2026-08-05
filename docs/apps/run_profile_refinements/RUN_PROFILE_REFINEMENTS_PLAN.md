@@ -8,6 +8,13 @@ deterministic Sidebar lifecycles, and development runtimes refresh after
 relevant saves. Page Preview participates as a TE2-owned URL runtime whose
 ports and refresh behavior are supplied by the backend rather than user JSON.
 
+Complete the presentation boundary around those owned surfaces: the server
+retains logical Sidebar membership and lifecycle authority, while each browser
+client owns ordering, foreground selection, last-active agent routing, and
+embedded/hidden/detached presentation. GeckoView remains a first-class inline
+client of that shared contract. Electron additionally reconstructs owned
+surfaces in detachable native windows with surface-aware tools and DevTools.
+
 The implementation is divided into independent slices so auxiliary Vite/HMR
 routing can be proven before selection, refresh, or instrumentation work is
 introduced.
@@ -19,17 +26,23 @@ introduced.
 - Slice B is implemented, covered by Python and frontend tests, and live overlap
   selection has been validated.
 - Slice C is implemented and covered by Python/frontend unit tests plus the
-  Code TE2 TypeScript check and production bundle build. Live validation of
-  URL readiness, exact Stop/exit teardown, and save-driven refresh is pending.
+  Code TE2 TypeScript check and production bundle build. A lifecycle audit
+  reopened startup stale-shell reconciliation and exact native relay release;
+  live validation of URL readiness, Stop/exit teardown, and save-driven refresh
+  remains pending.
 - Slice D is implemented and covered by focused frontend, Electron, Gecko
   syntax/unit/APK packaging, and build checks. Live native console registration,
   reconnect, and teardown validation is pending.
-- Slice E remains deferred.
+- Slice E is refined and pending. It now covers shared browser/Gecko/Electron
+  presentation state and mention routing before the Electron-only detached
+  window and native DevTools work.
 
 ## Confirmed Current Architecture
 
 - Python owns profile parsing, active project/file state, draft-save policy,
-  run selection, and Sidebar state projection.
+  run selection, and the logical Sidebar slot projection. Current Sidebar
+  preferences still persist global `active_host_id` and `order`; Slice E removes
+  those values from server presentation authority.
 - Framework-Shells shell identity and lifecycle events own running/stopped
   state. The current projection is event-driven and must remain free of
   periodic polling.
@@ -39,8 +52,9 @@ introduced.
   group with rollback on auxiliary failure.
 - URL-backed Run Profiles are represented by project/profile-scoped
   `RunProfileSurface` slots. The slot retains exact project, profile, and shell
-  identity and is removed on Stop, terminal lifecycle, or stale-shell
-  reconciliation.
+  identity. Stop and live terminal events remove it, but the startup dashboard
+  snapshot currently accepts retained exited shell records and can preserve a
+  stale slot until its running-status filter is corrected.
 - A non-Page-Preview profile creates a Sidebar URL slot only when `sidebarUrl`
   is non-empty. A process without a URL has running state but no URL surface.
 - Page Preview always resolves a backend-supplied URL on port 3000. Its Vite 7
@@ -62,6 +76,15 @@ introduced.
 - GeckoView can inject packaged code at document start through its WebExtension.
   Electron can target a loaded subframe through `did-frame-finish-load`,
   `WebFrameMain.fromId`, and `WebFrameMain.executeJavaScript`.
+- Native surface release currently clears exact-origin runtime/cache policy but
+  does not close the matching Electron or Gecko relay listener group. Both
+  native managers retain whole-client teardown as a fallback.
+- The host frontend already has in-memory client-active ids, but server ledger
+  notifications can overwrite them. Mention delivery currently broadcasts to
+  the complete Sidebar IPC room rather than an exact client presentation.
+- The dependency-free `ui/modal-kit` JSX runtime creates real DOM nodes in an
+  arbitrary document. It has no virtual DOM, lifecycle scopes, subscriptions,
+  or disposal contract yet.
 
 ## Required Invariants
 
@@ -74,6 +97,9 @@ introduced.
 - Native clients own their loopback listeners. Groups close on framework
   retarget, app teardown, route-set replacement, exact profile Stop, or dead
   shell reconciliation.
+- Exact native release is keyed by stable `surfaceId` and closes only that
+  surface's relay group, runtime/cache policy, console injection state, and
+  Inspector registration. Whole-client `stopAll()` remains a teardown fallback.
 - The primary route determines same-device behavior before auxiliary listeners
   are bound.
 - Page Preview participates in owned URL-surface lifecycle. Its active route
@@ -81,6 +107,21 @@ introduced.
   user-configurable port or `devRuntime` fields.
 - Browser-only clients keep using original URLs. Native-only instrumentation is
   optional and must not become a standalone application dependency.
+- The server owns logical Sidebar slot membership, lifecycle, readiness, and
+  immutable surface metadata. It does not own one cross-client dock order or
+  foreground selection.
+- Each browser client owns dock ordering, foreground selection, last-active
+  agent target, and embedded/hidden/detached presentation. Server ledger updates
+  are reconciled into that local state rather than replacing it.
+- GeckoView consumes the same client presentation store and exact release
+  contract as the ordinary browser host. It remains inline and must preserve
+  its pre-navigation marker, WebExtension console injection, native Inspector,
+  cache policy, and Run Target relay behavior.
+- Mention intent carries the originating client's exact stable host id and
+  transient presentation id. The backend validates the target and routes to its
+  registered Sidebar peer; console worker ids remain diagnostic metadata.
+- Electron detachment changes only Electron presentation. Closing a detached
+  window reattaches it and never stops the backend profile.
 - Existing profile JSON remains valid.
 - Selection UI uses the shared TE2 modal system, not browser-native dialogs.
 - Profile selection is revalidated before draft writes or process launch.
@@ -346,6 +387,10 @@ retry against the resolved URL.
 The same rule applies to Page Preview and custom/node/python URL profiles. A
 profile without a URL bypasses this work entirely.
 
+Startup stale-shell reconciliation must treat only running Framework-Shell
+records as live. Retained exited records in `fws.dashboard.open` are historical
+state and must close, not preserve, a matching Run Profile surface and route.
+
 ### Post-Commit Save Event
 
 Introduce a typed `FileSaved` worker event after a successful disk commit. Both
@@ -403,11 +448,22 @@ Generalize the existing Run Profile document-start marker. The WebExtension
 injects the packaged Socket.IO client and console bridge into the marked top
 frame and provides the configured framework console origin explicitly.
 
+`run_target_release(surfaceId)` must cross the WebExtension native port into
+Kotlin. Kotlin owns a `surfaceId -> relayGroupId` association and closes only
+that group's listeners and streams. Framework retarget, return to the launcher,
+Activity destruction, and native connection failure retain whole-client
+`stopAll()` cleanup.
+
 ### Electron
 
 Listen for marked subframe completion, resolve the exact `WebFrameMain` from the
 event's process/routing ids, verify the frame URL and marker, then inject the
 same packaged bridge with `executeJavaScript`.
+
+Electron main owns the equivalent `surfaceId -> relayGroupId` association.
+`release_run_target_surface` clears both `ElectronRunProfileRuntime` policy and
+the exact listener group. App-view loss, framework retarget, and application
+shutdown retain whole-client cleanup.
 
 ### Browser Boundary
 
@@ -415,36 +471,123 @@ Ordinary browser pages cannot receive this injection across origins without app
 cooperation or an HTTP-aware proxy. They continue to run normally without the
 bridge. This is instrumentation, not a product runtime dependency.
 
-## Slice E: Electron Surface Presentation And Native DevTools
+## Slice E: Shared Client Presentation, Gecko Parity, And Electron Detachment
 
-Electron consumes the same backend-owned surface projection as the browser
-Sidebar. It maintains a client-local registry from stable `surfaceId` to the
-current Electron presentation and transient native identifiers.
+### Shared Presentation Authority
+
+The server ledger remains authoritative for the set of logical Sidebar slots.
+It creates, replaces, and removes owned surfaces and projects readiness and
+runtime metadata. Actual iframes and native windows are client presentations,
+so literal iframe count is derived by the client rather than persisted by the
+server.
+
+Each host client maintains a versioned presentation store containing:
+
+```ts
+interface SidebarClientPresentationState {
+  version: 1;
+  order: string[];                 // Stable Sidebar host ids.
+  foregroundHostId: string;
+  lastAgentHostId: string;
+  lastAgentPresentationId: string;
+  presentations: Record<string, "embedded" | "hidden" | "detached">;
+}
+```
+
+On every server ledger update the client:
+
+1. removes local ids absent from the authoritative slot set;
+2. preserves the local order of surviving ids;
+3. appends newly created server slots deterministically;
+4. preserves the local foreground surface when it still exists; and
+5. selects a local neighboring/MRU fallback when that surface disappears.
+
+The server no longer persists or broadcasts one authoritative `active_host_id`
+or dock `order`. A client may publish bounded focus metadata when another
+backend action requires it, but that notification does not become cross-client
+presentation authority.
+
+Browser and Gecko hosts persist this versioned state in origin-local storage.
+Electron's framework relay binds a new random loopback port per process, so
+framework-page `localStorage` is reliable only within that Electron session.
+Cross-launch Electron state uses a small validated preload/main-backed store
+under the existing desktop configuration boundary.
+
+### Exact Mention Routing
+
+Mention actions include the originating client's current `lastAgentHostId` and
+`lastAgentPresentationId`. The backend validates that the stable host still
+exists, that the presentation registered for the same client, and that the peer
+has the required agent capability. It then routes to that exact Sidebar peer
+instead of broadcasting to every `sidebar_ipc` connection.
+
+The stable host id is lifecycle identity. Presentation and console worker ids
+are transient instance/diagnostic identities and are refreshed when an iframe
+is reconstructed or detached.
+
+### Shared Component Runtime
+
+Extract the generic TSX-to-DOM primitives from `ui/modal-kit` into a reusable
+component core while keeping modal-kit compatibility. Add only the mechanisms
+needed by long-lived Sidebar and detached-window chrome:
+
+- an explicit owner/disposal scope;
+- event/subscription cleanup;
+- document/window-aware rendering;
+- small controller-driven state updates; and
+- refs for iframe and native-bridge integration.
+
+Do not introduce a virtual DOM or make the component runtime lifecycle
+authority. Backend surface projections and the client presentation controller
+remain the state sources.
+
+### GeckoView Compatibility
+
+GeckoView remains an inline Sidebar renderer and does not expose Electron-style
+detachment. It still consumes the shared ordering, foreground, reconciliation,
+and mention-target store because that logic runs in the common Code TE2 host.
+
+Iframe creation and reconstruction must continue to set the complete
+pre-navigation `window.name` marker before assigning the final URL. Existing
+WebExtension injection, compact console-worker identity, Inspector target
+registration, exact-origin cache policy, route resolution, and auxiliary-port
+behavior remain unchanged. Ledger removal additionally sends exact surface
+release through the WebExtension/Kotlin bridge before discarding the iframe.
+
+### Electron Detachment And Surface Tools
+
+Electron consumes the same backend-owned surface projection and shared client
+store. Electron main maintains a registry from stable `surfaceId` to the current
+presentation and transient native identifiers.
 
 ```text
 surfaceId
-    -> embedded iframe or native view
-    -> detached BrowserWindow/WebContentsView
-    -> current webContents/frame identifiers
+    -> embedded iframe or detached presentation
+    -> BrowserWindow / WebContentsView / frame identifiers
+    -> relay group, runtime policy, console worker, and DevTools target
 ```
 
-The first implementation may reconstruct the URL in a dedicated window. A
-later native-view implementation may use `WebContentsView` from creation so the
-same browsing context can be reparented without reload. Neither mechanism moves
-a DOM iframe between renderer processes, and neither changes backend ownership.
+The first implementation reconstructs the URL in a dedicated trusted window
+shell. It applies the complete iframe marker and immutable surface metadata
+before navigation, waits until the detached presentation is ready, then removes
+the embedded presentation. A later implementation may create every surface as
+a `WebContentsView` so the same browsing context can be reparented without a
+reload. Neither mechanism changes backend ownership.
 
 - Detach/reattach changes only the requesting Electron client's presentation.
 - Closing a detached window returns the surface to its embedded presentation;
   it does not stop the profile.
-- Profile Stop, shell exit, project teardown, or backend surface removal closes
-  every Electron presentation for that `surfaceId`.
+- Profile Stop, shell exit, project teardown, backend removal, app-view loss,
+  or framework retarget closes every Electron presentation for that surface.
 - Route-set resolution remains Electron-main-owned and is reused by either
   presentation.
+- The detached trusted shell renders TSX/HTML chrome containing surface label,
+  profile/project identity, attach/close, refresh, exact backend Stop, console,
+  and DevTools actions. These controls invoke existing backend/native ownership
+  paths rather than terminating Framework-Shells directly.
 - A dedicated `webContents` can use Electron's built-in DevTools directly.
-  The current common `devTools` marker is projected into Electron, but Electron
-  does not presently inject Chobitsu, register a target, or display DevTools.
-- Console instrumentation and native DevTools address the current presentation
-  through the surface registry rather than retaining stale iframe/frame ids.
+- Console instrumentation and DevTools target the registry's current
+  presentation rather than retaining stale iframe/frame ids.
 
 ## Cache Policy
 
@@ -461,6 +604,9 @@ the owned profile route set.
 - Direct same-device URLs and unrouted dev-runtime surfaces register their exact
   origin through the native bridge before iframe navigation.
 - Surface removal, framework retarget, and native teardown release the policy.
+- Policy release and native relay release are separate obligations. Exact
+  surface removal closes both; whole-client teardown closes every remaining
+  listener and policy registration.
 - Ordinary browsers retain profile-owned revision reloads but cannot receive
   cross-origin header mutation or bridge injection without app cooperation.
 - Initial surface creation still waits for the bounded URL-readiness result so
@@ -477,6 +623,10 @@ the owned profile route set.
 - Project-scoped slot identity, terminal cleanup, typed save events, overlap
   fanout, hidden-slot refresh revisions, URL-only surface eligibility, and
   bounded readiness cancellation.
+- Startup dashboard reconciliation excludes retained exited shells and closes
+  their stale surfaces/routes.
+- Mention requests reject missing, stale, cross-client, or non-agent
+  presentation targets and deliver valid requests to one exact registered peer.
 - Page Preview backend-generated primary/HMR routes and rejection of manual
   Page Preview port fields.
 
@@ -490,11 +640,17 @@ the owned profile route set.
 
 - Primary-first same-device fallback.
 - Complete remote group binding and rollback on auxiliary collision.
-- Group teardown on profile stop, retarget, and app shutdown.
+- Exact surface-to-group teardown on profile Stop, backend surface removal, and
+  dead-shell reconciliation without closing another profile's listeners.
+- Whole-client group teardown on retarget, launcher/app-view return, renderer or
+  Activity loss, and app shutdown.
 - Marked-frame console injection, unique worker registration, reconnect, and
   teardown.
-- Electron surface reconstruction, detach/reattach, built-in DevTools targeting,
-  and backend-removal cleanup without changing another client's presentation.
+- Gecko iframe reconstruction preserves the pre-navigation marker, Inspector
+  target, console worker, cache policy, and route behavior.
+- Electron surface reconstruction, detach/reattach, surface-aware chrome,
+  built-in DevTools targeting, and backend-removal cleanup without changing
+  another client's presentation.
 
 ### Frontend
 
@@ -509,6 +665,15 @@ the owned profile route set.
   or touch long press.
 - Exact slot cleanup and dev-runtime reload without duplicate requests.
 - Runner-dependent field visibility and no slot creation for URL-less profiles.
+- Two clients can retain different dock orders and foreground surfaces while
+  consuming the same authoritative server slot set.
+- Ledger reconciliation removes missing ids, preserves surviving local order,
+  appends new slots, and chooses a local fallback foreground surface.
+- Mentions use the initiating client's last active agent presentation and never
+  fan out to unrelated Sidebar peers.
+- Browser and Gecko presentation state survives reload through versioned
+  origin-local storage; Electron uses its stable client-state bridge when
+  cross-launch persistence is required.
 
 ### Live Acceptance
 
@@ -523,7 +688,11 @@ routing, and HMR through a remote native client. Subsequent slices must prove:
 5. Play remains available while profiles run; the adjacent Stop control and
    dock-menu Stop action target only explicitly selected running profiles.
 6. Opt-in console workers appear with profile-aware unique identities.
-7. Electron can reconstruct, detach, reattach, inspect, and remove an owned
+7. Gecko preserves inline frame, console, Inspector, cache, and relay behavior
+   while client-local ordering and targeted mentions change.
+8. Exact surface removal closes only the matching Electron or Gecko listener
+   group, including after a Code TE2 worker restart observes an exited shell.
+9. Electron can reconstruct, detach, reattach, inspect, and remove an owned
    surface without altering another client's presentation.
 
 ## Delivery Order
@@ -533,6 +702,13 @@ routing, and HMR through a remote native client. Subsequent slices must prove:
 3. Slice C: owned Sidebar lifecycle and dev-runtime refresh. Implemented;
    live acceptance pending.
 4. Slice D: native console instrumentation.
-5. Slice E: Electron surface presentation and built-in DevTools.
-6. Update the main Code TE2 contract and repo memory after each validated
+5. Slice E prerequisite: correct startup stale-shell reconciliation and exact
+   Electron/Gecko surface-to-relay teardown.
+6. Slice E shared client presentation: local ordering/foreground state, exact
+   mention routing, ledger reconciliation, and the reusable TSX component core.
+7. Slice E Gecko parity: preserve inline marker/instrumentation/Inspector/relay
+   behavior under the shared presentation state.
+8. Slice E Electron presentation: detachable surface windows, surface-aware
+   tools, reattach behavior, and built-in DevTools.
+9. Update the main Code TE2 contract and repo memory after each validated
    architectural slice.
