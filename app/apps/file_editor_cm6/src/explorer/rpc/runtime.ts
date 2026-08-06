@@ -37,6 +37,7 @@ export interface ExplorerRpcRuntimeDeps {
   updateProblemsPanel: (payload: JsonObject) => void;
   reloadEditorFrame: () => void | Promise<void>;
   requestAdapterRestart: () => void | Promise<void>;
+  buildSidebarMentionPayload: (payload: JsonObject) => JsonObject;
   log?: (...args: unknown[]) => void;
   warn?: (...args: unknown[]) => void;
   error?: (...args: unknown[]) => void;

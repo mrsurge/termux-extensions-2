@@ -24,6 +24,7 @@ interface ExplorerTreeMenuControllerDeps {
   getProjectPath(): string | null;
   hasExplorerRpc(): boolean;
   notifyExplorer(method: ExplorerRpcMethod, payload: JsonObject): void;
+  buildSidebarMentionPayload(payload: JsonObject): JsonObject;
   toast(message: string): void;
   isInSelectMode(rel: string | null): boolean;
   enableSelectMode(rel: string): void;
@@ -150,7 +151,10 @@ export function createExplorerTreeMenuController(
     }
     const absPath = buildAbsolutePath(projectPath, relPath);
     try {
-      deps.notifyExplorer(EXPLORER_RPC_METHODS.mentionAgent, { path: absPath });
+      deps.notifyExplorer(
+        EXPLORER_RPC_METHODS.mentionAgent,
+        deps.buildSidebarMentionPayload({ path: absPath }),
+      );
       deps.toast('Mentioned in conversation');
     } catch (error) {
       console.error('Failed to send mention:', error);

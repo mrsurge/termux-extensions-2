@@ -5,6 +5,7 @@ import type {
   UnknownRecord,
 } from '../sidebar-shortcuts/types.ts';
 import type { UiIpcRpcMethod } from '../../../src/ui_ipc/rpc_contract.ts';
+import type { SidebarIpcRpcMethod } from '../../../src/sidebar_ipc/rpc_contract.ts';
 
 export interface SidebarShortcutsBootstrapDeps {
   initSidebarShortcuts: (opts: SidebarShortcutsOptions) => SidebarShortcutsRuntime;
@@ -15,6 +16,8 @@ export interface SidebarShortcutsBootstrapDeps {
   closeAllMenus: () => void;
   setMenuChecked: (el: HTMLElement | null, checked: boolean) => void;
   emitSidebarUiRequest?: (method: UiIpcRpcMethod, payload?: UnknownRecord) => void;
+  emitSidebarRpcRequest?: (method: SidebarIpcRpcMethod, payload?: UnknownRecord) => void;
+  getClientId: () => string;
 }
 
 export function initSidebarShortcutsSafe(deps: SidebarShortcutsBootstrapDeps): SidebarShortcutsRuntime | null {
@@ -27,6 +30,8 @@ export function initSidebarShortcutsSafe(deps: SidebarShortcutsBootstrapDeps): S
       closeAllMenus: deps.closeAllMenus,
       setMenuChecked: deps.setMenuChecked,
       emitSidebarUiRequest: deps.emitSidebarUiRequest,
+      emitSidebarRpcRequest: deps.emitSidebarRpcRequest,
+      getClientId: deps.getClientId,
     });
     // init() is deferred — called after runBootSequence completes
     // so sidebar loading doesn't compete with core editor boot.

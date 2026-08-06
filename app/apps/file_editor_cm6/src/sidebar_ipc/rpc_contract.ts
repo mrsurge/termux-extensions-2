@@ -19,6 +19,7 @@ export const SIDEBAR_IPC_RPC_METHODS = {
   windowOpenUrl: 'sidebar.window.openUrl',
   windowStateUpdate: 'sidebar.window.state.update',
   windowActivate: 'sidebar.window.activate',
+  windowPresentationUpdate: 'sidebar.window.presentation.update',
   windowClose: 'sidebar.window.close',
   windowReadinessUpdate: 'sidebar.window.readiness.update',
   activeShortcutSet: 'sidebar.activeShortcut.set',

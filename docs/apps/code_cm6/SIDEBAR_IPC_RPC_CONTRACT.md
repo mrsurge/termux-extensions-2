@@ -66,8 +66,22 @@ It does not own:
   - External/sidebar-originated edit/open signal, gated by `trackAgentSidebarEdits` where applicable.
   - Params: `{ path? , abs? , rel? , line? , column? , source? , conversation_id? }`.
 - `sidebar.mention`
-  - External/sidebar-originated mention relay to sidebar listeners.
-  - Params: `{ path? , rel? , line? , column? , source? , conversation_id? , text? }`.
+  - Delivers an external/sidebar-originated mention to one validated agent app
+    room; it never falls back to a global active agent or room broadcast.
+  - Params: `{ path, rel?, line?, column?, source?, text?, target: { clientId,
+    hostId, presentationId } }`.
+  - The backend requires the originating host client to be connected, the exact
+    transient presentation to be registered for that client and stable host,
+    the host to exist as an agent-conversation slot in the authoritative
+    ledger, and the target app peer to be registered. It derives
+    `conversation_id` from the ledger slot and ignores caller authority for it.
+- `sidebar.window.presentation.update`
+  - Registers or releases one transient presentation id for a stable Sidebar
+    host id on the calling host connection.
+  - Params: `{ hostId, presentationId }`; an empty `presentationId` releases it.
+  - Client identity is taken from the registered host Socket.IO session, never
+    from caller params. The host republishes its live presentations after every
+    Sidebar IPC re-registration; no timer or polling loop is involved.
 - `sidebar.project.lookup`
   - Checks whether a path is an official known project root.
   - Params: `{ path }`.
@@ -104,7 +118,9 @@ It does not own:
 - `sidebar.clientState`
   - Params: `{ client_id, activeShortcutId, ts }`.
 - `sidebar.mention`
-  - Params: same shape as `sidebar.mention` request.
+  - Params: the validated request shape plus ledger-derived
+    `conversation_id`/`conversationId` and normalized target app metadata.
+  - Sent only to the target app room.
 - `sidebar.file.open`
   - Params: normalized backend open payload for listeners that need visibility.
 - `sidebar.project.opened`

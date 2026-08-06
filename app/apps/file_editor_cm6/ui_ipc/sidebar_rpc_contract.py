@@ -29,6 +29,7 @@ SIDEBAR_IPC_RPC_METHOD_WINDOW_CREATE: Final = "sidebar.window.create"
 SIDEBAR_IPC_RPC_METHOD_WINDOW_OPEN_URL: Final = "sidebar.window.openUrl"
 SIDEBAR_IPC_RPC_METHOD_WINDOW_STATE_UPDATE: Final = "sidebar.window.state.update"
 SIDEBAR_IPC_RPC_METHOD_WINDOW_ACTIVATE: Final = "sidebar.window.activate"
+SIDEBAR_IPC_RPC_METHOD_WINDOW_PRESENTATION_UPDATE: Final = "sidebar.window.presentation.update"
 SIDEBAR_IPC_RPC_METHOD_WINDOW_CLOSE: Final = "sidebar.window.close"
 SIDEBAR_IPC_RPC_METHOD_WINDOW_READINESS_UPDATE: Final = "sidebar.window.readiness.update"
 SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST: Final = "sidebar.drafts.list"
@@ -61,6 +62,7 @@ SidebarIpcRpcMethod = Literal[
     "sidebar.window.openUrl",
     "sidebar.window.state.update",
     "sidebar.window.activate",
+    "sidebar.window.presentation.update",
     "sidebar.window.close",
     "sidebar.window.readiness.update",
     "sidebar.drafts.list",
@@ -128,6 +130,7 @@ ALLOWED_REQUEST_METHODS: Final[set[str]] = {
     SIDEBAR_IPC_RPC_METHOD_WINDOW_OPEN_URL,
     SIDEBAR_IPC_RPC_METHOD_WINDOW_STATE_UPDATE,
     SIDEBAR_IPC_RPC_METHOD_WINDOW_ACTIVATE,
+    SIDEBAR_IPC_RPC_METHOD_WINDOW_PRESENTATION_UPDATE,
     SIDEBAR_IPC_RPC_METHOD_WINDOW_CLOSE,
     SIDEBAR_IPC_RPC_METHOD_WINDOW_READINESS_UPDATE,
     SIDEBAR_IPC_RPC_METHOD_DRAFTS_LIST,

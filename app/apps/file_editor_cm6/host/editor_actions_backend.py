@@ -166,17 +166,17 @@ async def handle_host_diagnostics_mention_request(
     source_name: str,
 ) -> JsonMap:
     del source_name
-    from ..ui_ipc.sidebar_ws import emit_sidebar_mention_global
+    from ..ui_ipc.sidebar_ws import emit_sidebar_mention_targeted
 
     path = data.get("path")
     if not isinstance(path, str) or not path.strip():
         raise ValueError("missing path for diagnostics mention")
 
     payload: JsonMap = {"path": path.strip(), "source": "diagnostics"}
+    payload["target"] = data.get("target", {})
     for key in ("lineNo", "endLineNo", "col", "endCol", "content"):
         value = data.get(key)
         if value is not None:
             payload[key] = value
 
-    await emit_sidebar_mention_global(payload)
-    return {"ok": True}
+    return await emit_sidebar_mention_targeted(payload)

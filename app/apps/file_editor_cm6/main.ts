@@ -111,6 +111,12 @@ interface SidebarShortcutsLike {
   init?: () => unknown;
   hydrate?: () => unknown;
   applyUiPrefs?: (prefs: UnknownRecord) => unknown;
+  getMentionTarget?: () => {
+    clientId: string;
+    hostId: string;
+    presentationId: string;
+  } | null;
+  publishPresentationIdentities?: () => void;
 }
 
 type CacheIndicatorHandler = (info: unknown) => void;
@@ -208,6 +214,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     );
   }
 
+  let sidebarShortcuts: SidebarShortcutsLike | null = null;
   const uiIpcConnections = createUiIpcConnections({
     ensureSocketIoLoaded,
     initConsoleBridge,
@@ -216,6 +223,9 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
       const state = await editorStateController.syncEditorState(true);
       if (state) dispatchHostOpenStateProjection(state, 'ui_ipc_host_state_resync');
       fileTabsController.broadcastOpenState(state);
+    },
+    onSidebarConnected: () => {
+      sidebarShortcuts?.publishPresentationIdentities?.();
     },
   });
   function _requestSidebarUiControl(method: UiIpcRpcMethod, payload?: unknown) {
@@ -523,7 +533,13 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
 
   let editorState: EditorState | null = null;
   let branchMenuHandle: unknown = null;
-  let sidebarShortcuts: SidebarShortcutsLike | null = null;
+  function buildSidebarMentionPayload(payload: UnknownRecord): UnknownRecord {
+    const target = sidebarShortcuts?.getMentionTarget?.();
+    if (!target) {
+      throw new Error('Select an agent conversation before mentioning content');
+    }
+    return { ...payload, target };
+  }
   const hostUiPrefsRuntime = createHostUiPrefsRuntime({
     getSidebarShortcuts: () => sidebarShortcuts,
     warn: (...args) => console.warn(...args),
@@ -1003,6 +1019,10 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     closeAllMenus,
     setMenuChecked,
     emitSidebarUiRequest: _requestSidebarUiControl,
+    emitSidebarRpcRequest: (method, payload) => {
+      uiIpcConnections.emitSidebarRpcRequest(method, asUnknownRecord(payload));
+    },
+    getClientId: () => clientId,
   });
 
   drainPendingWatcherEvents();
@@ -1200,7 +1220,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     triggerEditorSearchPanel: (reason: string, opts?: UnknownRecord) => searchPanelController.triggerEditorSearchPanel(reason, opts),
     openFile: (path: string, opts?: OpenFileOptions) => openFile(path, opts),
     jumpToCurrentFileLine: (line: number | string) => jumpToCurrentFileLine(line),
-    requestDiagnosticsMention: (payload: UnknownRecord) => uiIpcConnections.requestBackendDiagnosticsMention(payload),
+    requestDiagnosticsMention: (payload: UnknownRecord) => uiIpcConnections.requestBackendDiagnosticsMention(buildSidebarMentionPayload(payload)),
     requestCodeInspectorCommand: (payload: UnknownRecord) => uiIpcConnections.requestUiIpc(UI_IPC_RPC_METHODS.hostCodeInspectorCommand, payload),
     emitImeIntent: (active: boolean, params: UnknownRecord = {}) => {
       uiIpcConnections.emitUiIpcNotification(active ? 'imeFocus' : 'imeBlur', params);
@@ -1304,6 +1324,7 @@ export default async function initFileEditor(rootEl: HTMLElement, api: HostApi, 
     resetActiveFileState: () => resetActiveFileState(),
     toast: (message: string, kind?: unknown) => host.toast(message, kind),
     requestBackendBootSnapshot: (payload?: UnknownRecord) => uiIpcConnections.requestBackendBootSnapshot(payload),
+    buildSidebarMentionPayload,
     editorFrameEl,
     sidebarShortcuts,
     ensureEditorFrameReady: () => ensureEditorFrameReady(),

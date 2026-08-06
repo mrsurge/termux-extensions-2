@@ -16,6 +16,12 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "force_asset_update",
   "register_run_target_surface",
   "release_run_target_surface",
+  "read_sidebar_presentation_state",
+  "write_sidebar_presentation_state",
+  "detach_sidebar_surface",
+  "focus_sidebar_surface",
+  "close_sidebar_surface",
+  "reconcile_sidebar_surfaces",
 ] as const;
 
 export type ElectronAppViewCommand = typeof ELECTRON_APP_VIEW_COMMANDS[number];
@@ -73,6 +79,76 @@ export type ElectronRunTargetDescriptor =
   | ElectronRunTargetRoute
   | ElectronRunTargetRouteSet;
 
+export type ElectronSidebarPresentationMode =
+  | "embedded"
+  | "hidden"
+  | "detached";
+
+export type ElectronSidebarPresentationState = {
+  version: 1;
+  order: string[];
+  foregroundHostId: string;
+  lastAgentHostId: string;
+  lastAgentPresentationId: string;
+  presentations: Record<string, ElectronSidebarPresentationMode>;
+};
+
+export const ELECTRON_SIDEBAR_SURFACE_DESCRIPTOR_VERSION = 1 as const;
+
+export type ElectronSidebarSurfaceDescriptor = {
+  version: typeof ELECTRON_SIDEBAR_SURFACE_DESCRIPTOR_VERSION;
+  hostId: string;
+  surfaceId: string;
+  presentationId: string;
+  label: string;
+  url: string;
+  windowName: string;
+  appId: string;
+  projectPath: string;
+  profileId: string;
+  shellId: string;
+  devRuntime: boolean;
+  devTools: boolean;
+  consoleWorkerId: string;
+};
+
+export type ElectronSidebarSurfaceAction =
+  | "attach"
+  | "console"
+  | "devtools"
+  | "refresh"
+  | "stop";
+
+export type ElectronSidebarSurfaceEvent = {
+  type: "closed" | "action";
+  hostId: string;
+  surfaceId: string;
+  presentationId: string;
+  action?: ElectronSidebarSurfaceAction;
+};
+
+export type ElectronSidebarSurfaceDetachRequest = {
+  descriptor: ElectronSidebarSurfaceDescriptor;
+  focus: boolean;
+};
+
+export type ElectronSidebarSurfaceReference = {
+  surfaceId: string;
+  presentationId?: string;
+};
+
+export type ElectronSidebarSurfaceReconcileRequest = {
+  surfaceIds: string[];
+};
+
+export type ElectronDetachedSurfaceBridge = {
+  ready(): void;
+  action(action: ElectronSidebarSurfaceAction): void;
+  onState(
+    listener: (descriptor: ElectronSidebarSurfaceDescriptor) => void,
+  ): () => void;
+};
+
 export type ElectronAppViewBridge = {
   readonly identity: typeof ELECTRON_APP_VIEW_IDENTITY;
   inspect(): Promise<ElectronAppViewInspection>;
@@ -85,6 +161,26 @@ export type ElectronAppViewBridge = {
     route?: ElectronRunTargetDescriptor,
   ): Promise<{ ok: true }>;
   releaseRunTargetSurface(surfaceId: string): Promise<{ ok: true }>;
+  readSidebarPresentationState(): Promise<ElectronSidebarPresentationState>;
+  writeSidebarPresentationState(
+    state: ElectronSidebarPresentationState,
+  ): Promise<{ ok: true }>;
+  detachSidebarSurface(
+    descriptor: ElectronSidebarSurfaceDescriptor,
+    options?: { focus?: boolean },
+  ): Promise<{ ok: true; presentationId: string }>;
+  focusSidebarSurface(
+    surfaceId: string,
+    presentationId?: string,
+  ): Promise<{ ok: boolean }>;
+  closeSidebarSurface(
+    surfaceId: string,
+    presentationId?: string,
+  ): Promise<{ ok: true }>;
+  reconcileSidebarSurfaces(surfaceIds: string[]): Promise<{ ok: true }>;
+  onSidebarSurfaceEvent(
+    listener: (event: ElectronSidebarSurfaceEvent) => void,
+  ): () => void;
 };
 
 export function validateElectronAppViewCommand(value: unknown): ElectronAppViewCommand {

@@ -3445,8 +3445,8 @@ with a resolved URL. Its stable `surfaceId` is independent of the current
 Framework-Shell generation and client presentation. The surface records project,
 profile, runner, exact shell id/label, source URL, `devRuntime`, and
 `refreshRevision`; the Sidebar slot additionally retains the route set and
-Inspector metadata. Browser iframe, GeckoView target, and future Electron window
-identifiers are presentations, not lifecycle authority.
+Inspector metadata. Browser iframe, GeckoView target, and Electron detached
+window identifiers are presentations, not lifecycle authority.
 
 After Framework-Shell readiness and before creating the surface, Python performs
 one bounded, cancellable HTTP readiness transaction. Connection failures and
@@ -3553,8 +3553,40 @@ Allowed app-view commands are:
 | `force_asset_update` | Run the desktop asset updater. |
 | `register_run_target_surface` | Register exact-frame `devRuntime` instrumentation metadata; it does not create a proxy. |
 | `release_run_target_surface` | Release exact-frame instrumentation metadata; it does not tear down a running shell's proxy. |
+| `detach_sidebar_surface` | Reconstruct one validated Sidebar surface in an Electron-main-owned floating window and wait for it to become ready. |
+| `focus_sidebar_surface` | Focus the exact detached surface presentation. |
+| `close_sidebar_surface` | Close the exact detached presentation and request inline reattachment. |
+| `reconcile_sidebar_surfaces` | Close native presentations absent from the current authoritative Sidebar ledger. |
 
-The command allowlist is exact-view and origin validated in Electron main. Code TE2 console workers in Electron app views register as `electron:main_page:<suffix>`; browser and Android retain generic `main_page` labels.
+The command allowlist is exact-view and origin validated in Electron main. The
+preload also delivers bounded detached-surface events only to that exact app
+view. Code TE2 console workers in Electron app views register as
+`electron:main_page:<suffix>`; browser and Android retain generic `main_page`
+labels.
+
+### Detached Sidebar presentations
+
+Detachment changes only the requesting Electron client's presentation. The
+backend ledger and stable `surfaceId` remain lifecycle authority, while Electron
+main maps that identity to one normal floating `BrowserWindow`, its trusted
+local header renderer, and a framework-partition `WebContentsView`. The target
+frame starts at `about:blank`, receives the complete namespaced `window.name`
+marker, then navigates to the final URL. Code TE2 removes the inline iframe only
+after Electron reports the detached page ready.
+
+The trusted header exposes Attach, Refresh, Console, DevTools, exact Stop, and
+Close. Attach or user Close publishes an exact reattach event so Code TE2
+recreates the inline iframe with a new transient presentation id. Stop travels
+back through the existing project/profile/shell backend action and never kills
+Framework-Shells directly from Electron. Backend ledger removal, app-view loss,
+main navigation, renderer loss, framework retarget, and process exit close the
+native presentation without recreating stale inline state.
+
+Detached window lifetime remains independent from Run Target listener lifetime.
+The exact `ownerId + shellId` framework projection owns primary and auxiliary
+relay listeners; detach, attach, window close, and iframe reconstruction do not
+release that group. Runtime/cache/console instrumentation remains surface-scoped
+and is applied before either embedded or detached navigation.
 
 Run-target listeners are owned by Electron main, not the renderer. Electron main
 also owns a direct strict-MessagePack Code TE2 UI IPC client which receives the

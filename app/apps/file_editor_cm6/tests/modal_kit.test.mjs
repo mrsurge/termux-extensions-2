@@ -67,6 +67,9 @@ test("JSX modal frame renders in the supplied document and preserves events", as
   assert.equal(closes, 1);
   frame.root.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   assert.equal(closes, 2);
+  frame.dispose();
+  frame.root.querySelector('button[aria-label="Close"]')?.click();
+  assert.equal(closes, 2);
   window.close();
 });
 

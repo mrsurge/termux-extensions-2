@@ -81,12 +81,14 @@ async def publish_sidebar_window_state_changed(
     if isinstance(skip_sidebar_sid, str) and skip_sidebar_sid:
         payload["skipSidebarSid"] = skip_sidebar_sid
 
+    raw_slots = state.get("slots")
+    slot_count = len(raw_slots) if isinstance(raw_slots, dict) else 0
     logger.info(
-        "[sidebar_window_events] publish source=%s scope=%s client=%s active=%s",
+        "[sidebar_window_events] publish source=%s scope=%s client=%s slots=%s",
         source,
         sidebar_scope,
         client_id or "",
-        state.get("activeHostId") or state.get("active_host_id") or "",
+        slot_count,
     )
     await publish_worker_event(
         build_event(

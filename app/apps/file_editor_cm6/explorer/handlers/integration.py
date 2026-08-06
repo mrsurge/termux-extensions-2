@@ -28,16 +28,20 @@ async def handle_mention_agent(
 ) -> None:
     del msg_id
     try:
-        from ...ui_ipc.sidebar_ws import emit_sidebar_mention_global
+        from ...ui_ipc.sidebar_ws import emit_sidebar_mention_targeted
 
         path = cast(str, params["path"])
-        mention_payload: JsonObject = {"path": path, "source": "explorer"}
+        mention_payload: JsonObject = {
+            "path": path,
+            "source": "explorer",
+            "target": params.get("target", {}),
+        }
         for key in ("lineNo", "endLineNo", "col", "endCol", "content"):
             value = params.get(key)
             if value is not None:
                 mention_payload[key] = value
 
-        await emit_sidebar_mention_global(mention_payload)
+        _ = await emit_sidebar_mention_targeted(mention_payload)
         logger.info("[mention:agent] relayed to sidebar_ipc path=%s", path)
     except Exception as exc:
         logger.warning("[mention:agent] relay failed: %s", exc)

@@ -348,6 +348,9 @@ interface CachedPrefsLike extends Record<string, unknown> {
 
 interface MonacoBootWindowLike extends Window {
   __te2InlineMonacoBootSnapshot?: unknown;
+  __te2InlineMonacoBuildSidebarMentionPayload?: (
+    payload: Record<string, unknown>,
+  ) => Record<string, unknown>;
 }
 
 (function () {
@@ -443,7 +446,18 @@ interface MonacoBootWindowLike extends Window {
       return currentPath;
     },
     sendEditorMentionRequest: function (payload) {
-      return editorRpcNotify(EDITOR_RPC_METHODS.mentionRequest, payload);
+      const buildTargetedPayload =
+        bootWindow.__te2InlineMonacoBuildSidebarMentionPayload;
+      if (typeof buildTargetedPayload !== "function") return false;
+      try {
+        return editorRpcNotify(
+          EDITOR_RPC_METHODS.mentionRequest,
+          buildTargetedPayload(payload),
+        );
+      } catch (error) {
+        console.warn("[mention] no active agent presentation", error);
+        return false;
+      }
     },
     goToDefinition: function () {
       codeInspectorRuntime?.goToDefinition();

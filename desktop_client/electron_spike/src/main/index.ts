@@ -11,6 +11,7 @@ import {
   session,
   webFrameMain,
   WebContentsView,
+  type IpcMainEvent,
   type IpcMainInvokeEvent,
   type WebContents,
 } from "electron";
@@ -28,6 +29,11 @@ import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
 import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
 import { RunTargetRelayManager } from "./run-target-relay";
 import { ElectronRunProfileRuntime } from "./run-profile-runtime";
+import { DetachedSidebarSurfaceRegistry } from "./sidebar-surface-registry";
+import {
+  readDesktopSidebarPresentationState,
+  writeDesktopSidebarPresentationState,
+} from "./sidebar-presentation-store";
 import { ElectronUiIpcClient } from "./ui-ipc-client";
 import {
   ELECTRON_APP_VIEW_IDENTITY,
@@ -35,6 +41,12 @@ import {
   validateElectronAppViewCommand,
   type ElectronAppViewInspection,
 } from "../shared/app-view-contracts";
+import {
+  validateElectronSidebarSurfaceAction,
+  validateElectronSidebarSurfaceDetachRequest,
+  validateElectronSidebarSurfaceReconcileRequest,
+  validateElectronSidebarSurfaceReference,
+} from "../shared/sidebar-surface-contracts";
 import {
   frameworkOrigin,
   readDesktopSettings,
@@ -89,8 +101,10 @@ let relay: FrameworkRelay;
 let runTargetRelays: RunTargetRelayManager | null = null;
 let uiIpcClient: ElectronUiIpcClient | null = null;
 let runProfileRuntime: ElectronRunProfileRuntime | null = null;
+let detachedSurfaceRegistry: DetachedSidebarSurfaceRegistry | null = null;
 let dialogHost: DesktopDialogHost | null = null;
 const surfaceWindows = new Set<BrowserWindow>();
+const trustedFrameworkContents = new Set<WebContents>();
 const assets = new DesktopAssetManager();
 
 function errorMessage(error: unknown): string {
@@ -245,12 +259,14 @@ function closeSurfaceWindows(): void {
 }
 
 function closeAppView(): void {
+  detachedSurfaceRegistry?.closeAll(false);
   runProfileRuntime?.clear();
   if (!appView) return;
   const closing = appView;
   closeSurfaceWindows();
   dialogHost?.closeForOwner(closing.webContents);
   appView = null;
+  trustedFrameworkContents.delete(closing.webContents);
   mainWindow?.contentView.removeChildView(closing);
   if (!closing.webContents.isDestroyed()) closing.webContents.close();
 }
@@ -344,6 +360,43 @@ async function handleAppViewControl(
     );
     return { ok: true };
   }
+  if (command === "read_sidebar_presentation_state") {
+    return readDesktopSidebarPresentationState();
+  }
+  if (command === "write_sidebar_presentation_state") {
+    await writeDesktopSidebarPresentationState(payload);
+    return { ok: true };
+  }
+  if (command === "detach_sidebar_surface") {
+    const request = validateElectronSidebarSurfaceDetachRequest(payload);
+    if (!detachedSurfaceRegistry) {
+      throw new Error("Detached Sidebar surface host is unavailable");
+    }
+    return detachedSurfaceRegistry.detach(request.descriptor, request.focus);
+  }
+  if (command === "focus_sidebar_surface") {
+    const reference = validateElectronSidebarSurfaceReference(payload);
+    return {
+      ok: detachedSurfaceRegistry?.focus(
+        reference.surfaceId,
+        reference.presentationId,
+      ) || false,
+    };
+  }
+  if (command === "close_sidebar_surface") {
+    const reference = validateElectronSidebarSurfaceReference(payload);
+    detachedSurfaceRegistry?.close(
+      reference.surfaceId,
+      reference.presentationId,
+      true,
+    );
+    return { ok: true };
+  }
+  if (command === "reconcile_sidebar_surfaces") {
+    const request = validateElectronSidebarSurfaceReconcileRequest(payload);
+    detachedSurfaceRegistry?.reconcile(request.surfaceIds);
+    return { ok: true };
+  }
   if (command === "reload") {
     const contents = event.sender;
     setImmediate(() => {
@@ -362,7 +415,10 @@ async function handleAppViewControl(
   return { ok: true };
 }
 
-function installContextMenu(contents: WebContents): void {
+function installContextMenu(
+  contents: WebContents,
+  explicitOwnerWindow?: BrowserWindow,
+): void {
   contents.on("context-menu", (event, params) => {
     event.preventDefault();
     contents.focus();
@@ -382,7 +438,8 @@ function installContextMenu(contents: WebContents): void {
         click: () => contents.paste(),
       },
     ]);
-    const ownerWindow = BrowserWindow.fromWebContents(contents) || mainWindow;
+    const ownerWindow =
+      explicitOwnerWindow || BrowserWindow.fromWebContents(contents) || mainWindow;
     if (ownerWindow && !ownerWindow.isDestroyed()) {
       menu.popup({ window: ownerWindow });
     }
@@ -400,6 +457,10 @@ function createAppView(): WebContentsView {
     },
   });
   view.setBackgroundColor("#111315");
+  trustedFrameworkContents.add(view.webContents);
+  view.webContents.once("destroyed", () => {
+    trustedFrameworkContents.delete(view.webContents);
+  });
   view.webContents.setZoomFactor(settings.zoomLevel);
   installContextMenu(view.webContents);
   view.webContents.on("dom-ready", () => {
@@ -411,6 +472,7 @@ function createAppView(): WebContentsView {
 
   const notify = () => sendNavigation(view.webContents);
   view.webContents.on("will-navigate", () => {
+    detachedSurfaceRegistry?.closeAll(false);
     closeSurfaceWindows();
     dialogHost?.closeForOwner(view.webContents);
   });
@@ -444,6 +506,7 @@ function createAppView(): WebContentsView {
     }
   });
   view.webContents.on("render-process-gone", (_event, details) => {
+    detachedSurfaceRegistry?.closeAll(false);
     closeSurfaceWindows();
     dialogHost?.closeForOwner(view.webContents);
     console.error(`[te2-desktop] App renderer exited: ${details.reason}`);
@@ -497,19 +560,53 @@ function createAppView(): WebContentsView {
     return { action: "deny" };
   });
 
-  const frameworkSession = view.webContents.session;
-  frameworkSession.setPermissionRequestHandler((requestingContents, permission, callback) => {
-    let allowed = false;
-    try {
-      allowed = requestingContents === view.webContents &&
-        new URL(requestingContents.getURL()).origin === relay.browserOrigin &&
-        ["clipboard-read", "clipboard-sanitized-write"].includes(String(permission));
-    } catch {
-      allowed = false;
-    }
-    callback(allowed);
-  });
   return view;
+}
+
+function installFrameworkPermissionPolicy(): void {
+  session.fromPartition(ELECTRON_FRAMEWORK_PARTITION).setPermissionRequestHandler(
+    (requestingContents, permission, callback) => {
+      let allowed = false;
+      try {
+        const url = new URL(requestingContents.getURL());
+        const loopback =
+          url.hostname === "127.0.0.1" ||
+          url.hostname === "localhost" ||
+          url.hostname === "::1" ||
+          url.hostname === "[::1]";
+        allowed = trustedFrameworkContents.has(requestingContents) &&
+          loopback &&
+          ["clipboard-read", "clipboard-sanitized-write"].includes(
+            String(permission),
+          );
+      } catch {
+        allowed = false;
+      }
+      callback(allowed);
+    },
+  );
+}
+
+function handleDetachedSurfaceReady(event: IpcMainEvent): void {
+  if (!detachedSurfaceRegistry?.handleShellReady(event.sender)) {
+    console.warn("[te2-desktop] Rejected detached surface ready event");
+  }
+}
+
+function handleDetachedSurfaceAction(
+  event: IpcMainEvent,
+  rawAction: unknown,
+): void {
+  let action;
+  try {
+    action = validateElectronSidebarSurfaceAction(rawAction);
+  } catch (error) {
+    console.warn(`[te2-desktop] Rejected detached surface action: ${errorMessage(error)}`);
+    return;
+  }
+  if (!detachedSurfaceRegistry?.handleShellAction(event.sender, action)) {
+    console.warn("[te2-desktop] Rejected detached surface action sender");
+  }
 }
 
 async function navigateApp(rawUrl: string): Promise<{ url: string }> {
@@ -716,8 +813,23 @@ async function main(): Promise<void> {
     session.fromPartition(ELECTRON_FRAMEWORK_PARTITION),
     () => relay.browserOrigin,
   );
+  installFrameworkPermissionPolicy();
 
   mainWindow = createMainWindow();
+  detachedSurfaceRegistry = new DetachedSidebarSurfaceRegistry({
+    getAppPath: () => app.getAppPath(),
+    getAppContents: () => appView?.webContents || null,
+    getRelayOrigin: () => relay.browserOrigin,
+    shellUrl: `${SHELL_SCHEME}://${SHELL_HOST}/surface/index.html`,
+    frameworkPartition: ELECTRON_FRAMEWORK_PARTITION,
+    registerTrustedContents: (contents) => trustedFrameworkContents.add(contents),
+    unregisterTrustedContents: (contents) => trustedFrameworkContents.delete(contents),
+    installContextMenu: (contents, owner) => installContextMenu(contents, owner),
+    installScrollbars: (contents) => installChromiumScrollbars(contents, "surface"),
+    injectRunProfileFrame: async (frame) => {
+      await runProfileRuntime?.injectFrame(frame);
+    },
+  });
   dialogHost = new DesktopDialogHost({
     getMainWindow: () => mainWindow,
     getAppContents: () => appView?.webContents || null,
@@ -727,6 +839,8 @@ async function main(): Promise<void> {
     installContextMenu,
   });
   dialogHost.registerIpc();
+  ipcMain.on("te2-desktop:sidebar-surface-ready", handleDetachedSurfaceReady);
+  ipcMain.on("te2-desktop:sidebar-surface-action", handleDetachedSurfaceAction);
   ipcMain.handle(
     "te2-desktop:native-request",
     (event, method: NativeRequestMethod, params: Record<string, unknown> = {}) => {
@@ -756,6 +870,16 @@ async function main(): Promise<void> {
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => {
   ipcMain.removeHandler("te2-desktop:app-view-control");
+  ipcMain.removeListener(
+    "te2-desktop:sidebar-surface-ready",
+    handleDetachedSurfaceReady,
+  );
+  ipcMain.removeListener(
+    "te2-desktop:sidebar-surface-action",
+    handleDetachedSurfaceAction,
+  );
+  detachedSurfaceRegistry?.closeAll(false);
+  detachedSurfaceRegistry = null;
   closeAppView();
   dialogHost?.dispose();
   dialogHost = null;

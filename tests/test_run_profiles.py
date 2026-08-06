@@ -833,10 +833,8 @@ class RunProfileSidebarDevToolsTests(unittest.IsolatedAsyncioTestCase):
         merged = sidebar_window_state._upsert_slot(
             {
                 "slots": {"runner-profile:preview": enabled},
-                "order": ["launcher", "runner-profile:preview"],
             },
             disabled,
-            activate=True,
         )
         slot = cast(
             dict[str, object],

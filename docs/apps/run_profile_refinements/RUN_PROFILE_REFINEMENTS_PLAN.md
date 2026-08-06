@@ -34,16 +34,24 @@ introduced.
 - Slice D is implemented and covered by focused frontend, Electron, Gecko
   syntax/unit/APK packaging, and build checks. Live native console registration,
   reconnect, and teardown validation is pending.
-- Slice E is refined and pending. It now covers shared browser/Gecko/Electron
-  presentation state and mention routing before the Electron-only detached
-  window and native DevTools work.
+- Slice E's presentation foundation and exact mention routing are implemented
+  and validated. The server
+  ledger now owns membership only; browser/Gecko and Electron persist and
+  reconcile client-local order, foreground, last-agent, and presentation-mode
+  state. Mention producers carry the client/host/presentation tuple; Python
+  validates its ephemeral registration and authoritative ledger slot, derives
+  conversation identity, and emits only to the registered agent app room.
+  The shared dependency-free component runtime is also extracted with explicit
+  owner/disposal, event/subscription cleanup, document-aware rendering, refs,
+  and synchronous projection control while modal-kit remains compatible.
+  Electron-only detached windows remain pending.
 
 ## Confirmed Current Architecture
 
 - Python owns profile parsing, active project/file state, draft-save policy,
-  run selection, and the logical Sidebar slot projection. Current Sidebar
-  preferences still persist global `active_host_id` and `order`; Slice E removes
-  those values from server presentation authority.
+  run selection, and the logical Sidebar slot projection. Sidebar ledger v2
+  persists slot membership and metadata only; global `active_host_id` and
+  `order` are no longer server presentation authority.
 - Framework-Shells shell identity and lifecycle events own running/stopped
   state. The current projection is event-driven and must remain free of
   periodic polling.
@@ -85,12 +93,19 @@ introduced.
   generation. `surfaceId` remains presentation and dev-runtime-policy identity;
   iframe removal, reconstruction, or app-view navigation does not tear down a
   still-running shell's listeners.
-- The host frontend already has in-memory client-active ids, but server ledger
-  notifications can overwrite them. Mention delivery currently broadcasts to
-  the complete Sidebar IPC room rather than an exact client presentation.
-- The dependency-free `ui/modal-kit` JSX runtime creates real DOM nodes in an
-  arbitrary document. It has no virtual DOM, lifecycle scopes, subscriptions,
-  or disposal contract yet.
+- The host frontend owns a versioned client presentation store. Browser and
+  Gecko hosts use `localStorage`; Electron uses a validated preload/main bridge
+  backed by an atomic XDG-config file. Every server ledger update is reconciled
+  into local order and foreground state instead of overwriting them. Mention
+  producers use the client-local last-active agent target (or a live foreground
+  agent on first use), and the backend delivers only after exact presentation,
+  ledger, conversation, and app-peer validation.
+- The dependency-free `ui/component-runtime` creates real DOM nodes in an
+  arbitrary document. It provides hierarchical owner/disposal scopes, owned
+  event and subscription cleanup, object refs, and a small synchronous state
+  projection controller without a virtual DOM. `ui/modal-kit/jsx-runtime.ts`
+  is a compatibility re-export, and modal shell destruction disposes its owned
+  JSX listeners before removing the DOM.
 
 ## Required Invariants
 
@@ -537,6 +552,11 @@ bridge. This is instrumentation, not a product runtime dependency.
 
 ## Slice E: Shared Client Presentation, Gecko Parity, And Electron Detachment
 
+Implementation status: complete in source and automated validation. Gecko
+remains inline with regression coverage; Electron now reconstructs detached
+surfaces in registry-owned floating windows. Live detached-window acceptance is
+the remaining handoff step, not an additional implementation slice.
+
 ### Shared Presentation Authority
 
 The server ledger remains authoritative for the set of logical Sidebar slots.
@@ -581,9 +601,14 @@ under the existing desktop configuration boundary.
 
 Mention actions include the originating client's current `lastAgentHostId` and
 `lastAgentPresentationId`. The backend validates that the stable host still
-exists, that the presentation registered for the same client, and that the peer
-has the required agent capability. It then routes to that exact Sidebar peer
-instead of broadcasting to every `sidebar_ipc` connection.
+exists, that the presentation is registered ephemerally for the same client,
+and that the ledger identifies a live agent conversation with a registered app
+peer. It derives the authoritative conversation id from that ledger slot and
+routes only to the app room instead of broadcasting to every `sidebar_ipc`
+connection. Missing or stale targets fail rather than using a global fallback.
+The transient registration travels on the registered host's Sidebar IPC
+connection, takes client identity from that connection rather than request
+params, and is republished after each transport registration acknowledgement.
 
 The stable host id is lifecycle identity. Presentation and console worker ids
 are transient instance/diagnostic identities and are refreshed when an iframe
@@ -591,9 +616,9 @@ is reconstructed or detached.
 
 ### Shared Component Runtime
 
-Extract the generic TSX-to-DOM primitives from `ui/modal-kit` into a reusable
-component core while keeping modal-kit compatibility. Add only the mechanisms
-needed by long-lived Sidebar and detached-window chrome:
+The generic TSX-to-DOM primitives now live under `ui/component-runtime`, while
+`ui/modal-kit` retains a compatibility re-export. The core supplies only the
+mechanisms needed by long-lived Sidebar and detached-window chrome:
 
 - an explicit owner/disposal scope;
 - event/subscription cleanup;
@@ -636,12 +661,13 @@ ownerId + shellId
     -> native primary/auxiliary relay listener group
 ```
 
-The first implementation reconstructs the URL in a dedicated trusted window
-shell. It applies the complete iframe marker and immutable surface metadata
-before navigation, waits until the detached presentation is ready, then removes
-the embedded presentation. A later implementation may create every surface as
-a `WebContentsView` so the same browsing context can be reparented without a
-reload. Neither mechanism changes backend ownership.
+The implementation reconstructs the URL in a dedicated trusted window shell.
+Each registry-owned normal `BrowserWindow` hosts a framework-partition
+`WebContentsView`. Electron applies the complete iframe marker and immutable
+surface metadata before navigation, waits until the detached presentation is
+ready, then Code TE2 removes the embedded presentation. A later implementation
+may create every surface as a `WebContentsView` so the same browsing context can
+be reparented without a reload. Neither mechanism changes backend ownership.
 
 - Detach/reattach changes only the requesting Electron client's presentation.
 - Closing a detached window returns the surface to its embedded presentation;

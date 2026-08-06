@@ -12,7 +12,10 @@ import {
   notifyExplorerRpc,
   requestExplorerRpc,
 } from "../../../src/explorer/rpc/client.ts";
-import { SIDEBAR_IPC_RPC_NOTIFICATIONS } from "../../../src/sidebar_ipc/rpc_contract.ts";
+import {
+  SIDEBAR_IPC_RPC_METHODS,
+  SIDEBAR_IPC_RPC_NOTIFICATIONS,
+} from "../../../src/sidebar_ipc/rpc_contract.ts";
 import {
   UI_IPC_RPC_METHODS,
   type UiIpcRpcMethod,
@@ -34,6 +37,7 @@ import {
 } from "./constants.ts";
 import {
   configureDevToolsTargetNavigation,
+  devToolsTargetWindowName,
   runProfileRuntimeMetadata,
   shouldRecreateDevToolsTargetFrame,
 } from "./devtools-target.ts";
@@ -52,6 +56,20 @@ import {
   collectShortcuts as collectShortcutsFromPrefs,
   pickMruShortcut as pickMruShortcutFromModel,
 } from "./shortcut-model.ts";
+import {
+  activateSidebarPresentation,
+  bindSidebarAgentPresentation,
+  clearSidebarPresentationForeground,
+  emptySidebarPresentationState,
+  loadSidebarPresentationState,
+  reconcileSidebarPresentationState,
+  reorderSidebarPresentationState,
+  resolveSidebarMentionTarget,
+  saveSidebarPresentationState,
+  setSidebarPresentationMode,
+  sidebarPresentationStatesEqual,
+  type SidebarClientPresentationState,
+} from "./presentation-state.ts";
 import {
   releaseRunTargetSurface,
   prepareRunTargetUrl,
@@ -115,6 +133,61 @@ interface SidebarRuntimeEventWindow {
   __cm6PendingSidebarEvents?: UnknownRecord[];
 }
 
+type ElectronSidebarSurfaceAction =
+  | "attach"
+  | "console"
+  | "devtools"
+  | "refresh"
+  | "stop";
+
+interface ElectronSidebarSurfaceDescriptor {
+  version: 1;
+  hostId: string;
+  surfaceId: string;
+  presentationId: string;
+  label: string;
+  url: string;
+  windowName: string;
+  appId: string;
+  projectPath: string;
+  profileId: string;
+  shellId: string;
+  devRuntime: boolean;
+  devTools: boolean;
+  consoleWorkerId: string;
+}
+
+interface ElectronSidebarSurfaceEvent {
+  type: "closed" | "action";
+  hostId: string;
+  surfaceId: string;
+  presentationId: string;
+  action?: ElectronSidebarSurfaceAction;
+}
+
+interface ElectronSidebarSurfaceBridge {
+  detachSidebarSurface(
+    descriptor: ElectronSidebarSurfaceDescriptor,
+    options?: { focus?: boolean },
+  ): Promise<{ ok: true; presentationId: string }>;
+  focusSidebarSurface(
+    surfaceId: string,
+    presentationId?: string,
+  ): Promise<{ ok: boolean }>;
+  closeSidebarSurface(
+    surfaceId: string,
+    presentationId?: string,
+  ): Promise<{ ok: true }>;
+  reconcileSidebarSurfaces(surfaceIds: string[]): Promise<{ ok: true }>;
+  onSidebarSurfaceEvent(
+    listener: (event: ElectronSidebarSurfaceEvent) => void,
+  ): () => void;
+}
+
+interface ElectronSidebarSurfaceWindow extends Window {
+  te2Electron?: ElectronSidebarSurfaceBridge;
+}
+
 const SIDEBAR_LAUNCHER_ICON_SRC =
   "/apps/file_editor_cm6/static/icons/sidebar-launcher.svg";
 const SIDEBAR_SELF_APP_ID = "file_editor_cm6";
@@ -176,6 +249,12 @@ export function initSidebarShortcuts(
     typeof options.emitSidebarUiRequest === "function"
       ? options.emitSidebarUiRequest
       : null;
+  const emitSidebarRpcRequest =
+    typeof options.emitSidebarRpcRequest === "function"
+      ? options.emitSidebarRpcRequest
+      : null;
+  const getClientId =
+    typeof options.getClientId === "function" ? options.getClientId : () => "";
   const setMenuChecked =
     typeof options.setMenuChecked === "function"
       ? options.setMenuChecked
@@ -257,6 +336,14 @@ export function initSidebarShortcuts(
   let _lastPickerPath = "";
   let _clientActiveShortcutId = "";
   let _clientActiveWindowHostId = "";
+  let _pendingActivatedWindowHostId = "";
+  let _presentationState = emptySidebarPresentationState();
+  let _presentationStateLoaded = false;
+  let _presentationStateLoadPromise: Promise<void> | null = null;
+  let _presentationPersistQueue: Promise<void> = Promise.resolve();
+  let _detachedPresentationIds = new Map<string, string>();
+  let _detachPromises = new Map<string, Promise<boolean>>();
+  let _electronSurfaceEventsUnsubscribe: (() => void) | null = null;
   let _lastShortcutUsageKey = "";
   let _lastShortcutUsageStamp = 0;
 
@@ -1276,6 +1363,405 @@ export function initSidebarShortcuts(
     }
   }
 
+  function _queuePresentationStatePersist() {
+    if (!_presentationStateLoaded) return;
+    const snapshot = _presentationState;
+    _presentationPersistQueue = _presentationPersistQueue
+      .catch(() => {})
+      .then(() => saveSidebarPresentationState(snapshot))
+      .catch((error: unknown) => {
+        console.warn("[Sidebar] presentation state persist failed", error);
+      });
+  }
+
+  function _commitPresentationState(
+    next: SidebarClientPresentationState,
+    options: { persist?: boolean } = {},
+  ): boolean {
+    if (sidebarPresentationStatesEqual(_presentationState, next)) return false;
+    _presentationState = next;
+    _clientActiveWindowHostId = next.foregroundHostId;
+    if (next.foregroundHostId) _clientActiveShortcutId = "";
+    if (options.persist !== false) _queuePresentationStatePersist();
+    return true;
+  }
+
+  function _slotIsAgent(slot: SidebarAppDockSlot | null): boolean {
+    if (!slot) return false;
+    const appId = _normStr(slot.app_id || slot.appId)
+      .toLowerCase()
+      .replaceAll("_", "-");
+    const stateKind = _normStr(slot.state_kind || slot.stateKind).toLowerCase();
+    return appId === "als" || appId === "als-rs" || stateKind === "conversation";
+  }
+
+  function _newPresentationId(hostId: string): string {
+    const randomId =
+      typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    return `inline:${hostId}:${randomId}`;
+  }
+
+  function _newDetachedPresentationId(hostId: string): string {
+    const randomId =
+      typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    return `detached:${hostId}:${randomId}`;
+  }
+
+  function _electronSurfaceBridge(): ElectronSidebarSurfaceBridge | null {
+    const bridge = (window as ElectronSidebarSurfaceWindow).te2Electron;
+    return bridge && typeof bridge.detachSidebarSurface === "function"
+      ? bridge
+      : null;
+  }
+
+  function _surfaceIdForShortcut(sc: SidebarShortcut): string {
+    const surface = asRecord(sc.run_profile_surface || sc.runProfileSurface);
+    const hostId = _normStr(sc.host_id) || sc.key;
+    return _normStr(surface.surfaceId) || `sidebar:${hostId}`;
+  }
+
+  function _presentationModeForHost(hostId: string) {
+    return _presentationState.presentations[hostId] || "embedded";
+  }
+
+  function _isDetachedShortcut(sc: SidebarShortcut): boolean {
+    const hostId = _normStr(sc.host_id);
+    return !!(
+      hostId &&
+      _electronSurfaceBridge() &&
+      _presentationModeForHost(hostId) === "detached"
+    );
+  }
+
+  function _detachedSurfaceDescriptor(
+    sc: SidebarShortcut,
+    url: string,
+    presentationId: string,
+  ): ElectronSidebarSurfaceDescriptor {
+    const hostId = _normStr(sc.host_id);
+    const slot = _findAppDockSlot(hostId);
+    const surface = asRecord(sc.run_profile_surface || sc.runProfileSurface);
+    const readiness = asRecord(slot?.readiness);
+    const runtime = runProfileRuntimeMetadata(sc);
+    return {
+      version: 1,
+      hostId,
+      surfaceId: _surfaceIdForShortcut(sc),
+      presentationId,
+      label: _normStr(sc.label) || _normStr(sc.app_id) || "Sidebar surface",
+      url: new URL(url, window.location.href).href,
+      windowName: devToolsTargetWindowName(sc),
+      appId: _normStr(sc.app_id),
+      projectPath: _normStr(surface.projectPath),
+      profileId: _normStr(surface.profileId),
+      shellId: _normStr(surface.shellId),
+      devRuntime: runtime?.devRuntime === true,
+      devTools: runtime?.devTools === true,
+      consoleWorkerId: _normStr(
+        slot?.console_worker_id ||
+          slot?.consoleWorkerId ||
+          readiness.console_worker_id ||
+          readiness.consoleWorkerId,
+      ),
+    };
+  }
+
+  async function _ensureDetachedShortcut(
+    sc: SidebarShortcut,
+    focus: boolean,
+  ): Promise<boolean> {
+    const bridge = _electronSurfaceBridge();
+    const hostId = _normStr(sc.host_id);
+    if (!bridge || !hostId) return false;
+    const existing = _detachPromises.get(hostId);
+    if (existing) {
+      const ready = await existing;
+      if (ready && focus) {
+        await bridge.focusSidebarSurface(
+          _surfaceIdForShortcut(sc),
+          _detachedPresentationIds.get(hostId),
+        );
+      }
+      return ready;
+    }
+    const pending = (async () => {
+      if (
+        sc.kind === SHORTCUT_KIND_FRAMEWORK_APP &&
+        !(await _ensureFrameworkAppRunning(sc.app_id))
+      ) {
+        return false;
+      }
+      const entry = _iframeMap.get(sc.key) || null;
+      const fallbackUrl = _shortcutFrameUrl(sc, entry);
+      if (!fallbackUrl) return false;
+      const runtime = runProfileRuntimeMetadata(sc);
+      const loadUrl = await prepareRunTargetUrl(
+        sc.run_target_route || sc.runTargetRoute,
+        fallbackUrl,
+        runtime,
+      );
+      const presentationId =
+        _detachedPresentationIds.get(hostId) ||
+        _newDetachedPresentationId(hostId);
+      const result = await bridge.detachSidebarSurface(
+        _detachedSurfaceDescriptor(sc, loadUrl, presentationId),
+        { focus },
+      );
+      if (result.ok !== true || result.presentationId !== presentationId) {
+        throw new Error("Electron detached surface returned a stale presentation");
+      }
+      _detachedPresentationIds.set(hostId, presentationId);
+      _commitPresentationState(
+        setSidebarPresentationMode(_presentationState, hostId, "detached"),
+      );
+      _publishPresentationIdentity(hostId, presentationId);
+      _bindAgentPresentationIfCurrent(hostId, presentationId);
+      if (entry) {
+        try {
+          entry.iframe.remove();
+        } catch (_) {}
+        _iframeMap.delete(sc.key);
+      }
+      return true;
+    })()
+      .catch((error: unknown) => {
+        toast(errorMessage(error, "Failed to detach Sidebar surface"));
+        return false;
+      })
+      .finally(() => {
+        _detachPromises.delete(hostId);
+      });
+    _detachPromises.set(hostId, pending);
+    return pending;
+  }
+
+  function _reattachDetachedShortcut(event: ElectronSidebarSurfaceEvent): void {
+    const currentPresentationId = _detachedPresentationIds.get(event.hostId);
+    if (!currentPresentationId || currentPresentationId !== event.presentationId) {
+      return;
+    }
+    _detachedPresentationIds.delete(event.hostId);
+    _commitPresentationState(
+      setSidebarPresentationMode(_presentationState, event.hostId, "embedded"),
+    );
+    const normalized = _collectVisibleShortcuts(_latestUiPrefs || {});
+    const ensured = _ensureActiveSelection(_latestUiPrefs || {}, normalized);
+    void _syncIframesAndActivate(
+      _latestUiPrefs || {},
+      normalized,
+      ensured.active,
+    );
+  }
+
+  function _handleElectronSurfaceEvent(event: ElectronSidebarSurfaceEvent): void {
+    if (!event || typeof event !== "object") return;
+    if (event.type === "closed") {
+      _reattachDetachedShortcut(event);
+      return;
+    }
+    if (event.type !== "action") return;
+    if (event.action === "console") {
+      document.getElementById("mi-toggle-console")?.click();
+      return;
+    }
+    if (event.action !== "stop") return;
+    const slot = _findAppDockSlot(event.hostId);
+    const surface = asRecord(slot?.run_profile_surface || slot?.runProfileSurface);
+    const projectPath = _normStr(surface.projectPath);
+    const profileId = _normStr(surface.profileId);
+    if (!projectPath || !profileId) return;
+    _requestSidebarControl(UI_IPC_RPC_METHODS.hostRunProfileStop, {
+      projectPath,
+      profileId,
+      shellId: _normStr(surface.shellId),
+      source: "electron_detached_surface",
+    });
+  }
+
+  function _reconcileElectronDetachedSurfaces(
+    slots: SidebarAppDockSlot[],
+  ): void {
+    const bridge = _electronSurfaceBridge();
+    if (!bridge || !_presentationStateLoaded) return;
+    const liveHostIds = new Set(slots.map((slot) => _windowHostId(slot)));
+    for (const hostId of [..._detachedPresentationIds.keys()]) {
+      if (!liveHostIds.has(hostId)) _detachedPresentationIds.delete(hostId);
+    }
+    const surfaceIds = slots
+      .map((slot) => _appDockSlotToEntry(slot))
+      .filter((sc): sc is SidebarShortcut => !!sc)
+      .filter(
+        (sc) =>
+          _presentationModeForHost(_normStr(sc.host_id)) === "detached",
+      )
+      .map((sc) => _surfaceIdForShortcut(sc));
+    void bridge.reconcileSidebarSurfaces(surfaceIds).catch((error: unknown) => {
+      console.warn("[Sidebar] detached surface reconcile failed", error);
+    });
+  }
+
+  function _presentationIdForHost(hostId: string): string {
+    return (
+      _detachedPresentationIds.get(hostId) ||
+      _iframeMap.get(`dock:${hostId}`)?.presentationId ||
+      ""
+    );
+  }
+
+  function _publishPresentationIdentity(
+    hostId: string,
+    presentationId: string,
+  ): void {
+    if (!hostId || !emitSidebarRpcRequest) return;
+    emitSidebarRpcRequest(
+      SIDEBAR_IPC_RPC_METHODS.windowPresentationUpdate,
+      {
+        hostId,
+        host_id: hostId,
+        presentationId,
+        presentation_id: presentationId,
+        source: "sidebar_presentation",
+      },
+    );
+  }
+
+  function publishPresentationIdentities(): void {
+    _iframeMap.forEach((entry, key) => {
+      if (!key.startsWith("dock:")) return;
+      _publishPresentationIdentity(key.slice("dock:".length), entry.presentationId);
+    });
+    _detachedPresentationIds.forEach((presentationId, hostId) => {
+      _publishPresentationIdentity(hostId, presentationId);
+    });
+  }
+
+  function getMentionTarget() {
+    if (!_presentationStateLoaded) return null;
+    const agentHostIds = _appDockSlots
+      .filter((slot) => _slotIsAgent(slot))
+      .map((slot) => _windowHostId(slot))
+      .filter(Boolean);
+    const presentationIds = Object.fromEntries(
+      agentHostIds.map((hostId) => [hostId, _presentationIdForHost(hostId)]),
+    );
+    const target = resolveSidebarMentionTarget(
+      _presentationState,
+      getClientId(),
+      agentHostIds,
+      presentationIds,
+    );
+    if (
+      target &&
+      (_presentationState.lastAgentHostId !== target.hostId ||
+        _presentationState.lastAgentPresentationId !== target.presentationId)
+    ) {
+      _commitPresentationState(
+        activateSidebarPresentation(_presentationState, target.hostId, {
+          agent: true,
+          presentationId: target.presentationId,
+        }),
+      );
+    }
+    return target;
+  }
+
+  function _bindAgentPresentationIfCurrent(
+    hostId: string,
+    presentationId: string,
+  ) {
+    if (!_presentationStateLoaded || !_slotIsAgent(_findAppDockSlot(hostId))) {
+      return;
+    }
+    _commitPresentationState(
+      bindSidebarAgentPresentation(
+        _presentationState,
+        hostId,
+        presentationId,
+      ),
+    );
+  }
+
+  function _sortAppDockSlotsByPresentationOrder(
+    slots: SidebarAppDockSlot[],
+  ): SidebarAppDockSlot[] {
+    const byHostId = new Map(
+      slots
+        .map((slot) => [_windowHostId(slot), slot] as const)
+        .filter(([hostId]) => !!hostId),
+    );
+    return _presentationState.order
+      .map((hostId) => byHostId.get(hostId) || null)
+      .filter((slot): slot is SidebarAppDockSlot => !!slot);
+  }
+
+  function _reconcilePresentationWithDockSlots(
+    slots: SidebarAppDockSlot[],
+    options: { notifyFallback?: boolean } = {},
+  ): SidebarAppDockSlot[] {
+    if (!_presentationStateLoaded) {
+      return slots.slice().sort((left, right) =>
+        _windowHostId(left).localeCompare(_windowHostId(right)),
+      );
+    }
+    const previousForeground = _presentationState.foregroundHostId;
+    const nextHostIds = new Set(
+      slots.map((slot) => _windowHostId(slot)).filter(Boolean),
+    );
+    for (const previousSlot of _appDockSlots) {
+      const previousHostId = _windowHostId(previousSlot);
+      if (!previousHostId || nextHostIds.has(previousHostId)) continue;
+      const previousShortcut = _appDockSlotToEntry(previousSlot);
+      if (previousShortcut) {
+        _releaseRunProfileSurface(_runProfileSurfaceId(previousShortcut));
+      }
+      _detachedPresentationIds.delete(previousHostId);
+    }
+    const next = reconcileSidebarPresentationState(
+      _presentationState,
+      slots.map((slot) => _windowHostId(slot)).filter(Boolean),
+    );
+    _commitPresentationState(next);
+    const ordered = _sortAppDockSlotsByPresentationOrder(slots);
+    _reconcileElectronDetachedSurfaces(ordered);
+    if (
+      options.notifyFallback !== false &&
+      previousForeground &&
+      previousForeground !== next.foregroundHostId &&
+      next.foregroundHostId
+    ) {
+      _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowActivate, {
+        hostId: next.foregroundHostId,
+        host_id: next.foregroundHostId,
+        source: "sidebar_ledger_fallback",
+      });
+    }
+    return ordered;
+  }
+
+  async function _ensurePresentationStateLoaded(): Promise<void> {
+    if (_presentationStateLoaded) return;
+    if (_presentationStateLoadPromise) return _presentationStateLoadPromise;
+    _presentationStateLoadPromise = (async () => {
+      try {
+        _presentationState = await loadSidebarPresentationState();
+      } catch (error) {
+        console.warn("[Sidebar] presentation state load failed", error);
+        _presentationState = emptySidebarPresentationState();
+      }
+      _presentationStateLoaded = true;
+      _appDockSlots = _reconcilePresentationWithDockSlots(_appDockSlots, {
+        notifyFallback: false,
+      });
+      _clientActiveWindowHostId = _presentationState.foregroundHostId;
+      _presentationStateLoadPromise = null;
+    })();
+    return _presentationStateLoadPromise;
+  }
+
   function _setClientActiveShortcut(
     shortcutId: unknown,
     options: UnknownRecord = {},
@@ -1285,7 +1771,23 @@ export function initSidebarShortcuts(
     if (activeWindow) {
       const hostId = _windowHostId(activeWindow);
       const prevWindowId = _clientActiveWindowHostId;
-      _clientActiveWindowHostId = hostId;
+      if (_presentationStateLoaded) {
+        _commitPresentationState(
+          activateSidebarPresentation(_presentationState, hostId, {
+            agent: _slotIsAgent(activeWindow),
+            presentationId: _presentationIdForHost(hostId),
+          }),
+        );
+      } else {
+        _clientActiveWindowHostId = hostId;
+      }
+      const activeDockShortcut = _appDockSlotToEntry(activeWindow);
+      if (
+        activeDockShortcut &&
+        _presentationModeForHost(hostId) === "detached"
+      ) {
+        void _ensureDetachedShortcut(activeDockShortcut, true);
+      }
       _clientActiveShortcutId = "";
       if (options.emit && hostId && hostId !== prevWindowId) {
         _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowActivate, {
@@ -1313,7 +1815,14 @@ export function initSidebarShortcuts(
 
     const prevId = _clientActiveShortcutId;
     _clientActiveShortcutId = nextId;
-    if (nextId) _clientActiveWindowHostId = "";
+    if (nextId) {
+      _clientActiveWindowHostId = "";
+      if (_presentationStateLoaded) {
+        _commitPresentationState(
+          clearSidebarPresentationForeground(_presentationState),
+        );
+      }
+    }
 
     if (options.updateLastUsed && nextId) {
       _maybeUpdateShortcutLastUsed(nextId);
@@ -1475,12 +1984,11 @@ export function initSidebarShortcuts(
       }
     }
     if (!hostIds.length) return false;
-    _requestSidebarControl(UI_IPC_RPC_METHODS.sidebarWindowOrderUpdate, {
-      order: ["launcher", ...hostIds],
-      host_ids: hostIds,
-      hostIds,
-      source: "header_icon_drag",
-    });
+    if (!_presentationStateLoaded) return false;
+    const next = reorderSidebarPresentationState(_presentationState, hostIds);
+    if (!_commitPresentationState(next)) return true;
+    _appDockSlots = _sortAppDockSlotsByPresentationOrder(_appDockSlots);
+    _applyUiPrefsHydrated();
     return true;
   }
 
@@ -1622,6 +2130,51 @@ export function initSidebarShortcuts(
       (sc as SidebarShortcut).run_profile_surface ||
         (sc as SidebarShortcut).runProfileSurface,
     );
+    const presentationHostId = _normStr((sc as SidebarShortcut).host_id);
+    const electronBridge = _electronSurfaceBridge();
+    if (presentationHostId && electronBridge) {
+      addSeparator();
+      const surfaceAction = document.createElement("div");
+      surfaceAction.className = "fe-dd-item";
+      const isDetached =
+        _presentationModeForHost(presentationHostId) === "detached";
+      surfaceAction.textContent = isDetached ? "Attach" : "Detach";
+      surfaceAction.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        _closeHeaderIconMenu();
+        if (!isDetached) {
+          void _ensureDetachedShortcut(sc as SidebarShortcut, true).then(() => {
+            const normalized = _collectVisibleShortcuts(_latestUiPrefs || {});
+            const ensured = _ensureActiveSelection(
+              _latestUiPrefs || {},
+              normalized,
+            );
+            void _syncIframesAndActivate(
+              _latestUiPrefs || {},
+              normalized,
+              ensured.active,
+            );
+          });
+          return;
+        }
+        const presentationId =
+          _detachedPresentationIds.get(presentationHostId) || "";
+        void electronBridge
+          .closeSidebarSurface(
+            _surfaceIdForShortcut(sc as SidebarShortcut),
+            presentationId,
+          )
+          .then(() => {
+            _reattachDetachedShortcut({
+              type: "closed",
+              hostId: presentationHostId,
+              surfaceId: _surfaceIdForShortcut(sc as SidebarShortcut),
+              presentationId,
+            });
+          });
+      });
+      menu.appendChild(surfaceAction);
+    }
     if (appId) {
       addSeparator();
       const kill = document.createElement("div");
@@ -2417,10 +2970,23 @@ export function initSidebarShortcuts(
     entry.iframe = nextIframe;
     entry.url = initialUrl || _shortcutFrameUrl(sc, null, { forceReload: true });
     entry.loaded = !!initialUrl;
+    entry.presentationId = _newPresentationId(
+      _normStr(sc.host_id) || sc.key,
+    );
     entry.devToolsName = devToolsName;
     entry.runProfileSurfaceId = _runProfileSurfaceId(sc);
     entry.version = shortcutVersion(sc.version);
     _iframeMap.set(sc.key, entry);
+    if (_isAppDockEntry(sc)) {
+      _publishPresentationIdentity(
+        _normStr(sc.host_id),
+        entry.presentationId,
+      );
+      _bindAgentPresentationIfCurrent(
+        _normStr(sc.host_id),
+        entry.presentationId,
+      );
+    }
     return entry;
   }
 
@@ -2656,10 +3222,18 @@ export function initSidebarShortcuts(
       ? shortcuts
       : _collectVisibleShortcuts(uiPrefs);
     const desiredKeys = new Set(resolvedShortcuts.map((sc) => sc.key));
+    const detachedKeys = new Set(
+      resolvedShortcuts.filter(_isDetachedShortcut).map((sc) => sc.key),
+    );
 
     _iframeMap.forEach((entry, key) => {
-      if (!desiredKeys.has(key)) {
-        _releaseRunProfileSurface(entry.runProfileSurfaceId);
+      if (!desiredKeys.has(key) || detachedKeys.has(key)) {
+        if (!detachedKeys.has(key) && key.startsWith("dock:")) {
+          _publishPresentationIdentity(key.slice("dock:".length), "");
+        }
+        if (!detachedKeys.has(key)) {
+          _releaseRunProfileSurface(entry.runProfileSurfaceId);
+        }
         try {
           entry.iframe.remove();
         } catch (_) {}
@@ -2672,20 +3246,38 @@ export function initSidebarShortcuts(
 
     // Create iframes for app dock slots and active URL slots.
     resolvedShortcuts.forEach((sc) => {
+      if (detachedKeys.has(sc.key)) {
+        void _ensureDetachedShortcut(sc, false);
+        return;
+      }
       let entry = _iframeMap.get(sc.key);
       if (!entry) {
         const iframe = document.createElement("iframe");
         const devToolsName = _configureShortcutIframeElement(iframe, sc);
         stack.appendChild(iframe);
+        const presentationId = _newPresentationId(
+          _normStr(sc.host_id) || sc.key,
+        );
         entry = {
           iframe,
           url: _shortcutFrameUrl(sc, null),
           loaded: false,
+          presentationId,
           devToolsName,
           runProfileSurfaceId: _runProfileSurfaceId(sc),
           version: shortcutVersion(sc.version),
         };
         _iframeMap.set(sc.key, entry);
+        if (_isAppDockEntry(sc)) {
+          _publishPresentationIdentity(
+            _normStr(sc.host_id),
+            presentationId,
+          );
+          _bindAgentPresentationIfCurrent(
+            _normStr(sc.host_id),
+            presentationId,
+          );
+        }
       } else if (
         shouldRecreateDevToolsTargetFrame(
           entry.devToolsName,
@@ -2727,7 +3319,10 @@ export function initSidebarShortcuts(
 
     // Eager load (best-effort). For framework apps this will start apps too.
     const eager = resolvedShortcuts.filter(
-      (sc) => sc && sc.load === SHORTCUT_LOAD_EAGER,
+      (sc) =>
+        sc &&
+        sc.load === SHORTCUT_LOAD_EAGER &&
+        !detachedKeys.has(sc.key),
     );
     for (const sc of eager) {
       const entry = _iframeMap.get(sc.key);
@@ -2746,7 +3341,9 @@ export function initSidebarShortcuts(
     });
 
     let activeReady = false;
-    if (hasActive && resolvedActive) {
+    if (resolvedActive && detachedKeys.has(resolvedActive.key)) {
+      activeReady = true;
+    } else if (hasActive && resolvedActive) {
       const entry = _iframeMap.get(resolvedActive.key);
       if (entry) {
         if (
@@ -3739,17 +4336,8 @@ export function initSidebarShortcuts(
     payload: UnknownRecord,
   ): SidebarAppDockSlot[] {
     const slots = asRecord(payload.slots);
-    const order = Array.isArray(payload.order)
-      ? payload.order.map((item) => _normStr(item)).filter(Boolean)
-      : [];
     if (Object.keys(slots).length) {
-      const orderedHostIds = order.filter(
-        (item) => item !== "launcher" && slots[item],
-      );
-      const unorderedHostIds = Object.keys(slots).filter(
-        (hostId) => !orderedHostIds.includes(hostId),
-      );
-      return [...orderedHostIds, ...unorderedHostIds]
+      return Object.keys(slots)
         .map((hostId) => asRecord(slots[hostId]))
         .filter(
           (item): item is SidebarAppDockSlot =>
@@ -3757,7 +4345,7 @@ export function initSidebarShortcuts(
         );
     }
 
-    // One-turn migration tolerance for older local pref payloads; live RPC shape is slots/order.
+    // One-turn migration tolerance for the earlier draft array shape.
     return Array.isArray(payload.windows)
       ? payload.windows.filter(
           (item): item is SidebarAppDockSlot =>
@@ -3768,20 +4356,15 @@ export function initSidebarShortcuts(
 
   function _applyAppDockLedgerPayload(payload: UnknownRecord) {
     const windows = _appDockSlotsFromLedgerPayload(payload);
-    _appDockSlots = windows;
-    const activeHostId = _normStr(
-      payload.activeHostId || payload.active_host_id,
-    );
-    if (activeHostId) {
-      _clientActiveWindowHostId = activeHostId;
-      _clientActiveShortcutId = "";
-    } else if (
-      _clientActiveWindowHostId &&
-      !_appDockSlots.some(
-        (win) => _windowHostId(win) === _clientActiveWindowHostId,
-      )
+    _appDockSlots = _reconcilePresentationWithDockSlots(windows);
+    if (
+      _pendingActivatedWindowHostId &&
+      _findAppDockSlot(_pendingActivatedWindowHostId)
     ) {
-      _clientActiveWindowHostId = "";
+      const hostId = _pendingActivatedWindowHostId;
+      _pendingActivatedWindowHostId = "";
+      _setClientActiveShortcut(hostId, { emit: false });
+      return;
     }
     if (!_hydrated) return;
     _applyUiPrefsHydrated();
@@ -3792,6 +4375,7 @@ export function initSidebarShortcuts(
     if (_hydrated) return;
     _hydratePromise = (async () => {
       try {
+        await _ensurePresentationStateLoaded();
         await _bootstrapExtensionManifest();
       } finally {
         _setFrameworkEventsEnabled(true);
@@ -3804,6 +4388,20 @@ export function initSidebarShortcuts(
   }
 
   async function init() {
+    const electronBridge = _electronSurfaceBridge();
+    if (electronBridge && !_electronSurfaceEventsUnsubscribe) {
+      _electronSurfaceEventsUnsubscribe = electronBridge.onSidebarSurfaceEvent(
+        _handleElectronSurfaceEvent,
+      );
+      window.addEventListener(
+        "beforeunload",
+        () => {
+          _electronSurfaceEventsUnsubscribe?.();
+          _electronSurfaceEventsUnsubscribe = null;
+        },
+        { once: true },
+      );
+    }
     // Resolve core DOM.
     agentToggleBtn = document.getElementById("fe-agent-toggle");
 
@@ -4103,19 +4701,8 @@ export function initSidebarShortcuts(
           return;
         }
         if (eventType === SIDEBAR_IPC_RPC_NOTIFICATIONS.clientState) {
-          const payload = asRecord(data.payload);
-          const activeWindowHostId = _normStr(
-            payload.activeWindowHostId || payload.active_window_host_id,
-          );
-          if (activeWindowHostId) {
-            _clientActiveWindowHostId = activeWindowHostId;
-            _clientActiveShortcutId = "";
-            _applyUiPrefsHydrated();
-            return;
-          }
-          _setClientActiveShortcut(_normStr(payload.activeShortcutId), {
-            emit: false,
-          });
+          // Backend client state is coordination metadata, not presentation
+          // authority. Foreground and ordering remain local to this host.
           return;
         }
         if (eventType === SIDEBAR_IPC_RPC_NOTIFICATIONS.windowsChanged) {
@@ -4126,9 +4713,11 @@ export function initSidebarShortcuts(
           const payload = asRecord(data.payload);
           const hostId = _normStr(payload.hostId || payload.host_id);
           if (hostId) {
-            _clientActiveWindowHostId = hostId;
-            _clientActiveShortcutId = "";
-            _applyUiPrefsHydrated();
+            if (_findAppDockSlot(hostId)) {
+              _setClientActiveShortcut(hostId, { emit: false });
+            } else {
+              _pendingActivatedWindowHostId = hostId;
+            }
           }
           return;
         }
@@ -4179,5 +4768,12 @@ export function initSidebarShortcuts(
     }
   }
 
-  return { init, hydrate, applyUiPrefs, getActiveUrl };
+  return {
+    init,
+    hydrate,
+    applyUiPrefs,
+    getActiveUrl,
+    getMentionTarget,
+    publishPresentationIdentities,
+  };
 }

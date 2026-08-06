@@ -31,7 +31,6 @@ from .rpc_contract import (
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ACTIVATE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CLOSE,
     UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_CREATE,
-    UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ORDER_UPDATE,
     UI_IPC_RPC_METHOD_HOST_STATE_FILE_SCROLL_UPDATE,
     UiIpcRpcMethod,
     build_jsonrpc_error,
@@ -249,11 +248,6 @@ async def dispatch_ui_ipc_rpc_request(
         from .sidebar_ws import handle_ui_sidebar_window_close_request
 
         return await handle_ui_sidebar_window_close_request(params)
-
-    if method == UI_IPC_RPC_METHOD_SIDEBAR_WINDOW_ORDER_UPDATE:
-        from .sidebar_ws import handle_ui_sidebar_window_order_update_request
-
-        return await handle_ui_sidebar_window_order_update_request(params)
 
     if method == UI_IPC_RPC_METHOD_SIDEBAR_ACTIVE_SHORTCUT_SET:
         from .sidebar_ws import handle_ui_sidebar_active_shortcut_set_request

@@ -102,6 +102,7 @@ let gitButtons: ExplorerGitButtons | null = null;
 let explorerRpcRuntime: ExplorerRpcRuntime | null = null;
 const explorerRuntimeState = createExplorerRuntimeState();
 let draftUpdateListenerInstalled = false;
+let buildSidebarMentionPayload = (payload: JsonObject): JsonObject => payload;
 
 // Currently opened document (relative to project root), if known.
 let activeFileRel: string | null = null;
@@ -315,7 +316,10 @@ explorerSearchOverlayController = createExplorerSearchOverlayController({
           if (!hasExplorerRpc()) {
             throw new Error("Explorer RPC unavailable");
           }
-          notifyExplorer(EXPLORER_RPC_METHODS.mentionAgent, { ...payload });
+          notifyExplorer(
+            EXPLORER_RPC_METHODS.mentionAgent,
+            buildSidebarMentionPayload({ ...payload }),
+          );
         },
         getProjectPath: () => explorerRuntimeState.getProjectPath(),
         activeFileAbs: activeAbs,
@@ -365,6 +369,7 @@ const explorerTreeMenuController = createExplorerTreeMenuController({
   getProjectPath: () => explorerRuntimeState.getProjectPath(),
   hasExplorerRpc: () => hasExplorerRpc(),
   notifyExplorer: (method, payload) => notifyExplorer(method, payload),
+  buildSidebarMentionPayload: (payload) => buildSidebarMentionPayload(payload),
   toast,
   isInSelectMode: (rel) => rel !== null && isInSelectMode(rel),
   enableSelectMode: (rel) => enableSelectMode(rel),
@@ -776,6 +781,7 @@ const explorerRefreshController = createExplorerRefreshController({
 });
 
 export async function initExplorerUI(options: ExplorerUiInitOptions) {
+  buildSidebarMentionPayload = options.buildSidebarMentionPayload;
   const drawer = document.getElementById("fe-drawer");
   const drawerBody =
     drawer?.querySelector<HTMLElement>(".fe-drawer-body") || null;

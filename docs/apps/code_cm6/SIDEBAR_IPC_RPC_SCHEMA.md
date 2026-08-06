@@ -14,7 +14,7 @@ It defines the JSON-RPC 2.0 envelope and payload shapes for the logical `/sideba
 - backend-owned cwd sync to sidebar clients
 - active shortcut state and refresh requests
 - sidebar/external file-open and edit signals routed through backend host hooks
-- sidebar/external mention relay
+- exact sidebar/external mention delivery to a validated agent app peer
 - sidebar/external project lookup, open, and create requests routed through backend project hooks
 - drawer open, close, toggle, and state notifications
 
@@ -119,15 +119,24 @@ Protocol error codes should follow JSON-RPC 2.0 conventions:
 
 ```json
 {
-  "path": "optional absolute or repo-relative path",
+  "path": "absolute or repo-relative path",
   "rel": "optional project-relative path",
   "line": 1,
   "column": 1,
   "source": "sidebar",
-  "conversation_id": "optional conversation id",
-  "text": "optional mention text"
+  "text": "optional mention text",
+  "target": {
+    "clientId": "originating host client id",
+    "hostId": "stable agent Sidebar slot id",
+    "presentationId": "current transient iframe/window presentation id"
+  }
 }
 ```
+
+The caller does not own `conversation_id`. The backend validates the exact
+client/host/presentation tuple against the connected host, ephemeral
+presentation registration, and authoritative Sidebar ledger. It derives the
+conversation id from that slot and overwrites any caller-supplied value.
 
 `DrawerPayload`:
 
@@ -309,7 +318,9 @@ Result when dropped by preference gate:
 
 ### `sidebar.mention`
 
-External/sidebar-originated mention relay to sidebar listeners.
+External/sidebar-originated mention delivery to one validated agent app room.
+Missing, disconnected, stale, cross-client, non-agent, or unregistered targets
+are rejected; there is no global active-agent or broadcast fallback.
 
 Params: `MentionPayload`
 
@@ -317,7 +328,46 @@ Result:
 
 ```json
 {
-  "ok": true
+  "ok": true,
+  "app_id": "als-rs",
+  "conversation_id": "conversation-a",
+  "target": {
+    "clientId": "client-a",
+    "hostId": "slot:als-rs:conversation-a",
+    "presentationId": "inline:slot:als-rs:conversation-a:uuid",
+    "appId": "als-rs"
+  }
+}
+```
+
+### `sidebar.window.presentation.update`
+
+Registers one ephemeral presentation-routing proof on the calling registered
+host connection. This is not durable slot or presentation authority.
+
+Params:
+
+```json
+{
+  "hostId": "stable Sidebar slot id",
+  "presentationId": "current transient iframe/window id, or empty to release"
+}
+```
+
+The backend derives `clientId` from the registered host session and rejects
+non-host callers or unknown ledger slots. The host republishes all live
+presentation ids after each Sidebar IPC registration acknowledgement, so
+reconnect recovery remains event-driven.
+
+Result:
+
+```json
+{
+  "ok": true,
+  "client_id": "client-a",
+  "host_id": "agent-slot",
+  "presentation_id": "inline:agent-slot:uuid",
+  "registered": true
 }
 ```
 
@@ -537,7 +587,9 @@ Params:
 
 ### `sidebar.mention`
 
-Params: `MentionPayload`
+Params: the validated `MentionPayload`, including the ledger-derived
+`conversation_id`/`conversationId` and normalized target metadata. This
+notification is emitted only to the registered target app room.
 
 ### `sidebar.file.open`
 

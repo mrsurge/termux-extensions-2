@@ -1,4 +1,8 @@
-import { jsx, renderWithDocument } from "./jsx-runtime.ts";
+import {
+  createComponentOwner,
+  jsx,
+  renderWithOwner,
+} from "./jsx-runtime.ts";
 
 export interface ModalFrameOptions {
   id: string;
@@ -13,6 +17,7 @@ export interface ModalFrameElements {
   root: HTMLElement;
   body: HTMLElement;
   footer: HTMLElement;
+  dispose: () => void;
 }
 
 interface ModalFrameComponentProps extends ModalFrameOptions {
@@ -66,10 +71,11 @@ export function createModalFrame(
   document: Document,
   options: ModalFrameOptions,
 ): ModalFrameElements {
+  const owner = createComponentOwner();
   let root: HTMLElement | null = null;
   let body: HTMLElement | null = null;
   let footer: HTMLElement | null = null;
-  const rendered = renderWithDocument(document, () =>
+  const rendered = renderWithOwner(document, owner, () =>
     <ModalFrame
       {...options}
       rootRef={(element: HTMLElement) => { root = element; }}
@@ -78,7 +84,8 @@ export function createModalFrame(
     />
   );
   if (!root || !body || !footer || rendered !== root) {
+    owner.dispose();
     throw new Error("Declarative modal frame did not produce its required elements");
   }
-  return { root, body, footer };
+  return { root, body, footer, dispose: () => owner.dispose() };
 }

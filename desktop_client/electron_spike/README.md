@@ -71,8 +71,16 @@ The packaged `TE2Desktop` launcher supplies `--no-sandbox` to the bundled
   renderer's native copy and paste commands directly.
 - Code TE2 console workers in the Electron app view register as
   `electron:main_page:<suffix>`. Their frozen `window.te2Electron` bridge exposes
-  `identity`, `inspect()`, `reload()`, `home()`, and `forceAssetUpdate()` through
-  an exact-view/origin-validated native command allowlist.
+  identity and bounded launcher, asset, Run Profile instrumentation, Sidebar
+  presentation, and detached-surface operations through an
+  exact-view/origin-validated native command allowlist.
+- Code TE2 Sidebar surfaces can detach into normal floating windows. Electron
+  main owns their stable-surface registry, trusted local TSX header, and
+  framework-partition content view. The full target marker is installed before
+  navigation, and the inline iframe is removed only after the detached page is
+  ready. Attach or user Close reconstructs the inline presentation; exact Stop,
+  backend removal, app-view loss, and framework retarget retain their separate
+  lifecycle semantics.
 - On Linux, Electron automatically selects native Wayland when the desktop
   session supports it. Detached modal/dialog windows retain parent-modal
   ownership but do not request global always-on-top status. After a child has

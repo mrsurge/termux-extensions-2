@@ -610,6 +610,9 @@ export function createDeclarativeModalShell(
     footerEl,
     open,
     close,
-    destroy: () => root.remove(),
+    destroy: () => {
+      frame.dispose();
+      root.remove();
+    },
   };
 }

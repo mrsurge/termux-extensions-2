@@ -13,7 +13,7 @@ from app.extensions.apps.registry import AppRegistry
 from ..stores import get_preferences_store
 
 SIDEBAR_WINDOW_STATE_PREF_KEY = "sidebarWindowState"
-SIDEBAR_WINDOW_STATE_VERSION = 1
+SIDEBAR_WINDOW_STATE_VERSION = 2
 ALLOWED_READINESS_STATUSES = {"starting", "ready", "error", "stopped"}
 RUN_TARGET_TICKET_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -66,8 +66,6 @@ def _new_instance_id() -> str:
 def _empty_state() -> JsonObject:
     return {
         "version": SIDEBAR_WINDOW_STATE_VERSION,
-        "active_host_id": "",
-        "order": ["launcher"],
         "slots": {},
         "updated_at": 0,
     }
@@ -701,24 +699,7 @@ def _load_pref_state() -> JsonObject:
             if slot and host_id:
                 slots[host_id] = slot
 
-    raw_order = [_norm(item) for item in _as_list(raw_state.get("order")) if _norm(item)]
-    order: list[str] = ["launcher"]
-    for item in raw_order:
-        if item == "launcher" or item in order:
-            continue
-        if item.startswith("url:") or item in slots:
-            order.append(item)
-    for host_id in slots:
-        if host_id not in order:
-            order.append(host_id)
-
-    active = _norm(raw_state.get("active_host_id") or raw_state.get("activeHostId"))
-    if active and active not in slots:
-        active = ""
-
     state.update({
-        "active_host_id": active,
-        "order": order,
         "slots": slots,
         "updated_at": _as_int(raw_state.get("updated_at") or raw_state.get("updatedAt"), 0),
     })
@@ -734,24 +715,8 @@ def _save_pref_state(state: JsonObject) -> JsonObject:
         if slot and host_id:
             slots[host_id] = slot
 
-    order: list[str] = ["launcher"]
-    for item in [_norm(value) for value in _as_list(state.get("order")) if _norm(value)]:
-        if item == "launcher" or item in order:
-            continue
-        if item.startswith("url:") or item in slots:
-            order.append(item)
-    for host_id in slots:
-        if host_id not in order:
-            order.append(host_id)
-
-    active = _norm(state.get("active_host_id") or state.get("activeHostId"))
-    if active and active not in slots:
-        active = ""
-
     payload: JsonObject = {
         "version": SIDEBAR_WINDOW_STATE_VERSION,
-        "active_host_id": active,
-        "order": order,
         "slots": slots,
         "updated_at": _now_ms(),
     }
@@ -759,24 +724,18 @@ def _save_pref_state(state: JsonObject) -> JsonObject:
     return payload
 
 
-def get_sidebar_window_state(active_host_id: str | None = None) -> JsonObject:
+def get_sidebar_window_state() -> JsonObject:
     state = _load_pref_state()
     slots = _as_object(state.get("slots"))
-    active = _norm(active_host_id) or _norm(state.get("active_host_id"))
-    if active and active not in slots:
-        active = ""
     return {
         "version": SIDEBAR_WINDOW_STATE_VERSION,
-        "active_host_id": active,
-        "activeHostId": active,
-        "order": list(_as_list(state.get("order"))),
         "slots": dict(slots),
         "catalog": list_launcher_apps(),
         "ts": _now_ms(),
     }
 
 
-def _upsert_slot(state: JsonObject, slot: JsonObject, *, activate: bool = True) -> JsonObject:
+def _upsert_slot(state: JsonObject, slot: JsonObject) -> JsonObject:
     normalized = _normalize_slot(slot)
     if not normalized:
         raise ValueError("invalid sidebar slot")
@@ -791,15 +750,7 @@ def _upsert_slot(state: JsonObject, slot: JsonObject, *, activate: bool = True) 
         })
     raw_slots[host_id] = normalized
     state["slots"] = raw_slots
-    order = [_norm(item) for item in _as_list(state.get("order")) if _norm(item)] or ["launcher"]
-    if "launcher" not in order:
-        order.insert(0, "launcher")
-    if host_id not in order:
-        order.append(host_id)
-    state["order"] = order
     state["updated_at"] = _now_ms()
-    if activate:
-        state["active_host_id"] = host_id
     return state
 
 
@@ -869,18 +820,14 @@ def create_sidebar_window(params: JsonObject) -> JsonObject:
             surface = _normalize_run_profile_surface(surface_value, canonical_url=url)
             url_slot["run_profile_surface"] = surface
             url_slot["runProfileSurface"] = surface
-        state = _upsert_slot(
-            _load_pref_state(),
-            url_slot,
-            activate=_as_bool(params.get("activate"), True),
-        )
-        saved = _save_pref_state(state)
+        state = _upsert_slot(_load_pref_state(), url_slot)
+        _save_pref_state(state)
         window = _normalize_slot(url_slot)
         return {
             "ok": True,
             "window": window,
             "slot": window,
-            "state": get_sidebar_window_state(_norm(saved.get("active_host_id"))),
+            "state": get_sidebar_window_state(),
         }
 
     app_id = _app_id_from_params(params)
@@ -935,10 +882,10 @@ def create_sidebar_window(params: JsonObject) -> JsonObject:
             "url": _validate_state_url(app_id, raw_url, base_url),
             "restore_url": _validate_state_url(app_id, raw_url, base_url),
         })
-    state = _upsert_slot(_load_pref_state(), slot, activate=bool(params.get("activate", True)))
-    saved = _save_pref_state(state)
+    state = _upsert_slot(_load_pref_state(), slot)
+    _save_pref_state(state)
     window = _normalize_slot(slot)
-    return {"ok": True, "window": window, "slot": window, "state": get_sidebar_window_state(_norm(saved.get("active_host_id")))}
+    return {"ok": True, "window": window, "slot": window, "state": get_sidebar_window_state()}
 
 
 def open_sidebar_window_url(params: JsonObject) -> JsonObject:
@@ -990,10 +937,10 @@ def open_sidebar_window_url(params: JsonObject) -> JsonObject:
         "updated_at": now,
         "created_at": _as_int(params.get("created_at"), now),
     }
-    state = _upsert_slot(state, slot, activate=bool(params.get("activate", False)))
-    saved = _save_pref_state(state)
+    state = _upsert_slot(state, slot)
+    _save_pref_state(state)
     window = _normalize_slot(slot)
-    return {"ok": True, "window": window, "slot": window, "state": get_sidebar_window_state(_norm(saved.get("active_host_id")))}
+    return {"ok": True, "window": window, "slot": window, "state": get_sidebar_window_state()}
 
 
 def activate_sidebar_window(params: JsonObject) -> JsonObject:
@@ -1004,9 +951,7 @@ def activate_sidebar_window(params: JsonObject) -> JsonObject:
     slots = _as_object(state.get("slots"))
     if host_id not in slots:
         raise ValueError(f"unknown sidebar window: {host_id}")
-    state["active_host_id"] = host_id
-    _save_pref_state(state)
-    return {"ok": True, "host_id": host_id, "state": get_sidebar_window_state(host_id)}
+    return {"ok": True, "host_id": host_id, "state": get_sidebar_window_state()}
 
 
 def close_sidebar_window(params: JsonObject) -> JsonObject:
@@ -1016,60 +961,9 @@ def close_sidebar_window(params: JsonObject) -> JsonObject:
     state = _load_pref_state()
     slots = _as_object(state.get("slots"))
     slots.pop(host_id, None)
-    order = [_norm(item) for item in _as_list(state.get("order")) if _norm(item) and _norm(item) != host_id]
-    if "launcher" not in order:
-        order.insert(0, "launcher")
     state["slots"] = slots
-    state["order"] = order
-    if _norm(state.get("active_host_id")) == host_id:
-        next_active = next((item for item in order if item != "launcher" and item in slots), "")
-        state["active_host_id"] = next_active
     _save_pref_state(state)
-    return {"ok": True, "closed": host_id, "state": get_sidebar_window_state(_norm(state.get("active_host_id")))}
-
-
-def _order_host_id(value: object) -> str:
-    raw = _norm(value)
-    if raw.startswith("dock:"):
-        return raw[len("dock:"):]
-    return raw
-
-
-def reorder_sidebar_windows(params: JsonObject) -> JsonObject:
-    requested = _as_list(params.get("order") or params.get("host_ids") or params.get("hostIds"))
-    if not requested:
-        raise ValueError("order is required")
-
-    state = _load_pref_state()
-    slots = _as_object(state.get("slots"))
-    current_order = [_norm(item) for item in _as_list(state.get("order")) if _norm(item)]
-    next_order: list[str] = ["launcher"]
-    seen: set[str] = set()
-
-    def append_host_id(value: object) -> None:
-        host_id = _order_host_id(value)
-        if not host_id or host_id == "launcher" or host_id in seen:
-            return
-        if host_id not in slots:
-            return
-        next_order.append(host_id)
-        seen.add(host_id)
-
-    for item in requested:
-        append_host_id(item)
-    for item in current_order:
-        append_host_id(item)
-    for host_id in slots:
-        append_host_id(host_id)
-
-    state["order"] = next_order
-    saved = _save_pref_state(state)
-    active = _norm(saved.get("active_host_id"))
-    return {
-        "ok": True,
-        "order": list(_as_list(saved.get("order"))),
-        "state": get_sidebar_window_state(active),
-    }
+    return {"ok": True, "closed": host_id, "state": get_sidebar_window_state()}
 
 
 def update_sidebar_window_readiness(params: JsonObject) -> JsonObject:
@@ -1108,4 +1002,4 @@ def update_sidebar_window_readiness(params: JsonObject) -> JsonObject:
     state["slots"] = slots
     _save_pref_state(state)
     updated = _normalize_slot(slot)
-    return {"ok": True, "window": updated, "slot": updated, "state": get_sidebar_window_state(_norm(state.get("active_host_id")))}
+    return {"ok": True, "window": updated, "slot": updated, "state": get_sidebar_window_state()}

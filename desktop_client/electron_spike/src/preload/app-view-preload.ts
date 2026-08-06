@@ -7,6 +7,9 @@ import {
   type ElectronAppViewInspection,
   type ElectronRunTargetDescriptor,
   type ElectronRunProfileRuntimeMetadata,
+  type ElectronSidebarSurfaceDescriptor,
+  type ElectronSidebarSurfaceEvent,
+  type ElectronSidebarPresentationState,
 } from "../shared/app-view-contracts";
 import type { AssetUpdateResult } from "../shared/contracts";
 
@@ -69,6 +72,56 @@ const electronBridge: ElectronAppViewBridge = Object.freeze({
   },
   releaseRunTargetSurface(surfaceId: string): Promise<{ ok: true }> {
     return invokeElectron("release_run_target_surface", surfaceId);
+  },
+  readSidebarPresentationState(): Promise<ElectronSidebarPresentationState> {
+    return invokeElectron("read_sidebar_presentation_state");
+  },
+  writeSidebarPresentationState(
+    state: ElectronSidebarPresentationState,
+  ): Promise<{ ok: true }> {
+    return invokeElectron("write_sidebar_presentation_state", state);
+  },
+  detachSidebarSurface(
+    descriptor: ElectronSidebarSurfaceDescriptor,
+    options: { focus?: boolean } = {},
+  ): Promise<{ ok: true; presentationId: string }> {
+    return invokeElectron("detach_sidebar_surface", {
+      descriptor,
+      focus: options.focus !== false,
+    });
+  },
+  focusSidebarSurface(
+    surfaceId: string,
+    presentationId?: string,
+  ): Promise<{ ok: boolean }> {
+    return invokeElectron("focus_sidebar_surface", {
+      surfaceId,
+      presentationId,
+    });
+  },
+  closeSidebarSurface(
+    surfaceId: string,
+    presentationId?: string,
+  ): Promise<{ ok: true }> {
+    return invokeElectron("close_sidebar_surface", {
+      surfaceId,
+      presentationId,
+    });
+  },
+  reconcileSidebarSurfaces(surfaceIds: string[]): Promise<{ ok: true }> {
+    return invokeElectron("reconcile_sidebar_surfaces", { surfaceIds });
+  },
+  onSidebarSurfaceEvent(
+    listener: (event: ElectronSidebarSurfaceEvent) => void,
+  ): () => void {
+    const channel = "te2-desktop:sidebar-surface-event";
+    const handler = (_event: Electron.IpcRendererEvent, value: unknown) => {
+      if (value && typeof value === "object") {
+        listener(value as ElectronSidebarSurfaceEvent);
+      }
+    };
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.off(channel, handler);
   },
 });
 

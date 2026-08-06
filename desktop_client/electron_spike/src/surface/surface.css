@@ -1,0 +1,90 @@
+:root {
+  color-scheme: dark;
+  font-family: "JetBrains Mono", "Noto Sans Mono", monospace;
+  background: #111315;
+  color: #e5e7eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#surface-root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+.surface-header {
+  height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 7px 0 11px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 13%, transparent);
+  background: #171a1d;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.surface-identity {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  overflow: hidden;
+}
+
+.surface-title,
+.surface-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.surface-title {
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.surface-detail {
+  color: #9ca3af;
+  font-size: 0.68rem;
+}
+
+.surface-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.surface-button {
+  height: 27px;
+  min-width: 29px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 0.69rem;
+  cursor: pointer;
+}
+
+.surface-button:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.surface-button.danger {
+  color: #ff9d9d;
+}
+
+.surface-button.close {
+  font-size: 0.95rem;
+  padding: 0 7px;
+}

@@ -77,6 +77,7 @@ interface HostBootRuntimeDeps {
   resetActiveFileState: () => void;
   toast: (message: string, kind?: unknown) => void;
   requestBackendBootSnapshot: (payload?: UnknownRecord) => Promise<unknown>;
+  buildSidebarMentionPayload: (payload: UnknownRecord) => UnknownRecord;
   editorFrameEl: HTMLElement;
   sidebarShortcuts: BootSidebarShortcutsLike | null | undefined;
   ensureEditorFrameReady: () => Promise<unknown>;
@@ -133,6 +134,8 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
         updateProblemsPanel: (payload) => deps.problemsPanel.update(payload),
         reloadEditorFrame: () => deps.reloadEditorFrame(),
         requestAdapterRestart: () => deps.requestAdapterRestart(),
+        buildSidebarMentionPayload: (payload) =>
+          deps.buildSidebarMentionPayload(payload),
       }),
       connectUIIPC: () => deps.connectUIIPC(),
       connectSidebarIPC: () => deps.connectSidebarIPC(),
@@ -195,6 +198,7 @@ export function createHostBootRuntime(deps: HostBootRuntimeDeps) {
       mountInlineEditorHost: (snapshot) => bootInlineEditorHost(deps.editorFrameEl, {
         ensureSocketIoLoaded: deps.ensureSocketIoLoaded,
         bootSnapshot: snapshot,
+        buildSidebarMentionPayload: deps.buildSidebarMentionPayload,
       }),
     }).then(() => {
       runPostBootSidebarHydration(deps);

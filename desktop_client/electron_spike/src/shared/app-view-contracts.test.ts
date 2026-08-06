@@ -26,6 +26,30 @@ test("Electron app-view commands are strictly allowlisted", () => {
     validateElectronAppViewCommand("release_run_target_surface"),
     "release_run_target_surface",
   );
+  assert.equal(
+    validateElectronAppViewCommand("read_sidebar_presentation_state"),
+    "read_sidebar_presentation_state",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("write_sidebar_presentation_state"),
+    "write_sidebar_presentation_state",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("detach_sidebar_surface"),
+    "detach_sidebar_surface",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("focus_sidebar_surface"),
+    "focus_sidebar_surface",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("close_sidebar_surface"),
+    "close_sidebar_surface",
+  );
+  assert.equal(
+    validateElectronAppViewCommand("reconcile_sidebar_surfaces"),
+    "reconcile_sidebar_surfaces",
+  );
   assert.throws(
     () => validateElectronAppViewCommand("execute_javascript"),
     /Unsupported Electron app-view command/,

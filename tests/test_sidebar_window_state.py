@@ -1,0 +1,126 @@
+# pyright: basic
+from __future__ import annotations
+
+import copy
+import unittest
+from typing import cast
+from unittest.mock import patch
+
+from app.apps.file_editor_cm6.ui_ipc import sidebar_window_state
+
+
+class _FakePreferencesStore:
+    def __init__(self, sidebar_state: dict[str, object]) -> None:
+        self.data: dict[str, object] = {
+            "ui": {"sidebarWindowState": copy.deepcopy(sidebar_state)}
+        }
+        self.update_count = 0
+
+    def get_preferences(self) -> dict[str, object]:
+        return copy.deepcopy(self.data)
+
+    def update_preferences(
+        self,
+        *,
+        ui: dict[str, object] | None = None,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        if ui:
+            ui_store = self.data.setdefault("ui", {})
+            assert isinstance(ui_store, dict)
+            ui_store.update(copy.deepcopy(ui))
+            self.update_count += 1
+        return copy.deepcopy(self.data)
+
+
+def _url_slot(host_id: str) -> dict[str, object]:
+    return {
+        "kind": "url",
+        "host_id": host_id,
+        "hostId": host_id,
+        "title": host_id,
+        "label": host_id,
+        "url": f"http://127.0.0.1/{host_id}",
+        "restore_url": f"http://127.0.0.1/{host_id}",
+        "state_kind": "url",
+        "query_state": {"url": f"http://127.0.0.1/{host_id}"},
+    }
+
+
+class SidebarWindowLedgerTests(unittest.TestCase):
+    def test_legacy_presentation_fields_are_not_projected_or_resaved(self) -> None:
+        store = _FakePreferencesStore(
+            {
+                "version": 1,
+                "active_host_id": "beta",
+                "order": ["launcher", "beta", "alpha"],
+                "slots": {
+                    "alpha": _url_slot("alpha"),
+                    "beta": _url_slot("beta"),
+                },
+            }
+        )
+        with (
+            patch.object(sidebar_window_state, "get_preferences_store", return_value=store),
+            patch.object(sidebar_window_state, "list_launcher_apps", return_value=[]),
+        ):
+            projected = sidebar_window_state.get_sidebar_window_state()
+            saved = sidebar_window_state._save_pref_state(
+                sidebar_window_state._load_pref_state()
+            )
+
+        self.assertEqual(2, projected["version"])
+        self.assertNotIn("active_host_id", projected)
+        self.assertNotIn("activeHostId", projected)
+        self.assertNotIn("order", projected)
+        projected_slots = cast(dict[str, object], projected["slots"])
+        self.assertEqual({"alpha", "beta"}, set(projected_slots))
+        self.assertNotIn("active_host_id", saved)
+        self.assertNotIn("order", saved)
+
+    def test_activation_validates_membership_without_writing_preferences(self) -> None:
+        store = _FakePreferencesStore(
+            {"version": 2, "slots": {"alpha": _url_slot("alpha")}}
+        )
+        with (
+            patch.object(sidebar_window_state, "get_preferences_store", return_value=store),
+            patch.object(sidebar_window_state, "list_launcher_apps", return_value=[]),
+        ):
+            result = sidebar_window_state.activate_sidebar_window(
+                {"host_id": "alpha"}
+            )
+            with self.assertRaisesRegex(ValueError, "unknown sidebar window"):
+                sidebar_window_state.activate_sidebar_window(
+                    {"host_id": "missing"}
+                )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(0, store.update_count)
+
+    def test_close_removes_only_ledger_membership(self) -> None:
+        store = _FakePreferencesStore(
+            {
+                "version": 2,
+                "slots": {
+                    "alpha": _url_slot("alpha"),
+                    "beta": _url_slot("beta"),
+                },
+            }
+        )
+        with (
+            patch.object(sidebar_window_state, "get_preferences_store", return_value=store),
+            patch.object(sidebar_window_state, "list_launcher_apps", return_value=[]),
+        ):
+            result = sidebar_window_state.close_sidebar_window(
+                {"host_id": "alpha"}
+            )
+
+        state = cast(dict[str, object], result["state"])
+        slots = cast(dict[str, object], state["slots"])
+        self.assertEqual({"beta"}, set(slots))
+        self.assertNotIn("activeHostId", state)
+        self.assertNotIn("order", state)
+
+
+if __name__ == "__main__":
+    unittest.main()

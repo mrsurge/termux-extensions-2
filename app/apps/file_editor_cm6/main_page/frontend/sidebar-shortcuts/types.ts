@@ -1,4 +1,6 @@
 import type { UiIpcRpcMethod } from "../../../src/ui_ipc/rpc_contract.ts";
+import type { SidebarIpcRpcMethod } from "../../../src/sidebar_ipc/rpc_contract.ts";
+import type { SidebarMentionTarget } from "./presentation-state.ts";
 
 export type UnknownRecord = Record<string, unknown>;
 
@@ -198,6 +200,11 @@ export interface SidebarShortcutsOptions {
     method: UiIpcRpcMethod,
     payload?: UnknownRecord,
   ) => void;
+  emitSidebarRpcRequest?: (
+    method: SidebarIpcRpcMethod,
+    payload?: UnknownRecord,
+  ) => void;
+  getClientId?: () => string;
   setMenuChecked?: (el: HTMLElement | null, checked: boolean) => void;
 }
 
@@ -206,12 +213,15 @@ export interface SidebarShortcutsRuntime {
   hydrate: () => Promise<void> | void;
   applyUiPrefs: (uiPrefs: UnknownRecord) => void;
   getActiveUrl: (uiPrefs: UnknownRecord) => string;
+  getMentionTarget: () => SidebarMentionTarget | null;
+  publishPresentationIdentities: () => void;
 }
 
 export interface IframeEntry {
   iframe: HTMLIFrameElement;
   url: string;
   loaded: boolean;
+  presentationId: string;
   devToolsName: string;
   runProfileSurfaceId: string;
   version: string;

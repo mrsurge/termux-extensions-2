@@ -73,9 +73,11 @@ function registerRuntimeInstrumentation(
   runtime: RunProfileRuntimeMetadata,
   url: string,
   route?: RunTargetDescriptor,
-): void {
+): Promise<void> {
   const surfaceId = String(runtime.surfaceId || '').trim();
-  if (!surfaceId || runtime.devRuntime !== true || runtimeRegistrations.has(surfaceId)) return;
+  if (!surfaceId || runtime.devRuntime !== true) return Promise.resolve();
+  const current = runtimeRegistrations.get(surfaceId);
+  if (current) return current;
   const nativeWindow = window as NativeRunTargetWindow;
   const registration = typeof nativeWindow.te2Electron?.registerRunTargetSurface === 'function'
     ? nativeWindow.te2Electron.registerRunTargetSurface(runtime, url, route).then(() => {})
@@ -87,6 +89,7 @@ function registerRuntimeInstrumentation(
     console.warn('[run-profile-runtime] registration failed', error);
   });
   runtimeRegistrations.set(surfaceId, retained);
+  return retained;
 }
 
 export async function prepareRunTargetUrl(
@@ -96,7 +99,7 @@ export async function prepareRunTargetUrl(
 ): Promise<string> {
   const resolvedUrl = route ? originalRouteUrl(route) || fallbackUrl : fallbackUrl;
   if (runtime?.devRuntime === true) {
-    registerRuntimeInstrumentation(runtime, resolvedUrl, route || undefined);
+    await registerRuntimeInstrumentation(runtime, resolvedUrl, route || undefined);
   }
   return resolvedUrl;
 }

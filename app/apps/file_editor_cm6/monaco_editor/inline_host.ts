@@ -140,6 +140,9 @@ const INLINE_EDITOR_HOST_STYLE = `
 interface InlineEditorBootOptions {
   ensureSocketIoLoaded?: (() => Promise<unknown>) | null;
   bootSnapshot?: unknown;
+  buildSidebarMentionPayload?: (
+    payload: Record<string, unknown>,
+  ) => Record<string, unknown>;
 }
 
 declare global {
@@ -147,6 +150,9 @@ declare global {
     __te2InlineMonacoHost?: boolean;
     __te2InlineMonacoApiBase?: string;
     __te2InlineMonacoBootSnapshot?: unknown;
+    __te2InlineMonacoBuildSidebarMentionPayload?: (
+      payload: Record<string, unknown>,
+    ) => Record<string, unknown>;
     __te2InlineMonacoBoot?: Promise<void>;
   }
 }
@@ -240,6 +246,8 @@ export async function mountInlineEditorHost(
   window.__te2InlineMonacoHost = true;
   window.__te2InlineMonacoApiBase = INLINE_EDITOR_API_BASE;
   window.__te2InlineMonacoBootSnapshot = options.bootSnapshot || null;
+  window.__te2InlineMonacoBuildSidebarMentionPayload =
+    options.buildSidebarMentionPayload;
   editorFrame.innerHTML = INLINE_EDITOR_MARKUP;
   await ensureInlineEditorAssetsLoaded(options.ensureSocketIoLoaded);
   await import('./m_editor_app.ts');

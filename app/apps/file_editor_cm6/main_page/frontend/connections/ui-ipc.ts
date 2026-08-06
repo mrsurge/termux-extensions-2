@@ -32,6 +32,7 @@ interface UiIpcConnectionsDeps {
   initConsoleBridge: (args: ConsoleBridgeOptions) => unknown;
   getClientId: () => string;
   onHostStateResync?: () => Promise<void> | void;
+  onSidebarConnected?: () => void;
 }
 
 type UiIpcRpcConnection = ReturnType<typeof createUiIpcRpcConnection>;
@@ -113,6 +114,13 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     } catch (_) {}
   }
 
+  function sidebarNotificationTargetsThisClient(params: JsonObject): boolean {
+    const targetClientId = String(
+      params.clientId || params.client_id || "",
+    ).trim();
+    return !targetClientId || targetClientId === deps.getClientId();
+  }
+
   function nextSidebarRpcRequestId(): string {
     sidebarRpcRequestCounter += 1;
     return `sidebar_ipc_${Date.now()}_${sidebarRpcRequestCounter}`;
@@ -180,7 +188,9 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.windowsChanged) {
       dispatchSidebarEvent({ type: method, payload: params });
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.windowActivated) {
-      dispatchSidebarEvent({ type: method, payload: params });
+      if (sidebarNotificationTargetsThisClient(params)) {
+        dispatchSidebarEvent({ type: method, payload: params });
+      }
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.windowReadinessChanged) {
       dispatchSidebarEvent({ type: method, payload: params });
     } else if (method === SIDEBAR_IPC_RPC_NOTIFICATIONS.activeShortcutRefresh) {
@@ -234,11 +244,15 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
         sidebarIpcSocket = socket;
         socket.on('connect', () => {
           try {
-            emitSidebarRpcRequest(SIDEBAR_IPC_RPC_METHODS.register, {
-              role: 'host',
-              app: 'file_editor_cm6',
-              client_id: deps.getClientId(),
-            });
+            emitSidebarRpcRequest(
+              SIDEBAR_IPC_RPC_METHODS.register,
+              {
+                role: 'host',
+                app: 'file_editor_cm6',
+                client_id: deps.getClientId(),
+              },
+              () => deps.onSidebarConnected?.(),
+            );
             emitSidebarRpcRequest(
               SIDEBAR_IPC_RPC_METHODS.windowsList,
               {
@@ -340,10 +354,12 @@ export function createUiIpcConnections(deps: UiIpcConnectionsDeps) {
               payload: params,
             });
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.sidebarWindowActivated) {
-            dispatchSidebarEvent({
-              type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowActivated,
-              payload: params,
-            });
+            if (sidebarNotificationTargetsThisClient(params)) {
+              dispatchSidebarEvent({
+                type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowActivated,
+                payload: params,
+              });
+            }
           } else if (method === UI_IPC_RPC_NOTIFICATIONS.sidebarWindowReadinessChanged) {
             dispatchSidebarEvent({
               type: SIDEBAR_IPC_RPC_NOTIFICATIONS.windowReadinessChanged,
