@@ -215,7 +215,11 @@ def _replace_relevant_shell_ids(payload: object) -> None:
     if isinstance(shells, list):
         for item in cast(list[object], shells):
             shell = _mapping(item)
-            if shell is None or not _is_run_profile_label(_text(shell.get("label"))):
+            if (
+                shell is None
+                or _text(shell.get("status")).strip().lower() != "running"
+                or not _is_run_profile_label(_text(shell.get("label")))
+            ):
                 continue
             shell_id = _text(shell.get("id"))
             label = _text(shell.get("label"))

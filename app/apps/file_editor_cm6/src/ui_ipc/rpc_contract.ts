@@ -63,6 +63,7 @@ export const UI_IPC_RPC_NOTIFICATIONS = {
   sidebarWindowReadinessChanged: 'ui.sidebar.window.readiness.changed',
   codeInspectorChanged: 'ui.codeInspector.changed',
   runProfileStateChanged: 'ui.runProfile.state.changed',
+  runTargetRoutesChanged: 'ui.runTarget.routes.changed',
 } as const;
 
 type ValueOf<T> = T[keyof T];

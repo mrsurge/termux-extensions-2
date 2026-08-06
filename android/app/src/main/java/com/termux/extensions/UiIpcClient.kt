@@ -1,10 +1,14 @@
 package com.termux.extensions
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import io.socket.client.IO
 import io.socket.client.Socket
 import org.json.JSONObject
 import java.net.URI
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 /**
  * Socket.IO client that connects to the editor's UI IPC bus and listens for
@@ -12,12 +16,14 @@ import java.net.URI
  */
 class UiIpcClient(
     private val filter: EditorInputFilter,
+    private val clientId: String = "android-native",
     private var imeContextSwitchingEnabled: Boolean = true,
     private val onFilterChanged: ((Boolean) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "UiIpcClient"
         private const val DEFAULT_CONSOLE_TAIL_LINES = 500
+        private const val UI_IPC_CONNECT_RETRY_MS = 2000L
         private const val UI_IPC_RPC_NOTIFICATION_EVENT = "rpc.notify"
         private const val UI_IPC_EDITOR_FOCUS = "ui.editor.focus"
         private const val UI_IPC_EDITOR_BLUR = "ui.editor.blur"
@@ -33,6 +39,10 @@ class UiIpcClient(
     private var consoleDrawerEnabled = false
     private var consoleTailLines = DEFAULT_CONSOLE_TAIL_LINES
     private var activeImeOwner: String? = null
+    private val reconnectHandler = Handler(Looper.getMainLooper())
+    private val reconnectUiIpc = Runnable {
+        uiIpcSocket?.takeUnless { it.connected() }?.connect()
+    }
 
     /** Callback for console events — receives (eventName, JSONObject) */
     var onConsoleEvent: ((String, JSONObject) -> Unit)? = null
@@ -49,7 +59,8 @@ class UiIpcClient(
                 path = "/ui_ipc_ws/socket.io"
                 transports = arrayOf("websocket")
                 upgrade = false
-                query = "app_id=file_editor_cm6&source=android_native"
+                query = "app_id=file_editor_cm6&source=android_native&client_id=" +
+                    URLEncoder.encode(clientId, StandardCharsets.UTF_8.name())
                 auth = mapOf("rpcCodec" to UI_IPC_RPC_CODEC)
                 reconnection = true
                 reconnectionDelay = 2000
@@ -60,6 +71,7 @@ class UiIpcClient(
             val uri = URI.create("$normalizedBaseUrl/ui_ipc")
             uiIpcSocket = IO.socket(uri, opts).apply {
                 on(Socket.EVENT_CONNECT) {
+                    reconnectHandler.removeCallbacks(reconnectUiIpc)
                     Log.i(TAG, "Connected to UI IPC at $normalizedBaseUrl")
                 }
                 on(Socket.EVENT_DISCONNECT) {
@@ -72,6 +84,8 @@ class UiIpcClient(
                     }
                 }
                 on(Socket.EVENT_CONNECT_ERROR) { args ->
+                    reconnectHandler.removeCallbacks(reconnectUiIpc)
+                    reconnectHandler.postDelayed(reconnectUiIpc, UI_IPC_CONNECT_RETRY_MS)
                     Log.w(TAG, "Connect error: ${args.firstOrNull()}")
                 }
                 on(UI_IPC_RPC_NOTIFICATION_EVENT) { args ->
@@ -312,8 +326,9 @@ class UiIpcClient(
 
     fun disconnect() {
         try {
-            uiIpcSocket?.disconnect()
+            reconnectHandler.removeCallbacks(reconnectUiIpc)
             uiIpcSocket?.off()
+            uiIpcSocket?.disconnect()
             uiIpcSocket = null
             disconnectConsoleSocket()
             activeImeOwner = null

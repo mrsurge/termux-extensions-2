@@ -14,7 +14,7 @@ runtime from entering Gecko builds.
 The module pins the Cefrium SDK and Gradle plugin to `0.6.3`, targets arm64, and
 requires Android API 29 or newer.
 
-Check free space before starting Gradle and stop if less than 3 GB is available:
+Check free space before starting Gradle and stop if less than 2 GB is available:
 
 ```bash
 df -Pk .
@@ -35,7 +35,7 @@ Framework-Shell console, UI IPC client, diagnostics, and persistent-network
 service from `android/app/src/main`.
 
 Cefrium always loads TE2 through one dynamically allocated
-`127.0.0.1` origin owned by `CefriumFrameworkRelay`:
+`127.0.0.1` origin owned by the shared `AndroidFrameworkRelay`:
 
 ```text
 Cefrium

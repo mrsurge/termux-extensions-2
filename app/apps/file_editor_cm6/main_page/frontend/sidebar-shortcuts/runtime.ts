@@ -54,7 +54,7 @@ import {
 } from "./shortcut-model.ts";
 import {
   releaseRunTargetSurface,
-  resolveRunTargetUrl,
+  prepareRunTargetUrl,
 } from './run-target-resolver.ts';
 import type {
   FrameworkAppManifest,
@@ -2476,7 +2476,7 @@ export function initSidebarShortcuts(
       ((sc.run_target_route || sc.runTargetRoute) || runtimeMetadata?.devRuntime === true)
     ) {
       try {
-        loadUrl = await resolveRunTargetUrl(
+        loadUrl = await prepareRunTargetUrl(
           sc.run_target_route || sc.runTargetRoute,
           url,
           runtimeMetadata,

@@ -3391,15 +3391,50 @@ After a routed shell starts, Python registers its deterministic owner label, exa
 
 Each Axum WebSocket route connects only to its registered `127.0.0.1:<port>` destination on the framework host and bridges binary WebSocket frames to raw TCP. Registration validates the complete owner/shell route set before replacing live state. An exact repeated registration reuses and renews the group; relaunch replaces every prior ticket; owner/shell release removes the complete group. The singular `runTarget.route.register` operation remains compatible by delegating to a one-port route set.
 
-The Sidebar preserves the original primary URL and the complete route set. Ordinary browsers use the original URL. Electron and GeckoView resolve native route sets in this order:
+The Sidebar preserves the original primary URL and the complete route set.
+Ordinary browsers use the original URL. Rust additionally exposes
+`runTarget.routes.list`, a full projection of the active owner/shell route
+generations. The framework serves that projection directly through no-store
+`GET /api/run-targets/routes` and an event-driven no-store
+`GET /api/run-targets/events` SSE stream. Every SSE connection begins with an
+authoritative snapshot and then receives complete replacement projections after
+registration or release. Code TE2 also publishes
+`ui.runTarget.routes.changed` over strict MessagePack UI IPC for Electron and
+sends Electron a current snapshot when its native client reconnects.
 
-1. Exclusively bind the primary preferred port on `127.0.0.1`.
-2. Primary `EADDRINUSE` / `BindException` means the server is already local, so bind no auxiliary ports and open the original primary URL.
-3. Primary bind success means the framework is remote; bind every declared auxiliary port before navigating.
-4. Any auxiliary collision is a labeled fatal error and rolls back all listeners created for that group.
-5. Once the group is complete, open the primary local URL. Requests and WebSocket upgrades to auxiliary ports, including declared Vite port 5173 or Page Preview HMR port 24678, traverse their own ticketed raw-TCP tunnels.
+GeckoView reconciles the framework SSE projection after its process-local
+framework relay is ready; Electron reconciles its direct UI IPC projection.
+Both determine locality once from the configured framework origin:
+`localhost`, `127.0.0.1`, and `::1` are local, while every other configured host
+is remote. No DNS, loopback-port, or framework-identity probe participates. A
+configured local framework needs no Run Target listeners. A remote framework binds the primary
+preferred port and every declared auxiliary port on `127.0.0.1` before marking
+the projection ready. Any occupied port is a fatal collision; auxiliary failure
+rolls back the complete partially created group, and `EADDRINUSE` /
+`BindException` never implies locality. Generation fencing prevents a
+superseded projection from binding or resurrecting a removed group.
 
-Relay groups use a stable owner-derived id so one profile cannot silently replace another profile's local listeners. Framework retarget, route-set replacement, native-client teardown, exact profile Stop, and dead-shell reconciliation close grouped listeners and streams and invalidate the complete Rust ticket group.
+Requests and WebSocket upgrades to auxiliary ports, including declared Vite
+ports or Page Preview HMR port 24678, traverse their own ticketed raw-TCP
+tunnels. The projection event itself creates, reuses, and removes listener
+groups; no page, iframe, preload, or WebExtension request participates. A route
+feed interruption preserves existing listeners, and the reconnect snapshot
+reconciles them. Electron gates new app navigation while its UI IPC authority is
+unavailable; Gecko gates only an actual pending cold-session restore. A fully restarted native client
+reconstructs every required listener from its first snapshot before restoring
+the app. Projection snapshots are serialized with route registration and
+release publications, preventing a connect-time snapshot from overwriting a
+newer lifecycle event. Gecko cold start retargets its framework relay, opens the
+framework projection stream, reconciles the first snapshot, and only then
+restores the remote app. A complete serialized `GeckoSession` is restored only
+when both random loopback origins still match; otherwise Gecko loads the saved
+app URL rebased through the current framework relay. Warm background return preserves the
+live Gecko session without reloading it. Exact Framework-Shell removal immediately closes that generation's
+owned listeners; same-owner relaunch replaces its old generation. Framework
+retarget and native process/Activity destruction retain whole-client cleanup.
+
+There is no route/proxy polling. The only retry loop in this flow is the bounded
+backend HTTP page-readiness check before initial surface publication.
 
 Native negotiation never changes URL paths, queries, or fragments, never dynamically remaps ports, and never exposes an arbitrary framework-host TCP destination.
 
@@ -3447,7 +3482,13 @@ first four normalized alphanumeric characters (or `prof`), the injector is
 `gkvw` or `elct`, and the four-character base62 owner remains stable in session
 storage for that page/window. The full surface-aware label remains registered as
 worker metadata and is not repeated in the selector id.
-Surface removal, framework retarget, and native teardown release this policy.
+Surface removal carries the stable `surfaceId` independently of `devRuntime` and
+releases runtime/cache policy, console injection, Inspector registration, and
+presentation state. It does not own relay listener lifetime. Native listeners
+are owned by exact Run Target `ownerId + shellId` generations and reconcile from
+the client's authoritative projection feed. A shell removed during an asynchronous
+resolve cannot bind or resurrect a listener afterward. Framework retarget and
+native process/Activity teardown retain whole-client relay cleanup.
 The separate `devTools` option still controls only GeckoView's full Chobitsu
 Inspector target runtime. Ordinary browsers keep refresh behavior but cannot
 receive native cross-origin header mutation or bridge injection.
@@ -3510,14 +3551,19 @@ Allowed app-view commands are:
 | `reload` | Reload the exact app view. |
 | `home` | Return to the desktop launcher. |
 | `force_asset_update` | Run the desktop asset updater. |
-| `resolve_run_target` | Resolve a validated Run Profile route by binding the preferred local port or returning the original same-device URL. |
+| `register_run_target_surface` | Register exact-frame `devRuntime` instrumentation metadata; it does not create a proxy. |
+| `release_run_target_surface` | Release exact-frame instrumentation metadata; it does not tear down a running shell's proxy. |
 
 The command allowlist is exact-view and origin validated in Electron main. Code TE2 console workers in Electron app views register as `electron:main_page:<suffix>`; browser and Android retain generic `main_page` labels.
 
-Run-target listeners are owned by Electron main, not the renderer. The app-view
-preload exposes only the validated `resolveRunTarget` operation; Electron closes
-all relay listeners and active streams when the framework connection changes or
-the desktop process exits.
+Run-target listeners are owned by Electron main, not the renderer. Electron main
+also owns a direct strict-MessagePack Code TE2 UI IPC client which receives the
+authoritative owner/shell route projection. Electron reconciles listeners from
+that projection and gates app navigation on the first ready projection event;
+the preload exposes no Run Target resolve operation. App-view navigation does
+not tear down a still-running shell's group. Electron closes all relay listeners
+and active streams when the framework connection changes or the desktop process
+exits.
 
 ### Desktop shell behavior
 
@@ -3664,11 +3710,11 @@ The Cefrium module is intentionally isolated:
 - It applies the `com.cefrium` Gradle plugin only inside the Cefrium module.
 - The plugin must not be applied to Gecko variants because it generates Chromium resource classes and carries the large CEF runtime.
 - The module shares the packaged asset model and common Android source, but remains an evaluation path until the primary-renderer decision changes.
-- Keep at least 3 GB free before Android builds.
+- Keep at least 2 GB free before Android builds.
 
 ### Runtime behavior
 
-Cefrium always loads TE2 through one dynamically allocated `127.0.0.1` relay origin owned by `CefriumFrameworkRelay`, even when a configured framework host is reachable directly.
+Cefrium always loads TE2 through one dynamically allocated `127.0.0.1` relay origin owned by the shared `AndroidFrameworkRelay`, even when a configured framework host is reachable directly.
 
 The relay behavior is:
 
@@ -3759,11 +3805,26 @@ target lifecycle events, the Inspector client's target snapshot, and active
 Kotlin selection. Opening the Inspector surface republishes the authoritative
 target snapshot so a hidden client cannot retain stale routing state.
 
-Run-target routing is a separate WebExtension native-message path, not part of
-the Inspector CDP broker. A top-frame content bridge marks availability and
-forwards a bounded resolve request over the existing `browser` native port.
-Both the extension background and Kotlin revalidate the configured framework
-origin before `RunTargetRelay` binds the preferred client loopback port. The
-relay preserves the original path/query/fragment, falls back to the original
-URL only on `BindException`, and is torn down when the configured framework
-target changes or the Activity is destroyed.
+Run-target routing is independent of the Inspector CDP broker, WebExtension
+messages, and Code TE2 UI IPC. After `AndroidFrameworkRelay` is retargeted,
+Kotlin opens the Rust framework's no-store `/api/run-targets/events` stream;
+each connection starts with a fresh authoritative owner/shell route snapshot,
+and every later event is a complete replacement projection. Kotlin immediately
+reconciles every listener group. Local mode requires an explicitly configured loopback
+origin; every configured non-loopback host uses remote mode and binds the exact
+preferred ports. `BindException` is a collision. Shell route removal tears down
+the exact group, and a superseded projection cannot resurrect it.
+
+Native Settings retain the real upstream framework IP/port. Gecko itself loads
+framework pages through a process-local `AndroidFrameworkRelay` origin, which
+proxies HTTP, SSE, Socket.IO, and WebSocket traffic to that upstream. This keeps
+the page in a localhost browser security context without making the Run Target
+locality check mistake the browser relay for the framework host. Launcher
+app-open responses are rewritten through the relay so `/app/...` navigation
+activates the Kotlin replacement header. Cold app restoration occurs only after
+the first fresh native route snapshot has reconciled. Gecko restores complete
+serialized session state only when the saved random loopback origins still
+match; otherwise it loads the saved `/app/<id>` URL through the current relay.
+There is no route polling; iframe refresh performs no
+proxy request. Configured-framework changes and Activity destruction tear down
+all groups.

@@ -10,24 +10,10 @@ let enabled = false;
 let nativePort = null;
 let reconnectTimer = 0;
 let frameworkBaseUrl = "";
-const pendingRunTargets = new Map();
 const devRuntimeOriginsBySurface = new Map();
 const devRuntimeLabelsBySurface = new Map();
 const devRuntimeWorkerIdBasesBySurface = new Map();
 let devRuntimeOrigins = new Set();
-
-function runtimeMetadata(route) {
-  const runtime = route && typeof route.te2Runtime === "object"
-    ? route.te2Runtime
-    : null;
-  const surfaceId = String(runtime?.surfaceId || "").trim();
-  if (!surfaceId || runtime?.devRuntime !== true) return null;
-  return {
-    surfaceId,
-    workerIdBase: String(runtime.workerIdBase || "rp-prof").trim() || "rp-prof",
-    workerLabel: String(runtime.workerLabel || surfaceId).trim() || surfaceId,
-  };
-}
 
 function routeEntries(route) {
   if (route?.dto === "RunTargetRouteSet") {
@@ -37,12 +23,10 @@ function routeEntries(route) {
   return route && typeof route === "object" ? [route] : [];
 }
 
-function routeOrigin(entry, mode) {
+function routeOrigin(entry) {
   const original = new URL(String(entry.originalUrl || ""));
-  if (mode === "tunnel") {
-    original.hostname = "127.0.0.1";
-    original.port = String(Number(entry.preferredPort));
-  }
+  original.hostname = "127.0.0.1";
+  original.port = String(Number(entry.preferredPort));
   return original.origin;
 }
 
@@ -54,30 +38,15 @@ function rebuildDevRuntimeOrigins() {
   devRuntimeOrigins = next;
 }
 
-function registerDevRuntimePolicy(route, result) {
-  const runtime = runtimeMetadata(route);
-  if (!runtime || result?.ok !== true) return;
-  const origins = new Set();
-  for (const entry of routeEntries(route)) {
-    try {
-      origins.add(routeOrigin(entry, result.mode));
-    } catch (_) {}
-  }
-  try {
-    origins.add(new URL(String(result.url || "")).origin);
-  } catch (_) {}
-  if (origins.size === 0) return;
-  devRuntimeOriginsBySurface.set(runtime.surfaceId, origins);
-  devRuntimeLabelsBySurface.set(runtime.surfaceId, runtime.workerLabel);
-  devRuntimeWorkerIdBasesBySurface.set(runtime.surfaceId, runtime.workerIdBase);
-  rebuildDevRuntimeOrigins();
-}
-
-function registerDirectDevRuntimePolicy(runtime, url) {
+function registerDirectDevRuntimePolicy(runtime, url, route) {
   const surfaceId = String(runtime?.surfaceId || "").trim();
   if (!surfaceId || runtime?.devRuntime !== true) return false;
   try {
-    devRuntimeOriginsBySurface.set(surfaceId, new Set([new URL(String(url || "")).origin]));
+    const origins = new Set([new URL(String(url || "")).origin]);
+    for (const entry of routeEntries(route)) {
+      try { origins.add(routeOrigin(entry)); } catch (_) {}
+    }
+    devRuntimeOriginsBySurface.set(surfaceId, origins);
     devRuntimeLabelsBySurface.set(
       surfaceId,
       String(runtime.workerLabel || surfaceId).trim() || surfaceId,
@@ -301,7 +270,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
   }
   if (
     !message ||
-    !["run_target_resolve", "run_target_register", "run_target_release"].includes(message.type)
+    !["run_target_register", "run_target_release"].includes(message.type)
   ) {
     return undefined;
   }
@@ -317,49 +286,13 @@ browser.runtime.onMessage.addListener((message, sender) => {
   }
   if (message.type === "run_target_register") {
     return Promise.resolve(
-      registerDirectDevRuntimePolicy(message.runtime, message.url)
+      registerDirectDevRuntimePolicy(message.runtime, message.url, message.route)
         ? { ok: true }
         : { ok: false, error: "Run Profile runtime registration is invalid" },
     );
   }
-  if (!nativePort) {
-    return Promise.resolve({ ok: false, error: "Native run target bridge is unavailable" });
-  }
-  const requestId = String(message.requestId || "");
-  if (!requestId || pendingRunTargets.has(requestId)) {
-    return Promise.resolve({ ok: false, error: "Run target request id is invalid" });
-  }
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      pendingRunTargets.delete(requestId);
-      resolve({ ok: false, error: "Native run target request timed out" });
-    }, 5000);
-    pendingRunTargets.set(requestId, { resolve, timeout, route: message.route });
-    try {
-      nativePort.postMessage({
-        type: "run_target_resolve",
-        requestId,
-        route: message.route,
-        pageOrigin: message.pageOrigin,
-      });
-    } catch (error) {
-      pendingRunTargets.delete(requestId);
-      clearTimeout(timeout);
-      resolve({
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
+  return Promise.resolve({ ok: false, error: "Unsupported run target request" });
 });
-
-function rejectPendingRunTargets(error) {
-  for (const pending of pendingRunTargets.values()) {
-    clearTimeout(pending.timeout);
-    pending.resolve({ ok: false, error });
-  }
-  pendingRunTargets.clear();
-}
 
 // Static interception stays disabled until Kotlin confirms the local server port.
 function connectNativeBridge() {
@@ -380,15 +313,6 @@ function connectNativeBridge() {
           type: "asset_intercept_ready",
           port: assetServerPort,
         });
-      } else if (message && message.type === "run_target_resolve_result") {
-        const requestId = String(message.requestId || "");
-        const pending = pendingRunTargets.get(requestId);
-        if (pending) {
-          pendingRunTargets.delete(requestId);
-          clearTimeout(pending.timeout);
-          registerDevRuntimePolicy(pending.route, message);
-          pending.resolve(message);
-        }
       }
     });
     port.onDisconnect.addListener(() => {
@@ -397,7 +321,6 @@ function connectNativeBridge() {
       enabled = false;
       frameworkBaseUrl = "";
       clearDevRuntimePolicies();
-      rejectPendingRunTargets("Native run target bridge disconnected");
       scheduleNativeReconnect();
     });
   } catch (error) {
@@ -405,7 +328,6 @@ function connectNativeBridge() {
     enabled = false;
     frameworkBaseUrl = "";
     clearDevRuntimePolicies();
-    rejectPendingRunTargets("Native run target bridge is unavailable");
     scheduleNativeReconnect();
   }
 }

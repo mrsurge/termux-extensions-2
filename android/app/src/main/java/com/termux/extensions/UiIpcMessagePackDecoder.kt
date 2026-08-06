@@ -1,14 +1,20 @@
 package com.termux.extensions
 
 import org.msgpack.core.MessagePack
+import org.msgpack.value.ArrayValue
 import org.msgpack.value.MapValue
 import org.msgpack.value.Value
+import org.json.JSONArray
+import org.json.JSONObject
 
 internal data class UiIpcRpcNotification(
     val jsonRpc: String,
     val method: String,
+    val params: JSONObject,
+) {
     val source: String?
-)
+        get() = params.optString("source").trim().ifEmpty { null }
+}
 
 /** Strict MessagePack boundary for native consumers of UI IPC notifications. */
 internal object UiIpcMessagePackDecoder {
@@ -24,12 +30,12 @@ internal object UiIpcMessagePackDecoder {
         val jsonRpc = stringField(envelope, "jsonrpc") ?: return null
         val method = stringField(envelope, "method") ?: return null
         val params = field(envelope, "params")
-        val source = if (params?.isMapValue == true) {
-            stringField(params.asMapValue(), "source")
+        val paramsObject = if (params?.isMapValue == true) {
+            jsonObject(params.asMapValue())
         } else {
-            null
+            JSONObject()
         }
-        return UiIpcRpcNotification(jsonRpc, method, source)
+        return UiIpcRpcNotification(jsonRpc, method, paramsObject)
     }
 
     private fun stringField(map: MapValue, name: String): String? {
@@ -41,5 +47,29 @@ internal object UiIpcMessagePackDecoder {
         return map.map().entries.firstOrNull { (key, _) ->
             key.isStringValue && key.asStringValue().asString() == name
         }?.value
+    }
+
+    private fun jsonObject(map: MapValue): JSONObject = JSONObject().apply {
+        map.map().forEach { (key, value) ->
+            if (key.isStringValue) {
+                put(key.asStringValue().asString(), jsonValue(value))
+            }
+        }
+    }
+
+    private fun jsonArray(array: ArrayValue): JSONArray = JSONArray().apply {
+        array.list().forEach { put(jsonValue(it)) }
+    }
+
+    private fun jsonValue(value: Value): Any = when {
+        value.isNilValue -> JSONObject.NULL
+        value.isBooleanValue -> value.asBooleanValue().boolean
+        value.isIntegerValue -> value.asIntegerValue().toLong()
+        value.isFloatValue -> value.asFloatValue().toDouble()
+        value.isStringValue -> value.asStringValue().asString()
+        value.isBinaryValue -> value.asBinaryValue().asByteArray()
+        value.isArrayValue -> jsonArray(value.asArrayValue())
+        value.isMapValue -> jsonObject(value.asMapValue())
+        else -> value.toString()
     }
 }

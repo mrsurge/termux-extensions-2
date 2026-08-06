@@ -3,7 +3,6 @@ import type { Session, WebFrameMain } from "electron";
 import type {
   ElectronRunProfileRuntimeMetadata,
   ElectronRunTargetDescriptor,
-  ElectronRunTargetResolution,
   ElectronRunTargetRoute,
 } from "../shared/app-view-contracts";
 
@@ -16,26 +15,10 @@ type RuntimeConfig = ElectronRunProfileRuntimeMetadata & {
   targetLabel?: string;
 };
 
-function routeRuntime(route: ElectronRunTargetDescriptor): ElectronRunProfileRuntimeMetadata | null {
-  const runtime = route.te2Runtime;
-  const surfaceId = String(runtime?.surfaceId || "").trim();
-  if (!surfaceId || runtime?.devRuntime !== true) return null;
-  return { ...runtime, surfaceId };
-}
-
 function routeEntries(route: ElectronRunTargetDescriptor): ElectronRunTargetRoute[] {
   return route.dto === "RunTargetRouteSet"
     ? [route.primary, ...route.additional]
     : [route];
-}
-
-function routeOrigin(route: ElectronRunTargetRoute, mode: "direct" | "tunnel"): string {
-  const target = new URL(route.originalUrl);
-  if (mode === "tunnel") {
-    target.hostname = "127.0.0.1";
-    target.port = String(route.preferredPort);
-  }
-  return target.origin;
 }
 
 function replaceRequestHeader(
@@ -134,31 +117,25 @@ export class ElectronRunProfileRuntime {
     });
   }
 
-  register(
-    route: ElectronRunTargetDescriptor,
-    resolution: ElectronRunTargetResolution,
+  registerDirect(
+    runtime: ElectronRunProfileRuntimeMetadata,
+    url: string,
+    route?: ElectronRunTargetDescriptor,
   ): void {
-    const runtime = routeRuntime(route);
-    if (!runtime) return;
-    const origins = new Set<string>();
-    for (const entry of routeEntries(route)) {
-      try {
-        origins.add(routeOrigin(entry, resolution.mode));
-      } catch {}
-    }
-    try {
-      origins.add(new URL(resolution.url).origin);
-    } catch {}
-    if (origins.size === 0) return;
-    this.originsBySurface.set(runtime.surfaceId, origins);
-    this.rebuildOrigins();
-  }
-
-  registerDirect(runtime: ElectronRunProfileRuntimeMetadata, url: string): void {
     const surfaceId = String(runtime?.surfaceId || "").trim();
     if (!surfaceId || runtime?.devRuntime !== true) return;
-    const origin = new URL(url).origin;
-    this.originsBySurface.set(surfaceId, new Set([origin]));
+    const origins = new Set([new URL(url).origin]);
+    if (route) {
+      for (const entry of routeEntries(route)) {
+        try {
+          const target = new URL(entry.originalUrl);
+          target.hostname = "127.0.0.1";
+          target.port = String(entry.preferredPort);
+          origins.add(target.origin);
+        } catch {}
+      }
+    }
+    this.originsBySurface.set(surfaceId, origins);
     this.rebuildOrigins();
   }
 

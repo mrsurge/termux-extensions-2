@@ -14,18 +14,22 @@ import java.net.URLConnection
 import java.nio.charset.StandardCharsets
 import java.util.Collections
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Stable loopback origin for the Cefrium browser.
+ * Stable loopback origin shared by Android browser clients.
  *
  * Android-owned launcher/API routes and inventory-approved editor assets
  * terminate here. All other HTTP, SSE, Socket.IO, and raw WebSocket traffic is
  * streamed byte-for-byte to the configured TE2 origin.
  */
-class CefriumFrameworkRelay(
-    private val assetRoot: File,
+class AndroidFrameworkRelay(
+    private val assetRoot: File? = null,
+    private val assetPathResolver: ((String) -> String?)? = null,
     private val requestHandler: ((LocalHttpRequest) -> LocalHttpResponse?)? = null,
 ) {
     @Volatile
@@ -42,7 +46,7 @@ class CefriumFrameworkRelay(
     private var serverThread: Thread? = null
     private val workerIndex = AtomicInteger(0)
     private val workers = Executors.newCachedThreadPool { runnable ->
-        Thread(runnable, "CefriumRelay-${workerIndex.incrementAndGet()}").apply {
+        Thread(runnable, "AndroidFrameworkRelay-${workerIndex.incrementAndGet()}").apply {
             isDaemon = true
         }
     }
@@ -51,7 +55,7 @@ class CefriumFrameworkRelay(
 
     val browserOrigin: String
         get() {
-            check(port > 0) { "Cefrium relay has not started" }
+            check(port > 0) { "Android framework relay has not started" }
             return "http://$LOOPBACK_HOST:$port"
         }
 
@@ -65,6 +69,8 @@ class CefriumFrameworkRelay(
         }
         target = RelayTarget.parse(configuredOrigin)
         running = true
+        val started = CountDownLatch(1)
+        val startupError = AtomicReference<Throwable?>(null)
         serverThread = Thread({
             try {
                 val server = ServerSocket().apply {
@@ -73,6 +79,7 @@ class CefriumFrameworkRelay(
                 }
                 serverSocket = server
                 port = server.localPort
+                started.countDown()
                 while (running) {
                     try {
                         val socket = server.accept()
@@ -80,29 +87,32 @@ class CefriumFrameworkRelay(
                         workers.execute { handleClient(socket) }
                     } catch (error: Exception) {
                         if (running) {
-                            System.err.println("[cefrium-relay] accept failed: ${error.message}")
+                            System.err.println("[android-framework-relay] accept failed: ${error.message}")
                         }
                     }
                 }
+            } catch (error: Throwable) {
+                startupError.set(error)
             } finally {
+                started.countDown()
                 closeQuietly(serverSocket)
                 serverSocket = null
                 port = 0
             }
-        }, "CefriumRelayServer").apply {
+        }, "AndroidFrameworkRelayServer").apply {
             isDaemon = true
             start()
         }
 
-        val deadline = System.currentTimeMillis() + START_TIMEOUT_MS
-        while (port == 0 && running && System.currentTimeMillis() < deadline) {
-            Thread.sleep(10)
-        }
-        if (port <= 0) {
+        val signaled = started.await(START_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        if (!signaled || port <= 0) {
             stop()
-            throw IllegalStateException("Cefrium relay failed to bind $LOOPBACK_HOST")
+            throw IllegalStateException(
+                "Android framework relay failed to bind $LOOPBACK_HOST",
+                startupError.get(),
+            )
         }
-        System.out.println("[cefrium-relay] $browserOrigin -> ${target.origin}")
+        System.out.println("[android-framework-relay] $browserOrigin -> ${target.origin}")
     }
 
     fun retarget(configuredOrigin: String) {
@@ -114,7 +124,7 @@ class CefriumFrameworkRelay(
         // that one client long enough to receive the successful local response.
         closeActiveSockets(except = requestSocket.get())
         System.out.println(
-            "[cefrium-relay] retargeted $browserOrigin: ${previous.origin} -> ${next.origin}",
+            "[android-framework-relay] retargeted $browserOrigin: ${previous.origin} -> ${next.origin}",
         )
     }
 
@@ -163,9 +173,11 @@ class CefriumFrameworkRelay(
             val request = readRequest(input) ?: return
             val path = request.target.substringBefore('?')
             if (request.isChunked && (
-                    path.startsWith(ANDROID_SHELL_PREFIX) ||
-                        path.startsWith(ANDROID_API_PREFIX) ||
-                        CefriumAssetRoutes.localPath(path) != null
+                    (requestHandler != null && (
+                        path.startsWith(ANDROID_SHELL_PREFIX) ||
+                            path.startsWith(ANDROID_API_PREFIX)
+                        )) ||
+                        assetPathResolver?.invoke(path) != null
                     )
             ) {
                 sendLocalResponse(
@@ -193,8 +205,8 @@ class CefriumFrameworkRelay(
             }
 
             val localPath = when {
-                path.startsWith(ANDROID_SHELL_PREFIX) -> path
-                else -> CefriumAssetRoutes.localPath(path)
+                assetRoot != null && path.startsWith(ANDROID_SHELL_PREFIX) -> path
+                else -> assetPathResolver?.invoke(path)
             }
             if (localPath != null) {
                 serveLocalAsset(client, request.method, localPath)
@@ -380,9 +392,11 @@ class CefriumFrameworkRelay(
             return
         }
 
+        val root = assetRoot
+            ?: throw IllegalStateException("Local asset root is unavailable")
         val relativePath = requestPath.removePrefix("/")
-        val file = File(assetRoot, relativePath)
-        val rootPath = assetRoot.canonicalPath.trimEnd(File.separatorChar) + File.separator
+        val file = File(root, relativePath)
+        val rootPath = root.canonicalPath.trimEnd(File.separatorChar) + File.separator
         val filePath = file.canonicalPath
         if (!file.isFile || !filePath.startsWith(rootPath)) {
             sendLocalResponse(client, method, LocalHttpResponse.text(404, "404 Not Found"))
@@ -605,10 +619,10 @@ class CefriumFrameworkRelay(
             fun parse(raw: String): RelayTarget {
                 val parsed = URI(raw.trim())
                 require(parsed.scheme.equals("http", ignoreCase = true)) {
-                    "Cefrium framework target must use HTTP"
+                    "Android framework target must use HTTP"
                 }
                 val host = parsed.host?.takeIf { it.isNotBlank() }
-                    ?: throw IllegalArgumentException("Cefrium framework target is missing a host")
+                    ?: throw IllegalArgumentException("Android framework target is missing a host")
                 val port = if (parsed.port > 0) parsed.port else 80
                 val authorityHost = if (host.contains(':')) "[$host]" else host
                 val authority = if (port == 80) authorityHost else "$authorityHost:$port"

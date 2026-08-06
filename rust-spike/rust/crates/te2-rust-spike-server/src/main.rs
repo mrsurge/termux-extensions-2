@@ -46,6 +46,7 @@ const APPS_EVENT_CHANNEL_CAPACITY: usize = 64;
 #[derive(Clone)]
 pub(crate) struct AppState {
     config: Arc<ServerConfig>,
+    instance_id: Arc<str>,
     http_client: reqwest::Client,
     sio_routes: Arc<SioRouteIndex>,
     launch_store: Arc<LaunchStore>,
@@ -60,6 +61,10 @@ pub(crate) struct AppState {
 impl AppState {
     pub(crate) fn project_root(&self) -> &str {
         &self.config.project_root
+    }
+
+    pub(crate) fn instance_id(&self) -> &str {
+        &self.instance_id
     }
 
     pub(crate) fn app_roots(&self) -> &[AppRoot] {
@@ -140,6 +145,8 @@ struct HealthResponse {
     status: &'static str,
     app: &'static str,
     version: &'static str,
+    #[serde(rename = "instanceId")]
+    instance_id: String,
     host: String,
     port: u16,
     project_root: String,
@@ -187,6 +194,7 @@ async fn main() -> Result<()> {
     let launch_store = Arc::new(LaunchStore::default());
     let state = AppState {
         config,
+        instance_id: Arc::from(new_instance_id()?),
         http_client,
         sio_routes,
         launch_store,
@@ -272,10 +280,22 @@ async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
         status: "ok",
         app: APP_ID,
         version: env!("CARGO_PKG_VERSION"),
+        instance_id: state.instance_id().to_owned(),
         host: state.config.host.clone(),
         port: state.config.port,
         project_root: state.config.project_root.clone(),
     })
+}
+
+fn new_instance_id() -> Result<String> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).context("failed to generate framework instance id")?;
+    let mut value = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(value, "{byte:02x}");
+    }
+    Ok(value)
 }
 
 pub(crate) fn json_error(status: StatusCode, error: &str) -> Response {

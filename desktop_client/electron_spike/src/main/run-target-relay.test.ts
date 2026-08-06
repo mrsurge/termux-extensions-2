@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 
 import {
+  isConfiguredFrameworkLoopback,
   localRunTargetUrl,
   normalizeRunTargetRoute,
   normalizeRunTargetRouteSet,
@@ -12,23 +13,49 @@ import {
 
 const TICKET = "a".repeat(64);
 
-function route(port: number) {
+function route(port: number, ticket = TICKET) {
   return {
-    ticket: TICKET,
-    tunnelPath: `/api/run-targets/${TICKET}/tunnel`,
+    ticket,
+    tunnelPath: `/api/run-targets/${ticket}/tunnel`,
     preferredPort: port,
     originalUrl: `http://localhost:${port}/health?full=1#status`,
   };
 }
 
-function routeSet(primaryPort: number, additionalPort: number) {
+function routeSet(
+  primaryPort: number,
+  additionalPort: number,
+  ownerId = "owner:first",
+  shellId = "shell:first",
+  primaryTicket = TICKET,
+  auxiliaryTicket = "b".repeat(64),
+) {
   return {
     dto: "RunTargetRouteSet",
     version: 1,
-    relayGroupId: "d".repeat(64),
-    primary: route(primaryPort),
-    additional: [{ ...route(additionalPort), ticket: "b".repeat(64), tunnelPath: `/api/run-targets/${"b".repeat(64)}/tunnel`, label: "Vite / HMR" }],
+    ownerId,
+    shellId,
+    relayGroupId: primaryTicket,
+    primary: route(primaryPort, primaryTicket),
+    additional: [{ ...route(additionalPort, auxiliaryTicket), label: "Vite / HMR" }],
   };
+}
+
+function projection(...groups: ReturnType<typeof routeSet>[]) {
+  return {
+    dto: "RunTargetRouteProjection",
+    version: 1,
+    groups,
+  };
+}
+
+async function availablePorts(count: number): Promise<number[]> {
+  const reservations = Array.from({ length: count }, () => net.createServer());
+  try {
+    return await Promise.all(reservations.map((server) => listen(server)));
+  } finally {
+    await Promise.all(reservations.map((server) => close(server)));
+  }
 }
 
 function listen(server: net.Server, port = 0): Promise<number> {
@@ -41,7 +68,29 @@ function listen(server: net.Server, port = 0): Promise<number> {
 }
 
 function close(server: net.Server): Promise<void> {
+  if (!server.listening) return Promise.resolve();
   return new Promise((resolvePromise) => server.close(() => resolvePromise()));
+}
+
+async function assertPortFree(port: number): Promise<void> {
+  const server = net.createServer();
+  try {
+    await listen(server, port);
+  } finally {
+    await close(server);
+  }
+}
+
+async function assertPortOwned(port: number): Promise<void> {
+  const server = net.createServer();
+  try {
+    await assert.rejects(
+      listen(server, port),
+      (error: NodeJS.ErrnoException) => error.code === "EADDRINUSE",
+    );
+  } finally {
+    await close(server);
+  }
 }
 
 test("run target route requires a ticket-bound tunnel and matching loopback port", () => {
@@ -68,85 +117,190 @@ test("route sets require unique labeled auxiliary ports", () => {
   );
 });
 
-test("occupied preferred port selects same-device direct mode", async () => {
-  const occupied = net.createServer();
-  const port = await listen(occupied);
-  const manager = new RunTargetRelayManager(() => "http://framework.example:8089");
-  try {
-    assert.deepEqual(await manager.resolve(route(port)), {
-      ok: true,
-      mode: "direct",
-      url: `http://localhost:${port}/health?full=1#status`,
-    });
-  } finally {
-    await manager.stopAll();
-    await close(occupied);
-  }
+test("framework locality uses only the configured host", () => {
+  assert.equal(isConfiguredFrameworkLoopback("http://localhost:8089"), true);
+  assert.equal(isConfiguredFrameworkLoopback("http://127.0.0.1:8089"), true);
+  assert.equal(isConfiguredFrameworkLoopback("http://[::1]:8089"), true);
+  assert.equal(isConfiguredFrameworkLoopback("http://100.91.80.45:8089"), false);
+  assert.equal(isConfiguredFrameworkLoopback("http://framework.example:8089"), false);
 });
 
-test("free preferred port creates a reusable client tunnel", async () => {
-  const reservation = net.createServer();
-  const port = await listen(reservation);
-  await close(reservation);
+test("authoritative remote projection creates and reuses all listeners", async () => {
+  const [primaryPort, auxiliaryPort] = await availablePorts(2);
+  const descriptor = routeSet(primaryPort, auxiliaryPort);
   const manager = new RunTargetRelayManager(() => "http://framework.example:8089");
   try {
-    const expected = {
-      ok: true,
-      mode: "tunnel",
-      url: `http://127.0.0.1:${port}/health?full=1#status`,
-    };
-    const [first, second] = await Promise.all([
-      manager.resolve(route(port)),
-      manager.resolve(route(port)),
-    ]);
-    assert.deepEqual(first, expected);
-    assert.deepEqual(second, expected);
+    await manager.updateRouteProjection(projection(descriptor));
+    assert.equal(manager.debugSnapshot().projectionReady, true);
+    await assertPortOwned(primaryPort);
+    await assertPortOwned(auxiliaryPort);
+
+    await manager.updateRouteProjection(projection(descriptor));
+    await assertPortOwned(primaryPort);
+    await assertPortOwned(auxiliaryPort);
   } finally {
     await manager.stopAll();
   }
 });
 
-test("route set binds primary and auxiliary ports as one reusable group", async () => {
-  const primaryReservation = net.createServer();
-  const primaryPort = await listen(primaryReservation);
-  await close(primaryReservation);
-  const auxiliaryReservation = net.createServer();
-  const auxiliaryPort = await listen(auxiliaryReservation);
-  await close(auxiliaryReservation);
-  const manager = new RunTargetRelayManager(() => "http://framework.example:8089");
+test("configured loopback projection creates no client listeners", async () => {
+  const [primaryPort, auxiliaryPort] = await availablePorts(2);
+  const manager = new RunTargetRelayManager(() => "http://127.0.0.1:8089");
   try {
-    const expected = {
-      ok: true,
-      mode: "tunnel",
-      url: `http://127.0.0.1:${primaryPort}/health?full=1#status`,
-    };
-    assert.deepEqual(await manager.resolve(routeSet(primaryPort, auxiliaryPort)), expected);
-    assert.deepEqual(await manager.resolve(routeSet(primaryPort, auxiliaryPort)), expected);
+    await manager.updateRouteProjection(projection(routeSet(primaryPort, auxiliaryPort)));
+    assert.equal(manager.debugSnapshot().projectionReady, true);
+    await assertPortFree(primaryPort);
+    await assertPortFree(auxiliaryPort);
   } finally {
     await manager.stopAll();
   }
 });
 
-test("occupied auxiliary port rolls back the primary listener", async () => {
-  const primaryReservation = net.createServer();
-  const primaryPort = await listen(primaryReservation);
-  await close(primaryReservation);
+test("occupied auxiliary port fails projection and rolls back primary", async () => {
+  const [primaryPort] = await availablePorts(1);
   const occupied = net.createServer();
   const auxiliaryPort = await listen(occupied);
   const manager = new RunTargetRelayManager(() => "http://framework.example:8089");
   try {
     await assert.rejects(
-      manager.resolve(routeSet(primaryPort, auxiliaryPort)),
+      manager.updateRouteProjection(projection(routeSet(primaryPort, auxiliaryPort))),
       /Vite \/ HMR port .* already in use/,
     );
-    const rebound = net.createServer();
-    try {
-      await listen(rebound, primaryPort);
-    } finally {
-      await close(rebound);
-    }
+    assert.equal(manager.debugSnapshot().projectionReady, false);
+    await assertPortFree(primaryPort);
   } finally {
     await manager.stopAll();
     await close(occupied);
+  }
+});
+
+test("projection removal closes only the exited Framework-Shell group", async () => {
+  const [firstPrimary, firstAuxiliary, secondPrimary, secondAuxiliary] =
+    await availablePorts(4);
+  const first = routeSet(firstPrimary, firstAuxiliary);
+  const second = routeSet(
+    secondPrimary,
+    secondAuxiliary,
+    "owner:second",
+    "shell:second",
+    "c".repeat(64),
+    "d".repeat(64),
+  );
+  const manager = new RunTargetRelayManager(() => "http://framework.example:8089");
+  try {
+    await manager.updateRouteProjection(projection(first, second));
+    await manager.updateRouteProjection(projection(second));
+    await assertPortFree(firstPrimary);
+    await assertPortFree(firstAuxiliary);
+    await assertPortOwned(secondPrimary);
+    await assertPortOwned(secondAuxiliary);
+
+    await manager.updateRouteProjection(projection());
+    await assertPortFree(secondPrimary);
+    await assertPortFree(secondAuxiliary);
+  } finally {
+    await manager.stopAll();
+  }
+});
+
+test("a new shell generation replaces the same owner's stale listeners", async () => {
+  const [primaryPort, auxiliaryPort] = await availablePorts(2);
+  const first = routeSet(primaryPort, auxiliaryPort);
+  const replacement = routeSet(
+    primaryPort,
+    auxiliaryPort,
+    "owner:first",
+    "shell:replacement",
+    "e".repeat(64),
+    "f".repeat(64),
+  );
+  const manager = new RunTargetRelayManager(() => "http://framework.example:8089");
+  try {
+    await manager.updateRouteProjection(projection(first));
+    await manager.updateRouteProjection(projection(replacement));
+    await assertPortOwned(primaryPort);
+    await assertPortOwned(auxiliaryPort);
+
+    await manager.updateRouteProjection(projection());
+    await assertPortFree(primaryPort);
+    await assertPortFree(auxiliaryPort);
+  } finally {
+    await manager.stopAll();
+  }
+});
+
+test("UI IPC interruption preserves listeners until the next snapshot event", async () => {
+  const [primaryPort, auxiliaryPort] = await availablePorts(2);
+  const descriptor = routeSet(primaryPort, auxiliaryPort);
+  const manager = new RunTargetRelayManager(() => "http://framework.example:8089");
+  try {
+    await manager.updateRouteProjection(projection(descriptor));
+    manager.suspendRouteProjection();
+    await assertPortOwned(primaryPort);
+    await assertPortOwned(auxiliaryPort);
+
+    const ready = manager.waitUntilProjectionReady();
+    const reconcile = manager.updateRouteProjection(projection(descriptor));
+    await Promise.all([ready, reconcile]);
+    assert.equal(manager.debugSnapshot().projectionReady, true);
+  } finally {
+    await manager.stopAll();
+  }
+});
+
+test("a fresh manager reconstructs listeners from one projection event", async () => {
+  const [primaryPort, auxiliaryPort] = await availablePorts(2);
+  const descriptor = routeSet(primaryPort, auxiliaryPort);
+  const first = new RunTargetRelayManager(() => "http://framework.example:8089");
+  await first.updateRouteProjection(projection(descriptor));
+  await assertPortOwned(primaryPort);
+  await first.stopAll();
+  await assertPortFree(primaryPort);
+
+  const restarted = new RunTargetRelayManager(() => "http://framework.example:8089");
+  try {
+    await restarted.updateRouteProjection(projection(descriptor));
+    await assertPortOwned(primaryPort);
+    await assertPortOwned(auxiliaryPort);
+  } finally {
+    await restarted.stopAll();
+  }
+});
+
+test("superseded projection cannot resurrect removed listeners", async () => {
+  const [primaryPort, auxiliaryPort] = await availablePorts(2);
+  const descriptor = routeSet(primaryPort, auxiliaryPort);
+  let releaseProbe!: () => void;
+  let markProbeStarted!: () => void;
+  let probeCount = 0;
+  const probeStarted = new Promise<void>((resolvePromise) => {
+    markProbeStarted = resolvePromise;
+  });
+  const probeGate = new Promise<void>((resolvePromise) => {
+    releaseProbe = resolvePromise;
+  });
+  const manager = new RunTargetRelayManager(
+    () => "http://framework.example:8089",
+    async () => {
+      probeCount += 1;
+      if (probeCount === 1) {
+        markProbeStarted();
+        await probeGate;
+      }
+      return false;
+    },
+  );
+  try {
+    const first = manager.updateRouteProjection(projection(descriptor));
+    await probeStarted;
+    const removal = manager.updateRouteProjection(projection());
+    releaseProbe();
+    await Promise.all([first, removal]);
+    assert.equal(manager.debugSnapshot().projectionReady, true);
+    await assertPortFree(primaryPort);
+    await assertPortFree(auxiliaryPort);
+  } finally {
+    releaseProbe();
+    await manager.stopAll();
   }
 });

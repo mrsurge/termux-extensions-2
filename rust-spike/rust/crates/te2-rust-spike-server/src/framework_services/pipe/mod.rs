@@ -1394,7 +1394,8 @@ mod tests {
                 json!({
                     "ownerId": "runner-profile:file_editor_cm6:project:web",
                     "shellId": "shell-4173",
-                    "port": 4173
+                    "port": 4173,
+                    "originalUrl": "http://127.0.0.1:4173/"
                 }),
                 &root,
                 2400,
@@ -1429,7 +1430,12 @@ mod tests {
                     "ownerId": "runner-profile:file_editor_cm6:project:web",
                     "shellId": "shell-4173",
                     "primaryPort": 4173,
-                    "additionalPorts": [{"port": 5173, "label": "Vite / HMR"}]
+                    "primaryUrl": "http://127.0.0.1:4173/preview",
+                    "additionalPorts": [{
+                        "port": 5173,
+                        "label": "Vite / HMR",
+                        "originalUrl": "http://127.0.0.1:5173/"
+                    }]
                 }),
                 &root,
                 2400,
@@ -1460,6 +1466,36 @@ mod tests {
                 .and_then(|value| value.get("preferredPort"))
                 .and_then(|value| value.as_u64()),
             Some(5173)
+        );
+        assert_eq!(
+            route_set.get("ownerId").and_then(|value| value.as_str()),
+            Some("runner-profile:file_editor_cm6:project:web")
+        );
+        assert_eq!(
+            route_set.get("shellId").and_then(|value| value.as_str()),
+            Some("shell-4173")
+        );
+
+        let listed = dispatch_request(
+            targeted_request(
+                "runTarget.routes.list",
+                json!({}),
+                &root,
+                2400,
+                "service.runTarget",
+            ),
+            &responder,
+            &scheduler,
+            None,
+        )
+        .await;
+        let projection = listed.result.expect("run target route projection");
+        assert_eq!(
+            projection
+                .get("groups")
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(1)
         );
 
         let released = dispatch_request(

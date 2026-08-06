@@ -17,7 +17,7 @@ class AndroidShellGateway(
     private val httpClient: OkHttpClient,
     private val onSettingsChanged: (AndroidAppSettings) -> Unit,
     private val diagnosticsProvider: () -> JSONObject,
-    private val appUrlRewriter: (String) -> String = { it },
+    private val appUrlRewriter: (String) -> String,
 ) {
     fun handle(request: LocalHttpRequest): LocalHttpResponse? {
         if (!request.path.startsWith(API_PREFIX)) return null

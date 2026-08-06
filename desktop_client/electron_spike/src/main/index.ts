@@ -1,4 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { extname, relative, resolve } from "node:path";
 
 import {
@@ -27,12 +28,12 @@ import { startFrameworkRelay, type FrameworkRelay } from "./framework-relay";
 import { DESKTOP_MODAL_WINDOW_POLICY } from "./modal-window-policy";
 import { RunTargetRelayManager } from "./run-target-relay";
 import { ElectronRunProfileRuntime } from "./run-profile-runtime";
+import { ElectronUiIpcClient } from "./ui-ipc-client";
 import {
   ELECTRON_APP_VIEW_IDENTITY,
   ELECTRON_FRAMEWORK_PARTITION,
   validateElectronAppViewCommand,
   type ElectronAppViewInspection,
-  type ElectronRunTargetDescriptor,
 } from "../shared/app-view-contracts";
 import {
   frameworkOrigin,
@@ -86,6 +87,7 @@ let settings: DesktopShellSettings;
 let configuredFrameworkOrigin: string;
 let relay: FrameworkRelay;
 let runTargetRelays: RunTargetRelayManager | null = null;
+let uiIpcClient: ElectronUiIpcClient | null = null;
 let runProfileRuntime: ElectronRunProfileRuntime | null = null;
 let dialogHost: DesktopDialogHost | null = null;
 const surfaceWindows = new Set<BrowserWindow>();
@@ -313,6 +315,7 @@ async function handleAppViewControl(
       electronVersion: process.versions.electron,
       chromiumVersion: process.versions.chrome,
       assets: assetStatus,
+      runTargets: runTargetRelays?.debugSnapshot() || {},
     };
     return inspection;
   }
@@ -320,13 +323,6 @@ async function handleAppViewControl(
     // Keep this renderer alive long enough to return the install result. The
     // paired reload hook activates the already-invalidated asset snapshot.
     return updateDesktopAssets(true, false);
-  }
-  if (command === "resolve_run_target") {
-    if (!runTargetRelays) throw new Error("Run target relay is not initialized");
-    const route = payload as ElectronRunTargetDescriptor;
-    const result = await runTargetRelays.resolve(route);
-    runProfileRuntime?.register(route, result);
-    return result;
   }
   if (command === "release_run_target_surface") {
     runProfileRuntime?.release(String(payload || ""));
@@ -339,8 +335,13 @@ async function handleAppViewControl(
     const registration = payload as {
       runtime: Parameters<ElectronRunProfileRuntime["registerDirect"]>[0];
       url: string;
+      route?: Parameters<ElectronRunProfileRuntime["registerDirect"]>[2];
     };
-    runProfileRuntime?.registerDirect(registration.runtime, registration.url);
+    runProfileRuntime?.registerDirect(
+      registration.runtime,
+      registration.url,
+      registration.route,
+    );
     return { ok: true };
   }
   if (command === "reload") {
@@ -517,6 +518,8 @@ async function navigateApp(rawUrl: string): Promise<{ url: string }> {
     throw new Error("Framework app navigation must use the desktop relay origin");
   }
   target.searchParams.set("gv_native", "1");
+  if (!runTargetRelays) throw new Error("Run target relay is not initialized");
+  await runTargetRelays.waitUntilProjectionReady();
   closeAppView();
   appView = createAppView();
   mainWindow?.contentView.addChildView(appView);
@@ -541,6 +544,7 @@ async function saveConnection(params: Record<string, unknown>): Promise<{
   configuredFrameworkOrigin = nextOrigin;
   if (nextOrigin !== previousOrigin) {
     await runTargetRelays?.stopAll();
+    uiIpcClient?.connect(nextOrigin);
     runProfileRuntime?.clear();
     relay.retarget(nextOrigin);
     closeAppView();
@@ -698,6 +702,16 @@ async function main(): Promise<void> {
   configuredFrameworkOrigin = frameworkOrigin(settings);
   relay = await startFrameworkRelay(configuredFrameworkOrigin, assets);
   runTargetRelays = new RunTargetRelayManager(() => configuredFrameworkOrigin);
+  uiIpcClient = new ElectronUiIpcClient(
+    `electron:${randomUUID()}`,
+    (projection) => {
+      void runTargetRelays?.updateRouteProjection(projection).catch((error) => {
+        console.warn(`[te2-run-target] route projection rejected: ${errorMessage(error)}`);
+      });
+    },
+    () => runTargetRelays?.suspendRouteProjection(),
+  );
+  uiIpcClient.connect(configuredFrameworkOrigin);
   runProfileRuntime = new ElectronRunProfileRuntime(
     session.fromPartition(ELECTRON_FRAMEWORK_PARTITION),
     () => relay.browserOrigin,
@@ -747,6 +761,8 @@ app.on("before-quit", () => {
   dialogHost = null;
   void runTargetRelays?.stopAll();
   runTargetRelays = null;
+  uiIpcClient?.disconnect();
+  uiIpcClient = null;
   runProfileRuntime?.clear();
   runProfileRuntime = null;
   void relay?.stop();

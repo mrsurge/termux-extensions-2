@@ -14,7 +14,6 @@ export const ELECTRON_APP_VIEW_COMMANDS = [
   "reload",
   "home",
   "force_asset_update",
-  "resolve_run_target",
   "register_run_target_surface",
   "release_run_target_surface",
 ] as const;
@@ -31,6 +30,7 @@ export type ElectronAppViewInspection = {
   electronVersion: string;
   chromiumVersion: string;
   assets: AssetStatus;
+  runTargets: Record<string, unknown>;
 };
 
 export type ElectronRunTargetRoute = {
@@ -61,6 +61,8 @@ export type ElectronRunTargetAuxiliaryRoute = ElectronRunTargetRoute & {
 export type ElectronRunTargetRouteSet = {
   dto: "RunTargetRouteSet";
   version: 1;
+  ownerId: string;
+  shellId: string;
   relayGroupId: string;
   primary: ElectronRunTargetRoute;
   additional: ElectronRunTargetAuxiliaryRoute[];
@@ -71,22 +73,16 @@ export type ElectronRunTargetDescriptor =
   | ElectronRunTargetRoute
   | ElectronRunTargetRouteSet;
 
-export type ElectronRunTargetResolution = {
-  ok: true;
-  mode: "direct" | "tunnel";
-  url: string;
-};
-
 export type ElectronAppViewBridge = {
   readonly identity: typeof ELECTRON_APP_VIEW_IDENTITY;
   inspect(): Promise<ElectronAppViewInspection>;
   reload(): Promise<{ ok: true }>;
   home(): Promise<{ ok: true }>;
   forceAssetUpdate(): Promise<AssetUpdateResult>;
-  resolveRunTarget(route: ElectronRunTargetDescriptor): Promise<ElectronRunTargetResolution>;
   registerRunTargetSurface(
     runtime: ElectronRunProfileRuntimeMetadata,
     url: string,
+    route?: ElectronRunTargetDescriptor,
   ): Promise<{ ok: true }>;
   releaseRunTargetSurface(surfaceId: string): Promise<{ ok: true }>;
 };

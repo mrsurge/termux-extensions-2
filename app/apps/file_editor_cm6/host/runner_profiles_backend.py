@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 from ..monaco_editor.editor_backend_services.contracts import JsonMap
 from ..page_preview_shell_manager import (
@@ -56,15 +57,14 @@ async def build_run_profile_selection_response(
         request["includeAllProfiles"] = True
     projection = await build_run_profile_state_projection(request)
     candidates = projection.get("candidates")
-    candidate_list = (
-        [
-            item
-            for item in candidates
-            if isinstance(item, Mapping) and item.get("running") is not True
-        ]
-        if isinstance(candidates, list)
-        else []
-    )
+    candidate_list: list[JsonMap] = []
+    if isinstance(candidates, list):
+        for item in cast(list[object], candidates):
+            if not isinstance(item, dict):
+                continue
+            candidate = cast(JsonMap, item)
+            if candidate.get("running") is not True:
+                candidate_list.append(candidate)
     return {
         "ok": True,
         "data": {
@@ -101,11 +101,11 @@ async def handle_runner_profile_run_request(
                 owner_id=shell.label,
                 shell_id=shell.shell_id,
                 primary_port=PAGE_PREVIEW_PORT,
+                primary_url=url,
                 additional_ports=(
                     RunProfileAdditionalPort(PAGE_PREVIEW_HMR_PORT, "Vite / HMR"),
                 ),
             )
-            _decorate_route_urls(run_target_route, primary_url=url)
             await wait_for_run_profile_url(
                 project_root=match.project_root,
                 profile_id=profile.profile_id,
@@ -135,7 +135,7 @@ async def handle_runner_profile_run_request(
                 "error": f"Page Preview URL setup failed: {exc}",
                 "data": {"profileId": profile.profile_id, "runner": profile.runner},
             }
-        await _publish_run_profile_state_best_effort(
+        _ = await _publish_run_profile_state_best_effort(
             path=str(match.active_file),
             source=f"{source_name}:page_preview_started",
         )
@@ -177,11 +177,10 @@ async def handle_runner_profile_run_request(
                 owner_id=shell.label,
                 shell_id=shell.shell_id,
                 primary_port=profile.port,
+                primary_url=(
+                    profile.sidebar_url or f"http://127.0.0.1:{profile.port}/"
+                ),
                 additional_ports=profile.additional_ports,
-            )
-            _decorate_route_urls(
-                run_target_route,
-                primary_url=profile.sidebar_url,
             )
         except Exception as exc:
             stopped_suffix = ""
@@ -191,7 +190,7 @@ async def handle_runner_profile_run_request(
                     profile_id=profile.profile_id,
                 )
                 stopped_suffix = "; profile stopped"
-                await _publish_run_profile_state_best_effort(
+                _ = await _publish_run_profile_state_best_effort(
                     path=str(match.active_file),
                     source=f"{source_name}:route_setup_failed",
                 )
@@ -241,7 +240,7 @@ async def handle_runner_profile_run_request(
     if profile.sidebar_url:
         message = f"{message}; opened {profile.sidebar_url}"
 
-    await _publish_run_profile_state_best_effort(
+    _ = await _publish_run_profile_state_best_effort(
         path=str(match.active_file),
         source=f"{source_name}:run_profile_started",
     )
@@ -414,25 +413,11 @@ async def _publish_run_profile_state_best_effort(*, path: str, source: str) -> J
         return {}
 
 
-def _devtools_target_id(project_root: Path, profile_id: str) -> str:
+def _devtools_target_id(  # pyright: ignore[reportUnusedFunction]
+    project_root: Path,
+    profile_id: str,
+) -> str:
     return run_profile_surface_id(project_root, profile_id)
-
-
-def _decorate_route_urls(route_set: JsonMap, *, primary_url: str) -> None:
-    primary = _json_object(route_set.get("primary"))
-    primary["originalUrl"] = primary_url
-    route_set["primary"] = primary
-    additional_routes = route_set.get("additional")
-    if not isinstance(additional_routes, list):
-        return
-    for item in additional_routes:
-        route = _json_object(item)
-        preferred_port = route.get("preferredPort")
-        if isinstance(preferred_port, int):
-            route["originalUrl"] = f"http://127.0.0.1:{preferred_port}/"
-        if isinstance(item, dict):
-            item.clear()
-            item.update(route)
 
 
 async def _cleanup_failed_launch(
@@ -463,12 +448,6 @@ async def _cleanup_failed_launch(
         path=str(match.active_file),
         source="run_profile_launch_failed",
     )
-
-
-def _json_object(value: object) -> JsonMap:
-    if not isinstance(value, Mapping):
-        return {}
-    return {str(key): item for key, item in value.items()}
 
 
 def _text(value: object) -> str:

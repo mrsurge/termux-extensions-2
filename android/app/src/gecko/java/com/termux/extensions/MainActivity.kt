@@ -67,6 +67,7 @@ class MainActivity : AppCompatActivity() {
     private val editorInputFilter = EditorInputFilter()
     private val composeConsoleState = ComposeConsoleState()
     private var uiIpcClient: UiIpcClient? = null
+    private var runTargetProjectionClient: RunTargetProjectionClient? = null
     private var nativeConsoleWorker: AndroidNativeConsoleWorker? = null
     private var devToolsInspector: GeckoDevToolsInspector? = null
     private var devToolsInspectorEnabled = false
@@ -80,6 +81,7 @@ class MainActivity : AppCompatActivity() {
 
     private var editorAssetManager: EditorAssetManager? = null
     private var localAssetServer: LocalAssetServer? = null
+    private var frameworkRelay: AndroidFrameworkRelay? = null
     private lateinit var androidSettingsStore: AndroidAppSettingsStore
     private lateinit var androidDiagnostics: AndroidDiagnostics
     @Volatile private var lastStartupFailure: String? = null
@@ -104,7 +106,10 @@ class MainActivity : AppCompatActivity() {
     private var activityResumed = false
     private val appHealthCheckRunnable = Runnable { runAppHealthProbe() }
 
-    private var frameworkBaseUrl: String = DEFAULT_FRAMEWORK_URL
+    @Volatile private var frameworkBaseUrl: String = DEFAULT_FRAMEWORK_URL
+    private val clientStartupState = AndroidClientStartupState()
+    private var preservePersistedSessionUntilStartupReady = false
+    private var lastRunTargetError: String? = null
     private var currentAppId: String = DEFAULT_APP_ID
     private var isLocked: Boolean = false
 
@@ -121,16 +126,56 @@ class MainActivity : AppCompatActivity() {
 
     private fun persistSessionState(state: GeckoSession.SessionState?) {
         try {
+            if (
+                preservePersistedSessionUntilStartupReady &&
+                !clientStartupState.isReady()
+            ) {
+                return
+            }
             val serialized = state?.toString()
-            prefs().edit().putString("session_state", serialized).apply()
+            prefs().edit().apply {
+                putString(PREF_SESSION_STATE, serialized)
+                currentFrameworkRelayOrigin()?.let {
+                    putString(PREF_SESSION_FRAMEWORK_ORIGIN, it)
+                }
+                currentLauncherOrigin()?.let {
+                    putString(PREF_SESSION_LAUNCHER_ORIGIN, it)
+                }
+                apply()
+            }
         } catch (_: Exception) {
         }
     }
 
     private fun loadSavedSessionState(): GeckoSession.SessionState? {
         return try {
-            val s = prefs().getString("session_state", null)
-            if (s.isNullOrBlank()) null else GeckoSession.SessionState.fromString(s)
+            val preferences = prefs()
+            val serialized = preferences.getString(PREF_SESSION_STATE, null)
+            if (serialized.isNullOrBlank()) return null
+            val rawLastUrl = preferences.getString(PREF_LAST_URL, null)
+            val previousFrameworkOrigin =
+                preferences.getString(PREF_SESSION_FRAMEWORK_ORIGIN, null)
+                    ?: androidSavedAppOrigin(rawLastUrl)
+            val previousLauncherOrigin =
+                preferences.getString(PREF_SESSION_LAUNCHER_ORIGIN, null)
+                    ?: androidSavedLauncherOrigin(serialized)
+            val currentFrameworkOrigin = browserFrameworkBaseUrl()
+            val currentLauncherOrigin = currentLauncherOrigin()
+            // Gecko session history embeds encoded security principals tied to
+            // its original origins. Rewriting visible URL strings while either
+            // random loopback port changed makes restoreState silently discard
+            // the history and leave about:blank. In that case the rebased
+            // last_url is the only safe cold-process restoration source.
+            if (!androidSavedSessionOriginsMatch(
+                    previousFrameworkOrigin,
+                    currentFrameworkOrigin,
+                    previousLauncherOrigin,
+                    currentLauncherOrigin,
+                )
+            ) {
+                return null
+            }
+            GeckoSession.SessionState.fromString(serialized)
         } catch (_: Exception) {
             null
         }
@@ -139,18 +184,49 @@ class MainActivity : AppCompatActivity() {
     private fun persistLastUrl(url: String?) {
         try {
             if (url.isNullOrBlank()) return
-            prefs().edit().putString("last_url", url).apply()
+            prefs().edit().apply {
+                putString(PREF_LAST_URL, url)
+                currentFrameworkRelayOrigin()?.let {
+                    putString(PREF_SESSION_FRAMEWORK_ORIGIN, it)
+                }
+                currentLauncherOrigin()?.let {
+                    putString(PREF_SESSION_LAUNCHER_ORIGIN, it)
+                }
+                apply()
+            }
         } catch (_: Exception) {
         }
     }
 
     private fun loadLastUrl(): String? {
         return try {
-            prefs().getString("last_url", null)
+            val preferences = prefs()
+            val saved = preferences.getString(PREF_LAST_URL, null) ?: return null
+            val previousFrameworkOrigin =
+                preferences.getString(PREF_SESSION_FRAMEWORK_ORIGIN, null)
+                    ?: androidSavedAppOrigin(saved)
+            rewriteAndroidSavedSessionPayload(
+                serializedState = saved,
+                previousFrameworkOrigin = previousFrameworkOrigin,
+                currentFrameworkOrigin = browserFrameworkBaseUrl(),
+                previousLauncherOrigin = null,
+                currentLauncherOrigin = null,
+            )
         } catch (_: Exception) {
             null
         }
     }
+
+    private fun currentFrameworkRelayOrigin(): String? =
+        frameworkRelay?.port?.takeIf { it > 0 }?.let { frameworkRelay?.browserOrigin }
+
+    private fun currentLauncherOrigin(): String? =
+        localAssetServer?.port?.takeIf { it > 0 }?.let {
+            "http://127.0.0.1:$it"
+        }
+
+    private fun browserFrameworkBaseUrl(): String =
+        frameworkRelay?.browserOrigin ?: frameworkBaseUrl
 
     private fun appIdFromRemoteAppUri(uri: Uri): String? {
         if (!isFrameworkOrigin(uri)) return null
@@ -175,7 +251,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isFrameworkOrigin(uri: Uri): Boolean {
-        val frameworkUri = Uri.parse(frameworkBaseUrl)
+        val frameworkUri = Uri.parse(browserFrameworkBaseUrl())
         return uri.scheme.equals(frameworkUri.scheme, ignoreCase = true) &&
             uri.host.equals(frameworkUri.host, ignoreCase = true) &&
             effectivePort(uri) == effectivePort(frameworkUri)
@@ -191,6 +267,70 @@ class MainActivity : AppCompatActivity() {
                 return GeckoResult.fromValue(AllowOrDeny.ALLOW)
             }
         }
+
+    private fun isAppShellUrl(uri: Uri): Boolean {
+        val path = uri.path ?: return false
+        return path == "/app" || path.startsWith("/app/")
+    }
+
+    private fun ensureGvNative(uri: Uri): Uri {
+        if (uri.queryParameterNames.contains("gv_native")) return uri
+        val builder = uri.buildUpon()
+        val existingQuery = uri.encodedQuery
+        builder.encodedQuery(
+            if (existingQuery.isNullOrBlank()) "gv_native=1" else "$existingQuery&gv_native=1",
+        )
+        return builder.build()
+    }
+
+    private fun createNavigationDelegate() = object : GeckoSession.NavigationDelegate {
+        override fun onLoadRequest(
+            session: GeckoSession,
+            request: GeckoSession.NavigationDelegate.LoadRequest,
+        ): GeckoResult<AllowOrDeny>? {
+            val uri = try {
+                Uri.parse(request.uri)
+            } catch (_: Exception) {
+                return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+            }
+
+            val scheme = uri.scheme?.lowercase()
+            if (scheme != null && scheme != "http" && scheme != "https") {
+                return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+            }
+
+            val frameworkOrigin = isFrameworkOrigin(uri)
+            val path = uri.path.orEmpty()
+            if (frameworkOrigin && (path == "/" || path.isEmpty())) {
+                runOnUiThread { loadHome() }
+                return GeckoResult.fromValue(AllowOrDeny.DENY)
+            }
+
+            if (!frameworkOrigin || !isAppShellUrl(uri)) {
+                runOnUiThread { applyNavigationState(uri) }
+                return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+            }
+
+            val rewritten = ensureGvNative(uri)
+            val rewrittenUrl = rewritten.toString()
+            if (clientStartupState.gateAppNavigation(rewrittenUrl)) {
+                Log.i(
+                    "MainActivity",
+                    "Queued app navigation until native startup is ready: $rewrittenUrl",
+                )
+                return GeckoResult.fromValue(AllowOrDeny.DENY)
+            }
+
+            if (rewrittenUrl != request.uri) {
+                runOnUiThread { session.loadUri(rewrittenUrl) }
+                return GeckoResult.fromValue(AllowOrDeny.DENY)
+            }
+
+            persistLastUrl(rewrittenUrl)
+            runOnUiThread { applyNavigationState(rewritten) }
+            return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+        }
+    }
 
     private fun createGeckoSession(): GeckoSession {
         return GeckoSession(
@@ -404,69 +544,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            navigationDelegate = object : GeckoSession.NavigationDelegate {
-                private fun isAppShellUrl(uri: Uri): Boolean {
-                    val path = uri.path ?: return false
-                    return path == "/app" || path.startsWith("/app/")
-                }
-
-                private fun ensureGvNative(uri: Uri): Uri {
-                    val params = uri.queryParameterNames
-                    if (params.contains("gv_native")) return uri
-                    val builder = uri.buildUpon()
-                    val existingQuery = uri.encodedQuery
-                    if (existingQuery.isNullOrBlank()) {
-                        builder.encodedQuery("gv_native=1")
-                    } else {
-                        builder.encodedQuery("$existingQuery&gv_native=1")
-                    }
-                    return builder.build()
-                }
-
-                override fun onLoadRequest(
-                    session: GeckoSession,
-                    request: GeckoSession.NavigationDelegate.LoadRequest
-                ): GeckoResult<AllowOrDeny>? {
-                    val uri = try {
-                        Uri.parse(request.uri)
-                    } catch (_: Exception) {
-                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
-                    }
-
-                    val scheme = uri.scheme?.lowercase()
-                    if (scheme != null && scheme != "http" && scheme != "https") {
-                        // Ignore javascript:, about:, etc. so UI state isn't toggled.
-                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
-                    }
-
-                    val path = uri.path.orEmpty()
-                    if (isFrameworkOrigin(uri) && (path == "/" || path.isEmpty())) {
-                        runOnUiThread { loadHome() }
-                        return GeckoResult.fromValue(AllowOrDeny.DENY)
-                    }
-
-                    val isAppShell = isAppShellUrl(uri)
-                    runOnUiThread {
-                        applyNavigationState(uri)
-                    }
-
-                    if (!isAppShell) {
-                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
-                    }
-
-                    val rewritten = ensureGvNative(uri)
-                    if (rewritten.toString() == request.uri) {
-                        persistLastUrl(request.uri)
-                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
-                    }
-
-                    runOnUiThread {
-                        persistLastUrl(rewritten.toString())
-                        geckoSession.loadUri(rewritten.toString())
-                    }
-                    return GeckoResult.fromValue(AllowOrDeny.DENY)
-                }
-            }
+            navigationDelegate = createNavigationDelegate()
         }
     }
 
@@ -499,7 +577,7 @@ class MainActivity : AppCompatActivity() {
             geckoSession.setActive(true)
         } catch (_: Exception) {
         }
-        restoreRemoteSessionAfterHealthCheck()
+        wakeFrameworkAndLoad(forceLoadHome = false, restoreRemoteSession = true)
     }
 
     private fun dpToPx(dp: Int): Int {
@@ -559,6 +637,8 @@ class MainActivity : AppCompatActivity() {
         androidDiagnostics = AndroidDiagnostics(applicationContext)
         androidDiagnostics.beginSession()
         androidSettingsStore = AndroidAppSettingsStore(applicationContext)
+        preservePersistedSessionUntilStartupReady =
+            !prefs().getString(PREF_LAST_URL, null).isNullOrBlank()
         toolsStateStore = AndroidToolsStateStore(applicationContext)
         toolsState = toolsStateStore.load()
         toolsSelectedTab = toolsState.selectedTab
@@ -835,69 +915,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            navigationDelegate = object : GeckoSession.NavigationDelegate {
-                private fun isAppShellUrl(uri: Uri): Boolean {
-                    val path = uri.path ?: return false
-                    return path == "/app" || path.startsWith("/app/")
-                }
-
-                private fun ensureGvNative(uri: Uri): Uri {
-                    val params = uri.queryParameterNames
-                    if (params.contains("gv_native")) return uri
-                    val builder = uri.buildUpon()
-                    val existingQuery = uri.encodedQuery
-                    if (existingQuery.isNullOrBlank()) {
-                        builder.encodedQuery("gv_native=1")
-                    } else {
-                        builder.encodedQuery("$existingQuery&gv_native=1")
-                    }
-                    return builder.build()
-                }
-
-                override fun onLoadRequest(
-                    session: GeckoSession,
-                    request: GeckoSession.NavigationDelegate.LoadRequest
-                ): GeckoResult<AllowOrDeny>? {
-                    val uri = try {
-                        Uri.parse(request.uri)
-                    } catch (_: Exception) {
-                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
-                    }
-
-                    val scheme = uri.scheme?.lowercase()
-                    if (scheme != null && scheme != "http" && scheme != "https") {
-                        // Ignore javascript:, about:, etc. so UI state isn't toggled.
-                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
-                    }
-
-                    val path = uri.path.orEmpty()
-                    if (isFrameworkOrigin(uri) && (path == "/" || path.isEmpty())) {
-                        runOnUiThread { loadHome() }
-                        return GeckoResult.fromValue(AllowOrDeny.DENY)
-                    }
-
-                    val isAppShell = isAppShellUrl(uri)
-                    runOnUiThread {
-                        applyNavigationState(uri)
-                    }
-
-                    if (!isAppShell) {
-                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
-                    }
-
-                    val rewritten = ensureGvNative(uri)
-                    if (rewritten.toString() == request.uri) {
-                        persistLastUrl(request.uri)
-                        return GeckoResult.fromValue(AllowOrDeny.ALLOW)
-                    }
-
-                    runOnUiThread {
-                        persistLastUrl(rewritten.toString())
-                        geckoSession.loadUri(rewritten.toString())
-                    }
-                    return GeckoResult.fromValue(AllowOrDeny.DENY)
-                }
-            }
+            navigationDelegate = createNavigationDelegate()
         }
 
         runtime = GeckoRuntimeProvider.get(
@@ -1186,6 +1204,8 @@ class MainActivity : AppCompatActivity() {
     private fun loadHome() {
         if (!::geckoSession.isInitialized) return
         if (!requireAssetInterceptor("home navigation")) return
+        clientStartupState.cancelPendingRestore()
+        preservePersistedSessionUntilStartupReady = false
         inAppShell = false
         appHealthFailureCount = 0
         uiHandler.removeCallbacks(appHealthCheckRunnable)
@@ -1204,6 +1224,9 @@ class MainActivity : AppCompatActivity() {
     private fun loadApp(appId: String) {
         if (!::geckoSession.isInitialized) return
         if (!requireAssetInterceptor("app navigation")) return
+        val appUrl = browserFrameworkBaseUrl().trimEnd('/') +
+            "/app/" + appId + "?gv_native=1"
+        if (clientStartupState.gateAppNavigation(appUrl)) return
         inAppShell = true
         nativeHeader.visibility = View.VISIBLE
         updatePersistentNetworkService()
@@ -1211,7 +1234,7 @@ class MainActivity : AppCompatActivity() {
         appHealthFailureCount = 0
         isLocked = false
         findViewById<Button>(R.id.btnLock).text = "Lock"
-        geckoSession.loadUri(frameworkBaseUrl.trimEnd('/') + "/app/" + appId + "?gv_native=1")
+        geckoSession.loadUri(appUrl)
         updateAppHealthMonitoring(immediate = true)
     }
 
@@ -1410,7 +1433,7 @@ class MainActivity : AppCompatActivity() {
             processesGeckoView.setSession(created)
             processesSession = created
         }
-        val url = frameworkBaseUrl.trimEnd('/') + "/fws"
+        val url = browserFrameworkBaseUrl().trimEnd('/') + "/fws"
         if (processesLoadedUrl != url) {
             processesLoadedUrl = url
             session.loadUri(url)
@@ -1426,7 +1449,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun reloadProcessesSessionForSettings() {
-        if (processesLoadedUrl == frameworkBaseUrl.trimEnd('/') + "/fws") return
+        if (processesLoadedUrl == browserFrameworkBaseUrl().trimEnd('/') + "/fws") return
         processesLoadedUrl = null
         if (toolsSelectedTab == NativeToolsTab.PROCESSES) ensureProcessesSession()
     }
@@ -1556,7 +1579,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun androidDiagnosticRuntimeState(): JSONObject = JSONObject().apply {
         put("frameworkBaseUrl", frameworkBaseUrl)
+        put("browserFrameworkBaseUrl", browserFrameworkBaseUrl())
         put("localAssetServerPort", localAssetServer?.port ?: 0)
+        put("frameworkRelayPort", frameworkRelay?.port ?: 0)
+        put("runTargets", runTargetRelays.debugSnapshot())
+        put("clientStartupPhase", clientStartupState.phaseName())
         put("assetRootExists", editorAssetManager?.getAssetRoot()?.exists() == true)
         put("localAssetVersion", editorAssetManager?.getLocalVersion() ?: JSONObject.NULL)
         put("lastStartupFailure", lastStartupFailure ?: JSONObject.NULL)
@@ -1598,6 +1625,14 @@ class MainActivity : AppCompatActivity() {
             }
 
             // Start local file server
+            val relay = AndroidFrameworkRelay()
+            relay.start(frameworkBaseUrl)
+            frameworkRelay = relay
+            Log.i(
+                "MainActivity",
+                "Framework browser relay ${relay.browserOrigin} -> $frameworkBaseUrl",
+            )
+
             val gateway = AndroidShellGateway(
                 settingsStore = androidSettingsStore,
                 httpClient = httpClient,
@@ -1607,6 +1642,7 @@ class MainActivity : AppCompatActivity() {
                 diagnosticsProvider = {
                     androidDiagnostics.snapshot(androidDiagnosticRuntimeState())
                 },
+                appUrlRewriter = relay::rewriteFrameworkUrl,
             )
             val server = LocalAssetServer(mgr.getAssetRoot(), gateway::handle)
             server.start()
@@ -1686,8 +1722,6 @@ class MainActivity : AppCompatActivity() {
                                             "Asset interceptor acknowledged local port $assetPort",
                                         )
                                         completeReady()
-                                    } else if (payload.optString("type") == "run_target_resolve") {
-                                        handleRunTargetResolve(payload, source)
                                     }
                                 }
 
@@ -1700,7 +1734,7 @@ class MainActivity : AppCompatActivity() {
                             val msg = JSONObject().apply {
                                 put("type", "set_asset_port")
                                 put("port", assetPort)
-                                put("frameworkBaseUrl", frameworkBaseUrl)
+                                put("frameworkBaseUrl", browserFrameworkBaseUrl())
                             }
                             port.postMessage(msg)
                             Log.i("MainActivity", "Sent asset port $assetPort to extension")
@@ -1761,53 +1795,21 @@ class MainActivity : AppCompatActivity() {
         Log.i("MainActivity", "Released asset interceptor for activity teardown")
     }
 
-    private fun handleRunTargetResolve(payload: JSONObject, source: WebExtension.Port) {
-        val requestId = payload.optString("requestId").trim()
-        val route = payload.optJSONObject("route")
-        val pageOrigin = payload.optString("pageOrigin").trim()
-        val expectedOrigin = runCatching { Uri.parse(frameworkBaseUrl) }.getOrNull()
-        val suppliedOrigin = runCatching { Uri.parse(pageOrigin) }.getOrNull()
-        val trusted = expectedOrigin != null && suppliedOrigin != null &&
-            expectedOrigin.scheme.equals(suppliedOrigin.scheme, ignoreCase = true) &&
-            expectedOrigin.host.equals(suppliedOrigin.host, ignoreCase = true) &&
-            effectivePort(expectedOrigin) == effectivePort(suppliedOrigin)
-        if (requestId.isEmpty() || route == null || !trusted) {
-            source.postMessage(JSONObject().apply {
-                put("type", "run_target_resolve_result")
-                put("requestId", requestId)
-                put("ok", false)
-                put("error", "Run target request origin is not trusted")
-            })
-            return
-        }
-        runTargetRelays.resolve(route, frameworkBaseUrl) { result ->
-            runOnUiThread {
-                if (assetExtensionPort !== source) return@runOnUiThread
-                val response = result.fold(
-                    onSuccess = { it.toJson(requestId) },
-                    onFailure = { error -> JSONObject().apply {
-                        put("type", "run_target_resolve_result")
-                        put("requestId", requestId)
-                        put("ok", false)
-                        put("error", error.message ?: "Run target relay failed")
-                    } },
-                )
-                source.postMessage(response)
-            }
-        }
-    }
-
     private fun applyAndroidSettings(settings: AndroidAppSettings, reconnect: Boolean) {
         val devToolsSettingChanged =
             devToolsInspectorEnabled != settings.devToolsInspectorEnabled
         val frameworkChanged = frameworkBaseUrl != settings.frameworkBaseUrl
         frameworkBaseUrl = settings.frameworkBaseUrl
         if (frameworkChanged) {
+            runTargetProjectionClient?.disconnect()
+            runTargetProjectionClient = null
             runTargetRelays.stopAll()
+            lastRunTargetError = null
+            frameworkRelay?.retarget(frameworkBaseUrl)
             assetExtensionPort?.postMessage(JSONObject().apply {
                 put("type", "set_asset_port")
                 put("port", localAssetServer?.port ?: 0)
-                put("frameworkBaseUrl", frameworkBaseUrl)
+                put("frameworkBaseUrl", browserFrameworkBaseUrl())
             })
         }
         persistentNetworkNotificationEnabled = settings.persistentNetworkNotification
@@ -1849,7 +1851,18 @@ class MainActivity : AppCompatActivity() {
     private fun savedRemoteAppId(): String? {
         val lastUrl = loadLastUrl() ?: return null
         return try {
-            appIdFromRemoteAppUri(Uri.parse(lastUrl))
+            val uri = Uri.parse(lastUrl)
+            val scheme = uri.scheme?.lowercase()
+            val segments = uri.pathSegments
+            if (
+                scheme !in setOf("http", "https") ||
+                segments.size < 2 ||
+                segments[0] != "app"
+            ) {
+                null
+            } else {
+                segments[1].takeIf { it.isNotBlank() }
+            }
         } catch (_: Exception) {
             null
         }
@@ -1875,21 +1888,24 @@ class MainActivity : AppCompatActivity() {
     private fun restoreSavedRemoteSession(health: AndroidRemoteAppHealth) {
         val appId = savedRemoteAppId()
         if (health != AndroidRemoteAppHealth.HEALTHY || appId == null) {
+            preservePersistedSessionUntilStartupReady = false
             loadHome()
             return
         }
 
         val restored = try {
             val state = loadSavedSessionState()
-            if (state != null) {
+            if (state == null) {
+                false
+            } else {
                 geckoSession.restoreState(state)
                 true
-            } else {
-                false
             }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Log.w("MainActivity", "Saved Gecko session restore failed", error)
             false
         }
+        preservePersistedSessionUntilStartupReady = false
         if (!restored) {
             val lastUrl = loadLastUrl()
             if (lastUrl.isNullOrBlank()) {
@@ -1905,12 +1921,50 @@ class MainActivity : AppCompatActivity() {
         updateAppHealthMonitoring(immediate = true)
     }
 
-    private fun restoreRemoteSessionAfterHealthCheck() {
-        val frameworkUrl = frameworkBaseUrl
+    private fun dispatchClientStartupAction(action: AndroidClientStartupAction?) {
+        when (action) {
+            is AndroidClientStartupAction.RestoreSession -> {
+                restoreSavedRemoteSession(action.health)
+            }
+            is AndroidClientStartupAction.Navigate -> {
+                preservePersistedSessionUntilStartupReady = false
+                if (::geckoSession.isInitialized) geckoSession.loadUri(action.url)
+            }
+            AndroidClientStartupAction.LoadHome -> loadHome()
+            null -> Unit
+        }
+    }
+
+    private fun onRunTargetProjectionReady(generation: Long) {
+        if (!clientStartupState.isCurrent(generation) || !runTargetRelays.isProjectionReady()) {
+            return
+        }
+        lastRunTargetError = null
+        dispatchClientStartupAction(clientStartupState.markProjectionReady(generation))
+    }
+
+    private fun onRunTargetProjectionFailed(generation: Long, error: Throwable) {
+        if (!clientStartupState.isCurrent(generation)) return
+        clientStartupState.markProjectionFailed(generation)
+        val message = error.message ?: "Run target relay reconciliation failed"
+        Log.w("MainActivity", message, error)
+        if (lastRunTargetError == message) return
+        lastRunTargetError = message
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    private fun startSavedRemoteSessionHealthCheck(
+        generation: Long,
+        frameworkUrl: String,
+    ) {
         val appId = savedRemoteAppId()
         Thread {
             val health = probeRemoteAppHealth(frameworkUrl, appId)
-            runOnUiThread { restoreSavedRemoteSession(health) }
+            runOnUiThread {
+                dispatchClientStartupAction(
+                    clientStartupState.recordRestoreHealth(generation, health),
+                )
+            }
         }.start()
     }
 
@@ -1952,10 +2006,90 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    private fun connectUiIpc(
+        settings: AndroidAppSettings,
+        frameworkUrl: String,
+    ) {
+        uiIpcClient?.disconnect()
+        val client = UiIpcClient(
+            filter = editorInputFilter,
+            clientId = androidNativeConsoleWorkerId(this, "gecko"),
+            imeContextSwitchingEnabled = settings.imeContextSwitchingEnabled,
+        ) { active ->
+            runOnUiThread {
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+                if (active) {
+                    geckoView.requestFocus()
+                    imm?.restartInput(geckoView)
+                    imm?.showSoftInput(geckoView, 0)
+                } else {
+                    imm?.restartInput(geckoView)
+                }
+            }
+        }
+        client.onConsoleEvent = { eventName, data ->
+            composeConsoleState.onConsoleEvent(eventName, data)
+        }
+        uiIpcClient = client
+        client.connect(frameworkUrl)
+        if (
+            consoleOverlay.visibility == View.VISIBLE &&
+            toolsSelectedTab == NativeToolsTab.CONSOLE
+        ) {
+            client.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
+        }
+    }
+
+    private fun connectRunTargetProjection(
+        generation: Long,
+        frameworkUrl: String,
+    ) {
+        if (!clientStartupState.isCurrent(generation)) return
+        runTargetProjectionClient?.disconnect()
+        val client = RunTargetProjectionClient(httpClient)
+        client.onProjection = projection@{ projection ->
+            if (!clientStartupState.markProjectionReceived(generation)) return@projection
+            runCatching {
+                runTargetRelays.updateRouteProjection(
+                    projection,
+                    frameworkUrl,
+                ) { result ->
+                    runOnUiThread {
+                        result.fold(
+                            onSuccess = { onRunTargetProjectionReady(generation) },
+                            onFailure = { error ->
+                                onRunTargetProjectionFailed(generation, error)
+                            },
+                        )
+                    }
+                }
+            }.onFailure { error ->
+                runOnUiThread { onRunTargetProjectionFailed(generation, error) }
+            }
+        }
+        client.onTransportUnavailable = unavailable@{ error ->
+            if (!clientStartupState.isCurrent(generation)) return@unavailable
+            clientStartupState.markAuthorityUnavailable(generation)
+            Log.w(
+                "MainActivity",
+                "Authoritative Run Target stream unavailable; retaining current listeners",
+                error,
+            )
+        }
+        runTargetProjectionClient = client
+        client.connect(frameworkUrl)
+    }
+
     private fun wakeFrameworkAndLoad(
         forceLoadHome: Boolean = true,
         restoreRemoteSession: Boolean = false,
     ) {
+        val hasSavedRemoteSession = restoreRemoteSession && savedRemoteAppId() != null
+        val shouldLoadHome = forceLoadHome || (restoreRemoteSession && !hasSavedRemoteSession)
+        val generation = clientStartupState.begin(
+            restoreSavedSession = hasSavedRemoteSession,
+            loadHomeWhenReady = shouldLoadHome,
+        )
         Thread {
             val base = IPC_SLEEP_BASE_URL.trimEnd('/')
             val settings = androidSettingsStore.load()
@@ -1980,7 +2114,42 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            if (!clientStartupState.isCurrent(generation)) return@Thread
             frameworkBaseUrl = frameworkUrl
+            val relayError = runCatching {
+                val relay = frameworkRelay
+                    ?: throw IllegalStateException("Android framework relay is not running")
+                relay.retarget(frameworkUrl)
+            }.exceptionOrNull()
+            if (relayError != null) {
+                Log.e("MainActivity", "Framework relay startup gate failed", relayError)
+                runOnUiThread {
+                    if (clientStartupState.isCurrent(generation)) {
+                        showFatalStartupToast(
+                            relayError.message ?: "Android framework relay is unavailable",
+                        )
+                    }
+                }
+                return@Thread
+            }
+            if (!clientStartupState.markFrameworkRelayReady(generation)) return@Thread
+
+            // The configured framework relay is authoritative and must exist
+            // before any remote Run Target request, app-health probe, or page
+            // restoration. The projection stream always starts with a fresh,
+            // no-store snapshot from the remote Rust registry.
+            runOnUiThread {
+                if (!clientStartupState.isCurrent(generation)) return@runOnUiThread
+                try {
+                    connectRunTargetProjection(generation, frameworkUrl)
+                    connectUiIpc(settings, frameworkUrl)
+                } catch (error: Exception) {
+                    onRunTargetProjectionFailed(generation, error)
+                }
+            }
+            if (hasSavedRemoteSession) {
+                startSavedRemoteSessionHealthCheck(generation, frameworkUrl)
+            }
 
             // Check server for newer assets and download bundle if needed
             try {
@@ -2014,54 +2183,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             connectNativeConsoleWorker(frameworkUrl)
-
-            // Connect IME filter IPC after server URL is known
-            try {
-                uiIpcClient?.disconnect()
-                uiIpcClient = UiIpcClient(
-                    filter = editorInputFilter,
-                    imeContextSwitchingEnabled = settings.imeContextSwitchingEnabled,
-                ) { active ->
-                    runOnUiThread {
-                        val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
-                        if (active) {
-                            geckoView.requestFocus()
-                            imm?.restartInput(geckoView)
-                            imm?.showSoftInput(geckoView, 0)
-                        } else {
-                            imm?.restartInput(geckoView)
-                        }
-                    }
-                }
-                uiIpcClient?.onConsoleEvent = { eventName, data ->
-                    composeConsoleState.onConsoleEvent(eventName, data)
-                }
-                uiIpcClient?.connect(frameworkUrl)
-                if (
-                    consoleOverlay.visibility == View.VISIBLE &&
-                    toolsSelectedTab == NativeToolsTab.CONSOLE
-                ) {
-                    uiIpcClient?.setConsoleDrawerEnabled(true, CONSOLE_TAIL_LINES)
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("MainActivity", "UiIpcClient setup failed", e)
-            }
-
-            val restoreHealth = if (restoreRemoteSession) {
-                probeRemoteAppHealth(frameworkUrl, savedRemoteAppId())
-            } else {
-                null
-            }
-            runOnUiThread {
-                if (restoreRemoteSession) {
-                    restoreSavedRemoteSession(
-                        restoreHealth ?: AndroidRemoteAppHealth.UNREACHABLE,
-                    )
-                } else if (forceLoadHome) {
-                    loadHome()
-                } else {
-                    // If we restored session state, don't clobber it by forcing a fresh home load.
-                    // Still apply native side effects (header + foreground service decision) based on current URL.
+            if (!hasSavedRemoteSession && !shouldLoadHome) {
+                runOnUiThread {
                     try {
                         updatePersistentNetworkService()
                     } catch (_: Exception) {
@@ -2091,6 +2214,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         uiHandler.removeCallbacks(appHealthCheckRunnable)
+        runTargetProjectionClient?.disconnect()
+        runTargetProjectionClient = null
         uiIpcClient?.disconnect()
         uiIpcClient = null
         nativeConsoleWorker?.disconnect()
@@ -2104,6 +2229,8 @@ class MainActivity : AppCompatActivity() {
         releaseAssetInterceptor()
         localAssetServer?.stop()
         localAssetServer = null
+        frameworkRelay?.stop()
+        frameworkRelay = null
         if (::geckoSession.isInitialized) {
             geckoSession.close()
         }
@@ -2112,6 +2239,10 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val CONSOLE_TAIL_LINES = 500
+        private const val PREF_SESSION_STATE = "session_state"
+        private const val PREF_LAST_URL = "last_url"
+        private const val PREF_SESSION_FRAMEWORK_ORIGIN = "session_framework_origin"
+        private const val PREF_SESSION_LAUNCHER_ORIGIN = "session_launcher_origin"
         private const val DEFAULT_FRAMEWORK_URL = "http://127.0.0.1:8089"
         private const val ASSET_INTERCEPT_READY_TIMEOUT_MS = 10_000L
         private const val APP_HEALTH_INTERVAL_MS = 2_000L

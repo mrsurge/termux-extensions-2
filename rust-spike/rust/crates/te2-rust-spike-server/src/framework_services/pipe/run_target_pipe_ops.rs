@@ -17,8 +17,25 @@ pub(super) async fn dispatch_run_target_request(
     match request.method.as_deref()? {
         "runTarget.route.register" => Some(register(request, responder, scheduler).await),
         "runTarget.routes.register" => Some(register_set(request, responder, scheduler).await),
+        "runTarget.routes.list" => Some(list(request, responder, scheduler).await),
         "runTarget.route.release" => Some(release(request, responder, scheduler).await),
         _ => None,
+    }
+}
+
+async fn list(
+    request: &PipeEnvelope,
+    responder: &PipeIdentity,
+    scheduler: &FrameworkServiceScheduler,
+) -> PipeEnvelope {
+    let value = scheduler.run_targets().list().await;
+    match serde_json::to_value(value) {
+        Ok(value) => PipeEnvelope::success_response(request, responder, value),
+        Err(error) => PipeEnvelope::error_response(
+            request,
+            responder,
+            PipeError::new("runTarget.internalError", error.to_string(), false, None),
+        ),
     }
 }
 

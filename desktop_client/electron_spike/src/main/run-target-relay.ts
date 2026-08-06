@@ -2,8 +2,6 @@ import * as net from "node:net";
 
 import type {
   ElectronRunTargetAuxiliaryRoute,
-  ElectronRunTargetDescriptor,
-  ElectronRunTargetResolution,
   ElectronRunTargetRoute,
   ElectronRunTargetRouteSet,
 } from "../shared/app-view-contracts";
@@ -19,6 +17,17 @@ type RelayEntry = {
   server: net.Server;
   sockets: Set<net.Socket>;
   websockets: Set<WebSocket>;
+};
+
+type GroupIdentity = {
+  ownerId: string;
+  shellId: string;
+};
+
+export type ElectronRunTargetRouteProjection = {
+  dto: "RunTargetRouteProjection";
+  version: 1;
+  groups: ElectronRunTargetRouteSet[];
 };
 
 function errorCode(error: unknown): string {
@@ -80,16 +89,26 @@ export function normalizeRunTargetRouteSet(raw: unknown): ElectronRunTargetRoute
     return {
       dto: "RunTargetRouteSet",
       version: 1,
+      ownerId: "",
+      shellId: "",
       relayGroupId: primary.ticket,
       primary,
       additional: [],
     };
+  }
+  const ownerId = String(value.ownerId || "").trim();
+  const shellId = String(value.shellId || "").trim();
+  if (!ownerId || !shellId) {
+    throw new Error("Run target Framework-Shell ownership is invalid");
   }
   const relayGroupId = String(value.relayGroupId || "").trim();
   if (!TICKET_RE.test(relayGroupId)) {
     throw new Error("Run target relay group is invalid");
   }
   const primary = normalizeRunTargetRoute(value.primary);
+  if (relayGroupId !== primary.ticket) {
+    throw new Error("Run target relay group must identify the primary route");
+  }
   if (!Array.isArray(value.additional) || value.additional.length > MAX_AUXILIARY_PORTS) {
     throw new Error("Run target auxiliary routes are invalid");
   }
@@ -109,10 +128,37 @@ export function normalizeRunTargetRouteSet(raw: unknown): ElectronRunTargetRoute
   return {
     dto: "RunTargetRouteSet",
     version: 1,
+    ownerId,
+    shellId,
     relayGroupId,
     primary,
     additional,
   };
+}
+
+export function normalizeRunTargetRouteProjection(
+  raw: unknown,
+): ElectronRunTargetRouteProjection {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Run target route projection is invalid");
+  }
+  const value = raw as Record<string, unknown>;
+  if (value.dto !== "RunTargetRouteProjection" || value.version !== 1) {
+    throw new Error("Run target route projection is invalid");
+  }
+  if (!Array.isArray(value.groups)) {
+    throw new Error("Run target route projection groups are invalid");
+  }
+  return {
+    dto: "RunTargetRouteProjection",
+    version: 1,
+    groups: value.groups.map(normalizeRunTargetRouteSet),
+  };
+}
+
+export function isConfiguredFrameworkLoopback(configuredFrameworkOrigin: string): boolean {
+  const hostname = new URL(configuredFrameworkOrigin).hostname.toLowerCase();
+  return ["127.0.0.1", "localhost", "[::1]", "::1"].includes(hostname);
 }
 
 export function localRunTargetUrl(route: ElectronRunTargetRoute): string {
@@ -148,30 +194,134 @@ function closeServer(server: net.Server): Promise<void> {
 
 export class RunTargetRelayManager {
   readonly #entries = new Map<number, RelayEntry>();
+  readonly #groupIdentities = new Map<string, GroupIdentity>();
+  #activeRoutesByShellId = new Map<string, ElectronRunTargetRouteSet>();
+  #hasAuthoritativeProjection = false;
+  #projectionReady = false;
+  #projectionGeneration = 0;
+  #lastConfiguredLoopback: boolean | null = null;
+  #lastError: string | null = null;
+  readonly #readyWaiters = new Set<{
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }>();
   #mutationQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly frameworkOrigin: () => string) {}
+  constructor(
+    private readonly frameworkOrigin: () => string,
+    private readonly localityClassifier:
+      (frameworkOrigin: string) => boolean | Promise<boolean> =
+        isConfiguredFrameworkLoopback,
+  ) {}
 
-  resolve(rawRoute: ElectronRunTargetDescriptor | unknown): Promise<ElectronRunTargetResolution> {
-    const operation = this.#mutationQueue.then(() => this.#resolveNow(rawRoute));
+  updateRouteProjection(rawProjection: unknown): Promise<void> {
+    const projection = normalizeRunTargetRouteProjection(rawProjection);
+    const next = new Map(projection.groups.map((group) => [group.shellId, group]));
+    const generation = ++this.#projectionGeneration;
+    this.#activeRoutesByShellId = next;
+    this.#hasAuthoritativeProjection = true;
+    this.#projectionReady = false;
+    const operation = this.#mutationQueue.then(
+      () => this.#reconcileProjection(next, generation),
+    );
     this.#mutationQueue = operation.then(() => undefined, () => undefined);
+    void operation.then(
+      () => {
+        if (generation !== this.#projectionGeneration) return;
+        this.#projectionReady = true;
+        this.#lastError = null;
+        this.#resolveReadyWaiters();
+      },
+      (error: unknown) => {
+        if (generation !== this.#projectionGeneration) return;
+        const normalized = error instanceof Error ? error : new Error(String(error));
+        this.#projectionReady = false;
+        this.#lastError = normalized.message;
+        this.#rejectReadyWaiters(normalized);
+      },
+    );
     return operation;
   }
 
-  async #resolveNow(rawRoute: unknown): Promise<ElectronRunTargetResolution> {
-    const legacy = Boolean(rawRoute && typeof rawRoute === "object" && !("primary" in rawRoute));
-    const routeSet = normalizeRunTargetRouteSet(rawRoute);
+  suspendRouteProjection(): void {
+    this.#hasAuthoritativeProjection = false;
+    this.#projectionReady = false;
+    this.#projectionGeneration += 1;
+  }
+
+  waitUntilProjectionReady(timeoutMs = 10_000): Promise<void> {
+    if (this.#hasAuthoritativeProjection && this.#projectionReady) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        resolve,
+        reject,
+        timeout: setTimeout(() => {
+          this.#readyWaiters.delete(waiter);
+          reject(new Error("Run target route authority did not become ready"));
+        }, timeoutMs),
+      };
+      this.#readyWaiters.add(waiter);
+    });
+  }
+
+  debugSnapshot(): Record<string, unknown> {
+    return {
+      authorityAvailable: this.#hasAuthoritativeProjection,
+      projectionReady: this.#projectionReady,
+      configuredLoopback: this.#lastConfiguredLoopback,
+      lastError: this.#lastError,
+      projectedGroups: this.#activeRoutesByShellId.size,
+      listenerPorts: [...this.#entries.keys()].sort((left, right) => left - right),
+    };
+  }
+
+  async #reconcileProjection(
+    next: Map<string, ElectronRunTargetRouteSet>,
+    generation: number,
+  ): Promise<void> {
+    const configuredLoopback = await this.localityClassifier(this.frameworkOrigin());
+    if (generation !== this.#projectionGeneration) return;
+    const staleGroupIds = [...this.#groupIdentities]
+      .filter(([groupId, identity]) => {
+        const active = next.get(identity.shellId);
+        return !active ||
+          active.ownerId !== identity.ownerId ||
+          active.relayGroupId !== groupId ||
+          !this.#groupMatches(active);
+      })
+      .map(([groupId]) => groupId);
+    await Promise.all(staleGroupIds.map((groupId) => this.#stopGroup(groupId)));
+    this.#lastConfiguredLoopback = configuredLoopback;
+    if (configuredLoopback) {
+      await Promise.all([...this.#groupIdentities.keys()].map((groupId) => (
+        this.#stopGroup(groupId)
+      )));
+      return;
+    }
+    for (const routeSet of next.values()) {
+      if (generation !== this.#projectionGeneration) return;
+      await this.#startOrReuseGroup(routeSet);
+    }
+  }
+
+  async #startOrReuseGroup(routeSet: ElectronRunTargetRouteSet): Promise<void> {
+    const oldGroupIds = [...this.#groupIdentities]
+      .filter(([, identity]) => (
+        identity.ownerId === routeSet.ownerId && identity.shellId !== routeSet.shellId
+      ))
+      .map(([groupId]) => groupId);
+    await Promise.all(oldGroupIds.map((groupId) => this.#stopGroup(groupId)));
     const existingPrimary = this.#entries.get(routeSet.primary.preferredPort);
     if (existingPrimary && existingPrimary.groupId !== routeSet.relayGroupId) {
-      if (legacy) await this.#stopGroup(existingPrimary.groupId);
-      else {
-        throw new Error(
-          `Run target port ${routeSet.primary.preferredPort} is owned by another profile`,
-        );
-      }
+      throw new Error(
+        `Run target port ${routeSet.primary.preferredPort} is owned by another profile`,
+      );
     }
     if (this.#groupMatches(routeSet)) {
-      return { ok: true, mode: "tunnel", url: localRunTargetUrl(routeSet.primary) };
+      return;
     }
     await this.#stopGroup(routeSet.relayGroupId);
 
@@ -181,7 +331,7 @@ export class RunTargetRelayManager {
     } catch (error) {
       primary.server.close();
       if (errorCode(error) === "EADDRINUSE") {
-        return { ok: true, mode: "direct", url: routeSet.primary.originalUrl };
+        throw new Error(`Run target port ${routeSet.primary.preferredPort} is already in use`);
       }
       throw error;
     }
@@ -209,7 +359,10 @@ export class RunTargetRelayManager {
       await this.#stopGroup(routeSet.relayGroupId);
       throw error;
     }
-    return { ok: true, mode: "tunnel", url: localRunTargetUrl(routeSet.primary) };
+    this.#groupIdentities.set(routeSet.relayGroupId, {
+      ownerId: routeSet.ownerId,
+      shellId: routeSet.shellId,
+    });
   }
 
   stopAll(): Promise<void> {
@@ -252,12 +405,36 @@ export class RunTargetRelayManager {
   }
 
   async #stopAllNow(): Promise<void> {
+    this.#hasAuthoritativeProjection = false;
+    this.#projectionReady = false;
+    this.#projectionGeneration += 1;
+    this.#activeRoutesByShellId.clear();
+    this.#groupIdentities.clear();
+    this.#lastConfiguredLoopback = null;
+    this.#lastError = null;
     await Promise.all([...this.#entries.values()].map((entry) => this.#stopEntry(entry)));
   }
 
   async #stopGroup(groupId: string): Promise<void> {
+    this.#groupIdentities.delete(groupId);
     const entries = [...this.#entries.values()].filter((entry) => entry.groupId === groupId);
     await Promise.all(entries.map((entry) => this.#stopEntry(entry)));
+  }
+
+  #resolveReadyWaiters(): void {
+    for (const waiter of this.#readyWaiters) {
+      clearTimeout(waiter.timeout);
+      waiter.resolve();
+    }
+    this.#readyWaiters.clear();
+  }
+
+  #rejectReadyWaiters(error: Error): void {
+    for (const waiter of this.#readyWaiters) {
+      clearTimeout(waiter.timeout);
+      waiter.reject(error);
+    }
+    this.#readyWaiters.clear();
   }
 
   #accept(entry: RelayEntry, socket: net.Socket): void {

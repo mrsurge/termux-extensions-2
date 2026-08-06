@@ -90,6 +90,8 @@ export interface RunTargetAuxiliaryRouteDescriptor extends RunTargetRouteDescrip
 export interface RunTargetRouteSetDescriptor extends UnknownRecord {
   dto: "RunTargetRouteSet";
   version: 1;
+  ownerId: string;
+  shellId: string;
   relayGroupId: string;
   primary: RunTargetRouteDescriptor;
   additional: RunTargetAuxiliaryRouteDescriptor[];

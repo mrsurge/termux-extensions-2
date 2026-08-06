@@ -12,10 +12,10 @@ class UiIpcMessagePackDecoderTest {
                 "a6706172616d7381a6736f75726365a6656469746f72"
         )
 
-        assertEquals(
-            UiIpcRpcNotification("2.0", "ui.ime.focus", "editor"),
-            UiIpcMessagePackDecoder.decode(payload)
-        )
+        val decoded = UiIpcMessagePackDecoder.decode(payload)
+        assertEquals("2.0", decoded?.jsonRpc)
+        assertEquals("ui.ime.focus", decoded?.method)
+        assertEquals("editor", decoded?.source)
     }
 
     @Test

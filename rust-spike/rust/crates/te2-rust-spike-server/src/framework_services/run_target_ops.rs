@@ -4,10 +4,11 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 
 const ROUTE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_ADDITIONAL_PORTS: usize = 8;
+const ROUTE_UPDATE_CHANNEL_CAPACITY: usize = 64;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +16,8 @@ pub(crate) struct RunTargetRegisterRequest {
     pub(crate) owner_id: String,
     pub(crate) shell_id: String,
     pub(crate) port: u16,
+    #[serde(default)]
+    pub(crate) original_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -23,6 +26,7 @@ pub(crate) struct RunTargetRouteSetRegisterRequest {
     pub(crate) owner_id: String,
     pub(crate) shell_id: String,
     pub(crate) primary_port: u16,
+    pub(crate) primary_url: String,
     #[serde(default)]
     pub(crate) additional_ports: Vec<RunTargetAdditionalPortRequest>,
 }
@@ -32,6 +36,7 @@ pub(crate) struct RunTargetRouteSetRegisterRequest {
 pub(crate) struct RunTargetAdditionalPortRequest {
     pub(crate) port: u16,
     pub(crate) label: String,
+    pub(crate) original_url: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,6 +57,7 @@ pub(crate) struct RunTargetRouteResult {
     pub(crate) ticket: String,
     pub(crate) tunnel_path: String,
     pub(crate) preferred_port: u16,
+    pub(crate) original_url: String,
     pub(crate) expires_at: u64,
 }
 
@@ -68,8 +74,19 @@ pub(crate) struct RunTargetAdditionalRouteResult {
 pub(crate) struct RunTargetRouteSetResult {
     pub(crate) dto: &'static str,
     pub(crate) version: u16,
+    pub(crate) owner_id: String,
+    pub(crate) shell_id: String,
+    pub(crate) relay_group_id: String,
     pub(crate) primary: RunTargetRouteResult,
     pub(crate) additional: Vec<RunTargetAdditionalRouteResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RunTargetRouteProjection {
+    pub(crate) dto: &'static str,
+    pub(crate) version: u16,
+    pub(crate) groups: Vec<RunTargetRouteSetResult>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,9 +102,20 @@ pub(crate) struct RunTargetRoute {
     pub(crate) port: u16,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct RunTargetRegistry {
     inner: Arc<Mutex<HashMap<String, RegisteredRoute>>>,
+    updates: broadcast::Sender<RunTargetRouteProjection>,
+}
+
+impl Default for RunTargetRegistry {
+    fn default() -> Self {
+        let (updates, _) = broadcast::channel(ROUTE_UPDATE_CHANNEL_CAPACITY);
+        Self {
+            inner: Arc::new(Mutex::new(HashMap::new())),
+            updates,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -96,6 +124,7 @@ struct RegisteredRoute {
     owner_id: String,
     shell_id: String,
     port: u16,
+    original_url: String,
     label: Option<String>,
     primary: bool,
     expires_at: tokio::time::Instant,
@@ -105,6 +134,7 @@ struct RegisteredRoute {
 #[derive(Clone)]
 struct RouteSpec {
     port: u16,
+    original_url: String,
     label: Option<String>,
     primary: bool,
 }
@@ -118,12 +148,18 @@ impl RunTargetRegistry {
         if request.port == 0 {
             return Err("port must be between 1 and 65535".to_owned());
         }
+        let default_url = format!("http://127.0.0.1:{}/", request.port);
+        let original_url = normalize_original_url(
+            request.original_url.as_deref().unwrap_or(&default_url),
+            request.port,
+        )?;
         let result = self
             .register_specs(
                 request.owner_id,
                 request.shell_id,
                 vec![RouteSpec {
                     port: request.port,
+                    original_url,
                     label: None,
                     primary: true,
                 }],
@@ -162,10 +198,12 @@ impl RunTargetRegistry {
             {
                 renew(route);
             }
-            return route_set_result(
+            let result = route_set_result(
                 routes.values().filter(|route| route.owner_id == owner_id),
                 &specs,
-            );
+            )?;
+            self.publish_locked(&routes);
+            return Ok(result);
         }
 
         // Generate the complete replacement before mutating the live set. A
@@ -184,6 +222,7 @@ impl RunTargetRegistry {
                 owner_id: owner_id.clone(),
                 shell_id: shell_id.clone(),
                 port: spec.port,
+                original_url: spec.original_url.clone(),
                 label: spec.label.clone(),
                 primary: spec.primary,
                 expires_at: tokio::time::Instant::now() + ROUTE_TTL,
@@ -197,10 +236,12 @@ impl RunTargetRegistry {
         for route in replacement {
             routes.insert(route.ticket.clone(), route);
         }
-        route_set_result(
+        let result = route_set_result(
             routes.values().filter(|route| route.owner_id == owner_id),
             &specs,
-        )
+        )?;
+        self.publish_locked(&routes);
+        Ok(result)
     }
 
     pub(crate) async fn release(
@@ -240,10 +281,14 @@ impl RunTargetRegistry {
             }
             false
         });
+        let released = routes.len() != before;
+        if released {
+            self.publish_locked(&routes);
+        }
         Ok(RunTargetReleaseResult {
             dto: "RunTargetReleaseResult",
             version: 1,
-            released: routes.len() != before,
+            released,
         })
     }
 
@@ -253,6 +298,56 @@ impl RunTargetRegistry {
         let route = routes.get_mut(ticket)?;
         renew(route);
         Some(RunTargetRoute { port: route.port })
+    }
+
+    pub(crate) async fn list(&self) -> RunTargetRouteProjection {
+        let mut routes = self.inner.lock().await;
+        purge_expired(&mut routes);
+        projection_from_routes(&routes)
+    }
+
+    pub(crate) async fn subscribe(
+        &self,
+    ) -> (
+        RunTargetRouteProjection,
+        broadcast::Receiver<RunTargetRouteProjection>,
+    ) {
+        let mut routes = self.inner.lock().await;
+        purge_expired(&mut routes);
+        // Subscribe while holding the mutation lock. Any mutation published
+        // after this snapshot is therefore queued after the initial projection.
+        let receiver = self.updates.subscribe();
+        (projection_from_routes(&routes), receiver)
+    }
+
+    fn publish_locked(&self, routes: &HashMap<String, RegisteredRoute>) {
+        let _ = self.updates.send(projection_from_routes(routes));
+    }
+}
+
+fn projection_from_routes(routes: &HashMap<String, RegisteredRoute>) -> RunTargetRouteProjection {
+    let mut identities = routes
+        .values()
+        .map(|route| (route.owner_id.clone(), route.shell_id.clone()))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    identities.sort();
+    let mut groups = Vec::with_capacity(identities.len());
+    for (owner_id, shell_id) in identities {
+        let mut group = routes
+            .values()
+            .filter(|route| route.owner_id == owner_id && route.shell_id == shell_id)
+            .collect::<Vec<_>>();
+        group.sort_by_key(|route| (!route.primary, route.port));
+        if let Ok(result) = registered_group_result(&owner_id, &shell_id, &group) {
+            groups.push(result);
+        }
+    }
+    RunTargetRouteProjection {
+        dto: "RunTargetRouteProjection",
+        version: 1,
+        groups,
     }
 }
 
@@ -282,6 +377,7 @@ fn validate_route_set(
     seen.insert(request.primary_port);
     let mut specs = vec![RouteSpec {
         port: request.primary_port,
+        original_url: normalize_original_url(&request.primary_url, request.primary_port)?,
         label: None,
         primary: true,
     }];
@@ -298,6 +394,7 @@ fn validate_route_set(
         }
         specs.push(RouteSpec {
             port: additional.port,
+            original_url: normalize_original_url(&additional.original_url, additional.port)?,
             label: Some(label.to_owned()),
             primary: false,
         });
@@ -311,6 +408,7 @@ fn route_set_matches(existing: &[RegisteredRoute], shell_id: &str, specs: &[Rout
         && specs.iter().all(|spec| {
             existing.iter().any(|route| {
                 route.port == spec.port
+                    && route.original_url == spec.original_url
                     && route.label == spec.label
                     && route.primary == spec.primary
             })
@@ -343,6 +441,39 @@ fn route_set_result<'a>(
     Ok(RunTargetRouteSetResult {
         dto: "RunTargetRouteSet",
         version: 1,
+        owner_id: primary.owner_id.clone(),
+        shell_id: primary.shell_id.clone(),
+        relay_group_id: primary.ticket.clone(),
+        primary: route_result(primary),
+        additional,
+    })
+}
+
+fn registered_group_result(
+    owner_id: &str,
+    shell_id: &str,
+    routes: &[&RegisteredRoute],
+) -> Result<RunTargetRouteSetResult, String> {
+    let primary = routes
+        .iter()
+        .copied()
+        .find(|route| route.primary)
+        .ok_or_else(|| "run-target group has no primary route".to_owned())?;
+    let additional = routes
+        .iter()
+        .copied()
+        .filter(|route| !route.primary)
+        .map(|route| RunTargetAdditionalRouteResult {
+            label: route.label.clone().unwrap_or_default(),
+            route: route_result(route),
+        })
+        .collect();
+    Ok(RunTargetRouteSetResult {
+        dto: "RunTargetRouteSet",
+        version: 1,
+        owner_id: owner_id.to_owned(),
+        shell_id: shell_id.to_owned(),
+        relay_group_id: primary.ticket.clone(),
         primary: route_result(primary),
         additional,
     })
@@ -365,8 +496,23 @@ fn route_result(route: &RegisteredRoute) -> RunTargetRouteResult {
         ticket: route.ticket.clone(),
         tunnel_path: format!("/api/run-targets/{}/tunnel", route.ticket),
         preferred_port: route.port,
+        original_url: route.original_url.clone(),
         expires_at: route.expires_at_epoch_ms,
     }
+}
+
+fn normalize_original_url(raw: &str, expected_port: u16) -> Result<String, String> {
+    let parsed = url::Url::parse(raw).map_err(|error| format!("invalid originalUrl: {error}"))?;
+    if parsed.scheme() != "http" || !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("originalUrl must be credential-free HTTP".to_owned());
+    }
+    if !matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "::1")) {
+        return Err("originalUrl must address server loopback".to_owned());
+    }
+    if parsed.port_or_known_default() != Some(expected_port) {
+        return Err("originalUrl port must match its run-target port".to_owned());
+    }
+    Ok(parsed.to_string())
 }
 
 fn expires_at_epoch_ms() -> u64 {
@@ -400,9 +546,11 @@ mod tests {
             owner_id: "project:profile".to_owned(),
             shell_id: shell_id.to_owned(),
             primary_port: 4173,
+            primary_url: "http://127.0.0.1:4173/preview".to_owned(),
             additional_ports: vec![RunTargetAdditionalPortRequest {
                 port: additional_port,
                 label: "Vite / HMR".to_owned(),
+                original_url: format!("http://127.0.0.1:{additional_port}/"),
             }],
         }
     }
@@ -506,5 +654,31 @@ mod tests {
             .expect_err("duplicate port");
         assert!(error.contains("duplicate run-target port"));
         assert!(registry.resolve(&existing.primary.ticket).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn subscription_starts_with_fresh_snapshot_and_receives_complete_replacements() {
+        let registry = RunTargetRegistry::default();
+        let (initial, mut updates) = registry.subscribe().await;
+        assert!(initial.groups.is_empty());
+
+        registry
+            .register_set(route_set("shell-1", 5173))
+            .await
+            .expect("registered route set");
+        let registered = updates.recv().await.expect("registration projection");
+        assert_eq!(registered.groups.len(), 1);
+        assert_eq!(registered.groups[0].shell_id, "shell-1");
+
+        registry
+            .release(RunTargetReleaseRequest {
+                owner_id: "project:profile".to_owned(),
+                shell_id: Some("shell-1".to_owned()),
+                ticket: None,
+            })
+            .await
+            .expect("released route set");
+        let released = updates.recv().await.expect("release projection");
+        assert!(released.groups.is_empty());
     }
 }

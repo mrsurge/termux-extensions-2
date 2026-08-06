@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 internal data class AndroidRunTargetRoute(
     val ticket: String,
@@ -28,23 +29,12 @@ internal data class AndroidRunTargetRoute(
 )
 
 internal data class AndroidRunTargetRouteSet(
+    val ownerId: String,
+    val shellId: String,
     val relayGroupId: String,
     val primary: AndroidRunTargetRoute,
     val additional: List<AndroidRunTargetRoute>,
 )
-
-internal data class AndroidRunTargetResolution(
-    val mode: String,
-    val url: String,
-) {
-    fun toJson(requestId: String): JSONObject = JSONObject().apply {
-        put("type", "run_target_resolve_result")
-        put("requestId", requestId)
-        put("ok", true)
-        put("mode", mode)
-        put("url", url)
-    }
-}
 
 internal fun normalizeAndroidRunTargetRoute(
     raw: JSONObject,
@@ -77,8 +67,12 @@ internal fun normalizeAndroidRunTargetRoute(
 internal fun normalizeAndroidRunTargetRouteSet(raw: JSONObject): AndroidRunTargetRouteSet {
     if (!raw.has("primary")) {
         val primary = normalizeAndroidRunTargetRoute(raw)
-        return AndroidRunTargetRouteSet(primary.ticket, primary, emptyList())
+        return AndroidRunTargetRouteSet("", "", primary.ticket, primary, emptyList())
     }
+    val ownerId = raw.optString("ownerId").trim()
+    val shellId = raw.optString("shellId").trim()
+    require(ownerId.isNotEmpty()) { "Run target owner id is required" }
+    require(shellId.isNotEmpty()) { "Run target shell id is required" }
     val relayGroupId = raw.optString("relayGroupId").trim()
     require(relayGroupId.matches(Regex("^[0-9a-f]{64}$"))) {
         "Run target relay group is invalid"
@@ -101,7 +95,27 @@ internal fun normalizeAndroidRunTargetRouteSet(raw: JSONObject): AndroidRunTarge
             add(route)
         }
     }
-    return AndroidRunTargetRouteSet(relayGroupId, primary, additional)
+    require(relayGroupId == primary.ticket) { "Run target relay group is invalid" }
+    return AndroidRunTargetRouteSet(ownerId, shellId, relayGroupId, primary, additional)
+}
+
+internal fun normalizeAndroidRunTargetProjection(raw: JSONObject): List<AndroidRunTargetRouteSet> {
+    require(raw.optString("dto") == "RunTargetRouteProjection") {
+        "Run target projection is invalid"
+    }
+    require(raw.optInt("version", -1) == 1) { "Run target projection version is invalid" }
+    val groups = raw.optJSONArray("groups")
+        ?: throw IllegalArgumentException("Run target projection groups are invalid")
+    return buildList {
+        for (index in 0 until groups.length()) {
+            add(
+                normalizeAndroidRunTargetRouteSet(
+                    groups.optJSONObject(index)
+                        ?: throw IllegalArgumentException("Run target projection group is invalid"),
+                ),
+            )
+        }
+    }
 }
 
 internal fun localAndroidRunTargetUrl(route: AndroidRunTargetRoute): String {
@@ -138,11 +152,25 @@ private fun tunnelWebSocketUrl(frameworkBaseUrl: String, tunnelPath: String): St
     ).toASCIIString()
 }
 
+internal fun isAndroidConfiguredFrameworkLoopback(frameworkBaseUrl: String): Boolean {
+    val host = runCatching {
+        URI(frameworkBaseUrl.trimEnd('/') + "/").host
+    }.getOrNull()?.removeSurrounding("[", "]")?.lowercase()
+    return host in setOf("127.0.0.1", "localhost", "::1")
+}
+
 /** Owns native loopback listeners used to make remote Run Profile ports local. */
 internal class RunTargetRelayManager(
     private val httpClient: OkHttpClient,
     private val executor: ExecutorService = Executors.newCachedThreadPool(),
+    private val localityClassifier: (String) -> Boolean =
+        ::isAndroidConfiguredFrameworkLoopback,
 ) {
+    private data class GroupIdentity(
+        val ownerId: String,
+        val shellId: String,
+    )
+
     private data class Entry(
         val groupId: String,
         val route: AndroidRunTargetRoute,
@@ -154,95 +182,157 @@ internal class RunTargetRelayManager(
     )
 
     private val lock = Any()
+    private val mutationExecutor = Executors.newSingleThreadExecutor()
     private val entries = mutableMapOf<Int, Entry>()
-
-    fun resolve(
-        rawRoute: JSONObject,
+    private val groupIdentities = mutableMapOf<String, GroupIdentity>()
+    private var activeRoutesByShellId = emptyMap<String, AndroidRunTargetRouteSet>()
+    private var hasAuthoritativeProjection = false
+    private var projectionReady = false
+    private var lastConfiguredLoopback: Boolean? = null
+    private var lastError: String? = null
+    private val projectionGeneration = AtomicLong(0)
+    fun updateRouteProjection(
+        rawProjection: JSONObject,
         frameworkBaseUrl: String,
-        completion: (Result<AndroidRunTargetResolution>) -> Unit,
+        completion: (Result<Unit>) -> Unit = {},
     ) {
-        executor.execute {
+        val groups = normalizeAndroidRunTargetProjection(rawProjection)
+        val next = groups.associateBy { it.shellId }
+        val generation = projectionGeneration.incrementAndGet()
+        synchronized(lock) {
+            activeRoutesByShellId = next
+            hasAuthoritativeProjection = true
+            projectionReady = false
+        }
+        mutationExecutor.execute {
             val result = runCatching {
-                val legacy = !rawRoute.has("primary")
-                val routeSet = normalizeAndroidRunTargetRouteSet(rawRoute)
+                val configuredLoopback = localityClassifier(frameworkBaseUrl)
                 synchronized(lock) {
-                    val existing = entries[routeSet.primary.preferredPort]
-                    if (existing != null && existing.groupId != routeSet.relayGroupId) {
-                        if (legacy) {
-                            stopGroupLocked(existing.groupId)
-                        } else {
-                            throw IllegalStateException(
-                                "Run target port ${routeSet.primary.preferredPort} " +
-                                    "is owned by another profile",
-                            )
-                        }
+                    if (generation != projectionGeneration.get()) return@synchronized
+                    require(hasAuthoritativeProjection) {
+                        "Run target route authority is unavailable"
                     }
-                    if (groupMatchesLocked(routeSet)) {
-                        return@synchronized AndroidRunTargetResolution(
-                            mode = "tunnel",
-                            url = localAndroidRunTargetUrl(routeSet.primary),
-                        )
+                    reconcileProjectionLocked(next, frameworkBaseUrl, configuredLoopback)
+                    lastConfiguredLoopback = configuredLoopback
+                    lastError = null
+                    projectionReady = true
+                }
+            }
+            result.exceptionOrNull()?.let { error ->
+                synchronized(lock) {
+                    if (generation == projectionGeneration.get()) {
+                        lastError = error.message ?: error.javaClass.simpleName
+                        projectionReady = false
                     }
-                    stopGroupLocked(routeSet.relayGroupId)
-
-                    try {
-                        startEntryLocked(
-                            routeSet.relayGroupId,
-                            routeSet.primary,
-                            frameworkBaseUrl,
-                        )
-                    } catch (error: BindException) {
-                        return@synchronized AndroidRunTargetResolution(
-                            mode = "direct",
-                            url = routeSet.primary.originalUrl,
-                        )
-                    }
-                    try {
-                        routeSet.additional.forEach { route ->
-                            val occupied = entries[route.preferredPort]
-                            if (occupied != null && occupied.groupId != routeSet.relayGroupId) {
-                                throw IllegalStateException(
-                                    "${route.label} port ${route.preferredPort} " +
-                                        "is owned by another run profile",
-                                )
-                            }
-                            try {
-                                startEntryLocked(
-                                    routeSet.relayGroupId,
-                                    route,
-                                    frameworkBaseUrl,
-                                )
-                            } catch (error: BindException) {
-                                throw IllegalStateException(
-                                    "${route.label} port ${route.preferredPort} is already in use",
-                                    error,
-                                )
-                            }
-                        }
-                    } catch (error: Exception) {
-                        stopGroupLocked(routeSet.relayGroupId)
-                        throw error
-                    }
-                    AndroidRunTargetResolution(
-                        mode = "tunnel",
-                        url = localAndroidRunTargetUrl(routeSet.primary),
-                    )
                 }
             }
             completion(result)
         }
     }
 
+    fun suspendRouteProjection() {
+        synchronized(lock) {
+            hasAuthoritativeProjection = false
+            projectionReady = false
+            projectionGeneration.incrementAndGet()
+        }
+    }
+
+    fun isProjectionReady(): Boolean = synchronized(lock) {
+        hasAuthoritativeProjection && projectionReady
+    }
+
+    fun debugSnapshot(): JSONObject = synchronized(lock) {
+        JSONObject().apply {
+            put("authorityAvailable", hasAuthoritativeProjection)
+            put("projectionReady", projectionReady)
+            put("configuredLoopback", lastConfiguredLoopback ?: JSONObject.NULL)
+            put("lastError", lastError ?: JSONObject.NULL)
+            put("projectedGroups", activeRoutesByShellId.size)
+            put("listenerPorts", org.json.JSONArray(entries.keys.sorted()))
+        }
+    }
+
     fun stopAll() {
         synchronized(lock) {
+            hasAuthoritativeProjection = false
+            projectionReady = false
+            activeRoutesByShellId = emptyMap()
+            projectionGeneration.incrementAndGet()
+            groupIdentities.clear()
             entries.values.toList().forEach(::stopEntryLocked)
             entries.clear()
+            lastConfiguredLoopback = null
+            lastError = null
         }
     }
 
     fun close() {
         stopAll()
+        mutationExecutor.shutdownNow()
         executor.shutdownNow()
+    }
+
+    private fun reconcileProjectionLocked(
+        next: Map<String, AndroidRunTargetRouteSet>,
+        frameworkBaseUrl: String,
+        configuredLoopback: Boolean,
+    ) {
+        val staleGroupIds = groupIdentities.entries
+            .filter { (groupId, identity) ->
+                val active = next[identity.shellId]
+                active == null ||
+                    active.ownerId != identity.ownerId ||
+                    active.relayGroupId != groupId ||
+                    !groupMatchesLocked(active)
+            }
+            .map { it.key }
+        staleGroupIds.forEach(::stopGroupLocked)
+        if (configuredLoopback) {
+            groupIdentities.keys.toList().forEach(::stopGroupLocked)
+            return
+        }
+        next.values.forEach { routeSet ->
+            startOrReuseGroupLocked(routeSet, frameworkBaseUrl)
+        }
+    }
+
+    private fun startOrReuseGroupLocked(
+        routeSet: AndroidRunTargetRouteSet,
+        frameworkBaseUrl: String,
+    ) {
+        val routes = listOf(routeSet.primary) + routeSet.additional
+        routes.forEach { route ->
+            val occupied = entries[route.preferredPort]
+            if (occupied != null && occupied.groupId != routeSet.relayGroupId) {
+                val prefix = route.label?.let { "$it " }.orEmpty()
+                throw IllegalStateException(
+                    "${prefix}port ${route.preferredPort} is already in use",
+                )
+            }
+        }
+        if (groupMatchesLocked(routeSet)) return
+        stopGroupLocked(routeSet.relayGroupId)
+        try {
+            routes.forEach { route ->
+                try {
+                    startEntryLocked(routeSet.relayGroupId, route, frameworkBaseUrl)
+                } catch (error: BindException) {
+                    val prefix = route.label?.let { "$it " }.orEmpty()
+                    throw IllegalStateException(
+                        "${prefix}port ${route.preferredPort} is already in use",
+                        error,
+                    )
+                }
+            }
+            groupIdentities[routeSet.relayGroupId] = GroupIdentity(
+                ownerId = routeSet.ownerId,
+                shellId = routeSet.shellId,
+            )
+        } catch (error: Exception) {
+            stopGroupLocked(routeSet.relayGroupId)
+            throw error
+        }
     }
 
     private fun acceptLoop(entry: Entry) {
@@ -267,7 +357,11 @@ internal class RunTargetRelayManager(
         frameworkBaseUrl: String,
     ) {
         val server = ServerSocket()
-        server.reuseAddress = false
+        // Exact Framework-Shell replacement must be able to reclaim the same
+        // loopback port immediately after the prior owned listener closes.
+        // SO_REUSEADDR does not permit a second simultaneous listener here;
+        // an unrelated live owner still produces BindException.
+        server.reuseAddress = true
         try {
             server.bind(
                 InetSocketAddress(
@@ -295,6 +389,7 @@ internal class RunTargetRelayManager(
     }
 
     private fun stopGroupLocked(groupId: String) {
+        groupIdentities.remove(groupId)
         entries.values.filter { it.groupId == groupId }.toList().forEach(::stopEntryLocked)
     }
 

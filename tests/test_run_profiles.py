@@ -902,7 +902,9 @@ class RunProfileSidebarDevToolsTests(unittest.IsolatedAsyncioTestCase):
         route_set = {
             "dto": "RunTargetRouteSet",
             "version": 1,
-            "relayGroupId": "c" * 64,
+            "ownerId": "runner-profile:test:web",
+            "shellId": "shell-web",
+            "relayGroupId": primary_ticket,
             "primary": {
                 "dto": "RunTargetRoute",
                 "version": 1,
@@ -944,12 +946,16 @@ class RunTargetServiceTests(unittest.IsolatedAsyncioTestCase):
         rust_result = {
             "dto": "RunTargetRouteSet",
             "version": 1,
+            "ownerId": "runner-profile:test:web",
+            "shellId": "shell-web",
+            "relayGroupId": primary_ticket,
             "primary": {
                 "dto": "RunTargetRoute",
                 "version": 1,
                 "ticket": primary_ticket,
                 "tunnelPath": f"/api/run-targets/{primary_ticket}/tunnel",
                 "preferredPort": 4173,
+                "originalUrl": "http://127.0.0.1:4173/app",
                 "expiresAt": 999,
             },
             "additional": [
@@ -959,26 +965,98 @@ class RunTargetServiceTests(unittest.IsolatedAsyncioTestCase):
                     "ticket": auxiliary_ticket,
                     "tunnelPath": f"/api/run-targets/{auxiliary_ticket}/tunnel",
                     "preferredPort": 5173,
+                    "originalUrl": "http://127.0.0.1:5173/",
                     "expiresAt": 999,
                     "label": "Vite / HMR",
                 }
             ],
         }
         call = AsyncMock(return_value=rust_result)
-        with patch.object(run_target_service, "call_async", call):
+        with (
+            patch.object(run_target_service, "call_async", call),
+            patch.object(
+                run_target_service,
+                "_publish_run_target_routes_best_effort",
+                AsyncMock(),
+            ),
+        ):
             result = await run_target_service.register_run_target_routes(
                 owner_id="runner-profile:test:web",
                 shell_id="shell-web",
                 primary_port=4173,
+                primary_url="http://127.0.0.1:4173/app",
                 additional_ports=(
                     runner_profiles.RunProfileAdditionalPort(5173, "Vite / HMR"),
                 ),
             )
 
         self.assertEqual(result["dto"], "RunTargetRouteSet")
+        self.assertEqual(result["ownerId"], "runner-profile:test:web")
+        self.assertEqual(result["shellId"], "shell-web")
         self.assertEqual(len(cast(str, result["relayGroupId"])), 64)
         call.assert_awaited_once()
         self.assertEqual(call.await_args.args[0], "runTarget.routes.register")
+
+    async def test_route_projection_preserves_exact_shell_generation(self) -> None:
+        primary_ticket = "a" * 64
+        rust_projection = {
+            "dto": "RunTargetRouteProjection",
+            "version": 1,
+            "groups": [
+                {
+                    "dto": "RunTargetRouteSet",
+                    "version": 1,
+                    "ownerId": "runner-profile:test:web",
+                    "shellId": "shell-web",
+                    "relayGroupId": primary_ticket,
+                    "primary": {
+                        "dto": "RunTargetRoute",
+                        "version": 1,
+                        "ticket": primary_ticket,
+                        "tunnelPath": f"/api/run-targets/{primary_ticket}/tunnel",
+                        "preferredPort": 4173,
+                        "originalUrl": "http://127.0.0.1:4173/app",
+                        "expiresAt": 999,
+                    },
+                    "additional": [],
+                }
+            ],
+        }
+        with patch.object(
+            run_target_service,
+            "call_async",
+            AsyncMock(return_value=rust_projection),
+        ):
+            projection = await run_target_service.list_run_target_routes()
+
+        groups = cast(list[dict[str, object]], projection["groups"])
+        self.assertEqual(groups[0]["ownerId"], "runner-profile:test:web")
+        self.assertEqual(groups[0]["shellId"], "shell-web")
+        self.assertEqual(groups[0]["relayGroupId"], primary_ticket)
+
+    async def test_release_publishes_the_authoritative_route_projection(self) -> None:
+        projection = {
+            "dto": "RunTargetRouteProjection",
+            "version": 1,
+            "groups": [],
+        }
+        call = AsyncMock(side_effect=[{"released": True}, projection])
+        emitter = AsyncMock()
+        with (
+            patch.object(run_target_service, "call_async", call),
+            patch.object(run_target_service, "_run_target_routes_emitter", emitter),
+        ):
+            released = await run_target_service.release_run_target_route(
+                owner_id="runner-profile:test:web",
+                shell_id="shell-web",
+            )
+
+        self.assertTrue(released)
+        self.assertEqual(
+            [awaited.args[0] for awaited in call.await_args_list],
+            ["runTarget.route.release", "runTarget.routes.list"],
+        )
+        emitter.assert_awaited_once_with(projection)
 
 
 class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
@@ -1025,13 +1103,16 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
             route = {
                 "dto": "RunTargetRouteSet",
                 "version": 1,
-                "relayGroupId": "d" * 64,
+                "ownerId": shell.label,
+                "shellId": shell.shell_id,
+                "relayGroupId": ticket,
                 "primary": {
                     "dto": "RunTargetRoute",
                     "version": 1,
                     "ticket": ticket,
                     "tunnelPath": f"/api/run-targets/{ticket}/tunnel",
                     "preferredPort": 4173,
+                    "originalUrl": "http://127.0.0.1:4173/app",
                     "expiresAt": 999,
                 },
                 "additional": [
@@ -1041,6 +1122,7 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
                         "ticket": auxiliary_ticket,
                         "tunnelPath": f"/api/run-targets/{auxiliary_ticket}/tunnel",
                         "preferredPort": 5173,
+                        "originalUrl": "http://127.0.0.1:5173/",
                         "expiresAt": 999,
                         "label": "Vite / HMR",
                     }
@@ -1087,6 +1169,7 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
                 owner_id=shell.label,
                 shell_id=shell.shell_id,
                 primary_port=4173,
+                primary_url=match.profile.sidebar_url,
                 additional_ports=match.profile.additional_ports,
             )
             projected = cast(
@@ -1136,9 +1219,18 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
             route = {
                 "dto": "RunTargetRouteSet",
                 "version": 1,
+                "ownerId": shell.label,
+                "shellId": shell.shell_id,
                 "relayGroupId": "d" * 64,
-                "primary": {"preferredPort": 3000},
-                "additional": [{"preferredPort": 24678, "label": "Vite / HMR"}],
+                "primary": {
+                    "preferredPort": 3000,
+                    "originalUrl": "http://127.0.0.1:3000/",
+                },
+                "additional": [{
+                    "preferredPort": 24678,
+                    "originalUrl": "http://127.0.0.1:24678/",
+                    "label": "Vite / HMR",
+                }],
             }
             register = AsyncMock(return_value=route)
             wait_ready = AsyncMock()
@@ -1180,6 +1272,7 @@ class RunProfileProcessStateTests(unittest.IsolatedAsyncioTestCase):
                 owner_id=shell.label,
                 shell_id=shell.shell_id,
                 primary_port=3000,
+                primary_url="http://127.0.0.1:3000/",
                 additional_ports=(
                     runner_profiles.RunProfileAdditionalPort(24678, "Vite / HMR"),
                 ),
@@ -1496,6 +1589,44 @@ class RunProfileProjectionTests(unittest.IsolatedAsyncioTestCase):
             [call.kwargs["source"] for call in refresh.await_args_list],
             ["fws.shell.updated", "fws.shell.removed"],
         )
+
+    def test_fws_snapshot_tracks_only_running_run_profile_shells(self) -> None:
+        run_profile_fws_bridge._relevant_shell_labels.clear()
+        try:
+            run_profile_fws_bridge._replace_relevant_shell_ids(
+                {
+                    "result": {
+                        "state": {
+                            "shells": [
+                                {
+                                    "id": "running-profile",
+                                    "label": "runner-profile:file_editor_cm6:project:python",
+                                    "status": "running",
+                                },
+                                {
+                                    "id": "exited-profile",
+                                    "label": "runner-profile:file_editor_cm6:project:web",
+                                    "status": "exited",
+                                },
+                                {
+                                    "id": "running-terminal",
+                                    "label": "terminal:other",
+                                    "status": "running",
+                                },
+                            ]
+                        }
+                    }
+                }
+            )
+
+            self.assertEqual(
+                run_profile_fws_bridge._relevant_shell_labels,
+                {
+                    "running-profile": "runner-profile:file_editor_cm6:project:python",
+                },
+            )
+        finally:
+            run_profile_fws_bridge._relevant_shell_labels.clear()
 
 
 class RunProfileRefinementContractTests(unittest.IsolatedAsyncioTestCase):

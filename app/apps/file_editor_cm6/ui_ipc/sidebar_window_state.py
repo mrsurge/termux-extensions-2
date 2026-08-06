@@ -326,13 +326,19 @@ def _normalize_run_target_route(value: object, *, canonical_url: str) -> JsonObj
         )
 
     relay_group_id = _norm(raw.get("relayGroupId") or raw.get("relay_group_id"))
+    owner_id = _norm(raw.get("ownerId") or raw.get("owner_id"))
+    shell_id = _norm(raw.get("shellId") or raw.get("shell_id"))
     if not RUN_TARGET_TICKET_RE.fullmatch(relay_group_id):
         raise ValueError("runTargetRoute relayGroupId is invalid")
+    if not owner_id or not shell_id:
+        raise ValueError("runTargetRoute ownerId and shellId are required")
     primary = _normalize_run_target_descriptor(
         raw.get("primary"),
         canonical_url=canonical_url,
         require_label=False,
     )
+    if relay_group_id != _norm(primary.get("ticket")):
+        raise ValueError("runTargetRoute relayGroupId must identify the primary route")
     additional_obj = raw.get("additional")
     additional_values = (
         cast(list[object], additional_obj) if isinstance(additional_obj, list) else []
@@ -355,6 +361,8 @@ def _normalize_run_target_route(value: object, *, canonical_url: str) -> JsonObj
     return {
         "dto": "RunTargetRouteSet",
         "version": 1,
+        "ownerId": owner_id,
+        "shellId": shell_id,
         "relayGroupId": relay_group_id,
         "primary": primary,
         "additional": additional,

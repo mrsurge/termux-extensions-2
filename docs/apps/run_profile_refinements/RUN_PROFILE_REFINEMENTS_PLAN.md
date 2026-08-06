@@ -26,9 +26,10 @@ introduced.
 - Slice B is implemented, covered by Python and frontend tests, and live overlap
   selection has been validated.
 - Slice C is implemented and covered by Python/frontend unit tests plus the
-  Code TE2 TypeScript check and production bundle build. A lifecycle audit
-  reopened startup stale-shell reconciliation and exact native relay release;
-  live validation of URL readiness, Stop/exit teardown, and save-driven refresh
+  Code TE2 TypeScript check and production bundle build. Startup stale-shell
+  reconciliation and exact Electron/Gecko shell-owned relay teardown are
+  implemented.
+  Live validation of URL readiness, Stop/exit teardown, and save-driven refresh
   remains pending.
 - Slice D is implemented and covered by focused frontend, Electron, Gecko
   syntax/unit/APK packaging, and build checks. Live native console registration,
@@ -52,9 +53,9 @@ introduced.
   group with rollback on auxiliary failure.
 - URL-backed Run Profiles are represented by project/profile-scoped
   `RunProfileSurface` slots. The slot retains exact project, profile, and shell
-  identity. Stop and live terminal events remove it, but the startup dashboard
-  snapshot currently accepts retained exited shell records and can preserve a
-  stale slot until its running-status filter is corrected.
+  identity. Stop and live terminal events remove it, and startup dashboard
+  reconciliation retains only records whose Framework-Shell status is
+  `running`.
 - A non-Page-Preview profile creates a Sidebar URL slot only when `sidebarUrl`
   is non-empty. A process without a URL has running state but no URL surface.
 - Page Preview always resolves a backend-supplied URL on port 3000. Its Vite 7
@@ -76,9 +77,14 @@ introduced.
 - GeckoView can inject packaged code at document start through its WebExtension.
   Electron can target a loaded subframe through `did-frame-finish-load`,
   `WebFrameMain.fromId`, and `WebFrameMain.executeJavaScript`.
-- Native surface release currently clears exact-origin runtime/cache policy but
-  does not close the matching Electron or Gecko relay listener group. Both
-  native managers retain whole-client teardown as a fallback.
+- Rust exposes the complete active route-set projection. Android consumes a
+  fresh snapshot plus complete replacement events from the framework's no-store
+  SSE control plane; Electron retains the strict MessagePack Code TE2 UI IPC
+  projection and reconnect snapshot.
+- Native relay ownership is the exact `ownerId + shellId` Framework-Shell
+  generation. `surfaceId` remains presentation and dev-runtime-policy identity;
+  iframe removal, reconstruction, or app-view navigation does not tear down a
+  still-running shell's listeners.
 - The host frontend already has in-memory client-active ids, but server ledger
   notifications can overwrite them. Mention delivery currently broadcasts to
   the complete Sidebar IPC room rather than an exact client presentation.
@@ -88,20 +94,32 @@ introduced.
 
 ## Required Invariants
 
-- No periodic lifecycle or running-state polling. A bounded, cancellable HTTP
-  readiness retry during URL-surface launch is permitted and required.
+- No periodic route, proxy, lifecycle, or running-state polling. The only
+  permitted retry loop is the bounded, cancellable HTTP page-readiness check
+  during URL-surface launch.
 - Python remains the Run Profile orchestration authority.
 - Framework-Shells remains running-state authority.
 - Rust registers only declared ports for the exact profile owner and running
   shell. There is no arbitrary TCP-proxy endpoint.
 - Native clients own their loopback listeners. Groups close on framework
-  retarget, app teardown, route-set replacement, exact profile Stop, or dead
-  shell reconciliation.
-- Exact native release is keyed by stable `surfaceId` and closes only that
-  surface's relay group, runtime/cache policy, console injection state, and
-  Inspector registration. Whole-client `stopAll()` remains a teardown fallback.
-- The primary route determines same-device behavior before auxiliary listeners
-  are bound.
+  retarget, native process/Activity teardown, route-set replacement, exact
+  profile Stop, or dead-shell reconciliation.
+- Route-set registration, replacement, and release are projected by the Rust
+  registry as complete snapshots. Android consumes the framework-owned no-store
+  SSE stream after its framework relay is ready; Electron consumes the direct
+  native UI IPC projection correlated with Code TE2. These feeds are the sole
+  authority for native listeners; there is no presentation resolve request.
+- A transient projection-feed interruption preserves existing listener groups.
+  Electron gates new app navigation while UI IPC is unavailable; Android gates
+  only an actual pending cold-session restore. Reconnect always begins with a
+  fresh complete snapshot.
+- Locality is explicit and settings-owned: only a configured `localhost`,
+  `127.0.0.1`, or `::1` framework origin is local. Every configured non-loopback
+  origin is remote, regardless of any separate local forward exposing the same
+  framework. A bind failure is always a collision, never a locality signal.
+- Exact `surfaceId` release closes only runtime/cache policy, console injection,
+  Inspector registration, and presentation state. It does not own relay
+  lifetime. Whole-client `stopAll()` remains a retarget/process teardown path.
 - Page Preview participates in owned URL-surface lifecycle. Its active route
   set and Vite/HMR refresh behavior are backend-defined and are not exposed as
   user-configurable port or `devRuntime` fields.
@@ -184,23 +202,53 @@ all auxiliary ports for one exact owner/shell pair.
 The projected route set contains one `primary` descriptor and an `additional`
 array. Auxiliary descriptors retain their profile label for UI and errors.
 
-### Native Resolution
+### Native Projection Reconciliation
 
-Native clients resolve a route set in this order:
+Native clients do not ask a page, iframe, preload, or WebExtension to resolve a
+route. The native framework-server process reconciles the complete route set in
+this order:
 
-1. Attempt to bind the primary preferred loopback port.
-2. If the primary port is already occupied, treat the profile as same-device,
-   bind no auxiliary listeners, and navigate to the original primary URL.
-3. If the primary bind succeeds, treat the profile as remote and bind every
-   auxiliary preferred port before navigation.
-4. If any auxiliary bind fails, report its label and port and roll back every
-   listener created for that route set. An auxiliary collision is not a
-   same-device signal.
-5. Resolve the profile iframe only after the complete remote route set is live.
+1. Receive the complete active route projection from the client's native
+   control plane: framework no-store SSE for Android after relay retarget, or
+   direct strict-MessagePack Code TE2 UI IPC for Electron.
+2. Treat that projection event as the only listener-creation and teardown
+   trigger. There is no route timer, status loop, or presentation-driven request.
+3. Determine locality once for that projection from the configured origin only.
+   `localhost`, `127.0.0.1`, and `::1` are local; every other configured host is
+   remote. Do not probe DNS, loopback ports, or framework instance identity.
+4. For a configured local framework, retain no native Run Target listeners.
+5. For a remote framework, bind the primary preferred port and every auxiliary
+   preferred port for each exact owner/shell generation before declaring the
+   projection ready.
+6. If any bind fails, report its port and roll back every listener created for
+   that route set. An auxiliary collision is not a same-device signal.
+7. Recheck the projection generation after asynchronous bind work so a
+   newer route event or shell exit cannot resurrect a listener group.
 
-This ordering avoids stealing port 5173 from a same-device Vite process. Two
-simultaneous remote profiles requesting the same client port produce an explicit
-conflict; dynamic port rewriting is outside this slice.
+Electron app navigation and Gecko cold-session restoration wait on the first
+reconciled projection event. A feed interruption marks route authority
+unavailable while preserving existing listeners; Gecko launcher and Recents
+navigation remain usable when no cold restore is pending. The reconnect snapshot
+reconciles any changes. Snapshots are serialized with normal route
+registration/release publications so a connect-time snapshot cannot overwrite a
+newer lifecycle event.
+
+A Gecko cold start follows one explicit gate: retarget the Kotlin framework
+relay from persisted Settings, open the framework-owned projection stream,
+receive its fresh authoritative snapshot, finish native listener reconciliation,
+and only then restore the remote app. Because both Android loopback servers may
+select new ports after process death, the complete serialized `GeckoSession` is
+restored only when its saved framework-relay and launcher origins still match.
+Otherwise the saved last URL is rebased through the current framework relay and
+loaded directly. A warm background
+return retains the existing live Gecko session and does not run this cold-start
+restore path. The frontend uses the canonical loopback URL directly and performs only separate,
+non-blocking `devRuntime` instrumentation registration.
+
+An active-route removal immediately closes only that shell generation's owned
+listener group. Relaunch of the same owner replaces the old generation before
+binding the new group. Two remote profiles requesting the same client port
+produce an explicit conflict; dynamic port rewriting is outside this slice.
 
 ## Slice B: Profile Selection And File Ownership
 
@@ -446,13 +494,26 @@ keeps selectors concise without discarding the full label used for diagnostics.
 
 Generalize the existing Run Profile document-start marker. The WebExtension
 injects the packaged Socket.IO client and console bridge into the marked top
-frame and provides the configured framework console origin explicitly.
+frame and provides the browser-visible framework origin explicitly.
 
-`run_target_release(surfaceId)` must cross the WebExtension native port into
-Kotlin. Kotlin owns a `surfaceId -> relayGroupId` association and closes only
-that group's listeners and streams. Framework retarget, return to the launcher,
-Activity destruction, and native connection failure retain whole-client
-`stopAll()` cleanup.
+Kotlin opens the Rust framework's no-store Run Target SSE control plane only
+after `AndroidFrameworkRelay` is retargeted. Every connection begins with a
+fresh authoritative owner/shell projection and later events replace it in full.
+The WebExtension has no route-resolution message. Its register/release messages
+manage only exact surface runtime policy and never own relay listeners. Code TE2
+UI IPC remains a separate IME/console lane and is not Android route authority.
+
+Android retains the configured upstream framework IP/port in native Settings
+but presents Gecko with a process-local `AndroidFrameworkRelay` origin. That
+relay forwards HTTP, SSE, Socket.IO, and WebSocket traffic to the upstream, so
+Gecko remains in a localhost security context without falsifying Run Target
+locality. The Android launcher rewrites every framework app-open URL through
+that relay, keeping the Kotlin replacement header synchronized with `/app/...`
+navigation. Cold app restoration waits until the framework projection snapshot
+has reconciled every required Run Target listener. It restores complete Gecko
+session state only when the saved loopback origins still match; otherwise it
+loads the saved app URL through the current relay. Framework retarget and
+Activity destruction retain whole-client cleanup.
 
 ### Electron
 
@@ -460,9 +521,12 @@ Listen for marked subframe completion, resolve the exact `WebFrameMain` from the
 event's process/routing ids, verify the frame URL and marker, then inject the
 same packaged bridge with `executeJavaScript`.
 
-Electron main owns the equivalent `surfaceId -> relayGroupId` association.
-`release_run_target_surface` clears both `ElectronRunProfileRuntime` policy and
-the exact listener group. App-view loss, framework retarget, and application
+Electron main connects directly to Code TE2 UI IPC as an `electron_native`
+client and reconciles the same owner/shell route projection. App navigation
+waits on the first ready projection event; the preload exposes no route resolve
+operation. `register_run_target_surface` and `release_run_target_surface` manage
+only `ElectronRunProfileRuntime` instrumentation policy. App-view loss does not
+terminate a still-running profile's relay; framework retarget and application
 shutdown retain whole-client cleanup.
 
 ### Browser Boundary
@@ -550,9 +614,10 @@ and mention-target store because that logic runs in the common Code TE2 host.
 Iframe creation and reconstruction must continue to set the complete
 pre-navigation `window.name` marker before assigning the final URL. Existing
 WebExtension injection, compact console-worker identity, Inspector target
-registration, exact-origin cache policy, route resolution, and auxiliary-port
-behavior remain unchanged. Ledger removal additionally sends exact surface
-release through the WebExtension/Kotlin bridge before discarding the iframe.
+registration, exact-origin cache policy, projection-driven routing, and auxiliary-port
+behavior remain unchanged. Ledger removal releases surface policy before
+discarding the iframe; exact relay teardown arrives independently through the
+shell-owned native route projection.
 
 ### Electron Detachment And Surface Tools
 
@@ -564,7 +629,11 @@ presentation and transient native identifiers.
 surfaceId
     -> embedded iframe or detached presentation
     -> BrowserWindow / WebContentsView / frame identifiers
-    -> relay group, runtime policy, console worker, and DevTools target
+    -> runtime policy, console worker, and DevTools target
+
+ownerId + shellId
+    -> authoritative route generation
+    -> native primary/auxiliary relay listener group
 ```
 
 The first implementation reconstructs the URL in a dedicated trusted window
@@ -579,8 +648,8 @@ reload. Neither mechanism changes backend ownership.
   it does not stop the profile.
 - Profile Stop, shell exit, project teardown, backend removal, app-view loss,
   or framework retarget closes every Electron presentation for that surface.
-- Route-set resolution remains Electron-main-owned and is reused by either
-  presentation.
+- Projection-driven route reconciliation remains Electron-main-owned and is
+  reused by either presentation.
 - The detached trusted shell renders TSX/HTML chrome containing surface label,
   profile/project identity, attach/close, refresh, exact backend Stop, console,
   and DevTools actions. These controls invoke existing backend/native ownership
@@ -605,8 +674,9 @@ the owned profile route set.
   origin through the native bridge before iframe navigation.
 - Surface removal, framework retarget, and native teardown release the policy.
 - Policy release and native relay release are separate obligations. Exact
-  surface removal closes both; whole-client teardown closes every remaining
-  listener and policy registration.
+  surface removal closes policy state, while the Framework-Shell route removal
+  closes the matching listener group. Whole-client teardown closes every
+  remaining listener and policy registration.
 - Ordinary browsers retain profile-owned revision reloads but cannot receive
   cross-origin header mutation or bridge injection without app cooperation.
 - Initial surface creation still waits for the bounded URL-readiness result so
@@ -638,12 +708,18 @@ the owned profile route set.
 
 ### Electron And GeckoView
 
-- Primary-first same-device fallback.
+- Exact configured-origin locality: only `localhost`, `127.0.0.1`, and `::1`
+  are local; every other configured host is remote without an identity probe.
 - Complete remote group binding and rollback on auxiliary collision.
-- Exact surface-to-group teardown on profile Stop, backend surface removal, and
-  dead-shell reconciliation without closing another profile's listeners.
-- Whole-client group teardown on retarget, launcher/app-view return, renderer or
-  Activity loss, and app shutdown.
+- Exact owner/shell-group teardown on profile Stop, Framework-Shell exit, route
+  replacement, and dead-shell reconciliation without closing another profile's
+  listeners.
+- A superseded asynchronous projection cannot resurrect stale listeners.
+- Native process restart reconstructs all required remote listeners from one
+  reconnect snapshot before app navigation.
+- No native/frontend route polling; only bounded launch-time HTTP page
+  readiness may retry.
+- Whole-client group teardown on retarget, Activity loss, and app shutdown.
 - Marked-frame console injection, unique worker registration, reconnect, and
   teardown.
 - Gecko iframe reconstruction preserves the pre-navigation marker, Inspector
@@ -690,8 +766,8 @@ routing, and HMR through a remote native client. Subsequent slices must prove:
 6. Opt-in console workers appear with profile-aware unique identities.
 7. Gecko preserves inline frame, console, Inspector, cache, and relay behavior
    while client-local ordering and targeted mentions change.
-8. Exact surface removal closes only the matching Electron or Gecko listener
-   group, including after a Code TE2 worker restart observes an exited shell.
+8. Exact Framework-Shell route removal closes only the matching Electron or
+   Gecko listener group, including after UI IPC reconnect and app-worker restart.
 9. Electron can reconstruct, detach, reattach, inspect, and remove an owned
    surface without altering another client's presentation.
 
@@ -703,7 +779,7 @@ routing, and HMR through a remote native client. Subsequent slices must prove:
    live acceptance pending.
 4. Slice D: native console instrumentation.
 5. Slice E prerequisite: correct startup stale-shell reconciliation and exact
-   Electron/Gecko surface-to-relay teardown.
+   Electron/Gecko shell-generation relay teardown.
 6. Slice E shared client presentation: local ordering/foreground state, exact
    mention routing, ledger reconciliation, and the reusable TSX component core.
 7. Slice E Gecko parity: preserve inline marker/instrumentation/Inspector/relay

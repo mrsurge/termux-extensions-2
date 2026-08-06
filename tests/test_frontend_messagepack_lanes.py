@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from typing import cast
 from unittest.mock import AsyncMock, patch
+
+from socketio.exceptions import ConnectionRefusedError
 
 from app.apps.file_editor_cm6.frontend_rpc_codec import (
     RPC_CODEC_AUTH_FIELD,
@@ -19,8 +22,12 @@ from app.apps.file_editor_cm6.monaco_editor.editor_rpc_emit import (
 from app.apps.file_editor_cm6.monaco_editor.editor_rpc_socketio import (
     EditorRpcSocketIONamespace,
 )
+from app.apps.file_editor_cm6.host.run_target_service import (
+    emit_run_target_routes_snapshot,
+)
 from app.apps.file_editor_cm6.ui_ipc.rpc_contract import (
     UI_IPC_RPC_METHOD_HOST_BOOT_SNAPSHOT_GET,
+    UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED,
 )
 from app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws import UIIPCNamespace
 
@@ -165,6 +172,139 @@ class UiIpcMessagePackTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual([("ui-sid", "ui_ipc")], entered)
+
+    async def test_native_ui_connect_joins_native_room_and_receives_route_snapshot(self) -> None:
+        namespace = UIIPCNamespace("/ui_ipc")
+        entered: list[tuple[str, str]] = []
+        emitted: list[tuple[str, object, str | None]] = []
+
+        async def enter_room(sid: str, room: str) -> None:
+            entered.append((sid, room))
+
+        async def save_session(sid: str, session: dict[str, object]) -> None:
+            self.assertEqual("native-sid", sid)
+            self.assertEqual("android_native", session["source"])
+
+        async def emit(
+            event: str,
+            payload: object,
+            *,
+            to: str | None = None,
+        ) -> None:
+            emitted.append((event, payload, to))
+
+        projection = {
+            "dto": "RunTargetRouteProjection",
+            "version": 1,
+            "groups": [],
+        }
+        namespace.enter_room = enter_room  # type: ignore[method-assign]
+        namespace.save_session = save_session  # type: ignore[method-assign]
+        namespace.emit = emit  # type: ignore[method-assign]
+        with (
+            patch("app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws.get_history_store") as history,
+            patch("app.apps.file_editor_cm6.ui_ipc.ui_ipc_ws.get_project_root", return_value=""),
+            patch(
+                "app.apps.file_editor_cm6.host.run_target_service.list_run_target_routes",
+                new=AsyncMock(return_value=projection),
+            ),
+        ):
+            history.return_value.get_active_project.return_value = ""
+            await namespace.on_connect(
+                "native-sid",
+                {
+                    "QUERY_STRING": (
+                        "app_id=file_editor_cm6&source=android_native&client_id=android%3Agecko"
+                    )
+                },
+                {RPC_CODEC_AUTH_FIELD: RPC_CODEC_MSGPACK_V1},
+            )
+
+        self.assertEqual(
+            [("native-sid", "ui_ipc"), ("native-sid", "ui_ipc_native")],
+            entered,
+        )
+        decoded = [
+            decode_frontend_rpc_message(cast(bytes, payload), lane="ui_ipc")
+            for _, payload, _ in emitted
+        ]
+        self.assertIn(
+            {
+                "jsonrpc": "2.0",
+                "method": UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED,
+                "params": projection,
+            },
+            decoded,
+        )
+
+    async def test_native_ui_connect_is_rejected_when_route_snapshot_is_unavailable(self) -> None:
+        namespace = UIIPCNamespace("/ui_ipc")
+        entered: list[tuple[str, str]] = []
+
+        async def enter_room(sid: str, room: str) -> None:
+            entered.append((sid, room))
+
+        namespace.enter_room = enter_room  # type: ignore[method-assign]
+        namespace.save_session = AsyncMock()  # type: ignore[method-assign]
+        with patch(
+            "app.apps.file_editor_cm6.host.run_target_service.list_run_target_routes",
+            new=AsyncMock(side_effect=RuntimeError("pipe unavailable")),
+        ):
+            with self.assertRaisesRegex(
+                ConnectionRefusedError,
+                "Native run-target projection is unavailable",
+            ):
+                await namespace.on_connect(
+                    "native-sid",
+                    {
+                        "QUERY_STRING": (
+                            "app_id=file_editor_cm6&source=android_native&client_id=android%3Agecko"
+                        )
+                    },
+                    {RPC_CODEC_AUTH_FIELD: RPC_CODEC_MSGPACK_V1},
+                )
+
+        self.assertEqual(
+            [("native-sid", "ui_ipc"), ("native-sid", "ui_ipc_native")],
+            entered,
+        )
+
+    async def test_native_connect_snapshot_is_serialized_with_route_publications(self) -> None:
+        first_list_started = asyncio.Event()
+        release_first_list = asyncio.Event()
+        list_calls = 0
+        emitted: list[int] = []
+
+        async def list_routes() -> dict[str, object]:
+            nonlocal list_calls
+            list_calls += 1
+            current = list_calls
+            if current == 1:
+                first_list_started.set()
+                await release_first_list.wait()
+            return {
+                "dto": "RunTargetRouteProjection",
+                "version": 1,
+                "groups": [],
+                "testSequence": current,
+            }
+
+        async def emit(projection: dict[str, object]) -> None:
+            emitted.append(cast(int, projection["testSequence"]))
+
+        with patch(
+            "app.apps.file_editor_cm6.host.run_target_service.list_run_target_routes",
+            new=list_routes,
+        ):
+            first = asyncio.create_task(emit_run_target_routes_snapshot(emit))
+            await first_list_started.wait()
+            second = asyncio.create_task(emit_run_target_routes_snapshot(emit))
+            await asyncio.sleep(0)
+            self.assertEqual(1, list_calls)
+            release_first_list.set()
+            await asyncio.gather(first, second)
+
+        self.assertEqual([1, 2], emitted)
 
 
 if __name__ == "__main__":

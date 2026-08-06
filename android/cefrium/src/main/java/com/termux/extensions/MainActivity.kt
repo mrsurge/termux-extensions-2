@@ -41,7 +41,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var diagnostics: AndroidDiagnostics
     private lateinit var assetManager: EditorAssetManager
     private lateinit var shellGateway: AndroidShellGateway
-    private lateinit var relay: CefriumFrameworkRelay
+    private lateinit var relay: AndroidFrameworkRelay
 
     private val editorInputFilter = EditorInputFilter()
     private val consoleState = ComposeConsoleState()
@@ -144,9 +144,10 @@ class MainActivity : AppCompatActivity() {
             ).show()
         }
 
-        relay = CefriumFrameworkRelay(assetManager.getAssetRoot()) { request ->
-            shellGateway.handle(request)
-        }
+        relay = AndroidFrameworkRelay(
+            assetRoot = assetManager.getAssetRoot(),
+            assetPathResolver = CefriumAssetRoutes::localPath,
+        ) { request -> shellGateway.handle(request) }
         shellGateway = AndroidShellGateway(
             settingsStore = settingsStore,
             httpClient = httpClient,

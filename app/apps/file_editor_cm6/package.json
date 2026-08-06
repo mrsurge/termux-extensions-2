@@ -11,7 +11,7 @@
     "test:explorer-tree": "node --test tests/explorer_tree_chrome.test.mjs",
     "test:file-tabs": "node --test tests/file_tabs_controller.test.mjs",
     "test:editor-preferences": "node --test tests/editor_inlay_hints_preference.test.mjs",
-    "test:run-profiles": "node --test tests/run_file.test.mjs tests/run_profiles_modal.test.mjs tests/sidebar_devtools_target.test.mjs",
+    "test:run-profiles": "node --test tests/run_file.test.mjs tests/run_profiles_modal.test.mjs tests/run_target_resolver.test.mjs tests/sidebar_devtools_target.test.mjs",
     "test:code-inspector": "node --test tests/code_navigation_runtime.test.mjs tests/code_inspector_runtime.test.mjs",
     "test:marketplace": "node --test tests/explorer_marketplace.test.mjs",
     "test:mobile-input": "node --test tests/mobile_special_keys.test.mjs",

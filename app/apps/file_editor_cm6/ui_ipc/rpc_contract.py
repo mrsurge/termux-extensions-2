@@ -109,6 +109,9 @@ UI_IPC_RPC_NOTIFICATION_CODE_INSPECTOR_CHANGED: Final = "ui.codeInspector.change
 UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED: Final = (
     "ui.runProfile.state.changed"
 )
+UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED: Final = (
+    "ui.runTarget.routes.changed"
+)
 
 UiIpcRpcNotification = Literal[
     "ui.editor.save",
@@ -136,6 +139,7 @@ UiIpcRpcNotification = Literal[
     "ui.sidebar.window.readiness.changed",
     "ui.codeInspector.changed",
     "ui.runProfile.state.changed",
+    "ui.runTarget.routes.changed",
 ]
 
 ALLOWED_REQUEST_METHODS: Final[set[str]] = {
@@ -197,6 +201,7 @@ ALLOWED_NOTIFICATION_METHODS: Final[set[str]] = {
     UI_IPC_RPC_NOTIFICATION_SIDEBAR_WINDOW_READINESS_CHANGED,
     UI_IPC_RPC_NOTIFICATION_CODE_INSPECTOR_CHANGED,
     UI_IPC_RPC_NOTIFICATION_RUN_PROFILE_STATE_CHANGED,
+    UI_IPC_RPC_NOTIFICATION_RUN_TARGET_ROUTES_CHANGED,
 }
 
 JsonObject = dict[str, object]

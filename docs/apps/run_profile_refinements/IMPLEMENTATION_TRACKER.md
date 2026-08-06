@@ -2,8 +2,8 @@
 
 ## Status
 
-- Phase: Slices A-D implemented; shared client presentation, exact native teardown,
-  and Electron detachment refined and pending
+- Phase: Slices A-D and shell-owned native teardown implemented; shared client
+  presentation and Electron detachment refined and pending
 - Implementation approval: granted through native dev-runtime instrumentation
 - Baseline checkpoint: `0aef632a`
 - Target branch: `main`
@@ -21,7 +21,7 @@
 | Run-current-file override | Implemented | Ordinary no-owner click stays fast; forced selector can explicitly bypass profiles. |
 | Run Profile surface ownership | Implemented | Python owns one project/profile `RunProfileSurface`; the Sidebar iframe is a reconstructable presentation rather than lifecycle authority. |
 | Surface eligibility | Implemented | Only profiles with a resolved URL receive a surface/slot/readiness transaction. URL-less profiles retain process state only. |
-| Sidebar iframe ownership | Partial | Project-scoped host ids retain owner/shell metadata and live Stop/terminal events remove the exact slot. Startup reconciliation still treats retained exited Framework-Shell records as live. |
+| Sidebar iframe ownership | Implemented | Project-scoped host ids retain owner/shell metadata; live Stop/terminal events remove the exact slot, and startup reconciliation retains only running Framework-Shell records. |
 | `devRuntime` save refresh | Implemented | Canonical and bulk save paths publish typed post-commit `FileSaved`; matching custom/node/python surfaces advance refresh revision off the save path. |
 | Page Preview ownership | Implemented | Page Preview participates with backend-generated surface/routing behavior rather than user-configured runtime ports. |
 | Page Preview active ports | Implemented | Express owns primary port 3000; Vite 7 middleware HMR owns 24678. Port 5173 is not bound or reserved. |
@@ -33,23 +33,35 @@
 | Dock Stop action | Implemented | Every owned Run Profile URL surface adds exact backend Stop to its existing right-click/touch-long-press dock menu. |
 | Profile route cache policy | Implemented | Raw TCP stays transport-only; Gecko `webRequest` and Electron `session.webRequest` apply exact-origin no-cache/no-store policy while excluding WebSocket upgrades. |
 | `devRuntime` console bridge | Implemented | The existing option injects the explicit-framework-origin bridge into marked Gecko frames at document start and exact Electron subframes after load. No second schema flag exists. |
-| Native listener teardown | Partial | Electron and Gecko close listener groups on replacement, framework retarget, and whole-client teardown. Exact surface removal currently releases runtime/cache policy but does not close the corresponding native relay group. |
+| Native listener lifecycle | Gecko live-validated; Electron validation pending | Rust projects exact owner/shell route generations through complete replacement snapshots. Gecko consumes the framework-owned no-store SSE feed after relay retarget; Electron retains native UI IPC. Both reconstruct listeners from a reconnect snapshot, and iframe/surface release never owns relay lifetime. |
+| Native locality detection | Gecko live-validated; Electron validation pending | Only a configured `localhost`, `127.0.0.1`, or `::1` origin is local. Every non-loopback configured host is remote even when a separate local forward reaches the same framework; occupied ports remain deterministic collisions. |
+| Android framework browser origin | Live-validated | Native Settings retain the upstream IP/port while `AndroidFrameworkRelay` gives Gecko one localhost browser origin for HTTP/SSE/Socket.IO/WebSocket. Launcher app-open URLs are rewritten through that origin so Kotlin app chrome remains synchronized; Run Target locality uses only the upstream setting. |
+| Gecko cold-start state machine | Live-validated | Cold start orders framework-relay retarget, a fresh framework Run Target snapshot, listener reconciliation, then remote-app restoration. Full serialized Gecko state is used only when saved random loopback origins still match; otherwise the rebased saved app URL is loaded. Warm background return keeps the live session. |
 | Client-local Sidebar presentation | Planned | The server will retain logical slot membership/lifecycle while each browser client owns ordering, foreground selection, last-active agent target, and embedded/hidden/detached presentation. |
 | Targeted mentions | Planned | Mention intent will carry the originating client's exact Sidebar host/presentation target; the backend will validate and route it instead of inferring one global active Sidebar. |
 | GeckoView presentation parity | Planned | Gecko remains an inline presentation but uses the same client-local ordering, foreground, mention-target, marker, and exact surface-release contracts as browser/Electron clients. |
 | Component runtime | Planned | Extract the dependency-free TSX-to-DOM core from `ui/modal-kit` for reusable Sidebar and detached-window chrome while retaining explicit lifecycle/disposal. |
 | Electron detached presentation | Planned | A client-local surface registry will reconstruct an owned surface in a floating window, retain marker/runtime metadata, expose surface-specific tools, and reattach without changing backend lifecycle. |
-| Contract/docs/repo memory | Partial | Plan/tracker describe the refined shape. The main Code TE2 contract and repo memory remain unchanged until implementation is validated. |
+| Contract/docs/repo memory | Updated for this slice | Plan/tracker, the main Code TE2 contract, and repo memory describe running-only startup reconciliation and exact native relay ownership. |
 
 ## Invariants Checklist
 
-- [x] No periodic lifecycle or running-state polling in the design.
+- [x] No periodic route, proxy, lifecycle, or running-state polling in the design.
 - [x] Bounded launch-time HTTP readiness retries are explicitly permitted.
 - [x] Python remains profile orchestration authority.
 - [x] Framework-Shells remains running-state authority.
 - [x] Rust routes remain exact-owner, exact-shell, declared-port only.
-- [x] Native listeners are grouped by profile route set and cleaned on replacement, retarget, and native teardown.
-- [ ] Exact profile Stop, backend surface removal, and dead-shell reconciliation close the matching Electron and Gecko relay group.
+- [x] Native listeners are grouped by exact owner/shell route generation and cleaned on replacement, retarget, and native teardown.
+- [x] Exact profile Stop, Framework-Shell route removal, and dead-shell reconciliation close the matching Electron and Gecko relay group.
+- [x] Rust publishes authoritative complete route snapshots after registration/release and on reconnect: framework no-store SSE for Android and native UI IPC for Electron.
+- [x] A superseded queued projection cannot bind after its exact Framework-Shell generation exits.
+- [x] Native app navigation is event-gated on the first reconciled projection;
+  frontend/iframe refresh never creates or resolves a proxy.
+- [x] Native-connect snapshots are serialized with registration/release
+  publications so connect-time state cannot arrive after a newer route event.
+- [x] Gecko cold start restores the remote app only after the framework relay,
+  fresh framework route snapshot, and native route listeners are ready.
+- [x] Port collisions are errors and cannot select same-device direct mode.
 - [x] Standalone/browser behavior does not depend on native instrumentation.
 - [x] Existing Run Profile JSON remains backward compatible.
 - [x] Page Preview uses backend-generated active ports and implicit Vite/HMR
@@ -73,9 +85,9 @@
 | Schema parser and UI form | Complete | Parser, generated form contract, and modal serialization have only scalar `port`; a repeatable object control is needed. |
 | Run candidate resolution | Complete | Candidate enumeration is canonical; exact profile ids can intentionally select a non-owner, while ordinary Run retains owner matching. |
 | Rust route registry | Complete | Registry deliberately replaces the prior route for one owner; raw tunnel maps one ticket to one port. |
-| Electron relay grouping | Complete | Electron resolves primary-first listener groups and rolls back partial auxiliary binds. Exact surface-to-group release remains missing. |
-| GeckoView relay grouping | Complete | Kotlin resolves primary-first listener groups and rolls back partial auxiliary binds. Exact surface-to-group release remains missing. |
-| Sidebar slot lifecycle | Complete | Exact host-id close exists, live Stop/terminal events invoke it, and frontend ledger removal tears down the iframe. Startup snapshots still need running-status filtering. |
+| Electron relay grouping | Complete | Electron main reconciles its native UI IPC route snapshot directly, binds one owner/shell group, rolls back partial binds, and handles exact removal/replacement without a renderer request. |
+| GeckoView relay grouping | Complete | Kotlin reconciles the framework-owned no-store SSE route snapshot directly, binds one owner/shell group, rolls back partial binds, and fences superseded projection work without a WebExtension request. |
+| Sidebar slot lifecycle | Complete | Exact host-id close exists, live Stop/terminal events invoke it, frontend ledger removal tears down the iframe, and startup snapshots retain only running records. |
 | URL surface eligibility | Complete | Non-preview launch opens a slot only for non-empty `sidebarUrl`; Page Preview always synthesizes its URL. |
 | Page Preview Vite ports | Complete | Current middleware implementation binds primary HTTP on 3000 and a separate HMR WebSocket server on 24678; it does not bind 5173. |
 | Shell versus URL readiness | Complete | Both shellspecs use output markers. Page Preview emits its marker from the Express listen callback, which proves listening but not a non-404 document route. |
@@ -90,9 +102,10 @@
 | Electron DevTools boundary | Complete | The shared iframe marker is present in Electron, but current Electron source has no marker consumer, Chobitsu injection, target registry, or DevTools display call. |
 | Client presentation authority | Complete | Frontend state is currently mixed: in-memory client-active ids exist, but server ledger notifications still overwrite them and persisted `active_host_id`/`order` remain global. |
 | Mention routing authority | Complete | Current mention delivery broadcasts to the complete `sidebar_ipc` room; exact last-active client presentation is not represented. |
-| Restart reconciliation | Complete | The FWS dashboard snapshot filters Run Profile labels but not shell status, so retained exited records can preserve stale Sidebar surfaces after the app worker restarts. |
-| Electron exact relay release | Complete | `release_run_target_surface` releases runtime/cache policy only; the relay manager has whole-client `stopAll()` and an internal group stop but no public surface release. |
-| Gecko exact relay release | Complete | WebExtension `run_target_release` releases runtime/cache policy only; Kotlin exposes whole-client `stopAll()` but no surface-to-group release. |
+| Restart reconciliation | Complete | The FWS dashboard snapshot retains only `running` Run Profile shells, so retained exited records cannot preserve stale Sidebar surfaces after app-worker restart. |
+| Electron exact relay release | Complete | Rust route removal publishes the exact owner/shell projection over UI IPC; Electron main reconciles the owned group immediately. `release_run_target_surface` remains runtime/cache policy only. |
+| Gecko exact relay release | Complete | Rust route removal publishes a complete framework SSE projection; Kotlin reconciles the owned group immediately and prevents superseded projection work from resurrecting it. |
+| Locality detection | Complete; live revalidation pending | Both native clients use exact configured-loopback classification with no framework identity request. `EADDRINUSE`/`BindException` reports a collision instead of silently navigating to an unrelated local service. |
 | Electron presentation persistence | Complete | The framework relay binds a random loopback port per process, so framework-page `localStorage` is session-local across Electron launches unless a stable preload/main-backed store is used. |
 
 ## Implementation Slices
@@ -102,8 +115,8 @@
 - [x] Add `additionalPorts` parser, validation, form controls, and tests.
 - [x] Add atomic Rust route-set registration and grouped release.
 - [x] Project primary and auxiliary route descriptors through Sidebar metadata.
-- [x] Add Electron grouped resolution and rollback.
-- [x] Add GeckoView grouped resolution and rollback.
+- [x] Add Electron projection-driven grouped reconciliation and rollback.
+- [x] Add GeckoView projection-driven grouped reconciliation and rollback.
 - [x] Prove Vite HMR through declared auxiliary ports.
 
 ### Slice B: Profile Selection
@@ -138,8 +151,8 @@
 - [x] Match successful saves against running profile include sets off the save path.
 - [x] Reload each matching slot with an incremented refresh revision.
 - [x] Keep Page Preview save refresh Vite/HMR-owned rather than duplicating hard reloads.
-- [ ] Filter startup FWS snapshots to running shells before stale-surface reconciliation.
-- [ ] Release the exact Electron and Gecko relay group when the owned surface disappears.
+- [x] Filter startup FWS snapshots to running shells before stale-surface reconciliation.
+- [x] Release the exact Electron and Gecko relay group when its Framework-Shell route disappears.
 - [x] Preserve stable surface, relay, console-worker, and Inspector metadata across iframe reconstruction.
 
 ### Slice D: Native Dev Runtime Instrumentation
@@ -151,7 +164,13 @@
 - [x] Inject exact marked Electron subframes after load.
 - [x] Apply exact-origin request/response cache policy without touching WebSockets.
 - [x] Release native runtime policy with surface removal and framework retarget.
-- [ ] Carry exact surface release through Electron main and the Gecko WebExtension/Kotlin bridge to the native relay group.
+- [x] Carry authoritative owner/shell route snapshots over native UI IPC to Electron and framework no-store SSE to Gecko.
+- [x] Remove frontend/preload/WebExtension route-resolution requests.
+- [x] Gate native app navigation and restoration on projection-ready events.
+- [x] Reconstruct native listeners after a full client restart from the reconnect snapshot.
+- [x] Keep Android upstream Settings distinct from Gecko's localhost framework relay origin.
+- [x] Rebase saved Gecko framework/launcher loopback origins and restore the
+  complete cold-session state after native route reconciliation.
 - [ ] Live-validate registration, reconnect, background, and teardown.
 
 ### Slice E: Shared Client Presentation, Gecko Parity, And Electron Detachment
@@ -201,7 +220,14 @@
 | Native dev-runtime Electron tests | Passed | All 43 desktop tests, typecheck, and compile passed; focused coverage proves exact-origin cache policy/release and exact-frame console injection. |
 | Native dev-runtime Gecko checks | Passed | WebExtension scripts passed `node --check`; Gecko unit tests passed 4/4; `:app:assembleGeckoDebug` rebuilt an APK containing the new runtime loader. |
 | Native dev-runtime live acceptance | Pending | Console worker registration, reconnect/background behavior, header behavior, and exact teardown still require live native-client validation. |
-| Lifecycle correction tests | Planned | Cover retained exited-shell startup reconciliation plus exact Electron and Gecko surface-to-relay release without disturbing unrelated profiles. |
+| Shell-owned lifecycle Python tests | Passed | 51 focused tests cover exact route ownership, native UI IPC snapshots, registration/release publication, and running-only startup reconciliation. |
+| Shell-owned lifecycle frontend tests | Passed | All 24 Run Profile frontend tests pass; navigation keeps the canonical target URL, performs no native route-resolution request, and registers dev-runtime policy separately. |
+| Shell-owned lifecycle Rust tests | Passed | Six focused route registry/pipe tests pass; the server compiles with the health instance-id and list projection. |
+| Shell-owned lifecycle Electron tests | Passed | All 48 desktop tests pass, including exact configured-host locality, occupied-port rejection, exact shell removal/replacement, UI IPC interruption/reconnect, and stale-projection fencing; typecheck and compile pass. |
+| Shell-owned lifecycle Gecko tests | Passed | The complete Gecko unit suite passes, including locality, occupied-port rejection, event-driven projection removal/replacement, transient UI IPC interruption, stale-projection fencing, and full native-manager restart reconstruction. |
+| Shell-owned lifecycle Gecko build | Passed | The complete Gecko and Cefrium unit suites, `:app:assembleGeckoDebug`, and `:cefrium:assembleDebug` pass with the Linux SDK environment. |
+| Configured-origin Gecko revalidation | Complete | Live validation confirms launcher app URLs traverse the framework relay, remote Run Target listeners restore before the saved app page, and launcher/Recents navigation remains usable outside the cold-restore gate. The Android build guard is 2 GB. |
+| Shell-owned lifecycle live acceptance | Gecko accepted; Electron pending | The remote Gecko framework/run-profile path is operating as expected. Electron remote proxy switching, collision, Stop/exit teardown, and reconnect behavior still need live validation. |
 | Shared presentation tests | Planned | Cover independent per-client order/foreground state, deterministic ledger reconciliation, targeted mentions, and storage migration/fallback. |
 | Gecko presentation regression | Planned | Prove inline iframe reconstruction retains marker, console worker, Inspector target, cache policy, route group, and exact teardown. |
 | Electron detached presentation | Planned | Prove metadata-before-navigation reconstruction, surface-aware tools, detach/reattach, cross-launch client state, and backend-removal cleanup. |

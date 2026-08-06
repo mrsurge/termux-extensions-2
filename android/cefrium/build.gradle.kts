@@ -96,6 +96,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
     implementation("io.socket:socket.io-client:2.1.1")
     implementation("org.msgpack:msgpack-core:0.9.12")
     debugImplementation("androidx.compose.ui:ui-tooling")

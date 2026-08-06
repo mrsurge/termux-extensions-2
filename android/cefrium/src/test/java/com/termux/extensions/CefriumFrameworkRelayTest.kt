@@ -15,7 +15,7 @@ import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-class CefriumFrameworkRelayTest {
+class AndroidFrameworkRelayTest {
     private val closeables = mutableListOf<AutoCloseable>()
 
     @After
@@ -35,7 +35,7 @@ class CefriumFrameworkRelayTest {
         File(root, "android-shell").mkdirs()
         File(root, "android-shell/index.html").writeText("launcher")
 
-        val relay = CefriumFrameworkRelay(root) { request ->
+        val relay = AndroidFrameworkRelay(root, CefriumAssetRoutes::localPath) { request ->
             if (request.path == "/android-api/settings") {
                 LocalHttpResponse.text(200, """{"ok":true}""", "application/json")
             } else {
@@ -84,7 +84,7 @@ class CefriumFrameworkRelayTest {
         closeables += upstream
         val root = Files.createTempDirectory("cefrium-relay-assets").toFile()
         closeables += AutoCloseable { root.deleteRecursively() }
-        val relay = CefriumFrameworkRelay(root)
+        val relay = AndroidFrameworkRelay(root, CefriumAssetRoutes::localPath)
         relay.start(upstream.origin)
         closeables += AutoCloseable(relay::stop)
 
@@ -128,7 +128,7 @@ class CefriumFrameworkRelayTest {
         closeables += upstream
         val root = Files.createTempDirectory("cefrium-relay-assets").toFile()
         closeables += AutoCloseable { root.deleteRecursively() }
-        val relay = CefriumFrameworkRelay(root)
+        val relay = AndroidFrameworkRelay(root, CefriumAssetRoutes::localPath)
         relay.start(upstream.origin)
         closeables += AutoCloseable(relay::stop)
 
@@ -177,7 +177,7 @@ class CefriumFrameworkRelayTest {
         closeables += second
         val root = Files.createTempDirectory("cefrium-relay-assets").toFile()
         closeables += AutoCloseable { root.deleteRecursively() }
-        val relay = CefriumFrameworkRelay(root)
+        val relay = AndroidFrameworkRelay(root, CefriumAssetRoutes::localPath)
         relay.start(first.origin)
         closeables += AutoCloseable(relay::stop)
         val browserOrigin = relay.browserOrigin
@@ -210,8 +210,8 @@ class CefriumFrameworkRelayTest {
         closeables += next
         val root = Files.createTempDirectory("cefrium-relay-assets").toFile()
         closeables += AutoCloseable { root.deleteRecursively() }
-        lateinit var relay: CefriumFrameworkRelay
-        relay = CefriumFrameworkRelay(root) { request ->
+        lateinit var relay: AndroidFrameworkRelay
+        relay = AndroidFrameworkRelay(root, CefriumAssetRoutes::localPath) { request ->
             if (request.path == "/android-api/settings") {
                 relay.retarget(next.origin)
                 LocalHttpResponse.text(200, "saved")
